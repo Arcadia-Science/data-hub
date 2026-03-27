@@ -75,7 +75,7 @@ The service is implemented as a `win32serviceutil.ServiceFramework` subclass in 
 
 | Dependency | Purpose | Status |
 |---|---|---|
-| `pywin32` | Windows Service support (conditional, Windows only) | **New (optional)** |
+| `pywin32` | Windows Service support (conditional, Windows only) | Optional in `watcher/pyproject.toml` |
 
 `pywin32` is declared as an optional dependency in `pyproject.toml` under an extras group:
 
@@ -84,7 +84,7 @@ The service is implemented as a `win32serviceutil.ServiceFramework` subclass in 
 windows-service = ["pywin32"]
 ```
 
-On lab PCs: `pip install data-hub-utils[windows-service]`. On macOS dev machines, the extras group is omitted and `service.py` is never imported.
+On lab PCs: `uv pip install ./packages/shared "./watcher[windows-service]"`. On macOS dev machines, the extras group is omitted and `service.py` is never imported.
 
 ## Acceptance Criteria
 

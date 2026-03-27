@@ -6,6 +6,8 @@ How to organize the repository as it grows from a Python utilities package to a 
 
 The repository is a single Python package (`data-hub-utils`) containing the Lambda function, per-instrument workflows, and integrations with Ganymede, Notion, S3, and Slack. It is managed with `uv` and deployed as a Docker image to AWS Lambda.
 
+> **Note:** A copy of the original `data-hub-utils` package is available in `legacy/` for reference during implementation. It will be removed once the monorepo migration is complete.
+
 ## Target State
 
 The repository will contain four concerns:
@@ -318,57 +320,15 @@ test:
 	cd apps/web && pnpm test
 ```
 
-## Divergences from Existing Docs
+## Relationship to Other Docs
 
-This layout changes the watcher import path from what is described in [watcher/CONFIG_AND_VALIDATION.md](./watcher/CONFIG_AND_VALIDATION.md):
+The watcher docs (`watcher/*.md`) use the `data_hub_watcher` package name and `watcher/src/data_hub_watcher/` module structure defined in this layout. Dependencies that were previously in the monolithic `data-hub-utils` package are split between `watcher/pyproject.toml` (watcher-specific: click, pydantic, pyyaml, watchdog) and `data-hub-shared` (shared: boto3, requests).
 
-| Document says | This layout uses | Reason |
-|---|---|---|
-| `src/data_hub_utils/watcher/` | `watcher/src/data_hub_watcher/` | Separate package avoids pulling Lambda dependencies onto lab PCs |
-| `from data_hub_utils.watcher.models import ...` | `from data_hub_watcher.models import ...` | Follows from the package rename |
-
-The module structure (filenames and responsibilities) is unchanged — only the top-level package name differs. The watcher docs should be updated to reflect the new import path when the restructure is performed.
-
-Similarly, [lambda/MIGRATION.md](./lambda/MIGRATION.md) references adding an API client "to the Lambda codebase." In this layout, the Lambda-specific API client lives at `lambda/src/data_hub_lambda/api_client.py` rather than inside `data_hub_utils`.
-
-## Alternative: Single Python Package
-
-If the overhead of three Python packages is not justified early on, keep all Python code in a single `data-hub-utils` package (matching the current structure) and add the Next.js app alongside it:
-
-```
-data-hub/
-├── apps/
-│   └── web/                       # Next.js (new)
-├── src/
-│   └── data_hub_utils/
-│       ├── aws/
-│       ├── workflows/
-│       ├── watcher/               # As specified in existing docs
-│       ├── ganymede/
-│       ├── notion/
-│       ├── lib/
-│       └── ...
-├── docs/
-├── pyproject.toml                 # Single Python package
-├── Dockerfile
-└── README.md
-```
-
-This preserves all existing doc references unchanged. The tradeoff is that the watcher installation on lab PCs pulls in Lambda-only dependencies (pandas, scikit-image, etc.) unless managed via optional dependency groups:
-
-```toml
-[project.optional-dependencies]
-watcher = ["click", "pyyaml", "watchdog"]
-lambda = ["pandas", "openpyxl", "scikit-image", "tifffile"]
-```
-
-The Lambda Dockerfile would install with `uv pip install .[lambda]` and lab PCs with `uv pip install .[watcher]`.
-
-This approach works well initially and can be split into a uv workspace later if dependency separation becomes a real concern.
+[lambda/MIGRATION.md](./lambda/MIGRATION.md) references adding an API client "to the Lambda codebase." In this layout, the Lambda-specific API client lives at `lambda/src/data_hub_lambda/api_client.py`.
 
 ## Migration Path
 
 1. Create `apps/web/` and scaffold the Next.js project (independent of any Python changes).
-2. Build the watcher as either `data_hub_utils.watcher` (single package) or `data_hub_watcher` (workspace package).
+2. Build the watcher as `data_hub_watcher` (workspace package).
 3. Once the Lambda migration ([lambda/MIGRATION.md](./lambda/MIGRATION.md)) removes the Ganymede and Notion dependencies, perform the package split if using the single-package approach initially.
 4. Update CI/CD workflows to add path-filtered triggers for each service.

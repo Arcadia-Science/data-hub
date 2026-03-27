@@ -77,7 +77,7 @@ The following values are derived at runtime, not stored in the config file:
 
 ## Pydantic Models
 
-Define the following Pydantic models (e.g., in `src/data_hub_utils/watcher/models.py`):
+Define the following Pydantic models (e.g., in `watcher/src/data_hub_watcher/models.py`):
 
 - **`RunDetectionConfig`** — validates the run detection settings (used only when `upload_mode` is `"manual"`)
   - `method`: Literal `"prefix"` or `"directory"`
@@ -119,29 +119,28 @@ Config validation (`data-hub watcher config validate`) is purely local — no ne
 ## Module Structure
 
 ```
-src/data_hub_utils/
-├── watcher/
-│   ├── __init__.py
-│   ├── models.py          # Pydantic models for config validation
-│   ├── constants.py       # API URL mapping, heartbeat interval, file stability defaults
-│   ├── config_io.py       # YAML read/write, path resolution, checksum
-│   ├── api_client.py      # Data Hub API client
-│   ├── monitor.py         # watchdog event handler and stability detection
-│   ├── run_detector.py    # Run detection, grouping, and reporting
-│   ├── uploader.py        # S3 upload logic with retry and ledger
-│   ├── heartbeat.py       # Heartbeat loop (background thread)
-│   ├── events.py          # Event reporting to the Data Hub API
-│   ├── service.py         # Windows Service wrapper (pywin32, Windows only)
-│   └── cli.py             # Click CLI commands
+watcher/src/data_hub_watcher/
+├── __init__.py
+├── models.py          # Pydantic models for config validation
+├── constants.py       # API URL mapping, heartbeat interval, file stability defaults
+├── config_io.py       # YAML read/write, path resolution, checksum
+├── api_client.py      # Data Hub API client
+├── monitor.py         # watchdog event handler and stability detection
+├── run_detector.py    # Run detection, grouping, and reporting
+├── uploader.py        # S3 upload logic with retry and ledger
+├── heartbeat.py       # Heartbeat loop (background thread)
+├── events.py          # Event reporting to the Data Hub API
+├── service.py         # Windows Service wrapper (pywin32, Windows only)
+└── cli.py             # Click CLI commands
 ```
 
 ## Dependencies
 
 | Dependency | Purpose | Status |
 |---|---|---|
-| `click` | CLI framework | Already in `pyproject.toml` |
-| `pydantic` | Config validation | Already in `pyproject.toml` |
-| `pyyaml` | YAML parsing | **New** |
+| `click` | CLI framework | In `watcher/pyproject.toml` |
+| `pydantic` | Config validation | In `watcher/pyproject.toml` |
+| `pyyaml` | YAML parsing | In `watcher/pyproject.toml` |
 
 ## Acceptance Criteria
 

@@ -183,7 +183,7 @@ Events are sent in batches (one or more events per request) to reduce HTTP overh
 
 | Dependency | Purpose | Status |
 |---|---|---|
-| `requests` | HTTP client for Data Hub API | Already in `pyproject.toml` |
+| `requests` | HTTP client for Data Hub API | Via `data-hub-shared` |
 
 ## Acceptance Criteria
 

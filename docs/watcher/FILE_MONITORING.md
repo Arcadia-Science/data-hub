@@ -111,7 +111,7 @@ On each heartbeat interval, if `upload_mode` is `manual`, the watcher also polls
 
 | Dependency | Purpose | Status |
 |---|---|---|
-| `watchdog` | Filesystem event monitoring | **New** |
+| `watchdog` | Filesystem event monitoring | In `watcher/pyproject.toml` |
 
 ## Acceptance Criteria
 

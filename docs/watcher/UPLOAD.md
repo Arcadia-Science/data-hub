@@ -45,7 +45,7 @@ All watcher activity is logged to three channels:
 
 | Dependency | Purpose | Status |
 |---|---|---|
-| `boto3` | S3 uploads | Already in `pyproject.toml` |
+| `boto3` | S3 uploads | Via `data-hub-shared` |
 
 ## Acceptance Criteria
 
