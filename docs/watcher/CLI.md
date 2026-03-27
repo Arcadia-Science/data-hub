@@ -41,9 +41,9 @@ Steps:
   - **New instrument:** User enters a kebab-case ID (validated locally). The CLI sends `POST /instruments` to the API. The API creates the instrument in a **pending** state. An admin confirms it via the Data Hub web UI.
 4. Prompt for watch directory (validate that the path exists).
 5. Prompt for file patterns (pre-populated from API metadata for existing instruments; blank for new instruments).
-6. Prompt for upload mode (`auto` / `manual`). Default: `auto`.
-7. If `manual`: prompt for run detection method (`prefix` / `directory`).
+6. Prompt for run detection method (`prefix` / `directory`). Default: `prefix`.
   - If `prefix`: prompt for prefix pattern (default: `^([^_]+)`). Show an example of how filenames in the watch directory would be grouped.
+7. Prompt for upload mode (`auto` / `manual`). Default: `auto`.
 8. Register the watcher with the API via `POST /watchers/register`. The API returns a `watcher_id` (UUID).
 9. Write config to disk.
 10. Push config to the API via `PUT /watchers/{watcher_id}/config`.
@@ -76,6 +76,15 @@ Fetching instruments from Data Hub API...
 ? Watch directory: /data/spectramax-id3
 ? File types [*.xls]: *.xls
 
+? Run detection method:
+  > prefix    — Group files by a shared filename prefix (e.g., "20260325_file1.csv" → run "20260325")
+    directory — Group files by subdirectory (e.g., "20260325_exp/file1.csv" → run "20260325_exp")
+
+? Prefix pattern [^([^_]+)]:
+
+  Preview — files in /data/spectramax-id3 would be grouped as:
+    Run "20260326": 20260326_experiment.xls
+
 Registering watcher with Data Hub API...
 ✓ Watcher registered (ID: a1b2c3d4-e5f6-7890-abcd-ef1234567890)
 ✓ Configuration saved to ~/.data-hub/config.yaml
@@ -100,9 +109,6 @@ Fetching instruments from Data Hub API...
 
 ? Watch directory: /data/mass-spec
 ? File types [*.csv]: *.csv
-? Upload mode:
-    auto   — Upload files to S3 automatically when detected
-  > manual — Report new instrument runs without uploading; upload on demand via the web UI
 
 ? Run detection method:
   > prefix    — Group files by a shared filename prefix (e.g., "20260325_file1.csv" → run "20260325")
@@ -113,6 +119,10 @@ Fetching instruments from Data Hub API...
   Preview — files in /data/mass-spec would be grouped as:
     Run "20260325": 20260325_data_file_1.csv, 20260325_data_file_2.csv
     Run "20260326": 20260326_data_file_1.csv
+
+? Upload mode:
+    auto   — Upload files to S3 automatically when detected
+  > manual — Report new instrument runs without uploading; upload on demand via the web UI
 
 Registering watcher with Data Hub API...
 ✓ Watcher registered (ID: b2c3d4e5-f6a7-8901-bcde-f12345678901)
@@ -132,19 +142,9 @@ Watcher ID:      a1b2c3d4-e5f6-7890-abcd-ef1234567890
 Instrument:      spectramax-id3-plate-reader
 Watch directory: /data/spectramax-id3
 File patterns:   *.xls
+Run detection:   prefix (pattern: ^([^_]+))
 Upload mode:     auto
 Enabled:         ✓
-```
-
-When `upload_mode` is `manual`, the additional run detection settings are also shown:
-
-```
-Instrument:        mass-spec-instrument
-Watch directory:   /data/mass-spec
-File patterns:     *.csv
-Upload mode:       manual
-Run detection:     prefix (pattern: ^([^_]+))
-Enabled:           ✓
 ```
 
 ## `data-hub watcher config validate`
@@ -226,4 +226,4 @@ One-shot upload of a single file to S3.
 6. `data-hub watcher config open` opens the config in the system editor, re-validates on close, and pushes to the API.
 7. `data-hub watcher watch --dry-run` logs all activity without performing uploads or sending heartbeats.
 8. `data-hub watcher upload --file <path>` uploads a single file to the correct S3 path.
-9. `data-hub watcher init` prompts for `upload_mode` and, when `manual`, for `run_detection` settings.
+9. `data-hub watcher init` prompts for `run_detection` and `upload_mode` independently.

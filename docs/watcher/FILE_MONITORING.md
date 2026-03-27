@@ -42,9 +42,9 @@ To avoid re-uploading files on watcher restart, the watcher maintains a local up
 - **After upload:** Write the entry to the ledger.
 - **Append-only:** The ledger is never automatically pruned (manual cleanup or future garbage collection).
 
-## Run Detection (manual mode only)
+## Run Detection
 
-When `upload_mode` is `manual`, stable files (see stability detection above) are not uploaded immediately. Instead, they are grouped into instrument runs and reported to the API.
+Stable files (see stability detection above) are grouped into instrument runs using the `run_detection` config. In `auto` mode, files are still uploaded immediately after grouping. In `manual` mode, runs are reported to the API and files are not uploaded until a user queues the run via the web UI.
 
 **Grouping by prefix (`method: prefix`):**
 

@@ -25,27 +25,12 @@ instrument:
     - "*.xls"
   enabled: true
   upload_mode: auto
-```
-
-For instruments that generate large amounts of data, the watcher can be configured to report detected instrument runs without uploading them, allowing users to select which instrument runs to upload via the web UI:
-
-```yaml
-version: 1
-
-environment: staging
-watcher_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
-
-instrument:
-  id: mass-spec-instrument
-  watch_directory: /path/to/instrument/output
-  file_patterns:
-    - "*.csv"
-  enabled: true
-  upload_mode: manual
   run_detection:
     method: prefix
     prefix_pattern: "^([^_]+)"
 ```
+
+`run_detection` determines how files are grouped into instrument runs. `upload_mode` controls what happens after a run is detected: `auto` uploads files immediately, `manual` reports the run and waits for a user to queue it for upload via the web UI.
 
 ## Field Definitions
 
@@ -60,7 +45,7 @@ instrument:
 | `instrument.file_patterns` | `list[str]` | Yes | One or more glob patterns (e.g., `*.xls`, `*.csv`). At least one required. |
 | `instrument.enabled` | `bool` | No | Defaults to `true`. Allows disabling the watcher without removing the config. |
 | `instrument.upload_mode` | `str` | No | `"auto"` (default) or `"manual"`. In `auto` mode, files are uploaded to S3 immediately on detection (existing behavior). In `manual` mode, the watcher detects and groups files into instrument runs and reports them to the API, but does not upload. Users select runs for upload via the web UI. |
-| `instrument.run_detection` | `RunDetectionConfig` | Conditional | Required when `upload_mode` is `"manual"`. Configures how files are grouped into instrument runs. |
+| `instrument.run_detection` | `RunDetectionConfig` | Yes | Configures how files are grouped into instrument runs. Independent of `upload_mode`. |
 | `instrument.run_detection.method` | `str` | Yes | `"prefix"` or `"directory"`. `"prefix"`: files whose names share a common prefix (extracted via regex) belong to the same run. `"directory"`: files within the same top-level subdirectory belong to the same run, and the directory name is the run ID. |
 | `instrument.run_detection.prefix_pattern` | `str` | No | Regex applied to filenames; the first capture group extracts the run ID. Default: `^([^_]+)` (everything before the first underscore). Only used when `method` is `"prefix"`. |
 
@@ -79,7 +64,7 @@ The following values are derived at runtime, not stored in the config file:
 
 Define the following Pydantic models (e.g., in `watcher/src/data_hub_watcher/models.py`):
 
-- **`RunDetectionConfig`** — validates the run detection settings (used only when `upload_mode` is `"manual"`)
+- **`RunDetectionConfig`** — validates the run detection settings
   - `method`: Literal `"prefix"` or `"directory"`
   - `prefix_pattern`: Optional regex string. Required if `method` is `"prefix"`. Must contain exactly one capture group. Default: `^([^_]+)`.
 - **`InstrumentConfig`** — validates the instrument entry
@@ -88,7 +73,7 @@ Define the following Pydantic models (e.g., in `watcher/src/data_hub_watcher/mod
   - `file_patterns`: Non-empty list of strings; each must be a valid glob pattern
   - `enabled`: Defaults to `True`
   - `upload_mode`: Literal `"auto"` or `"manual"`, default `"auto"`
-  - `run_detection`: Optional `RunDetectionConfig`. Required if `upload_mode` is `"manual"`.
+  - `run_detection`: Required `RunDetectionConfig`.
 - **`WatcherConfig`** — validates the full config file
   - `version`: Must be `1`
   - `environment`: Literal `"staging"` or `"production"`
@@ -105,7 +90,7 @@ Define the following Pydantic models (e.g., in `watcher/src/data_hub_watcher/mod
 - `environment` is not `"staging"` or `"production"`
 - Config file is malformed YAML or does not match the schema
 - `instrument.upload_mode` is not `"auto"` or `"manual"`
-- `instrument.upload_mode` is `"manual"` but `instrument.run_detection` is missing
+- `instrument.run_detection` is missing
 - `instrument.run_detection.method` is not `"prefix"` or `"directory"`
 - `instrument.run_detection.method` is `"prefix"` but `prefix_pattern` is not a valid regex or does not contain exactly one capture group
 
@@ -145,4 +130,4 @@ watcher/src/data_hub_watcher/
 ## Acceptance Criteria
 
 1. `data-hub watcher config validate` catches all structural errors (malformed YAML, non-kebab-case ID, missing fields) without network calls.
-2. `data-hub watcher config validate` catches missing `run_detection` when `upload_mode` is `manual` and invalid `prefix_pattern`.
+2. `data-hub watcher config validate` catches missing `run_detection` and invalid `prefix_pattern`.

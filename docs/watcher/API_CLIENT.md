@@ -58,27 +58,14 @@ The watcher config is dual-written: local YAML file and the Data Hub API.
   "file_patterns": ["*.xls"],
   "enabled": true,
   "upload_mode": "auto",
-  "run_detection": null
-}
-```
-
-When `upload_mode` is `"manual"`, the `run_detection` field is populated:
-
-```json
-{
-  "config_checksum": "sha256:def456...",
-  "environment": "staging",
-  "instrument_id": "mass-spec-instrument",
-  "watch_directory": "/data/mass-spec",
-  "file_patterns": ["*.csv"],
-  "enabled": true,
-  "upload_mode": "manual",
   "run_detection": {
     "method": "prefix",
     "prefix_pattern": "^([^_]+)"
   }
 }
 ```
+
+`run_detection` is configured for every instrument independently of `upload_mode`. It determines how the watcher groups files into logical runs. `upload_mode` controls what happens after a run is detected: `"auto"` uploads immediately, `"manual"` reports the run and waits for a user to queue it for upload via the web UI.
 
 ## New Instrument Registration
 
