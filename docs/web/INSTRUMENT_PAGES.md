@@ -59,7 +59,7 @@ Detailed view of a single watcher instance, providing remote troubleshooting wit
 
 **Content:**
 - **Header:** watcher ID, instrument name, hostname, OS info, status badge, last heartbeat timestamp.
-- **Config section:** the last-pushed config payload (from `watchers.config_payload`), displayed as a formatted YAML or key-value summary.
+- **Config section:** the last-pushed config YAML (from `watchers.config_yaml`), displayed as a formatted YAML block.
 - **Heartbeat history:** a time-series chart or table of recent heartbeats (from `watcher_heartbeats`), showing status, upload/error counters, and uptime over time. Default view: last 24 hours. Filterable by date range.
 - **Event log:** a chronological feed of significant events (from `watcher_events`), showing event type icon/badge, message, timestamp, and expandable details. Default view: last 7 days. Filterable by event type and date range. Event type color coding: green for `file_uploaded` / `run_uploaded` / `config_synced`, red for `upload_failed` / `error`, blue for `watcher_started` / `watcher_stopped` / `run_reported`.
 

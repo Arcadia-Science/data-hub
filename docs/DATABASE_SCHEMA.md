@@ -109,7 +109,7 @@ Registered file upload service instances. One watcher per instrument PC.
 | `hostname` | `text` | | The hostname of the machine running the watcher. |
 | `os_info` | `text` | | OS description (e.g., "Windows 11 23H2"). |
 | `config_checksum` | `text` | | SHA-256 of the last-pushed config YAML. |
-| `config_payload` | `jsonb` | | The full config payload last pushed by the watcher. |
+| `config_yaml` | `text` | | The raw YAML text of the watcher's config file, stored verbatim as pushed by the watcher. |
 | `last_heartbeat_at` | `timestamptz` | | Updated on each heartbeat. |
 | `status` | `text` | NOT NULL, DEFAULT `'registered'` | One of `registered`, `watching`, `stopped`, `stale`. |
 | `created_at` | `timestamptz` | NOT NULL, DEFAULT `now()` | |

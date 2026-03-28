@@ -21,8 +21,8 @@ This mapping is defined as a constant in `watcher/constants.py`.
 |---|---|---|
 | `GET` | `/instruments` | List registered instruments with metadata (id, display name, suggested file patterns). |
 | `POST` | `/instruments` | Register a new instrument (created in "pending" state until confirmed by an admin in the Data Hub web UI). |
-| `POST` | `/watchers/register` | Register a new watcher instance. Accepts instrument ID, hostname, OS info, and the initial config payload. Returns a `watcher_id` (UUID). |
-| `PUT` | `/watchers/{watcher_id}/config` | Push the full watcher config and its checksum. |
+| `POST` | `/watchers/register` | Register a new watcher instance. Accepts instrument ID, hostname, OS info, and the raw config YAML. Returns a `watcher_id` (UUID). |
+| `PUT` | `/watchers/{watcher_id}/config` | Push the raw config YAML and its checksum. |
 | `GET` | `/watchers/{watcher_id}/config-checksum` | Returns the SHA-256 checksum of the config last pushed to the API. |
 | `POST` | `/watchers/{watcher_id}/heartbeat` | Send a heartbeat with status payload. |
 | `POST` | `/watchers/{watcher_id}/events` | Report significant watcher events (uploads, errors, state changes) for centralized visibility in the web UI. |
@@ -52,21 +52,11 @@ The watcher config is dual-written: local YAML file and the Data Hub API.
 ```json
 {
   "config_checksum": "sha256:abc123...",
-  "environment": "staging",
-  "instrument_id": "spectramax-id3-plate-reader",
-  "watch_directory": "/data/spectramax-id3",
-  "file_patterns": ["*.xls"],
-  "enabled": true,
-  "upload_mode": "auto",
-  "stability_period_seconds": 5,
-  "run_detection": {
-    "method": "prefix",
-    "prefix_pattern": "^([^_]+)"
-  }
+  "config_yaml": "version: 1\nenvironment: staging\nwatcher_id: a1b2c3d4-e5f6-...\ninstrument:\n  id: spectramax-id3-plate-reader\n  ..."
 }
 ```
 
-`run_detection` is configured for every instrument independently of `upload_mode`. It determines how the watcher groups files into logical runs. `upload_mode` controls what happens after a run is detected: `"auto"` uploads immediately, `"manual"` reports the run and waits for a user to queue it for upload via the web UI.
+The watcher sends the raw YAML text of its config file. The API stores this string as-is — no YAML-to-JSON transformation is performed. This keeps a single canonical config format (the YAML file) and avoids an implicit mapping between the nested YAML structure (`instrument.id`, `instrument.watch_directory`) and a flat JSON representation.
 
 ## New Instrument Registration
 

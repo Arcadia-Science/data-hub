@@ -15,21 +15,11 @@ Registers a new watcher instance.
   "instrument_id": "spectramax-id3-plate-reader",
   "hostname": "LAB-PC-01",
   "os_info": "Windows 11 23H2",
-  "config": {
-    "environment": "staging",
-    "instrument_id": "spectramax-id3-plate-reader",
-    "watch_directory": "/data/spectramax-id3",
-    "file_patterns": ["*.xls"],
-    "enabled": true,
-    "upload_mode": "auto",
-    "stability_period_seconds": 5,
-    "run_detection": {
-      "method": "prefix",
-      "prefix_pattern": "^([^_]+)"
-    }
-  }
+  "config_yaml": "version: 1\nenvironment: staging\nwatcher_id: a1b2c3d4-e5f6-...\ninstrument:\n  id: spectramax-id3-plate-reader\n  ..."
 }
 ```
+
+`config_yaml` is the raw text of the watcher's YAML config file. The API stores this string verbatim.
 
 **Response:** `201 Created`
 
@@ -44,26 +34,18 @@ Registers a new watcher instance.
 
 ## `PUT /api/watchers/:watcher_id/config`
 
-Pushes the watcher's config and its checksum. See [watcher/API_CLIENT.md](../watcher/API_CLIENT.md) for the full payload schema including `upload_mode` and `run_detection` fields.
+Pushes the raw config YAML and its checksum.
 
 **Request body:**
 
 ```json
 {
   "config_checksum": "sha256:abc123...",
-  "environment": "staging",
-  "instrument_id": "spectramax-id3-plate-reader",
-  "watch_directory": "/data/spectramax-id3",
-  "file_patterns": ["*.xls"],
-  "enabled": true,
-  "upload_mode": "auto",
-  "stability_period_seconds": 5,
-  "run_detection": {
-    "method": "prefix",
-    "prefix_pattern": "^([^_]+)"
-  }
+  "config_yaml": "version: 1\nenvironment: staging\nwatcher_id: a1b2c3d4-e5f6-...\ninstrument:\n  id: spectramax-id3-plate-reader\n  ..."
 }
 ```
+
+`config_yaml` is the raw text of the watcher's YAML config file. The API stores this string verbatim — no parsing or transformation is performed.
 
 **Response:** `200 OK`
 
@@ -128,19 +110,7 @@ Returns the full detail for a single watcher instance. Used by the `/watchers/:i
   "os_info": "Windows 11 23H2",
   "status": "watching",
   "config_checksum": "sha256:abc123...",
-  "config_payload": {
-    "environment": "staging",
-    "instrument_id": "spectramax-id3-plate-reader",
-    "watch_directory": "/data/spectramax-id3",
-    "file_patterns": ["*.xls"],
-    "enabled": true,
-    "upload_mode": "auto",
-    "stability_period_seconds": 5,
-    "run_detection": {
-      "method": "prefix",
-      "prefix_pattern": "^([^_]+)"
-    }
-  },
+  "config_yaml": "version: 1\nenvironment: staging\nwatcher_id: a1b2c3d4-e5f6-...\ninstrument:\n  id: spectramax-id3-plate-reader\n  ...",
   "last_heartbeat_at": "2026-03-26T20:15:00Z",
   "created_at": "2026-03-20T10:00:00Z",
   "updated_at": "2026-03-26T20:15:01Z"
@@ -353,12 +323,12 @@ Standard HTTP status codes: `400` for validation errors, `401` for missing/inval
 ## Acceptance Criteria
 
 1. `POST /api/watchers/register` returns a `watcher_id` and creates a watcher record linked to the instrument.
-2. `PUT /api/watchers/:watcher_id/config` stores the config payload and checksum; `GET /api/watchers/:watcher_id/config-checksum` returns it.
+2. `PUT /api/watchers/:watcher_id/config` stores the raw config YAML and checksum; `GET /api/watchers/:watcher_id/config-checksum` returns the checksum.
 3. `POST /api/watchers/:watcher_id/heartbeat` inserts a `watcher_heartbeats` row and updates `watchers.last_heartbeat_at`. The API maps request field names (e.g., `files_uploaded_since_last_heartbeat`) to database column names (e.g., `files_uploaded_since_last`).
 4. `POST /api/watchers/:watcher_id/events` accepts batches of watcher events and inserts them into `watcher_events`.
 5. `GET /api/watchers/:watcher_id/events` returns events filtered by type and date range, ordered by timestamp descending.
 6. `GET /api/watchers/:watcher_id/heartbeats` returns heartbeat history filtered by date range.
 7. `watcher_heartbeats` includes manual-mode counters (`runs_reported_since_last`, `runs_uploaded_since_last`) alongside the existing upload counters.
 8. `GET /api/watchers` returns all registered watchers with status indicators (stale if no heartbeat in 5 minutes).
-9. `GET /api/watchers/:watcher_id` returns the full watcher detail including config payload, for the watcher detail page.
+9. `GET /api/watchers/:watcher_id` returns the full watcher detail including the raw config YAML, for the watcher detail page.
 10. `GET /api/watchers/:watcher_id/upload-queue` returns runs with `status = 'queued_for_upload'` for the watcher's instrument, including their `reported_files`.
