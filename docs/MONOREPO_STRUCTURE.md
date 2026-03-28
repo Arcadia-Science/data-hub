@@ -232,7 +232,7 @@ The Lambda Dockerfile copies both the shared package and the lambda package into
 ```dockerfile
 FROM ghcr.io/astral-sh/uv:0.8.12 AS uv
 
-FROM public.ecr.aws/lambda/python:3.13 AS builder
+FROM public.ecr.aws/lambda/python:3.12 AS builder
 
 RUN dnf install -y git
 
@@ -252,7 +252,7 @@ RUN --mount=from=uv,source=/uv,target=/bin/uv \
     uv export --frozen --no-emit-workspace --no-dev --no-editable -o requirements.txt && \
     uv pip install -r requirements.txt --target "${LAMBDA_TASK_ROOT}"
 
-FROM public.ecr.aws/lambda/python:3.13
+FROM public.ecr.aws/lambda/python:3.12
 
 COPY --from=builder ${LAMBDA_TASK_ROOT} ${LAMBDA_TASK_ROOT}
 COPY packages/shared/src ${LAMBDA_TASK_ROOT}

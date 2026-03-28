@@ -25,7 +25,7 @@ instrument:
     - "*.xls"
   enabled: true
   upload_mode: auto
-  stability_period_seconds: 10
+  stability_period_seconds: 5
   run_detection:
     method: prefix
     prefix_pattern: "^([^_]+)"

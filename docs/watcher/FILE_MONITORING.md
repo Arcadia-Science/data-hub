@@ -44,7 +44,7 @@ To avoid re-uploading files on watcher restart, the watcher maintains a local up
 
 ## Run Detection
 
-Stable files (see stability detection above) are grouped into instrument runs using the `run_detection` config. In `auto` mode, files are still uploaded immediately after grouping. In `manual` mode, runs are reported to the API and files are not uploaded until a user queues the run via the web UI.
+Stable files (see stability detection above) are grouped into instrument runs using the `run_detection` config. **The run must be reported to the API before any file in that run is uploaded to S3.** In `auto` mode, the watcher reports the run and then uploads its files immediately. In `manual` mode, the watcher reports the run and waits — files are not uploaded until a user queues the run via the web UI.
 
 **Grouping by prefix (`method: prefix`):**
 
@@ -102,7 +102,7 @@ On each heartbeat interval, if `upload_mode` is `manual`, the watcher also polls
 2. For each returned run:
    a. Verify that all files listed in the run are still present on the local filesystem. If any are missing, report an error to the API and skip the run.
    b. Update the run ledger status to `uploading`.
-   c. Upload each file to S3 using the same upload logic as auto mode (see [UPLOAD.md](./UPLOAD.md)), with S3 key `{instrument.id}/{relative_path}`.
+   c. Upload each file to S3 using the same upload logic as auto mode (see [UPLOAD.md](./UPLOAD.md)), with S3 key `{instrument.id}/{filename}`.
    d. On success, call `PATCH /api/instrument-runs/{id}` with status `uploaded` and the S3 file records.
    e. Update the run ledger status to `uploaded`.
    f. Write each file to the upload ledger for deduplication.

@@ -17,10 +17,11 @@ The target bucket is `arcadia-raw-data-hub-{environment}`, derived from the `env
 ## Upload Process
 
 1. Confirm the instrument is registered and not pending (same check as `watch` startup). Refuse to upload if the instrument is still pending.
-2. Construct the S3 URI: `s3://arcadia-raw-data-hub-{environment}/{instrument.id}/{filename}`
-3. Use the existing `s3_utils.upload_file` function, which handles MIME type detection and `Content-Disposition` for images.
-4. On success: log the upload and write to the deduplication ledger.
-5. On failure: log the error and retry up to 3 times with exponential backoff (1s, 2s, 4s). After 3 failures, log the file as failed and move on. Failed files are retried on the next watcher restart (they won't be in the ledger).
+2. Confirm the file belongs to an instrument run that has already been reported to the API. The run must exist before upload — see [FILE_MONITORING.md](./FILE_MONITORING.md) (run detection / run reporting).
+3. Construct the S3 URI: `s3://arcadia-raw-data-hub-{environment}/{instrument.id}/{filename}`
+4. Use the existing `s3_utils.upload_file` function, which handles MIME type detection and `Content-Disposition` for images.
+5. On success: log the upload and write to the deduplication ledger.
+6. On failure: log the error and retry up to 3 times with exponential backoff (1s, 2s, 4s). After 3 failures, log the file as failed and move on. Failed files are retried on the next watcher restart (they won't be in the ledger).
 
 ## Logging
 

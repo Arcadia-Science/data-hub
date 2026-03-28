@@ -281,43 +281,13 @@ Queues multiple reported runs for upload in a single request. Called by the web 
 
 ## `GET /api/watchers/:watcher_id/upload-queue`
 
-Returns runs that have been queued for upload and belong to this watcher's instrument. Polled by the watcher on each heartbeat interval.
-
-**Response:**
-
-```json
-{
-  "runs": [
-    {
-      "id": "mass-spec-instrument/20260325",
-      "run_id": "20260325",
-      "instrument_id": "mass-spec-instrument",
-      "reported_files": [
-        {
-          "relative_path": "20260325_data_file_1.csv",
-          "filename": "20260325_data_file_1.csv",
-          "size_bytes": 1048576
-        },
-        {
-          "relative_path": "20260325_data_file_2.csv",
-          "filename": "20260325_data_file_2.csv",
-          "size_bytes": 2097152
-        }
-      ]
-    }
-  ]
-}
-```
-
-**Behavior:**
-- Filters `instrument_runs` where `status = 'queued_for_upload'` and `instrument_id` matches the watcher's registered instrument.
-- Includes the `reported_files` for each run so the watcher knows which files to upload.
+Documented in [WATCHERS.md](./WATCHERS.md#get-apiwatcherswatcher_idupload-queue). Lives under the `/api/watchers/` path namespace and should be implemented alongside the other watcher routes.
 
 ## `PATCH /api/instrument-runs/:id`
 
-Updates a run's status and optionally adds file records. Used by the watcher to report upload progress/completion, and by the Lambda to update processing status.
+Updates a run's status and optionally adds file records or updates reported files. Used by the watcher to report upload progress/completion, update detected files for a reported run, and by the Lambda to update processing status.
 
-**Request body (partial):**
+**Request body — upload completion (watcher):**
 
 ```json
 {
@@ -335,9 +305,31 @@ Updates a run's status and optionally adds file records. Used by the watcher to 
 }
 ```
 
+**Request body — updating detected files for a reported run (watcher):**
+
+When new files arrive for an already-reported run, the watcher sends the updated file list. The API upserts `reported_files` rows (skip duplicates by `relative_path`).
+
+```json
+{
+  "detected_files": [
+    {
+      "relative_path": "20260325_data_file_1.csv",
+      "filename": "20260325_data_file_1.csv",
+      "size_bytes": 1048576
+    },
+    {
+      "relative_path": "20260325_data_file_3.csv",
+      "filename": "20260325_data_file_3.csv",
+      "size_bytes": 512000
+    }
+  ]
+}
+```
+
 **Validation:**
 - Status transitions must follow the lifecycle: `reported` → `queued_for_upload` → `uploading` → `uploaded` → `processing` → `completed`/`failed`. Invalid transitions return `409 Conflict`.
 - The `deleted` status cannot be set via this endpoint — use `DELETE /api/instrument-runs/:id` instead.
+- `detected_files` can only be sent for runs with `status = 'reported'`. Returns `409 Conflict` if the run has already been queued or uploaded.
 
 **Response:** `200 OK` with the updated run object.
 
