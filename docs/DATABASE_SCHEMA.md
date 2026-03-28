@@ -112,6 +112,7 @@ Registered file upload service instances. One watcher per instrument PC.
 | `status` | `text` | NOT NULL, DEFAULT `'registered'` | One of `registered`, `watching`, `stopped`, `stale`. |
 | `created_at` | `timestamptz` | NOT NULL, DEFAULT `now()` | |
 | `updated_at` | `timestamptz` | NOT NULL, DEFAULT `now()` | |
+| `deleted_at` | `timestamptz` | | Soft-delete marker. `NULL` means active; non-`NULL` means deregistered. Queries should filter on this column to exclude deregistered watchers. |
 
 A watcher is considered `stale` if no heartbeat has been received for more than 5 minutes (configurable). This can be determined at query time or via a periodic job.
 
@@ -262,7 +263,7 @@ This is intentionally schemaless within `data` — each instrument workflow defi
 - `files(instrument_run_id)` — file list for a run.
 - `run_report_data(instrument_run_id)` — report data for a run.
 - `reported_files(instrument_run_id)` — reported files for a run.
-- `watchers(instrument_id)` — watcher list for an instrument.
+- `watchers(instrument_id) WHERE deleted_at IS NULL` — partial index for active (non-deleted) watchers per instrument.
 - `watcher_heartbeats(watcher_id, timestamp DESC)` — recent heartbeats.
 - `watcher_events(watcher_id, timestamp DESC)` — recent events for a watcher.
 - `watcher_events(watcher_id, event_type)` — filtering events by type.

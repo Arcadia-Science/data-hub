@@ -49,16 +49,19 @@ The replacement for a Notion report page. Displays all information the Lambda wr
 Admin view of all registered file upload service instances.
 
 **Content:**
-- Table: watcher ID, instrument, hostname, status (watching / stopped / stale), last heartbeat, uptime.
+- Table: watcher ID, instrument, hostname, status (watching / stopped / stale), last heartbeat, uptime. Each row has a **"Deregister"** action button (see below).
 - Status indicators: green for active (heartbeat within 5 min), yellow for stale, gray for stopped.
 - Click into a watcher for detail view (`/watchers/:id`).
+- **"Deregistered Watchers" tab or toggle** — shows soft-deleted watchers (`deleted_at` set) with muted styling. Each row shows: watcher ID, instrument, hostname, last status, `deleted_at` timestamp. No action buttons.
+- **Deregister action:** calls `DELETE /api/v1/watchers/:watcher_id`. Requires a confirmation dialog warning that the watcher will no longer be able to send heartbeats or events. The confirmation dialog should advise the user to stop the watcher service on the instrument PC first.
 
 ## Watcher Detail (`/watchers/:id`)
 
 Detailed view of a single watcher instance, providing remote troubleshooting without RDP access to the lab PC.
 
 **Content:**
-- **Header:** watcher ID, instrument name, hostname, OS info, status badge, last heartbeat timestamp.
+- **Header:** watcher ID, instrument name, hostname, OS info, status badge, last heartbeat timestamp. Includes a **"Deregister"** button (same behavior and confirmation dialog as the watchers list page).
+- For soft-deleted watchers (`deleted_at` set): muted header with `deleted_at` timestamp. No action buttons. Heartbeat history and event log remain visible for historical diagnostics.
 - **Config section:** the last-pushed config YAML (from `watchers.config_yaml`), displayed as a formatted YAML block.
 - **Heartbeat history:** a time-series chart or table of recent heartbeats (from `watcher_heartbeats`), showing status, upload/error counters, and uptime over time. Default view: last 24 hours. Filterable by date range.
 - **Event log:** a chronological feed of significant events (from `watcher_events`), showing event type icon/badge, message, timestamp, and expandable details. Default view: last 7 days. Filterable by event type and date range. Event type color coding: green for `file_uploaded` / `run_uploaded` / `config_synced`, red for `upload_failed` / `error`, blue for `watcher_started` / `watcher_stopped` / `run_reported`.
@@ -75,10 +78,11 @@ Admin view for managing the instrument registry.
 ## Acceptance Criteria
 
 1. The run detail page renders metadata, file links, and report data tables (including plate map grids for SpectraMax).
-2. The watchers page shows all registered watchers with heartbeat status indicators.
+2. The watchers page shows all active watchers with heartbeat status indicators. Deregistered watchers are accessible via a "Deregistered Watchers" tab or toggle.
 3. The instrument detail page shows a "Reported Runs" section with "Upload" and "Dismiss" actions for instruments with manual-mode watchers.
 4. Bulk upload selection works: users can select multiple reported runs and queue them all for upload in one action.
 5. The run detail page shows `reported_files` (not downloadable) for runs in `reported` status and S3-backed files (downloadable) for uploaded/completed runs.
 6. The delete confirmation dialog on the run detail page warns about S3 file deletion and requires run ID confirmation for completed runs.
 7. Deleted runs are visible in a "Deleted Runs" tab on the instrument detail page with muted styling.
 8. The watcher detail page (`/watchers/:id`) displays config, heartbeat history (chart or table), and a chronological event log with type filtering.
+9. The watchers list and watcher detail pages include a "Deregister" action with a confirmation dialog. Deregistered watchers display with muted styling and no action buttons.

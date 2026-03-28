@@ -49,6 +49,8 @@ Pushes the raw config YAML and its checksum.
 
 **Response:** `200 OK`
 
+Returns `404` if the watcher does not exist or has been soft-deleted.
+
 ## `GET /api/v1/watchers/:watcher_id/config-checksum`
 
 Returns the SHA-256 checksum of the last-pushed config.
@@ -61,7 +63,7 @@ Returns the SHA-256 checksum of the last-pushed config.
 }
 ```
 
-Returns `404` if the watcher has never pushed a config.
+Returns `404` if the watcher does not exist, has been soft-deleted, or has never pushed a config.
 
 ## `GET /api/v1/watchers`
 
@@ -73,6 +75,9 @@ Lists all registered watchers. Used by the `/watchers` admin page.
 |---|---|---|
 | `instrument_id` | `string` | Filter by instrument. |
 | `status` | `string` | Filter by status (e.g., `watching`, `stopped`, `stale`). |
+| `include_deleted` | `bool` | If `true`, include soft-deleted (deregistered) watchers. Default: `false`. |
+
+By default, soft-deleted watchers (`deleted_at IS NOT NULL`) are excluded. Pass `include_deleted=true` to include them (used by the "Deregistered Watchers" UI view).
 
 **Response:**
 
@@ -117,7 +122,27 @@ Returns the full detail for a single watcher instance. Used by the `/watchers/:i
 }
 ```
 
-Returns `404` if the watcher does not exist.
+Returns `404` if the watcher does not exist or has been soft-deleted.
+
+## `DELETE /api/v1/watchers/:watcher_id`
+
+Soft-deletes a watcher by setting `deleted_at`. Used by admins to deregister decommissioned watchers so they no longer appear in the default `/watchers` list.
+
+**Response:** `200 OK`
+
+```json
+{
+  "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "deleted_at": "2026-03-28T14:00:00Z"
+}
+```
+
+**Behavior:**
+- Sets `deleted_at = now()` on the watcher row. The watcher's `status` column is preserved for audit purposes.
+- The watcher must exist and not already be soft-deleted (`deleted_at` must be `NULL`). Returns `404` if not found, `409 Conflict` if already deleted.
+- Heartbeats and events from a soft-deleted watcher are rejected with `404`. If a decommissioned watcher is still running, it will log heartbeat failures and should be stopped manually on the instrument PC.
+- Soft-deleted watchers are excluded from `GET /api/v1/watchers` by default. Pass `include_deleted=true` to include them.
+- Associated `watcher_heartbeats` and `watcher_events` rows are retained for historical diagnostics.
 
 ## `POST /api/v1/watchers/:watcher_id/heartbeat`
 
@@ -158,6 +183,9 @@ Records a heartbeat from the watcher.
 The request uses the watcher's field names (e.g., `files_uploaded_since_last_heartbeat`). The API maps these to the shorter database column names (e.g., `files_uploaded_since_last`) when inserting into `watcher_heartbeats`. The `instrument_id` and `watch_directory` fields are validated against the watcher's registration but are not stored in the heartbeats table — they are already available via the `watcher_id` foreign key to the `watchers` table.
 
 **Response:** `200 OK`
+
+**Validation:**
+- Returns `404` if the watcher does not exist or has been soft-deleted.
 
 **Side effects:**
 - Inserts a row into `watcher_heartbeats`.
@@ -230,6 +258,7 @@ Records significant watcher events. Called by the watcher to report state change
 ```
 
 **Validation:**
+- Returns `404` if the watcher does not exist or has been soft-deleted.
 - `event_type` must be one of the recognized types (see [watcher/API_CLIENT.md](../watcher/API_CLIENT.md), event reporting section).
 - `timestamp` and `message` are required for each event.
 - Maximum 100 events per request.
@@ -329,6 +358,7 @@ Standard HTTP status codes: `400` for validation errors, `401` for missing/inval
 5. `GET /api/v1/watchers/:watcher_id/events` returns events filtered by type and date range, ordered by timestamp descending.
 6. `GET /api/v1/watchers/:watcher_id/heartbeats` returns heartbeat history filtered by date range.
 7. `watcher_heartbeats` includes manual-mode counters (`runs_reported_since_last`, `runs_uploaded_since_last`) alongside the existing upload counters.
-8. `GET /api/v1/watchers` returns all registered watchers with status indicators (stale if no heartbeat in 5 minutes).
+8. `GET /api/v1/watchers` returns all registered watchers with status indicators (stale if no heartbeat in 5 minutes). Soft-deleted watchers are excluded by default; include them when `include_deleted=true` is passed.
 9. `GET /api/v1/watchers/:watcher_id` returns the full watcher detail including the raw config YAML, for the watcher detail page.
 10. `GET /api/v1/watchers/:watcher_id/upload-queue` returns runs with `status = 'queued_for_upload'` for the watcher's instrument, including their `reported_files`. Each item includes `instrument_id` and `run_id` so the watcher can construct nested API URLs.
+11. `DELETE /api/v1/watchers/:watcher_id` soft-deletes the watcher (sets `deleted_at`). Returns `409` for already-deleted watchers. Subsequent heartbeat, event, and config requests for a soft-deleted watcher return `404`.
