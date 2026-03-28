@@ -22,6 +22,7 @@ Registers a new watcher instance.
     "file_patterns": ["*.xls"],
     "enabled": true,
     "upload_mode": "auto",
+    "stability_period_seconds": 5,
     "run_detection": {
       "method": "prefix",
       "prefix_pattern": "^([^_]+)"
@@ -56,6 +57,7 @@ Pushes the watcher's config and its checksum. See [watcher/API_CLIENT.md](../wat
   "file_patterns": ["*.xls"],
   "enabled": true,
   "upload_mode": "auto",
+  "stability_period_seconds": 5,
   "run_detection": {
     "method": "prefix",
     "prefix_pattern": "^([^_]+)"

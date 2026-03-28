@@ -16,10 +16,11 @@ The target bucket is `arcadia-raw-data-hub-{environment}`, derived from the `env
 
 ## Upload Process
 
-1. Construct the S3 URI: `s3://arcadia-raw-data-hub-{environment}/{instrument.id}/{filename}`
-2. Use the existing `s3_utils.upload_file` function, which handles MIME type detection and `Content-Disposition` for images.
-3. On success: log the upload and write to the deduplication ledger.
-4. On failure: log the error and retry up to 3 times with exponential backoff (1s, 2s, 4s). After 3 failures, log the file as failed and move on. Failed files are retried on the next watcher restart (they won't be in the ledger).
+1. Confirm the instrument is registered and not pending (same check as `watch` startup). Refuse to upload if the instrument is still pending.
+2. Construct the S3 URI: `s3://arcadia-raw-data-hub-{environment}/{instrument.id}/{filename}`
+3. Use the existing `s3_utils.upload_file` function, which handles MIME type detection and `Content-Disposition` for images.
+4. On success: log the upload and write to the deduplication ledger.
+5. On failure: log the error and retry up to 3 times with exponential backoff (1s, 2s, 4s). After 3 failures, log the file as failed and move on. Failed files are retried on the next watcher restart (they won't be in the ledger).
 
 ## Logging
 
@@ -50,3 +51,4 @@ All watcher activity is logged to three channels:
 ## Acceptance Criteria
 
 1. `data-hub watcher upload --file <path>` uploads a single file to the correct S3 path.
+2. `data-hub watcher upload` refuses to upload if the instrument is still pending.

@@ -43,11 +43,12 @@ Steps:
 5. Prompt for file patterns (pre-populated from API metadata for existing instruments; blank for new instruments).
 6. Prompt for run detection method (`prefix` / `directory`). Default: `prefix`.
   - If `prefix`: prompt for prefix pattern (default: `^([^_]+)`). Show an example of how filenames in the watch directory would be grouped.
-7. Prompt for upload mode (`auto` / `manual`). Default: `auto`.
-8. Register the watcher with the API via `POST /watchers/register`. The API returns a `watcher_id` (UUID).
-9. Write config to disk.
-10. Push config to the API via `PUT /watchers/{watcher_id}/config`.
-11. Run local validation and display the result.
+7. Prompt for file stability period in seconds (default: `5`). Explain that this controls how long the watcher waits after a file stops changing before uploading it.
+8. Prompt for upload mode (`auto` / `manual`). Default: `auto`.
+9. Register the watcher with the API via `POST /watchers/register`. The API returns a `watcher_id` (UUID).
+10. Write config to disk.
+11. Push config to the API via `PUT /watchers/{watcher_id}/config`.
+12. Run local validation and display the result.
 
 If a config file already exists, prompt to overwrite.
 
@@ -85,6 +86,12 @@ Fetching instruments from Data Hub API...
   Preview — files in /data/spectramax-id3 would be grouped as:
     Run "20260326": 20260326_experiment.xls
 
+? File stability period in seconds [5]:
+
+? Upload mode:
+  > auto   — Upload files to S3 automatically when detected
+    manual — Report new instrument runs without uploading; upload on demand via the web UI
+
 Registering watcher with Data Hub API...
 ✓ Watcher registered (ID: a1b2c3d4-e5f6-7890-abcd-ef1234567890)
 ✓ Configuration saved to ~/.data-hub/config.yaml
@@ -120,6 +127,8 @@ Fetching instruments from Data Hub API...
     Run "20260325": 20260325_data_file_1.csv, 20260325_data_file_2.csv
     Run "20260326": 20260326_data_file_1.csv
 
+? File stability period in seconds [5]: 30
+
 ? Upload mode:
     auto   — Upload files to S3 automatically when detected
   > manual — Report new instrument runs without uploading; upload on demand via the web UI
@@ -144,8 +153,11 @@ Watch directory: /data/spectramax-id3
 File patterns:   *.xls
 Run detection:   prefix (pattern: ^([^_]+))
 Upload mode:     auto
+Stability:       5s
 Enabled:         ✓
 ```
+
+If the config file is missing, malformed YAML, or fails validation, `config show` prints the error and exits with code 1 instead of crashing with a traceback. This lets users diagnose issues without needing to run `config validate` separately.
 
 ## `data-hub watcher config validate`
 
@@ -163,6 +175,7 @@ $ data-hub watcher config edit
 Current instrument: spectramax-id3-plate-reader
 ? Watch directory [/data/spectramax-id3]:
 ? File types [*.xls]: *.xls, *.xlsx
+? File stability period in seconds [5]:
 ? Enabled [true]:
 
 ✓ Configuration updated.
@@ -214,6 +227,7 @@ One-shot upload of a single file to S3.
 - `--dry-run`: Log the S3 key without performing the upload.
 - The S3 key is `{instrument.id}/{filename}`, derived from config.
 - Validates config before uploading.
+- Confirms the instrument is registered and not pending (same check as `watch`). Refuses to upload if the instrument is still pending.
 - Does not require the watcher to be running.
 
 ## Acceptance Criteria
@@ -226,4 +240,5 @@ One-shot upload of a single file to S3.
 6. `data-hub watcher config open` opens the config in the system editor, re-validates on close, and pushes to the API.
 7. `data-hub watcher watch --dry-run` logs all activity without performing uploads or sending heartbeats.
 8. `data-hub watcher upload --file <path>` uploads a single file to the correct S3 path.
-9. `data-hub watcher init` prompts for `run_detection` and `upload_mode` independently.
+9. `data-hub watcher upload` refuses to upload if the instrument is still pending.
+10. `data-hub watcher init` prompts for `run_detection` and `upload_mode` independently.

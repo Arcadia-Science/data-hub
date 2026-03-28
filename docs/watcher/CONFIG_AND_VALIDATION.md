@@ -25,6 +25,7 @@ instrument:
     - "*.xls"
   enabled: true
   upload_mode: auto
+  stability_period_seconds: 10
   run_detection:
     method: prefix
     prefix_pattern: "^([^_]+)"
@@ -45,6 +46,7 @@ instrument:
 | `instrument.file_patterns` | `list[str]` | Yes | One or more glob patterns (e.g., `*.xls`, `*.csv`). At least one required. |
 | `instrument.enabled` | `bool` | No | Defaults to `true`. Allows disabling the watcher without removing the config. |
 | `instrument.upload_mode` | `str` | No | `"auto"` (default) or `"manual"`. In `auto` mode, files are uploaded to S3 immediately on detection (existing behavior). In `manual` mode, the watcher detects and groups files into instrument runs and reports them to the API, but does not upload. Users select runs for upload via the web UI. |
+| `instrument.stability_period_seconds` | `int` | No | How long (in seconds) a file's size and modification time must remain unchanged before the file is considered stable and queued for upload. Default: `5`. Some instruments write large files incrementally and need a longer window. See [FILE_MONITORING.md](./FILE_MONITORING.md) for full stability detection behavior. |
 | `instrument.run_detection` | `RunDetectionConfig` | Yes | Configures how files are grouped into instrument runs. Independent of `upload_mode`. |
 | `instrument.run_detection.method` | `str` | Yes | `"prefix"` or `"directory"`. `"prefix"`: files whose names share a common prefix (extracted via regex) belong to the same run. `"directory"`: files within the same top-level subdirectory belong to the same run, and the directory name is the run ID. |
 | `instrument.run_detection.prefix_pattern` | `str` | No | Regex applied to filenames; the first capture group extracts the run ID. Default: `^([^_]+)` (everything before the first underscore). Only used when `method` is `"prefix"`. |
@@ -73,6 +75,7 @@ Define the following Pydantic models (e.g., in `watcher/src/data_hub_watcher/mod
   - `file_patterns`: Non-empty list of strings; each must be a valid glob pattern
   - `enabled`: Defaults to `True`
   - `upload_mode`: Literal `"auto"` or `"manual"`, default `"auto"`
+  - `stability_period_seconds`: Positive `int`, default `5`. Must be between 1 and 300 (inclusive).
   - `run_detection`: Required `RunDetectionConfig`.
 - **`WatcherConfig`** — validates the full config file
   - `version`: Must be `1`
@@ -93,6 +96,7 @@ Define the following Pydantic models (e.g., in `watcher/src/data_hub_watcher/mod
 - `instrument.run_detection` is missing
 - `instrument.run_detection.method` is not `"prefix"` or `"directory"`
 - `instrument.run_detection.method` is `"prefix"` but `prefix_pattern` is not a valid regex or does not contain exactly one capture group
+- `instrument.stability_period_seconds` is not an integer or is outside the range 1–300
 
 **Warnings (logged, do not block):**
 

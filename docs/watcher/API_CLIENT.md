@@ -58,6 +58,7 @@ The watcher config is dual-written: local YAML file and the Data Hub API.
   "file_patterns": ["*.xls"],
   "enabled": true,
   "upload_mode": "auto",
+  "stability_period_seconds": 5,
   "run_detection": {
     "method": "prefix",
     "prefix_pattern": "^([^_]+)"
@@ -75,7 +76,7 @@ When a user enters a new instrument ID during `init`:
 2. The CLI sends `POST /instruments` with the ID and an optional display name.
 3. The API creates the instrument in a **pending** state.
 4. The CLI prints: "Instrument registered as pending. An admin must confirm it in the Data Hub web app before the watcher can start."
-5. The `watch` command checks instrument status on startup and refuses to run if the instrument is still pending.
+5. The `watch` and `upload` commands check instrument status on startup and refuse to run if the instrument is still pending.
 
 ## Heartbeat
 

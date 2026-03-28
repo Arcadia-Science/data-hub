@@ -6,7 +6,7 @@ Maps to `monitor.py`, `run_detector.py` in the watcher module structure.
 
 ## Library
 
-Use [`watchdog`](https://github.com/gorakhargosh/watchdog) for cross-platform filesystem event monitoring.
+Use [watchdog](https://github.com/gorakhargosh/watchdog) for cross-platform filesystem event monitoring.
 
 ## Initial Scan
 
@@ -27,10 +27,10 @@ After the initial scan, the watcher listens for `FileCreatedEvent` and `FileModi
 Instrument software may write files incrementally (e.g., large TIFF images). The watcher must not upload a file while it is still being written.
 
 1. When a matching file event is detected, record the file's size and modification time.
-2. Wait a configurable **stability period** (default: 5 seconds, defined in `watcher/constants.py`).
+2. Wait for `instrument.stability_period_seconds` (default: 5 seconds). This value is configured per instrument in the config file — see [CONFIG_AND_VALIDATION.md](./CONFIG_AND_VALIDATION.md). Instruments that write large files incrementally (e.g., multi-GB imaging data) should use a longer period.
 3. Re-check the file's size and modification time. If unchanged, the file is considered stable and is queued for upload.
 4. If changed, reset the stability timer.
-5. Cap the maximum wait at a configurable timeout (default: 5 minutes) after which the file is logged as an error and skipped.
+5. Cap the maximum wait at a configurable timeout (default: 5 minutes, defined in `watcher/constants.py`) after which the file is logged as an error and skipped.
 
 ## Deduplication
 
