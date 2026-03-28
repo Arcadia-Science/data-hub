@@ -160,13 +160,13 @@ One record per instrument run, replacing the Notion report page as the primary r
 | `id` | `text` | PK | Composite-style ID: `{instrument_id}/{run_id}` to guarantee global uniqueness while preserving the run ID's meaning. |
 | `instrument_id` | `text` | FK → `instruments.id`, NOT NULL | |
 | `run_id` | `text` | NOT NULL | The run identifier — derived by the Lambda function for auto-mode runs (e.g., filename without extension), or by the watcher's run detection logic for manual-mode runs (e.g., shared prefix, directory name). |
-| `status` | `text` | NOT NULL, DEFAULT `'processing'` | One of `reported`, `queued_for_upload`, `uploading`, `uploaded`, `processing`, `completed`, `failed`, `deleted`. See status lifecycle below. |
+| `status` | `text` | NOT NULL, DEFAULT `'processing'` | One of `reported`, `queued_for_upload`, `uploading`, `uploaded`, `processing`, `completed`, `failed`. See status lifecycle below. |
 | `source` | `text` | NOT NULL, DEFAULT `'lambda'` | How the run was created. One of `lambda` (created by the Lambda function after processing an S3 event) or `watcher` (reported by the watcher in manual mode). |
 | `watcher_id` | `uuid` | FK → `watchers.id` | Set when the run was reported by a watcher. `NULL` for Lambda-created runs. |
 | `report_version` | `text` | | The version string of the workflow that generated the report (e.g., `"0.1.7"`). |
 | `created_at` | `timestamptz` | NOT NULL, DEFAULT `now()` | When the run was first created (reported by watcher or processed by Lambda). |
 | `updated_at` | `timestamptz` | NOT NULL, DEFAULT `now()` | |
-| `deleted_at` | `timestamptz` | | When the run was soft-deleted. `NULL` means active. |
+| `deleted_at` | `timestamptz` | | Canonical soft-delete marker. `NULL` means active; non-`NULL` means deleted. Queries should filter on this column rather than `status`. |
 
 Unique constraint on `(instrument_id, run_id)`.
 
@@ -179,8 +179,9 @@ Watcher (auto mode):    reported → uploading → uploaded → processing → c
                                                                     ↘ failed
 Lambda (no watcher):                                      processing → completed
                                                                     ↘ failed
-Any status except deleted: ────────────────────────────────────────────────────→ deleted
 ```
+
+Soft-deletion is orthogonal to status: setting `deleted_at` marks a run as deleted regardless of its current status. The `status` column preserves the run's last workflow state for audit purposes.
 
 In both watcher modes, the watcher drives the run through `reported` → `uploading` → `uploaded`. The Lambda function, triggered by the S3 upload, takes over and updates the status to `processing` and then `completed` (or `failed`) via its upsert to `POST /api/instrument-runs`. The difference between manual and auto mode is whether `queued_for_upload` is involved: in manual mode a user must queue the run for upload via the web UI, while in auto mode the watcher uploads immediately after reporting. The "Lambda (no watcher)" path applies when a file arrives in S3 without watcher involvement (e.g., a direct upload or re-processing trigger) — the Lambda creates the run directly in `processing` status.
 
@@ -191,7 +192,6 @@ In both watcher modes, the watcher drives the run through `reported` → `upload
 - `processing` — the Lambda function has picked up the run and is processing it. Set by the Lambda's upsert to `POST /api/instrument-runs`.
 - `completed` — processing finished successfully. Set by the Lambda.
 - `failed` — processing failed. Set by the Lambda.
-- `deleted` — soft-deleted; files removed from S3, `deleted_at` is set.
 
 ### `instrument_run_metadata`
 
@@ -279,7 +279,7 @@ This is intentionally schemaless within `data` — each instrument workflow defi
 - `watcher_events(watcher_id, timestamp DESC)` — recent events for a watcher.
 - `watcher_events(watcher_id, event_type)` — filtering events by type.
 - `instrument_runs(status, instrument_id)` — upload queue queries (filtering by `queued_for_upload` for a given instrument).
-- `instrument_runs(deleted_at)` — partial index on non-null `deleted_at` for deleted runs queries.
+- `instrument_runs(instrument_id, created_at DESC) WHERE deleted_at IS NULL` — partial index for active (non-deleted) runs queries, covering the default dashboard and instrument-page views.
 
 ## Acceptance Criteria
 

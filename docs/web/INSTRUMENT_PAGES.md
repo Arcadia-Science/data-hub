@@ -12,9 +12,9 @@ All runs for a single instrument.
   - **"Upload"** button — queues the run for upload (`POST /api/instrument-runs/:id/request-upload`).
   - **"Dismiss"** button — soft-deletes the reported run without uploading (`DELETE /api/instrument-runs/:id`). Requires confirmation.
   - **Bulk actions:** checkbox selection with "Upload selected" and "Dismiss selected" buttons at the top of the section.
-- Runs table with the same columns as the dashboard table, filtered to this instrument. Sortable and paginated. Includes all statuses except `deleted` (which are shown via a separate toggle or tab).
+- Runs table with the same columns as the dashboard table, filtered to this instrument. Sortable and paginated. Excludes soft-deleted runs (where `deleted_at` is set), which are shown via a separate toggle or tab.
 - Metadata filters specific to this instrument (e.g., filter by measurement mode for SpectraMax, by tape type for TapeStation).
-- **"Deleted Runs" tab or toggle** — shows soft-deleted runs for this instrument with muted styling. Each row shows: run ID, original status before deletion, `deleted_at` timestamp.
+- **"Deleted Runs" tab or toggle** — shows soft-deleted runs (`deleted_at` set) for this instrument with muted styling. Each row shows: run ID, last workflow status (preserved in the `status` column), `deleted_at` timestamp.
 
 ## Run Detail (`/instruments/:instrumentId/runs/:runId`)
 
@@ -27,7 +27,7 @@ The replacement for a Notion report page. Displays all information the Lambda wr
     - For runs in `uploaded`, `processing`, `completed`, `failed` statuses: **"Delete"** button (soft-delete with confirmation dialog, see below).
     - For `queued_for_upload` runs: status indicator showing the run is waiting for the watcher to pick it up. No action buttons (the user has already requested upload).
     - For `uploading` runs: progress indicator. No action buttons.
-    - For `deleted` runs: muted header with `deleted_at` timestamp. No action buttons.
+    - For soft-deleted runs (`deleted_at` set): muted header with `deleted_at` timestamp. No action buttons.
 - **Delete confirmation dialog:** Warns the user that deletion will remove all files from S3 and is not reversible. Shows the count and total size of files that will be deleted. Requires the user to type the run ID to confirm (for runs with `completed` status that have report data).
 - Metadata section: key-value display of all `instrument_run_metadata` entries for this run (e.g., Measurement Mode: Fluorescence, Wavelength: 450). Empty for `reported` runs.
 - Files section: depends on run status:
@@ -36,7 +36,7 @@ The replacement for a Notion report page. Displays all information the Lambda wr
     - **Images** (PNG, TIFF, JPEG): rendered inline.
     - **PDFs**: embedded PDF viewer or download link.
     - **Spreadsheets** (XLS, XLSX, CSV): download link.
-  - For `deleted` runs: shows the file list from the database (filenames, sizes) but without download links. A note explains that files have been deleted from S3.
+  - For soft-deleted runs: shows the file list from the database (filenames, sizes) but without download links. A note explains that files have been deleted from S3.
 - Report data section: rendered from `run_report_data` entries. Empty for `reported` / `queued_for_upload` / `uploading` / `uploaded` runs. The rendering depends on `data_type`:
   - `plate_map` → plate-format grid (rows A–H/P, columns 1–12/24) with values in cells.
   - `raw_well_data` → scrollable data table.

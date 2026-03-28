@@ -20,7 +20,7 @@ The landing page. Shows a summary of recent activity across all instruments.
 - A combined recent runs table across all instruments, sorted by `created_at DESC`. Each row shows: instrument name, run ID, status badge, metadata summary, timestamp. Rows link to the run detail page. Status badges use distinct colors for each state (e.g., `reported` = blue, `queued_for_upload` = amber, `uploading` = amber animated, `uploaded` = teal, `processing` = purple, `completed` = green, `failed` = red).
 - Filters: instrument (multi-select dropdown), status (including new statuses), source (`lambda` / `watcher`), date range.
 - Search: by run ID (partial match).
-- Deleted runs are excluded by default. A "Show deleted" toggle reveals them with a visual strikethrough or muted style.
+- Soft-deleted runs (`deleted_at` set) are excluded by default. A "Show deleted" toggle reveals them with a visual strikethrough or muted style.
 
 ## Shared UI Patterns
 

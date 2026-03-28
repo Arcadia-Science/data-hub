@@ -141,7 +141,7 @@ Lists instrument runs with filtering and pagination. Used by the web UI dashboar
 }
 ```
 
-By default, runs with `status = 'deleted'` are excluded. Pass `include_deleted=true` to include them (used by the "Deleted Runs" UI view).
+By default, soft-deleted runs (`deleted_at IS NOT NULL`) are excluded. Pass `include_deleted=true` to include them (used by the "Deleted Runs" UI view).
 
 ## `GET /api/instrument-runs/:id`
 
@@ -328,17 +328,17 @@ When new files arrive for an already-reported run, the watcher sends the updated
 
 **Validation:**
 - Status transitions must follow the lifecycle. Valid paths: `reported` → `queued_for_upload` → `uploading` → `uploaded` → `processing` → `completed`/`failed` (manual mode), or `reported` → `uploading` → `uploaded` → `processing` → `completed`/`failed` (auto mode). Invalid transitions return `409 Conflict`.
-- The `deleted` status cannot be set via this endpoint — use `DELETE /api/instrument-runs/:id` instead.
+- Soft-deleted runs (`deleted_at` set) cannot be updated — returns `409 Conflict`. Use `DELETE /api/instrument-runs/:id` to soft-delete.
 - `detected_files` can only be sent for runs with `status = 'reported'`. Returns `409 Conflict` if the run has already been queued or uploaded.
 
 **Response:** `200 OK` with the updated run object.
 
 ## `DELETE /api/instrument-runs/:id`
 
-Soft-deletes an instrument run. Removes all associated files from S3 and marks the run as deleted.
+Soft-deletes an instrument run by setting `deleted_at`. Removes all associated files from S3.
 
 **Validation:**
-- The run must exist and not already be deleted. Returns `404` if not found, `409` if already deleted.
+- The run must exist and not already be soft-deleted (`deleted_at` must be `NULL`). Returns `404` if not found, `409` if already deleted.
 - Runs in `uploading` status cannot be deleted (the upload must complete or be cancelled first). Returns `409 Conflict`.
 
 **Request body:** None required.
@@ -348,14 +348,13 @@ Soft-deletes an instrument run. Removes all associated files from S3 and marks t
 ```json
 {
   "id": "mass-spec-instrument/20260325",
-  "status": "deleted",
   "deleted_at": "2026-03-27T10:00:00Z",
   "files_deleted": 2
 }
 ```
 
 **Side effects:**
-1. Sets `instrument_runs.status` to `deleted` and `instrument_runs.deleted_at` to now.
+1. Sets `instrument_runs.deleted_at` to now. The `status` column is left unchanged so the run's last workflow state is preserved for audit purposes.
 2. Deletes all S3 objects referenced in the `files` table for this run (both raw and processed buckets).
 3. Does **not** delete database rows for `files`, `reported_files`, `instrument_run_metadata`, or `run_report_data` — these are retained for audit purposes and potential future restore functionality.
 
@@ -426,5 +425,5 @@ Standard HTTP status codes: `400` for validation errors, `401` for missing/inval
 7. `POST /api/instrument-runs/batch-request-upload` queues multiple reported runs and reports which were queued vs. skipped.
 8. `GET /api/watchers/:watcher_id/upload-queue` returns runs with `status = 'queued_for_upload'` for the watcher's instrument, including their `reported_files`.
 9. `PATCH /api/instrument-runs/:id` correctly enforces status transition rules and accepts file records on upload completion.
-10. `DELETE /api/instrument-runs/:id` soft-deletes the run (sets `deleted_at`, status to `deleted`) and deletes all associated S3 objects. Returns `409` for runs in `uploading` status.
-11. `GET /api/instrument-runs` excludes deleted runs by default; includes them when `include_deleted=true` is passed.
+10. `DELETE /api/instrument-runs/:id` soft-deletes the run (sets `deleted_at`) and deletes all associated S3 objects. The `status` column is preserved. Returns `409` for runs in `uploading` status or already-deleted runs.
+11. `GET /api/instrument-runs` excludes soft-deleted runs (`deleted_at IS NOT NULL`) by default; includes them when `include_deleted=true` is passed.
