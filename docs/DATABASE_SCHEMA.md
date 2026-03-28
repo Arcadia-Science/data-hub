@@ -157,7 +157,7 @@ One record per instrument run, replacing the Notion report page as the primary r
 
 | Column | Type | Constraints | Description |
 |---|---|---|---|
-| `id` | `text` | PK | Composite-style ID: `{instrument_id}/{run_id}` to guarantee global uniqueness while preserving the run ID's meaning. |
+| `id` | `uuid` | PK, DEFAULT `gen_random_uuid()` | Surrogate primary key. The natural key is `(instrument_id, run_id)`. |
 | `instrument_id` | `text` | FK → `instruments.id`, NOT NULL | |
 | `run_id` | `text` | NOT NULL | The run identifier — derived by the Lambda function for auto-mode runs (e.g., filename without extension), or by the watcher's run detection logic for manual-mode runs (e.g., shared prefix, directory name). |
 | `status` | `text` | NOT NULL, DEFAULT `'processing'` | One of `reported`, `queued_for_upload`, `uploading`, `uploaded`, `processing`, `completed`, `failed`. See status lifecycle below. |
@@ -183,13 +183,13 @@ Lambda (no watcher):                                      processing → complet
 
 Soft-deletion is orthogonal to status: setting `deleted_at` marks a run as deleted regardless of its current status. The `status` column preserves the run's last workflow state for audit purposes.
 
-In both watcher modes, the watcher drives the run through `reported` → `uploading` → `uploaded`. The Lambda function, triggered by the S3 upload, takes over and updates the status to `processing` and then `completed` (or `failed`) via its upsert to `POST /api/instrument-runs`. The difference between manual and auto mode is whether `queued_for_upload` is involved: in manual mode a user must queue the run for upload via the web UI, while in auto mode the watcher uploads immediately after reporting. The "Lambda (no watcher)" path applies when a file arrives in S3 without watcher involvement (e.g., a direct upload or re-processing trigger) — the Lambda creates the run directly in `processing` status.
+In both watcher modes, the watcher drives the run through `reported` → `uploading` → `uploaded`. The Lambda function, triggered by the S3 upload, takes over and updates the status to `processing` and then `completed` (or `failed`) via its upsert to `POST /api/instruments/:instrumentId/runs`. The difference between manual and auto mode is whether `queued_for_upload` is involved: in manual mode a user must queue the run for upload via the web UI, while in auto mode the watcher uploads immediately after reporting. The "Lambda (no watcher)" path applies when a file arrives in S3 without watcher involvement (e.g., a direct upload or re-processing trigger) — the Lambda creates the run directly in `processing` status.
 
 - `reported` — watcher detected the run and reported it; files exist on the local instrument PC but have not been uploaded to S3.
 - `queued_for_upload` — manual mode only. A user selected this run for upload via the web UI; the watcher will pick it up on its next poll.
 - `uploading` — the watcher is actively uploading files to S3.
 - `uploaded` — all files have been uploaded to S3; awaiting Lambda processing via S3 trigger.
-- `processing` — the Lambda function has picked up the run and is processing it. Set by the Lambda's upsert to `POST /api/instrument-runs`.
+- `processing` — the Lambda function has picked up the run and is processing it. Set by the Lambda's upsert to `POST /api/instruments/:instrumentId/runs`.
 - `completed` — processing finished successfully. Set by the Lambda.
 - `failed` — processing failed. Set by the Lambda.
 
@@ -200,7 +200,7 @@ Key-value metadata for instrument runs. Replaces Ganymede file tags and the inst
 | Column | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | `bigint` | PK, generated | |
-| `instrument_run_id` | `text` | FK → `instrument_runs.id`, NOT NULL | |
+| `instrument_run_id` | `uuid` | FK → `instrument_runs.id`, NOT NULL | |
 | `key` | `text` | NOT NULL | Metadata key (e.g., `tape_type`, `measurement_mode`, `wavelengths`). |
 | `value` | `text` | NOT NULL | Metadata value. For multi-valued properties (e.g., wavelengths, dye channels), store one row per value. |
 
@@ -224,7 +224,7 @@ Files detected by the watcher for runs in manual mode, before they have been upl
 | Column | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | `bigint` | PK, generated | |
-| `instrument_run_id` | `text` | FK → `instrument_runs.id`, NOT NULL | |
+| `instrument_run_id` | `uuid` | FK → `instrument_runs.id`, NOT NULL | |
 | `relative_path` | `text` | NOT NULL | Path relative to the watcher's watch directory (e.g., `20260325_data_file_1.csv` or `20260325_testing/data_file_1.csv`). |
 | `filename` | `text` | NOT NULL | The filename component (last segment of the path). |
 | `size_bytes` | `bigint` | | File size at detection time. |
@@ -239,7 +239,7 @@ Every file uploaded to S3 for an instrument run.
 | Column | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | `bigint` | PK, generated | |
-| `instrument_run_id` | `text` | FK → `instrument_runs.id`, NOT NULL | |
+| `instrument_run_id` | `uuid` | FK → `instrument_runs.id`, NOT NULL | |
 | `s3_bucket` | `text` | NOT NULL | |
 | `s3_key` | `text` | NOT NULL, UNIQUE | |
 | `filename` | `text` | NOT NULL | Original filename. |
@@ -255,7 +255,7 @@ Structured tabular data extracted by the Lambda function. Replaces the Ganymede 
 | Column | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | `bigint` | PK, generated | |
-| `instrument_run_id` | `text` | FK → `instrument_runs.id`, NOT NULL | |
+| `instrument_run_id` | `uuid` | FK → `instrument_runs.id`, NOT NULL | |
 | `data_type` | `text` | NOT NULL | Identifies the dataset (e.g., `raw_well_data`, `plate_map`, `kinetic_data`, `spectrum_data`, `sample_table`). |
 | `data` | `jsonb` | NOT NULL | The structured data as a JSON array of row objects. |
 | `created_at` | `timestamptz` | NOT NULL, DEFAULT `now()` | |

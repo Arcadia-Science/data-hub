@@ -280,7 +280,6 @@ Returns runs that have been queued for upload and belong to this watcher's instr
 {
   "runs": [
     {
-      "id": "mass-spec-instrument/20260325",
       "run_id": "20260325",
       "instrument_id": "mass-spec-instrument",
       "reported_files": [
@@ -303,6 +302,7 @@ Returns runs that have been queued for upload and belong to this watcher's instr
 **Behavior:**
 - Filters `instrument_runs` where `status = 'queued_for_upload'` and `instrument_id` matches the watcher's registered instrument.
 - Includes the `reported_files` for each run so the watcher knows which files to upload.
+- The watcher constructs `PATCH /api/instruments/{instrument_id}/runs/{run_id}` URLs from the `instrument_id` and `run_id` in each response item.
 
 ## Error Responses
 
@@ -331,4 +331,4 @@ Standard HTTP status codes: `400` for validation errors, `401` for missing/inval
 7. `watcher_heartbeats` includes manual-mode counters (`runs_reported_since_last`, `runs_uploaded_since_last`) alongside the existing upload counters.
 8. `GET /api/watchers` returns all registered watchers with status indicators (stale if no heartbeat in 5 minutes).
 9. `GET /api/watchers/:watcher_id` returns the full watcher detail including the raw config YAML, for the watcher detail page.
-10. `GET /api/watchers/:watcher_id/upload-queue` returns runs with `status = 'queued_for_upload'` for the watcher's instrument, including their `reported_files`.
+10. `GET /api/watchers/:watcher_id/upload-queue` returns runs with `status = 'queued_for_upload'` for the watcher's instrument, including their `reported_files`. Each item includes `instrument_id` and `run_id` so the watcher can construct nested API URLs.

@@ -15,9 +15,9 @@ The API endpoints in [api/WATCHERS.md](./api/WATCHERS.md) and [api/INSTRUMENT_RU
 | `GET /watchers/{watcher_id}/config-checksum` | `GET /api/watchers/:watcher_id/config-checksum` |
 | `POST /watchers/{watcher_id}/heartbeat` | `POST /api/watchers/:watcher_id/heartbeat` |
 | `POST /watchers/{watcher_id}/events` | `POST /api/watchers/:watcher_id/events` |
-| `POST /instrument-runs` (with `status: reported`) | `POST /api/instrument-runs` |
+| `POST /instruments/{instrument_id}/runs` (with `status: reported`) | `POST /api/instruments/:instrumentId/runs` |
 | `GET /watchers/{watcher_id}/upload-queue` | `GET /api/watchers/:watcher_id/upload-queue` |
-| `PATCH /instrument-runs/{id}` | `PATCH /api/instrument-runs/:id` |
+| `PATCH /instruments/{instrument_id}/runs/{run_id}` | `PATCH /api/instruments/:instrumentId/runs/:runId` |
 
 ## S3 Conventions
 

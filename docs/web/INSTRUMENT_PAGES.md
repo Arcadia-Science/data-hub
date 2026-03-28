@@ -2,15 +2,15 @@
 
 Prerequisite reading: [ARCHITECTURE.md](../ARCHITECTURE.md), [api/INSTRUMENT_RUNS.md](../api/INSTRUMENT_RUNS.md), [api/INSTRUMENTS.md](../api/INSTRUMENTS.md), [api/WATCHERS.md](../api/WATCHERS.md), [web/DASHBOARD.md](./DASHBOARD.md) (shared UI patterns).
 
-## Instrument Detail (`/instruments/:id`)
+## Instrument Detail (`/instruments/:instrumentId`)
 
 All runs for a single instrument.
 
 **Content:**
 - Instrument header: display name, status, watcher status(es), upload mode indicator (auto / manual).
 - **Reported Runs section** (visible only for instruments with manual-mode watchers and at least one reported run): a highlighted section above the main runs table showing runs with `status = 'reported'`. Each row shows: run ID, file count, total size, detected timestamp, and action buttons:
-  - **"Upload"** button — queues the run for upload (`POST /api/instrument-runs/:id/request-upload`).
-  - **"Dismiss"** button — soft-deletes the reported run without uploading (`DELETE /api/instrument-runs/:id`). Requires confirmation.
+  - **"Upload"** button — queues the run for upload (`POST /api/instruments/:instrumentId/runs/:runId/request-upload`).
+  - **"Dismiss"** button — soft-deletes the reported run without uploading (`DELETE /api/instruments/:instrumentId/runs/:runId`). Requires confirmation.
   - **Bulk actions:** checkbox selection with "Upload selected" and "Dismiss selected" buttons at the top of the section.
 - Runs table with the same columns as the dashboard table, filtered to this instrument. Sortable and paginated. Excludes soft-deleted runs (where `deleted_at` is set), which are shown via a separate toggle or tab.
 - Metadata filters specific to this instrument (e.g., filter by measurement mode for SpectraMax, by tape type for TapeStation).
