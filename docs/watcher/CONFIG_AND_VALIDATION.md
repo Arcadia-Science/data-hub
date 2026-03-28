@@ -116,7 +116,8 @@ watcher/src/data_hub_watcher/
 ├── api_client.py      # Data Hub API client
 ├── monitor.py         # watchdog event handler and stability detection
 ├── run_detector.py    # Run detection, grouping, and reporting
-├── uploader.py        # S3 upload logic with retry and ledger
+├── state.py           # SQLite local state database (deduplication, run tracking)
+├── uploader.py        # S3 upload logic with retry
 ├── heartbeat.py       # Heartbeat loop (background thread)
 ├── events.py          # Event reporting to the Data Hub API
 ├── service.py         # Windows Service wrapper (pywin32, Windows only)

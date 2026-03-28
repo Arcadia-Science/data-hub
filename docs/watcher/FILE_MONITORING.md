@@ -10,7 +10,7 @@ Use [watchdog](https://github.com/gorakhargosh/watchdog) for cross-platform file
 
 ## Initial Scan
 
-On startup, the watcher performs a full scan of `instrument.watch_directory` for files matching `instrument.file_patterns`. Any files not already in the upload ledger (see deduplication section below) are queued for upload.
+On startup, the watcher performs a full scan of `instrument.watch_directory` for files matching `instrument.file_patterns`. Any files not already in the local state database (see deduplication section below) are queued for upload.
 
 ## Event Handling
 
@@ -34,13 +34,13 @@ Instrument software may write files incrementally (e.g., large TIFF images). The
 
 ## Deduplication
 
-To avoid re-uploading files on watcher restart, the watcher maintains a local upload ledger.
+To avoid re-uploading files on watcher restart, the watcher maintains a local state database.
 
-- **Location:** `~/.data-hub/upload_ledger.json`
-- **Schema:** Maps `filename -> { sha256, uploaded_at, s3_key }`
-- **Initial scan:** Skip files whose name and SHA-256 hash match a ledger entry.
-- **After upload:** Write the entry to the ledger.
-- **Append-only:** The ledger is never automatically pruned (manual cleanup or future garbage collection).
+- **Location:** `~/.data-hub/watcher.db` (SQLite). See "Local state database" section below for schema and rationale.
+- **`uploaded_files` table columns:** `filename TEXT`, `sha256 TEXT`, `uploaded_at TEXT`, `s3_key TEXT`. Primary key on `(filename, sha256)`.
+- **Initial scan:** Skip files whose name and SHA-256 hash match an `uploaded_files` row.
+- **After upload:** Insert a row inside the same transaction that marks the upload complete.
+- **Pruning:** Rows older than 90 days (by `uploaded_at`) are deleted automatically on watcher startup. This is configurable via a constant in `watcher/constants.py`.
 
 ## Run Detection
 
@@ -79,7 +79,7 @@ Runs are reported to the API as soon as the first file in the run becomes stable
   - `status`: `"reported"`
   - `watcher_id` from config
   - `detected_files`: list of `{ relative_path, filename, size_bytes }`
-2. On success, write the run to the run ledger (see below).
+2. On success, write the run to the local state database (see "Local state database" section below).
 3. On API failure, retry on the next heartbeat interval. The run stays in the in-memory tracker until successfully reported.
 4. **Existing run:** When a stable file is assigned to a run ID that has already been reported (and is still in `reported` status), send `PATCH /api/instrument-runs/{id}` with the updated file list. Runs that have already been queued for upload or uploaded are not modified.
 
@@ -92,16 +92,44 @@ In auto mode, the watcher uploads files immediately after reporting the run — 
 3. On success, call `PATCH /api/instrument-runs/{id}` with status `uploaded` and the S3 file records.
 4. The Lambda function, triggered by the S3 upload, takes over and updates the status to `processing` and then `completed` (or `failed`) via its upsert to `POST /api/instrument-runs`.
 
-## Run Ledger (manual mode only)
+## Local State Database
 
-In addition to the upload ledger, manual mode maintains a run ledger to track reported and uploaded runs.
+The watcher stores all local state — upload deduplication records and run tracking — in a single SQLite database at `~/.data-hub/watcher.db`. This replaces the earlier design of separate JSON files (`upload_ledger.json`, `run_ledger.json`) and addresses several problems with JSON-file-based state:
 
-- **Location:** `~/.data-hub/run_ledger.json`
-- **Schema:** Maps `run_id -> { status, reported_at, uploaded_at, files: [{ relative_path, filename, size_bytes }] }`
-- **Status values:** `reported`, `queued_for_upload`, `uploading`, `uploaded`
-- **Initial scan:** On startup, skip runs already present in the run ledger with status `reported` or `uploaded`. Runs with status `queued_for_upload` are checked against the upload queue.
-- **After reporting:** Write the run entry with status `reported`.
-- **After upload:** Update the run entry with status `uploaded` and `uploaded_at`.
+- **Atomicity:** SQLite transactions ensure that a crash mid-write cannot corrupt state. JSON files read entirely into memory, modified, and written back can be truncated by a crash, losing all deduplication state.
+- **Concurrent access:** SQLite with WAL mode supports concurrent readers and serialized writers. JSON files have no locking and would become a race condition under threads or async workers.
+- **Bounded growth:** SQLite rows can be pruned with indexed queries. The `uploaded_files` table is pruned on startup (default: retain 90 days). JSON files required manual cleanup.
+- **Reduced duplication:** The run tracking table stores only the minimal state needed to avoid duplicate API calls on restart (`run_id` and `status`). Detailed run metadata (file lists, timestamps) is the API's responsibility — the watcher does not duplicate it locally.
+
+**Configuration:** Open the database with `journal_mode=WAL` and `synchronous=NORMAL` for crash safety with good write performance.
+
+### `uploaded_files` table
+
+Tracks which files have been uploaded to S3, for deduplication on restart.
+
+| Column | Type | Description |
+|---|---|---|
+| `filename` | `TEXT NOT NULL` | Original filename. |
+| `sha256` | `TEXT NOT NULL` | SHA-256 hash of the file at upload time. |
+| `uploaded_at` | `TEXT NOT NULL` | ISO 8601 timestamp. |
+| `s3_key` | `TEXT NOT NULL` | The S3 object key the file was uploaded to. |
+
+Primary key on `(filename, sha256)`.
+
+### `runs` table (manual mode only)
+
+Tracks which runs have been reported to the API, so the watcher can avoid duplicate reports on restart. The API is the source of truth for run details — this table stores only the minimum needed for local decision-making.
+
+| Column | Type | Description |
+|---|---|---|
+| `run_id` | `TEXT NOT NULL` | Primary key. The detected run ID. |
+| `status` | `TEXT NOT NULL` | One of `reported`, `queued_for_upload`, `uploading`, `uploaded`. |
+| `reported_at` | `TEXT NOT NULL` | ISO 8601 timestamp of when the run was first reported. |
+| `uploaded_at` | `TEXT` | ISO 8601 timestamp of when upload completed. `NULL` until uploaded. |
+
+- **Initial scan:** On startup, skip runs already present in the `runs` table with status `reported` or `uploaded`. Runs with status `queued_for_upload` are checked against the upload queue.
+- **After reporting:** Insert a row with status `reported`.
+- **After upload:** Update the row to status `uploaded` and set `uploaded_at`.
 
 ## Upload Queue Polling (manual mode only)
 
@@ -110,26 +138,29 @@ On each heartbeat interval, if `upload_mode` is `manual`, the watcher also polls
 1. Call `GET /api/watchers/{watcher_id}/upload-queue`.
 2. For each returned run:
    a. Verify that all files listed in the run are still present on the local filesystem. If any are missing, report an error to the API and skip the run.
-   b. Update the run ledger status to `uploading`.
+   b. Update the `runs` row to status `uploading`.
    c. Upload each file to S3 using the same upload logic as auto mode (see [UPLOAD.md](./UPLOAD.md)), with S3 key `{instrument.id}/{filename}`.
    d. On success, call `PATCH /api/instrument-runs/{id}` with status `uploaded` and the S3 file records.
-   e. Update the run ledger status to `uploaded`.
-   f. Write each file to the upload ledger for deduplication.
+   e. Update the `runs` row to status `uploaded`.
+   f. Insert each file into the `uploaded_files` table for deduplication.
 
 ## Dependencies
 
 | Dependency | Purpose | Status |
 |---|---|---|
 | `watchdog` | Filesystem event monitoring | In `watcher/pyproject.toml` |
+| `sqlite3` | Local state database (deduplication, run tracking) | Python standard library |
 
 ## Acceptance Criteria
 
 1. `data-hub watcher watch` detects new files in the watch directory and uploads them to the correct S3 path (`{instrument.id}/{filename}`).
 2. `data-hub watcher watch` waits for file stability before uploading.
-3. `data-hub watcher watch` does not re-upload files already present in the upload ledger on restart.
+3. `data-hub watcher watch` does not re-upload files already present in the `uploaded_files` table on restart.
 4. `data-hub watcher watch` in manual mode with `prefix` detection groups files by the configured prefix pattern and reports runs to the API as files become stable.
 5. `data-hub watcher watch` in manual mode with `directory` detection monitors subdirectories and reports runs to the API as files become stable.
 6. `data-hub watcher watch` in manual mode polls the upload queue and uploads files for runs that have been queued via the web UI.
 7. `data-hub watcher watch` in manual mode correctly handles the case where local files have been deleted before upload is requested (reports error to API).
 8. `data-hub watcher watch` in auto mode reports runs to the API, then immediately uploads files and transitions the run through `reported` → `uploading` → `uploaded`.
-9. The run ledger (`~/.data-hub/run_ledger.json`) prevents duplicate run reports on watcher restart.
+9. The local state database (`~/.data-hub/watcher.db`) prevents duplicate run reports on watcher restart.
+10. The `uploaded_files` table is pruned of rows older than 90 days on watcher startup.
+11. A crash mid-write does not corrupt the local state database.
