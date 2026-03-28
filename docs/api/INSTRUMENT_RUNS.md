@@ -2,11 +2,11 @@
 
 Prerequisite reading: [ARCHITECTURE.md](../ARCHITECTURE.md), [DATABASE_SCHEMA.md](../DATABASE_SCHEMA.md) (`instrument_runs`, `instrument_run_metadata`, `files`, `reported_files`, `run_report_data` tables), [AUTHENTICATION.md](./AUTHENTICATION.md).
 
-Instrument run endpoints are nested under `/api/instruments/:instrumentId/runs`. The `:instrumentId` and `:runId` parameters are the natural keys (e.g., `spectramax-id3-plate-reader` and `2026-03-26_experiment`), not database UUIDs. The database still uses a `uuid` surrogate PK internally — see [DATABASE_SCHEMA.md](../DATABASE_SCHEMA.md).
+Instrument run endpoints are nested under `/api/v1/instruments/:instrumentId/runs`. The `:instrumentId` and `:runId` parameters are the natural keys (e.g., `spectramax-id3-plate-reader` and `2026-03-26_experiment`), not database UUIDs. The database still uses a `uuid` surrogate PK internally — see [DATABASE_SCHEMA.md](../DATABASE_SCHEMA.md).
 
-A cross-instrument list endpoint (`GET /api/instrument-runs`) is also provided for the dashboard.
+A cross-instrument list endpoint (`GET /api/v1/instrument-runs`) is also provided for the dashboard.
 
-## `POST /api/instruments/:instrumentId/runs`
+## `POST /api/v1/instruments/:instrumentId/runs`
 
 Creates or updates an instrument run record. Idempotent on `(instrument_id, run_id)` — if the run already exists, it is updated rather than duplicated. This handles the case where the Lambda is re-invoked for the same run (e.g., via GitHub Actions), or the watcher re-reports a run after restart.
 
@@ -95,7 +95,7 @@ This endpoint serves two callers with different payloads:
 - For Lambda-created runs: upserts `instrument_run_metadata`, inserts `files` rows (skip duplicates by `s3_key`), replaces `run_report_data` rows.
 - For watcher-reported runs: upserts `reported_files` rows from the `detected_files` array (skip duplicates by `relative_path`). No `files`, `metadata`, or `report_data` processing at this stage.
 
-## `GET /api/instruments/:instrumentId/runs`
+## `GET /api/v1/instruments/:instrumentId/runs`
 
 Lists instrument runs for a specific instrument with filtering and pagination. Used by the instrument detail page.
 
@@ -145,7 +145,7 @@ Lists instrument runs for a specific instrument with filtering and pagination. U
 
 By default, soft-deleted runs (`deleted_at IS NOT NULL`) are excluded. Pass `include_deleted=true` to include them (used by the "Deleted Runs" UI view).
 
-## `GET /api/instrument-runs`
+## `GET /api/v1/instrument-runs`
 
 Cross-instrument list of runs with filtering and pagination. Used by the web UI dashboard to show recent activity across all instruments.
 
@@ -163,9 +163,9 @@ Cross-instrument list of runs with filtering and pagination. Used by the web UI 
 | `per_page` | `int` | Results per page. Default: `25`. Max: `100`. |
 | `include_deleted` | `bool` | If `true`, include soft-deleted runs. Default: `false`. |
 
-**Response:** Same shape as `GET /api/instruments/:instrumentId/runs`.
+**Response:** Same shape as `GET /api/v1/instruments/:instrumentId/runs`.
 
-## `GET /api/instruments/:instrumentId/runs/:runId`
+## `GET /api/v1/instruments/:instrumentId/runs/:runId`
 
 Returns the full detail for an instrument run, including all files, metadata, and report data.
 
@@ -252,7 +252,7 @@ For runs with `status = 'reported'`, the `files` array is empty and `reported_fi
 }
 ```
 
-## `POST /api/instruments/:instrumentId/runs/:runId/request-upload`
+## `POST /api/v1/instruments/:instrumentId/runs/:runId/request-upload`
 
 Queues a reported run for upload. Called by the web UI when a user selects a run to upload.
 
@@ -275,7 +275,7 @@ Queues a reported run for upload. Called by the web UI when a user selects a run
 - Sets `instrument_runs.status` to `queued_for_upload`.
 - Sets `instrument_runs.updated_at` to now.
 
-## `POST /api/instrument-runs/batch-request-upload`
+## `POST /api/v1/instrument-runs/batch-request-upload`
 
 Queues multiple reported runs for upload in a single request. Called by the web UI for bulk upload actions. This endpoint is not nested under a single instrument because the batch may span multiple instruments.
 
@@ -305,11 +305,11 @@ Queues multiple reported runs for upload in a single request. Called by the web 
 }
 ```
 
-## `GET /api/watchers/:watcher_id/upload-queue`
+## `GET /api/v1/watchers/:watcher_id/upload-queue`
 
-Documented in [WATCHERS.md](./WATCHERS.md#get-apiwatcherswatcher_idupload-queue). Lives under the `/api/watchers/` path namespace and should be implemented alongside the other watcher routes.
+Documented in [WATCHERS.md](./WATCHERS.md#get-apiv1watcherswatcher_idupload-queue). Lives under the `/api/v1/watchers/` path namespace and should be implemented alongside the other watcher routes.
 
-## `PATCH /api/instruments/:instrumentId/runs/:runId`
+## `PATCH /api/v1/instruments/:instrumentId/runs/:runId`
 
 Updates a run's status and optionally adds file records or updates reported files. Used by the watcher to report upload progress/completion, update detected files for a reported run, and by the Lambda to update processing status.
 
@@ -354,12 +354,12 @@ When new files arrive for an already-reported run, the watcher sends the updated
 
 **Validation:**
 - Status transitions must follow the lifecycle. Valid paths: `reported` → `queued_for_upload` → `uploading` → `uploaded` → `processing` → `completed`/`failed` (manual mode), or `reported` → `uploading` → `uploaded` → `processing` → `completed`/`failed` (auto mode). Invalid transitions return `409 Conflict`.
-- Soft-deleted runs (`deleted_at` set) cannot be updated — returns `409 Conflict`. Use `DELETE /api/instruments/:instrumentId/runs/:runId` to soft-delete.
+- Soft-deleted runs (`deleted_at` set) cannot be updated — returns `409 Conflict`. Use `DELETE /api/v1/instruments/:instrumentId/runs/:runId` to soft-delete.
 - `detected_files` can only be sent for runs with `status = 'reported'`. Returns `409 Conflict` if the run has already been queued or uploaded.
 
 **Response:** `200 OK` with the updated run object.
 
-## `DELETE /api/instruments/:instrumentId/runs/:runId`
+## `DELETE /api/v1/instruments/:instrumentId/runs/:runId`
 
 Soft-deletes an instrument run by setting `deleted_at`. Removes all associated files from S3.
 
@@ -387,7 +387,7 @@ Soft-deletes an instrument run by setting `deleted_at`. Removes all associated f
 
 ## Endpoints — Files
 
-### `GET /api/files/:id/download`
+### `GET /api/v1/files/:id/download`
 
 Redirects to a pre-signed S3 URL for the file. Allows the web UI to link directly to file downloads without exposing S3 URLs in the page HTML.
 
@@ -397,7 +397,7 @@ Redirects to a pre-signed S3 URL for the file. Allows the web UI to link directl
 
 These endpoints replace the Notion webhook → Lambda function URL path for follow-on analyses (e.g., Michaelis-Menten kinetics on SpectraMax iD3 runs).
 
-### `POST /api/instruments/:instrumentId/runs/:runId/analyses`
+### `POST /api/v1/instruments/:instrumentId/runs/:runId/analyses`
 
 Triggers a follow-on analysis for a completed instrument run. The API either invokes the Lambda function directly or enqueues the job.
 
@@ -421,7 +421,7 @@ Triggers a follow-on analysis for a completed instrument run. The API either inv
 }
 ```
 
-### `GET /api/instruments/:instrumentId/runs/:runId/analyses`
+### `GET /api/v1/instruments/:instrumentId/runs/:runId/analyses`
 
 Returns analysis results for the run, including status and output data.
 
@@ -443,15 +443,15 @@ Standard HTTP status codes: `400` for validation errors, `401` for missing/inval
 
 ## Acceptance Criteria
 
-1. `POST /api/instruments/:instrumentId/runs` creates an instrument run with metadata, files, and report data. Calling it twice with the same `instrument_id` and `run_id` updates the existing record rather than creating a duplicate.
-2. `GET /api/instruments/:instrumentId/runs` returns paginated results with filtering by status and search.
-3. `GET /api/instrument-runs` returns paginated results across all instruments with filtering by instrument, status, and search.
-4. `GET /api/instruments/:instrumentId/runs/:runId` returns the full run detail including pre-signed download URLs for all files.
+1. `POST /api/v1/instruments/:instrumentId/runs` creates an instrument run with metadata, files, and report data. Calling it twice with the same `instrument_id` and `run_id` updates the existing record rather than creating a duplicate.
+2. `GET /api/v1/instruments/:instrumentId/runs` returns paginated results with filtering by status and search.
+3. `GET /api/v1/instrument-runs` returns paginated results across all instruments with filtering by instrument, status, and search.
+4. `GET /api/v1/instruments/:instrumentId/runs/:runId` returns the full run detail including pre-signed download URLs for all files.
 5. Pre-signed S3 URLs work for downloading raw and processed files from the web UI.
-6. `POST /api/instruments/:instrumentId/runs` accepts watcher-reported runs with `status: reported` and `detected_files`, creating `instrument_runs` and `reported_files` rows.
-7. `POST /api/instruments/:instrumentId/runs/:runId/request-upload` transitions a `reported` run to `queued_for_upload`. Returns `409` for runs in other statuses.
-8. `POST /api/instrument-runs/batch-request-upload` queues multiple reported runs (identified by `instrument_id` + `run_id` pairs) and reports which were queued vs. skipped.
-9. `GET /api/watchers/:watcher_id/upload-queue` returns runs with `status = 'queued_for_upload'` for the watcher's instrument, including their `reported_files`.
-10. `PATCH /api/instruments/:instrumentId/runs/:runId` correctly enforces status transition rules and accepts file records on upload completion.
-11. `DELETE /api/instruments/:instrumentId/runs/:runId` soft-deletes the run (sets `deleted_at`) and deletes all associated S3 objects. The `status` column is preserved. Returns `409` for runs in `uploading` status or already-deleted runs.
-12. `GET /api/instruments/:instrumentId/runs` and `GET /api/instrument-runs` exclude soft-deleted runs by default; include them when `include_deleted=true` is passed.
+6. `POST /api/v1/instruments/:instrumentId/runs` accepts watcher-reported runs with `status: reported` and `detected_files`, creating `instrument_runs` and `reported_files` rows.
+7. `POST /api/v1/instruments/:instrumentId/runs/:runId/request-upload` transitions a `reported` run to `queued_for_upload`. Returns `409` for runs in other statuses.
+8. `POST /api/v1/instrument-runs/batch-request-upload` queues multiple reported runs (identified by `instrument_id` + `run_id` pairs) and reports which were queued vs. skipped.
+9. `GET /api/v1/watchers/:watcher_id/upload-queue` returns runs with `status = 'queued_for_upload'` for the watcher's instrument, including their `reported_files`.
+10. `PATCH /api/v1/instruments/:instrumentId/runs/:runId` correctly enforces status transition rules and accepts file records on upload completion.
+11. `DELETE /api/v1/instruments/:instrumentId/runs/:runId` soft-deletes the run (sets `deleted_at`) and deletes all associated S3 objects. The `status` column is preserved. Returns `409` for runs in `uploading` status or already-deleted runs.
+12. `GET /api/v1/instruments/:instrumentId/runs` and `GET /api/v1/instrument-runs` exclude soft-deleted runs by default; include them when `include_deleted=true` is passed.

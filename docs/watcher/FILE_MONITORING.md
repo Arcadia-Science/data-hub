@@ -73,23 +73,23 @@ Example with directory `20260325_testing/` containing `data_file_1.csv`, `data_f
 
 Runs are reported to the API as soon as the first file in the run becomes stable. Subsequent files trigger updates to the existing run. The watcher does not attempt to determine when a run is "complete."
 
-1. **New run:** When a stable file is assigned to a run ID that has not yet been reported, send `POST /api/instruments/{instrument_id}/runs` with:
+1. **New run:** When a stable file is assigned to a run ID that has not yet been reported, send `POST /api/v1/instruments/{instrument_id}/runs` with:
   - `run_id` — the detected run ID
   - `status`: `"reported"`
   - `watcher_id` from config
   - `detected_files`: list of `{ relative_path, filename, size_bytes }`
 2. On success, write the run to the local state database (see "Local state database" section below).
 3. On API failure, retry on the next heartbeat interval. The run stays in the in-memory tracker until successfully reported.
-4. **Existing run:** When a stable file is assigned to a run ID that has already been reported (and is still in `reported` status), send `PATCH /api/instruments/{instrument_id}/runs/{run_id}` with the updated file list. Runs that have already been queued for upload or uploaded are not modified.
+4. **Existing run:** When a stable file is assigned to a run ID that has already been reported (and is still in `reported` status), send `PATCH /api/v1/instruments/{instrument_id}/runs/{run_id}` with the updated file list. Runs that have already been queued for upload or uploaded are not modified.
 
 ## Auto-Mode Upload After Reporting
 
 In auto mode, the watcher uploads files immediately after reporting the run — there is no `queued_for_upload` step.
 
-1. After the run is successfully reported (status `reported`), update the run status to `uploading` via `PATCH /api/instruments/{instrument_id}/runs/{run_id}`.
+1. After the run is successfully reported (status `reported`), update the run status to `uploading` via `PATCH /api/v1/instruments/{instrument_id}/runs/{run_id}`.
 2. Upload each file to S3 using the same upload logic as manual mode (see [UPLOAD.md](./UPLOAD.md)), with S3 key `{instrument.id}/{filename}`.
-3. On success, call `PATCH /api/instruments/{instrument_id}/runs/{run_id}` with status `uploaded` and the S3 file records.
-4. The Lambda function, triggered by the S3 upload, takes over and updates the status to `processing` and then `completed` (or `failed`) via its upsert to `POST /api/instruments/{instrument_id}/runs`.
+3. On success, call `PATCH /api/v1/instruments/{instrument_id}/runs/{run_id}` with status `uploaded` and the S3 file records.
+4. The Lambda function, triggered by the S3 upload, takes over and updates the status to `processing` and then `completed` (or `failed`) via its upsert to `POST /api/v1/instruments/{instrument_id}/runs`.
 
 ## Local State Database
 
@@ -134,12 +134,12 @@ Tracks which runs have been reported to the API, so the watcher can avoid duplic
 
 On each heartbeat interval, if `upload_mode` is `manual`, the watcher also polls the API for runs that have been queued for upload:
 
-1. Call `GET /api/watchers/{watcher_id}/upload-queue`.
+1. Call `GET /api/v1/watchers/{watcher_id}/upload-queue`.
 2. For each returned run:
    a. Verify that all files listed in the run are still present on the local filesystem. If any are missing, report an error to the API and skip the run.
    b. Update the `runs` row to status `uploading`.
    c. Upload each file to S3 using the same upload logic as auto mode (see [UPLOAD.md](./UPLOAD.md)), with S3 key `{instrument.id}/{filename}`.
-   d. On success, call `PATCH /api/instruments/{instrument_id}/runs/{run_id}` with status `uploaded` and the S3 file records.
+   d. On success, call `PATCH /api/v1/instruments/{instrument_id}/runs/{run_id}` with status `uploaded` and the S3 file records.
    e. Update the `runs` row to status `uploaded`.
    f. Insert each file into the `uploaded_files` table for deduplication.
 

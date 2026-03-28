@@ -8,16 +8,16 @@ The API endpoints in [api/WATCHERS.md](./api/WATCHERS.md) and [api/INSTRUMENT_RU
 
 | Watcher expectation | API endpoint |
 |---|---|
-| `GET /instruments` | `GET /api/instruments` |
-| `POST /instruments` | `POST /api/instruments` |
-| `POST /watchers/register` | `POST /api/watchers/register` |
-| `PUT /watchers/{watcher_id}/config` | `PUT /api/watchers/:watcher_id/config` |
-| `GET /watchers/{watcher_id}/config-checksum` | `GET /api/watchers/:watcher_id/config-checksum` |
-| `POST /watchers/{watcher_id}/heartbeat` | `POST /api/watchers/:watcher_id/heartbeat` |
-| `POST /watchers/{watcher_id}/events` | `POST /api/watchers/:watcher_id/events` |
-| `POST /instruments/{instrument_id}/runs` (with `status: reported`) | `POST /api/instruments/:instrumentId/runs` |
-| `GET /watchers/{watcher_id}/upload-queue` | `GET /api/watchers/:watcher_id/upload-queue` |
-| `PATCH /instruments/{instrument_id}/runs/{run_id}` | `PATCH /api/instruments/:instrumentId/runs/:runId` |
+| `GET /instruments` | `GET /api/v1/instruments` |
+| `POST /instruments` | `POST /api/v1/instruments` |
+| `POST /watchers/register` | `POST /api/v1/watchers/register` |
+| `PUT /watchers/{watcher_id}/config` | `PUT /api/v1/watchers/:watcher_id/config` |
+| `GET /watchers/{watcher_id}/config-checksum` | `GET /api/v1/watchers/:watcher_id/config-checksum` |
+| `POST /watchers/{watcher_id}/heartbeat` | `POST /api/v1/watchers/:watcher_id/heartbeat` |
+| `POST /watchers/{watcher_id}/events` | `POST /api/v1/watchers/:watcher_id/events` |
+| `POST /instruments/{instrument_id}/runs` (with `status: reported`) | `POST /api/v1/instruments/:instrumentId/runs` |
+| `GET /watchers/{watcher_id}/upload-queue` | `GET /api/v1/watchers/:watcher_id/upload-queue` |
+| `PATCH /instruments/{instrument_id}/runs/{run_id}` | `PATCH /api/v1/instruments/:instrumentId/runs/:runId` |
 
 ## S3 Conventions
 

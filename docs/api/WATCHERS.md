@@ -4,7 +4,7 @@ Prerequisite reading: [ARCHITECTURE.md](../ARCHITECTURE.md), [DATABASE_SCHEMA.md
 
 These endpoints fulfill the contract defined in [watcher/API_CLIENT.md](../watcher/API_CLIENT.md).
 
-## `POST /api/watchers/register`
+## `POST /api/v1/watchers/register`
 
 Registers a new watcher instance.
 
@@ -32,7 +32,7 @@ Registers a new watcher instance.
 **Validation:**
 - `instrument_id` must reference an existing instrument that is `active` or `pending`.
 
-## `PUT /api/watchers/:watcher_id/config`
+## `PUT /api/v1/watchers/:watcher_id/config`
 
 Pushes the raw config YAML and its checksum.
 
@@ -49,7 +49,7 @@ Pushes the raw config YAML and its checksum.
 
 **Response:** `200 OK`
 
-## `GET /api/watchers/:watcher_id/config-checksum`
+## `GET /api/v1/watchers/:watcher_id/config-checksum`
 
 Returns the SHA-256 checksum of the last-pushed config.
 
@@ -63,7 +63,7 @@ Returns the SHA-256 checksum of the last-pushed config.
 
 Returns `404` if the watcher has never pushed a config.
 
-## `GET /api/watchers`
+## `GET /api/v1/watchers`
 
 Lists all registered watchers. Used by the `/watchers` admin page.
 
@@ -95,7 +95,7 @@ Lists all registered watchers. Used by the `/watchers` admin page.
 
 A watcher with no heartbeat in the last 5 minutes should be returned with `status: "stale"` regardless of its stored status (computed at query time or via a periodic job — see `watchers` table in [DATABASE_SCHEMA.md](../DATABASE_SCHEMA.md)).
 
-## `GET /api/watchers/:watcher_id`
+## `GET /api/v1/watchers/:watcher_id`
 
 Returns the full detail for a single watcher instance. Used by the `/watchers/:id` detail page.
 
@@ -119,7 +119,7 @@ Returns the full detail for a single watcher instance. Used by the `/watchers/:i
 
 Returns `404` if the watcher does not exist.
 
-## `POST /api/watchers/:watcher_id/heartbeat`
+## `POST /api/v1/watchers/:watcher_id/heartbeat`
 
 Records a heartbeat from the watcher.
 
@@ -163,7 +163,7 @@ The request uses the watcher's field names (e.g., `files_uploaded_since_last_hea
 - Inserts a row into `watcher_heartbeats`.
 - Updates `watchers.last_heartbeat_at` and `watchers.status`.
 
-## `GET /api/watchers/:watcher_id/heartbeats`
+## `GET /api/v1/watchers/:watcher_id/heartbeats`
 
 Returns recent heartbeat history for a watcher. Used by the watcher detail page.
 
@@ -197,7 +197,7 @@ Returns recent heartbeat history for a watcher. Used by the watcher detail page.
 
 Results are ordered by `timestamp DESC`.
 
-## `POST /api/watchers/:watcher_id/events`
+## `POST /api/v1/watchers/:watcher_id/events`
 
 Records significant watcher events. Called by the watcher to report state changes, uploads, and errors. Events are accepted in batches.
 
@@ -234,7 +234,7 @@ Records significant watcher events. Called by the watcher to report state change
 - `timestamp` and `message` are required for each event.
 - Maximum 100 events per request.
 
-## `GET /api/watchers/:watcher_id/events`
+## `GET /api/v1/watchers/:watcher_id/events`
 
 Returns recent events for a watcher. Used by the watcher detail page.
 
@@ -270,7 +270,7 @@ Returns recent events for a watcher. Used by the watcher detail page.
 
 Results are ordered by `timestamp DESC`.
 
-## `GET /api/watchers/:watcher_id/upload-queue`
+## `GET /api/v1/watchers/:watcher_id/upload-queue`
 
 Returns runs that have been queued for upload and belong to this watcher's instrument. Polled by the watcher on each heartbeat interval.
 
@@ -302,7 +302,7 @@ Returns runs that have been queued for upload and belong to this watcher's instr
 **Behavior:**
 - Filters `instrument_runs` where `status = 'queued_for_upload'` and `instrument_id` matches the watcher's registered instrument.
 - Includes the `reported_files` for each run so the watcher knows which files to upload.
-- The watcher constructs `PATCH /api/instruments/{instrument_id}/runs/{run_id}` URLs from the `instrument_id` and `run_id` in each response item.
+- The watcher constructs `PATCH /api/v1/instruments/{instrument_id}/runs/{run_id}` URLs from the `instrument_id` and `run_id` in each response item.
 
 ## Error Responses
 
@@ -322,13 +322,13 @@ Standard HTTP status codes: `400` for validation errors, `401` for missing/inval
 
 ## Acceptance Criteria
 
-1. `POST /api/watchers/register` returns a `watcher_id` and creates a watcher record linked to the instrument.
-2. `PUT /api/watchers/:watcher_id/config` stores the raw config YAML and checksum; `GET /api/watchers/:watcher_id/config-checksum` returns the checksum.
-3. `POST /api/watchers/:watcher_id/heartbeat` inserts a `watcher_heartbeats` row and updates `watchers.last_heartbeat_at`. The API maps request field names (e.g., `files_uploaded_since_last_heartbeat`) to database column names (e.g., `files_uploaded_since_last`).
-4. `POST /api/watchers/:watcher_id/events` accepts batches of watcher events and inserts them into `watcher_events`.
-5. `GET /api/watchers/:watcher_id/events` returns events filtered by type and date range, ordered by timestamp descending.
-6. `GET /api/watchers/:watcher_id/heartbeats` returns heartbeat history filtered by date range.
+1. `POST /api/v1/watchers/register` returns a `watcher_id` and creates a watcher record linked to the instrument.
+2. `PUT /api/v1/watchers/:watcher_id/config` stores the raw config YAML and checksum; `GET /api/v1/watchers/:watcher_id/config-checksum` returns the checksum.
+3. `POST /api/v1/watchers/:watcher_id/heartbeat` inserts a `watcher_heartbeats` row and updates `watchers.last_heartbeat_at`. The API maps request field names (e.g., `files_uploaded_since_last_heartbeat`) to database column names (e.g., `files_uploaded_since_last`).
+4. `POST /api/v1/watchers/:watcher_id/events` accepts batches of watcher events and inserts them into `watcher_events`.
+5. `GET /api/v1/watchers/:watcher_id/events` returns events filtered by type and date range, ordered by timestamp descending.
+6. `GET /api/v1/watchers/:watcher_id/heartbeats` returns heartbeat history filtered by date range.
 7. `watcher_heartbeats` includes manual-mode counters (`runs_reported_since_last`, `runs_uploaded_since_last`) alongside the existing upload counters.
-8. `GET /api/watchers` returns all registered watchers with status indicators (stale if no heartbeat in 5 minutes).
-9. `GET /api/watchers/:watcher_id` returns the full watcher detail including the raw config YAML, for the watcher detail page.
-10. `GET /api/watchers/:watcher_id/upload-queue` returns runs with `status = 'queued_for_upload'` for the watcher's instrument, including their `reported_files`. Each item includes `instrument_id` and `run_id` so the watcher can construct nested API URLs.
+8. `GET /api/v1/watchers` returns all registered watchers with status indicators (stale if no heartbeat in 5 minutes).
+9. `GET /api/v1/watchers/:watcher_id` returns the full watcher detail including the raw config YAML, for the watcher detail page.
+10. `GET /api/v1/watchers/:watcher_id/upload-queue` returns runs with `status = 'queued_for_upload'` for the watcher's instrument, including their `reported_files`. Each item includes `instrument_id` and `run_id` so the watcher can construct nested API URLs.

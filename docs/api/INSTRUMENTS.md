@@ -2,7 +2,7 @@
 
 Prerequisite reading: [ARCHITECTURE.md](../ARCHITECTURE.md), [DATABASE_SCHEMA.md](../DATABASE_SCHEMA.md) (`instruments` table), [AUTHENTICATION.md](./AUTHENTICATION.md).
 
-## `GET /api/instruments`
+## `GET /api/v1/instruments`
 
 Returns all registered instruments.
 
@@ -20,7 +20,7 @@ Returns all registered instruments.
 ]
 ```
 
-## `GET /api/instruments/:instrumentId`
+## `GET /api/v1/instruments/:instrumentId`
 
 Returns the detail for a single instrument, including summary counts. Used by the instrument detail page header.
 
@@ -42,9 +42,9 @@ Returns the detail for a single instrument, including summary counts. Used by th
 
 Returns `404` if the instrument does not exist.
 
-Instrument runs are nested under this resource — see [INSTRUMENT_RUNS.md](./INSTRUMENT_RUNS.md) for `GET /api/instruments/:instrumentId/runs` and related endpoints.
+Instrument runs are nested under this resource — see [INSTRUMENT_RUNS.md](./INSTRUMENT_RUNS.md) for `GET /api/v1/instruments/:instrumentId/runs` and related endpoints.
 
-## `POST /api/instruments`
+## `POST /api/v1/instruments`
 
 Registers a new instrument in `pending` status. Called by the watcher CLI when a user enters an instrument ID not in the list.
 
@@ -63,7 +63,7 @@ Registers a new instrument in `pending` status. Called by the watcher CLI when a
 - `id` must be valid kebab-case and not already exist.
 - `display_name` is optional; defaults to a title-cased version of the ID.
 
-## `PATCH /api/instruments/:instrumentId`
+## `PATCH /api/v1/instruments/:instrumentId`
 
 Updates an instrument's status or metadata. Used by admins via the web UI to confirm pending instruments or update file patterns.
 
@@ -95,6 +95,6 @@ Standard HTTP status codes: `400` for validation errors, `401` for missing/inval
 
 ## Acceptance Criteria
 
-1. `POST /api/instruments` creates a new instrument in `pending` status; `PATCH /api/instruments/:instrumentId` can set it to `active`.
-2. `GET /api/instruments` returns all instruments with their metadata, matching the response shape expected by the file upload service.
-3. `GET /api/instruments/:instrumentId` returns the instrument detail with summary counts (run count, watcher count).
+1. `POST /api/v1/instruments` creates a new instrument in `pending` status; `PATCH /api/v1/instruments/:instrumentId` can set it to `active`.
+2. `GET /api/v1/instruments` returns all instruments with their metadata, matching the response shape expected by the file upload service.
+3. `GET /api/v1/instruments/:instrumentId` returns the instrument detail with summary counts (run count, watcher count).

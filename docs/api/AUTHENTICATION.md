@@ -6,8 +6,8 @@ Prerequisite reading: [ARCHITECTURE.md](../ARCHITECTURE.md), [DATABASE_SCHEMA.md
 
 | Environment | URL |
 |---|---|
-| Staging | `https://data-hub-staging.arcadiascience.com/api` |
-| Production | `https://data-hub.arcadiascience.com/api` |
+| Staging | `https://data-hub-staging.arcadiascience.com/api/v1` |
+| Production | `https://data-hub.arcadiascience.com/api/v1` |
 
 These are implemented as Next.js API route handlers under `app/api/`.
 
@@ -40,7 +40,7 @@ API middleware on all `/api/` routes (except the Auth.js routes and public healt
 
 These endpoints are used by the web UI's settings page. All require an authenticated session (cookie-based auth only — tokens cannot be used to manage tokens).
 
-### `GET /api/tokens`
+### `GET /api/v1/tokens`
 
 Lists the current user's personal access tokens.
 
@@ -61,7 +61,7 @@ Lists the current user's personal access tokens.
 
 The full token value is never returned — only the prefix.
 
-### `POST /api/tokens`
+### `POST /api/v1/tokens`
 
 Creates a new personal access token. The plaintext token is returned **once** in the response.
 
@@ -91,7 +91,7 @@ Creates a new personal access token. The plaintext token is returned **once** in
 
 The `token` field contains the full plaintext token. The UI must display it with a copy-to-clipboard button and a warning that it will not be shown again.
 
-### `DELETE /api/tokens/:id`
+### `DELETE /api/v1/tokens/:id`
 
 Revokes (deletes) a personal access token. Users can only delete their own tokens.
 

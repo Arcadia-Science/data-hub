@@ -10,8 +10,8 @@ The API base URL is derived from the `environment` field via a hardcoded mapping
 
 | Environment | API URL |
 |---|---|
-| `staging` | `https://data-hub-staging.arcadiascience.com/api` |
-| `production` | `https://data-hub.arcadiascience.com/api` |
+| `staging` | `https://data-hub-staging.arcadiascience.com/api/v1` |
+| `production` | `https://data-hub.arcadiascience.com/api/v1` |
 
 This mapping is defined as a constant in `watcher/constants.py`.
 

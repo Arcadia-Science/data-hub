@@ -183,13 +183,13 @@ Lambda (no watcher):                                      processing → complet
 
 Soft-deletion is orthogonal to status: setting `deleted_at` marks a run as deleted regardless of its current status. The `status` column preserves the run's last workflow state for audit purposes.
 
-In both watcher modes, the watcher drives the run through `reported` → `uploading` → `uploaded`. The Lambda function, triggered by the S3 upload, takes over and updates the status to `processing` and then `completed` (or `failed`) via its upsert to `POST /api/instruments/:instrumentId/runs`. The difference between manual and auto mode is whether `queued_for_upload` is involved: in manual mode a user must queue the run for upload via the web UI, while in auto mode the watcher uploads immediately after reporting. The "Lambda (no watcher)" path applies when a file arrives in S3 without watcher involvement (e.g., a direct upload or re-processing trigger) — the Lambda creates the run directly in `processing` status.
+In both watcher modes, the watcher drives the run through `reported` → `uploading` → `uploaded`. The Lambda function, triggered by the S3 upload, takes over and updates the status to `processing` and then `completed` (or `failed`) via its upsert to `POST /api/v1/instruments/:instrumentId/runs`. The difference between manual and auto mode is whether `queued_for_upload` is involved: in manual mode a user must queue the run for upload via the web UI, while in auto mode the watcher uploads immediately after reporting. The "Lambda (no watcher)" path applies when a file arrives in S3 without watcher involvement (e.g., a direct upload or re-processing trigger) — the Lambda creates the run directly in `processing` status.
 
 - `reported` — watcher detected the run and reported it; files exist on the local instrument PC but have not been uploaded to S3.
 - `queued_for_upload` — manual mode only. A user selected this run for upload via the web UI; the watcher will pick it up on its next poll.
 - `uploading` — the watcher is actively uploading files to S3.
 - `uploaded` — all files have been uploaded to S3; awaiting Lambda processing via S3 trigger.
-- `processing` — the Lambda function has picked up the run and is processing it. Set by the Lambda's upsert to `POST /api/instruments/:instrumentId/runs`.
+- `processing` — the Lambda function has picked up the run and is processing it. Set by the Lambda's upsert to `POST /api/v1/instruments/:instrumentId/runs`.
 - `completed` — processing finished successfully. Set by the Lambda.
 - `failed` — processing failed. Set by the Lambda.
 
