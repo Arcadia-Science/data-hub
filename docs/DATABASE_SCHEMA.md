@@ -11,8 +11,6 @@ Instrument 1──* InstrumentRun 1──* File
      │                │
      │                ├──1 RunReport
      │                │
-     │                ├──* ProcessedArtifact
-     │                │
      │                └──* ReportedFile
      │
      └──* Watcher ──* WatcherHeartbeat
@@ -164,6 +162,7 @@ One record per instrument run, replacing the Notion report page as the primary r
 | `source` | `text` | NOT NULL, DEFAULT `'lambda'` | How the run was created. One of `lambda` (created by the Lambda function after processing an S3 event) or `watcher` (reported by the watcher in manual mode). |
 | `watcher_id` | `uuid` | FK → `watchers.id` | Set when the run was reported by a watcher. `NULL` for Lambda-created runs. |
 | `report_version` | `text` | | The version string of the workflow that generated the report (e.g., `"0.1.7"`). |
+| `metadata` | `jsonb` | NOT NULL, DEFAULT `'{}'` | Instrument-specific key-value metadata (e.g., `{"measurement_mode": "Fluorescence", "wavelength": "450"}`). Stored as a flat object. Multi-valued properties use JSON arrays (e.g., `{"dye_channel": ["FAM", "SYBR"]}`). |
 | `created_at` | `timestamptz` | NOT NULL, DEFAULT `now()` | When the run was first created (reported by watcher or processed by Lambda). |
 | `updated_at` | `timestamptz` | NOT NULL, DEFAULT `now()` | |
 | `deleted_at` | `timestamptz` | | Canonical soft-delete marker. `NULL` means active; non-`NULL` means deleted. Queries should filter on this column rather than `status`. |
@@ -193,29 +192,18 @@ In both watcher modes, the watcher drives the run through `reported` → `upload
 - `completed` — processing finished successfully. Set by the Lambda.
 - `failed` — processing failed. Set by the Lambda.
 
-### `instrument_run_metadata`
+**Known metadata keys by instrument** (derived from current Ganymede tags and Notion properties):
 
-Key-value metadata for instrument runs. Replaces Ganymede file tags and the instrument-specific Notion page properties (e.g., Tape Type, Column Type, Measurement Mode).
-
-| Column | Type | Constraints | Description |
-|---|---|---|---|
-| `id` | `bigint` | PK, generated | |
-| `instrument_run_id` | `uuid` | FK → `instrument_runs.id`, NOT NULL | |
-| `key` | `text` | NOT NULL | Metadata key (e.g., `tape_type`, `measurement_mode`, `wavelengths`). |
-| `value` | `text` | NOT NULL | Metadata value. For multi-valued properties (e.g., wavelengths, dye channels), store one row per value. |
-
-Unique constraint on `(instrument_run_id, key, value)`.
-
-The known metadata keys by instrument, derived from current Ganymede tags and Notion properties:
-
-| Instrument | Metadata keys | Cardinality |
+| Instrument | Metadata keys | Value type |
 |---|---|---|
-| Agilent 4150 TapeStation | `tape_type` | single |
-| Akta FPLC | `column_type` | single |
-| Azure 600 Gel Doc | `imaging_mode`, `capture_type`, `wavelength`, `wavelength_color` | single, single, multi, multi |
-| Azure Cielo qPCR | `dye_channel` | multi |
-| SpectraMax iD3 Plate Reader | `measurement_mode`, `measurement_type`, `wavelength` | single, single, single |
-| SpectraMax iD5 Plate Reader | `measurement_mode`, `measurement_type`, `wavelength` | single, single, single |
+| Agilent 4150 TapeStation | `tape_type` | string |
+| Akta FPLC | `column_type` | string |
+| Azure 600 Gel Doc | `imaging_mode`, `capture_type`, `wavelength`, `wavelength_color` | string, string, string[], string[] |
+| Azure Cielo qPCR | `dye_channel` | string[] |
+| SpectraMax iD3 Plate Reader | `measurement_mode`, `measurement_type`, `wavelength` | string, string, string |
+| SpectraMax iD5 Plate Reader | `measurement_mode`, `measurement_type`, `wavelength` | string, string, string |
+
+Multi-valued properties (marked `string[]`) are stored as JSON arrays within the `metadata` object rather than as separate scalar values.
 
 ### `reported_files`
 
@@ -270,7 +258,7 @@ This is intentionally schemaless within `data` — each instrument workflow defi
 - `personal_access_tokens(user_id)` — tokens for a user.
 - `personal_access_tokens(token_hash)` — token lookup on API auth (unique index).
 - `instrument_runs(instrument_id, created_at DESC)` — dashboard queries sorted by recency.
-- `instrument_run_metadata(instrument_run_id)` — metadata lookups for a run.
+- `instrument_runs` GIN index on `metadata` — supports `@>` containment queries for metadata filtering (e.g., `WHERE metadata @> '{"measurement_mode": "Fluorescence"}'`).
 - `files(instrument_run_id)` — file list for a run.
 - `run_report_data(instrument_run_id)` — report data for a run.
 - `reported_files(instrument_run_id)` — reported files for a run.

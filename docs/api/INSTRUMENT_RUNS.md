@@ -1,6 +1,6 @@
 # API: Instrument Runs
 
-Prerequisite reading: [ARCHITECTURE.md](../ARCHITECTURE.md), [DATABASE_SCHEMA.md](../DATABASE_SCHEMA.md) (`instrument_runs`, `instrument_run_metadata`, `files`, `reported_files`, `run_report_data` tables), [AUTHENTICATION.md](./AUTHENTICATION.md).
+Prerequisite reading: [ARCHITECTURE.md](../ARCHITECTURE.md), [DATABASE_SCHEMA.md](../DATABASE_SCHEMA.md) (`instrument_runs`, `files`, `reported_files`, `run_report_data` tables), [AUTHENTICATION.md](./AUTHENTICATION.md).
 
 Instrument run endpoints are nested under `/api/v1/instruments/:instrumentId/runs`. The `:instrumentId` and `:runId` parameters are the natural keys (e.g., `spectramax-id3-plate-reader` and `2026-03-26_experiment`), not database UUIDs. The database still uses a `uuid` surrogate PK internally — see [DATABASE_SCHEMA.md](../DATABASE_SCHEMA.md).
 
@@ -92,7 +92,7 @@ This endpoint serves two callers with different payloads:
 **Behavior:**
 - Validates that `:instrumentId` matches an existing instrument. The `instrument_id` stored in the database row comes from the URL path parameter.
 - Upserts the `instrument_runs` row (sets `source` and `watcher_id` for watcher-reported runs).
-- For Lambda-created runs: upserts `instrument_run_metadata`, inserts `files` rows (skip duplicates by `s3_key`), replaces `run_report_data` rows.
+- For Lambda-created runs: merges `metadata` into the `instrument_runs.metadata` JSONB column, inserts `files` rows (skip duplicates by `s3_key`), replaces `run_report_data` rows.
 - For watcher-reported runs: upserts `reported_files` rows from the `detected_files` array (skip duplicates by `relative_path`). No `files`, `metadata`, or `report_data` processing at this stage.
 
 ## `GET /api/v1/instruments/:instrumentId/runs`
@@ -383,7 +383,7 @@ Soft-deletes an instrument run by setting `deleted_at`. Removes all associated f
 **Side effects:**
 1. Sets `instrument_runs.deleted_at` to now. The `status` column is left unchanged so the run's last workflow state is preserved for audit purposes.
 2. Deletes all S3 objects referenced in the `files` table for this run (both raw and processed buckets).
-3. Does **not** delete database rows for `files`, `reported_files`, `instrument_run_metadata`, or `run_report_data` — these are retained for audit purposes and potential future restore functionality.
+3. Does **not** delete database rows for `files`, `reported_files`, or `run_report_data`, and does not clear the `metadata` column — these are retained for audit purposes and potential future restore functionality.
 
 ## Endpoints — Files
 

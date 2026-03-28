@@ -29,7 +29,7 @@ The replacement for a Notion report page. Displays all information the Lambda wr
     - For `uploading` runs: progress indicator. No action buttons.
     - For soft-deleted runs (`deleted_at` set): muted header with `deleted_at` timestamp. No action buttons.
 - **Delete confirmation dialog:** Warns the user that deletion will remove all files from S3 and is not reversible. Shows the count and total size of files that will be deleted. Requires the user to type the run ID to confirm (for runs with `completed` status that have report data).
-- Metadata section: key-value display of all `instrument_run_metadata` entries for this run (e.g., Measurement Mode: Fluorescence, Wavelength: 450). Empty for `reported` runs.
+- Metadata section: key-value display of the run's `metadata` JSONB object (e.g., Measurement Mode: Fluorescence, Wavelength: 450). Array values are displayed as comma-separated lists. Empty for `reported` runs.
 - Files section: depends on run status:
   - For `reported` or `queued_for_upload` runs: shows the `reported_files` list (filename, size, detected timestamp). Files are **not** downloadable since they haven't been uploaded to S3. A note explains that files are on the instrument PC and will be uploaded when the watcher processes the upload request.
   - For `uploaded`, `processing`, `completed` runs: list of raw and processed files with download links (pre-signed S3 URLs). Inline preview for supported types:
