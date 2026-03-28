@@ -152,14 +152,14 @@ On each heartbeat interval, if `upload_mode` is `manual`, the watcher also polls
 
 ## Acceptance Criteria
 
-1. `data-hub watcher watch` detects new files in the watch directory and uploads them to the correct S3 path (`{instrument.id}/{filename}`).
-2. `data-hub watcher watch` waits for file stability before uploading.
-3. `data-hub watcher watch` does not re-upload files already present in the `uploaded_files` table on restart.
-4. `data-hub watcher watch` in manual mode with `prefix` detection groups files by the configured prefix pattern and reports runs to the API as files become stable.
-5. `data-hub watcher watch` in manual mode with `directory` detection monitors subdirectories and reports runs to the API as files become stable.
-6. `data-hub watcher watch` in manual mode polls the upload queue and uploads files for runs that have been queued via the web UI.
-7. `data-hub watcher watch` in manual mode correctly handles the case where local files have been deleted before upload is requested (reports error to API).
-8. `data-hub watcher watch` in auto mode reports runs to the API, then immediately uploads files and transitions the run through `reported` → `uploading` → `uploaded`.
+1. `data-hub-watcher watch` detects new files in the watch directory and uploads them to the correct S3 path (`{instrument.id}/{filename}`).
+2. `data-hub-watcher watch` waits for file stability before uploading.
+3. `data-hub-watcher watch` does not re-upload files already present in the `uploaded_files` table on restart.
+4. `data-hub-watcher watch` in manual mode with `prefix` detection groups files by the configured prefix pattern and reports runs to the API as files become stable.
+5. `data-hub-watcher watch` in manual mode with `directory` detection monitors subdirectories and reports runs to the API as files become stable.
+6. `data-hub-watcher watch` in manual mode polls the upload queue and uploads files for runs that have been queued via the web UI.
+7. `data-hub-watcher watch` in manual mode correctly handles the case where local files have been deleted before upload is requested (reports error to API).
+8. `data-hub-watcher watch` in auto mode reports runs to the API, then immediately uploads files and transitions the run through `reported` → `uploading` → `uploaded`.
 9. The local state database (`~/.data-hub/watcher.db`) prevents duplicate run reports on watcher restart.
 10. The `uploaded_files` table is pruned of rows older than 90 days on watcher startup.
 11. A crash mid-write does not corrupt the local state database.

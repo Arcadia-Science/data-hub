@@ -42,10 +42,10 @@ The watcher config is dual-written: local YAML file and the Data Hub API.
 
 | Trigger | Behavior |
 |---|---|
-| `data-hub watcher init` | Push after writing to disk. Fails if API is unreachable (registration is a prerequisite). |
-| `data-hub watcher config edit` | Push after writing to disk. Warns if API is unreachable; local write still succeeds. |
-| `data-hub watcher config open` | Push after editor closes and validation passes. Same failure handling as `edit`. |
-| `data-hub watcher watch` (startup) | Compute SHA-256 of local config file. Compare against `GET /watchers/{watcher_id}/config-checksum`. If they differ, push. If API is unreachable, log a warning and proceed. |
+| `data-hub-watcher init` | Push after writing to disk. Fails if API is unreachable (registration is a prerequisite). |
+| `data-hub-watcher config edit` | Push after writing to disk. Warns if API is unreachable; local write still succeeds. |
+| `data-hub-watcher config open` | Push after editor closes and validation passes. Same failure handling as `edit`. |
+| `data-hub-watcher watch` (startup) | Compute SHA-256 of local config file. Compare against `GET /watchers/{watcher_id}/config-checksum`. If they differ, push. If API is unreachable, log a warning and proceed. |
 
 **Config push payload:**
 
@@ -70,7 +70,7 @@ When a user enters a new instrument ID during `init`:
 
 ## Heartbeat
 
-While `data-hub watcher watch` is running, the watcher sends a `POST /watchers/{watcher_id}/heartbeat` at a fixed interval (default: 60 seconds, defined as a constant in `watcher/constants.py`).
+While `data-hub-watcher watch` is running, the watcher sends a `POST /watchers/{watcher_id}/heartbeat` at a fixed interval (default: 60 seconds, defined as a constant in `watcher/constants.py`).
 
 **Auto mode payload:**
 
@@ -165,6 +165,6 @@ Events are sent in batches (one or more events per request) to reduce HTTP overh
 
 ## Acceptance Criteria
 
-1. `data-hub watcher watch` sends heartbeats at the configured interval and tolerates API downtime.
-2. `data-hub watcher watch` compares the local config checksum against the API on startup and pushes if they differ.
+1. `data-hub-watcher watch` sends heartbeats at the configured interval and tolerates API downtime.
+2. `data-hub-watcher watch` compares the local config checksum against the API on startup and pushes if they differ.
 3. The watcher reports significant events (uploads, errors, state changes) to `POST /watchers/{watcher_id}/events`. Event reporting failures do not block file monitoring or uploads.

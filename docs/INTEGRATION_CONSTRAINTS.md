@@ -57,8 +57,8 @@ The `instruments` database table is the source of truth for all API consumers. T
   - Avoid POSIX-only path assumptions (e.g., `~` expansion must use `Path.home()`).
   - The `service` subcommand is Windows-only; all other commands work on both platforms.
 - **Windows Service deployment:** On lab instrument PCs, the watcher should run as a Windows Service for unattended operation. The service must start automatically on boot, survive user logouts, and recover from crashes via the Windows Service Control Manager's restart policy.
-- **Offline config validation:** `data-hub watcher config validate` makes no network calls.
-- **Idempotent writes:** Running `data-hub watcher init` with the same inputs twice produces the same config file.
+- **Offline config validation:** `data-hub-watcher config validate` makes no network calls.
+- **Idempotent writes:** Running `data-hub-watcher init` with the same inputs twice produces the same config file.
 - **Linting and type checking:** Must pass the existing `ruff` and `pyright` configurations in `pyproject.toml`.
 
 ## Non-functional Requirements — Lambda

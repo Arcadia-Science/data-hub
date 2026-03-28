@@ -51,5 +51,5 @@ All watcher activity is logged to three channels:
 
 ## Acceptance Criteria
 
-1. `data-hub watcher upload --file <path>` uploads a single file to the correct S3 path.
-2. `data-hub watcher upload` refuses to upload if the instrument is still pending.
+1. `data-hub-watcher upload --file <path>` uploads a single file to the correct S3 path.
+2. `data-hub-watcher upload` refuses to upload if the instrument is still pending.

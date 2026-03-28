@@ -103,7 +103,7 @@ Define the following Pydantic models (e.g., in `watcher/src/data_hub_watcher/mod
 - `instrument.watch_directory` contains no files matching any pattern
 - `instrument.enabled` is `false`
 
-Config validation (`data-hub watcher config validate`) is purely local — no network calls. API-side checks (instrument exists, watcher is registered) happen at `init` time and `watch` startup.
+Config validation (`data-hub-watcher config validate`) is purely local — no network calls. API-side checks (instrument exists, watcher is registered) happen at `init` time and `watch` startup.
 
 ## Module Structure
 
@@ -134,5 +134,5 @@ watcher/src/data_hub_watcher/
 
 ## Acceptance Criteria
 
-1. `data-hub watcher config validate` catches all structural errors (malformed YAML, non-kebab-case ID, missing fields) without network calls.
-2. `data-hub watcher config validate` catches missing `run_detection` and invalid `prefix_pattern`.
+1. `data-hub-watcher config validate` catches all structural errors (malformed YAML, non-kebab-case ID, missing fields) without network calls.
+2. `data-hub-watcher config validate` catches missing `run_detection` and invalid `prefix_pattern`.
