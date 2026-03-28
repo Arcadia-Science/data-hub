@@ -26,7 +26,7 @@ This mapping is defined as a constant in `watcher/constants.py`.
 | `GET` | `/watchers/{watcher_id}/config-checksum` | Returns the SHA-256 checksum of the config last pushed to the API. |
 | `POST` | `/watchers/{watcher_id}/heartbeat` | Send a heartbeat with status payload. |
 | `POST` | `/watchers/{watcher_id}/events` | Report significant watcher events (uploads, errors, state changes) for centralized visibility in the web UI. |
-| `POST` | `/instrument-runs` | Report a detected instrument run (manual mode). Sends run ID, detected files, and status `reported`. |
+| `POST` | `/instrument-runs` | Report a detected instrument run (auto and manual mode). Sends run ID, detected files, and status `reported`. |
 | `GET` | `/watchers/{watcher_id}/upload-queue` | Poll for runs that a user has queued for upload via the web UI. Returns runs with status `queued_for_upload` for this watcher's instrument. |
 | `PATCH` | `/instrument-runs/{id}` | Update a run's status and file records after upload completes. |
 

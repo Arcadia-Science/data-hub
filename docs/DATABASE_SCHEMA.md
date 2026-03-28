@@ -173,20 +173,24 @@ Unique constraint on `(instrument_id, run_id)`.
 **Status lifecycle:**
 
 ```
-Watcher (manual mode):    reported → queued_for_upload → uploading → uploaded → processing → completed
-                                                                                          ↘ failed
-Lambda (auto mode):                                                           processing → completed
+Watcher (manual mode):  reported → queued_for_upload → uploading → uploaded → processing → completed
                                                                                         ↘ failed
-Any status except deleted: ──────────────────────────────────────────────────────────────→ deleted
+Watcher (auto mode):    reported → uploading → uploaded → processing → completed
+                                                                    ↘ failed
+Lambda (no watcher):                                      processing → completed
+                                                                    ↘ failed
+Any status except deleted: ────────────────────────────────────────────────────→ deleted
 ```
 
+In both watcher modes, the watcher drives the run through `reported` → `uploading` → `uploaded`. The Lambda function, triggered by the S3 upload, takes over and updates the status to `processing` and then `completed` (or `failed`) via its upsert to `POST /api/instrument-runs`. The difference between manual and auto mode is whether `queued_for_upload` is involved: in manual mode a user must queue the run for upload via the web UI, while in auto mode the watcher uploads immediately after reporting. The "Lambda (no watcher)" path applies when a file arrives in S3 without watcher involvement (e.g., a direct upload or re-processing trigger) — the Lambda creates the run directly in `processing` status.
+
 - `reported` — watcher detected the run and reported it; files exist on the local instrument PC but have not been uploaded to S3.
-- `queued_for_upload` — a user selected this run for upload via the web UI; the watcher will pick it up on its next poll.
+- `queued_for_upload` — manual mode only. A user selected this run for upload via the web UI; the watcher will pick it up on its next poll.
 - `uploading` — the watcher is actively uploading files to S3.
 - `uploaded` — all files have been uploaded to S3; awaiting Lambda processing via S3 trigger.
-- `processing` — the Lambda function is processing the run (existing status).
-- `completed` — processing finished successfully (existing status).
-- `failed` — processing failed (existing status).
+- `processing` — the Lambda function has picked up the run and is processing it. Set by the Lambda's upsert to `POST /api/instrument-runs`.
+- `completed` — processing finished successfully. Set by the Lambda.
+- `failed` — processing failed. Set by the Lambda.
 - `deleted` — soft-deleted; files removed from S3, `deleted_at` is set.
 
 ### `instrument_run_metadata`

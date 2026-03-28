@@ -2,7 +2,7 @@
 
 Prerequisite reading: [ARCHITECTURE.md](../ARCHITECTURE.md), [DATABASE_SCHEMA.md](../DATABASE_SCHEMA.md) (`instrument_runs`, `instrument_run_metadata`, `files`, `reported_files`, `run_report_data` tables), [AUTHENTICATION.md](./AUTHENTICATION.md).
 
-These endpoints are called by the Lambda function after processing an S3 event, and by the watcher in manual mode to report and upload instrument runs.
+These endpoints are called by the Lambda function after processing an S3 event, and by the watcher to report and upload instrument runs (both auto and manual mode).
 
 ## `POST /api/instrument-runs`
 
@@ -52,7 +52,7 @@ This endpoint serves two callers with different payloads:
 }
 ```
 
-**2. Watcher (manual-mode runs) — lightweight payload with detected files:**
+**2. Watcher (auto and manual mode) — lightweight payload with detected files:**
 
 ```json
 {
@@ -327,7 +327,7 @@ When new files arrive for an already-reported run, the watcher sends the updated
 ```
 
 **Validation:**
-- Status transitions must follow the lifecycle: `reported` → `queued_for_upload` → `uploading` → `uploaded` → `processing` → `completed`/`failed`. Invalid transitions return `409 Conflict`.
+- Status transitions must follow the lifecycle. Valid paths: `reported` → `queued_for_upload` → `uploading` → `uploaded` → `processing` → `completed`/`failed` (manual mode), or `reported` → `uploading` → `uploaded` → `processing` → `completed`/`failed` (auto mode). Invalid transitions return `409 Conflict`.
 - The `deleted` status cannot be set via this endpoint — use `DELETE /api/instrument-runs/:id` instead.
 - `detected_files` can only be sent for runs with `status = 'reported'`. Returns `409 Conflict` if the run has already been queued or uploaded.
 

@@ -83,6 +83,15 @@ Runs are reported to the API as soon as the first file in the run becomes stable
 3. On API failure, retry on the next heartbeat interval. The run stays in the in-memory tracker until successfully reported.
 4. **Existing run:** When a stable file is assigned to a run ID that has already been reported (and is still in `reported` status), send `PATCH /api/instrument-runs/{id}` with the updated file list. Runs that have already been queued for upload or uploaded are not modified.
 
+## Auto-Mode Upload After Reporting
+
+In auto mode, the watcher uploads files immediately after reporting the run — there is no `queued_for_upload` step.
+
+1. After the run is successfully reported (status `reported`), update the run status to `uploading` via `PATCH /api/instrument-runs/{id}`.
+2. Upload each file to S3 using the same upload logic as manual mode (see [UPLOAD.md](./UPLOAD.md)), with S3 key `{instrument.id}/{filename}`.
+3. On success, call `PATCH /api/instrument-runs/{id}` with status `uploaded` and the S3 file records.
+4. The Lambda function, triggered by the S3 upload, takes over and updates the status to `processing` and then `completed` (or `failed`) via its upsert to `POST /api/instrument-runs`.
+
 ## Run Ledger (manual mode only)
 
 In addition to the upload ledger, manual mode maintains a run ledger to track reported and uploaded runs.
@@ -122,4 +131,5 @@ On each heartbeat interval, if `upload_mode` is `manual`, the watcher also polls
 5. `data-hub watcher watch` in manual mode with `directory` detection monitors subdirectories and reports runs to the API as files become stable.
 6. `data-hub watcher watch` in manual mode polls the upload queue and uploads files for runs that have been queued via the web UI.
 7. `data-hub watcher watch` in manual mode correctly handles the case where local files have been deleted before upload is requested (reports error to API).
-8. The run ledger (`~/.data-hub/run_ledger.json`) prevents duplicate run reports on watcher restart.
+8. `data-hub watcher watch` in auto mode reports runs to the API, then immediately uploads files and transitions the run through `reported` → `uploading` → `uploaded`.
+9. The run ledger (`~/.data-hub/run_ledger.json`) prevents duplicate run reports on watcher restart.
