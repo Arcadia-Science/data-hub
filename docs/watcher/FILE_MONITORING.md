@@ -75,21 +75,20 @@ Runs are reported to the API as soon as the first file in the run becomes stable
 
 1. **New run:** When a stable file is assigned to a run ID that has not yet been reported, send `POST /api/v1/instruments/{instrument_id}/runs` with:
   - `run_id` — the detected run ID
-  - `status`: `"reported"`
+  - `source`: `"watcher"`
   - `watcher_id` from config
   - `detected_files`: list of `{ relative_path, filename, size_bytes }`
 2. On success, write the run to the local state database (see "Local state database" section below).
 3. On API failure, retry on the next heartbeat interval. The run stays in the in-memory tracker until successfully reported.
-4. **Existing run:** When a stable file is assigned to a run ID that has already been reported (and is still in `reported` status), send `PATCH /api/v1/instruments/{instrument_id}/runs/{run_id}` with the updated file list. Runs that have already been queued for upload or uploaded are not modified.
+4. **Existing run:** When a stable file is assigned to a run ID that has already been reported (and has not yet been uploaded), send `PATCH /api/v1/instruments/{instrument_id}/runs/{run_id}` with the updated `detected_files` list. Runs whose files have already been uploaded to S3 are not modified.
 
 ## Auto-Mode Upload After Reporting
 
-In auto mode, the watcher uploads files immediately after reporting the run — there is no `queued_for_upload` step.
+In auto mode, the watcher uploads files immediately after reporting the run.
 
-1. After the run is successfully reported (status `reported`), update the run status to `uploading` via `PATCH /api/v1/instruments/{instrument_id}/runs/{run_id}`.
-2. Upload each file to S3 using the same upload logic as manual mode (see [UPLOAD.md](./UPLOAD.md)), with S3 key `{instrument.id}/{filename}`.
-3. On success, call `PATCH /api/v1/instruments/{instrument_id}/runs/{run_id}` with status `uploaded` and the S3 file records.
-4. The Lambda function, triggered by the S3 upload, takes over and updates the status to `processing` and then `completed` (or `failed`) via its upsert to `POST /api/v1/instruments/{instrument_id}/runs`.
+1. After the run is successfully reported, upload each file to S3 using the same upload logic as manual mode (see [UPLOAD.md](./UPLOAD.md)), with S3 key `{instrument.id}/{filename}`.
+2. On success, call `PATCH /api/v1/instruments/{instrument_id}/runs/{run_id}` with the S3 file records.
+3. The Lambda function is triggered by the S3 upload and processes each file individually (extracting metadata, parsing data) via `PATCH /api/v1/files/{file_id}`.
 
 ## Local State Database
 
@@ -98,7 +97,7 @@ The watcher stores all local state — upload deduplication records and run trac
 - **Atomicity:** SQLite transactions ensure that a crash mid-write cannot corrupt state. JSON files read entirely into memory, modified, and written back can be truncated by a crash, losing all deduplication state.
 - **Concurrent access:** SQLite with WAL mode supports concurrent readers and serialized writers. JSON files have no locking and would become a race condition under threads or async workers.
 - **Bounded growth:** SQLite rows can be pruned with indexed queries. The `uploaded_files` table is pruned on startup (default: retain 90 days). JSON files required manual cleanup.
-- **Reduced duplication:** The run tracking table stores only the minimal state needed to avoid duplicate API calls on restart (`run_id` and `status`). Detailed run metadata (file lists, timestamps) is the API's responsibility — the watcher does not duplicate it locally.
+- **Reduced duplication:** The run tracking table stores only the minimal state needed to avoid duplicate API calls on restart (`run_id` and timestamps). Detailed run metadata (file lists, timestamps) is the API's responsibility — the watcher does not duplicate it locally.
 
 **Configuration:** Open the database with `journal_mode=WAL` and `synchronous=NORMAL` for crash safety with good write performance.
 
@@ -115,33 +114,31 @@ Tracks which files have been uploaded to S3, for deduplication on restart.
 
 Primary key on `(filename, sha256)`.
 
-### `runs` table (manual mode only)
+### `runs` table
 
 Tracks which runs have been reported to the API, so the watcher can avoid duplicate reports on restart. The API is the source of truth for run details — this table stores only the minimum needed for local decision-making.
 
 | Column | Type | Description |
 |---|---|---|
 | `run_id` | `TEXT NOT NULL` | Primary key. The detected run ID. |
-| `status` | `TEXT NOT NULL` | One of `reported`, `queued_for_upload`, `uploading`, `uploaded`. |
 | `reported_at` | `TEXT NOT NULL` | ISO 8601 timestamp of when the run was first reported. |
 | `uploaded_at` | `TEXT` | ISO 8601 timestamp of when upload completed. `NULL` until uploaded. |
 
-- **Initial scan:** On startup, skip runs already present in the `runs` table with status `reported` or `uploaded`. Runs with status `queued_for_upload` are checked against the upload queue.
-- **After reporting:** Insert a row with status `reported`.
-- **After upload:** Update the row to status `uploaded` and set `uploaded_at`.
+- **Initial scan:** On startup, skip runs already present in the `runs` table.
+- **After reporting:** Insert a row with `reported_at` set.
+- **After upload:** Set `uploaded_at`.
 
 ## Upload Queue Polling (manual mode only)
 
 On each heartbeat interval, if `upload_mode` is `manual`, the watcher also polls the API for runs that have been queued for upload:
 
-1. Call `GET /api/v1/watchers/{watcher_id}/upload-queue`.
+1. Call `GET /api/v1/watchers/{watcher_id}/upload-queue`. This returns runs where `upload_requested_at` is set.
 2. For each returned run:
    a. Verify that all files listed in the run are still present on the local filesystem. If any are missing, report an error to the API and skip the run.
-   b. Update the `runs` row to status `uploading`.
-   c. Upload each file to S3 using the same upload logic as auto mode (see [UPLOAD.md](./UPLOAD.md)), with S3 key `{instrument.id}/{filename}`.
-   d. On success, call `PATCH /api/v1/instruments/{instrument_id}/runs/{run_id}` with status `uploaded` and the S3 file records.
-   e. Update the `runs` row to status `uploaded`.
-   f. Insert each file into the `uploaded_files` table for deduplication.
+   b. Upload each file to S3 using the same upload logic as auto mode (see [UPLOAD.md](./UPLOAD.md)), with S3 key `{instrument.id}/{filename}`.
+   c. On success, call `PATCH /api/v1/instruments/{instrument_id}/runs/{run_id}` with the S3 file records.
+   d. Update the local `runs` row to set `uploaded_at`.
+   e. Insert each file into the `uploaded_files` table for deduplication.
 
 ## Dependencies
 
@@ -159,7 +156,7 @@ On each heartbeat interval, if `upload_mode` is `manual`, the watcher also polls
 5. `data-hub-watcher watch` in manual mode with `directory` detection monitors subdirectories and reports runs to the API as files become stable.
 6. `data-hub-watcher watch` in manual mode polls the upload queue and uploads files for runs that have been queued via the web UI.
 7. `data-hub-watcher watch` in manual mode correctly handles the case where local files have been deleted before upload is requested (reports error to API).
-8. `data-hub-watcher watch` in auto mode reports runs to the API, then immediately uploads files and transitions the run through `reported` → `uploading` → `uploaded`.
+8. `data-hub-watcher watch` in auto mode reports runs to the API, then immediately uploads files and records them via `PATCH`.
 9. The local state database (`~/.data-hub/watcher.db`) prevents duplicate run reports on watcher restart.
 10. The `uploaded_files` table is pruned of rows older than 90 days on watcher startup.
 11. A crash mid-write does not corrupt the local state database.

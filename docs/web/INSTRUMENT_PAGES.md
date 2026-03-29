@@ -8,41 +8,42 @@ All runs for a single instrument.
 
 **Content:**
 - Instrument header: display name, status, watcher status(es), upload mode indicator (auto / manual).
-- **Reported Runs section** (visible only for instruments with manual-mode watchers and at least one reported run): a highlighted section above the main runs table showing runs with `status = 'reported'`. Each row shows: run ID, file count, total size, detected timestamp, and action buttons:
+- **Reported Runs section** (visible only for instruments with manual-mode watchers and at least one run with `reported_files` and no `upload_requested_at`): a highlighted section above the main runs table showing runs awaiting upload. Each row shows: run ID, file count, total size, detected timestamp, and action buttons:
   - **"Upload"** button — queues the run for upload (`POST /api/v1/instruments/:instrumentId/runs/:runId/request-upload`).
   - **"Dismiss"** button — soft-deletes the reported run without uploading (`DELETE /api/v1/instruments/:instrumentId/runs/:runId`). Requires confirmation.
   - **Bulk actions:** checkbox selection with "Upload selected" and "Dismiss selected" buttons at the top of the section.
 - Runs table with the same columns as the dashboard table, filtered to this instrument. Sortable and paginated. Excludes soft-deleted runs (where `deleted_at` is set), which are shown via a separate toggle or tab.
 - Metadata filters specific to this instrument (e.g., filter by measurement mode for SpectraMax, by tape type for TapeStation).
-- **"Deleted Runs" tab or toggle** — shows soft-deleted runs (`deleted_at` set) for this instrument with muted styling. Each row shows: run ID, last workflow status (preserved in the `status` column), `deleted_at` timestamp.
+- **"Deleted Runs" tab or toggle** — shows soft-deleted runs (`deleted_at` set) for this instrument with muted styling. Each row shows: run ID, `deleted_at` timestamp.
 
 ## Run Detail (`/instruments/:instrumentId/runs/:runId`)
 
-The replacement for a Notion report page. Displays all information the Lambda wrote for this run.
+The replacement for a Notion report page. Displays all information about the run: per-file processing results, metadata, and report data.
 
 **Content:**
-- Header: instrument name, run ID, status badge, timestamps, report version, source indicator (`lambda` or `watcher`).
+- Header: instrument name, run ID, timestamps, source indicator (`lambda` or `watcher`).
   - **Action buttons in header:**
-    - For `reported` runs: **"Upload"** button (queues for upload) and **"Dismiss"** button (soft-delete without uploading).
-    - For runs in `uploaded`, `processing`, `completed`, `failed` statuses: **"Delete"** button (soft-delete with confirmation dialog, see below).
-    - For `queued_for_upload` runs: status indicator showing the run is waiting for the watcher to pick it up. No action buttons (the user has already requested upload).
-    - For `uploading` runs: progress indicator. No action buttons.
+    - For runs with `reported_files` and no `upload_requested_at`: **"Upload"** button (queues for upload) and **"Dismiss"** button (soft-delete without uploading).
+    - For runs with `upload_requested_at` set but no files uploaded yet: status indicator showing the run is waiting for the watcher to pick it up.
+    - For runs with uploaded files: **"Delete"** button (soft-delete with confirmation dialog, see below).
     - For soft-deleted runs (`deleted_at` set): muted header with `deleted_at` timestamp. No action buttons.
-- **Delete confirmation dialog:** Warns the user that deletion will remove all files from S3 and is not reversible. Shows the count and total size of files that will be deleted. Requires the user to type the run ID to confirm (for runs with `completed` status that have report data).
-- Metadata section: key-value display of the run's `metadata` JSONB object (e.g., Measurement Mode: Fluorescence, Wavelength: 450). Array values are displayed as comma-separated lists. Empty for `reported` runs.
-- Files section: depends on run status:
-  - For `reported` or `queued_for_upload` runs: shows the `reported_files` list (filename, size, detected timestamp). Files are **not** downloadable since they haven't been uploaded to S3. A note explains that files are on the instrument PC and will be uploaded when the watcher processes the upload request.
-  - For `uploaded`, `processing`, `completed` runs: list of raw and processed files with download links (pre-signed S3 URLs). Inline preview for supported types:
+- **Delete confirmation dialog:** Warns the user that deletion will remove all files from S3 and is not reversible. Shows the count and total size of files that will be deleted. Requires the user to type the run ID to confirm (for runs that have report data).
+- Metadata section: two-level display:
+  - **Run-level metadata:** key-value display of the run's `metadata` JSONB object. Array values are displayed as comma-separated lists. May be empty if no run-level metadata has been set.
+  - **Per-file metadata:** shown inline with each file in the files section (see below).
+- Files section: depends on what data is available for the run:
+  - **Reported files** (when `reported_files` exist and files have not been uploaded): shows the `reported_files` list (filename, size, detected timestamp). Files are **not** downloadable since they haven't been uploaded to S3. A note explains that files are on the instrument PC.
+  - **Uploaded files** (when `files` rows exist): list of raw and processed files with download links (pre-signed S3 URLs). Each file shows a **status badge** (`uploaded`, `processing`, `completed`, `failed`) and its per-file `metadata` as key-value pairs. Files with `status = 'failed'` display the `error_message`. Inline preview for supported types:
     - **Images** (PNG, TIFF, JPEG): rendered inline.
     - **PDFs**: embedded PDF viewer or download link.
     - **Spreadsheets** (XLS, XLSX, CSV): download link.
-  - For soft-deleted runs: shows the file list from the database (filenames, sizes) but without download links. A note explains that files have been deleted from S3.
-- Report data section: rendered from `run_report_data` entries. Empty for `reported` / `queued_for_upload` / `uploading` / `uploaded` runs. The rendering depends on `data_type`:
+  - **Soft-deleted runs:** shows the file list from the database (filenames, sizes) but without download links. A note explains that files have been deleted from S3.
+- Report data section: rendered from `run_report_data` entries, grouped by source file (`file_id`). Report data with `file_id = NULL` (from run-level analyses) is shown in a separate "Run Analysis" subsection. The rendering depends on `data_type`:
   - `plate_map` → plate-format grid (rows A–H/P, columns 1–12/24) with values in cells.
   - `raw_well_data` → scrollable data table.
   - `kinetic_data`, `spectrum_data` → data table (with optional chart visualization in future scope).
   - `sample_table` → data table.
-- Analysis section (if analyses exist): status and results of follow-on analyses.
+- **Run Analysis section:** shows the status and results of run-level analyses triggered via `POST /api/v1/instruments/:instrumentId/runs/:runId/analyses`. Includes a **"Run Analysis"** button to trigger new analyses (only available when files have been processed).
 
 ## Watchers (`/watchers`)
 
@@ -77,12 +78,13 @@ Admin view for managing the instrument registry.
 
 ## Acceptance Criteria
 
-1. The run detail page renders metadata, file links, and report data tables (including plate map grids for SpectraMax).
+1. The run detail page renders per-file status badges, per-file metadata, file download links, and report data tables (including plate map grids for SpectraMax).
 2. The watchers page shows all active watchers with heartbeat status indicators. Deregistered watchers are accessible via a "Deregistered Watchers" tab or toggle.
 3. The instrument detail page shows a "Reported Runs" section with "Upload" and "Dismiss" actions for instruments with manual-mode watchers.
 4. Bulk upload selection works: users can select multiple reported runs and queue them all for upload in one action.
-5. The run detail page shows `reported_files` (not downloadable) for runs in `reported` status and S3-backed files (downloadable) for uploaded/completed runs.
-6. The delete confirmation dialog on the run detail page warns about S3 file deletion and requires run ID confirmation for completed runs.
+5. The run detail page shows `reported_files` (not downloadable) for runs awaiting upload and S3-backed files (downloadable, with per-file processing status) for uploaded runs.
+6. The delete confirmation dialog on the run detail page warns about S3 file deletion and requires run ID confirmation for runs with report data.
 7. Deleted runs are visible in a "Deleted Runs" tab on the instrument detail page with muted styling.
 8. The watcher detail page (`/watchers/:id`) displays config, heartbeat history (chart or table), and a chronological event log with type filtering.
 9. The watchers list and watcher detail pages include a "Deregister" action with a confirmation dialog. Deregistered watchers display with muted styling and no action buttons.
+10. The run detail page includes a "Run Analysis" button and displays run-level analysis results in a dedicated section.

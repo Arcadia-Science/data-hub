@@ -16,9 +16,9 @@ Prerequisite reading: [ARCHITECTURE.md](../ARCHITECTURE.md), [api/INSTRUMENT_RUN
 The landing page. Shows a summary of recent activity across all instruments.
 
 **Content:**
-- Summary cards per instrument: instrument name, count of runs, last run date, watcher status (online / offline / no watcher). For instruments with manual-mode watchers, show the count of reported runs awaiting upload as a badge.
-- A combined recent runs table across all instruments, sorted by `created_at DESC`. Each row shows: instrument name, run ID, status badge, metadata summary, timestamp. Rows link to the run detail page. Status badges use distinct colors for each state (e.g., `reported` = blue, `queued_for_upload` = amber, `uploading` = amber animated, `uploaded` = teal, `processing` = purple, `completed` = green, `failed` = red).
-- Filters: instrument (multi-select dropdown), status (including new statuses), source (`lambda` / `watcher`), date range.
+- Summary cards per instrument: instrument name, count of runs, last run date, watcher status (online / offline / no watcher). For instruments with manual-mode watchers, show the count of runs awaiting upload (runs with `reported_files` and no `upload_requested_at`) as a badge.
+- A combined recent runs table across all instruments, sorted by `created_at DESC`. Each row shows: instrument name, run ID, file processing summary (e.g., "3/3 files processed" or "1 failed"), metadata summary, timestamp. Rows link to the run detail page. The file processing summary uses color to indicate state: green when all files are `completed`, red when any file is `failed`, gray when files are still `uploaded`/`processing`.
+- Filters: instrument (multi-select dropdown), source (`lambda` / `watcher`), date range.
 - Search: by run ID (partial match).
 - Soft-deleted runs (`deleted_at` set) are excluded by default. A "Show deleted" toggle reveals them with a visual strikethrough or muted style.
 

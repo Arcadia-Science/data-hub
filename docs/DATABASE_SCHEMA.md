@@ -7,9 +7,11 @@ PostgreSQL, hosted via a managed service (e.g., Supabase, Neon, or RDS). Schema 
 ```
 User 1──* PersonalAccessToken
 
-Instrument 1──* InstrumentRun 1──* File
+Instrument 1──* InstrumentRun 1──* File 1──* RunReportData
+     │                │              │
+     │                │              └── metadata, status (per-file processing)
      │                │
-     │                ├──1 RunReport
+     │                ├──* RunReportData (run-level analyses, file_id NULL)
      │                │
      │                └──* ReportedFile
      │
@@ -152,59 +154,22 @@ Rows should be pruned periodically (e.g., retain 90 days) to prevent unbounded g
 
 ### `instrument_runs`
 
-One record per instrument run, replacing the Notion report page as the primary record.
+One record per instrument run, replacing the Notion report page as the primary record. A run is a logical grouping of files — it is created either by the watcher (which detects a run on the instrument PC) or by the Lambda function (which auto-creates a run when a file arrives in S3 without watcher involvement). The run itself has no processing status; processing status is tracked per file in the `files` table.
 
 | Column | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | `uuid` | PK, DEFAULT `gen_random_uuid()` | Surrogate primary key. The natural key is `(instrument_id, run_id)`. |
 | `instrument_id` | `text` | FK → `instruments.id`, NOT NULL | |
 | `run_id` | `text` | NOT NULL | The run identifier — derived by the Lambda function for auto-mode runs (e.g., filename without extension), or by the watcher's run detection logic for manual-mode runs (e.g., shared prefix, directory name). |
-| `status` | `text` | NOT NULL, DEFAULT `'processing'` | One of `reported`, `queued_for_upload`, `uploading`, `uploaded`, `processing`, `completed`, `failed`. See status lifecycle below. |
-| `source` | `text` | NOT NULL, DEFAULT `'lambda'` | How the run was created. One of `lambda` (created by the Lambda function after processing an S3 event) or `watcher` (reported by the watcher in manual mode). |
+| `source` | `text` | NOT NULL, DEFAULT `'lambda'` | How the run was created. One of `lambda` (auto-created by the Lambda function when a file arrives in S3 without a pre-existing run) or `watcher` (reported by the watcher). |
 | `watcher_id` | `uuid` | FK → `watchers.id` | Set when the run was reported by a watcher. `NULL` for Lambda-created runs. |
-| `report_version` | `text` | | The version string of the workflow that generated the report (e.g., `"0.1.7"`). |
-| `metadata` | `jsonb` | NOT NULL, DEFAULT `'{}'` | Instrument-specific key-value metadata (e.g., `{"measurement_mode": "Fluorescence", "wavelength": "450"}`). Stored as a flat object. Multi-valued properties use JSON arrays (e.g., `{"dye_channel": ["FAM", "SYBR"]}`). |
-| `created_at` | `timestamptz` | NOT NULL, DEFAULT `now()` | When the run was first created (reported by watcher or processed by Lambda). |
+| `metadata` | `jsonb` | NOT NULL, DEFAULT `'{}'` | Run-level metadata. May be populated manually or aggregated from per-file metadata during run-level analysis. Stored as a flat object; multi-valued properties use JSON arrays (e.g., `{"dye_channel": ["FAM", "SYBR"]}`). |
+| `upload_requested_at` | `timestamptz` | | Manual mode only. Set when a user requests upload via the web UI. The watcher polls for runs where this is non-`NULL` to determine what to upload. `NULL` for auto-mode runs and runs not yet queued for upload. |
+| `created_at` | `timestamptz` | NOT NULL, DEFAULT `now()` | When the run was first created (reported by watcher or auto-created by Lambda). |
 | `updated_at` | `timestamptz` | NOT NULL, DEFAULT `now()` | |
-| `deleted_at` | `timestamptz` | | Canonical soft-delete marker. `NULL` means active; non-`NULL` means deleted. Queries should filter on this column rather than `status`. |
+| `deleted_at` | `timestamptz` | | Soft-delete marker. `NULL` means active; non-`NULL` means deleted. Queries should filter on this column to exclude deleted runs. |
 
 Unique constraint on `(instrument_id, run_id)`.
-
-**Status lifecycle:**
-
-```
-Watcher (manual mode):  reported → queued_for_upload → uploading → uploaded → processing → completed
-                                                                                        ↘ failed
-Watcher (auto mode):    reported → uploading → uploaded → processing → completed
-                                                                    ↘ failed
-Lambda (no watcher):                                      processing → completed
-                                                                    ↘ failed
-```
-
-Soft-deletion is orthogonal to status: setting `deleted_at` marks a run as deleted regardless of its current status. The `status` column preserves the run's last workflow state for audit purposes.
-
-In both watcher modes, the watcher drives the run through `reported` → `uploading` → `uploaded`. The Lambda function, triggered by the S3 upload, takes over and updates the status to `processing` and then `completed` (or `failed`) via its upsert to `POST /api/v1/instruments/:instrumentId/runs`. The difference between manual and auto mode is whether `queued_for_upload` is involved: in manual mode a user must queue the run for upload via the web UI, while in auto mode the watcher uploads immediately after reporting. The "Lambda (no watcher)" path applies when a file arrives in S3 without watcher involvement (e.g., a direct upload or re-processing trigger) — the Lambda creates the run directly in `processing` status.
-
-- `reported` — watcher detected the run and reported it; files exist on the local instrument PC but have not been uploaded to S3.
-- `queued_for_upload` — manual mode only. A user selected this run for upload via the web UI; the watcher will pick it up on its next poll.
-- `uploading` — the watcher is actively uploading files to S3.
-- `uploaded` — all files have been uploaded to S3; awaiting Lambda processing via S3 trigger.
-- `processing` — the Lambda function has picked up the run and is processing it. Set by the Lambda's upsert to `POST /api/v1/instruments/:instrumentId/runs`.
-- `completed` — processing finished successfully. Set by the Lambda.
-- `failed` — processing failed. Set by the Lambda.
-
-**Known metadata keys by instrument** (derived from current Ganymede tags and Notion properties):
-
-| Instrument | Metadata keys | Value type |
-|---|---|---|
-| Agilent 4150 TapeStation | `tape_type` | string |
-| Akta FPLC | `column_type` | string |
-| Azure 600 Gel Doc | `imaging_mode`, `capture_type`, `wavelength`, `wavelength_color` | string, string, string[], string[] |
-| Azure Cielo qPCR | `dye_channel` | string[] |
-| SpectraMax iD3 Plate Reader | `measurement_mode`, `measurement_type`, `wavelength` | string, string, string |
-| SpectraMax iD5 Plate Reader | `measurement_mode`, `measurement_type`, `wavelength` | string, string, string |
-
-Multi-valued properties (marked `string[]`) are stored as JSON arrays within the `metadata` object rather than as separate scalar values.
 
 ### `reported_files`
 
@@ -223,7 +188,7 @@ Unique constraint on `(instrument_run_id, relative_path)`.
 
 ### `files`
 
-Every file uploaded to S3 for an instrument run.
+Every file uploaded to S3 for an instrument run. Each file has its own processing status — the Lambda function processes files individually as they arrive in S3, extracting metadata and (for instruments that require it) parsing structured data.
 
 | Column | Type | Constraints | Description |
 |---|---|---|---|
@@ -235,16 +200,46 @@ Every file uploaded to S3 for an instrument run.
 | `content_type` | `text` | | MIME type. |
 | `size_bytes` | `bigint` | | |
 | `category` | `text` | NOT NULL, DEFAULT `'raw'` | One of `raw`, `processed`. Distinguishes raw uploads from Lambda-generated artifacts. |
+| `status` | `text` | NOT NULL, DEFAULT `'uploaded'` | One of `uploaded`, `processing`, `completed`, `failed`. See file status lifecycle below. |
+| `metadata` | `jsonb` | NOT NULL, DEFAULT `'{}'` | Instrument-specific key-value metadata extracted by the Lambda function from this file (e.g., `{"measurement_mode": "Fluorescence", "wavelength": "450"}`). Stored as a flat object; multi-valued properties use JSON arrays. |
+| `error_message` | `text` | | Human-readable error description if `status = 'failed'`. `NULL` otherwise. |
+| `processed_at` | `timestamptz` | | When the Lambda function finished processing this file (regardless of success or failure). |
 | `created_at` | `timestamptz` | NOT NULL, DEFAULT `now()` | |
+
+**File status lifecycle:**
+
+```
+uploaded → processing → completed
+                     ↘ failed
+```
+
+- `uploaded` — the file has been uploaded to S3 (by the watcher or via direct upload) but has not yet been processed by the Lambda function.
+- `processing` — the Lambda function has been triggered by the S3 event and is processing this file.
+- `completed` — the Lambda function successfully extracted metadata and (if applicable) parsed structured data from this file.
+- `failed` — the Lambda function encountered an error processing this file. See `error_message` for details.
+
+**Known metadata keys by instrument** (derived from current Ganymede tags and Notion properties):
+
+| Instrument | Metadata keys | Value type |
+|---|---|---|
+| Agilent 4150 TapeStation | `tape_type` | string |
+| Akta FPLC | `column_type` | string |
+| Azure 600 Gel Doc | `imaging_mode`, `capture_type`, `wavelength`, `wavelength_color` | string, string, string[], string[] |
+| Azure Cielo qPCR | `dye_channel` | string[] |
+| SpectraMax iD3 Plate Reader | `measurement_mode`, `measurement_type`, `wavelength` | string, string, string |
+| SpectraMax iD5 Plate Reader | `measurement_mode`, `measurement_type`, `wavelength` | string, string, string |
+
+Multi-valued properties (marked `string[]`) are stored as JSON arrays within the `metadata` object rather than as separate scalar values.
 
 ### `run_report_data`
 
-Structured tabular data extracted by the Lambda function. Replaces the Ganymede BigQuery tables (e.g., `Spectramax_Raw_Well_Data`) and the parsed data displayed in Notion page blocks.
+Structured tabular data extracted by the Lambda function from individual files, or produced by run-level analyses. Replaces the Ganymede BigQuery tables (e.g., `Spectramax_Raw_Well_Data`) and the parsed data displayed in Notion page blocks.
 
 | Column | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | `bigint` | PK, generated | |
 | `instrument_run_id` | `uuid` | FK → `instrument_runs.id`, NOT NULL | |
+| `file_id` | `bigint` | FK → `files.id` | The source file this data was extracted from. `NULL` for data produced by run-level analyses (which may aggregate across multiple files). |
 | `data_type` | `text` | NOT NULL | Identifies the dataset (e.g., `raw_well_data`, `plate_map`, `kinetic_data`, `spectrum_data`, `sample_table`). |
 | `data` | `jsonb` | NOT NULL | The structured data as a JSON array of row objects. |
 | `created_at` | `timestamptz` | NOT NULL, DEFAULT `now()` | |
@@ -259,16 +254,18 @@ This is intentionally schemaless within `data` — each instrument workflow defi
 - `personal_access_tokens(user_id)` — tokens for a user.
 - `personal_access_tokens(token_hash)` — token lookup on API auth (unique index).
 - `instrument_runs(instrument_id, created_at DESC)` — dashboard queries sorted by recency.
-- `instrument_runs` GIN index on `metadata` — supports `@>` containment queries for metadata filtering (e.g., `WHERE metadata @> '{"measurement_mode": "Fluorescence"}'`).
+- `instrument_runs(instrument_id, created_at DESC) WHERE deleted_at IS NULL` — partial index for active (non-deleted) runs queries, covering the default dashboard and instrument-page views.
+- `instrument_runs` GIN index on `metadata` — supports `@>` containment queries for run-level metadata filtering.
 - `files(instrument_run_id)` — file list for a run.
+- `files(status, instrument_run_id)` — per-file processing queries (e.g., finding all `uploaded` files for a run, or all `failed` files across runs).
+- `files` GIN index on `metadata` — supports `@>` containment queries for per-file metadata filtering (e.g., `WHERE metadata @> '{"measurement_mode": "Fluorescence"}'`).
 - `run_report_data(instrument_run_id)` — report data for a run.
+- `run_report_data(file_id)` — report data for a specific file.
 - `reported_files(instrument_run_id)` — reported files for a run.
 - `watchers(instrument_id) WHERE deleted_at IS NULL` — partial index for active (non-deleted) watchers per instrument.
 - `watcher_heartbeats(watcher_id, timestamp DESC)` — recent heartbeats.
 - `watcher_events(watcher_id, timestamp DESC)` — recent events for a watcher.
 - `watcher_events(watcher_id, event_type)` — filtering events by type.
-- `instrument_runs(status, instrument_id)` — upload queue queries (filtering by `queued_for_upload` for a given instrument).
-- `instrument_runs(instrument_id, created_at DESC) WHERE deleted_at IS NULL` — partial index for active (non-deleted) runs queries, covering the default dashboard and instrument-page views.
 
 ## Acceptance Criteria
 

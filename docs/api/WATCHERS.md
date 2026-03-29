@@ -329,7 +329,7 @@ Returns runs that have been queued for upload and belong to this watcher's instr
 ```
 
 **Behavior:**
-- Filters `instrument_runs` where `status = 'queued_for_upload'` and `instrument_id` matches the watcher's registered instrument.
+- Filters `instrument_runs` where `upload_requested_at IS NOT NULL` and `instrument_id` matches the watcher's registered instrument.
 - Includes the `reported_files` for each run so the watcher knows which files to upload.
 - The watcher constructs `PATCH /api/v1/instruments/{instrument_id}/runs/{run_id}` URLs from the `instrument_id` and `run_id` in each response item.
 
@@ -360,5 +360,5 @@ Standard HTTP status codes: `400` for validation errors, `401` for missing/inval
 7. `watcher_heartbeats` includes manual-mode counters (`runs_reported_since_last`, `runs_uploaded_since_last`) alongside the existing upload counters.
 8. `GET /api/v1/watchers` returns all registered watchers with status indicators (stale if no heartbeat in 5 minutes). Soft-deleted watchers are excluded by default; include them when `include_deleted=true` is passed.
 9. `GET /api/v1/watchers/:watcher_id` returns the full watcher detail including the raw config YAML, for the watcher detail page.
-10. `GET /api/v1/watchers/:watcher_id/upload-queue` returns runs with `status = 'queued_for_upload'` for the watcher's instrument, including their `reported_files`. Each item includes `instrument_id` and `run_id` so the watcher can construct nested API URLs.
+10. `GET /api/v1/watchers/:watcher_id/upload-queue` returns runs where `upload_requested_at` is set for the watcher's instrument, including their `reported_files`. Each item includes `instrument_id` and `run_id` so the watcher can construct nested API URLs.
 11. `DELETE /api/v1/watchers/:watcher_id` soft-deletes the watcher (sets `deleted_at`). Returns `409` for already-deleted watchers. Subsequent heartbeat, event, and config requests for a soft-deleted watcher return `404`.
