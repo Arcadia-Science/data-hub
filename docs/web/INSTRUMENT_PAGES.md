@@ -14,7 +14,7 @@ All runs for a single instrument.
   - **Bulk actions:** checkbox selection with "Upload selected" and "Dismiss selected" buttons at the top of the section.
 - Runs table with the same columns as the dashboard table, filtered to this instrument. Sortable and paginated. Excludes soft-deleted runs (where `deleted_at` is set), which are shown via a separate toggle or tab.
 - Metadata filters specific to this instrument (e.g., filter by measurement mode for SpectraMax, by tape type for TapeStation).
-- **"Deleted Runs" tab or toggle** — shows soft-deleted runs (`deleted_at` set) for this instrument with muted styling. Each row shows: run ID, `deleted_at` timestamp.
+- **"Deleted Runs" tab or toggle** — shows soft-deleted runs (`deleted_at` set) for this instrument with muted styling. Each row shows: run ID, `deleted_at` timestamp, and whether the run is restorable (i.e., `files_purged_at` is still `NULL`).
 
 ## Run Detail (`/instruments/:instrumentId/runs/:runId`)
 
@@ -26,8 +26,8 @@ The replacement for a Notion report page. Displays all information about the run
     - For runs with `reported_files` and no `upload_requested_at`: **"Upload"** button (queues for upload) and **"Dismiss"** button (soft-delete without uploading).
     - For runs with `upload_requested_at` set but no files uploaded yet: status indicator showing the run is waiting for the watcher to pick it up.
     - For runs with uploaded files: **"Delete"** button (soft-delete with confirmation dialog, see below).
-    - For soft-deleted runs (`deleted_at` set): muted header with `deleted_at` timestamp. No action buttons.
-- **Delete confirmation dialog:** Warns the user that deletion will remove all files from S3 and is not reversible. Shows the count and total size of files that will be deleted. Requires the user to type the run ID to confirm (for runs that have report data).
+    - For soft-deleted runs (`deleted_at` set): muted header with `deleted_at` timestamp. If the run is still within the retention window (`files_purged_at` is `NULL`), a **"Restore"** button is shown (clears `deleted_at`). After purge, no action buttons.
+- **Delete confirmation dialog:** Warns the user that the run will be soft-deleted and can be restored within the retention period (default: 30 days), after which S3 files are permanently removed. Shows the count and total size of files associated with the run. Requires the user to type the run ID to confirm (for runs that have report data).
 - Metadata section: two-level display:
   - **Run-level metadata:** key-value display of the run's `metadata` JSONB object. Array values are displayed as comma-separated lists. May be empty if no run-level metadata has been set.
   - **Per-file metadata:** shown inline with each file in the files section (see below).
@@ -37,7 +37,8 @@ The replacement for a Notion report page. Displays all information about the run
     - **Images** (PNG, TIFF, JPEG): rendered inline.
     - **PDFs**: embedded PDF viewer or download link.
     - **Spreadsheets** (XLS, XLSX, CSV): download link.
-  - **Soft-deleted runs:** shows the file list from the database (filenames, sizes) but without download links. A note explains that files have been deleted from S3.
+  - **Soft-deleted runs (within retention window, `files_purged_at` NULL):** shows the file list with download links still functional (S3 objects are retained). A banner explains that the run is deleted and will be permanently purged after the retention period, with the option to restore.
+  - **Soft-deleted runs (after purge, `files_purged_at` set):** shows the file list from the database (filenames, sizes) but without download links. A note explains that S3 files have been permanently removed and the run can no longer be restored.
 - Report data section: rendered from `run_report_data` entries, grouped by source file (`file_id`). Report data with `file_id = NULL` (from run-level analyses) is shown in a separate "Run Analysis" subsection. The rendering depends on `data_type`:
   - `plate_map` → plate-format grid (rows A–H/P, columns 1–12/24) with values in cells.
   - `raw_well_data` → scrollable data table.
@@ -83,8 +84,8 @@ Admin view for managing the instrument registry.
 3. The instrument detail page shows a "Reported Runs" section with "Upload" and "Dismiss" actions for instruments with manual-mode watchers.
 4. Bulk upload selection works: users can select multiple reported runs and queue them all for upload in one action.
 5. The run detail page shows `reported_files` (not downloadable) for runs awaiting upload and S3-backed files (downloadable, with per-file processing status) for uploaded runs.
-6. The delete confirmation dialog on the run detail page warns about S3 file deletion and requires run ID confirmation for runs with report data.
-7. Deleted runs are visible in a "Deleted Runs" tab on the instrument detail page with muted styling.
+6. The delete confirmation dialog on the run detail page explains the retention period and requires run ID confirmation for runs with report data.
+7. Deleted runs are visible in a "Deleted Runs" tab on the instrument detail page with muted styling, showing restore eligibility based on whether S3 files have been purged.
 8. The watcher detail page (`/watchers/:id`) displays config, heartbeat history (chart or table), and a chronological event log with type filtering.
 9. The watchers list and watcher detail pages include a "Deregister" action with a confirmation dialog. Deregistered watchers display with muted styling and no action buttons.
 10. The run detail page includes a "Run Analysis" button and displays run-level analysis results in a dedicated section.

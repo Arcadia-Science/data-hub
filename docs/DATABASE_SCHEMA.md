@@ -167,7 +167,8 @@ One record per instrument run, replacing the Notion report page as the primary r
 | `upload_requested_at` | `timestamptz` | | Manual mode only. Set when a user requests upload via the web UI. The watcher polls for runs where this is non-`NULL` to determine what to upload. `NULL` for auto-mode runs and runs not yet queued for upload. |
 | `created_at` | `timestamptz` | NOT NULL, DEFAULT `now()` | When the run was first created (reported by watcher or auto-created by Lambda). |
 | `updated_at` | `timestamptz` | NOT NULL, DEFAULT `now()` | |
-| `deleted_at` | `timestamptz` | | Soft-delete marker. `NULL` means active; non-`NULL` means deleted. Queries should filter on this column to exclude deleted runs. |
+| `deleted_at` | `timestamptz` | | Soft-delete marker. `NULL` means active; non-`NULL` means deleted. Queries should filter on this column to exclude deleted runs. S3 objects are retained until `files_purged_at` is set by the lifecycle job. |
+| `files_purged_at` | `timestamptz` | | Set by the S3 lifecycle cleanup job when S3 objects for this run have been permanently deleted. `NULL` means S3 objects are still available (either the run is active, or it's within the soft-delete retention window). A run with `deleted_at` set but `files_purged_at` NULL can still be restored with full data. |
 
 Unique constraint on `(instrument_id, run_id)`.
 

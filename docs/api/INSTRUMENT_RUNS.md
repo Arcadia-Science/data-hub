@@ -342,7 +342,7 @@ When new files arrive for an already-reported run, the watcher sends the updated
 
 ## `DELETE /api/v1/instruments/:instrumentId/runs/:runId`
 
-Soft-deletes an instrument run by setting `deleted_at`. Removes all associated files from S3.
+Soft-deletes an instrument run by setting `deleted_at`. S3 objects are **not** deleted immediately — they are retained so the run can be restored if needed. Permanent cleanup of S3 objects for soft-deleted runs is handled by a separate lifecycle process (see "S3 lifecycle for soft-deleted runs" below).
 
 **Validation:**
 - The run must exist and not already be soft-deleted (`deleted_at` must be `NULL`). Returns `404` if not found, `409` if already deleted.
@@ -355,15 +355,27 @@ Soft-deletes an instrument run by setting `deleted_at`. Removes all associated f
 {
   "instrument_id": "mass-spec-instrument",
   "run_id": "20260325",
-  "deleted_at": "2026-03-27T10:00:00Z",
-  "files_deleted": 2
+  "deleted_at": "2026-03-27T10:00:00Z"
 }
 ```
 
 **Side effects:**
 1. Sets `instrument_runs.deleted_at` to now.
-2. Deletes all S3 objects referenced in the `files` table for this run (both raw and processed buckets).
-3. Does **not** delete database rows for `files`, `reported_files`, or `run_report_data`, and does not clear the `metadata` columns — these are retained for audit purposes and potential future restore functionality.
+2. Does **not** delete S3 objects, database rows (`files`, `reported_files`, `run_report_data`), or `metadata` columns — all are retained for audit purposes and to support restoring the run within the retention window.
+
+### Restoring a soft-deleted run
+
+A soft-deleted run can be restored by clearing `deleted_at` (setting it back to `NULL`) as long as the S3 objects have not yet been permanently removed by the lifecycle process. A dedicated restore endpoint is out of scope for v1 but the data model supports it.
+
+### S3 lifecycle for soft-deleted runs
+
+S3 objects for soft-deleted runs are cleaned up by a scheduled background job (e.g., a daily cron or Lambda) rather than inline during the DELETE request. The job:
+
+1. Queries for runs where `deleted_at` is older than a configurable retention period (default: 30 days).
+2. Deletes all S3 objects referenced in the `files` table for those runs (both raw and processed buckets).
+3. Sets a `files_purged_at` timestamp on the `instrument_runs` row to record when S3 objects were permanently removed.
+
+This separation ensures that soft-delete is fast (no inline S3 I/O), reversible within the retention window, and that permanent data destruction is an explicit, auditable step. The retention period should be documented for users so they understand the window for recovery.
 
 ## Endpoints — Files
 
@@ -550,5 +562,5 @@ Standard HTTP status codes: `400` for validation errors, `401` for missing/inval
 10. `PATCH /api/v1/instruments/:instrumentId/runs/:runId` accepts file records on upload and updates detected files. Returns `409` for soft-deleted runs.
 11. `POST /api/v1/instruments/:instrumentId/runs/:runId/files` creates a file record and returns the file ID. Calling it twice with the same `s3_key` returns the existing record rather than creating a duplicate.
 12. `PATCH /api/v1/files/:fileId` updates per-file status, metadata, and report data. Enforces the `uploaded` → `processing` → `completed`/`failed` lifecycle.
-13. `DELETE /api/v1/instruments/:instrumentId/runs/:runId` soft-deletes the run (sets `deleted_at`) and deletes all associated S3 objects.
+13. `DELETE /api/v1/instruments/:instrumentId/runs/:runId` soft-deletes the run (sets `deleted_at`). S3 objects are retained and only permanently removed after the retention period by the lifecycle job.
 14. `GET /api/v1/instruments/:instrumentId/runs` and `GET /api/v1/instrument-runs` exclude soft-deleted runs by default; include them when `include_deleted=true` is passed.
