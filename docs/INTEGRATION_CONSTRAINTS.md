@@ -19,6 +19,17 @@ The API endpoints in [api/WATCHERS.md](./api/WATCHERS.md) and [api/INSTRUMENT_RU
 | `GET /watchers/{watcher_id}/upload-queue` | `GET /api/v1/watchers/:watcher_id/upload-queue` |
 | `PATCH /instruments/{instrument_id}/runs/{run_id}` | `PATCH /api/v1/instruments/:instrumentId/runs/:runId` |
 
+## Lambda API Contract
+
+The API endpoints in [api/INSTRUMENT_RUNS.md](./api/INSTRUMENT_RUNS.md) must satisfy the contract required by the Lambda function (see [lambda/MIGRATION.md](./lambda/MIGRATION.md)). The Lambda receives S3 events and derives `instrument_id` from the S3 key prefix and `run_id` from the filename. It expects:
+
+| Lambda expectation | API endpoint |
+|---|---|
+| `POST /instruments/{instrument_id}/runs` (with `source: lambda`) | `POST /api/v1/instruments/:instrumentId/runs` |
+| `POST /instruments/{instrument_id}/runs/{run_id}/files` (idempotent on `s3_key`) | `POST /api/v1/instruments/:instrumentId/runs/:runId/files` |
+| `PATCH /files/{file_id}` (status, metadata, report data) | `PATCH /api/v1/files/:fileId` |
+| `POST /instruments/{instrument_id}/runs/{run_id}/analyses` | `POST /api/v1/instruments/:instrumentId/runs/:runId/analyses` |
+
 ## S3 Conventions
 
 - Raw data bucket: `arcadia-raw-data-hub-{environment}`
@@ -52,10 +63,6 @@ The `instruments` database table is the source of truth for all API consumers. T
 ## Non-functional Requirements — Watcher
 
 - **Python 3.12+** as required by the existing project.
-- **Cross-platform:** Must work on Windows (lab instrument PCs) and macOS (developer machines).
-  - Use `pathlib.Path` for all path handling.
-  - Avoid POSIX-only path assumptions (e.g., `~` expansion must use `Path.home()`).
-  - The `service` subcommand is Windows-only; all other commands work on both platforms.
 - **Windows Service deployment:** On lab instrument PCs, the watcher should run as a Windows Service for unattended operation. The service must start automatically on boot, survive user logouts, and recover from crashes via the Windows Service Control Manager's restart policy.
 - **Offline config validation:** `data-hub-watcher config validate` makes no network calls.
 - **Idempotent writes:** Running `data-hub-watcher init` with the same inputs twice produces the same config file.

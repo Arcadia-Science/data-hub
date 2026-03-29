@@ -8,12 +8,13 @@ The Lambda function (`lambda_function.py`) is triggered by S3 events and process
 
 The Lambda is invoked once per file landing in S3. For each file, the Lambda:
 
-1. **Ensures the instrument run exists.** The Lambda derives a `run_id` from the filename (e.g., filename without extension) and calls `POST /api/v1/instruments/:instrumentId/runs` with upsert semantics. If a watcher already created the run, this is a no-op. If no run exists (the "no watcher" path — e.g., a direct S3 upload or re-processing trigger), the run is auto-created.
-2. **Marks the file as processing.** Calls `PATCH /api/v1/files/:fileId` with `status: "processing"`.
-3. **Extracts metadata.** Reads instrument-specific key-value metadata from the file (e.g., `measurement_mode`, `wavelength`) and writes it to the file's `metadata` column via the API.
-4. **Parses structured data (instrument-specific).** For instruments like the plate reader, the Lambda parses the file to extract tabular data (e.g., `raw_well_data`, `plate_map`) and writes it to `run_report_data` linked to the specific file.
-5. **Uploads processed artifacts (if any).** Some workflows produce processed files (e.g., images, PDFs). These are uploaded to the processed S3 bucket and recorded as additional `files` rows with `category: "processed"`.
-6. **Marks the file as completed (or failed).** Updates the file status to `completed` or `failed` via `PATCH /api/v1/files/:fileId`.
+1. **Ensures the instrument run exists.** The Lambda derives the `instrument_id` from the S3 key prefix and a `run_id` from the filename (e.g., filename without extension) and calls `POST /api/v1/instruments/:instrumentId/runs` with upsert semantics. If a watcher already created the run, this is a no-op. If no run exists (the "no watcher" path — e.g., a direct S3 upload or re-processing trigger), the run is auto-created.
+2. **Creates or retrieves the file record.** Calls `POST /api/v1/instruments/:instrumentId/runs/:runId/files` with the S3 bucket, S3 key, and filename from the S3 event. The endpoint is idempotent on `s3_key` — if the watcher already created the file record, the existing record is returned. The response provides the `fileId` used in all subsequent steps.
+3. **Marks the file as processing.** Calls `PATCH /api/v1/files/:fileId` with `status: "processing"`.
+4. **Extracts metadata.** Reads instrument-specific key-value metadata from the file (e.g., `measurement_mode`, `wavelength`) and writes it to the file's `metadata` column via the API.
+5. **Parses structured data (instrument-specific).** For instruments like the plate reader, the Lambda parses the file to extract tabular data (e.g., `raw_well_data`, `plate_map`) and writes it to `run_report_data` linked to the specific file.
+6. **Uploads processed artifacts (if any).** Some workflows produce processed files (e.g., images, PDFs). These are uploaded to the processed S3 bucket and recorded via `POST /api/v1/instruments/:instrumentId/runs/:runId/files` with `category: "processed"`.
+7. **Marks the file as completed (or failed).** Updates the file status to `completed` or `failed` via `PATCH /api/v1/files/:fileId`.
 
 Not every file requires parsing. For instruments like the Gel Doc or TapeStation, the Lambda may only extract metadata and mark the file as completed — no `run_report_data` rows are created. The two tiers of processing:
 
@@ -34,9 +35,9 @@ When a user triggers run-level processing, the API invokes the Lambda function (
 |---|---|
 | `ganymede.api.get_files(tag=...)` to get file metadata and tags | Tags are no longer needed. The Lambda receives the filename from the S3 event and extracts metadata from the raw file directly. |
 | `ganymede.api.post_query(sql)` to query BigQuery tables (SpectraMax) | The Lambda parses raw data from the downloaded file and writes it to `run_report_data` via the API. |
-| `notion.api.create_page_in_database(...)` with properties and blocks | Per-file: `PATCH /api/v1/files/:fileId` with metadata and status. Run creation: `POST /api/v1/instruments/:instrumentId/runs` (upsert). |
-| `notion.utils.get_instrument_run_page_id(...)` for idempotency | The runs endpoint is idempotent on `(instrument_id, run_id)` — upsert semantics. The files endpoint is idempotent on `s3_key`. |
-| `notion.api.upload_file(...)` for embedding files in pages | Files are already in S3. The Lambda records their S3 keys via the API. |
+| `notion.api.create_page_in_database(...)` with properties and blocks | File creation: `POST /api/v1/instruments/:instrumentId/runs/:runId/files`. Per-file updates: `PATCH /api/v1/files/:fileId` with metadata and status. Run creation: `POST /api/v1/instruments/:instrumentId/runs` (upsert). |
+| `notion.utils.get_instrument_run_page_id(...)` for idempotency | The runs endpoint is idempotent on `(instrument_id, run_id)` — upsert semantics. The files endpoint is idempotent on `s3_key` — see `POST /api/v1/instruments/:instrumentId/runs/:runId/files`. |
+| `notion.api.upload_file(...)` for embedding files in pages | Files are already in S3. The Lambda records their S3 keys via `POST /api/v1/instruments/:instrumentId/runs/:runId/files`. |
 | `notion.api.update_page_properties(...)` for analysis status | `POST /api/v1/instruments/:instrumentId/runs/:runId/analyses` for run-level processing. |
 | Return Notion page URL for Slack messages | Return the web app URL: `https://data-hub.arcadiascience.com/instruments/{instrument_id}/runs/{run_id}`. |
 

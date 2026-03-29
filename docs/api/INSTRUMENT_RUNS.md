@@ -64,7 +64,7 @@ The Lambda calls this before processing a file to ensure the parent run record e
 - Validates that `:instrumentId` matches an existing instrument. The `instrument_id` stored in the database row comes from the URL path parameter.
 - Upserts the `instrument_runs` row (sets `source` and `watcher_id` for watcher-reported runs).
 - For watcher-reported runs: upserts `reported_files` rows from the `detected_files` array (skip duplicates by `relative_path`).
-- For Lambda-created runs: creates the run record only. File records, metadata, and report data are written via the per-file endpoint (`PATCH /api/v1/files/:fileId`).
+- For Lambda-created runs: creates the run record only. The Lambda then creates file records via `POST /api/v1/instruments/:instrumentId/runs/:runId/files` and writes metadata and report data via `PATCH /api/v1/files/:fileId`.
 
 ## `GET /api/v1/instruments/:instrumentId/runs`
 
@@ -367,6 +367,56 @@ Soft-deletes an instrument run by setting `deleted_at`. Removes all associated f
 
 ## Endpoints — Files
 
+### `POST /api/v1/instruments/:instrumentId/runs/:runId/files`
+
+Creates a file record for an instrument run. Idempotent on `s3_key` — if a file with the same S3 key already exists, returns the existing record. This is the primary endpoint used by the Lambda function to register a file before processing it. It also supports the Lambda recording processed artifacts (with `category: "processed"`).
+
+**Request body:**
+
+```json
+{
+  "s3_bucket": "arcadia-raw-data-hub-staging",
+  "s3_key": "spectramax-id3-plate-reader/2026-03-26_experiment.xls",
+  "filename": "2026-03-26_experiment.xls",
+  "content_type": "application/vnd.ms-excel",
+  "size_bytes": 45056,
+  "category": "raw"
+}
+```
+
+**Required fields:** `s3_bucket`, `s3_key`, `filename`.
+
+**Optional fields:** `content_type`, `size_bytes`, `category` (defaults to `raw`).
+
+**Validation:**
+- The run must exist and not be soft-deleted. Returns `404` if not found, `409 Conflict` if deleted.
+- `s3_key` must be non-empty.
+
+**Response:** `201 Created` (or `200 OK` if the file already exists)
+
+```json
+{
+  "id": 1,
+  "instrument_run_id": "a8e3c2f1-7b4d-4e6a-9f1c-2d3b4a5e6f78",
+  "s3_bucket": "arcadia-raw-data-hub-staging",
+  "s3_key": "spectramax-id3-plate-reader/2026-03-26_experiment.xls",
+  "filename": "2026-03-26_experiment.xls",
+  "content_type": "application/vnd.ms-excel",
+  "size_bytes": 45056,
+  "category": "raw",
+  "status": "uploaded",
+  "metadata": {},
+  "error_message": null,
+  "processed_at": null,
+  "created_at": "2026-03-26T20:15:00Z"
+}
+```
+
+**Behavior:**
+- Looks up the run by `:instrumentId` + `:runId` (natural keys).
+- Attempts to insert a `files` row. If a row with the same `s3_key` already exists (UNIQUE constraint), returns the existing row with `200 OK` instead of `201 Created`.
+- New files are created with `status: "uploaded"`. The Lambda subsequently transitions the status via `PATCH /api/v1/files/:fileId`.
+
 ### `GET /api/v1/files/:id/download`
 
 Redirects to a pre-signed S3 URL for the file. Allows the web UI to link directly to file downloads without exposing S3 URLs in the page HTML.
@@ -498,6 +548,7 @@ Standard HTTP status codes: `400` for validation errors, `401` for missing/inval
 8. `POST /api/v1/instrument-runs/batch-request-upload` queues multiple reported runs (identified by `instrument_id` + `run_id` pairs) and reports which were queued vs. skipped.
 9. `GET /api/v1/watchers/:watcher_id/upload-queue` returns runs with `upload_requested_at` set for the watcher's instrument, including their `reported_files`.
 10. `PATCH /api/v1/instruments/:instrumentId/runs/:runId` accepts file records on upload and updates detected files. Returns `409` for soft-deleted runs.
-11. `PATCH /api/v1/files/:fileId` updates per-file status, metadata, and report data. Enforces the `uploaded` → `processing` → `completed`/`failed` lifecycle.
-12. `DELETE /api/v1/instruments/:instrumentId/runs/:runId` soft-deletes the run (sets `deleted_at`) and deletes all associated S3 objects.
-13. `GET /api/v1/instruments/:instrumentId/runs` and `GET /api/v1/instrument-runs` exclude soft-deleted runs by default; include them when `include_deleted=true` is passed.
+11. `POST /api/v1/instruments/:instrumentId/runs/:runId/files` creates a file record and returns the file ID. Calling it twice with the same `s3_key` returns the existing record rather than creating a duplicate.
+12. `PATCH /api/v1/files/:fileId` updates per-file status, metadata, and report data. Enforces the `uploaded` → `processing` → `completed`/`failed` lifecycle.
+13. `DELETE /api/v1/instruments/:instrumentId/runs/:runId` soft-deletes the run (sets `deleted_at`) and deletes all associated S3 objects.
+14. `GET /api/v1/instruments/:instrumentId/runs` and `GET /api/v1/instrument-runs` exclude soft-deleted runs by default; include them when `include_deleted=true` is passed.
