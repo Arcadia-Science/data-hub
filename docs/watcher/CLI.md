@@ -19,6 +19,7 @@ data-hub-watcher
 │   └── --dry-run         # Log activity without uploading or sending heartbeats
 ├── upload                # One-shot upload of a specific file
 │   ├── --file <path>
+│   ├── --run-id <run_id>
 │   └── --dry-run
 └── service               # Windows Service management (Windows only)
     ├── install           # Install the watcher as a Windows Service
@@ -227,8 +228,9 @@ The process runs until interrupted with Ctrl+C (SIGINT/SIGTERM), at which point 
 One-shot upload of a single file to S3.
 
 - `--file <path>`: Path to the file to upload (required).
+- `--run-id <run_id>`: The run ID to upload into (required). Must match an existing reported run.
 - `--dry-run`: Log the S3 key without performing the upload.
-- The S3 key is `{instrument.id}/{filename}`, derived from config.
+- The S3 key is `{instrument.id}/{run_id}/{filename}`.
 - Validates config before uploading.
 - Confirms the instrument is registered and not pending (same check as `watch`). Refuses to upload if the instrument is still pending.
 - Does not require the watcher to be running.

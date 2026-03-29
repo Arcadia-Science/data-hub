@@ -88,7 +88,7 @@ The source of truth for registered instruments. Replaces the `Instrument` enum f
 
 | Column | Type | Constraints | Description |
 |---|---|---|---|
-| `id` | `text` | PK | Kebab-case identifier (e.g., `spectramax-id3-plate-reader`). Also used as S3 key prefix. |
+| `id` | `text` | PK | Kebab-case identifier (e.g., `spectramax-id3-plate-reader`). Also used as the first segment of the S3 key (`{instrument_id}/{run_id}/{filename}`). |
 | `display_name` | `text` | NOT NULL | Human-readable name (e.g., "SpectraMax iD3 Plate Reader"). |
 | `status` | `text` | NOT NULL, DEFAULT `'active'` | One of `pending`, `active`, `inactive`. New instruments registered via the watcher CLI start as `pending` until confirmed by an admin. |
 | `file_patterns` | `text[]` | | Suggested glob patterns for the file upload service (e.g., `["*.xls"]`). |

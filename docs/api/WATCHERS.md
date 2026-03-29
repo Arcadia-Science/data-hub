@@ -240,7 +240,7 @@ Records significant watcher events. Called by the watcher to report state change
       "message": "Uploaded 2026-03-26_experiment.xls to S3",
       "details": {
         "filename": "2026-03-26_experiment.xls",
-        "s3_key": "spectramax-id3-plate-reader/2026-03-26_experiment.xls",
+        "s3_key": "spectramax-id3-plate-reader/2026-03-26_experiment/2026-03-26_experiment.xls",
         "size_bytes": 45056,
         "duration_ms": 1200
       }
@@ -286,7 +286,7 @@ Returns recent events for a watcher. Used by the watcher detail page.
       "message": "Uploaded 2026-03-26_experiment.xls to S3",
       "details": {
         "filename": "2026-03-26_experiment.xls",
-        "s3_key": "spectramax-id3-plate-reader/2026-03-26_experiment.xls",
+        "s3_key": "spectramax-id3-plate-reader/2026-03-26_experiment/2026-03-26_experiment.xls",
         "size_bytes": 45056,
         "duration_ms": 1200
       },

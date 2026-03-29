@@ -41,7 +41,7 @@ instrument:
 | `environment` | `str` | Yes | Must be `"staging"` or `"production"`. Determines which S3 bucket and API URL to target. |
 | `watcher_id` | `str` | No | UUID assigned by the Data Hub API during registration. Written automatically by `init`; not user-editable. |
 | `instrument` | `InstrumentConfig` | Yes | The instrument configuration. |
-| `instrument.id` | `str` | Yes | Kebab-case identifier for the instrument (e.g., `spectramax-id3-plate-reader`). Must be registered with the Data Hub API. Also used as the S3 key prefix. |
+| `instrument.id` | `str` | Yes | Kebab-case identifier for the instrument (e.g., `spectramax-id3-plate-reader`). Must be registered with the Data Hub API. Also used as the first segment of the S3 key (`{instrument_id}/{run_id}/{filename}`). |
 | `instrument.watch_directory` | `str` | Yes | Absolute path to the local directory to watch. Must exist on the filesystem. |
 | `instrument.file_patterns` | `list[str]` | Yes | One or more glob patterns (e.g., `*.xls`, `*.csv`). At least one required. |
 | `instrument.enabled` | `bool` | No | Defaults to `true`. Allows disabling the watcher without removing the config. |
@@ -59,7 +59,7 @@ The following values are derived at runtime, not stored in the config file:
 |---|---|
 | **API base URL** | Resolved from `environment` via a hardcoded mapping in the codebase (see [API_CLIENT.md](./API_CLIENT.md)). |
 | **S3 bucket** | `arcadia-raw-data-hub-{environment}` |
-| **S3 key prefix** | `{instrument.id}/` (always equals the instrument ID) |
+| **S3 key** | `{instrument.id}/{run_id}/{filename}` — the `run_id` comes from the watcher's run detection logic |
 | **Heartbeat interval** | Codebase constant (default: 60 seconds) |
 
 ## Pydantic Models

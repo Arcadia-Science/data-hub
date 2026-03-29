@@ -128,7 +128,7 @@ Events are sent via `POST /watchers/{watcher_id}/events` as they occur. To avoid
 |---|---|---|
 | `watcher_started` | `watch` command starts successfully | `{ upload_mode, watch_directory }` |
 | `watcher_stopped` | Clean shutdown (SIGINT/SIGTERM or service stop) | `{ uptime_seconds, reason }` (`reason`: `signal` or `service`) |
-| `file_uploaded` | File successfully uploaded to S3 | `{ filename, s3_key, size_bytes, duration_ms }` |
+| `file_uploaded` | File successfully uploaded to S3 | `{ filename, s3_key, run_id, size_bytes, duration_ms }` |
 | `upload_failed` | File upload failed after all retries | `{ filename, error, attempts }` |
 | `run_reported` | Instrument run reported to API (manual mode) | `{ run_id, file_count }` |
 | `run_uploaded` | All files for a run uploaded to S3 (manual mode) | `{ run_id, file_count, total_bytes }` |
@@ -146,7 +146,7 @@ Events are sent via `POST /watchers/{watcher_id}/events` as they occur. To avoid
       "message": "Uploaded 2026-03-26_experiment.xls to S3",
       "details": {
         "filename": "2026-03-26_experiment.xls",
-        "s3_key": "spectramax-id3-plate-reader/2026-03-26_experiment.xls",
+        "s3_key": "spectramax-id3-plate-reader/2026-03-26_experiment/2026-03-26_experiment.xls",
         "size_bytes": 45056,
         "duration_ms": 1200
       }

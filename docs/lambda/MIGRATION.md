@@ -8,7 +8,7 @@ The Lambda function (`lambda_function.py`) is triggered by S3 events and process
 
 The Lambda is invoked once per file landing in S3. For each file, the Lambda:
 
-1. **Ensures the instrument run exists.** The Lambda derives the `instrument_id` from the S3 key prefix and a `run_id` from the filename (e.g., filename without extension) and calls `POST /api/v1/instruments/:instrumentId/runs` with upsert semantics. If a watcher already created the run, this is a no-op. If no run exists (the "no watcher" path — e.g., a direct S3 upload or re-processing trigger), the run is auto-created.
+1. **Ensures the instrument run exists.** The Lambda derives `instrument_id` and `run_id` from the S3 key path segments (`{instrument_id}/{run_id}/{filename}`) and calls `POST /api/v1/instruments/:instrumentId/runs` with upsert semantics. If a watcher already created the run, this is a no-op. If no run exists (the "no watcher" path — e.g., a direct S3 upload or re-processing trigger), the run is auto-created.
 2. **Creates or retrieves the file record.** Calls `POST /api/v1/instruments/:instrumentId/runs/:runId/files` with the S3 bucket, S3 key, and filename from the S3 event. The endpoint is idempotent on `s3_key` — if the watcher already created the file record, the existing record is returned. The response provides the `fileId` used in all subsequent steps.
 3. **Marks the file as processing.** Calls `PATCH /api/v1/files/:fileId` with `status: "processing"`.
 4. **Extracts metadata.** Reads instrument-specific key-value metadata from the file (e.g., `measurement_mode`, `wavelength`) and writes it to the file's `metadata` column via the API.

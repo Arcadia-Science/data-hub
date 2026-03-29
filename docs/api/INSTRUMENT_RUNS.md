@@ -165,7 +165,7 @@ Returns the full detail for an instrument run, including all files (with per-fil
     {
       "id": 1,
       "filename": "2026-03-26_experiment.xls",
-      "s3_key": "spectramax-id3-plate-reader/2026-03-26_experiment.xls",
+      "s3_key": "spectramax-id3-plate-reader/2026-03-26_experiment/2026-03-26_experiment.xls",
       "content_type": "application/vnd.ms-excel",
       "size_bytes": 45056,
       "category": "raw",
@@ -303,7 +303,7 @@ Updates a run record. Used by the watcher to add file records after upload compl
   "files": [
     {
       "s3_bucket": "arcadia-raw-data-hub-staging",
-      "s3_key": "mass-spec-instrument/20260325_data_file_1.csv",
+      "s3_key": "mass-spec-instrument/20260325/20260325_data_file_1.csv",
       "filename": "20260325_data_file_1.csv",
       "content_type": "text/csv",
       "size_bytes": 1048576,
@@ -376,7 +376,7 @@ Creates a file record for an instrument run. Idempotent on `s3_key` — if a fil
 ```json
 {
   "s3_bucket": "arcadia-raw-data-hub-staging",
-  "s3_key": "spectramax-id3-plate-reader/2026-03-26_experiment.xls",
+  "s3_key": "spectramax-id3-plate-reader/2026-03-26_experiment/2026-03-26_experiment.xls",
   "filename": "2026-03-26_experiment.xls",
   "content_type": "application/vnd.ms-excel",
   "size_bytes": 45056,
@@ -399,7 +399,7 @@ Creates a file record for an instrument run. Idempotent on `s3_key` — if a fil
   "id": 1,
   "instrument_run_id": "a8e3c2f1-7b4d-4e6a-9f1c-2d3b4a5e6f78",
   "s3_bucket": "arcadia-raw-data-hub-staging",
-  "s3_key": "spectramax-id3-plate-reader/2026-03-26_experiment.xls",
+  "s3_key": "spectramax-id3-plate-reader/2026-03-26_experiment/2026-03-26_experiment.xls",
   "filename": "2026-03-26_experiment.xls",
   "content_type": "application/vnd.ms-excel",
   "size_bytes": 45056,

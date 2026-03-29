@@ -86,7 +86,7 @@ Runs are reported to the API as soon as the first file in the run becomes stable
 
 In auto mode, the watcher uploads files immediately after reporting the run.
 
-1. After the run is successfully reported, upload each file to S3 using the same upload logic as manual mode (see [UPLOAD.md](./UPLOAD.md)), with S3 key `{instrument.id}/{filename}`.
+1. After the run is successfully reported, upload each file to S3 using the same upload logic as manual mode (see [UPLOAD.md](./UPLOAD.md)), with S3 key `{instrument.id}/{run_id}/{filename}`.
 2. On success, call `PATCH /api/v1/instruments/{instrument_id}/runs/{run_id}` with the S3 file records.
 3. The Lambda function is triggered by the S3 upload and processes each file individually (extracting metadata, parsing data) via `PATCH /api/v1/files/{file_id}`.
 
@@ -135,7 +135,7 @@ On each heartbeat interval, if `upload_mode` is `manual`, the watcher also polls
 1. Call `GET /api/v1/watchers/{watcher_id}/upload-queue`. This returns runs where `upload_requested_at` is set.
 2. For each returned run:
    a. Verify that all files listed in the run are still present on the local filesystem. If any are missing, report an error to the API and skip the run.
-   b. Upload each file to S3 using the same upload logic as auto mode (see [UPLOAD.md](./UPLOAD.md)), with S3 key `{instrument.id}/{filename}`.
+   b. Upload each file to S3 using the same upload logic as auto mode (see [UPLOAD.md](./UPLOAD.md)), with S3 key `{instrument.id}/{run_id}/{filename}`.
    c. On success, call `PATCH /api/v1/instruments/{instrument_id}/runs/{run_id}` with the S3 file records.
    d. Update the local `runs` row to set `uploaded_at`.
    e. Insert each file into the `uploaded_files` table for deduplication.
@@ -149,7 +149,7 @@ On each heartbeat interval, if `upload_mode` is `manual`, the watcher also polls
 
 ## Acceptance Criteria
 
-1. `data-hub-watcher watch` detects new files in the watch directory and uploads them to the correct S3 path (`{instrument.id}/{filename}`).
+1. `data-hub-watcher watch` detects new files in the watch directory and uploads them to the correct S3 path (`{instrument.id}/{run_id}/{filename}`).
 2. `data-hub-watcher watch` waits for file stability before uploading.
 3. `data-hub-watcher watch` does not re-upload files already present in the `uploaded_files` table on restart.
 4. `data-hub-watcher watch` in manual mode with `prefix` detection groups files by the configured prefix pattern and reports runs to the API as files become stable.
