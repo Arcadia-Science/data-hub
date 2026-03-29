@@ -294,7 +294,7 @@ Documented in [WATCHERS.md](./WATCHERS.md#get-apiv1watcherswatcher_idupload-queu
 
 ## `PATCH /api/v1/instruments/:instrumentId/runs/:runId`
 
-Updates a run record. Used by the watcher to add file records after upload completion or to update detected files for a reported run.
+Updates a run record. Accepts any combination of the fields below — callers send only the fields they need to update.
 
 **Request body — adding file records after upload (watcher):**
 
@@ -334,9 +334,24 @@ When new files arrive for an already-reported run, the watcher sends the updated
 }
 ```
 
+**Request body — setting run-level metadata (Lambda or analysis pipeline):**
+
+After processing all files in a run, the Lambda function (or a run-level analysis) can write aggregated metadata to the run. The provided object **replaces** the existing metadata entirely (patch-by-key semantics would require the caller to read-then-merge, adding complexity for no clear benefit at current scale).
+
+```json
+{
+  "metadata": {
+    "measurement_mode": "Fluorescence",
+    "measurement_type": "Endpoint",
+    "wavelength": "450"
+  }
+}
+```
+
 **Validation:**
 - Soft-deleted runs (`deleted_at` set) cannot be updated — returns `409 Conflict`.
 - File records are upserted by `s3_key` (skip duplicates).
+- `metadata`, if provided, must be a JSON object (not an array or scalar).
 
 **Response:** `200 OK` with the updated run object.
 
@@ -559,7 +574,7 @@ Standard HTTP status codes: `400` for validation errors, `401` for missing/inval
 7. `POST /api/v1/instruments/:instrumentId/runs/:runId/request-upload` sets `upload_requested_at` for runs with reported files. Returns `409` for runs already queued or soft-deleted.
 8. `POST /api/v1/instrument-runs/batch-request-upload` queues multiple reported runs (identified by `instrument_id` + `run_id` pairs) and reports which were queued vs. skipped.
 9. `GET /api/v1/watchers/:watcher_id/upload-queue` returns runs with `upload_requested_at` set for the watcher's instrument, including their `reported_files`.
-10. `PATCH /api/v1/instruments/:instrumentId/runs/:runId` accepts file records on upload and updates detected files. Returns `409` for soft-deleted runs.
+10. `PATCH /api/v1/instruments/:instrumentId/runs/:runId` accepts file records on upload, updates detected files, and sets run-level metadata. Returns `409` for soft-deleted runs.
 11. `POST /api/v1/instruments/:instrumentId/runs/:runId/files` creates a file record and returns the file ID. Calling it twice with the same `s3_key` returns the existing record rather than creating a duplicate.
 12. `PATCH /api/v1/files/:fileId` updates per-file status, metadata, and report data. Enforces the `uploaded` → `processing` → `completed`/`failed` lifecycle.
 13. `DELETE /api/v1/instruments/:instrumentId/runs/:runId` soft-deletes the run (sets `deleted_at`). S3 objects are retained and only permanently removed after the retention period by the lifecycle job.
