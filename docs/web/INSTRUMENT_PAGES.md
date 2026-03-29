@@ -51,8 +51,8 @@ The replacement for a Notion report page. Displays all information about the run
 Admin view of all registered file upload service instances.
 
 **Content:**
-- Table: watcher ID, instrument, hostname, status (watching / stopped / stale), last heartbeat, uptime. Each row has a **"Deregister"** action button (see below).
-- Status indicators: green for active (heartbeat within 5 min), yellow for stale, gray for stopped.
+- Table: watcher ID, instrument, hostname, effective status (watching / stopped / stale), last heartbeat, uptime. Each row has a **"Deregister"** action button (see below). The `stale` status is not stored in the database — it is computed at query time by the API when `last_heartbeat_at` exceeds the 5-minute threshold (see [DATABASE_SCHEMA.md](../DATABASE_SCHEMA.md)).
+- Status indicators: green for active (heartbeat within 5 min), yellow for stale (computed), gray for stopped.
 - Click into a watcher for detail view (`/watchers/:id`).
 - **"Deregistered Watchers" tab or toggle** — shows soft-deleted watchers (`deleted_at` set) with muted styling. Each row shows: watcher ID, instrument, hostname, last status, `deleted_at` timestamp. No action buttons.
 - **Deregister action:** calls `DELETE /api/v1/watchers/:watcher_id`. Requires a confirmation dialog warning that the watcher will no longer be able to send heartbeats or events. The confirmation dialog should advise the user to stop the watcher service on the instrument PC first.

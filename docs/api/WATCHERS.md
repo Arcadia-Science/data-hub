@@ -74,7 +74,7 @@ Lists all registered watchers. Used by the `/watchers` admin page.
 | Parameter | Type | Description |
 |---|---|---|
 | `instrument_id` | `string` | Filter by instrument. |
-| `status` | `string` | Filter by status (e.g., `watching`, `stopped`, `stale`). |
+| `status` | `string` | Filter by effective status (e.g., `watching`, `stopped`, `stale`). `stale` is computed at query time (see `watchers` table in [DATABASE_SCHEMA.md](../DATABASE_SCHEMA.md)), so filtering by `stale` matches watchers whose `last_heartbeat_at` has exceeded the staleness threshold. |
 | `include_deleted` | `bool` | If `true`, include soft-deleted (deregistered) watchers. Default: `false`. |
 
 By default, soft-deleted watchers (`deleted_at IS NOT NULL`) are excluded. Pass `include_deleted=true` to include them (used by the "Deregistered Watchers" UI view).
@@ -98,7 +98,7 @@ By default, soft-deleted watchers (`deleted_at IS NOT NULL`) are excluded. Pass 
 }
 ```
 
-A watcher with no heartbeat in the last 5 minutes should be returned with `status: "stale"` regardless of its stored status (computed at query time or via a periodic job — see `watchers` table in [DATABASE_SCHEMA.md](../DATABASE_SCHEMA.md)).
+`stale` is computed at query time, not stored. When returning watchers, the API must check `last_heartbeat_at`: if it is older than 5 minutes (or `NULL`), the response `status` field is `stale` regardless of the stored `status` value. See the `watchers` table in [DATABASE_SCHEMA.md](../DATABASE_SCHEMA.md) for the full rule.
 
 ## `GET /api/v1/watchers/:watcher_id`
 
@@ -189,7 +189,7 @@ The request uses the watcher's field names (e.g., `files_uploaded_since_last_hea
 
 **Side effects:**
 - Inserts a row into `watcher_heartbeats`.
-- Updates `watchers.last_heartbeat_at` and `watchers.status`.
+- Updates `watchers.last_heartbeat_at` to `now()` and sets `watchers.status` to the payload's `status` value (one of `watching`, `stopped` — never `stale`, which is computed at query time).
 
 ## `GET /api/v1/watchers/:watcher_id/heartbeats`
 
@@ -353,12 +353,12 @@ Standard HTTP status codes: `400` for validation errors, `401` for missing/inval
 
 1. `POST /api/v1/watchers/register` returns a `watcher_id` and creates a watcher record linked to the instrument.
 2. `PUT /api/v1/watchers/:watcher_id/config` stores the raw config YAML and checksum; `GET /api/v1/watchers/:watcher_id/config-checksum` returns the checksum.
-3. `POST /api/v1/watchers/:watcher_id/heartbeat` inserts a `watcher_heartbeats` row and updates `watchers.last_heartbeat_at`. The API maps request field names (e.g., `files_uploaded_since_last_heartbeat`) to database column names (e.g., `files_uploaded_since_last`).
+3. `POST /api/v1/watchers/:watcher_id/heartbeat` inserts a `watcher_heartbeats` row and updates `watchers.last_heartbeat_at` and `watchers.status` (to the payload's status value, which must be one of `watching` or `stopped`). The API maps request field names (e.g., `files_uploaded_since_last_heartbeat`) to database column names (e.g., `files_uploaded_since_last`).
 4. `POST /api/v1/watchers/:watcher_id/events` accepts batches of watcher events and inserts them into `watcher_events`.
 5. `GET /api/v1/watchers/:watcher_id/events` returns events filtered by type and date range, ordered by timestamp descending.
 6. `GET /api/v1/watchers/:watcher_id/heartbeats` returns heartbeat history filtered by date range.
 7. `watcher_heartbeats` includes manual-mode counters (`runs_reported_since_last`, `runs_uploaded_since_last`) alongside the existing upload counters.
-8. `GET /api/v1/watchers` returns all registered watchers with status indicators (stale if no heartbeat in 5 minutes). Soft-deleted watchers are excluded by default; include them when `include_deleted=true` is passed.
+8. `GET /api/v1/watchers` returns all registered watchers with effective status — the API computes `stale` at query time by checking `last_heartbeat_at` against the 5-minute threshold, overriding the stored status in the response. Soft-deleted watchers are excluded by default; include them when `include_deleted=true` is passed.
 9. `GET /api/v1/watchers/:watcher_id` returns the full watcher detail including the raw config YAML, for the watcher detail page.
 10. `GET /api/v1/watchers/:watcher_id/upload-queue` returns runs where `upload_requested_at` is set for the watcher's instrument, including their `reported_files`. Each item includes `instrument_id` and `run_id` so the watcher can construct nested API URLs.
 11. `DELETE /api/v1/watchers/:watcher_id` soft-deletes the watcher (sets `deleted_at`). Returns `409` for already-deleted watchers. Subsequent heartbeat, event, and config requests for a soft-deleted watcher return `404`.

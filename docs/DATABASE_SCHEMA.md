@@ -111,12 +111,12 @@ Registered file upload service instances. One watcher per instrument PC.
 | `config_checksum` | `text` | | SHA-256 of the last-pushed config YAML. |
 | `config_yaml` | `text` | | The raw YAML text of the watcher's config file, stored verbatim as pushed by the watcher. |
 | `last_heartbeat_at` | `timestamptz` | | Updated on each heartbeat. |
-| `status` | `text` | NOT NULL, DEFAULT `'registered'` | One of `registered`, `watching`, `stopped`, `stale`. |
+| `status` | `text` | NOT NULL, DEFAULT `'registered'` | One of `registered`, `watching`, `stopped`. |
 | `created_at` | `timestamptz` | NOT NULL, DEFAULT `now()` | |
 | `updated_at` | `timestamptz` | NOT NULL, DEFAULT `now()` | |
 | `deleted_at` | `timestamptz` | | Soft-delete marker. `NULL` means active; non-`NULL` means deregistered. Queries should filter on this column to exclude deregistered watchers. |
 
-A watcher is considered `stale` if no heartbeat has been received for more than 5 minutes (configurable). This can be determined at query time or via a periodic job.
+`stale` is not a stored status — it is computed at query time. A watcher is stale when `last_heartbeat_at < now() - interval '5 minutes'` (threshold is configurable). API responses replace the stored status with `stale` when this condition is true. The stored `status` column only ever contains `registered`, `watching`, or `stopped`.
 
 ### `watcher_heartbeats`
 
