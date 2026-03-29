@@ -73,6 +73,7 @@ data-hub/
 │           ├── run_detector.py
 │           ├── uploader.py
 │           ├── heartbeat.py
+│           ├── state.py
 │           ├── events.py
 │           ├── service.py
 │           └── cli.py
@@ -171,7 +172,7 @@ dependencies = [
 ]
 
 [project.scripts]
-data-hub = "data_hub_watcher.cli:cli"
+data-hub-watcher = "data_hub_watcher.cli:cli"
 
 [tool.uv.sources]
 data-hub-shared = { workspace = true }
@@ -242,7 +243,7 @@ ENV UV_LINK_MODE=copy
 
 RUN --mount=from=uv,source=/uv,target=/bin/uv \
     --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,source=lambda/uv.lock,target=uv.lock \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=lambda/pyproject.toml,target=pyproject.toml \
     --mount=type=bind,source=packages/shared/pyproject.toml,target=packages/shared/pyproject.toml \
     --mount=type=bind,source=packages/shared/src,target=packages/shared/src \

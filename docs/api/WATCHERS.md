@@ -14,12 +14,9 @@ Registers a new watcher instance.
 {
   "instrument_id": "spectramax-id3-plate-reader",
   "hostname": "LAB-PC-01",
-  "os_info": "Windows 11 23H2",
-  "config_yaml": "version: 1\nenvironment: staging\nwatcher_id: a1b2c3d4-e5f6-...\ninstrument:\n  id: spectramax-id3-plate-reader\n  ..."
+  "os_info": "Windows 11 23H2"
 }
 ```
-
-`config_yaml` is the raw text of the watcher's YAML config file. The API stores this string verbatim.
 
 **Response:** `201 Created`
 

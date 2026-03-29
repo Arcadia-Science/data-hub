@@ -21,7 +21,7 @@ This mapping is defined as a constant in `watcher/constants.py`.
 |---|---|---|
 | `GET` | `/instruments` | List registered instruments with metadata (id, display name, suggested file patterns). |
 | `POST` | `/instruments` | Register a new instrument (created in "pending" state until confirmed by an admin in the Data Hub web UI). |
-| `POST` | `/watchers/register` | Register a new watcher instance. Accepts instrument ID, hostname, OS info, and the raw config YAML. Returns a `watcher_id` (UUID). |
+| `POST` | `/watchers/register` | Register a new watcher instance. Accepts instrument ID, hostname, and OS info. Returns a `watcher_id` (UUID). Config is pushed separately via `PUT /watchers/{watcher_id}/config`. |
 | `PUT` | `/watchers/{watcher_id}/config` | Push the raw config YAML and its checksum. |
 | `GET` | `/watchers/{watcher_id}/config-checksum` | Returns the SHA-256 checksum of the config last pushed to the API. |
 | `POST` | `/watchers/{watcher_id}/heartbeat` | Send a heartbeat with status payload. |
