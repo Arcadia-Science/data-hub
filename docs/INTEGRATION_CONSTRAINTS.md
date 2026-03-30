@@ -18,6 +18,7 @@ The API endpoints in [api/WATCHERS.md](./api/WATCHERS.md) and [api/INSTRUMENT_RU
 | `POST /instruments/{instrument_id}/runs` (with `source: watcher` and `detected_files`) | `POST /api/v1/instruments/:instrumentId/runs` |
 | `GET /watchers/{watcher_id}/upload-queue` | `GET /api/v1/watchers/:watcher_id/upload-queue` |
 | `PATCH /instruments/{instrument_id}/runs/{run_id}` | `PATCH /api/v1/instruments/:instrumentId/runs/:runId` |
+| `PATCH /files/{file_id}` (S3 info after upload) | `PATCH /api/v1/files/:fileId` |
 
 ## Lambda API Contract
 

@@ -9,11 +9,9 @@ User 1──* PersonalAccessToken
 
 Instrument 1──* InstrumentRun 1──* File 1──* RunReportData
      │                │              │
-     │                │              └── metadata, status (per-file processing)
+     │                │              └── metadata, status (per-file lifecycle)
      │                │
-     │                ├──* RunReportData (run-level analyses, file_id NULL)
-     │                │
-     │                └──* ReportedFile
+     │                └──* RunReportData (run-level analyses, file_id NULL)
      │
      └──* Watcher ──* WatcherHeartbeat
               │
@@ -131,7 +129,6 @@ Append-only log of heartbeats from watchers. Used for uptime monitoring and diag
 | `upload_mode` | `text` | | `auto` or `manual`. Included so heartbeat history is interpretable without joining the watcher config. |
 | `files_uploaded_since_last` | `int` | DEFAULT `0` | |
 | `runs_reported_since_last` | `int` | DEFAULT `0` | Manual mode only. |
-| `runs_uploaded_since_last` | `int` | DEFAULT `0` | Manual mode only. |
 | `errors_since_last` | `int` | DEFAULT `0` | |
 | `uptime_seconds` | `int` | | |
 | `created_at` | `timestamptz` | NOT NULL, DEFAULT `now()` | Server-side receive time. |
@@ -146,7 +143,7 @@ Rows should be pruned periodically (e.g., retain 90 days) to prevent unbounded g
 |---|---|---|---|
 | `id` | `bigint` | PK, generated | |
 | `watcher_id` | `uuid` | FK → `watchers.id`, NOT NULL | |
-| `event_type` | `text` | NOT NULL | One of `watcher_started`, `watcher_stopped`, `file_uploaded`, `upload_failed`, `run_reported`, `run_uploaded`, `config_synced`, `error`. |
+| `event_type` | `text` | NOT NULL | One of `watcher_started`, `watcher_stopped`, `file_uploaded`, `upload_failed`, `run_reported`, `config_synced`, `error`. |
 | `message` | `text` | NOT NULL | Human-readable summary (e.g., "Uploaded 2026-03-26_experiment.xls to S3"). |
 | `details` | `jsonb` | | Structured event data. Shape varies by `event_type` — see [watcher/API_CLIENT.md](./watcher/API_CLIENT.md), section on event reporting. |
 | `timestamp` | `timestamptz` | NOT NULL | Client-reported event time. |
@@ -164,7 +161,6 @@ One record per instrument run, replacing the Notion report page as the primary r
 | `source` | `text` | NOT NULL, DEFAULT `'lambda'` | How the run was created. One of `lambda` (auto-created by the Lambda function when a file arrives in S3 without a pre-existing run) or `watcher` (reported by the watcher). |
 | `watcher_id` | `uuid` | FK → `watchers.id` | Set when the run was reported by a watcher. `NULL` for Lambda-created runs. |
 | `metadata` | `jsonb` | NOT NULL, DEFAULT `'{}'` | Run-level metadata, written via `PATCH /api/v1/instruments/:instrumentId/runs/:runId`. Typically set by the Lambda function after processing all files in a run (aggregated from per-file metadata) or by a run-level analysis pipeline. Stored as a flat object; multi-valued properties use JSON arrays (e.g., `{"dye_channel": ["FAM", "SYBR"]}`). |
-| `upload_requested_at` | `timestamptz` | | Manual mode only. Set when a user requests upload via the web UI. The watcher polls for runs where this is non-`NULL` to determine what to upload. `NULL` for auto-mode runs and runs not yet queued for upload. |
 | `created_at` | `timestamptz` | NOT NULL, DEFAULT `now()` | When the run was first created (reported by watcher or auto-created by Lambda). |
 | `updated_at` | `timestamptz` | NOT NULL, DEFAULT `now()` | |
 | `deleted_at` | `timestamptz` | | Soft-delete marker. `NULL` means active; non-`NULL` means deleted. Queries should filter on this column to exclude deleted runs. S3 objects are retained until `files_purged_at` is set by the lifecycle job. |
@@ -172,52 +168,50 @@ One record per instrument run, replacing the Notion report page as the primary r
 
 Unique constraint on `(instrument_id, run_id)`.
 
-### `reported_files`
-
-Files detected by the watcher for runs in manual mode, before they have been uploaded to S3. These records allow the web UI to display file details (names, sizes) for reported runs that haven't been uploaded yet. Once a run is uploaded and the files are recorded in the `files` table (with S3 keys), the corresponding `reported_files` rows are no longer the primary source of truth but are retained for audit purposes.
-
-| Column | Type | Constraints | Description |
-|---|---|---|---|
-| `id` | `bigint` | PK, generated | |
-| `instrument_run_id` | `uuid` | FK → `instrument_runs.id`, NOT NULL | |
-| `relative_path` | `text` | NOT NULL | Path relative to the watcher's watch directory (e.g., `20260325_data_file_1.csv` or `20260325_testing/data_file_1.csv`). |
-| `filename` | `text` | NOT NULL | The filename component (last segment of the path). |
-| `size_bytes` | `bigint` | | File size at detection time. |
-| `detected_at` | `timestamptz` | NOT NULL, DEFAULT `now()` | When the watcher first detected this file. |
-
-Unique constraint on `(instrument_run_id, relative_path)`.
-
 ### `files`
 
-Every file uploaded to S3 for an instrument run. Each file has its own processing status — the Lambda function processes files individually as they arrive in S3, extracting metadata and (for instruments that require it) parsing structured data.
+Every file associated with an instrument run. A file progresses through a lifecycle from detection (by the watcher) through upload (to S3) to processing (by the Lambda function). Files created by the Lambda (auto-mode or direct S3 upload) skip the detection and upload-request phases entirely.
 
 | Column | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | `bigint` | PK, generated | |
 | `instrument_run_id` | `uuid` | FK → `instrument_runs.id`, NOT NULL | |
-| `s3_bucket` | `text` | NOT NULL | |
-| `s3_key` | `text` | NOT NULL, UNIQUE | |
+| `relative_path` | `text` | | Path relative to the watcher's watch directory (e.g., `20260325_data_file_1.csv` or `20260325_testing/data_file_1.csv`). `NULL` for Lambda-created files (they skip the detection phase). |
+| `s3_bucket` | `text` | | `NULL` until the file is uploaded to S3. |
+| `s3_key` | `text` | | `NULL` until the file is uploaded to S3. See partial unique index below. |
 | `filename` | `text` | NOT NULL | Original filename. |
 | `content_type` | `text` | | MIME type. |
 | `size_bytes` | `bigint` | | |
 | `category` | `text` | NOT NULL, DEFAULT `'raw'` | One of `raw`, `processed`. Distinguishes raw uploads from Lambda-generated artifacts. |
-| `status` | `text` | NOT NULL, DEFAULT `'uploaded'` | One of `uploaded`, `processing`, `completed`, `failed`. See file status lifecycle below. |
+| `status` | `text` | NOT NULL, DEFAULT `'detected'` | One of `detected`, `upload_requested`, `uploaded`, `processing`, `completed`, `failed`. See file status lifecycle below. |
 | `metadata` | `jsonb` | NOT NULL, DEFAULT `'{}'` | Instrument-specific key-value metadata extracted by the Lambda function from this file (e.g., `{"measurement_mode": "Fluorescence", "wavelength": "450"}`). Stored as a flat object; multi-valued properties use JSON arrays. |
 | `error_message` | `text` | | Human-readable error description if `status = 'failed'`. `NULL` otherwise. |
+| `detected_at` | `timestamptz` | | When the watcher first detected this file on the local filesystem. `NULL` for Lambda-created files. |
+| `upload_requested_at` | `timestamptz` | | When a user requested upload of this file via the web UI. `NULL` for auto-mode and Lambda-created files. |
+| `uploaded_at` | `timestamptz` | | When the file was confirmed uploaded to S3. For Lambda-created files, equals `created_at`. |
 | `processed_at` | `timestamptz` | | When the Lambda function finished processing this file (regardless of success or failure). |
 | `created_at` | `timestamptz` | NOT NULL, DEFAULT `now()` | |
+| `deleted_at` | `timestamptz` | | Per-file soft-delete for dismissing individual files. `NULL` means active. |
+
+Unique constraint on `(instrument_run_id, relative_path) WHERE relative_path IS NOT NULL` — prevents duplicate detected files within a run.
+
+Partial unique index on `s3_key WHERE s3_key IS NOT NULL` — prevents duplicate S3 keys while allowing multiple rows with `NULL` `s3_key` (detected-but-not-uploaded files).
 
 **File status lifecycle:**
 
 ```
-uploaded → processing → completed
-                     ↘ failed
+detected → upload_requested → uploaded → processing → completed
+                                                    ↘ failed
 ```
 
-- `uploaded` — the file has been uploaded to S3 (by the watcher or via direct upload) but has not yet been processed by the Lambda function.
+- `detected` — the watcher has seen this file on the local filesystem and reported it to the API. The file has not been uploaded to S3. `s3_bucket` and `s3_key` are `NULL`.
+- `upload_requested` — a user has requested upload of this file via the web UI. The watcher will pick it up on its next upload-queue poll.
+- `uploaded` — the file has been uploaded to S3 (by the watcher or created directly by the Lambda function) but has not yet been processed by the Lambda function.
 - `processing` — the Lambda function has been triggered by the S3 event and is processing this file.
 - `completed` — the Lambda function successfully extracted metadata and (if applicable) parsed structured data from this file.
 - `failed` — the Lambda function encountered an error processing this file. See `error_message` for details.
+
+Files created by the Lambda function (auto-mode, direct S3 upload) are inserted directly with `status: 'uploaded'`, `s3_bucket`, and `s3_key` populated — they skip the `detected` and `upload_requested` states. Files created by the watcher in auto mode are inserted with `status: 'detected'` and immediately transition to `uploaded` after the watcher uploads them to S3.
 
 **Known metadata keys by instrument** (derived from current Ganymede tags and Notion properties):
 
@@ -258,11 +252,12 @@ This is intentionally schemaless within `data` — each instrument workflow defi
 - `instrument_runs(instrument_id, created_at DESC) WHERE deleted_at IS NULL` — partial index for active (non-deleted) runs queries, covering the default dashboard and instrument-page views.
 - `instrument_runs` GIN index on `metadata` — supports `@>` containment queries for run-level metadata filtering.
 - `files(instrument_run_id)` — file list for a run.
-- `files(status, instrument_run_id)` — per-file processing queries (e.g., finding all `uploaded` files for a run, or all `failed` files across runs).
+- `files(status, instrument_run_id)` — per-file processing and lifecycle queries (e.g., finding all `detected` files for a run, all `upload_requested` files for a watcher's instrument, or all `failed` files across runs).
+- `files(instrument_run_id) WHERE deleted_at IS NULL` — partial index for active (non-dismissed) files within a run.
+- `files(upload_requested_at) WHERE upload_requested_at IS NOT NULL AND uploaded_at IS NULL AND deleted_at IS NULL` — partial index for the upload queue: files that have been requested for upload but not yet uploaded.
 - `files` GIN index on `metadata` — supports `@>` containment queries for per-file metadata filtering (e.g., `WHERE metadata @> '{"measurement_mode": "Fluorescence"}'`).
 - `run_report_data(instrument_run_id)` — report data for a run.
 - `run_report_data(file_id)` — report data for a specific file.
-- `reported_files(instrument_run_id)` — reported files for a run.
 - `watchers(instrument_id) WHERE deleted_at IS NULL` — partial index for active (non-deleted) watchers per instrument.
 - `watcher_heartbeats(watcher_id, timestamp DESC)` — recent heartbeats.
 - `watcher_events(watcher_id, timestamp DESC)` — recent events for a watcher.

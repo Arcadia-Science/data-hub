@@ -1,6 +1,6 @@
 # Lambda Function Migration
 
-Prerequisite reading: [ARCHITECTURE.md](../ARCHITECTURE.md), [DATABASE_SCHEMA.md](../DATABASE_SCHEMA.md) (`files`, `run_report_data` tables), [api/INSTRUMENT_RUNS.md](../api/INSTRUMENT_RUNS.md).
+Prerequisite reading: [ARCHITECTURE.md](../ARCHITECTURE.md), [DATABASE_SCHEMA.md](../DATABASE_SCHEMA.md) (`files`, `run_report_data` tables — note that `files` is a unified table tracking files from detection through processing), [api/INSTRUMENT_RUNS.md](../api/INSTRUMENT_RUNS.md).
 
 The Lambda function (`lambda_function.py`) is triggered by S3 events and processes each uploaded file individually. Its job is to record the file in the database, extract metadata, and — for instruments that require it — parse structured data from the file. The refactoring from Notion to the Data Hub API can be done incrementally, one instrument at a time.
 

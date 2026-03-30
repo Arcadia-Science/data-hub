@@ -26,9 +26,10 @@ This mapping is defined as a constant in `watcher/constants.py`.
 | `GET` | `/watchers/{watcher_id}/config-checksum` | Returns the SHA-256 checksum of the config last pushed to the API. |
 | `POST` | `/watchers/{watcher_id}/heartbeat` | Send a heartbeat with status payload. |
 | `POST` | `/watchers/{watcher_id}/events` | Report significant watcher events (uploads, errors, state changes) for centralized visibility in the web UI. |
-| `POST` | `/instruments/{instrument_id}/runs` | Report a detected instrument run (auto and manual mode). Sends run ID, detected files, source, and watcher ID. |
-| `GET` | `/watchers/{watcher_id}/upload-queue` | Poll for runs that a user has queued for upload via the web UI. Returns runs where `upload_requested_at` is set for this watcher's instrument. |
-| `PATCH` | `/instruments/{instrument_id}/runs/{run_id}` | Add file records after upload and update detected files. Both path parameters are natural keys known to the watcher from its config and run detection logic. |
+| `POST` | `/instruments/{instrument_id}/runs` | Report a detected instrument run (auto and manual mode). Sends run ID, detected files, source, and watcher ID. Creates `files` rows with `status: 'detected'`. |
+| `GET` | `/watchers/{watcher_id}/upload-queue` | Poll for files that a user has queued for upload via the web UI. Returns a flat list of files where `upload_requested_at` is set and `uploaded_at` is `NULL` for this watcher's instrument. |
+| `PATCH` | `/instruments/{instrument_id}/runs/{run_id}` | Update detected files for a reported run. Both path parameters are natural keys known to the watcher from its config and run detection logic. |
+| `PATCH` | `/files/{file_id}` | Mark a detected file as uploaded by setting S3 info (`s3_bucket`, `s3_key`, `content_type`, `status: "uploaded"`). Called after each individual file upload. The file ID comes from the upload-queue response or the run creation response. |
 
 ## Authentication
 
@@ -97,7 +98,6 @@ While `data-hub-watcher watch` is running, the watcher sends a `POST /watchers/{
   "watch_directory": "/data/mass-spec",
   "upload_mode": "manual",
   "runs_reported_since_last_heartbeat": 1,
-  "runs_uploaded_since_last_heartbeat": 0,
   "files_uploaded_since_last_heartbeat": 0,
   "errors_since_last_heartbeat": 0,
   "uptime_seconds": 3600
@@ -128,10 +128,9 @@ Events are sent via `POST /watchers/{watcher_id}/events` as they occur. To avoid
 |---|---|---|
 | `watcher_started` | `watch` command starts successfully | `{ upload_mode, watch_directory }` |
 | `watcher_stopped` | Clean shutdown (SIGINT/SIGTERM or service stop) | `{ uptime_seconds, reason }` (`reason`: `signal` or `service`) |
-| `file_uploaded` | File successfully uploaded to S3 | `{ filename, s3_key, run_id, size_bytes, duration_ms }` |
-| `upload_failed` | File upload failed after all retries | `{ filename, error, attempts }` |
+| `file_uploaded` | File successfully uploaded to S3 | `{ file_id, filename, s3_key, run_id, size_bytes, duration_ms }` |
+| `upload_failed` | File upload failed after all retries | `{ file_id, filename, run_id, error, attempts }` |
 | `run_reported` | Instrument run reported to API (manual mode) | `{ run_id, file_count }` |
-| `run_uploaded` | All files for a run uploaded to S3 (manual mode) | `{ run_id, file_count, total_bytes }` |
 | `config_synced` | Config pushed to API | `{ trigger }` (`trigger`: `init`, `edit`, `open`, or `startup`) |
 | `error` | Unexpected errors not covered by other event types | `{ error, context }` |
 

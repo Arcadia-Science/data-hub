@@ -170,7 +170,6 @@ Records a heartbeat from the watcher.
   "watch_directory": "/data/mass-spec",
   "upload_mode": "manual",
   "runs_reported_since_last_heartbeat": 1,
-  "runs_uploaded_since_last_heartbeat": 0,
   "files_uploaded_since_last_heartbeat": 0,
   "errors_since_last_heartbeat": 0,
   "uptime_seconds": 3600
@@ -211,7 +210,6 @@ Returns recent heartbeat history for a watcher. Used by the watcher detail page.
       "upload_mode": "auto",
       "files_uploaded_since_last": 2,
       "runs_reported_since_last": 0,
-      "runs_uploaded_since_last": 0,
       "errors_since_last": 0,
       "uptime_seconds": 3600,
       "created_at": "2026-03-26T20:15:01Z"
@@ -298,37 +296,37 @@ Results are ordered by `timestamp DESC`.
 
 ## `GET /api/v1/watchers/:watcher_id/upload-queue`
 
-Returns runs that have been queued for upload and belong to this watcher's instrument. Polled by the watcher on each heartbeat interval.
+Returns a flat list of files that have been queued for upload and belong to this watcher's instrument. Polled by the watcher on each heartbeat interval.
 
 **Response:**
 
 ```json
 {
-  "runs": [
+  "files": [
     {
-      "run_id": "20260325",
+      "id": 1,
       "instrument_id": "mass-spec-instrument",
-      "reported_files": [
-        {
-          "relative_path": "20260325_data_file_1.csv",
-          "filename": "20260325_data_file_1.csv",
-          "size_bytes": 1048576
-        },
-        {
-          "relative_path": "20260325_data_file_2.csv",
-          "filename": "20260325_data_file_2.csv",
-          "size_bytes": 2097152
-        }
-      ]
+      "run_id": "20260325",
+      "relative_path": "20260325_data_file_1.csv",
+      "filename": "20260325_data_file_1.csv",
+      "size_bytes": 1048576
+    },
+    {
+      "id": 2,
+      "instrument_id": "mass-spec-instrument",
+      "run_id": "20260325",
+      "relative_path": "20260325_data_file_2.csv",
+      "filename": "20260325_data_file_2.csv",
+      "size_bytes": 2097152
     }
   ]
 }
 ```
 
 **Behavior:**
-- Filters `instrument_runs` where `upload_requested_at IS NOT NULL` and `instrument_id` matches the watcher's registered instrument.
-- Includes the `reported_files` for each run so the watcher knows which files to upload.
-- The watcher constructs `PATCH /api/v1/instruments/{instrument_id}/runs/{run_id}` URLs from the `instrument_id` and `run_id` in each response item.
+- Filters `files` where `upload_requested_at IS NOT NULL AND uploaded_at IS NULL AND deleted_at IS NULL` and the parent run's `instrument_id` matches the watcher's registered instrument.
+- Each file includes `instrument_id` and `run_id` (from the parent `instrument_runs` row) so the watcher can construct the S3 key (`{instrument_id}/{run_id}/{filename}`).
+- Each file includes its `id` so the watcher can call `PATCH /api/v1/files/{file_id}` after uploading.
 
 ## Error Responses
 
@@ -354,8 +352,8 @@ Standard HTTP status codes: `400` for validation errors, `401` for missing/inval
 4. `POST /api/v1/watchers/:watcher_id/events` accepts batches of watcher events and inserts them into `watcher_events`.
 5. `GET /api/v1/watchers/:watcher_id/events` returns events filtered by type and date range, ordered by timestamp descending.
 6. `GET /api/v1/watchers/:watcher_id/heartbeats` returns heartbeat history filtered by date range.
-7. `watcher_heartbeats` includes manual-mode counters (`runs_reported_since_last`, `runs_uploaded_since_last`) alongside the existing upload counters.
+7. `watcher_heartbeats` includes manual-mode counters (`runs_reported_since_last`) alongside the existing upload counters (`files_uploaded_since_last`).
 8. `GET /api/v1/watchers` returns all registered watchers with effective status — the API computes `stale` at query time by checking `last_heartbeat_at` against the 5-minute threshold, overriding the stored status in the response. Soft-deleted watchers are excluded by default; include them when `include_deleted=true` is passed.
 9. `GET /api/v1/watchers/:watcher_id` returns the full watcher detail including the raw config YAML, for the watcher detail page.
-10. `GET /api/v1/watchers/:watcher_id/upload-queue` returns runs where `upload_requested_at` is set for the watcher's instrument, including their `reported_files`. Each item includes `instrument_id` and `run_id` so the watcher can construct nested API URLs.
+10. `GET /api/v1/watchers/:watcher_id/upload-queue` returns a flat list of files where `upload_requested_at` is set and `uploaded_at` is `NULL` for the watcher's instrument. Each file includes `id`, `instrument_id`, `run_id`, and `relative_path` so the watcher can construct S3 keys and call `PATCH /api/v1/files/:fileId` after uploading.
 11. `DELETE /api/v1/watchers/:watcher_id` soft-deletes the watcher (sets `deleted_at`). Returns `409` for already-deleted watchers. Subsequent heartbeat, event, and config requests for a soft-deleted watcher return `404`.

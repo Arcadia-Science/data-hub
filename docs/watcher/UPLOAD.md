@@ -37,8 +37,8 @@ All watcher activity is logged to three channels:
 - Heartbeat sent / failed
 - Config sync events
 - Run detected / reported / updated (manual mode)
-- Upload queue polled / run queued for upload (manual mode)
-- Run upload started / completed / failed (manual mode)
+- Upload queue polled / file queued for upload (manual mode)
+- File upload started / completed / failed (manual mode)
 - Service start / stop (Windows Service mode)
 
 **2. stdout** — same content as the log file. When running as a Windows Service, stdout is not visible; the log file and event reporting (below) are the primary observability channels.
