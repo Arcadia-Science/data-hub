@@ -89,7 +89,7 @@ Runs are reported to the API as soon as the first file in the run becomes stable
 In auto mode, the watcher uploads files immediately after reporting the run.
 
 1. After the run is successfully reported (which creates `files` rows with `status: 'detected'`), upload each file to S3 using the same upload logic as manual mode (see [UPLOAD.md](./UPLOAD.md)), with S3 key `{instrument.id}/{run_id}/{filename}`.
-2. On success for each file, call `PATCH /api/v1/files/{file_id}` with the S3 info (`s3_bucket`, `s3_key`, `content_type`, `status: "uploaded"`). The file ID is returned in the `POST /instruments/{instrument_id}/runs` response.
+2. On success for each file, call `PATCH /api/v1/files/{file_id}` with the S3 info (`s3_bucket`, `s3_key`, `content_type`, `status: "uploaded"`). The file ID is returned in the `POST /instruments/{instrument_id}/runs/{run_id}` response.
 3. The Lambda function is triggered by the S3 upload and processes each file individually (extracting metadata, parsing data) via `PATCH /api/v1/files/{file_id}`.
 
 ## Crash Recovery

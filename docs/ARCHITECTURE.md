@@ -92,9 +92,9 @@ An agent picking up any workstream should read this document and [INTEGRATION_CO
 | API Watchers | Database schema, Authentication |
 | API Instrument Runs | Database schema, Authentication |
 | Web Dashboard | API Instrument Runs |
-| Web Instrument Pages | API Instrument Runs, API Instruments |
+| Web Instrument Pages | API Instrument Runs, API Instruments, API Watchers |
 | Web Settings | API Authentication |
-| Lambda Migration | API Instrument Runs |
+| Lambda Migration | Database schema, API Instrument Runs |
 | Watcher Config | Nothing else |
 | Watcher CLI | Watcher Config, Watcher API Client |
 | Watcher API Client | Watcher Config |

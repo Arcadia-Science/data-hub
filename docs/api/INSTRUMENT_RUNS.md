@@ -515,7 +515,7 @@ This sets `files.s3_bucket`, `files.s3_key`, `files.content_type`, `files.status
 
 **Validation:**
 - The file must exist. Returns `404` if not found.
-- `status` transitions are enforced. Valid transitions: `upload_requested` → `uploaded` (watcher path), `uploaded` → `processing` → `completed`/`failed` (Lambda path). Returns `409 Conflict` for invalid transitions.
+- `status` transitions are enforced. Valid transitions: `detected` → `uploaded` (auto-mode watcher path), `upload_requested` → `uploaded` (manual-mode watcher path), `uploaded` → `processing` → `completed`/`failed` (Lambda path). Returns `409 Conflict` for invalid transitions.
 - When setting `s3_key`, the value must not conflict with existing keys (partial unique constraint).
 - The file's parent run must not be soft-deleted.
 - The file must not be soft-deleted (`deleted_at` must be `NULL`).
@@ -610,7 +610,7 @@ Standard HTTP status codes: `400` for validation errors, `401` for missing/inval
 8. `GET /api/v1/watchers/:watcher_id/upload-queue` returns a flat list of files where `upload_requested_at` is set and `uploaded_at` is `NULL` for the watcher's instrument, including run context.
 9. `PATCH /api/v1/instruments/:instrumentId/runs/:runId` updates detected files and sets run-level metadata. Returns `409` for soft-deleted runs.
 10. `POST /api/v1/instruments/:instrumentId/runs/:runId/files` creates a file record with S3 info (Lambda path) and returns the file ID. Calling it twice with the same `s3_key` returns the existing record rather than creating a duplicate.
-11. `PATCH /api/v1/files/:fileId` supports both the watcher upload path (`upload_requested` → `uploaded` with S3 info) and the Lambda processing path (`uploaded` → `processing` → `completed`/`failed` with metadata and report data).
+11. `PATCH /api/v1/files/:fileId` supports the auto-mode watcher path (`detected` → `uploaded`), the manual-mode watcher path (`upload_requested` → `uploaded` with S3 info), and the Lambda processing path (`uploaded` → `processing` → `completed`/`failed` with metadata and report data).
 12. `DELETE /api/v1/files/:fileId` soft-deletes individual files in `detected` or `upload_requested` status. Returns `409` for files already uploaded to S3.
 13. `DELETE /api/v1/instruments/:instrumentId/runs/:runId` soft-deletes the run (sets `deleted_at`). S3 objects are retained and only permanently removed after the retention period by the lifecycle job.
 14. `GET /api/v1/instruments/:instrumentId/runs` and `GET /api/v1/instrument-runs` exclude soft-deleted runs by default; include them when `include_deleted=true` is passed.
