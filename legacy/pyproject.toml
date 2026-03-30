@@ -1,0 +1,90 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "data-hub-utils"
+version = "0.2.0"
+description = "Utilities for interfacing with Ganymede, processing data in AWS, and creating reports in Notion."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [
+    { name="Arcadia Science", email="swe@arcadiascience.com" },
+]
+
+dependencies = [
+    "aws-lambda-typing>=2.20.0",
+    "boto3>=1.40.4",
+    "click>=8.2.1",
+    "michaelis-menten-analysis",
+    "openpyxl>=3.1.5",
+    "pandas>=2.3.1",
+    "pydantic>=2.11.9",
+    "pyright>=1.1.407",
+    "python-dotenv>=1.0.0",
+    "requests>=2.31.0",
+    "scikit-image>=0.25.2",
+    "tifffile>=2025.9.30",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.2.0",
+    "pyright>=1.1.408",
+    "pytest>=8.3.5",
+    "ruff>=0.11.11",
+]
+
+[tool.ruff]
+# The directories to consider when resolving first- vs. third-party imports.
+src = ["."]
+
+line-length = 100
+indent-width = 4
+
+# Run ruff on Jupyter notebooks (this is not enabled by default).
+extend-include = ["*.ipynb"]
+
+[tool.ruff.lint.per-file-ignores]
+# Ignore star and unused imports.
+"__init__.py" = ["F403", "F405"]
+
+[tool.ruff.lint]
+select = [
+    # flake8-bugbear
+    "B",
+    # pycodestyle error
+    "E",
+    # pyflakes
+    "F",
+    # isort
+    "I",
+    # pyupgrade
+    "UP",
+    # pycodestyle warning
+    "W",
+]
+
+# Rule codes to ignore.
+ignore = []
+
+# Allow fix for all enabled rules when `--fix` is provided.
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.format]
+# Like Black, use double quotes, indent with spaces, and respect trailing commas
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.uv.sources]
+michaelis-menten-analysis = { git = "https://github.com/Arcadia-Science/2025-michaelis-menten-analysis", rev = "a654d37aa737745cef8d8f3b5df358ab717f8064"}
+
+[tool.ruff.lint.isort]
+order-by-type = true
+no-lines-before = ["future", "standard-library"]
