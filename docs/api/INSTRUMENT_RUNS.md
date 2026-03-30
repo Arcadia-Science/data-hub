@@ -258,36 +258,6 @@ Queues a reported run for upload. Called by the web UI when a user selects a run
 - Sets `instrument_runs.upload_requested_at` to now.
 - Sets `instrument_runs.updated_at` to now.
 
-## `POST /api/v1/instrument-runs/batch-request-upload`
-
-Queues multiple reported runs for upload in a single request. Called by the web UI for bulk upload actions. This endpoint is not nested under a single instrument because the batch may span multiple instruments.
-
-**Request body:**
-
-```json
-{
-  "runs": [
-    { "instrument_id": "mass-spec-instrument", "run_id": "20260325" },
-    { "instrument_id": "mass-spec-instrument", "run_id": "20260326" }
-  ]
-}
-```
-
-**Validation:**
-- All referenced runs must exist and have `reported_files`. Runs that don't meet the criteria (already queued, no reported files, soft-deleted) are skipped with a warning in the response.
-
-**Response:** `200 OK`
-
-```json
-{
-  "queued": [
-    { "instrument_id": "mass-spec-instrument", "run_id": "20260325" },
-    { "instrument_id": "mass-spec-instrument", "run_id": "20260326" }
-  ],
-  "skipped": []
-}
-```
-
 ## `GET /api/v1/watchers/:watcher_id/upload-queue`
 
 Documented in [WATCHERS.md](./WATCHERS.md#get-apiv1watcherswatcher_idupload-queue). Lives under the `/api/v1/watchers/` path namespace and should be implemented alongside the other watcher routes. Returns runs where `upload_requested_at` is non-`NULL` for the watcher's instrument.
@@ -448,6 +418,8 @@ Creates a file record for an instrument run. Idempotent on `s3_key` — if a fil
 
 Redirects to a pre-signed S3 URL for the file. Allows the web UI to link directly to file downloads without exposing S3 URLs in the page HTML.
 
+This endpoint requires authentication (session cookie or personal access token). Returns `401 Unauthorized` if not authenticated.
+
 **Response:** `302 Redirect` with `Location` header set to the pre-signed URL.
 
 ### `PATCH /api/v1/files/:fileId`
@@ -572,10 +544,9 @@ Standard HTTP status codes: `400` for validation errors, `401` for missing/inval
 5. Pre-signed S3 URLs work for downloading raw and processed files from the web UI.
 6. `POST /api/v1/instruments/:instrumentId/runs` accepts watcher-reported runs with `detected_files`, creating `instrument_runs` and `reported_files` rows.
 7. `POST /api/v1/instruments/:instrumentId/runs/:runId/request-upload` sets `upload_requested_at` for runs with reported files. Returns `409` for runs already queued or soft-deleted.
-8. `POST /api/v1/instrument-runs/batch-request-upload` queues multiple reported runs (identified by `instrument_id` + `run_id` pairs) and reports which were queued vs. skipped.
-9. `GET /api/v1/watchers/:watcher_id/upload-queue` returns runs with `upload_requested_at` set for the watcher's instrument, including their `reported_files`.
-10. `PATCH /api/v1/instruments/:instrumentId/runs/:runId` accepts file records on upload, updates detected files, and sets run-level metadata. Returns `409` for soft-deleted runs.
-11. `POST /api/v1/instruments/:instrumentId/runs/:runId/files` creates a file record and returns the file ID. Calling it twice with the same `s3_key` returns the existing record rather than creating a duplicate.
-12. `PATCH /api/v1/files/:fileId` updates per-file status, metadata, and report data. Enforces the `uploaded` → `processing` → `completed`/`failed` lifecycle.
-13. `DELETE /api/v1/instruments/:instrumentId/runs/:runId` soft-deletes the run (sets `deleted_at`). S3 objects are retained and only permanently removed after the retention period by the lifecycle job.
-14. `GET /api/v1/instruments/:instrumentId/runs` and `GET /api/v1/instrument-runs` exclude soft-deleted runs by default; include them when `include_deleted=true` is passed.
+8. `GET /api/v1/watchers/:watcher_id/upload-queue` returns runs with `upload_requested_at` set for the watcher's instrument, including their `reported_files`.
+9. `PATCH /api/v1/instruments/:instrumentId/runs/:runId` accepts file records on upload, updates detected files, and sets run-level metadata. Returns `409` for soft-deleted runs.
+10. `POST /api/v1/instruments/:instrumentId/runs/:runId/files` creates a file record and returns the file ID. Calling it twice with the same `s3_key` returns the existing record rather than creating a duplicate.
+11. `PATCH /api/v1/files/:fileId` updates per-file status, metadata, and report data. Enforces the `uploaded` → `processing` → `completed`/`failed` lifecycle.
+12. `DELETE /api/v1/instruments/:instrumentId/runs/:runId` soft-deletes the run (sets `deleted_at`). S3 objects are retained and only permanently removed after the retention period by the lifecycle job.
+13. `GET /api/v1/instruments/:instrumentId/runs` and `GET /api/v1/instrument-runs` exclude soft-deleted runs by default; include them when `include_deleted=true` is passed.
