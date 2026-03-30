@@ -1,8 +1,8 @@
+import { db } from "@/lib/db";
+import { accounts, sessions, users, verificationTokens } from "@/lib/db/schema";
+import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
-import { DrizzleAdapter } from "@auth/drizzle-adapter";
-import { db } from "@/lib/db";
-import { users, accounts, sessions, verificationTokens } from "@/lib/db/schema";
 
 declare module "next-auth" {
   interface Session {

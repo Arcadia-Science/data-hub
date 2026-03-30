@@ -1,5 +1,5 @@
-import { signIn } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
+import { signIn } from "@/lib/auth";
 import { Metadata } from "next/types";
 
 export const metadata: Metadata = {

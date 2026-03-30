@@ -1,6 +1,6 @@
+import { Button } from "@/components/ui/button";
 import { auth, signOut } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { Button } from "@/components/ui/button";
 import { Metadata } from "next/types";
 
 export const metadata: Metadata = {
