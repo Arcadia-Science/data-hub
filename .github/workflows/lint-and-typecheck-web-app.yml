@@ -10,6 +10,10 @@ on:
       - staging
       - production
 
+defaults:
+  run:
+    working-directory: web-app
+
 jobs:
   lint-and-typecheck:
     runs-on: ubuntu-latest
