@@ -138,7 +138,7 @@ export const personalAccessTokens = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    // User-provided label (e.g., "Lab PC watcher", "Lambda production").
+    // User-provided label (e.g., "Plate Reader PC", "Lambda production").
     name: text("name").notNull(),
     // SHA-256 hash of the token. The plaintext token is shown once at creation
     // and never stored.

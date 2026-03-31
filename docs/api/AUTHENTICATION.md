@@ -50,7 +50,7 @@ Lists the current user's personal access tokens.
 [
   {
     "id": "a1b2c3d4-...",
-    "name": "Lab PC watcher",
+    "name": "Plate Reader PC",
     "token_prefix": "dhub_a1b2",
     "last_used_at": "2026-03-26T20:15:00Z",
     "expires_at": null,
@@ -69,7 +69,7 @@ Creates a new personal access token. The plaintext token is returned **once** in
 
 ```json
 {
-  "name": "Lab PC watcher",
+  "name": "Plate Reader PC",
   "expires_at": "2027-03-26T00:00:00Z"
 }
 ```
@@ -81,7 +81,7 @@ Creates a new personal access token. The plaintext token is returned **once** in
 ```json
 {
   "id": "a1b2c3d4-...",
-  "name": "Lab PC watcher",
+  "name": "Plate Reader PC",
   "token": "dhub_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0",
   "token_prefix": "dhub_a1b2",
   "expires_at": "2027-03-26T00:00:00Z",
