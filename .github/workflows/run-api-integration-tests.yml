@@ -1,4 +1,4 @@
-name: Integration tests
+name: Run API integration tests
 
 on:
   push:
@@ -44,5 +44,5 @@ jobs:
       - name: Install packages
         run: npm ci
 
-      - name: Run integration tests
+      - name: Run API integration tests
         run: npm run test:integration
