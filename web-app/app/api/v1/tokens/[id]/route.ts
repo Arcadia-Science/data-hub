@@ -20,6 +20,8 @@ export async function DELETE(
     return Response.json({ error: "Invalid token ID" }, { status: 400 });
   }
 
+  // Scope the delete to the authenticated user so one user can never
+  // delete another user's token — a non-match returns 0 rows → 404.
   const deleted = await db
     .delete(personalAccessTokens)
     .where(

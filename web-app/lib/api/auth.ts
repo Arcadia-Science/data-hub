@@ -25,6 +25,8 @@ export async function authenticateRequest(
   }
 
   const plaintext = authHeader.slice(7);
+  // Reject tokens without our prefix early to avoid a needless DB lookup
+  // when the bearer value is a JWT or other non-PAT credential.
   if (!plaintext.startsWith("dhub_")) {
     return null;
   }
@@ -48,6 +50,8 @@ export async function authenticateRequest(
     return null;
   }
 
+  // Defer the last-used timestamp update so it doesn't add latency to the
+  // API response. next/server `after()` runs after the response is sent.
   after(async () => {
     await db
       .update(personalAccessTokens)

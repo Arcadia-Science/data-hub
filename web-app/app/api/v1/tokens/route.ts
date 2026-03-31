@@ -65,6 +65,8 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Only the hash is persisted — the plaintext is returned in this response
+  // and can never be retrieved again.
   const plaintext = generateToken();
   const tokenHash = hashToken(plaintext);
   const tokenPrefix = getTokenPrefix(plaintext);

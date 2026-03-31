@@ -11,5 +11,7 @@ export function hashToken(plaintext: string): string {
 }
 
 export function getTokenPrefix(plaintext: string): string {
-  return plaintext.slice(0, 9);
+  // "dhub_" (5) + first 4 hex chars — enough to identify a token in the UI
+  // without leaking meaningful entropy.
+  return plaintext.slice(0, TOKEN_PREFIX.length + 4);
 }

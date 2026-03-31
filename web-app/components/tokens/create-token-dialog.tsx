@@ -98,6 +98,8 @@ export function CreateTokenDialog() {
     <Dialog
       open={open}
       onOpenChange={(value) => {
+        // Block dismissal while the plaintext is shown — the token can never
+        // be retrieved again, so the user must explicitly click "Done".
         if (!value && step === "display") return;
         setOpen(value);
         if (!value) reset();
