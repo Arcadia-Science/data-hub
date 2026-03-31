@@ -82,7 +82,11 @@ export async function buildRunListQuery(filters: RunListFilters) {
   }
 
   if (filters.search) {
-    conditions.push(ilike(instrumentRuns.runId, `%${filters.search}%`));
+    const escaped = filters.search
+      .replace(/\\/g, "\\\\")
+      .replace(/%/g, "\\%")
+      .replace(/_/g, "\\_");
+    conditions.push(ilike(instrumentRuns.runId, `%${escaped}%`));
   }
 
   const where = conditions.length > 0 ? and(...conditions) : undefined;

@@ -37,7 +37,7 @@ export async function POST(
 
   const { watcherId } = await params;
   if (!isValidUUID(watcherId)) {
-    return apiError(400, NOT_FOUND, "Invalid watcher ID format");
+    return apiError(400, VALIDATION_ERROR, "Invalid watcher ID format");
   }
 
   const watcher = await findActiveWatcher(watcherId);
@@ -117,7 +117,7 @@ export async function GET(
 
   const { watcherId } = await params;
   if (!isValidUUID(watcherId)) {
-    return apiError(400, NOT_FOUND, "Invalid watcher ID format");
+    return apiError(400, VALIDATION_ERROR, "Invalid watcher ID format");
   }
 
   const watcher = await findActiveWatcher(watcherId);

@@ -23,7 +23,7 @@ export async function POST(
 
   const { watcherId } = await params;
   if (!isValidUUID(watcherId)) {
-    return apiError(400, NOT_FOUND, "Invalid watcher ID format");
+    return apiError(400, VALIDATION_ERROR, "Invalid watcher ID format");
   }
 
   const watcher = await findActiveWatcher(watcherId);
@@ -38,9 +38,21 @@ export async function POST(
     return apiError(400, VALIDATION_ERROR, "Invalid JSON body");
   }
 
+  const VALID_WATCHER_STATUSES = ["registered", "watching", "stopped"] as const;
   const status = body.status as string | undefined;
   if (!status) {
     return apiError(400, VALIDATION_ERROR, "status is required");
+  }
+  if (
+    !VALID_WATCHER_STATUSES.includes(
+      status as (typeof VALID_WATCHER_STATUSES)[number]
+    )
+  ) {
+    return apiError(
+      400,
+      VALIDATION_ERROR,
+      `Invalid status '${status}' — must be one of: ${VALID_WATCHER_STATUSES.join(", ")}`
+    );
   }
 
   const timestamp = body.timestamp

@@ -58,14 +58,34 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     return apiError(400, VALIDATION_ERROR, "Invalid JSON body");
   }
 
-  const fileIds = Array.isArray(body.file_ids) ? body.file_ids : [];
-  if (fileIds.length === 0) {
+  const MAX_FILE_IDS = 100;
+  const rawFileIds = Array.isArray(body.file_ids) ? body.file_ids : [];
+  if (rawFileIds.length === 0) {
     return apiError(
       400,
       VALIDATION_ERROR,
       "file_ids must be a non-empty array"
     );
   }
+  if (rawFileIds.length > MAX_FILE_IDS) {
+    return apiError(
+      400,
+      VALIDATION_ERROR,
+      `file_ids cannot exceed ${MAX_FILE_IDS} entries`
+    );
+  }
+  if (
+    !rawFileIds.every(
+      (id: unknown) => typeof id === "number" && Number.isInteger(id)
+    )
+  ) {
+    return apiError(
+      400,
+      VALIDATION_ERROR,
+      "file_ids must contain only integer values"
+    );
+  }
+  const fileIds: number[] = rawFileIds;
 
   // Fetch all specified files in a single query to validate ownership,
   // status, and soft-delete state in bulk.

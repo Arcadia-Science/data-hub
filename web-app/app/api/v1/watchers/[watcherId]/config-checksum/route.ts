@@ -1,5 +1,10 @@
 import { authenticateRequest } from "@/lib/api/auth";
-import { apiError, NOT_FOUND, UNAUTHORIZED } from "@/lib/api/errors";
+import {
+  apiError,
+  NOT_FOUND,
+  UNAUTHORIZED,
+  VALIDATION_ERROR,
+} from "@/lib/api/errors";
 import { isValidUUID } from "@/lib/api/validators";
 import { findActiveWatcher } from "@/lib/api/watchers";
 import type { NextRequest } from "next/server";
@@ -15,7 +20,7 @@ export async function GET(
 
   const { watcherId } = await params;
   if (!isValidUUID(watcherId)) {
-    return apiError(400, NOT_FOUND, "Invalid watcher ID format");
+    return apiError(400, VALIDATION_ERROR, "Invalid watcher ID format");
   }
 
   const watcher = await findActiveWatcher(watcherId);

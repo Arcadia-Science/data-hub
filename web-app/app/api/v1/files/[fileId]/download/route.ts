@@ -1,7 +1,12 @@
 import { authenticateRequest } from "@/lib/api/auth";
-import { apiError, NOT_FOUND, UNAUTHORIZED } from "@/lib/api/errors";
+import {
+  apiError,
+  NOT_FOUND,
+  UNAUTHORIZED,
+  VALIDATION_ERROR,
+} from "@/lib/api/errors";
 import { db } from "@/lib/db";
-import { files } from "@/lib/db/schema";
+import { files, instrumentRuns } from "@/lib/db/schema";
 import { getPresignedDownloadUrl } from "@/lib/s3";
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
@@ -27,19 +32,35 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
   const { fileId } = await params;
   const numericId = parseInt(fileId, 10);
   if (isNaN(numericId)) {
-    return apiError(404, NOT_FOUND, "Invalid file ID");
+    return apiError(400, VALIDATION_ERROR, "Invalid file ID");
   }
 
   const [file] = await db
     .select({
       s3Bucket: files.s3Bucket,
       s3Key: files.s3Key,
+      deletedAt: files.deletedAt,
+      instrumentRunId: files.instrumentRunId,
     })
     .from(files)
     .where(eq(files.id, numericId))
     .limit(1);
 
   if (!file) {
+    return apiError(404, NOT_FOUND, `File '${fileId}' not found`);
+  }
+
+  if (file.deletedAt) {
+    return apiError(404, NOT_FOUND, `File '${fileId}' not found`);
+  }
+
+  const [parentRun] = await db
+    .select({ deletedAt: instrumentRuns.deletedAt })
+    .from(instrumentRuns)
+    .where(eq(instrumentRuns.id, file.instrumentRunId))
+    .limit(1);
+
+  if (parentRun?.deletedAt) {
     return apiError(404, NOT_FOUND, `File '${fileId}' not found`);
   }
 

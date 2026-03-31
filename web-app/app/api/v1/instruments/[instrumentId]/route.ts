@@ -107,11 +107,26 @@ export async function PATCH(
     return apiError(404, NOT_FOUND, `Instrument '${instrumentId}' not found`);
   }
 
-  // Map API snake_case field names to Drizzle camelCase column names.
+  const VALID_INSTRUMENT_STATUSES = ["pending", "active", "inactive"];
+  if (
+    "status" in body &&
+    !VALID_INSTRUMENT_STATUSES.includes(body.status as string)
+  ) {
+    return apiError(
+      400,
+      VALIDATION_ERROR,
+      `Invalid status — must be one of: ${VALID_INSTRUMENT_STATUSES.join(", ")}`
+    );
+  }
+
   const updates: Record<string, unknown> = {};
   if ("status" in body) updates.status = body.status;
   if ("file_patterns" in body) updates.filePatterns = body.file_patterns;
   if ("display_name" in body) updates.displayName = body.display_name;
+
+  if (Object.keys(updates).length === 0) {
+    return apiError(400, VALIDATION_ERROR, "No valid fields to update");
+  }
 
   const [updated] = await db
     .update(instruments)
