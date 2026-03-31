@@ -1,6 +1,12 @@
+import { instruments } from "@/lib/db/schema";
+import {
+  api,
+  closeTestDb,
+  getTestDb,
+  resetDb,
+  seedTestUser,
+} from "@/tests/integration/helpers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { instruments } from "../../lib/db/schema";
-import { api, closeTestDb, getTestDb, resetDb, seedTestUser } from "./helpers";
 
 describe("Instrument Runs API", () => {
   let token: string;
@@ -40,6 +46,9 @@ describe("Instrument Runs API", () => {
     expect(data.id).toBeTruthy();
   });
 
+  // Run creation is idempotent on (instrument_id, run_id). This handles the
+  // race where a Lambda auto-creates a run that was already reported by the
+  // watcher — the second call returns the existing record with 200 instead of 201.
   it("POST is idempotent — returns 200 for duplicate run_id", async () => {
     const res = await api(`/api/v1/instruments/${instrumentId}/runs`, {
       method: "POST",
@@ -78,6 +87,9 @@ describe("Instrument Runs API", () => {
     expect(res.status).toBe(404);
   });
 
+  // Watcher payloads can include detected_files alongside the run creation,
+  // allowing atomic reporting of a run and its constituent files in a single
+  // request. Files start in "detected" status (not yet uploaded to S3).
   it("POST with detected_files creates file records alongside the run", async () => {
     const res = await api(`/api/v1/instruments/${instrumentId}/runs`, {
       method: "POST",
@@ -189,6 +201,8 @@ describe("Instrument Runs API", () => {
   // PATCH /api/v1/instruments/:instrumentId/runs/:runId
   // -------------------------------------------------------------------------
 
+  // Metadata is a full replacement (not a deep merge). The Lambda or analysis
+  // pipeline writes the complete metadata object after processing all files.
   it("PATCH updates run metadata", async () => {
     const res = await api(`/api/v1/instruments/${instrumentId}/runs/run-001`, {
       method: "PATCH",
@@ -221,6 +235,8 @@ describe("Instrument Runs API", () => {
   // DELETE /api/v1/instruments/:instrumentId/runs/:runId
   // -------------------------------------------------------------------------
 
+  // Runs are soft-deleted (deleted_at set). S3 objects are NOT removed here —
+  // a separate lifecycle job handles S3 cleanup after a retention period.
   it("DELETE soft-deletes a run", async () => {
     const res = await api(`/api/v1/instruments/${instrumentId}/runs/run-001`, {
       method: "DELETE",

@@ -1,5 +1,10 @@
+import {
+  api,
+  closeTestDb,
+  resetDb,
+  seedTestUser,
+} from "@/tests/integration/helpers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { api, closeTestDb, resetDb, seedTestUser } from "./helpers";
 
 describe("Instruments API", () => {
   let token: string;
@@ -17,6 +22,8 @@ describe("Instruments API", () => {
   // POST /api/v1/instruments
   // -------------------------------------------------------------------------
 
+  // New instruments always start as "pending" until an admin confirms them.
+  // This prevents unvetted instruments from appearing in the active dashboard.
   it("POST /api/v1/instruments creates an instrument", async () => {
     const res = await api("/api/v1/instruments", {
       method: "POST",
@@ -30,6 +37,8 @@ describe("Instruments API", () => {
     expect(data.status).toBe("pending");
   });
 
+  // When no display_name is provided, the API derives one from the kebab-case
+  // id by title-casing each segment (e.g., "plate-reader-abc" → "Plate Reader Abc").
   it("POST /api/v1/instruments derives display_name from kebab-case id", async () => {
     const res = await api("/api/v1/instruments", {
       method: "POST",
@@ -52,6 +61,8 @@ describe("Instruments API", () => {
     expect(data.error.code).toBe("CONFLICT");
   });
 
+  // Instrument IDs must be kebab-case because they're used as the first
+  // segment of S3 keys (e.g., {instrument_id}/{run_id}/{filename}).
   it("POST /api/v1/instruments rejects invalid kebab-case", async () => {
     const res = await api("/api/v1/instruments", {
       method: "POST",

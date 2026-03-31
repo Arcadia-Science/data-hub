@@ -1,6 +1,15 @@
+import {
+  api,
+  closeTestDb,
+  resetDb,
+  seedTestUser,
+} from "@/tests/integration/helpers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { api, closeTestDb, resetDb, seedTestUser } from "./helpers";
 
+// Tests the authenticateRequest middleware's rejection paths. The middleware
+// checks in order: (1) NextAuth session cookie, (2) Bearer scheme,
+// (3) dhub_ prefix, (4) token hash in DB, (5) expiry. These tests exercise
+// each rejection point via the PAT path (no session cookies in integration tests).
 describe("Authentication", () => {
   let validToken: string;
 
@@ -27,6 +36,8 @@ describe("Authentication", () => {
     expect(res.status).toBe(401);
   });
 
+  // The middleware short-circuits before DB lookup when the token lacks the
+  // dhub_ prefix. This prevents unnecessary queries for JWTs or other tokens.
   it("returns 401 for a Bearer token without the dhub_ prefix", async () => {
     const res = await api("/api/v1/instruments", {
       headers: { Authorization: "Bearer some-random-jwt-token" },

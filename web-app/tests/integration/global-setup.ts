@@ -4,10 +4,14 @@ import net from "node:net";
 import postgres from "postgres";
 
 const TEST_DB = "data_hub_test";
+// Matches the credentials expected by the CI Postgres service container
+// and local dev defaults. Override via env vars if using a non-standard setup.
 const PG_URL = `postgres://postgres:postgres@127.0.0.1:5432`;
 
 let serverProcess: ChildProcess | null = null;
 
+// Bind to port 0, let the OS assign a free port, then immediately release it.
+// This avoids hardcoding a port that might collide with other services.
 async function getFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
@@ -24,6 +28,8 @@ async function getFreePort(): Promise<number> {
   });
 }
 
+// Poll until the server responds with a non-5xx status. A 404 or redirect
+// from the root URL is fine — it just means the app is up and routing works.
 async function waitForServer(url: string, timeoutMs = 120_000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -41,7 +47,8 @@ async function waitForServer(url: string, timeoutMs = 120_000) {
 }
 
 export async function setup() {
-  // 1. Create test database if it doesn't exist
+  // 1. Connect to the default `postgres` DB to create the test database.
+  //    We can't use the test DB URL directly because it might not exist yet.
   const adminSql = postgres(`${PG_URL}/postgres`);
   const existing = await adminSql`
     SELECT 1 FROM pg_database WHERE datname = ${TEST_DB}
@@ -53,14 +60,22 @@ export async function setup() {
 
   const databaseUrl = `${PG_URL}/${TEST_DB}`;
 
-  // 2. Push schema via drizzle-kit
+  // 2. Push schema via drizzle-kit. --force skips the interactive confirmation
+  //    prompt that drizzle-kit shows when it detects destructive changes.
   execSync("npx drizzle-kit push --force", {
     cwd: import.meta.dirname ? import.meta.dirname + "/../.." : process.cwd(),
     env: { ...process.env, DATABASE_URL: databaseUrl },
     stdio: "pipe",
   });
 
-  // 3. Start Next.js server on a random port
+  // 3. Build and start the Next.js production server. We use a production
+  //    build (`next build` + `next start`) rather than `next dev` because:
+  //    - dev mode re-compiles on every request, making tests 5-10x slower
+  //    - production mode matches the actual deployment behavior
+  //
+  //    AUTH_SECRET is required by NextAuth even though we bypass sessions in
+  //    tests (PAT auth). AUTH_GOOGLE_* stubs prevent startup errors from the
+  //    Google OAuth provider config.
   const port = await getFreePort();
   const baseUrl = `http://127.0.0.1:${port}`;
 
@@ -97,7 +112,9 @@ export async function setup() {
 
   await waitForServer(baseUrl);
 
-  // Export for test helpers via env
+  // Vitest global setup runs in a separate worker from tests. The only way
+  // to pass dynamic values (port, DB URL) to test files is via process.env,
+  // which Vitest propagates to test workers automatically.
   process.env.__TEST_BASE_URL = baseUrl;
   process.env.__TEST_DATABASE_URL = databaseUrl;
 

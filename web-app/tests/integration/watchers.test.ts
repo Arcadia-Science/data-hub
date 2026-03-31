@@ -1,7 +1,17 @@
+import { instruments } from "@/lib/db/schema";
+import {
+  api,
+  closeTestDb,
+  getTestDb,
+  resetDb,
+  seedTestUser,
+} from "@/tests/integration/helpers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { instruments } from "../../lib/db/schema";
-import { api, closeTestDb, getTestDb, resetDb, seedTestUser } from "./helpers";
 
+// Tests run sequentially within this file, building state progressively:
+// register → heartbeat → events → config → delete → verify soft-delete behavior.
+// This mirrors the real watcher lifecycle (CLI registers, sends heartbeats,
+// reports events, syncs config, and eventually deregisters).
 describe("Watchers API", () => {
   let token: string;
   let watcherId: string;
@@ -129,6 +139,9 @@ describe("Watchers API", () => {
   // POST /api/v1/watchers/:watcherId/heartbeat
   // -------------------------------------------------------------------------
 
+  // Heartbeats serve two purposes: (1) append to the heartbeat history log
+  // for auditing, and (2) update the watcher's denormalized last_heartbeat_at
+  // so staleness can be computed without scanning the heartbeats table.
   it("POST /api/v1/watchers/:id/heartbeat records a heartbeat", async () => {
     const res = await api(`/api/v1/watchers/${watcherId}/heartbeat`, {
       method: "POST",
@@ -173,6 +186,8 @@ describe("Watchers API", () => {
   // POST /api/v1/watchers/:watcherId/events
   // -------------------------------------------------------------------------
 
+  // Events are batch-inserted (up to 100 per request) to reduce round trips
+  // from the watcher CLI, which buffers events between heartbeat intervals.
   it("POST /api/v1/watchers/:id/events records events", async () => {
     const res = await api(`/api/v1/watchers/${watcherId}/events`, {
       method: "POST",
@@ -251,6 +266,9 @@ describe("Watchers API", () => {
   // PUT /api/v1/watchers/:watcherId/config
   // -------------------------------------------------------------------------
 
+  // The watcher pushes its config YAML and a SHA-256 checksum on startup.
+  // The checksum is later used by the watcher to poll for config drift
+  // without downloading the full YAML on every heartbeat.
   it("PUT /api/v1/watchers/:id/config stores config", async () => {
     const res = await api(`/api/v1/watchers/${watcherId}/config`, {
       method: "PUT",
@@ -291,6 +309,8 @@ describe("Watchers API", () => {
   // DELETE /api/v1/watchers/:watcherId
   // -------------------------------------------------------------------------
 
+  // Watchers are soft-deleted (deleted_at set) rather than physically removed,
+  // preserving the audit trail of heartbeats and events for debugging.
   it("DELETE /api/v1/watchers/:id soft-deletes the watcher", async () => {
     const res = await api(`/api/v1/watchers/${watcherId}`, {
       method: "DELETE",

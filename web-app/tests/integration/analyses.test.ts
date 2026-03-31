@@ -1,6 +1,12 @@
+import { instruments } from "@/lib/db/schema";
+import {
+  api,
+  closeTestDb,
+  getTestDb,
+  resetDb,
+  seedTestUser,
+} from "@/tests/integration/helpers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { instruments } from "../../lib/db/schema";
-import { api, closeTestDb, getTestDb, resetDb, seedTestUser } from "./helpers";
 
 describe("Analyses API", () => {
   let token: string;

@@ -1,7 +1,24 @@
+import { instruments } from "@/lib/db/schema";
+import {
+  api,
+  closeTestDb,
+  getTestDb,
+  resetDb,
+  seedTestUser,
+} from "@/tests/integration/helpers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { instruments } from "../../lib/db/schema";
-import { api, closeTestDb, getTestDb, resetDb, seedTestUser } from "./helpers";
 
+// Files have two distinct lifecycle paths through the status state machine:
+//
+//   Watcher path:  detected → [upload_requested →] uploaded → processing → completed|failed
+//   Lambda path:   (created as "uploaded" via POST .../files) → processing → completed|failed
+//
+// The watcher path starts with files detected on a local filesystem that must
+// be uploaded to S3. The Lambda path starts with files already in S3 (the
+// Lambda function creates the file record after the S3 object exists).
+//
+// `fileId` tracks a watcher-path file; `lambdaFileId` tracks a Lambda-path file.
+// Tests drive each through its full lifecycle to verify the state machine.
 describe("Files API", () => {
   let token: string;
   const instrumentId = "files-test-instrument";
@@ -59,6 +76,8 @@ describe("Files API", () => {
   // POST /api/v1/instruments/:instrumentId/runs/:runId/files (Lambda path)
   // -------------------------------------------------------------------------
 
+  // Lambda creates files already in S3, so they start in "uploaded" status
+  // rather than "detected". The s3_bucket/s3_key identify the S3 object.
   it("POST creates a file with uploaded status (Lambda path)", async () => {
     const res = await api(
       `/api/v1/instruments/${instrumentId}/runs/${runId}/files`,
@@ -83,6 +102,8 @@ describe("Files API", () => {
     lambdaFileId = data.id;
   });
 
+  // Idempotent on s3_key via a partial unique index. This prevents duplicate
+  // file records when the Lambda retries after a timeout.
   it("POST is idempotent on s3_key — returns 200 for duplicate", async () => {
     const res = await api(
       `/api/v1/instruments/${instrumentId}/runs/${runId}/files`,
@@ -133,6 +154,8 @@ describe("Files API", () => {
   // PATCH /api/v1/files/:fileId — watcher path (detected → uploaded)
   // -------------------------------------------------------------------------
 
+  // Watcher path: after the watcher uploads the file to S3, it calls PATCH
+  // to transition detected → uploaded and attach the S3 coordinates.
   it("PATCH transitions detected → uploaded with S3 info", async () => {
     const res = await api(`/api/v1/files/${fileId}`, {
       method: "PATCH",
@@ -162,6 +185,9 @@ describe("Files API", () => {
     expect((await res.json()).status).toBe("processing");
   });
 
+  // The Lambda function calls this after successfully parsing the file.
+  // report_data is inserted into the run_report_data table, linked to both
+  // the file and its parent run for querying from either direction.
   it("PATCH transitions processing → completed with metadata and report_data", async () => {
     const res = await api(`/api/v1/files/${fileId}`, {
       method: "PATCH",
@@ -190,6 +216,8 @@ describe("Files API", () => {
     });
   });
 
+  // "completed" and "failed" are terminal states — the state machine
+  // forbids any further transitions to prevent data corruption.
   it("PATCH rejects invalid status transition (completed → uploaded)", async () => {
     const res = await api(`/api/v1/files/${fileId}`, {
       method: "PATCH",
@@ -257,8 +285,10 @@ describe("Files API", () => {
     expect(data.deleted_at).toBeTruthy();
   });
 
+  // Once a file has been uploaded to S3, it can only be removed via the
+  // run-level DELETE (which handles S3 lifecycle). Per-file DELETE is
+  // limited to pre-upload states to prevent orphaned S3 objects.
   it("DELETE rejects dismissal of uploaded files", async () => {
-    // fileId is now in "completed" status
     const res = await api(`/api/v1/files/${fileId}`, {
       method: "DELETE",
       token,
