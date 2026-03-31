@@ -79,27 +79,29 @@ export async function setup() {
   const port = await getFreePort();
   const baseUrl = `http://127.0.0.1:${port}`;
 
+  const serverEnv = {
+    ...process.env,
+    DATABASE_URL: databaseUrl,
+    AUTH_SECRET: "test-secret-at-least-32-characters-long!!",
+    AUTH_GOOGLE_ID: "stub",
+    AUTH_GOOGLE_SECRET: "stub",
+    // Dummy AWS credentials so the S3 presigner can compute signatures
+    // without hitting the real credential provider chain. getSignedUrl only
+    // needs a key pair for HMAC signing — it never makes a network call.
+    AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID ?? "test-key",
+    AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY ?? "test-secret",
+    AWS_REGION: process.env.AWS_REGION ?? "us-east-1",
+  };
+
   execSync("npx next build", {
     cwd: import.meta.dirname ? import.meta.dirname + "/../.." : process.cwd(),
-    env: {
-      ...process.env,
-      DATABASE_URL: databaseUrl,
-      AUTH_SECRET: "test-secret-at-least-32-characters-long!!",
-      AUTH_GOOGLE_ID: "stub",
-      AUTH_GOOGLE_SECRET: "stub",
-    },
+    env: serverEnv,
     stdio: "pipe",
   });
 
   serverProcess = spawn("npx", ["next", "start", "-p", String(port)], {
     cwd: import.meta.dirname ? import.meta.dirname + "/../.." : process.cwd(),
-    env: {
-      ...process.env,
-      DATABASE_URL: databaseUrl,
-      AUTH_SECRET: "test-secret-at-least-32-characters-long!!",
-      AUTH_GOOGLE_ID: "stub",
-      AUTH_GOOGLE_SECRET: "stub",
-    },
+    env: serverEnv,
     stdio: "pipe",
   });
 
