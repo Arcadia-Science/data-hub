@@ -14,6 +14,12 @@ export async function DELETE(
 
   const { id } = await params;
 
+  const UUID_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!UUID_RE.test(id)) {
+    return Response.json({ error: "Invalid token ID" }, { status: 400 });
+  }
+
   const deleted = await db
     .delete(personalAccessTokens)
     .where(

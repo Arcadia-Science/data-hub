@@ -57,6 +57,12 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    if (expiresAt <= new Date()) {
+      return Response.json(
+        { error: "expires_at must be in the future" },
+        { status: 400 }
+      );
+    }
   }
 
   const plaintext = generateToken();

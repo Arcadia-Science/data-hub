@@ -15,13 +15,9 @@ import { personalAccessTokens } from "@/lib/db/schema";
 import { formatRelativeTime } from "@/lib/utils";
 import { desc, eq } from "drizzle-orm";
 import { KeyRound } from "lucide-react";
-import { redirect } from "next/navigation";
 
 export default async function TokensPage() {
   const session = await auth();
-  if (!session?.user?.id) {
-    redirect("/login");
-  }
 
   const tokens = await db
     .select({
@@ -33,7 +29,7 @@ export default async function TokensPage() {
       createdAt: personalAccessTokens.createdAt,
     })
     .from(personalAccessTokens)
-    .where(eq(personalAccessTokens.userId, session.user.id))
+    .where(eq(personalAccessTokens.userId, session!.user!.id!))
     .orderBy(desc(personalAccessTokens.createdAt));
 
   const isExpired = (expiresAt: Date | null) =>

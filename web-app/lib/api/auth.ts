@@ -4,6 +4,7 @@ import { personalAccessTokens } from "@/lib/db/schema";
 import { hashToken } from "@/lib/tokens";
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
+import { after } from "next/server";
 
 type AuthResult = {
   userId: string;
@@ -47,14 +48,12 @@ export async function authenticateRequest(
     return null;
   }
 
-  // Non-blocking last-used update (best-effort)
-  db.update(personalAccessTokens)
-    .set({ lastUsedAt: new Date() })
-    .where(eq(personalAccessTokens.id, pat.id))
-    .then(
-      () => {},
-      () => {}
-    );
+  after(async () => {
+    await db
+      .update(personalAccessTokens)
+      .set({ lastUsedAt: new Date() })
+      .where(eq(personalAccessTokens.id, pat.id));
+  });
 
   return { userId: pat.userId, authMethod: "token" };
 }

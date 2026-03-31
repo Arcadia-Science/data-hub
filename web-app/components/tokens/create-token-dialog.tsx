@@ -22,6 +22,7 @@ import {
 import { Check, Copy, Loader2, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useState, useTransition } from "react";
+import { toast } from "sonner";
 
 type Step = "form" | "display";
 
@@ -70,6 +71,8 @@ export function CreateTokenDialog() {
       });
 
       if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        toast.error(body?.error ?? "Failed to create token");
         return;
       }
 
@@ -174,7 +177,7 @@ export function CreateTokenDialog() {
             </DialogHeader>
             <div className="min-w-0 py-2">
               <div className="flex items-center gap-2">
-                <code className="overflow-x-hidden min-w-0 flex-1 rounded-md border bg-muted px-3 py-2 font-mono text-sm">
+                <code className="min-w-0 flex-1 overflow-x-hidden rounded-md border bg-muted px-3 py-2 font-mono text-sm">
                   {plaintext}
                 </code>
                 <Button
