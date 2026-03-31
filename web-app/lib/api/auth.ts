@@ -1,0 +1,71 @@
+import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { personalAccessTokens } from "@/lib/db/schema";
+import { hashToken } from "@/lib/tokens";
+import { eq } from "drizzle-orm";
+import type { NextRequest } from "next/server";
+import { after } from "next/server";
+
+type AuthResult = {
+  userId: string;
+  authMethod: "session" | "token";
+};
+
+export async function authenticateRequest(
+  _request: NextRequest
+): Promise<AuthResult | null> {
+  const session = await auth();
+  if (session?.user?.id) {
+    return { userId: session.user.id, authMethod: "session" };
+  }
+
+  const authHeader = _request.headers.get("authorization");
+  if (!authHeader?.startsWith("Bearer ")) {
+    return null;
+  }
+
+  const plaintext = authHeader.slice(7);
+  // Reject tokens without our prefix early to avoid a needless DB lookup
+  // when the bearer value is a JWT or other non-PAT credential.
+  if (!plaintext.startsWith("dhub_")) {
+    return null;
+  }
+
+  const hash = hashToken(plaintext);
+  const [pat] = await db
+    .select({
+      id: personalAccessTokens.id,
+      userId: personalAccessTokens.userId,
+      expiresAt: personalAccessTokens.expiresAt,
+    })
+    .from(personalAccessTokens)
+    .where(eq(personalAccessTokens.tokenHash, hash))
+    .limit(1);
+
+  if (!pat) {
+    return null;
+  }
+
+  if (pat.expiresAt && pat.expiresAt < new Date()) {
+    return null;
+  }
+
+  // Defer the last-used timestamp update so it doesn't add latency to the
+  // API response. next/server `after()` runs after the response is sent.
+  after(async () => {
+    await db
+      .update(personalAccessTokens)
+      .set({ lastUsedAt: new Date() })
+      .where(eq(personalAccessTokens.id, pat.id));
+  });
+
+  return { userId: pat.userId, authMethod: "token" };
+}
+
+export async function requireSession(): Promise<AuthResult | null> {
+  const session = await auth();
+  if (session?.user?.id) {
+    return { userId: session.user.id, authMethod: "session" };
+  }
+  return null;
+}

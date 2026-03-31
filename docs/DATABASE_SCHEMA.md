@@ -71,9 +71,9 @@ User-created tokens for authenticating with the API from external clients (e.g.,
 |---|---|---|---|
 | `id` | `uuid` | PK, DEFAULT `gen_random_uuid()` | |
 | `user_id` | `text` | FK → `users.id`, NOT NULL | The user who created this token. |
-| `name` | `text` | NOT NULL | User-provided label (e.g., "Lab PC watcher", "Lambda production"). |
+| `name` | `text` | NOT NULL | User-provided label (e.g., "Plate Reader PC", "Lambda production"). |
 | `token_hash` | `text` | NOT NULL, UNIQUE | SHA-256 hash of the token. The plaintext token is shown once at creation and never stored. |
-| `token_prefix` | `text` | NOT NULL | First 8 characters of the token, stored for display purposes (e.g., `dhub_a1b2...`). |
+| `token_prefix` | `text` | NOT NULL | First 9 characters of the token, stored for display purposes (e.g., `dhub_a1b2...`). |
 | `last_used_at` | `timestamptz` | | Updated on each API call authenticated with this token. |
 | `expires_at` | `timestamptz` | | Optional expiry. `NULL` means no expiry. |
 | `created_at` | `timestamptz` | NOT NULL, DEFAULT `now()` | |
