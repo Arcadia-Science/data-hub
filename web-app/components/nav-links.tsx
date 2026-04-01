@@ -4,7 +4,10 @@ import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const links = [{ href: "/instruments", label: "Instruments" }] as const;
+const links = [
+  { href: "/instruments", label: "Instruments" },
+  { href: "/watchers", label: "Watchers" },
+] as const;
 
 export function NavLinks() {
   const pathname = usePathname();

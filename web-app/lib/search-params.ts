@@ -38,6 +38,20 @@ export const instrumentDetailParamsCache = createSearchParamsCache(
   instrumentDetailSearchParams
 );
 
+// Watcher detail page filters. `since` controls the heartbeat time range,
+// `events_since` controls the event log time range, and `event_type` filters
+// events by type. All are optional — omitting them defaults to the last 24h
+// with all event types included (handled in the data layer).
+export const watcherDetailSearchParams = {
+  event_type: parseAsArrayOf(parseAsString).withDefault([]),
+  since: parseAsString,
+  events_since: parseAsString,
+};
+
+export const watcherDetailParamsCache = createSearchParamsCache(
+  watcherDetailSearchParams
+);
+
 export function hasActiveFilters(params: {
   search: string;
   instrument_id: string[];
