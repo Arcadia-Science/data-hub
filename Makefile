@@ -1,6 +1,6 @@
 .PHONY: lint-py
 lint-py:
-	uv run ruff check --exit-zero .
+	uv run ruff check .
 	uv run ruff format --check .
 
 .PHONY: format-py
