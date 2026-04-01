@@ -1,5 +1,8 @@
 [tool.uv.workspace]
-members = ["watcher", "packages/shared"]
+members = ["lambda", "watcher", "packages/shared"]
+
+[tool.uv.sources]
+michaelis-menten-analysis = { git = "https://github.com/Arcadia-Science/2025-michaelis-menten-analysis", rev = "a654d37aa737745cef8d8f3b5df358ab717f8064" }
 
 [dependency-groups]
 dev = [
@@ -10,7 +13,7 @@ dev = [
 ]
 
 [tool.ruff]
-src = ["watcher/src", "packages/shared/src"]
+src = ["lambda/src", "watcher/src", "packages/shared/src"]
 exclude = ["legacy"]
 line-length = 100
 indent-width = 4
@@ -49,5 +52,5 @@ order-by-type = true
 no-lines-before = ["future", "standard-library"]
 
 [tool.pyright]
-include = ["watcher", "packages/shared"]
+include = ["lambda", "watcher", "packages/shared"]
 exclude = ["legacy", ".venv"]

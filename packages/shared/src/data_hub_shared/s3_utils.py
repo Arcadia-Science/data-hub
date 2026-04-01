@@ -63,6 +63,56 @@ def upload_file(
     client.upload_file(str(local_path), bucket, key, ExtraArgs=extra)
 
 
+def download_file(
+    s3_uri: str,
+    local_path: Path,
+    *,
+    s3_client: S3Client | None = None,
+) -> None:
+    """Download a file from *s3_uri* to *local_path*."""
+    client = s3_client or get_s3_client()
+    bucket, key = parse_s3_uri(s3_uri)
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    logger.debug("Downloading s3://%s/%s → %s", bucket, key, local_path)
+    client.download_file(bucket, key, str(local_path))
+
+
+def list_objects(
+    s3_uri_prefix: str,
+    suffix: str = "",
+    *,
+    s3_client: S3Client | None = None,
+) -> list[str]:
+    """Return S3 URIs for all objects under *s3_uri_prefix*, optionally filtered by *suffix*."""
+    client = s3_client or get_s3_client()
+    bucket, prefix = parse_s3_uri(s3_uri_prefix)
+
+    object_uris: list[str] = []
+    paginator = client.get_paginator("list_objects_v2")
+
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if not suffix or key.endswith(suffix):
+                object_uris.append(f"s3://{bucket}/{key}")
+
+    return object_uris
+
+
+def upload_folder(
+    local_path: Path,
+    s3_uri_prefix: str,
+    *,
+    s3_client: S3Client | None = None,
+) -> None:
+    """Upload all files in *local_path* to S3 under *s3_uri_prefix*."""
+    for file_path in local_path.rglob("*"):
+        if file_path.is_file():
+            relative = file_path.relative_to(local_path)
+            object_uri = f"{s3_uri_prefix}/{relative}".replace("\\", "/")
+            upload_file(file_path, object_uri, s3_client=s3_client)
+
+
 def get_content_type(file_path: Path) -> str | None:
     """Return the guessed MIME type for *file_path*, or ``None``."""
     content_type, _ = mimetypes.guess_type(str(file_path))

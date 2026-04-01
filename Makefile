@@ -63,4 +63,4 @@ check-all:
 # Docker.
 .PHONY: docker-build
 docker-build:
-	source .env && export GIT_AUTH_TOKEN=$$GH_PERSONAL_ACCESS_TOKEN && docker build --secret id=GIT_AUTH_TOKEN -t data-hub-utils .
+	source .env && export GIT_AUTH_TOKEN=$$GH_PERSONAL_ACCESS_TOKEN && docker build -f lambda/Dockerfile --secret id=GIT_AUTH_TOKEN -t data-hub-lambda .
