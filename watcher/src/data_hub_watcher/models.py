@@ -26,6 +26,9 @@ class RunDetectionConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_prefix_pattern(self) -> RunDetectionConfig:
+        # Prefix mode requires exactly one capture group in the regex — that
+        # group is the run ID. This is validated eagerly at config load time
+        # so the user gets a clear error rather than a silent mismatch at runtime.
         if self.method == "prefix":
             pat = self.prefix_pattern or r"^([^_]+)"
             try:
@@ -74,6 +77,8 @@ class WatcherConfig(BaseModel):
 
     @model_validator(mode="after")
     def _emit_warnings(self) -> WatcherConfig:
+        # Surface common misconfigurations as warnings at load time rather
+        # than silently doing nothing when the watcher starts.
         if not self.instrument.enabled:
             logger.warning("Instrument %r is disabled in config", self.instrument.id)
         watch_dir = self.instrument.watch_directory
@@ -86,6 +91,9 @@ class WatcherConfig(BaseModel):
 # API response models
 # ---------------------------------------------------------------------------
 
+# API responses may contain fields the watcher doesn't know about yet
+# (e.g. after a server-side schema change). "ignore" extra fields so the
+# watcher keeps working without requiring a synchronized release.
 _API_MODEL_CONFIG = ConfigDict(extra="ignore")
 
 

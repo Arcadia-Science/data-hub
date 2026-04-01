@@ -42,8 +42,13 @@ class DataHubClient:
 
     def __init__(self, base_url: str, api_key: str | None = None) -> None:
         self.base_url = base_url.rstrip("/")
+        # A persistent session reuses TCP connections across requests, which
+        # matters when the watcher is long-running and chatting with the API
+        # every heartbeat interval.
         self._session = requests.Session()
 
+        # Allow the API key to be passed explicitly (e.g. during `init`) or
+        # fall back to the environment variable for normal operation.
         key = api_key or os.environ.get("DATA_HUB_API_KEY", "")
         if key:
             self._session.headers["Authorization"] = f"Bearer {key}"
@@ -137,7 +142,11 @@ class DataHubClient:
         return ConfigChecksumResponse.model_validate(resp.json())
 
     def get_config_checksum(self, watcher_id: str) -> ConfigChecksumResponse | None:
-        """Return the remote checksum, or ``None`` if no config has been pushed."""
+        """Return the remote checksum, or ``None`` if no config has been pushed.
+
+        A 404 is expected for newly registered watchers that haven't pushed
+        config yet — it is not an error condition.
+        """
         try:
             resp = self._request("GET", f"/watchers/{watcher_id}/config-checksum")
             return ConfigChecksumResponse.model_validate(resp.json())

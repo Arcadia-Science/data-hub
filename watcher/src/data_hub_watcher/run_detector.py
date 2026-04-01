@@ -100,7 +100,11 @@ class RunDetector:
     # ------------------------------------------------------------------
 
     def on_stable_file(self, path: Path) -> None:
-        """Process a file that has been determined to be stable."""
+        """Process a file that has been determined to be stable.
+
+        First file for a given run ID triggers a POST to create the run;
+        subsequent files for the same run ID trigger a PATCH to update it.
+        """
         run_id = self._extract_run_id(path)
         if run_id is None:
             return
@@ -118,6 +122,8 @@ class RunDetector:
             run = RunState(run_id=run_id)
             self._runs[run_id] = run
 
+        # Guard against duplicate stable-file callbacks for the same path
+        # (can happen if the file is modified again after stabilising).
         if any(f.path == path for f in run.files):
             return
         run.files.append(info)
@@ -147,6 +153,11 @@ class RunDetector:
         return m.group(1)
 
     def _extract_directory(self, path: Path) -> str | None:
+        """In directory mode, the first subdirectory name under the watch dir
+        is the run ID.  For example:
+            watch_dir/RUN001/data.csv  →  run_id = "RUN001"
+        Files sitting directly in the watch dir have no run context and are skipped.
+        """
         try:
             rel = path.relative_to(self._watch_dir)
         except ValueError:
@@ -201,6 +212,12 @@ class RunDetector:
             self._upload_cb(run.run_id, list(run.files))
 
     def _update_run(self, run: RunState) -> None:
+        """PATCH the run with the full file list, then upload only new files.
+
+        The API receives the complete file manifest each time so it can
+        reconcile its own state, but the upload callback only gets the files
+        that weren't in the previous snapshot to avoid re-uploading.
+        """
         payload = {
             "detected_files": [self._file_payload(f) for f in run.files],
         }
@@ -212,6 +229,8 @@ class RunDetector:
             self._counters.errors += 1
             return
 
+        # Only upload files that don't appear earlier in the list — earlier
+        # entries were already uploaded on a prior report or update.
         new_files = [
             f
             for f in run.files

@@ -31,7 +31,11 @@ class StateDB:
 
     def __init__(self, db_path: Path) -> None:
         db_path.parent.mkdir(parents=True, exist_ok=True)
+        # check_same_thread=False is required because the heartbeat and
+        # stability-checker threads also read from this DB.
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        # WAL mode allows concurrent reads from background threads while
+        # the main thread writes, without blocking.
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._create_tables()
@@ -71,6 +75,12 @@ class StateDB:
         return removed
 
     def is_uploaded(self, filename: str, sha256: str) -> bool:
+        """Check whether this exact file content has already been uploaded.
+
+        Keyed on (filename, sha256) so re-uploading is triggered if the file
+        content changes (same name, different hash) but skipped if the same
+        file is seen again unchanged.
+        """
         cur = self._conn.execute(
             "SELECT 1 FROM uploaded_files WHERE filename = ? AND sha256 = ?",
             (filename, sha256),
@@ -101,6 +111,11 @@ class StateDB:
         return RunRecord(run_id=row[0], reported_at=row[1], uploaded_at=row[2])
 
     def record_run_reported(self, run_id: str) -> None:
+        """Mark a run as reported, preserving any existing uploaded_at timestamp.
+
+        The sub-SELECT keeps uploaded_at intact if the run was already recorded
+        (e.g. a retry after a previous partial failure).
+        """
         now = datetime.now(timezone.utc).isoformat()
         self._conn.execute(
             "INSERT OR REPLACE INTO runs (run_id, reported_at, uploaded_at) "

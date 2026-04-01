@@ -42,6 +42,8 @@ def _extra_args(file_path: Path) -> dict[str, str]:
     content_type, _ = mimetypes.guess_type(str(file_path))
     if content_type:
         args["ContentType"] = content_type
+        # Images get "inline" disposition so browsers render them directly
+        # instead of prompting a download when accessed via pre-signed URL.
         if content_type.startswith("image/"):
             args["ContentDisposition"] = "inline"
     return args

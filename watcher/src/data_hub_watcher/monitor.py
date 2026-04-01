@@ -160,7 +160,11 @@ class FileMonitor:
     # ------------------------------------------------------------------
 
     def _initial_scan(self) -> None:
-        """Walk the directory for existing files and enqueue unuploaded ones."""
+        """Walk the directory for existing files and enqueue unuploaded ones.
+
+        This catches files that appeared while the watcher was stopped (e.g.
+        between a crash and restart, or overnight when running as a service).
+        """
         iterator = self._watch_dir.rglob("*") if self._recursive else self._watch_dir.iterdir()
         count = 0
         for entry in iterator:
@@ -203,6 +207,13 @@ class FileMonitor:
             self._check_pending()
 
     def _check_pending(self) -> None:
+        """Poll each pending file's size + mtime against its last-known values.
+
+        A file is "stable" when its size and mtime haven't changed for the full
+        stability period.  If the file keeps changing beyond
+        MAX_STABILITY_WAIT_SECONDS it is abandoned — this guards against files
+        that are continuously appended to (e.g. active log streams).
+        """
         now = time.monotonic()
         stable: list[Path] = []
         timed_out: list[Path] = []
@@ -215,6 +226,8 @@ class FileMonitor:
                     del self._pending[path]
                     continue
 
+                # File is still being written — reset the snapshot but keep
+                # the original first_seen time for timeout calculation.
                 if stat.st_size != pf.size or stat.st_mtime != pf.mtime:
                     pf.size = stat.st_size
                     pf.mtime = stat.st_mtime

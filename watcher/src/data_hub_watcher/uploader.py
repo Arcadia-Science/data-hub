@@ -137,6 +137,10 @@ class Uploader:
         """Upload one file to S3, notify the API, and record in StateDB.
 
         Returns ``True`` on success, ``False`` after all retries exhausted.
+
+        ``file_id`` is ``None`` in auto mode (file records are created
+        server-side during run reporting) and set in manual mode (the server
+        already has a file record and expects a PATCH with S3 metadata).
         """
         s3_key = f"{self._instrument_id}/{run_id}/{path.name}"
         s3_uri = f"s3://{self._s3_bucket}/{s3_key}"
@@ -149,6 +153,8 @@ class Uploader:
         client = self._get_s3_client()
         last_exc: Exception | None = None
 
+        # Exponential backoff: 1s, 2s, 4s. Retries protect against transient
+        # S3 errors or brief network blips that are common on lab-PC networks.
         for attempt in range(UPLOAD_RETRY_MAX):
             try:
                 upload_file(path, s3_uri, s3_client=client)

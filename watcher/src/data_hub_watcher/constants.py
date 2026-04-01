@@ -14,11 +14,17 @@ DEFAULT_CONFIG_FILENAME = "config.yaml"
 
 HEARTBEAT_INTERVAL_SECONDS = 60
 DEFAULT_STABILITY_PERIOD_SECONDS = 5
+# Captures everything before the first underscore as the run ID,
+# e.g. "RUN001_data.csv" → group(1) = "RUN001".
 DEFAULT_PREFIX_PATTERN = r"^([^_]+)"
 
+# If a file keeps changing for longer than this, give up and skip it
+# (likely being continuously appended to or locked by another process).
 MAX_STABILITY_WAIT_SECONDS = 300
 UPLOAD_RETRY_MAX = 3
 UPLOAD_RETRY_BASE_DELAY = 1
+# Upload records older than this are pruned from the local state DB
+# to prevent unbounded growth on long-running watcher instances.
 PRUNE_DAYS = 90
 STATE_DB_FILENAME = "watcher.db"
 SERVICE_NAME = "DataHubWatcher"

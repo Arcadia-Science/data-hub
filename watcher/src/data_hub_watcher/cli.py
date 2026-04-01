@@ -169,7 +169,9 @@ def init(ctx: click.Context) -> None:
     if not file_patterns:
         raise click.ClickException("At least one file pattern is required.")
 
-    # 6. Run detection
+    # "prefix": run ID extracted from filename via regex
+    #   (e.g. "RUN001_data.csv" → "RUN001").
+    # "directory": each subdirectory under watch dir is its own run.
     method = click.prompt(
         "Run detection method",
         type=click.Choice(["prefix", "directory"], case_sensitive=False),
@@ -181,14 +183,18 @@ def init(ctx: click.Context) -> None:
         prefix_pattern = click.prompt("Prefix pattern (regex)", default=DEFAULT_PREFIX_PATTERN)
         _preview_prefix_pattern(prefix_pattern or DEFAULT_PREFIX_PATTERN, watch_dir)
 
-    # 7. Stability period
+    # How long a file's size + mtime must remain unchanged before we consider
+    # it fully written. Instruments that produce large files may need a longer
+    # period to avoid uploading partial writes.
     stability = click.prompt(
         "Stability period (seconds)",
         type=click.IntRange(1, 300),
         default=DEFAULT_STABILITY_PERIOD_SECONDS,
     )
 
-    # 8. Upload mode
+    # "auto": files are uploaded to S3 immediately after run detection.
+    # "manual": the server decides which files to upload via a queue, polled
+    # on each heartbeat tick. Useful when uploads need human approval.
     upload_mode = click.prompt(
         "Upload mode",
         type=click.Choice(["auto", "manual"], case_sensitive=False),
@@ -515,6 +521,9 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
         watch_directory=inst.watch_directory,
     )
 
+    # Directory-mode run detection needs recursive monitoring because each
+    # subdirectory represents a distinct run. Prefix mode only watches the
+    # top-level directory since run IDs are extracted from filenames.
     is_recursive = inst.run_detection.method == "directory" and not is_auto
     monitor = FileMonitor(
         watch_directory=inst.watch_directory,
@@ -534,6 +543,9 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
         counters=counters,
     )
 
+    # In manual mode the server controls which files to upload. We piggyback
+    # on the heartbeat tick to poll the server's upload queue, so uploads
+    # happen at the same cadence as heartbeats without a separate timer.
     if not is_auto:
         _original_tick = heartbeat._tick
 
@@ -553,7 +565,9 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
         )
     )
 
-    # Step 7: Crash recovery — retry any unreported runs from a previous session
+    # If the watcher crashed mid-session, some runs may have been detected but
+    # never successfully POSTed to the API. Retry those before starting the
+    # normal event loop so they aren't silently lost.
     detector.retry_unreported_runs()
 
     # Step 8: Start everything
@@ -631,6 +645,9 @@ def upload(ctx: click.Context, file_path: str | None, run_id: str | None, dry_ru
 
     if file_path:
         fp = Path(file_path).resolve()
+        # Preserve the directory structure under the watch dir in the S3 key.
+        # Files outside the watch dir (e.g. an absolute path the user passed)
+        # get flattened to just the filename.
         if fp.is_relative_to(inst.watch_directory):
             rel = fp.relative_to(inst.watch_directory)
         else:

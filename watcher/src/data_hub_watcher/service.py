@@ -46,7 +46,12 @@ def install_service() -> None:
 
 
 def _configure_recovery() -> None:
-    """Set the service to restart on first and second failure."""
+    """Set the service to restart on first and second failure.
+
+    After two consecutive failures the service stops retrying to avoid a
+    crash loop (e.g. due to a persistent config or credential issue).
+    The failure counter resets after 24 h of healthy uptime.
+    """
     import win32service as ws  # type: ignore[import-untyped]
 
     hscm = ws.OpenSCManager(None, None, ws.SC_MANAGER_ALL_ACCESS)
@@ -127,7 +132,13 @@ def query_service_status() -> dict[str, Any]:
 
 
 def _create_service_class() -> type | None:
-    """Dynamically create the ServiceFramework subclass on Windows only."""
+    """Dynamically create the ServiceFramework subclass on Windows only.
+
+    The class is built at import time (not eagerly at top-of-module) so
+    that (a) the module can be imported safely on non-Windows for type
+    checking and tests, and (b) win32serviceutil can discover the class
+    by its qualified name for service registration.
+    """
     if sys.platform != "win32":
         return None
 
