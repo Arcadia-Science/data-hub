@@ -1,5 +1,10 @@
 import { db } from "@/lib/db";
-import { files, instrumentRuns, instruments } from "@/lib/db/schema";
+import {
+  files,
+  instrumentRuns,
+  instruments,
+  runReportData,
+} from "@/lib/db/schema";
 import type { SQL } from "drizzle-orm";
 import {
   and,
@@ -187,4 +192,54 @@ export async function buildRunListQuery(filters: RunListFilters) {
       total_pages: totalPages,
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Shared types for the run detail page
+// ---------------------------------------------------------------------------
+
+export type RunDetail = NonNullable<
+  Awaited<ReturnType<typeof lookupRunByNaturalKey>>
+>;
+
+export type RunFile = typeof files.$inferSelect;
+
+export type RunReportEntry = {
+  id: number;
+  dataType: string;
+  fileId: number | null;
+  data: unknown;
+};
+
+// ---------------------------------------------------------------------------
+// Per-run file list — all files (including soft-deleted) ordered by creation.
+// ---------------------------------------------------------------------------
+
+export async function getRunFiles(runInternalId: string): Promise<RunFile[]> {
+  return db
+    .select()
+    .from(files)
+    .where(eq(files.instrumentRunId, runInternalId))
+    .orderBy(files.createdAt);
+}
+
+// ---------------------------------------------------------------------------
+// Per-run report data — all report entries for a run, ordered by id.
+// ---------------------------------------------------------------------------
+
+export async function getRunReportData(
+  runInternalId: string
+): Promise<RunReportEntry[]> {
+  const rows = await db
+    .select({
+      id: runReportData.id,
+      dataType: runReportData.dataType,
+      fileId: runReportData.fileId,
+      data: runReportData.data,
+    })
+    .from(runReportData)
+    .where(eq(runReportData.instrumentRunId, runInternalId))
+    .orderBy(runReportData.id);
+
+  return rows;
 }
