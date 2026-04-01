@@ -1,8 +1,0 @@
----
-description: 
-alwaysApply: true
----
-
-If changes have been made in `web-app/`, run precommit checks using `cd web-app && npm run precommit` after ALL changes have been made.
-
-If changes have been made in `watcher/` or root Python config files (`pyproject.toml`, `Makefile`), run `make precommit` after ALL changes have been made.

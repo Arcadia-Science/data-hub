@@ -1,26 +1,53 @@
-.PHONY: lint
-lint:
+.PHONY: lint-py
+lint-py:
 	uv run ruff check --exit-zero .
 	uv run ruff format --check .
 
-.PHONY: format
-format:
+.PHONY: format-py
+format-py:
 	uv run ruff check --fix .
 	uv run ruff format .
 
-.PHONY: typecheck
-typecheck:
+.PHONY: typecheck-py
+typecheck-py:
 	uv run pyright --project pyproject.toml
 
-.PHONY: test
-test:
+.PHONY: test-py
+test-py:
 	uv run pytest -v .
 
-.PHONY: precommit
-precommit:
-	make format
-	make lint
-	make typecheck
+.PHONY: format-fe
+format-fe:
+	cd web-app && npm run format
+
+.PHONY: lint-fe
+lint-fe:
+	cd web-app && npm run lint
+
+.PHONY: typecheck-fe
+typecheck-fe:
+	cd web-app && npm run typecheck
+
+.PHONY: test-fe
+test-fe:
+	cd web-app && npm run test:integration
+
+.PHONY: check-py
+check-py:
+	make format-py
+	make lint-py
+	make typecheck-py
+
+.PHONY: check-fe
+check-fe:
+	make format-fe
+	make lint-fe
+	make typecheck-fe
+
+.PHONY: check-all
+check-all:
+	make check-py
+	make check-fe
 
 .PHONY: docker-build
 docker-build:
