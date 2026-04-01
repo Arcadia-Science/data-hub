@@ -71,6 +71,8 @@ type RunListFilters = {
   includeDeleted: boolean;
 };
 
+const MAX_PER_PAGE = 100;
+
 const ALLOWED_SORT_FIELDS: Record<
   string,
   (typeof instrumentRuns)["createdAt" | "updatedAt"]
@@ -80,6 +82,7 @@ const ALLOWED_SORT_FIELDS: Record<
 };
 
 export async function buildRunListQuery(filters: RunListFilters) {
+  const perPage = Math.min(Math.max(filters.perPage, 1), MAX_PER_PAGE);
   const conditions: SQL[] = [];
 
   if (filters.instrumentId) {
@@ -111,6 +114,7 @@ export async function buildRunListQuery(filters: RunListFilters) {
   }
 
   if (filters.search) {
+    // TODO: add a pg_trgm GIN index on instrument_runs.run_id for performant ilike
     const escaped = filters.search
       .replace(/\\/g, "\\\\")
       .replace(/%/g, "\\%")
@@ -123,8 +127,11 @@ export async function buildRunListQuery(filters: RunListFilters) {
   // Single-query aggregation: counts per-run file stats using FILTER (WHERE ...)
   // to avoid N+1 queries. All non-deleted files are counted.
   const fileCount = sql<number>`cast(count(${files.id}) filter (where ${files.deletedAt} is null) as int)`;
+
   const filesCompleted = sql<number>`cast(count(${files.id}) filter (where ${files.status} = 'completed' and ${files.deletedAt} is null) as int)`;
+
   const filesFailed = sql<number>`cast(count(${files.id}) filter (where ${files.status} = 'failed' and ${files.deletedAt} is null) as int)`;
+
   // "Pending upload" = files on the instrument PC that haven't reached S3 yet.
   // A non-zero count signals the run has files requiring manual upload action.
   const filesPendingUpload = sql<number>`cast(count(${files.id}) filter (where ${files.status} in ('detected', 'upload_requested') and ${files.deletedAt} is null) as int)`;
@@ -140,8 +147,8 @@ export async function buildRunListQuery(filters: RunListFilters) {
     .from(instrumentRuns)
     .where(where);
 
-  const totalPages = Math.ceil(total / filters.perPage);
-  const offset = (filters.page - 1) * filters.perPage;
+  const totalPages = Math.ceil(total / perPage);
+  const offset = (filters.page - 1) * perPage;
 
   const rows = await db
     .select({
@@ -165,14 +172,14 @@ export async function buildRunListQuery(filters: RunListFilters) {
     .where(where)
     .groupBy(instrumentRuns.id, instruments.displayName)
     .orderBy(orderFn(sortCol))
-    .limit(filters.perPage)
+    .limit(perPage)
     .offset(offset);
 
   return {
     data: rows,
     pagination: {
       page: filters.page,
-      per_page: filters.perPage,
+      per_page: perPage,
       total,
       total_pages: totalPages,
     },

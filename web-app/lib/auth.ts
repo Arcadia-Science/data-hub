@@ -3,6 +3,7 @@ import { accounts, sessions, users, verificationTokens } from "@/lib/db/schema";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
+import { cache } from "react";
 
 declare module "next-auth" {
   interface Session {
@@ -15,7 +16,12 @@ declare module "next-auth" {
   }
 }
 
-export const { handlers, signIn, signOut, auth } = NextAuth({
+const {
+  handlers,
+  signIn,
+  signOut,
+  auth: uncachedAuth,
+} = NextAuth({
   adapter: DrizzleAdapter(db, {
     usersTable: users,
     accountsTable: accounts,
@@ -42,3 +48,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     },
   },
 });
+
+export { handlers, signIn, signOut };
+
+export const auth = cache(uncachedAuth);

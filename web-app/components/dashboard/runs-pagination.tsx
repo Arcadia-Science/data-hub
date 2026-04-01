@@ -19,8 +19,8 @@ export function RunsPagination({ pagination }: { pagination: PaginationData }) {
 
   if (pagination.total_pages <= 1) return null;
 
-  const start = (pagination.page - 1) * pagination.per_page + 1;
-  const end = Math.min(pagination.page * pagination.per_page, pagination.total);
+  const start = (page - 1) * pagination.per_page + 1;
+  const end = Math.min(page * pagination.per_page, pagination.total);
 
   return (
     <div className="flex items-center justify-between">
@@ -39,7 +39,7 @@ export function RunsPagination({ pagination }: { pagination: PaginationData }) {
           Prev
         </Button>
         <span className="px-2 text-sm text-muted-foreground tabular-nums">
-          {pagination.page} / {pagination.total_pages}
+          {page} / {pagination.total_pages}
         </span>
         <Button
           variant="outline"

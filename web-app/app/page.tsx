@@ -3,21 +3,18 @@ import {
   InstrumentCardsSkeleton,
 } from "@/components/dashboard/instrument-cards";
 import { RunsPagination } from "@/components/dashboard/runs-pagination";
-import {
-  RunsTable,
-  RunsTableSkeleton,
-} from "@/components/dashboard/runs-table";
+import { RunsTable } from "@/components/dashboard/runs-table";
 import { RunsToolbar } from "@/components/dashboard/runs-toolbar";
 import { getInstruments } from "@/lib/api/dashboard";
 import { buildRunListQuery } from "@/lib/api/instrument-runs";
 import { auth } from "@/lib/auth";
-import { dashboardParamsCache } from "@/lib/search-params";
+import { dashboardParamsCache, hasActiveFilters } from "@/lib/search-params";
 import { redirect } from "next/navigation";
 import type { Metadata } from "next/types";
 import { Suspense } from "react";
 
 export const metadata: Metadata = {
-  title: "Dashboard | Data Hub",
+  title: "Dashboard",
 };
 
 export default async function DashboardPage({
@@ -46,12 +43,7 @@ export default async function DashboardPage({
     }),
   ]);
 
-  const hasFilters =
-    params.search !== "" ||
-    params.instrument_id.length > 0 ||
-    params.date_from !== null ||
-    params.date_to !== null ||
-    params.include_deleted;
+  const hasFilters = hasActiveFilters(params);
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6 p-6">
@@ -61,10 +53,7 @@ export default async function DashboardPage({
 
       <RunsToolbar instruments={instruments} />
 
-      <Suspense key={JSON.stringify(params)} fallback={<RunsTableSkeleton />}>
-        <RunsTable data={runResult.data} hasFilters={hasFilters} />
-      </Suspense>
-
+      <RunsTable data={runResult.data} hasFilters={hasFilters} />
       <RunsPagination pagination={runResult.pagination} />
     </div>
   );

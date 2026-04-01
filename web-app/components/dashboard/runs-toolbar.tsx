@@ -18,7 +18,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
-import { dashboardSearchParams } from "@/lib/search-params";
+import { dashboardSearchParams, hasActiveFilters } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 import {
   CalendarDays,
@@ -44,12 +44,7 @@ export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
 
   const [instrumentOpen, setInstrumentOpen] = useState(false);
 
-  const hasFilters =
-    filters.search !== "" ||
-    filters.instrument_id.length > 0 ||
-    filters.date_from !== null ||
-    filters.date_to !== null ||
-    filters.include_deleted;
+  const hasFilters = hasActiveFilters(filters);
 
   function toggleInstrument(id: string) {
     const current = filters.instrument_id;
