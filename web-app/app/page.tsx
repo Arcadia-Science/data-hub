@@ -1,37 +1,64 @@
-import { Button } from "@/components/ui/button";
-import { auth, signOut } from "@/lib/auth";
+import {
+  InstrumentCards,
+  InstrumentCardsSkeleton,
+} from "@/components/dashboard/instrument-cards";
+import { RunsPagination } from "@/components/dashboard/runs-pagination";
+import { RunsTable } from "@/components/dashboard/runs-table";
+import { RunsToolbar } from "@/components/dashboard/runs-toolbar";
+import { getInstruments } from "@/lib/api/dashboard";
+import { buildRunListQuery } from "@/lib/api/instrument-runs";
+import { auth } from "@/lib/auth";
+import { dashboardParamsCache, hasActiveFilters } from "@/lib/search-params";
 import { redirect } from "next/navigation";
-import { Metadata } from "next/types";
+import type { Metadata } from "next/types";
+import { Suspense } from "react";
 
 export const metadata: Metadata = {
-  title: "Home | Data Hub",
+  title: "Dashboard",
 };
 
-export default async function Page() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const session = await auth();
+  if (!session) redirect("/login");
 
-  if (!session) {
-    redirect("/login");
-  }
+  const params = dashboardParamsCache.parse(await searchParams);
+
+  // Convert empty array to undefined so buildRunListQuery skips the filter
+  // and returns runs across all instruments (the unfiltered default).
+  const instrumentIds =
+    params.instrument_id.length > 0 ? params.instrument_id : undefined;
+
+  // Fetch the instrument list (for the toolbar combobox) and the filtered run
+  // page in parallel since neither depends on the other's result.
+  const [instruments, runResult] = await Promise.all([
+    getInstruments(),
+    buildRunListQuery({
+      instrumentId: instrumentIds,
+      search: params.search || undefined,
+      dateFrom: params.date_from ?? undefined,
+      dateTo: params.date_to ?? undefined,
+      page: params.page,
+      perPage: params.per_page,
+      includeDeleted: params.include_deleted,
+    }),
+  ]);
+
+  const hasFilters = hasActiveFilters(params);
 
   return (
-    <div className="flex min-h-svh items-center justify-center p-6">
-      <div className="flex max-w-md flex-col gap-4 text-center">
-        <h1 className="text-2xl font-semibold">Welcome to Data Hub</h1>
-        <p className="text-muted-foreground">
-          Signed in as {session.user?.email}
-        </p>
-        <form
-          action={async () => {
-            "use server";
-            await signOut({ redirectTo: "/login" });
-          }}
-        >
-          <Button variant="outline" className="cursor-pointer" size="lg">
-            Sign out
-          </Button>
-        </form>
-      </div>
+    <div className="mx-auto flex max-w-7xl flex-col gap-6 p-6">
+      <Suspense fallback={<InstrumentCardsSkeleton />}>
+        <InstrumentCards />
+      </Suspense>
+
+      <RunsToolbar instruments={instruments} />
+
+      <RunsTable data={runResult.data} hasFilters={hasFilters} />
+      <RunsPagination pagination={runResult.pagination} />
     </div>
   );
 }

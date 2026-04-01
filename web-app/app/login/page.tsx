@@ -3,7 +3,7 @@ import { signIn } from "@/lib/auth";
 import { Metadata } from "next/types";
 
 export const metadata: Metadata = {
-  title: "Login | Data Hub",
+  title: "Login",
 };
 
 export default function LoginPage() {

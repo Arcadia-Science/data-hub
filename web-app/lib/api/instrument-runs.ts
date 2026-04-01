@@ -1,7 +1,18 @@
 import { db } from "@/lib/db";
 import { files, instrumentRuns, instruments } from "@/lib/db/schema";
 import type { SQL } from "drizzle-orm";
-import { and, asc, desc, eq, ilike, isNull, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  ilike,
+  inArray,
+  isNull,
+  lte,
+  sql,
+} from "drizzle-orm";
 
 // ---------------------------------------------------------------------------
 // Run lookup by natural key (instrumentId, runId) — shared across detail,
@@ -48,15 +59,19 @@ export async function lookupRunByNaturalKey(
 // ---------------------------------------------------------------------------
 
 type RunListFilters = {
-  instrumentId?: string;
+  instrumentId?: string | string[];
   source?: string;
   search?: string;
+  dateFrom?: string;
+  dateTo?: string;
   sort?: string;
   order?: string;
   page: number;
   perPage: number;
   includeDeleted: boolean;
 };
+
+const MAX_PER_PAGE = 100;
 
 const ALLOWED_SORT_FIELDS: Record<
   string,
@@ -67,10 +82,18 @@ const ALLOWED_SORT_FIELDS: Record<
 };
 
 export async function buildRunListQuery(filters: RunListFilters) {
+  const perPage = Math.min(Math.max(filters.perPage, 1), MAX_PER_PAGE);
   const conditions: SQL[] = [];
 
   if (filters.instrumentId) {
-    conditions.push(eq(instrumentRuns.instrumentId, filters.instrumentId));
+    const ids = Array.isArray(filters.instrumentId)
+      ? filters.instrumentId
+      : [filters.instrumentId];
+    if (ids.length === 1) {
+      conditions.push(eq(instrumentRuns.instrumentId, ids[0]));
+    } else if (ids.length > 1) {
+      conditions.push(inArray(instrumentRuns.instrumentId, ids));
+    }
   }
 
   if (!filters.includeDeleted) {
@@ -81,7 +104,20 @@ export async function buildRunListQuery(filters: RunListFilters) {
     conditions.push(eq(instrumentRuns.source, filters.source));
   }
 
+  if (filters.dateFrom) {
+    conditions.push(gte(instrumentRuns.createdAt, new Date(filters.dateFrom)));
+  }
+  // dateTo is a date string (e.g. "2026-03-28") without a time component.
+  // Advance by one day so the filter is inclusive of the entire selected day.
+  if (filters.dateTo) {
+    const end = new Date(filters.dateTo);
+    end.setDate(end.getDate() + 1);
+    conditions.push(lte(instrumentRuns.createdAt, end));
+  }
+
   if (filters.search) {
+    // Escape LIKE wildcards so user input is treated as literal text.
+    // TODO: add a pg_trgm GIN index on instrument_runs.run_id for performant ilike
     const escaped = filters.search
       .replace(/\\/g, "\\\\")
       .replace(/%/g, "\\%")
@@ -94,8 +130,11 @@ export async function buildRunListQuery(filters: RunListFilters) {
   // Single-query aggregation: counts per-run file stats using FILTER (WHERE ...)
   // to avoid N+1 queries. All non-deleted files are counted.
   const fileCount = sql<number>`cast(count(${files.id}) filter (where ${files.deletedAt} is null) as int)`;
+
   const filesCompleted = sql<number>`cast(count(${files.id}) filter (where ${files.status} = 'completed' and ${files.deletedAt} is null) as int)`;
+
   const filesFailed = sql<number>`cast(count(${files.id}) filter (where ${files.status} = 'failed' and ${files.deletedAt} is null) as int)`;
+
   // "Pending upload" = files on the instrument PC that haven't reached S3 yet.
   // A non-zero count signals the run has files requiring manual upload action.
   const filesPendingUpload = sql<number>`cast(count(${files.id}) filter (where ${files.status} in ('detected', 'upload_requested') and ${files.deletedAt} is null) as int)`;
@@ -111,8 +150,8 @@ export async function buildRunListQuery(filters: RunListFilters) {
     .from(instrumentRuns)
     .where(where);
 
-  const totalPages = Math.ceil(total / filters.perPage);
-  const offset = (filters.page - 1) * filters.perPage;
+  const totalPages = Math.ceil(total / perPage);
+  const offset = (filters.page - 1) * perPage;
 
   const rows = await db
     .select({
@@ -136,14 +175,14 @@ export async function buildRunListQuery(filters: RunListFilters) {
     .where(where)
     .groupBy(instrumentRuns.id, instruments.displayName)
     .orderBy(orderFn(sortCol))
-    .limit(filters.perPage)
+    .limit(perPage)
     .offset(offset);
 
   return {
     data: rows,
     pagination: {
       page: filters.page,
-      per_page: filters.perPage,
+      per_page: perPage,
       total,
       total_pages: totalPages,
     },
