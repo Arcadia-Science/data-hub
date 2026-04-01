@@ -27,6 +27,7 @@ def split_file_into_n_parts(file_path: Path, n_parts: int) -> list[Path]:
     """Splits a file into *n_parts* approximately equal binary chunks.
 
     Part filenames follow the pattern ``<stem>_part_NNN<suffix>``.
+    Used by the Notion API's multi-part upload for files >20 MB.
     """
     file_name = file_path.stem
     file_size = file_path.stat().st_size

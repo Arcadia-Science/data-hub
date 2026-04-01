@@ -12,4 +12,6 @@ NOTION_SUPPORTED_FILE_TYPES = [
     ".mp4", ".mkv", ".webm", ".mov", ".qt", ".mpeg",
 ]  # fmt: skip
 
+# Base URL for building web app links included in Slack notifications.
+# Migrated workflows return "{DATA_HUB_WEB_URL}/instruments/{id}/runs/{run_id}".
 DATA_HUB_WEB_URL = "https://data-hub.arcadiascience.com"

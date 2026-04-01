@@ -31,6 +31,8 @@ class ApiError(Exception):
         self.detail = detail
 
 
+# (connect_timeout, read_timeout) in seconds. The read timeout is generous
+# because the runs and files endpoints perform upsert queries under the hood.
 DEFAULT_TIMEOUT: tuple[float, float] = (5, 30)
 
 
@@ -43,6 +45,9 @@ class DataHubClient:
         api_key: str | None = None,
         timeout: tuple[float, float] = DEFAULT_TIMEOUT,
     ) -> None:
+        # base_url should include the API version prefix (e.g.,
+        # "https://data-hub.arcadiascience.com/api/v1") — method paths
+        # are appended relative to it.
         self.base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._session = requests.Session()
@@ -95,7 +100,12 @@ class DataHubClient:
     # ------------------------------------------------------------------
 
     def ensure_run(self, instrument_id: str, run_id: str) -> RunResponse:
-        """Upsert an instrument run (idempotent on instrument_id + run_id)."""
+        """Upsert an instrument run (idempotent on instrument_id + run_id).
+
+        If the watcher already created the run, returns the existing record.
+        If no run exists (e.g., direct S3 upload), auto-creates it with
+        ``source: "lambda"`` so it shows the correct origin in the UI.
+        """
         resp = self._request(
             "POST",
             f"/instruments/{instrument_id}/runs",
@@ -119,7 +129,12 @@ class DataHubClient:
         size_bytes: int | None = None,
         category: str = "raw",
     ) -> FileResponse:
-        """Create a file record (idempotent on s3_key)."""
+        """Create a file record (idempotent on s3_key).
+
+        The API creates the file in ``uploaded`` status because the file is
+        already in S3 when the Lambda is triggered. If the watcher already
+        created a record for this ``s3_key``, the existing record is returned.
+        """
         payload: dict[str, Any] = {
             "s3_bucket": s3_bucket,
             "s3_key": s3_key,
@@ -147,7 +162,12 @@ class DataHubClient:
         report_data: list[dict[str, Any]] | None = None,
         error_message: str | None = None,
     ) -> FileResponse:
-        """Update a file record (status transition, metadata, report data)."""
+        """Update a file record (status transition, metadata, report data).
+
+        The API enforces a state machine: uploaded → processing → completed|failed.
+        ``report_data`` is a list of ``{data_type, data}`` objects inserted into
+        ``run_report_data`` for instruments that produce tabular data (e.g., plate reader).
+        """
         payload: dict[str, Any] = {}
         if status is not None:
             payload["status"] = status

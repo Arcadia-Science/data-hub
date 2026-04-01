@@ -52,22 +52,28 @@ def process_file(
     )
     file_id = file_record.id
 
-    # 3. Mark as processing.
-    client.update_file(file_id, status="processing")
+    try:
+        # 3. Mark as processing.
+        client.update_file(file_id, status="processing")
 
-    # 4. Download from S3 for metadata extraction.
-    raw_data_dir = config.LOCAL_RAW_DATA_DIRPATH / Instrument.AKTA_FPLC.value / run_id
-    local_file_path = raw_data_dir / filename
-    s3_utils.download_file(f"s3://{s3_bucket}/{s3_key}", local_file_path)
-    logger.info("Downloaded %s to %s", filename, local_file_path)
+        # 4. Download from S3 for metadata extraction.
+        raw_data_dir = config.LOCAL_RAW_DATA_DIRPATH / Instrument.AKTA_FPLC.value / run_id
+        local_file_path = raw_data_dir / filename
+        s3_utils.download_file(f"s3://{s3_bucket}/{s3_key}", local_file_path)
+        logger.info("Downloaded %s to %s", filename, local_file_path)
 
-    # 5. Extract metadata. Column type was previously read from Ganymede tags;
-    #    until a new extraction method is implemented, metadata is empty.
-    metadata: dict[str, str] = {}
+        # 5. Extract metadata. Column type was previously read from Ganymede tags;
+        # until a new extraction method is implemented, metadata is empty.
+        metadata: dict[str, str] = {}
 
-    # 6. Mark as completed with metadata.
-    client.update_file(file_id, status="completed", metadata=metadata)
-    logger.info("File %s marked as completed.", filename)
+        # 6. Mark as completed with metadata.
+        client.update_file(file_id, status="completed", metadata=metadata)
+        logger.info("File %s marked as completed.", filename)
+
+    except Exception as e:
+        logger.error("Error marking file as completed: %s", e)
+        client.update_file(file_id, status="failed", error_message=str(e))
+        raise
 
     # 7. Return the web app URL.
     return f"{DATA_HUB_WEB_URL}/instruments/{instrument_id}/runs/{run_id}"

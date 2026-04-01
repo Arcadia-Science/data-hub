@@ -5,6 +5,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+# Allow extra fields so the client doesn't break when the API adds new
+# response fields that haven't been modeled here yet.
 _API_MODEL_CONFIG = ConfigDict(extra="ignore")
 
 

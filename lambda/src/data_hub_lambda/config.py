@@ -9,10 +9,13 @@ class LambdaConfig:
     ``data_hub_shared.config``.
     """
 
+    # Legacy — used by Notion and Ganymede workflows (removed after full migration).
     GANYMEDE_API_KEY: str | None
     NOTION_API_SECRET: str | None
     NOTION_PAGE_ID: str | None
     AWS_LAMBDA_FUNCTION_URL_AUTH_TOKEN: str | None
+
+    # Data Hub API — used by migrated per-file workflows.
     DATA_HUB_API_URL: str | None
     DATA_HUB_API_KEY: str | None
 

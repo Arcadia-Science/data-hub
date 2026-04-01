@@ -8,6 +8,11 @@ ENV UV_COMPILE_BYTECODE=1
 ENV UV_NO_INSTALLER_METADATA=1
 ENV UV_LINK_MODE=copy
 
+# Resolve and install third-party deps into the Lambda task root. The
+# workspace root uv.lock is mounted for version pinning, but workspace
+# packages (shared, lambda) are excluded from the export — they're copied
+# as source in the final stage instead. GIT_AUTH_TOKEN is needed for the
+# private michaelis-menten-analysis git dependency.
 RUN --mount=from=uv,source=/uv,target=/bin/uv \
     --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
@@ -23,6 +28,8 @@ RUN --mount=from=uv,source=/uv,target=/bin/uv \
 FROM public.ecr.aws/lambda/python:3.12
 
 COPY --from=builder ${LAMBDA_TASK_ROOT} ${LAMBDA_TASK_ROOT}
+# Workspace packages are copied as source (not pip-installed) so they land
+# directly on the Python path alongside the third-party deps.
 COPY packages/shared/src ${LAMBDA_TASK_ROOT}
 COPY lambda/src ${LAMBDA_TASK_ROOT}
 

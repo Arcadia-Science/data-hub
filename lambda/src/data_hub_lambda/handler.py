@@ -79,7 +79,9 @@ def parse_s3_event(event: S3Event) -> S3EventInfo:
     s3_bucket: str = record["s3"]["bucket"]["name"]  # type: ignore[index]
     s3_key: str = unquote_plus(record["s3"]["object"]["key"])  # type: ignore[index]
 
-    # Pattern: {instrument_id}/{filename}
+    # S3 key layout is {instrument_id}/{filename} — the run_id is encoded in
+    # the filename itself and must be extracted per-instrument below. This
+    # differs from the watcher's 3-segment layout ({instrument_id}/{run_id}/{filename}).
     pattern = r"^/?([^/]+)/([^/]+)$"
     match = re.match(pattern, s3_key)
     if not match:
@@ -154,7 +156,13 @@ def _get_api_client() -> DataHubClient:
 
 
 def handle_notion_webhook_event(request_payload: dict[str, Any], context: Context) -> None:
-    """Handles Lambda function URL invocations from Notion webhook events."""
+    """Handles Lambda function URL invocations from Notion webhook events.
+
+    This is a temporary run-level analysis path. Users trigger it from a
+    Notion database page which fires a webhook to the Lambda function URL.
+    Once migrated, this will move to ``POST /api/v1/.../analyses`` triggered
+    from the web UI instead.
+    """
     request_body = json.loads(request_payload["body"])
     notion_page_id = request_body["data"]["id"]
     notion_page_properties = request_body["data"]["properties"]
@@ -162,6 +170,7 @@ def handle_notion_webhook_event(request_payload: dict[str, Any], context: Contex
     run_id = notion_page_properties["Instrument Run ID"]["title"][0]["plain_text"]
     analysis_name = notion_page_properties["Analysis"]["select"]["name"]
 
+    # Currently hardcoded to iD3 — the only instrument with webhook-triggered analyses.
     instrument_name = INSTRUMENT_ID_TO_NAME_MAP[Instrument.SPECTRAMAX_ID3_PLATE_READER.value]
 
     if analysis_name == Analysis.MICHAELIS_MENTEN_KINETICS.value:
@@ -207,18 +216,26 @@ def lambda_handler(event: dict[str, Any], context: Context) -> None:
     """Top-level Lambda handler dispatching to instrument workflows."""
     logger.info("Received event: %s", pformat(event))
 
+    # event_info is only populated for S3-triggered invocations; manual
+    # invocations (GitHub Actions) don't carry S3 bucket/key details.
     event_info: S3EventInfo | None = None
 
     try:
+        # S3 trigger — the primary invocation path for per-file processing.
         if "Records" in event:
             event_info = parse_s3_event(event)  # type: ignore[arg-type]
             instrument_id = event_info.instrument_id
             run_id = event_info.run_id
 
+        # GitHub Actions manual trigger — provides instrument_name + run_id
+        # directly, without S3 context. Used for re-processing or backfills.
         elif "instrument_name" in event and "run_id" in event:
             instrument_id = INSTRUMENT_NAME_TO_ID_MAP[event["instrument_name"]]
             run_id = event["run_id"]
 
+        # Lambda function URL — Notion webhook for run-level analyses
+        # (e.g., Michaelis-Menten kinetics). Handled separately and returns
+        # early because it bypasses the per-file dispatch below.
         elif "body" in event:
             if is_authenticated_url_request(event):
                 handle_notion_webhook_event(event, context)
@@ -241,6 +258,9 @@ def lambda_handler(event: dict[str, Any], context: Context) -> None:
         logger.info("Generating report for run %s...", run_id)
 
         # -- Akta FPLC: fully migrated to per-file API processing -----
+        # This is the first workflow migrated from Notion/Ganymede to the
+        # Data Hub API (see docs/lambda/MIGRATION.md). It requires S3 event
+        # info (bucket, key, filename) which isn't available from manual invocations.
         if instrument_id == Instrument.AKTA_FPLC.value:
             if event_info is None:
                 logger.warning(
@@ -259,11 +279,16 @@ def lambda_handler(event: dict[str, Any], context: Context) -> None:
             )
 
         # -- Legacy Notion workflows -----------------------------------
+        # These workflows still write to Notion and query Ganymede. They will
+        # be migrated one at a time to the per-file API path (see MIGRATION.md).
         elif instrument_id == Instrument.AGILENT_4150_TAPESTATION.value:
             instrument_run_page_id = get_instrument_run_page_id(instrument_name, run_id)
             result_url = agilent_4150_tapestation.generate_report(
                 run_id, notion_page_id=instrument_run_page_id
             )
+            # When a page already exists, generate_report appends new files to
+            # it. Skip the Slack notification to avoid duplicate messages — the
+            # initial creation already sent one.
             if instrument_run_page_id is not None:
                 return
 
@@ -275,6 +300,8 @@ def lambda_handler(event: dict[str, Any], context: Context) -> None:
             result_url = azure_cielo_qpcr.generate_report(
                 run_id, notion_page_id=instrument_run_page_id
             )
+            # Same early-return logic as TapeStation — skip Slack when
+            # appending files to an existing Notion page.
             if instrument_run_page_id is not None:
                 return
 

@@ -18,6 +18,8 @@ def query_raw_well_data(excel_file_name: str) -> pd.DataFrame:
     df_raw_well_data = pd.DataFrame([item["row"] for item in raw_well_data])
     logger.info("Found %d raw well data rows in Ganymede.", len(df_raw_well_data))
 
+    # Ganymede may contain data from multiple flow runs if the same file was
+    # re-processed. Keep only the most recent run to avoid duplicated rows.
     flow_run_ids = df_raw_well_data["__flow_run_id"].unique()
     if len(flow_run_ids) > 1:
         logger.info(
@@ -57,6 +59,8 @@ def transform_raw_well_data(df_raw_well_data: pd.DataFrame) -> pd.DataFrame:
     columns = ["well_row", "well_column", "well_id", "absorbance", "time"]
     df_kinetic_data = df_kinetic_data[columns]
 
+    # Reconstruct well_id as "A01", "B12", etc. — the original well_position
+    # from Ganymede uses inconsistent formatting across plate types.
     df_kinetic_data["well_id"] = df_kinetic_data["well_row"] + df_kinetic_data[
         "well_column"
     ].astype(str).str.zfill(2)
@@ -65,7 +69,11 @@ def transform_raw_well_data(df_raw_well_data: pd.DataFrame) -> pd.DataFrame:
 
 
 def create_plate_map(df_raw_well_data: pd.DataFrame) -> pd.DataFrame:
-    """Creates a 96- or 384-well plate map from raw well data."""
+    """Creates a 96- or 384-well plate map from raw well data.
+
+    Infers the plate format from the column count: <=12 columns → 96-well
+    (8 rows A-H), >12 columns → 384-well (16 rows A-P).
+    """
     if df_raw_well_data["column_label"].max() <= 12:
         row_labels = list("ABCDEFGH")
         column_labels = list(range(1, 13))
