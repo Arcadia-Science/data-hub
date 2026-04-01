@@ -5,10 +5,16 @@ on:
     branches:
       - staging
       - production
+    paths:
+      - 'web-app/**'
+      - '.github/workflows/lint-and-typecheck-web-app.yml'
   pull_request:
     branches:
       - staging
       - production
+    paths:
+      - 'web-app/**'
+      - '.github/workflows/lint-and-typecheck-web-app.yml'
 
 defaults:
   run:

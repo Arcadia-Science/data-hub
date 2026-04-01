@@ -1,0 +1,41 @@
+name: Lint and typecheck Python packages
+
+on:
+  push:
+    branches:
+      - staging
+      - production
+    paths:
+      - 'watcher/**'
+      - 'packages/shared/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'Makefile'
+      - '.github/workflows/lint-and-typecheck-python.yml'
+  pull_request:
+    branches:
+      - staging
+      - production
+    paths:
+      - 'watcher/**'
+      - 'packages/shared/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'Makefile'
+      - '.github/workflows/lint-and-typecheck-python.yml'
+
+jobs:
+  lint-and-typecheck-python-packages:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install dependencies
+        run: uv sync --all-packages
+
+      - name: Lint
+        run: make lint-py
+
+      - name: Type check
+        run: make typecheck-py

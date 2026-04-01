@@ -1,0 +1,27 @@
+[project]
+name = "data-hub-watcher"
+version = "0.2.0"
+requires-python = ">=3.12"
+dependencies = [
+    "click>=8.2.1",
+    "data-hub-shared",
+    "pydantic>=2.11.9",
+    "pyyaml>=6.0",
+    "watchdog>=4.0.0",
+]
+
+[project.optional-dependencies]
+windows-service = ["pywin32"]
+
+[tool.uv.sources]
+data-hub-shared = { workspace = true }
+
+[project.scripts]
+data-hub-watcher = "data_hub_watcher.cli:cli"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

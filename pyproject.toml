@@ -1,0 +1,53 @@
+[tool.uv.workspace]
+members = ["watcher", "packages/shared"]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.2.0",
+    "pyright>=1.1.408",
+    "pytest>=8.3.5",
+    "ruff>=0.11.11",
+]
+
+[tool.ruff]
+src = ["watcher/src", "packages/shared/src"]
+exclude = ["legacy"]
+line-length = 100
+indent-width = 4
+extend-include = ["*.ipynb"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F403", "F405"]
+
+[tool.ruff.lint]
+select = [
+    # flake8-bugbear
+    "B",
+    # pycodestyle error
+    "E",
+    # pyflakes
+    "F",
+    # isort
+    "I",
+    # pyupgrade
+    "UP",
+    # pycodestyle warning
+    "W",
+]
+ignore = []
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.ruff.lint.isort]
+order-by-type = true
+no-lines-before = ["future", "standard-library"]
+
+[tool.pyright]
+include = ["watcher", "packages/shared"]
+exclude = ["legacy", ".venv"]

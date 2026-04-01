@@ -1,0 +1,6 @@
+---
+description: Ensure that all code changes are checked for formatting, lint, and type errors by running `make check-all` after every update.
+alwaysApply: true
+---
+
+Run formatting, lint, and type checks using `make check-all` after ALL changes have been made.
