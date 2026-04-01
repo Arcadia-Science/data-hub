@@ -1,7 +1,18 @@
 import { db } from "@/lib/db";
 import { files, instrumentRuns, instruments } from "@/lib/db/schema";
 import type { SQL } from "drizzle-orm";
-import { and, asc, desc, eq, ilike, isNull, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  ilike,
+  inArray,
+  isNull,
+  lte,
+  sql,
+} from "drizzle-orm";
 
 // ---------------------------------------------------------------------------
 // Run lookup by natural key (instrumentId, runId) — shared across detail,
@@ -48,9 +59,11 @@ export async function lookupRunByNaturalKey(
 // ---------------------------------------------------------------------------
 
 type RunListFilters = {
-  instrumentId?: string;
+  instrumentId?: string | string[];
   source?: string;
   search?: string;
+  dateFrom?: string;
+  dateTo?: string;
   sort?: string;
   order?: string;
   page: number;
@@ -70,7 +83,14 @@ export async function buildRunListQuery(filters: RunListFilters) {
   const conditions: SQL[] = [];
 
   if (filters.instrumentId) {
-    conditions.push(eq(instrumentRuns.instrumentId, filters.instrumentId));
+    const ids = Array.isArray(filters.instrumentId)
+      ? filters.instrumentId
+      : [filters.instrumentId];
+    if (ids.length === 1) {
+      conditions.push(eq(instrumentRuns.instrumentId, ids[0]));
+    } else if (ids.length > 1) {
+      conditions.push(inArray(instrumentRuns.instrumentId, ids));
+    }
   }
 
   if (!filters.includeDeleted) {
@@ -79,6 +99,15 @@ export async function buildRunListQuery(filters: RunListFilters) {
 
   if (filters.source === "lambda" || filters.source === "watcher") {
     conditions.push(eq(instrumentRuns.source, filters.source));
+  }
+
+  if (filters.dateFrom) {
+    conditions.push(gte(instrumentRuns.createdAt, new Date(filters.dateFrom)));
+  }
+  if (filters.dateTo) {
+    const end = new Date(filters.dateTo);
+    end.setDate(end.getDate() + 1);
+    conditions.push(lte(instrumentRuns.createdAt, end));
   }
 
   if (filters.search) {
