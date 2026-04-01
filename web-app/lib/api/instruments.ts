@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { instrumentRuns, instruments, watchers } from "@/lib/db/schema";
 import { and, count, eq, isNull, sql } from "drizzle-orm";
+import { cache } from "react";
 
 export type InstrumentListItem = {
   id: string;
@@ -74,7 +75,7 @@ export type InstrumentDetail = {
   watchersOffline: number;
 };
 
-export async function getInstrumentById(
+export const getInstrumentById = cache(async function getInstrumentById(
   instrumentId: string
 ): Promise<InstrumentDetail | null> {
   const [instrument] = await db
@@ -136,4 +137,4 @@ export async function getInstrumentById(
     watchersOnline,
     watchersOffline,
   };
-}
+});
