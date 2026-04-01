@@ -1,4 +1,3 @@
-import { DashboardHeader } from "@/components/dashboard/dashboard-header";
 import {
   InstrumentCards,
   InstrumentCardsSkeleton,
@@ -56,8 +55,6 @@ export default async function DashboardPage({
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6 p-6">
-      <DashboardHeader session={session} />
-
       <Suspense fallback={<InstrumentCardsSkeleton />}>
         <InstrumentCards />
       </Suspense>

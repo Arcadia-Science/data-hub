@@ -15,6 +15,11 @@ import { personalAccessTokens } from "@/lib/db/schema";
 import { formatRelativeTime } from "@/lib/utils";
 import { desc, eq } from "drizzle-orm";
 import { KeyRound } from "lucide-react";
+import type { Metadata } from "next/types";
+
+export const metadata: Metadata = {
+  title: "Access Tokens",
+};
 
 export default async function TokensPage() {
   const session = await auth();

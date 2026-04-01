@@ -1,6 +1,14 @@
 import { SettingsNav } from "@/components/settings/settings-nav";
 import { auth } from "@/lib/auth";
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+
+export const metadata: Metadata = {
+  title: {
+    template: "%s | Settings | Data Hub",
+    default: "Settings | Data Hub",
+  },
+};
 
 export default async function SettingsLayout({
   children,
