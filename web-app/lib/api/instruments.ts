@@ -1,0 +1,139 @@
+import { db } from "@/lib/db";
+import { instrumentRuns, instruments, watchers } from "@/lib/db/schema";
+import { and, count, eq, isNull, sql } from "drizzle-orm";
+
+export type InstrumentListItem = {
+  id: string;
+  displayName: string;
+  status: "pending" | "active" | "inactive";
+  filePatterns: string[] | null;
+  runCount: number;
+  watcherCount: number;
+  createdAt: Date;
+};
+
+// Uses pre-aggregated sub-selects instead of direct joins to avoid row
+// multiplication (instruments × runs × watchers would inflate counts).
+export async function getInstrumentListWithCounts(): Promise<
+  InstrumentListItem[]
+> {
+  const runCountSq = db
+    .select({
+      instrumentId: instrumentRuns.instrumentId,
+      count: sql<number>`cast(count(*) as int)`.as("run_count"),
+    })
+    .from(instrumentRuns)
+    .where(isNull(instrumentRuns.deletedAt))
+    .groupBy(instrumentRuns.instrumentId)
+    .as("run_counts");
+
+  const watcherCountSq = db
+    .select({
+      instrumentId: watchers.instrumentId,
+      count: sql<number>`cast(count(*) as int)`.as("watcher_count"),
+    })
+    .from(watchers)
+    .where(isNull(watchers.deletedAt))
+    .groupBy(watchers.instrumentId)
+    .as("watcher_counts");
+
+  const rows = await db
+    .select({
+      id: instruments.id,
+      displayName: instruments.displayName,
+      status: instruments.status,
+      filePatterns: instruments.filePatterns,
+      createdAt: instruments.createdAt,
+      runCount: sql<number>`coalesce(${runCountSq.count}, 0)`,
+      watcherCount: sql<number>`coalesce(${watcherCountSq.count}, 0)`,
+    })
+    .from(instruments)
+    .leftJoin(runCountSq, eq(runCountSq.instrumentId, instruments.id))
+    .leftJoin(watcherCountSq, eq(watcherCountSq.instrumentId, instruments.id))
+    .orderBy(instruments.displayName);
+
+  return rows;
+}
+
+// Must match the same staleness window used in dashboard.ts so both pages
+// agree on whether a watcher is "online". A watcher is stale when its last
+// heartbeat is older than this threshold, even if its DB status is "watching".
+const HEARTBEAT_STALE_MINUTES = 5;
+
+export type InstrumentDetail = {
+  id: string;
+  displayName: string;
+  status: "pending" | "active" | "inactive";
+  filePatterns: string[] | null;
+  s3TriggerSuffix: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  runCount: number;
+  watcherCount: number;
+  watchersOnline: number;
+  watchersOffline: number;
+};
+
+export async function getInstrumentById(
+  instrumentId: string
+): Promise<InstrumentDetail | null> {
+  const [instrument] = await db
+    .select()
+    .from(instruments)
+    .where(eq(instruments.id, instrumentId))
+    .limit(1);
+
+  if (!instrument) return null;
+
+  // Fetch run count and watcher rows in parallel — watcher rows are returned
+  // individually so we can classify each as online/offline based on heartbeat.
+  const [runCountResult, watcherRows] = await Promise.all([
+    db
+      .select({ value: count() })
+      .from(instrumentRuns)
+      .where(
+        and(
+          eq(instrumentRuns.instrumentId, instrumentId),
+          isNull(instrumentRuns.deletedAt)
+        )
+      ),
+    db
+      .select({
+        status: watchers.status,
+        lastHeartbeatAt: watchers.lastHeartbeatAt,
+      })
+      .from(watchers)
+      .where(
+        and(eq(watchers.instrumentId, instrumentId), isNull(watchers.deletedAt))
+      ),
+  ]);
+
+  const staleThreshold = new Date(
+    Date.now() - HEARTBEAT_STALE_MINUTES * 60 * 1000
+  );
+
+  let watchersOnline = 0;
+  let watchersOffline = 0;
+  for (const w of watcherRows) {
+    const isOnline =
+      w.status === "watching" &&
+      w.lastHeartbeatAt &&
+      w.lastHeartbeatAt > staleThreshold;
+    if (isOnline) watchersOnline++;
+    else watchersOffline++;
+  }
+
+  return {
+    id: instrument.id,
+    displayName: instrument.displayName,
+    status: instrument.status,
+    filePatterns: instrument.filePatterns,
+    s3TriggerSuffix: instrument.s3TriggerSuffix,
+    createdAt: instrument.createdAt,
+    updatedAt: instrument.updatedAt,
+    runCount: runCountResult[0].value,
+    watcherCount: watcherRows.length,
+    watchersOnline,
+    watchersOffline,
+  };
+}

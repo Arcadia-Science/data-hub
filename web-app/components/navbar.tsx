@@ -1,4 +1,5 @@
 import { UserMenu } from "@/components/dashboard/user-menu";
+import { NavLinks } from "@/components/nav-links";
 import { signOut } from "@/lib/auth";
 import type { Session } from "next-auth";
 import Link from "next/link";
@@ -7,9 +8,12 @@ export function Navbar({ session }: { session: Session }) {
   return (
     <header className="border-b bg-background">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3">
-        <Link href="/" className="text-lg font-medium tracking-tight">
-          Data Hub
-        </Link>
+        <div className="flex items-center gap-6">
+          <Link href="/" className="text-lg font-medium tracking-tight">
+            Data Hub
+          </Link>
+          <NavLinks />
+        </div>
         <UserMenu
           user={session.user}
           signOutAction={async () => {

@@ -23,6 +23,21 @@ export const dashboardParamsCache = createSearchParamsCache(
   dashboardSearchParams
 );
 
+// Mirrors dashboardSearchParams but omits `instrument_id` (implicit from the
+// route segment) and sort/order (defaults to created_at desc).
+export const instrumentDetailSearchParams = {
+  search: parseAsString.withDefault(""),
+  date_from: parseAsString,
+  date_to: parseAsString,
+  include_deleted: parseAsBoolean.withDefault(false),
+  page: parseAsInteger.withDefault(1),
+  per_page: parseAsInteger.withDefault(25),
+};
+
+export const instrumentDetailParamsCache = createSearchParamsCache(
+  instrumentDetailSearchParams
+);
+
 export function hasActiveFilters(params: {
   search: string;
   instrument_id: string[];
