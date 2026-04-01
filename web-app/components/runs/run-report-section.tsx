@@ -37,10 +37,6 @@ export function RunReportSection({
 
   const fileMap = new Map(files.map((f) => [f.id, f]));
 
-  // Report entries are grouped for display:
-  //  - runLevel: aggregate results computed across all files (fileId is null)
-  //  - byFile: per-file parsed output, keyed by file ID for collapsible sections
-  const runLevel = reportData.filter((r) => r.fileId === null);
   const byFile = new Map<number, RunReportEntry[]>();
   for (const entry of reportData) {
     if (entry.fileId !== null) {
@@ -61,23 +57,6 @@ export function RunReportSection({
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-6">
-        {runLevel.length > 0 && (
-          <div className="flex flex-col gap-3">
-            <h3 className="text-sm font-medium">Run Analysis</h3>
-            {runLevel.map((entry) => (
-              <div key={entry.id} className="flex flex-col gap-1.5">
-                <Badge
-                  variant="outline"
-                  className="w-fit font-mono text-[10px]"
-                >
-                  {entry.dataType}
-                </Badge>
-                <ReportEntryRenderer entry={entry} />
-              </div>
-            ))}
-          </div>
-        )}
-
         {Array.from(byFile.entries()).map(([fileId, entries]) => {
           const file = fileMap.get(fileId);
           return (

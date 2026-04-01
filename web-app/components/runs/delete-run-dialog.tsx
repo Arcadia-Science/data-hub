@@ -40,7 +40,8 @@ export function DeleteRunDialog({
   const requiresConfirmation = hasReportData;
   const isConfirmed = !requiresConfirmation || confirmValue === runId;
 
-  function handleDelete() {
+  function handleDelete(e: React.MouseEvent) {
+    e.preventDefault();
     startTransition(async () => {
       const res = await fetch(
         `/api/v1/instruments/${instrumentId}/runs/${runId}`,

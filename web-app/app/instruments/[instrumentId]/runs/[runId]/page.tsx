@@ -78,7 +78,7 @@ export default async function RunDetailPage({ params }: Props) {
         isDeleted={isDeleted}
       />
 
-      {(fileReportData.length > 0 || hasReportData) && (
+      {fileReportData.length > 0 && (
         <RunReportSection reportData={fileReportData} files={files} />
       )}
 

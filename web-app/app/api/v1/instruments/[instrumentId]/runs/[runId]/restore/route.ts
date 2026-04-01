@@ -55,10 +55,18 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
   const restored = await lookupRunByNaturalKey(instrumentId, runId);
 
+  if (!restored) {
+    return apiError(
+      404,
+      NOT_FOUND,
+      `Run '${runId}' could not be found after restore`
+    );
+  }
+
   return Response.json({
-    id: restored!.id,
-    instrument_id: restored!.instrumentId,
-    run_id: restored!.runId,
-    deleted_at: restored!.deletedAt,
+    id: restored.id,
+    instrument_id: restored.instrumentId,
+    run_id: restored.runId,
+    deleted_at: restored.deletedAt,
   });
 }

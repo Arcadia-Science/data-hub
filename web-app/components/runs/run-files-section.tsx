@@ -1,12 +1,23 @@
 "use client";
 
 import { FileCard } from "@/components/runs/file-card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import type { RunFile } from "@/lib/api/instrument-runs";
-import { Loader2, Upload, X } from "lucide-react";
+import { CheckSquare, Loader2, Upload, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -52,6 +63,10 @@ export function RunFilesSection({
     [selectableFiles, selectedIds]
   );
 
+  const allDetectedSelected =
+    selectableFiles.length > 0 &&
+    selectableFiles.every((f) => selectedIds.has(f.id));
+
   function toggleFile(fileId: number) {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -59,6 +74,10 @@ export function RunFilesSection({
       else next.add(fileId);
       return next;
     });
+  }
+
+  function selectAllDetected() {
+    setSelectedIds(new Set(selectableFiles.map((f) => f.id)));
   }
 
   function handleBulkUpload() {
@@ -95,7 +114,10 @@ export function RunFilesSection({
           fetch(`/api/v1/files/${fid}`, { method: "DELETE" })
         )
       );
-      const failed = results.filter((r) => r.status === "rejected").length;
+      const failed = results.filter(
+        (r) =>
+          r.status === "rejected" || (r.status === "fulfilled" && !r.value.ok)
+      ).length;
       if (failed > 0) {
         toast.error(`${failed} file(s) failed to dismiss`);
       } else {
@@ -118,22 +140,37 @@ export function RunFilesSection({
                 ` (+${dismissedFiles.length} dismissed)`}
             </span>
           </span>
-          {dismissedFiles.length > 0 && (
-            <div className="flex items-center gap-2">
-              <Label
-                htmlFor="show-dismissed"
-                className="text-xs font-normal text-muted-foreground"
-              >
-                Show dismissed
-              </Label>
-              <Switch
-                id="show-dismissed"
-                size="sm"
-                checked={showDismissed}
-                onCheckedChange={setShowDismissed}
-              />
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            {!isDeleted &&
+              selectableFiles.length > 0 &&
+              !allDetectedSelected && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 gap-1 text-xs"
+                  onClick={selectAllDetected}
+                >
+                  <CheckSquare className="size-3" />
+                  Select all
+                </Button>
+              )}
+            {dismissedFiles.length > 0 && (
+              <>
+                <Label
+                  htmlFor="show-dismissed"
+                  className="text-xs font-normal text-muted-foreground"
+                >
+                  Show dismissed
+                </Label>
+                <Switch
+                  id="show-dismissed"
+                  size="sm"
+                  checked={showDismissed}
+                  onCheckedChange={setShowDismissed}
+                />
+              </>
+            )}
+          </div>
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-2">
@@ -157,16 +194,36 @@ export function RunFilesSection({
                 )}
                 Upload selected
               </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 gap-1 text-xs text-muted-foreground"
-                onClick={handleBulkDismiss}
-                disabled={isPending}
-              >
-                <X className="size-3" />
-                Dismiss selected
-              </Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 gap-1 text-xs text-muted-foreground"
+                    disabled={isPending}
+                  >
+                    <X className="size-3" />
+                    Dismiss selected
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>
+                      Dismiss {selectedDetectedIds.length} file(s)?
+                    </AlertDialogTitle>
+                    <AlertDialogDescription>
+                      The selected files will be soft-deleted. The watcher will
+                      skip them on future scans.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleBulkDismiss}>
+                      Dismiss
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
           </div>
         )}

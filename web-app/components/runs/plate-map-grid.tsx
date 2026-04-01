@@ -3,6 +3,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { Fragment } from "react";
 
 type WellData = { well: string; value: unknown };
 
@@ -77,11 +78,8 @@ export function PlateMapGrid({ data }: { data: unknown }) {
 
         {/* Data rows */}
         {rowLabels.map((rowLabel, ri) => (
-          <>
-            <div
-              key={`row-${rowLabel}`}
-              className="flex items-center justify-center py-1 text-xs font-medium text-muted-foreground"
-            >
+          <Fragment key={rowLabel}>
+            <div className="flex items-center justify-center py-1 text-xs font-medium text-muted-foreground">
               {rowLabel}
             </div>
             {colLabels.map((_, ci) => {
@@ -115,7 +113,7 @@ export function PlateMapGrid({ data }: { data: unknown }) {
                 </Tooltip>
               );
             })}
-          </>
+          </Fragment>
         ))}
       </div>
     </div>
