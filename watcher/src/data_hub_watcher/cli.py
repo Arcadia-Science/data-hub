@@ -16,10 +16,13 @@ from data_hub_watcher.api_client import ApiError, DataHubClient
 from data_hub_watcher.config_io import config_checksum, load_config, save_config
 from data_hub_watcher.constants import (
     API_URLS,
+    DEFAULT_CONFIG_DIR,
     DEFAULT_PREFIX_PATTERN,
     DEFAULT_STABILITY_PERIOD_SECONDS,
     HEARTBEAT_INTERVAL_SECONDS,
+    PRUNE_DAYS,
     S3_BUCKET_TEMPLATE,
+    STATE_DB_FILENAME,
     resolve_config_path,
 )
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
@@ -29,6 +32,10 @@ from data_hub_watcher.models import (
     RunDetectionConfig,
     WatcherConfig,
 )
+from data_hub_watcher.monitor import FileMonitor
+from data_hub_watcher.run_detector import RunDetector
+from data_hub_watcher.state import StateDB
+from data_hub_watcher.uploader import Uploader
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +87,19 @@ def _load_and_client(ctx: click.Context) -> tuple[WatcherConfig, DataHubClient, 
     cfg = load_config(path)
     client = _make_client(cfg.environment)
     return cfg, client, path
+
+
+def _setup_file_logging() -> None:
+    """Add a RotatingFileHandler to the root logger (``~/.data-hub/watcher.log``)."""
+    from logging.handlers import RotatingFileHandler
+
+    log_path = DEFAULT_CONFIG_DIR / "watcher.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    handler = RotatingFileHandler(
+        str(log_path), maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
+    )
+    handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+    logging.getLogger().addHandler(handler)
 
 
 # ---------------------------------------------------------------------------
@@ -457,9 +477,55 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
         )
         return
 
-    # Step 3: Start heartbeat + event reporter
+    # Step 3: File logging
+    _setup_file_logging()
+
+    # Step 4: State DB + pruning
+    db_path = DEFAULT_CONFIG_DIR / STATE_DB_FILENAME
+    state_db = StateDB(db_path)
+    state_db.prune_uploaded_files(PRUNE_DAYS)
+
+    # Step 5: Core services
     counters = WatcherCounters()
     reporter = EventReporter(client, cfg.watcher_id)
+
+    is_auto = inst.upload_mode == "auto"
+
+    uploader = Uploader(
+        client=client,
+        state_db=state_db,
+        event_reporter=reporter,
+        counters=counters,
+        instrument_id=inst.id,
+        watcher_id=cfg.watcher_id,
+        environment=cfg.environment,
+        watch_directory=inst.watch_directory,
+    )
+
+    detector = RunDetector(
+        method=inst.run_detection.method,
+        prefix_pattern=inst.run_detection.prefix_pattern,
+        instrument_id=inst.id,
+        watcher_id=cfg.watcher_id,
+        client=client,
+        state_db=state_db,
+        event_reporter=reporter,
+        counters=counters,
+        upload_callback=uploader.upload_files if is_auto else None,
+        watch_directory=inst.watch_directory,
+    )
+
+    is_recursive = inst.run_detection.method == "directory" and not is_auto
+    monitor = FileMonitor(
+        watch_directory=inst.watch_directory,
+        file_patterns=inst.file_patterns,
+        stability_period=inst.stability_period_seconds,
+        on_stable_file=detector.on_stable_file,
+        state_db=state_db,
+        recursive=is_recursive,
+    )
+
+    # Step 6: Heartbeat (with manual-mode queue polling)
     heartbeat = HeartbeatLoop(
         client=client,
         watcher_id=cfg.watcher_id,
@@ -468,6 +534,18 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
         counters=counters,
     )
 
+    if not is_auto:
+        _original_tick = heartbeat._tick
+
+        def _tick_with_upload_poll() -> None:
+            _original_tick()
+            try:
+                uploader.poll_upload_queue()
+            except Exception:
+                logger.exception("Upload queue poll failed")
+
+        heartbeat._tick = _tick_with_upload_poll  # type: ignore[assignment]
+
     reporter.queue_event(
         WatcherEvent(
             event_type=EventType.WATCHER_STARTED,
@@ -475,13 +553,19 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
         )
     )
 
+    # Step 7: Crash recovery — retry any unreported runs from a previous session
+    detector.retry_unreported_runs()
+
+    # Step 8: Start everything
     heartbeat.start()
+    monitor.start()
+
     click.echo(f"Watcher is running (instrument={inst.id}, dir={inst.watch_directory})…")
     click.echo("Press Ctrl+C to stop.")
 
-    # Placeholder: file monitoring loop (FILE_MONITORING.md scope)
     def _shutdown(signum: int, frame: Any) -> None:
         click.echo("\nShutting down…")
+        monitor.stop()
         reporter.queue_event(
             WatcherEvent(
                 event_type=EventType.WATCHER_STOPPED,
@@ -490,6 +574,7 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
         )
         heartbeat.stop()
         reporter.flush()
+        state_db.close()
         raise SystemExit(0)
 
     signal.signal(signal.SIGINT, _shutdown)
@@ -529,6 +614,21 @@ def upload(ctx: click.Context, file_path: str | None, run_id: str | None, dry_ru
     environment = cfg.environment
     s3_bucket = S3_BUCKET_TEMPLATE.format(environment=environment)
 
+    db_path = DEFAULT_CONFIG_DIR / STATE_DB_FILENAME
+    state_db = StateDB(db_path)
+    counters = WatcherCounters()
+    reporter = EventReporter(client, cfg.watcher_id)
+    uploader = Uploader(
+        client=client,
+        state_db=state_db,
+        event_reporter=reporter,
+        counters=counters,
+        instrument_id=inst.id,
+        watcher_id=cfg.watcher_id,
+        environment=cfg.environment,
+        watch_directory=inst.watch_directory,
+    )
+
     if file_path:
         fp = Path(file_path).resolve()
         if fp.is_relative_to(inst.watch_directory):
@@ -540,23 +640,42 @@ def upload(ctx: click.Context, file_path: str | None, run_id: str | None, dry_ru
         if dry_run:
             click.echo(f"[dry-run] Would upload {fp}")
             click.echo(f"  → s3://{s3_bucket}/{s3_key}")
+            state_db.close()
             return
 
-        # Actual upload deferred to UPLOAD.md scope
-        click.echo("Upload logic not yet implemented (UPLOAD.md scope).")
-        click.echo(f"  File:   {fp}")
-        click.echo(f"  Bucket: {s3_bucket}")
-        click.echo(f"  Key:    {s3_key}")
+        from data_hub_watcher.monitor import file_sha256
+
+        sha = file_sha256(fp)
+        if state_db.is_uploaded(fp.name, sha):
+            click.echo(f"File already uploaded: {fp.name}")
+            state_db.close()
+            return
+
+        from data_hub_shared.s3_utils import get_s3_client
+        from data_hub_shared.s3_utils import upload_file as s3_upload
+
+        s3_uri = f"s3://{s3_bucket}/{s3_key}"
+        click.echo(f"Uploading {fp.name} → {s3_uri}")
+        try:
+            s3_upload(fp, s3_uri, s3_client=get_s3_client())
+        except Exception as exc:
+            state_db.close()
+            raise click.ClickException(f"Upload failed: {exc}") from exc
+
+        state_db.record_upload(fp.name, sha, s3_key)
+        click.echo(click.style("✓ Upload complete.", fg="green"))
+        state_db.close()
     else:
-        # Queue-based upload
         click.echo("Fetching upload queue…")
         try:
             queue = client.get_upload_queue(cfg.watcher_id)
         except ApiError as exc:
+            state_db.close()
             raise click.ClickException(f"Failed to fetch upload queue: {exc.message}") from exc
 
         if not queue.files:
             click.echo("Upload queue is empty.")
+            state_db.close()
             return
 
         click.echo(f"{len(queue.files)} file(s) in queue:")
@@ -565,9 +684,13 @@ def upload(ctx: click.Context, file_path: str | None, run_id: str | None, dry_ru
 
         if dry_run:
             click.echo("[dry-run] No files uploaded.")
+            state_db.close()
             return
 
-        click.echo("Upload logic not yet implemented (UPLOAD.md scope).")
+        uploader.poll_upload_queue()
+        reporter.flush()
+        click.echo(click.style(f"✓ Processed {len(queue.files)} file(s).", fg="green"))
+        state_db.close()
 
 
 # ---------------------------------------------------------------------------
@@ -587,35 +710,77 @@ def _windows_only() -> None:
 
 
 @service.command("install")
-def service_install() -> None:
+@click.pass_context
+def service_install(ctx: click.Context) -> None:
     """Install the watcher as a Windows service."""
     _windows_only()
-    click.echo("Service install not yet implemented (WINDOWS_SERVICE.md scope).")
+    # Validate config before installing
+    path = _resolve_path(ctx)
+    load_config(path)
+
+    from data_hub_watcher.service import install_service
+
+    try:
+        install_service()
+        click.echo(click.style("✓ Service installed.", fg="green"))
+    except Exception as exc:
+        raise click.ClickException(f"Failed to install service: {exc}") from exc
 
 
 @service.command("uninstall")
 def service_uninstall() -> None:
     """Uninstall the watcher Windows service."""
     _windows_only()
-    click.echo("Service uninstall not yet implemented (WINDOWS_SERVICE.md scope).")
+
+    from data_hub_watcher.service import uninstall_service
+
+    try:
+        uninstall_service()
+        click.echo(click.style("✓ Service removed.", fg="green"))
+    except Exception as exc:
+        raise click.ClickException(f"Failed to remove service: {exc}") from exc
 
 
 @service.command("start")
-def service_start() -> None:
+def service_start_cmd() -> None:
     """Start the watcher Windows service."""
     _windows_only()
-    click.echo("Service start not yet implemented (WINDOWS_SERVICE.md scope).")
+
+    from data_hub_watcher.service import start_service
+
+    try:
+        start_service()
+        click.echo(click.style("✓ Service started.", fg="green"))
+    except Exception as exc:
+        raise click.ClickException(f"Failed to start service: {exc}") from exc
 
 
 @service.command("stop")
-def service_stop() -> None:
+def service_stop_cmd() -> None:
     """Stop the watcher Windows service."""
     _windows_only()
-    click.echo("Service stop not yet implemented (WINDOWS_SERVICE.md scope).")
+
+    from data_hub_watcher.service import stop_service
+
+    try:
+        stop_service()
+        click.echo(click.style("✓ Service stopped.", fg="green"))
+    except Exception as exc:
+        raise click.ClickException(f"Failed to stop service: {exc}") from exc
 
 
 @service.command("status")
-def service_status() -> None:
+def service_status_cmd() -> None:
     """Show the watcher Windows service status."""
     _windows_only()
-    click.echo("Service status not yet implemented (WINDOWS_SERVICE.md scope).")
+
+    from data_hub_watcher.service import query_service_status
+
+    try:
+        info = query_service_status()
+        click.echo(f"Service: {info['service_name']}")
+        click.echo(f"  State: {info['state']}")
+        if info.get("pid"):
+            click.echo(f"  PID:   {info['pid']}")
+    except Exception as exc:
+        raise click.ClickException(f"Failed to query service status: {exc}") from exc

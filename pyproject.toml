@@ -1,5 +1,5 @@
 [tool.uv.workspace]
-members = ["watcher"]
+members = ["watcher", "packages/shared"]
 
 [dependency-groups]
 dev = [
@@ -10,7 +10,7 @@ dev = [
 ]
 
 [tool.ruff]
-src = ["watcher/src"]
+src = ["watcher/src", "packages/shared/src"]
 exclude = ["legacy"]
 line-length = 100
 indent-width = 4
@@ -49,5 +49,5 @@ order-by-type = true
 no-lines-before = ["future", "standard-library"]
 
 [tool.pyright]
-include = ["watcher"]
+include = ["watcher", "packages/shared"]
 exclude = ["legacy", ".venv"]
