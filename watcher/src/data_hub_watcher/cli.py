@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import logging
 import os
 import platform
@@ -214,7 +213,7 @@ def init(ctx: click.Context) -> None:
     _push_config_to_api(client, watcher_id, path)
 
     click.echo(click.style("\n✓ Setup complete!", fg="green", bold=True))
-    click.echo(f"  Start watching with: data-hub-watcher watch")
+    click.echo("  Start watching with: data-hub-watcher watch")
 
 
 def _register_new_instrument(client: DataHubClient) -> Any:
@@ -288,7 +287,7 @@ def config_show(ctx: click.Context) -> None:
     click.echo(f"  Version:     {cfg.version}")
     click.echo(f"  Environment: {cfg.environment}")
     click.echo(f"  Watcher ID:  {cfg.watcher_id or '(not registered)'}")
-    click.echo(f"  Instrument:")
+    click.echo("  Instrument:")
     click.echo(f"    ID:              {inst.id}")
     click.echo(f"    Watch directory: {inst.watch_directory}")
     click.echo(f"    File patterns:   {', '.join(inst.file_patterns)}")
@@ -529,7 +528,7 @@ def upload(ctx: click.Context, file_path: str | None, run_id: str | None, dry_ru
             return
 
         # Actual upload deferred to UPLOAD.md scope
-        click.echo(f"Upload logic not yet implemented (UPLOAD.md scope).")
+        click.echo("Upload logic not yet implemented (UPLOAD.md scope).")
         click.echo(f"  File:   {fp}")
         click.echo(f"  Bucket: {s3_bucket}")
         click.echo(f"  Key:    {s3_key}")
