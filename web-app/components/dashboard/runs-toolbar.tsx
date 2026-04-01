@@ -37,6 +37,9 @@ type Instrument = {
 };
 
 export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
+  // shallow: false triggers a server-side re-fetch on every filter change so
+  // the table data stays in sync with the URL. throttleMs debounces rapid
+  // keystrokes (e.g. search typing) to avoid excessive server round-trips.
   const [filters, setFilters] = useQueryStates(dashboardSearchParams, {
     shallow: false,
     throttleMs: 300,
@@ -46,6 +49,7 @@ export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
 
   const hasFilters = hasActiveFilters(filters);
 
+  // Reset to page 1 whenever filters change to avoid landing on an empty page.
   function toggleInstrument(id: string) {
     const current = filters.instrument_id;
     const next = current.includes(id)

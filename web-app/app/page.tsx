@@ -27,9 +27,13 @@ export default async function DashboardPage({
 
   const params = dashboardParamsCache.parse(await searchParams);
 
+  // Convert empty array to undefined so buildRunListQuery skips the filter
+  // and returns runs across all instruments (the unfiltered default).
   const instrumentIds =
     params.instrument_id.length > 0 ? params.instrument_id : undefined;
 
+  // Fetch the instrument list (for the toolbar combobox) and the filtered run
+  // page in parallel since neither depends on the other's result.
   const [instruments, runResult] = await Promise.all([
     getInstruments(),
     buildRunListQuery({

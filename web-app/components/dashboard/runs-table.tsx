@@ -29,6 +29,8 @@ type RunRow = {
   files_pending_upload: number;
 };
 
+// Renders at most 3 key-value pairs from the run's freeform JSON metadata.
+// This keeps the table column compact; a detail view can show the full object.
 function MetadataSummary({ metadata }: { metadata: unknown }) {
   if (!metadata || typeof metadata !== "object") return null;
   const entries = Object.entries(metadata as Record<string, unknown>).slice(

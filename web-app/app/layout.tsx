@@ -48,6 +48,7 @@ export default async function RootLayout({
           <ThemeProvider>
             <NuqsAdapter>
               <TooltipProvider>
+                {/* Hide the navbar on unauthenticated routes (e.g. /login) */}
                 {session && <Navbar session={session} />}
                 {children}
                 <Toaster />

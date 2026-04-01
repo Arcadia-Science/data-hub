@@ -107,6 +107,8 @@ export async function buildRunListQuery(filters: RunListFilters) {
   if (filters.dateFrom) {
     conditions.push(gte(instrumentRuns.createdAt, new Date(filters.dateFrom)));
   }
+  // dateTo is a date string (e.g. "2026-03-28") without a time component.
+  // Advance by one day so the filter is inclusive of the entire selected day.
   if (filters.dateTo) {
     const end = new Date(filters.dateTo);
     end.setDate(end.getDate() + 1);
@@ -114,6 +116,7 @@ export async function buildRunListQuery(filters: RunListFilters) {
   }
 
   if (filters.search) {
+    // Escape LIKE wildcards so user input is treated as literal text.
     // TODO: add a pg_trgm GIN index on instrument_runs.run_id for performant ilike
     const escaped = filters.search
       .replace(/\\/g, "\\\\")

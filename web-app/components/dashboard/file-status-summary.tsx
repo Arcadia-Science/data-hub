@@ -21,6 +21,8 @@ export function FileStatusSummary({
   const allDone = filesCompleted === fileCount;
   const hasFailed = filesFailed > 0;
 
+  // Badge priority: failed (red) > all done (green) > in-progress (grey).
+  // A single failure overrides an otherwise-complete run to draw attention.
   let variant: "default" | "destructive" | "secondary" = "secondary";
   if (allDone) variant = "default";
   if (hasFailed) variant = "destructive";

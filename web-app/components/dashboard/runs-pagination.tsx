@@ -12,6 +12,7 @@ type PaginationData = {
 };
 
 export function RunsPagination({ pagination }: { pagination: PaginationData }) {
+  // shallow: false ensures page changes trigger a server re-fetch for new data.
   const [page, setPage] = useQueryState(
     "page",
     parseAsInteger.withDefault(1).withOptions({ shallow: false })
