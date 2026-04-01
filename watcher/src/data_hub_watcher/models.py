@@ -1,4 +1,5 @@
 from __future__ import annotations
+import fnmatch
 import logging
 import re
 from datetime import datetime
@@ -82,8 +83,20 @@ class WatcherConfig(BaseModel):
         if not self.instrument.enabled:
             logger.warning("Instrument %r is disabled in config", self.instrument.id)
         watch_dir = self.instrument.watch_directory
-        if watch_dir.exists() and not any(watch_dir.iterdir()):
-            logger.warning("Watch directory is empty: %s", watch_dir)
+        if watch_dir.exists():
+            patterns = self.instrument.file_patterns
+            has_match = any(
+                fnmatch.fnmatch(entry.name, pat)
+                for entry in watch_dir.iterdir()
+                if entry.is_file()
+                for pat in patterns
+            )
+            if not has_match:
+                logger.warning(
+                    "Watch directory %s contains no files matching patterns %s",
+                    watch_dir,
+                    patterns,
+                )
         return self
 
 
@@ -138,6 +151,15 @@ class EventsResponse(BaseModel):
     received: int
 
 
+class RunFileResponse(BaseModel):
+    model_config = _API_MODEL_CONFIG
+
+    id: int
+    filename: str
+    relative_path: str | None = None
+    status: str | None = None
+
+
 class RunResponse(BaseModel):
     model_config = _API_MODEL_CONFIG
 
@@ -145,6 +167,7 @@ class RunResponse(BaseModel):
     instrument_id: str
     run_id: str
     source: Literal["lambda", "watcher"]
+    files: list[RunFileResponse] = Field(default_factory=list)
 
 
 class RunDetailResponse(BaseModel):

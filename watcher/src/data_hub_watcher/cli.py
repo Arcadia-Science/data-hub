@@ -1,4 +1,5 @@
 from __future__ import annotations
+import fnmatch
 import logging
 import os
 import platform
@@ -237,7 +238,7 @@ def init(ctx: click.Context) -> None:
     click.echo(f"Config saved to {path}")
 
     # 11. Push config to API
-    _push_config_to_api(client, watcher_id, path)
+    _push_config_to_api(client, watcher_id, path, trigger="init")
 
     click.echo(click.style("\n✓ Setup complete!", fg="green", bold=True))
     click.echo("  Start watching with: data-hub-watcher watch")
@@ -281,17 +282,111 @@ def _preview_prefix_pattern(pattern: str, directory: Path) -> None:
         click.echo("  (no matching files found for preview)")
 
 
-def _push_config_to_api(client: DataHubClient, watcher_id: str, path: Path) -> None:
+def _push_config_to_api(
+    client: DataHubClient,
+    watcher_id: str,
+    path: Path,
+    *,
+    trigger: str = "init",
+    reporter: EventReporter | None = None,
+) -> None:
     """Push config YAML and checksum to the API."""
     try:
         yaml_content = path.read_text(encoding="utf-8")
         checksum = config_checksum(path)
         client.push_config(watcher_id, yaml_content, checksum)
         click.echo("Config synced to Data Hub.")
+        if reporter is not None:
+            reporter.queue_event(
+                WatcherEvent(
+                    event_type=EventType.CONFIG_SYNCED,
+                    message=f"Config synced (trigger={trigger})",
+                    details={"trigger": trigger},
+                )
+            )
     except ApiError as exc:
         click.echo(
             click.style(f"Warning: could not sync config to API: {exc.message}", fg="yellow")
         )
+
+
+def _dry_run_scan(cfg: WatcherConfig) -> None:
+    """Scan the watch directory and log what ``watch`` would do, without side effects."""
+    inst = cfg.instrument
+    is_auto = inst.upload_mode == "auto"
+    is_recursive = inst.run_detection.method == "directory" and not is_auto
+    watch_dir = inst.watch_directory
+    s3_bucket = S3_BUCKET_TEMPLATE.format(environment=cfg.environment)
+
+    prefix_re: re.Pattern[str] | None = None
+    if inst.run_detection.method == "prefix" and inst.run_detection.prefix_pattern:
+        prefix_re = re.compile(inst.run_detection.prefix_pattern)
+
+    iterator = watch_dir.rglob("*") if is_recursive else watch_dir.iterdir()
+    matched: list[Path] = []
+    for entry in sorted(iterator):
+        if not entry.is_file():
+            continue
+        if not any(fnmatch.fnmatch(entry.name, pat) for pat in inst.file_patterns):
+            continue
+        matched.append(entry)
+
+    if not matched:
+        click.echo(f"\nNo matching files found in {watch_dir}")
+        return
+
+    runs: dict[str, list[Path]] = {}
+    unmatched: list[Path] = []
+    for path in matched:
+        run_id = _extract_run_id_for_dry_run(path, inst.run_detection.method, prefix_re, watch_dir)
+        if run_id is None:
+            unmatched.append(path)
+        else:
+            runs.setdefault(run_id, []).append(path)
+
+    click.echo(f"\nDetected {len(matched)} file(s) in {watch_dir}:")
+
+    for run_id in sorted(runs):
+        files = runs[run_id]
+        click.echo(f"\n  Run {click.style(run_id, bold=True)} ({len(files)} file(s)):")
+        for path in files:
+            s3_key = f"{inst.id}/{run_id}/{path.name}"
+            click.echo(f"    {path.name}")
+            click.echo(f"      → s3://{s3_bucket}/{s3_key}")
+
+    if unmatched:
+        click.echo(f"\n  {len(unmatched)} file(s) did not match any run pattern:")
+        for path in unmatched:
+            click.echo(f"    {path.name}")
+
+    mode_label = (
+        "auto (files would be uploaded immediately)"
+        if is_auto
+        else "manual (runs would be reported without uploading)"
+    )
+    click.echo(f"\nUpload mode: {mode_label}")
+    click.echo(f"Total: {len(runs)} run(s), {sum(len(f) for f in runs.values())} grouped file(s)")
+
+
+def _extract_run_id_for_dry_run(
+    path: Path, method: str, prefix_re: re.Pattern[str] | None, watch_dir: Path
+) -> str | None:
+    """Extract a run ID from *path* using the same logic as ``RunDetector``."""
+    if method == "prefix":
+        if prefix_re is None:
+            return None
+        m = prefix_re.match(path.name)
+        if m and m.group(1):
+            return m.group(1)
+        return None
+    try:
+        rel = path.relative_to(watch_dir)
+    except ValueError:
+        return None
+    parts = rel.parts
+    if len(parts) < 2:
+        return None
+    return parts[0]
 
 
 # ---------------------------------------------------------------------------
@@ -403,18 +498,21 @@ def config_edit(ctx: click.Context) -> None:
 
     if cfg.watcher_id:
         client = _make_client(cfg.environment)
-        _push_config_to_api(client, cfg.watcher_id, path)
+        _push_config_to_api(client, cfg.watcher_id, path, trigger="edit")
 
 
 @config.command("open")
+@click.option(
+    "--editor", "editor_override", default=None, help="Editor command (e.g. --editor code)."
+)
 @click.pass_context
-def config_open(ctx: click.Context) -> None:
+def config_open(ctx: click.Context, editor_override: str | None) -> None:
     """Open the config file in your editor, then re-validate."""
     path = _resolve_path(ctx)
     if not path.exists():
         raise click.ClickException(f"Config file not found: {path}")
 
-    editor = os.environ.get("EDITOR", os.environ.get("VISUAL"))
+    editor = editor_override or os.environ.get("EDITOR", os.environ.get("VISUAL"))
     if editor:
         subprocess.call([editor, str(path)])
     else:
@@ -428,7 +526,7 @@ def config_open(ctx: click.Context) -> None:
 
     if cfg.watcher_id:
         client = _make_client(cfg.environment)
-        _push_config_to_api(client, cfg.watcher_id, path)
+        _push_config_to_api(client, cfg.watcher_id, path, trigger="open")
 
 
 @config.command("path")
@@ -472,12 +570,13 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
     remote = client.get_config_checksum(cfg.watcher_id)
     if remote is None or remote.config_checksum != local_checksum:
         click.echo("Syncing config to Data Hub…")
-        _push_config_to_api(client, cfg.watcher_id, path)
+        _push_config_to_api(client, cfg.watcher_id, path, trigger="startup")
 
     if dry_run:
+        _dry_run_scan(cfg)
         click.echo(
             click.style(
-                "✓ Dry run complete. Config is valid, API reachable, instrument active.",
+                "\n✓ Dry run complete. Config is valid, API reachable, instrument active.",
                 fg="green",
             )
         )
@@ -540,6 +639,9 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
         watcher_id=cfg.watcher_id,
         interval_seconds=HEARTBEAT_INTERVAL_SECONDS,
         event_reporter=reporter,
+        instrument_id=inst.id,
+        watch_directory=str(inst.watch_directory),
+        upload_mode=inst.upload_mode,
         counters=counters,
     )
 
@@ -609,7 +711,16 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
 @click.option("--dry-run", is_flag=True, help="Log what would be uploaded without uploading.")
 @click.pass_context
 def upload(ctx: click.Context, file_path: str | None, run_id: str | None, dry_run: bool) -> None:
-    """Upload files to Data Hub (manual trigger)."""
+    """Upload files to Data Hub (manual trigger).
+
+    One-shot mode: pass both --file and --run-id to upload a single file.
+    Queue mode:    omit both to process the server-side upload queue.
+    """
+    if file_path and not run_id:
+        raise click.ClickException("--run-id is required when --file is specified.")
+    if run_id and not file_path:
+        raise click.ClickException("--file is required when --run-id is specified.")
+
     cfg, client, path = _load_and_client(ctx)
     inst = cfg.instrument
 
@@ -652,7 +763,7 @@ def upload(ctx: click.Context, file_path: str | None, run_id: str | None, dry_ru
             rel = fp.relative_to(inst.watch_directory)
         else:
             rel = Path(fp.name)
-        s3_key = f"{inst.id}/{run_id or 'unassigned'}/{rel}"
+        s3_key = f"{inst.id}/{run_id}/{rel}"
 
         if dry_run:
             click.echo(f"[dry-run] Would upload {fp}")
@@ -722,8 +833,8 @@ def service() -> None:
 
 def _windows_only() -> None:
     if sys.platform != "win32":
-        click.echo("Windows Service management is only available on Windows.")
-        raise SystemExit(0)
+        click.echo("Error: Windows Service management is only available on Windows.", err=True)
+        raise SystemExit(1)
 
 
 @service.command("install")

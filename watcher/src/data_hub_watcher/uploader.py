@@ -89,7 +89,7 @@ class Uploader:
         (auto mode only).
         """
         for info in files:
-            self._upload_single(info.path, run_id, file_id=None)
+            self._upload_single(info.path, run_id, file_id=info.file_id)
 
         self._state_db.record_run_uploaded(run_id)
 
@@ -138,9 +138,9 @@ class Uploader:
 
         Returns ``True`` on success, ``False`` after all retries exhausted.
 
-        ``file_id`` is ``None`` in auto mode (file records are created
-        server-side during run reporting) and set in manual mode (the server
-        already has a file record and expects a PATCH with S3 metadata).
+        ``file_id`` is set when a file record exists server-side (created
+        during run reporting or present in the upload queue).  Only ``None``
+        if the response did not include file IDs.
         """
         s3_key = f"{self._instrument_id}/{run_id}/{path.name}"
         s3_uri = f"s3://{self._s3_bucket}/{s3_key}"

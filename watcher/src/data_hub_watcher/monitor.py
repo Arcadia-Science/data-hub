@@ -46,6 +46,7 @@ class _PendingFile:
     size: int
     mtime: float
     first_seen: float = field(default_factory=time.monotonic)
+    last_changed: float = field(default_factory=time.monotonic)
 
 
 class _EventHandler(FileSystemEventHandler):
@@ -198,8 +199,10 @@ class FileMonitor:
                     path=path, size=stat.st_size, mtime=stat.st_mtime
                 )
             else:
-                existing.size = stat.st_size
-                existing.mtime = stat.st_mtime
+                if stat.st_size != existing.size or stat.st_mtime != existing.mtime:
+                    existing.size = stat.st_size
+                    existing.mtime = stat.st_mtime
+                    existing.last_changed = time.monotonic()
 
     def _stability_loop(self) -> None:
         """Periodically check pending files for stability or timeout."""
@@ -226,18 +229,17 @@ class FileMonitor:
                     del self._pending[path]
                     continue
 
-                # File is still being written — reset the snapshot but keep
-                # the original first_seen time for timeout calculation.
                 if stat.st_size != pf.size or stat.st_mtime != pf.mtime:
                     pf.size = stat.st_size
                     pf.mtime = stat.st_mtime
+                    pf.last_changed = now
                     continue
 
-                elapsed = now - pf.first_seen
-                if elapsed >= self._stability_period:
+                elapsed_since_change = now - pf.last_changed
+                if elapsed_since_change >= self._stability_period:
                     stable.append(path)
                     del self._pending[path]
-                elif elapsed >= MAX_STABILITY_WAIT_SECONDS:
+                elif (now - pf.first_seen) >= MAX_STABILITY_WAIT_SECONDS:
                     timed_out.append(path)
                     del self._pending[path]
 

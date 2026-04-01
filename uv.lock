@@ -171,10 +171,14 @@ version = "0.1.0"
 source = { editable = "packages/shared" }
 dependencies = [
     { name = "boto3" },
+    { name = "requests" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "boto3", specifier = ">=1.35" }]
+requires-dist = [
+    { name = "boto3", specifier = ">=1.35" },
+    { name = "requests", specifier = ">=2.31" },
+]
 
 [[package]]
 name = "data-hub-watcher"
@@ -185,7 +189,6 @@ dependencies = [
     { name = "data-hub-shared" },
     { name = "pydantic" },
     { name = "pyyaml" },
-    { name = "requests" },
     { name = "watchdog" },
 ]
 
@@ -201,7 +204,6 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.11.9" },
     { name = "pywin32", marker = "extra == 'windows-service'" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "requests", specifier = ">=2.32" },
     { name = "watchdog", specifier = ">=4.0.0" },
 ]
 provides-extras = ["windows-service"]

@@ -28,6 +28,7 @@ class FileInfo:
     path: Path
     filename: str
     size_bytes: int
+    file_id: int | None = None
 
 
 @dataclass
@@ -38,6 +39,7 @@ class RunState:
     files: list[FileInfo] = field(default_factory=list)
     reported: bool = False
     api_run_id: str | None = None
+    uploaded_file_count: int = 0
 
 
 class RunDetector:
@@ -177,7 +179,12 @@ class RunDetector:
     # ------------------------------------------------------------------
 
     def _file_payload(self, info: FileInfo) -> dict[str, object]:
+        try:
+            relative_path = str(info.path.relative_to(self._watch_dir))
+        except ValueError:
+            relative_path = info.filename
         return {
+            "relative_path": relative_path,
             "filename": info.filename,
             "size_bytes": info.size_bytes,
         }
@@ -195,6 +202,12 @@ class RunDetector:
             run.api_run_id = resp.id
             self._state_db.record_run_reported(run.run_id)
             self._counters.runs_reported += 1
+
+            file_id_by_name = {rf.filename: rf.id for rf in resp.files}
+            for f in run.files:
+                if f.filename in file_id_by_name:
+                    f.file_id = file_id_by_name[f.filename]
+
             self._reporter.queue_event(
                 WatcherEvent(
                     event_type=EventType.RUN_REPORTED,
@@ -210,6 +223,7 @@ class RunDetector:
 
         if self._upload_cb:
             self._upload_cb(run.run_id, list(run.files))
+        run.uploaded_file_count = len(run.files)
 
     def _update_run(self, run: RunState) -> None:
         """PATCH the run with the full file list, then upload only new files.
@@ -229,15 +243,10 @@ class RunDetector:
             self._counters.errors += 1
             return
 
-        # Only upload files that don't appear earlier in the list — earlier
-        # entries were already uploaded on a prior report or update.
-        new_files = [
-            f
-            for f in run.files
-            if not any(prev.path == f.path for prev in run.files[: run.files.index(f)])
-        ]
+        new_files = run.files[run.uploaded_file_count :]
         if self._upload_cb and new_files:
             self._upload_cb(run.run_id, new_files)
+        run.uploaded_file_count = len(run.files)
 
     # ------------------------------------------------------------------
     # crash recovery

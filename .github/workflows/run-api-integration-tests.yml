@@ -5,10 +5,16 @@ on:
     branches:
       - staging
       - production
+    paths:
+      - 'web-app/**'
+      - '.github/workflows/run-api-integration-tests.yml'
   pull_request:
     branches:
       - staging
       - production
+    paths:
+      - 'web-app/**'
+      - '.github/workflows/run-api-integration-tests.yml'
 
 defaults:
   run:

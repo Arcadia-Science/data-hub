@@ -160,8 +160,8 @@ def _create_service_class() -> type | None:
 
             import servicemanager  # type: ignore[import-untyped]
 
-            from data_hub_watcher.api_client import DataHubClient
-            from data_hub_watcher.config_io import load_config
+            from data_hub_watcher.api_client import ApiError, DataHubClient
+            from data_hub_watcher.config_io import config_checksum, load_config
             from data_hub_watcher.constants import (
                 API_URLS,
                 HEARTBEAT_INTERVAL_SECONDS,
@@ -185,6 +185,31 @@ def _create_service_class() -> type | None:
             base_url = API_URLS[cfg.environment]
             client = DataHubClient(base_url)
 
+            # Step 1: Check instrument status (mirrors CLI watch startup)
+            try:
+                detail = client.get_instrument(inst.id)
+                if detail.status == "pending":
+                    servicemanager.LogErrorMsg(
+                        f"Instrument {inst.id!r} is still pending activation. "
+                        "Service cannot start until the instrument is activated."
+                    )
+                    return
+            except ApiError as exc:
+                servicemanager.LogErrorMsg(f"Cannot reach API during startup: {exc.message}")
+                return
+
+            # Step 2: Sync config checksum
+            if cfg.watcher_id:
+                local_cs = config_checksum(path)
+                try:
+                    remote = client.get_config_checksum(cfg.watcher_id)
+                    if remote is None or remote.config_checksum != local_cs:
+                        yaml_content = path.read_text(encoding="utf-8")
+                        client.push_config(cfg.watcher_id, yaml_content, local_cs)
+                        servicemanager.LogInfoMsg("Config synced to Data Hub")
+                except ApiError as exc:
+                    servicemanager.LogWarningMsg(f"Could not sync config to API: {exc.message}")
+
             db_path = path.parent / STATE_DB_FILENAME
             state_db = StateDB(db_path)
             state_db.prune_uploaded_files(PRUNE_DAYS)
@@ -197,6 +222,9 @@ def _create_service_class() -> type | None:
                 watcher_id=cfg.watcher_id or "",
                 interval_seconds=HEARTBEAT_INTERVAL_SECONDS,
                 event_reporter=reporter,
+                instrument_id=inst.id,
+                watch_directory=str(inst.watch_directory),
+                upload_mode=inst.upload_mode,
                 counters=counters,
             )
 

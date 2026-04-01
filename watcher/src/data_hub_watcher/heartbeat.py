@@ -30,12 +30,18 @@ class HeartbeatLoop:
         watcher_id: str,
         interval_seconds: int,
         event_reporter: EventReporter,
+        instrument_id: str,
+        watch_directory: str,
+        upload_mode: str,
         counters: WatcherCounters | None = None,
     ) -> None:
         self._client = client
         self._watcher_id = watcher_id
         self._interval = interval_seconds
         self._event_reporter = event_reporter
+        self._instrument_id = instrument_id
+        self._watch_directory = watch_directory
+        self._upload_mode = upload_mode
         self.counters = counters or WatcherCounters()
 
         self._stop_event = threading.Event()
@@ -85,6 +91,9 @@ class HeartbeatLoop:
         return {
             "status": status,
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "instrument_id": self._instrument_id,
+            "watch_directory": self._watch_directory,
+            "upload_mode": self._upload_mode,
             "files_uploaded_since_last_heartbeat": self.counters.files_uploaded,
             "runs_reported_since_last_heartbeat": self.counters.runs_reported,
             "errors_since_last_heartbeat": self.counters.errors,
