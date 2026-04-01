@@ -109,11 +109,7 @@ def stop_service() -> None:
 def query_service_status() -> dict[str, Any]:
     """Return a dict with service status info for display."""
     import win32service as ws  # type: ignore[import-untyped]
-    import win32serviceutil  # type: ignore[import-untyped]
 
-    status = win32serviceutil.QueryServiceStatus(SERVICE_NAME)
-    # status is a tuple: (svcType, svcState, ctrlsAccepted, exitCode,
-    #                      svcSpecificExitCode, checkPoint, waitHint)
     state_map = {
         ws.SERVICE_STOPPED: "stopped",
         ws.SERVICE_START_PENDING: "start_pending",
@@ -123,12 +119,29 @@ def query_service_status() -> dict[str, Any]:
         ws.SERVICE_PAUSE_PENDING: "pause_pending",
         ws.SERVICE_PAUSED: "paused",
     }
-    svc_state = status[1]
-    return {
-        "service_name": SERVICE_NAME,
-        "state": state_map.get(svc_state, f"unknown ({svc_state})"),
-        "pid": status[5] if svc_state == ws.SERVICE_RUNNING else None,
-    }
+
+    # Use QueryServiceStatusEx to get the extended status which includes the
+    # process ID.  The basic QueryServiceStatus only returns 7 fields
+    # (svcType, svcState, ctrlsAccepted, exitCode, svcSpecificExitCode,
+    # checkPoint, waitHint) — none of which is a PID.
+    hscm = ws.OpenSCManager(None, None, ws.SC_MANAGER_CONNECT)
+    try:
+        hs = ws.OpenService(hscm, SERVICE_NAME, ws.SERVICE_QUERY_STATUS)
+        try:
+            # QueryServiceStatusEx returns a SERVICE_STATUS_PROCESS dict with
+            # keys like CurrentState, ProcessId, etc.
+            status_ex: dict[str, Any] = ws.QueryServiceStatusEx(hs)  # type: ignore[assignment]
+            svc_state: int = status_ex["CurrentState"]
+            pid: int = status_ex.get("ProcessId", 0)
+            return {
+                "service_name": SERVICE_NAME,
+                "state": state_map.get(svc_state, f"unknown ({svc_state})"),
+                "pid": pid if pid and svc_state == ws.SERVICE_RUNNING else None,
+            }
+        finally:
+            ws.CloseServiceHandle(hs)
+    finally:
+        ws.CloseServiceHandle(hscm)
 
 
 def _create_service_class() -> type | None:

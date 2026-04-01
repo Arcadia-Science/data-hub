@@ -2,6 +2,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -34,6 +35,7 @@ class HeartbeatLoop:
         watch_directory: str,
         upload_mode: str,
         counters: WatcherCounters | None = None,
+        on_tick: Callable[[], None] | None = None,
     ) -> None:
         self._client = client
         self._watcher_id = watcher_id
@@ -43,6 +45,7 @@ class HeartbeatLoop:
         self._watch_directory = watch_directory
         self._upload_mode = upload_mode
         self.counters = counters or WatcherCounters()
+        self._on_tick = on_tick
 
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -73,6 +76,8 @@ class HeartbeatLoop:
         # the watcher is alive, and flushing piggybacks on that liveness signal.
         self._send_heartbeat(status="watching")
         self._event_reporter.flush()
+        if self._on_tick is not None:
+            self._on_tick()
 
     def _send_heartbeat(self, status: str = "watching") -> None:
         payload = self._build_payload(status)

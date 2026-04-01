@@ -37,11 +37,20 @@ class ApiError(Exception):
         self.detail = detail
 
 
+DEFAULT_TIMEOUT: tuple[float, float] = (5, 30)  # (connect, read) seconds
+
+
 class DataHubClient:
     """HTTP client for the Data Hub API."""
 
-    def __init__(self, base_url: str, api_key: str | None = None) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str | None = None,
+        timeout: tuple[float, float] = DEFAULT_TIMEOUT,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
+        self._timeout = timeout
         # A persistent session reuses TCP connections across requests, which
         # matters when the watcher is long-running and chatting with the API
         # every heartbeat interval.
@@ -84,7 +93,9 @@ class DataHubClient:
         params: dict[str, Any] | None = None,
     ) -> requests.Response:
         try:
-            resp = self._session.request(method, self._url(path), json=json, params=params)
+            resp = self._session.request(
+                method, self._url(path), json=json, params=params, timeout=self._timeout
+            )
         except requests.ConnectionError as exc:
             raise ApiError(f"Connection error: {exc}") from exc
         except requests.Timeout as exc:

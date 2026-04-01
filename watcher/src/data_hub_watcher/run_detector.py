@@ -81,7 +81,7 @@ class RunDetector:
         state_db: StateDB,
         event_reporter: EventReporter,
         counters: WatcherCounters,
-        upload_callback: Callable[[str, list[FileInfo]], None] | None = None,
+        upload_callback: Callable[[str, list[FileInfo]], int] | None = None,
         watch_directory: Path,
     ) -> None:
         self._method = method
@@ -180,7 +180,7 @@ class RunDetector:
 
     def _file_payload(self, info: FileInfo) -> dict[str, object]:
         try:
-            relative_path = str(info.path.relative_to(self._watch_dir))
+            relative_path = info.path.relative_to(self._watch_dir).as_posix()
         except ValueError:
             relative_path = info.filename
         return {
@@ -222,8 +222,10 @@ class RunDetector:
             return
 
         if self._upload_cb:
-            self._upload_cb(run.run_id, list(run.files))
-        run.uploaded_file_count = len(run.files)
+            succeeded = self._upload_cb(run.run_id, list(run.files))
+            run.uploaded_file_count = succeeded
+        else:
+            run.uploaded_file_count = len(run.files)
 
     def _update_run(self, run: RunState) -> None:
         """PATCH the run with the full file list, then upload only new files.
@@ -245,8 +247,10 @@ class RunDetector:
 
         new_files = run.files[run.uploaded_file_count :]
         if self._upload_cb and new_files:
-            self._upload_cb(run.run_id, new_files)
-        run.uploaded_file_count = len(run.files)
+            succeeded = self._upload_cb(run.run_id, new_files)
+            run.uploaded_file_count += succeeded
+        else:
+            run.uploaded_file_count = len(run.files)
 
     # ------------------------------------------------------------------
     # crash recovery

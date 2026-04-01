@@ -633,7 +633,15 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
         recursive=is_recursive,
     )
 
-    # Step 6: Heartbeat (with manual-mode queue polling)
+    # In manual mode the server controls which files to upload. We piggyback
+    # on the heartbeat tick to poll the server's upload queue, so uploads
+    # happen at the same cadence as heartbeats without a separate timer.
+    def _poll_upload_queue() -> None:
+        try:
+            uploader.poll_upload_queue()
+        except Exception:
+            logger.exception("Upload queue poll failed")
+
     heartbeat = HeartbeatLoop(
         client=client,
         watcher_id=cfg.watcher_id,
@@ -643,22 +651,8 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
         watch_directory=str(inst.watch_directory),
         upload_mode=inst.upload_mode,
         counters=counters,
+        on_tick=_poll_upload_queue if not is_auto else None,
     )
-
-    # In manual mode the server controls which files to upload. We piggyback
-    # on the heartbeat tick to poll the server's upload queue, so uploads
-    # happen at the same cadence as heartbeats without a separate timer.
-    if not is_auto:
-        _original_tick = heartbeat._tick
-
-        def _tick_with_upload_poll() -> None:
-            _original_tick()
-            try:
-                uploader.poll_upload_queue()
-            except Exception:
-                logger.exception("Upload queue poll failed")
-
-        heartbeat._tick = _tick_with_upload_poll  # type: ignore[assignment]
 
     reporter.queue_event(
         WatcherEvent(
@@ -763,7 +757,7 @@ def upload(ctx: click.Context, file_path: str | None, run_id: str | None, dry_ru
             rel = fp.relative_to(inst.watch_directory)
         else:
             rel = Path(fp.name)
-        s3_key = f"{inst.id}/{run_id}/{rel}"
+        s3_key = f"{inst.id}/{run_id}/{rel.as_posix()}"
 
         if dry_run:
             click.echo(f"[dry-run] Would upload {fp}")
@@ -774,7 +768,7 @@ def upload(ctx: click.Context, file_path: str | None, run_id: str | None, dry_ru
         from data_hub_watcher.monitor import file_sha256
 
         sha = file_sha256(fp)
-        if state_db.is_uploaded(fp.name, sha):
+        if state_db.is_uploaded(fp.name, sha, s3_key):
             click.echo(f"File already uploaded: {fp.name}")
             state_db.close()
             return

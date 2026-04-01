@@ -174,7 +174,7 @@ class FileMonitor:
             if not any(fnmatch.fnmatch(entry.name, pat) for pat in self._patterns):
                 continue
             sha = file_sha256(entry)
-            if self._state_db.is_uploaded(entry.name, sha):
+            if self._state_db.has_any_upload(entry.name, sha):
                 continue
             self._enqueue(entry)
             count += 1

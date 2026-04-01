@@ -8,6 +8,7 @@ reads from the heartbeat thread.
 from __future__ import annotations
 import logging
 import sqlite3
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -38,6 +39,7 @@ class StateDB:
         # the main thread writes, without blocking.
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._lock = threading.Lock()
         self._create_tables()
 
     def _create_tables(self) -> None:
@@ -48,7 +50,7 @@ class StateDB:
                 sha256     TEXT NOT NULL,
                 uploaded_at TEXT NOT NULL,
                 s3_key     TEXT NOT NULL,
-                PRIMARY KEY (filename, sha256)
+                PRIMARY KEY (filename, sha256, s3_key)
             );
 
             CREATE TABLE IF NOT EXISTS runs (
@@ -67,45 +69,62 @@ class StateDB:
     def prune_uploaded_files(self, days: int = 90) -> int:
         """Delete upload records older than *days*. Returns rows removed."""
         cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        cur = self._conn.execute("DELETE FROM uploaded_files WHERE uploaded_at < ?", (cutoff,))
-        self._conn.commit()
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM uploaded_files WHERE uploaded_at < ?", (cutoff,))
+            self._conn.commit()
         removed = cur.rowcount
         if removed:
             logger.info("Pruned %d uploaded_files record(s) older than %d days", removed, days)
         return removed
 
-    def is_uploaded(self, filename: str, sha256: str) -> bool:
-        """Check whether this exact file content has already been uploaded.
+    def is_uploaded(self, filename: str, sha256: str, s3_key: str) -> bool:
+        """Check whether this exact file has already been uploaded to *s3_key*.
 
-        Keyed on (filename, sha256) so re-uploading is triggered if the file
-        content changes (same name, different hash) but skipped if the same
-        file is seen again unchanged.
+        Keyed on ``(filename, sha256, s3_key)`` so the same file content can
+        be uploaded to different S3 destinations (e.g. different runs that
+        produce identically-named output files).
         """
-        cur = self._conn.execute(
-            "SELECT 1 FROM uploaded_files WHERE filename = ? AND sha256 = ?",
-            (filename, sha256),
-        )
-        return cur.fetchone() is not None
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT 1 FROM uploaded_files WHERE filename = ? AND sha256 = ? AND s3_key = ?",
+                (filename, sha256, s3_key),
+            )
+            return cur.fetchone() is not None
+
+    def has_any_upload(self, filename: str, sha256: str) -> bool:
+        """Check whether this file content has been uploaded to *any* destination.
+
+        Used by the file monitor's initial scan to skip files that have already
+        been processed, before the S3 key is known.
+        """
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT 1 FROM uploaded_files WHERE filename = ? AND sha256 = ?",
+                (filename, sha256),
+            )
+            return cur.fetchone() is not None
 
     def record_upload(self, filename: str, sha256: str, s3_key: str) -> None:
         now = datetime.now(timezone.utc).isoformat()
-        self._conn.execute(
-            "INSERT OR REPLACE INTO uploaded_files (filename, sha256, uploaded_at, s3_key) "
-            "VALUES (?, ?, ?, ?)",
-            (filename, sha256, now, s3_key),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO uploaded_files (filename, sha256, uploaded_at, s3_key) "
+                "VALUES (?, ?, ?, ?)",
+                (filename, sha256, now, s3_key),
+            )
+            self._conn.commit()
 
     # ------------------------------------------------------------------
     # runs
     # ------------------------------------------------------------------
 
     def get_run(self, run_id: str) -> RunRecord | None:
-        cur = self._conn.execute(
-            "SELECT run_id, reported_at, uploaded_at FROM runs WHERE run_id = ?",
-            (run_id,),
-        )
-        row = cur.fetchone()
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT run_id, reported_at, uploaded_at FROM runs WHERE run_id = ?",
+                (run_id,),
+            )
+            row = cur.fetchone()
         if row is None:
             return None
         return RunRecord(run_id=row[0], reported_at=row[1], uploaded_at=row[2])
@@ -117,24 +136,27 @@ class StateDB:
         (e.g. a retry after a previous partial failure).
         """
         now = datetime.now(timezone.utc).isoformat()
-        self._conn.execute(
-            "INSERT OR REPLACE INTO runs (run_id, reported_at, uploaded_at) "
-            "VALUES (?, ?, (SELECT uploaded_at FROM runs WHERE run_id = ?))",
-            (run_id, now, run_id),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO runs (run_id, reported_at, uploaded_at) "
+                "VALUES (?, ?, (SELECT uploaded_at FROM runs WHERE run_id = ?))",
+                (run_id, now, run_id),
+            )
+            self._conn.commit()
 
     def record_run_uploaded(self, run_id: str) -> None:
         now = datetime.now(timezone.utc).isoformat()
-        self._conn.execute(
-            "UPDATE runs SET uploaded_at = ? WHERE run_id = ?",
-            (now, run_id),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "UPDATE runs SET uploaded_at = ? WHERE run_id = ?",
+                (now, run_id),
+            )
+            self._conn.commit()
 
     # ------------------------------------------------------------------
     # lifecycle
     # ------------------------------------------------------------------
 
     def close(self) -> None:
-        self._conn.close()
+        with self._lock:
+            self._conn.close()

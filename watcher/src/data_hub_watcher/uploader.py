@@ -82,16 +82,28 @@ class Uploader:
     # Auto-mode: upload a batch of files for a reported run
     # ------------------------------------------------------------------
 
-    def upload_files(self, run_id: str, files: list[FileInfo]) -> None:
+    def upload_files(self, run_id: str, files: list[FileInfo]) -> int:
         """Upload every file in *files* for the given *run_id*.
 
         Called by ``RunDetector`` immediately after a successful run report
-        (auto mode only).
+        (auto mode only).  Returns the number of files successfully uploaded.
         """
+        succeeded = 0
         for info in files:
-            self._upload_single(info.path, run_id, file_id=info.file_id)
+            if self._upload_single(info.path, run_id, file_id=info.file_id):
+                succeeded += 1
 
-        self._state_db.record_run_uploaded(run_id)
+        if succeeded == len(files):
+            self._state_db.record_run_uploaded(run_id)
+        else:
+            logger.warning(
+                "Not marking run %s as uploaded: %d/%d files succeeded",
+                run_id,
+                succeeded,
+                len(files),
+            )
+
+        return succeeded
 
     # ------------------------------------------------------------------
     # Manual-mode: poll the server queue
@@ -146,7 +158,7 @@ class Uploader:
         s3_uri = f"s3://{self._s3_bucket}/{s3_key}"
         sha = file_sha256(path)
 
-        if self._state_db.is_uploaded(path.name, sha):
+        if self._state_db.is_uploaded(path.name, sha, s3_key):
             logger.debug("Skipping already-uploaded file: %s", path.name)
             return True
 
@@ -183,7 +195,8 @@ class Uploader:
             self._counters.errors += 1
             return False
 
-        # Notify API
+        # Notify API — treat a failed PATCH as an upload failure so the file
+        # is not recorded in the dedup DB and will be retried next time.
         if file_id is not None:
             content_type = get_content_type(path)
             try:
@@ -197,7 +210,16 @@ class Uploader:
                     },
                 )
             except ApiError as exc:
-                logger.warning("PATCH /files/%d failed: %s", file_id, exc.message)
+                logger.error("PATCH /files/%d failed: %s", file_id, exc.message)
+                self._counters.errors += 1
+                self._reporter.queue_event(
+                    WatcherEvent(
+                        event_type=EventType.UPLOAD_FAILED,
+                        message=f"Upload notification failed: {path.name}",
+                        details={"s3_key": s3_key, "file_id": file_id, "error": exc.message},
+                    )
+                )
+                return False
 
         self._state_db.record_upload(path.name, sha, s3_key)
         self._counters.files_uploaded += 1

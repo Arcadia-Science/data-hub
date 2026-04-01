@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -43,18 +44,20 @@ class EventReporter:
         self._client = client
         self._watcher_id = watcher_id
         self._queue: list[WatcherEvent] = []
+        self._lock = threading.Lock()
 
     def queue_event(self, event: WatcherEvent) -> None:
-        self._queue.append(event)
+        with self._lock:
+            self._queue.append(event)
 
     def flush(self) -> None:
-        if not self._queue:
-            return
-
-        # Snapshot and clear before the network call so events queued
-        # during the flush aren't lost if the request fails.
-        events_to_send = list(self._queue)
-        self._queue.clear()
+        with self._lock:
+            if not self._queue:
+                return
+            # Snapshot and clear atomically so events queued from other
+            # threads during the network call aren't lost.
+            events_to_send = list(self._queue)
+            self._queue.clear()
 
         try:
             self._client.send_events(
