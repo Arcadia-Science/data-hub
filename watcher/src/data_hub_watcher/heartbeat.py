@@ -53,13 +53,19 @@ class HeartbeatLoop:
         self._stop_event.set()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=self._interval + 5)
+        # Send a final "stopped" heartbeat so the server knows the watcher
+        # shut down gracefully rather than silently disappearing.
         self._send_heartbeat(status="stopped")
 
     def _run(self) -> None:
+        # Event.wait() returns True when set (stop requested) and False on timeout,
+        # so the loop fires a tick every interval and exits immediately on stop.
         while not self._stop_event.wait(timeout=self._interval):
             self._tick()
 
     def _tick(self) -> None:
+        # Heartbeat first, then flush events — the heartbeat tells the server
+        # the watcher is alive, and flushing piggybacks on that liveness signal.
         self._send_heartbeat(status="watching")
         self._event_reporter.flush()
 
@@ -70,6 +76,8 @@ class HeartbeatLoop:
         except (ApiError, Exception) as exc:
             logger.warning("Heartbeat failed: %s", exc)
 
+        # Reset counters after every attempt (success or failure) so the next
+        # heartbeat only reports activity since the previous one, not cumulative.
         self.counters.files_uploaded = 0
         self.counters.runs_reported = 0
         self.counters.errors = 0

@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -52,6 +51,8 @@ class EventReporter:
         if not self._queue:
             return
 
+        # Snapshot and clear before the network call so events queued
+        # during the flush aren't lost if the request fails.
         events_to_send = list(self._queue)
         self._queue.clear()
 
@@ -61,4 +62,6 @@ class EventReporter:
                 [e.to_dict() for e in events_to_send],
             )
         except (ApiError, Exception) as exc:
+            # Events are intentionally dropped on failure rather than re-queued
+            # to avoid unbounded growth when the API is unreachable.
             logger.warning("Failed to flush %d event(s): %s", len(events_to_send), exc)
