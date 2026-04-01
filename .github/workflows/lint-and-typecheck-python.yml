@@ -1,0 +1,27 @@
+name: Lint and typecheck Python packages
+
+on:
+  push:
+    branches:
+      - staging
+      - production
+  pull_request:
+    branches:
+      - staging
+      - production
+
+jobs:
+  lint-and-typecheck-python-packages:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install dependencies
+        run: uv sync --all-packages
+
+      - name: Lint
+        run: make lint
+
+      - name: Type check
+        run: make typecheck
