@@ -1,22 +1,10 @@
 import { Badge } from "@/components/ui/badge";
 import { DeregisterDialog } from "@/components/watchers/deregister-dialog";
-import type { EffectiveStatus, WatcherDetail } from "@/lib/api/watchers";
+import { statusBadge } from "@/components/watchers/status-badge";
+import type { WatcherDetail } from "@/lib/api/watchers";
 import { formatRelativeTime } from "@/lib/utils";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
-
-const statusBadge: Record<
-  EffectiveStatus,
-  {
-    label: string;
-    variant: "default" | "outline" | "secondary" | "destructive";
-  }
-> = {
-  watching: { label: "Watching", variant: "default" },
-  stale: { label: "Stale", variant: "destructive" },
-  stopped: { label: "Stopped", variant: "secondary" },
-  registered: { label: "Registered", variant: "outline" },
-};
 
 export function WatcherHeader({ watcher }: { watcher: WatcherDetail }) {
   const sb = statusBadge[watcher.effectiveStatus];

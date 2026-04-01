@@ -10,7 +10,7 @@ type Tab = "active" | "deregistered";
 // Both partitions are pre-fetched on the server and passed down, so toggling
 // between Active / Deregistered is purely client-side (no URL state or
 // refetch needed — the watcher count is small enough to hold both in memory).
-export function WatchersToolbar({
+export function WatchersView({
   activeData,
   deregisteredData,
 }: {

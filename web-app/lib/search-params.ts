@@ -38,10 +38,9 @@ export const instrumentDetailParamsCache = createSearchParamsCache(
   instrumentDetailSearchParams
 );
 
-// Watcher detail page filters. `since` controls the heartbeat time range,
-// `events_since` controls the event log time range, and `event_type` filters
-// events by type. All are optional — omitting them defaults to the last 24h
-// with all event types included (handled in the data layer).
+// Watcher detail page filters. `event_type` and `events_since` are controlled
+// by EventLogToolbar. `since` (heartbeat time range) has no toolbar UI yet —
+// it exists to support deep-linking; defaults to 24h in the data layer.
 export const watcherDetailSearchParams = {
   event_type: parseAsArrayOf(parseAsString).withDefault([]),
   since: parseAsString,

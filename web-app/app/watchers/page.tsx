@@ -1,4 +1,4 @@
-import { WatchersToolbar } from "@/components/watchers/watchers-toolbar";
+import { WatchersView } from "@/components/watchers/watchers-view";
 import { getWatcherList } from "@/lib/api/watchers";
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
@@ -25,7 +25,7 @@ export default async function WatchersPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Watchers</h1>
       </div>
-      <WatchersToolbar activeData={active} deregisteredData={deregistered} />
+      <WatchersView activeData={active} deregisteredData={deregistered} />
     </div>
   );
 }

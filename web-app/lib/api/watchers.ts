@@ -56,7 +56,6 @@ export type WatcherListItem = {
   hostname: string | null;
   effectiveStatus: EffectiveStatus;
   lastHeartbeatAt: Date | null;
-  uptimeSeconds: number | null;
   createdAt: Date;
   deletedAt: Date | null;
 };
@@ -85,29 +84,18 @@ export async function getWatcherList(opts: {
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(desc(watchers.createdAt));
 
-  return rows.map((row) => {
-    // Approximate uptime: seconds since last heartbeat. Only meaningful when
-    // the watcher is actively running (status = "watching").
-    const lastHb = row.lastHeartbeatAt;
-    const uptimeSeconds =
-      lastHb && row.status === "watching"
-        ? Math.round((Date.now() - lastHb.getTime()) / 1000)
-        : null;
-
-    return {
-      id: row.id,
-      instrumentId: row.instrumentId,
-      instrumentDisplayName: row.instrumentDisplayName,
-      hostname: row.hostname,
-      // Deregistered watchers always show as "stopped" regardless of their
-      // last DB status — they can no longer heartbeat so staleness is moot.
-      effectiveStatus: row.deletedAt ? "stopped" : computeEffectiveStatus(row),
-      lastHeartbeatAt: row.lastHeartbeatAt,
-      uptimeSeconds,
-      createdAt: row.createdAt,
-      deletedAt: row.deletedAt,
-    };
-  });
+  return rows.map((row) => ({
+    id: row.id,
+    instrumentId: row.instrumentId,
+    instrumentDisplayName: row.instrumentDisplayName,
+    hostname: row.hostname,
+    // Deregistered watchers always show as "stopped" regardless of their
+    // last DB status — they can no longer heartbeat so staleness is moot.
+    effectiveStatus: row.deletedAt ? "stopped" : computeEffectiveStatus(row),
+    lastHeartbeatAt: row.lastHeartbeatAt,
+    createdAt: row.createdAt,
+    deletedAt: row.deletedAt,
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -150,12 +138,6 @@ export const getWatcherById = cache(async function getWatcherById(
 
   if (!row) return null;
 
-  const lastHb = row.lastHeartbeatAt;
-  const uptimeSeconds =
-    lastHb && row.status === "watching"
-      ? Math.round((Date.now() - lastHb.getTime()) / 1000)
-      : null;
-
   return {
     id: row.id,
     instrumentId: row.instrumentId,
@@ -164,7 +146,6 @@ export const getWatcherById = cache(async function getWatcherById(
     osInfo: row.osInfo,
     effectiveStatus: row.deletedAt ? "stopped" : computeEffectiveStatus(row),
     lastHeartbeatAt: row.lastHeartbeatAt,
-    uptimeSeconds,
     configYaml: row.configYaml,
     configChecksum: row.configChecksum,
     createdAt: row.createdAt,
@@ -194,10 +175,12 @@ export type WatcherHeartbeatRow = {
 // rule forbids.
 const DEFAULT_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 
+export type PaginatedResult<T> = { rows: T[]; truncated: boolean };
+
 export async function getWatcherHeartbeats(
   watcherId: string,
   opts: { since?: Date; limit?: number } = {}
-): Promise<WatcherHeartbeatRow[]> {
+): Promise<PaginatedResult<WatcherHeartbeatRow>> {
   const limit = opts.limit ?? 200;
   const since = opts.since ?? new Date(Date.now() - DEFAULT_LOOKBACK_MS);
   const conditions = [
@@ -219,9 +202,10 @@ export async function getWatcherHeartbeats(
     .from(watcherHeartbeats)
     .where(and(...conditions))
     .orderBy(desc(watcherHeartbeats.timestamp))
-    .limit(limit);
+    .limit(limit + 1);
 
-  return rows;
+  const truncated = rows.length > limit;
+  return { rows: truncated ? rows.slice(0, limit) : rows, truncated };
 }
 
 // ---------------------------------------------------------------------------
@@ -239,7 +223,7 @@ export type WatcherEventRow = {
 export async function getWatcherEvents(
   watcherId: string,
   opts: { since?: Date; eventTypes?: string[]; limit?: number } = {}
-): Promise<WatcherEventRow[]> {
+): Promise<PaginatedResult<WatcherEventRow>> {
   const limit = opts.limit ?? 200;
   const since = opts.since ?? new Date(Date.now() - DEFAULT_LOOKBACK_MS);
   const conditions = [
@@ -270,7 +254,8 @@ export async function getWatcherEvents(
     .from(watcherEvents)
     .where(and(...conditions))
     .orderBy(desc(watcherEvents.timestamp))
-    .limit(limit);
+    .limit(limit + 1);
 
-  return rows;
+  const truncated = rows.length > limit;
+  return { rows: truncated ? rows.slice(0, limit) : rows, truncated };
 }

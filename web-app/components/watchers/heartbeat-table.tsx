@@ -28,16 +28,22 @@ function formatDuration(seconds: number): string {
 
 export function HeartbeatTable({
   heartbeats,
+  truncated = false,
 }: {
   heartbeats: WatcherHeartbeatRow[];
+  truncated?: boolean;
 }) {
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-sm font-medium">Heartbeat History</CardTitle>
         <CardDescription>
-          {heartbeats.length} heartbeat{heartbeats.length !== 1 && "s"}
+          {truncated
+            ? `Showing latest ${heartbeats.length}`
+            : heartbeats.length}{" "}
+          heartbeat{heartbeats.length !== 1 && "s"}
           {heartbeats.length > 0 && " (last 24 hours)"}
+          {truncated && " — older entries omitted"}
         </CardDescription>
       </CardHeader>
       <CardContent>

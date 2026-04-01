@@ -72,11 +72,22 @@ function EventEntry({ event }: { event: WatcherEventRow }) {
   );
 }
 
-export function EventLog({ events }: { events: WatcherEventRow[] }) {
+export function EventLog({
+  events,
+  truncated = false,
+}: {
+  events: WatcherEventRow[];
+  truncated?: boolean;
+}) {
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-sm font-medium">Event Log</CardTitle>
+        {truncated && events.length > 0 && (
+          <p className="text-xs text-muted-foreground">
+            Showing latest {events.length} events — older entries omitted
+          </p>
+        )}
       </CardHeader>
       <CardContent className="p-0">
         {events.length === 0 ? (

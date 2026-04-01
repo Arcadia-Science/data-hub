@@ -8,23 +8,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { DeregisterDialog } from "@/components/watchers/deregister-dialog";
-import type { EffectiveStatus, WatcherListItem } from "@/lib/api/watchers";
+import { statusBadge } from "@/components/watchers/status-badge";
+import type { WatcherListItem } from "@/lib/api/watchers";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { SearchX } from "lucide-react";
 import Link from "next/link";
-
-const statusBadge: Record<
-  EffectiveStatus,
-  {
-    label: string;
-    variant: "default" | "outline" | "secondary" | "destructive";
-  }
-> = {
-  watching: { label: "Watching", variant: "default" },
-  stale: { label: "Stale", variant: "destructive" },
-  stopped: { label: "Stopped", variant: "secondary" },
-  registered: { label: "Registered", variant: "outline" },
-};
 
 export function WatchersTable({
   data,

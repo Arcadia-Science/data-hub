@@ -44,7 +44,7 @@ export default async function WatcherDetailPage({
     : undefined;
 
   // Three independent queries — none depends on the others' results.
-  const [watcher, heartbeats, events] = await Promise.all([
+  const [watcher, heartbeatResult, eventResult] = await Promise.all([
     getWatcherById(watcherId),
     getWatcherHeartbeats(watcherId, { since: heartbeatSince }),
     getWatcherEvents(watcherId, {
@@ -60,9 +60,12 @@ export default async function WatcherDetailPage({
     <div className="mx-auto flex max-w-7xl flex-col gap-6 p-6">
       <WatcherHeader watcher={watcher} />
       <WatcherConfig configYaml={watcher.configYaml} />
-      <HeartbeatTable heartbeats={heartbeats} />
+      <HeartbeatTable
+        heartbeats={heartbeatResult.rows}
+        truncated={heartbeatResult.truncated}
+      />
       <EventLogToolbar />
-      <EventLog events={events} />
+      <EventLog events={eventResult.rows} truncated={eventResult.truncated} />
     </div>
   );
 }
