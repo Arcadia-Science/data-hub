@@ -1,54 +1,66 @@
-.PHONY: lint-py
-lint-py:
+# Python.
+.PHONY: py-lint
+py-lint:
 	uv run ruff check .
 	uv run ruff format --check .
 
-.PHONY: format-py
-format-py:
+.PHONY: py-format
+py-format:
 	uv run ruff check --fix .
 	uv run ruff format .
 
-.PHONY: typecheck-py
-typecheck-py:
+.PHONY: py-typecheck
+py-typecheck:
 	uv run pyright --project pyproject.toml
 
-.PHONY: test-py
-test-py:
+.PHONY: py-test
+py-test:
 	uv run pytest -v .
 
-.PHONY: format-fe
-format-fe:
+# Web app.
+.PHONY: fe-format
+fe-format:
 	cd web-app && npm run format
 
-.PHONY: lint-fe
-lint-fe:
+.PHONY: fe-lint
+fe-lint:
 	cd web-app && npm run lint
 
-.PHONY: typecheck-fe
-typecheck-fe:
+.PHONY: fe-typecheck
+fe-typecheck:
 	cd web-app && npm run typecheck
 
-.PHONY: test-fe
-test-fe:
+.PHONY: fe-test
+fe-test:
 	cd web-app && npm run test:integration
 
-.PHONY: check-py
-check-py:
-	make format-py
-	make lint-py
-	make typecheck-py
+.PHONY: dev
+dev:
+	cd web-app && npm run dev
 
-.PHONY: check-fe
-check-fe:
-	make format-fe
-	make lint-fe
-	make typecheck-fe
+.PHONY: fe-build
+fe-build:
+	cd web-app && npm run build
+
+# Checks.
+.PHONY: py-check
+py-check:
+	make py-format
+	make py-lint
+	make py-typecheck
+
+.PHONY: fe-check
+fe-check:
+	make fe-format
+	make fe-lint
+	make fe-typecheck
 
 .PHONY: check-all
 check-all:
-	make check-py
-	make check-fe
+	make py-check
+	make fe-check
 
+# Docker.
 .PHONY: docker-build
 docker-build:
 	source .env && export GIT_AUTH_TOKEN=$$GH_PERSONAL_ACCESS_TOKEN && docker build --secret id=GIT_AUTH_TOKEN -t data-hub-utils .
