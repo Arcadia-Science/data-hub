@@ -11,6 +11,7 @@ dev = [
 
 [tool.ruff]
 src = ["watcher/src"]
+exclude = ["legacy"]
 line-length = 100
 indent-width = 4
 extend-include = ["*.ipynb"]
@@ -46,3 +47,7 @@ line-ending = "auto"
 [tool.ruff.lint.isort]
 order-by-type = true
 no-lines-before = ["future", "standard-library"]
+
+[tool.pyright]
+include = ["watcher"]
+exclude = ["legacy", ".venv"]

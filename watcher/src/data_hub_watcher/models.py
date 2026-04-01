@@ -34,9 +34,7 @@ class RunDetectionConfig(BaseModel):
                 raise ValueError(f"Invalid prefix_pattern regex: {exc}") from exc
             groups = compiled.groups
             if groups != 1:
-                raise ValueError(
-                    f"prefix_pattern must have exactly 1 capture group, got {groups}"
-                )
+                raise ValueError(f"prefix_pattern must have exactly 1 capture group, got {groups}")
             self.prefix_pattern = pat
         return self
 
@@ -54,9 +52,7 @@ class InstrumentConfig(BaseModel):
     @classmethod
     def _validate_kebab_case(cls, v: str) -> str:
         if not re.match(r"^[a-z0-9]+(-[a-z0-9]+)*$", v):
-            raise ValueError(
-                f"Instrument id must be kebab-case (a-z, 0-9, hyphens): {v!r}"
-            )
+            raise ValueError(f"Instrument id must be kebab-case (a-z, 0-9, hyphens): {v!r}")
         return v
 
     @field_validator("watch_directory")

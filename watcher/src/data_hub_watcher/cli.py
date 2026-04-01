@@ -119,7 +119,8 @@ def init(ctx: click.Context) -> None:
     if instruments:
         click.echo("\nExisting instruments:")
         for i, inst in enumerate(instruments, 1):
-            status_badge = click.style(f"[{inst.status}]", fg="yellow" if inst.status == "pending" else "green")
+            color = "yellow" if inst.status == "pending" else "green"
+            status_badge = click.style(f"[{inst.status}]", fg=color)
             click.echo(f"  {i}. {inst.id} {status_badge} — {inst.display_name}")
         click.echo(f"  {len(instruments) + 1}. Register a new instrument")
 
@@ -158,7 +159,7 @@ def init(ctx: click.Context) -> None:
     prefix_pattern: str | None = None
     if method == "prefix":
         prefix_pattern = click.prompt("Prefix pattern (regex)", default=DEFAULT_PREFIX_PATTERN)
-        _preview_prefix_pattern(prefix_pattern, watch_dir)
+        _preview_prefix_pattern(prefix_pattern or DEFAULT_PREFIX_PATTERN, watch_dir)
 
     # 7. Stability period
     stability = click.prompt(
@@ -262,7 +263,9 @@ def _push_config_to_api(client: DataHubClient, watcher_id: str, path: Path) -> N
         client.push_config(watcher_id, yaml_content, checksum)
         click.echo("Config synced to Data Hub.")
     except ApiError as exc:
-        click.echo(click.style(f"Warning: could not sync config to API: {exc.message}", fg="yellow"))
+        click.echo(
+            click.style(f"Warning: could not sync config to API: {exc.message}", fg="yellow")
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -304,7 +307,7 @@ def config_show(ctx: click.Context) -> None:
 def config_validate(ctx: click.Context) -> None:
     """Validate the config file (offline, no network calls)."""
     path = _resolve_path(ctx)
-    cfg = load_config(path)  # raises on validation error
+    load_config(path)  # raises on validation error
     click.echo(click.style(f"✓ Config is valid: {path}", fg="green"))
 
 
@@ -446,7 +449,12 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
         _push_config_to_api(client, cfg.watcher_id, path)
 
     if dry_run:
-        click.echo(click.style("✓ Dry run complete. Config is valid, API reachable, instrument active.", fg="green"))
+        click.echo(
+            click.style(
+                "✓ Dry run complete. Config is valid, API reachable, instrument active.",
+                fg="green",
+            )
+        )
         return
 
     # Step 3: Start heartbeat + event reporter
@@ -460,10 +468,12 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
         counters=counters,
     )
 
-    reporter.queue_event(WatcherEvent(
-        event_type=EventType.WATCHER_STARTED,
-        message=f"Watcher started on {platform.node()}",
-    ))
+    reporter.queue_event(
+        WatcherEvent(
+            event_type=EventType.WATCHER_STARTED,
+            message=f"Watcher started on {platform.node()}",
+        )
+    )
 
     heartbeat.start()
     click.echo(f"Watcher is running (instrument={inst.id}, dir={inst.watch_directory})…")
@@ -472,10 +482,12 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
     # Placeholder: file monitoring loop (FILE_MONITORING.md scope)
     def _shutdown(signum: int, frame: Any) -> None:
         click.echo("\nShutting down…")
-        reporter.queue_event(WatcherEvent(
-            event_type=EventType.WATCHER_STOPPED,
-            message="Watcher stopped by user",
-        ))
+        reporter.queue_event(
+            WatcherEvent(
+                event_type=EventType.WATCHER_STOPPED,
+                message="Watcher stopped by user",
+            )
+        )
         heartbeat.stop()
         reporter.flush()
         raise SystemExit(0)
@@ -519,7 +531,10 @@ def upload(ctx: click.Context, file_path: str | None, run_id: str | None, dry_ru
 
     if file_path:
         fp = Path(file_path).resolve()
-        rel = fp.relative_to(inst.watch_directory) if fp.is_relative_to(inst.watch_directory) else Path(fp.name)
+        if fp.is_relative_to(inst.watch_directory):
+            rel = fp.relative_to(inst.watch_directory)
+        else:
+            rel = Path(fp.name)
         s3_key = f"{inst.id}/{run_id or 'unassigned'}/{rel}"
 
         if dry_run:

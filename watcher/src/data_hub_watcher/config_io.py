@@ -40,7 +40,7 @@ def load_config(path: Path) -> WatcherConfig:
         errors = exc.errors()
         lines = [f"Config validation failed ({len(errors)} error(s)):"]
         for err in errors:
-            loc = " → ".join(str(l) for l in err["loc"])
+            loc = " → ".join(str(line) for line in err["loc"])
             lines.append(f"  • {loc}: {err['msg']}")
         raise click.ClickException("\n".join(lines)) from exc
 

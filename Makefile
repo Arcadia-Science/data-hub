@@ -10,7 +10,7 @@ format:
 
 .PHONY: typecheck
 typecheck:
-	uv run pyright --project pyproject.toml .
+	uv run pyright --project pyproject.toml
 
 .PHONY: test
 test:

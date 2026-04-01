@@ -79,9 +79,7 @@ class DataHubClient:
         params: dict[str, Any] | None = None,
     ) -> requests.Response:
         try:
-            resp = self._session.request(
-                method, self._url(path), json=json, params=params
-            )
+            resp = self._session.request(method, self._url(path), json=json, params=params)
         except requests.ConnectionError as exc:
             raise ApiError(f"Connection error: {exc}") from exc
         except requests.Timeout as exc:
@@ -99,9 +97,7 @@ class DataHubClient:
         resp = self._request("GET", "/instruments")
         return [InstrumentResponse.model_validate(item) for item in resp.json()]
 
-    def create_instrument(
-        self, id: str, display_name: str | None = None
-    ) -> InstrumentResponse:
+    def create_instrument(self, id: str, display_name: str | None = None) -> InstrumentResponse:
         payload: dict[str, Any] = {"id": id}
         if display_name:
             payload["display_name"] = display_name
@@ -150,40 +146,26 @@ class DataHubClient:
                 return None
             raise
 
-    def send_heartbeat(
-        self, watcher_id: str, payload: dict[str, Any]
-    ) -> HeartbeatResponse:
-        resp = self._request(
-            "POST", f"/watchers/{watcher_id}/heartbeat", json=payload
-        )
+    def send_heartbeat(self, watcher_id: str, payload: dict[str, Any]) -> HeartbeatResponse:
+        resp = self._request("POST", f"/watchers/{watcher_id}/heartbeat", json=payload)
         return HeartbeatResponse.model_validate(resp.json())
 
-    def send_events(
-        self, watcher_id: str, events: list[dict[str, Any]]
-    ) -> EventsResponse:
-        resp = self._request(
-            "POST", f"/watchers/{watcher_id}/events", json={"events": events}
-        )
+    def send_events(self, watcher_id: str, events: list[dict[str, Any]]) -> EventsResponse:
+        resp = self._request("POST", f"/watchers/{watcher_id}/events", json={"events": events})
         return EventsResponse.model_validate(resp.json())
 
     # ------------------------------------------------------------------
     # Runs
     # ------------------------------------------------------------------
 
-    def report_run(
-        self, instrument_id: str, run_data: dict[str, Any]
-    ) -> RunResponse:
-        resp = self._request(
-            "POST", f"/instruments/{instrument_id}/runs", json=run_data
-        )
+    def report_run(self, instrument_id: str, run_data: dict[str, Any]) -> RunResponse:
+        resp = self._request("POST", f"/instruments/{instrument_id}/runs", json=run_data)
         return RunResponse.model_validate(resp.json())
 
     def update_run(
         self, instrument_id: str, run_id: str, data: dict[str, Any]
     ) -> RunDetailResponse:
-        resp = self._request(
-            "PATCH", f"/instruments/{instrument_id}/runs/{run_id}", json=data
-        )
+        resp = self._request("PATCH", f"/instruments/{instrument_id}/runs/{run_id}", json=data)
         return RunDetailResponse.model_validate(resp.json())
 
     # ------------------------------------------------------------------
@@ -194,8 +176,6 @@ class DataHubClient:
         resp = self._request("GET", f"/watchers/{watcher_id}/upload-queue")
         return UploadQueueResponse.model_validate(resp.json())
 
-    def mark_file_uploaded(
-        self, file_id: int, s3_info: dict[str, Any]
-    ) -> FileResponse:
+    def mark_file_uploaded(self, file_id: int, s3_info: dict[str, Any]) -> FileResponse:
         resp = self._request("PATCH", f"/files/{file_id}", json=s3_info)
         return FileResponse.model_validate(resp.json())
