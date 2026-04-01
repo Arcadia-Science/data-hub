@@ -35,7 +35,7 @@ jobs:
         run: uv sync --all-packages
 
       - name: Lint
-        run: make lint-py
+        run: make py-lint
 
       - name: Type check
-        run: make typecheck-py
+        run: make py-typecheck
