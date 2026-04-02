@@ -7,8 +7,7 @@ class Config:
     """Shared configuration from environment variables.
 
     Contains settings used by both the Lambda function and the watcher.
-    Lambda-specific settings (Ganymede, Notion, Data Hub API) live in
-    ``data_hub_lambda.config``.
+    Lambda-specific settings live in `data_hub_lambda.config`.
     """
 
     LOCAL_DATA_DIRPATH: Path

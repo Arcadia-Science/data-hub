@@ -25,7 +25,6 @@ from data_hub_lambda import (
 )
 from data_hub_lambda.api_client import DataHubClient
 from data_hub_lambda.config import lambda_config
-from data_hub_lambda.constants import DATA_HUB_WEB_URL
 from data_hub_shared import slack
 from data_hub_shared.constants import (
     INSTRUMENT_ID_TO_NAME_MAP,
@@ -173,10 +172,6 @@ def lambda_handler(event: dict[str, Any], context: Context) -> None:
     try:
         logger.info("Generating report for run %s...", run_id)
 
-        # -- Akta FPLC: fully migrated to per-file API processing -----
-        # This is the first workflow migrated from Notion/Ganymede to the
-        # Data Hub API (see docs/lambda/MIGRATION.md). It requires S3 event
-        # info (bucket, key, filename) which isn't available from manual invocations.
         if instrument_id == Instrument.AKTA_FPLC.value:
             if event_info is None:
                 logger.warning(
@@ -194,9 +189,6 @@ def lambda_handler(event: dict[str, Any], context: Context) -> None:
                 client=api_client,
             )
 
-        # -- Legacy Notion workflows -----------------------------------
-        # These workflows still write to Notion and query Ganymede. They will
-        # be migrated one at a time to the per-file API path (see MIGRATION.md).
         elif instrument_id == Instrument.AGILENT_4150_TAPESTATION.value:
             if event_info is None:
                 logger.warning(
@@ -273,16 +265,10 @@ def lambda_handler(event: dict[str, Any], context: Context) -> None:
             logger.error("Unsupported instrument: %s", instrument_id)
             return
 
-        # Determine link label based on whether it's a Data Hub or Notion URL.
-        if result_url.startswith(DATA_HUB_WEB_URL):
-            link_label = "View in Data Hub"
-        else:
-            link_label = "View in Notion"
-
         slack.send_message(
             f"*{instrument_name}*\n"
             f"A report was generated for run `{run_id}`!\n"
-            f"<{result_url}|{link_label}>"
+            f"<{result_url}|View in Data Hub>"
         )
     except Exception:
         logger.exception("Failed to generate report for run %s.", run_id)
