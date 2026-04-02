@@ -1,9 +1,6 @@
 [tool.uv.workspace]
 members = ["lambda", "watcher", "packages/shared"]
 
-[tool.uv.sources]
-michaelis-menten-analysis = { git = "https://github.com/Arcadia-Science/2025-michaelis-menten-analysis", rev = "a654d37aa737745cef8d8f3b5df358ab717f8064" }
-
 [dependency-groups]
 dev = [
     "pre-commit>=4.2.0",

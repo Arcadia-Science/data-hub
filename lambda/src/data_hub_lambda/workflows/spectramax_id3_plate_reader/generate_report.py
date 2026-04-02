@@ -3,15 +3,10 @@ import re
 
 from data_hub_lambda.ganymede import api as ganymede_api
 from data_hub_lambda.ganymede import utils as ganymede_utils
-from data_hub_lambda.lib.spectramax_plate_reader import (
-    create_plate_map,
-    query_raw_well_data,
-)
 from data_hub_lambda.notion.api import (
     create_file_block,
     create_heading_block,
     create_page_in_database,
-    create_table_block,
 )
 from data_hub_lambda.notion.models import ReportPage
 from data_hub_lambda.notion.utils import (
@@ -66,9 +61,7 @@ def generate_report(run_id: str) -> str:
     logger.info("Files queried from Ganymede.\n")
 
     logger.info("Querying raw well data from Ganymede...")
-    df_raw_well_data = query_raw_well_data(excel_file_name)
     raw_well_data_file_path = raw_data_dir_path / "raw_well_data.xlsx"
-    df_raw_well_data.to_excel(raw_well_data_file_path)
     logger.info("Raw well data queried from Ganymede.\n")
 
     instrument_name = INSTRUMENT_ID_TO_NAME_MAP[Instrument.SPECTRAMAX_ID3_PLATE_READER.value]
@@ -94,24 +87,6 @@ def generate_report(run_id: str) -> str:
         create_heading_block(2, "Parsed data from Ganymede Tables"),
         create_file_block(raw_well_data_file_path, block_type="file"),
     ]
-
-    if tags["measurement_type"] == "Endpoint":
-        df_plate_map = create_plate_map(df_raw_well_data)
-        df_plate_map.insert(0, " ", df_plate_map.index)
-        page_content.append(create_heading_block(2, "Plate reader measurements"))
-        page_content.append(create_table_block(df_plate_map))
-    elif tags["measurement_type"] == "Kinetic":
-        df_kinetic_data = df_raw_well_data[["time", "well_position", "value"]].rename(
-            columns={"time": "Time", "well_position": "Well Position", "value": "Value"}
-        )
-        page_content.append(create_heading_block(2, "First 25 rows of kinetic data"))
-        page_content.append(create_table_block(df_kinetic_data.head(25)))
-    elif tags["measurement_type"] == "Spectrum":
-        df_spectrum_data = df_raw_well_data[["wavelength", "well_position", "value"]].rename(
-            columns={"wavelength": "Wavelength", "well_position": "Well Position", "value": "Value"}
-        )
-        page_content.append(create_heading_block(2, "First 25 rows of spectrum data"))
-        page_content.append(create_table_block(df_spectrum_data.head(25)))
 
     page_id = create_page_in_database(
         database_id=instrument_database["id"],
