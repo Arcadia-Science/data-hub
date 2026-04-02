@@ -223,7 +223,21 @@ def lambda_handler(event: dict[str, Any], context: Context) -> None:
                 return
 
         elif instrument_id == Instrument.SPECTRAMAX_ID3_PLATE_READER.value:
-            result_url = spectramax_id3_plate_reader.generate_report(run_id)
+            if event_info is None:
+                logger.warning(
+                    "Manual invocation for SpectraMax iD3 is not yet supported via the API path."
+                )
+                return
+
+            api_client = _get_api_client()
+            result_url = spectramax_id3_plate_reader.process_file(
+                instrument_id=event_info.instrument_id,
+                run_id=event_info.run_id,
+                s3_bucket=event_info.s3_bucket,
+                s3_key=event_info.s3_key,
+                filename=event_info.filename,
+                client=api_client,
+            )
 
         else:
             logger.error("Unsupported instrument: %s", instrument_id)
