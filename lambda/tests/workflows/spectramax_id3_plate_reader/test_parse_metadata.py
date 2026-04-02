@@ -3,9 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from data_hub_lambda.workflows.spectramax_id3_plate_reader.parse_metadata import (
-    parse_metadata,
-)
+from data_hub_lambda.spectramax_plate_reader import parse_metadata
 
 _FIXTURES_DIR = Path(__file__).parent / "fixtures"
 

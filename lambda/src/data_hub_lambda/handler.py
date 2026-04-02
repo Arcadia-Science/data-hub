@@ -16,6 +16,7 @@ from urllib.parse import quote, unquote_plus
 from aws_lambda_typing.context import Context
 from aws_lambda_typing.events.s3 import S3Event
 
+from data_hub_lambda import spectramax_plate_reader
 from data_hub_lambda.api_client import DataHubClient
 from data_hub_lambda.config import lambda_config
 from data_hub_lambda.constants import DATA_HUB_WEB_URL
@@ -25,7 +26,6 @@ from data_hub_lambda.workflows import (
     akta_fplc,
     azure_600_gel_doc,
     azure_cielo_qpcr,
-    spectramax_id3_plate_reader,
 )
 from data_hub_shared import slack
 from data_hub_shared.constants import (
@@ -222,7 +222,10 @@ def lambda_handler(event: dict[str, Any], context: Context) -> None:
             if instrument_run_page_id is not None:
                 return
 
-        elif instrument_id == Instrument.SPECTRAMAX_ID3_PLATE_READER.value:
+        elif (
+            instrument_id == Instrument.SPECTRAMAX_ID3_PLATE_READER.value
+            or instrument_id == Instrument.SPECTRAMAX_ID5_PLATE_READER.value
+        ):
             if event_info is None:
                 logger.warning(
                     "Manual invocation for SpectraMax iD3 is not yet supported via the API path."
@@ -230,7 +233,7 @@ def lambda_handler(event: dict[str, Any], context: Context) -> None:
                 return
 
             api_client = _get_api_client()
-            result_url = spectramax_id3_plate_reader.process_file(
+            result_url = spectramax_plate_reader.process_file(
                 instrument_id=event_info.instrument_id,
                 run_id=event_info.run_id,
                 s3_bucket=event_info.s3_bucket,

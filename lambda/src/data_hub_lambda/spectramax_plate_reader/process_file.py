@@ -9,7 +9,7 @@ import logging
 
 from data_hub_lambda.api_client import DataHubClient
 from data_hub_lambda.constants import DATA_HUB_WEB_URL
-from data_hub_lambda.workflows.spectramax_id3_plate_reader.parse_metadata import (
+from data_hub_lambda.spectramax_plate_reader import (
     parse_metadata,
 )
 from data_hub_shared import s3_utils
