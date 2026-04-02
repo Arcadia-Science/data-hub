@@ -10,6 +10,7 @@ dependencies = [
     "pydantic>=2.11.9",
     "requests>=2.31.0",
     "tifffile>=2025.9.30",
+    "scikit-image>=0.26.0",
 ]
 
 [build-system]

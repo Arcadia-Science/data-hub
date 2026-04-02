@@ -3,12 +3,6 @@ import os
 
 
 class LambdaConfig:
-    """Lambda-specific configuration from environment variables.
-
-    Settings shared with the watcher (AWS, S3, Slack) live in
-    `data_hub_shared.config`.
-    """
-
     DATA_HUB_API_URL: str | None
     DATA_HUB_API_KEY: str | None
 

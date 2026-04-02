@@ -1,5 +1,3 @@
-"""Parse dye channel names from Azure Cielo qPCR Cq Values CSV exports."""
-
 from __future__ import annotations
 import csv
 from pathlib import Path

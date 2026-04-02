@@ -51,7 +51,7 @@ def process_file(run_id: str, filename: str) -> str:
         logger.info("File %s marked as completed.", filename)
 
     except Exception as e:
-        logger.error("Error marking file as completed: %s", e)
+        logger.error("Error processing file: %s", e)
         client.update_file(file_id, status="failed", error_message=str(e))
         raise
 

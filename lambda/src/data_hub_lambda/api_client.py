@@ -1,9 +1,3 @@
-"""HTTP client for the Data Hub API — Lambda-specific endpoints.
-
-Mirrors the watcher's `api_client.py` structure with methods tailored to
-the Lambda's per-file processing workflow.
-"""
-
 from __future__ import annotations
 import logging
 import os

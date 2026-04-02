@@ -1,4 +1,4 @@
-name: Lint and typecheck Python packages
+name: Lint, typecheck, and test Python packages
 
 on:
   push:
@@ -6,6 +6,7 @@ on:
       - staging
       - production
     paths:
+      - 'lambda/**'
       - 'watcher/**'
       - 'packages/shared/**'
       - 'pyproject.toml'
@@ -17,6 +18,7 @@ on:
       - staging
       - production
     paths:
+      - 'lambda/**'
       - 'watcher/**'
       - 'packages/shared/**'
       - 'pyproject.toml'
@@ -25,7 +27,7 @@ on:
       - '.github/workflows/lint-and-typecheck-python.yml'
 
 jobs:
-  lint-and-typecheck-python-packages:
+  lint-typecheck-and-test-python-packages:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,3 +41,6 @@ jobs:
 
       - name: Type check
         run: make py-typecheck
+
+      - name: Test
+        run: make py-test

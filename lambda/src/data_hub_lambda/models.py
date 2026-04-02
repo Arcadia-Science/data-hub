@@ -1,5 +1,3 @@
-"""Pydantic response models for the Data Hub API (Lambda client)."""
-
 from __future__ import annotations
 from datetime import datetime
 

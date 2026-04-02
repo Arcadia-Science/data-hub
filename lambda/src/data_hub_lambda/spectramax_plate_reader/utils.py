@@ -19,12 +19,6 @@ import pandas as pd
 MEASUREMENT_MODES = {"Absorbance", "Fluorescence"}
 MEASUREMENT_TYPES = {"Endpoint", "Kinetic", "Well Scan"}
 
-_MEASUREMENT_TYPE_LABELS: dict[str, str] = {
-    "Endpoint": "Endpoint",
-    "Kinetic": "Kinetic",
-    "Well Scan": "Well Scan",
-}
-
 _COL_PLATE_NAME = 1
 _COL_MEASUREMENT_TYPE = 4
 _COL_MEASUREMENT_MODE = 5
@@ -73,26 +67,26 @@ def parse_metadata(file_path: Path) -> dict[str, str]:
         fields = line.split("\t")
 
         measurement_mode = fields[_COL_MEASUREMENT_MODE].strip()
-        measurement_type_raw = fields[_COL_MEASUREMENT_TYPE].strip()
-        wavelength_raw = fields[_COL_WAVELENGTH].strip()
+        measurement_type = fields[_COL_MEASUREMENT_TYPE].strip()
+        wavelength = fields[_COL_WAVELENGTH].strip()
 
         if measurement_mode not in MEASUREMENT_MODES:
             raise ValueError(
                 f"Unexpected measurement mode '{measurement_mode}'; "
                 f"expected one of {sorted(MEASUREMENT_MODES)}"
             )
-        if measurement_type_raw not in MEASUREMENT_TYPES:
+        if measurement_type not in MEASUREMENT_TYPES:
             raise ValueError(
-                f"Unexpected measurement type '{measurement_type_raw}'; "
+                f"Unexpected measurement type '{measurement_type}'; "
                 f"expected one of {sorted(MEASUREMENT_TYPES)}"
             )
-        if not wavelength_raw.isdigit():
-            raise ValueError(f"Expected numeric wavelength, got '{wavelength_raw}'")
+        if not wavelength.isdigit():
+            raise ValueError(f"Expected numeric wavelength, got '{wavelength}'")
 
         return {
             "measurement_mode": measurement_mode,
-            "measurement_type": _MEASUREMENT_TYPE_LABELS[measurement_type_raw],
-            "wavelength": f"{wavelength_raw} nm",
+            "measurement_type": measurement_type,
+            "wavelength": f"{wavelength} nm",
         }
 
     raise ValueError(f"No 'Plate:' header line found in {file_path}")

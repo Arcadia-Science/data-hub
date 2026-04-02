@@ -1,8 +1,3 @@
-"""AWS Lambda handler for per-file instrument processing.
-
-Invocation source: S3 "New object created" events.
-"""
-
 from __future__ import annotations
 import re
 import warnings
@@ -139,7 +134,7 @@ def lambda_handler(event: dict[str, Any], context: Context) -> None:
     instrument_name = INSTRUMENT_ID_TO_NAME_MAP[instrument_id]
 
     try:
-        logger.info("Generating report for run %s...", run_id)
+        logger.info("Processing file %s...", event_info.filename)
 
         if instrument_id == Instrument.AKTA_FPLC.value:
             result_url = akta_fplc.process_file(
@@ -165,9 +160,9 @@ def lambda_handler(event: dict[str, Any], context: Context) -> None:
                 filename=event_info.filename,
             )
 
-        elif (
-            instrument_id == Instrument.SPECTRAMAX_ID3_PLATE_READER.value
-            or instrument_id == Instrument.SPECTRAMAX_ID5_PLATE_READER.value
+        elif instrument_id in (
+            Instrument.SPECTRAMAX_ID3_PLATE_READER.value,
+            Instrument.SPECTRAMAX_ID5_PLATE_READER.value,
         ):
             result_url = spectramax_plate_reader.process_file(
                 instrument_id=event_info.instrument_id,  # pyright: ignore[reportArgumentType]
