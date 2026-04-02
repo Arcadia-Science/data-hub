@@ -41,7 +41,7 @@ class TestEndpoint:
         assert self.df["plate_name"].unique().tolist() == ["Plate2"]
 
     def test_time_is_null(self) -> None:
-        assert self.df["time"].isna().all()
+        assert bool(self.df["time"].isna().all())
 
     def test_wavelength(self) -> None:
         assert (self.df["wavelength"] == 750).all()
