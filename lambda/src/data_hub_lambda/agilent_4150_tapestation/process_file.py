@@ -1,9 +1,3 @@
-"""Agilent 4150 TapeStation per-file processor — migrated to the Data Hub API.
-
-Replaces the legacy Notion/Ganymede-based ``generate_report`` with a
-per-file flow that writes results to the Data Hub REST API.
-"""
-
 from __future__ import annotations
 import logging
 

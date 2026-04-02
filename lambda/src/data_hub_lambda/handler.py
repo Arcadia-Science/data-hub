@@ -20,15 +20,12 @@ from data_hub_lambda import (
     agilent_4150_tapestation,
     akta_fplc,
     azure_600_gel_doc,
+    azure_cielo_qpcr,
     spectramax_plate_reader,
 )
 from data_hub_lambda.api_client import DataHubClient
 from data_hub_lambda.config import lambda_config
 from data_hub_lambda.constants import DATA_HUB_WEB_URL
-from data_hub_lambda.notion.utils import get_instrument_run_page_id
-from data_hub_lambda.workflows import (
-    azure_cielo_qpcr,
-)
 from data_hub_shared import slack
 from data_hub_shared.constants import (
     INSTRUMENT_ID_TO_NAME_MAP,
@@ -236,14 +233,21 @@ def lambda_handler(event: dict[str, Any], context: Context) -> None:
             )
 
         elif instrument_id == Instrument.AZURE_CIELO_QPCR.value:
-            instrument_run_page_id = get_instrument_run_page_id(instrument_name, run_id)
-            result_url = azure_cielo_qpcr.generate_report(
-                run_id, notion_page_id=instrument_run_page_id
-            )
-            # Same early-return logic as TapeStation — skip Slack when
-            # appending files to an existing Notion page.
-            if instrument_run_page_id is not None:
+            if event_info is None:
+                logger.warning(
+                    "Manual invocation for Azure Cielo qPCR is not yet supported via the API path."
+                )
                 return
+
+            api_client = _get_api_client()
+            result_url = azure_cielo_qpcr.process_file(
+                instrument_id=event_info.instrument_id,
+                run_id=event_info.run_id,
+                s3_bucket=event_info.s3_bucket,
+                s3_key=event_info.s3_key,
+                filename=event_info.filename,
+                client=api_client,
+            )
 
         elif (
             instrument_id == Instrument.SPECTRAMAX_ID3_PLATE_READER.value
