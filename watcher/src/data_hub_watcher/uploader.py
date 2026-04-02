@@ -1,6 +1,6 @@
 """S3 upload with retry, API notification, and local state recording.
 
-``Uploader`` handles both auto-mode (immediate upload after run detection)
+`Uploader` handles both auto-mode (immediate upload after run detection)
 and manual-mode (poll the server's upload queue on heartbeat ticks).
 """
 
@@ -31,7 +31,7 @@ class Uploader:
     Parameters
     ----------
     client:
-        API client for ``PATCH /files/{id}`` calls.
+        API client for `PATCH /files/{id}` calls.
     state_db:
         Local SQLite DB for deduplication.
     event_reporter:
@@ -43,11 +43,11 @@ class Uploader:
     watcher_id:
         Watcher identity for queue polling.
     environment:
-        ``"staging"`` or ``"production"`` — determines the S3 bucket name.
+        `"staging"` or `"production"` — determines the S3 bucket name.
     watch_directory:
         Root watch directory for resolving relative paths in queue mode.
     s3_client:
-        Optional pre-built boto3 S3 client.  Created lazily if ``None``.
+        Optional pre-built boto3 S3 client.  Created lazily if `None`.
     """
 
     def __init__(
@@ -85,7 +85,7 @@ class Uploader:
     def upload_files(self, run_id: str, files: list[FileInfo]) -> int:
         """Upload every file in *files* for the given *run_id*.
 
-        Called by ``RunDetector`` immediately after a successful run report
+        Called by `RunDetector` immediately after a successful run report
         (auto mode only).  Returns the number of files successfully uploaded.
         """
         succeeded = 0
@@ -148,10 +148,10 @@ class Uploader:
     def _upload_single(self, path: Path, run_id: str, *, file_id: int | None) -> bool:
         """Upload one file to S3, notify the API, and record in StateDB.
 
-        Returns ``True`` on success, ``False`` after all retries exhausted.
+        Returns `True` on success, `False` after all retries exhausted.
 
-        ``file_id`` is set when a file record exists server-side (created
-        during run reporting or present in the upload queue).  Only ``None``
+        `file_id` is set when a file record exists server-side (created
+        during run reporting or present in the upload queue).  Only `None`
         if the response did not include file IDs.
         """
         s3_key = f"{self._instrument_id}/{run_id}/{path.name}"

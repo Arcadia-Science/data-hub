@@ -6,7 +6,7 @@ import requests
 
 
 def get_current_utc_time() -> str:
-    """Returns the current UTC time as a ``YYYY-MM-DD HH:MM:SS`` string."""
+    """Returns the current UTC time as a `YYYY-MM-DD HH:MM:SS` string."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")  # noqa: UP017
 
 

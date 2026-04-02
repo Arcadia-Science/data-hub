@@ -1,9 +1,3 @@
-"""HTTP client for the Data Hub API — Lambda-specific endpoints.
-
-Mirrors the watcher's ``api_client.py`` structure with methods tailored to
-the Lambda's per-file processing workflow.
-"""
-
 from __future__ import annotations
 import logging
 import os
@@ -104,7 +98,7 @@ class DataHubClient:
 
         If the watcher already created the run, returns the existing record.
         If no run exists (e.g., direct S3 upload), auto-creates it with
-        ``source: "lambda"`` so it shows the correct origin in the UI.
+        `source: "lambda"` so it shows the correct origin in the UI.
         """
         resp = self._request(
             "POST",
@@ -131,9 +125,9 @@ class DataHubClient:
     ) -> FileResponse:
         """Create a file record (idempotent on s3_key).
 
-        The API creates the file in ``uploaded`` status because the file is
+        The API creates the file in `uploaded` status because the file is
         already in S3 when the Lambda is triggered. If the watcher already
-        created a record for this ``s3_key``, the existing record is returned.
+        created a record for this `s3_key`, the existing record is returned.
         """
         payload: dict[str, Any] = {
             "s3_bucket": s3_bucket,
@@ -165,8 +159,8 @@ class DataHubClient:
         """Update a file record (status transition, metadata, report data).
 
         The API enforces a state machine: uploaded → processing → completed|failed.
-        ``report_data`` is a list of ``{data_type, data}`` objects inserted into
-        ``run_report_data`` for instruments that produce tabular data (e.g., plate reader).
+        `report_data` is a list of `{data_type, data}` objects inserted into
+        `run_report_data` for instruments that produce tabular data (e.g., plate reader).
         """
         payload: dict[str, Any] = {}
         if status is not None:
@@ -180,3 +174,27 @@ class DataHubClient:
 
         resp = self._request("PATCH", f"/files/{file_id}", json=payload)
         return FileResponse.model_validate(resp.json())
+
+
+# ---------------------------------------------------------------------------
+# Module-level singleton
+# ---------------------------------------------------------------------------
+
+_client: DataHubClient | None = None
+
+
+def get_client() -> DataHubClient:
+    """Return a module-level `DataHubClient` singleton.
+
+    The client is created lazily on first call so that environment variables
+    are read after the Lambda runtime has injected them.
+    """
+    global _client
+    if _client is None:
+        from data_hub_lambda.config import lambda_config
+
+        _client = DataHubClient(
+            base_url=lambda_config.DATA_HUB_API_URL or "",
+            api_key=lambda_config.DATA_HUB_API_KEY,
+        )
+    return _client

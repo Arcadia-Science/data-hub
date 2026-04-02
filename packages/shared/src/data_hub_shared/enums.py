@@ -14,9 +14,3 @@ class Instrument(Enum):
     AZURE_CIELO_QPCR = "azure-cielo-qpcr"
     SPECTRAMAX_ID3_PLATE_READER = "spectramax-id3-plate-reader"
     SPECTRAMAX_ID5_PLATE_READER = "spectramax-id5-plate-reader"
-
-
-class Analysis(Enum):
-    """Enum for supported analyses."""
-
-    MICHAELIS_MENTEN_KINETICS = "Michaelis-Menten Kinetics"

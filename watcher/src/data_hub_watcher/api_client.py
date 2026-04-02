@@ -71,7 +71,7 @@ class DataHubClient:
         return f"{self.base_url}{path}"
 
     def _handle_error(self, resp: requests.Response) -> None:
-        """Parse an error body and raise ``ApiError``."""
+        """Parse an error body and raise `ApiError`."""
         detail: ApiErrorDetail | None = None
         try:
             body = resp.json()
@@ -153,7 +153,7 @@ class DataHubClient:
         return ConfigChecksumResponse.model_validate(resp.json())
 
     def get_config_checksum(self, watcher_id: str) -> ConfigChecksumResponse | None:
-        """Return the remote checksum, or ``None`` if no config has been pushed.
+        """Return the remote checksum, or `None` if no config has been pushed.
 
         A 404 is expected for newly registered watchers that haven't pushed
         config yet — it is not an error condition.

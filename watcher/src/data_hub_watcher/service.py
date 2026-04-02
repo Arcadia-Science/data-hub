@@ -1,7 +1,7 @@
 """Windows Service wrapper for the Data Hub Watcher.
 
-This module is only imported on Windows and requires the ``pywin32`` optional
-dependency (``pip install data-hub-watcher[windows-service]``).
+This module is only imported on Windows and requires the `pywin32` optional
+dependency (`pip install data-hub-watcher[windows-service]`).
 
 All win32 imports are done lazily inside each function so that:
   1. The module can be imported on any platform for type-checking.
@@ -312,7 +312,7 @@ def _create_service_class() -> type | None:
 
 
 # Materialise the class at module scope so win32serviceutil can find it by
-# qualified name (``data_hub_watcher.service.DataHubWatcherService``).
+# qualified name (`data_hub_watcher.service.DataHubWatcherService`).
 _svc_cls = _create_service_class()
 if _svc_cls is not None:
     DataHubWatcherService = _svc_cls  # noqa: F841

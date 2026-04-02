@@ -15,7 +15,7 @@ py-typecheck:
 
 .PHONY: py-test
 py-test:
-	uv run pytest -v .
+	uv run pytest -v
 
 # Web app.
 .PHONY: fe-format

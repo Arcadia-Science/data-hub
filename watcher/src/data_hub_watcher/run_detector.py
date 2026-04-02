@@ -1,6 +1,6 @@
 """Run detection: group stable files into instrument runs and report them.
 
-``RunDetector`` receives stable-file notifications from ``FileMonitor``,
+`RunDetector` receives stable-file notifications from `FileMonitor`,
 groups them by run ID (extracted via prefix regex or parent directory),
 reports new / updated runs to the Data Hub API, and — in auto mode —
 hands them off to an upload callback immediately after reporting.
@@ -48,24 +48,24 @@ class RunDetector:
     Parameters
     ----------
     method:
-        ``"prefix"`` or ``"directory"``.
+        `"prefix"` or `"directory"`.
     prefix_pattern:
-        Regex with one capture group (only used when *method* is ``"prefix"``).
+        Regex with one capture group (only used when *method* is `"prefix"`).
     instrument_id:
         Instrument ID used in API paths.
     watcher_id:
         Watcher ID for event reporting.
     client:
-        ``DataHubClient`` for API calls.
+        `DataHubClient` for API calls.
     state_db:
-        ``StateDB`` for persistence.
+        `StateDB` for persistence.
     event_reporter:
         For queuing structured events.
     counters:
         Heartbeat counters to increment on successful reports.
     upload_callback:
-        If set, called with ``(run_id, files)`` after a successful report.
-        Typically ``Uploader.upload_files`` in auto mode; ``None`` in manual mode.
+        If set, called with `(run_id, files)` after a successful report.
+        Typically `Uploader.upload_files` in auto mode; `None` in manual mode.
     watch_directory:
         The root watch directory (used for relative path calculation).
     """

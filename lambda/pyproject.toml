@@ -6,13 +6,11 @@ dependencies = [
     "data-hub-shared",
     "aws-lambda-typing>=2.20.0",
     "matplotlib>=3.8",
-    "michaelis-menten-analysis",
-    "openpyxl>=3.1.5",
-    "pandas>=2.3.1",
+    "pandas>=2.2",
     "pydantic>=2.11.9",
     "requests>=2.31.0",
-    "scikit-image>=0.25.2",
     "tifffile>=2025.9.30",
+    "scikit-image>=0.26.0",
 ]
 
 [build-system]
@@ -21,7 +19,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.uv.sources]
 data-hub-shared = { workspace = true }
-michaelis-menten-analysis = { git = "https://github.com/Arcadia-Science/2025-michaelis-menten-analysis", rev = "a654d37aa737745cef8d8f3b5df358ab717f8064" }
 
 [tool.setuptools.packages.find]
 where = ["src"]

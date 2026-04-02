@@ -1,6 +1,6 @@
 """File monitoring with watchdog and stability detection.
 
-``FileMonitor`` watches a directory for new/modified files, filters them
+`FileMonitor` watches a directory for new/modified files, filters them
 by glob patterns, waits for each file to become "stable" (size + mtime
 unchanged for the configured period), then invokes a callback.
 """
@@ -87,17 +87,17 @@ class FileMonitor:
     watch_directory:
         Top-level directory to monitor.
     file_patterns:
-        Glob patterns (e.g. ``["*.csv", "*.txt"]``) matched against filenames.
+        Glob patterns (e.g. `["*.csv", "*.txt"]`) matched against filenames.
     stability_period:
         Seconds a file's size + mtime must remain unchanged before it is
         considered stable.
     on_stable_file:
-        Called with the ``Path`` of each stable file.
+        Called with the `Path` of each stable file.
     state_db:
         Used to skip files that have already been uploaded.
     recursive:
-        Whether to monitor subdirectories (``True`` for directory-mode run
-        detection, ``False`` otherwise).
+        Whether to monitor subdirectories (`True` for directory-mode run
+        detection, `False` otherwise).
     """
 
     def __init__(
