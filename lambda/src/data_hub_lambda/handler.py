@@ -16,14 +16,13 @@ from urllib.parse import quote, unquote_plus
 from aws_lambda_typing.context import Context
 from aws_lambda_typing.events.s3 import S3Event
 
-from data_hub_lambda import spectramax_plate_reader
+from data_hub_lambda import akta_fplc, spectramax_plate_reader
 from data_hub_lambda.api_client import DataHubClient
 from data_hub_lambda.config import lambda_config
 from data_hub_lambda.constants import DATA_HUB_WEB_URL
 from data_hub_lambda.notion.utils import get_instrument_run_page_id
 from data_hub_lambda.workflows import (
     agilent_4150_tapestation,
-    akta_fplc,
     azure_600_gel_doc,
     azure_cielo_qpcr,
 )
