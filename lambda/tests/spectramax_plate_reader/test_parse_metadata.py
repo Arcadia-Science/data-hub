@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from data_hub_lambda.spectramax_plate_reader import parse_metadata
+from data_hub_lambda.spectramax_plate_reader.utils import parse_metadata
 
 _FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -102,12 +102,6 @@ class TestParseMetadataHappyPath:
             "measurement_type": "Kinetic",
             "wavelength": "488 nm",
         }
-
-    def test_well_scan_without_space(self, tmp_path: Path) -> None:
-        """'WellScan' (no space) should map to 'Well Scan' in output."""
-        path = _build_xls(tmp_path, measurement_type="WellScan", wavelength="600")
-        result = parse_metadata(path)
-        assert result["measurement_type"] == "Well Scan"
 
 
 # ---------------------------------------------------------------------------

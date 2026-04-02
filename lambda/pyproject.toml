@@ -6,6 +6,7 @@ dependencies = [
     "data-hub-shared",
     "aws-lambda-typing>=2.20.0",
     "matplotlib>=3.8",
+    "pandas>=2.2",
     "pydantic>=2.11.9",
     "requests>=2.31.0",
     "tifffile>=2025.9.30",
