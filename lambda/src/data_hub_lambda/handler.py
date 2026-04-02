@@ -23,8 +23,6 @@ from data_hub_lambda import (
     azure_cielo_qpcr,
     spectramax_plate_reader,
 )
-from data_hub_lambda.api_client import DataHubClient
-from data_hub_lambda.config import lambda_config
 from data_hub_shared import slack
 from data_hub_shared.constants import (
     INSTRUMENT_ID_TO_NAME_MAP,
@@ -124,14 +122,6 @@ def get_cloudwatch_logs_url(context: Context) -> str:
     return f"{base_url}?region={region}#logsV2:{logs_path}"
 
 
-def _get_api_client() -> DataHubClient:
-    """Creates a ``DataHubClient`` from Lambda environment config."""
-    return DataHubClient(
-        base_url=lambda_config.DATA_HUB_API_URL or "",
-        api_key=lambda_config.DATA_HUB_API_KEY,
-    )
-
-
 # ------------------------------------------------------------------
 # Main handler
 # ------------------------------------------------------------------
@@ -179,14 +169,9 @@ def lambda_handler(event: dict[str, Any], context: Context) -> None:
                 )
                 return
 
-            api_client = _get_api_client()
             result_url = akta_fplc.process_file(
-                instrument_id=event_info.instrument_id,
                 run_id=event_info.run_id,
-                s3_bucket=event_info.s3_bucket,
-                s3_key=event_info.s3_key,
                 filename=event_info.filename,
-                client=api_client,
             )
 
         elif instrument_id == Instrument.AGILENT_4150_TAPESTATION.value:
@@ -197,14 +182,9 @@ def lambda_handler(event: dict[str, Any], context: Context) -> None:
                 )
                 return
 
-            api_client = _get_api_client()
             result_url = agilent_4150_tapestation.process_file(
-                instrument_id=event_info.instrument_id,
                 run_id=event_info.run_id,
-                s3_bucket=event_info.s3_bucket,
-                s3_key=event_info.s3_key,
                 filename=event_info.filename,
-                client=api_client,
             )
 
         elif instrument_id == Instrument.AZURE_600_GEL_DOC.value:
@@ -214,14 +194,9 @@ def lambda_handler(event: dict[str, Any], context: Context) -> None:
                 )
                 return
 
-            api_client = _get_api_client()
             result_url = azure_600_gel_doc.process_file(
-                instrument_id=event_info.instrument_id,
                 run_id=event_info.run_id,
-                s3_bucket=event_info.s3_bucket,
-                s3_key=event_info.s3_key,
                 filename=event_info.filename,
-                client=api_client,
             )
 
         elif instrument_id == Instrument.AZURE_CIELO_QPCR.value:
@@ -231,14 +206,9 @@ def lambda_handler(event: dict[str, Any], context: Context) -> None:
                 )
                 return
 
-            api_client = _get_api_client()
             result_url = azure_cielo_qpcr.process_file(
-                instrument_id=event_info.instrument_id,
                 run_id=event_info.run_id,
-                s3_bucket=event_info.s3_bucket,
-                s3_key=event_info.s3_key,
                 filename=event_info.filename,
-                client=api_client,
             )
 
         elif (
@@ -251,14 +221,10 @@ def lambda_handler(event: dict[str, Any], context: Context) -> None:
                 )
                 return
 
-            api_client = _get_api_client()
             result_url = spectramax_plate_reader.process_file(
                 instrument_id=event_info.instrument_id,
                 run_id=event_info.run_id,
-                s3_bucket=event_info.s3_bucket,
-                s3_key=event_info.s3_key,
                 filename=event_info.filename,
-                client=api_client,
             )
 
         else:

@@ -180,3 +180,27 @@ class DataHubClient:
 
         resp = self._request("PATCH", f"/files/{file_id}", json=payload)
         return FileResponse.model_validate(resp.json())
+
+
+# ---------------------------------------------------------------------------
+# Module-level singleton
+# ---------------------------------------------------------------------------
+
+_client: DataHubClient | None = None
+
+
+def get_client() -> DataHubClient:
+    """Return a module-level ``DataHubClient`` singleton.
+
+    The client is created lazily on first call so that environment variables
+    are read after the Lambda runtime has injected them.
+    """
+    global _client
+    if _client is None:
+        from data_hub_lambda.config import lambda_config
+
+        _client = DataHubClient(
+            base_url=lambda_config.DATA_HUB_API_URL or "",
+            api_key=lambda_config.DATA_HUB_API_KEY,
+        )
+    return _client

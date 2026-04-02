@@ -38,13 +38,19 @@ def _make_client(file_response: FileResponse | None = None) -> MagicMock:
 class TestProcessFile:
     """Integration-style tests for the process_file workflow."""
 
+    @patch("data_hub_lambda.azure_cielo_qpcr.process_file.get_client")
     @patch("data_hub_lambda.azure_cielo_qpcr.process_file.s3_utils")
     @patch("data_hub_lambda.azure_cielo_qpcr.process_file.config")
     def test_csv_file_extracts_dye_channels(
-        self, mock_config: MagicMock, mock_s3: MagicMock, tmp_path: Path
+        self,
+        mock_config: MagicMock,
+        mock_s3: MagicMock,
+        mock_get_client: MagicMock,
+        tmp_path: Path,
     ) -> None:
         """A CSV file should have dye_channels parsed and sent as metadata."""
         mock_config.LOCAL_RAW_DATA_DIRPATH = tmp_path
+        mock_config.AWS_S3_RAW_DATA_BUCKET = _S3_BUCKET
 
         fixture = _FIXTURES_DIR / "example.csv"
         run_dir = tmp_path / _INSTRUMENT_ID / _RUN_ID
@@ -52,15 +58,9 @@ class TestProcessFile:
         (run_dir / _FILENAME_CSV).write_text(fixture.read_text())
 
         client = _make_client()
+        mock_get_client.return_value = client
 
-        result_url = process_file(
-            instrument_id=_INSTRUMENT_ID,
-            run_id=_RUN_ID,
-            s3_bucket=_S3_BUCKET,
-            s3_key=_S3_KEY,
-            filename=_FILENAME_CSV,
-            client=client,
-        )
+        result_url = process_file(run_id=_RUN_ID, filename=_FILENAME_CSV)
 
         client.ensure_run.assert_called_once_with(_INSTRUMENT_ID, _RUN_ID)
         client.create_file.assert_called_once()
@@ -75,15 +75,20 @@ class TestProcessFile:
         assert _INSTRUMENT_ID in result_url
         assert _RUN_ID in result_url
 
+    @patch("data_hub_lambda.azure_cielo_qpcr.process_file.get_client")
     @patch("data_hub_lambda.azure_cielo_qpcr.process_file.s3_utils")
     @patch("data_hub_lambda.azure_cielo_qpcr.process_file.config")
     def test_non_csv_file_has_empty_metadata(
-        self, mock_config: MagicMock, mock_s3: MagicMock, tmp_path: Path
+        self,
+        mock_config: MagicMock,
+        mock_s3: MagicMock,
+        mock_get_client: MagicMock,
+        tmp_path: Path,
     ) -> None:
         """Non-CSV files (e.g. PDF) should be registered with empty metadata."""
         mock_config.LOCAL_RAW_DATA_DIRPATH = tmp_path
+        mock_config.AWS_S3_RAW_DATA_BUCKET = _S3_BUCKET
         pdf_filename = "Experiment_20260101_Report.pdf"
-        s3_key = f"{_INSTRUMENT_ID}/{pdf_filename}"
 
         run_dir = tmp_path / _INSTRUMENT_ID / _RUN_ID
         run_dir.mkdir(parents=True)
@@ -92,26 +97,26 @@ class TestProcessFile:
         file_resp = _make_file_response()
         file_resp.filename = pdf_filename
         client = _make_client(file_resp)
+        mock_get_client.return_value = client
 
-        process_file(
-            instrument_id=_INSTRUMENT_ID,
-            run_id=_RUN_ID,
-            s3_bucket=_S3_BUCKET,
-            s3_key=s3_key,
-            filename=pdf_filename,
-            client=client,
-        )
+        process_file(run_id=_RUN_ID, filename=pdf_filename)
 
         completed_call = client.update_file.call_args_list[1]
         assert completed_call.kwargs["metadata"] == {}
 
+    @patch("data_hub_lambda.azure_cielo_qpcr.process_file.get_client")
     @patch("data_hub_lambda.azure_cielo_qpcr.process_file.s3_utils")
     @patch("data_hub_lambda.azure_cielo_qpcr.process_file.config")
     def test_marks_failed_on_error(
-        self, mock_config: MagicMock, mock_s3: MagicMock, tmp_path: Path
+        self,
+        mock_config: MagicMock,
+        mock_s3: MagicMock,
+        mock_get_client: MagicMock,
+        tmp_path: Path,
     ) -> None:
         """If processing raises, the file should be marked as failed."""
         mock_config.LOCAL_RAW_DATA_DIRPATH = tmp_path
+        mock_config.AWS_S3_RAW_DATA_BUCKET = _S3_BUCKET
 
         run_dir = tmp_path / _INSTRUMENT_ID / _RUN_ID
         run_dir.mkdir(parents=True)
@@ -119,16 +124,10 @@ class TestProcessFile:
         bad_csv.write_text("Wrong,Headers,Only\nA,B,C\n")
 
         client = _make_client()
+        mock_get_client.return_value = client
 
         with pytest.raises(ValueError):
-            process_file(
-                instrument_id=_INSTRUMENT_ID,
-                run_id=_RUN_ID,
-                s3_bucket=_S3_BUCKET,
-                s3_key=_S3_KEY,
-                filename=_FILENAME_CSV,
-                client=client,
-            )
+            process_file(run_id=_RUN_ID, filename=_FILENAME_CSV)
 
         failed_call = client.update_file.call_args_list[-1]
         assert failed_call.kwargs["status"] == "failed"
