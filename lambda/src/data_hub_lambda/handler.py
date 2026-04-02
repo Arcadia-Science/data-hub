@@ -1,8 +1,6 @@
 """AWS Lambda handler for per-file instrument processing.
 
-Invocation sources:
-  1. S3 "New object created" events.
-  2. Manual invocations via the GitHub Actions workflow.
+Invocation source: S3 "New object created" events.
 """
 
 from __future__ import annotations
@@ -24,10 +22,7 @@ from data_hub_lambda import (
     spectramax_plate_reader,
 )
 from data_hub_shared import slack
-from data_hub_shared.constants import (
-    INSTRUMENT_ID_TO_NAME_MAP,
-    INSTRUMENT_NAME_TO_ID_MAP,
-)
+from data_hub_shared.constants import INSTRUMENT_ID_TO_NAME_MAP
 from data_hub_shared.enums import Instrument
 from data_hub_shared.logger import get_named_logger
 
@@ -131,30 +126,14 @@ def lambda_handler(event: dict[str, Any], context: Context) -> None:
     """Top-level Lambda handler dispatching to instrument workflows."""
     logger.info("Received event: %s", pformat(event))
 
-    # event_info is only populated for S3-triggered invocations; manual
-    # invocations (GitHub Actions) don't carry S3 bucket/key details.
-    event_info: S3EventInfo | None = None
-
     try:
-        # S3 trigger — the primary invocation path for per-file processing.
-        if "Records" in event:
-            event_info = parse_s3_event(event)  # type: ignore[arg-type]
-            instrument_id = event_info.instrument_id
-            run_id = event_info.run_id
-
-        # GitHub Actions manual trigger — provides instrument_name + run_id
-        # directly, without S3 context. Used for re-processing or backfills.
-        elif "instrument_name" in event and "run_id" in event:
-            instrument_id = INSTRUMENT_NAME_TO_ID_MAP[event["instrument_name"]]
-            run_id = event["run_id"]
-
-        else:
-            raise ValueError("Unsupported event type.")
-
+        event_info = parse_s3_event(event)  # type: ignore[arg-type]
     except Exception:
         logger.exception("Error handling event.")
         return
 
+    instrument_id = event_info.instrument_id
+    run_id = event_info.run_id
     logger.info("Instrument ID: '%s'", instrument_id)
     logger.info("Run ID: '%s'", run_id)
     instrument_name = INSTRUMENT_ID_TO_NAME_MAP[instrument_id]
@@ -163,49 +142,24 @@ def lambda_handler(event: dict[str, Any], context: Context) -> None:
         logger.info("Generating report for run %s...", run_id)
 
         if instrument_id == Instrument.AKTA_FPLC.value:
-            if event_info is None:
-                logger.warning(
-                    "Manual invocation for Akta FPLC is not yet supported via the API path."
-                )
-                return
-
             result_url = akta_fplc.process_file(
                 run_id=event_info.run_id,
                 filename=event_info.filename,
             )
 
         elif instrument_id == Instrument.AGILENT_4150_TAPESTATION.value:
-            if event_info is None:
-                logger.warning(
-                    "Manual invocation for Agilent 4150 TapeStation is not yet supported "
-                    "via the API path."
-                )
-                return
-
             result_url = agilent_4150_tapestation.process_file(
                 run_id=event_info.run_id,
                 filename=event_info.filename,
             )
 
         elif instrument_id == Instrument.AZURE_600_GEL_DOC.value:
-            if event_info is None:
-                logger.warning(
-                    "Manual invocation for Azure 600 Gel Doc is not yet supported via the API path."
-                )
-                return
-
             result_url = azure_600_gel_doc.process_file(
                 run_id=event_info.run_id,
                 filename=event_info.filename,
             )
 
         elif instrument_id == Instrument.AZURE_CIELO_QPCR.value:
-            if event_info is None:
-                logger.warning(
-                    "Manual invocation for Azure Cielo qPCR is not yet supported via the API path."
-                )
-                return
-
             result_url = azure_cielo_qpcr.process_file(
                 run_id=event_info.run_id,
                 filename=event_info.filename,
@@ -215,14 +169,8 @@ def lambda_handler(event: dict[str, Any], context: Context) -> None:
             instrument_id == Instrument.SPECTRAMAX_ID3_PLATE_READER.value
             or instrument_id == Instrument.SPECTRAMAX_ID5_PLATE_READER.value
         ):
-            if event_info is None:
-                logger.warning(
-                    "Manual invocation for SpectraMax iD3 is not yet supported via the API path."
-                )
-                return
-
             result_url = spectramax_plate_reader.process_file(
-                instrument_id=event_info.instrument_id,
+                instrument_id=event_info.instrument_id,  # pyright: ignore[reportArgumentType]
                 run_id=event_info.run_id,
                 filename=event_info.filename,
             )
