@@ -16,13 +16,12 @@ from urllib.parse import quote, unquote_plus
 from aws_lambda_typing.context import Context
 from aws_lambda_typing.events.s3 import S3Event
 
-from data_hub_lambda import akta_fplc, spectramax_plate_reader
+from data_hub_lambda import agilent_4150_tapestation, akta_fplc, spectramax_plate_reader
 from data_hub_lambda.api_client import DataHubClient
 from data_hub_lambda.config import lambda_config
 from data_hub_lambda.constants import DATA_HUB_WEB_URL
 from data_hub_lambda.notion.utils import get_instrument_run_page_id
 from data_hub_lambda.workflows import (
-    agilent_4150_tapestation,
     azure_600_gel_doc,
     azure_cielo_qpcr,
 )
@@ -198,15 +197,22 @@ def lambda_handler(event: dict[str, Any], context: Context) -> None:
         # These workflows still write to Notion and query Ganymede. They will
         # be migrated one at a time to the per-file API path (see MIGRATION.md).
         elif instrument_id == Instrument.AGILENT_4150_TAPESTATION.value:
-            instrument_run_page_id = get_instrument_run_page_id(instrument_name, run_id)
-            result_url = agilent_4150_tapestation.generate_report(
-                run_id, notion_page_id=instrument_run_page_id
-            )
-            # When a page already exists, generate_report appends new files to
-            # it. Skip the Slack notification to avoid duplicate messages — the
-            # initial creation already sent one.
-            if instrument_run_page_id is not None:
+            if event_info is None:
+                logger.warning(
+                    "Manual invocation for Agilent 4150 TapeStation is not yet supported "
+                    "via the API path."
+                )
                 return
+
+            api_client = _get_api_client()
+            result_url = agilent_4150_tapestation.process_file(
+                instrument_id=event_info.instrument_id,
+                run_id=event_info.run_id,
+                s3_bucket=event_info.s3_bucket,
+                s3_key=event_info.s3_key,
+                filename=event_info.filename,
+                client=api_client,
+            )
 
         elif instrument_id == Instrument.AZURE_600_GEL_DOC.value:
             result_url = azure_600_gel_doc.generate_report(run_id)
