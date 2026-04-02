@@ -26,8 +26,8 @@ class RunRecord:
 class StateDB:
     """Thin wrapper around a SQLite database with two tables.
 
-    - ``uploaded_files`` — tracks files already sent to S3.
-    - ``runs`` — tracks runs reported to and uploaded via the API.
+    - `uploaded_files` — tracks files already sent to S3.
+    - `runs` — tracks runs reported to and uploaded via the API.
     """
 
     def __init__(self, db_path: Path) -> None:
@@ -80,7 +80,7 @@ class StateDB:
     def is_uploaded(self, filename: str, sha256: str, s3_key: str) -> bool:
         """Check whether this exact file has already been uploaded to *s3_key*.
 
-        Keyed on ``(filename, sha256, s3_key)`` so the same file content can
+        Keyed on `(filename, sha256, s3_key)` so the same file content can
         be uploaded to different S3 destinations (e.g. different runs that
         produce identically-named output files).
         """

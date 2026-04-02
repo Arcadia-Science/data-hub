@@ -17,11 +17,11 @@ def process_file(run_id: str, filename: str) -> str:
     """Process a single Azure Cielo qPCR file through the Data Hub API.
 
     For Cq Values CSV files, the unique dye channel names are extracted from
-    the ``Fluorescence`` column and stored as run-level metadata.
+    the `Fluorescence` column and stored as run-level metadata.
 
     Args:
-        run_id: The run ID (``Experiment_YYYYMMDD`` prefix).
-        filename: The original filename (e.g. ``Experiment_20260101_CqValues.csv``).
+        run_id: The run ID (`Experiment_YYYYMMDD` prefix).
+        filename: The original filename (e.g. `Experiment_20260101_CqValues.csv`).
 
     Returns:
         The web app URL for the instrument run.

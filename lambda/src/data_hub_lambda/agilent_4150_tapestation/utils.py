@@ -3,7 +3,7 @@ import re
 
 
 def parse_run_id_from_filename(filename: str) -> str:
-    """Parses the ``YYYY-MM-DD - HH-MM-SS`` run ID prefix from a TapeStation filename."""
+    """Parses the `YYYY-MM-DD - HH-MM-SS` run ID prefix from a TapeStation filename."""
     if filename.endswith(".pdf"):
         pattern = r"(\d{4}-\d{2}-\d{2} - \d{2}\.\d{2}\.\d{2})"
     elif filename.endswith(".csv"):
@@ -22,13 +22,13 @@ def parse_run_id_from_filename(filename: str) -> str:
 def parse_tape_type(filename: str) -> str | None:
     """Extracts the tape type from a TapeStation CSV filename.
 
-    Filenames follow the pattern ``YYYY-MM-DD - HH-MM-SS-<TapeType>_<suffix>.csv``.
+    Filenames follow the pattern `YYYY-MM-DD - HH-MM-SS-<TapeType>_<suffix>.csv`.
     For example:
 
-    - ``2026-02-18 - 18-00-04-gDNA_peakTable.csv`` → ``"gDNA"``
-    - ``2026-02-18 - 18-00-04-HSD1000_peakTable.csv`` → ``"HSD1000"``
+    - `2026-02-18 - 18-00-04-gDNA_peakTable.csv` → `"gDNA"`
+    - `2026-02-18 - 18-00-04-HSD1000_peakTable.csv` → `"HSD1000"`
 
-    Returns ``None`` for non-CSV files or if the pattern doesn't match.
+    Returns `None` for non-CSV files or if the pattern doesn't match.
     """
     if not filename.endswith(".csv"):
         return None

@@ -11,13 +11,13 @@ from data_hub_watcher.models import WatcherConfig
 
 
 def ensure_config_dir() -> Path:
-    """Create ``~/.data-hub/`` if it does not exist and return the path."""
+    """Create `~/.data-hub/` if it does not exist and return the path."""
     DEFAULT_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     return DEFAULT_CONFIG_DIR
 
 
 def load_config(path: Path) -> WatcherConfig:
-    """Read *path* as YAML and return a validated ``WatcherConfig``."""
+    """Read *path* as YAML and return a validated `WatcherConfig`."""
     if not path.exists():
         raise click.ClickException(f"Config file not found: {path}")
 
@@ -57,14 +57,14 @@ def save_config(config: WatcherConfig, path: Path) -> None:
 
 
 def config_checksum(path: Path) -> str:
-    """Return ``sha256:<hex>`` digest of the config file contents."""
+    """Return `sha256:<hex>` digest of the config file contents."""
     contents = path.read_bytes()
     digest = hashlib.sha256(contents).hexdigest()
     return f"sha256:{digest}"
 
 
 def _convert_paths(obj: object) -> None:
-    """Recursively convert ``Path`` values to strings for YAML serialization."""
+    """Recursively convert `Path` values to strings for YAML serialization."""
     if isinstance(obj, dict):
         for key in list(obj.keys()):
             val = obj[key]

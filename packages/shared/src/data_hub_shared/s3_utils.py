@@ -2,7 +2,7 @@
 
 Ported from legacy/src/data_hub_utils/aws/s3_utils.py, but without
 the global boto3 client singleton. Callers either pass an explicit
-``s3_client`` or one is created from ambient environment credentials.
+`s3_client` or one is created from ambient environment credentials.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ def get_s3_client() -> S3Client:
 
 
 def parse_s3_uri(s3_uri: str) -> tuple[str, str]:
-    """Split an S3 URI into ``(bucket, key)``.
+    """Split an S3 URI into `(bucket, key)`.
 
     >>> parse_s3_uri("s3://my-bucket/path/to/file.txt")
     ('my-bucket', 'path/to/file.txt')
@@ -37,7 +37,7 @@ def parse_s3_uri(s3_uri: str) -> tuple[str, str]:
 
 
 def _extra_args(file_path: Path) -> dict[str, str]:
-    """Build ``ExtraArgs`` for an S3 upload (content-type, disposition)."""
+    """Build `ExtraArgs` for an S3 upload (content-type, disposition)."""
     args: dict[str, str] = {}
     content_type, _ = mimetypes.guess_type(str(file_path))
     if content_type:
@@ -55,7 +55,7 @@ def upload_file(
     *,
     s3_client: S3Client | None = None,
 ) -> None:
-    """Upload *local_path* to *s3_uri* (e.g. ``s3://bucket/key``)."""
+    """Upload *local_path* to *s3_uri* (e.g. `s3://bucket/key`)."""
     client = s3_client or get_s3_client()
     bucket, key = parse_s3_uri(s3_uri)
     extra = _extra_args(local_path)
@@ -114,6 +114,6 @@ def upload_folder(
 
 
 def get_content_type(file_path: Path) -> str | None:
-    """Return the guessed MIME type for *file_path*, or ``None``."""
+    """Return the guessed MIME type for *file_path*, or `None`."""
     content_type, _ = mimetypes.guess_type(str(file_path))
     return content_type

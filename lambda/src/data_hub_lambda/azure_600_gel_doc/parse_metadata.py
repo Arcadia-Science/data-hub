@@ -1,19 +1,19 @@
 """Parse imaging metadata from Azure 600 Gel Doc TIFF files.
 
-The Azure 600 stores instrument metadata in the TIFF ``XPComment`` tag
-(tag 40092) as a .NET ``BinaryFormatter``-serialized ``ImageInfo`` object.
-This module extracts the key fields by scanning for ``BinaryObjectString``
-records (type ``0x06``) in the serialized byte stream and mapping them to
+The Azure 600 stores instrument metadata in the TIFF `XPComment` tag
+(tag 40092) as a .NET `BinaryFormatter`-serialized `ImageInfo` object.
+This module extracts the key fields by scanning for `BinaryObjectString`
+records (type `0x06`) in the serialized byte stream and mapping them to
 the known class field structure.
 
 Extracted fields:
-  - **capture_type** — ``"Auto Image"`` or ``"Manual"``.
-  - **imaging_mode** — ``"True Color Imaging"``, ``"Fluorescence"``, or
-    ``"Chemiluminescence"``.
+  - **capture_type** — `"Auto Image"` or `"Manual"`.
+  - **imaging_mode** — `"True Color Imaging"`, `"Fluorescence"`, or
+    `"Chemiluminescence"`.
   - **wavelengths** — list of excitation wavelength strings (e.g.
-    ``["628", "524", "472"]``). Empty for chemiluminescence.
+    `["628", "524", "472"]`). Empty for chemiluminescence.
   - **colors** — list of color-channel names (e.g.
-    ``["Red", "Green", "Blue"]``). Empty for chemiluminescence.
+    `["Red", "Green", "Blue"]`). Empty for chemiluminescence.
 """
 
 from __future__ import annotations
@@ -39,11 +39,11 @@ def parse_metadata(file_path: Path) -> dict[str, Any]:
     """Extract imaging metadata from an Azure 600 Gel Doc TIFF.
 
     Returns:
-        A dict with keys ``capture_type``, ``imaging_mode``,
-        ``wavelengths``, and ``colors``.
+        A dict with keys `capture_type`, `imaging_mode`,
+        `wavelengths`, and `colors`.
 
     Raises:
-        ValueError: If the file lacks the expected ``XPComment`` tag.
+        ValueError: If the file lacks the expected `XPComment` tag.
     """
     raw = _read_xp_comment(file_path)
     all_strings = _extract_string_records(raw)
@@ -96,9 +96,9 @@ def _read_leb128(data: bytes, offset: int) -> tuple[int, int]:
 
 
 def _extract_string_records(data: bytes) -> list[tuple[str, int]]:
-    """Find all ``BinaryObjectString`` records (type ``0x06``) in the stream.
+    """Find all `BinaryObjectString` records (type `0x06`) in the stream.
 
-    Returns a list of ``(decoded_string, byte_offset)`` sorted by offset.
+    Returns a list of `(decoded_string, byte_offset)` sorted by offset.
     """
     results: list[tuple[str, int]] = []
     i = 0
@@ -118,10 +118,10 @@ def _extract_string_records(data: bytes) -> list[tuple[str, int]]:
 
 
 def _find_channel_boundary(data: bytes) -> int:
-    """Return the byte offset where the ``ImageChannel`` class definition begins.
+    """Return the byte offset where the `ImageChannel` class definition begins.
 
     All string records *before* this offset belong to the top-level
-    ``ImageInfo`` object; records *at or after* it belong to channel objects.
+    `ImageInfo` object; records *at or after* it belong to channel objects.
     """
     idx = data.find(_CHANNEL_CLASS_NAME + b"\x16\x00\x00\x00")
     if idx < 0:
@@ -130,7 +130,7 @@ def _find_channel_boundary(data: bytes) -> int:
 
 
 def _parse_capture_type(info_strings: list[str]) -> str | None:
-    """Find and normalize the ``CaptureType`` value from ImageInfo strings."""
+    """Find and normalize the `CaptureType` value from ImageInfo strings."""
     for s in info_strings:
         if s in _CAPTURE_TYPE_LABELS:
             return _CAPTURE_TYPE_LABELS[s]
@@ -140,8 +140,8 @@ def _parse_capture_type(info_strings: list[str]) -> str | None:
 def _group_channel_strings(channel_strings: list[str]) -> list[dict[str, str]]:
     """Group channel string records into per-channel dicts.
 
-    Each active ``ImageChannel`` produces exactly four consecutive string
-    records: ``DyeName``, ``ExcitationName``, ``EmissionName``, ``ExposureType``.
+    Each active `ImageChannel` produces exactly four consecutive string
+    records: `DyeName`, `ExcitationName`, `EmissionName`, `ExposureType`.
     Inactive channels are serialized with null markers and produce no string
     records.
     """
@@ -180,5 +180,5 @@ def _extract_wavelengths(channels: list[dict[str, str]]) -> list[str]:
 
 
 def _extract_colors(channels: list[dict[str, str]]) -> list[str]:
-    """Return color names from channels whose ``DyeName`` is a known color."""
+    """Return color names from channels whose `DyeName` is a known color."""
     return [ch["dye_name"] for ch in channels if ch["dye_name"] in _COLOR_NAMES]

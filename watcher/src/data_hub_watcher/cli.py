@@ -91,7 +91,7 @@ def _load_and_client(ctx: click.Context) -> tuple[WatcherConfig, DataHubClient, 
 
 
 def _setup_file_logging() -> None:
-    """Add a RotatingFileHandler to the root logger (``~/.data-hub/watcher.log``)."""
+    """Add a RotatingFileHandler to the root logger (`~/.data-hub/watcher.log`)."""
     from logging.handlers import RotatingFileHandler
 
     log_path = DEFAULT_CONFIG_DIR / "watcher.log"
@@ -311,7 +311,7 @@ def _push_config_to_api(
 
 
 def _dry_run_scan(cfg: WatcherConfig) -> None:
-    """Scan the watch directory and log what ``watch`` would do, without side effects."""
+    """Scan the watch directory and log what `watch` would do, without side effects."""
     inst = cfg.instrument
     is_auto = inst.upload_mode == "auto"
     is_recursive = inst.run_detection.method == "directory" and not is_auto
@@ -371,7 +371,7 @@ def _dry_run_scan(cfg: WatcherConfig) -> None:
 def _extract_run_id_for_dry_run(
     path: Path, method: str, prefix_re: re.Pattern[str] | None, watch_dir: Path
 ) -> str | None:
-    """Extract a run ID from *path* using the same logic as ``RunDetector``."""
+    """Extract a run ID from *path* using the same logic as `RunDetector`."""
     if method == "prefix":
         if prefix_re is None:
             return None

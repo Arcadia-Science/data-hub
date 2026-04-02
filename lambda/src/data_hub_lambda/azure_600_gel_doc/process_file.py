@@ -1,6 +1,5 @@
 from __future__ import annotations
 import logging
-from pathlib import Path
 
 from data_hub_lambda.api_client import get_client
 from data_hub_lambda.azure_600_gel_doc.image_processing import TIFFProcessor
@@ -24,7 +23,7 @@ def process_file(run_id: str, filename: str) -> str:
 
     Args:
         run_id: The run ID (filename stem).
-        filename: The original filename (e.g. ``26.04.01_16.51.59.tif``).
+        filename: The original filename (e.g. `26.04.01_16.51.59.tif`).
 
     Returns:
         The web app URL for the instrument run.
@@ -54,7 +53,9 @@ def process_file(run_id: str, filename: str) -> str:
         s3_utils.download_file(f"s3://{s3_bucket}/{s3_key}", local_file_path)
         logger.info("Downloaded %s to %s", filename, local_file_path)
 
-        png_file_path = _process_tiff(local_file_path)
+        tiff_processor = TIFFProcessor(local_file_path)
+        tiff_processor.load()
+        png_file_path = tiff_processor.export_figure()
 
         processed_bucket = config.AWS_S3_PROCESSED_DATA_BUCKET
         png_s3_key = f"{INSTRUMENT_ID}/{png_file_path.name}"
@@ -82,10 +83,3 @@ def process_file(run_id: str, filename: str) -> str:
         raise
 
     return f"{DATA_HUB_WEB_URL}/instruments/{INSTRUMENT_ID}/runs/{run_id}"
-
-
-def _process_tiff(tiff_path: Path) -> Path:
-    """Run the TIFF through the image processing pipeline and return the PNG path."""
-    tiff_processor = TIFFProcessor(tiff_path)
-    tiff_processor.load()
-    return tiff_processor.export_figure()

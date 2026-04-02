@@ -12,7 +12,7 @@ def get_named_logger(
 
     Args:
         name: The name of the logger.
-        level: The logging level. Defaults to ``logging.INFO``.
+        level: The logging level. Defaults to `logging.INFO`.
         log_file_path: Optional path for a file handler.
 
     Returns:

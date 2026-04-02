@@ -56,7 +56,7 @@ def parse_s3_event(event: S3Event) -> S3EventInfo:
     """Parses instrument ID, run ID, and file details from an S3 event.
 
     Returns:
-        An ``S3EventInfo`` with all fields populated.
+        An `S3EventInfo` with all fields populated.
 
     Raises:
         ValueError: If the event payload is malformed or the instrument is unsupported.

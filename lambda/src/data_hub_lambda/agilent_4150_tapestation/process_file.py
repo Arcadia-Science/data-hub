@@ -17,8 +17,8 @@ def process_file(run_id: str, filename: str) -> str:
     """Process a single Agilent 4150 TapeStation file through the Data Hub API.
 
     Args:
-        run_id: The run ID (``YYYY-MM-DD - HH-MM-SS`` prefix).
-        filename: The original filename (e.g. ``2026-02-18 - 18-00-04-gDNA_peakTable.csv``).
+        run_id: The run ID (`YYYY-MM-DD - HH-MM-SS` prefix).
+        filename: The original filename (e.g. `2026-02-18 - 18-00-04-gDNA_peakTable.csv`).
 
     Returns:
         The web app URL for the instrument run.

@@ -19,7 +19,7 @@ def process_file(instrument_id: InstrumentType, run_id: str, filename: str) -> s
     Args:
         instrument_id: The instrument ID (iD3 or iD5).
         run_id: The run ID (filename stem).
-        filename: The original filename (e.g. ``033126_CM_Od750.xls``).
+        filename: The original filename (e.g. `033126_CM_Od750.xls`).
 
     Returns:
         The web app URL for the instrument run.

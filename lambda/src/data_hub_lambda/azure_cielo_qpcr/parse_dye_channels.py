@@ -10,17 +10,17 @@ _FLUORESCENCE_COLUMN = "Fluorescence"
 def parse_dye_channels(file_path: Path) -> list[str]:
     """Extract the unique dye channel names from a Cq Values CSV file.
 
-    Reads the ``Fluorescence`` column and returns the distinct values in the
+    Reads the `Fluorescence` column and returns the distinct values in the
     order they first appear.
 
     Args:
         file_path: Path to the Cq Values CSV file.
 
     Returns:
-        A list of unique dye channel names, e.g. ``["ORANGE 560", "TAMRA", "ROX"]``.
+        A list of unique dye channel names, e.g. `["ORANGE 560", "TAMRA", "ROX"]`.
 
     Raises:
-        ValueError: If the CSV has no ``Fluorescence`` column.
+        ValueError: If the CSV has no `Fluorescence` column.
     """
     seen: dict[str, None] = {}
 

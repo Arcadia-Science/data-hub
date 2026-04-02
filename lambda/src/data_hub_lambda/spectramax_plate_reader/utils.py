@@ -1,14 +1,14 @@
-"""Parse instrument metadata from SpectraMax iD3 plate reader ``.xls`` exports.
+"""Parse instrument metadata from SpectraMax iD3 plate reader `.xls` exports.
 
-SoftMax Pro exports plate data as tab-delimited text with an ``.xls``
-extension.  The plate header line (``Plate:  ...``) encodes measurement
+SoftMax Pro exports plate data as tab-delimited text with an `.xls`
+extension.  The plate header line (`Plate:  ...`) encodes measurement
 settings at fixed column positions.
 
 The raw data section of each plate block is a grid of 8 rows (A–H for
 96-well plates) × 12 columns, repeated once per reading (1 for Endpoint,
 *N* for Kinetic time-points or Well Scan positions).  Each reading group
 is followed by an empty separator line.  A summary table (no
-``Temperature`` column header) follows the last group before ``~End``.
+`Temperature` column header) follows the last group before `~End`.
 """
 
 from __future__ import annotations
@@ -48,11 +48,11 @@ _WELL_DATA_COLUMNS = [
 
 
 def parse_metadata(file_path: Path) -> dict[str, str]:
-    """Extract measurement metadata from a SpectraMax ``.xls`` file.
+    """Extract measurement metadata from a SpectraMax `.xls` file.
 
     Returns:
-        A dict with keys ``measurement_mode``, ``measurement_type``, and
-        ``wavelength``.  Example::
+        A dict with keys `measurement_mode`, `measurement_type`, and
+        `wavelength`.  Example::
 
             {
                 "measurement_mode": "Absorbance",
@@ -61,7 +61,7 @@ def parse_metadata(file_path: Path) -> dict[str, str]:
             }
 
     Raises:
-        ValueError: If the file contains no ``Plate:`` header or the header
+        ValueError: If the file contains no `Plate:` header or the header
             contains unexpected values.
     """
     text = file_path.read_text(encoding="utf-16")
@@ -99,7 +99,7 @@ def parse_metadata(file_path: Path) -> dict[str, str]:
 
 
 def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
-    """Parse raw well readings from a SpectraMax ``.xls`` file into long form.
+    """Parse raw well readings from a SpectraMax `.xls` file into long form.
 
     Each row in the returned DataFrame represents a single well reading.
     Wells with no data (empty cells) are omitted.
@@ -110,19 +110,19 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
         ============== ======= ==========================================
         Column         Type    Notes
         ============== ======= ==========================================
-        time           str?    ``None`` for Endpoint reads
-        plate_name     str     e.g. ``"Plate2"``
-        well_position  str     e.g. ``"A1"``, ``"H12"``
+        time           str?    None for Endpoint reads
+        plate_name     str     e.g. "Plate2"
+        well_position  str     e.g. "A1", "H12"
         temperature_c  float?  Celsius; shared across all wells in a
                                reading group
         value          float   Raw instrument reading
-        row_label      str     e.g. ``"A"``
-        column_label   int     e.g. ``1``
-        wavelength     int?    Nanometres; ``None`` when not reported
+        row_label      str     e.g. "A"
+        column_label   int     e.g. 1
+        wavelength     int?    Nanometres; `None` when not reported
         ============== ======= ==========================================
 
     Raises:
-        ValueError: If the file contains no ``Plate:`` header line.
+        ValueError: If the file contains no `Plate:` header line.
     """
     text = file_path.read_text(encoding="utf-16")
     lines = text.splitlines()
@@ -144,7 +144,7 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
         wavelength_raw = plate_fields[_COL_WAVELENGTH].strip()
         wavelength = int(wavelength_raw) if wavelength_raw.isdigit() else None
 
-        i += 2  # skip plate header + column header row
+        i += 2  # Skip plate header + column header row.
 
         for _ in range(num_readings):
             time_val: str | None = None
@@ -182,15 +182,15 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
 
                 i += 1
 
-            # skip blank separator between reading groups
+            # Skip blank separator between reading groups.
             if i < len(lines) and lines[i].strip() == "":
                 i += 1
 
-        # skip summary table until ~End
+        # Skip summary table until ~End.
         while i < len(lines) and not lines[i].startswith("~End"):
             i += 1
         if i < len(lines):
-            i += 1  # advance past ~End
+            i += 1  # Advance past ~End.
 
     if not records:
         raise ValueError(f"No 'Plate:' header line found in {file_path}")

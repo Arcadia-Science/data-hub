@@ -17,7 +17,7 @@ def process_file(run_id: str, filename: str) -> str:
 
     Args:
         run_id: The run ID (filename stem).
-        filename: The original filename (e.g. ``2025-09-23_test.pdf``).
+        filename: The original filename (e.g. `2025-09-23_test.pdf`).
 
     Returns:
         The web app URL for the instrument run.
