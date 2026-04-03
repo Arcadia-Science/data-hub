@@ -13,9 +13,16 @@ py-format:
 py-typecheck:
 	uv run pyright --project pyproject.toml
 
+.PHONY: py-test-unit
+py-test-unit:
+	uv run pytest -v -m "not integration"
+
+.PHONY: py-test-integration
+py-test-integration:
+	uv run pytest -v -m integration
+
 .PHONY: py-test
-py-test:
-	uv run pytest -v
+py-test: py-test-unit py-test-integration
 
 # Web app.
 .PHONY: fe-format
@@ -30,8 +37,8 @@ fe-lint:
 fe-typecheck:
 	cd web-app && npm run typecheck
 
-.PHONY: fe-test
-fe-test:
+.PHONY: fe-test-integration
+fe-test-integration:
 	cd web-app && npm run test:integration
 
 .PHONY: dev

@@ -1,7 +1,10 @@
 from __future__ import annotations
 import logging
 
-from data_hub_lambda.agilent_4150_tapestation import parse_tape_type
+# Import from the utils submodule directly (not the package __init__) to avoid
+# a circular import: __init__.py re-exports process_file, so importing from
+# the package here would trigger a partially-initialized module error.
+from data_hub_lambda.agilent_4150_tapestation.utils import parse_tape_type
 from data_hub_lambda.api_client import get_client
 from data_hub_lambda.constants import DATA_HUB_WEB_URL
 from data_hub_shared import s3_utils
