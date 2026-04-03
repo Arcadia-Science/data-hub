@@ -16,6 +16,7 @@ import pytest
 import requests
 
 from data_hub_lambda.handler import lambda_handler
+from integration.conftest import IntegrationEnv
 
 # Reuse the real instrument data files from the existing unit test directories
 # so integration tests exercise the same parsing paths with identical inputs.
@@ -51,7 +52,7 @@ def _api_get(base_url: str, api_token: str, path: str) -> dict[str, Any]:
 class TestQPCRHappyPath:
     def test_csv_completes_with_dye_channels(
         self,
-        integration_env: Any,
+        integration_env: IntegrationEnv,
         make_s3_event: Callable[..., dict[str, Any]],
         s3_fixture_files: dict[str, Path],
         mock_context: MagicMock,
@@ -150,9 +151,9 @@ class TestFailurePath:
         s3_fixture_files[s3_key] = bad_csv
 
         event = make_s3_event("azure-cielo-qpcr", "Experiment_20260201_CqValues.csv")
-        # No `pytest.raises` needed — lambda_handler catches processing
-        # errors internally and marks the file as failed via the API rather
-        # than propagating the exception.
+        # No `pytest.raises` needed — process_file marks the file as failed
+        # via the API and re-raises; lambda_handler then catches the
+        # re-raised exception and sends a Slack notification (also mocked).
         lambda_handler(event, mock_context)
 
         run = _api_get(

@@ -74,7 +74,13 @@ class IntegrationEnv:
 
 
 def _get_free_port() -> int:
-    """Bind to port 0, grab the OS-assigned port, then release it."""
+    """Bind to port 0, grab the OS-assigned port, then release it.
+
+    There is a TOCTOU race between releasing the socket and the server
+    binding to the returned port — another process could claim it in
+    between.  Extremely unlikely in CI (single job per runner) and rare
+    on developer machines, but possible with parallel test runs.
+    """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
@@ -297,6 +303,15 @@ def integration_env(
             server_proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             server_proc.kill()
+
+        # Clear env vars so subsequent tests don't inherit them.
+        for key in (
+            "DATA_HUB_API_URL",
+            "DATA_HUB_API_KEY",
+            "AWS_S3_RAW_DATA_BUCKET",
+            "LOCAL_DATA_DIRPATH",
+        ):
+            os.environ.pop(key, None)
 
 
 # ---------------------------------------------------------------------------
