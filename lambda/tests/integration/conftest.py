@@ -1,7 +1,7 @@
 """Session-scoped and function-scoped fixtures for Lambda -> API integration tests.
 
 These fixtures spin up a real Next.js server backed by Postgres so that
-``lambda_handler`` -> ``process_file`` -> ``DataHubClient`` exercises the
+`lambda_handler` -> `process_file` -> `DataHubClient` exercises the
 full HTTP path with only S3 downloads and Slack mocked.
 """
 
@@ -45,7 +45,7 @@ _TOKEN_PREFIX = "dhub_"
 _WEB_APP_DIR = Path(__file__).resolve().parents[3] / "web-app"
 
 # Instruments seeded at session scope — must match the kebab-case IDs used
-# by the Python ``Instrument`` enum and the S3 key prefix convention.
+# by the Python `Instrument` enum and the S3 key prefix convention.
 _INSTRUMENTS: dict[str, str] = {
     "azure-cielo-qpcr": "Azure Cielo qPCR",
     "spectramax-id3-plate-reader": "SpectraMax iD3 Plate Reader",
@@ -143,12 +143,12 @@ def _token_display_prefix(plaintext: str) -> str:
 
 def _reset_singletons() -> None:
     """Re-initialize shared/lambda config objects *in place* and drop the
-    cached API client so the next ``get_client()`` call picks up the new
+    cached API client so the next `get_client()` call picks up the new
     environment variables.
 
     Mutating the existing objects (rather than replacing them) is critical
-    because other modules bind ``config`` / ``lambda_config`` via
-    ``from … import config`` — a replacement would leave stale references.
+    because other modules bind `config` / `lambda_config` via
+    `from … import config` — a replacement would leave stale references.
     """
     import data_hub_lambda.api_client as _api_mod
     import data_hub_lambda.config as _lcfg_mod
@@ -159,7 +159,7 @@ def _reset_singletons() -> None:
     _api_mod._client = None
     # Re-run __init__ on the *same* object instances rather than assigning new
     # ones.  This is necessary because process_file modules already hold
-    # direct references via ``from data_hub_shared.config import config``.
+    # direct references via `from data_hub_shared.config import config`.
     _scfg_mod.config.__init__()  # type: ignore[misc]
     _lcfg_mod.lambda_config.__init__()  # type: ignore[misc]
 
@@ -242,7 +242,7 @@ def integration_env(
         #    We bypass the API for seeding because PAT creation requires an
         #    authenticated session, and there is no session-based auth in tests.
         #    The server only stores the SHA-256 hash — the plaintext is returned
-        #    here for use in ``Authorization: Bearer dhub_…`` headers.
+        #    here for use in `Authorization: Bearer dhub_…` headers.
         token_plaintext = _generate_token()
         conn = psycopg2.connect(_PG_TEST_DSN)
         conn.autocommit = True
@@ -368,8 +368,8 @@ def make_s3_event() -> Callable[..., dict[str, Any]]:
 def s3_fixture_files() -> dict[str, Path]:
     """Registry mapping S3 keys to local fixture file paths.
 
-    Tests populate this dict *before* calling ``lambda_handler`` so the
-    patched ``download_file`` knows which local file to copy::
+    Tests populate this dict *before* calling `lambda_handler` so the
+    patched `download_file` knows which local file to copy::
 
         s3_fixture_files["azure-cielo-qpcr/file.csv"] = Path("/path/to/fixture.csv")
     """
@@ -381,7 +381,7 @@ def mock_s3_download(
     integration_env: IntegrationEnv,
     s3_fixture_files: dict[str, Path],
 ) -> Generator[MagicMock, None, None]:
-    """Patch ``s3_utils.download_file`` to copy from local fixture files
+    """Patch `s3_utils.download_file` to copy from local fixture files
     instead of hitting real S3."""
 
     def _fake_download(s3_uri: str, local_path: Path, **_: Any) -> None:
@@ -399,7 +399,7 @@ def mock_s3_download(
 
     # Patch at the *source module* rather than each import site. This works
     # because process_file modules import the module object
-    # (``from data_hub_shared import s3_utils``) and resolve ``download_file``
+    # (`from data_hub_shared import s3_utils`) and resolve `download_file`
     # via attribute lookup at call time, so they see the patched version.
     with patch("data_hub_shared.s3_utils.download_file", side_effect=_fake_download) as mock:
         yield mock
@@ -412,7 +412,7 @@ def mock_s3_download(
 
 @pytest.fixture(autouse=True)
 def mock_slack() -> Generator[MagicMock, None, None]:
-    """Patch ``slack.send_message`` as a no-op (captures calls for assertions)."""
+    """Patch `slack.send_message` as a no-op (captures calls for assertions)."""
     with patch("data_hub_shared.slack.send_message") as mock:
         yield mock
 
@@ -424,9 +424,9 @@ def mock_slack() -> Generator[MagicMock, None, None]:
 
 @pytest.fixture()
 def mock_context() -> MagicMock:
-    """Lightweight mock for ``aws_lambda_typing.context.Context``.
+    """Lightweight mock for `aws_lambda_typing.context.Context`.
 
-    Provides the attributes accessed by ``get_cloudwatch_logs_url`` so it
+    Provides the attributes accessed by `get_cloudwatch_logs_url` so it
     doesn't crash on the failure path.
     """
     from aws_lambda_typing.context import Context

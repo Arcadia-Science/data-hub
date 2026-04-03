@@ -1,6 +1,6 @@
 """Integration tests: Lambda -> API -> Postgres.
 
-Each test constructs a realistic S3 event, calls ``lambda_handler`` with
+Each test constructs a realistic S3 event, calls `lambda_handler` with
 only S3 and Slack mocked, then verifies the outcome via API GETs and
 direct DB queries.
 """
@@ -22,8 +22,8 @@ from data_hub_lambda.handler import lambda_handler
 _QPCR_FIXTURES = Path(__file__).resolve().parents[1] / "azure_cielo_qpcr" / "fixtures"
 _SPECTRAMAX_FIXTURES = Path(__file__).resolve().parents[1] / "spectramax_plate_reader" / "fixtures"
 
-# Apply the ``integration`` marker to every test in this module so they can
-# be selected (or excluded) with ``pytest -m integration``.
+# Apply the `integration` marker to every test in this module so they can
+# be selected (or excluded) with `pytest -m integration`.
 pytestmark = pytest.mark.integration
 
 
@@ -150,7 +150,7 @@ class TestFailurePath:
         s3_fixture_files[s3_key] = bad_csv
 
         event = make_s3_event("azure-cielo-qpcr", "Experiment_20260201_CqValues.csv")
-        # No ``pytest.raises`` needed — lambda_handler catches processing
+        # No `pytest.raises` needed — lambda_handler catches processing
         # errors internally and marks the file as failed via the API rather
         # than propagating the exception.
         lambda_handler(event, mock_context)
