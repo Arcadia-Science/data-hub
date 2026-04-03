@@ -1,4 +1,4 @@
-# Python.
+# Python packages.
 .PHONY: py-lint
 py-lint:
 	uv run ruff check .
@@ -49,7 +49,7 @@ dev:
 fe-build:
 	cd web-app && npm run build
 
-# Checks.
+# Formatting, linting, and type checking.
 .PHONY: py-check
 py-check:
 	make py-format
@@ -67,7 +67,7 @@ check-all:
 	make py-check
 	make fe-check
 
-# Docker.
+# Lambda.
 .PHONY: docker-build
 docker-build:
 	source .env && export GIT_AUTH_TOKEN=$$GH_PERSONAL_ACCESS_TOKEN && docker build -f lambda/Dockerfile --secret id=GIT_AUTH_TOKEN -t data-hub-lambda .

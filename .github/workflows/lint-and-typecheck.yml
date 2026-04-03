@@ -1,28 +1,36 @@
-name: Lint and typecheck web app
+name: Lint and typecheck
 
 on:
   push:
     branches:
       - staging
       - production
-    paths:
-      - 'web-app/**'
-      - '.github/workflows/lint-and-typecheck-web-app.yml'
   pull_request:
     branches:
       - staging
       - production
-    paths:
-      - 'web-app/**'
-      - '.github/workflows/lint-and-typecheck-web-app.yml'
-
-defaults:
-  run:
-    working-directory: web-app
 
 jobs:
-  lint-and-typecheck:
+  python:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install dependencies
+        run: uv sync --all-packages
+
+      - name: Lint
+        run: make py-lint
+
+      - name: Type check
+        run: make py-typecheck
+
+  web-app:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web-app
     steps:
       - uses: actions/checkout@v4
 
