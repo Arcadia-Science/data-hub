@@ -5,7 +5,7 @@ import pytest
 
 from data_hub_lambda.spectramax_plate_reader.utils import parse_raw_well_data
 
-_FIXTURES_DIR = Path(__file__).parent / "fixtures"
+_FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures"
 
 _EXPECTED_COLUMNS = [
     "time",
@@ -29,7 +29,7 @@ class TestEndpoint:
 
     @pytest.fixture(autouse=True)
     def _load(self) -> None:
-        self.df = parse_raw_well_data(_FIXTURES_DIR / "example_1.xls")
+        self.df = parse_raw_well_data(_FIXTURES_DIR / "spectramax_plate_reader_example_1.xls")
 
     def test_columns(self) -> None:
         assert list(self.df.columns) == _EXPECTED_COLUMNS
@@ -72,7 +72,7 @@ class TestWellScan:
 
     @pytest.fixture(autouse=True)
     def _load(self) -> None:
-        self.df = parse_raw_well_data(_FIXTURES_DIR / "example_2.xls")
+        self.df = parse_raw_well_data(_FIXTURES_DIR / "spectramax_plate_reader_example_2.xls")
 
     def test_shape(self) -> None:
         assert self.df.shape == (480, 8)  # 5 scans × 8 rows × 12 cols
@@ -114,7 +114,7 @@ class TestKinetic:
 
     @pytest.fixture(autouse=True)
     def _load(self) -> None:
-        self.df = parse_raw_well_data(_FIXTURES_DIR / "example_3.xls")
+        self.df = parse_raw_well_data(_FIXTURES_DIR / "spectramax_plate_reader_example_3.xls")
 
     def test_shape(self) -> None:
         assert self.df.shape == (46272, 8)  # 241 × 96 × 2 plates

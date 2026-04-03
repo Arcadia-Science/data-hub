@@ -5,7 +5,7 @@ import pytest
 
 from data_hub_lambda.spectramax_plate_reader.utils import parse_metadata
 
-_FIXTURES_DIR = Path(__file__).parent / "fixtures"
+_FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures"
 
 # Minimal SoftMax Pro plate header used by the synthetic-file helpers.
 _BOILERPLATE_PREFIX = "Plate:\tPlate1\t1.3\tPlateFormat"
@@ -45,7 +45,7 @@ class TestRealFixtures:
     """Tests against real SpectraMax export files in the fixtures directory."""
 
     def test_example_1_absorbance_endpoint(self) -> None:
-        result = parse_metadata(_FIXTURES_DIR / "example_1.xls")
+        result = parse_metadata(_FIXTURES_DIR / "spectramax_plate_reader_example_1.xls")
         assert result == {
             "measurement_mode": "Absorbance",
             "measurement_type": "Endpoint",
@@ -53,7 +53,7 @@ class TestRealFixtures:
         }
 
     def test_example_2_absorbance_well_scan(self) -> None:
-        result = parse_metadata(_FIXTURES_DIR / "example_2.xls")
+        result = parse_metadata(_FIXTURES_DIR / "spectramax_plate_reader_example_2.xls")
         assert result == {
             "measurement_mode": "Absorbance",
             "measurement_type": "Well Scan",
@@ -61,7 +61,7 @@ class TestRealFixtures:
         }
 
     def test_example_3_absorbance_kinetic(self) -> None:
-        result = parse_metadata(_FIXTURES_DIR / "example_3.xls")
+        result = parse_metadata(_FIXTURES_DIR / "spectramax_plate_reader_example_3.xls")
         assert result == {
             "measurement_mode": "Absorbance",
             "measurement_type": "Kinetic",

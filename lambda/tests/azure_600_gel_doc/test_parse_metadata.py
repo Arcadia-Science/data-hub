@@ -12,7 +12,7 @@ from data_hub_lambda.azure_600_gel_doc.parse_metadata import (
     parse_metadata,
 )
 
-_FIXTURES_DIR = Path(__file__).parent / "fixtures"
+_FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures"
 
 
 # ---------------------------------------------------------------------------
@@ -24,7 +24,7 @@ class TestRealFixture:
     """Tests against the real Azure 600 TIFF in the fixtures directory."""
 
     def test_parse_metadata_chemiluminescence(self) -> None:
-        result = parse_metadata(_FIXTURES_DIR / "example.tif")
+        result = parse_metadata(_FIXTURES_DIR / "azure_600_gel_doc_example.tif")
         assert result == {
             "capture_type": "Manual",
             "imaging_mode": "Chemiluminescence",
@@ -33,19 +33,19 @@ class TestRealFixture:
         }
 
     def test_capture_type(self) -> None:
-        result = parse_metadata(_FIXTURES_DIR / "example.tif")
+        result = parse_metadata(_FIXTURES_DIR / "azure_600_gel_doc_example.tif")
         assert result["capture_type"] == "Manual"
 
     def test_imaging_mode(self) -> None:
-        result = parse_metadata(_FIXTURES_DIR / "example.tif")
+        result = parse_metadata(_FIXTURES_DIR / "azure_600_gel_doc_example.tif")
         assert result["imaging_mode"] == "Chemiluminescence"
 
     def test_no_wavelengths_for_chemi(self) -> None:
-        result = parse_metadata(_FIXTURES_DIR / "example.tif")
+        result = parse_metadata(_FIXTURES_DIR / "azure_600_gel_doc_example.tif")
         assert result["wavelengths"] == []
 
     def test_no_colors_for_chemi(self) -> None:
-        result = parse_metadata(_FIXTURES_DIR / "example.tif")
+        result = parse_metadata(_FIXTURES_DIR / "azure_600_gel_doc_example.tif")
         assert result["colors"] == []
 
 
@@ -56,12 +56,12 @@ class TestRealFixture:
 
 class TestReadXpComment:
     def test_reads_bytes(self) -> None:
-        raw = _read_xp_comment(_FIXTURES_DIR / "example.tif")
+        raw = _read_xp_comment(_FIXTURES_DIR / "azure_600_gel_doc_example.tif")
         assert isinstance(raw, bytes)
         assert len(raw) > 0
 
     def test_contains_imaging_system_marker(self) -> None:
-        raw = _read_xp_comment(_FIXTURES_DIR / "example.tif")
+        raw = _read_xp_comment(_FIXTURES_DIR / "azure_600_gel_doc_example.tif")
         assert b"Azure.Image.Processing.ImageInfo" in raw
 
     def test_missing_tag_raises(self, tmp_path: Path) -> None:
@@ -73,7 +73,7 @@ class TestReadXpComment:
 
 class TestExtractStringRecords:
     def test_finds_known_strings(self) -> None:
-        raw = _read_xp_comment(_FIXTURES_DIR / "example.tif")
+        raw = _read_xp_comment(_FIXTURES_DIR / "azure_600_gel_doc_example.tif")
         strings = _extract_string_records(raw)
         values = [s for s, _ in strings]
         assert "Chemi Blot" in values
@@ -81,7 +81,7 @@ class TestExtractStringRecords:
         assert "Chemiluminescence" in values
 
     def test_preserves_offset_ordering(self) -> None:
-        raw = _read_xp_comment(_FIXTURES_DIR / "example.tif")
+        raw = _read_xp_comment(_FIXTURES_DIR / "azure_600_gel_doc_example.tif")
         strings = _extract_string_records(raw)
         offsets = [off for _, off in strings]
         assert offsets == sorted(offsets)
@@ -89,7 +89,7 @@ class TestExtractStringRecords:
 
 class TestFindChannelBoundary:
     def test_boundary_separates_regions(self) -> None:
-        raw = _read_xp_comment(_FIXTURES_DIR / "example.tif")
+        raw = _read_xp_comment(_FIXTURES_DIR / "azure_600_gel_doc_example.tif")
         boundary = _find_channel_boundary(raw)
         all_strings = _extract_string_records(raw)
         value_strings = [(s, off) for s, off in all_strings if "Azure.Image.Processing" not in s]

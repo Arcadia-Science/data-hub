@@ -5,7 +5,7 @@ import pytest
 
 from data_hub_lambda.azure_cielo_qpcr.parse_dye_channels import parse_dye_channels
 
-_FIXTURES_DIR = Path(__file__).parent / "fixtures"
+_FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures"
 
 
 # ---------------------------------------------------------------------------
@@ -17,11 +17,11 @@ class TestRealFixture:
     """Tests against the real Cq Values CSV export in the fixtures directory."""
 
     def test_example_csv_has_three_dye_channels(self) -> None:
-        result = parse_dye_channels(_FIXTURES_DIR / "example.csv")
+        result = parse_dye_channels(_FIXTURES_DIR / "azure_cielo_qpcr_example.csv")
         assert result == ["ORANGE 560", "TAMRA", "ROX"]
 
     def test_example_csv_preserves_order(self) -> None:
-        result = parse_dye_channels(_FIXTURES_DIR / "example.csv")
+        result = parse_dye_channels(_FIXTURES_DIR / "azure_cielo_qpcr_example.csv")
         assert result[0] == "ORANGE 560"
         assert result[-1] == "ROX"
 

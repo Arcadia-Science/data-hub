@@ -7,7 +7,7 @@ import pytest
 from data_hub_lambda.azure_cielo_qpcr.process_file import process_file
 from data_hub_lambda.models import FileResponse
 
-_FIXTURES_DIR = Path(__file__).parent / "fixtures"
+_FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures"
 
 _INSTRUMENT_ID = "azure-cielo-qpcr"
 _RUN_ID = "Experiment_20260101"
@@ -52,7 +52,7 @@ class TestProcessFile:
         mock_config.LOCAL_RAW_DATA_DIRPATH = tmp_path
         mock_config.AWS_S3_RAW_DATA_BUCKET = _S3_BUCKET
 
-        fixture = _FIXTURES_DIR / "example.csv"
+        fixture = _FIXTURES_DIR / "azure_cielo_qpcr_example.csv"
         run_dir = tmp_path / _INSTRUMENT_ID / _RUN_ID
         run_dir.mkdir(parents=True)
         (run_dir / _FILENAME_CSV).write_text(fixture.read_text())

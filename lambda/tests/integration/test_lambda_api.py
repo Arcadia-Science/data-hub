@@ -18,10 +18,7 @@ import requests
 from data_hub_lambda.handler import lambda_handler
 from integration.conftest import IntegrationEnv
 
-# Reuse the real instrument data files from the existing unit test directories
-# so integration tests exercise the same parsing paths with identical inputs.
-_QPCR_FIXTURES = Path(__file__).resolve().parents[1] / "azure_cielo_qpcr" / "fixtures"
-_SPECTRAMAX_FIXTURES = Path(__file__).resolve().parents[1] / "spectramax_plate_reader" / "fixtures"
+_FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures"
 
 # Apply the `integration` marker to every test in this module so they can
 # be selected (or excluded) with `pytest -m integration`.
@@ -59,7 +56,7 @@ class TestQPCRHappyPath:
     ) -> None:
         # Register the real fixture CSV so the patched S3 download can find it.
         s3_key = "azure-cielo-qpcr/Experiment_20260101_CqValues.csv"
-        s3_fixture_files[s3_key] = _QPCR_FIXTURES / "example.csv"
+        s3_fixture_files[s3_key] = _FIXTURES_DIR / "azure_cielo_qpcr_example.csv"
 
         event = make_s3_event("azure-cielo-qpcr", "Experiment_20260101_CqValues.csv")
         lambda_handler(event, mock_context)
@@ -100,7 +97,7 @@ class TestSpectraMaxHappyPath:
         mock_context: MagicMock,
     ) -> None:
         s3_key = "spectramax-id3-plate-reader/033126_CM_Od750.xls"
-        s3_fixture_files[s3_key] = _SPECTRAMAX_FIXTURES / "example_1.xls"
+        s3_fixture_files[s3_key] = _FIXTURES_DIR / "spectramax_plate_reader_example_1.xls"
 
         event = make_s3_event("spectramax-id3-plate-reader", "033126_CM_Od750.xls")
         lambda_handler(event, mock_context)
@@ -182,7 +179,7 @@ class TestIdempotentRunCreation:
         mock_context: MagicMock,
     ) -> None:
         s3_key = "azure-cielo-qpcr/Experiment_20260301_CqValues.csv"
-        s3_fixture_files[s3_key] = _QPCR_FIXTURES / "example.csv"
+        s3_fixture_files[s3_key] = _FIXTURES_DIR / "azure_cielo_qpcr_example.csv"
 
         # Fire the same event twice to verify the upsert semantics of
         # ensure_run: the API returns 200 (existing) on the second call
