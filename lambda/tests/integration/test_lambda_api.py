@@ -91,7 +91,7 @@ class TestQPCRHappyPath:
 class TestSpectraMaxHappyPath:
     def test_xls_completes_with_report_data(
         self,
-        integration_env: Any,
+        integration_env: IntegrationEnv,
         make_s3_event: Callable[..., dict[str, Any]],
         s3_fixture_files: dict[str, Path],
         mock_context: MagicMock,
@@ -108,21 +108,87 @@ class TestSpectraMaxHappyPath:
             "/api/v1/instruments/spectramax-id3-plate-reader/runs/033126_CM_Od750",
         )
 
-        # SpectraMax run IDs are the filename stem (extension stripped by the handler).
+        assert run["source"] == "lambda"
         assert run["run_id"] == "033126_CM_Od750"
 
         assert len(run["files"]) == 1
         file = run["files"][0]
         assert file["status"] == "completed"
-        assert file["metadata"]
 
-        # Unlike qPCR, plate readers produce tabular report_data rows that are
-        # stored in the run_report_data table and returned alongside the run.
-        assert len(run["report_data"]) >= 1
+        # Fixture example_1 is an Endpoint / Absorbance / 750 nm plate.
+        assert file["metadata"]["measurement_mode"] == "Absorbance"
+        assert file["metadata"]["measurement_type"] == "Endpoint"
+        assert file["metadata"]["wavelength"] == "750 nm"
+
+        # Plate readers produce tabular report_data rows stored in
+        # run_report_data and returned alongside the run.
+        assert len(run["report_data"]) == 1
         rd = run["report_data"][0]
         assert rd["data_type"] == "raw_well_data"
         assert isinstance(rd["data"], list)
         assert len(rd["data"]) > 0
+
+        first_row = rd["data"][0]
+        expected_columns = {
+            "time",
+            "plate_name",
+            "well_position",
+            "temperature_c",
+            "value",
+            "row_label",
+            "column_label",
+            "wavelength",
+        }
+        assert set(first_row.keys()) == expected_columns
+        assert first_row["plate_name"] == "Plate2"
+
+
+# ------------------------------------------------------------------
+# Test 4b': Azure 600 Gel Doc — happy path with processed image
+# ------------------------------------------------------------------
+
+
+class TestAzure600GelDocHappyPath:
+    def test_tif_completes_with_metadata_and_processed_image(
+        self,
+        integration_env: IntegrationEnv,
+        make_s3_event: Callable[..., dict[str, Any]],
+        s3_fixture_files: dict[str, Path],
+        mock_context: MagicMock,
+    ) -> None:
+        s3_key = "azure-600-gel-doc/26.04.01_16.51.59.tif"
+        s3_fixture_files[s3_key] = _FIXTURES_DIR / "azure_600_gel_doc_example.tif"
+
+        event = make_s3_event("azure-600-gel-doc", "26.04.01_16.51.59.tif")
+        lambda_handler(event, mock_context)
+
+        run = _api_get(
+            integration_env.base_url,
+            integration_env.api_token,
+            "/api/v1/instruments/azure-600-gel-doc/runs/26.04.01_16.51.59",
+        )
+
+        assert run["source"] == "lambda"
+        assert run["run_id"] == "26.04.01_16.51.59"
+
+        # The Gel Doc pipeline registers two files: the raw TIFF and a
+        # contrast-enhanced PNG derived from it.
+        assert len(run["files"]) == 2
+
+        raw_file = next(f for f in run["files"] if f["category"] == "raw")
+        processed_file = next(f for f in run["files"] if f["category"] == "processed")
+
+        assert raw_file["status"] == "completed"
+        assert raw_file["filename"] == "26.04.01_16.51.59.tif"
+        assert raw_file["metadata"]["capture_type"] == "Manual"
+        assert raw_file["metadata"]["imaging_mode"] == "Chemiluminescence"
+        assert raw_file["metadata"]["wavelengths"] == []
+        assert raw_file["metadata"]["colors"] == []
+
+        assert processed_file["filename"] == "26.04.01_16.51.59.png"
+
+        # Gel Doc files don't produce tabular report_data.
+        assert run["report_data"] == []
 
 
 # ------------------------------------------------------------------
@@ -133,7 +199,7 @@ class TestSpectraMaxHappyPath:
 class TestFailurePath:
     def test_malformed_csv_marks_file_as_failed(
         self,
-        integration_env: Any,
+        integration_env: IntegrationEnv,
         make_s3_event: Callable[..., dict[str, Any]],
         s3_fixture_files: dict[str, Path],
         mock_context: MagicMock,
@@ -173,7 +239,7 @@ class TestFailurePath:
 class TestIdempotentRunCreation:
     def test_duplicate_event_creates_single_run(
         self,
-        integration_env: Any,
+        integration_env: IntegrationEnv,
         make_s3_event: Callable[..., dict[str, Any]],
         s3_fixture_files: dict[str, Path],
         mock_context: MagicMock,

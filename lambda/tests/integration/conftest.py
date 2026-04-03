@@ -48,6 +48,7 @@ _WEB_APP_DIR = Path(__file__).resolve().parents[3] / "web-app"
 # by the Python `Instrument` enum and the S3 key prefix convention.
 _INSTRUMENTS: dict[str, str] = {
     "azure-cielo-qpcr": "Azure Cielo qPCR",
+    "azure-600-gel-doc": "Azure 600 Gel Doc",
     "spectramax-id3-plate-reader": "SpectraMax iD3 Plate Reader",
     "spectramax-id5-plate-reader": "SpectraMax iD5 Plate Reader",
 }
@@ -286,6 +287,7 @@ def integration_env(
         os.environ["DATA_HUB_API_URL"] = f"{base_url}/api/v1"
         os.environ["DATA_HUB_API_KEY"] = token_plaintext
         os.environ["AWS_S3_RAW_DATA_BUCKET"] = "test-bucket"
+        os.environ["AWS_S3_PROCESSED_DATA_BUCKET"] = "test-processed-bucket"
         os.environ["LOCAL_DATA_DIRPATH"] = str(tmp_data)
 
         _reset_singletons()
@@ -309,6 +311,7 @@ def integration_env(
             "DATA_HUB_API_URL",
             "DATA_HUB_API_KEY",
             "AWS_S3_RAW_DATA_BUCKET",
+            "AWS_S3_PROCESSED_DATA_BUCKET",
             "LOCAL_DATA_DIRPATH",
         ):
             os.environ.pop(key, None)
@@ -417,6 +420,19 @@ def mock_s3_download(
     # (`from data_hub_shared import s3_utils`) and resolve `download_file`
     # via attribute lookup at call time, so they see the patched version.
     with patch("data_hub_shared.s3_utils.download_file", side_effect=_fake_download) as mock:
+        yield mock
+
+
+# ---------------------------------------------------------------------------
+# Step 3b' — S3 upload patch
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def mock_s3_upload() -> Generator[MagicMock, None, None]:
+    """Patch `s3_utils.upload_file` as a no-op so processors that write to the
+    processed bucket (e.g. Azure 600 Gel Doc) don't hit real S3."""
+    with patch("data_hub_shared.s3_utils.upload_file") as mock:
         yield mock
 
 
