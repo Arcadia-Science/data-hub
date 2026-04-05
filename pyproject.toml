@@ -52,7 +52,7 @@ no-lines-before = ["future", "standard-library"]
 [tool.pytest.ini_options]
 testpaths = ["lambda/tests", "watcher/tests", "packages/shared/tests"]
 addopts = "--import-mode=importlib"
-markers = ["integration: Lambda-to-API integration tests (require Postgres + Next.js)"]
+markers = ["integration: Tests requiring Postgres + Next.js server"]
 
 [tool.pyright]
 include = ["lambda", "watcher", "packages/shared"]
