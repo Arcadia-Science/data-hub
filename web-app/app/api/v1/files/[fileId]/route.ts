@@ -15,16 +15,17 @@ type RouteContext = {
   params: Promise<{ fileId: string }>;
 };
 
-// Enforced state machine for file status transitions. The two paths through
-// the lifecycle are:
-//   Watcher flow:  detected → [upload_requested →] uploaded → processing → completed|failed
-//   Lambda flow:   (created as "uploaded" via POST .../files) → processing → completed|failed
-// "completed" and "failed" are terminal states — no further transitions allowed.
+// Enforced state machine for file status transitions:
+//   Watcher flow:   detected → [upload_requested →] uploaded → processing → completed|failed
+//   Lambda flow:    (created as "uploaded" via POST .../files) → processing → completed|failed
+//   Reprocessing:   completed|failed → processing → completed|failed
 const VALID_TRANSITIONS: Record<string, string[]> = {
   detected: ["uploaded"],
   upload_requested: ["uploaded"],
   uploaded: ["processing"],
   processing: ["completed", "failed"],
+  completed: ["processing"],
+  failed: ["processing"],
 };
 
 // ---------------------------------------------------------------------------
@@ -109,6 +110,14 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     }
     if (body.status === "completed" || body.status === "failed") {
       updates.processedAt = now;
+    }
+    if (
+      body.status === "processing" &&
+      (file.status === "completed" || file.status === "failed")
+    ) {
+      updates.processedAt = null;
+      updates.errorMessage = null;
+      await db.delete(runReportData).where(eq(runReportData.fileId, numericId));
     }
   }
 
