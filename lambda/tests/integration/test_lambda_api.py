@@ -53,6 +53,7 @@ class TestQPCRHappyPath:
         make_s3_event: Callable[..., dict[str, Any]],
         s3_fixture_files: dict[str, Path],
         mock_context: MagicMock,
+        mock_slack: MagicMock,
     ) -> None:
         # Register the real fixture CSV so the patched S3 download can find it.
         s3_key = "azure-cielo-qpcr/Experiment_20260101_CqValues.csv"
@@ -83,6 +84,11 @@ class TestQPCRHappyPath:
         # qPCR files don't produce tabular report_data (unlike plate readers).
         assert run["report_data"] == []
 
+        mock_slack.assert_called_once()
+        slack_msg = mock_slack.call_args[0][0]
+        assert "Experiment_20260101" in slack_msg
+        assert "View in Data Hub" in slack_msg
+
 
 # ------------------------------------------------------------------
 # Test 4b: SpectraMax plate reader — happy path with report_data
@@ -96,6 +102,7 @@ class TestSpectraMaxHappyPath:
         make_s3_event: Callable[..., dict[str, Any]],
         s3_fixture_files: dict[str, Path],
         mock_context: MagicMock,
+        mock_slack: MagicMock,
     ) -> None:
         s3_key = "spectramax-id3-plate-reader/033126_CM_Od750.xls"
         s3_fixture_files[s3_key] = _FIXTURES_DIR / "spectramax_plate_reader_example_1.xls"
@@ -144,6 +151,11 @@ class TestSpectraMaxHappyPath:
         assert set(first_row.keys()) == expected_columns
         assert first_row["plate_name"] == "Plate2"
 
+        mock_slack.assert_called_once()
+        slack_msg = mock_slack.call_args[0][0]
+        assert "033126_CM_Od750" in slack_msg
+        assert "View in Data Hub" in slack_msg
+
 
 # ------------------------------------------------------------------
 # Test 4b': Azure 600 Gel Doc — happy path with processed image
@@ -157,6 +169,7 @@ class TestAzure600GelDocHappyPath:
         make_s3_event: Callable[..., dict[str, Any]],
         s3_fixture_files: dict[str, Path],
         mock_context: MagicMock,
+        mock_slack: MagicMock,
     ) -> None:
         s3_key = "azure-600-gel-doc/26.04.01_16.51.59.tif"
         s3_fixture_files[s3_key] = _FIXTURES_DIR / "azure_600_gel_doc_example.tif"
@@ -193,6 +206,11 @@ class TestAzure600GelDocHappyPath:
         # Gel Doc files don't produce tabular report_data.
         assert run["report_data"] == []
 
+        mock_slack.assert_called_once()
+        slack_msg = mock_slack.call_args[0][0]
+        assert "26.04.01_16.51.59" in slack_msg
+        assert "View in Data Hub" in slack_msg
+
 
 # ------------------------------------------------------------------
 # Test 4c: Malformed file — failure path
@@ -206,6 +224,7 @@ class TestFailurePath:
         make_s3_event: Callable[..., dict[str, Any]],
         s3_fixture_files: dict[str, Path],
         mock_context: MagicMock,
+        mock_slack: MagicMock,
         tmp_path: Path,
     ) -> None:
         # Create a CSV whose headers don't match the expected qPCR format.
@@ -233,6 +252,11 @@ class TestFailurePath:
         assert file["status"] == "failed"
         assert file["error_message"]
 
+        mock_slack.assert_called_once()
+        slack_msg = mock_slack.call_args[0][0]
+        assert "Experiment_20260201" in slack_msg
+        assert "View CloudWatch logs" in slack_msg
+
 
 # ------------------------------------------------------------------
 # Test 4d: Idempotent run creation
@@ -246,6 +270,7 @@ class TestIdempotentRunCreation:
         make_s3_event: Callable[..., dict[str, Any]],
         s3_fixture_files: dict[str, Path],
         mock_context: MagicMock,
+        mock_slack: MagicMock,
     ) -> None:
         s3_key = "azure-cielo-qpcr/Experiment_20260301_CqValues.csv"
         s3_fixture_files[s3_key] = _FIXTURES_DIR / "azure_cielo_qpcr_example.csv"
@@ -282,3 +307,9 @@ class TestIdempotentRunCreation:
         )
         assert run["run_id"] == "Experiment_20260301"
         assert run["source"] == "lambda"
+
+        assert mock_slack.call_count == 2
+        for call in mock_slack.call_args_list:
+            slack_msg = call[0][0]
+            assert "Experiment_20260301" in slack_msg
+            assert "View in Data Hub" in slack_msg
