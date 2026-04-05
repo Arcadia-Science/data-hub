@@ -62,6 +62,7 @@ def parse_s3_event(event: S3Event) -> S3EventInfo:
     # S3 key layout is {instrument_id}/{filename} — the run_id is encoded in
     # the filename itself and must be extracted per-instrument below. This
     # differs from the watcher's 3-segment layout ({instrument_id}/{run_id}/{filename}).
+    # TODO: Consolidate this once we have a unified S3 key layout.
     pattern = r"^/?([^/]+)/([^/]+)$"
     match = re.match(pattern, s3_key)
     if not match:

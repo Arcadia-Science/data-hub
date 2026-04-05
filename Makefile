@@ -22,7 +22,8 @@ py-test-integration:
 	uv run pytest -v -m integration
 
 .PHONY: py-test
-py-test: py-test-unit py-test-integration
+py-test:
+	uv run pytest -v
 
 # Web app.
 .PHONY: fe-format
