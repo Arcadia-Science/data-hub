@@ -8,12 +8,12 @@ watcher operates on a real lab instrument PC.
 from __future__ import annotations
 from collections.abc import Generator
 
-import psycopg2
 import pytest
 
 from data_hub_shared.testing import (
     IntegrationEnv,
     db_query,
+    db_update,
     seed_instruments,
     start_test_server,
     truncate_tables,
@@ -68,20 +68,6 @@ _WATCHER_TABLES = [
 def reset_watcher_data(integration_env: IntegrationEnv) -> None:
     """Truncate watcher-related tables between tests, preserving instruments and the PAT."""
     truncate_tables(integration_env.db_dsn, _WATCHER_TABLES)
-
-
-# ---------------------------------------------------------------------------
-# Helpers re-exported for test modules
-# ---------------------------------------------------------------------------
-
-
-def db_update(dsn: str, sql: str, params: tuple[object, ...] | None = None) -> None:
-    """Execute an UPDATE/INSERT directly for simulating server-side actions."""
-    conn = psycopg2.connect(dsn)
-    conn.autocommit = True
-    with conn.cursor() as cur:
-        cur.execute(sql, params)
-    conn.close()
 
 
 __all__ = [

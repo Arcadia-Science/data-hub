@@ -200,6 +200,15 @@ def db_query(
     return rows
 
 
+def db_update(dsn: str, sql: str, params: tuple[object, ...] | None = None) -> None:
+    """Execute an UPDATE/INSERT directly for simulating server-side actions."""
+    conn = psycopg2.connect(dsn)
+    conn.autocommit = True
+    with conn.cursor() as cur:
+        cur.execute(sql, params)
+    conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Server lifecycle context manager
 # ---------------------------------------------------------------------------
