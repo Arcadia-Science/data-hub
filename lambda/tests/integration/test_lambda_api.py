@@ -105,7 +105,7 @@ class TestSpectraMaxHappyPath:
         mock_slack: MagicMock,
     ) -> None:
         s3_key = "spectramax-id3-plate-reader/033126_CM_Od750.xls"
-        s3_fixture_files[s3_key] = _FIXTURES_DIR / "spectramax_plate_reader_example_1.xls"
+        s3_fixture_files[s3_key] = _FIXTURES_DIR / "spectramax_plate_reader_endpoint.xls"
 
         event = make_s3_event("spectramax-id3-plate-reader", "033126_CM_Od750.xls")
         lambda_handler(event, mock_context)
@@ -123,7 +123,7 @@ class TestSpectraMaxHappyPath:
         file = run["files"][0]
         assert file["status"] == "completed"
 
-        # Fixture example_1 is an Endpoint / Absorbance / 750 nm plate.
+        # Fixture endpoint.xls is an Endpoint / Absorbance / 750 nm plate.
         # Measurement metadata is stored at the run level.
         assert run["metadata"]["measurement_mode"] == "Absorbance"
         assert run["metadata"]["measurement_type"] == "Endpoint"
@@ -433,7 +433,7 @@ class TestFileReprocessing:
         replaces rather than appends.
         """
         s3_key = "spectramax-id3-plate-reader/033126_CM_Od750.xls"
-        s3_fixture_files[s3_key] = _FIXTURES_DIR / "spectramax_plate_reader_example_1.xls"
+        s3_fixture_files[s3_key] = _FIXTURES_DIR / "spectramax_plate_reader_endpoint.xls"
 
         event = make_s3_event("spectramax-id3-plate-reader", "033126_CM_Od750.xls")
         lambda_handler(event, mock_context)

@@ -44,24 +44,24 @@ def _build_xls(
 class TestRealFixtures:
     """Tests against real SpectraMax export files in the fixtures directory."""
 
-    def test_example_1_absorbance_endpoint(self) -> None:
-        result = parse_metadata(_FIXTURES_DIR / "spectramax_plate_reader_example_1.xls")
+    def test_endpoint_absorbance(self) -> None:
+        result = parse_metadata(_FIXTURES_DIR / "spectramax_plate_reader_endpoint.xls")
         assert result == {
             "measurement_mode": "Absorbance",
             "measurement_type": "Endpoint",
             "wavelength": "750 nm",
         }
 
-    def test_example_2_absorbance_well_scan(self) -> None:
-        result = parse_metadata(_FIXTURES_DIR / "spectramax_plate_reader_example_2.xls")
+    def test_well_scan_absorbance(self) -> None:
+        result = parse_metadata(_FIXTURES_DIR / "spectramax_plate_reader_well_scan.xls")
         assert result == {
             "measurement_mode": "Absorbance",
             "measurement_type": "Well Scan",
             "wavelength": "595 nm",
         }
 
-    def test_example_3_absorbance_kinetic(self) -> None:
-        result = parse_metadata(_FIXTURES_DIR / "spectramax_plate_reader_example_3.xls")
+    def test_kinetic_absorbance(self) -> None:
+        result = parse_metadata(_FIXTURES_DIR / "spectramax_plate_reader_kinetic.xls")
         assert result == {
             "measurement_mode": "Absorbance",
             "measurement_type": "Kinetic",

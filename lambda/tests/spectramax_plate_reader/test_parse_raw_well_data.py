@@ -25,11 +25,11 @@ _EXPECTED_COLUMNS = [
 
 
 class TestEndpoint:
-    """example_1.xls — Endpoint / Absorbance / 750 nm, single plate, rows A–D populated."""
+    """Endpoint / Absorbance / 750 nm, single plate, rows A–D populated."""
 
     @pytest.fixture(autouse=True)
     def _load(self) -> None:
-        self.df = parse_raw_well_data(_FIXTURES_DIR / "spectramax_plate_reader_example_1.xls")
+        self.df = parse_raw_well_data(_FIXTURES_DIR / "spectramax_plate_reader_endpoint.xls")
 
     def test_columns(self) -> None:
         assert list(self.df.columns) == _EXPECTED_COLUMNS
@@ -68,11 +68,11 @@ class TestEndpoint:
 
 
 class TestWellScan:
-    """example_2.xls — Well Scan / Absorbance / 595 nm, 5 scan positions."""
+    """Well Scan / Absorbance / 595 nm, 5 scan positions."""
 
     @pytest.fixture(autouse=True)
     def _load(self) -> None:
-        self.df = parse_raw_well_data(_FIXTURES_DIR / "spectramax_plate_reader_example_2.xls")
+        self.df = parse_raw_well_data(_FIXTURES_DIR / "spectramax_plate_reader_well_scan.xls")
 
     def test_shape(self) -> None:
         assert self.df.shape == (480, 8)  # 5 scans × 8 rows × 12 cols
@@ -110,11 +110,11 @@ class TestWellScan:
 
 
 class TestKinetic:
-    """example_3.xls — Kinetic / Absorbance / 595 nm, 241 time points, 2 plates."""
+    """Kinetic / Absorbance / 595 nm, 241 time points, 2 plates."""
 
     @pytest.fixture(autouse=True)
     def _load(self) -> None:
-        self.df = parse_raw_well_data(_FIXTURES_DIR / "spectramax_plate_reader_example_3.xls")
+        self.df = parse_raw_well_data(_FIXTURES_DIR / "spectramax_plate_reader_kinetic.xls")
 
     def test_shape(self) -> None:
         assert self.df.shape == (46272, 8)  # 241 × 96 × 2 plates
