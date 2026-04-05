@@ -96,6 +96,44 @@ class TestQPCRHappyPath:
 
 
 class TestSpectraMaxHappyPath:
+    @pytest.mark.parametrize(
+        ("fixture_file", "run_id", "expected_metadata", "expected_first_plate"),
+        [
+            pytest.param(
+                "spectramax_plate_reader_endpoint.xls",
+                "033126_CM_Od750",
+                {
+                    "measurement_mode": "Absorbance",
+                    "measurement_type": "Endpoint",
+                    "wavelength": "750 nm",
+                },
+                "Plate2",
+                id="endpoint",
+            ),
+            pytest.param(
+                "spectramax_plate_reader_well_scan.xls",
+                "033126_WS_Od595",
+                {
+                    "measurement_mode": "Absorbance",
+                    "measurement_type": "Well Scan",
+                    "wavelength": "595 nm",
+                },
+                "Plate1",
+                id="well-scan",
+            ),
+            pytest.param(
+                "spectramax_plate_reader_kinetic.xls",
+                "033126_KN_Od595",
+                {
+                    "measurement_mode": "Absorbance",
+                    "measurement_type": "Kinetic",
+                    "wavelength": "595 nm",
+                },
+                "Plate4",
+                id="kinetic",
+            ),
+        ],
+    )
     def test_xls_completes_with_report_data(
         self,
         integration_env: IntegrationEnv,
@@ -103,34 +141,34 @@ class TestSpectraMaxHappyPath:
         s3_fixture_files: dict[str, Path],
         mock_context: MagicMock,
         mock_slack: MagicMock,
+        fixture_file: str,
+        run_id: str,
+        expected_metadata: dict[str, str],
+        expected_first_plate: str,
     ) -> None:
-        s3_key = "spectramax-id3-plate-reader/033126_CM_Od750.xls"
-        s3_fixture_files[s3_key] = _FIXTURES_DIR / "spectramax_plate_reader_endpoint.xls"
+        filename = f"{run_id}.xls"
+        s3_key = f"spectramax-id3-plate-reader/{filename}"
+        s3_fixture_files[s3_key] = _FIXTURES_DIR / fixture_file
 
-        event = make_s3_event("spectramax-id3-plate-reader", "033126_CM_Od750.xls")
+        event = make_s3_event("spectramax-id3-plate-reader", filename)
         lambda_handler(event, mock_context)
 
         run = _api_get(
             integration_env.base_url,
             integration_env.api_token,
-            "/api/v1/instruments/spectramax-id3-plate-reader/runs/033126_CM_Od750",
+            f"/api/v1/instruments/spectramax-id3-plate-reader/runs/{run_id}",
         )
 
         assert run["source"] == "lambda"
-        assert run["run_id"] == "033126_CM_Od750"
+        assert run["run_id"] == run_id
 
         assert len(run["files"]) == 1
         file = run["files"][0]
         assert file["status"] == "completed"
 
-        # Fixture endpoint.xls is an Endpoint / Absorbance / 750 nm plate.
-        # Measurement metadata is stored at the run level.
-        assert run["metadata"]["measurement_mode"] == "Absorbance"
-        assert run["metadata"]["measurement_type"] == "Endpoint"
-        assert run["metadata"]["wavelength"] == "750 nm"
+        for key, value in expected_metadata.items():
+            assert run["metadata"][key] == value
 
-        # Plate readers produce tabular report_data rows stored in
-        # run_report_data and returned alongside the run.
         assert len(run["report_data"]) == 1
         rd = run["report_data"][0]
         assert rd["data_type"] == "raw_well_data"
@@ -149,11 +187,11 @@ class TestSpectraMaxHappyPath:
             "wavelength",
         }
         assert set(first_row.keys()) == expected_columns
-        assert first_row["plate_name"] == "Plate2"
+        assert first_row["plate_name"] == expected_first_plate
 
         mock_slack.assert_called_once()
         slack_msg = mock_slack.call_args[0][0]
-        assert "033126_CM_Od750" in slack_msg
+        assert run_id in slack_msg
         assert "View in Data Hub" in slack_msg
 
 
