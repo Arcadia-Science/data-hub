@@ -107,6 +107,30 @@ class DataHubClient:
         )
         return RunResponse.model_validate(resp.json())
 
+    def update_run(
+        self,
+        instrument_id: str,
+        run_id: str,
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> RunResponse:
+        """Update an instrument run (currently supports metadata only).
+
+        Metadata is a full replacement — the API does not deep-merge.  The
+        Lambda typically calls this once per run after processing the file(s)
+        that contribute run-level metadata.
+        """
+        payload: dict[str, Any] = {}
+        if metadata is not None:
+            payload["metadata"] = metadata
+
+        resp = self._request(
+            "PATCH",
+            f"/instruments/{instrument_id}/runs/{run_id}",
+            json=payload,
+        )
+        return RunResponse.model_validate(resp.json())
+
     # ------------------------------------------------------------------
     # Files
     # ------------------------------------------------------------------

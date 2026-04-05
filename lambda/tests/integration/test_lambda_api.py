@@ -76,8 +76,9 @@ class TestQPCRHappyPath:
         assert len(run["files"]) == 1
         file = run["files"][0]
         assert file["status"] == "completed"
-        # Dye channels are extracted from the Fluorescence column of the CSV.
-        assert file["metadata"]["dye_channels"] == ["ORANGE 560", "TAMRA", "ROX"]
+        # Dye channels are extracted from the Fluorescence column of the CSV
+        # and stored as run-level metadata.
+        assert run["metadata"]["dye_channels"] == ["ORANGE 560", "TAMRA", "ROX"]
 
         # qPCR files don't produce tabular report_data (unlike plate readers).
         assert run["report_data"] == []
@@ -116,9 +117,10 @@ class TestSpectraMaxHappyPath:
         assert file["status"] == "completed"
 
         # Fixture example_1 is an Endpoint / Absorbance / 750 nm plate.
-        assert file["metadata"]["measurement_mode"] == "Absorbance"
-        assert file["metadata"]["measurement_type"] == "Endpoint"
-        assert file["metadata"]["wavelength"] == "750 nm"
+        # Measurement metadata is stored at the run level.
+        assert run["metadata"]["measurement_mode"] == "Absorbance"
+        assert run["metadata"]["measurement_type"] == "Endpoint"
+        assert run["metadata"]["wavelength"] == "750 nm"
 
         # Plate readers produce tabular report_data rows stored in
         # run_report_data and returned alongside the run.
@@ -180,10 +182,11 @@ class TestAzure600GelDocHappyPath:
 
         assert raw_file["status"] == "completed"
         assert raw_file["filename"] == "26.04.01_16.51.59.tif"
-        assert raw_file["metadata"]["capture_type"] == "Manual"
-        assert raw_file["metadata"]["imaging_mode"] == "Chemiluminescence"
-        assert raw_file["metadata"]["wavelengths"] == []
-        assert raw_file["metadata"]["colors"] == []
+        # TIFF metadata is stored at the run level.
+        assert run["metadata"]["capture_type"] == "Manual"
+        assert run["metadata"]["imaging_mode"] == "Chemiluminescence"
+        assert run["metadata"]["wavelengths"] == []
+        assert run["metadata"]["colors"] == []
 
         assert processed_file["filename"] == "26.04.01_16.51.59.png"
 
