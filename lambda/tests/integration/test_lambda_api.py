@@ -170,6 +170,7 @@ class TestAzure600GelDocHappyPath:
         s3_fixture_files: dict[str, Path],
         mock_context: MagicMock,
         mock_slack: MagicMock,
+        mock_s3_upload: MagicMock,
     ) -> None:
         s3_key = "azure-600-gel-doc/26.04.01_16.51.59.tif"
         s3_fixture_files[s3_key] = _FIXTURES_DIR / "azure_600_gel_doc_example.tif"
@@ -195,6 +196,7 @@ class TestAzure600GelDocHappyPath:
 
         assert raw_file["status"] == "completed"
         assert raw_file["filename"] == "26.04.01_16.51.59.tif"
+
         # TIFF metadata is stored at the run level.
         assert run["metadata"]["capture_type"] == "Manual"
         assert run["metadata"]["imaging_mode"] == "Chemiluminescence"
@@ -202,9 +204,15 @@ class TestAzure600GelDocHappyPath:
         assert run["metadata"]["colors"] == []
 
         assert processed_file["filename"] == "26.04.01_16.51.59.png"
+        assert processed_file["status"] == "uploaded"
 
         # Gel Doc files don't produce tabular report_data.
         assert run["report_data"] == []
+
+        # The pipeline uploads the contrast-enhanced PNG to the processed bucket.
+        mock_s3_upload.assert_called_once()
+        upload_dest = mock_s3_upload.call_args[0][1]
+        assert upload_dest == "s3://test-processed-bucket/azure-600-gel-doc/26.04.01_16.51.59.png"
 
         mock_slack.assert_called_once()
         slack_msg = mock_slack.call_args[0][0]
@@ -313,3 +321,128 @@ class TestIdempotentRunCreation:
             slack_msg = call[0][0]
             assert "Experiment_20260301" in slack_msg
             assert "View in Data Hub" in slack_msg
+
+
+# ------------------------------------------------------------------
+# Test 4e: File reprocessing
+# ------------------------------------------------------------------
+
+
+class TestFileReprocessing:
+    def test_duplicate_event_creates_single_file(
+        self,
+        integration_env: IntegrationEnv,
+        make_s3_event: Callable[..., dict[str, Any]],
+        s3_fixture_files: dict[str, Path],
+        mock_context: MagicMock,
+        mock_slack: MagicMock,
+    ) -> None:
+        """Firing the same S3 event twice must not create a duplicate file row.
+
+        The create_file API is idempotent on s3_key (partial unique index with
+        onConflictDoNothing). The second invocation reprocesses the existing
+        file via completed → processing → completed.
+        """
+        s3_key = "azure-cielo-qpcr/Experiment_20260301_CqValues.csv"
+        s3_fixture_files[s3_key] = _FIXTURES_DIR / "azure_cielo_qpcr_example.csv"
+
+        event = make_s3_event("azure-cielo-qpcr", "Experiment_20260301_CqValues.csv")
+        lambda_handler(event, mock_context)
+        lambda_handler(event, mock_context)
+
+        conn = psycopg2.connect(integration_env.db_dsn)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COUNT(*) FROM files WHERE s3_key = %s",
+                    (s3_key,),
+                )
+                row = cur.fetchone()
+                assert row is not None
+                file_count = row[0]
+        finally:
+            conn.close()
+
+        assert file_count == 1
+
+        run = _api_get(
+            integration_env.base_url,
+            integration_env.api_token,
+            "/api/v1/instruments/azure-cielo-qpcr/runs/Experiment_20260301",
+        )
+        assert len(run["files"]) == 1
+        assert run["files"][0]["status"] == "completed"
+
+    def test_reprocess_clears_failed_state(
+        self,
+        integration_env: IntegrationEnv,
+        make_s3_event: Callable[..., dict[str, Any]],
+        s3_fixture_files: dict[str, Path],
+        mock_context: MagicMock,
+        mock_slack: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """A failed file can be reprocessed successfully on a retry.
+
+        First invocation uses a malformed CSV → file ends in "failed" with an
+        error_message. Second invocation swaps in the valid fixture → the
+        file transitions failed → processing → completed with the error
+        cleared.
+        """
+        s3_key = "azure-cielo-qpcr/Experiment_20260301_CqValues.csv"
+        bad_csv = tmp_path / "bad.csv"
+        bad_csv.write_text("Wrong,Headers,Only\nA,B,C\n")
+        s3_fixture_files[s3_key] = bad_csv
+
+        event = make_s3_event("azure-cielo-qpcr", "Experiment_20260301_CqValues.csv")
+        lambda_handler(event, mock_context)
+
+        run = _api_get(
+            integration_env.base_url,
+            integration_env.api_token,
+            "/api/v1/instruments/azure-cielo-qpcr/runs/Experiment_20260301",
+        )
+        assert run["files"][0]["status"] == "failed"
+        assert run["files"][0]["error_message"]
+
+        # Swap in the valid fixture and reprocess.
+        s3_fixture_files[s3_key] = _FIXTURES_DIR / "azure_cielo_qpcr_example.csv"
+        lambda_handler(event, mock_context)
+
+        run = _api_get(
+            integration_env.base_url,
+            integration_env.api_token,
+            "/api/v1/instruments/azure-cielo-qpcr/runs/Experiment_20260301",
+        )
+        assert len(run["files"]) == 1
+        assert run["files"][0]["status"] == "completed"
+        assert run["files"][0]["error_message"] is None
+
+    def test_reprocess_does_not_duplicate_report_data(
+        self,
+        integration_env: IntegrationEnv,
+        make_s3_event: Callable[..., dict[str, Any]],
+        s3_fixture_files: dict[str, Path],
+        mock_context: MagicMock,
+        mock_slack: MagicMock,
+    ) -> None:
+        """Reprocessing a plate reader file must not double the report_data.
+
+        The PATCH endpoint deletes existing run_report_data rows for the file
+        when transitioning back to "processing", so the second invocation
+        replaces rather than appends.
+        """
+        s3_key = "spectramax-id3-plate-reader/033126_CM_Od750.xls"
+        s3_fixture_files[s3_key] = _FIXTURES_DIR / "spectramax_plate_reader_example_1.xls"
+
+        event = make_s3_event("spectramax-id3-plate-reader", "033126_CM_Od750.xls")
+        lambda_handler(event, mock_context)
+        lambda_handler(event, mock_context)
+
+        run = _api_get(
+            integration_env.base_url,
+            integration_env.api_token,
+            "/api/v1/instruments/spectramax-id3-plate-reader/runs/033126_CM_Od750",
+        )
+        assert len(run["report_data"]) == 1
+        assert run["report_data"][0]["data_type"] == "raw_well_data"
