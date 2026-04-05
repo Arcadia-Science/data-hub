@@ -66,8 +66,13 @@ _WATCHER_TABLES = [
 
 @pytest.fixture(autouse=True)
 def reset_watcher_data(integration_env: IntegrationEnv) -> None:
-    """Truncate watcher-related tables between tests, preserving instruments and the PAT."""
+    """Truncate watcher-related tables between tests, preserving the seeded instrument and PAT."""
     truncate_tables(integration_env.db_dsn, _WATCHER_TABLES)
+    db_update(
+        integration_env.db_dsn,
+        "DELETE FROM instruments WHERE id != %s",
+        (INSTRUMENT_ID,),
+    )
 
 
 __all__ = [

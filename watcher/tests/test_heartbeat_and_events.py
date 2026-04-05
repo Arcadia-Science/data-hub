@@ -5,6 +5,7 @@ Tests the watcher's ongoing lifecycle — heartbeat-driven status transitions
 """
 
 from __future__ import annotations
+from datetime import datetime, timezone
 
 import pytest
 
@@ -63,9 +64,9 @@ class TestHeartbeat:
 
         rows = db_query(
             integration_env.db_dsn,
-            """SELECT files_uploaded_since_last_heartbeat,
-                      runs_reported_since_last_heartbeat,
-                      errors_since_last_heartbeat,
+            """SELECT files_uploaded_since_last,
+                      runs_reported_since_last,
+                      errors_since_last,
                       uptime_seconds,
                       upload_mode
                FROM watcher_heartbeats
@@ -122,11 +123,20 @@ class TestEvents:
         integration_env: IntegrationEnv,
     ) -> None:
         watcher = client.register_watcher(instrument_id)
+        now = datetime.now(timezone.utc).isoformat()
         result = client.send_events(
             watcher.watcher_id,
             [
-                {"event_type": "watcher_started", "message": "Watcher started on LAB-PC-01"},
-                {"event_type": "run_detected", "message": "Detected run EXP-001"},
+                {
+                    "event_type": "watcher_started",
+                    "timestamp": now,
+                    "message": "Watcher started on LAB-PC-01",
+                },
+                {
+                    "event_type": "run_reported",
+                    "timestamp": now,
+                    "message": "Detected run EXP-001",
+                },
             ],
         )
         assert result.received == 2
@@ -139,7 +149,7 @@ class TestEvents:
         )
         assert len(rows) == 2
         assert rows[0][0] == "watcher_started"
-        assert rows[1][0] == "run_detected"
+        assert rows[1][0] == "run_reported"
 
     def test_send_events_watcher_started_and_stopped(
         self,
@@ -148,13 +158,14 @@ class TestEvents:
         integration_env: IntegrationEnv,
     ) -> None:
         watcher = client.register_watcher(instrument_id)
+        now = datetime.now(timezone.utc).isoformat()
         client.send_events(
             watcher.watcher_id,
-            [{"event_type": "watcher_started", "message": "Started"}],
+            [{"event_type": "watcher_started", "timestamp": now, "message": "Started"}],
         )
         client.send_events(
             watcher.watcher_id,
-            [{"event_type": "watcher_stopped", "message": "Stopped"}],
+            [{"event_type": "watcher_stopped", "timestamp": now, "message": "Stopped"}],
         )
 
         rows = db_query(
@@ -166,10 +177,11 @@ class TestEvents:
 
     def test_send_events_invalid_type_400(self, client: DataHubClient, instrument_id: str) -> None:
         watcher = client.register_watcher(instrument_id)
+        now = datetime.now(timezone.utc).isoformat()
         with pytest.raises(ApiError) as exc_info:
             client.send_events(
                 watcher.watcher_id,
-                [{"event_type": "bogus", "message": "bad event"}],
+                [{"event_type": "bogus", "timestamp": now, "message": "bad event"}],
             )
         assert exc_info.value.status_code == 400
 
