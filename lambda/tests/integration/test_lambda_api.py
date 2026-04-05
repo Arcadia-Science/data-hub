@@ -59,6 +59,7 @@ class TestQPCRHappyPath:
         s3_key = "azure-cielo-qpcr/Experiment_20260101_CqValues.csv"
         s3_fixture_files[s3_key] = _FIXTURES_DIR / "azure_cielo_qpcr_example.csv"
 
+        # Fire the event to trigger the pipeline.
         event = make_s3_event("azure-cielo-qpcr", "Experiment_20260101_CqValues.csv")
         lambda_handler(event, mock_context)
 
@@ -77,6 +78,7 @@ class TestQPCRHappyPath:
         assert len(run["files"]) == 1
         file = run["files"][0]
         assert file["status"] == "completed"
+
         # Dye channels are extracted from the Fluorescence column of the CSV
         # and stored as run-level metadata.
         assert run["metadata"]["dye_channels"] == ["ORANGE 560", "TAMRA", "ROX"]
@@ -146,13 +148,16 @@ class TestSpectraMaxHappyPath:
         expected_metadata: dict[str, str],
         expected_first_plate: str,
     ) -> None:
+        # Register the real fixture CSV so the patched S3 download can find it.
         filename = f"{run_id}.xls"
         s3_key = f"spectramax-id3-plate-reader/{filename}"
         s3_fixture_files[s3_key] = _FIXTURES_DIR / fixture_file
 
+        # Fire the event to trigger the pipeline.
         event = make_s3_event("spectramax-id3-plate-reader", filename)
         lambda_handler(event, mock_context)
 
+        # Verify via the real API that the full pipeline wrote correct data.
         run = _api_get(
             integration_env.base_url,
             integration_env.api_token,
@@ -166,16 +171,18 @@ class TestSpectraMaxHappyPath:
         file = run["files"][0]
         assert file["status"] == "completed"
 
+        # Verify the run-level metadata.
         for key, value in expected_metadata.items():
             assert run["metadata"][key] == value
 
+        # Verify the raw well data.
         assert len(run["report_data"]) == 1
-        rd = run["report_data"][0]
-        assert rd["data_type"] == "raw_well_data"
-        assert isinstance(rd["data"], list)
-        assert len(rd["data"]) > 0
+        run_report_data = run["report_data"][0]
+        assert run_report_data["data_type"] == "raw_well_data"
+        assert isinstance(run_report_data["data"], list)
+        assert len(run_report_data["data"]) > 0
 
-        first_row = rd["data"][0]
+        first_row = run_report_data["data"][0]
         expected_columns = {
             "time",
             "plate_name",
@@ -189,6 +196,7 @@ class TestSpectraMaxHappyPath:
         assert set(first_row.keys()) == expected_columns
         assert first_row["plate_name"] == expected_first_plate
 
+        # Verify the Slack notification.
         mock_slack.assert_called_once()
         slack_msg = mock_slack.call_args[0][0]
         assert run_id in slack_msg
@@ -210,20 +218,24 @@ class TestAzure600GelDocHappyPath:
         mock_slack: MagicMock,
         mock_s3_upload: MagicMock,
     ) -> None:
-        s3_key = "azure-600-gel-doc/26.04.01_16.51.59.tif"
+        # Register the real fixture TIFF so the patched S3 download can find it.
+        run_id = "26.04.01_16.51.59"
+        s3_key = f"azure-600-gel-doc/{run_id}.tif"
         s3_fixture_files[s3_key] = _FIXTURES_DIR / "azure_600_gel_doc_example.tif"
 
-        event = make_s3_event("azure-600-gel-doc", "26.04.01_16.51.59.tif")
+        # Fire the event to trigger the pipeline.
+        event = make_s3_event("azure-600-gel-doc", f"{run_id}.tif")
         lambda_handler(event, mock_context)
 
+        # Verify via the real API that the full pipeline wrote correct data.
         run = _api_get(
             integration_env.base_url,
             integration_env.api_token,
-            "/api/v1/instruments/azure-600-gel-doc/runs/26.04.01_16.51.59",
+            f"/api/v1/instruments/azure-600-gel-doc/runs/{run_id}",
         )
 
         assert run["source"] == "lambda"
-        assert run["run_id"] == "26.04.01_16.51.59"
+        assert run["run_id"] == run_id
 
         # The Gel Doc pipeline registers two files: the raw TIFF and a
         # contrast-enhanced PNG derived from it.
@@ -233,15 +245,16 @@ class TestAzure600GelDocHappyPath:
         processed_file = next(f for f in run["files"] if f["category"] == "processed")
 
         assert raw_file["status"] == "completed"
-        assert raw_file["filename"] == "26.04.01_16.51.59.tif"
+        assert raw_file["filename"] == f"{run_id}.tif"
 
-        # TIFF metadata is stored at the run level.
+        # Verify the run-level metadata.
         assert run["metadata"]["capture_type"] == "Manual"
         assert run["metadata"]["imaging_mode"] == "Chemiluminescence"
         assert run["metadata"]["wavelengths"] == []
         assert run["metadata"]["colors"] == []
 
-        assert processed_file["filename"] == "26.04.01_16.51.59.png"
+        # Verify the processed file.
+        assert processed_file["filename"] == f"{run_id}.png"
         assert processed_file["status"] == "uploaded"
 
         # Gel Doc files don't produce tabular report_data.
@@ -250,11 +263,12 @@ class TestAzure600GelDocHappyPath:
         # The pipeline uploads the contrast-enhanced PNG to the processed bucket.
         mock_s3_upload.assert_called_once()
         upload_dest = mock_s3_upload.call_args[0][1]
-        assert upload_dest == "s3://test-processed-bucket/azure-600-gel-doc/26.04.01_16.51.59.png"
+        assert upload_dest == f"s3://test-processed-bucket/azure-600-gel-doc/{run_id}.png"
 
+        # Verify the Slack notification.
         mock_slack.assert_called_once()
         slack_msg = mock_slack.call_args[0][0]
-        assert "26.04.01_16.51.59" in slack_msg
+        assert run_id in slack_msg
         assert "View in Data Hub" in slack_msg
 
 
@@ -278,29 +292,32 @@ class TestFailurePath:
         bad_csv = tmp_path / "bad.csv"
         bad_csv.write_text("Wrong,Headers,Only\nA,B,C\n")
 
-        s3_key = "azure-cielo-qpcr/Experiment_20260201_CqValues.csv"
+        run_id = "Experiment_20260201"
+        filename = f"{run_id}_CqValues.csv"
+        s3_key = f"azure-cielo-qpcr/{filename}"
         s3_fixture_files[s3_key] = bad_csv
 
-        event = make_s3_event("azure-cielo-qpcr", "Experiment_20260201_CqValues.csv")
-        # No `pytest.raises` needed — process_file marks the file as failed
-        # via the API and re-raises; lambda_handler then catches the
-        # re-raised exception and sends a Slack notification (also mocked).
+        # Fire the event to trigger the pipeline.
+        event = make_s3_event("azure-cielo-qpcr", filename)
         lambda_handler(event, mock_context)
 
+        # Verify via the real API that the full pipeline wrote correct data.
         run = _api_get(
             integration_env.base_url,
             integration_env.api_token,
-            "/api/v1/instruments/azure-cielo-qpcr/runs/Experiment_20260201",
+            f"/api/v1/instruments/azure-cielo-qpcr/runs/{run_id}",
         )
 
+        # Verify that the file was marked as failed.
         assert len(run["files"]) == 1
         file = run["files"][0]
         assert file["status"] == "failed"
         assert file["error_message"]
 
+        # Verify the Slack notification.
         mock_slack.assert_called_once()
         slack_msg = mock_slack.call_args[0][0]
-        assert "Experiment_20260201" in slack_msg
+        assert run_id in slack_msg
         assert "View CloudWatch logs" in slack_msg
 
 
@@ -318,13 +335,14 @@ class TestIdempotentRunCreation:
         mock_context: MagicMock,
         mock_slack: MagicMock,
     ) -> None:
-        s3_key = "azure-cielo-qpcr/Experiment_20260301_CqValues.csv"
+        run_id = "Experiment_20260301"
+        s3_key = f"azure-cielo-qpcr/{run_id}_CqValues.csv"
         s3_fixture_files[s3_key] = _FIXTURES_DIR / "azure_cielo_qpcr_example.csv"
 
         # Fire the same event twice to verify the upsert semantics of
         # ensure_run: the API returns 200 (existing) on the second call
         # rather than creating a duplicate.
-        event = make_s3_event("azure-cielo-qpcr", "Experiment_20260301_CqValues.csv")
+        event = make_s3_event("azure-cielo-qpcr", f"{run_id}_CqValues.csv")
         lambda_handler(event, mock_context)
         lambda_handler(event, mock_context)
 
@@ -336,7 +354,7 @@ class TestIdempotentRunCreation:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT COUNT(*) FROM instrument_runs WHERE run_id = %s",
-                    ("Experiment_20260301",),
+                    (run_id,),
                 )
                 row = cur.fetchone()
                 assert row is not None
@@ -349,15 +367,15 @@ class TestIdempotentRunCreation:
         run = _api_get(
             integration_env.base_url,
             integration_env.api_token,
-            "/api/v1/instruments/azure-cielo-qpcr/runs/Experiment_20260301",
+            f"/api/v1/instruments/azure-cielo-qpcr/runs/{run_id}",
         )
-        assert run["run_id"] == "Experiment_20260301"
+        assert run["run_id"] == run_id
         assert run["source"] == "lambda"
 
         assert mock_slack.call_count == 2
         for call in mock_slack.call_args_list:
             slack_msg = call[0][0]
-            assert "Experiment_20260301" in slack_msg
+            assert run_id in slack_msg
             assert "View in Data Hub" in slack_msg
 
 
@@ -381,10 +399,11 @@ class TestFileReprocessing:
         onConflictDoNothing). The second invocation reprocesses the existing
         file via completed → processing → completed.
         """
-        s3_key = "azure-cielo-qpcr/Experiment_20260301_CqValues.csv"
+        run_id = "Experiment_20260301"
+        s3_key = f"azure-cielo-qpcr/{run_id}_CqValues.csv"
         s3_fixture_files[s3_key] = _FIXTURES_DIR / "azure_cielo_qpcr_example.csv"
 
-        event = make_s3_event("azure-cielo-qpcr", "Experiment_20260301_CqValues.csv")
+        event = make_s3_event("azure-cielo-qpcr", f"{run_id}_CqValues.csv")
         lambda_handler(event, mock_context)
         lambda_handler(event, mock_context)
 
@@ -406,7 +425,7 @@ class TestFileReprocessing:
         run = _api_get(
             integration_env.base_url,
             integration_env.api_token,
-            "/api/v1/instruments/azure-cielo-qpcr/runs/Experiment_20260301",
+            f"/api/v1/instruments/azure-cielo-qpcr/runs/{run_id}",
         )
         assert len(run["files"]) == 1
         assert run["files"][0]["status"] == "completed"
@@ -427,18 +446,19 @@ class TestFileReprocessing:
         file transitions failed → processing → completed with the error
         cleared.
         """
-        s3_key = "azure-cielo-qpcr/Experiment_20260301_CqValues.csv"
+        run_id = "Experiment_20260301"
+        s3_key = f"azure-cielo-qpcr/{run_id}_CqValues.csv"
         bad_csv = tmp_path / "bad.csv"
         bad_csv.write_text("Wrong,Headers,Only\nA,B,C\n")
         s3_fixture_files[s3_key] = bad_csv
 
-        event = make_s3_event("azure-cielo-qpcr", "Experiment_20260301_CqValues.csv")
+        event = make_s3_event("azure-cielo-qpcr", f"{run_id}_CqValues.csv")
         lambda_handler(event, mock_context)
 
         run = _api_get(
             integration_env.base_url,
             integration_env.api_token,
-            "/api/v1/instruments/azure-cielo-qpcr/runs/Experiment_20260301",
+            f"/api/v1/instruments/azure-cielo-qpcr/runs/{run_id}",
         )
         assert run["files"][0]["status"] == "failed"
         assert run["files"][0]["error_message"]
@@ -450,11 +470,16 @@ class TestFileReprocessing:
         run = _api_get(
             integration_env.base_url,
             integration_env.api_token,
-            "/api/v1/instruments/azure-cielo-qpcr/runs/Experiment_20260301",
+            f"/api/v1/instruments/azure-cielo-qpcr/runs/{run_id}",
         )
         assert len(run["files"]) == 1
         assert run["files"][0]["status"] == "completed"
         assert run["files"][0]["error_message"] is None
+
+        # Verify the Slack notifications.
+        assert mock_slack.call_count == 2
+        assert "View CloudWatch logs" in mock_slack.call_args_list[0][0][0]
+        assert "View in Data Hub" in mock_slack.call_args_list[1][0][0]
 
     def test_reprocess_does_not_duplicate_report_data(
         self,
@@ -470,17 +495,29 @@ class TestFileReprocessing:
         when transitioning back to "processing", so the second invocation
         replaces rather than appends.
         """
-        s3_key = "spectramax-id3-plate-reader/033126_CM_Od750.xls"
+        run_id = "033126_CM_Od750"
+        s3_key = f"spectramax-id3-plate-reader/{run_id}.xls"
         s3_fixture_files[s3_key] = _FIXTURES_DIR / "spectramax_plate_reader_endpoint.xls"
 
-        event = make_s3_event("spectramax-id3-plate-reader", "033126_CM_Od750.xls")
+        # Fire the event twice.
+        event = make_s3_event("spectramax-id3-plate-reader", f"{run_id}.xls")
         lambda_handler(event, mock_context)
         lambda_handler(event, mock_context)
 
+        # Verify via the real API that the full pipeline wrote correct data.
         run = _api_get(
             integration_env.base_url,
             integration_env.api_token,
-            "/api/v1/instruments/spectramax-id3-plate-reader/runs/033126_CM_Od750",
+            f"/api/v1/instruments/spectramax-id3-plate-reader/runs/{run_id}",
         )
+
+        # Verify that the report_data was not duplicated.
         assert len(run["report_data"]) == 1
         assert run["report_data"][0]["data_type"] == "raw_well_data"
+
+        # Verify the Slack notifications.
+        assert mock_slack.call_count == 2
+        for call in mock_slack.call_args_list:
+            slack_msg = call[0][0]
+            assert run_id in slack_msg
+            assert "View in Data Hub" in slack_msg

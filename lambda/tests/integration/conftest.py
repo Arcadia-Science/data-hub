@@ -192,7 +192,7 @@ def integration_env(
     admin_conn.close()
 
     # 2. Push the Drizzle schema (mirrors web-app/tests/integration/global-setup.ts).
-    #    --force skips the interactive confirmation prompt for destructive changes.
+    # `--force` skips the interactive confirmation prompt for destructive changes.
     subprocess.run(
         ["npx", "drizzle-kit", "push", "--force"],
         cwd=str(_WEB_APP_DIR),
@@ -246,10 +246,10 @@ def integration_env(
         _wait_for_server(base_url, proc=server_proc)
 
         # 5. Seed a user + personal access token directly via psycopg2.
-        #    We bypass the API for seeding because PAT creation requires an
-        #    authenticated session, and there is no session-based auth in tests.
-        #    The server only stores the SHA-256 hash — the plaintext is returned
-        #    here for use in `Authorization: Bearer dhub_…` headers.
+        # We bypass the API for seeding because PAT creation requires an
+        # authenticated session, and there is no session-based auth in tests.
+        # The server only stores the SHA-256 hash — the plaintext is returned
+        # here for use in `Authorization: Bearer dhub_…` headers.
         token_plaintext = _generate_token()
         conn = psycopg2.connect(_PG_TEST_DSN)
         conn.autocommit = True
@@ -282,7 +282,7 @@ def integration_env(
         conn.close()
 
         # 7. Set env vars for Lambda modules and reset singletons so
-        #    DataHubClient / Config pick up the test server URL.
+        # DataHubClient / Config pick up the test server URL.
         tmp_data = tmp_path_factory.mktemp("data")
         os.environ["DATA_HUB_API_URL"] = f"{base_url}/api/v1"
         os.environ["DATA_HUB_API_KEY"] = token_plaintext
