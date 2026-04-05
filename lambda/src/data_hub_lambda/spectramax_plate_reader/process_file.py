@@ -55,10 +55,10 @@ def process_file(instrument_id: InstrumentType, run_id: str, filename: str) -> s
         well_data = parse_raw_well_data(local_file_path)
         logger.info("Parsed %d well data rows.", len(well_data))
 
+        client.update_run(instrument_id, run_id, metadata=metadata)
         client.update_file(
             file_id,
             status="completed",
-            metadata=metadata,
             report_data=[
                 {
                     "data_type": "raw_well_data",

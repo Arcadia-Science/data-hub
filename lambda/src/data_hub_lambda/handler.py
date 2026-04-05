@@ -16,6 +16,7 @@ from data_hub_lambda import (
     azure_cielo_qpcr,
     spectramax_plate_reader,
 )
+from data_hub_lambda.agilent_4150_tapestation.utils import parse_run_id_from_filename
 from data_hub_shared import slack
 from data_hub_shared.constants import INSTRUMENT_ID_TO_NAME_MAP
 from data_hub_shared.enums import Instrument
@@ -61,6 +62,7 @@ def parse_s3_event(event: S3Event) -> S3EventInfo:
     # S3 key layout is {instrument_id}/{filename} — the run_id is encoded in
     # the filename itself and must be extracted per-instrument below. This
     # differs from the watcher's 3-segment layout ({instrument_id}/{run_id}/{filename}).
+    # TODO: Consolidate this once we have a unified S3 key layout.
     pattern = r"^/?([^/]+)/([^/]+)$"
     match = re.match(pattern, s3_key)
     if not match:
@@ -74,7 +76,7 @@ def parse_s3_event(event: S3Event) -> S3EventInfo:
         if not run_id:
             raise ValueError(f"No run ID found in filename: {filename}")
     elif instrument_id == Instrument.AGILENT_4150_TAPESTATION.value:
-        run_id = agilent_4150_tapestation.parse_run_id_from_filename(filename)
+        run_id = parse_run_id_from_filename(filename)
     elif instrument_id == Instrument.AKTA_FPLC.value:
         run_id = filename.replace(".pdf", "")
     elif instrument_id in (

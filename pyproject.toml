@@ -4,6 +4,7 @@ members = ["lambda", "watcher", "packages/shared"]
 [dependency-groups]
 dev = [
     "pre-commit>=4.2.0",
+    "psycopg2-binary>=2.9.10",
     "pyright>=1.1.408",
     "pytest>=8.3.5",
     "ruff>=0.11.11",
@@ -51,6 +52,7 @@ no-lines-before = ["future", "standard-library"]
 [tool.pytest.ini_options]
 testpaths = ["lambda/tests", "watcher/tests", "packages/shared/tests"]
 addopts = "--import-mode=importlib"
+markers = ["integration: Lambda-to-API integration tests (require Postgres + Next.js)"]
 
 [tool.pyright]
 include = ["lambda", "watcher", "packages/shared"]

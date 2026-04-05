@@ -57,7 +57,8 @@ def process_file(run_id: str, filename: str) -> str:
             metadata["dye_channels"] = dye_channels
             logger.info("Parsed dye channels: %s", dye_channels)
 
-        client.update_file(file_id, status="completed", metadata=metadata)
+        client.update_run(INSTRUMENT_ID, run_id, metadata=metadata)
+        client.update_file(file_id, status="completed")
         logger.info("File %s marked as completed.", filename)
 
     except Exception as e:

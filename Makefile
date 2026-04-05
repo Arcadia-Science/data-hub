@@ -1,4 +1,4 @@
-# Python.
+# Python packages.
 .PHONY: py-lint
 py-lint:
 	uv run ruff check .
@@ -12,6 +12,14 @@ py-format:
 .PHONY: py-typecheck
 py-typecheck:
 	uv run pyright --project pyproject.toml
+
+.PHONY: py-test-unit
+py-test-unit:
+	uv run pytest -v -m "not integration"
+
+.PHONY: py-test-integration
+py-test-integration:
+	uv run pytest -v -m integration
 
 .PHONY: py-test
 py-test:
@@ -30,8 +38,8 @@ fe-lint:
 fe-typecheck:
 	cd web-app && npm run typecheck
 
-.PHONY: fe-test
-fe-test:
+.PHONY: fe-test-integration
+fe-test-integration:
 	cd web-app && npm run test:integration
 
 .PHONY: dev
@@ -42,7 +50,7 @@ dev:
 fe-build:
 	cd web-app && npm run build
 
-# Checks.
+# Formatting, linting, and type checking.
 .PHONY: py-check
 py-check:
 	make py-format
@@ -60,7 +68,7 @@ check-all:
 	make py-check
 	make fe-check
 
-# Docker.
+# Lambda.
 .PHONY: docker-build
 docker-build:
 	source .env && export GIT_AUTH_TOKEN=$$GH_PERSONAL_ACCESS_TOKEN && docker build -f lambda/Dockerfile --secret id=GIT_AUTH_TOKEN -t data-hub-lambda .

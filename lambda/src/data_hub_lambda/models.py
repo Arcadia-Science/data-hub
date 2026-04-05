@@ -23,6 +23,7 @@ class RunResponse(BaseModel):
     instrument_id: str
     run_id: str
     source: str
+    metadata: dict = Field(default_factory=dict)
 
 
 class FileResponse(BaseModel):
