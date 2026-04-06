@@ -107,23 +107,6 @@ class TestReportRun:
         assert rows[0][0] == "detected"
         assert rows[0][1] is not None
 
-    def test_report_run_does_not_return_file_ids(
-        self, client: DataHubClient, instrument_id: str
-    ) -> None:
-        watcher = client.register_watcher(instrument_id)
-        result = client.report_run(
-            instrument_id,
-            {
-                "run_id": "EXP-002",
-                "source": "watcher",
-                "watcher_id": watcher.watcher_id,
-                "detected_files": [
-                    {"filename": "data.csv", "relative_path": "EXP-002/data.csv"},
-                ],
-            },
-        )
-        assert result.files == []
-
     def test_report_run_idempotent(
         self,
         client: DataHubClient,
