@@ -53,6 +53,7 @@ no-lines-before = ["future", "standard-library"]
 testpaths = ["lambda/tests", "watcher/tests", "packages/shared/tests"]
 addopts = "--import-mode=importlib"
 markers = ["integration: Tests requiring Postgres + Next.js server"]
+filterwarnings = ["ignore::DeprecationWarning:matplotlib"]
 
 [tool.pyright]
 include = ["lambda", "watcher", "packages/shared"]
