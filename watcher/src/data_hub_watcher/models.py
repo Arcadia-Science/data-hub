@@ -151,15 +151,6 @@ class EventsResponse(BaseModel):
     received: int
 
 
-class RunFileResponse(BaseModel):
-    model_config = _API_MODEL_CONFIG
-
-    id: int
-    filename: str
-    relative_path: str | None = None
-    status: str | None = None
-
-
 class RunResponse(BaseModel):
     model_config = _API_MODEL_CONFIG
 
@@ -167,7 +158,6 @@ class RunResponse(BaseModel):
     instrument_id: str
     run_id: str
     source: Literal["lambda", "watcher"]
-    files: list[RunFileResponse] = Field(default_factory=list)
 
 
 class RunDetailResponse(BaseModel):

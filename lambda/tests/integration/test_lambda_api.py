@@ -16,7 +16,7 @@ import pytest
 import requests
 
 from data_hub_lambda.handler import lambda_handler
-from integration.conftest import IntegrationEnv
+from data_hub_shared.testing import IntegrationEnv
 
 _FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures"
 

@@ -203,11 +203,6 @@ class RunDetector:
             self._state_db.record_run_reported(run.run_id)
             self._counters.runs_reported += 1
 
-            file_id_by_name = {rf.filename: rf.id for rf in resp.files}
-            for f in run.files:
-                if f.filename in file_id_by_name:
-                    f.file_id = file_id_by_name[f.filename]
-
             self._reporter.queue_event(
                 WatcherEvent(
                     event_type=EventType.RUN_REPORTED,
