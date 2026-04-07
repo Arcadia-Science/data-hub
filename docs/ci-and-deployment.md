@@ -80,7 +80,7 @@ npm run db:push
 
 The Lambda function is deployed as a Docker container image via [AWS SAM](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/). Infrastructure is defined in `infra/template.yaml` and includes:
 
-- S3 buckets (`arcadia-raw-data-hub-{env}` and `arcadia-processed-data-hub-{env}`)
+- S3 buckets (`arcadia-data-hub-raw-{env}` and `arcadia-data-hub-processed-{env}`)
 - The Lambda function (container image, 1024 MB memory, 300 s timeout, function URL)
 - S3 event triggers for each supported instrument
 - IAM roles for Lambda execution and GitHub Actions deployment (OIDC)
@@ -100,6 +100,8 @@ On pushes to `staging` or `production`, the **Deploy Lambda** workflow:
 3. Runs `sam deploy` to update the CloudFormation stack.
 
 Secrets (`DATA_HUB_API_KEY`, `SLACK_WEBHOOK_URL`, `LAMBDA_AUTH_TOKEN`, etc.) are stored in GitHub environment secrets scoped to each environment.
+
+> **Note:** The CI deploy role has intentionally narrow permissions — enough to push a new container image and update the existing CloudFormation stack, but _not_ enough to create the stack from scratch or to add/remove S3 buckets, Lambda functions, or S3 event triggers. Initial stack creation and infrastructure-level changes (e.g., adding a new instrument trigger) must be performed by an admin with broader AWS permissions. Once the stack exists, routine image-update deploys through CI work without issue.
 
 #### Local deployment
 

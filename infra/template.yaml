@@ -56,8 +56,10 @@ Resources:
 
   RawDataBucket:
     Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
-      BucketName: !Sub "arcadia-raw-data-hub-${Environment}"
+      BucketName: !Sub "arcadia-data-hub-raw-${Environment}"
       VersioningConfiguration:
         Status: Enabled
       Tags:
@@ -66,8 +68,10 @@ Resources:
 
   ProcessedDataBucket:
     Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
-      BucketName: !Sub "arcadia-processed-data-hub-${Environment}"
+      BucketName: !Sub "arcadia-data-hub-processed-${Environment}"
       VersioningConfiguration:
         Status: Enabled
       Tags:
@@ -206,6 +210,9 @@ Resources:
                   - !Sub "${ProcessedDataBucket.Arn}/*"
 
   # ---- IAM: GitHub Actions deploy role ----
+  # Scoped for routine image-update deploys only.  Initial stack creation and
+  # infrastructure changes (new buckets, Lambda functions, S3 event triggers)
+  # require broader permissions — run those from an admin session.
 
   GitHubActionsDeployRole:
     Type: AWS::IAM::Role
@@ -286,8 +293,10 @@ Resources:
                   - iam:DeleteRolePolicy
                   - iam:DetachRolePolicy
                   - iam:TagRole
+                  # iam:DeleteRole is intentionally omitted — role replacement
+                  # requires an admin deploy (see ci-and-deployment.md).
                 Resource:
-                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/data-hub-*"
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/data-hub-*-${Environment}"
 
 Outputs:
   DataHubFunctionArn:

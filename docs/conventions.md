@@ -14,7 +14,7 @@ All raw data files are stored in S3 with the key pattern:
 - **`run_id`** — unique identifier for the run, either extracted from the filename prefix or from a subdirectory name.
 - **`filename`** — the original filename.
 
-The S3 bucket name follows the template `arcadia-raw-data-hub-{environment}`, where `environment` is `staging` or `production`.
+The S3 bucket name follows the template `arcadia-data-hub-raw-{environment}`, where `environment` is `staging` or `production`.
 
 ## Instrument IDs
 
@@ -63,8 +63,8 @@ Run `make check-all` before pushing. CI enforces the same checks.
 
 | Environment | API URL | S3 bucket |
 | --- | --- | --- |
-| Staging | `https://data-hub-env-staging-arcadia-science.vercel.app/api/v1` | `arcadia-raw-data-hub-staging` |
-| Production | `https://data-hub.arcadiascience.com/api/v1` | `arcadia-raw-data-hub-production` |
+| Staging | `https://data-hub-env-staging-arcadia-science.vercel.app/api/v1` | `arcadia-data-hub-raw-staging` |
+| Production | `https://data-hub.arcadiascience.com/api/v1` | `arcadia-data-hub-raw-production` |
 
 ## Testing
 
