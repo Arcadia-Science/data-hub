@@ -1,11 +1,9 @@
 version = 0.1
 
-# Required parameters without defaults. For local deploys, either:
-#   1. Source a .env file before running (e.g., `source .env && make sam-deploy-staging`)
-#   2. Override on the command line: sam deploy --config-env staging --parameter-overrides "EcrImageUri=..."
-#
-# In CI (deploy-lambda.yml), these are passed via --parameter-overrides from
-# GitHub environment secrets, which take precedence over the values here.
+# Static deploy configuration per environment. Parameter overrides with
+# secret/dynamic values are passed via the Makefile (local) or the GitHub
+# Actions workflow (CI), where shell variable expansion works correctly.
+# SAM CLI does NOT expand environment variables inside samconfig.toml.
 
 [staging.deploy.parameters]
 stack_name = "data-hub-staging"
@@ -14,14 +12,7 @@ s3_prefix = "data-hub-staging"
 region = "us-west-1"
 capabilities = "CAPABILITY_NAMED_IAM"
 confirm_changeset = true
-parameter_overrides = [
-    "Environment=staging",
-    "EcrImageUri=${ECR_IMAGE_URI}",
-    "DataHubApiUrl=${DATA_HUB_API_URL}",
-    "DataHubApiKey=${DATA_HUB_API_KEY}",
-    "SlackWebhookUrl=${SLACK_WEBHOOK_URL}",
-    "OidcProviderArn=${OIDC_PROVIDER_ARN}",
-]
+resolve_image_repos = true
 
 [production.deploy.parameters]
 stack_name = "data-hub-production"
@@ -30,11 +21,4 @@ s3_prefix = "data-hub-production"
 region = "us-west-1"
 capabilities = "CAPABILITY_NAMED_IAM"
 confirm_changeset = true
-parameter_overrides = [
-    "Environment=production",
-    "EcrImageUri=${ECR_IMAGE_URI}",
-    "DataHubApiUrl=${DATA_HUB_API_URL}",
-    "DataHubApiKey=${DATA_HUB_API_KEY}",
-    "SlackWebhookUrl=${SLACK_WEBHOOK_URL}",
-    "OidcProviderArn=${OIDC_PROVIDER_ARN}",
-]
+resolve_image_repos = true

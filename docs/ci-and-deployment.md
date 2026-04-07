@@ -116,7 +116,7 @@ aws ecr get-login-password --region us-west-1 \
   | docker login --username AWS --password-stdin <ACCOUNT_ID>.dkr.ecr.us-west-1.amazonaws.com
 
 # Build the image.
-make docker-build
+make docker-build-lambda
 
 # Tag and push.
 docker tag data-hub-lambda:latest <ECR_REPOSITORY_URI>:staging-initial
@@ -134,10 +134,10 @@ export DATA_HUB_API_KEY="<your-api-key>"
 export SLACK_WEBHOOK_URL="<your-slack-webhook>"
 export OIDC_PROVIDER_ARN="<arn-from-step-1>"
 
-make sam-deploy-staging
+make sam-deploy ENV=staging
 ```
 
-Repeat with the production values and `make sam-deploy-production` when ready.
+Repeat with the production values and `make sam-deploy ENV=production` when ready.
 
 **4. Configure GitHub environment secrets:**
 
@@ -177,20 +177,24 @@ Secrets (`DATA_HUB_API_KEY`, `SLACK_WEBHOOK_URL`, etc.) are stored in GitHub env
 
 #### Local deployment
 
-You can deploy from your machine after building the Docker image:
+Local deployment requires the following tools in addition to the [general prerequisites](getting-started.md#prerequisites):
+
+- [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) — used for bootstrap commands and ECR login.
+- [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html) — used by `make sam-deploy-*` to package and deploy CloudFormation stacks. Install with `brew install aws-sam-cli` on macOS.
+- AWS credentials configured (`aws configure` or environment variables) with permission to deploy the stack.
+
+Once installed, build and deploy:
 
 ```sh
 # Build the container image.
-make docker-build
+make docker-build-lambda
 
 # Deploy to staging (will prompt for changeset confirmation).
-make sam-deploy-staging
+make sam-deploy ENV=staging
 
 # Deploy to production.
-make sam-deploy-production
+make sam-deploy ENV=production
 ```
-
-This requires AWS credentials with permission to deploy the stack.
 
 ## Running checks locally
 

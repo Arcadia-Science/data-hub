@@ -45,7 +45,7 @@ Each processor module exposes a `process_file()` function that accepts the run I
 The Lambda function is packaged as a container image:
 
 ```sh
-make docker-build
+make docker-build-lambda
 ```
 
 The Dockerfile is a multi-stage build:

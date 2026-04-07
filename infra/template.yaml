@@ -51,12 +51,69 @@ Resources:
 
   RawDataBucket:
     Type: AWS::S3::Bucket
+    DependsOn: S3InvokeLambdaPermission
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
       BucketName: !Sub "arcadia-data-hub-raw-${Environment}"
       VersioningConfiguration:
         Status: Enabled
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: agilent-4150-tapestation/
+                  - Name: suffix
+                    Value: .pdf
+            Function: !GetAtt DataHubFunction.Arn
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: akta-fplc/
+                  - Name: suffix
+                    Value: .pdf
+            Function: !GetAtt DataHubFunction.Arn
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: azure-600-gel-doc/
+                  - Name: suffix
+                    Value: .tif
+            Function: !GetAtt DataHubFunction.Arn
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: azure-cielo-qpcr/
+                  - Name: suffix
+                    Value: .csv
+            Function: !GetAtt DataHubFunction.Arn
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: spectramax-id3-plate-reader/
+                  - Name: suffix
+                    Value: .xls
+            Function: !GetAtt DataHubFunction.Arn
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: spectramax-id5-plate-reader/
+                  - Name: suffix
+                    Value: .xls
+            Function: !GetAtt DataHubFunction.Arn
       Tags:
         - Key: project
           Value: arcadia-data-hub
@@ -88,84 +145,24 @@ Resources:
         AuthType: NONE
       Environment:
         Variables:
-          AWS_S3_RAW_DATA_BUCKET: !Ref RawDataBucket
-          AWS_S3_PROCESSED_DATA_BUCKET: !Ref ProcessedDataBucket
+          AWS_S3_RAW_DATA_BUCKET: !Sub "arcadia-data-hub-raw-${Environment}"
+          AWS_S3_PROCESSED_DATA_BUCKET: !Sub "arcadia-data-hub-processed-${Environment}"
           DATA_HUB_API_URL: !Ref DataHubApiUrl
           DATA_HUB_API_KEY: !Ref DataHubApiKey
           SLACK_WEBHOOK_URL: !Ref SlackWebhookUrl
-      Events:
-        TapeStation:
-          Type: S3
-          Properties:
-            Bucket: !Ref RawDataBucket
-            Events: s3:ObjectCreated:*
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: agilent-4150-tapestation/
-                  - Name: suffix
-                    Value: .pdf
-        AktaFplc:
-          Type: S3
-          Properties:
-            Bucket: !Ref RawDataBucket
-            Events: s3:ObjectCreated:*
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: akta-fplc/
-                  - Name: suffix
-                    Value: .pdf
-        GelDoc:
-          Type: S3
-          Properties:
-            Bucket: !Ref RawDataBucket
-            Events: s3:ObjectCreated:*
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: azure-600-gel-doc/
-                  - Name: suffix
-                    Value: .tif
-        CieloQpcr:
-          Type: S3
-          Properties:
-            Bucket: !Ref RawDataBucket
-            Events: s3:ObjectCreated:*
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: azure-cielo-qpcr/
-                  - Name: suffix
-                    Value: .csv
-        SpectramaxId3:
-          Type: S3
-          Properties:
-            Bucket: !Ref RawDataBucket
-            Events: s3:ObjectCreated:*
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: spectramax-id3-plate-reader/
-                  - Name: suffix
-                    Value: .xls
-        SpectramaxId5:
-          Type: S3
-          Properties:
-            Bucket: !Ref RawDataBucket
-            Events: s3:ObjectCreated:*
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: spectramax-id5-plate-reader/
-                  - Name: suffix
-                    Value: .xls
+
+  # ---- S3 → Lambda event wiring ----
+  # Defined as explicit resources rather than SAM Events to avoid the circular
+  # dependency that occurs when the bucket and function are in the same template.
+
+  S3InvokeLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref DataHubFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub "arn:aws:s3:::arcadia-data-hub-raw-${Environment}"
+      SourceAccount: !Ref AWS::AccountId
 
   # ---- IAM: Lambda execution role ----
 
@@ -192,16 +189,16 @@ Resources:
                   - s3:GetObject
                   - s3:ListBucket
                 Resource:
-                  - !GetAtt RawDataBucket.Arn
-                  - !Sub "${RawDataBucket.Arn}/*"
+                  - !Sub "arn:aws:s3:::arcadia-data-hub-raw-${Environment}"
+                  - !Sub "arn:aws:s3:::arcadia-data-hub-raw-${Environment}/*"
               - Effect: Allow
                 Action:
                   - s3:GetObject
                   - s3:PutObject
                   - s3:ListBucket
                 Resource:
-                  - !GetAtt ProcessedDataBucket.Arn
-                  - !Sub "${ProcessedDataBucket.Arn}/*"
+                  - !Sub "arn:aws:s3:::arcadia-data-hub-processed-${Environment}"
+                  - !Sub "arn:aws:s3:::arcadia-data-hub-processed-${Environment}/*"
 
   # ---- IAM: GitHub Actions deploy role ----
   # Scoped for routine image-update deploys only.  Initial stack creation and
@@ -254,7 +251,7 @@ Resources:
                   - lambda:UpdateFunctionCode
                   - lambda:UpdateFunctionConfiguration
                   - lambda:GetFunction
-                Resource: !GetAtt DataHubFunction.Arn
+                Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:data-hub-${Environment}"
         - PolicyName: SamDeploy
           PolicyDocument:
             Version: "2012-10-17"
