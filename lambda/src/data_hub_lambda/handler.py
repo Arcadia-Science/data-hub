@@ -160,14 +160,14 @@ def lambda_handler(event: dict[str, Any], context: Context) -> None:
 
         slack.send_message(
             f"*{instrument_name}*\n"
-            f"A report was generated for run `{run_id}`!\n"
+            f"Finished preprocessing run `{run_id}`!\n"
             f"<{result_url}|View in Data Hub>"
         )
     except Exception:
-        logger.exception("Failed to generate report for run %s.", run_id)
+        logger.exception("Failed to preprocess run %s.", run_id)
         logs_url = get_cloudwatch_logs_url(context)
         slack.send_message(
             f"*{instrument_name}*\n"
-            f"Failed to generate report for run `{run_id}`!\n"
+            f"Failed to preprocess run `{run_id}`!\n"
             f"<{logs_url}|View CloudWatch logs>"
         )

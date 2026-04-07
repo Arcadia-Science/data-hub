@@ -6,39 +6,19 @@ Data Hub is a platform for automatically ingesting, processing, and visualizing 
 
 ```mermaid
 flowchart LR
-    subgraph Lab["Lab instrument PCs"]
-        W["Watcher (CLI agent)"]
-    end
-
-    subgraph AWS
-        S3["S3 bucket"]
-        L["Lambda"]
-    end
-
-    subgraph Vercel
-        API["Next.js API"]
-        UI["Web dashboard"]
-        DB[(PostgreSQL)]
-    end
-
-    Slack["Slack"]
-
-    W -- "upload raw files" --> S3
-    W -- "heartbeats, events, runs" --> API
-    S3 -- "trigger" --> L
-    L -- "download raw files" --> S3
-    L -- "create runs, upload results" --> API
-    L -- "success/failure alerts" --> Slack
-    API --> DB
-    UI --> API
-    UI --> DB
+    W[Watcher] -->|raw files| S3[S3]
+    S3 -->|trigger| L[Lambda]
+    W -->|heartbeats, runs| API[API]
+    L -->|results| API
+    API --> DB[(PostgreSQL)]
+    API --> UI[Web app]
 ```
 
 ## Components
 
 | Directory | Package | Description |
 | --- | --- | --- |
-| `web-app/` | — | Next.js web application and REST API. Deployed on Vercel. |
+| `web-app/` | `data-hub-web-app` | Next.js web application and REST API. Deployed on Vercel. |
 | `lambda/` | `data-hub-lambda` | AWS Lambda function triggered by S3 uploads. Runs instrument-specific processing pipelines. |
 | `watcher/` | `data-hub-watcher` | CLI agent installed on lab instrument PCs. Detects new files, uploads them to S3, and reports status to the API. |
 | `packages/shared/` | `data-hub-shared` | Shared Python library providing S3 utilities, instrument enums, Slack integration, and test infrastructure. |
@@ -52,9 +32,9 @@ flowchart LR
 3. It groups files into runs (by filename prefix or subdirectory) and reports each run to the **API**.
 4. It uploads raw files to **S3** at the key `{instrument_id}/{run_id}/{filename}`.
 5. The S3 upload triggers the **Lambda** function.
-6. Lambda downloads the file, dispatches to the appropriate instrument processor, and generates a report.
+6. Lambda downloads the file and dispatches to the appropriate instrument processor for preprocessing (e.g., extracting metadata).
 7. Lambda creates/updates the run and files via the **API** and sends a **Slack** notification.
-8. Users view results in the **web dashboard**.
+8. Users view the run in the **web dashboard**.
 
 ### Manual upload (manual mode)
 

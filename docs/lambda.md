@@ -1,14 +1,14 @@
 # Lambda
 
-The Data Hub Lambda function processes raw instrument data uploaded to S3. It is triggered by S3 events, runs an instrument-specific processing pipeline, and reports results back through the API and Slack.
+The Data Hub Lambda function preprocesses raw instrument data uploaded to S3. It is triggered by S3 events, runs an instrument-specific preprocessing pipeline, and reports results back through the API and Slack.
 
 ## How it works
 
 1. An S3 `PutObject` event triggers the Lambda function.
 2. The handler parses the S3 key to extract the instrument ID, run ID, and filename. The expected key layout is `{instrument_id}/{run_id}/{filename}`.
 3. It dispatches to the appropriate instrument processor based on the instrument ID.
-4. The processor downloads the raw file from S3, generates a report (charts, analyses), and creates/updates the run and files via the Data Hub API.
-5. On success, a Slack message is sent with a link to view the report in the web dashboard.
+4. The processor downloads the raw file from S3, preprocesses it (e.g., extracting metadata), and creates/updates the run and files via the Data Hub API.
+5. On success, a Slack message is sent with a link to view the run in the web dashboard.
 6. On failure, a Slack message is sent with a link to the CloudWatch logs.
 
 ## Supported instruments
@@ -22,7 +22,7 @@ The Data Hub Lambda function processes raw instrument data uploaded to S3. It is
 | SpectraMax iD3 Plate Reader | `spectramax_plate_reader` | `spectramax-id3-plate-reader` |
 | SpectraMax iD5 Plate Reader | `spectramax_plate_reader` | `spectramax-id5-plate-reader` |
 
-Each processor module exposes a `process_file()` function that accepts the run ID and filename (and instrument ID for SpectraMax readers) and returns a URL to the generated report.
+Each processor module exposes a `process_file()` function that accepts the run ID and filename (and instrument ID for SpectraMax readers) and returns a URL to the run in the web dashboard.
 
 ## Adding a new instrument
 
@@ -32,7 +32,7 @@ Each processor module exposes a `process_file()` function that accepts the run I
 
    ```python
    def process_file(run_id: str, filename: str) -> str:
-       """Process a file and return the URL to the generated report."""
+       """Process a file and return the URL to the run in the web dashboard."""
        ...
    ```
 
@@ -62,7 +62,7 @@ The entry point is `data_hub_lambda.handler.lambda_handler`.
 The Lambda function depends on a scientific Python stack:
 
 - `pandas` — data manipulation
-- `matplotlib` — chart generation
+- `matplotlib` — plotting
 - `scikit-image` — image processing
 - `tifffile` — TIFF file reading
 - `pydantic` — data validation
