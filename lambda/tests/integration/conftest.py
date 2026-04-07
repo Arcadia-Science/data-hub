@@ -125,15 +125,18 @@ def make_s3_event() -> Callable[..., dict[str, Any]]:
     Usage::
 
         def test_example(make_s3_event):
-            event = make_s3_event("azure-cielo-qpcr", "Experiment_20260101_CqValues.csv")
+            event = make_s3_event(
+                "azure-cielo-qpcr", "Experiment_20260101", "CqValues.csv",
+            )
     """
 
     def _factory(
         instrument_id: str,
+        run_id: str,
         filename: str,
         bucket: str = "test-bucket",
     ) -> dict[str, Any]:
-        s3_key = f"{instrument_id}/{filename}"
+        s3_key = f"{instrument_id}/{run_id}/{filename}"
         return {
             "Records": [
                 {

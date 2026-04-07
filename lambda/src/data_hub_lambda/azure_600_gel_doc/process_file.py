@@ -32,7 +32,7 @@ def process_file(run_id: str, filename: str) -> str:
 
     client = get_client()
     s3_bucket = config.AWS_S3_RAW_DATA_BUCKET
-    s3_key = f"{INSTRUMENT_ID}/{filename}"
+    s3_key = f"{INSTRUMENT_ID}/{run_id}/{filename}"
 
     client.ensure_run(INSTRUMENT_ID, run_id)
 
@@ -58,7 +58,7 @@ def process_file(run_id: str, filename: str) -> str:
         png_file_path = tiff_processor.export_figure()
 
         processed_bucket = config.AWS_S3_PROCESSED_DATA_BUCKET
-        png_s3_key = f"{INSTRUMENT_ID}/{png_file_path.name}"
+        png_s3_key = f"{INSTRUMENT_ID}/{run_id}/{png_file_path.name}"
         s3_utils.upload_file(png_file_path, f"s3://{processed_bucket}/{png_s3_key}")
         logger.info("Uploaded processed image to s3://%s/%s", processed_bucket, png_s3_key)
 

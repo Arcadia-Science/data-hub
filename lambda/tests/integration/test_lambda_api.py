@@ -56,11 +56,13 @@ class TestQPCRHappyPath:
         mock_slack: MagicMock,
     ) -> None:
         # Register the real fixture CSV so the patched S3 download can find it.
-        s3_key = "azure-cielo-qpcr/Experiment_20260101_CqValues.csv"
+        run_id = "Experiment_20260101"
+        filename = f"{run_id}_CqValues.csv"
+        s3_key = f"azure-cielo-qpcr/{run_id}/{filename}"
         s3_fixture_files[s3_key] = _FIXTURES_DIR / "azure_cielo_qpcr_example.csv"
 
         # Fire the event to trigger the pipeline.
-        event = make_s3_event("azure-cielo-qpcr", "Experiment_20260101_CqValues.csv")
+        event = make_s3_event("azure-cielo-qpcr", run_id, filename)
         lambda_handler(event, mock_context)
 
         # Verify via the real API that the full pipeline wrote correct data.
@@ -150,11 +152,11 @@ class TestSpectraMaxHappyPath:
     ) -> None:
         # Register the real fixture CSV so the patched S3 download can find it.
         filename = f"{run_id}.xls"
-        s3_key = f"spectramax-id3-plate-reader/{filename}"
+        s3_key = f"spectramax-id3-plate-reader/{run_id}/{filename}"
         s3_fixture_files[s3_key] = _FIXTURES_DIR / fixture_file
 
         # Fire the event to trigger the pipeline.
-        event = make_s3_event("spectramax-id3-plate-reader", filename)
+        event = make_s3_event("spectramax-id3-plate-reader", run_id, filename)
         lambda_handler(event, mock_context)
 
         # Verify via the real API that the full pipeline wrote correct data.
@@ -220,11 +222,12 @@ class TestAzure600GelDocHappyPath:
     ) -> None:
         # Register the real fixture TIFF so the patched S3 download can find it.
         run_id = "26.04.01_16.51.59"
-        s3_key = f"azure-600-gel-doc/{run_id}.tif"
+        filename = f"{run_id}.tif"
+        s3_key = f"azure-600-gel-doc/{run_id}/{filename}"
         s3_fixture_files[s3_key] = _FIXTURES_DIR / "azure_600_gel_doc_example.tif"
 
         # Fire the event to trigger the pipeline.
-        event = make_s3_event("azure-600-gel-doc", f"{run_id}.tif")
+        event = make_s3_event("azure-600-gel-doc", run_id, filename)
         lambda_handler(event, mock_context)
 
         # Verify via the real API that the full pipeline wrote correct data.
@@ -263,7 +266,7 @@ class TestAzure600GelDocHappyPath:
         # The pipeline uploads the contrast-enhanced PNG to the processed bucket.
         mock_s3_upload.assert_called_once()
         upload_dest = mock_s3_upload.call_args[0][1]
-        assert upload_dest == f"s3://test-processed-bucket/azure-600-gel-doc/{run_id}.png"
+        assert upload_dest == f"s3://test-processed-bucket/azure-600-gel-doc/{run_id}/{run_id}.png"
 
         # Verify the Slack notification.
         mock_slack.assert_called_once()
@@ -294,11 +297,11 @@ class TestFailurePath:
 
         run_id = "Experiment_20260201"
         filename = f"{run_id}_CqValues.csv"
-        s3_key = f"azure-cielo-qpcr/{filename}"
+        s3_key = f"azure-cielo-qpcr/{run_id}/{filename}"
         s3_fixture_files[s3_key] = bad_csv
 
         # Fire the event to trigger the pipeline.
-        event = make_s3_event("azure-cielo-qpcr", filename)
+        event = make_s3_event("azure-cielo-qpcr", run_id, filename)
         lambda_handler(event, mock_context)
 
         # Verify via the real API that the full pipeline wrote correct data.
@@ -336,13 +339,14 @@ class TestIdempotentRunCreation:
         mock_slack: MagicMock,
     ) -> None:
         run_id = "Experiment_20260301"
-        s3_key = f"azure-cielo-qpcr/{run_id}_CqValues.csv"
+        filename = f"{run_id}_CqValues.csv"
+        s3_key = f"azure-cielo-qpcr/{run_id}/{filename}"
         s3_fixture_files[s3_key] = _FIXTURES_DIR / "azure_cielo_qpcr_example.csv"
 
         # Fire the same event twice to verify the upsert semantics of
         # ensure_run: the API returns 200 (existing) on the second call
         # rather than creating a duplicate.
-        event = make_s3_event("azure-cielo-qpcr", f"{run_id}_CqValues.csv")
+        event = make_s3_event("azure-cielo-qpcr", run_id, filename)
         lambda_handler(event, mock_context)
         lambda_handler(event, mock_context)
 
@@ -400,10 +404,11 @@ class TestFileReprocessing:
         file via completed → processing → completed.
         """
         run_id = "Experiment_20260301"
-        s3_key = f"azure-cielo-qpcr/{run_id}_CqValues.csv"
+        filename = f"{run_id}_CqValues.csv"
+        s3_key = f"azure-cielo-qpcr/{run_id}/{filename}"
         s3_fixture_files[s3_key] = _FIXTURES_DIR / "azure_cielo_qpcr_example.csv"
 
-        event = make_s3_event("azure-cielo-qpcr", f"{run_id}_CqValues.csv")
+        event = make_s3_event("azure-cielo-qpcr", run_id, filename)
         lambda_handler(event, mock_context)
         lambda_handler(event, mock_context)
 
@@ -447,12 +452,13 @@ class TestFileReprocessing:
         cleared.
         """
         run_id = "Experiment_20260301"
-        s3_key = f"azure-cielo-qpcr/{run_id}_CqValues.csv"
+        filename = f"{run_id}_CqValues.csv"
+        s3_key = f"azure-cielo-qpcr/{run_id}/{filename}"
         bad_csv = tmp_path / "bad.csv"
         bad_csv.write_text("Wrong,Headers,Only\nA,B,C\n")
         s3_fixture_files[s3_key] = bad_csv
 
-        event = make_s3_event("azure-cielo-qpcr", f"{run_id}_CqValues.csv")
+        event = make_s3_event("azure-cielo-qpcr", run_id, filename)
         lambda_handler(event, mock_context)
 
         run = _api_get(
@@ -496,11 +502,12 @@ class TestFileReprocessing:
         replaces rather than appends.
         """
         run_id = "033126_CM_Od750"
-        s3_key = f"spectramax-id3-plate-reader/{run_id}.xls"
+        filename = f"{run_id}.xls"
+        s3_key = f"spectramax-id3-plate-reader/{run_id}/{filename}"
         s3_fixture_files[s3_key] = _FIXTURES_DIR / "spectramax_plate_reader_endpoint.xls"
 
         # Fire the event twice.
-        event = make_s3_event("spectramax-id3-plate-reader", f"{run_id}.xls")
+        event = make_s3_event("spectramax-id3-plate-reader", run_id, filename)
         lambda_handler(event, mock_context)
         lambda_handler(event, mock_context)
 
