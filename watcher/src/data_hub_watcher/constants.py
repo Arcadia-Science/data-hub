@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 API_URLS: dict[str, str] = {
-    "staging": "https://data-hub-staging.arcadiascience.com/api/v1",
+    "staging": "https://data-hub-env-staging-arcadia-science.vercel.app/api/v1",
     "production": "https://data-hub.arcadiascience.com/api/v1",
 }
 

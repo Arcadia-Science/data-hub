@@ -45,6 +45,14 @@ See the full [Getting Started guide](docs/getting-started.md) for prerequisites 
 
 ## Documentation
 
+### Guides
+
+- [Adding an instrument](docs/guides/adding-an-instrument.md) — end-to-end: watcher setup, activation, optional Lambda preprocessing
+- [Installing a watcher](docs/guides/installing-a-watcher.md) — lab operator focused: init, watch, troubleshooting
+- [Managing tokens](docs/guides/managing-tokens.md) — creating, using, and revoking API tokens
+
+### Reference
+
 - [Architecture](docs/architecture.md) — system overview, data flow, and design decisions
 - [Getting started](docs/getting-started.md) — development setup, environment variables, running locally
 - [Watcher](docs/watcher.md) — CLI commands, configuration, run detection, upload modes

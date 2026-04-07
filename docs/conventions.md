@@ -63,7 +63,7 @@ Run `make check-all` before pushing. CI enforces the same checks.
 
 | Environment | API URL | S3 bucket |
 | --- | --- | --- |
-| Staging | `https://data-hub-staging.arcadiascience.com/api/v1` | `arcadia-raw-data-hub-staging` |
+| Staging | `https://data-hub-env-staging-arcadia-science.vercel.app/api/v1` | `arcadia-raw-data-hub-staging` |
 | Production | `https://data-hub.arcadiascience.com/api/v1` | `arcadia-raw-data-hub-production` |
 
 ## Testing
