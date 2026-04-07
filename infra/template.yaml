@@ -251,6 +251,7 @@ Resources:
                   - lambda:UpdateFunctionCode
                   - lambda:UpdateFunctionConfiguration
                   - lambda:GetFunction
+                  - lambda:GetFunctionUrlConfig
                 Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:data-hub-${Environment}"
         - PolicyName: SamDeploy
           PolicyDocument:
