@@ -5,10 +5,26 @@ on:
     branches:
       - staging
       - production
+    paths:
+      - .github/workflows/lint-and-typecheck.yml
+      - lambda/**
+      - packages/**
+      - web-app/**
+      - pyproject.toml
+      - uv.lock
+      - Makefile
   pull_request:
     branches:
       - staging
       - production
+    paths:
+      - .github/workflows/lint-and-typecheck.yml
+      - lambda/**
+      - packages/**
+      - web-app/**
+      - pyproject.toml
+      - uv.lock
+      - Makefile
 
 jobs:
   python:

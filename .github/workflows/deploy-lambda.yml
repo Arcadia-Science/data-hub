@@ -6,6 +6,7 @@ on:
       - staging
       - production
     paths:
+      - .github/workflows/deploy-lambda.yml
       - lambda/**
       - packages/shared/**
       - infra/**
