@@ -61,7 +61,6 @@ jobs:
             --s3-prefix "data-hub-${{ github.ref_name }}" \
             --no-resolve-s3 \
             --image-repository "${{ steps.ecr-login.outputs.registry }}/data-hub" \
-            --no-resolve-image-repos \
             --parameter-overrides \
               "EcrImageUri=${IMAGE_URI}" \
               "DataHubApiUrl=${{ secrets.DATA_HUB_API_URL }}" \
