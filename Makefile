@@ -72,3 +72,21 @@ check-all:
 .PHONY: docker-build
 docker-build:
 	source .env && export GIT_AUTH_TOKEN=$$GH_PERSONAL_ACCESS_TOKEN && docker build -f lambda/Dockerfile --secret id=GIT_AUTH_TOKEN -t data-hub-lambda .
+
+# SAM infrastructure.
+.PHONY: sam-bootstrap
+sam-bootstrap:
+	aws cloudformation deploy \
+		--template-file infra/bootstrap.yaml \
+		--stack-name data-hub-bootstrap \
+		--region us-west-1 \
+		--capabilities CAPABILITY_NAMED_IAM \
+		--tags project=arcadia-data-hub
+
+.PHONY: sam-deploy-staging
+sam-deploy-staging:
+	cd infra && sam deploy --config-env staging
+
+.PHONY: sam-deploy-production
+sam-deploy-production:
+	cd infra && sam deploy --config-env production

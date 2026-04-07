@@ -113,7 +113,24 @@ Add unit tests in `lambda/tests/` for the new processor. Integration tests will 
 
 ### 5. Configure the S3 trigger
 
-The S3 bucket needs an event notification configured to trigger the Lambda function for the new instrument's file types. This is done in AWS outside this repository.
+Add an S3 event to the Lambda function in `infra/template.yaml` under the `Events` section of `DataHubFunction`. Each event specifies a prefix (the instrument ID) and a suffix (the file extension):
+
+```yaml
+BioRadCfx96:
+  Type: S3
+  Properties:
+    Bucket: !Ref RawDataBucket
+    Events: s3:ObjectCreated:*
+    Filter:
+      S3Key:
+        Rules:
+          - Name: prefix
+            Value: bio-rad-cfx96/
+          - Name: suffix
+            Value: .csv
+```
+
+The trigger is created automatically on the next `sam deploy` (or when the deploy workflow runs after merge).
 
 ## What you get without Lambda
 

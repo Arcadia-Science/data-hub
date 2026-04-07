@@ -78,16 +78,45 @@ npm run db:push
 
 ### Lambda (AWS)
 
-The Lambda function is deployed as a Docker container image.
+The Lambda function is deployed as a Docker container image via [AWS SAM](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/). Infrastructure is defined in `infra/template.yaml` and includes:
+
+- S3 buckets (`arcadia-raw-data-hub-{env}` and `arcadia-processed-data-hub-{env}`)
+- The Lambda function (container image, 1024 MB memory, 300 s timeout, function URL)
+- S3 event triggers for each supported instrument
+- IAM roles for Lambda execution and GitHub Actions deployment (OIDC)
+
+A separate bootstrap stack (`infra/bootstrap.yaml`) creates shared resources — the ECR repository and the GitHub OIDC identity provider — and only needs to be deployed once:
+
+```sh
+make sam-bootstrap
+```
+
+#### Automated deployment (`deploy-lambda.yml`)
+
+On pushes to `staging` or `production`, the **Deploy Lambda** workflow:
+
+1. Assumes the environment's deploy role via OIDC (no long-lived AWS keys).
+2. Builds and pushes the Docker image to ECR.
+3. Runs `sam deploy` to update the CloudFormation stack.
+
+Secrets (`DATA_HUB_API_KEY`, `SLACK_WEBHOOK_URL`, `LAMBDA_AUTH_TOKEN`, etc.) are stored in GitHub environment secrets scoped to each environment.
+
+#### Local deployment
+
+You can deploy from your machine after building the Docker image:
 
 ```sh
 # Build the container image.
 make docker-build
+
+# Deploy to staging (will prompt for changeset confirmation).
+make sam-deploy-staging
+
+# Deploy to production.
+make sam-deploy-production
 ```
 
-This requires a `GH_PERSONAL_ACCESS_TOKEN` in your `.env` file (for a private Git dependency). The image is built from `lambda/Dockerfile` and uses the `public.ecr.aws/lambda/python:3.12` base image.
-
-Deployment to AWS (pushing to ECR and updating the Lambda function) is handled outside this repository.
+This requires a `GH_PERSONAL_ACCESS_TOKEN` in your `.env` file (for a private Git dependency) and AWS credentials with permission to deploy the stack.
 
 ## Running checks locally
 

@@ -1,0 +1,315 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >-
+  Data Hub per-environment stack: S3 buckets, Lambda function with S3 triggers,
+  and IAM roles for Lambda execution and GitHub Actions deployment.
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues:
+      - staging
+      - production
+
+  EcrImageUri:
+    Type: String
+    Description: Full ECR image URI including tag (e.g., 123456789.dkr.ecr.us-west-1.amazonaws.com/arcadia-data-hub:staging-abc123)
+
+  GitHubOrg:
+    Type: String
+    Default: Arcadia-Science
+
+  GitHubRepo:
+    Type: String
+    Default: data-hub
+
+  DataHubApiUrl:
+    Type: String
+    Description: Base URL of the Data Hub web API
+
+  DataHubApiKey:
+    Type: String
+    NoEcho: true
+    Description: API key for Lambda to authenticate with the Data Hub API
+
+  SlackWebhookUrl:
+    Type: String
+    NoEcho: true
+    Description: Slack incoming webhook URL for Lambda notifications
+
+  LambdaAuthToken:
+    Type: String
+    NoEcho: true
+    Description: Token for authenticating requests to the Lambda function URL
+
+  OidcProviderArn:
+    Type: String
+    Description: ARN of the GitHub Actions OIDC provider (from bootstrap stack)
+
+Globals:
+  Function:
+    Timeout: 300
+    MemorySize: 1024
+
+Resources:
+  # ---- S3 buckets ----
+
+  RawDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "arcadia-raw-data-hub-${Environment}"
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: project
+          Value: arcadia-data-hub
+
+  ProcessedDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "arcadia-processed-data-hub-${Environment}"
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: project
+          Value: arcadia-data-hub
+
+  # ---- Lambda function ----
+
+  DataHubFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "data-hub-${Environment}"
+      PackageType: Image
+      ImageUri: !Ref EcrImageUri
+      EphemeralStorage:
+        Size: 512
+      Role: !GetAtt LambdaExecutionRole.Arn
+      FunctionUrlConfig:
+        AuthType: NONE
+      Environment:
+        Variables:
+          AWS_S3_RAW_DATA_BUCKET: !Ref RawDataBucket
+          AWS_S3_PROCESSED_DATA_BUCKET: !Ref ProcessedDataBucket
+          DATA_HUB_API_URL: !Ref DataHubApiUrl
+          DATA_HUB_API_KEY: !Ref DataHubApiKey
+          SLACK_WEBHOOK_URL: !Ref SlackWebhookUrl
+          AWS_LAMBDA_FUNCTION_URL_AUTH_TOKEN: !Ref LambdaAuthToken
+      Events:
+        TapeStation:
+          Type: S3
+          Properties:
+            Bucket: !Ref RawDataBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: agilent-4150-tapestation/
+                  - Name: suffix
+                    Value: .pdf
+        AktaFplc:
+          Type: S3
+          Properties:
+            Bucket: !Ref RawDataBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: akta-fplc/
+                  - Name: suffix
+                    Value: .pdf
+        GelDoc:
+          Type: S3
+          Properties:
+            Bucket: !Ref RawDataBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: azure-600-gel-doc/
+                  - Name: suffix
+                    Value: .tif
+        CieloQpcr:
+          Type: S3
+          Properties:
+            Bucket: !Ref RawDataBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: azure-cielo-qpcr/
+                  - Name: suffix
+                    Value: .csv
+        SpectramaxId3:
+          Type: S3
+          Properties:
+            Bucket: !Ref RawDataBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: spectramax-id3-plate-reader/
+                  - Name: suffix
+                    Value: .xls
+        SpectramaxId5:
+          Type: S3
+          Properties:
+            Bucket: !Ref RawDataBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: spectramax-id5-plate-reader/
+                  - Name: suffix
+                    Value: .xls
+
+  # ---- IAM: Lambda execution role ----
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "data-hub-lambda-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt RawDataBucket.Arn
+                  - !Sub "${RawDataBucket.Arn}/*"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt ProcessedDataBucket.Arn
+                  - !Sub "${ProcessedDataBucket.Arn}/*"
+
+  # ---- IAM: GitHub Actions deploy role ----
+
+  GitHubActionsDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "data-hub-deploy-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref OidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub:
+                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/${Environment}"
+                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:environment:${Environment}"
+      Policies:
+        - PolicyName: EcrPush
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:PutImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                Resource: !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/arcadia-data-hub"
+        - PolicyName: LambdaUpdate
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:UpdateFunctionCode
+                  - lambda:UpdateFunctionConfiguration
+                  - lambda:GetFunction
+                Resource: !GetAtt DataHubFunction.Arn
+        - PolicyName: SamDeploy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:DescribeStacks
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:GetTemplateSummary
+                Resource: !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/data-hub-${Environment}/*"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::aws-sam-cli-managed-default-samclisourcebucket-*"
+                  - !Sub "arn:aws:s3:::aws-sam-cli-managed-default-samclisourcebucket-*/*"
+              - Effect: Allow
+                Action:
+                  - iam:GetRole
+                  - iam:PassRole
+                  - iam:CreateRole
+                  - iam:AttachRolePolicy
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:TagRole
+                Resource:
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/data-hub-*"
+
+Outputs:
+  DataHubFunctionArn:
+    Description: Lambda function ARN
+    Value: !GetAtt DataHubFunction.Arn
+
+  DataHubFunctionName:
+    Description: Lambda function name
+    Value: !Ref DataHubFunction
+
+  DataHubFunctionUrl:
+    Description: Lambda function URL
+    Value: !GetAtt DataHubFunctionUrl.FunctionUrl
+
+  RawDataBucketName:
+    Description: Raw data S3 bucket name
+    Value: !Ref RawDataBucket
+
+  ProcessedDataBucketName:
+    Description: Processed data S3 bucket name
+    Value: !Ref ProcessedDataBucket
+
+  DeployRoleArn:
+    Description: GitHub Actions deploy role ARN
+    Value: !GetAtt GitHubActionsDeployRole.Arn
