@@ -7,18 +7,14 @@ version = 0.1
 
 [staging.deploy.parameters]
 stack_name = "data-hub-staging"
-resolve_s3 = true
 s3_prefix = "data-hub-staging"
 region = "us-west-1"
 capabilities = "CAPABILITY_NAMED_IAM"
 confirm_changeset = true
-resolve_image_repos = true
 
 [production.deploy.parameters]
 stack_name = "data-hub-production"
-resolve_s3 = true
 s3_prefix = "data-hub-production"
 region = "us-west-1"
 capabilities = "CAPABILITY_NAMED_IAM"
 confirm_changeset = true
-resolve_image_repos = true

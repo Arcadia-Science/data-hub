@@ -90,6 +90,8 @@ ifndef ENV
 	$(error ENV is required, e.g. make sam-deploy ENV=staging)
 endif
 	cd infra && sam deploy --config-env $(ENV) \
+		--resolve-s3 \
+		--resolve-image-repos \
 		--parameter-overrides \
 		"Environment=$(ENV)" \
 		"EcrImageUri=$(ECR_IMAGE_URI)" \
