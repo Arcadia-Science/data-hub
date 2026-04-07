@@ -132,7 +132,6 @@ export ECR_IMAGE_URI="<ECR_REPOSITORY_URI>:staging-initial"
 export DATA_HUB_API_URL="https://data-hub-env-staging-arcadia-science.vercel.app/api/v1"
 export DATA_HUB_API_KEY="<your-api-key>"
 export SLACK_WEBHOOK_URL="<your-slack-webhook>"
-export LAMBDA_AUTH_TOKEN="<your-auth-token>"
 export OIDC_PROVIDER_ARN="<arn-from-step-1>"
 
 make sam-deploy-staging
@@ -161,7 +160,6 @@ In your GitHub repo, go to **Settings → Environments**, create a `staging` env
 | `DATA_HUB_API_URL` | Base API URL for the environment |
 | `DATA_HUB_API_KEY` | API key for Lambda → Data Hub authentication |
 | `SLACK_WEBHOOK_URL` | Slack incoming webhook URL |
-| `LAMBDA_AUTH_TOKEN` | Token for authenticating Lambda function URL requests |
 
 Once secrets are set, the CI workflow handles all subsequent deploys automatically.
 
@@ -173,7 +171,7 @@ On pushes to `staging` or `production`, the **Deploy Lambda** workflow:
 2. Builds and pushes the Docker image to ECR.
 3. Runs `sam deploy` to update the CloudFormation stack.
 
-Secrets (`DATA_HUB_API_KEY`, `SLACK_WEBHOOK_URL`, `LAMBDA_AUTH_TOKEN`, etc.) are stored in GitHub environment secrets scoped to each environment.
+Secrets (`DATA_HUB_API_KEY`, `SLACK_WEBHOOK_URL`, etc.) are stored in GitHub environment secrets scoped to each environment.
 
 > **Note:** The CI deploy role has intentionally narrow permissions — enough to push a new container image and update the existing CloudFormation stack, but _not_ enough to create the stack from scratch or to add/remove S3 buckets, Lambda functions, or S3 event triggers. Initial stack creation and infrastructure-level changes (e.g., adding a new instrument trigger) must be performed by an admin with broader AWS permissions. Once the stack exists, routine image-update deploys through CI work without issue.
 

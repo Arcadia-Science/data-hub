@@ -20,7 +20,6 @@ parameter_overrides = [
     "DataHubApiUrl=${DATA_HUB_API_URL}",
     "DataHubApiKey=${DATA_HUB_API_KEY}",
     "SlackWebhookUrl=${SLACK_WEBHOOK_URL}",
-    "LambdaAuthToken=${LAMBDA_AUTH_TOKEN}",
     "OidcProviderArn=${OIDC_PROVIDER_ARN}",
 ]
 
@@ -37,6 +36,5 @@ parameter_overrides = [
     "DataHubApiUrl=${DATA_HUB_API_URL}",
     "DataHubApiKey=${DATA_HUB_API_KEY}",
     "SlackWebhookUrl=${SLACK_WEBHOOK_URL}",
-    "LambdaAuthToken=${LAMBDA_AUTH_TOKEN}",
     "OidcProviderArn=${OIDC_PROVIDER_ARN}",
 ]

@@ -59,5 +59,4 @@ jobs:
               "DataHubApiUrl=${{ secrets.DATA_HUB_API_URL }}" \
               "DataHubApiKey=${{ secrets.DATA_HUB_API_KEY }}" \
               "SlackWebhookUrl=${{ secrets.SLACK_WEBHOOK_URL }}" \
-              "LambdaAuthToken=${{ secrets.LAMBDA_AUTH_TOKEN }}" \
               "OidcProviderArn=${{ secrets.OIDC_PROVIDER_ARN }}"

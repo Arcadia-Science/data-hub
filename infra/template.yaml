@@ -37,11 +37,6 @@ Parameters:
     NoEcho: true
     Description: Slack incoming webhook URL for Lambda notifications
 
-  LambdaAuthToken:
-    Type: String
-    NoEcho: true
-    Description: Token for authenticating requests to the Lambda function URL
-
   OidcProviderArn:
     Type: String
     Description: ARN of the GitHub Actions OIDC provider (from bootstrap stack)
@@ -98,7 +93,6 @@ Resources:
           DATA_HUB_API_URL: !Ref DataHubApiUrl
           DATA_HUB_API_KEY: !Ref DataHubApiKey
           SLACK_WEBHOOK_URL: !Ref SlackWebhookUrl
-          AWS_LAMBDA_FUNCTION_URL_AUTH_TOKEN: !Ref LambdaAuthToken
       Events:
         TapeStation:
           Type: S3
