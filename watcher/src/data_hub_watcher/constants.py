@@ -7,7 +7,7 @@ API_URLS: dict[str, str] = {
     "production": "https://data-hub.arcadiascience.com/api/v1",
 }
 
-S3_BUCKET_TEMPLATE = "arcadia-raw-data-hub-{environment}"
+S3_BUCKET_TEMPLATE = "arcadia-data-hub-raw-{environment}"
 
 DEFAULT_CONFIG_DIR = Path("~/.data-hub").expanduser()
 DEFAULT_CONFIG_FILENAME = "config.yaml"

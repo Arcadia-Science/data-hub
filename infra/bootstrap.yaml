@@ -1,0 +1,70 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  One-time shared resources for Data Hub: ECR repository and GitHub Actions
+  OIDC identity provider. Deploy this stack once, not per environment.
+
+Resources:
+  EcrRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: data-hub
+      ImageTagMutability: MUTABLE
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Expire untagged images after 7 days",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "sinceImagePushed",
+                  "countUnit": "days",
+                  "countNumber": 7
+                },
+                "action": {
+                  "type": "expire"
+                }
+              },
+              {
+                "rulePriority": 2,
+                "description": "Keep only the 50 most recent tagged images",
+                "selection": {
+                  "tagStatus": "tagged",
+                  "tagPrefixList": ["staging-", "production-"],
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 50
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+      Tags:
+        - Key: project
+          Value: arcadia-data-hub
+
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        # GitHub Actions OIDC thumbprint — AWS validates the provider certificate
+        # chain regardless, so the exact value here is not security-critical.
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+
+Outputs:
+  EcrRepositoryUri:
+    Description: ECR repository URI for container images
+    Value: !GetAtt EcrRepository.RepositoryUri
+    Export:
+      Name: !Sub "${AWS::StackName}-EcrRepositoryUri"
+
+  OidcProviderArn:
+    Description: ARN of the GitHub Actions OIDC identity provider
+    Value: !GetAtt GitHubOidcProvider.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-OidcProviderArn"

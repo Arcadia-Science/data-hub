@@ -1,0 +1,65 @@
+name: Deploy Lambda function
+
+on:
+  push:
+    branches:
+      - staging
+      - production
+    paths:
+      - lambda/**
+      - packages/shared/**
+      - infra/**
+      - uv.lock
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-west-1
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ github.ref_name }}-${{ github.sha }}
+        run: |
+          IMAGE_URI="${ECR_REGISTRY}/data-hub:${IMAGE_TAG}"
+          docker build \
+            --provenance=false \
+            --platform linux/amd64 \
+            -f lambda/Dockerfile \
+            -t "${IMAGE_URI}" \
+            .
+          docker push "${IMAGE_URI}"
+          echo "IMAGE_URI=${IMAGE_URI}" >> "$GITHUB_ENV"
+
+      - uses: aws-actions/setup-sam@v2
+
+      - name: Deploy SAM stack
+        working-directory: infra
+        run: |
+          sam deploy \
+            --config-env "${{ github.ref_name }}" \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              "EcrImageUri=${IMAGE_URI}" \
+              "DataHubApiUrl=${{ secrets.DATA_HUB_API_URL }}" \
+              "DataHubApiKey=${{ secrets.DATA_HUB_API_KEY }}" \
+              "SlackWebhookUrl=${{ secrets.SLACK_WEBHOOK_URL }}" \
+              "Environment=${{ github.ref_name }}" \
+              "OidcProviderArn=${{ secrets.OIDC_PROVIDER_ARN }}"

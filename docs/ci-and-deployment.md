@@ -78,16 +78,123 @@ npm run db:push
 
 ### Lambda (AWS)
 
-The Lambda function is deployed as a Docker container image.
+The Lambda function is deployed as a Docker container image via [AWS SAM](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/). Infrastructure is defined in `infra/template.yaml` and includes:
+
+- S3 buckets (`arcadia-data-hub-raw-{env}` and `arcadia-data-hub-processed-{env}`)
+- The Lambda function (container image, 1024 MB memory, 300 s timeout, function URL)
+- S3 event triggers for each supported instrument
+- IAM roles for Lambda execution and GitHub Actions deployment (OIDC)
+
+A separate bootstrap stack (`infra/bootstrap.yaml`) creates shared resources — the ECR repository and the GitHub OIDC identity provider — and only needs to be deployed once:
+
+```sh
+make sam-bootstrap
+```
+
+#### First-time AWS setup
+
+After deploying the bootstrap stack, follow these steps to bring up the first environment. You need admin-level AWS credentials for the initial deploy (the CI role cannot create stacks from scratch).
+
+**1. Get the bootstrap stack outputs:**
+
+```sh
+aws cloudformation describe-stacks \
+  --stack-name data-hub-bootstrap \
+  --region us-west-1 \
+  --query "Stacks[0].Outputs"
+```
+
+Note the `OidcProviderArn` and `EcrRepositoryUri` values — you'll need them in steps 3 and 4 below.
+
+> **Note:** If your AWS account already has an OIDC provider for `token.actions.githubusercontent.com` (from another project), the bootstrap stack will fail with an `AWS::EarlyValidation::ResourceExistenceCheck` error. In that case, remove the `GitHubOidcProvider` resource from `bootstrap.yaml` (or skip the bootstrap stack entirely) and use the existing provider's ARN. Check with `aws iam list-open-id-connect-providers`.
+
+**2. Build and push the Docker image to ECR:**
+
+```sh
+# Log in to ECR.
+aws ecr get-login-password --region us-west-1 \
+  | docker login --username AWS --password-stdin <ACCOUNT_ID>.dkr.ecr.us-west-1.amazonaws.com
+
+# Build the image.
+make docker-build-lambda
+
+# Tag and push.
+docker tag data-hub-lambda:latest <ECR_REPOSITORY_URI>:staging-initial
+docker push <ECR_REPOSITORY_URI>:staging-initial
+```
+
+**3. Deploy the per-environment stack:**
+
+Set the required environment variables (the `samconfig.toml` references them via `${...}`) and deploy:
+
+```sh
+export ECR_IMAGE_URI="<ECR_REPOSITORY_URI>:staging-initial"
+export DATA_HUB_API_URL="https://data-hub-env-staging-arcadia-science.vercel.app/api/v1"
+export DATA_HUB_API_KEY="<your-api-key>"
+export SLACK_WEBHOOK_URL="<your-slack-webhook>"
+export OIDC_PROVIDER_ARN="<arn-from-step-1>"
+
+make sam-deploy ENV=staging
+```
+
+Repeat with the production values and `make sam-deploy ENV=production` when ready.
+
+**4. Configure GitHub environment secrets:**
+
+After the stack deploys, grab the deploy role ARN:
+
+```sh
+aws cloudformation describe-stacks \
+  --stack-name data-hub-staging \
+  --region us-west-1 \
+  --query "Stacks[0].Outputs[?OutputKey=='DeployRoleArn'].OutputValue" \
+  --output text
+```
+
+In your GitHub repo, go to **Settings → Environments**, create a `staging` environment (and later `production`), and add these secrets:
+
+| Secret | Value |
+| --- | --- |
+| `AWS_DEPLOY_ROLE_ARN` | Deploy role ARN from the stack output |
+| `OIDC_PROVIDER_ARN` | OIDC provider ARN from the bootstrap stack |
+| `DATA_HUB_API_URL` | Base API URL for the environment |
+| `DATA_HUB_API_KEY` | API key for Lambda → Data Hub authentication |
+| `SLACK_WEBHOOK_URL` | Slack incoming webhook URL |
+
+Once secrets are set, the CI workflow handles all subsequent deploys automatically.
+
+#### Automated deployment (`deploy-lambda.yml`)
+
+On pushes to `staging` or `production`, the **Deploy Lambda** workflow:
+
+1. Assumes the environment's deploy role via OIDC (no long-lived AWS keys).
+2. Builds and pushes the Docker image to ECR.
+3. Runs `sam deploy` to update the CloudFormation stack.
+
+Secrets (`DATA_HUB_API_KEY`, `SLACK_WEBHOOK_URL`, etc.) are stored in GitHub environment secrets scoped to each environment.
+
+> **Note:** The CI deploy role has intentionally narrow permissions — enough to push a new container image and update the existing CloudFormation stack, but _not_ enough to create the stack from scratch or to add/remove S3 buckets, Lambda functions, or S3 event triggers. Initial stack creation and infrastructure-level changes (e.g., adding a new instrument trigger) must be performed by an admin with broader AWS permissions. Once the stack exists, routine image-update deploys through CI work without issue.
+
+#### Local deployment
+
+Local deployment requires the following tools in addition to the [general prerequisites](getting-started.md#prerequisites):
+
+- [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) — used for bootstrap commands and ECR login.
+- [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html) — used by `make sam-deploy` to package and deploy CloudFormation stacks. Install with `brew install aws-sam-cli` on macOS.
+- AWS credentials configured (`aws configure` or environment variables) with permission to deploy the stack.
+
+Once installed, build and deploy:
 
 ```sh
 # Build the container image.
-make docker-build
+make docker-build-lambda
+
+# Deploy to staging (will prompt for changeset confirmation).
+make sam-deploy ENV=staging
+
+# Deploy to production.
+make sam-deploy ENV=production
 ```
-
-This requires a `GH_PERSONAL_ACCESS_TOKEN` in your `.env` file (for a private Git dependency). The image is built from `lambda/Dockerfile` and uses the `public.ecr.aws/lambda/python:3.12` base image.
-
-Deployment to AWS (pushing to ECR and updating the Lambda function) is handled outside this repository.
 
 ## Running checks locally
 

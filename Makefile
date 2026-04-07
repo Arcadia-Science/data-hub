@@ -69,6 +69,48 @@ check-all:
 	make fe-check
 
 # Lambda.
-.PHONY: docker-build
-docker-build:
-	source .env && export GIT_AUTH_TOKEN=$$GH_PERSONAL_ACCESS_TOKEN && docker build -f lambda/Dockerfile --secret id=GIT_AUTH_TOKEN -t data-hub-lambda .
+.PHONY: docker-build-lambda
+docker-build-lambda:
+	docker build --provenance=false --platform linux/amd64 -f lambda/Dockerfile -t data-hub-lambda .
+
+# SAM infrastructure.
+.PHONY: sam-bootstrap
+sam-bootstrap:
+	aws cloudformation deploy \
+		--template-file infra/bootstrap.yaml \
+		--stack-name data-hub-bootstrap \
+		--region us-west-1 \
+		--capabilities CAPABILITY_NAMED_IAM \
+		--tags project=arcadia-data-hub
+
+# Usage: make sam-deploy ENV=staging
+.PHONY: sam-deploy
+sam-deploy:
+ifndef ENV
+	$(error ENV is required, e.g. make sam-deploy ENV=staging)
+endif
+	cd infra && sam deploy --config-env $(ENV) \
+		--parameter-overrides \
+		"Environment=$(ENV)" \
+		"EcrImageUri=$(ECR_IMAGE_URI)" \
+		"DataHubApiUrl=$(DATA_HUB_API_URL)" \
+		"DataHubApiKey=$(DATA_HUB_API_KEY)" \
+		"SlackWebhookUrl=$(SLACK_WEBHOOK_URL)" \
+		"OidcProviderArn=$(OIDC_PROVIDER_ARN)"
+
+# Usage: make sam-teardown ENV=staging
+.PHONY: sam-teardown
+sam-teardown:
+ifndef ENV
+	$(error ENV is required, e.g. make sam-teardown ENV=staging)
+endif
+ifeq ($(ENV),production)
+	$(error Refusing to tear down production — do this manually)
+endif
+	@echo "Tearing down data-hub-$(ENV)..."
+	aws cloudformation delete-stack --stack-name data-hub-$(ENV) --region us-west-1
+	aws cloudformation wait stack-delete-complete --stack-name data-hub-$(ENV) --region us-west-1
+	@echo "Removing retained S3 buckets..."
+	-aws s3 rb s3://arcadia-data-hub-raw-$(ENV) --force
+	-aws s3 rb s3://arcadia-data-hub-processed-$(ENV) --force
+	@echo "Teardown complete."

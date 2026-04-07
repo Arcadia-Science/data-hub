@@ -30,7 +30,7 @@ def process_file(run_id: str, filename: str) -> str:
 
     client = get_client()
     s3_bucket = config.AWS_S3_RAW_DATA_BUCKET
-    s3_key = f"{INSTRUMENT_ID}/{filename}"
+    s3_key = f"{INSTRUMENT_ID}/{run_id}/{filename}"
 
     client.ensure_run(INSTRUMENT_ID, run_id)
 
