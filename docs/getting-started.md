@@ -47,7 +47,7 @@ vercel env pull
 
 ### Lambda / shared library
 
-These are set in the Lambda runtime environment and are only needed locally for integration tests:
+These are set in the Lambda runtime environment:
 
 | Variable | Required | Purpose |
 | --- | --- | --- |

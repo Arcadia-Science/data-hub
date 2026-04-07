@@ -16,10 +16,11 @@ pip install ./watcher
 data-hub-watcher --help
 ```
 
-On Windows, the watcher can optionally be installed as a Windows service (requires `pywin32`):
+On Windows, the watcher can optionally be installed as a Windows service (requires `pywin32`). Install the extra, then use the `service install` CLI command to register it with Windows:
 
 ```sh
 pip install "./watcher[windows-service]"
+data-hub-watcher service install
 ```
 
 ## Quick start
@@ -92,6 +93,8 @@ Subcommands for managing the YAML config file:
 | `config path` | Print the resolved config file path |
 
 ### `service` (Windows only)
+
+Requires the `windows-service` extra (`pip install "./watcher[windows-service]"`).
 
 Manage the watcher as a Windows service:
 
