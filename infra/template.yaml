@@ -261,6 +261,7 @@ Resources:
                   - cloudformation:CreateChangeSet
                   - cloudformation:DeleteChangeSet
                   - cloudformation:DescribeChangeSet
+                  - cloudformation:DescribeStackEvents
                   - cloudformation:DescribeStacks
                   - cloudformation:ExecuteChangeSet
                   - cloudformation:GetTemplateSummary
