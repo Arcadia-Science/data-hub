@@ -157,6 +157,7 @@ In your GitHub repo, go to **Settings → Environments**, create a `staging` env
 | --- | --- |
 | `AWS_DEPLOY_ROLE_ARN` | Deploy role ARN from the stack output |
 | `OIDC_PROVIDER_ARN` | OIDC provider ARN from the bootstrap stack |
+| `SAM_S3_BUCKET` | SAM CLI managed S3 bucket name (see `sam deploy` output, e.g. `aws-sam-cli-managed-default-samclisourcebucket-*`) |
 | `DATA_HUB_API_URL` | Base API URL for the environment |
 | `DATA_HUB_API_KEY` | API key for Lambda → Data Hub authentication |
 | `SLACK_WEBHOOK_URL` | Slack incoming webhook URL |
