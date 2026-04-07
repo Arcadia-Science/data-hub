@@ -180,7 +180,7 @@ Secrets (`DATA_HUB_API_KEY`, `SLACK_WEBHOOK_URL`, etc.) are stored in GitHub env
 Local deployment requires the following tools in addition to the [general prerequisites](getting-started.md#prerequisites):
 
 - [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) — used for bootstrap commands and ECR login.
-- [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html) — used by `make sam-deploy-*` to package and deploy CloudFormation stacks. Install with `brew install aws-sam-cli` on macOS.
+- [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html) — used by `make sam-deploy` to package and deploy CloudFormation stacks. Install with `brew install aws-sam-cli` on macOS.
 - AWS credentials configured (`aws configure` or environment variables) with permission to deploy the stack.
 
 Once installed, build and deploy:

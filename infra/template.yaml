@@ -241,7 +241,7 @@ Resources:
                   - ecr:InitiateLayerUpload
                   - ecr:UploadLayerPart
                   - ecr:CompleteLayerUpload
-                Resource: !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/arcadia-data-hub"
+                Resource: !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/data-hub"
         - PolicyName: LambdaUpdate
           PolicyDocument:
             Version: "2012-10-17"

@@ -25,6 +25,19 @@ Resources:
                 "action": {
                   "type": "expire"
                 }
+              },
+              {
+                "rulePriority": 2,
+                "description": "Keep only the 50 most recent tagged images",
+                "selection": {
+                  "tagStatus": "tagged",
+                  "tagPrefixList": ["staging-", "production-"],
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 50
+                },
+                "action": {
+                  "type": "expire"
+                }
               }
             ]
           }

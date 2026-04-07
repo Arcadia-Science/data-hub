@@ -37,8 +37,10 @@ jobs:
           ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
           IMAGE_TAG: ${{ github.ref_name }}-${{ github.sha }}
         run: |
-          IMAGE_URI="${ECR_REGISTRY}/arcadia-data-hub:${IMAGE_TAG}"
+          IMAGE_URI="${ECR_REGISTRY}/data-hub:${IMAGE_TAG}"
           docker build \
+            --provenance=false \
+            --platform linux/amd64 \
             -f lambda/Dockerfile \
             -t "${IMAGE_URI}" \
             .
@@ -59,4 +61,5 @@ jobs:
               "DataHubApiUrl=${{ secrets.DATA_HUB_API_URL }}" \
               "DataHubApiKey=${{ secrets.DATA_HUB_API_KEY }}" \
               "SlackWebhookUrl=${{ secrets.SLACK_WEBHOOK_URL }}" \
+              "Environment=${{ github.ref_name }}" \
               "OidcProviderArn=${{ secrets.OIDC_PROVIDER_ARN }}"
