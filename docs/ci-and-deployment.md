@@ -91,6 +91,80 @@ A separate bootstrap stack (`infra/bootstrap.yaml`) creates shared resources —
 make sam-bootstrap
 ```
 
+#### First-time AWS setup
+
+After deploying the bootstrap stack, follow these steps to bring up the first environment. You need admin-level AWS credentials for the initial deploy (the CI role cannot create stacks from scratch).
+
+**1. Get the bootstrap stack outputs:**
+
+```sh
+aws cloudformation describe-stacks \
+  --stack-name data-hub-bootstrap \
+  --region us-west-1 \
+  --query "Stacks[0].Outputs"
+```
+
+Note the `OidcProviderArn` and `EcrRepositoryUri` values — you'll need them in steps 3 and 4 below.
+
+> **Note:** If your AWS account already has an OIDC provider for `token.actions.githubusercontent.com` (from another project), the bootstrap stack will fail with an `AWS::EarlyValidation::ResourceExistenceCheck` error. In that case, remove the `GitHubOidcProvider` resource from `bootstrap.yaml` (or skip the bootstrap stack entirely) and use the existing provider's ARN. Check with `aws iam list-open-id-connect-providers`.
+
+**2. Build and push the Docker image to ECR:**
+
+```sh
+# Log in to ECR.
+aws ecr get-login-password --region us-west-1 \
+  | docker login --username AWS --password-stdin <ACCOUNT_ID>.dkr.ecr.us-west-1.amazonaws.com
+
+# Build the image.
+make docker-build
+
+# Tag and push.
+docker tag data-hub-lambda:latest <ECR_REPOSITORY_URI>:staging-initial
+docker push <ECR_REPOSITORY_URI>:staging-initial
+```
+
+**3. Deploy the per-environment stack:**
+
+Set the required environment variables (the `samconfig.toml` references them via `${...}`) and deploy:
+
+```sh
+export ECR_IMAGE_URI="<ECR_REPOSITORY_URI>:staging-initial"
+export DATA_HUB_API_URL="https://data-hub-env-staging-arcadia-science.vercel.app/api/v1"
+export DATA_HUB_API_KEY="<your-api-key>"
+export SLACK_WEBHOOK_URL="<your-slack-webhook>"
+export LAMBDA_AUTH_TOKEN="<your-auth-token>"
+export OIDC_PROVIDER_ARN="<arn-from-step-1>"
+
+make sam-deploy-staging
+```
+
+Repeat with the production values and `make sam-deploy-production` when ready.
+
+**4. Configure GitHub environment secrets:**
+
+After the stack deploys, grab the deploy role ARN:
+
+```sh
+aws cloudformation describe-stacks \
+  --stack-name data-hub-staging \
+  --region us-west-1 \
+  --query "Stacks[0].Outputs[?OutputKey=='DeployRoleArn'].OutputValue" \
+  --output text
+```
+
+In your GitHub repo, go to **Settings → Environments**, create a `staging` environment (and later `production`), and add these secrets:
+
+| Secret | Value |
+| --- | --- |
+| `AWS_DEPLOY_ROLE_ARN` | Deploy role ARN from the stack output |
+| `OIDC_PROVIDER_ARN` | OIDC provider ARN from the bootstrap stack |
+| `DATA_HUB_API_URL` | Base API URL for the environment |
+| `DATA_HUB_API_KEY` | API key for Lambda → Data Hub authentication |
+| `SLACK_WEBHOOK_URL` | Slack incoming webhook URL |
+| `LAMBDA_AUTH_TOKEN` | Token for authenticating Lambda function URL requests |
+
+Once secrets are set, the CI workflow handles all subsequent deploys automatically.
+
 #### Automated deployment (`deploy-lambda.yml`)
 
 On pushes to `staging` or `production`, the **Deploy Lambda** workflow:
@@ -118,7 +192,7 @@ make sam-deploy-staging
 make sam-deploy-production
 ```
 
-This requires a `GH_PERSONAL_ACCESS_TOKEN` in your `.env` file (for a private Git dependency) and AWS credentials with permission to deploy the stack.
+This requires AWS credentials with permission to deploy the stack.
 
 ## Running checks locally
 

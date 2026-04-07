@@ -36,11 +36,9 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
           IMAGE_TAG: ${{ github.ref_name }}-${{ github.sha }}
-          GIT_AUTH_TOKEN: ${{ secrets.GIT_AUTH_TOKEN }}
         run: |
           IMAGE_URI="${ECR_REGISTRY}/arcadia-data-hub:${IMAGE_TAG}"
           docker build \
-            --secret id=GIT_AUTH_TOKEN,env=GIT_AUTH_TOKEN \
             -f lambda/Dockerfile \
             -t "${IMAGE_URI}" \
             .

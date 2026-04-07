@@ -71,7 +71,7 @@ check-all:
 # Lambda.
 .PHONY: docker-build
 docker-build:
-	source .env && export GIT_AUTH_TOKEN=$$GH_PERSONAL_ACCESS_TOKEN && docker build -f lambda/Dockerfile --secret id=GIT_AUTH_TOKEN -t data-hub-lambda .
+	docker build -f lambda/Dockerfile -t data-hub-lambda .
 
 # SAM infrastructure.
 .PHONY: sam-bootstrap

@@ -7,7 +7,7 @@ Resources:
   EcrRepository:
     Type: AWS::ECR::Repository
     Properties:
-      RepositoryName: arcadia-data-hub
+      RepositoryName: data-hub
       ImageTagMutability: MUTABLE
       LifecyclePolicy:
         LifecyclePolicyText: |

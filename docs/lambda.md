@@ -48,8 +48,6 @@ The Lambda function is packaged as a container image:
 make docker-build
 ```
 
-This requires a `GH_PERSONAL_ACCESS_TOKEN` in your `.env` file (used for a private Git dependency during `uv export`).
-
 The Dockerfile is a multi-stage build:
 
 1. **Builder stage**: Uses `uv` to export and install third-party dependencies into the Lambda task root.
