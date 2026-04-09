@@ -221,6 +221,17 @@ class FileResponse(BaseModel):
     created_at: datetime
 
 
+class PresignedUploadResponse(BaseModel):
+    model_config = _API_MODEL_CONFIG
+
+    upload_url: str
+    s3_bucket: str
+    s3_key: str
+    file_id: int
+    expires_in: int
+    already_uploaded: bool = False
+
+
 class ApiErrorDetail(BaseModel):
     model_config = _API_MODEL_CONFIG
 

@@ -9,6 +9,8 @@ This guide is for lab operators setting up the Data Hub Watcher on an instrument
 - **The watch directory** — the folder where the instrument writes its output files
 - **File patterns** — the file extensions you want to upload (e.g., `*.csv`, `*.xlsx`, `*.tiff`)
 
+> **Note:** The watcher does **not** require AWS credentials. Uploads are routed through the Data Hub API using presigned S3 URLs, so only the `DATA_HUB_API_KEY` is needed on lab PCs.
+
 ## Installation
 
 Clone the repository and sync dependencies with `uv`:

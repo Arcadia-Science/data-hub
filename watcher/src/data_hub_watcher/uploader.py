@@ -1,18 +1,22 @@
-"""S3 upload with retry, API notification, and local state recording.
+"""Presigned-URL upload with retry, API notification, and local state recording.
 
 `Uploader` handles both auto-mode (immediate upload after run detection)
 and manual-mode (poll the server's upload queue on heartbeat ticks).
+
+Files are uploaded via presigned S3 PUT URLs obtained from the API, so the
+watcher does not need AWS credentials.
 """
 
 from __future__ import annotations
 import logging
+import mimetypes
 import time
 from pathlib import Path
 
-from data_hub_shared.s3_utils import S3Client, get_content_type, get_s3_client, upload_file
+import requests as http_requests
+
 from data_hub_watcher.api_client import ApiError, DataHubClient
 from data_hub_watcher.constants import (
-    S3_BUCKET_TEMPLATE,
     UPLOAD_RETRY_BASE_DELAY,
     UPLOAD_RETRY_MAX,
 )
@@ -25,13 +29,18 @@ from data_hub_watcher.state import StateDB
 logger = logging.getLogger(__name__)
 
 
+def _guess_content_type(path: Path) -> str | None:
+    content_type, _ = mimetypes.guess_type(str(path))
+    return content_type
+
+
 class Uploader:
-    """Uploads files to S3 and notifies the Data Hub API.
+    """Uploads files via presigned S3 PUT URLs and notifies the Data Hub API.
 
     Parameters
     ----------
     client:
-        API client for `PATCH /files/{id}` calls.
+        API client for presigned URL requests and file status updates.
     state_db:
         Local SQLite DB for deduplication.
     event_reporter:
@@ -39,15 +48,11 @@ class Uploader:
     counters:
         Heartbeat counters incremented on each upload.
     instrument_id:
-        Used to construct S3 keys.
+        Instrument identifier for API calls.
     watcher_id:
         Watcher identity for queue polling.
-    environment:
-        `"staging"` or `"production"` — determines the S3 bucket name.
     watch_directory:
         Root watch directory for resolving relative paths in queue mode.
-    s3_client:
-        Optional pre-built boto3 S3 client.  Created lazily if `None`.
     """
 
     def __init__(
@@ -59,9 +64,7 @@ class Uploader:
         counters: WatcherCounters,
         instrument_id: str,
         watcher_id: str,
-        environment: str,
         watch_directory: Path,
-        s3_client: S3Client | None = None,
     ) -> None:
         self._client = client
         self._state_db = state_db
@@ -69,14 +72,7 @@ class Uploader:
         self._counters = counters
         self._instrument_id = instrument_id
         self._watcher_id = watcher_id
-        self._s3_bucket = S3_BUCKET_TEMPLATE.format(environment=environment)
         self._watch_dir = watch_directory
-        self._s3_client = s3_client
-
-    def _get_s3_client(self) -> S3Client:
-        if self._s3_client is None:
-            self._s3_client = get_s3_client()
-        return self._s3_client
 
     # ------------------------------------------------------------------
     # Auto-mode: upload a batch of files for a reported run
@@ -90,7 +86,7 @@ class Uploader:
         """
         succeeded = 0
         for info in files:
-            if self._upload_single(info.path, run_id, file_id=info.file_id):
+            if self._upload_single(info.path, run_id):
                 succeeded += 1
 
         if succeeded == len(files):
@@ -139,37 +135,77 @@ class Uploader:
                 self._counters.errors += 1
                 continue
 
-            self._upload_single(local_path, qf.run_id, file_id=qf.id)
+            self._upload_single(local_path, qf.run_id)
+
+    # ------------------------------------------------------------------
+    # Presigned PUT helper
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _put_to_presigned_url(url: str, path: Path, content_type: str | None) -> None:
+        """HTTP PUT a file's bytes to a presigned S3 URL."""
+        headers: dict[str, str] = {}
+        if content_type:
+            headers["Content-Type"] = content_type
+
+        with open(path, "rb") as fh:
+            resp = http_requests.put(url, data=fh, headers=headers, timeout=300)
+        resp.raise_for_status()
 
     # ------------------------------------------------------------------
     # Single-file upload with retry
     # ------------------------------------------------------------------
 
-    def _upload_single(self, path: Path, run_id: str, *, file_id: int | None) -> bool:
-        """Upload one file to S3, notify the API, and record in StateDB.
+    def _upload_single(self, path: Path, run_id: str) -> bool:
+        """Upload one file via a presigned URL, notify the API, and record in StateDB.
 
         Returns `True` on success, `False` after all retries exhausted.
-
-        `file_id` is set when a file record exists server-side (created
-        during run reporting or present in the upload queue).  Only `None`
-        if the response did not include file IDs.
         """
-        s3_key = f"{self._instrument_id}/{run_id}/{path.name}"
-        s3_uri = f"s3://{self._s3_bucket}/{s3_key}"
+        content_type = _guess_content_type(path)
         sha = file_sha256(path)
+
+        # Request a presigned upload URL from the API. This also creates or
+        # locates the server-side file record.
+        try:
+            presigned = self._client.request_upload_url(
+                self._instrument_id,
+                run_id,
+                path.name,
+                content_type=content_type,
+                size_bytes=path.stat().st_size,
+            )
+        except ApiError as exc:
+            logger.error("Failed to get presigned URL for %s: %s", path.name, exc.message)
+            self._counters.errors += 1
+            self._reporter.queue_event(
+                WatcherEvent(
+                    event_type=EventType.UPLOAD_FAILED,
+                    message=f"Presigned URL request failed: {path.name}",
+                    details={"error": exc.message},
+                )
+            )
+            return False
+
+        s3_key = presigned.s3_key
+        s3_bucket = presigned.s3_bucket
+        file_id = presigned.file_id
+
+        if presigned.already_uploaded:
+            logger.debug("Server says already uploaded, skipping: %s", path.name)
+            self._state_db.record_upload(path.name, sha, s3_key)
+            return True
 
         if self._state_db.is_uploaded(path.name, sha, s3_key):
             logger.debug("Skipping already-uploaded file: %s", path.name)
             return True
 
-        client = self._get_s3_client()
         last_exc: Exception | None = None
 
         # Exponential backoff: 1s, 2s, 4s. Retries protect against transient
-        # S3 errors or brief network blips that are common on lab-PC networks.
+        # network errors common on lab-PC networks.
         for attempt in range(UPLOAD_RETRY_MAX):
             try:
-                upload_file(path, s3_uri, s3_client=client)
+                self._put_to_presigned_url(presigned.upload_url, path, content_type)
                 break
             except Exception as exc:
                 last_exc = exc
@@ -197,29 +233,27 @@ class Uploader:
 
         # Notify API — treat a failed PATCH as an upload failure so the file
         # is not recorded in the dedup DB and will be retried next time.
-        if file_id is not None:
-            content_type = get_content_type(path)
-            try:
-                self._client.mark_file_uploaded(
-                    file_id,
-                    {
-                        "s3_bucket": self._s3_bucket,
-                        "s3_key": s3_key,
-                        "content_type": content_type,
-                        "status": "uploaded",
-                    },
+        try:
+            self._client.mark_file_uploaded(
+                file_id,
+                {
+                    "s3_bucket": s3_bucket,
+                    "s3_key": s3_key,
+                    "content_type": content_type,
+                    "status": "uploaded",
+                },
+            )
+        except ApiError as exc:
+            logger.error("PATCH /files/%d failed: %s", file_id, exc.message)
+            self._counters.errors += 1
+            self._reporter.queue_event(
+                WatcherEvent(
+                    event_type=EventType.UPLOAD_FAILED,
+                    message=f"Upload notification failed: {path.name}",
+                    details={"s3_key": s3_key, "file_id": file_id, "error": exc.message},
                 )
-            except ApiError as exc:
-                logger.error("PATCH /files/%d failed: %s", file_id, exc.message)
-                self._counters.errors += 1
-                self._reporter.queue_event(
-                    WatcherEvent(
-                        event_type=EventType.UPLOAD_FAILED,
-                        message=f"Upload notification failed: {path.name}",
-                        details={"s3_key": s3_key, "file_id": file_id, "error": exc.message},
-                    )
-                )
-                return False
+            )
+            return False
 
         self._state_db.record_upload(path.name, sha, s3_key)
         self._counters.files_uploaded += 1
@@ -230,5 +264,5 @@ class Uploader:
                 details={"s3_key": s3_key, "sha256": sha},
             )
         )
-        logger.info("Uploaded %s → %s", path.name, s3_uri)
+        logger.info("Uploaded %s → s3://%s/%s", path.name, s3_bucket, s3_key)
         return True

@@ -22,7 +22,6 @@ from data_hub_watcher.constants import (
     DEFAULT_STABILITY_PERIOD_SECONDS,
     HEARTBEAT_INTERVAL_SECONDS,
     PRUNE_DAYS,
-    S3_BUCKET_TEMPLATE,
     STATE_DB_FILENAME,
     load_env,
     resolve_config_path,
@@ -322,7 +321,6 @@ def _dry_run_scan(cfg: WatcherConfig) -> None:
     is_auto = inst.upload_mode == "auto"
     is_recursive = inst.run_detection.method == "directory" and not is_auto
     watch_dir = inst.watch_directory
-    s3_bucket = S3_BUCKET_TEMPLATE.format(environment=cfg.environment)
 
     prefix_re: re.Pattern[str] | None = None
     if inst.run_detection.method == "prefix" and inst.run_detection.prefix_pattern:
@@ -358,7 +356,7 @@ def _dry_run_scan(cfg: WatcherConfig) -> None:
         for path in files:
             s3_key = f"{inst.id}/{run_id}/{path.name}"
             click.echo(f"    {path.name}")
-            click.echo(f"      → s3://{s3_bucket}/{s3_key}")
+            click.echo(f"      → {s3_key}")
 
     if unmatched:
         click.echo(f"\n  {len(unmatched)} file(s) did not match any run pattern:")
@@ -609,7 +607,6 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
         counters=counters,
         instrument_id=inst.id,
         watcher_id=cfg.watcher_id,
-        environment=cfg.environment,
         watch_directory=inst.watch_directory,
     )
 
@@ -736,9 +733,6 @@ def upload(ctx: click.Context, file_path: str | None, run_id: str | None, dry_ru
     if detail.status == "pending":
         raise click.ClickException(f"Instrument {inst.id!r} is pending. Cannot upload yet.")
 
-    environment = cfg.environment
-    s3_bucket = S3_BUCKET_TEMPLATE.format(environment=environment)
-
     db_path = DEFAULT_CONFIG_DIR / STATE_DB_FILENAME
     state_db = StateDB(db_path)
     counters = WatcherCounters()
@@ -750,47 +744,69 @@ def upload(ctx: click.Context, file_path: str | None, run_id: str | None, dry_ru
         counters=counters,
         instrument_id=inst.id,
         watcher_id=cfg.watcher_id,
-        environment=cfg.environment,
         watch_directory=inst.watch_directory,
     )
 
     if file_path:
+        assert run_id is not None  # guaranteed by the guard above
         fp = Path(file_path).resolve()
-        # Preserve the directory structure under the watch dir in the S3 key.
-        # Files outside the watch dir (e.g. an absolute path the user passed)
-        # get flattened to just the filename.
-        if fp.is_relative_to(inst.watch_directory):
-            rel = fp.relative_to(inst.watch_directory)
-        else:
-            rel = Path(fp.name)
-        s3_key = f"{inst.id}/{run_id}/{rel.as_posix()}"
+        s3_key_preview = f"{inst.id}/{run_id}/{fp.name}"
 
         if dry_run:
             click.echo(f"[dry-run] Would upload {fp}")
-            click.echo(f"  → s3://{s3_bucket}/{s3_key}")
+            click.echo(f"  → {s3_key_preview}")
             state_db.close()
             return
 
         from data_hub_watcher.monitor import file_sha256
 
         sha = file_sha256(fp)
-        if state_db.is_uploaded(fp.name, sha, s3_key):
+        if state_db.is_uploaded(fp.name, sha, s3_key_preview):
             click.echo(f"File already uploaded: {fp.name}")
             state_db.close()
             return
 
-        from data_hub_shared.s3_utils import get_s3_client
-        from data_hub_shared.s3_utils import upload_file as s3_upload
+        import mimetypes
 
-        s3_uri = f"s3://{s3_bucket}/{s3_key}"
-        click.echo(f"Uploading {fp.name} → {s3_uri}")
+        content_type, _ = mimetypes.guess_type(str(fp))
+
+        click.echo(f"Requesting presigned upload URL for {fp.name}…")
         try:
-            s3_upload(fp, s3_uri, s3_client=get_s3_client())
+            presigned = client.request_upload_url(
+                inst.id, run_id, fp.name, content_type=content_type, size_bytes=fp.stat().st_size
+            )
+        except ApiError as exc:
+            state_db.close()
+            raise click.ClickException(f"Failed to get upload URL: {exc.message}") from exc
+
+        if presigned.already_uploaded:
+            click.echo(f"File already uploaded: {fp.name}")
+            state_db.record_upload(fp.name, sha, presigned.s3_key)
+            state_db.close()
+            return
+
+        click.echo(f"Uploading {fp.name} → s3://{presigned.s3_bucket}/{presigned.s3_key}")
+        try:
+            Uploader._put_to_presigned_url(presigned.upload_url, fp, content_type)
         except Exception as exc:
             state_db.close()
             raise click.ClickException(f"Upload failed: {exc}") from exc
 
-        state_db.record_upload(fp.name, sha, s3_key)
+        try:
+            client.mark_file_uploaded(
+                presigned.file_id,
+                {
+                    "s3_bucket": presigned.s3_bucket,
+                    "s3_key": presigned.s3_key,
+                    "content_type": content_type,
+                    "status": "uploaded",
+                },
+            )
+        except ApiError as exc:
+            state_db.close()
+            raise click.ClickException(f"Failed to notify API: {exc.message}") from exc
+
+        state_db.record_upload(fp.name, sha, presigned.s3_key)
         click.echo(click.style("✓ Upload complete.", fg="green"))
         state_db.close()
     else:
