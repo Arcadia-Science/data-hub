@@ -65,11 +65,18 @@ _WATCHER_TABLES = [
 
 
 @pytest.fixture(autouse=True)
-def reset_watcher_data(integration_env: IntegrationEnv) -> None:
-    """Truncate watcher-related tables between tests, preserving the seeded instrument and PAT."""
-    truncate_tables(integration_env.db_dsn, _WATCHER_TABLES)
+def reset_watcher_data(request: pytest.FixtureRequest) -> None:
+    """Truncate watcher-related tables between tests, preserving the seeded instrument and PAT.
+
+    Only runs for tests marked ``integration``; unit tests in this directory
+    are silently skipped so they don't require a live Postgres instance.
+    """
+    if "integration" not in {m.name for m in request.node.iter_markers()}:
+        return
+    env: IntegrationEnv = request.getfixturevalue("integration_env")
+    truncate_tables(env.db_dsn, _WATCHER_TABLES)
     db_update(
-        integration_env.db_dsn,
+        env.db_dsn,
         "DELETE FROM instruments WHERE id != %s",
         (INSTRUMENT_ID,),
     )
