@@ -24,7 +24,9 @@ from data_hub_watcher.constants import (
     PRUNE_DAYS,
     S3_BUCKET_TEMPLATE,
     STATE_DB_FILENAME,
+    load_env,
     resolve_config_path,
+    save_api_key,
 )
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import HeartbeatLoop, WatcherCounters
@@ -60,6 +62,7 @@ logger = logging.getLogger(__name__)
 @click.pass_context
 def cli(ctx: click.Context, config_path: str | None, verbose: bool) -> None:
     """Data Hub Watcher — file upload service for lab instrument PCs."""
+    load_env()
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -127,6 +130,9 @@ def init(ctx: click.Context) -> None:
     api_key = os.environ.get("DATA_HUB_API_KEY", "")
     if not api_key:
         api_key = click.prompt("DATA_HUB_API_KEY", hide_input=True)
+
+    env_path = save_api_key(api_key)
+    click.echo(f"API key saved to {env_path}")
 
     client = _make_client(environment, api_key=api_key)
 

@@ -180,6 +180,7 @@ def _create_service_class() -> type | None:
                 HEARTBEAT_INTERVAL_SECONDS,
                 PRUNE_DAYS,
                 STATE_DB_FILENAME,
+                load_env,
                 resolve_config_path,
             )
             from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
@@ -191,6 +192,7 @@ def _create_service_class() -> type | None:
 
             servicemanager.LogInfoMsg(f"{SERVICE_DISPLAY_NAME} starting")
 
+            load_env()
             path = resolve_config_path()
             cfg = load_config(path)
             inst = cfg.instrument
