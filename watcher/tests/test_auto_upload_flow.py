@@ -236,6 +236,60 @@ class TestMarkFileUploaded:
 
 
 # ------------------------------------------------------------------
+# request_upload_url
+# ------------------------------------------------------------------
+
+
+class TestRequestUploadUrl:
+    def test_request_upload_url_returns_presigned_url(
+        self,
+        client: DataHubClient,
+        instrument_id: str,
+    ) -> None:
+        _register_and_report(client, instrument_id)
+        result = client.request_upload_url(instrument_id, "EXP-001", "data_001.csv")
+        assert result.upload_url
+        assert result.s3_key == f"{instrument_id}/EXP-001/data_001.csv"
+        assert result.s3_bucket
+        assert result.file_id > 0
+        assert result.expires_in == 3600
+        assert result.already_uploaded is False
+
+    def test_request_upload_url_creates_file_record_if_missing(
+        self,
+        client: DataHubClient,
+        instrument_id: str,
+    ) -> None:
+        _register_and_report(client, instrument_id)
+        result = client.request_upload_url(instrument_id, "EXP-001", "brand_new_file.csv")
+        assert result.file_id > 0
+        assert result.already_uploaded is False
+
+    def test_request_upload_url_already_uploaded(
+        self,
+        client: DataHubClient,
+        instrument_id: str,
+        integration_env: IntegrationEnv,
+    ) -> None:
+        _register_and_report(client, instrument_id)
+        file_id = _get_file_id(integration_env.db_dsn, "EXP-001", "data_001.csv")
+
+        client.mark_file_uploaded(
+            file_id,
+            {
+                "s3_bucket": "test-bucket",
+                "s3_key": f"{instrument_id}/EXP-001/data_001.csv",
+                "content_type": "text/csv",
+                "status": "uploaded",
+            },
+        )
+
+        result = client.request_upload_url(instrument_id, "EXP-001", "data_001.csv")
+        assert result.already_uploaded is True
+        assert result.file_id == file_id
+
+
+# ------------------------------------------------------------------
 # Full end-to-end lifecycle
 # ------------------------------------------------------------------
 
