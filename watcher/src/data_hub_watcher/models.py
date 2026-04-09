@@ -224,11 +224,11 @@ class FileResponse(BaseModel):
 class PresignedUploadResponse(BaseModel):
     model_config = _API_MODEL_CONFIG
 
-    upload_url: str
+    upload_url: str | None = None
     s3_bucket: str
     s3_key: str
     file_id: int
-    expires_in: int
+    expires_in: int | None = None
     already_uploaded: bool = False
 
 

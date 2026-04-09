@@ -203,6 +203,7 @@ class Uploader:
 
         # Exponential backoff: 1s, 2s, 4s. Retries protect against transient
         # network errors common on lab-PC networks.
+        assert presigned.upload_url is not None
         for attempt in range(UPLOAD_RETRY_MAX):
             try:
                 self._put_to_presigned_url(presigned.upload_url, path, content_type)

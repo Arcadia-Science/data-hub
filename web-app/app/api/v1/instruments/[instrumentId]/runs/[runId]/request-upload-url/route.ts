@@ -75,18 +75,16 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   const sizeBytes =
     typeof body.size_bytes === "number" ? body.size_bytes : undefined;
 
-  // The watcher uses the filename as the relative path for single-file runs.
-  // Multi-level relative paths (e.g. "subdir/file.csv") are preserved as-is.
-  const relativePath = filename;
-
-  // Look up existing file record by run + relative path.
+  // Look up existing file record by run + filename.  The file may have been
+  // created by report_run with a full relative_path (e.g. "EXP-001/data.csv"),
+  // but the watcher only sends the bare filename for upload requests.
   const [existingFile] = await db
     .select()
     .from(files)
     .where(
       and(
         eq(files.instrumentRunId, run.id),
-        eq(files.relativePath, relativePath),
+        eq(files.filename, filename),
         isNull(files.deletedAt)
       )
     )
@@ -121,7 +119,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       .insert(files)
       .values({
         instrumentRunId: run.id,
-        relativePath,
+        relativePath: filename,
         filename,
         contentType: contentType ?? null,
         sizeBytes: sizeBytes ?? null,

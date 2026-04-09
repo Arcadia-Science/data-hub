@@ -91,6 +91,8 @@ export async function setup() {
     AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID ?? "test-key",
     AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY ?? "test-secret",
     AWS_REGION: process.env.AWS_REGION ?? "us-east-1",
+    S3_RAW_DATA_BUCKET:
+      process.env.S3_RAW_DATA_BUCKET ?? "test-raw-data-bucket",
   };
 
   execSync("npx next build", {

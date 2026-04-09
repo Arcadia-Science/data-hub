@@ -785,6 +785,7 @@ def upload(ctx: click.Context, file_path: str | None, run_id: str | None, dry_ru
             state_db.close()
             return
 
+        assert presigned.upload_url is not None
         click.echo(f"Uploading {fp.name} → s3://{presigned.s3_bucket}/{presigned.s3_key}")
         try:
             Uploader._put_to_presigned_url(presigned.upload_url, fp, content_type)
