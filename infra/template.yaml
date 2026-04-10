@@ -359,3 +359,7 @@ Outputs:
   WebAppRoleArn:
     Description: Vercel web app IAM role ARN (set as AWS_ROLE_ARN in Vercel)
     Value: !GetAtt WebAppS3Role.Arn
+
+  WebAppRoleArn:
+    Description: Vercel web app IAM role ARN (set as AWS_ROLE_ARN in Vercel)
+    Value: !GetAtt WebAppS3Role.Arn
