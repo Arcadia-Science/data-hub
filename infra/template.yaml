@@ -41,6 +41,18 @@ Parameters:
     Type: String
     Description: ARN of the GitHub Actions OIDC provider (from bootstrap stack)
 
+  VercelOidcProviderArn:
+    Type: String
+    Description: ARN of the Vercel OIDC provider (from bootstrap stack)
+
+  VercelTeamSlug:
+    Type: String
+    Default: arcadia-science
+
+  VercelProject:
+    Type: String
+    Default: data-hub
+
 Globals:
   Function:
     Timeout: 300
@@ -293,6 +305,40 @@ Resources:
                 Resource:
                   - !Sub "arn:aws:iam::${AWS::AccountId}:role/data-hub-*-${Environment}"
 
+  # ---- IAM: Vercel web app role (OIDC federation) ----
+  # Allows the Vercel-hosted Next.js app to generate presigned S3 URLs for
+  # watcher file uploads/downloads without long-lived AWS credentials.
+
+  WebAppS3Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "data-hub-webapp-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref VercelOidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                !Sub "oidc.vercel.com/${VercelTeamSlug}:aud": !Sub "https://vercel.com/${VercelTeamSlug}"
+              StringLike:
+                !Sub "oidc.vercel.com/${VercelTeamSlug}:sub":
+                  - !Sub "owner:${VercelTeamSlug}:project:${VercelProject}:environment:${Environment}"
+                  - !Sub "owner:${VercelTeamSlug}:project:${VercelProject}:environment:preview"
+      Policies:
+        - PolicyName: S3PresignedUrlAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource:
+                  - !Sub "arn:aws:s3:::arcadia-data-hub-raw-${Environment}/*"
+
 Outputs:
   DataHubFunctionArn:
     Description: Lambda function ARN
@@ -317,3 +363,7 @@ Outputs:
   DeployRoleArn:
     Description: GitHub Actions deploy role ARN
     Value: !GetAtt GitHubActionsDeployRole.Arn
+
+  WebAppRoleArn:
+    Description: Vercel web app IAM role ARN (set as AWS_ROLE_ARN in Vercel)
+    Value: !GetAtt WebAppS3Role.Arn
