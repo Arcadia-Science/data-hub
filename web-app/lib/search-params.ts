@@ -45,6 +45,8 @@ export const watcherDetailSearchParams = {
   event_type: parseAsArrayOf(parseAsString).withDefault([]),
   since: parseAsString,
   events_since: parseAsString,
+  hb_page: parseAsInteger.withDefault(1),
+  logs_page: parseAsInteger.withDefault(1),
 };
 
 export const watcherDetailParamsCache = createSearchParamsCache(

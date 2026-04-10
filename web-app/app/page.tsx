@@ -2,9 +2,9 @@ import {
   InstrumentCards,
   InstrumentCardsSkeleton,
 } from "@/components/dashboard/instrument-cards";
-import { RunsPagination } from "@/components/dashboard/runs-pagination";
 import { RunsTable } from "@/components/dashboard/runs-table";
 import { RunsToolbar } from "@/components/dashboard/runs-toolbar";
+import { PaginationNav } from "@/components/pagination-nav";
 import { getInstruments } from "@/lib/api/dashboard";
 import { buildRunListQuery } from "@/lib/api/instrument-runs";
 import { auth } from "@/lib/auth";
@@ -58,7 +58,11 @@ export default async function DashboardPage({
       <RunsToolbar instruments={instruments} />
 
       <RunsTable data={runResult.data} hasFilters={hasFilters} />
-      <RunsPagination pagination={runResult.pagination} />
+      <PaginationNav
+        page={runResult.pagination.page}
+        totalPages={runResult.pagination.total_pages}
+        pageParam="page"
+      />
     </div>
   );
 }
