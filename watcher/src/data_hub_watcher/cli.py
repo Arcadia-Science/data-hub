@@ -831,14 +831,16 @@ def _windows_only() -> None:
 def service_install(ctx: click.Context) -> None:
     """Install the watcher as a Windows service."""
     _windows_only()
-    # Validate config before installing
     path = _resolve_path(ctx)
     load_config(path)
 
+    from data_hub_watcher.constants import DEFAULT_CONFIG_DIR, ENV_FILENAME
     from data_hub_watcher.service import install_service
 
+    env_path = DEFAULT_CONFIG_DIR / ENV_FILENAME
+
     try:
-        install_service()
+        install_service(config_path=path.resolve(), env_path=env_path.resolve())
         click.echo(click.style("✓ Service installed.", fg="green"))
     except Exception as exc:
         raise click.ClickException(f"Failed to install service: {exc}") from exc
