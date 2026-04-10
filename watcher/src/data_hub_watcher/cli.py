@@ -79,8 +79,15 @@ def _resolve_path(ctx: click.Context) -> Path:
     return resolve_config_path(ctx.obj.get("config_path"))
 
 
-def _make_client(environment: str, api_key: str | None = None) -> DataHubClient:
-    base_url = API_URLS[environment]
+def _make_client(
+    environment: str, api_key: str | None = None, api_base_url: str | None = None
+) -> DataHubClient:
+    if environment == "preview":
+        if not api_base_url:
+            raise click.ClickException("api_base_url is required for the 'preview' environment.")
+        base_url = api_base_url
+    else:
+        base_url = API_URLS[environment]
     return DataHubClient(base_url, api_key=api_key)
 
 
@@ -88,7 +95,7 @@ def _load_and_client(ctx: click.Context) -> tuple[WatcherConfig, DataHubClient, 
     """Load config and build a matching API client. Returns (config, client, path)."""
     path = _resolve_path(ctx)
     cfg = load_config(path)
-    client = _make_client(cfg.environment)
+    client = _make_client(cfg.environment, api_base_url=cfg.api_base_url)
     return cfg, client, path
 
 
@@ -122,8 +129,15 @@ def init(ctx: click.Context) -> None:
     # 1. Environment
     environment = click.prompt(
         "Environment",
-        type=click.Choice(["staging", "production"], case_sensitive=False),
+        type=click.Choice(["staging", "production", "preview"], case_sensitive=False),
     )
+
+    api_base_url: str | None = None
+    if environment == "preview":
+        raw_url: str = click.prompt(
+            "Preview deployment base URL (e.g. https://data-hub-git-my-branch.vercel.app/api/v1)"
+        )
+        api_base_url = raw_url.rstrip("/")
 
     # 2. API key
     api_key = os.environ.get("DATA_HUB_API_KEY", "")
@@ -133,7 +147,7 @@ def init(ctx: click.Context) -> None:
     env_path = save_api_key(api_key)
     click.echo(f"API key saved to {env_path}")
 
-    client = _make_client(environment, api_key=api_key)
+    client = _make_client(environment, api_key=api_key, api_base_url=api_base_url)
 
     # 3. Instruments
     click.echo("\nFetching instruments…")
@@ -225,6 +239,7 @@ def init(ctx: click.Context) -> None:
     config = WatcherConfig(
         version=1,
         environment=environment,
+        api_base_url=api_base_url,
         watcher_id=watcher_id,
         instrument=InstrumentConfig(
             id=selected.id,
@@ -414,6 +429,8 @@ def config_show(ctx: click.Context) -> None:
     click.echo(f"Config: {path}")
     click.echo(f"  Version:     {cfg.version}")
     click.echo(f"  Environment: {cfg.environment}")
+    if cfg.api_base_url:
+        click.echo(f"  API base URL: {cfg.api_base_url}")
     click.echo(f"  Watcher ID:  {cfg.watcher_id or '(not registered)'}")
     click.echo("  Instrument:")
     click.echo(f"    ID:              {inst.id}")
@@ -485,6 +502,7 @@ def config_edit(ctx: click.Context) -> None:
     new_config = WatcherConfig(
         version=cfg.version,
         environment=cfg.environment,
+        api_base_url=cfg.api_base_url,
         watcher_id=cfg.watcher_id,
         instrument=InstrumentConfig(
             id=inst.id,
@@ -501,7 +519,7 @@ def config_edit(ctx: click.Context) -> None:
     click.echo(f"Config saved to {path}")
 
     if cfg.watcher_id:
-        client = _make_client(cfg.environment)
+        client = _make_client(cfg.environment, api_base_url=cfg.api_base_url)
         _push_config_to_api(client, cfg.watcher_id, path, trigger="edit")
 
 
@@ -529,7 +547,7 @@ def config_open(ctx: click.Context, editor_override: str | None) -> None:
     click.echo(click.style("✓ Config is valid after editing.", fg="green"))
 
     if cfg.watcher_id:
-        client = _make_client(cfg.environment)
+        client = _make_client(cfg.environment, api_base_url=cfg.api_base_url)
         _push_config_to_api(client, cfg.watcher_id, path, trigger="open")
 
 

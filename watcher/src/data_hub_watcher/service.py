@@ -197,7 +197,10 @@ def _create_service_class() -> type | None:
             cfg = load_config(path)
             inst = cfg.instrument
 
-            base_url = API_URLS[cfg.environment]
+            if cfg.environment == "preview":
+                base_url = cfg.api_base_url
+            else:
+                base_url = API_URLS[cfg.environment]
             client = DataHubClient(base_url)
 
             # Step 1: Check instrument status (mirrors CLI watch startup)

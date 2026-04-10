@@ -41,7 +41,7 @@ uv run data-hub-watcher init
 
 The wizard will walk you through:
 
-1. **Environment** — choose `staging` (for testing) or `production`.
+1. **Environment** — choose `staging` (for testing), `production`, or `preview` (for testing against a Vercel preview deployment). If you choose `preview`, you'll be prompted for the deployment's API base URL (e.g. `https://data-hub-git-my-branch.vercel.app/api/v1`).
 
 2. **API key** — paste the personal access token. The key is saved to `~/.data-hub/.env` so you don't need to set it again. You can also set the `DATA_HUB_API_KEY` environment variable before running `init` to skip this prompt.
 
@@ -155,8 +155,8 @@ The instrument was registered but hasn't been confirmed by an admin yet. Ask you
 The watcher can't reach the Data Hub API. Check:
 
 - Your internet connection.
-- That the correct environment is set in the config (`staging` vs `production`).
-- That the API URL is reachable: `https://data-hub.arcadiascience.com` (production) or `https://data-hub-env-staging-arcadia-science.vercel.app` (staging).
+- That the correct environment is set in the config (`staging`, `production`, or `preview`).
+- That the API URL is reachable: `https://data-hub.arcadiascience.com` (production), `https://data-hub-env-staging-arcadia-science.vercel.app` (staging), or the custom URL you provided (preview).
 
 ### Files aren't being detected
 
