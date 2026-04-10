@@ -102,6 +102,34 @@ def _read_paths_from_registry() -> tuple[Path, Path]:
     return Path(config_str), Path(env_str)
 
 
+def _delete_paths_from_registry() -> None:
+    """Remove custom registry values written by ``install_service``.
+
+    Silently ignored if the key or values don't exist (e.g. the service
+    was installed before registry storage was added).
+    """
+    import winreg  # type: ignore[import-untyped]
+
+    try:
+        key = winreg.OpenKey(  # type: ignore[attr-defined]
+            winreg.HKEY_LOCAL_MACHINE,  # type: ignore[attr-defined]
+            _REG_KEY,
+            0,
+            winreg.KEY_SET_VALUE,  # type: ignore[attr-defined]
+        )
+    except OSError:
+        return
+
+    try:
+        for name in (_REG_CONFIG_PATH, _REG_ENV_PATH):
+            try:
+                winreg.DeleteValue(key, name)  # type: ignore[attr-defined]
+            except OSError:
+                pass
+    finally:
+        winreg.CloseKey(key)  # type: ignore[attr-defined]
+
+
 def _configure_recovery() -> None:
     """Set the service to restart on first and second failure.
 
@@ -138,13 +166,22 @@ def _configure_recovery() -> None:
 
 
 def uninstall_service() -> None:
-    """Stop (if running) and remove the Windows service."""
+    """Stop (if running) and remove the Windows service.
+
+    ``RemoveService`` deletes the ``HKLM\\...\\Services\\<name>`` key,
+    which includes the custom ``ConfigPath`` / ``EnvPath`` values written
+    by ``install_service``.  We still attempt an explicit cleanup first
+    so stale values are removed even if ``RemoveService`` only marks the
+    key for deferred deletion.
+    """
     import win32serviceutil  # type: ignore[import-untyped]
 
     try:
         win32serviceutil.StopService(SERVICE_NAME)
     except Exception:
         pass  # already stopped or doesn't exist
+
+    _delete_paths_from_registry()
     win32serviceutil.RemoveService(SERVICE_NAME)
     logger.info("Service '%s' removed", SERVICE_NAME)
 
@@ -393,10 +430,10 @@ if _svc_cls is not None:
 # hands control to the service dispatcher.
 
 if __name__ == "__main__":
-    import servicemanager  # type: ignore[import-untyped]
-
     if _svc_cls is None:
         raise SystemExit("This module must be run on Windows.")
+
+    import servicemanager  # type: ignore[import-untyped]
 
     servicemanager.Initialize(SERVICE_NAME)  # type: ignore[attr-defined]
     servicemanager.PrepareToHostSingle(_svc_cls)  # type: ignore[attr-defined]
