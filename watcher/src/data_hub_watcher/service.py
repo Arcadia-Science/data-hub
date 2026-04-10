@@ -180,6 +180,7 @@ def _create_service_class() -> type | None:
                 HEARTBEAT_INTERVAL_SECONDS,
                 PRUNE_DAYS,
                 STATE_DB_FILENAME,
+                load_env,
                 resolve_config_path,
             )
             from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
@@ -191,11 +192,15 @@ def _create_service_class() -> type | None:
 
             servicemanager.LogInfoMsg(f"{SERVICE_DISPLAY_NAME} starting")
 
+            load_env()
             path = resolve_config_path()
             cfg = load_config(path)
             inst = cfg.instrument
 
-            base_url = API_URLS[cfg.environment]
+            if cfg.environment == "preview":
+                base_url = cfg.api_base_url
+            else:
+                base_url = API_URLS[cfg.environment]
             client = DataHubClient(base_url)
 
             # Step 1: Check instrument status (mirrors CLI watch startup)
@@ -250,7 +255,6 @@ def _create_service_class() -> type | None:
                 counters=counters,
                 instrument_id=inst.id,
                 watcher_id=cfg.watcher_id or "",
-                environment=cfg.environment,
                 watch_directory=inst.watch_directory,
             )
 

@@ -72,9 +72,16 @@ class InstrumentConfig(BaseModel):
 
 class WatcherConfig(BaseModel):
     version: Literal[1]
-    environment: Literal["staging", "production"]
+    environment: Literal["staging", "production", "preview"]
+    api_base_url: str | None = None
     watcher_id: str | None = None
     instrument: InstrumentConfig
+
+    @model_validator(mode="after")
+    def _validate_preview_url(self) -> WatcherConfig:
+        if self.environment == "preview" and not self.api_base_url:
+            raise ValueError("api_base_url is required when environment is 'preview'")
+        return self
 
     @model_validator(mode="after")
     def _emit_warnings(self) -> WatcherConfig:
@@ -219,6 +226,17 @@ class FileResponse(BaseModel):
     uploaded_at: datetime | None = None
     processed_at: datetime | None = None
     created_at: datetime
+
+
+class PresignedUploadResponse(BaseModel):
+    model_config = _API_MODEL_CONFIG
+
+    upload_url: str | None = None
+    s3_bucket: str
+    s3_key: str
+    file_id: int
+    expires_in: int | None = None
+    already_uploaded: bool = False
 
 
 class ApiErrorDetail(BaseModel):

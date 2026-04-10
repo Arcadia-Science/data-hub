@@ -1,16 +1,18 @@
 from __future__ import annotations
 import os
+import re
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 API_URLS: dict[str, str] = {
     "staging": "https://data-hub-env-staging-arcadia-science.vercel.app/api/v1",
     "production": "https://data-hub.arcadiascience.com/api/v1",
 }
 
-S3_BUCKET_TEMPLATE = "arcadia-data-hub-raw-{environment}"
-
 DEFAULT_CONFIG_DIR = Path("~/.data-hub").expanduser()
 DEFAULT_CONFIG_FILENAME = "config.yaml"
+ENV_FILENAME = ".env"
 
 HEARTBEAT_INTERVAL_SECONDS = 60
 DEFAULT_STABILITY_PERIOD_SECONDS = 5
@@ -30,6 +32,50 @@ STATE_DB_FILENAME = "watcher.db"
 SERVICE_NAME = "DataHubWatcher"
 
 CONFIG_PATH_ENV_VAR = "DATA_HUB_CONFIG_PATH"
+
+
+def load_env() -> None:
+    """Load ``~/.data-hub/.env`` into the process environment.
+
+    Existing environment variables take precedence (``override=False``),
+    so an explicit ``DATA_HUB_API_KEY`` export still wins.
+    """
+    env_path = DEFAULT_CONFIG_DIR / ENV_FILENAME
+    load_dotenv(env_path)
+
+
+def save_api_key(api_key: str) -> Path:
+    """Persist *api_key* to ``~/.data-hub/.env`` and return the file path.
+
+    Preserves any other variables already present in the file and
+    single-quotes the value to guard against special characters
+    (``#``, ``=``, whitespace) that would confuse dotenv parsers.
+    """
+    env_path = DEFAULT_CONFIG_DIR / ENV_FILENAME
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+
+    key_line = f"DATA_HUB_API_KEY='{api_key}'\n"
+    _KEY_RE = re.compile(r"^DATA_HUB_API_KEY=")
+
+    if env_path.exists():
+        lines = env_path.read_text(encoding="utf-8").splitlines(keepends=True)
+        replaced = False
+        new_lines: list[str] = []
+        for line in lines:
+            if _KEY_RE.match(line):
+                new_lines.append(key_line)
+                replaced = True
+            else:
+                new_lines.append(line)
+        if not replaced:
+            if new_lines and not new_lines[-1].endswith("\n"):
+                new_lines.append("\n")
+            new_lines.append(key_line)
+        env_path.write_text("".join(new_lines), encoding="utf-8")
+    else:
+        env_path.write_text(key_line, encoding="utf-8")
+
+    return env_path
 
 
 def resolve_config_path(cli_override: str | None = None) -> Path:

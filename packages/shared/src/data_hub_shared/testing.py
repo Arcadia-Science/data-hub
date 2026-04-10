@@ -249,6 +249,7 @@ def start_test_server() -> Generator[IntegrationEnv, None, None]:
         "AWS_ACCESS_KEY_ID": os.environ.get("AWS_ACCESS_KEY_ID", "test-key"),
         "AWS_SECRET_ACCESS_KEY": os.environ.get("AWS_SECRET_ACCESS_KEY", "test-secret"),
         "AWS_REGION": os.environ.get("AWS_REGION", "us-east-1"),
+        "S3_RAW_DATA_BUCKET": os.environ.get("S3_RAW_DATA_BUCKET", "data-hub-test-raw"),
     }
 
     build_result = subprocess.run(

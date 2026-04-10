@@ -13,6 +13,7 @@ from data_hub_watcher.models import (
     HeartbeatResponse,
     InstrumentDetailResponse,
     InstrumentResponse,
+    PresignedUploadResponse,
     RegisterWatcherResponse,
     RunDetailResponse,
     RunResponse,
@@ -195,6 +196,26 @@ class DataHubClient:
     def get_upload_queue(self, watcher_id: str) -> UploadQueueResponse:
         resp = self._request("GET", f"/watchers/{watcher_id}/upload-queue")
         return UploadQueueResponse.model_validate(resp.json())
+
+    def request_upload_url(
+        self,
+        instrument_id: str,
+        run_id: str,
+        filename: str,
+        content_type: str | None = None,
+        size_bytes: int | None = None,
+    ) -> PresignedUploadResponse:
+        payload: dict[str, Any] = {"filename": filename}
+        if content_type:
+            payload["content_type"] = content_type
+        if size_bytes is not None:
+            payload["size_bytes"] = size_bytes
+        resp = self._request(
+            "POST",
+            f"/instruments/{instrument_id}/runs/{run_id}/request-upload-url",
+            json=payload,
+        )
+        return PresignedUploadResponse.model_validate(resp.json())
 
     def mark_file_uploaded(self, file_id: int, s3_info: dict[str, Any]) -> FileResponse:
         resp = self._request("PATCH", f"/files/{file_id}", json=s3_info)
