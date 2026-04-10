@@ -6,11 +6,18 @@ dependency (`pip install data-hub-watcher[windows-service]`).
 All win32 imports are done lazily inside each function so that:
   1. The module can be imported on any platform for type-checking.
   2. Pyright does not flag undefined variables on non-Windows hosts.
+
+When run as ``python -m data_hub_watcher.service`` by the Windows Service
+Control Manager, the ``__main__`` block at the bottom of this file starts
+the service control dispatcher.  This avoids depending on
+``pythonservice.exe`` (which frequently fails to activate the virtual
+environment created by ``uv``).
 """
 
 from __future__ import annotations
 import logging
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from data_hub_watcher.constants import SERVICE_NAME
@@ -23,13 +30,26 @@ logger = logging.getLogger(__name__)
 SERVICE_DISPLAY_NAME = "Data Hub Watcher"
 SERVICE_DESCRIPTION = "Monitors instrument directories and uploads data files to Data Hub."
 
+_REG_KEY = rf"SYSTEM\CurrentControlSet\Services\{SERVICE_NAME}"
+_REG_CONFIG_PATH = "ConfigPath"
+_REG_ENV_PATH = "EnvPath"
 
-def install_service() -> None:
-    """Install the watcher as a Windows service with automatic start and recovery."""
+
+def install_service(config_path: Path, env_path: Path) -> None:
+    """Install the watcher as a Windows service with automatic start and recovery.
+
+    The service binary path is registered as
+    ``"<venv>/python.exe" -m data_hub_watcher.service`` so that the
+    virtual-environment's interpreter (and all installed packages) are
+    available when the SCM starts the process.
+
+    *config_path* and *env_path* are persisted to the service's registry
+    key so that ``SvcDoRun`` can locate them regardless of which Windows
+    user account the service runs under (typically Local System).
+    """
     import win32service as ws  # type: ignore[import-untyped]
     import win32serviceutil  # type: ignore[import-untyped]
 
-    exe = sys.executable
     class_path = f"{__name__}.DataHubWatcherService"
 
     win32serviceutil.InstallService(
@@ -37,12 +57,77 @@ def install_service() -> None:
         serviceName=SERVICE_NAME,
         displayName=SERVICE_DISPLAY_NAME,
         startType=ws.SERVICE_AUTO_START,
-        exeName=exe,
+        exeName=sys.executable,
+        exeArgs="-m data_hub_watcher.service",
         description=SERVICE_DESCRIPTION,
     )
 
+    _store_paths_in_registry(config_path, env_path)
     _configure_recovery()
     logger.info("Service '%s' installed successfully", SERVICE_NAME)
+
+
+def _store_paths_in_registry(config_path: Path, env_path: Path) -> None:
+    """Write *config_path* and *env_path* into the service's registry key."""
+    import winreg  # type: ignore[import-untyped]
+
+    key = winreg.OpenKey(  # type: ignore[attr-defined]
+        winreg.HKEY_LOCAL_MACHINE,  # type: ignore[attr-defined]
+        _REG_KEY,
+        0,
+        winreg.KEY_SET_VALUE,  # type: ignore[attr-defined]
+    )
+    try:
+        winreg.SetValueEx(key, _REG_CONFIG_PATH, 0, winreg.REG_SZ, str(config_path))  # type: ignore[attr-defined]
+        winreg.SetValueEx(key, _REG_ENV_PATH, 0, winreg.REG_SZ, str(env_path))  # type: ignore[attr-defined]
+    finally:
+        winreg.CloseKey(key)  # type: ignore[attr-defined]
+
+
+def _read_paths_from_registry() -> tuple[Path, Path]:
+    """Read config & env paths previously stored by ``install_service``."""
+    import winreg  # type: ignore[import-untyped]
+
+    key = winreg.OpenKey(  # type: ignore[attr-defined]
+        winreg.HKEY_LOCAL_MACHINE,  # type: ignore[attr-defined]
+        _REG_KEY,
+        0,
+        winreg.KEY_QUERY_VALUE,  # type: ignore[attr-defined]
+    )
+    try:
+        config_str, _ = winreg.QueryValueEx(key, _REG_CONFIG_PATH)  # type: ignore[attr-defined]
+        env_str, _ = winreg.QueryValueEx(key, _REG_ENV_PATH)  # type: ignore[attr-defined]
+    finally:
+        winreg.CloseKey(key)  # type: ignore[attr-defined]
+    return Path(config_str), Path(env_str)
+
+
+def _delete_paths_from_registry() -> None:
+    """Remove custom registry values written by ``install_service``.
+
+    Silently ignored if the key or values don't exist (e.g. the service
+    was installed before registry storage was added).
+    """
+    import winreg  # type: ignore[import-untyped]
+
+    try:
+        key = winreg.OpenKey(  # type: ignore[attr-defined]
+            winreg.HKEY_LOCAL_MACHINE,  # type: ignore[attr-defined]
+            _REG_KEY,
+            0,
+            winreg.KEY_SET_VALUE,  # type: ignore[attr-defined]
+        )
+    except OSError:
+        return
+
+    try:
+        for name in (_REG_CONFIG_PATH, _REG_ENV_PATH):
+            try:
+                winreg.DeleteValue(key, name)  # type: ignore[attr-defined]
+            except OSError:
+                pass
+    finally:
+        winreg.CloseKey(key)  # type: ignore[attr-defined]
 
 
 def _configure_recovery() -> None:
@@ -81,13 +166,22 @@ def _configure_recovery() -> None:
 
 
 def uninstall_service() -> None:
-    """Stop (if running) and remove the Windows service."""
+    """Stop (if running) and remove the Windows service.
+
+    ``RemoveService`` deletes the ``HKLM\\...\\Services\\<name>`` key,
+    which includes the custom ``ConfigPath`` / ``EnvPath`` values written
+    by ``install_service``.  We still attempt an explicit cleanup first
+    so stale values are removed even if ``RemoveService`` only marks the
+    key for deferred deletion.
+    """
     import win32serviceutil  # type: ignore[import-untyped]
 
     try:
         win32serviceutil.StopService(SERVICE_NAME)
     except Exception:
         pass  # already stopped or doesn't exist
+
+    _delete_paths_from_registry()
     win32serviceutil.RemoveService(SERVICE_NAME)
     logger.info("Service '%s' removed", SERVICE_NAME)
 
@@ -172,6 +266,7 @@ def _create_service_class() -> type | None:
             import platform
 
             import servicemanager  # type: ignore[import-untyped]
+            from dotenv import load_dotenv
 
             from data_hub_watcher.api_client import ApiError, DataHubClient
             from data_hub_watcher.config_io import config_checksum, load_config
@@ -180,8 +275,6 @@ def _create_service_class() -> type | None:
                 HEARTBEAT_INTERVAL_SECONDS,
                 PRUNE_DAYS,
                 STATE_DB_FILENAME,
-                load_env,
-                resolve_config_path,
             )
             from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
             from data_hub_watcher.heartbeat import HeartbeatLoop, WatcherCounters
@@ -192,8 +285,16 @@ def _create_service_class() -> type | None:
 
             servicemanager.LogInfoMsg(f"{SERVICE_DISPLAY_NAME} starting")
 
-            load_env()
-            path = resolve_config_path()
+            try:
+                path, env_path = _read_paths_from_registry()
+            except Exception as exc:
+                servicemanager.LogErrorMsg(
+                    f"Cannot read config/env paths from registry: {exc}. "
+                    "Re-run 'data-hub-watcher service install'."
+                )
+                return
+
+            load_dotenv(env_path)
             cfg = load_config(path)
             inst = cfg.instrument
 
@@ -320,3 +421,20 @@ def _create_service_class() -> type | None:
 _svc_cls = _create_service_class()
 if _svc_cls is not None:
     DataHubWatcherService = _svc_cls  # noqa: F841
+
+
+# --- SCM entry point ---------------------------------------------------------
+# The service is registered with a binary path of:
+#   "<venv>/python.exe" -m data_hub_watcher.service
+# When the SCM starts the process, Python executes this __main__ block which
+# hands control to the service dispatcher.
+
+if __name__ == "__main__":
+    if _svc_cls is None:
+        raise SystemExit("This module must be run on Windows.")
+
+    import servicemanager  # type: ignore[import-untyped]
+
+    servicemanager.Initialize(SERVICE_NAME)  # type: ignore[attr-defined]
+    servicemanager.PrepareToHostSingle(_svc_cls)  # type: ignore[attr-defined]
+    servicemanager.StartServiceCtrlDispatcher()  # type: ignore[attr-defined]

@@ -827,18 +827,41 @@ def _windows_only() -> None:
 
 
 @service.command("install")
+@click.option(
+    "--env-path",
+    "env_path_override",
+    type=click.Path(dir_okay=False),
+    default=None,
+    help="Path to the .env file. Defaults to ~/.data-hub/.env.",
+)
 @click.pass_context
-def service_install(ctx: click.Context) -> None:
+def service_install(ctx: click.Context, env_path_override: str | None) -> None:
     """Install the watcher as a Windows service."""
     _windows_only()
-    # Validate config before installing
     path = _resolve_path(ctx)
     load_config(path)
 
     from data_hub_watcher.service import install_service
 
+    if env_path_override is not None:
+        env_path = Path(env_path_override).resolve()
+    else:
+        from data_hub_watcher.constants import DEFAULT_CONFIG_DIR, ENV_FILENAME
+
+        env_path = (DEFAULT_CONFIG_DIR / ENV_FILENAME).resolve()
+
+    if not env_path.exists():
+        click.echo(
+            click.style(
+                f"⚠ Warning: {env_path} does not exist. "
+                "Run 'data-hub-watcher login' first or pass --env-path.",
+                fg="yellow",
+            ),
+            err=True,
+        )
+
     try:
-        install_service()
+        install_service(config_path=path.resolve(), env_path=env_path)
         click.echo(click.style("✓ Service installed.", fg="green"))
     except Exception as exc:
         raise click.ClickException(f"Failed to install service: {exc}") from exc
