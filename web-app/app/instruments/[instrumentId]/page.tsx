@@ -1,7 +1,7 @@
-import { RunsPagination } from "@/components/dashboard/runs-pagination";
 import { InstrumentHeader } from "@/components/instruments/instrument-header";
 import { InstrumentRunsTable } from "@/components/instruments/instrument-runs-table";
 import { InstrumentRunsToolbar } from "@/components/instruments/instrument-runs-toolbar";
+import { PaginationNav } from "@/components/pagination-nav";
 import { buildRunListQuery } from "@/lib/api/instrument-runs";
 import { getInstrumentById } from "@/lib/api/instruments";
 import { auth } from "@/lib/auth";
@@ -66,7 +66,11 @@ export default async function InstrumentDetailPage({
         instrumentId={instrumentId}
         hasFilters={hasFilters}
       />
-      <RunsPagination pagination={runResult.pagination} />
+      <PaginationNav
+        page={runResult.pagination.page}
+        totalPages={runResult.pagination.total_pages}
+        pageParam="page"
+      />
     </div>
   );
 }
