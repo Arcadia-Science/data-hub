@@ -1,7 +1,8 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  One-time shared resources for Data Hub: ECR repository and GitHub Actions
-  OIDC identity provider. Deploy this stack once, not per environment.
+  One-time shared resources for Data Hub: ECR repository, GitHub Actions OIDC
+  identity provider, and Vercel OIDC identity provider. Deploy once, not per
+  environment.
 
 Resources:
   EcrRepository:
@@ -56,6 +57,15 @@ Resources:
         # chain regardless, so the exact value here is not security-critical.
         - 6938fd4d98bab03faadb97b34396831e3780aea1
 
+  VercelOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://oidc.vercel.com/arcadia-science
+      ClientIdList:
+        - https://vercel.com/arcadia-science
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+
 Outputs:
   EcrRepositoryUri:
     Description: ECR repository URI for container images
@@ -63,8 +73,14 @@ Outputs:
     Export:
       Name: !Sub "${AWS::StackName}-EcrRepositoryUri"
 
-  OidcProviderArn:
+  GitHubOidcProviderArn:
     Description: ARN of the GitHub Actions OIDC identity provider
     Value: !GetAtt GitHubOidcProvider.Arn
     Export:
-      Name: !Sub "${AWS::StackName}-OidcProviderArn"
+      Name: !Sub "${AWS::StackName}-GitHubOidcProviderArn"
+
+  VercelOidcProviderArn:
+    Description: ARN of the Vercel OIDC identity provider
+    Value: !GetAtt VercelOidcProvider.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-VercelOidcProviderArn"
