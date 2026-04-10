@@ -4,33 +4,30 @@ The Data Hub Watcher is a CLI agent that runs on lab instrument PCs. It monitors
 
 ## Installation
 
-The watcher is a Python package with a CLI entry point:
+The watcher is a Python package managed with [uv](https://docs.astral.sh/uv/getting-started/installation/). From the repo root:
 
 ```sh
-# From the repo root (development):
 uv sync --all-packages
 uv run data-hub-watcher --help
-
-# Or install as a standalone tool:
-pip install ./watcher
-data-hub-watcher --help
 ```
 
-On Windows, the watcher can optionally be installed as a Windows service (requires `pywin32`). Install the extra, then use the `service install` CLI command to register it with Windows:
+All `data-hub-watcher` commands should be run from the `data-hub` project directory using `uv run`.
+
+On Windows, the watcher can optionally be installed as a Windows service:
 
 ```sh
-pip install "./watcher[windows-service]"
-data-hub-watcher service install
+uv sync --all-packages --extra windows-service
+uv run data-hub-watcher service install
 ```
 
 ## Quick start
 
 ```sh
 # Run the interactive setup wizard.
-data-hub-watcher init
+uv run data-hub-watcher init
 
 # Start watching for files.
-data-hub-watcher watch
+uv run data-hub-watcher watch
 ```
 
 ## Commands
@@ -39,12 +36,12 @@ data-hub-watcher watch
 
 Interactive setup wizard that:
 
-1. Prompts for the environment (`staging` or `production`).
-2. Prompts for an API key (or reads `DATA_HUB_API_KEY` from the environment).
+1. Prompts for the environment (`staging`, `production`, or `preview`). Choosing `preview` also prompts for a custom API base URL.
+2. Prompts for an API key (or reads `DATA_HUB_API_KEY` from the environment). The key is saved to `~/.data-hub/.env`.
 3. Fetches existing instruments from the API or registers a new one.
 4. Prompts for the watch directory, file patterns, run detection method, stability period, and upload mode.
 5. Registers the watcher with the API.
-6. Saves the config to `~/.data-hub/config.yaml` and syncs it to the API.
+6. Saves the config to `~/.data-hub/config.yaml`, the API key to `~/.data-hub/.env`, and syncs the config to the API.
 
 ### `watch`
 
@@ -59,7 +56,7 @@ While running:
 
 - **File monitor** watches the directory for new/modified files using `watchdog` and waits for each file to stabilize (size + mtime unchanged for the configured stability period).
 - **Run detector** groups stable files into runs using the configured method (prefix regex or subdirectory).
-- **Uploader** uploads files to S3 at `{instrument_id}/{run_id}/{filename}` (auto mode) or polls the server's upload queue (manual mode).
+- **Uploader** requests a presigned S3 URL from the API and uploads each file via HTTP PUT (auto mode), or polls the server's upload queue (manual mode). The watcher does not need AWS credentials.
 - **Heartbeat loop** sends periodic heartbeats (every 60 seconds) to the API. In manual mode, it also polls the upload queue on each tick.
 - **Event reporter** batches and flushes lifecycle events (started, stopped, file uploaded, errors) to the API.
 
@@ -71,13 +68,13 @@ One-shot file upload for manual use:
 
 ```sh
 # Upload a specific file.
-data-hub-watcher upload --file /path/to/file.csv --run-id RUN001
+uv run data-hub-watcher upload --file /path/to/file.csv --run-id RUN001
 
 # Process the server-side upload queue.
-data-hub-watcher upload
+uv run data-hub-watcher upload
 
 # Preview without uploading.
-data-hub-watcher upload --dry-run
+uv run data-hub-watcher upload --dry-run
 ```
 
 ### `config`
@@ -94,7 +91,7 @@ Subcommands for managing the YAML config file:
 
 ### `service` (Windows only)
 
-Requires the `windows-service` extra (`pip install "./watcher[windows-service]"`).
+Requires the `windows-service` extra (`uv sync --all-packages --extra windows-service`).
 
 Manage the watcher as a Windows service:
 
@@ -108,13 +105,14 @@ Manage the watcher as a Windows service:
 
 ## Configuration
 
-The config file lives at `~/.data-hub/config.yaml` by default. Override with `--config` or the `DATA_HUB_CONFIG_PATH` environment variable.
+The config file lives at `~/.data-hub/config.yaml` by default. Override with `--config` or the `DATA_HUB_CONFIG_PATH` environment variable. The API key is stored separately in `~/.data-hub/.env`.
 
 ### Config file format
 
 ```yaml
 version: 1
-environment: production          # "staging" or "production"
+environment: production          # "staging", "production", or "preview"
+api_base_url: null               # required when environment is "preview"
 watcher_id: <assigned-by-api>
 instrument:
   id: akta-fplc                  # kebab-case instrument ID

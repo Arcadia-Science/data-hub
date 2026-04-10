@@ -9,8 +9,6 @@ This guide is for lab operators setting up the Data Hub Watcher on an instrument
 - **The watch directory** — the folder where the instrument writes its output files
 - **File patterns** — the file extensions you want to upload (e.g., `*.csv`, `*.xlsx`, `*.tiff`)
 
-> **Note:** The watcher does **not** require AWS credentials. Uploads are routed through the Data Hub API using presigned S3 URLs, so only the `DATA_HUB_API_KEY` is needed on lab PCs.
-
 ## Installation
 
 Clone the repository and sync dependencies with `uv`:
@@ -43,7 +41,7 @@ The wizard will walk you through:
 
 1. **Environment** — choose `staging` (for testing), `production`, or `preview` (for testing against a Vercel preview deployment). If you choose `preview`, you'll be prompted for the deployment's API base URL (e.g. `https://data-hub-git-my-branch.vercel.app/api/v1`).
 
-2. **API key** — paste the personal access token. The key is saved to `~/.data-hub/.env` so you don't need to set it again. You can also set the `DATA_HUB_API_KEY` environment variable before running `init` to skip this prompt.
+2. **API key** — paste the personal access token. The key is saved to `~/.data-hub/.env`. You can also set the `DATA_HUB_API_KEY` environment variable before running `init` to skip this prompt.
 
 3. **Instrument** — select an existing instrument from the list, or register a new one by choosing the last option. New instruments start as `pending` and must be activated by an admin in the web app before the watcher can start.
 

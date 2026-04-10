@@ -42,6 +42,7 @@ Tokens are hashed with SHA-256 before storage. The plaintext token is shown once
 | `PATCH` | `/api/v1/files/:fileId` | Update file metadata |
 | `GET` | `/api/v1/files/:fileId/download` | Get a pre-signed S3 download URL |
 | `POST` | `/api/v1/instruments/:instrumentId/runs/:runId/request-upload` | Request file upload (manual mode) |
+| `POST` | `/api/v1/instruments/:instrumentId/runs/:runId/request-upload-url` | Get a pre-signed S3 upload URL for a file |
 
 ### Analyses
 
