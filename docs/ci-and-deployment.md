@@ -83,9 +83,9 @@ The Lambda function is deployed as a Docker container image via [AWS SAM](https:
 - S3 buckets (`arcadia-data-hub-raw-{env}` and `arcadia-data-hub-processed-{env}`)
 - The Lambda function (container image, 1024 MB memory, 300 s timeout, function URL)
 - S3 event triggers for each supported instrument
-- IAM roles for Lambda execution and GitHub Actions deployment (OIDC)
+- IAM roles for Lambda execution, GitHub Actions deployment (OIDC), and Vercel web app S3 access (OIDC)
 
-A separate bootstrap stack (`infra/bootstrap.yaml`) creates shared resources — the ECR repository and the GitHub OIDC identity provider — and only needs to be deployed once:
+A separate bootstrap stack (`infra/bootstrap.yaml`) creates shared resources — the ECR repository, the GitHub OIDC identity provider, and the Vercel OIDC identity provider — and only needs to be deployed once:
 
 ```sh
 make sam-bootstrap
@@ -104,7 +104,7 @@ aws cloudformation describe-stacks \
   --query "Stacks[0].Outputs"
 ```
 
-Note the `OidcProviderArn` and `EcrRepositoryUri` values — you'll need them in steps 3 and 4 below.
+Note the `GitHubOidcProviderArn`, `VercelOidcProviderArn`, and `EcrRepositoryUri` values — you'll need them in steps 3 and 4 below.
 
 > **Note:** If your AWS account already has an OIDC provider for `token.actions.githubusercontent.com` (from another project), the bootstrap stack will fail with an `AWS::EarlyValidation::ResourceExistenceCheck` error. In that case, remove the `GitHubOidcProvider` resource from `bootstrap.yaml` (or skip the bootstrap stack entirely) and use the existing provider's ARN. Check with `aws iam list-open-id-connect-providers`.
 
@@ -132,7 +132,8 @@ export ECR_IMAGE_URI="<ECR_REPOSITORY_URI>:staging-initial"
 export DATA_HUB_API_URL="https://data-hub-env-staging-arcadia-science.vercel.app/api/v1"
 export DATA_HUB_API_KEY="<your-api-key>"
 export SLACK_WEBHOOK_URL="<your-slack-webhook>"
-export OIDC_PROVIDER_ARN="<arn-from-step-1>"
+export GITHUB_OIDC_PROVIDER_ARN="<github-oidc-arn-from-step-1>"
+export VERCEL_OIDC_PROVIDER_ARN="<vercel-oidc-arn-from-step-1>"
 
 make sam-deploy ENV=staging
 ```
@@ -156,11 +157,14 @@ In your GitHub repo, go to **Settings → Environments**, create a `staging` env
 | Secret | Value |
 | --- | --- |
 | `AWS_DEPLOY_ROLE_ARN` | Deploy role ARN from the stack output |
-| `OIDC_PROVIDER_ARN` | OIDC provider ARN from the bootstrap stack |
+| `OIDC_PROVIDER_ARN` | GitHub OIDC provider ARN from the bootstrap stack |
+| `VERCEL_OIDC_PROVIDER_ARN` | Vercel OIDC provider ARN from the bootstrap stack |
 | `SAM_S3_BUCKET` | SAM CLI managed S3 bucket name (see `sam deploy` output, e.g. `aws-sam-cli-managed-default-samclisourcebucket-*`) |
 | `DATA_HUB_API_URL` | Base API URL for the environment |
 | `DATA_HUB_API_KEY` | API key for Lambda → Data Hub authentication |
 | `SLACK_WEBHOOK_URL` | Slack incoming webhook URL |
+
+You'll also need the `WebAppRoleArn` stack output to configure the Vercel web app. Set `AWS_ROLE_ARN` in the Vercel dashboard (under the appropriate environment) to the role ARN so the web app can generate presigned S3 URLs via OIDC federation.
 
 Once secrets are set, the CI workflow handles all subsequent deploys automatically.
 

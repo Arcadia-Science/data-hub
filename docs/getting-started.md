@@ -45,6 +45,9 @@ vercel env pull
 | `AUTH_GOOGLE_ID` | Yes | Google OAuth client ID |
 | `AUTH_GOOGLE_SECRET` | Yes | Google OAuth client secret |
 | `AUTH_SECRET` | Yes | NextAuth session encryption key |
+| `AWS_REGION` | No | AWS region for S3 presigned URLs (defaults to `us-west-1`) |
+| `AWS_ROLE_ARN` | No | IAM role ARN for Vercel OIDC federation to S3 (only needed on Vercel) |
+| `S3_RAW_DATA_BUCKET` | No | S3 bucket for raw data uploads (defaults to `arcadia-data-hub-raw-staging`) |
 
 ### Lambda / shared library
 

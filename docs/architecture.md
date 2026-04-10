@@ -10,6 +10,7 @@ flowchart LR
     S3 -->|trigger| L[Lambda]
     W -->|heartbeats, runs| API[API]
     L -->|results| API
+    API -->|presigned URLs| S3
     API --> DB[(PostgreSQL)]
     API --> UI[Web app]
 ```
@@ -48,5 +49,6 @@ Steps 1–3 are the same, but the watcher does not upload immediately. Instead:
 
 - **S3 as the integration boundary.** The watcher and Lambda never communicate directly. S3 acts as a durable hand-off point: the watcher writes, Lambda reads.
 - **API-driven coordination.** The watcher registers with the API, syncs its YAML config, and sends periodic heartbeats. This lets the web dashboard show watcher health and manage upload queues.
+- **Presigned URLs from the API.** The web app generates presigned S3 upload and download URLs so watchers and browsers can transfer files directly to/from S3 without routing data through the API. On Vercel, the app assumes an IAM role via OIDC federation (no long-lived AWS credentials).
 - **Shared library for contracts.** Instrument IDs, S3 utilities, and environment config live in `data-hub-shared` so they stay consistent across Lambda and the watcher without duplicating code.
 - **Integration tests against a real server.** The shared `testing.py` module spins up a real Next.js server backed by a Postgres database, so Lambda and watcher integration tests exercise the actual API surface.

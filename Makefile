@@ -98,7 +98,8 @@ endif
 		"DataHubApiUrl=$(DATA_HUB_API_URL)" \
 		"DataHubApiKey=$(DATA_HUB_API_KEY)" \
 		"SlackWebhookUrl=$(SLACK_WEBHOOK_URL)" \
-		"OidcProviderArn=$(OIDC_PROVIDER_ARN)"
+		"GitHubOidcProviderArn=$(GITHUB_OIDC_PROVIDER_ARN)" \
+		"VercelOidcProviderArn=$(VERCEL_OIDC_PROVIDER_ARN)"
 
 # Usage: make sam-teardown ENV=staging
 .PHONY: sam-teardown
