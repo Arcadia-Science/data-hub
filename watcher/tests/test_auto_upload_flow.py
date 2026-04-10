@@ -290,6 +290,56 @@ class TestRequestUploadUrl:
 
 
 # ------------------------------------------------------------------
+# Queue-mode: request-upload -> request-upload-url -> mark uploaded
+# ------------------------------------------------------------------
+
+
+class TestQueueModePresignedUploadFlow:
+    """Simulates manual/queue mode: files are detected, queued for upload via
+    ``request-upload``, then a presigned URL is obtained and the file is marked
+    uploaded — the same sequence ``Uploader.poll_upload_queue`` follows."""
+
+    def test_queued_file_gets_presigned_url_and_marks_uploaded(
+        self,
+        client: DataHubClient,
+        instrument_id: str,
+        integration_env: IntegrationEnv,
+    ) -> None:
+        _register_and_report(client, instrument_id)
+
+        file_id = _get_file_id(integration_env.db_dsn, "EXP-001", "data_001.csv")
+
+        # Transition the file to upload_requested (mirrors the UI "approve" action).
+        from data_hub_shared.testing import db_update
+
+        db_update(
+            integration_env.db_dsn,
+            "UPDATE files SET status = 'upload_requested' WHERE id = %s",
+            (file_id,),
+        )
+
+        # Watcher asks for a presigned URL for the queued file.
+        presigned = client.request_upload_url(
+            instrument_id, "EXP-001", "data_001.csv", content_type="text/csv"
+        )
+        assert presigned.upload_url
+        assert presigned.file_id == file_id
+        assert presigned.already_uploaded is False
+
+        # After uploading to S3, the watcher notifies the API.
+        result = client.mark_file_uploaded(
+            presigned.file_id,
+            {
+                "s3_bucket": presigned.s3_bucket,
+                "s3_key": presigned.s3_key,
+                "content_type": "text/csv",
+                "status": "uploaded",
+            },
+        )
+        assert result.status == "uploaded"
+
+
+# ------------------------------------------------------------------
 # Full end-to-end lifecycle
 # ------------------------------------------------------------------
 

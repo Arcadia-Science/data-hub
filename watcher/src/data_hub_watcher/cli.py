@@ -758,58 +758,12 @@ def upload(ctx: click.Context, file_path: str | None, run_id: str | None, dry_ru
             state_db.close()
             return
 
-        from data_hub_watcher.monitor import file_sha256
-
-        sha = file_sha256(fp)
-        if state_db.is_uploaded(fp.name, sha, s3_key_preview):
-            click.echo(f"File already uploaded: {fp.name}")
-            state_db.close()
-            return
-
-        import mimetypes
-
-        content_type, _ = mimetypes.guess_type(str(fp))
-
-        click.echo(f"Requesting presigned upload URL for {fp.name}…")
-        try:
-            presigned = client.request_upload_url(
-                inst.id, run_id, fp.name, content_type=content_type, size_bytes=fp.stat().st_size
-            )
-        except ApiError as exc:
-            state_db.close()
-            raise click.ClickException(f"Failed to get upload URL: {exc.message}") from exc
-
-        if presigned.already_uploaded:
-            click.echo(f"File already uploaded: {fp.name}")
-            state_db.record_upload(fp.name, sha, presigned.s3_key)
-            state_db.close()
-            return
-
-        assert presigned.upload_url is not None
-        click.echo(f"Uploading {fp.name} → s3://{presigned.s3_bucket}/{presigned.s3_key}")
-        try:
-            Uploader._put_to_presigned_url(presigned.upload_url, fp, content_type)
-        except Exception as exc:
-            state_db.close()
-            raise click.ClickException(f"Upload failed: {exc}") from exc
-
-        try:
-            client.mark_file_uploaded(
-                presigned.file_id,
-                {
-                    "s3_bucket": presigned.s3_bucket,
-                    "s3_key": presigned.s3_key,
-                    "content_type": content_type,
-                    "status": "uploaded",
-                },
-            )
-        except ApiError as exc:
-            state_db.close()
-            raise click.ClickException(f"Failed to notify API: {exc.message}") from exc
-
-        state_db.record_upload(fp.name, sha, presigned.s3_key)
-        click.echo(click.style("✓ Upload complete.", fg="green"))
+        click.echo(f"Uploading {fp.name}…")
+        ok = uploader._upload_single(fp, run_id)
         state_db.close()
+        if not ok:
+            raise click.ClickException(f"Upload failed for {fp.name}")
+        click.echo(click.style("✓ Upload complete.", fg="green"))
     else:
         click.echo("Fetching upload queue…")
         try:

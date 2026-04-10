@@ -252,7 +252,6 @@ def _create_service_class() -> type | None:
                 counters=counters,
                 instrument_id=inst.id,
                 watcher_id=cfg.watcher_id or "",
-                environment=cfg.environment,
                 watch_directory=inst.watch_directory,
             )
 

@@ -28,7 +28,6 @@ class FileInfo:
     path: Path
     filename: str
     size_bytes: int
-    file_id: int | None = None
 
 
 @dataclass

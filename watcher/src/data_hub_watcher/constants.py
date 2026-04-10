@@ -1,5 +1,6 @@
 from __future__ import annotations
 import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -44,10 +45,36 @@ def load_env() -> None:
 
 
 def save_api_key(api_key: str) -> Path:
-    """Persist *api_key* to ``~/.data-hub/.env`` and return the file path."""
+    """Persist *api_key* to ``~/.data-hub/.env`` and return the file path.
+
+    Preserves any other variables already present in the file and
+    single-quotes the value to guard against special characters
+    (``#``, ``=``, whitespace) that would confuse dotenv parsers.
+    """
     env_path = DEFAULT_CONFIG_DIR / ENV_FILENAME
     env_path.parent.mkdir(parents=True, exist_ok=True)
-    env_path.write_text(f"DATA_HUB_API_KEY={api_key}\n", encoding="utf-8")
+
+    key_line = f"DATA_HUB_API_KEY='{api_key}'\n"
+    _KEY_RE = re.compile(r"^DATA_HUB_API_KEY=")
+
+    if env_path.exists():
+        lines = env_path.read_text(encoding="utf-8").splitlines(keepends=True)
+        replaced = False
+        new_lines: list[str] = []
+        for line in lines:
+            if _KEY_RE.match(line):
+                new_lines.append(key_line)
+                replaced = True
+            else:
+                new_lines.append(line)
+        if not replaced:
+            if new_lines and not new_lines[-1].endswith("\n"):
+                new_lines.append("\n")
+            new_lines.append(key_line)
+        env_path.write_text("".join(new_lines), encoding="utf-8")
+    else:
+        env_path.write_text(key_line, encoding="utf-8")
+
     return env_path
 
 
