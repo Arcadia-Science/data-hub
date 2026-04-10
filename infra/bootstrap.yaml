@@ -3,9 +3,6 @@ Description: >-
   One-time shared resources for Data Hub: ECR repository, GitHub Actions OIDC
   identity provider, and Vercel OIDC identity provider. Deploy once, not per
   environment.
-  One-time shared resources for Data Hub: ECR repository, GitHub Actions OIDC
-  identity provider, and Vercel OIDC identity provider. Deploy once, not per
-  environment.
 
 Resources:
   EcrRepository:
