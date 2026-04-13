@@ -4,6 +4,7 @@ import {
   PlateMapGrid,
   type PlateWellData,
 } from "@/components/runs/plate-map-grid";
+import { FileProcessingErrors } from "@/components/runs/run-report-section";
 import { ReportDataTable } from "@/components/runs/report-data-table";
 import { RestoreRunButton } from "@/components/runs/restore-run-button";
 import type { RunDetailProps } from "@/components/runs/run-detail";
@@ -344,6 +345,8 @@ export function PlateReaderRunDetail({
           metadata={run.metadata as Record<string, unknown>}
         />
       </RunDetail.FilesMetadataLayout>
+
+      <FileProcessingErrors files={files} />
 
       <PlateMapSection
         entries={plateMapEntries}

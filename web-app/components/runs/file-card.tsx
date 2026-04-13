@@ -1,6 +1,5 @@
 "use client";
 
-import { FileStatusBadge } from "@/components/runs/file-status-badge";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,7 +16,6 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { RunFile } from "@/lib/api/instrument-runs";
 import {
-  AlertCircle,
   Download,
   Eye,
   FileText,
@@ -74,7 +72,7 @@ export function FileCard({
     "completed",
     "failed",
   ].includes(file.status);
-  const isFailed = file.status === "failed";
+
 
   // Signals the watcher agent on the instrument PC to transfer this file to S3.
   // The file transitions from "detected" → "upload_requested" until the watcher
@@ -122,7 +120,7 @@ export function FileCard({
     <div
       className={`flex items-start gap-3 rounded-lg border p-3 ${
         isDismissed ? "border-dashed opacity-50" : ""
-      } ${isFailed ? "border-destructive/30 bg-destructive/5" : ""}`}
+      }`}
     >
       {selectable && !isDismissed && (
         <Checkbox
@@ -138,10 +136,6 @@ export function FileCard({
           <span className="truncate font-mono text-sm font-medium">
             {file.filename}
           </span>
-          <FileStatusBadge status={file.status} />
-          <Badge variant="outline" className="text-[10px]">
-            {file.category}
-          </Badge>
           {isDismissed && (
             <Badge variant="secondary" className="text-[10px]">
               Dismissed
@@ -157,13 +151,6 @@ export function FileCard({
           {file.contentType && <span>{file.contentType}</span>}
           <span>Created {formatDate(file.createdAt)}</span>
         </div>
-
-        {isFailed && file.errorMessage && (
-          <div className="flex items-start gap-1.5 text-xs text-destructive">
-            <AlertCircle className="mt-0.5 size-3 shrink-0" />
-            <span>{file.errorMessage}</span>
-          </div>
-        )}
 
         {metadataEntries.length > 0 && (
           <div className="flex flex-wrap gap-x-4 gap-y-0.5 pt-0.5 text-xs text-muted-foreground">

@@ -7,7 +7,11 @@ import {
 } from "@/lib/api/errors";
 import { isValidKebabCase } from "@/lib/api/validators";
 import { db } from "@/lib/db";
-import { instruments } from "@/lib/db/schema";
+import {
+  type InstrumentType,
+  instruments,
+  VALID_INSTRUMENT_TYPES,
+} from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 
@@ -76,11 +80,9 @@ export async function POST(request: NextRequest) {
           .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
           .join(" ");
 
-  const VALID_INSTRUMENT_TYPES = ["generic", "plate_reader"] as const;
-  type InstrumentType = (typeof VALID_INSTRUMENT_TYPES)[number];
   const instrumentType: InstrumentType =
     typeof body.instrument_type === "string" &&
-    VALID_INSTRUMENT_TYPES.includes(body.instrument_type as InstrumentType)
+    (VALID_INSTRUMENT_TYPES as readonly string[]).includes(body.instrument_type)
       ? (body.instrument_type as InstrumentType)
       : "generic";
 

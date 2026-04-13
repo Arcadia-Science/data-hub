@@ -6,7 +6,12 @@ import {
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
 import { db } from "@/lib/db";
-import { instrumentRuns, instruments, watchers } from "@/lib/db/schema";
+import {
+  VALID_INSTRUMENT_TYPES,
+  instrumentRuns,
+  instruments,
+  watchers,
+} from "@/lib/db/schema";
 import { and, count, eq, isNull } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 
@@ -121,10 +126,11 @@ export async function PATCH(
     );
   }
 
-  const VALID_INSTRUMENT_TYPES = ["generic", "plate_reader"];
   if (
     "instrument_type" in body &&
-    !VALID_INSTRUMENT_TYPES.includes(body.instrument_type as string)
+    !(VALID_INSTRUMENT_TYPES as readonly string[]).includes(
+      body.instrument_type as string
+    )
   ) {
     return apiError(
       400,

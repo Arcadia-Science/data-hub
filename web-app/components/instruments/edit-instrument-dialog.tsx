@@ -19,15 +19,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { VALID_INSTRUMENT_TYPES } from "@/lib/db/schema";
 import { Loader2, Pencil } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
-const INSTRUMENT_TYPE_OPTIONS = [
-  { value: "generic", label: "Generic" },
-  { value: "plate_reader", label: "Plate Reader" },
-] as const;
+const TYPE_LABELS: Record<string, string> = {
+  generic: "Generic",
+  plate_reader: "Plate Reader",
+};
+
+const INSTRUMENT_TYPE_OPTIONS = VALID_INSTRUMENT_TYPES.map((value) => ({
+  value,
+  label: TYPE_LABELS[value] ?? value,
+}));
 
 export function EditInstrumentDialog({
   instrumentId,

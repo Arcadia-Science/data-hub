@@ -1,5 +1,3 @@
-"use client";
-
 import { FileStatusSummary } from "@/components/dashboard/file-status-summary";
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +12,7 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { FlaskConical, SearchX } from "lucide-react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 type RunRow = {
   id: string;
@@ -64,8 +62,6 @@ export function RunsTable({
   data: RunRow[];
   hasFilters: boolean;
 }) {
-  const router = useRouter();
-
   if (data.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed py-16">
@@ -98,10 +94,14 @@ export function RunsTable({
             return (
               <TableRow
                 key={row.id}
-                className={cn("cursor-pointer", isDeleted && "opacity-50")}
-                onClick={() => router.push(href)}
+                className={cn("group relative", isDeleted && "opacity-50")}
               >
                 <TableCell>
+                  <Link href={href} className="absolute inset-0" tabIndex={-1}>
+                    <span className="sr-only">
+                      View run {row.run_id}
+                    </span>
+                  </Link>
                   <div className="flex items-center gap-1.5">
                     <FlaskConical className="size-3.5 shrink-0 text-muted-foreground" />
                     <span className="text-sm font-medium">

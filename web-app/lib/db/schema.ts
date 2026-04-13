@@ -50,6 +50,9 @@ export const instrumentTypeEnum = pgEnum("instrument_type", [
   "plate_reader",
 ]);
 
+export const VALID_INSTRUMENT_TYPES = instrumentTypeEnum.enumValues;
+export type InstrumentType = (typeof VALID_INSTRUMENT_TYPES)[number];
+
 export const fileCategoryEnum = pgEnum("file_category", ["raw", "processed"]);
 
 export const fileStatusEnum = pgEnum("file_status", [

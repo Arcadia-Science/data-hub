@@ -56,15 +56,11 @@ export const watcherDetailParamsCache = createSearchParamsCache(
 export function hasActiveFilters(params: {
   search: string;
   instrument_id: string[];
-  date_from: string | null;
-  date_to: string | null;
   include_deleted: boolean;
 }): boolean {
   return (
     params.search !== "" ||
     params.instrument_id.length > 0 ||
-    params.date_from !== null ||
-    params.date_to !== null ||
     params.include_deleted
   );
 }

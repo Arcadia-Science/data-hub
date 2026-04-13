@@ -46,9 +46,7 @@ export function DefaultRunDetail({
         />
       </RunDetail.FilesMetadataLayout>
 
-      {fileReportData.length > 0 && (
-        <RunDetail.Report reportData={fileReportData} files={files} />
-      )}
+      <RunDetail.Report reportData={fileReportData} files={files} />
 
       <RunDetail.Analysis analysisData={analysisData} />
     </>
