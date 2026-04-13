@@ -10,72 +10,29 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { SearchX } from "lucide-react";
 import Link from "next/link";
 
-type RunRow = {
-  id: string;
-  instrument_id: string;
-  instrument_display_name: string;
-  run_id: string;
-  source: string;
-  metadata: unknown;
-  created_at: Date;
-  updated_at: Date;
-  deleted_at: Date | null;
-  file_count: number;
-  files_completed: number;
-  files_failed: number;
-  files_pending_upload: number;
-};
+import type { RunRow, RunsTableProps } from ".";
 
-// Shows at most 3 key-value pairs from the run's freeform JSON metadata
-// to keep the table column compact; the future run detail page shows all.
-function MetadataSummary({ metadata }: { metadata: unknown }) {
+function getMetadataField(metadata: unknown, key: string): string | null {
   if (!metadata || typeof metadata !== "object") return null;
-  const entries = Object.entries(metadata as Record<string, unknown>).slice(
-    0,
-    3
-  );
-  if (entries.length === 0) return null;
+  const value = (metadata as Record<string, unknown>)[key];
+  return value != null ? String(value) : null;
+}
 
+function MetadataFieldBadge({ value }: { value: string | null }) {
+  if (!value) return <span className="text-muted-foreground">—</span>;
   return (
-    <div className="flex flex-wrap gap-1">
-      {entries.map(([key, value]) => (
-        <Badge
-          key={key}
-          variant="outline"
-          className="max-w-[200px] truncate font-mono text-[10px] font-normal"
-        >
-          {key}: {String(value)}
-        </Badge>
-      ))}
-    </div>
+    <Badge
+      variant="outline"
+      className="font-mono text-[10px] font-normal"
+    >
+      {value}
+    </Badge>
   );
 }
 
-export function InstrumentRunsTable({
-  data,
-  instrumentId,
-  hasFilters,
-}: {
-  data: RunRow[];
-  instrumentId: string;
-  hasFilters: boolean;
-}) {
-  if (data.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed py-16">
-        <SearchX className="size-8 text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">
-          {hasFilters
-            ? "No runs match your filters."
-            : "No instrument runs yet."}
-        </p>
-      </div>
-    );
-  }
-
+export function PlateReaderRunsTable({ data, instrumentId }: RunsTableProps) {
   return (
     <div className="rounded-lg border">
       <Table>
@@ -83,8 +40,9 @@ export function InstrumentRunsTable({
           <TableRow>
             <TableHead>Run ID</TableHead>
             <TableHead>Files</TableHead>
-            <TableHead>Metadata</TableHead>
-            <TableHead>Source</TableHead>
+            <TableHead>Wavelength</TableHead>
+            <TableHead>Measurement Mode</TableHead>
+            <TableHead>Measurement Type</TableHead>
             <TableHead className="text-right">Created</TableHead>
           </TableRow>
         </TableHeader>
@@ -94,7 +52,6 @@ export function InstrumentRunsTable({
             return (
               <TableRow key={row.id} className={cn(isDeleted && "opacity-50")}>
                 <TableCell>
-                  {/* Links to the future run detail page (not yet built). */}
                   <Link
                     href={`/instruments/${instrumentId}/runs/${row.run_id}`}
                     className="hover:underline"
@@ -126,15 +83,19 @@ export function InstrumentRunsTable({
                   />
                 </TableCell>
                 <TableCell>
-                  <MetadataSummary metadata={row.metadata} />
+                  <MetadataFieldBadge
+                    value={getMetadataField(row.metadata, "wavelength")}
+                  />
                 </TableCell>
                 <TableCell>
-                  <Badge
-                    variant="outline"
-                    className="font-mono text-[10px] font-normal"
-                  >
-                    {row.source}
-                  </Badge>
+                  <MetadataFieldBadge
+                    value={getMetadataField(row.metadata, "measurement_mode")}
+                  />
+                </TableCell>
+                <TableCell>
+                  <MetadataFieldBadge
+                    value={getMetadataField(row.metadata, "measurement_type")}
+                  />
                 </TableCell>
                 <TableCell className="text-right">
                   <RelativeTime date={row.created_at.toISOString()} />

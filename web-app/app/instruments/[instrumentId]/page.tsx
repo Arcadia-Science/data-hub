@@ -1,5 +1,5 @@
 import { InstrumentHeader } from "@/components/instruments/instrument-header";
-import { InstrumentRunsTable } from "@/components/instruments/instrument-runs-table";
+import { InstrumentRunsTable } from "@/components/instruments/runs-table";
 import { InstrumentRunsToolbar } from "@/components/instruments/instrument-runs-toolbar";
 import { PaginationNav } from "@/components/pagination-nav";
 import { buildRunListQuery } from "@/lib/api/instrument-runs";
@@ -64,6 +64,7 @@ export default async function InstrumentDetailPage({
       <InstrumentRunsTable
         data={runResult.data}
         instrumentId={instrumentId}
+        instrumentType={instrument.instrumentType}
         hasFilters={hasFilters}
       />
       <PaginationNav
