@@ -105,6 +105,7 @@ export function InstrumentsTable({ data }: { data: InstrumentListItem[] }) {
                       instrumentId={row.id}
                       displayName={row.displayName}
                       filePatterns={row.filePatterns ?? []}
+                      instrumentType={row.instrumentType}
                     />
                   </div>
                 </TableCell>

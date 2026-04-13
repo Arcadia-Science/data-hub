@@ -8,6 +8,13 @@
       "when": 1774914937148,
       "tag": "0000_parched_the_santerians",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1776105006278,
+      "tag": "0001_wealthy_mathemanic",
+      "breakpoints": true
     }
   ]
 }

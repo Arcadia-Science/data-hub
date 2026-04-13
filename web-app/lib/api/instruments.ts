@@ -7,6 +7,7 @@ export type InstrumentListItem = {
   id: string;
   displayName: string;
   status: "pending" | "active" | "inactive";
+  instrumentType: "generic" | "plate_reader";
   filePatterns: string[] | null;
   runCount: number;
   watcherCount: number;
@@ -43,6 +44,7 @@ export async function getInstrumentListWithCounts(): Promise<
       id: instruments.id,
       displayName: instruments.displayName,
       status: instruments.status,
+      instrumentType: instruments.instrumentType,
       filePatterns: instruments.filePatterns,
       createdAt: instruments.createdAt,
       runCount: sql<number>`coalesce(${runCountSq.count}, 0)`,
@@ -65,6 +67,7 @@ export type InstrumentDetail = {
   id: string;
   displayName: string;
   status: "pending" | "active" | "inactive";
+  instrumentType: "generic" | "plate_reader";
   filePatterns: string[] | null;
   s3TriggerSuffix: string | null;
   createdAt: Date;
@@ -128,6 +131,7 @@ export const getInstrumentById = cache(async function getInstrumentById(
     id: instrument.id,
     displayName: instrument.displayName,
     status: instrument.status,
+    instrumentType: instrument.instrumentType,
     filePatterns: instrument.filePatterns,
     s3TriggerSuffix: instrument.s3TriggerSuffix,
     createdAt: instrument.createdAt,

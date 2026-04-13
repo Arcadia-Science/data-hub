@@ -1,10 +1,4 @@
-import { DeleteRunDialog } from "@/components/runs/delete-run-dialog";
-import { RestoreRunButton } from "@/components/runs/restore-run-button";
-import { RunAnalysisSection } from "@/components/runs/run-analysis-section";
-import { RunFilesSection } from "@/components/runs/run-files-section";
-import { RunHeader } from "@/components/runs/run-header";
-import { RunMetadata } from "@/components/runs/run-metadata";
-import { RunReportSection } from "@/components/runs/run-report-section";
+import { RunDetailVariant } from "@/components/runs/variants";
 import {
   getRunFiles,
   getRunReportData,
@@ -41,48 +35,15 @@ export default async function RunDetailPage({ params }: Props) {
     getRunReportData(run.id),
   ]);
 
-  const isDeleted = run.deletedAt !== null;
-  // Restoring is only possible before the nightly purge job removes S3 objects.
-  const canRestore = isDeleted && run.filesPurgedAt === null;
-  const activeFileCount = files.filter((f) => f.deletedAt === null).length;
-  const hasReportData = reportData.length > 0;
-
-  // Report entries split into two groups:
-  //  - analysisData: run-level results not tied to a specific file (e.g. aggregated stats)
-  //  - fileReportData: parsed output from individual files (e.g. per-file plate maps)
-  const analysisData = reportData.filter((r) => r.fileId === null);
-  const fileReportData = reportData.filter((r) => r.fileId !== null);
-
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6 p-6">
-      <RunHeader run={run}>
-        {!isDeleted && (
-          <DeleteRunDialog
-            instrumentId={instrumentId}
-            runId={runId}
-            fileCount={activeFileCount}
-            hasReportData={hasReportData}
-          />
-        )}
-        {canRestore && (
-          <RestoreRunButton instrumentId={instrumentId} runId={runId} />
-        )}
-      </RunHeader>
-
-      <RunMetadata metadata={run.metadata as Record<string, unknown>} />
-
-      <RunFilesSection
+      <RunDetailVariant
+        run={run}
         files={files}
+        reportData={reportData}
         instrumentId={instrumentId}
         runId={runId}
-        isDeleted={isDeleted}
       />
-
-      {fileReportData.length > 0 && (
-        <RunReportSection reportData={fileReportData} files={files} />
-      )}
-
-      <RunAnalysisSection analysisData={analysisData} />
     </div>
   );
 }

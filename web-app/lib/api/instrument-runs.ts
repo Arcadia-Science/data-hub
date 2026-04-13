@@ -44,6 +44,7 @@ export async function lookupRunByNaturalKey(
       deletedAt: instrumentRuns.deletedAt,
       filesPurgedAt: instrumentRuns.filesPurgedAt,
       instrumentDisplayName: instruments.displayName,
+      instrumentType: instruments.instrumentType,
     })
     .from(instrumentRuns)
     .innerJoin(instruments, eq(instrumentRuns.instrumentId, instruments.id))

@@ -12,24 +12,39 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Loader2, Pencil } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
+const INSTRUMENT_TYPE_OPTIONS = [
+  { value: "generic", label: "Generic" },
+  { value: "plate_reader", label: "Plate Reader" },
+] as const;
+
 export function EditInstrumentDialog({
   instrumentId,
   displayName,
   filePatterns,
+  instrumentType,
 }: {
   instrumentId: string;
   displayName: string;
   filePatterns: string[];
+  instrumentType: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(displayName);
   const [patterns, setPatterns] = useState(filePatterns.join(", "));
+  const [type, setType] = useState(instrumentType);
   const [isPending, startTransition] = useTransition();
 
   function handleSave() {
@@ -45,6 +60,7 @@ export function EditInstrumentDialog({
         body: JSON.stringify({
           display_name: name.trim(),
           file_patterns: parsedPatterns,
+          instrument_type: type,
         }),
       });
 
@@ -70,6 +86,7 @@ export function EditInstrumentDialog({
         if (value) {
           setName(displayName);
           setPatterns(filePatterns.join(", "));
+          setType(instrumentType);
         }
       }}
     >
@@ -108,6 +125,24 @@ export function EditInstrumentDialog({
             />
             <p className="text-xs text-muted-foreground">
               Comma-separated glob patterns.
+            </p>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="edit-type">Instrument type</Label>
+            <Select value={type} onValueChange={setType}>
+              <SelectTrigger id="edit-type" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {INSTRUMENT_TYPE_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Controls the run detail page layout.
             </p>
           </div>
         </div>

@@ -11,35 +11,52 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { dashboardSearchParams, hasActiveFilters } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
-import {
-  CalendarDays,
-  Check,
-  ChevronsUpDown,
-  Search,
-  Trash2,
-  X,
-} from "lucide-react";
+import { Check, ChevronsUpDown, Search, X } from "lucide-react";
 import { useQueryStates } from "nuqs";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 type Instrument = {
   id: string;
   displayName: string;
 };
 
+const DATE_PRESETS = [
+  { value: "today", label: "Today", days: 0 },
+  { value: "3d", label: "Last 3 days", days: 3 },
+  { value: "1w", label: "Last week", days: 7 },
+  { value: "2w", label: "Last 2 weeks", days: 14 },
+  { value: "1m", label: "Last month", days: 30 },
+] as const;
+
+function dateFromDaysAgo(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+function resolvePreset(dateFrom: string | null): string {
+  if (!dateFrom) return "today";
+  for (const preset of DATE_PRESETS) {
+    if (dateFrom === dateFromDaysAgo(preset.days)) return preset.value;
+  }
+  return "";
+}
+
 export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
-  // shallow: false triggers a server-side re-fetch on every filter change so
-  // the table data stays in sync with the URL. throttleMs debounces rapid
-  // keystrokes (e.g. search typing) to avoid excessive server round-trips.
   const [filters, setFilters] = useQueryStates(dashboardSearchParams, {
     shallow: false,
     throttleMs: 300,
@@ -48,6 +65,11 @@ export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
   const [instrumentOpen, setInstrumentOpen] = useState(false);
 
   const hasFilters = hasActiveFilters(filters);
+
+  const activePreset = useMemo(
+    () => resolvePreset(filters.date_from),
+    [filters.date_from]
+  );
 
   // Reset to page 1 whenever filters change to avoid landing on an empty page.
   function toggleInstrument(id: string) {
@@ -151,53 +173,31 @@ export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
             </Button>
           )}
 
-          {/* Date range */}
-          <div className="flex items-center gap-2">
-            <CalendarDays className="size-3.5 text-muted-foreground" />
-            <Input
-              type="date"
-              value={filters.date_from ?? ""}
-              onChange={(e) =>
+          {/* Date range preset */}
+          <Select
+            value={activePreset}
+            onValueChange={(value) => {
+              const preset = DATE_PRESETS.find((p) => p.value === value);
+              if (preset) {
                 setFilters({
-                  date_from: e.target.value || null,
+                  date_from: dateFromDaysAgo(preset.days),
+                  date_to: null,
                   page: 1,
-                })
+                });
               }
-              className="h-9 w-36 text-xs"
-              aria-label="Date from"
-            />
-            <span className="text-xs text-muted-foreground">&ndash;</span>
-            <Input
-              type="date"
-              value={filters.date_to ?? ""}
-              onChange={(e) =>
-                setFilters({
-                  date_to: e.target.value || null,
-                  page: 1,
-                })
-              }
-              className="h-9 w-36 text-xs"
-              aria-label="Date to"
-            />
-          </div>
-
-          {/* Show deleted toggle */}
-          <div className="flex items-center gap-2">
-            <Switch
-              id="include-deleted"
-              checked={filters.include_deleted}
-              onCheckedChange={(checked) =>
-                setFilters({ include_deleted: checked, page: 1 })
-              }
-            />
-            <Label
-              htmlFor="include-deleted"
-              className="flex cursor-pointer items-center gap-1 text-xs"
-            >
-              <Trash2 className="size-3" />
-              Deleted
-            </Label>
-          </div>
+            }}
+          >
+            <SelectTrigger className="w-40 text-xs">
+              <SelectValue placeholder="Date range" />
+            </SelectTrigger>
+            <SelectContent>
+              {DATE_PRESETS.map((p) => (
+                <SelectItem key={p.value} value={p.value} className="text-xs">
+                  {p.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
     </div>

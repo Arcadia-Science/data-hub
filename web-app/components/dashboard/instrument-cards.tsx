@@ -12,6 +12,7 @@ import {
 } from "@/lib/api/dashboard";
 import { formatRelativeTime } from "@/lib/utils";
 import { Activity, Radio, Upload, WifiOff } from "lucide-react";
+import Link from "next/link";
 
 const watcherBadge: Record<
   InstrumentSummary["watcherStatus"],
@@ -43,38 +44,40 @@ export async function InstrumentCards() {
         const wb = watcherBadge[s.watcherStatus];
         const WatcherIcon = wb.icon;
         return (
-          <Card key={s.id}>
-            <CardHeader>
-              <div className="flex items-start justify-between gap-2">
-                <CardTitle className="text-sm font-medium">
-                  {s.displayName}
-                </CardTitle>
-                <Badge
-                  variant={wb.variant}
-                  className="shrink-0 gap-1 text-[10px]"
-                >
-                  <WatcherIcon className="size-3" />
-                  {wb.label}
-                </Badge>
-              </div>
-              <CardDescription className="text-xs">
-                <span className="font-mono">{s.runCount}</span>{" "}
-                {s.runCount === 1 ? "run" : "runs"}
-                {s.lastRunAt && (
-                  <> &middot; last {formatRelativeTime(s.lastRunAt)}</>
+          <Link key={s.id} href={`/instruments/${s.id}`}>
+            <Card className="transition-colors hover:bg-muted/50">
+              <CardHeader>
+                <div className="flex items-start justify-between gap-2">
+                  <CardTitle className="text-sm font-medium">
+                    {s.displayName}
+                  </CardTitle>
+                  <Badge
+                    variant={wb.variant}
+                    className="shrink-0 gap-1 text-[10px]"
+                  >
+                    <WatcherIcon className="size-3" />
+                    {wb.label}
+                  </Badge>
+                </div>
+                <CardDescription className="text-xs">
+                  <span className="font-mono">{s.runCount}</span>{" "}
+                  {s.runCount === 1 ? "run" : "runs"}
+                  {s.lastRunAt && (
+                    <> &middot; Last run {formatRelativeTime(s.lastRunAt)}</>
+                  )}
+                </CardDescription>
+                {s.filesPendingUpload > 0 && (
+                  <Badge
+                    variant="secondary"
+                    className="mt-1 w-fit gap-1 text-[10px]"
+                  >
+                    <Upload className="size-3" />
+                    {s.filesPendingUpload} pending upload
+                  </Badge>
                 )}
-              </CardDescription>
-              {s.filesPendingUpload > 0 && (
-                <Badge
-                  variant="secondary"
-                  className="mt-1 w-fit gap-1 text-[10px]"
-                >
-                  <Upload className="size-3" />
-                  {s.filesPendingUpload} pending upload
-                </Badge>
-              )}
-            </CardHeader>
-          </Card>
+              </CardHeader>
+            </Card>
+          </Link>
         );
       })}
     </div>

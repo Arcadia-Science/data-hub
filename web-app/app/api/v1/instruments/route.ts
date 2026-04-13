@@ -22,6 +22,7 @@ export async function GET(request: NextRequest) {
       id: instruments.id,
       display_name: instruments.displayName,
       status: instruments.status,
+      instrument_type: instruments.instrumentType,
       file_patterns: instruments.filePatterns,
       s3_trigger_suffix: instruments.s3TriggerSuffix,
     })
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest) {
     return apiError(401, UNAUTHORIZED, "Authentication required");
   }
 
-  let body: { id?: string; display_name?: string };
+  let body: { id?: string; display_name?: string; instrument_type?: string };
   try {
     body = await request.json();
   } catch {
@@ -75,14 +76,22 @@ export async function POST(request: NextRequest) {
           .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
           .join(" ");
 
-  // New instruments start as "pending" until confirmed by an admin.
+  const VALID_INSTRUMENT_TYPES = ["generic", "plate_reader"] as const;
+  type InstrumentType = (typeof VALID_INSTRUMENT_TYPES)[number];
+  const instrumentType: InstrumentType =
+    typeof body.instrument_type === "string" &&
+    VALID_INSTRUMENT_TYPES.includes(body.instrument_type as InstrumentType)
+      ? (body.instrument_type as InstrumentType)
+      : "generic";
+
   const [created] = await db
     .insert(instruments)
-    .values({ id, displayName, status: "pending" })
+    .values({ id, displayName, status: "pending", instrumentType })
     .returning({
       id: instruments.id,
       display_name: instruments.displayName,
       status: instruments.status,
+      instrument_type: instruments.instrumentType,
       file_patterns: instruments.filePatterns,
       s3_trigger_suffix: instruments.s3TriggerSuffix,
       created_at: instruments.createdAt,

@@ -54,6 +54,7 @@ export async function GET(
     id: instrument.id,
     display_name: instrument.displayName,
     status: instrument.status,
+    instrument_type: instrument.instrumentType,
     file_patterns: instrument.filePatterns,
     s3_trigger_suffix: instrument.s3TriggerSuffix,
     created_at: instrument.createdAt,
@@ -67,6 +68,7 @@ const ALLOWED_PATCH_FIELDS = new Set([
   "status",
   "file_patterns",
   "display_name",
+  "instrument_type",
 ]);
 
 export async function PATCH(
@@ -119,10 +121,23 @@ export async function PATCH(
     );
   }
 
+  const VALID_INSTRUMENT_TYPES = ["generic", "plate_reader"];
+  if (
+    "instrument_type" in body &&
+    !VALID_INSTRUMENT_TYPES.includes(body.instrument_type as string)
+  ) {
+    return apiError(
+      400,
+      VALIDATION_ERROR,
+      `Invalid instrument_type — must be one of: ${VALID_INSTRUMENT_TYPES.join(", ")}`
+    );
+  }
+
   const updates: Record<string, unknown> = {};
   if ("status" in body) updates.status = body.status;
   if ("file_patterns" in body) updates.filePatterns = body.file_patterns;
   if ("display_name" in body) updates.displayName = body.display_name;
+  if ("instrument_type" in body) updates.instrumentType = body.instrument_type;
 
   if (Object.keys(updates).length === 0) {
     return apiError(400, VALIDATION_ERROR, "No valid fields to update");
@@ -136,6 +151,7 @@ export async function PATCH(
       id: instruments.id,
       display_name: instruments.displayName,
       status: instruments.status,
+      instrument_type: instruments.instrumentType,
       file_patterns: instruments.filePatterns,
       s3_trigger_suffix: instruments.s3TriggerSuffix,
       created_at: instruments.createdAt,

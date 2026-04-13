@@ -39,7 +39,7 @@ export default async function DashboardPage({
     buildRunListQuery({
       instrumentId: instrumentIds,
       search: params.search || undefined,
-      dateFrom: params.date_from ?? undefined,
+      dateFrom: params.date_from ?? new Date().toISOString().slice(0, 10),
       dateTo: params.date_to ?? undefined,
       page: params.page,
       perPage: params.per_page,
