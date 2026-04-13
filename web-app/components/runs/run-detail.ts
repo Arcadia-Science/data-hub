@@ -1,19 +1,20 @@
+import { RunAnalysisSection } from "@/components/runs/run-analysis-section";
+import { RunFilesMetadataLayout } from "@/components/runs/run-files-metadata-layout";
+import { RunFilesSection } from "@/components/runs/run-files-section";
+import { RunHeader } from "@/components/runs/run-header";
+import { RunMetadata } from "@/components/runs/run-metadata";
+import { RunReportSection } from "@/components/runs/run-report-section";
 import type {
   RunDetail as RunDetailType,
   RunFile,
   RunReportEntry,
 } from "@/lib/api/instrument-runs";
 
-import { RunAnalysisSection } from "./run-analysis-section";
-import { RunFilesSection } from "./run-files-section";
-import { RunHeader } from "./run-header";
-import { RunMetadata } from "./run-metadata";
-import { RunReportSection } from "./run-report-section";
-
 export const RunDetail = {
   Header: RunHeader,
   Metadata: RunMetadata,
   Files: RunFilesSection,
+  FilesMetadataLayout: RunFilesMetadataLayout,
   Report: RunReportSection,
   Analysis: RunAnalysisSection,
 };

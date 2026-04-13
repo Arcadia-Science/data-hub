@@ -187,12 +187,12 @@ export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
               }
             }}
           >
-            <SelectTrigger className="w-40 text-xs">
+            <SelectTrigger className="min-h-8.5 w-40 text-sm">
               <SelectValue placeholder="Date range" />
             </SelectTrigger>
             <SelectContent>
               {DATE_PRESETS.map((p) => (
-                <SelectItem key={p.value} value={p.value} className="text-xs">
+                <SelectItem key={p.value} value={p.value} className="text-sm">
                   {p.label}
                 </SelectItem>
               ))}

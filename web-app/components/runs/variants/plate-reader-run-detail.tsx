@@ -10,7 +10,7 @@ import type { RunDetailProps } from "@/components/runs/run-detail";
 import { RunDetail } from "@/components/runs/run-detail";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { RunFile, RunReportEntry } from "@/lib/api/instrument-runs";
+import type { RunReportEntry } from "@/lib/api/instrument-runs";
 
 const PLATE_MAP_DATA_TYPES = new Set(["plate_map", "raw_well_data"]);
 
@@ -182,17 +182,13 @@ function extractPlateMaps(
 
 function PlateMapSection({
   entries,
-  files,
   heatmap,
   kineticLayout,
 }: {
   entries: RunReportEntry[];
-  files: RunFile[];
   heatmap: boolean;
   kineticLayout: boolean;
 }) {
-  const fileMap = new Map(files.map((f) => [f.id, f]));
-
   const byFile = new Map<number | null, RunReportEntry[]>();
   for (const entry of entries) {
     const group = byFile.get(entry.fileId) ?? [];
@@ -222,50 +218,35 @@ function PlateMapSection({
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-6">
-        {sections.map(({ fileId, groups }) => {
-          const file = fileId !== null ? fileMap.get(fileId) : undefined;
-          return (
-            <div key={fileId ?? "run-level"} className="flex flex-col gap-3">
-              {file && <h3 className="text-sm font-medium">{file.filename}</h3>}
-              {groups.map((g, i) => (
-                <div key={i} className="flex flex-col gap-1.5">
-                  {g.label && (
-                    <Badge
-                      variant="outline"
-                      className="w-fit font-mono text-[10px]"
-                    >
-                      {g.label}
-                    </Badge>
-                  )}
-                  {g.mode === "kinetic" ? (
-                    <KineticPlateMapWithTimeSlider
-                      timeLabels={g.timeLabels}
-                      frames={g.frames}
-                      heatmap={heatmap}
-                    />
-                  ) : (
-                    <PlateMapGrid data={g.wells} heatmap={heatmap} />
-                  )}
-                </div>
-              ))}
-            </div>
-          );
-        })}
+        {sections.map(({ fileId, groups }) => (
+          <div key={fileId ?? "run-level"} className="flex flex-col gap-10">
+            {groups.map((g, i) => (
+              <div key={i} className="flex flex-col gap-2">
+                {g.label && (
+                  <h4 className="font-mono text-sm leading-snug font-medium text-foreground">
+                    {g.label}
+                  </h4>
+                )}
+                {g.mode === "kinetic" ? (
+                  <KineticPlateMapWithTimeSlider
+                    timeLabels={g.timeLabels}
+                    frames={g.frames}
+                    heatmap={heatmap}
+                  />
+                ) : (
+                  <PlateMapGrid data={g.wells} heatmap={heatmap} />
+                )}
+              </div>
+            ))}
+          </div>
+        ))}
       </CardContent>
     </Card>
   );
 }
 
-function OtherReportData({
-  entries,
-  files,
-}: {
-  entries: RunReportEntry[];
-  files: RunFile[];
-}) {
+function OtherReportData({ entries }: { entries: RunReportEntry[] }) {
   if (entries.length === 0) return null;
-
-  const fileMap = new Map(files.map((f) => [f.id, f]));
 
   const byFile = new Map<number | null, RunReportEntry[]>();
   for (const entry of entries) {
@@ -286,10 +267,8 @@ function OtherReportData({
       </CardHeader>
       <CardContent className="flex flex-col gap-6">
         {Array.from(byFile.entries()).map(([fileId, items]) => {
-          const file = fileId !== null ? fileMap.get(fileId) : undefined;
           return (
             <div key={fileId ?? "run-level"} className="flex flex-col gap-3">
-              {file && <h3 className="text-sm font-medium">{file.filename}</h3>}
               {items.map((entry) => (
                 <div key={entry.id} className="flex flex-col gap-1.5">
                   <Badge
@@ -354,23 +333,25 @@ export function PlateReaderRunDetail({
         )}
       </RunDetail.Header>
 
-      <RunDetail.Metadata metadata={run.metadata as Record<string, unknown>} />
-
-      <RunDetail.Files
-        files={files}
-        instrumentId={instrumentId}
-        runId={runId}
-        isDeleted={isDeleted}
-      />
+      <RunDetail.FilesMetadataLayout>
+        <RunDetail.Files
+          files={files}
+          instrumentId={instrumentId}
+          runId={runId}
+          isDeleted={isDeleted}
+        />
+        <RunDetail.Metadata
+          metadata={run.metadata as Record<string, unknown>}
+        />
+      </RunDetail.FilesMetadataLayout>
 
       <PlateMapSection
         entries={plateMapEntries}
-        files={files}
         heatmap={heatmap}
         kineticLayout={measurementType === "Kinetic"}
       />
 
-      <OtherReportData entries={otherEntries} files={files} />
+      <OtherReportData entries={otherEntries} />
 
       <RunDetail.Analysis analysisData={analysisData} />
     </>

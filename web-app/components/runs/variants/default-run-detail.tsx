@@ -34,14 +34,17 @@ export function DefaultRunDetail({
         )}
       </RunDetail.Header>
 
-      <RunDetail.Metadata metadata={run.metadata as Record<string, unknown>} />
-
-      <RunDetail.Files
-        files={files}
-        instrumentId={instrumentId}
-        runId={runId}
-        isDeleted={isDeleted}
-      />
+      <RunDetail.FilesMetadataLayout>
+        <RunDetail.Files
+          files={files}
+          instrumentId={instrumentId}
+          runId={runId}
+          isDeleted={isDeleted}
+        />
+        <RunDetail.Metadata
+          metadata={run.metadata as Record<string, unknown>}
+        />
+      </RunDetail.FilesMetadataLayout>
 
       {fileReportData.length > 0 && (
         <RunDetail.Report reportData={fileReportData} files={files} />
