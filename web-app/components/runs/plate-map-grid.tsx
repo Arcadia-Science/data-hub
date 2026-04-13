@@ -1,14 +1,15 @@
+"use client";
+
+import { Slider } from "@/components/ui/slider";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Fragment } from "react";
+import { Fragment, useMemo, useState } from "react";
 
-type WellData = { well: string; value: unknown };
+export type PlateWellData = { well: string; value: unknown };
 
-// Parses standard microplate well notation (e.g. "A1", "H12", "P24").
-// Rows A-P and columns 1-24 cover up to 384-well plates.
 function parseWell(well: string): { row: number; col: number } | null {
   const match = well.match(/^([A-P])(\d{1,2})$/i);
   if (!match) return null;
@@ -28,14 +29,70 @@ function formatCellValue(value: unknown): string {
   return String(value);
 }
 
-export function PlateMapGrid({ data }: { data: unknown }) {
+// Plotly Plasma sequential colorscale stops as [R, G, B].
+const PLASMA_STOPS: [number, number, number][] = [
+  [13, 8, 135],
+  [70, 3, 159],
+  [114, 1, 168],
+  [156, 23, 158],
+  [189, 55, 134],
+  [216, 87, 107],
+  [237, 121, 83],
+  [251, 159, 58],
+  [253, 202, 38],
+  [240, 249, 33],
+];
+
+function lerpRgb(
+  a: [number, number, number],
+  b: [number, number, number],
+  t: number
+): [number, number, number] {
+  return [
+    Math.round(a[0] + (b[0] - a[0]) * t),
+    Math.round(a[1] + (b[1] - a[1]) * t),
+    Math.round(a[2] + (b[2] - a[2]) * t),
+  ];
+}
+
+// Returns [background, foreground] CSS color strings.
+function heatmapColor(
+  value: number,
+  min: number,
+  max: number
+): [string, string] {
+  const n = PLASMA_STOPS.length - 1;
+  if (max === min) {
+    const mid = PLASMA_STOPS[Math.floor(n / 2)];
+    return [`rgb(${mid[0]},${mid[1]},${mid[2]})`, "#fff"];
+  }
+  const t = Math.max(0, Math.min(1, (value - min) / (max - min)));
+  const scaled = t * n;
+  const i = Math.min(Math.floor(scaled), n - 1);
+  const [r, g, b] = lerpRgb(PLASMA_STOPS[i], PLASMA_STOPS[i + 1], scaled - i);
+  // Perceived luminance (rec. 709) for text contrast.
+  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  const fg = lum < 140 ? "#fff" : "hsl(330 30% 15%)";
+  return [`rgb(${r},${g},${b})`, fg];
+}
+
+type PlateMapGridProps = {
+  data: unknown;
+  heatmap?: boolean;
+  /** When heatmap is on, use this scale instead of inferring min/max from `data`. */
+  heatmapRange?: { min: number; max: number };
+};
+
+export function PlateMapGrid({
+  data,
+  heatmap = false,
+  heatmapRange,
+}: PlateMapGridProps) {
   if (!Array.isArray(data)) return null;
 
-  const wells = data as WellData[];
+  const wells = data as PlateWellData[];
   if (wells.length === 0) return null;
 
-  // Grid dimensions are inferred from the data so plates of any size (96, 384,
-  // or custom layouts) render correctly without hard-coding dimensions.
   let maxRow = 0;
   let maxCol = 0;
   const cellMap = new Map<string, unknown>();
@@ -51,71 +108,213 @@ export function PlateMapGrid({ data }: { data: unknown }) {
   const rows = maxRow + 1;
   const cols = maxCol + 1;
 
+  let vMin = Infinity;
+  let vMax = -Infinity;
+  if (heatmap) {
+    if (heatmapRange) {
+      vMin = heatmapRange.min;
+      vMax = heatmapRange.max;
+    } else {
+      for (const v of cellMap.values()) {
+        if (typeof v === "number") {
+          if (v < vMin) vMin = v;
+          if (v > vMax) vMax = v;
+        }
+      }
+    }
+  }
+  const hasRange = isFinite(vMin) && isFinite(vMax);
+
   const rowLabels = Array.from({ length: rows }, (_, i) =>
     String.fromCharCode(65 + i)
   );
   const colLabels = Array.from({ length: cols }, (_, i) => String(i + 1));
 
   return (
-    <div className="overflow-x-auto">
-      <div
-        className="inline-grid gap-px text-center"
-        style={{
-          gridTemplateColumns: `2rem repeat(${cols}, minmax(3rem, 1fr))`,
-        }}
-      >
-        {/* Corner */}
-        <div />
-        {/* Column headers */}
-        {colLabels.map((c) => (
-          <div
-            key={c}
-            className="py-1 text-xs font-medium text-muted-foreground"
-          >
-            {c}
-          </div>
-        ))}
-
-        {/* Data rows */}
-        {rowLabels.map((rowLabel, ri) => (
-          <Fragment key={rowLabel}>
-            <div className="flex items-center justify-center py-1 text-xs font-medium text-muted-foreground">
-              {rowLabel}
+    <div className="flex flex-col gap-2">
+      <div className="overflow-x-auto">
+        <div
+          className="inline-grid gap-px text-center"
+          style={{
+            gridTemplateColumns: `2rem repeat(${cols}, minmax(3rem, 1fr))`,
+          }}
+        >
+          {/* Column headers */}
+          {colLabels.map((c, ci) => (
+            <div
+              key={c}
+              className="py-1 text-xs font-medium text-muted-foreground"
+              style={{ gridRow: 1, gridColumn: ci + 2 }}
+            >
+              {c}
             </div>
-            {colLabels.map((_, ci) => {
-              const value = cellMap.get(`${ri}-${ci}`);
-              const display = formatCellValue(value);
-              const full =
-                value !== null && value !== undefined ? String(value) : "";
-              const hasValue = display !== "";
+          ))}
 
-              return (
-                <Tooltip key={`${ri}-${ci}`}>
-                  <TooltipTrigger asChild>
-                    <div
-                      className={`flex items-center justify-center rounded border px-1 py-1.5 font-mono text-[10px] ${
-                        hasValue
-                          ? "border-border bg-muted/50"
-                          : "border-transparent"
-                      }`}
-                    >
-                      {display || "·"}
-                    </div>
-                  </TooltipTrigger>
-                  {hasValue && (
-                    <TooltipContent>
-                      <span className="font-mono">
-                        {rowLabel}
-                        {ci + 1}: {full}
-                      </span>
-                    </TooltipContent>
-                  )}
-                </Tooltip>
-              );
-            })}
-          </Fragment>
-        ))}
+          {/* Data rows */}
+          {rowLabels.map((rowLabel, ri) => (
+            <Fragment key={rowLabel}>
+              <div
+                className="flex items-center justify-center text-xs font-medium text-muted-foreground"
+                style={{ gridRow: ri + 2, gridColumn: 1 }}
+              >
+                {rowLabel}
+              </div>
+              {colLabels.map((_, ci) => {
+                const value = cellMap.get(`${ri}-${ci}`);
+                const display = formatCellValue(value);
+                const full =
+                  value !== null && value !== undefined ? String(value) : "";
+                const hasValue = display !== "";
+
+                const useHeatmap =
+                  heatmap && hasRange && typeof value === "number";
+                const [bg, fg] = useHeatmap
+                  ? heatmapColor(value, vMin, vMax)
+                  : ["", ""];
+
+                return (
+                  <Tooltip key={`${ri}-${ci}`}>
+                    <TooltipTrigger asChild>
+                      <div
+                        className={
+                          useHeatmap
+                            ? "flex items-center justify-center rounded px-1 py-2.5 font-mono text-[10px] transition-colors"
+                            : `flex items-center justify-center rounded border px-2.5 py-2.5 font-mono text-xs ${
+                                hasValue
+                                  ? "border-border bg-muted/50"
+                                  : "border-transparent"
+                              }`
+                        }
+                        style={{
+                          gridRow: ri + 2,
+                          gridColumn: ci + 2,
+                          ...(useHeatmap
+                            ? { backgroundColor: bg, color: fg }
+                            : {}),
+                        }}
+                      >
+                        {display || "·"}
+                      </div>
+                    </TooltipTrigger>
+                    {hasValue && (
+                      <TooltipContent>
+                        <span className="font-mono">
+                          {rowLabel}
+                          {ci + 1}: {full}
+                        </span>
+                      </TooltipContent>
+                    )}
+                  </Tooltip>
+                );
+              })}
+            </Fragment>
+          ))}
+        </div>
       </div>
+
+      {/* Color legend */}
+      {heatmap && hasRange && (
+        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+          <span className="font-mono">{formatCellValue(vMin)}</span>
+          <div
+            className="h-2 w-24 rounded-sm"
+            style={{
+              background: `linear-gradient(to right, rgb(13,8,135), rgb(189,55,134), rgb(253,202,38), rgb(240,249,33))`,
+            }}
+          />
+          <span className="font-mono">{formatCellValue(vMax)}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function computeGlobalHeatmapRange(
+  frames: PlateWellData[][]
+): { min: number; max: number } | undefined {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const frame of frames) {
+    for (const w of frame) {
+      if (typeof w.value === "number") {
+        if (w.value < min) min = w.value;
+        if (w.value > max) max = w.value;
+      }
+    }
+  }
+  if (!isFinite(min) || !isFinite(max)) return undefined;
+  return { min, max };
+}
+
+type KineticPlateMapWithTimeSliderProps = {
+  timeLabels: string[];
+  frames: PlateWellData[][];
+  heatmap: boolean;
+};
+
+/**
+ * Plate map with a time index slider (for kinetic absorbance series).
+ * Heatmap scale is global across all frames so colors stay comparable while scrubbing.
+ */
+export function KineticPlateMapWithTimeSlider({
+  timeLabels,
+  frames,
+  heatmap,
+}: KineticPlateMapWithTimeSliderProps) {
+  const [index, setIndex] = useState(0);
+  const maxIdx = Math.max(0, frames.length - 1);
+  const selectedIndex = Math.min(Math.max(0, index), maxIdx);
+
+  const heatmapRange = useMemo(
+    () => (heatmap ? computeGlobalHeatmapRange(frames) : undefined),
+    [heatmap, frames]
+  );
+
+  if (frames.length === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-3">
+      <PlateMapGrid
+        data={frames[selectedIndex]}
+        heatmap={heatmap}
+        heatmapRange={heatmapRange}
+      />
+      {frames.length > 1 && (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span>Time</span>
+            <span
+              className="min-w-0 truncate font-mono text-foreground tabular-nums"
+              title={timeLabels[selectedIndex] ?? ""}
+            >
+              {timeLabels[selectedIndex] ?? "—"}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span
+              className="w-10 shrink-0 truncate text-center font-mono text-[10px] text-muted-foreground"
+              title={timeLabels[0]}
+            >
+              {timeLabels[0]}
+            </span>
+            <Slider
+              className="flex-1 py-1"
+              min={0}
+              max={maxIdx}
+              step={1}
+              value={[selectedIndex]}
+              onValueChange={(v) => setIndex(v[0] ?? 0)}
+              aria-label="Select measurement time"
+            />
+            <span
+              className="w-10 shrink-0 truncate text-center font-mono text-[10px] text-muted-foreground"
+              title={timeLabels[maxIdx]}
+            >
+              {timeLabels[maxIdx]}
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
