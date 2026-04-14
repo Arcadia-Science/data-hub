@@ -60,6 +60,14 @@ class TestRealFixtures:
             "wavelength": "595 nm",
         }
 
+    def test_endpoint_fluorescence(self) -> None:
+        result = parse_metadata(_FIXTURES_DIR / "spectramax_plate_reader_fluorescence.xls")
+        assert result == {
+            "measurement_mode": "Fluorescence",
+            "measurement_type": "Endpoint",
+            "wavelength": "512 nm",
+        }
+
     def test_endpoint_sparse_absorbance(self) -> None:
         result = parse_metadata(_FIXTURES_DIR / "spectramax_plate_reader_endpoint_sparse.xls")
         assert result == {

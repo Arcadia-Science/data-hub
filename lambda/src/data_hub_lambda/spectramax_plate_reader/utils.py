@@ -1,17 +1,22 @@
 """Parse instrument metadata from SpectraMax iD3 plate reader `.xls` exports.
 
 SoftMax Pro exports plate data as tab-delimited text with an `.xls`
-extension.  The plate header line (`Plate:  ...`) encodes measurement
-settings at fixed column positions.
+extension.  The plate header line (``Plate:  ...``) encodes measurement
+settings, but the field layout varies by measurement mode (Absorbance vs
+Fluorescence).  Fields before the ``Raw`` token are stable; fields after
+it shift depending on the mode.  We locate ``Raw`` as an anchor and read
+subsequent fields at fixed offsets from it.
 
-The raw data section of each plate block is a grid of 8 rows (A–H for
-96-well plates) × 12 columns, repeated once per reading (1 for Endpoint,
-*N* for Kinetic time-points or Well Scan positions).  Each reading group
-is followed by an empty separator line.  A summary table (no
-`Temperature` column header) follows the last group before `~End`.
+The raw data section of each plate block is a grid of rows × columns
+(e.g. 8 × 12 for 96-well, 16 × 24 for 384-well), repeated once per
+reading (1 for Endpoint, *N* for Kinetic time-points or Well Scan
+positions).  Each reading group is followed by an empty separator line.
+A summary table (no ``Temperature`` column header) follows the last
+group before ``~End``.
 """
 
 from __future__ import annotations
+from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
@@ -22,11 +27,55 @@ MEASUREMENT_TYPES = {"Endpoint", "Kinetic", "Well Scan"}
 _COL_PLATE_NAME = 1
 _COL_MEASUREMENT_TYPE = 4
 _COL_MEASUREMENT_MODE = 5
-_COL_NUM_READINGS = 8
-_COL_WAVELENGTH = 15
-_COL_NUM_WELLS = 18
+
+_OFF_NUM_READINGS = 2  # offset from Raw index
+_OFF_WAVELENGTH = 9
+_OFF_NUM_WELLS = 12
 
 _ROW_LABELS = "ABCDEFGHIJKLMNOP"
+
+
+@dataclass(frozen=True)
+class _PlateHeader:
+    """Parsed fields from a single ``Plate:`` header line."""
+
+    plate_name: str
+    measurement_type: str
+    measurement_mode: str
+    num_readings: int
+    wavelength_raw: str
+    num_wells: int
+
+
+def _parse_plate_header(line: str) -> _PlateHeader:
+    """Parse a ``Plate:`` header line into structured fields.
+
+    Locates the ``Raw`` token to anchor field positions so that both
+    Absorbance and Fluorescence layouts are handled correctly.
+
+    Raises:
+        ValueError: If the line has no ``Raw`` token or required fields
+            cannot be read.
+    """
+    fields = line.split("\t")
+
+    raw_idx: int | None = None
+    for j in range(6, len(fields)):
+        if fields[j] == "Raw":
+            raw_idx = j
+            break
+    if raw_idx is None:
+        raise ValueError(f"No 'Raw' anchor token found in plate header: {line!r}")
+
+    return _PlateHeader(
+        plate_name=fields[_COL_PLATE_NAME],
+        measurement_type=fields[_COL_MEASUREMENT_TYPE].strip(),
+        measurement_mode=fields[_COL_MEASUREMENT_MODE].strip(),
+        num_readings=int(fields[raw_idx + _OFF_NUM_READINGS]),
+        wavelength_raw=fields[raw_idx + _OFF_WAVELENGTH].strip(),
+        num_wells=int(fields[raw_idx + _OFF_NUM_WELLS]),
+    )
+
 
 _WELL_DATA_COLUMNS = [
     "time",
@@ -87,29 +136,25 @@ def parse_metadata(file_path: Path) -> dict[str, str]:
         if not line.startswith("Plate:"):
             continue
 
-        fields = line.split("\t")
+        header = _parse_plate_header(line)
 
-        measurement_mode = fields[_COL_MEASUREMENT_MODE].strip()
-        measurement_type = fields[_COL_MEASUREMENT_TYPE].strip()
-        wavelength = fields[_COL_WAVELENGTH].strip()
-
-        if measurement_mode not in MEASUREMENT_MODES:
+        if header.measurement_mode not in MEASUREMENT_MODES:
             raise ValueError(
-                f"Unexpected measurement mode '{measurement_mode}'; "
+                f"Unexpected measurement mode '{header.measurement_mode}'; "
                 f"expected one of {sorted(MEASUREMENT_MODES)}"
             )
-        if measurement_type not in MEASUREMENT_TYPES:
+        if header.measurement_type not in MEASUREMENT_TYPES:
             raise ValueError(
-                f"Unexpected measurement type '{measurement_type}'; "
+                f"Unexpected measurement type '{header.measurement_type}'; "
                 f"expected one of {sorted(MEASUREMENT_TYPES)}"
             )
-        if not wavelength.isdigit():
-            raise ValueError(f"Expected numeric wavelength, got '{wavelength}'")
+        if not header.wavelength_raw.isdigit():
+            raise ValueError(f"Expected numeric wavelength, got '{header.wavelength_raw}'")
 
         return {
-            "measurement_mode": measurement_mode,
-            "measurement_type": measurement_type,
-            "wavelength": f"{wavelength} nm",
+            "measurement_mode": header.measurement_mode,
+            "measurement_type": header.measurement_type,
+            "wavelength": f"{header.wavelength_raw} nm",
         }
 
     raise ValueError(f"No 'Plate:' header line found in {file_path}")
@@ -152,19 +197,15 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
             i += 1
             continue
 
-        plate_fields = lines[i].split("\t")
-        plate_name = plate_fields[_COL_PLATE_NAME]
-        num_readings = int(plate_fields[_COL_NUM_READINGS])
-        num_wells = int(plate_fields[_COL_NUM_WELLS])
-        wavelength_raw = plate_fields[_COL_WAVELENGTH].strip()
-        wavelength = int(wavelength_raw) if wavelength_raw.isdigit() else None
+        header = _parse_plate_header(lines[i])
+        wavelength = int(header.wavelength_raw) if header.wavelength_raw.isdigit() else None
 
         num_cols = _count_cols_in_header(lines[i + 1])
-        num_rows = num_wells // num_cols
+        num_rows = header.num_wells // num_cols
 
         i += 2  # Skip plate header + column header row.
 
-        for _ in range(num_readings):
+        for _ in range(header.num_readings):
             time_val: str | None = None
             temp_val: float | None = None
 
@@ -188,7 +229,7 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
                     records.append(
                         {
                             "time": time_val,
-                            "plate_name": plate_name,
+                            "plate_name": header.plate_name,
                             "well_position": f"{row_label}{column_label}",
                             "temperature_c": temp_val,
                             "value": float(val_str),
