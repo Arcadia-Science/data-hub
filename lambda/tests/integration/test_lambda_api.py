@@ -18,6 +18,8 @@ import requests
 from data_hub_lambda.handler import lambda_handler
 from data_hub_shared.testing import IntegrationEnv
 
+from .conftest import _reset_singletons
+
 _FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures"
 
 # Apply the `integration` marker to every test in this module so they can
@@ -528,3 +530,120 @@ class TestFileReprocessing:
             slack_msg = call[0][0]
             assert run_id in slack_msg
             assert "View in Data Hub" in slack_msg
+
+
+# ------------------------------------------------------------------
+# Test 4f: Function URL invocation
+# ------------------------------------------------------------------
+
+
+class TestFunctionUrlInvocation:
+    def test_happy_path_processes_file(
+        self,
+        integration_env: IntegrationEnv,
+        make_function_url_event: Callable[..., dict[str, Any]],
+        s3_fixture_files: dict[str, Path],
+        mock_context: MagicMock,
+        mock_slack: MagicMock,
+    ) -> None:
+        """A Function URL event with a valid token processes the file
+        identically to a direct S3 trigger."""
+        run_id = "Experiment_20260401"
+        filename = f"{run_id}_CqValues.csv"
+        s3_key = f"azure-cielo-qpcr/{run_id}/{filename}"
+        s3_fixture_files[s3_key] = _FIXTURES_DIR / "azure_cielo_qpcr_example.csv"
+
+        event = make_function_url_event("azure-cielo-qpcr", run_id, filename)
+        result = lambda_handler(event, mock_context)
+
+        # Function URL invocations should not return an error response.
+        assert result is None or result.get("statusCode", 200) == 200
+
+        run = _api_get(
+            integration_env.base_url,
+            integration_env.api_token,
+            f"/api/v1/instruments/azure-cielo-qpcr/runs/{run_id}",
+        )
+        assert run["run_id"] == run_id
+        assert len(run["files"]) == 1
+        assert run["files"][0]["status"] == "completed"
+
+        mock_slack.assert_called_once()
+        assert "View in Data Hub" in mock_slack.call_args[0][0]
+
+    def test_wrong_token_returns_401(
+        self,
+        make_function_url_event: Callable[..., dict[str, Any]],
+        mock_context: MagicMock,
+        mock_slack: MagicMock,
+    ) -> None:
+        """A Function URL event with an incorrect Bearer token is rejected."""
+        event = make_function_url_event(
+            "azure-cielo-qpcr",
+            "Experiment_20260401",
+            "Experiment_20260401_CqValues.csv",
+            token="wrong-token",
+        )
+        result = lambda_handler(event, mock_context)
+
+        assert result == {"statusCode": 401, "body": "Unauthorized"}
+        mock_slack.assert_not_called()
+
+    def test_missing_auth_header_returns_401(
+        self,
+        make_function_url_event: Callable[..., dict[str, Any]],
+        mock_context: MagicMock,
+        mock_slack: MagicMock,
+    ) -> None:
+        """A Function URL event with no Authorization header is rejected."""
+        event = make_function_url_event(
+            "azure-cielo-qpcr",
+            "Experiment_20260401",
+            "Experiment_20260401_CqValues.csv",
+            token=None,
+        )
+        result = lambda_handler(event, mock_context)
+
+        assert result == {"statusCode": 401, "body": "Unauthorized"}
+        mock_slack.assert_not_called()
+
+    def test_unconfigured_token_returns_401(
+        self,
+        make_function_url_event: Callable[..., dict[str, Any]],
+        mock_context: MagicMock,
+        mock_slack: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """When LAMBDA_INVOKE_TOKEN is not set, all Function URL requests
+        are rejected even if the caller sends a valid-looking token."""
+        monkeypatch.delenv("LAMBDA_INVOKE_TOKEN", raising=False)
+        _reset_singletons()
+
+        event = make_function_url_event(
+            "azure-cielo-qpcr",
+            "Experiment_20260401",
+            "Experiment_20260401_CqValues.csv",
+        )
+        result = lambda_handler(event, mock_context)
+
+        assert result == {"statusCode": 401, "body": "Unauthorized"}
+        mock_slack.assert_not_called()
+
+    def test_invalid_json_body_returns_401(
+        self,
+        make_function_url_event: Callable[..., dict[str, Any]],
+        mock_context: MagicMock,
+        mock_slack: MagicMock,
+    ) -> None:
+        """A Function URL event with a valid token but non-JSON body is
+        rejected (the handler cannot parse the S3 event payload)."""
+        event = make_function_url_event(
+            "azure-cielo-qpcr",
+            "Experiment_20260401",
+            "Experiment_20260401_CqValues.csv",
+            body_override="this is not json",
+        )
+        result = lambda_handler(event, mock_context)
+
+        assert result == {"statusCode": 401, "body": "Unauthorized"}
+        mock_slack.assert_not_called()

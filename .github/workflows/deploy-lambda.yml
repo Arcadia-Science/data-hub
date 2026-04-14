@@ -68,4 +68,5 @@ jobs:
               "SlackWebhookUrl=${{ secrets.SLACK_WEBHOOK_URL }}" \
               "Environment=${{ github.ref_name }}" \
               "GitHubOidcProviderArn=${{ secrets.GH_OIDC_PROVIDER_ARN }}" \
-              "VercelOidcProviderArn=${{ secrets.VERCEL_OIDC_PROVIDER_ARN }}"
+              "VercelOidcProviderArn=${{ secrets.VERCEL_OIDC_PROVIDER_ARN }}" \
+              "LambdaInvokeToken=${{ secrets.LAMBDA_INVOKE_TOKEN }}"

@@ -8,7 +8,6 @@ import { ReportDataTable } from "@/components/runs/report-data-table";
 import { RestoreRunButton } from "@/components/runs/restore-run-button";
 import type { RunDetailProps } from "@/components/runs/run-detail";
 import { RunDetail } from "@/components/runs/run-detail";
-import { FileProcessingErrors } from "@/components/runs/run-report-section";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { RunReportEntry } from "@/lib/api/instrument-runs";
@@ -345,8 +344,6 @@ export function PlateReaderRunDetail({
           metadata={run.metadata as Record<string, unknown>}
         />
       </RunDetail.FilesMetadataLayout>
-
-      <FileProcessingErrors files={files} />
 
       <PlateMapSection
         entries={plateMapEntries}

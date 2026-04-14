@@ -15,7 +15,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { RunFile } from "@/lib/api/instrument-runs";
-import { Download, Eye, FileText, Loader2, Upload, X } from "lucide-react";
+import {
+  AlertCircle,
+  Download,
+  Eye,
+  FileText,
+  Loader2,
+  RotateCw,
+  Upload,
+  X,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "sonner";
@@ -65,6 +74,10 @@ export function FileCard({
     "completed",
     "failed",
   ].includes(file.status);
+  const isReprocessable =
+    !isDismissed &&
+    (file.status === "failed" || file.status === "completed") &&
+    file.s3Key !== null;
 
   // Signals the watcher agent on the instrument PC to transfer this file to S3.
   // The file transitions from "detected" → "upload_requested" until the watcher
@@ -100,6 +113,21 @@ export function FileCard({
         return;
       }
       toast.success(`Dismissed ${file.filename}`);
+      router.refresh();
+    });
+  }
+
+  function handleReprocess() {
+    startTransition(async () => {
+      const res = await fetch(`/api/v1/files/${file.id}/reprocess`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        toast.error(body?.error?.message ?? "Failed to start reprocessing");
+        return;
+      }
+      toast.success("Reprocessing started");
       router.refresh();
     });
   }
@@ -152,6 +180,13 @@ export function FileCard({
                 {Array.isArray(v) ? v.join(", ") : String(v)}
               </span>
             ))}
+          </div>
+        )}
+
+        {file.status === "failed" && file.errorMessage && (
+          <div className="mt-1 flex items-start gap-1.5 rounded-md bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
+            <AlertCircle className="mt-0.5 size-3 shrink-0" />
+            <span className="wrap-break-word">{file.errorMessage}</span>
           </div>
         )}
       </div>
@@ -212,29 +247,71 @@ export function FileCard({
         )}
 
         {isDownloadable && (
-          <div className="flex items-center gap-1">
-            {file.contentType?.startsWith("image/") && (
-              <Button variant="ghost" size="sm" className="h-7 text-xs" asChild>
-                <a
-                  href={`/api/v1/files/${file.id}/download`}
-                  target="_blank"
-                  rel="noopener noreferrer"
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex items-center gap-1">
+              {file.contentType?.startsWith("image/") && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs"
+                  asChild
                 >
-                  <Eye className="size-3" />
+                  <a
+                    href={`/api/v1/files/${file.id}/download`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <Eye className="size-3" />
+                  </a>
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1 text-xs"
+                asChild
+              >
+                <a href={`/api/v1/files/${file.id}/download`}>
+                  <Download className="size-3" />
+                  Download
                 </a>
               </Button>
+            </div>
+            {isReprocessable && (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 gap-1 text-xs"
+                    disabled={isPending}
+                  >
+                    {isPending ? (
+                      <Loader2 className="size-3 animate-spin" />
+                    ) : (
+                      <RotateCw className="size-3" />
+                    )}
+                    Reprocess
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Reprocess file?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      <strong className="font-mono">{file.filename}</strong>{" "}
+                      will be sent to the Lambda function for reprocessing. Any
+                      existing report data for this file will be cleared.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleReprocess}>
+                      Reprocess
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             )}
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 gap-1 text-xs"
-              asChild
-            >
-              <a href={`/api/v1/files/${file.id}/download`}>
-                <Download className="size-3" />
-                Download
-              </a>
-            </Button>
           </div>
         )}
       </div>
