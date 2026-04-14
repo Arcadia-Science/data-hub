@@ -28,6 +28,10 @@ _COL_PLATE_NAME = 1
 _COL_MEASUREMENT_TYPE = 4
 _COL_MEASUREMENT_MODE = 5
 
+# First index where the ``Raw`` token can appear.  Fields 0–5 are the
+# stable prefix: Plate:, plate_name, version, format, type, mode.
+_RAW_SEARCH_START = 6
+
 _OFF_NUM_READINGS = 2  # offset from Raw index
 _OFF_WAVELENGTH = 9
 _OFF_NUM_WELLS = 12
@@ -60,12 +64,20 @@ def _parse_plate_header(line: str) -> _PlateHeader:
     fields = line.split("\t")
 
     raw_idx: int | None = None
-    for j in range(6, len(fields)):
+    for j in range(_RAW_SEARCH_START, len(fields)):
         if fields[j] == "Raw":
             raw_idx = j
             break
     if raw_idx is None:
         raise ValueError(f"No 'Raw' anchor token found in plate header: {line!r}")
+
+    required_len = raw_idx + _OFF_NUM_WELLS + 1
+    if len(fields) < required_len:
+        raise ValueError(
+            f"Plate header too short after 'Raw' token "
+            f"(need {_OFF_NUM_WELLS + 1} fields after 'Raw', "
+            f"have {len(fields) - raw_idx})"
+        )
 
     return _PlateHeader(
         plate_name=fields[_COL_PLATE_NAME],
@@ -200,7 +212,15 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
         header = _parse_plate_header(lines[i])
         wavelength = int(header.wavelength_raw) if header.wavelength_raw.isdigit() else None
 
+        if i + 1 >= len(lines):
+            raise ValueError(
+                f"File truncated: no column header row after Plate: line at line {i + 1}"
+            )
         num_cols = _count_cols_in_header(lines[i + 1])
+        if header.num_wells % num_cols != 0:
+            raise ValueError(
+                f"num_wells ({header.num_wells}) is not evenly divisible by num_cols ({num_cols})"
+            )
         num_rows = header.num_wells // num_cols
 
         i += 2  # Skip plate header + column header row.
