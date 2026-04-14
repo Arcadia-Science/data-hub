@@ -332,6 +332,16 @@ describe("MCP Protocol (in-memory)", () => {
     expect(text).toContain("run-42");
   });
 
+  it("troubleshoot_instrument prompt includes instrument in message", async () => {
+    const result = await client.getPrompt({
+      name: "troubleshoot_instrument",
+      arguments: { instrumentId: "my-inst" },
+    });
+    expect(result.messages).toHaveLength(1);
+    const text = (result.messages[0].content as { text: string }).text;
+    expect(text).toContain("my-inst");
+  });
+
   it("compare_runs prompt includes both run IDs", async () => {
     const result = await client.getPrompt({
       name: "compare_runs",
