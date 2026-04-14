@@ -188,8 +188,6 @@ export const instruments = pgTable("instruments", {
   instrumentType: instrumentTypeEnum("instrument_type")
     .notNull()
     .default("generic"),
-  // Suggested glob patterns for the file upload service (e.g., `["*.xls"]`).
-  filePatterns: text("file_patterns").array(),
   // The file extension suffix configured on the S3→Lambda trigger (e.g.,
   // `.xls`). Used for validation warnings in the watcher.
   s3TriggerSuffix: text("s3_trigger_suffix"),

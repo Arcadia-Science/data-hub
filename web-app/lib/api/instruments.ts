@@ -2,14 +2,16 @@ import { db } from "@/lib/db";
 import { instrumentRuns, instruments, watchers } from "@/lib/db/schema";
 import { and, count, eq, isNull, sql } from "drizzle-orm";
 import { cache } from "react";
+import YAML from "yaml";
 
 export type InstrumentListItem = {
   id: string;
   displayName: string;
   status: "pending" | "active" | "inactive";
   instrumentType: "generic" | "plate_reader";
-  filePatterns: string[] | null;
+  filePatterns: string[];
   runCount: number;
+  lastRunAt: Date | null;
   watcherCount: number;
   watchersOnline: number;
   createdAt: Date;
@@ -18,6 +20,34 @@ export type InstrumentListItem = {
 // A watcher is stale when its last heartbeat is older than this threshold,
 // even if its DB status is "watching". Must match the window in dashboard.ts.
 const HEARTBEAT_STALE_MINUTES = 5;
+
+/**
+ * Extracts `instrument.file_patterns` from a watcher's stored config YAML.
+ * Returns an empty array when the YAML is missing or unparseable.
+ */
+function extractFilePatterns(configYaml: string | null): string[] {
+  if (!configYaml) return [];
+  try {
+    const doc = YAML.parse(configYaml);
+    const patterns = doc?.instrument?.file_patterns;
+    if (Array.isArray(patterns)) return patterns.map(String);
+  } catch {
+    // Malformed YAML — silently ignore.
+  }
+  return [];
+}
+
+/**
+ * Deduplicates and merges file patterns from all watcher configs for an
+ * instrument. When multiple watchers exist, patterns are unioned.
+ */
+function mergeFilePatterns(configs: (string | null)[]): string[] {
+  const set = new Set<string>();
+  for (const yaml of configs) {
+    for (const p of extractFilePatterns(yaml)) set.add(p);
+  }
+  return [...set].sort();
+}
 
 // Uses pre-aggregated sub-selects instead of direct joins to avoid row
 // multiplication (instruments × runs × watchers would inflate counts).
@@ -28,6 +58,9 @@ export async function getInstrumentListWithCounts(): Promise<
     .select({
       instrumentId: instrumentRuns.instrumentId,
       count: sql<number>`cast(count(*) as int)`.as("run_count"),
+      lastRunAt: sql<Date | null>`max(${instrumentRuns.createdAt})`.as(
+        "last_run_at"
+      ),
     })
     .from(instrumentRuns)
     .where(isNull(instrumentRuns.deletedAt))
@@ -48,24 +81,46 @@ export async function getInstrumentListWithCounts(): Promise<
     .groupBy(watchers.instrumentId)
     .as("watcher_counts");
 
-  const rows = await db
-    .select({
-      id: instruments.id,
-      displayName: instruments.displayName,
-      status: instruments.status,
-      instrumentType: instruments.instrumentType,
-      filePatterns: instruments.filePatterns,
-      createdAt: instruments.createdAt,
-      runCount: sql<number>`coalesce(${runCountSq.count}, 0)`,
-      watcherCount: sql<number>`coalesce(${watcherCountSq.count}, 0)`,
-      watchersOnline: sql<number>`coalesce(${watcherCountSq.online}, 0)`,
-    })
-    .from(instruments)
-    .leftJoin(runCountSq, eq(runCountSq.instrumentId, instruments.id))
-    .leftJoin(watcherCountSq, eq(watcherCountSq.instrumentId, instruments.id))
-    .orderBy(instruments.displayName);
+  const [rows, watcherConfigs] = await Promise.all([
+    db
+      .select({
+        id: instruments.id,
+        displayName: instruments.displayName,
+        status: instruments.status,
+        instrumentType: instruments.instrumentType,
+        createdAt: instruments.createdAt,
+        runCount: sql<number>`coalesce(${runCountSq.count}, 0)`,
+        lastRunAt: runCountSq.lastRunAt,
+        watcherCount: sql<number>`coalesce(${watcherCountSq.count}, 0)`,
+        watchersOnline: sql<number>`coalesce(${watcherCountSq.online}, 0)`,
+      })
+      .from(instruments)
+      .leftJoin(runCountSq, eq(runCountSq.instrumentId, instruments.id))
+      .leftJoin(
+        watcherCountSq,
+        eq(watcherCountSq.instrumentId, instruments.id)
+      )
+      .orderBy(instruments.displayName),
+    db
+      .select({
+        instrumentId: watchers.instrumentId,
+        configYaml: watchers.configYaml,
+      })
+      .from(watchers)
+      .where(isNull(watchers.deletedAt)),
+  ]);
 
-  return rows;
+  const configsByInstrument = new Map<string, (string | null)[]>();
+  for (const w of watcherConfigs) {
+    const arr = configsByInstrument.get(w.instrumentId) ?? [];
+    arr.push(w.configYaml);
+    configsByInstrument.set(w.instrumentId, arr);
+  }
+
+  return rows.map((row) => ({
+    ...row,
+    filePatterns: mergeFilePatterns(configsByInstrument.get(row.id) ?? []),
+  }));
 }
 
 export type InstrumentDetail = {
@@ -73,7 +128,7 @@ export type InstrumentDetail = {
   displayName: string;
   status: "pending" | "active" | "inactive";
   instrumentType: "generic" | "plate_reader";
-  filePatterns: string[] | null;
+  filePatterns: string[];
   s3TriggerSuffix: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -94,8 +149,6 @@ export const getInstrumentById = cache(async function getInstrumentById(
 
   if (!instrument) return null;
 
-  // Fetch run count and watcher rows in parallel — watcher rows are returned
-  // individually so we can classify each as online/offline based on heartbeat.
   const [runCountResult, watcherRows] = await Promise.all([
     db
       .select({ value: count() })
@@ -110,6 +163,7 @@ export const getInstrumentById = cache(async function getInstrumentById(
       .select({
         status: watchers.status,
         lastHeartbeatAt: watchers.lastHeartbeatAt,
+        configYaml: watchers.configYaml,
       })
       .from(watchers)
       .where(
@@ -137,7 +191,7 @@ export const getInstrumentById = cache(async function getInstrumentById(
     displayName: instrument.displayName,
     status: instrument.status,
     instrumentType: instrument.instrumentType,
-    filePatterns: instrument.filePatterns,
+    filePatterns: mergeFilePatterns(watcherRows.map((w) => w.configYaml)),
     s3TriggerSuffix: instrument.s3TriggerSuffix,
     createdAt: instrument.createdAt,
     updatedAt: instrument.updatedAt,

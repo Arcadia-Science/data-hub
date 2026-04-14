@@ -15,6 +15,13 @@
       "when": 1776105006278,
       "tag": "0001_wealthy_mathemanic",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1776126904654,
+      "tag": "0002_regular_emma_frost",
+      "breakpoints": true
     }
   ]
 }

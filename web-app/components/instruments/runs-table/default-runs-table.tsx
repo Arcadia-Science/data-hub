@@ -10,9 +10,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import Link from "next/link";
 
 import type { RunsTableProps } from ".";
+import { ClickableRow } from "./clickable-row";
 
 // Shows at most 3 key-value pairs from the run's freeform JSON metadata
 // to keep the table column compact; the run detail page shows all.
@@ -55,18 +55,17 @@ export function DefaultRunsTable({ data, instrumentId }: RunsTableProps) {
           {data.map((row) => {
             const isDeleted = row.deleted_at !== null;
             return (
-              <TableRow key={row.id} className={cn(isDeleted && "opacity-50")}>
+              <ClickableRow
+                key={row.id}
+                href={`/instruments/${instrumentId}/runs/${row.run_id}`}
+                className={cn(isDeleted && "opacity-50")}
+              >
                 <TableCell>
-                  <Link
-                    href={`/instruments/${instrumentId}/runs/${row.run_id}`}
-                    className="hover:underline"
+                  <span
+                    className={cn("font-mono", isDeleted && "line-through")}
                   >
-                    <span
-                      className={cn("font-mono", isDeleted && "line-through")}
-                    >
-                      {row.run_id}
-                    </span>
-                  </Link>
+                    {row.run_id}
+                  </span>
                   {isDeleted && (
                     <Badge variant="outline" className="ml-1.5 font-normal">
                       deleted
@@ -87,7 +86,7 @@ export function DefaultRunsTable({ data, instrumentId }: RunsTableProps) {
                 <TableCell className="text-right">
                   <RelativeTime date={row.created_at.toISOString()} />
                 </TableCell>
-              </TableRow>
+              </ClickableRow>
             );
           })}
         </TableBody>

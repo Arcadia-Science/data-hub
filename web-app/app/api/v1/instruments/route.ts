@@ -27,7 +27,6 @@ export async function GET(request: NextRequest) {
       display_name: instruments.displayName,
       status: instruments.status,
       instrument_type: instruments.instrumentType,
-      file_patterns: instruments.filePatterns,
       s3_trigger_suffix: instruments.s3TriggerSuffix,
     })
     .from(instruments);
@@ -94,7 +93,6 @@ export async function POST(request: NextRequest) {
       display_name: instruments.displayName,
       status: instruments.status,
       instrument_type: instruments.instrumentType,
-      file_patterns: instruments.filePatterns,
       s3_trigger_suffix: instruments.s3TriggerSuffix,
       created_at: instruments.createdAt,
     });

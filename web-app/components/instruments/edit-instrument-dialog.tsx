@@ -38,34 +38,25 @@ const INSTRUMENT_TYPE_OPTIONS = VALID_INSTRUMENT_TYPES.map((value) => ({
 export function EditInstrumentDialog({
   instrumentId,
   displayName,
-  filePatterns,
   instrumentType,
 }: {
   instrumentId: string;
   displayName: string;
-  filePatterns: string[];
   instrumentType: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(displayName);
-  const [patterns, setPatterns] = useState(filePatterns.join(", "));
   const [type, setType] = useState(instrumentType);
   const [isPending, startTransition] = useTransition();
 
   function handleSave() {
     startTransition(async () => {
-      const parsedPatterns = patterns
-        .split(",")
-        .map((p) => p.trim())
-        .filter(Boolean);
-
       const res = await fetch(`/api/v1/instruments/${instrumentId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           display_name: name.trim(),
-          file_patterns: parsedPatterns,
           instrument_type: type,
         }),
       });
@@ -91,22 +82,21 @@ export function EditInstrumentDialog({
         // server-side changes since the last time it was opened.
         if (value) {
           setName(displayName);
-          setPatterns(filePatterns.join(", "));
           setType(instrumentType);
         }
       }}
     >
       <DialogTrigger asChild>
-        <Button variant="ghost" size="sm" className="h-7 w-7 p-0">
+        <Button variant="ghost" size="sm" className="flex gap-2 text-sm">
           <Pencil className="size-3.5" />
-          <span className="sr-only">Edit instrument</span>
+          <span>Edit</span>
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Edit instrument</DialogTitle>
           <DialogDescription>
-            Update the display name or file patterns for{" "}
+            Update the display name or type for{" "}
             <span className="font-mono">{instrumentId}</span>.
           </DialogDescription>
         </DialogHeader>
@@ -120,18 +110,6 @@ export function EditInstrumentDialog({
               maxLength={100}
               autoFocus
             />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="edit-patterns">File patterns</Label>
-            <Input
-              id="edit-patterns"
-              placeholder="e.g. *.xls, *.csv"
-              value={patterns}
-              onChange={(e) => setPatterns(e.target.value)}
-            />
-            <p className="text-xs text-muted-foreground">
-              Comma-separated glob patterns.
-            </p>
           </div>
           <div className="grid gap-2">
             <Label htmlFor="edit-type">Instrument type</Label>

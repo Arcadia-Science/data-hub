@@ -60,7 +60,6 @@ export async function GET(
     display_name: instrument.displayName,
     status: instrument.status,
     instrument_type: instrument.instrumentType,
-    file_patterns: instrument.filePatterns,
     s3_trigger_suffix: instrument.s3TriggerSuffix,
     created_at: instrument.createdAt,
     updated_at: instrument.updatedAt,
@@ -71,7 +70,6 @@ export async function GET(
 
 const ALLOWED_PATCH_FIELDS = new Set([
   "status",
-  "file_patterns",
   "display_name",
   "instrument_type",
 ]);
@@ -141,7 +139,6 @@ export async function PATCH(
 
   const updates: Record<string, unknown> = {};
   if ("status" in body) updates.status = body.status;
-  if ("file_patterns" in body) updates.filePatterns = body.file_patterns;
   if ("display_name" in body) updates.displayName = body.display_name;
   if ("instrument_type" in body) updates.instrumentType = body.instrument_type;
 
@@ -158,7 +155,6 @@ export async function PATCH(
       display_name: instruments.displayName,
       status: instruments.status,
       instrument_type: instruments.instrumentType,
-      file_patterns: instruments.filePatterns,
       s3_trigger_suffix: instruments.s3TriggerSuffix,
       created_at: instruments.createdAt,
       updated_at: instruments.updatedAt,

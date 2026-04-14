@@ -68,23 +68,9 @@ export function InstrumentHeader({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-mono text-xs text-muted-foreground">
+        <span className="font-mono text-sm text-muted-foreground">
           {instrument.id}
         </span>
-        {instrument.filePatterns && instrument.filePatterns.length > 0 && (
-          <>
-            <span className="text-muted-foreground">·</span>
-            {instrument.filePatterns.map((p) => (
-              <Badge
-                key={p}
-                variant="outline"
-                className="font-mono text-sm font-normal"
-              >
-                {p}
-              </Badge>
-            ))}
-          </>
-        )}
       </div>
     </div>
   );
