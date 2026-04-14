@@ -32,6 +32,10 @@ export const instrumentDetailSearchParams = {
   include_deleted: parseAsBoolean.withDefault(false),
   page: parseAsInteger.withDefault(1),
   per_page: parseAsInteger.withDefault(25),
+  // Plate-reader metadata column filters (ignored for generic instruments).
+  wavelength: parseAsString,
+  measurement_mode: parseAsString,
+  measurement_type: parseAsString,
 };
 
 export const instrumentDetailParamsCache = createSearchParamsCache(
@@ -45,6 +49,8 @@ export const watcherDetailSearchParams = {
   event_type: parseAsArrayOf(parseAsString).withDefault([]),
   since: parseAsString,
   events_since: parseAsString,
+  hb_page: parseAsInteger.withDefault(1),
+  logs_page: parseAsInteger.withDefault(1),
 };
 
 export const watcherDetailParamsCache = createSearchParamsCache(
@@ -54,15 +60,11 @@ export const watcherDetailParamsCache = createSearchParamsCache(
 export function hasActiveFilters(params: {
   search: string;
   instrument_id: string[];
-  date_from: string | null;
-  date_to: string | null;
   include_deleted: boolean;
 }): boolean {
   return (
     params.search !== "" ||
     params.instrument_id.length > 0 ||
-    params.date_from !== null ||
-    params.date_to !== null ||
     params.include_deleted
   );
 }

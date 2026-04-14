@@ -3,15 +3,6 @@ import type { InstrumentDetail } from "@/lib/api/instruments";
 import { Activity, ArrowLeft, Radio, WifiOff } from "lucide-react";
 import Link from "next/link";
 
-const statusBadge: Record<
-  InstrumentDetail["status"],
-  { label: string; variant: "default" | "outline" | "secondary" }
-> = {
-  active: { label: "Active", variant: "default" },
-  pending: { label: "Pending", variant: "outline" },
-  inactive: { label: "Inactive", variant: "secondary" },
-};
-
 type WatcherVariant = "online" | "offline" | "no_watcher";
 
 const watcherBadge: Record<
@@ -39,7 +30,6 @@ export function InstrumentHeader({
 }: {
   instrument: InstrumentDetail;
 }) {
-  const sb = statusBadge[instrument.status];
   const wv = getWatcherVariant(instrument);
   const wb = watcherBadge[wv];
   const WatcherIcon = wb.icon;
@@ -59,13 +49,10 @@ export function InstrumentHeader({
           <h1 className="text-2xl font-semibold tracking-tight">
             {instrument.displayName}
           </h1>
-          <Badge variant={sb.variant} className="text-[10px]">
-            {sb.label}
-          </Badge>
         </div>
 
         <div className="flex items-center gap-2">
-          <Badge variant={wb.variant} className="gap-1 text-[10px]">
+          <Badge variant={wb.variant} className="gap-1 px-2 py-3 text-xs">
             <WatcherIcon className="size-3" />
             {wb.label}
             {instrument.watcherCount > 0 && (
@@ -74,30 +61,16 @@ export function InstrumentHeader({
               </span>
             )}
           </Badge>
-          <Badge variant="outline" className="font-mono text-[10px]">
+          <Badge variant="outline" className="px-2 py-3 font-mono text-xs">
             {instrument.runCount} {instrument.runCount === 1 ? "run" : "runs"}
           </Badge>
         </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-mono text-xs text-muted-foreground">
+        <span className="font-mono text-sm text-muted-foreground">
           {instrument.id}
         </span>
-        {instrument.filePatterns && instrument.filePatterns.length > 0 && (
-          <>
-            <span className="text-muted-foreground">·</span>
-            {instrument.filePatterns.map((p) => (
-              <Badge
-                key={p}
-                variant="outline"
-                className="font-mono text-[10px] font-normal"
-              >
-                {p}
-              </Badge>
-            ))}
-          </>
-        )}
       </div>
     </div>
   );

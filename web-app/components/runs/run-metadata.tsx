@@ -1,4 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 
 function formatValue(value: unknown): string {
   if (Array.isArray(value)) return value.join(", ");
@@ -18,7 +19,7 @@ export function RunMetadata({
     return (
       <Card size="sm">
         <CardHeader>
-          <CardTitle>Metadata</CardTitle>
+          <CardTitle>Instrument Metadata</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">No metadata recorded.</p>
@@ -30,17 +31,23 @@ export function RunMetadata({
   return (
     <Card size="sm">
       <CardHeader>
-        <CardTitle>Metadata</CardTitle>
+        <CardTitle>Instrument Metadata</CardTitle>
       </CardHeader>
       <CardContent>
-        <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
-          {entries.map(([key, value]) => (
-            <div key={key} className="col-span-2 grid grid-cols-subgrid">
-              <dt className="font-mono text-xs text-muted-foreground">{key}</dt>
-              <dd className="break-all">{formatValue(value)}</dd>
-            </div>
-          ))}
-        </dl>
+        <Table>
+          <TableBody>
+            {entries.map(([key, value]) => (
+              <TableRow key={key}>
+                <TableCell className="w-[40%] align-top font-mono text-xs whitespace-nowrap text-muted-foreground">
+                  {key}
+                </TableCell>
+                <TableCell className="min-w-0 align-top break-all whitespace-normal">
+                  {formatValue(value)}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       </CardContent>
     </Card>
   );

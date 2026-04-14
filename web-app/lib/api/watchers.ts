@@ -6,7 +6,7 @@ import {
   watcherHeartbeats,
   watchers,
 } from "@/lib/db/schema";
-import { and, desc, eq, gte, inArray, isNull } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, isNull } from "drizzle-orm";
 import { cache } from "react";
 
 export const STALE_THRESHOLD_MS = 5 * 60 * 1000;
@@ -175,37 +175,47 @@ export type WatcherHeartbeatRow = {
 // rule forbids.
 const DEFAULT_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 
-export type PaginatedResult<T> = { rows: T[]; truncated: boolean };
+export const WATCHER_PAGE_SIZE = 20;
+
+export type PaginatedResult<T> = { rows: T[]; total: number };
 
 export async function getWatcherHeartbeats(
   watcherId: string,
-  opts: { since?: Date; limit?: number } = {}
+  opts: { since?: Date; page?: number; pageSize?: number } = {}
 ): Promise<PaginatedResult<WatcherHeartbeatRow>> {
-  const limit = opts.limit ?? 200;
+  const pageSize = opts.pageSize ?? WATCHER_PAGE_SIZE;
+  const page = Math.max(1, opts.page ?? 1);
+  const offset = (page - 1) * pageSize;
   const since = opts.since ?? new Date(Date.now() - DEFAULT_LOOKBACK_MS);
   const conditions = [
     eq(watcherHeartbeats.watcherId, watcherId),
     gte(watcherHeartbeats.timestamp, since),
   ];
 
-  const rows = await db
-    .select({
-      id: watcherHeartbeats.id,
-      timestamp: watcherHeartbeats.timestamp,
-      status: watcherHeartbeats.status,
-      uploadMode: watcherHeartbeats.uploadMode,
-      filesUploadedSinceLast: watcherHeartbeats.filesUploadedSinceLast,
-      runsReportedSinceLast: watcherHeartbeats.runsReportedSinceLast,
-      errorsSinceLast: watcherHeartbeats.errorsSinceLast,
-      uptimeSeconds: watcherHeartbeats.uptimeSeconds,
-    })
-    .from(watcherHeartbeats)
-    .where(and(...conditions))
-    .orderBy(desc(watcherHeartbeats.timestamp))
-    .limit(limit + 1);
+  const [rows, [{ value: total }]] = await Promise.all([
+    db
+      .select({
+        id: watcherHeartbeats.id,
+        timestamp: watcherHeartbeats.timestamp,
+        status: watcherHeartbeats.status,
+        uploadMode: watcherHeartbeats.uploadMode,
+        filesUploadedSinceLast: watcherHeartbeats.filesUploadedSinceLast,
+        runsReportedSinceLast: watcherHeartbeats.runsReportedSinceLast,
+        errorsSinceLast: watcherHeartbeats.errorsSinceLast,
+        uptimeSeconds: watcherHeartbeats.uptimeSeconds,
+      })
+      .from(watcherHeartbeats)
+      .where(and(...conditions))
+      .orderBy(desc(watcherHeartbeats.timestamp))
+      .limit(pageSize)
+      .offset(offset),
+    db
+      .select({ value: count() })
+      .from(watcherHeartbeats)
+      .where(and(...conditions)),
+  ]);
 
-  const truncated = rows.length > limit;
-  return { rows: truncated ? rows.slice(0, limit) : rows, truncated };
+  return { rows, total };
 }
 
 // ---------------------------------------------------------------------------
@@ -222,9 +232,16 @@ export type WatcherEventRow = {
 
 export async function getWatcherEvents(
   watcherId: string,
-  opts: { since?: Date; eventTypes?: string[]; limit?: number } = {}
+  opts: {
+    since?: Date;
+    eventTypes?: string[];
+    page?: number;
+    pageSize?: number;
+  } = {}
 ): Promise<PaginatedResult<WatcherEventRow>> {
-  const limit = opts.limit ?? 200;
+  const pageSize = opts.pageSize ?? WATCHER_PAGE_SIZE;
+  const page = Math.max(1, opts.page ?? 1);
+  const offset = (page - 1) * pageSize;
   const since = opts.since ?? new Date(Date.now() - DEFAULT_LOOKBACK_MS);
   const conditions = [
     eq(watcherEvents.watcherId, watcherId),
@@ -243,19 +260,25 @@ export async function getWatcherEvents(
     }
   }
 
-  const rows = await db
-    .select({
-      id: watcherEvents.id,
-      eventType: watcherEvents.eventType,
-      message: watcherEvents.message,
-      details: watcherEvents.details,
-      timestamp: watcherEvents.timestamp,
-    })
-    .from(watcherEvents)
-    .where(and(...conditions))
-    .orderBy(desc(watcherEvents.timestamp))
-    .limit(limit + 1);
+  const [rows, [{ value: total }]] = await Promise.all([
+    db
+      .select({
+        id: watcherEvents.id,
+        eventType: watcherEvents.eventType,
+        message: watcherEvents.message,
+        details: watcherEvents.details,
+        timestamp: watcherEvents.timestamp,
+      })
+      .from(watcherEvents)
+      .where(and(...conditions))
+      .orderBy(desc(watcherEvents.timestamp))
+      .limit(pageSize)
+      .offset(offset),
+    db
+      .select({ value: count() })
+      .from(watcherEvents)
+      .where(and(...conditions)),
+  ]);
 
-  const truncated = rows.length > limit;
-  return { rows: truncated ? rows.slice(0, limit) : rows, truncated };
+  return { rows, total };
 }

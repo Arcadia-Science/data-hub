@@ -1,9 +1,7 @@
-import { EventLog } from "@/components/watchers/event-log";
-import { EventLogToolbar } from "@/components/watchers/event-log-toolbar";
-import { HeartbeatTable } from "@/components/watchers/heartbeat-table";
-import { WatcherConfig } from "@/components/watchers/watcher-config";
+import { WatcherDetailTabs } from "@/components/watchers/watcher-detail-tabs";
 import { WatcherHeader } from "@/components/watchers/watcher-header";
 import {
+  WATCHER_PAGE_SIZE,
   getWatcherById,
   getWatcherEvents,
   getWatcherHeartbeats,
@@ -46,26 +44,37 @@ export default async function WatcherDetailPage({
   // Three independent queries — none depends on the others' results.
   const [watcher, heartbeatResult, eventResult] = await Promise.all([
     getWatcherById(watcherId),
-    getWatcherHeartbeats(watcherId, { since: heartbeatSince }),
+    getWatcherHeartbeats(watcherId, {
+      since: heartbeatSince,
+      page: filters.hb_page,
+    }),
     getWatcherEvents(watcherId, {
       since: eventsSince,
       eventTypes:
         filters.event_type.length > 0 ? filters.event_type : undefined,
+      page: filters.logs_page,
     }),
   ]);
 
   if (!watcher) notFound();
 
+  const hbTotalPages = Math.ceil(heartbeatResult.total / WATCHER_PAGE_SIZE);
+  const logsTotalPages = Math.ceil(eventResult.total / WATCHER_PAGE_SIZE);
+
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6 p-6">
       <WatcherHeader watcher={watcher} />
-      <WatcherConfig configYaml={watcher.configYaml} />
-      <HeartbeatTable
+      <WatcherDetailTabs
+        configYaml={watcher.configYaml}
         heartbeats={heartbeatResult.rows}
-        truncated={heartbeatResult.truncated}
+        heartbeatsTotal={heartbeatResult.total}
+        heartbeatsPage={filters.hb_page}
+        heartbeatsTotalPages={hbTotalPages}
+        events={eventResult.rows}
+        eventsTotal={eventResult.total}
+        eventsPage={filters.logs_page}
+        eventsTotalPages={logsTotalPages}
       />
-      <EventLogToolbar />
-      <EventLog events={eventResult.rows} truncated={eventResult.truncated} />
     </div>
   );
 }

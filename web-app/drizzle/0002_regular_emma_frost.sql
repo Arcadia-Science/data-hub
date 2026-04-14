@@ -1,0 +1,1 @@
+ALTER TABLE "instruments" DROP COLUMN "file_patterns";

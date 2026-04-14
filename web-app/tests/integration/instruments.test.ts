@@ -133,19 +133,17 @@ describe("Instruments API", () => {
     expect(data.status).toBe("active");
   });
 
-  it("PATCH /api/v1/instruments/:id updates display_name and file_patterns", async () => {
+  it("PATCH /api/v1/instruments/:id updates display_name", async () => {
     const res = await api("/api/v1/instruments/test-instrument", {
       method: "PATCH",
       token,
       body: {
         display_name: "Renamed Instrument",
-        file_patterns: ["*.csv", "*.xlsx"],
       },
     });
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.display_name).toBe("Renamed Instrument");
-    expect(data.file_patterns).toEqual(["*.csv", "*.xlsx"]);
   });
 
   it("PATCH /api/v1/instruments/:id rejects unknown fields", async () => {

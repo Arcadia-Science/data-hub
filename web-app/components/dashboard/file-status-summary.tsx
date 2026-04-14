@@ -29,11 +29,11 @@ export function FileStatusSummary({
 
   return (
     <div className="flex items-center gap-1.5">
-      <Badge variant={variant} className="font-mono text-[10px]">
+      <Badge variant={variant} className="font-mono">
         {filesCompleted}/{fileCount} processed
       </Badge>
       {filesPendingUpload > 0 && (
-        <Badge variant="outline" className="gap-1 font-mono text-[10px]">
+        <Badge variant="outline" className="gap-1 font-mono">
           <Upload className="size-3" />
           {filesPendingUpload}
         </Badge>

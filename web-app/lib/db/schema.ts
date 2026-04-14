@@ -45,6 +45,14 @@ export const instrumentRunSourceEnum = pgEnum("instrument_run_source", [
   "watcher",
 ]);
 
+export const instrumentTypeEnum = pgEnum("instrument_type", [
+  "generic",
+  "plate_reader",
+]);
+
+export const VALID_INSTRUMENT_TYPES = instrumentTypeEnum.enumValues;
+export type InstrumentType = (typeof VALID_INSTRUMENT_TYPES)[number];
+
 export const fileCategoryEnum = pgEnum("file_category", ["raw", "processed"]);
 
 export const fileStatusEnum = pgEnum("file_status", [
@@ -175,8 +183,11 @@ export const instruments = pgTable("instruments", {
   // New instruments registered via the watcher CLI start as `pending` until
   // confirmed by an admin.
   status: instrumentStatusEnum("status").notNull().default("active"),
-  // Suggested glob patterns for the file upload service (e.g., `["*.xls"]`).
-  filePatterns: text("file_patterns").array(),
+  // Categorises the instrument for variant-specific UI (e.g., plate reader
+  // runs display a plate map grid). Defaults to "generic" for existing rows.
+  instrumentType: instrumentTypeEnum("instrument_type")
+    .notNull()
+    .default("generic"),
   // The file extension suffix configured on the S3→Lambda trigger (e.g.,
   // `.xls`). Used for validation warnings in the watcher.
   s3TriggerSuffix: text("s3_trigger_suffix"),

@@ -10,17 +10,15 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { InstrumentListItem } from "@/lib/api/instruments";
-import { FlaskConical, SearchX } from "lucide-react";
+import { formatDistanceToNowStrict, isToday } from "date-fns";
+import { FlaskConical, Radio, SearchX, WifiOff } from "lucide-react";
 import Link from "next/link";
 
-const statusBadge: Record<
-  InstrumentListItem["status"],
-  { label: string; variant: "default" | "outline" | "secondary" }
-> = {
-  active: { label: "Active", variant: "default" },
-  pending: { label: "Pending", variant: "outline" },
-  inactive: { label: "Inactive", variant: "secondary" },
-};
+function formatLastRun(date: Date | null): string {
+  if (!date) return "—";
+  if (isToday(date)) return "Today";
+  return formatDistanceToNowStrict(date, { addSuffix: true });
+}
 
 export function InstrumentsTable({ data }: { data: InstrumentListItem[] }) {
   if (data.length === 0) {
@@ -42,58 +40,67 @@ export function InstrumentsTable({ data }: { data: InstrumentListItem[] }) {
             <TableHead>Instrument</TableHead>
             <TableHead>Status</TableHead>
             <TableHead>File Patterns</TableHead>
-            <TableHead className="text-right">Watchers</TableHead>
-            <TableHead className="text-right">Runs</TableHead>
+            <TableHead>Total Runs</TableHead>
+            <TableHead>Last Run</TableHead>
             <TableHead className="w-[100px]" />
           </TableRow>
         </TableHeader>
         <TableBody>
           {data.map((row) => {
-            const sb = statusBadge[row.status];
+            const isOnline = row.watcherCount > 0 && row.watchersOnline > 0;
             return (
-              <TableRow key={row.id}>
+              <TableRow key={row.id} className="text-sm">
                 <TableCell>
                   <Link
                     href={`/instruments/${row.id}`}
                     className="flex items-center gap-1.5 hover:underline"
                   >
                     <FlaskConical className="size-3.5 shrink-0 text-muted-foreground" />
-                    <span className="text-sm font-medium">
-                      {row.displayName}
-                    </span>
+                    <span className="font-medium">{row.displayName}</span>
                   </Link>
-                  <span className="mt-0.5 block font-mono text-[10px] text-muted-foreground">
+                  <span className="mt-0.5 block font-mono text-xs text-muted-foreground">
                     {row.id}
                   </span>
                 </TableCell>
                 <TableCell>
-                  <Badge variant={sb.variant} className="text-[10px]">
-                    {sb.label}
-                  </Badge>
+                  {row.watcherCount > 0 ? (
+                    <Badge
+                      variant={isOnline ? "default" : "destructive"}
+                      className="gap-1 text-sm"
+                    >
+                      {isOnline ? (
+                        <Radio className="size-3" />
+                      ) : (
+                        <WifiOff className="size-3" />
+                      )}
+                      {isOnline ? "Online" : "Offline"}
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="gap-1 text-sm">
+                      <WifiOff className="size-3" />
+                      No Watcher
+                    </Badge>
+                  )}
                 </TableCell>
                 <TableCell>
-                  {row.filePatterns && row.filePatterns.length > 0 ? (
+                  {row.filePatterns.length > 0 ? (
                     <div className="flex flex-wrap gap-1">
                       {row.filePatterns.map((p) => (
                         <Badge
                           key={p}
                           variant="outline"
-                          className="font-mono text-[10px] font-normal"
+                          className="font-mono text-sm font-normal"
                         >
                           {p}
                         </Badge>
                       ))}
                     </div>
                   ) : (
-                    <span className="text-xs text-muted-foreground">—</span>
+                    <span className="text-muted-foreground">—</span>
                   )}
                 </TableCell>
-                <TableCell className="text-right font-mono text-sm">
-                  {row.watcherCount}
-                </TableCell>
-                <TableCell className="text-right font-mono text-sm">
-                  {row.runCount}
-                </TableCell>
+                <TableCell className="font-mono">{row.runCount}</TableCell>
+                <TableCell>{formatLastRun(row.lastRunAt)}</TableCell>
                 <TableCell>
                   <div className="flex items-center justify-end gap-1">
                     {/* Only pending instruments need the approval action;
@@ -104,7 +111,7 @@ export function InstrumentsTable({ data }: { data: InstrumentListItem[] }) {
                     <EditInstrumentDialog
                       instrumentId={row.id}
                       displayName={row.displayName}
-                      filePatterns={row.filePatterns ?? []}
+                      instrumentType={row.instrumentType}
                     />
                   </div>
                 </TableCell>

@@ -7,7 +7,11 @@ import {
 } from "@/lib/api/errors";
 import { isValidKebabCase } from "@/lib/api/validators";
 import { db } from "@/lib/db";
-import { instruments } from "@/lib/db/schema";
+import {
+  type InstrumentType,
+  instruments,
+  VALID_INSTRUMENT_TYPES,
+} from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 
@@ -22,7 +26,7 @@ export async function GET(request: NextRequest) {
       id: instruments.id,
       display_name: instruments.displayName,
       status: instruments.status,
-      file_patterns: instruments.filePatterns,
+      instrument_type: instruments.instrumentType,
       s3_trigger_suffix: instruments.s3TriggerSuffix,
     })
     .from(instruments);
@@ -36,7 +40,7 @@ export async function POST(request: NextRequest) {
     return apiError(401, UNAUTHORIZED, "Authentication required");
   }
 
-  let body: { id?: string; display_name?: string };
+  let body: { id?: string; display_name?: string; instrument_type?: string };
   try {
     body = await request.json();
   } catch {
@@ -75,15 +79,20 @@ export async function POST(request: NextRequest) {
           .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
           .join(" ");
 
-  // New instruments start as "pending" until confirmed by an admin.
+  const instrumentType: InstrumentType =
+    typeof body.instrument_type === "string" &&
+    (VALID_INSTRUMENT_TYPES as readonly string[]).includes(body.instrument_type)
+      ? (body.instrument_type as InstrumentType)
+      : "generic";
+
   const [created] = await db
     .insert(instruments)
-    .values({ id, displayName, status: "pending" })
+    .values({ id, displayName, status: "pending", instrumentType })
     .returning({
       id: instruments.id,
       display_name: instruments.displayName,
       status: instruments.status,
-      file_patterns: instruments.filePatterns,
+      instrument_type: instruments.instrumentType,
       s3_trigger_suffix: instruments.s3TriggerSuffix,
       created_at: instruments.createdAt,
     });

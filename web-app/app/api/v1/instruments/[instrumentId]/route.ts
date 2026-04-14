@@ -6,7 +6,12 @@ import {
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
 import { db } from "@/lib/db";
-import { instrumentRuns, instruments, watchers } from "@/lib/db/schema";
+import {
+  instrumentRuns,
+  instruments,
+  VALID_INSTRUMENT_TYPES,
+  watchers,
+} from "@/lib/db/schema";
 import { and, count, eq, isNull } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 
@@ -54,7 +59,7 @@ export async function GET(
     id: instrument.id,
     display_name: instrument.displayName,
     status: instrument.status,
-    file_patterns: instrument.filePatterns,
+    instrument_type: instrument.instrumentType,
     s3_trigger_suffix: instrument.s3TriggerSuffix,
     created_at: instrument.createdAt,
     updated_at: instrument.updatedAt,
@@ -65,8 +70,8 @@ export async function GET(
 
 const ALLOWED_PATCH_FIELDS = new Set([
   "status",
-  "file_patterns",
   "display_name",
+  "instrument_type",
 ]);
 
 export async function PATCH(
@@ -119,10 +124,23 @@ export async function PATCH(
     );
   }
 
+  if (
+    "instrument_type" in body &&
+    !(VALID_INSTRUMENT_TYPES as readonly string[]).includes(
+      body.instrument_type as string
+    )
+  ) {
+    return apiError(
+      400,
+      VALIDATION_ERROR,
+      `Invalid instrument_type — must be one of: ${VALID_INSTRUMENT_TYPES.join(", ")}`
+    );
+  }
+
   const updates: Record<string, unknown> = {};
   if ("status" in body) updates.status = body.status;
-  if ("file_patterns" in body) updates.filePatterns = body.file_patterns;
   if ("display_name" in body) updates.displayName = body.display_name;
+  if ("instrument_type" in body) updates.instrumentType = body.instrument_type;
 
   if (Object.keys(updates).length === 0) {
     return apiError(400, VALIDATION_ERROR, "No valid fields to update");
@@ -136,7 +154,7 @@ export async function PATCH(
       id: instruments.id,
       display_name: instruments.displayName,
       status: instruments.status,
-      file_patterns: instruments.filePatterns,
+      instrument_type: instruments.instrumentType,
       s3_trigger_suffix: instruments.s3TriggerSuffix,
       created_at: instruments.createdAt,
       updated_at: instruments.updatedAt,

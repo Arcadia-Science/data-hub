@@ -1,15 +1,12 @@
 "use client";
 
+import { PaginationNav } from "@/components/pagination-nav";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { WatcherEventRow } from "@/lib/api/watchers";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { ChevronDown, Inbox } from "lucide-react";
 import { useState } from "react";
 
-// Color-coded by severity: green (default) for successful data operations,
-// red (destructive) for failures, blue-ish (outline) for lifecycle events.
-// Unknown event types fall back to "secondary" so new types don't break the UI.
 const eventTypeMeta: Record<
   string,
   {
@@ -74,37 +71,36 @@ function EventEntry({ event }: { event: WatcherEventRow }) {
 
 export function EventLog({
   events,
-  truncated = false,
+  page,
+  totalPages,
 }: {
   events: WatcherEventRow[];
-  truncated?: boolean;
+  page: number;
+  totalPages: number;
 }) {
+  if (events.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-2 py-8">
+        <Inbox className="size-6 text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">
+          No events in this time range.
+        </p>
+      </div>
+    );
+  }
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-sm font-medium">Event Log</CardTitle>
-        {truncated && events.length > 0 && (
-          <p className="text-xs text-muted-foreground">
-            Showing latest {events.length} events — older entries omitted
-          </p>
-        )}
-      </CardHeader>
-      <CardContent className="p-0">
-        {events.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-2 py-8">
-            <Inbox className="size-6 text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">
-              No events in this time range.
-            </p>
-          </div>
-        ) : (
-          <div className="divide-y">
-            {events.map((event) => (
-              <EventEntry key={event.id} event={event} />
-            ))}
-          </div>
-        )}
-      </CardContent>
-    </Card>
+    <div className="rounded-md border">
+      <div className="divide-y">
+        {events.map((event) => (
+          <EventEntry key={event.id} event={event} />
+        ))}
+      </div>
+      <PaginationNav
+        page={page}
+        totalPages={totalPages}
+        pageParam="logs_page"
+      />
+    </div>
   );
 }

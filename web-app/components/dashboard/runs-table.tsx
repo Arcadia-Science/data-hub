@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { FlaskConical, SearchX } from "lucide-react";
+import Link from "next/link";
 
 type RunRow = {
   id: string;
@@ -89,9 +90,16 @@ export function RunsTable({
         <TableBody>
           {data.map((row) => {
             const isDeleted = row.deleted_at !== null;
+            const href = `/instruments/${row.instrument_id}/runs/${row.run_id}`;
             return (
-              <TableRow key={row.id} className={cn(isDeleted && "opacity-50")}>
+              <TableRow
+                key={row.id}
+                className={cn("group relative", isDeleted && "opacity-50")}
+              >
                 <TableCell>
+                  <Link href={href} className="absolute inset-0" tabIndex={-1}>
+                    <span className="sr-only">View run {row.run_id}</span>
+                  </Link>
                   <div className="flex items-center gap-1.5">
                     <FlaskConical className="size-3.5 shrink-0 text-muted-foreground" />
                     <span className="text-sm font-medium">
@@ -129,7 +137,7 @@ export function RunsTable({
                   <MetadataSummary metadata={row.metadata} />
                 </TableCell>
                 <TableCell className="text-right">
-                  <RelativeTime date={row.created_at.toISOString()} />
+                  <RelativeTime date={new Date(row.created_at).toISOString()} />
                 </TableCell>
               </TableRow>
             );

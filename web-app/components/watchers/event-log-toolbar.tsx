@@ -38,13 +38,14 @@ export function EventLogToolbar() {
     const next = current.includes(type)
       ? current.filter((t) => t !== type)
       : [...current, type];
-    setFilters({ event_type: next });
+    setFilters({ event_type: next, logs_page: null });
   }
 
   function clearFilters() {
     setFilters({
       event_type: [],
       events_since: null,
+      logs_page: null,
     });
   }
 
@@ -85,7 +86,12 @@ export function EventLogToolbar() {
         <Input
           type="date"
           value={filters.events_since ?? ""}
-          onChange={(e) => setFilters({ events_since: e.target.value || null })}
+          onChange={(e) =>
+            setFilters({
+              events_since: e.target.value || null,
+              logs_page: null,
+            })
+          }
           className="h-8 w-36 text-xs"
           aria-label="Events since"
         />
