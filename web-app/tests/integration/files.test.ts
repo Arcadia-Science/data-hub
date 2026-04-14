@@ -24,6 +24,8 @@ describe("Files API", () => {
   const instrumentId = "files-test-instrument";
   const runId = "files-test-run";
   let fileId: number;
+  let secondFileId: number;
+  let thirdFileId: number;
   let lambdaFileId: number;
 
   beforeAll(async () => {
@@ -55,17 +57,27 @@ describe("Files API", () => {
             filename: "sample2.csv",
             size_bytes: 1024,
           },
+          {
+            relative_path: "sample3.csv",
+            filename: "sample3.csv",
+            size_bytes: 256,
+          },
         ],
       },
     });
 
-    // Fetch the run to get file IDs
+    // Fetch the run and store file IDs by filename for targeted assertions.
     const detail = await api(
       `/api/v1/instruments/${instrumentId}/runs/${runId}`,
       { token }
     );
     const detailData = await detail.json();
-    fileId = detailData.files[0].id;
+    const byName = (name: string) =>
+      detailData.files.find((f: { filename: string }) => f.filename === name)!
+        .id;
+    fileId = byName("sample.csv");
+    secondFileId = byName("sample2.csv");
+    thirdFileId = byName("sample3.csv");
   });
 
   afterAll(async () => {
@@ -264,19 +276,7 @@ describe("Files API", () => {
   // -------------------------------------------------------------------------
 
   it("DELETE soft-deletes a detected file", async () => {
-    // Use the second detected file (sample2.csv) which is still in detected status
-    const detail = await api(
-      `/api/v1/instruments/${instrumentId}/runs/${runId}`,
-      { token }
-    );
-    const detailData = await detail.json();
-    const detectedFile = detailData.files.find(
-      (f: { status: string; relative_path: string }) =>
-        f.status === "detected" && f.relative_path === "sample2.csv"
-    );
-    expect(detectedFile).toBeTruthy();
-
-    const res = await api(`/api/v1/files/${detectedFile.id}`, {
+    const res = await api(`/api/v1/files/${secondFileId}`, {
       method: "DELETE",
       token,
     });
@@ -302,5 +302,132 @@ describe("Files API", () => {
       token,
     });
     expect(res.status).toBe(404);
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /api/v1/files/:fileId/reprocess
+  //
+  // At this point in the test lifecycle:
+  //   fileId (sample.csv)             → completed, has S3 info
+  //   secondFileId (sample2.csv)      → detected, soft-deleted
+  //   thirdFileId (sample3.csv)       → detected, not deleted
+  //   lambdaFileId (processed_output) → failed, has S3 info
+  // -------------------------------------------------------------------------
+
+  it("REPROCESS returns 401 without auth", async () => {
+    const res = await api(`/api/v1/files/${lambdaFileId}/reprocess`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("REPROCESS returns 400 for invalid file ID", async () => {
+    const res = await api("/api/v1/files/abc/reprocess", {
+      method: "POST",
+      token,
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("REPROCESS returns 404 for nonexistent file", async () => {
+    const res = await api("/api/v1/files/999999/reprocess", {
+      method: "POST",
+      token,
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("REPROCESS returns 409 for non-reprocessable status (detected)", async () => {
+    const res = await api(`/api/v1/files/${thirdFileId}/reprocess`, {
+      method: "POST",
+      token,
+    });
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.error.message).toContain("detected");
+  });
+
+  it("REPROCESS returns 409 for soft-deleted file", async () => {
+    const res = await api(`/api/v1/files/${secondFileId}/reprocess`, {
+      method: "POST",
+      token,
+    });
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.error.message).toContain("soft-deleted");
+  });
+
+  // Create a dedicated run, add a failed file, then soft-delete the run
+  // to verify the parent-run guard without affecting other tests.
+  it("REPROCESS returns 409 when parent run is soft-deleted", async () => {
+    // Create a run and a file via the Lambda path.
+    const deletedRunId = "reprocess-deleted-run";
+    await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: { run_id: deletedRunId, source: "lambda" },
+    });
+    const createFileRes = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${deletedRunId}/files`,
+      {
+        method: "POST",
+        token,
+        body: {
+          s3_bucket: "test-bucket",
+          s3_key: `${instrumentId}/${deletedRunId}/data.csv`,
+          filename: "data.csv",
+        },
+      }
+    );
+    const createdFile = await createFileRes.json();
+
+    // Transition the file to "failed" so it would normally be reprocessable.
+    await api(`/api/v1/files/${createdFile.id}`, {
+      method: "PATCH",
+      token,
+      body: { status: "processing" },
+    });
+    await api(`/api/v1/files/${createdFile.id}`, {
+      method: "PATCH",
+      token,
+      body: { status: "failed", error_message: "intentional failure" },
+    });
+
+    // Soft-delete the parent run.
+    await api(`/api/v1/instruments/${instrumentId}/runs/${deletedRunId}`, {
+      method: "DELETE",
+      token,
+    });
+
+    const res = await api(`/api/v1/files/${createdFile.id}/reprocess`, {
+      method: "POST",
+      token,
+    });
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.error.message).toContain("parent run");
+  });
+
+  // These two tests verify that both reprocessable statuses (failed and
+  // completed) pass all validation guards. They return 503 because the
+  // test server has no LAMBDA_FUNCTION_URL / LAMBDA_INVOKE_TOKEN configured.
+  it("REPROCESS returns 503 for failed file when Lambda is not configured", async () => {
+    const res = await api(`/api/v1/files/${lambdaFileId}/reprocess`, {
+      method: "POST",
+      token,
+    });
+    expect(res.status).toBe(503);
+    const data = await res.json();
+    expect(data.error.message).toContain("not configured");
+  });
+
+  it("REPROCESS returns 503 for completed file when Lambda is not configured", async () => {
+    const res = await api(`/api/v1/files/${fileId}/reprocess`, {
+      method: "POST",
+      token,
+    });
+    expect(res.status).toBe(503);
+    const data = await res.json();
+    expect(data.error.message).toContain("not configured");
   });
 });
