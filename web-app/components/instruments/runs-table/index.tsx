@@ -1,3 +1,4 @@
+import type { PlateReaderFilterOptions } from "@/lib/api/instrument-runs";
 import type { InstrumentType } from "@/lib/db/schema";
 import { SearchX } from "lucide-react";
 
@@ -30,11 +31,13 @@ export function InstrumentRunsTable({
   instrumentId,
   instrumentType,
   hasFilters,
+  filterOptions,
 }: {
   data: RunRow[];
   instrumentId: string;
   instrumentType: InstrumentType;
   hasFilters: boolean;
+  filterOptions?: PlateReaderFilterOptions;
 }) {
   if (data.length === 0) {
     return (
@@ -49,12 +52,16 @@ export function InstrumentRunsTable({
     );
   }
 
-  const tableProps = { data, instrumentId };
-
   switch (instrumentType) {
     case "plate_reader":
-      return <PlateReaderRunsTable {...tableProps} />;
+      return (
+        <PlateReaderRunsTable
+          data={data}
+          instrumentId={instrumentId}
+          filterOptions={filterOptions!}
+        />
+      );
     default:
-      return <DefaultRunsTable {...tableProps} />;
+      return <DefaultRunsTable data={data} instrumentId={instrumentId} />;
   }
 }

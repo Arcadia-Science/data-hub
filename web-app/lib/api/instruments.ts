@@ -11,8 +11,13 @@ export type InstrumentListItem = {
   filePatterns: string[] | null;
   runCount: number;
   watcherCount: number;
+  watchersOnline: number;
   createdAt: Date;
 };
+
+// A watcher is stale when its last heartbeat is older than this threshold,
+// even if its DB status is "watching". Must match the window in dashboard.ts.
+const HEARTBEAT_STALE_MINUTES = 5;
 
 // Uses pre-aggregated sub-selects instead of direct joins to avoid row
 // multiplication (instruments × runs × watchers would inflate counts).
@@ -33,6 +38,9 @@ export async function getInstrumentListWithCounts(): Promise<
     .select({
       instrumentId: watchers.instrumentId,
       count: sql<number>`cast(count(*) as int)`.as("watcher_count"),
+      online: sql<number>`cast(count(*) filter (where ${watchers.status} = 'watching' and ${watchers.lastHeartbeatAt} > now() - interval '${sql.raw(String(HEARTBEAT_STALE_MINUTES))} minutes') as int)`.as(
+        "online_count"
+      ),
     })
     .from(watchers)
     .where(isNull(watchers.deletedAt))
@@ -49,6 +57,7 @@ export async function getInstrumentListWithCounts(): Promise<
       createdAt: instruments.createdAt,
       runCount: sql<number>`coalesce(${runCountSq.count}, 0)`,
       watcherCount: sql<number>`coalesce(${watcherCountSq.count}, 0)`,
+      watchersOnline: sql<number>`coalesce(${watcherCountSq.online}, 0)`,
     })
     .from(instruments)
     .leftJoin(runCountSq, eq(runCountSq.instrumentId, instruments.id))
@@ -57,11 +66,6 @@ export async function getInstrumentListWithCounts(): Promise<
 
   return rows;
 }
-
-// Must match the same staleness window used in dashboard.ts so both pages
-// agree on whether a watcher is "online". A watcher is stale when its last
-// heartbeat is older than this threshold, even if its DB status is "watching".
-const HEARTBEAT_STALE_MINUTES = 5;
 
 export type InstrumentDetail = {
   id: string;

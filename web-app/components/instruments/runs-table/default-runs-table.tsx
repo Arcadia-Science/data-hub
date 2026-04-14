@@ -30,7 +30,7 @@ function MetadataSummary({ metadata }: { metadata: unknown }) {
         <Badge
           key={key}
           variant="outline"
-          className="max-w-[200px] truncate font-mono text-[10px] font-normal"
+          className="max-w-[200px] truncate font-mono font-normal"
         >
           {key}: {String(value)}
         </Badge>
@@ -63,7 +63,7 @@ export function DefaultRunsTable({ data, instrumentId }: RunsTableProps) {
                   >
                     <span
                       className={cn(
-                        "font-mono text-sm",
+                        "font-mono",
                         isDeleted && "line-through"
                       )}
                     >
@@ -73,7 +73,7 @@ export function DefaultRunsTable({ data, instrumentId }: RunsTableProps) {
                   {isDeleted && (
                     <Badge
                       variant="outline"
-                      className="ml-1.5 text-[10px] font-normal"
+                      className="ml-1.5 font-normal"
                     >
                       deleted
                     </Badge>

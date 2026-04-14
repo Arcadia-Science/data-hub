@@ -10,17 +10,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { InstrumentListItem } from "@/lib/api/instruments";
-import { FlaskConical, SearchX } from "lucide-react";
+import { FlaskConical, Radio, SearchX, WifiOff } from "lucide-react";
 import Link from "next/link";
-
-const statusBadge: Record<
-  InstrumentListItem["status"],
-  { label: string; variant: "default" | "outline" | "secondary" }
-> = {
-  active: { label: "Active", variant: "default" },
-  pending: { label: "Pending", variant: "outline" },
-  inactive: { label: "Inactive", variant: "secondary" },
-};
 
 export function InstrumentsTable({ data }: { data: InstrumentListItem[] }) {
   if (data.length === 0) {
@@ -49,7 +40,8 @@ export function InstrumentsTable({ data }: { data: InstrumentListItem[] }) {
         </TableHeader>
         <TableBody>
           {data.map((row) => {
-            const sb = statusBadge[row.status];
+            const isOnline =
+              row.watcherCount > 0 && row.watchersOnline > 0;
             return (
               <TableRow key={row.id}>
                 <TableCell>
@@ -67,9 +59,24 @@ export function InstrumentsTable({ data }: { data: InstrumentListItem[] }) {
                   </span>
                 </TableCell>
                 <TableCell>
-                  <Badge variant={sb.variant} className="text-[10px]">
-                    {sb.label}
-                  </Badge>
+                  {row.watcherCount > 0 ? (
+                    <Badge
+                      variant={isOnline ? "default" : "destructive"}
+                      className="gap-1 text-[10px]"
+                    >
+                      {isOnline ? (
+                        <Radio className="size-3" />
+                      ) : (
+                        <WifiOff className="size-3" />
+                      )}
+                      {isOnline ? "Online" : "Offline"}
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="gap-1 text-[10px]">
+                      <WifiOff className="size-3" />
+                      No Watcher
+                    </Badge>
+                  )}
                 </TableCell>
                 <TableCell>
                   {row.filePatterns && row.filePatterns.length > 0 ? (

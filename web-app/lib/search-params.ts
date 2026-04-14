@@ -32,6 +32,10 @@ export const instrumentDetailSearchParams = {
   include_deleted: parseAsBoolean.withDefault(false),
   page: parseAsInteger.withDefault(1),
   per_page: parseAsInteger.withDefault(25),
+  // Plate-reader metadata column filters (ignored for generic instruments).
+  wavelength: parseAsString,
+  measurement_mode: parseAsString,
+  measurement_type: parseAsString,
 };
 
 export const instrumentDetailParamsCache = createSearchParamsCache(

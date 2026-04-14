@@ -75,6 +75,9 @@ type RunListFilters = {
   page: number;
   perPage: number;
   includeDeleted: boolean;
+  wavelength?: string;
+  measurementMode?: string;
+  measurementType?: string;
 };
 
 const MAX_PER_PAGE = 100;
@@ -129,6 +132,23 @@ export async function buildRunListQuery(filters: RunListFilters) {
       .replace(/%/g, "\\%")
       .replace(/_/g, "\\_");
     conditions.push(ilike(instrumentRuns.runId, `%${escaped}%`));
+  }
+
+  // Plate-reader metadata column filters (leverages the GIN index).
+  if (filters.wavelength) {
+    conditions.push(
+      sql`${instrumentRuns.metadata}->>'wavelength' = ${filters.wavelength}`
+    );
+  }
+  if (filters.measurementMode) {
+    conditions.push(
+      sql`${instrumentRuns.metadata}->>'measurement_mode' = ${filters.measurementMode}`
+    );
+  }
+  if (filters.measurementType) {
+    conditions.push(
+      sql`${instrumentRuns.metadata}->>'measurement_type' = ${filters.measurementType}`
+    );
   }
 
   const where = conditions.length > 0 ? and(...conditions) : undefined;
@@ -243,4 +263,57 @@ export async function getRunReportData(
     .orderBy(runReportData.id);
 
   return rows;
+}
+
+// ---------------------------------------------------------------------------
+// Distinct metadata values for plate-reader column filters.
+// ---------------------------------------------------------------------------
+
+export type PlateReaderFilterOptions = {
+  wavelengths: string[];
+  measurementModes: string[];
+  measurementTypes: string[];
+};
+
+const ALLOWED_METADATA_KEYS = new Set([
+  "wavelength",
+  "measurement_mode",
+  "measurement_type",
+]);
+
+async function distinctMetadataValues(
+  instrumentId: string,
+  key: string
+): Promise<string[]> {
+  if (!ALLOWED_METADATA_KEYS.has(key)) {
+    throw new Error(`Invalid metadata key: ${key}`);
+  }
+  // sql.raw is safe here because key is validated against the allowlist above.
+  const jsonKey = sql.raw(`'${key}'`);
+  const expr = sql<string>`${instrumentRuns.metadata}->>${jsonKey}`;
+
+  const rows = await db
+    .selectDistinct({ value: expr })
+    .from(instrumentRuns)
+    .where(
+      and(
+        eq(instrumentRuns.instrumentId, instrumentId),
+        isNull(instrumentRuns.deletedAt),
+        sql`${expr} is not null`
+      )
+    )
+    .orderBy(expr);
+
+  return rows.map((r) => r.value).filter(Boolean);
+}
+
+export async function getPlateReaderFilterOptions(
+  instrumentId: string
+): Promise<PlateReaderFilterOptions> {
+  const [wavelengths, measurementModes, measurementTypes] = await Promise.all([
+    distinctMetadataValues(instrumentId, "wavelength"),
+    distinctMetadataValues(instrumentId, "measurement_mode"),
+    distinctMetadataValues(instrumentId, "measurement_type"),
+  ]);
+  return { wavelengths, measurementModes, measurementTypes };
 }

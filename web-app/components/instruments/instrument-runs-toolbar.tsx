@@ -20,7 +20,10 @@ export function InstrumentRunsToolbar() {
     filters.search !== "" ||
     filters.date_from !== null ||
     filters.date_to !== null ||
-    filters.include_deleted;
+    filters.include_deleted ||
+    filters.wavelength !== null ||
+    filters.measurement_mode !== null ||
+    filters.measurement_type !== null;
 
   function clearFilters() {
     setFilters({
@@ -28,6 +31,9 @@ export function InstrumentRunsToolbar() {
       date_from: null,
       date_to: null,
       include_deleted: false,
+      wavelength: null,
+      measurement_mode: null,
+      measurement_type: null,
       page: 1,
     });
   }

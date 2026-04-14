@@ -1,4 +1,4 @@
-import { Geist_Mono, Inter } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 
 import "@/app/globals.css";
 import { Navbar } from "@/components/navbar";
@@ -11,7 +11,7 @@ import type { Metadata } from "next";
 import { SessionProvider } from "next-auth/react";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 
-const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
+const fontSans = Geist({ subsets: ["latin"], variable: "--font-sans" });
 
 const fontMono = Geist_Mono({
   subsets: ["latin"],
@@ -40,7 +40,7 @@ export default async function RootLayout({
         "antialiased",
         fontMono.variable,
         "font-sans",
-        inter.variable
+        fontSans.variable
       )}
     >
       <body>

@@ -2,7 +2,10 @@ import { InstrumentHeader } from "@/components/instruments/instrument-header";
 import { InstrumentRunsTable } from "@/components/instruments/runs-table";
 import { InstrumentRunsToolbar } from "@/components/instruments/instrument-runs-toolbar";
 import { PaginationNav } from "@/components/pagination-nav";
-import { buildRunListQuery } from "@/lib/api/instrument-runs";
+import {
+  buildRunListQuery,
+  getPlateReaderFilterOptions,
+} from "@/lib/api/instrument-runs";
 import { getInstrumentById } from "@/lib/api/instruments";
 import { auth } from "@/lib/auth";
 import { instrumentDetailParamsCache } from "@/lib/search-params";
@@ -44,18 +47,29 @@ export default async function InstrumentDetailPage({
       page: filters.page,
       perPage: filters.per_page,
       includeDeleted: filters.include_deleted,
+      wavelength: filters.wavelength ?? undefined,
+      measurementMode: filters.measurement_mode ?? undefined,
+      measurementType: filters.measurement_type ?? undefined,
     }),
   ]);
 
   if (!instrument) notFound();
 
-  // Computed separately from the toolbar's client-side check because this
-  // server component needs it for the empty-state message distinction.
+  const isPlateReader = instrument.instrumentType === "plate_reader";
+
+  // Fetch distinct metadata values for plate-reader column filter dropdowns.
+  const filterOptions = isPlateReader
+    ? await getPlateReaderFilterOptions(instrumentId)
+    : undefined;
+
   const hasFilters =
     filters.search !== "" ||
     filters.date_from !== null ||
     filters.date_to !== null ||
-    filters.include_deleted;
+    filters.include_deleted ||
+    filters.wavelength !== null ||
+    filters.measurement_mode !== null ||
+    filters.measurement_type !== null;
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6 p-6">
@@ -66,6 +80,7 @@ export default async function InstrumentDetailPage({
         instrumentId={instrumentId}
         instrumentType={instrument.instrumentType}
         hasFilters={hasFilters}
+        filterOptions={filterOptions}
       />
       <PaginationNav
         page={runResult.pagination.page}
