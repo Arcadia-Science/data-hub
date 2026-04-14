@@ -41,6 +41,40 @@ data-hub-watcher init
 
 The watcher stores the API key in its environment configuration and uses it for all subsequent API calls.
 
+### With an MCP client
+
+Add Data Hub to your MCP client configuration. For example, in Claude Desktop (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "data-hub": {
+      "url": "https://data-hub.arcadiascience.com/api/v1/mcp",
+      "headers": {
+        "Authorization": "Bearer dhub_abc123..."
+      }
+    }
+  }
+}
+```
+
+Or in Cursor (`.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "data-hub": {
+      "url": "https://data-hub.arcadiascience.com/api/v1/mcp",
+      "headers": {
+        "Authorization": "Bearer dhub_abc123..."
+      }
+    }
+  }
+}
+```
+
+The MCP server provides read-only access to instruments, runs, files, watchers, and system status. See [API — MCP](../api.md#mcp-model-context-protocol) for the full list of tools, resources, and prompts.
+
 ### With the API directly
 
 Pass the token in the `Authorization` header:

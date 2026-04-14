@@ -38,6 +38,10 @@ fe-lint:
 fe-typecheck:
 	cd web-app && npm run typecheck
 
+.PHONY: fe-test-mcp
+fe-test-mcp:
+	cd web-app && npm run test:mcp
+
 .PHONY: fe-test-integration
 fe-test-integration:
 	cd web-app && npm run test:integration

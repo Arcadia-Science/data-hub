@@ -11,15 +11,14 @@ type AuthResult = {
   authMethod: "session" | "token";
 };
 
-export async function authenticateRequest(
-  _request: NextRequest
+/**
+ * Validate a PAT from the Authorization header. Shared by both
+ * `authenticateRequest` (session + token) and `authenticateWithToken`
+ * (token-only) so the logic stays in one place.
+ */
+async function validatePat(
+  authHeader: string | null
 ): Promise<AuthResult | null> {
-  const session = await auth();
-  if (session?.user?.id) {
-    return { userId: session.user.id, authMethod: "session" };
-  }
-
-  const authHeader = _request.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) {
     return null;
   }
@@ -60,6 +59,28 @@ export async function authenticateRequest(
   });
 
   return { userId: pat.userId, authMethod: "token" };
+}
+
+export async function authenticateRequest(
+  _request: NextRequest
+): Promise<AuthResult | null> {
+  const session = await auth();
+  if (session?.user?.id) {
+    return { userId: session.user.id, authMethod: "session" };
+  }
+
+  return validatePat(_request.headers.get("authorization"));
+}
+
+/**
+ * Authenticate a request using only PAT (Personal Access Token) — skips the
+ * NextAuth session check.  Use this for API surfaces (like MCP) where callers
+ * will never have a browser session.
+ */
+export async function authenticateWithToken(
+  request: Pick<Request, "headers">
+): Promise<AuthResult | null> {
+  return validatePat(request.headers.get("authorization"));
 }
 
 export async function requireSession(): Promise<AuthResult | null> {
