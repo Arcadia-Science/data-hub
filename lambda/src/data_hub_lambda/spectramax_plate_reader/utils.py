@@ -24,7 +24,6 @@ _COL_MEASUREMENT_TYPE = 4
 _COL_MEASUREMENT_MODE = 5
 _COL_NUM_READINGS = 8
 _COL_WAVELENGTH = 15
-_COL_NUM_COLUMNS = 17
 _COL_NUM_WELLS = 18
 
 _ROW_LABELS = "ABCDEFGHIJKLMNOP"
@@ -39,6 +38,30 @@ _WELL_DATA_COLUMNS = [
     "column_label",
     "wavelength",
 ]
+
+
+def _count_cols_in_header(col_header_line: str) -> int:
+    """Return the number of data columns from the column-label header row.
+
+    The column header is tab-delimited::
+
+        <time> \\t Temperature(...) \\t 1 \\t 2 \\t ... \\t N \\t <separator> ...
+
+    We count consecutive numeric labels after the first two fields (time and
+    temperature) to determine the actual grid width.  This is more reliable
+    than the plate-header ``num_columns`` field which some SoftMax Pro
+    protocol templates populate with a value unrelated to the grid geometry.
+    """
+    fields = col_header_line.split("\t")
+    count = 0
+    for field in fields[2:]:
+        if field.strip().isdigit():
+            count += 1
+        elif count > 0:
+            break
+    if count == 0:
+        raise ValueError("Could not determine column count from header row")
+    return count
 
 
 def parse_metadata(file_path: Path) -> dict[str, str]:
@@ -132,11 +155,12 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
         plate_fields = lines[i].split("\t")
         plate_name = plate_fields[_COL_PLATE_NAME]
         num_readings = int(plate_fields[_COL_NUM_READINGS])
-        num_cols = int(plate_fields[_COL_NUM_COLUMNS])
         num_wells = int(plate_fields[_COL_NUM_WELLS])
-        num_rows = num_wells // num_cols
         wavelength_raw = plate_fields[_COL_WAVELENGTH].strip()
         wavelength = int(wavelength_raw) if wavelength_raw.isdigit() else None
+
+        num_cols = _count_cols_in_header(lines[i + 1])
+        num_rows = num_wells // num_cols
 
         i += 2  # Skip plate header + column header row.
 

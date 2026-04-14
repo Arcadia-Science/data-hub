@@ -60,6 +60,14 @@ class TestRealFixtures:
             "wavelength": "595 nm",
         }
 
+    def test_endpoint_sparse_absorbance(self) -> None:
+        result = parse_metadata(_FIXTURES_DIR / "spectramax_plate_reader_endpoint_sparse.xls")
+        assert result == {
+            "measurement_mode": "Absorbance",
+            "measurement_type": "Endpoint",
+            "wavelength": "600 nm",
+        }
+
     def test_kinetic_absorbance(self) -> None:
         result = parse_metadata(_FIXTURES_DIR / "spectramax_plate_reader_kinetic.xls")
         assert result == {
