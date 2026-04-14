@@ -66,7 +66,7 @@ export function InstrumentsTable({ data }: { data: InstrumentListItem[] }) {
                   {row.watcherCount > 0 ? (
                     <Badge
                       variant={isOnline ? "default" : "destructive"}
-                      className="gap-1 text-sm"
+                      className="gap-1 text-xs"
                     >
                       {isOnline ? (
                         <Radio className="size-3" />
@@ -76,7 +76,7 @@ export function InstrumentsTable({ data }: { data: InstrumentListItem[] }) {
                       {isOnline ? "Online" : "Offline"}
                     </Badge>
                   ) : (
-                    <Badge variant="outline" className="gap-1 text-sm">
+                    <Badge variant="outline" className="gap-1 text-xs">
                       <WifiOff className="size-3" />
                       No Watcher
                     </Badge>
@@ -89,7 +89,7 @@ export function InstrumentsTable({ data }: { data: InstrumentListItem[] }) {
                         <Badge
                           key={p}
                           variant="outline"
-                          className="font-mono text-sm font-normal"
+                          className="font-mono text-xs font-normal"
                         >
                           {p}
                         </Badge>

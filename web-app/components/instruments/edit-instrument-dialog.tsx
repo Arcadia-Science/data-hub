@@ -87,7 +87,7 @@ export function EditInstrumentDialog({
       }}
     >
       <DialogTrigger asChild>
-        <Button variant="ghost" size="sm" className="flex gap-2 text-sm">
+        <Button variant="ghost" size="sm" className="flex gap-2 text-xs">
           <Pencil className="size-3.5" />
           <span>Edit</span>
         </Button>

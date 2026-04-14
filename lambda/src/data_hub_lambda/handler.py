@@ -1,4 +1,6 @@
 from __future__ import annotations
+import hmac
+import json
 import re
 import warnings
 from dataclasses import dataclass
@@ -97,19 +99,72 @@ def get_cloudwatch_logs_url(context: Context) -> str:
 
 
 # ------------------------------------------------------------------
+# Function URL helpers
+# ------------------------------------------------------------------
+
+
+def _is_function_url_event(event: dict[str, Any]) -> bool:
+    return "requestContext" in event and "http" in event.get("requestContext", {})
+
+
+def _authenticate_function_url(event: dict[str, Any]) -> dict[str, Any] | None:
+    """Verify the Bearer token on a Function URL invocation.
+
+    Returns the parsed S3 event payload on success, or ``None`` if
+    authentication fails (the caller should return a 401 response).
+    """
+    from data_hub_lambda.config import lambda_config
+
+    expected = lambda_config.LAMBDA_INVOKE_TOKEN
+    if not expected:
+        logger.error("LAMBDA_INVOKE_TOKEN is not configured")
+        return None
+
+    headers: dict[str, str] = event.get("headers", {})
+    auth_header = headers.get("authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None
+
+    token = auth_header[len("Bearer ") :]
+    if not hmac.compare_digest(token, expected):
+        return None
+
+    body = event.get("body", "")
+    if event.get("isBase64Encoded"):
+        import base64
+
+        body = base64.b64decode(body).decode()
+
+    try:
+        return json.loads(body)  # type: ignore[no-any-return]
+    except (json.JSONDecodeError, TypeError):
+        logger.error("Function URL body is not valid JSON")
+        return None
+
+
+# ------------------------------------------------------------------
 # Main handler
 # ------------------------------------------------------------------
 
 
-def lambda_handler(event: dict[str, Any], context: Context) -> None:
+def lambda_handler(event: dict[str, Any], context: Context) -> dict[str, Any] | None:
     """Top-level Lambda handler dispatching to instrument workflows."""
     logger.info("Received event: %s", pformat(event))
+
+    # Function URL invocations carry a requestContext with an http key.
+    # Verify the Bearer token and unwrap the S3 event from the body.
+    if _is_function_url_event(event):
+        s3_event = _authenticate_function_url(event)
+        if s3_event is None:
+            logger.warning("Unauthorized Function URL invocation")
+            return {"statusCode": 401, "body": "Unauthorized"}
+        event = s3_event
 
     try:
         event_info = parse_s3_event(event)  # type: ignore[arg-type]
     except Exception:
         logger.exception("Error handling event.")
-        return
+        return None
 
     instrument_id = event_info.instrument_id
     run_id = event_info.run_id
@@ -156,7 +211,7 @@ def lambda_handler(event: dict[str, Any], context: Context) -> None:
 
         else:
             logger.error("Unsupported instrument: %s", instrument_id)
-            return
+            return None
 
         slack.send_message(
             f"*{instrument_name}*\n"
