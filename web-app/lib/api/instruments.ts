@@ -96,10 +96,7 @@ export async function getInstrumentListWithCounts(): Promise<
       })
       .from(instruments)
       .leftJoin(runCountSq, eq(runCountSq.instrumentId, instruments.id))
-      .leftJoin(
-        watcherCountSq,
-        eq(watcherCountSq.instrumentId, instruments.id)
-      )
+      .leftJoin(watcherCountSq, eq(watcherCountSq.instrumentId, instruments.id))
       .orderBy(instruments.displayName),
     db
       .select({
