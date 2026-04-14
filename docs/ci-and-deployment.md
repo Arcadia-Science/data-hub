@@ -132,6 +132,7 @@ export DATA_HUB_API_KEY="<your-api-key>"
 export SLACK_WEBHOOK_URL="<your-slack-webhook>"
 export GITHUB_OIDC_PROVIDER_ARN="<github-oidc-arn-from-step-1>"
 export VERCEL_OIDC_PROVIDER_ARN="<vercel-oidc-arn-from-step-1>"
+export LAMBDA_INVOKE_TOKEN="<shared-secret-for-function-url-auth>"
 
 make sam-deploy ENV=staging
 ```
@@ -161,8 +162,15 @@ In your GitHub repo, go to **Settings → Environments**, create a `staging` env
 | `DATA_HUB_API_URL` | Base API URL for the environment |
 | `DATA_HUB_API_KEY` | API key for Lambda → Data Hub authentication |
 | `SLACK_WEBHOOK_URL` | Slack incoming webhook URL |
+| `LAMBDA_INVOKE_TOKEN` | Shared secret for web app → Lambda Function URL authentication |
 
-You'll also need the `WebAppRoleArn` stack output to configure the Vercel web app. Set `AWS_ROLE_ARN` in the Vercel dashboard (under the appropriate environment) to the role ARN so the web app can generate presigned S3 URLs via OIDC federation.
+You'll also need the `WebAppRoleArn` and `DataHubFunctionUrl` stack outputs to configure the Vercel web app. In the Vercel dashboard (under the appropriate environment), set:
+
+| Vercel env var | Value |
+| --- | --- |
+| `AWS_ROLE_ARN` | `WebAppRoleArn` stack output — lets the web app generate presigned S3 URLs via OIDC federation |
+| `LAMBDA_FUNCTION_URL` | `DataHubFunctionUrl` stack output — the Lambda Function URL for manual reprocessing |
+| `LAMBDA_INVOKE_TOKEN` | Same shared secret configured in the GitHub environment secret above |
 
 Once secrets are set, the CI workflow handles all subsequent deploys automatically.
 
