@@ -62,6 +62,53 @@ export async function authenticateRequest(
   return { userId: pat.userId, authMethod: "token" };
 }
 
+/**
+ * Authenticate a request using only PAT (Personal Access Token) — skips the
+ * NextAuth session check.  Use this for API surfaces (like MCP) where callers
+ * will never have a browser session.
+ */
+export async function authenticateWithToken(
+  request: Pick<Request, "headers">
+): Promise<AuthResult | null> {
+  const authHeader = request.headers.get("authorization");
+  if (!authHeader?.startsWith("Bearer ")) {
+    return null;
+  }
+
+  const plaintext = authHeader.slice(7);
+  if (!plaintext.startsWith("dhub_")) {
+    return null;
+  }
+
+  const hash = hashToken(plaintext);
+  const [pat] = await db
+    .select({
+      id: personalAccessTokens.id,
+      userId: personalAccessTokens.userId,
+      expiresAt: personalAccessTokens.expiresAt,
+    })
+    .from(personalAccessTokens)
+    .where(eq(personalAccessTokens.tokenHash, hash))
+    .limit(1);
+
+  if (!pat) {
+    return null;
+  }
+
+  if (pat.expiresAt && pat.expiresAt < new Date()) {
+    return null;
+  }
+
+  after(async () => {
+    await db
+      .update(personalAccessTokens)
+      .set({ lastUsedAt: new Date() })
+      .where(eq(personalAccessTokens.id, pat.id));
+  });
+
+  return { userId: pat.userId, authMethod: "token" };
+}
+
 export async function requireSession(): Promise<AuthResult | null> {
   const session = await auth();
   if (session?.user?.id) {
