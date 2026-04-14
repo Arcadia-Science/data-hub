@@ -21,19 +21,17 @@ Runs formatting, linting, and type checking for both Python and the web app in p
 
 ### Tests (`test.yml`)
 
-Runs three test jobs in parallel.
+Runs two test jobs in parallel.
 
-**Python unit tests:**
-- `make py-test-unit` — runs all pytest tests not marked `integration`.
-
-**Python integration tests:**
+**Python tests:**
 - Starts a Postgres 17 service container.
 - Installs both Node.js 24 and Python packages.
-- `make py-test-integration` — runs pytest tests marked `integration`. These build and start a real Next.js production server, seed a test database, and exercise the Lambda and watcher against the live API.
+- `make py-test` — runs all pytest tests (unit and integration). Integration tests build and start a real Next.js production server, seed a test database, and exercise the Lambda and watcher against the live API.
 
-**API integration tests:**
+**TypeScript tests:**
 - Same Postgres + Node.js setup as above.
-- `make fe-test-integration` — runs Vitest integration tests in the web app that test the API routes.
+- `make fe-test-mcp` — runs in-memory MCP protocol tests (mocked data layer, no database).
+- `make fe-test-integration` — runs Vitest integration tests that test the API routes and MCP server over HTTP against a real database.
 
 ## Branch strategy
 

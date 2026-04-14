@@ -13,13 +13,14 @@ flowchart LR
     API -->|presigned URLs| S3
     API --> DB[(PostgreSQL)]
     API --> UI[Web app]
+    MCP[MCP clients] -->|tools, resources| API
 ```
 
 ## Components
 
 | Directory | Package | Description |
 | --- | --- | --- |
-| `web-app/` | `data-hub-web-app` | Next.js web application and REST API. Deployed on Vercel. |
+| `web-app/` | `data-hub-web-app` | Next.js web application, REST API, and MCP server. Deployed on Vercel. |
 | `lambda/` | `data-hub-lambda` | AWS Lambda function triggered by S3 uploads. Runs instrument-specific processing pipelines. |
 | `watcher/` | `data-hub-watcher` | CLI agent installed on lab instrument PCs. Detects new files, uploads them to S3, and reports status to the API. |
 | `packages/shared/` | `data-hub-shared` | Shared Python library providing S3 utilities, instrument enums, Slack integration, and test infrastructure. |
@@ -51,4 +52,5 @@ Steps 1–3 are the same, but the watcher does not upload immediately. Instead:
 - **API-driven coordination.** The watcher registers with the API, syncs its YAML config, and sends periodic heartbeats. This lets the web dashboard show watcher health and manage upload queues.
 - **Presigned URLs from the API.** The web app generates presigned S3 upload and download URLs so watchers and browsers can transfer files directly to/from S3 without routing data through the API. On Vercel, the app assumes an IAM role via OIDC federation (no long-lived AWS credentials).
 - **Shared library for contracts.** Instrument IDs, S3 utilities, and environment config live in `data-hub-shared` so they stay consistent across Lambda and the watcher without duplicating code.
+- **MCP for AI access.** The web app includes a [Model Context Protocol](https://modelcontextprotocol.io/) server at `/api/v1/mcp` that exposes read-only tools, resources, and prompts. AI clients (e.g. Claude Desktop, Cursor) can query instruments, runs, and system status using a personal access token.
 - **Integration tests against a real server.** The shared `testing.py` module spins up a real Next.js server backed by a Postgres database, so Lambda and watcher integration tests exercise the actual API surface.

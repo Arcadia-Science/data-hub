@@ -1,13 +1,13 @@
 # REST API
 
-The Data Hub API is served by the Next.js web application at `/api/v1/`. It is used by the watcher, the Lambda function, and the web dashboard.
+The Data Hub API is served by the Next.js web application at `/api/v1/`. It is used by the watcher, the Lambda function, MCP clients, and the web dashboard.
 
 ## Authentication
 
 The API supports two authentication methods:
 
 - **Session cookies** — used by the web dashboard (Google OAuth via NextAuth).
-- **Bearer tokens** — used by the watcher and Lambda. Tokens are created in the web dashboard under personal access tokens and sent in the `Authorization: Bearer <token>` header.
+- **Bearer tokens** — used by the watcher, Lambda, and MCP clients. Tokens are created in the web dashboard under personal access tokens and sent in the `Authorization: Bearer <token>` header.
 
 Tokens are hashed with SHA-256 before storage. The plaintext token is shown once at creation time.
 
@@ -72,6 +72,22 @@ Tokens are hashed with SHA-256 before storage. The plaintext token is shown once
 | `GET` | `/api/v1/tokens` | List personal access tokens |
 | `POST` | `/api/v1/tokens` | Create a new token |
 | `DELETE` | `/api/v1/tokens/:id` | Revoke a token |
+
+### MCP (Model Context Protocol)
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET`, `POST` | `/api/v1/mcp` | MCP server endpoint (Streamable HTTP transport) |
+
+The MCP server exposes Data Hub data to AI clients (e.g. Claude Desktop, Cursor) via the [Model Context Protocol](https://modelcontextprotocol.io/). It uses Bearer token authentication only — session cookies are not supported.
+
+**Tools:** `list_instruments`, `get_instrument`, `search_runs`, `get_run`, `get_run_report_data`, `list_run_files`, `get_system_status`, `list_watchers`
+
+**Resources:** `datahub://instruments`, `datahub://instruments/{instrumentId}/filter-options`
+
+**Prompts:** `daily_summary`, `run_analysis`, `troubleshoot_instrument`, `compare_runs`
+
+See [Managing tokens — With an MCP client](guides/managing-tokens.md#with-an-mcp-client) for configuration examples.
 
 ## Error responses
 
