@@ -1,6 +1,6 @@
 import { InstrumentHeader } from "@/components/instruments/instrument-header";
-import { InstrumentRunsTable } from "@/components/instruments/runs-table";
 import { InstrumentRunsToolbar } from "@/components/instruments/instrument-runs-toolbar";
+import { InstrumentRunsTable } from "@/components/instruments/runs-table";
 import { PaginationNav } from "@/components/pagination-nav";
 import {
   buildRunListQuery,

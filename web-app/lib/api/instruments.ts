@@ -38,9 +38,10 @@ export async function getInstrumentListWithCounts(): Promise<
     .select({
       instrumentId: watchers.instrumentId,
       count: sql<number>`cast(count(*) as int)`.as("watcher_count"),
-      online: sql<number>`cast(count(*) filter (where ${watchers.status} = 'watching' and ${watchers.lastHeartbeatAt} > now() - interval '${sql.raw(String(HEARTBEAT_STALE_MINUTES))} minutes') as int)`.as(
-        "online_count"
-      ),
+      online:
+        sql<number>`cast(count(*) filter (where ${watchers.status} = 'watching' and ${watchers.lastHeartbeatAt} > now() - interval '${sql.raw(String(HEARTBEAT_STALE_MINUTES))} minutes') as int)`.as(
+          "online_count"
+        ),
     })
     .from(watchers)
     .where(isNull(watchers.deletedAt))

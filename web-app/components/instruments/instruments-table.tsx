@@ -40,8 +40,7 @@ export function InstrumentsTable({ data }: { data: InstrumentListItem[] }) {
         </TableHeader>
         <TableBody>
           {data.map((row) => {
-            const isOnline =
-              row.watcherCount > 0 && row.watchersOnline > 0;
+            const isOnline = row.watcherCount > 0 && row.watchersOnline > 0;
             return (
               <TableRow key={row.id}>
                 <TableCell>

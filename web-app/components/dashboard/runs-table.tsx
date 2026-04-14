@@ -98,9 +98,7 @@ export function RunsTable({
               >
                 <TableCell>
                   <Link href={href} className="absolute inset-0" tabIndex={-1}>
-                    <span className="sr-only">
-                      View run {row.run_id}
-                    </span>
+                    <span className="sr-only">View run {row.run_id}</span>
                   </Link>
                   <div className="flex items-center gap-1.5">
                     <FlaskConical className="size-3.5 shrink-0 text-muted-foreground" />

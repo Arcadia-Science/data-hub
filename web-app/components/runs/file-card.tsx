@@ -15,14 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { RunFile } from "@/lib/api/instrument-runs";
-import {
-  Download,
-  Eye,
-  FileText,
-  Loader2,
-  Upload,
-  X,
-} from "lucide-react";
+import { Download, Eye, FileText, Loader2, Upload, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "sonner";
@@ -72,7 +65,6 @@ export function FileCard({
     "completed",
     "failed",
   ].includes(file.status);
-
 
   // Signals the watcher agent on the instrument PC to transfer this file to S3.
   // The file transitions from "detected" → "upload_requested" until the watcher

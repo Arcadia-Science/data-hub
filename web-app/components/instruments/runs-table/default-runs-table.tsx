@@ -62,19 +62,13 @@ export function DefaultRunsTable({ data, instrumentId }: RunsTableProps) {
                     className="hover:underline"
                   >
                     <span
-                      className={cn(
-                        "font-mono",
-                        isDeleted && "line-through"
-                      )}
+                      className={cn("font-mono", isDeleted && "line-through")}
                     >
                       {row.run_id}
                     </span>
                   </Link>
                   {isDeleted && (
-                    <Badge
-                      variant="outline"
-                      className="ml-1.5 font-normal"
-                    >
+                    <Badge variant="outline" className="ml-1.5 font-normal">
                       deleted
                     </Badge>
                   )}

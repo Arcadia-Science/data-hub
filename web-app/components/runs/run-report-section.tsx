@@ -1,10 +1,6 @@
 import { PlateMapGrid } from "@/components/runs/plate-map-grid";
 import { ReportDataTable } from "@/components/runs/report-data-table";
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { RunFile, RunReportEntry } from "@/lib/api/instrument-runs";
