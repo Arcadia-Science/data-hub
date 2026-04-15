@@ -1,4 +1,4 @@
-name: Lint and typecheck
+name: Python lint and typecheck
 
 on:
   push:
@@ -6,10 +6,9 @@ on:
       - staging
       - production
     paths:
-      - .github/workflows/lint-and-typecheck.yml
+      - .github/workflows/python-lint.yml
       - lambda/**
       - packages/**
-      - web-app/**
       - pyproject.toml
       - uv.lock
       - Makefile
@@ -18,16 +17,15 @@ on:
       - staging
       - production
     paths:
-      - .github/workflows/lint-and-typecheck.yml
+      - .github/workflows/python-lint.yml
       - lambda/**
       - packages/**
-      - web-app/**
       - pyproject.toml
       - uv.lock
       - Makefile
 
 jobs:
-  python:
+  python-lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,27 +39,3 @@ jobs:
 
       - name: Type check
         run: make py-typecheck
-
-  web-app:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web-app
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-
-      - name: Install packages
-        run: npm ci
-
-      - name: Check formatting
-        run: npm run format:check
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Type check
-        run: npm run typecheck

@@ -85,7 +85,7 @@ See the table below for a summary of environment variables configured for this a
 
 ## CI
 
-A GitHub Actions workflow (`.github/workflows/lint-and-typecheck.yml`) runs on every push to `staging` and `production`, as well as pull requests targeting both branches. It executes three checks:
+A GitHub Actions workflow (`.github/workflows/typescript-lint.yml`) runs on every push to `staging` and `production`, as well as pull requests targeting both branches. It executes three checks:
 
 1. **Format check** — `npm run format:check` (Prettier)
 2. **Lint** — `npm run lint` (ESLint)

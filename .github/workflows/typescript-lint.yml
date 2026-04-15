@@ -1,0 +1,44 @@
+name: TypeScript lint and typecheck
+
+on:
+  push:
+    branches:
+      - staging
+      - production
+    paths:
+      - .github/workflows/typescript-lint.yml
+      - web-app/**
+      - Makefile
+  pull_request:
+    branches:
+      - staging
+      - production
+    paths:
+      - .github/workflows/typescript-lint.yml
+      - web-app/**
+      - Makefile
+
+jobs:
+  typescript-lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Install packages
+        run: npm ci
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npm run typecheck
