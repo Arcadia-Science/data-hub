@@ -23,7 +23,7 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
   detected: ["uploaded"],
   upload_requested: ["uploaded"],
   uploaded: ["processing"],
-  processing: ["completed", "failed"],
+  processing: ["processing", "completed", "failed"],
   completed: ["processing"],
   failed: ["processing"],
 };
