@@ -1,5 +1,4 @@
-"use client";
-
+import { ClickableRow } from "@/components/instruments/runs-table/clickable-row";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -14,7 +13,6 @@ import { statusBadge } from "@/components/watchers/status-badge";
 import type { WatcherListItem } from "@/lib/api/watchers";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { SearchX } from "lucide-react";
-import { useRouter } from "next/navigation";
 
 export function WatchersTable({
   data,
@@ -23,8 +21,6 @@ export function WatchersTable({
   data: WatcherListItem[];
   isDeregisteredView?: boolean;
 }) {
-  const router = useRouter();
-
   if (data.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed py-16">
@@ -55,13 +51,10 @@ export function WatchersTable({
           {data.map((row) => {
             const sb = statusBadge[row.effectiveStatus];
             return (
-              <TableRow
+              <ClickableRow
                 key={row.id}
-                className={cn(
-                  "cursor-pointer",
-                  isDeregisteredView && "opacity-60"
-                )}
-                onClick={() => router.push(`/watchers/${row.id}`)}
+                href={`/watchers/${row.id}`}
+                className={cn(isDeregisteredView && "opacity-60")}
               >
                 <TableCell>
                   <span className="font-mono text-xs">
@@ -106,7 +99,7 @@ export function WatchersTable({
                     )}
                   </TableCell>
                 )}
-              </TableRow>
+              </ClickableRow>
             );
           })}
         </TableBody>
