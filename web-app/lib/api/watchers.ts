@@ -242,7 +242,8 @@ export async function getAllWatcherHeartbeats(
         gte(watcherHeartbeats.timestamp, since)
       )
     )
-    .orderBy(asc(watcherHeartbeats.timestamp));
+    .orderBy(asc(watcherHeartbeats.timestamp))
+    .limit(5000);
 }
 
 // ---------------------------------------------------------------------------
