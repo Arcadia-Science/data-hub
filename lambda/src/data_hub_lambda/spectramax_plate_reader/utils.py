@@ -40,6 +40,15 @@ _OFF_NUM_WELLS = 12
 
 _ROW_LABELS = "ABCDEFGHIJKLMNOP"
 
+
+def _parse_wavelengths(raw: str) -> tuple[int, ...]:
+    """Parse a space-separated wavelength string like ``'750'`` or ``'750 600'``."""
+    tokens = raw.split()
+    if not tokens or not all(t.isdigit() for t in tokens):
+        raise ValueError(f"Expected space-separated numeric wavelengths, got '{raw}'")
+    return tuple(int(t) for t in tokens)
+
+
 _WELL_POSITION_RE = re.compile(r"^([A-P])(\d{1,2})$")
 
 
@@ -112,6 +121,7 @@ class _ColumnLayout:
     format: Literal["grid", "flat"]
     num_data_cols: int
     well_positions: tuple[tuple[str, int], ...] = field(default=())
+    group_offsets: tuple[int, ...] = field(default=())
 
 
 def _parse_column_layout(col_header_line: str) -> _ColumnLayout:
@@ -131,14 +141,24 @@ def _parse_column_layout(col_header_line: str) -> _ColumnLayout:
     """
     fields = col_header_line.split("\t")
 
-    count = 0
-    for f in fields[2:]:
-        if f.strip().isdigit():
-            count += 1
-        elif count > 0:
-            break
-    if count > 0:
-        return _ColumnLayout(format="grid", num_data_cols=count)
+    groups: list[tuple[int, int]] = []
+    idx = 2
+    while idx < len(fields):
+        if fields[idx].strip().isdigit():
+            start = idx
+            count = 0
+            while idx < len(fields) and fields[idx].strip().isdigit():
+                count += 1
+                idx += 1
+            groups.append((start, count))
+        else:
+            idx += 1
+    if groups:
+        return _ColumnLayout(
+            format="grid",
+            num_data_cols=groups[0][1],
+            group_offsets=tuple(g[0] for g in groups),
+        )
 
     well_positions: list[tuple[str, int]] = []
     for f in fields[2:]:
@@ -193,13 +213,12 @@ def parse_metadata(file_path: Path) -> dict[str, str]:
                 f"Unexpected measurement type '{header.measurement_type}'; "
                 f"expected one of {sorted(MEASUREMENT_TYPES)}"
             )
-        if not header.wavelength_raw.isdigit():
-            raise ValueError(f"Expected numeric wavelength, got '{header.wavelength_raw}'")
+        wavelengths = _parse_wavelengths(header.wavelength_raw)
 
         return {
             "measurement_mode": header.measurement_mode,
             "measurement_type": header.measurement_type,
-            "wavelength": f"{header.wavelength_raw} nm",
+            "wavelength": ", ".join(f"{w} nm" for w in wavelengths),
         }
 
     raise ValueError(f"No 'Plate:' header line found in {file_path}")
@@ -243,7 +262,10 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
             continue
 
         header = _parse_plate_header(lines[i])
-        wavelength = int(header.wavelength_raw) if header.wavelength_raw.isdigit() else None
+        try:
+            wavelengths = _parse_wavelengths(header.wavelength_raw)
+        except ValueError:
+            wavelengths = ()
 
         if i + 1 >= len(lines):
             raise ValueError(
@@ -254,6 +276,7 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
         i += 2  # Skip plate header + column header row.
 
         if layout.format == "flat":
+            wl = wavelengths[0] if wavelengths else None
             for _ in range(header.num_readings):
                 row_fields = lines[i].split("\t")
                 time_str = row_fields[0].strip()
@@ -275,7 +298,7 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
                             "value": float(val_str),
                             "row_label": row_label,
                             "column_label": column_label,
-                            "wavelength": wavelength,
+                            "wavelength": wl,
                         }
                     )
 
@@ -292,6 +315,7 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
                 )
             num_rows = header.num_wells // num_cols
 
+            offsets = layout.group_offsets or (2,)
             for _ in range(header.num_readings):
                 time_val = None
                 temp_val = None
@@ -307,24 +331,26 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
 
                     row_label = _ROW_LABELS[row_idx]
 
-                    for col_idx in range(num_cols):
-                        val_str = row_fields[2 + col_idx].strip()
-                        if not val_str:
-                            continue
+                    for wl_idx, group_start in enumerate(offsets):
+                        wl = wavelengths[wl_idx] if wl_idx < len(wavelengths) else None
+                        for col_idx in range(num_cols):
+                            val_str = row_fields[group_start + col_idx].strip()
+                            if not val_str:
+                                continue
 
-                        column_label = col_idx + 1
-                        records.append(
-                            {
-                                "time": time_val,
-                                "plate_name": header.plate_name,
-                                "well_position": f"{row_label}{column_label}",
-                                "temperature_c": temp_val,
-                                "value": float(val_str),
-                                "row_label": row_label,
-                                "column_label": column_label,
-                                "wavelength": wavelength,
-                            }
-                        )
+                            column_label = col_idx + 1
+                            records.append(
+                                {
+                                    "time": time_val,
+                                    "plate_name": header.plate_name,
+                                    "well_position": f"{row_label}{column_label}",
+                                    "temperature_c": temp_val,
+                                    "value": float(val_str),
+                                    "row_label": row_label,
+                                    "column_label": column_label,
+                                    "wavelength": wl,
+                                }
+                            )
 
                     i += 1
 

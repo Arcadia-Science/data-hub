@@ -171,8 +171,17 @@ class TestParseMetadataValidation:
 
     def test_non_numeric_wavelength(self, tmp_path: Path) -> None:
         path = _build_xls(tmp_path, wavelength="ABC")
-        with pytest.raises(ValueError, match="Expected numeric wavelength"):
+        with pytest.raises(ValueError, match="Expected space-separated numeric wavelengths"):
             parse_metadata(path)
+
+    def test_dual_wavelength(self, tmp_path: Path) -> None:
+        path = _build_xls(tmp_path, wavelength="750 600")
+        result = parse_metadata(path)
+        assert result == {
+            "measurement_mode": "Absorbance",
+            "measurement_type": "Endpoint",
+            "wavelength": "750 nm, 600 nm",
+        }
 
     def test_missing_plate_header(self, tmp_path: Path) -> None:
         path = _build_xls(tmp_path, include_plate_line=False)
