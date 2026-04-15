@@ -1,3 +1,5 @@
+"use client";
+
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -12,7 +14,7 @@ import { statusBadge } from "@/components/watchers/status-badge";
 import type { WatcherListItem } from "@/lib/api/watchers";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { SearchX } from "lucide-react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 export function WatchersTable({
   data,
@@ -21,6 +23,8 @@ export function WatchersTable({
   data: WatcherListItem[];
   isDeregisteredView?: boolean;
 }) {
+  const router = useRouter();
+
   if (data.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed py-16">
@@ -53,24 +57,20 @@ export function WatchersTable({
             return (
               <TableRow
                 key={row.id}
-                className={cn(isDeregisteredView && "opacity-60")}
+                className={cn(
+                  "cursor-pointer",
+                  isDeregisteredView && "opacity-60"
+                )}
+                onClick={() => router.push(`/watchers/${row.id}`)}
               >
                 <TableCell>
-                  <Link
-                    href={`/watchers/${row.id}`}
-                    className="font-mono text-xs hover:underline"
-                  >
+                  <span className="font-mono text-xs">
                     {row.id.slice(0, 8)}…
-                  </Link>
+                  </span>
                 </TableCell>
                 <TableCell>
                   {row.instrumentDisplayName ? (
-                    <Link
-                      href={`/instruments/${row.instrumentId}`}
-                      className="text-sm hover:underline"
-                    >
-                      {row.instrumentDisplayName}
-                    </Link>
+                    <span className="text-sm">{row.instrumentDisplayName}</span>
                   ) : (
                     <span className="font-mono text-xs text-muted-foreground">
                       {row.instrumentId}
@@ -97,7 +97,7 @@ export function WatchersTable({
                   </span>
                 </TableCell>
                 {!isDeregisteredView && (
-                  <TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
                     {!row.deletedAt && (
                       <DeregisterDialog
                         watcherId={row.id}

@@ -3,16 +3,13 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EventLog } from "@/components/watchers/event-log";
 import { EventLogToolbar } from "@/components/watchers/event-log-toolbar";
-import { HeartbeatTable } from "@/components/watchers/heartbeat-table";
+import { HeartbeatChart } from "@/components/watchers/heartbeat-chart";
 import type { WatcherEventRow, WatcherHeartbeatRow } from "@/lib/api/watchers";
 import { parseAsString, useQueryState } from "nuqs";
 
 export function WatcherDetailTabs({
   configTab,
   heartbeats,
-  heartbeatsTotal,
-  heartbeatsPage,
-  heartbeatsTotalPages,
   events,
   eventsTotal,
   eventsPage,
@@ -20,9 +17,6 @@ export function WatcherDetailTabs({
 }: {
   configTab: React.ReactNode;
   heartbeats: WatcherHeartbeatRow[];
-  heartbeatsTotal: number;
-  heartbeatsPage: number;
-  heartbeatsTotalPages: number;
   events: WatcherEventRow[];
   eventsTotal: number;
   eventsPage: number;
@@ -37,7 +31,7 @@ export function WatcherDetailTabs({
     <Tabs value={tab} onValueChange={setTab}>
       <TabsList className="mb-4">
         <TabsTrigger value="logs">Logs</TabsTrigger>
-        <TabsTrigger value="heartbeats">Heartbeats</TabsTrigger>
+        <TabsTrigger value="status">Status</TabsTrigger>
         <TabsTrigger value="configuration">Configuration</TabsTrigger>
       </TabsList>
 
@@ -60,20 +54,16 @@ export function WatcherDetailTabs({
         />
       </TabsContent>
 
-      <TabsContent value="heartbeats" className="flex flex-col gap-4">
+      <TabsContent value="status" className="flex flex-col gap-4">
         <div>
-          <h3 className="text-sm font-medium">Heartbeat History</h3>
+          <h3 className="text-sm font-medium">Watcher Status</h3>
           <p className="text-xs text-muted-foreground">
-            {heartbeatsTotal} heartbeat{heartbeatsTotal !== 1 && "s"} (last 24
-            hours)
+            Activity and connectivity (last 24 hours)
           </p>
         </div>
-        <HeartbeatTable
-          heartbeats={heartbeats}
-          page={heartbeatsPage}
-          totalPages={heartbeatsTotalPages}
-        />
+        <HeartbeatChart heartbeats={heartbeats} />
       </TabsContent>
+
       <TabsContent value="configuration" className="flex flex-col gap-4">
         <div>
           <h3 className="text-sm font-medium">Configuration</h3>

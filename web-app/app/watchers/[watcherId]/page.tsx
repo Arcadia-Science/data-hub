@@ -3,9 +3,9 @@ import { WatcherDetailTabs } from "@/components/watchers/watcher-detail-tabs";
 import { WatcherHeader } from "@/components/watchers/watcher-header";
 import {
   WATCHER_PAGE_SIZE,
+  getAllWatcherHeartbeats,
   getWatcherById,
   getWatcherEvents,
-  getWatcherHeartbeats,
 } from "@/lib/api/watchers";
 import { auth } from "@/lib/auth";
 import { watcherDetailParamsCache } from "@/lib/search-params";
@@ -35,20 +35,14 @@ export default async function WatcherDetailPage({
   const { watcherId } = await params;
   const filters = watcherDetailParamsCache.parse(await searchParams);
 
-  // undefined defers to the data layer's default 24h lookback window, which
-  // avoids calling Date.now() in the render path (React purity rule).
   const heartbeatSince = filters.since ? new Date(filters.since) : undefined;
   const eventsSince = filters.events_since
     ? new Date(filters.events_since)
     : undefined;
 
-  // Three independent queries — none depends on the others' results.
-  const [watcher, heartbeatResult, eventResult] = await Promise.all([
+  const [watcher, heartbeats, eventResult] = await Promise.all([
     getWatcherById(watcherId),
-    getWatcherHeartbeats(watcherId, {
-      since: heartbeatSince,
-      page: filters.hb_page,
-    }),
+    getAllWatcherHeartbeats(watcherId, { since: heartbeatSince }),
     getWatcherEvents(watcherId, {
       since: eventsSince,
       eventTypes:
@@ -59,7 +53,6 @@ export default async function WatcherDetailPage({
 
   if (!watcher) notFound();
 
-  const hbTotalPages = Math.ceil(heartbeatResult.total / WATCHER_PAGE_SIZE);
   const logsTotalPages = Math.ceil(eventResult.total / WATCHER_PAGE_SIZE);
 
   return (
@@ -67,10 +60,7 @@ export default async function WatcherDetailPage({
       <WatcherHeader watcher={watcher} />
       <WatcherDetailTabs
         configTab={<WatcherConfig configYaml={watcher.configYaml} />}
-        heartbeats={heartbeatResult.rows}
-        heartbeatsTotal={heartbeatResult.total}
-        heartbeatsPage={filters.hb_page}
-        heartbeatsTotalPages={hbTotalPages}
+        heartbeats={heartbeats}
         events={eventResult.rows}
         eventsTotal={eventResult.total}
         eventsPage={filters.logs_page}
