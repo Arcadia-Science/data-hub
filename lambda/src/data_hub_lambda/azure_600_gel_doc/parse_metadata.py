@@ -17,6 +17,7 @@ Extracted fields:
 """
 
 from __future__ import annotations
+import re
 import struct
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,11 @@ _CAPTURE_TYPE_LABELS: dict[str, str] = {
 }
 
 _COLOR_NAMES = {"Red", "Green", "Blue", "Cyan", "Magenta", "Yellow"}
+
+_KNOWN_IMAGING_MODES = {"True Color Imaging", "Fluorescence", "Chemiluminescence"}
+
+_WAVELENGTH_RE = re.compile(r"(\d+)\s*nm")
+_LED_COLOR_RE = re.compile(r"\((\w+)\s+LED\)")
 
 
 def parse_metadata(file_path: Path) -> dict[str, Any]:
@@ -55,10 +61,9 @@ def parse_metadata(file_path: Path) -> dict[str, Any]:
     channel_strings = [s for s, off in value_strings if off >= boundary]
 
     capture_type = _parse_capture_type(info_strings)
-    channels = _group_channel_strings(channel_strings)
-    imaging_mode = _derive_imaging_mode(channels)
-    wavelengths = _extract_wavelengths(channels)
-    colors = _extract_colors(channels)
+    imaging_mode = _derive_imaging_mode(info_strings, channel_strings)
+    wavelengths = _extract_wavelengths(channel_strings)
+    colors = _extract_colors(channel_strings)
 
     return {
         "capture_type": capture_type,
@@ -137,48 +142,63 @@ def _parse_capture_type(info_strings: list[str]) -> str | None:
     return None
 
 
-def _group_channel_strings(channel_strings: list[str]) -> list[dict[str, str]]:
-    """Group channel string records into per-channel dicts.
+def _derive_imaging_mode(info_strings: list[str], channel_strings: list[str]) -> str | None:
+    """Determine the imaging mode from info-level and channel-level strings.
 
-    Each active `ImageChannel` produces exactly four consecutive string
-    records: `DyeName`, `ExcitationName`, `EmissionName`, `ExposureType`.
-    Inactive channels are serialized with null markers and produce no string
-    records.
+    Checks the top-level ``ImageInfo`` strings first (where modes like
+    ``"True Color Imaging"`` are stored explicitly), then falls back to
+    heuristics based on the channel string records.
     """
-    channels: list[dict[str, str]] = []
-    for i in range(0, len(channel_strings) - 3, 4):
-        channels.append(
-            {
-                "dye_name": channel_strings[i],
-                "excitation": channel_strings[i + 1],
-                "emission": channel_strings[i + 2],
-                "exposure_type": channel_strings[i + 3],
-            }
-        )
-    return channels
+    for s in info_strings:
+        if s in _KNOWN_IMAGING_MODES:
+            return s
 
-
-def _derive_imaging_mode(channels: list[dict[str, str]]) -> str | None:
-    """Determine the imaging mode from the active channel dye names."""
-    dye_names = {ch["dye_name"] for ch in channels}
-
-    if "Chemiluminescence" in dye_names:
+    if "Chemiluminescence" in channel_strings:
         return "Chemiluminescence"
 
-    if dye_names >= {"Red", "Green", "Blue"}:
+    if {"Red", "Green", "Blue"} <= set(channel_strings):
         return "True Color Imaging"
 
-    if channels:
+    if channel_strings:
         return "Fluorescence"
 
     return None
 
 
-def _extract_wavelengths(channels: list[dict[str, str]]) -> list[str]:
-    """Return excitation wavelength values (numeric strings only)."""
-    return [ch["excitation"] for ch in channels if ch["excitation"].isdigit()]
+def _extract_wavelengths(channel_strings: list[str]) -> list[str]:
+    """Return excitation wavelength values from channel strings.
+
+    Handles both plain numeric strings (``"628"``) and descriptive labels
+    (``"628nm (Red LED)"``).
+    """
+    wavelengths: list[str] = []
+    for s in channel_strings:
+        if s.isdigit():
+            wavelengths.append(s)
+            continue
+        m = _WAVELENGTH_RE.search(s)
+        if m:
+            wavelengths.append(m.group(1))
+    return wavelengths
 
 
-def _extract_colors(channels: list[dict[str, str]]) -> list[str]:
-    """Return color names from channels whose `DyeName` is a known color."""
-    return [ch["dye_name"] for ch in channels if ch["dye_name"] in _COLOR_NAMES]
+def _extract_colors(channel_strings: list[str]) -> list[str]:
+    """Return color names from channel strings.
+
+    Handles both plain color names (``"Red"``) and descriptive labels
+    (``"628nm (Red LED)"``).
+    """
+    colors: list[str] = []
+    seen: set[str] = set()
+    for s in channel_strings:
+        color: str | None = None
+        if s in _COLOR_NAMES:
+            color = s
+        else:
+            m = _LED_COLOR_RE.search(s)
+            if m and m.group(1) in _COLOR_NAMES:
+                color = m.group(1)
+        if color and color not in seen:
+            colors.append(color)
+            seen.add(color)
+    return colors
