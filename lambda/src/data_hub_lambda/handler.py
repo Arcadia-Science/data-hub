@@ -7,7 +7,7 @@ import warnings
 from dataclasses import dataclass
 from pprint import pformat
 from typing import Any
-from urllib.parse import quote, unquote_plus
+from urllib.parse import quote, unquote
 
 from aws_lambda_typing.context import Context
 from aws_lambda_typing.events.s3 import S3Event
@@ -59,7 +59,13 @@ def parse_s3_event(event: S3Event) -> S3EventInfo:
         raise ValueError("No records found in event payload.")
 
     s3_bucket: str = record["s3"]["bucket"]["name"]  # type: ignore[index]
-    s3_key: str = unquote_plus(record["s3"]["object"]["key"])  # type: ignore[index]
+    # Use unquote (not unquote_plus) so literal "+" in S3 key names is
+    # preserved.  S3 keys in this system use "+" as a separator (e.g.
+    # "Ben+Ray") and never contain bare spaces, so the form-encoding
+    # convention where + represents a space is not appropriate here.
+    # Synthetic event producers (reprocess endpoint, test fixtures) pair
+    # with this by percent-encoding "+" as "%2B".
+    s3_key: str = unquote(record["s3"]["object"]["key"])  # type: ignore[index]
 
     # S3 key layout: {instrument_id}/{run_id}/{filename}
     pattern = r"^/?([^/]+)/([^/]+)/([^/]+)$"

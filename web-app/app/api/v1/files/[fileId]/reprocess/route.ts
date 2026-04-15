@@ -112,14 +112,21 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   });
 
   // Build a synthetic S3 event matching the shape parse_s3_event expects.
-  // Lambda decodes event keys via unquote_plus(), so literal "+" characters
-  // must be sent as "%2B" to avoid being interpreted as spaces.
+  // Real S3 events use application/x-www-form-urlencoded encoding for the
+  // object key: "+" → "%2B", spaces → "+", and "/" stays literal.
+  // We replicate that with encodeURIComponent (which gives "%2B" for "+")
+  // then restore literal "/" to match S3's format.  The Lambda decodes
+  // with urllib.parse.unquote, which handles both "%2F" and "/" correctly,
+  // but keeping "/" literal makes the event payload identical to what S3
+  // would actually send.
   const s3Event = {
     Records: [
       {
         s3: {
           bucket: { name: file.s3Bucket },
-          object: { key: encodeURIComponent(file.s3Key) },
+          object: {
+            key: encodeURIComponent(file.s3Key).replaceAll("%2F", "/"),
+          },
         },
       },
     ],
