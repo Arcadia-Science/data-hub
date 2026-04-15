@@ -133,6 +133,7 @@ export type InstrumentDetail = {
   watcherCount: number;
   watchersOnline: number;
   watchersOffline: number;
+  activeWatcherId: string | null;
 };
 
 export const getInstrumentById = cache(async function getInstrumentById(
@@ -158,6 +159,7 @@ export const getInstrumentById = cache(async function getInstrumentById(
       ),
     db
       .select({
+        id: watchers.id,
         status: watchers.status,
         lastHeartbeatAt: watchers.lastHeartbeatAt,
         configYaml: watchers.configYaml,
@@ -174,14 +176,20 @@ export const getInstrumentById = cache(async function getInstrumentById(
 
   let watchersOnline = 0;
   let watchersOffline = 0;
+  let activeWatcherId: string | null = null;
   for (const w of watcherRows) {
     const isOnline =
       w.status === "watching" &&
       w.lastHeartbeatAt &&
       w.lastHeartbeatAt > staleThreshold;
-    if (isOnline) watchersOnline++;
-    else watchersOffline++;
+    if (isOnline) {
+      watchersOnline++;
+      activeWatcherId ??= w.id;
+    } else {
+      watchersOffline++;
+    }
   }
+  activeWatcherId ??= watcherRows[0]?.id ?? null;
 
   return {
     id: instrument.id,
@@ -196,5 +204,6 @@ export const getInstrumentById = cache(async function getInstrumentById(
     watcherCount: watcherRows.length,
     watchersOnline,
     watchersOffline,
+    activeWatcherId,
   };
 });

@@ -13,8 +13,8 @@ const watcherBadge: Record<
     icon: typeof Activity;
   }
 > = {
-  online: { label: "Online", variant: "default", icon: Radio },
-  offline: { label: "Offline", variant: "destructive", icon: WifiOff },
+  online: { label: "Watcher Online", variant: "default", icon: Radio },
+  offline: { label: "Watcher Offline", variant: "destructive", icon: WifiOff },
   no_watcher: { label: "No Watcher", variant: "outline", icon: WifiOff },
 };
 
@@ -35,10 +35,10 @@ export function InstrumentHeader({
   const WatcherIcon = wb.icon;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-2">
       <Link
         href="/instruments"
-        className="flex w-fit items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        className="mb-2 flex w-fit items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
       >
         <ArrowLeft className="size-3.5" />
         Back to instruments
@@ -52,15 +52,22 @@ export function InstrumentHeader({
         </div>
 
         <div className="flex items-center gap-2">
-          <Badge variant={wb.variant} className="gap-1 px-2 py-3 text-xs">
-            <WatcherIcon className="size-3" />
-            {wb.label}
-            {instrument.watcherCount > 0 && (
-              <span className="ml-0.5 font-mono">
-                ({instrument.watchersOnline}/{instrument.watcherCount})
-              </span>
-            )}
-          </Badge>
+          {instrument.activeWatcherId ? (
+            <Link href={`/watchers/${instrument.activeWatcherId}`}>
+              <Badge
+                variant={wb.variant}
+                className="gap-1 px-2 py-3 text-xs transition-colors hover:opacity-80"
+              >
+                <WatcherIcon className="size-3" />
+                {wb.label}
+              </Badge>
+            </Link>
+          ) : (
+            <Badge variant={wb.variant} className="gap-1 px-2 py-3 text-xs">
+              <WatcherIcon className="size-3" />
+              {wb.label}
+            </Badge>
+          )}
           <Badge variant="outline" className="px-2 py-3 font-mono text-xs">
             {instrument.runCount} {instrument.runCount === 1 ? "run" : "runs"}
           </Badge>

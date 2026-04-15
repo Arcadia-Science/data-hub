@@ -6,7 +6,7 @@ import {
   watcherHeartbeats,
   watchers,
 } from "@/lib/db/schema";
-import { and, count, desc, eq, gte, inArray, isNull } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNull } from "drizzle-orm";
 import { cache } from "react";
 
 export const STALE_THRESHOLD_MS = 5 * 60 * 1000;
@@ -216,6 +216,34 @@ export async function getWatcherHeartbeats(
   ]);
 
   return { rows, total };
+}
+
+export async function getAllWatcherHeartbeats(
+  watcherId: string,
+  opts: { since?: Date } = {}
+): Promise<WatcherHeartbeatRow[]> {
+  const since = opts.since ?? new Date(Date.now() - DEFAULT_LOOKBACK_MS);
+
+  return db
+    .select({
+      id: watcherHeartbeats.id,
+      timestamp: watcherHeartbeats.timestamp,
+      status: watcherHeartbeats.status,
+      uploadMode: watcherHeartbeats.uploadMode,
+      filesUploadedSinceLast: watcherHeartbeats.filesUploadedSinceLast,
+      runsReportedSinceLast: watcherHeartbeats.runsReportedSinceLast,
+      errorsSinceLast: watcherHeartbeats.errorsSinceLast,
+      uptimeSeconds: watcherHeartbeats.uptimeSeconds,
+    })
+    .from(watcherHeartbeats)
+    .where(
+      and(
+        eq(watcherHeartbeats.watcherId, watcherId),
+        gte(watcherHeartbeats.timestamp, since)
+      )
+    )
+    .orderBy(asc(watcherHeartbeats.timestamp))
+    .limit(5000);
 }
 
 // ---------------------------------------------------------------------------

@@ -10,7 +10,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { PlateReaderFilterOptions } from "@/lib/api/instrument-runs";
-import { cn } from "@/lib/utils";
+import { cn, formatBytes } from "@/lib/utils";
 
 import type { RunRow } from ".";
 import { ClickableRow } from "./clickable-row";
@@ -95,6 +95,7 @@ export function PlateReaderRunsTable({
           <TableRow>
             <TableHead>Run ID</TableHead>
             <TableHead>Files</TableHead>
+            <TableHead className="text-right">Total Size</TableHead>
             <TableHead>
               <FilterableColumnHeader
                 label="Wavelength"
@@ -128,7 +129,7 @@ export function PlateReaderRunsTable({
             return (
               <ClickableRow
                 key={row.id}
-                href={`/instruments/${instrumentId}/runs/${row.run_id}`}
+                href={`/instruments/${instrumentId}/runs/${encodeURIComponent(row.run_id)}`}
                 className={cn(isDeleted && "opacity-50")}
               >
                 <TableCell>
@@ -150,6 +151,9 @@ export function PlateReaderRunsTable({
                     filesFailed={row.files_failed}
                     filesPendingUpload={row.files_pending_upload}
                   />
+                </TableCell>
+                <TableCell className="text-right text-sm tabular-nums">
+                  {formatBytes(row.total_size_bytes)}
                 </TableCell>
                 <TableCell>
                   <MetadataFieldBadge

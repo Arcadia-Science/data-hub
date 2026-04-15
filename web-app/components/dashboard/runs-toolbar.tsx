@@ -35,7 +35,7 @@ type Instrument = {
 };
 
 const DATE_PRESETS = [
-  { value: "today", label: "Today", days: 0 },
+  { value: "today", label: "Last 24 hours", days: 0 },
   { value: "3d", label: "Last 3 days", days: 3 },
   { value: "1w", label: "Last week", days: 7 },
   { value: "2w", label: "Last 2 weeks", days: 14 },

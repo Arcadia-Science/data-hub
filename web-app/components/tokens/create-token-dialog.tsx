@@ -1,5 +1,6 @@
 "use client";
 
+import { CopyButton } from "@/components/copy-button";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -19,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Check, Copy, Loader2, Plus } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -48,14 +49,11 @@ export function CreateTokenDialog() {
   const [expiry, setExpiry] = useState("90");
   const [isPending, startTransition] = useTransition();
   const [plaintext, setPlaintext] = useState("");
-  const [copied, setCopied] = useState(false);
-
   const reset = useCallback(() => {
     setStep("form");
     setName("");
     setExpiry("90");
     setPlaintext("");
-    setCopied(false);
   }, []);
 
   const handleCreate = () => {
@@ -80,12 +78,6 @@ export function CreateTokenDialog() {
       setPlaintext(data.token);
       setStep("display");
     });
-  };
-
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(plaintext);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   };
 
   const handleDone = () => {
@@ -182,18 +174,7 @@ export function CreateTokenDialog() {
                 <code className="min-w-0 flex-1 overflow-x-hidden rounded-md border bg-muted px-3 py-2 font-mono text-sm">
                   {plaintext}
                 </code>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={handleCopy}
-                  aria-label="Copy token"
-                >
-                  {copied ? (
-                    <Check className="size-4" />
-                  ) : (
-                    <Copy className="size-4" />
-                  )}
-                </Button>
+                <CopyButton value={plaintext} />
               </div>
             </div>
             <DialogFooter>

@@ -112,12 +112,14 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   });
 
   // Build a synthetic S3 event matching the shape parse_s3_event expects.
+  // Lambda decodes event keys via unquote_plus(), so literal "+" characters
+  // must be sent as "%2B" to avoid being interpreted as spaces.
   const s3Event = {
     Records: [
       {
         s3: {
           bucket: { name: file.s3Bucket },
-          object: { key: file.s3Key },
+          object: { key: encodeURIComponent(file.s3Key) },
         },
       },
     ],

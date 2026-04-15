@@ -1,3 +1,4 @@
+import { ClickableRow } from "@/components/instruments/runs-table/clickable-row";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -12,7 +13,6 @@ import { statusBadge } from "@/components/watchers/status-badge";
 import type { WatcherListItem } from "@/lib/api/watchers";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { SearchX } from "lucide-react";
-import Link from "next/link";
 
 export function WatchersTable({
   data,
@@ -51,26 +51,19 @@ export function WatchersTable({
           {data.map((row) => {
             const sb = statusBadge[row.effectiveStatus];
             return (
-              <TableRow
+              <ClickableRow
                 key={row.id}
+                href={`/watchers/${row.id}`}
                 className={cn(isDeregisteredView && "opacity-60")}
               >
                 <TableCell>
-                  <Link
-                    href={`/watchers/${row.id}`}
-                    className="font-mono text-xs hover:underline"
-                  >
+                  <span className="font-mono text-xs">
                     {row.id.slice(0, 8)}…
-                  </Link>
+                  </span>
                 </TableCell>
                 <TableCell>
                   {row.instrumentDisplayName ? (
-                    <Link
-                      href={`/instruments/${row.instrumentId}`}
-                      className="text-sm hover:underline"
-                    >
-                      {row.instrumentDisplayName}
-                    </Link>
+                    <span className="text-sm">{row.instrumentDisplayName}</span>
                   ) : (
                     <span className="font-mono text-xs text-muted-foreground">
                       {row.instrumentId}
@@ -97,7 +90,7 @@ export function WatchersTable({
                   </span>
                 </TableCell>
                 {!isDeregisteredView && (
-                  <TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
                     {!row.deletedAt && (
                       <DeregisterDialog
                         watcherId={row.id}
@@ -106,7 +99,7 @@ export function WatchersTable({
                     )}
                   </TableCell>
                 )}
-              </TableRow>
+              </ClickableRow>
             );
           })}
         </TableBody>

@@ -46,10 +46,10 @@ export const instrumentDetailParamsCache = createSearchParamsCache(
 // by EventLogToolbar. `since` (heartbeat time range) has no toolbar UI yet —
 // it exists to support deep-linking; defaults to 24h in the data layer.
 export const watcherDetailSearchParams = {
+  tab: parseAsString.withDefault("logs"),
   event_type: parseAsArrayOf(parseAsString).withDefault([]),
   since: parseAsString,
   events_since: parseAsString,
-  hb_page: parseAsInteger.withDefault(1),
   logs_page: parseAsInteger.withDefault(1),
 };
 
