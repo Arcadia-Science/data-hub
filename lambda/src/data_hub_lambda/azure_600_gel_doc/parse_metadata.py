@@ -33,12 +33,16 @@ _CAPTURE_TYPE_LABELS: dict[str, str] = {
     "Manually Image": "Manual",
 }
 
-_COLOR_NAMES = {"Red", "Green", "Blue", "Cyan", "Magenta", "Yellow"}
+_COLOR_NAMES = {"Red", "Green", "Blue", "Cyan", "Magenta", "Yellow", "Orange", "FarRed"}
+
+_COLOR_DISPLAY_NAMES: dict[str, str] = {
+    "FarRed": "Far Red",
+}
 
 _KNOWN_IMAGING_MODES = {"True Color Imaging", "Fluorescence", "Chemiluminescence"}
 
 _WAVELENGTH_RE = re.compile(r"(\d+)\s*nm")
-_LED_COLOR_RE = re.compile(r"\((\w+)\s+LED\)")
+_PAREN_COLOR_RE = re.compile(r"\((\w+)\s+\w+\)")
 
 
 def parse_metadata(file_path: Path) -> dict[str, Any]:
@@ -185,8 +189,8 @@ def _extract_wavelengths(channel_strings: list[str]) -> list[str]:
 def _extract_colors(channel_strings: list[str]) -> list[str]:
     """Return color names from channel strings.
 
-    Handles both plain color names (``"Red"``) and descriptive labels
-    (``"628nm (Red LED)"``).
+    Handles plain color names (``"Red"``), LED labels (``"628nm (Red LED)"``),
+    and emission-filter labels (``"595nm (Orange EM)"``).
     """
     colors: list[str] = []
     seen: set[str] = set()
@@ -195,10 +199,10 @@ def _extract_colors(channel_strings: list[str]) -> list[str]:
         if s in _COLOR_NAMES:
             color = s
         else:
-            m = _LED_COLOR_RE.search(s)
+            m = _PAREN_COLOR_RE.search(s)
             if m and m.group(1) in _COLOR_NAMES:
                 color = m.group(1)
         if color and color not in seen:
-            colors.append(color)
+            colors.append(_COLOR_DISPLAY_NAMES.get(color, color))
             seen.add(color)
     return colors
