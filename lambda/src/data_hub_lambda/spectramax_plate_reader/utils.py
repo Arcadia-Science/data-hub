@@ -3,9 +3,9 @@
 SoftMax Pro exports plate data as tab-delimited text with an `.xls`
 extension.  The plate header line (``Plate:  ...``) encodes measurement
 settings, but the field layout varies by measurement mode (Absorbance vs
-Fluorescence).  Fields before the ``Raw`` token are stable; fields after
-it shift depending on the mode.  We locate ``Raw`` as an anchor and read
-subsequent fields at fixed offsets from it.
+Fluorescence).  Fields before the ``Raw``/``Reduced`` token are stable;
+fields after it shift depending on the mode.  We locate the anchor token
+and read subsequent fields at fixed offsets from it.
 
 The raw data section of each plate block is a grid of rows × columns
 (e.g. 8 × 12 for 96-well, 16 × 24 for 384-well), repeated once per
@@ -30,7 +30,9 @@ _COL_PLATE_NAME = 1
 _COL_MEASUREMENT_TYPE = 4
 _COL_MEASUREMENT_MODE = 5
 
-# First index where the ``Raw`` token can appear.  Fields 0–5 are the
+_ANCHOR_TOKENS = {"Raw", "Reduced"}
+
+# First index where the anchor token can appear.  Fields 0–5 are the
 # stable prefix: Plate:, plate_name, version, format, type, mode.
 _RAW_SEARCH_START = 6
 
@@ -67,22 +69,25 @@ class _PlateHeader:
 def _parse_plate_header(line: str) -> _PlateHeader:
     """Parse a ``Plate:`` header line into structured fields.
 
-    Locates the ``Raw`` token to anchor field positions so that both
-    Absorbance and Fluorescence layouts are handled correctly.
+    Locates the ``Raw`` or ``Reduced`` anchor token to determine field
+    positions so that both Absorbance and Fluorescence layouts are
+    handled correctly.
 
     Raises:
-        ValueError: If the line has no ``Raw`` token or required fields
-            cannot be read.
+        ValueError: If the line has no recognised anchor token or
+            required fields cannot be read.
     """
     fields = line.split("\t")
 
     raw_idx: int | None = None
     for j in range(_RAW_SEARCH_START, len(fields)):
-        if fields[j] == "Raw":
+        if fields[j] in _ANCHOR_TOKENS:
             raw_idx = j
             break
     if raw_idx is None:
-        raise ValueError(f"No 'Raw' anchor token found in plate header: {line!r}")
+        raise ValueError(
+            f"No anchor token ({'/'.join(sorted(_ANCHOR_TOKENS))}) found in plate header: {line!r}"
+        )
 
     required_len = raw_idx + _OFF_NUM_WELLS + 1
     if len(fields) < required_len:
