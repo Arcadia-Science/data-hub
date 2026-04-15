@@ -90,7 +90,7 @@ export function RunsTable({
         <TableBody>
           {data.map((row) => {
             const isDeleted = row.deleted_at !== null;
-            const href = `/instruments/${row.instrument_id}/runs/${row.run_id}`;
+            const href = `/instruments/${row.instrument_id}/runs/${encodeURIComponent(row.run_id)}`;
             return (
               <TableRow
                 key={row.id}

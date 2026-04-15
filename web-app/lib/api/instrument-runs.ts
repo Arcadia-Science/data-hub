@@ -31,6 +31,7 @@ export async function lookupRunByNaturalKey(
   instrumentId: string,
   runId: string
 ) {
+  const decodedRunId = decodeURIComponent(runId);
   const [row] = await db
     .select({
       id: instrumentRuns.id,
@@ -51,7 +52,7 @@ export async function lookupRunByNaturalKey(
     .where(
       and(
         eq(instrumentRuns.instrumentId, instrumentId),
-        eq(instrumentRuns.runId, runId)
+        eq(instrumentRuns.runId, decodedRunId)
       )
     )
     .limit(1);

@@ -57,7 +57,7 @@ export function DefaultRunsTable({ data, instrumentId }: RunsTableProps) {
             return (
               <ClickableRow
                 key={row.id}
-                href={`/instruments/${instrumentId}/runs/${row.run_id}`}
+                href={`/instruments/${instrumentId}/runs/${encodeURIComponent(row.run_id)}`}
                 className={cn(isDeleted && "opacity-50")}
               >
                 <TableCell>
