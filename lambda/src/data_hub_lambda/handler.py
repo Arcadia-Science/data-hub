@@ -2,6 +2,7 @@ from __future__ import annotations
 import hmac
 import json
 import re
+import shutil
 import warnings
 from dataclasses import dataclass
 from pprint import pformat
@@ -143,6 +144,21 @@ def _authenticate_function_url(event: dict[str, Any]) -> dict[str, Any] | None:
 
 
 # ------------------------------------------------------------------
+# Ephemeral storage cleanup
+# ------------------------------------------------------------------
+
+
+def _cleanup_tmp() -> None:
+    """Remove downloaded/processed files so warm containers don't run out of /tmp space."""
+    from data_hub_shared.config import config
+
+    data_dir = config.LOCAL_DATA_DIRPATH
+    if data_dir.exists():
+        shutil.rmtree(data_dir, ignore_errors=True)
+        logger.info("Cleaned up %s", data_dir)
+
+
+# ------------------------------------------------------------------
 # Main handler
 # ------------------------------------------------------------------
 
@@ -226,3 +242,5 @@ def lambda_handler(event: dict[str, Any], context: Context) -> dict[str, Any] | 
             f"Failed to preprocess run `{run_id}`!\n"
             f"<{logs_url}|View CloudWatch logs>"
         )
+    finally:
+        _cleanup_tmp()
