@@ -4,11 +4,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EventLog } from "@/components/watchers/event-log";
 import { EventLogToolbar } from "@/components/watchers/event-log-toolbar";
 import { HeartbeatTable } from "@/components/watchers/heartbeat-table";
-import { WatcherConfig } from "@/components/watchers/watcher-config";
 import type { WatcherEventRow, WatcherHeartbeatRow } from "@/lib/api/watchers";
+import { parseAsString, useQueryState } from "nuqs";
 
 export function WatcherDetailTabs({
-  configYaml,
+  configTab,
   heartbeats,
   heartbeatsTotal,
   heartbeatsPage,
@@ -18,7 +18,7 @@ export function WatcherDetailTabs({
   eventsPage,
   eventsTotalPages,
 }: {
-  configYaml: string | null;
+  configTab: React.ReactNode;
   heartbeats: WatcherHeartbeatRow[];
   heartbeatsTotal: number;
   heartbeatsPage: number;
@@ -28,8 +28,13 @@ export function WatcherDetailTabs({
   eventsPage: number;
   eventsTotalPages: number;
 }) {
+  const [tab, setTab] = useQueryState(
+    "tab",
+    parseAsString.withDefault("logs").withOptions({ shallow: false })
+  );
+
   return (
-    <Tabs defaultValue="logs">
+    <Tabs value={tab} onValueChange={setTab}>
       <TabsList className="mb-4">
         <TabsTrigger value="logs">Logs</TabsTrigger>
         <TabsTrigger value="heartbeats">Heartbeats</TabsTrigger>
@@ -73,7 +78,7 @@ export function WatcherDetailTabs({
         <div>
           <h3 className="text-sm font-medium">Configuration</h3>
         </div>
-        <WatcherConfig configYaml={configYaml} />
+        {configTab}
       </TabsContent>
     </Tabs>
   );

@@ -1,3 +1,4 @@
+import { WatcherConfig } from "@/components/watchers/watcher-config";
 import { WatcherDetailTabs } from "@/components/watchers/watcher-detail-tabs";
 import { WatcherHeader } from "@/components/watchers/watcher-header";
 import {
@@ -65,7 +66,7 @@ export default async function WatcherDetailPage({
     <div className="mx-auto flex max-w-7xl flex-col gap-6 p-6">
       <WatcherHeader watcher={watcher} />
       <WatcherDetailTabs
-        configYaml={watcher.configYaml}
+        configTab={<WatcherConfig configYaml={watcher.configYaml} />}
         heartbeats={heartbeatResult.rows}
         heartbeatsTotal={heartbeatResult.total}
         heartbeatsPage={filters.hb_page}
