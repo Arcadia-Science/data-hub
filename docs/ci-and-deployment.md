@@ -105,35 +105,37 @@ Note the `GitHubOidcProviderArn`, `VercelOidcProviderArn`, and `EcrRepositoryUri
 **2. Build and push the Docker image to ECR:**
 
 ```sh
-# Log in to ECR.
-aws ecr get-login-password --region us-west-1 \
-  | docker login --username AWS --password-stdin <ACCOUNT_ID>.dkr.ecr.us-west-1.amazonaws.com
-
-# Build the image.
 make docker-build-lambda
-
-# Tag and push.
-docker tag data-hub-lambda:latest <ECR_REPOSITORY_URI>:staging-initial
-docker push <ECR_REPOSITORY_URI>:staging-initial
+make docker-push-lambda ENV=staging
 ```
+
+This logs in to ECR, tags the image as `staging-<short-sha>`, and pushes it. The ECR registry is derived from your AWS account ID automatically.
 
 **3. Deploy the per-environment stack:**
 
-Set the required environment variables (the `samconfig.toml` references them via `${...}`) and deploy:
+Create an `infra/.env.staging` file (use `infra/.env.example` as a template) and fill in the values:
 
 ```sh
-export ECR_IMAGE_URI="<ECR_REPOSITORY_URI>:staging-initial"
-export DATA_HUB_API_URL="https://data-hub-env-staging-arcadia-science.vercel.app/api/v1"
-export DATA_HUB_API_KEY="<your-api-key>"
-export SLACK_WEBHOOK_URL="<your-slack-webhook>"
-export GITHUB_OIDC_PROVIDER_ARN="<github-oidc-arn-from-step-1>"
-export VERCEL_OIDC_PROVIDER_ARN="<vercel-oidc-arn-from-step-1>"
-export LAMBDA_INVOKE_TOKEN="<shared-secret-for-function-url-auth>"
+cp infra/.env.example infra/.env.staging
+```
 
+```
+ECR_IMAGE_URI=<image-uri-from-step-2>
+DATA_HUB_API_URL=https://data-hub-env-staging-arcadia-science.vercel.app/api/v1
+DATA_HUB_API_KEY=<your-api-key>
+SLACK_WEBHOOK_URL=<your-slack-webhook>
+GITHUB_OIDC_PROVIDER_ARN=<github-oidc-arn-from-step-1>
+VERCEL_OIDC_PROVIDER_ARN=<vercel-oidc-arn-from-step-1>
+LAMBDA_INVOKE_TOKEN=<shared-secret-for-function-url-auth>
+```
+
+Then deploy:
+
+```sh
 make sam-deploy ENV=staging
 ```
 
-Repeat with the production values and `make sam-deploy ENV=production` when ready.
+The Makefile automatically loads `infra/.env.staging` when `ENV=staging` is set. Repeat with an `infra/.env.production` file and `make sam-deploy ENV=production` when ready. These `infra/.env.*` files are gitignored (only `infra/.env.example` is tracked).
 
 **4. Configure GitHub environment secrets:**
 
@@ -190,17 +192,24 @@ Local deployment requires the following tools in addition to the [general prereq
 - [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html) — used by `make sam-deploy` to package and deploy CloudFormation stacks. Install with `brew install aws-sam-cli` on macOS.
 - AWS credentials configured (`aws configure` or environment variables) with permission to deploy the stack.
 
-Once installed, build and deploy:
+Create an environment-specific `.env` file if you haven't already (see [first-time setup](#first-time-aws-setup) for details on each variable):
+
+```sh
+cp infra/.env.example infra/.env.staging
+# Fill in the values in infra/.env.staging
+```
+
+Then build, push, and deploy:
 
 ```sh
 # Build the container image.
 make docker-build-lambda
 
-# Deploy to staging (will prompt for changeset confirmation).
-make sam-deploy ENV=staging
+# Tag and push to ECR.
+make docker-push-lambda ENV=staging
 
-# Deploy to production.
-make sam-deploy ENV=production
+# Deploy to staging (loads infra/.env.staging automatically).
+make sam-deploy ENV=staging
 ```
 
 ## Running checks locally

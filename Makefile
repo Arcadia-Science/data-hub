@@ -1,3 +1,8 @@
+# Load environment-specific .env file for SAM deploys (e.g. infra/.env.staging).
+ifdef ENV
+-include infra/.env.$(ENV)
+endif
+
 # Python packages.
 .PHONY: py-lint
 py-lint:
@@ -76,6 +81,21 @@ check-all:
 .PHONY: docker-build-lambda
 docker-build-lambda:
 	docker build --provenance=false --platform linux/amd64 -f lambda/Dockerfile -t data-hub-lambda .
+
+# Usage: make docker-push-lambda ENV=staging
+.PHONY: docker-push-lambda
+docker-push-lambda:
+ifndef ENV
+	$(error ENV is required, e.g. make docker-push-lambda ENV=staging)
+endif
+	$(eval AWS_ACCOUNT_ID := $(shell aws sts get-caller-identity --query Account --output text))
+	$(eval ECR_REGISTRY := $(AWS_ACCOUNT_ID).dkr.ecr.us-west-1.amazonaws.com)
+	$(eval IMAGE_TAG := $(ENV)-$(shell git rev-parse --short HEAD))
+	aws ecr get-login-password --region us-west-1 \
+		| docker login --username AWS --password-stdin $(ECR_REGISTRY)
+	docker tag data-hub-lambda:latest $(ECR_REGISTRY)/data-hub:$(IMAGE_TAG)
+	docker push $(ECR_REGISTRY)/data-hub:$(IMAGE_TAG)
+	@echo "Pushed $(ECR_REGISTRY)/data-hub:$(IMAGE_TAG)"
 
 # SAM infrastructure.
 .PHONY: sam-bootstrap
