@@ -16,8 +16,10 @@ group before ``~End``.
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 import pandas as pd
 
@@ -37,6 +39,8 @@ _OFF_WAVELENGTH = 9
 _OFF_NUM_WELLS = 12
 
 _ROW_LABELS = "ABCDEFGHIJKLMNOP"
+
+_WELL_POSITION_RE = re.compile(r"^([A-P])(\d{1,2})$")
 
 
 @dataclass(frozen=True)
@@ -101,28 +105,57 @@ _WELL_DATA_COLUMNS = [
 ]
 
 
-def _count_cols_in_header(col_header_line: str) -> int:
-    """Return the number of data columns from the column-label header row.
+@dataclass(frozen=True)
+class _ColumnLayout:
+    """Describes how data columns are arranged after the time+temperature prefix."""
 
-    The column header is tab-delimited::
+    format: Literal["grid", "flat"]
+    num_data_cols: int
+    well_positions: tuple[tuple[str, int], ...] = field(default=())
 
-        <time> \\t Temperature(...) \\t 1 \\t 2 \\t ... \\t N \\t <separator> ...
 
-    We count consecutive numeric labels after the first two fields (time and
-    temperature) to determine the actual grid width.  This is more reliable
-    than the plate-header ``num_columns`` field which some SoftMax Pro
-    protocol templates populate with a value unrelated to the grid geometry.
+def _parse_column_layout(col_header_line: str) -> _ColumnLayout:
+    """Determine the column layout from the column-label header row.
+
+    Two layouts are supported:
+
+    **Grid** – columns are numeric labels (``1``, ``2``, …, ``12``).
+    Each plate row (A, B, …) occupies its own data line::
+
+        <time> \\t Temperature(...) \\t 1 \\t 2 \\t ... \\t N
+
+    **Flat** – columns are well-position labels (``A1``, ``A2``, …,
+    ``H12``).  All wells appear on a single data line per reading::
+
+        <time> \\t Temperature(...) \\t A1 \\t A2 \\t ... \\t H12
     """
     fields = col_header_line.split("\t")
+
     count = 0
-    for field in fields[2:]:
-        if field.strip().isdigit():
+    for f in fields[2:]:
+        if f.strip().isdigit():
             count += 1
         elif count > 0:
             break
-    if count == 0:
-        raise ValueError("Could not determine column count from header row")
-    return count
+    if count > 0:
+        return _ColumnLayout(format="grid", num_data_cols=count)
+
+    well_positions: list[tuple[str, int]] = []
+    for f in fields[2:]:
+        m = _WELL_POSITION_RE.match(f.strip())
+        if m:
+            well_positions.append((m.group(1), int(m.group(2))))
+        elif well_positions:
+            break
+
+    if well_positions:
+        return _ColumnLayout(
+            format="flat",
+            num_data_cols=len(well_positions),
+            well_positions=tuple(well_positions),
+        )
+
+    raise ValueError("Could not determine column layout from header row")
 
 
 def parse_metadata(file_path: Path) -> dict[str, str]:
@@ -216,36 +249,23 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
             raise ValueError(
                 f"File truncated: no column header row after Plate: line at line {i + 1}"
             )
-        num_cols = _count_cols_in_header(lines[i + 1])
-        if header.num_wells % num_cols != 0:
-            raise ValueError(
-                f"num_wells ({header.num_wells}) is not evenly divisible by num_cols ({num_cols})"
-            )
-        num_rows = header.num_wells // num_cols
+        layout = _parse_column_layout(lines[i + 1])
 
         i += 2  # Skip plate header + column header row.
 
-        for _ in range(header.num_readings):
-            time_val: str | None = None
-            temp_val: float | None = None
-
-            for row_idx in range(num_rows):
+        if layout.format == "flat":
+            for _ in range(header.num_readings):
                 row_fields = lines[i].split("\t")
+                time_str = row_fields[0].strip()
+                time_val: str | None = time_str if time_str else None
+                temp_str = row_fields[1].strip()
+                temp_val: float | None = float(temp_str) if temp_str else None
 
-                if row_idx == 0:
-                    time_str = row_fields[0].strip()
-                    time_val = time_str if time_str else None
-                    temp_str = row_fields[1].strip()
-                    temp_val = float(temp_str) if temp_str else None
-
-                row_label = _ROW_LABELS[row_idx]
-
-                for col_idx in range(num_cols):
+                for col_idx, (row_label, column_label) in enumerate(layout.well_positions):
                     val_str = row_fields[2 + col_idx].strip()
                     if not val_str:
                         continue
 
-                    column_label = col_idx + 1
                     records.append(
                         {
                             "time": time_val,
@@ -261,9 +281,56 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
 
                 i += 1
 
-            # Skip blank separator between reading groups.
-            if i < len(lines) and lines[i].strip() == "":
-                i += 1
+                if i < len(lines) and lines[i].strip() == "":
+                    i += 1
+        else:
+            num_cols = layout.num_data_cols
+            if header.num_wells % num_cols != 0:
+                raise ValueError(
+                    f"num_wells ({header.num_wells}) is not evenly divisible "
+                    f"by num_cols ({num_cols})"
+                )
+            num_rows = header.num_wells // num_cols
+
+            for _ in range(header.num_readings):
+                time_val = None
+                temp_val = None
+
+                for row_idx in range(num_rows):
+                    row_fields = lines[i].split("\t")
+
+                    if row_idx == 0:
+                        time_str = row_fields[0].strip()
+                        time_val = time_str if time_str else None
+                        temp_str = row_fields[1].strip()
+                        temp_val = float(temp_str) if temp_str else None
+
+                    row_label = _ROW_LABELS[row_idx]
+
+                    for col_idx in range(num_cols):
+                        val_str = row_fields[2 + col_idx].strip()
+                        if not val_str:
+                            continue
+
+                        column_label = col_idx + 1
+                        records.append(
+                            {
+                                "time": time_val,
+                                "plate_name": header.plate_name,
+                                "well_position": f"{row_label}{column_label}",
+                                "temperature_c": temp_val,
+                                "value": float(val_str),
+                                "row_label": row_label,
+                                "column_label": column_label,
+                                "wavelength": wavelength,
+                            }
+                        )
+
+                    i += 1
+
+                # Skip blank separator between reading groups.
+                if i < len(lines) and lines[i].strip() == "":
+                    i += 1
 
         # Skip summary table until ~End.
         while i < len(lines) and not lines[i].startswith("~End"):

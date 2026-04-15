@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from data_hub_lambda.spectramax_plate_reader.utils import (
-    _count_cols_in_header,
+    _parse_column_layout,
     parse_metadata,
 )
 
@@ -109,6 +109,14 @@ class TestRealFixtures:
             "wavelength": "595 nm",
         }
 
+    def test_endpoint_flat(self) -> None:
+        result = parse_metadata(_FIXTURES_DIR / "spectramax_plate_reader_endpoint_flat.xls")
+        assert result == {
+            "measurement_mode": "Absorbance",
+            "measurement_type": "Endpoint",
+            "wavelength": "595 nm",
+        }
+
 
 # ---------------------------------------------------------------------------
 # Synthetic happy-path tests
@@ -180,7 +188,7 @@ class TestParseMetadataValidation:
         with pytest.raises(ValueError, match="No 'Raw' anchor token found"):
             parse_metadata(path)
 
-    def test_column_header_with_no_numeric_labels(self) -> None:
-        """Column header row lacking numeric labels raises ValueError."""
-        with pytest.raises(ValueError, match="Could not determine column count"):
-            _count_cols_in_header("\tTemperature\tA\tB")
+    def test_column_header_with_no_recognizable_labels(self) -> None:
+        """Column header row lacking numeric or well-position labels raises ValueError."""
+        with pytest.raises(ValueError, match="Could not determine column layout"):
+            _parse_column_layout("\tTemperature\tA\tB")

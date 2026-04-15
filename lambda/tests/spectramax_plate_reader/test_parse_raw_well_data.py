@@ -238,6 +238,51 @@ class TestKinetic:
         assert len(self.df[self.df["plate_name"] == "Plate5"]) == 241 * 96
 
 
+class TestEndpointFlat:
+    """Endpoint / Absorbance / 595 nm — flat layout where all 96 wells appear
+    on a single data line with well-position column headers (A1, A2, …, H12).
+    """
+
+    @pytest.fixture(autouse=True)
+    def _load(self) -> None:
+        self.df = parse_raw_well_data(_FIXTURES_DIR / "spectramax_plate_reader_endpoint_flat.xls")
+
+    def test_columns(self) -> None:
+        assert list(self.df.columns) == _EXPECTED_COLUMNS
+
+    def test_shape(self) -> None:
+        assert self.df.shape == (96, 8)
+
+    def test_plate_name(self) -> None:
+        assert self.df["plate_name"].unique().tolist() == ["Plate1"]
+
+    def test_time_is_null(self) -> None:
+        assert bool(self.df["time"].isna().all())
+
+    def test_wavelength(self) -> None:
+        assert (self.df["wavelength"] == 595).all()
+
+    def test_temperature(self) -> None:
+        assert self.df["temperature_c"].unique() == pytest.approx([29.9])
+
+    def test_first_well(self) -> None:
+        first = self.df.iloc[0]
+        assert first["well_position"] == "A1"
+        assert first["row_label"] == "A"
+        assert first["column_label"] == 1
+        assert first["value"] == pytest.approx(0.1887)
+
+    def test_last_well(self) -> None:
+        last = self.df.iloc[-1]
+        assert last["well_position"] == "H12"
+        assert last["row_label"] == "H"
+        assert last["column_label"] == 12
+        assert last["value"] == pytest.approx(0.1648)
+
+    def test_all_rows_populated(self) -> None:
+        assert set(self.df["row_label"].unique()) == set("ABCDEFGH")
+
+
 # ---------------------------------------------------------------------------
 # Error handling
 # ---------------------------------------------------------------------------
