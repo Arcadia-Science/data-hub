@@ -2,11 +2,12 @@ from __future__ import annotations
 import hmac
 import json
 import re
+import shutil
 import warnings
 from dataclasses import dataclass
 from pprint import pformat
 from typing import Any
-from urllib.parse import quote, unquote_plus
+from urllib.parse import quote, unquote
 
 from aws_lambda_typing.context import Context
 from aws_lambda_typing.events.s3 import S3Event
@@ -58,7 +59,13 @@ def parse_s3_event(event: S3Event) -> S3EventInfo:
         raise ValueError("No records found in event payload.")
 
     s3_bucket: str = record["s3"]["bucket"]["name"]  # type: ignore[index]
-    s3_key: str = unquote_plus(record["s3"]["object"]["key"])  # type: ignore[index]
+    # Use unquote (not unquote_plus) so literal "+" in S3 key names is
+    # preserved.  S3 keys in this system use "+" as a separator (e.g.
+    # "Ben+Ray") and never contain bare spaces, so the form-encoding
+    # convention where + represents a space is not appropriate here.
+    # Synthetic event producers (reprocess endpoint, test fixtures) pair
+    # with this by percent-encoding "+" as "%2B".
+    s3_key: str = unquote(record["s3"]["object"]["key"])  # type: ignore[index]
 
     # S3 key layout: {instrument_id}/{run_id}/{filename}
     pattern = r"^/?([^/]+)/([^/]+)/([^/]+)$"
@@ -140,6 +147,21 @@ def _authenticate_function_url(event: dict[str, Any]) -> dict[str, Any] | None:
     except (json.JSONDecodeError, TypeError):
         logger.error("Function URL body is not valid JSON")
         return None
+
+
+# ------------------------------------------------------------------
+# Ephemeral storage cleanup
+# ------------------------------------------------------------------
+
+
+def _cleanup_tmp() -> None:
+    """Remove downloaded/processed files so warm containers don't run out of /tmp space."""
+    from data_hub_shared.config import config
+
+    data_dir = config.LOCAL_DATA_DIRPATH
+    if data_dir.exists():
+        shutil.rmtree(data_dir, ignore_errors=True)
+        logger.info("Cleaned up %s", data_dir)
 
 
 # ------------------------------------------------------------------
@@ -226,3 +248,5 @@ def lambda_handler(event: dict[str, Any], context: Context) -> dict[str, Any] | 
             f"Failed to preprocess run `{run_id}`!\n"
             f"<{logs_url}|View CloudWatch logs>"
         )
+    finally:
+        _cleanup_tmp()

@@ -54,6 +54,30 @@ Each processor module exposes a `process_file()` function that accepts the run I
 
 4. **Add tests.** Add unit tests in `lambda/tests/` for the new processor.
 
+## Local processing CLI
+
+The `data-hub-process` CLI lets you run instrument-specific parsing and processing locally, without S3 or API access. This is useful for debugging processors against real files.
+
+```sh
+uv run data-hub-process <command> <file>
+```
+
+Available commands:
+
+| Command | Description |
+| --- | --- |
+| `gel-doc` | Process an Azure 600 Gel Doc TIFF (contrast-enhanced PNG + metadata) |
+| `qpcr` | Parse dye channels from an Azure Cielo qPCR Cq Values CSV |
+| `spectramax` | Parse metadata and raw well data from a SpectraMax `.xls` export |
+| `tapestation` | Extract the tape type from a TapeStation CSV filename |
+
+Example:
+
+```sh
+uv run data-hub-process gel-doc path/to/image.tif --output-dir out/
+uv run data-hub-process spectramax path/to/plate.xls
+```
+
 ## Docker build
 
 The Lambda function is packaged as a container image:
@@ -73,6 +97,7 @@ The entry point is `data_hub_lambda.handler.lambda_handler`.
 
 The Lambda function depends on a scientific Python stack:
 
+- `click` — CLI framework
 - `pandas` — data manipulation
 - `matplotlib` — plotting
 - `scikit-image` — image processing

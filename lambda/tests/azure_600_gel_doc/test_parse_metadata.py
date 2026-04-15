@@ -13,6 +13,8 @@ from data_hub_lambda.azure_600_gel_doc.parse_metadata import (
 )
 
 _FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures"
+_HAS_TRUE_COLOR_FIXTURE = (_FIXTURES_DIR / "azure_600_gel_doc_true_color.tif").exists()
+_HAS_FLUORESCENCE_FIXTURE = (_FIXTURES_DIR / "azure_600_gel_doc_fluorescence.tif").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -47,6 +49,58 @@ class TestRealFixture:
     def test_no_colors_for_chemi(self) -> None:
         result = parse_metadata(_FIXTURES_DIR / "azure_600_gel_doc_example.tif")
         assert result["colors"] == []
+
+
+@pytest.mark.skipif(not _HAS_TRUE_COLOR_FIXTURE, reason="true-color fixture not available")
+class TestTrueColorFixture:
+    """Tests against a True Color Imaging TIFF in the fixtures directory."""
+
+    def test_parse_metadata_true_color(self) -> None:
+        result = parse_metadata(_FIXTURES_DIR / "azure_600_gel_doc_true_color.tif")
+        assert result == {
+            "capture_type": "Auto Image",
+            "imaging_mode": "True Color Imaging",
+            "wavelengths": ["628", "524", "472"],
+            "colors": ["Red", "Green", "Blue"],
+        }
+
+    def test_imaging_mode(self) -> None:
+        result = parse_metadata(_FIXTURES_DIR / "azure_600_gel_doc_true_color.tif")
+        assert result["imaging_mode"] == "True Color Imaging"
+
+    def test_wavelengths(self) -> None:
+        result = parse_metadata(_FIXTURES_DIR / "azure_600_gel_doc_true_color.tif")
+        assert result["wavelengths"] == ["628", "524", "472"]
+
+    def test_colors(self) -> None:
+        result = parse_metadata(_FIXTURES_DIR / "azure_600_gel_doc_true_color.tif")
+        assert result["colors"] == ["Red", "Green", "Blue"]
+
+
+@pytest.mark.skipif(not _HAS_FLUORESCENCE_FIXTURE, reason="fluorescence fixture not available")
+class TestFluorescenceFixture:
+    """Tests against a Fluorescence (SYBR Safe) TIFF in the fixtures directory."""
+
+    def test_parse_metadata_fluorescence(self) -> None:
+        result = parse_metadata(_FIXTURES_DIR / "azure_600_gel_doc_fluorescence.tif")
+        assert result == {
+            "capture_type": "Auto Image",
+            "imaging_mode": "Fluorescence",
+            "wavelengths": ["472", "595"],
+            "colors": ["Blue", "Orange"],
+        }
+
+    def test_imaging_mode(self) -> None:
+        result = parse_metadata(_FIXTURES_DIR / "azure_600_gel_doc_fluorescence.tif")
+        assert result["imaging_mode"] == "Fluorescence"
+
+    def test_wavelengths(self) -> None:
+        result = parse_metadata(_FIXTURES_DIR / "azure_600_gel_doc_fluorescence.tif")
+        assert result["wavelengths"] == ["472", "595"]
+
+    def test_colors_include_orange(self) -> None:
+        result = parse_metadata(_FIXTURES_DIR / "azure_600_gel_doc_fluorescence.tif")
+        assert result["colors"] == ["Blue", "Orange"]
 
 
 # ---------------------------------------------------------------------------

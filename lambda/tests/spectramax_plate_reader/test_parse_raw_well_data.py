@@ -238,6 +238,100 @@ class TestKinetic:
         assert len(self.df[self.df["plate_name"] == "Plate5"]) == 241 * 96
 
 
+class TestEndpointFlat:
+    """Endpoint / Absorbance / 595 nm — flat layout where all 96 wells appear
+    on a single data line with well-position column headers (A1, A2, …, H12).
+    """
+
+    @pytest.fixture(autouse=True)
+    def _load(self) -> None:
+        self.df = parse_raw_well_data(_FIXTURES_DIR / "spectramax_plate_reader_endpoint_flat.xls")
+
+    def test_columns(self) -> None:
+        assert list(self.df.columns) == _EXPECTED_COLUMNS
+
+    def test_shape(self) -> None:
+        assert self.df.shape == (96, 8)
+
+    def test_plate_name(self) -> None:
+        assert self.df["plate_name"].unique().tolist() == ["Plate1"]
+
+    def test_time_is_null(self) -> None:
+        assert bool(self.df["time"].isna().all())
+
+    def test_wavelength(self) -> None:
+        assert (self.df["wavelength"] == 595).all()
+
+    def test_temperature(self) -> None:
+        assert self.df["temperature_c"].unique() == pytest.approx([29.9])
+
+    def test_first_well(self) -> None:
+        first = self.df.iloc[0]
+        assert first["well_position"] == "A1"
+        assert first["row_label"] == "A"
+        assert first["column_label"] == 1
+        assert first["value"] == pytest.approx(0.1887)
+
+    def test_last_well(self) -> None:
+        last = self.df.iloc[-1]
+        assert last["well_position"] == "H12"
+        assert last["row_label"] == "H"
+        assert last["column_label"] == 12
+        assert last["value"] == pytest.approx(0.1648)
+
+    def test_all_rows_populated(self) -> None:
+        assert set(self.df["row_label"].unique()) == set("ABCDEFGH")
+
+
+class TestDualWavelength:
+    """Endpoint / Absorbance / dual wavelength (750 + 600), synthetic 2×2 plate."""
+
+    @pytest.fixture(autouse=True)
+    def _load(self, tmp_path: Path) -> None:
+        prefix = "Plate:\tPlate1\t1.3\tPlateFormat"
+        middle = "\tRaw\tFALSE\t1\t\t\t\t\t\t2"
+        header = f"{prefix}\tEndpoint\tAbsorbance{middle}\t750 600\t1\t2\t4\t1\t4\n"
+        col_header = "\tTemperature(\xa1C)\t1\t2\t\t1\t2\t\t\n"
+        row_a = "\t25.0\t0.10\t0.20\t\t0.50\t0.60\t\t\n"
+        row_b = "\t\t0.30\t0.40\t\t0.70\t0.80\t\t\n"
+        blank = "\n"
+        summary_hdr = "\t\t1\t2\t\n"
+        summary_a = "\t\t0.10\t0.20\t\n"
+        summary_b = "\t\t0.30\t0.40\t\n"
+        content = (
+            f"##BLOCKS= 1\n{header}{col_header}{row_a}{row_b}"
+            f"{blank}{summary_hdr}{summary_a}{summary_b}~End\n"
+        )
+        path = tmp_path / "dual_wl.xls"
+        path.write_text(content, encoding="utf-16")
+        self.df = parse_raw_well_data(path)
+
+    def test_columns(self) -> None:
+        assert list(self.df.columns) == _EXPECTED_COLUMNS
+
+    def test_shape(self) -> None:
+        assert self.df.shape == (8, 8)  # 2 rows × 2 cols × 2 wavelengths
+
+    def test_wavelengths_present(self) -> None:
+        assert sorted(self.df["wavelength"].unique()) == [600, 750]
+
+    def test_wells_per_wavelength(self) -> None:
+        for wl in [750, 600]:
+            subset = self.df[self.df["wavelength"] == wl]
+            assert len(subset) == 4
+
+    def test_first_wavelength_values(self) -> None:
+        wl750 = self.df.loc[self.df["wavelength"] == 750, "value"]
+        assert wl750.tolist() == pytest.approx([0.10, 0.20, 0.30, 0.40])
+
+    def test_second_wavelength_values(self) -> None:
+        wl600 = self.df.loc[self.df["wavelength"] == 600, "value"]
+        assert wl600.tolist() == pytest.approx([0.50, 0.60, 0.70, 0.80])
+
+    def test_temperature(self) -> None:
+        assert (self.df["temperature_c"] == 25.0).all()
+
+
 # ---------------------------------------------------------------------------
 # Error handling
 # ---------------------------------------------------------------------------

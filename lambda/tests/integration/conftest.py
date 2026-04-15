@@ -13,6 +13,7 @@ from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
+from urllib.parse import quote
 
 import pytest
 
@@ -140,6 +141,9 @@ def make_s3_event() -> Callable[..., dict[str, Any]]:
         bucket: str = "test-bucket",
     ) -> dict[str, Any]:
         s3_key = f"{instrument_id}/{run_id}/{filename}"
+        # Real S3 events URL-encode the object key.  Use quote() (matching
+        # the Lambda's unquote() decoder) so "+" → "%2B" round-trips safely.
+        encoded_key = quote(s3_key, safe="/")
         return {
             "Records": [
                 {
@@ -149,7 +153,7 @@ def make_s3_event() -> Callable[..., dict[str, Any]]:
                     "eventName": "ObjectCreated:Put",
                     "s3": {
                         "bucket": {"name": bucket},
-                        "object": {"key": s3_key, "size": 1024},
+                        "object": {"key": encoded_key, "size": 1024},
                     },
                 }
             ]

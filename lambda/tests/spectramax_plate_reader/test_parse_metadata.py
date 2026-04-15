@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from data_hub_lambda.spectramax_plate_reader.utils import (
-    _count_cols_in_header,
+    _parse_column_layout,
     parse_metadata,
 )
 
@@ -34,7 +34,8 @@ _FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures"
 #  19  1
 #  20  4
 _BOILERPLATE_PREFIX = "Plate:\tPlate1\t1.3\tPlateFormat"
-_BOILERPLATE_MIDDLE = "\tRaw\tFALSE\t1\t\t\t\t\t\t1"
+_BOILERPLATE_MIDDLE_RAW = "\tRaw\tFALSE\t1\t\t\t\t\t\t1"
+_BOILERPLATE_MIDDLE_REDUCED = "\tReduced\tFALSE\t1\t\t\t\t\t\t1"
 _DATA_ROWS = "\tTemperature\t1\t2\n\t25.0\t0.123\t0.456\n~End\n"
 
 
@@ -44,14 +45,16 @@ def _build_xls(
     measurement_type: str = "Endpoint",
     measurement_mode: str = "Absorbance",
     wavelength: str = "450",
+    anchor: str = "Raw",
     include_plate_line: bool = True,
 ) -> Path:
     """Write a minimal UTF-16 LE fixture file and return its path."""
+    middle = _BOILERPLATE_MIDDLE_REDUCED if anchor == "Reduced" else _BOILERPLATE_MIDDLE_RAW
     lines = ["##BLOCKS= 1\n"]
     if include_plate_line:
         header = (
             f"{_BOILERPLATE_PREFIX}\t{measurement_type}\t{measurement_mode}"
-            f"{_BOILERPLATE_MIDDLE}\t{wavelength}\t1\t12\t96\t1\t4\n"
+            f"{middle}\t{wavelength}\t1\t12\t96\t1\t4\n"
         )
         lines.append(header)
     lines.append(_DATA_ROWS)
@@ -109,6 +112,14 @@ class TestRealFixtures:
             "wavelength": "595 nm",
         }
 
+    def test_endpoint_flat(self) -> None:
+        result = parse_metadata(_FIXTURES_DIR / "spectramax_plate_reader_endpoint_flat.xls")
+        assert result == {
+            "measurement_mode": "Absorbance",
+            "measurement_type": "Endpoint",
+            "wavelength": "595 nm",
+        }
+
 
 # ---------------------------------------------------------------------------
 # Synthetic happy-path tests
@@ -144,6 +155,21 @@ class TestParseMetadataHappyPath:
             "wavelength": "488 nm",
         }
 
+    def test_reduced_anchor(self, tmp_path: Path) -> None:
+        path = _build_xls(
+            tmp_path,
+            measurement_mode="Absorbance",
+            measurement_type="Endpoint",
+            wavelength="600",
+            anchor="Reduced",
+        )
+        result = parse_metadata(path)
+        assert result == {
+            "measurement_mode": "Absorbance",
+            "measurement_type": "Endpoint",
+            "wavelength": "600 nm",
+        }
+
 
 # ---------------------------------------------------------------------------
 # Validation / error tests
@@ -163,24 +189,33 @@ class TestParseMetadataValidation:
 
     def test_non_numeric_wavelength(self, tmp_path: Path) -> None:
         path = _build_xls(tmp_path, wavelength="ABC")
-        with pytest.raises(ValueError, match="Expected numeric wavelength"):
+        with pytest.raises(ValueError, match="Expected space-separated numeric wavelengths"):
             parse_metadata(path)
+
+    def test_dual_wavelength(self, tmp_path: Path) -> None:
+        path = _build_xls(tmp_path, wavelength="750 600")
+        result = parse_metadata(path)
+        assert result == {
+            "measurement_mode": "Absorbance",
+            "measurement_type": "Endpoint",
+            "wavelength": "750 nm, 600 nm",
+        }
 
     def test_missing_plate_header(self, tmp_path: Path) -> None:
         path = _build_xls(tmp_path, include_plate_line=False)
         with pytest.raises(ValueError, match="No 'Plate:' header line found"):
             parse_metadata(path)
 
-    def test_missing_raw_anchor_token(self, tmp_path: Path) -> None:
-        """Plate header with no ``Raw`` token raises a clear ValueError."""
+    def test_missing_anchor_token(self, tmp_path: Path) -> None:
+        """Plate header with no recognised anchor token raises a clear ValueError."""
         header = "Plate:\tPlate1\t1.3\tPlateFormat\tEndpoint\tAbsorbance\tNOT_RAW\n"
         content = f"##BLOCKS= 1\n{header}{_DATA_ROWS}"
         path = tmp_path / "no_raw.xls"
         path.write_text(content, encoding="utf-16")
-        with pytest.raises(ValueError, match="No 'Raw' anchor token found"):
+        with pytest.raises(ValueError, match="No anchor token"):
             parse_metadata(path)
 
-    def test_column_header_with_no_numeric_labels(self) -> None:
-        """Column header row lacking numeric labels raises ValueError."""
-        with pytest.raises(ValueError, match="Could not determine column count"):
-            _count_cols_in_header("\tTemperature\tA\tB")
+    def test_column_header_with_no_recognizable_labels(self) -> None:
+        """Column header row lacking numeric or well-position labels raises ValueError."""
+        with pytest.raises(ValueError, match="Could not determine column layout"):
+            _parse_column_layout("\tTemperature\tA\tB")
