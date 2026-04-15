@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 dependencies = [
     "data-hub-shared",
     "aws-lambda-typing>=2.20.0",
+    "click>=8.1",
     "matplotlib>=3.8",
     "pandas>=2.2",
     "pydantic>=2.11.9",
@@ -12,6 +13,9 @@ dependencies = [
     "tifffile>=2025.9.30",
     "scikit-image>=0.26.0",
 ]
+
+[project.scripts]
+data-hub-process = "data_hub_lambda.cli:cli"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
