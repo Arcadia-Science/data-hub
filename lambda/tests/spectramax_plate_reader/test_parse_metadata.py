@@ -3,11 +3,36 @@ from pathlib import Path
 
 import pytest
 
-from data_hub_lambda.spectramax_plate_reader.utils import parse_metadata
+from data_hub_lambda.spectramax_plate_reader.utils import (
+    _count_cols_in_header,
+    parse_metadata,
+)
 
 _FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures"
 
 # Minimal SoftMax Pro plate header used by the synthetic-file helpers.
+#
+# _build_xls assembles a header like:
+#   {PREFIX}\t{type}\t{mode}{MIDDLE}\t{wavelength}\t1\t12\t96\t1\t4
+#
+# Full field layout (tab-separated, 0-indexed):
+#   0  Plate:
+#   1  Plate1          (_COL_PLATE_NAME)
+#   2  1.3             (version)
+#   3  PlateFormat     (format)
+#   4  {type}          (_COL_MEASUREMENT_TYPE)
+#   5  {mode}          (_COL_MEASUREMENT_MODE)
+#   6  Raw             (anchor — _RAW_SEARCH_START)
+#   7  FALSE           (+1)
+#   8  1               (+2 = _OFF_NUM_READINGS)
+#   9–13  (empty)
+#  14  1
+#  15  {wavelength}    (+9 = _OFF_WAVELENGTH)
+#  16  1
+#  17  12
+#  18  96              (+12 = _OFF_NUM_WELLS)
+#  19  1
+#  20  4
 _BOILERPLATE_PREFIX = "Plate:\tPlate1\t1.3\tPlateFormat"
 _BOILERPLATE_MIDDLE = "\tRaw\tFALSE\t1\t\t\t\t\t\t1"
 _DATA_ROWS = "\tTemperature\t1\t2\n\t25.0\t0.123\t0.456\n~End\n"
@@ -58,6 +83,22 @@ class TestRealFixtures:
             "measurement_mode": "Absorbance",
             "measurement_type": "Well Scan",
             "wavelength": "595 nm",
+        }
+
+    def test_endpoint_fluorescence(self) -> None:
+        result = parse_metadata(_FIXTURES_DIR / "spectramax_plate_reader_fluorescence.xls")
+        assert result == {
+            "measurement_mode": "Fluorescence",
+            "measurement_type": "Endpoint",
+            "wavelength": "512 nm",
+        }
+
+    def test_endpoint_sparse_absorbance(self) -> None:
+        result = parse_metadata(_FIXTURES_DIR / "spectramax_plate_reader_endpoint_sparse.xls")
+        assert result == {
+            "measurement_mode": "Absorbance",
+            "measurement_type": "Endpoint",
+            "wavelength": "600 nm",
         }
 
     def test_kinetic_absorbance(self) -> None:
@@ -129,3 +170,17 @@ class TestParseMetadataValidation:
         path = _build_xls(tmp_path, include_plate_line=False)
         with pytest.raises(ValueError, match="No 'Plate:' header line found"):
             parse_metadata(path)
+
+    def test_missing_raw_anchor_token(self, tmp_path: Path) -> None:
+        """Plate header with no ``Raw`` token raises a clear ValueError."""
+        header = "Plate:\tPlate1\t1.3\tPlateFormat\tEndpoint\tAbsorbance\tNOT_RAW\n"
+        content = f"##BLOCKS= 1\n{header}{_DATA_ROWS}"
+        path = tmp_path / "no_raw.xls"
+        path.write_text(content, encoding="utf-16")
+        with pytest.raises(ValueError, match="No 'Raw' anchor token found"):
+            parse_metadata(path)
+
+    def test_column_header_with_no_numeric_labels(self) -> None:
+        """Column header row lacking numeric labels raises ValueError."""
+        with pytest.raises(ValueError, match="Could not determine column count"):
+            _count_cols_in_header("\tTemperature\tA\tB")

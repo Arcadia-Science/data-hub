@@ -2,34 +2,30 @@
 
 ## GitHub Actions
 
-Two workflows run on pushes to `staging`/`production` and on pull requests targeting those branches.
+Four workflows run on pushes to `staging`/`production` and on pull requests targeting those branches.
 
-### Lint and typecheck (`lint-and-typecheck.yml`)
+### Python lint and typecheck (`python-lint.yml`)
 
-Runs formatting, linting, and type checking for both Python and the web app in parallel.
-
-**Python job:**
 1. Install dependencies with `uv sync --all-packages`.
 2. `make py-lint` — Ruff linter and format check.
 3. `make py-typecheck` — Pyright.
 
-**Web app job:**
+### Python tests (`python-test.yml`)
+
+- Starts a Postgres 17 service container.
+- Installs both Node.js 24 and Python packages.
+- `make py-test` — runs all pytest tests (unit and integration). Integration tests build and start a real Next.js production server, seed a test database, and exercise the Lambda and watcher against the live API.
+
+### TypeScript lint and typecheck (`typescript-lint.yml`)
+
 1. Install dependencies with `npm ci`.
 2. `npm run format:check` — Prettier.
 3. `npm run lint` — ESLint.
 4. `npm run typecheck` — TypeScript compiler.
 
-### Tests (`test.yml`)
+### TypeScript tests (`typescript-test.yml`)
 
-Runs two test jobs in parallel.
-
-**Python tests:**
-- Starts a Postgres 17 service container.
-- Installs both Node.js 24 and Python packages.
-- `make py-test` — runs all pytest tests (unit and integration). Integration tests build and start a real Next.js production server, seed a test database, and exercise the Lambda and watcher against the live API.
-
-**TypeScript tests:**
-- Same Postgres + Node.js setup as above.
+- Starts a Postgres 17 service container and Node.js 24.
 - `make fe-test-mcp` — runs in-memory MCP protocol tests (mocked data layer, no database).
 - `make fe-test-integration` — runs Vitest integration tests that test the API routes and MCP server over HTTP against a real database.
 

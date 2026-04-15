@@ -1,4 +1,4 @@
-name: Run unit and integration tests
+name: Python tests
 
 on:
   push:
@@ -6,10 +6,9 @@ on:
       - staging
       - production
     paths:
-      - .github/workflows/test.yml
+      - .github/workflows/python-test.yml
       - lambda/**
       - packages/**
-      - web-app/**
       - pyproject.toml
       - uv.lock
       - Makefile
@@ -18,10 +17,9 @@ on:
       - staging
       - production
     paths:
-      - .github/workflows/test.yml
+      - .github/workflows/python-test.yml
       - lambda/**
       - packages/**
-      - web-app/**
       - pyproject.toml
       - uv.lock
       - Makefile
@@ -68,43 +66,3 @@ jobs:
 
       - name: Run all Python tests
         run: make py-test
-
-  typescript-tests:
-    runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
-    env:
-      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/data_hub_test
-      AUTH_SECRET: ci-test-secret-at-least-32-characters-long!!
-      AUTH_GOOGLE_ID: stub
-      AUTH_GOOGLE_SECRET: stub
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-
-      - name: Install packages
-        run: npm ci
-        working-directory: web-app
-
-      - name: Run MCP tests
-        run: make fe-test-mcp
-
-      - name: Run API integration tests
-        run: make fe-test-integration

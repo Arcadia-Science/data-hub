@@ -109,6 +109,90 @@ class TestWellScan:
         assert scan2["value"] == pytest.approx(0.1148)
 
 
+class TestEndpointSparse:
+    """Endpoint / Absorbance / 600 nm — plate header reports num_cols=4 but
+    the actual grid is 12 columns wide with only 4 values populated in row A.
+    This exercises the column-count derivation from the header row.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _load(self) -> None:
+        self.df = parse_raw_well_data(_FIXTURES_DIR / "spectramax_plate_reader_endpoint_sparse.xls")
+
+    def test_columns(self) -> None:
+        assert list(self.df.columns) == _EXPECTED_COLUMNS
+
+    def test_shape(self) -> None:
+        assert self.df.shape == (4, 8)  # only 4 wells populated (A1–A4)
+
+    def test_plate_name(self) -> None:
+        assert self.df["plate_name"].unique().tolist() == ["Plate1"]
+
+    def test_time_is_null(self) -> None:
+        assert bool(self.df["time"].isna().all())
+
+    def test_wavelength(self) -> None:
+        assert (self.df["wavelength"] == 600).all()
+
+    def test_temperature(self) -> None:
+        assert (self.df["temperature_c"] == 22.8).all()
+
+    def test_well_positions(self) -> None:
+        assert self.df["well_position"].tolist() == ["A1", "A2", "A3", "A4"]
+
+    def test_first_well(self) -> None:
+        first = self.df.iloc[0]
+        assert first["well_position"] == "A1"
+        assert first["value"] == pytest.approx(0.316717714285714)
+
+    def test_last_well(self) -> None:
+        last = self.df.iloc[-1]
+        assert last["well_position"] == "A4"
+        assert last["value"] == pytest.approx(0.0667328100470958)
+
+    def test_empty_rows_excluded(self) -> None:
+        assert set(self.df["row_label"].unique()) == {"A"}
+
+
+class TestFluorescence:
+    """Endpoint / Fluorescence / 512 nm — plate header has a different field
+    layout (extra field before 'Raw') that shifts column positions.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _load(self) -> None:
+        self.df = parse_raw_well_data(_FIXTURES_DIR / "spectramax_plate_reader_fluorescence.xls")
+
+    def test_columns(self) -> None:
+        assert list(self.df.columns) == _EXPECTED_COLUMNS
+
+    def test_shape(self) -> None:
+        assert self.df.shape == (2, 8)
+
+    def test_plate_name(self) -> None:
+        assert self.df["plate_name"].unique().tolist() == ["Plate2"]
+
+    def test_time_is_null(self) -> None:
+        assert bool(self.df["time"].isna().all())
+
+    def test_wavelength(self) -> None:
+        assert (self.df["wavelength"] == 512).all()
+
+    def test_temperature(self) -> None:
+        assert (self.df["temperature_c"] == 21.3).all()
+
+    def test_well_positions(self) -> None:
+        assert self.df["well_position"].tolist() == ["A1", "A2"]
+
+    def test_first_well(self) -> None:
+        first = self.df.iloc[0]
+        assert first["value"] == pytest.approx(1185426.0)
+
+    def test_last_well(self) -> None:
+        last = self.df.iloc[-1]
+        assert last["value"] == pytest.approx(1586385.0)
+
+
 class TestKinetic:
     """Kinetic / Absorbance / 595 nm, 241 time points, 2 plates."""
 
