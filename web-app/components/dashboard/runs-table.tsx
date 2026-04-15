@@ -10,7 +10,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { cn } from "@/lib/utils";
+import { cn, formatBytes } from "@/lib/utils";
 import { FlaskConical, SearchX } from "lucide-react";
 import Link from "next/link";
 
@@ -28,32 +28,8 @@ type RunRow = {
   files_completed: number;
   files_failed: number;
   files_pending_upload: number;
+  total_size_bytes: number;
 };
-
-// Renders at most 3 key-value pairs from the run's freeform JSON metadata.
-// This keeps the table column compact; a detail view can show the full object.
-function MetadataSummary({ metadata }: { metadata: unknown }) {
-  if (!metadata || typeof metadata !== "object") return null;
-  const entries = Object.entries(metadata as Record<string, unknown>).slice(
-    0,
-    3
-  );
-  if (entries.length === 0) return null;
-
-  return (
-    <div className="flex flex-wrap gap-1">
-      {entries.map(([key, value]) => (
-        <Badge
-          key={key}
-          variant="outline"
-          className="max-w-[200px] truncate font-mono text-[10px] font-normal"
-        >
-          {key}: {String(value)}
-        </Badge>
-      ))}
-    </div>
-  );
-}
 
 export function RunsTable({
   data,
@@ -83,7 +59,7 @@ export function RunsTable({
             <TableHead>Instrument</TableHead>
             <TableHead>Run ID</TableHead>
             <TableHead>Files</TableHead>
-            <TableHead>Metadata</TableHead>
+            <TableHead className="text-right">Total Size</TableHead>
             <TableHead className="text-right">Created</TableHead>
           </TableRow>
         </TableHeader>
@@ -133,8 +109,8 @@ export function RunsTable({
                     filesPendingUpload={row.files_pending_upload}
                   />
                 </TableCell>
-                <TableCell>
-                  <MetadataSummary metadata={row.metadata} />
+                <TableCell className="text-right text-sm tabular-nums">
+                  {formatBytes(row.total_size_bytes)}
                 </TableCell>
                 <TableCell className="text-right">
                   <RelativeTime date={new Date(row.created_at).toISOString()} />
@@ -157,7 +133,7 @@ export function RunsTableSkeleton() {
             <TableHead>Instrument</TableHead>
             <TableHead>Run ID</TableHead>
             <TableHead>Files</TableHead>
-            <TableHead>Metadata</TableHead>
+            <TableHead className="text-right">Total Size</TableHead>
             <TableHead className="text-right">Created</TableHead>
           </TableRow>
         </TableHeader>
@@ -173,8 +149,8 @@ export function RunsTableSkeleton() {
               <TableCell>
                 <Skeleton className="h-5 w-24" />
               </TableCell>
-              <TableCell>
-                <Skeleton className="h-4 w-32" />
+              <TableCell className="text-right">
+                <Skeleton className="ml-auto h-4 w-16" />
               </TableCell>
               <TableCell className="text-right">
                 <Skeleton className="ml-auto h-4 w-20" />

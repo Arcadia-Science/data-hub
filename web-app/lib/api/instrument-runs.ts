@@ -166,6 +166,8 @@ export async function buildRunListQuery(filters: RunListFilters) {
   // A non-zero count signals the run has files requiring manual upload action.
   const filesPendingUpload = sql<number>`cast(count(${files.id}) filter (where ${files.status} in ('detected', 'upload_requested') and ${files.deletedAt} is null) as int)`;
 
+  const totalSizeBytes = sql<number>`cast(coalesce(sum(${files.sizeBytes}) filter (where ${files.deletedAt} is null), 0) as bigint)`;
+
   const sortCol =
     ALLOWED_SORT_FIELDS[filters.sort ?? "created_at"] ??
     instrumentRuns.createdAt;
@@ -195,6 +197,7 @@ export async function buildRunListQuery(filters: RunListFilters) {
       files_completed: filesCompleted,
       files_failed: filesFailed,
       files_pending_upload: filesPendingUpload,
+      total_size_bytes: totalSizeBytes,
     })
     .from(instrumentRuns)
     .innerJoin(instruments, eq(instrumentRuns.instrumentId, instruments.id))

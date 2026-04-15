@@ -19,6 +19,7 @@ export type RunRow = {
   files_completed: number;
   files_failed: number;
   files_pending_upload: number;
+  total_size_bytes: number;
 };
 
 export type RunsTableProps = {
