@@ -36,6 +36,11 @@ export const instrumentDetailSearchParams = {
   wavelength: parseAsString,
   measurement_mode: parseAsString,
   measurement_type: parseAsString,
+  // Gel-doc metadata column filters.
+  capture_type: parseAsString,
+  imaging_mode: parseAsString,
+  gel_wavelength: parseAsString,
+  gel_color: parseAsString,
 };
 
 export const instrumentDetailParamsCache = createSearchParamsCache(

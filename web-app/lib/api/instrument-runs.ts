@@ -79,6 +79,10 @@ type RunListFilters = {
   wavelength?: string;
   measurementMode?: string;
   measurementType?: string;
+  captureType?: string;
+  imagingMode?: string;
+  gelWavelength?: string;
+  gelColor?: string;
 };
 
 const MAX_PER_PAGE = 100;
@@ -149,6 +153,28 @@ export async function buildRunListQuery(filters: RunListFilters) {
   if (filters.measurementType) {
     conditions.push(
       sql`${instrumentRuns.metadata}->>'measurement_type' = ${filters.measurementType}`
+    );
+  }
+
+  // Gel-doc metadata column filters (leverages the GIN index).
+  if (filters.captureType) {
+    conditions.push(
+      sql`${instrumentRuns.metadata}->>'capture_type' = ${filters.captureType}`
+    );
+  }
+  if (filters.imagingMode) {
+    conditions.push(
+      sql`${instrumentRuns.metadata}->>'imaging_mode' = ${filters.imagingMode}`
+    );
+  }
+  if (filters.gelWavelength) {
+    conditions.push(
+      sql`${instrumentRuns.metadata}->'wavelengths' @> ${JSON.stringify([filters.gelWavelength])}::jsonb`
+    );
+  }
+  if (filters.gelColor) {
+    conditions.push(
+      sql`${instrumentRuns.metadata}->'colors' @> ${JSON.stringify([filters.gelColor])}::jsonb`
     );
   }
 
@@ -283,6 +309,8 @@ const ALLOWED_METADATA_KEYS = new Set([
   "wavelength",
   "measurement_mode",
   "measurement_type",
+  "capture_type",
+  "imaging_mode",
 ]);
 
 async function distinctMetadataValues(
@@ -320,4 +348,49 @@ export async function getPlateReaderFilterOptions(
     distinctMetadataValues(instrumentId, "measurement_type"),
   ]);
   return { wavelengths, measurementModes, measurementTypes };
+}
+
+// ---------------------------------------------------------------------------
+// Distinct metadata values for gel-doc column filters.
+// ---------------------------------------------------------------------------
+
+export type GelDocFilterOptions = {
+  captureTypes: string[];
+  imagingModes: string[];
+  wavelengths: string[];
+  colors: string[];
+};
+
+const ALLOWED_METADATA_ARRAY_KEYS = new Set(["wavelengths", "colors"]);
+
+async function distinctMetadataArrayValues(
+  instrumentId: string,
+  key: string
+): Promise<string[]> {
+  if (!ALLOWED_METADATA_ARRAY_KEYS.has(key)) {
+    throw new Error(`Invalid metadata array key: ${key}`);
+  }
+  const jsonKey = sql.raw(`'${key}'`);
+  const rows = await db.execute<{ value: string }>(
+    sql`select distinct val as value
+        from ${instrumentRuns},
+             lateral jsonb_array_elements_text(${instrumentRuns.metadata}->${jsonKey}) as val
+        where ${instrumentRuns.instrumentId} = ${instrumentId}
+          and ${instrumentRuns.deletedAt} is null
+          and jsonb_typeof(${instrumentRuns.metadata}->${jsonKey}) = 'array'
+        order by val`
+  );
+  return Array.from(rows, (r) => r.value).filter(Boolean);
+}
+
+export async function getGelDocFilterOptions(
+  instrumentId: string
+): Promise<GelDocFilterOptions> {
+  const [captureTypes, imagingModes, wavelengths, colors] = await Promise.all([
+    distinctMetadataValues(instrumentId, "capture_type"),
+    distinctMetadataValues(instrumentId, "imaging_mode"),
+    distinctMetadataArrayValues(instrumentId, "wavelengths"),
+    distinctMetadataArrayValues(instrumentId, "colors"),
+  ]);
+  return { captureTypes, imagingModes, wavelengths, colors };
 }

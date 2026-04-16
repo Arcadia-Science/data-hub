@@ -1,5 +1,10 @@
 import { db } from "@/lib/db";
-import { instrumentRuns, instruments, watchers } from "@/lib/db/schema";
+import {
+  instrumentRuns,
+  instruments,
+  type InstrumentType,
+  watchers,
+} from "@/lib/db/schema";
 import { and, count, eq, isNull, sql } from "drizzle-orm";
 import { cache } from "react";
 import YAML from "yaml";
@@ -8,7 +13,7 @@ export type InstrumentListItem = {
   id: string;
   displayName: string;
   status: "pending" | "active" | "inactive";
-  instrumentType: "generic" | "plate_reader";
+  instrumentType: InstrumentType;
   filePatterns: string[];
   runCount: number;
   lastRunAt: Date | null;
@@ -124,7 +129,7 @@ export type InstrumentDetail = {
   id: string;
   displayName: string;
   status: "pending" | "active" | "inactive";
-  instrumentType: "generic" | "plate_reader";
+  instrumentType: InstrumentType;
   filePatterns: string[];
   s3TriggerSuffix: string | null;
   createdAt: Date;

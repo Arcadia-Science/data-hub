@@ -14,7 +14,14 @@ import { cn } from "@/lib/utils";
 import { ChevronsUpDown, ListFilter } from "lucide-react";
 import { useQueryStates } from "nuqs";
 
-type FilterParamKey = "wavelength" | "measurement_mode" | "measurement_type";
+type FilterParamKey =
+  | "wavelength"
+  | "measurement_mode"
+  | "measurement_type"
+  | "capture_type"
+  | "imaging_mode"
+  | "gel_wavelength"
+  | "gel_color";
 
 export function FilterableColumnHeader({
   label,

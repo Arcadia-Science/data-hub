@@ -48,6 +48,7 @@ export const instrumentRunSourceEnum = pgEnum("instrument_run_source", [
 export const instrumentTypeEnum = pgEnum("instrument_type", [
   "generic",
   "plate_reader",
+  "gel_doc",
 ]);
 
 export const VALID_INSTRUMENT_TYPES = instrumentTypeEnum.enumValues;
