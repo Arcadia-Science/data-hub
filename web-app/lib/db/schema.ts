@@ -125,20 +125,6 @@ export const sessions = pgTable(
   (session) => [index("idx_sessions_user_id").on(session.userId)]
 );
 
-export const verificationTokens = pgTable(
-  "verificationToken",
-  {
-    identifier: text("identifier").notNull(),
-    token: text("token").notNull(),
-    expires: timestamp("expires", { mode: "date" }).notNull(),
-  },
-  (verificationToken) => [
-    primaryKey({
-      columns: [verificationToken.identifier, verificationToken.token],
-    }),
-  ]
-);
-
 export const personalAccessTokens = pgTable(
   "personal_access_tokens",
   {

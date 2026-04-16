@@ -44,7 +44,6 @@ const TRUNCATE_ORDER = [
   "personal_access_tokens",
   "session",
   "account",
-  '"verificationToken"',
   "instruments",
   '"user"',
 ] as const;
