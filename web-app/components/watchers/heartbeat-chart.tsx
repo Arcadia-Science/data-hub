@@ -14,7 +14,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import type { WatcherHeartbeatRow } from "@/lib/api/watchers";
-import { formatTime, formatDateTime } from "@/lib/date";
+import { formatDateTime, formatTime } from "@/lib/date";
 import { cn } from "@/lib/utils";
 import { HeartPulse } from "lucide-react";
 import { useMemo } from "react";
@@ -218,9 +218,7 @@ export function HeartbeatChart({
               <ChartTooltipContent
                 labelFormatter={(_, payload) => {
                   const ts = payload?.[0]?.payload?.timestamp;
-                  return ts
-                    ? formatDateTime(new Date(ts))
-                    : "";
+                  return ts ? formatDateTime(new Date(ts)) : "";
                 }}
               />
             }

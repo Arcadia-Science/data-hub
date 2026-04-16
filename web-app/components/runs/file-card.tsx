@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { RunFile } from "@/lib/api/instrument-runs";
+import { formatDateTime } from "@/lib/date";
 import {
   AlertCircle,
   Download,
@@ -24,7 +25,6 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { formatDateTime } from "@/lib/date";
 import { useRouter } from "next/navigation";
 import { useEffect, useTransition } from "react";
 import { toast } from "sonner";
@@ -164,7 +164,9 @@ export function FileCard({
         <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
           <span>{formatBytes(file.sizeBytes)}</span>
           {file.contentType && <span>{file.contentType}</span>}
-          <span>Created {file.createdAt ? formatDateTime(file.createdAt) : "—"}</span>
+          <span>
+            Created {file.createdAt ? formatDateTime(file.createdAt) : "—"}
+          </span>
         </div>
 
         {metadataEntries.length > 0 && (

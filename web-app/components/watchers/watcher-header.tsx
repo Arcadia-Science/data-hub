@@ -80,10 +80,7 @@ export function WatcherHeader({ watcher }: { watcher: WatcherDetail }) {
           {isDeregistered && watcher.deletedAt && (
             <>
               <span>·</span>
-              <span>
-                Deregistered{" "}
-                {formatDate(watcher.deletedAt)}
-              </span>
+              <span>Deregistered {formatDate(watcher.deletedAt)}</span>
             </>
           )}
         </div>

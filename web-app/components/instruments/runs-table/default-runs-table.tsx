@@ -37,7 +37,10 @@ export function DefaultRunsTable({ data, instrumentId }: RunsTableProps) {
               >
                 <TableCell>
                   <div className="flex items-center gap-2.5">
-                    <RunStatusIcon filesFailed={row.files_failed} errorMessages={row.error_messages} />
+                    <RunStatusIcon
+                      filesFailed={row.files_failed}
+                      errorMessages={row.error_messages}
+                    />
                     <span
                       className={cn("font-mono", isDeleted && "line-through")}
                     >
