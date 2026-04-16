@@ -9,7 +9,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // (vi.mock calls are hoisted above all other imports).
 // ---------------------------------------------------------------------------
 
-const { MOCK_INSTRUMENT } = vi.hoisted(() => ({
+const {
+  MOCK_INSTRUMENT,
+  MOCK_GEL_DOC_INSTRUMENT,
+  MOCK_GENERIC_INSTRUMENT,
+  MOCK_FILE,
+} = vi.hoisted(() => ({
   MOCK_INSTRUMENT: {
     id: "test-plate-reader",
     displayName: "Test Plate Reader",
@@ -22,15 +27,59 @@ const { MOCK_INSTRUMENT } = vi.hoisted(() => ({
     watchersOnline: 1,
     createdAt: new Date("2024-01-01"),
   },
+  MOCK_GEL_DOC_INSTRUMENT: {
+    id: "test-gel-doc",
+    displayName: "Test Gel Doc",
+    status: "active",
+    instrumentType: "gel_doc",
+    filePatterns: ["*.tif"],
+    runCount: 1,
+    lastRunAt: new Date("2025-01-01"),
+    watcherCount: 1,
+    watchersOnline: 1,
+    createdAt: new Date("2024-01-01"),
+  },
+  MOCK_GENERIC_INSTRUMENT: {
+    id: "test-generic",
+    displayName: "Test Generic",
+    status: "active",
+    instrumentType: "generic",
+    filePatterns: ["*.dat"],
+    runCount: 0,
+    lastRunAt: null,
+    watcherCount: 0,
+    watchersOnline: 0,
+    createdAt: new Date("2024-01-01"),
+  },
+  MOCK_FILE: {
+    id: 42,
+    instrumentRunId: "internal-1",
+    filename: "data.csv",
+    status: "completed",
+    s3Bucket: "test-bucket",
+    s3Key: "path/to/data.csv",
+    contentType: "text/csv",
+    sizeBytes: 1234,
+    category: "raw",
+    metadata: {},
+    errorMessage: null,
+    deletedAt: null,
+  },
 }));
 
 vi.mock("@/lib/api/instruments", () => ({
-  getInstrumentListWithCounts: vi.fn().mockResolvedValue([MOCK_INSTRUMENT]),
-  getInstrumentById: vi
+  // The generic instrument is intentionally omitted from the list so we can
+  // assert that non-filterable types are filtered out of the filter-options
+  // resource template list.
+  getInstrumentListWithCounts: vi
     .fn()
-    .mockImplementation(async (id: string) =>
-      id === "test-plate-reader" ? MOCK_INSTRUMENT : null
-    ),
+    .mockResolvedValue([MOCK_INSTRUMENT, MOCK_GEL_DOC_INSTRUMENT]),
+  getInstrumentById: vi.fn().mockImplementation(async (id: string) => {
+    if (id === "test-plate-reader") return MOCK_INSTRUMENT;
+    if (id === "test-gel-doc") return MOCK_GEL_DOC_INSTRUMENT;
+    if (id === "test-generic") return MOCK_GENERIC_INSTRUMENT;
+    return null;
+  }),
 }));
 
 vi.mock("@/lib/api/instrument-runs", () => ({
@@ -51,6 +100,12 @@ vi.mock("@/lib/api/instrument-runs", () => ({
     measurementModes: ["Absorbance"],
     measurementTypes: ["Endpoint"],
   }),
+  getGelDocFilterOptions: vi.fn().mockResolvedValue({
+    captureTypes: ["Chemi"],
+    imagingModes: ["Single"],
+    wavelengths: ["520"],
+    colors: ["Green"],
+  }),
 }));
 
 vi.mock("@/lib/api/dashboard", () => ({
@@ -66,6 +121,60 @@ vi.mock("@/lib/api/dashboard", () => ({
 
 vi.mock("@/lib/api/watchers", () => ({
   getWatcherList: vi.fn().mockResolvedValue([]),
+  getWatcherHeartbeats: vi.fn().mockResolvedValue({
+    rows: [
+      {
+        id: 1,
+        timestamp: new Date("2025-01-01T12:00:00Z"),
+        status: "watching",
+        uploadMode: "auto",
+        filesUploadedSinceLast: 2,
+        runsReportedSinceLast: 1,
+        errorsSinceLast: 0,
+        uptimeSeconds: 3600,
+      },
+    ],
+    total: 1,
+  }),
+}));
+
+vi.mock("@/lib/api/files", () => ({
+  getActiveFileById: vi
+    .fn()
+    .mockImplementation(async (id: number) => (id === 42 ? MOCK_FILE : null)),
+  lookupFileForDownload: vi.fn().mockImplementation(async (id: number) => {
+    if (id === 42) {
+      return {
+        ok: true,
+        filename: MOCK_FILE.filename,
+        s3Bucket: MOCK_FILE.s3Bucket,
+        s3Key: MOCK_FILE.s3Key,
+      };
+    }
+    if (id === 99) {
+      return { ok: false, reason: "not_uploaded" };
+    }
+    return { ok: false, reason: "not_found" };
+  }),
+  countDownloadableRunFiles: vi.fn().mockResolvedValue(3),
+}));
+
+vi.mock("@/lib/api/file-reprocessing", () => ({
+  reprocessFile: vi.fn().mockImplementation(async (id: number) => {
+    if (id === 42) return { ok: true, fileId: id };
+    return {
+      ok: false,
+      status: 404,
+      code: "NOT_FOUND",
+      message: `File '${id}' not found`,
+    };
+  }),
+}));
+
+vi.mock("@/lib/s3", () => ({
+  getPresignedDownloadUrl: vi
+    .fn()
+    .mockResolvedValue("https://s3.example.com/signed-url"),
 }));
 
 // ---------------------------------------------------------------------------
@@ -118,7 +227,14 @@ describe("MCP Protocol (in-memory)", () => {
     "list_run_files",
     "get_system_status",
     "list_watchers",
+    "get_file",
+    "get_file_download_url",
+    "get_run_archive_path",
+    "reprocess_file",
+    "get_watcher_heartbeats",
   ] as const;
+
+  const WRITE_TOOLS = new Set(["reprocess_file"]);
 
   it("registers all expected tools", async () => {
     const { tools } = await client.listTools();
@@ -134,12 +250,20 @@ describe("MCP Protocol (in-memory)", () => {
     }
   });
 
-  it("every tool is annotated as read-only", async () => {
+  it("read-only tools are annotated as such; write tools are not", async () => {
     const { tools } = await client.listTools();
     for (const tool of tools) {
-      expect(tool.annotations?.readOnlyHint, `${tool.name} not read-only`).toBe(
-        true
-      );
+      if (WRITE_TOOLS.has(tool.name)) {
+        expect(
+          tool.annotations?.readOnlyHint,
+          `${tool.name} should not be read-only`
+        ).toBe(false);
+      } else {
+        expect(
+          tool.annotations?.readOnlyHint,
+          `${tool.name} not read-only`
+        ).toBe(true);
+      }
     }
   });
 
@@ -151,9 +275,23 @@ describe("MCP Protocol (in-memory)", () => {
     const getRun = tools.find((t) => t.name === "get_run")!;
     expect(getRun.inputSchema.properties).toHaveProperty("instrumentId");
     expect(getRun.inputSchema.properties).toHaveProperty("runId");
+
+    const getFile = tools.find((t) => t.name === "get_file")!;
+    expect(getFile.inputSchema.properties).toHaveProperty("fileId");
+
+    const reprocess = tools.find((t) => t.name === "reprocess_file")!;
+    expect(reprocess.inputSchema.properties).toHaveProperty("fileId");
+
+    const heartbeats = tools.find((t) => t.name === "get_watcher_heartbeats")!;
+    expect(heartbeats.inputSchema.properties).toHaveProperty("watcherId");
   });
 
   // ---- Tool execution (happy path) ----------------------------------------
+
+  function parseText(content: unknown): unknown {
+    const text = (content as Array<{ type: string; text: string }>)[0].text;
+    return JSON.parse(text);
+  }
 
   it("list_instruments returns JSON text content", async () => {
     const result = await client.callTool({
@@ -161,10 +299,7 @@ describe("MCP Protocol (in-memory)", () => {
       arguments: {},
     });
     expect(result.isError).toBeFalsy();
-    const text = (result.content as Array<{ type: string; text: string }>)[0]
-      .text;
-    const parsed = JSON.parse(text);
-    expect(parsed).toEqual(
+    expect(parseText(result.content)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: "test-plate-reader" }),
       ])
@@ -177,9 +312,7 @@ describe("MCP Protocol (in-memory)", () => {
       arguments: { instrumentId: "test-plate-reader" },
     });
     expect(result.isError).toBeFalsy();
-    const text = (result.content as Array<{ type: string; text: string }>)[0]
-      .text;
-    const parsed = JSON.parse(text);
+    const parsed = parseText(result.content) as { id: string };
     expect(parsed.id).toBe("test-plate-reader");
   });
 
@@ -189,9 +322,7 @@ describe("MCP Protocol (in-memory)", () => {
       arguments: { page: 1, perPage: 10 },
     });
     expect(result.isError).toBeFalsy();
-    const parsed = JSON.parse(
-      (result.content as Array<{ type: string; text: string }>)[0].text
-    );
+    const parsed = parseText(result.content);
     expect(parsed).toHaveProperty("runs");
     expect(parsed).toHaveProperty("total");
   });
@@ -210,6 +341,83 @@ describe("MCP Protocol (in-memory)", () => {
       arguments: {},
     });
     expect(result.isError).toBeFalsy();
+  });
+
+  it("get_file returns the file record", async () => {
+    const result = await client.callTool({
+      name: "get_file",
+      arguments: { fileId: 42 },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as { id: number };
+    expect(parsed.id).toBe(42);
+  });
+
+  it("get_file_download_url returns a presigned URL", async () => {
+    const result = await client.callTool({
+      name: "get_file_download_url",
+      arguments: { fileId: 42 },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as {
+      fileId: number;
+      filename: string;
+      downloadUrl: string;
+      expiresInSeconds: number;
+    };
+    expect(parsed.fileId).toBe(42);
+    expect(parsed.downloadUrl).toContain("s3.example.com");
+    expect(parsed.expiresInSeconds).toBeGreaterThan(0);
+  });
+
+  it("get_run_archive_path returns an archive path", async () => {
+    const result = await client.callTool({
+      name: "get_run_archive_path",
+      arguments: { instrumentId: "test-plate-reader", runId: "run-1" },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as {
+      archivePath: string;
+      contentType: string;
+    };
+    expect(parsed.archivePath).toContain("/download-archive");
+    expect(parsed.archivePath).toContain("test-plate-reader");
+    expect(parsed.archivePath).toContain("run-1");
+    expect(parsed.contentType).toBe("application/zip");
+  });
+
+  it("reprocess_file succeeds for a reprocessable file", async () => {
+    const result = await client.callTool({
+      name: "reprocess_file",
+      arguments: { fileId: 42 },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as {
+      status: string;
+      fileId: number;
+    };
+    expect(parsed.status).toBe("processing");
+    expect(parsed.fileId).toBe(42);
+  });
+
+  it("get_watcher_heartbeats returns heartbeat history", async () => {
+    const result = await client.callTool({
+      name: "get_watcher_heartbeats",
+      arguments: { watcherId: "abc", hours: 12 },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as {
+      watcherId: string;
+      sinceIso: string;
+      lookbackHours: number;
+      total: number;
+      heartbeats: unknown[];
+    };
+    expect(parsed.watcherId).toBe("abc");
+    expect(parsed.lookbackHours).toBe(12);
+    expect(parsed.total).toBe(1);
+    expect(parsed.heartbeats).toHaveLength(1);
+    expect(parsed.sinceIso).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
   });
 
   // ---- Tool execution (error paths) ---------------------------------------
@@ -252,6 +460,46 @@ describe("MCP Protocol (in-memory)", () => {
     expect(result.isError).toBe(true);
   });
 
+  it("get_file returns error for nonexistent file", async () => {
+    const result = await client.callTool({
+      name: "get_file",
+      arguments: { fileId: 999 },
+    });
+    expect(result.isError).toBe(true);
+  });
+
+  it("get_file_download_url returns error for unuploaded file", async () => {
+    const result = await client.callTool({
+      name: "get_file_download_url",
+      arguments: { fileId: 99 },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ type: string; text: string }>)[0]
+      .text;
+    expect(text).toContain("not been uploaded");
+  });
+
+  it("reprocess_file returns error when the core helper reports failure", async () => {
+    const result = await client.callTool({
+      name: "reprocess_file",
+      arguments: { fileId: 123 },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ type: string; text: string }>)[0]
+      .text;
+    expect(text).toContain("not found");
+    // The error payload prefixes the structured code so clients can branch
+    // on NOT_FOUND vs CONFLICT vs INTERNAL_ERROR without parsing the message.
+    expect(text).toContain("[NOT_FOUND]");
+  });
+
+  it("reprocess_file is annotated as destructive", async () => {
+    const { tools } = await client.listTools();
+    const tool = tools.find((t) => t.name === "reprocess_file")!;
+    expect(tool.annotations?.readOnlyHint).toBe(false);
+    expect(tool.annotations?.destructiveHint).toBe(true);
+  });
+
   // ---- Resources -----------------------------------------------------------
 
   it("lists resources including instruments", async () => {
@@ -276,11 +524,71 @@ describe("MCP Protocol (in-memory)", () => {
     );
   });
 
-  it("lists resource templates for plate reader filter options", async () => {
+  it("lists resource templates for filter options", async () => {
     const { resourceTemplates } = await client.listResourceTemplates();
     expect(
       resourceTemplates.some((t) => t.uriTemplate.includes("filter-options"))
     ).toBe(true);
+  });
+
+  it("filter-options list surfaces both plate-reader and gel-doc instruments", async () => {
+    const { resources } = await client.listResources();
+    const filterOptionUris = resources
+      .map((r) => r.uri)
+      .filter((uri) => uri.includes("/filter-options"));
+    expect(
+      filterOptionUris.some((uri) => uri.includes("test-plate-reader"))
+    ).toBe(true);
+    expect(filterOptionUris.some((uri) => uri.includes("test-gel-doc"))).toBe(
+      true
+    );
+  });
+
+  it("reads plate-reader filter options", async () => {
+    const { contents } = await client.readResource({
+      uri: "datahub://instruments/test-plate-reader/filter-options",
+    });
+    const parsed = JSON.parse(
+      (contents[0] as { uri: string; text: string }).text
+    );
+    expect(parsed).toHaveProperty("wavelengths");
+    expect(parsed).toHaveProperty("measurementModes");
+  });
+
+  it("reads gel-doc filter options", async () => {
+    const { contents } = await client.readResource({
+      uri: "datahub://instruments/test-gel-doc/filter-options",
+    });
+    const parsed = JSON.parse(
+      (contents[0] as { uri: string; text: string }).text
+    );
+    expect(parsed).toHaveProperty("captureTypes");
+    expect(parsed).toHaveProperty("colors");
+  });
+
+  it("filter-options read surfaces a structured error for unfilterable instrument types", async () => {
+    // MOCK_GENERIC_INSTRUMENT exists in getInstrumentById but has an
+    // instrumentType ('generic') that's not in FILTERABLE_INSTRUMENT_TYPES.
+    // The resource template should respond with an explanatory error object.
+    const { contents } = await client.readResource({
+      uri: "datahub://instruments/test-generic/filter-options",
+    });
+    const parsed = JSON.parse(
+      (contents[0] as { uri: string; text: string }).text
+    );
+    expect(parsed).toHaveProperty("error");
+    expect(String(parsed.error)).toContain("generic");
+  });
+
+  it("filter-options read surfaces a not-found error for unknown instrument IDs", async () => {
+    const { contents } = await client.readResource({
+      uri: "datahub://instruments/does-not-exist/filter-options",
+    });
+    const parsed = JSON.parse(
+      (contents[0] as { uri: string; text: string }).text
+    );
+    expect(parsed).toHaveProperty("error");
+    expect(String(parsed.error)).toContain("not found");
   });
 
   // ---- Prompts -------------------------------------------------------------
@@ -332,7 +640,7 @@ describe("MCP Protocol (in-memory)", () => {
     expect(text).toContain("run-42");
   });
 
-  it("troubleshoot_instrument prompt includes instrument in message", async () => {
+  it("troubleshoot_instrument prompt references heartbeat tool", async () => {
     const result = await client.getPrompt({
       name: "troubleshoot_instrument",
       arguments: { instrumentId: "my-inst" },
@@ -340,6 +648,7 @@ describe("MCP Protocol (in-memory)", () => {
     expect(result.messages).toHaveLength(1);
     const text = (result.messages[0].content as { text: string }).text;
     expect(text).toContain("my-inst");
+    expect(text).toContain("get_watcher_heartbeats");
   });
 
   it("compare_runs prompt includes both run IDs", async () => {

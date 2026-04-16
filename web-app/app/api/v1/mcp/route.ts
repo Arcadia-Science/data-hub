@@ -33,7 +33,7 @@ const verifyToken = async (
   return {
     token: bearerToken ?? "",
     clientId: result.userId,
-    scopes: ["read"],
+    scopes: ["read", "write"],
     extra: { userId: result.userId, authMethod: result.authMethod },
   };
 };

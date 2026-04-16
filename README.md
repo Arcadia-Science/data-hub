@@ -58,6 +58,7 @@ See the full [Getting Started guide](docs/getting-started.md) for prerequisites 
 - [Watcher](docs/watcher.md) — CLI commands, configuration, run detection, upload modes
 - [Lambda](docs/lambda.md) — processing pipeline, supported instruments, adding new instruments
 - [REST API](docs/api.md) — endpoint reference and authentication
+- [MCP server](docs/mcp.md) — tools, resources, prompts, and installation for Claude Desktop / Cursor
 - [Shared library](docs/shared-library.md) — module reference for `data-hub-shared`
 - [CI and deployment](docs/ci-and-deployment.md) — GitHub Actions, Vercel, Render, Lambda deployment
 - [Conventions](docs/conventions.md) — S3 key layout, instrument IDs, code style, environments

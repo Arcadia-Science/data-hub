@@ -73,7 +73,7 @@ Or in Cursor (`.cursor/mcp.json`):
 }
 ```
 
-The MCP server provides read-only access to instruments, runs, files, watchers, and system status. See [API — MCP](../api.md#mcp-model-context-protocol) for the full list of tools, resources, and prompts.
+See the [MCP server docs](../mcp.md) for the full list of tools, resources, prompts, and client-specific setup details.
 
 ### With the API directly
 

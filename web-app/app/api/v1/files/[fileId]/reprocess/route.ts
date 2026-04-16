@@ -1,36 +1,19 @@
 import { authenticateRequest } from "@/lib/api/auth";
-import {
-  apiError,
-  CONFLICT,
-  INTERNAL_ERROR,
-  NOT_FOUND,
-  UNAUTHORIZED,
-  VALIDATION_ERROR,
-} from "@/lib/api/errors";
-import { db } from "@/lib/db";
-import { files, instrumentRuns, runReportData } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { apiError, UNAUTHORIZED, VALIDATION_ERROR } from "@/lib/api/errors";
+import { reprocessFile } from "@/lib/api/file-reprocessing";
 import type { NextRequest } from "next/server";
-import { after } from "next/server";
 
 type RouteContext = {
   params: Promise<{ fileId: string }>;
 };
-
-const REPROCESSABLE_STATUSES = ["failed", "completed"];
-
-function getLambdaConfig() {
-  const url = process.env.LAMBDA_FUNCTION_URL;
-  const token = process.env.LAMBDA_INVOKE_TOKEN;
-  if (!url || !token) return null;
-  return { url, token };
-}
 
 // ---------------------------------------------------------------------------
 // POST /api/v1/files/:fileId/reprocess
 //
 // Transitions a failed or completed file back to "processing" and invokes
 // the Lambda Function URL to re-run the instrument's process_file workflow.
+// The core logic lives in lib/api/file-reprocessing.ts so the MCP server
+// can reuse it.
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
@@ -45,119 +28,14 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     return apiError(400, VALIDATION_ERROR, "Invalid file ID");
   }
 
-  const [file] = await db
-    .select()
-    .from(files)
-    .where(eq(files.id, numericId))
-    .limit(1);
-
-  if (!file) {
-    return apiError(404, NOT_FOUND, `File '${fileId}' not found`);
+  const result = await reprocessFile(numericId);
+  if (!result.ok) {
+    // ReprocessResult.code is the literal union ("NOT_FOUND" | "CONFLICT" |
+    // "INTERNAL_ERROR") which matches the string values of the NOT_FOUND /
+    // CONFLICT / INTERNAL_ERROR constants, so it can be passed straight
+    // through to apiError.
+    return apiError(result.status, result.code, result.message, result.details);
   }
 
-  if (file.deletedAt) {
-    return apiError(409, CONFLICT, "Cannot reprocess a soft-deleted file");
-  }
-
-  if (!REPROCESSABLE_STATUSES.includes(file.status)) {
-    return apiError(
-      409,
-      CONFLICT,
-      `Cannot reprocess a file in '${file.status}' status — only 'failed' or 'completed' files can be reprocessed`
-    );
-  }
-
-  if (!file.s3Bucket || !file.s3Key) {
-    return apiError(
-      409,
-      CONFLICT,
-      "File has no S3 location — it cannot be reprocessed"
-    );
-  }
-
-  // Verify parent run is not soft-deleted.
-  const [parentRun] = await db
-    .select({ deletedAt: instrumentRuns.deletedAt })
-    .from(instrumentRuns)
-    .where(eq(instrumentRuns.id, file.instrumentRunId))
-    .limit(1);
-
-  if (parentRun?.deletedAt) {
-    return apiError(
-      409,
-      CONFLICT,
-      "Cannot reprocess a file whose parent run is soft-deleted"
-    );
-  }
-
-  const lambda = getLambdaConfig();
-  if (!lambda) {
-    return apiError(
-      503,
-      INTERNAL_ERROR,
-      "Lambda reprocessing is not configured"
-    );
-  }
-
-  // Transition to "processing": clear previous error and report data.
-  await db.transaction(async (tx) => {
-    await tx.delete(runReportData).where(eq(runReportData.fileId, numericId));
-    await tx
-      .update(files)
-      .set({
-        status: "processing",
-        processedAt: null,
-        errorMessage: null,
-      })
-      .where(eq(files.id, numericId));
-  });
-
-  // Build a synthetic S3 event matching the shape parse_s3_event expects.
-  // Real S3 events use application/x-www-form-urlencoded encoding for the
-  // object key: "+" → "%2B", spaces → "+", and "/" stays literal.
-  // We replicate that with encodeURIComponent (which gives "%2B" for "+")
-  // then restore literal "/" to match S3's format.  The Lambda decodes
-  // with urllib.parse.unquote, which handles both "%2F" and "/" correctly,
-  // but keeping "/" literal makes the event payload identical to what S3
-  // would actually send.
-  const s3Event = {
-    Records: [
-      {
-        s3: {
-          bucket: { name: file.s3Bucket },
-          object: {
-            key: encodeURIComponent(file.s3Key).replaceAll("%2F", "/"),
-          },
-        },
-      },
-    ],
-  };
-
-  // The Lambda Function URL uses BUFFERED mode, so awaiting the response would
-  // block until processing finishes. We use `after` to invoke it after the
-  // response is sent — the runtime stays warm until the callback completes, so
-  // error logging is reliable. The Lambda calls back via PATCH /api/v1/files/:fileId
-  // with the final status (completed / failed).
-  after(async () => {
-    try {
-      const res = await fetch(lambda.url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${lambda.token}`,
-        },
-        body: JSON.stringify(s3Event),
-      });
-      if (!res.ok) {
-        console.error(
-          `Lambda returned ${res.status} for file ${numericId}:`,
-          await res.text().catch(() => "")
-        );
-      }
-    } catch (err) {
-      console.error(`Failed to invoke Lambda for file ${numericId}:`, err);
-    }
-  });
-
-  return Response.json({ status: "processing", file_id: numericId });
+  return Response.json({ status: "processing", file_id: result.fileId });
 }

@@ -81,13 +81,7 @@ Tokens are hashed with SHA-256 before storage. The plaintext token is shown once
 
 The MCP server exposes Data Hub data to AI clients (e.g. Claude Desktop, Cursor) via the [Model Context Protocol](https://modelcontextprotocol.io/). It uses Bearer token authentication only — session cookies are not supported.
 
-**Tools:** `list_instruments`, `get_instrument`, `search_runs`, `get_run`, `get_run_report_data`, `list_run_files`, `get_system_status`, `list_watchers`
-
-**Resources:** `datahub://instruments`, `datahub://instruments/{instrumentId}/filter-options`
-
-**Prompts:** `daily_summary`, `run_analysis`, `troubleshoot_instrument`, `compare_runs`
-
-See [Managing tokens — With an MCP client](guides/managing-tokens.md#with-an-mcp-client) for configuration examples.
+See the [MCP server docs](mcp.md) for the full tool, resource, and prompt reference and installation instructions for Claude Desktop and Cursor.
 
 ## Error responses
 
