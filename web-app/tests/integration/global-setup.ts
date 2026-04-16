@@ -79,7 +79,7 @@ export async function setup() {
   const port = await getFreePort();
   const baseUrl = `http://127.0.0.1:${port}`;
 
-  const serverEnv = {
+  const serverEnv: NodeJS.ProcessEnv = {
     ...process.env,
     DATABASE_URL: databaseUrl,
     AUTH_SECRET: "test-secret-at-least-32-characters-long!!",
@@ -94,6 +94,11 @@ export async function setup() {
     S3_RAW_DATA_BUCKET:
       process.env.S3_RAW_DATA_BUCKET ?? "test-raw-data-bucket",
   };
+  // Strip Lambda config so "not configured" test cases work regardless of
+  // the developer's local .env. Tests that need Lambda stubbed should mock
+  // the fetch call instead of relying on ambient env.
+  delete serverEnv.LAMBDA_FUNCTION_URL;
+  delete serverEnv.LAMBDA_INVOKE_TOKEN;
 
   execSync("npx next build", {
     cwd: import.meta.dirname ? import.meta.dirname + "/../.." : process.cwd(),

@@ -51,6 +51,10 @@ fe-test-mcp:
 fe-test-integration:
 	cd web-app && npm run test:integration
 
+.PHONY: fe-test
+fe-test:
+	cd web-app && npm run test:mcp && npm run test:integration
+
 .PHONY: dev
 dev:
 	cd web-app && npm run dev

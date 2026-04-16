@@ -110,9 +110,14 @@ describe("MCP Server (HTTP)", () => {
     expect(toolNames).toContain("get_run");
     expect(toolNames).toContain("get_run_report_data");
     expect(toolNames).toContain("list_run_files");
+    expect(toolNames).toContain("get_file");
+    expect(toolNames).toContain("get_file_download_url");
+    expect(toolNames).toContain("get_run_archive_path");
     expect(toolNames).toContain("get_system_status");
     expect(toolNames).toContain("list_watchers");
-    expect(toolNames).toHaveLength(8);
+    expect(toolNames).toContain("get_watcher_heartbeats");
+    expect(toolNames).toContain("reprocess_file");
+    expect(toolNames).toHaveLength(13);
   });
 
   // ---- Tool execution (end-to-end) -----------------------------------------
