@@ -25,7 +25,7 @@ import {
   X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useTransition } from "react";
+import { useEffect, useTransition } from "react";
 import { toast } from "sonner";
 
 function formatBytes(bytes: number | null): string {
@@ -131,6 +131,12 @@ export function FileCard({
     });
   }
 
+  useEffect(() => {
+    if (file.status !== "processing") return;
+    const id = setInterval(() => router.refresh(), 3000);
+    return () => clearInterval(id);
+  }, [file.status, router]);
+
   const metadataEntries = file.metadata
     ? Object.entries(file.metadata as Record<string, unknown>)
     : [];
@@ -176,6 +182,13 @@ export function FileCard({
                 {Array.isArray(v) ? v.join(", ") : String(v)}
               </span>
             ))}
+          </div>
+        )}
+
+        {file.status === "processing" && (
+          <div className="mt-1 flex items-center gap-1.5 rounded-md bg-muted px-2 py-1.5 text-xs text-muted-foreground">
+            <Loader2 className="size-3 animate-spin" />
+            <span>Processing…</span>
           </div>
         )}
 

@@ -132,36 +132,29 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     ],
   };
 
-  // Invoke the Lambda Function URL. We await the HTTP response (not the
-  // Lambda's processing) so we can roll back if the invocation itself fails.
-  // The Lambda will call back via PATCH /api/v1/files/:fileId when done.
-  let lambdaRes: Response;
-  try {
-    lambdaRes = await fetch(lambda.url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${lambda.token}`,
-      },
-      body: JSON.stringify(s3Event),
+  // Fire-and-forget: the Lambda Function URL uses BUFFERED mode, so awaiting
+  // the response would block until processing finishes. Instead we kick off
+  // the request without awaiting and let the Lambda call back via
+  // PATCH /api/v1/files/:fileId with the final status (completed / failed).
+  fetch(lambda.url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${lambda.token}`,
+    },
+    body: JSON.stringify(s3Event),
+  })
+    .then(async (res) => {
+      if (!res.ok) {
+        console.error(
+          `Lambda returned ${res.status} for file ${numericId}:`,
+          await res.text().catch(() => "")
+        );
+      }
+    })
+    .catch((err) => {
+      console.error(`Failed to invoke Lambda for file ${numericId}:`, err);
     });
-  } catch (err) {
-    console.error(`Failed to invoke Lambda for file ${numericId}:`, err);
-    await db
-      .update(files)
-      .set({ status: file.status, errorMessage: file.errorMessage })
-      .where(eq(files.id, numericId));
-    return apiError(502, INTERNAL_ERROR, "Failed to reach the Lambda function");
-  }
-
-  if (!lambdaRes.ok) {
-    console.error(`Lambda returned ${lambdaRes.status} for file ${numericId}`);
-    await db
-      .update(files)
-      .set({ status: file.status, errorMessage: file.errorMessage })
-      .where(eq(files.id, numericId));
-    return apiError(502, INTERNAL_ERROR, "Lambda invocation failed");
-  }
 
   return Response.json({ status: "processing", file_id: numericId });
 }
