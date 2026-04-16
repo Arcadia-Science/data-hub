@@ -14,7 +14,7 @@ export function RelativeTime({ date }: { date: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <time dateTime={date} className="cursor-default whitespace-nowrap">
+        <time dateTime={date} className="relative z-10 cursor-default whitespace-nowrap">
           {formatRelativeTime(date)}
         </time>
       </TooltipTrigger>
