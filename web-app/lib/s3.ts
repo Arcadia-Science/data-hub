@@ -5,6 +5,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { awsCredentialsProvider } from "@vercel/oidc-aws-credentials-provider";
+import type { Readable } from "node:stream";
 
 const DEFAULT_DOWNLOAD_EXPIRY_SECONDS = 15 * 60; // 15 minutes
 const DEFAULT_UPLOAD_EXPIRY_SECONDS = 60 * 60; // 1 hour — generous for large lab files over slow networks
@@ -34,6 +35,15 @@ export async function getPresignedDownloadUrl(
 ): Promise<string> {
   const command = new GetObjectCommand({ Bucket: bucket, Key: key });
   return getSignedUrl(s3, command, { expiresIn });
+}
+
+export async function getS3ObjectStream(
+  bucket: string,
+  key: string
+): Promise<Readable> {
+  const command = new GetObjectCommand({ Bucket: bucket, Key: key });
+  const response = await s3.send(command);
+  return response.Body as Readable;
 }
 
 export async function getPresignedUploadUrl(

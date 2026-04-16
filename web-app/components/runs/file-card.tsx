@@ -18,7 +18,6 @@ import type { RunFile } from "@/lib/api/instrument-runs";
 import {
   AlertCircle,
   Download,
-  Eye,
   FileText,
   Loader2,
   RotateCw,
@@ -164,9 +163,6 @@ export function FileCard({
         </div>
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-          {file.relativePath && (
-            <span className="font-mono">{file.relativePath}</span>
-          )}
           <span>{formatBytes(file.sizeBytes)}</span>
           {file.contentType && <span>{file.contentType}</span>}
           <span>Created {formatDate(file.createdAt)}</span>
@@ -249,22 +245,6 @@ export function FileCard({
         {isDownloadable && (
           <div className="flex flex-col items-end gap-1">
             <div className="flex items-center gap-1">
-              {file.contentType?.startsWith("image/") && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs"
-                  asChild
-                >
-                  <a
-                    href={`/api/v1/files/${file.id}/download`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <Eye className="size-3" />
-                  </a>
-                </Button>
-              )}
               <Button
                 variant="outline"
                 size="sm"
