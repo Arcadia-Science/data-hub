@@ -14,21 +14,13 @@ import { cn, formatBytes } from "@/lib/utils";
 import type { RunRow } from ".";
 import { ClickableRow } from "./clickable-row";
 import { FilterableColumnHeader } from "./filterable-column-header";
+import {
+  MetadataArrayBadges,
+  MetadataFieldBadge,
+  getMetadataArray,
+  getMetadataField,
+} from "./metadata-utils";
 import { RunStatusIcon } from "./run-status-icon";
-
-function getMetadataField(metadata: unknown, key: string): string | null {
-  if (!metadata || typeof metadata !== "object") return null;
-  const value = (metadata as Record<string, unknown>)[key];
-  return value != null ? String(value) : null;
-}
-
-function getMetadataArray(metadata: unknown, key: string): string[] {
-  if (!metadata || typeof metadata !== "object") return [];
-  const value = (metadata as Record<string, unknown>)[key];
-  if (Array.isArray(value)) return value.map(String);
-  if (value != null) return [String(value)];
-  return [];
-}
 
 const CAPTURE_TYPE_COLORS: Record<string, string> = {
   Gel: "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300",
@@ -94,45 +86,6 @@ function buildWavelengthColorMap(data: RunRow[]): Record<string, string> {
     map[sorted[i]] = WAVELENGTH_COLOR_CYCLE[i % WAVELENGTH_COLOR_CYCLE.length];
   }
   return map;
-}
-
-function MetadataFieldBadge({
-  value,
-  colorClass,
-}: {
-  value: string | null;
-  colorClass?: string;
-}) {
-  if (!value) return <span className="text-muted-foreground">—</span>;
-  return (
-    <Badge variant="outline" className={cn("font-mono", colorClass)}>
-      {value}
-    </Badge>
-  );
-}
-
-function MetadataArrayBadges({
-  values,
-  colorMap,
-}: {
-  values: string[];
-  colorMap?: Record<string, string>;
-}) {
-  if (values.length === 0)
-    return <span className="text-muted-foreground">—</span>;
-  return (
-    <div className="flex flex-wrap gap-1">
-      {values.map((v) => (
-        <Badge
-          key={v}
-          variant="outline"
-          className={cn("font-mono", colorMap?.[v])}
-        >
-          {v}
-        </Badge>
-      ))}
-    </div>
-  );
 }
 
 export function GelDocRunsTable({

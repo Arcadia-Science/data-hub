@@ -14,13 +14,8 @@ import { cn, formatBytes } from "@/lib/utils";
 import type { RunRow } from ".";
 import { ClickableRow } from "./clickable-row";
 import { FilterableColumnHeader } from "./filterable-column-header";
+import { MetadataFieldBadge, getMetadataField } from "./metadata-utils";
 import { RunStatusIcon } from "./run-status-icon";
-
-function getMetadataField(metadata: unknown, key: string): string | null {
-  if (!metadata || typeof metadata !== "object") return null;
-  const value = (metadata as Record<string, unknown>)[key];
-  return value != null ? String(value) : null;
-}
 
 const MEASUREMENT_TYPE_COLORS: Record<string, string> = {
   Kinetic:
@@ -60,21 +55,6 @@ function buildWavelengthColorMap(
     map[sorted[i]] = WAVELENGTH_COLOR_CYCLE[i % WAVELENGTH_COLOR_CYCLE.length];
   }
   return map;
-}
-
-function MetadataFieldBadge({
-  value,
-  colorClass,
-}: {
-  value: string | null;
-  colorClass?: string;
-}) {
-  if (!value) return <span className="text-muted-foreground">—</span>;
-  return (
-    <Badge variant="outline" className={cn("font-mono", colorClass)}>
-      {value}
-    </Badge>
-  );
 }
 
 export function PlateReaderRunsTable({

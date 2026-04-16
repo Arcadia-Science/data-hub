@@ -43,6 +43,9 @@ export async function getS3ObjectStream(
 ): Promise<Readable> {
   const command = new GetObjectCommand({ Bucket: bucket, Key: key });
   const response = await s3.send(command);
+  if (!response.Body) {
+    throw new Error(`Empty response body for s3://${bucket}/${key}`);
+  }
   return response.Body as Readable;
 }
 

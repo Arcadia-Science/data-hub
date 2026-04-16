@@ -67,7 +67,8 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
         archive.append(stream, { name: file.filename });
       }
       await archive.finalize();
-    } catch {
+    } catch (err) {
+      console.error("Archive streaming failed:", err);
       archive.abort();
     }
   })();
