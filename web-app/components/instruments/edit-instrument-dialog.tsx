@@ -28,6 +28,7 @@ import { toast } from "sonner";
 const TYPE_LABELS: Record<string, string> = {
   generic: "Generic",
   plate_reader: "Plate Reader",
+  gel_doc: "Gel Doc",
 };
 
 const INSTRUMENT_TYPE_OPTIONS = VALID_INSTRUMENT_TYPES.map((value) => ({

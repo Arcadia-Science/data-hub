@@ -1,8 +1,12 @@
-import type { PlateReaderFilterOptions } from "@/lib/api/instrument-runs";
+import type {
+  GelDocFilterOptions,
+  PlateReaderFilterOptions,
+} from "@/lib/api/instrument-runs";
 import type { InstrumentType } from "@/lib/db/schema";
 import { SearchX } from "lucide-react";
 
 import { DefaultRunsTable } from "./default-runs-table";
+import { GelDocRunsTable } from "./gel-doc-runs-table";
 import { PlateReaderRunsTable } from "./plate-reader-runs-table";
 
 export type RunRow = {
@@ -20,6 +24,7 @@ export type RunRow = {
   files_failed: number;
   files_pending_upload: number;
   total_size_bytes: number;
+  error_messages: string[];
 };
 
 export type RunsTableProps = {
@@ -33,12 +38,14 @@ export function InstrumentRunsTable({
   instrumentType,
   hasFilters,
   filterOptions,
+  gelDocFilterOptions,
 }: {
   data: RunRow[];
   instrumentId: string;
   instrumentType: InstrumentType;
   hasFilters: boolean;
   filterOptions?: PlateReaderFilterOptions;
+  gelDocFilterOptions?: GelDocFilterOptions;
 }) {
   if (data.length === 0) {
     return (
@@ -60,6 +67,14 @@ export function InstrumentRunsTable({
           data={data}
           instrumentId={instrumentId}
           filterOptions={filterOptions!}
+        />
+      );
+    case "gel_doc":
+      return (
+        <GelDocRunsTable
+          data={data}
+          instrumentId={instrumentId}
+          filterOptions={gelDocFilterOptions!}
         />
       );
     default:

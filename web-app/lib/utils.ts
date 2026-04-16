@@ -1,3 +1,4 @@
+import { formatDate } from "@/lib/date";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
@@ -17,7 +18,8 @@ const DIVISIONS: { amount: number; name: Intl.RelativeTimeFormatUnit }[] = [
   { amount: Number.POSITIVE_INFINITY, name: "years" },
 ];
 
-export function formatBytes(bytes: number): string {
+export function formatBytes(bytes: number | null): string {
+  if (bytes === null || bytes === undefined) return "—";
   if (bytes === 0) return "0 KB";
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 * 1024 * 1024)
@@ -36,5 +38,5 @@ export function formatRelativeTime(date: Date | string): string {
     duration /= division.amount;
   }
 
-  return d.toLocaleDateString();
+  return formatDate(d);
 }

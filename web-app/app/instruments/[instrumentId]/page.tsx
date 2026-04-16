@@ -4,6 +4,7 @@ import { InstrumentRunsTable } from "@/components/instruments/runs-table";
 import { PaginationNav } from "@/components/pagination-nav";
 import {
   buildRunListQuery,
+  getGelDocFilterOptions,
   getPlateReaderFilterOptions,
 } from "@/lib/api/instrument-runs";
 import { getInstrumentById } from "@/lib/api/instruments";
@@ -50,17 +51,23 @@ export default async function InstrumentDetailPage({
       wavelength: filters.wavelength ?? undefined,
       measurementMode: filters.measurement_mode ?? undefined,
       measurementType: filters.measurement_type ?? undefined,
+      captureType: filters.capture_type ?? undefined,
+      imagingMode: filters.imaging_mode ?? undefined,
+      gelWavelength: filters.gel_wavelength ?? undefined,
+      gelColor: filters.gel_color ?? undefined,
     }),
   ]);
 
   if (!instrument) notFound();
 
   const isPlateReader = instrument.instrumentType === "plate_reader";
+  const isGelDoc = instrument.instrumentType === "gel_doc";
 
-  // Fetch distinct metadata values for plate-reader column filter dropdowns.
-  const filterOptions = isPlateReader
-    ? await getPlateReaderFilterOptions(instrumentId)
-    : undefined;
+  // Fetch distinct metadata values for instrument-specific column filter dropdowns.
+  const [filterOptions, gelDocFilterOptions] = await Promise.all([
+    isPlateReader ? getPlateReaderFilterOptions(instrumentId) : undefined,
+    isGelDoc ? getGelDocFilterOptions(instrumentId) : undefined,
+  ]);
 
   const hasFilters =
     filters.search !== "" ||
@@ -69,7 +76,11 @@ export default async function InstrumentDetailPage({
     filters.include_deleted ||
     filters.wavelength !== null ||
     filters.measurement_mode !== null ||
-    filters.measurement_type !== null;
+    filters.measurement_type !== null ||
+    filters.capture_type !== null ||
+    filters.imaging_mode !== null ||
+    filters.gel_wavelength !== null ||
+    filters.gel_color !== null;
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6 p-6">
@@ -81,6 +92,7 @@ export default async function InstrumentDetailPage({
         instrumentType={instrument.instrumentType}
         hasFilters={hasFilters}
         filterOptions={filterOptions}
+        gelDocFilterOptions={gelDocFilterOptions}
       />
       <PaginationNav
         page={runResult.pagination.page}

@@ -336,6 +336,11 @@ Resources:
                   - s3:GetObject
                 Resource:
                   - !Sub "arn:aws:s3:::arcadia-data-hub-raw-${Environment}/*"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !Sub "arn:aws:s3:::arcadia-data-hub-processed-${Environment}/*"
 
 Outputs:
   DataHubFunctionArn:

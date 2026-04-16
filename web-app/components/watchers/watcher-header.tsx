@@ -2,6 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { DeregisterDialog } from "@/components/watchers/deregister-dialog";
 import { statusBadge } from "@/components/watchers/status-badge";
 import type { WatcherDetail } from "@/lib/api/watchers";
+import { formatDate } from "@/lib/date";
 import { formatRelativeTime } from "@/lib/utils";
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
@@ -79,14 +80,7 @@ export function WatcherHeader({ watcher }: { watcher: WatcherDetail }) {
           {isDeregistered && watcher.deletedAt && (
             <>
               <span>·</span>
-              <span>
-                Deregistered{" "}
-                {watcher.deletedAt.toLocaleDateString("en-US", {
-                  year: "numeric",
-                  month: "short",
-                  day: "numeric",
-                })}
-              </span>
+              <span>Deregistered {formatDate(watcher.deletedAt)}</span>
             </>
           )}
         </div>

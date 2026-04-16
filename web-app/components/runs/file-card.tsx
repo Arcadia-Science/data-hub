@@ -15,10 +15,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { RunFile } from "@/lib/api/instrument-runs";
+import { formatDateTime } from "@/lib/date";
+import { formatBytes } from "@/lib/utils";
 import {
   AlertCircle,
   Download,
-  Eye,
   FileText,
   Loader2,
   RotateCw,
@@ -26,25 +27,8 @@ import {
   X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useTransition } from "react";
+import { useEffect, useTransition } from "react";
 import { toast } from "sonner";
-
-function formatBytes(bytes: number | null): string {
-  if (bytes === null || bytes === undefined) return "—";
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
-}
-
-function formatDate(date: Date | null): string {
-  if (!date) return "—";
-  return new Intl.DateTimeFormat("en-US", {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format(new Date(date));
-}
 
 export function FileCard({
   file,
@@ -132,6 +116,12 @@ export function FileCard({
     });
   }
 
+  useEffect(() => {
+    if (file.status !== "processing") return;
+    const id = setInterval(() => router.refresh(), 3000);
+    return () => clearInterval(id);
+  }, [file.status, router]);
+
   const metadataEntries = file.metadata
     ? Object.entries(file.metadata as Record<string, unknown>)
     : [];
@@ -164,12 +154,11 @@ export function FileCard({
         </div>
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-          {file.relativePath && (
-            <span className="font-mono">{file.relativePath}</span>
-          )}
           <span>{formatBytes(file.sizeBytes)}</span>
           {file.contentType && <span>{file.contentType}</span>}
-          <span>Created {formatDate(file.createdAt)}</span>
+          <span>
+            Created {file.createdAt ? formatDateTime(file.createdAt) : "—"}
+          </span>
         </div>
 
         {metadataEntries.length > 0 && (
@@ -180,6 +169,13 @@ export function FileCard({
                 {Array.isArray(v) ? v.join(", ") : String(v)}
               </span>
             ))}
+          </div>
+        )}
+
+        {file.status === "processing" && (
+          <div className="mt-1 flex items-center gap-1.5 rounded-md bg-muted px-2 py-1.5 text-xs text-muted-foreground">
+            <Loader2 className="size-3 animate-spin" />
+            <span>Processing…</span>
           </div>
         )}
 
@@ -249,22 +245,6 @@ export function FileCard({
         {isDownloadable && (
           <div className="flex flex-col items-end gap-1">
             <div className="flex items-center gap-1">
-              {file.contentType?.startsWith("image/") && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs"
-                  asChild
-                >
-                  <a
-                    href={`/api/v1/files/${file.id}/download`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <Eye className="size-3" />
-                  </a>
-                </Button>
-              )}
               <Button
                 variant="outline"
                 size="sm"

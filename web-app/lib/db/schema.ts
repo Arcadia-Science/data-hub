@@ -48,6 +48,7 @@ export const instrumentRunSourceEnum = pgEnum("instrument_run_source", [
 export const instrumentTypeEnum = pgEnum("instrument_type", [
   "generic",
   "plate_reader",
+  "gel_doc",
 ]);
 
 export const VALID_INSTRUMENT_TYPES = instrumentTypeEnum.enumValues;
@@ -122,20 +123,6 @@ export const sessions = pgTable(
     expires: timestamp("expires", { mode: "date" }).notNull(),
   },
   (session) => [index("idx_sessions_user_id").on(session.userId)]
-);
-
-export const verificationTokens = pgTable(
-  "verificationToken",
-  {
-    identifier: text("identifier").notNull(),
-    token: text("token").notNull(),
-    expires: timestamp("expires", { mode: "date" }).notNull(),
-  },
-  (verificationToken) => [
-    primaryKey({
-      columns: [verificationToken.identifier, verificationToken.token],
-    }),
-  ]
 );
 
 export const personalAccessTokens = pgTable(

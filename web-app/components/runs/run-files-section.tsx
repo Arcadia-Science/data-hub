@@ -17,7 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import type { RunFile } from "@/lib/api/instrument-runs";
-import { CheckSquare, Loader2, Upload, X } from "lucide-react";
+import { CheckSquare, Download, Loader2, Upload, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -55,6 +55,14 @@ export function RunFilesSection({
   // already being processed or stored.
   const selectableFiles = useMemo(
     () => activeFiles.filter((f) => f.status === "detected"),
+    [activeFiles]
+  );
+
+  const downloadableFiles = useMemo(
+    () =>
+      activeFiles.filter((f) =>
+        ["uploaded", "processing", "completed", "failed"].includes(f.status)
+      ),
     [activeFiles]
   );
 
@@ -141,6 +149,21 @@ export function RunFilesSection({
             </span>
           </span>
           <div className="flex items-center gap-2">
+            {downloadableFiles.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1 text-xs"
+                asChild
+              >
+                <a
+                  href={`/api/v1/instruments/${instrumentId}/runs/${runId}/download-archive`}
+                >
+                  <Download className="size-3" />
+                  Download all
+                </a>
+              </Button>
+            )}
             {!isDeleted &&
               selectableFiles.length > 0 &&
               !allDetectedSelected && (
