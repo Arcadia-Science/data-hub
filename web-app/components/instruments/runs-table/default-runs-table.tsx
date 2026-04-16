@@ -1,4 +1,3 @@
-import { FileStatusSummary } from "@/components/dashboard/file-status-summary";
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -13,6 +12,7 @@ import { cn, formatBytes } from "@/lib/utils";
 
 import type { RunsTableProps } from ".";
 import { ClickableRow } from "./clickable-row";
+import { RunStatusIcon } from "./run-status-icon";
 
 export function DefaultRunsTable({ data, instrumentId }: RunsTableProps) {
   return (
@@ -36,24 +36,22 @@ export function DefaultRunsTable({ data, instrumentId }: RunsTableProps) {
                 className={cn(isDeleted && "opacity-50")}
               >
                 <TableCell>
-                  <span
-                    className={cn("font-mono", isDeleted && "line-through")}
-                  >
-                    {row.run_id}
-                  </span>
-                  {isDeleted && (
-                    <Badge variant="outline" className="ml-1.5 font-normal">
-                      deleted
-                    </Badge>
-                  )}
+                  <div className="flex items-center gap-2.5">
+                    <RunStatusIcon filesFailed={row.files_failed} errorMessages={row.error_messages} />
+                    <span
+                      className={cn("font-mono", isDeleted && "line-through")}
+                    >
+                      {row.run_id}
+                    </span>
+                    {isDeleted && (
+                      <Badge variant="outline" className="ml-1.5 font-normal">
+                        deleted
+                      </Badge>
+                    )}
+                  </div>
                 </TableCell>
-                <TableCell>
-                  <FileStatusSummary
-                    fileCount={row.file_count}
-                    filesCompleted={row.files_completed}
-                    filesFailed={row.files_failed}
-                    filesPendingUpload={row.files_pending_upload}
-                  />
+                <TableCell className="text-sm tabular-nums">
+                  {row.file_count}
                 </TableCell>
                 <TableCell className="text-right text-sm tabular-nums">
                   {formatBytes(row.total_size_bytes)}

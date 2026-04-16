@@ -194,6 +194,17 @@ export async function buildRunListQuery(filters: RunListFilters) {
 
   const totalSizeBytes = sql<number>`cast(coalesce(sum(${files.sizeBytes}) filter (where ${files.deletedAt} is null), 0) as bigint)`;
 
+  const errorMessages = sql<string[]>`coalesce(array_agg(${files.errorMessage}) filter (where ${files.status} = 'failed' and ${files.errorMessage} is not null and ${files.deletedAt} is null), '{}')`.mapWith({
+    mapFromDriverValue: (value: unknown) => {
+      if (Array.isArray(value)) return value as string[];
+      if (typeof value === "string") {
+        if (value === "{}") return [];
+        return value.replace(/^\{|}$/g, "").split(",").map(s => s.replace(/^"|"$/g, ""));
+      }
+      return [];
+    },
+  });
+
   const sortCol =
     ALLOWED_SORT_FIELDS[filters.sort ?? "created_at"] ??
     instrumentRuns.createdAt;
@@ -224,6 +235,7 @@ export async function buildRunListQuery(filters: RunListFilters) {
       files_failed: filesFailed,
       files_pending_upload: filesPendingUpload,
       total_size_bytes: totalSizeBytes,
+      error_messages: errorMessages,
     })
     .from(instrumentRuns)
     .innerJoin(instruments, eq(instrumentRuns.instrumentId, instruments.id))
