@@ -23,6 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { toDateInputValue } from "@/lib/date";
 import { dashboardSearchParams, hasActiveFilters } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 import { Check, ChevronsUpDown, Search, X } from "lucide-react";
@@ -45,7 +46,7 @@ const DATE_PRESETS = [
 function dateFromDaysAgo(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() - days);
-  return d.toISOString().slice(0, 10);
+  return toDateInputValue(d);
 }
 
 function resolvePreset(dateFrom: string | null): string {

@@ -5,10 +5,11 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { formatDateTime } from "@/lib/date";
 import { formatRelativeTime } from "@/lib/utils";
 
 export function RelativeTime({ date }: { date: string }) {
-  const full = new Date(date).toLocaleString();
+  const full = formatDateTime(new Date(date));
 
   return (
     <Tooltip>

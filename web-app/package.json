@@ -33,6 +33,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "date-fns": "^4.1.0",
+    "date-fns-tz": "^3.2.0",
     "drizzle-orm": "^0.45.2",
     "lucide-react": "^1.7.0",
     "mcp-handler": "^1.1.0",

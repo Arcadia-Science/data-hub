@@ -24,6 +24,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
+import { formatDateTime } from "@/lib/date";
 import { useRouter } from "next/navigation";
 import { useEffect, useTransition } from "react";
 import { toast } from "sonner";
@@ -35,14 +36,6 @@ function formatBytes(bytes: number | null): string {
   const sizes = ["B", "KB", "MB", "GB"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
-}
-
-function formatDate(date: Date | null): string {
-  if (!date) return "—";
-  return new Intl.DateTimeFormat("en-US", {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format(new Date(date));
 }
 
 export function FileCard({
@@ -171,7 +164,7 @@ export function FileCard({
         <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
           <span>{formatBytes(file.sizeBytes)}</span>
           {file.contentType && <span>{file.contentType}</span>}
-          <span>Created {formatDate(file.createdAt)}</span>
+          <span>Created {file.createdAt ? formatDateTime(file.createdAt) : "—"}</span>
         </div>
 
         {metadataEntries.length > 0 && (

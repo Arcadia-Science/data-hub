@@ -14,6 +14,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import type { WatcherHeartbeatRow } from "@/lib/api/watchers";
+import { formatTime, formatDateTime } from "@/lib/date";
 import { cn } from "@/lib/utils";
 import { HeartPulse } from "lucide-react";
 import { useMemo } from "react";
@@ -26,14 +27,6 @@ const chartConfig = {
 } satisfies ChartConfig;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-function formatTime(date: Date): string {
-  return date.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
-}
 
 const STATUS_COLORS: Record<string, string> = {
   watching: "bg-emerald-500",
@@ -226,10 +219,7 @@ export function HeartbeatChart({
                 labelFormatter={(_, payload) => {
                   const ts = payload?.[0]?.payload?.timestamp;
                   return ts
-                    ? new Date(ts).toLocaleString("en-US", {
-                        dateStyle: "short",
-                        timeStyle: "short",
-                      })
+                    ? formatDateTime(new Date(ts))
                     : "";
                 }}
               />

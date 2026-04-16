@@ -1,13 +1,7 @@
 import type { RunDetail } from "@/lib/api/instrument-runs";
+import { formatDateTime } from "@/lib/date";
 import { ArrowLeft, Trash2 } from "lucide-react";
 import Link from "next/link";
-
-function formatTimestamp(date: Date): string {
-  return new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
-}
 
 export function RunHeader({
   run,
@@ -30,9 +24,9 @@ export function RunHeader({
         <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">
           <Trash2 className="size-4 shrink-0" />
           <span>
-            Deleted {formatTimestamp(run.deletedAt)}
+            Deleted {formatDateTime(run.deletedAt)}
             {run.filesPurgedAt && (
-              <> &middot; Files purged {formatTimestamp(run.filesPurgedAt)}</>
+              <> &middot; Files purged {formatDateTime(run.filesPurgedAt)}</>
             )}
           </span>
         </div>
@@ -47,9 +41,9 @@ export function RunHeader({
       </div>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
-        <span>Created {formatTimestamp(run.createdAt)}</span>
+        <span>Created {formatDateTime(run.createdAt)}</span>
         <span className="text-muted-foreground/40">&middot;</span>
-        <span>Updated {formatTimestamp(run.updatedAt)}</span>
+        <span>Updated {formatDateTime(run.updatedAt)}</span>
       </div>
     </div>
   );
