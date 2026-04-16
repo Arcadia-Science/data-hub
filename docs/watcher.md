@@ -39,7 +39,7 @@ Interactive setup wizard that:
 1. Prompts for the environment (`staging`, `production`, or `preview`). Choosing `preview` also prompts for a custom API base URL.
 2. Prompts for an API key (or reads `DATA_HUB_API_KEY` from the environment). The key is saved to `~/.data-hub/.env`.
 3. Fetches existing instruments from the API or registers a new one.
-4. Prompts for the watch directory, file patterns, run detection method, stability period, and upload mode.
+4. Prompts for the watch directory, file patterns, run detection pattern, stability period, and upload mode.
 5. Registers the watcher with the API.
 6. Saves the config to `~/.data-hub/config.yaml`, the API key to `~/.data-hub/.env`, and syncs the config to the API.
 
@@ -55,7 +55,7 @@ Starts the file monitoring loop. Before entering the loop it:
 While running:
 
 - **File monitor** watches the directory for new/modified files using `watchdog` and waits for each file to stabilize (size + mtime unchanged for the configured stability period).
-- **Run detector** groups stable files into runs using the configured method (prefix regex or subdirectory).
+- **Run detector** groups stable files into runs by applying the configured regex to each file's relative path.
 - **Uploader** requests a presigned S3 URL from the API and uploads each file via HTTP PUT (auto mode), or polls the server's upload queue (manual mode). The watcher does not need AWS credentials.
 - **Heartbeat loop** sends periodic heartbeats (every 60 seconds) to the API. In manual mode, it also polls the upload queue on each tick.
 - **Event reporter** batches and flushes lifecycle events (started, stopped, file uploaded, errors) to the API.
@@ -124,14 +124,27 @@ instrument:
   upload_mode: auto              # "auto" or "manual"
   stability_period_seconds: 5    # 1–300
   run_detection:
-    method: prefix               # "prefix" or "directory"
-    prefix_pattern: "^([^_]+)"   # regex with one capture group (run ID)
+    pattern: '^([^/]+)/'         # regex with one capture group (run ID)
+    recursive: true
 ```
 
-### Run detection methods
+### Run detection
 
-- **`prefix`**: The run ID is extracted from each filename using a regex with one capture group. For example, `^([^_]+)` matches everything before the first underscore, so `RUN001_data.csv` yields run ID `RUN001`.
-- **`directory`**: Each subdirectory under the watch directory is treated as a separate run. The subdirectory name is the run ID.
+The `pattern` regex is applied (via `re.search`) to each file's path relative to `watch_directory`, with backslashes normalized to `/`. Capture group 1 is the run ID. The pattern must have exactly one capture group.
+
+When `recursive` is `true`, the watcher monitors subdirectories; when `false`, only files directly in the watch directory are considered.
+
+The `init` wizard offers the following presets (you can also supply a custom regex):
+
+| Preset | Pattern | Recursive | Description |
+| --- | --- | --- | --- |
+| Filename prefix | `^([^_]+)` | no | Run ID is everything before the first underscore. `RUN001_data.csv` → `RUN001`. |
+| Top subdirectory | `^([^/]+)/` | yes | Run ID is the top-level subdirectory name. `RUN001/data.csv` → `RUN001`. |
+| Deepest subdirectory | `([^/]+)/[^/]+$` | yes | Run ID is the immediate parent directory. `plate-a/well-b/data.csv` → `well-b`. |
+| Timestamp subdirectory | `(?:^│/)(\d{8}_\d{6}_\d{3})/` | yes | Run ID is a `YYYYMMDD_HHMMSS_fff`-shaped directory name anywhere in the path. |
+| Filename stem | `^(?:.+/)?([^/]+?)\.[^/.]+$` | no | Each file is its own run. Run ID is the filename without its final extension. |
+
+In YAML, prefer single-quoted strings for patterns so that backslash sequences like `\d` don't need escaping.
 
 ### Upload modes
 

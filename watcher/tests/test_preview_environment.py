@@ -28,7 +28,7 @@ def _make_instrument(tmp_path: Path) -> InstrumentConfig:
         id="test-instrument",
         watch_directory=watch_dir,
         file_patterns=["*.csv"],
-        run_detection=RunDetectionConfig(method="prefix"),
+        run_detection=RunDetectionConfig(pattern=r"^([^_]+)", recursive=False),
     )
 
 
@@ -109,7 +109,7 @@ class TestConfigRoundTrip:
                 "id": "test-instrument",
                 "watch_directory": str(watch_dir),
                 "file_patterns": ["*.csv"],
-                "run_detection": {"method": "prefix"},
+                "run_detection": {"pattern": "^([^_]+)", "recursive": False},
             },
         }
         path.write_text(yaml.dump(raw), encoding="utf-8")

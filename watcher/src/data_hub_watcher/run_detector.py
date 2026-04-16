@@ -1,9 +1,9 @@
 """Run detection: group stable files into instrument runs and report them.
 
 `RunDetector` receives stable-file notifications from `FileMonitor`,
-groups them by run ID (extracted via prefix regex or parent directory),
-reports new / updated runs to the Data Hub API, and — in auto mode —
-hands them off to an upload callback immediately after reporting.
+groups them by run ID (extracted via a regex applied to the POSIX-normalized
+relative path), reports new / updated runs to the Data Hub API, and — in
+auto mode — hands them off to an upload callback immediately after reporting.
 """
 
 from __future__ import annotations
@@ -46,10 +46,10 @@ class RunDetector:
 
     Parameters
     ----------
-    method:
-        `"prefix"` or `"directory"`.
-    prefix_pattern:
-        Regex with one capture group (only used when *method* is `"prefix"`).
+    pattern:
+        Regex with exactly one capture group applied to the POSIX-normalized
+        relative path (relative to *watch_directory*). Capture group 1 is
+        the run ID.
     instrument_id:
         Instrument ID used in API paths.
     watcher_id:
@@ -72,8 +72,7 @@ class RunDetector:
     def __init__(
         self,
         *,
-        method: str,
-        prefix_pattern: str | None,
+        pattern: str,
         instrument_id: str,
         watcher_id: str,
         client: DataHubClient,
@@ -83,8 +82,7 @@ class RunDetector:
         upload_callback: Callable[[str, list[FileInfo]], int] | None = None,
         watch_directory: Path,
     ) -> None:
-        self._method = method
-        self._prefix_re = re.compile(prefix_pattern) if prefix_pattern else None
+        self._pattern = re.compile(pattern)
         self._instrument_id = instrument_id
         self._watcher_id = watcher_id
         self._client = client
@@ -139,39 +137,16 @@ class RunDetector:
     # ------------------------------------------------------------------
 
     def _extract_run_id(self, path: Path) -> str | None:
-        if self._method == "prefix":
-            return self._extract_prefix(path)
-        return self._extract_directory(path)
-
-    def _extract_prefix(self, path: Path) -> str | None:
-        if self._prefix_re is None:
-            logger.warning("No prefix pattern configured — cannot detect run for %s", path)
-            return None
-        m = self._prefix_re.match(path.name)
-        if not m or not m.group(1):
-            logger.warning("File %s does not match prefix pattern — skipping", path.name)
-            return None
-        return m.group(1)
-
-    def _extract_directory(self, path: Path) -> str | None:
-        """In directory mode, the first subdirectory name under the watch dir
-        is the run ID.  For example:
-            watch_dir/RUN001/data.csv  →  run_id = "RUN001"
-        Files sitting directly in the watch dir have no run context and are skipped.
-        """
         try:
-            rel = path.relative_to(self._watch_dir)
+            rel = path.relative_to(self._watch_dir).as_posix()
         except ValueError:
             logger.warning("File %s is not inside watch directory — skipping", path)
             return None
-        parts = rel.parts
-        if len(parts) < 2:
-            logger.warning(
-                "File %s is directly in watch directory (directory mode needs subdirs) — skipping",
-                path,
-            )
+        m = self._pattern.search(rel)
+        if not m or not m.group(1):
+            logger.warning("File %s did not match run_detection.pattern — skipping", rel)
             return None
-        return parts[0]
+        return m.group(1)
 
     # ------------------------------------------------------------------
     # API reporting

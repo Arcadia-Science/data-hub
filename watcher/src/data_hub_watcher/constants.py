@@ -16,9 +16,43 @@ ENV_FILENAME = ".env"
 
 HEARTBEAT_INTERVAL_SECONDS = 60
 DEFAULT_STABILITY_PERIOD_SECONDS = 5
-# Captures everything before the first underscore as the run ID,
-# e.g. "RUN001_data.csv" → group(1) = "RUN001".
-DEFAULT_PREFIX_PATTERN = r"^([^_]+)"
+
+# Built-in presets for the ``init`` / ``config edit`` wizard.
+# Each entry: (key, description, pattern, recursive_default).
+# The stored config always uses a raw ``pattern`` + ``recursive``; these
+# presets exist purely as convenience shortcuts for operators.
+RUN_DETECTION_PRESETS: list[tuple[str, str, str, bool]] = [
+    (
+        "filename_prefix",
+        "Run ID is the filename prefix (before the first underscore)",
+        r"^([^_]+)",
+        False,
+    ),
+    (
+        "top_subdirectory",
+        "Each top-level subdirectory is a run",
+        r"^([^/]+)/",
+        True,
+    ),
+    (
+        "deepest_subdirectory",
+        "The deepest subdirectory (immediate parent of the file) is a run",
+        r"([^/]+)/[^/]+$",
+        True,
+    ),
+    (
+        "timestamp_subdirectory",
+        "Timestamp-named subdirectory (YYYYMMDD_HHMMSS_fff) is a run",
+        r"(?:^|/)(\d{8}_\d{6}_\d{3})/",
+        True,
+    ),
+    (
+        "filename_stem",
+        "Each file is its own run (run ID = filename without extension)",
+        r"^(?:.+/)?([^/]+?)\.[^/.]+$",
+        False,
+    ),
+]
 
 # If a file keeps changing for longer than this, give up and skip it
 # (likely being continuously appended to or locked by another process).

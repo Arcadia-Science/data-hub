@@ -18,10 +18,10 @@ from data_hub_watcher.config_io import config_checksum, load_config, save_config
 from data_hub_watcher.constants import (
     API_URLS,
     DEFAULT_CONFIG_DIR,
-    DEFAULT_PREFIX_PATTERN,
     DEFAULT_STABILITY_PERIOD_SECONDS,
     HEARTBEAT_INTERVAL_SECONDS,
     PRUNE_DAYS,
+    RUN_DETECTION_PRESETS,
     STATE_DB_FILENAME,
     load_env,
     resolve_config_path,
@@ -189,19 +189,7 @@ def init(ctx: click.Context) -> None:
     if not file_patterns:
         raise click.ClickException("At least one file pattern is required.")
 
-    # "prefix": run ID extracted from filename via regex
-    #   (e.g. "RUN001_data.csv" → "RUN001").
-    # "directory": each subdirectory under watch dir is its own run.
-    method = click.prompt(
-        "Run detection method",
-        type=click.Choice(["prefix", "directory"], case_sensitive=False),
-        default="prefix",
-    )
-
-    prefix_pattern: str | None = None
-    if method == "prefix":
-        prefix_pattern = click.prompt("Prefix pattern (regex)", default=DEFAULT_PREFIX_PATTERN)
-        _preview_prefix_pattern(prefix_pattern or DEFAULT_PREFIX_PATTERN, watch_dir)
+    run_pattern, run_recursive = _prompt_run_detection(watch_dir)
 
     # How long a file's size + mtime must remain unchanged before we consider
     # it fully written. Instruments that produce large files may need a longer
@@ -248,8 +236,8 @@ def init(ctx: click.Context) -> None:
             upload_mode=upload_mode,
             stability_period_seconds=stability,
             run_detection=RunDetectionConfig(
-                method=method,
-                prefix_pattern=prefix_pattern,
+                pattern=run_pattern,
+                recursive=run_recursive,
             ),
         ),
     )
@@ -276,8 +264,45 @@ def _register_new_instrument(client: DataHubClient) -> Any:
         raise click.ClickException(f"Failed to create instrument: {exc.message}") from exc
 
 
-def _preview_prefix_pattern(pattern: str, directory: Path) -> None:
-    """Show sample matches for the prefix pattern."""
+def _prompt_run_detection(
+    watch_dir: Path,
+    *,
+    current_pattern: str | None = None,
+    current_recursive: bool | None = None,
+) -> tuple[str, bool]:
+    """Prompt the operator for a run-detection pattern and recursive flag.
+
+    Returns ``(pattern, recursive)``.
+    """
+    click.echo("\nRun detection — how should the run ID be determined?")
+    for i, (_key, desc, _pat, _rec) in enumerate(RUN_DETECTION_PRESETS, 1):
+        click.echo(f"  {i}. {desc}")
+    custom_idx = len(RUN_DETECTION_PRESETS) + 1
+    click.echo(f"  {custom_idx}. Custom regex")
+
+    choice = click.prompt("Select", type=click.IntRange(1, custom_idx), default=1)
+
+    if choice == custom_idx:
+        pattern = click.prompt(
+            "Run detection pattern (regex with 1 capture group)",
+            default=current_pattern or RUN_DETECTION_PRESETS[0][2],
+        )
+        recursive_default = current_recursive if current_recursive is not None else True
+    else:
+        _key, _desc, pattern, recursive_default = RUN_DETECTION_PRESETS[choice - 1]
+        click.echo(f"  Pattern: {pattern}")
+
+    recursive = click.confirm(
+        "Watch subdirectories recursively?",
+        default=recursive_default if current_recursive is None else current_recursive,
+    )
+
+    _preview_run_pattern(pattern, watch_dir, recursive)
+    return pattern, recursive
+
+
+def _preview_run_pattern(pattern: str, directory: Path, recursive: bool) -> None:
+    """Show sample matches for the run detection pattern."""
     try:
         compiled = re.compile(pattern)
     except re.error:
@@ -286,17 +311,25 @@ def _preview_prefix_pattern(pattern: str, directory: Path) -> None:
 
     samples: list[str] = []
     try:
-        for entry in sorted(directory.iterdir())[:20]:
-            if entry.is_file():
-                m = compiled.match(entry.name)
-                if m and m.group(1):
-                    samples.append(f"    {entry.name} → run: {m.group(1)}")
+        iterator = sorted(directory.rglob("*")) if recursive else sorted(directory.iterdir())
+        for entry in iterator[:50]:
+            if not entry.is_file():
+                continue
+            try:
+                rel = entry.relative_to(directory).as_posix()
+            except ValueError:
+                continue
+            m = compiled.search(rel)
+            if m and m.group(1):
+                samples.append(f"    {rel} → run: {m.group(1)}")
+            if len(samples) >= 10:
+                break
     except PermissionError:
         pass
 
     if samples:
-        click.echo("  Prefix pattern preview:")
-        for s in samples[:10]:
+        click.echo("  Pattern preview:")
+        for s in samples:
             click.echo(s)
     else:
         click.echo("  (no matching files found for preview)")
@@ -334,12 +367,9 @@ def _dry_run_scan(cfg: WatcherConfig) -> None:
     """Scan the watch directory and log what `watch` would do, without side effects."""
     inst = cfg.instrument
     is_auto = inst.upload_mode == "auto"
-    is_recursive = inst.run_detection.method == "directory" and not is_auto
+    is_recursive = inst.run_detection.recursive
     watch_dir = inst.watch_directory
-
-    prefix_re: re.Pattern[str] | None = None
-    if inst.run_detection.method == "prefix" and inst.run_detection.prefix_pattern:
-        prefix_re = re.compile(inst.run_detection.prefix_pattern)
+    pattern_re = re.compile(inst.run_detection.pattern)
 
     iterator = watch_dir.rglob("*") if is_recursive else watch_dir.iterdir()
     matched: list[Path] = []
@@ -357,7 +387,7 @@ def _dry_run_scan(cfg: WatcherConfig) -> None:
     runs: dict[str, list[Path]] = {}
     unmatched: list[Path] = []
     for path in matched:
-        run_id = _extract_run_id_for_dry_run(path, inst.run_detection.method, prefix_re, watch_dir)
+        run_id = _extract_run_id_for_dry_run(path, pattern_re, watch_dir)
         if run_id is None:
             unmatched.append(path)
         else:
@@ -388,24 +418,17 @@ def _dry_run_scan(cfg: WatcherConfig) -> None:
 
 
 def _extract_run_id_for_dry_run(
-    path: Path, method: str, prefix_re: re.Pattern[str] | None, watch_dir: Path
+    path: Path, pattern_re: re.Pattern[str], watch_dir: Path
 ) -> str | None:
     """Extract a run ID from *path* using the same logic as `RunDetector`."""
-    if method == "prefix":
-        if prefix_re is None:
-            return None
-        m = prefix_re.match(path.name)
-        if m and m.group(1):
-            return m.group(1)
-        return None
     try:
-        rel = path.relative_to(watch_dir)
+        rel = path.relative_to(watch_dir).as_posix()
     except ValueError:
         return None
-    parts = rel.parts
-    if len(parts) < 2:
-        return None
-    return parts[0]
+    m = pattern_re.search(rel)
+    if m and m.group(1):
+        return m.group(1)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -439,9 +462,8 @@ def config_show(ctx: click.Context) -> None:
     click.echo(f"    Enabled:         {inst.enabled}")
     click.echo(f"    Upload mode:     {inst.upload_mode}")
     click.echo(f"    Stability (s):   {inst.stability_period_seconds}")
-    click.echo(f"    Run detection:   {inst.run_detection.method}")
-    if inst.run_detection.prefix_pattern:
-        click.echo(f"    Prefix pattern:  {inst.run_detection.prefix_pattern}")
+    click.echo(f"    Run pattern:     {inst.run_detection.pattern}")
+    click.echo(f"    Recursive:       {inst.run_detection.recursive}")
 
 
 @config.command("validate")
@@ -472,18 +494,11 @@ def config_edit(ctx: click.Context) -> None:
     )
     file_patterns = [p.strip() for p in patterns_raw.split(",") if p.strip()]
 
-    method = click.prompt(
-        "Run detection method",
-        type=click.Choice(["prefix", "directory"], case_sensitive=False),
-        default=inst.run_detection.method,
+    run_pattern, run_recursive = _prompt_run_detection(
+        watch_dir,
+        current_pattern=inst.run_detection.pattern,
+        current_recursive=inst.run_detection.recursive,
     )
-
-    prefix_pattern: str | None = inst.run_detection.prefix_pattern
-    if method == "prefix":
-        prefix_pattern = click.prompt(
-            "Prefix pattern",
-            default=prefix_pattern or DEFAULT_PREFIX_PATTERN,
-        )
 
     stability = click.prompt(
         "Stability period (seconds)",
@@ -511,7 +526,7 @@ def config_edit(ctx: click.Context) -> None:
             enabled=enabled,
             upload_mode=upload_mode,
             stability_period_seconds=stability,
-            run_detection=RunDetectionConfig(method=method, prefix_pattern=prefix_pattern),
+            run_detection=RunDetectionConfig(pattern=run_pattern, recursive=run_recursive),
         ),
     )
 
@@ -629,8 +644,7 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
     )
 
     detector = RunDetector(
-        method=inst.run_detection.method,
-        prefix_pattern=inst.run_detection.prefix_pattern,
+        pattern=inst.run_detection.pattern,
         instrument_id=inst.id,
         watcher_id=cfg.watcher_id,
         client=client,
@@ -641,17 +655,13 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
         watch_directory=inst.watch_directory,
     )
 
-    # Directory-mode run detection needs recursive monitoring because each
-    # subdirectory represents a distinct run. Prefix mode only watches the
-    # top-level directory since run IDs are extracted from filenames.
-    is_recursive = inst.run_detection.method == "directory" and not is_auto
     monitor = FileMonitor(
         watch_directory=inst.watch_directory,
         file_patterns=inst.file_patterns,
         stability_period=inst.stability_period_seconds,
         on_stable_file=detector.on_stable_file,
         state_db=state_db,
-        recursive=is_recursive,
+        recursive=inst.run_detection.recursive,
     )
 
     # In manual mode the server controls which files to upload. We piggyback

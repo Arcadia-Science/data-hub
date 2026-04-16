@@ -17,30 +17,21 @@ logger = logging.getLogger(__name__)
 
 
 class RunDetectionConfig(BaseModel):
-    method: Literal["prefix", "directory"]
-    prefix_pattern: str | None = None
+    pattern: str
+    recursive: bool = True
 
-    @field_validator("prefix_pattern", mode="before")
+    @field_validator("pattern")
     @classmethod
-    def _default_prefix_pattern(cls, v: str | None, info: object) -> str | None:
+    def _one_capture_group(cls, v: str) -> str:
+        try:
+            compiled = re.compile(v)
+        except re.error as exc:
+            raise ValueError(f"Invalid run_detection.pattern regex: {exc}") from exc
+        if compiled.groups != 1:
+            raise ValueError(
+                f"run_detection.pattern must have exactly 1 capture group, got {compiled.groups}"
+            )
         return v
-
-    @model_validator(mode="after")
-    def _validate_prefix_pattern(self) -> RunDetectionConfig:
-        # Prefix mode requires exactly one capture group in the regex — that
-        # group is the run ID. This is validated eagerly at config load time
-        # so the user gets a clear error rather than a silent mismatch at runtime.
-        if self.method == "prefix":
-            pat = self.prefix_pattern or r"^([^_]+)"
-            try:
-                compiled = re.compile(pat)
-            except re.error as exc:
-                raise ValueError(f"Invalid prefix_pattern regex: {exc}") from exc
-            groups = compiled.groups
-            if groups != 1:
-                raise ValueError(f"prefix_pattern must have exactly 1 capture group, got {groups}")
-            self.prefix_pattern = pat
-        return self
 
 
 class InstrumentConfig(BaseModel):
