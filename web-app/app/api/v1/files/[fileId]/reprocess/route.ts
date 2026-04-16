@@ -11,6 +11,7 @@ import { db } from "@/lib/db";
 import { files, instrumentRuns, runReportData } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
+import { after } from "next/server";
 
 type RouteContext = {
   params: Promise<{ fileId: string }>;
@@ -132,29 +133,31 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     ],
   };
 
-  // Fire-and-forget: the Lambda Function URL uses BUFFERED mode, so awaiting
-  // the response would block until processing finishes. Instead we kick off
-  // the request without awaiting and let the Lambda call back via
-  // PATCH /api/v1/files/:fileId with the final status (completed / failed).
-  fetch(lambda.url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${lambda.token}`,
-    },
-    body: JSON.stringify(s3Event),
-  })
-    .then(async (res) => {
+  // The Lambda Function URL uses BUFFERED mode, so awaiting the response would
+  // block until processing finishes. We use `after` to invoke it after the
+  // response is sent — the runtime stays warm until the callback completes, so
+  // error logging is reliable. The Lambda calls back via PATCH /api/v1/files/:fileId
+  // with the final status (completed / failed).
+  after(async () => {
+    try {
+      const res = await fetch(lambda.url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${lambda.token}`,
+        },
+        body: JSON.stringify(s3Event),
+      });
       if (!res.ok) {
         console.error(
           `Lambda returned ${res.status} for file ${numericId}:`,
           await res.text().catch(() => "")
         );
       }
-    })
-    .catch((err) => {
+    } catch (err) {
       console.error(`Failed to invoke Lambda for file ${numericId}:`, err);
-    });
+    }
+  });
 
   return Response.json({ status: "processing", file_id: numericId });
 }
