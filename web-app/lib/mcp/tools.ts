@@ -1,4 +1,10 @@
 import { getInstrumentSummaries } from "@/lib/api/dashboard";
+import { reprocessFile } from "@/lib/api/file-reprocessing";
+import {
+  countDownloadableRunFiles,
+  getActiveFileById,
+  lookupFileForDownload,
+} from "@/lib/api/files";
 import {
   buildRunListQuery,
   getRunFiles,
@@ -9,9 +15,15 @@ import {
   getInstrumentById,
   getInstrumentListWithCounts,
 } from "@/lib/api/instruments";
-import { getWatcherList } from "@/lib/api/watchers";
+import { getWatcherHeartbeats, getWatcherList } from "@/lib/api/watchers";
+import { getPresignedDownloadUrl } from "@/lib/s3";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+
+// Pre-signed URLs issued via the MCP server use the same default window as
+// the REST download route (15 minutes). Exposed in the tool response so
+// clients know how long the link remains valid.
+const DOWNLOAD_URL_EXPIRES_IN_SECONDS = 15 * 60;
 
 function textResult(data: unknown) {
   return {
@@ -266,6 +278,166 @@ export function registerTools(server: McpServer) {
         ? allWatchers.filter((w) => w.instrumentId === instrumentId)
         : allWatchers;
       return textResult(filtered);
+    }
+  );
+
+  server.registerTool(
+    "get_file",
+    {
+      title: "Get File",
+      description:
+        "Get detailed metadata for a single file by its numeric ID, including status, S3 location, size, extracted metadata, and any error message.",
+      inputSchema: {
+        fileId: z.number().int().describe("Numeric file ID"),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ fileId }) => {
+      const file = await getActiveFileById(fileId);
+      if (!file) {
+        return errorResult(`File '${fileId}' not found.`);
+      }
+      return textResult(file);
+    }
+  );
+
+  server.registerTool(
+    "get_file_download_url",
+    {
+      title: "Get File Download URL",
+      description:
+        "Get a short-lived pre-signed S3 URL to download the raw file contents. URL expires after 15 minutes.",
+      inputSchema: {
+        fileId: z.number().int().describe("Numeric file ID"),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ fileId }) => {
+      const lookup = await lookupFileForDownload(fileId);
+      if (!lookup.ok) {
+        if (lookup.reason === "not_uploaded") {
+          return errorResult(
+            `File '${fileId}' has not been uploaded to S3 yet.`
+          );
+        }
+        return errorResult(`File '${fileId}' not found.`);
+      }
+
+      const downloadUrl = await getPresignedDownloadUrl(
+        lookup.s3Bucket,
+        lookup.s3Key,
+        DOWNLOAD_URL_EXPIRES_IN_SECONDS
+      );
+
+      return textResult({
+        fileId,
+        filename: lookup.filename,
+        downloadUrl,
+        expiresInSeconds: DOWNLOAD_URL_EXPIRES_IN_SECONDS,
+      });
+    }
+  );
+
+  server.registerTool(
+    "get_run_archive_path",
+    {
+      title: "Get Run Archive Path",
+      description:
+        "Get an API path that streams a ZIP archive of all active, uploaded files for a run. The returned path is relative to the Data Hub API host — prepend the Data Hub origin to produce a full URL. Unlike get_file_download_url, the archive endpoint requires the same Bearer token the client used for this MCP session; the path cannot be fetched anonymously.",
+      inputSchema: {
+        instrumentId: z.string().describe("Instrument identifier"),
+        runId: z.string().describe("Run identifier within the instrument"),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ instrumentId, runId }) => {
+      const run = await lookupRunByNaturalKey(instrumentId, runId);
+      if (!run) {
+        return errorResult(
+          `Run '${runId}' not found for instrument '${instrumentId}'.`
+        );
+      }
+
+      // Mirror the preflight check in the download-archive route so callers
+      // get a clear error instead of a 404 from the ZIP stream. The archive
+      // route only includes files that have actually been uploaded to S3.
+      const count = await countDownloadableRunFiles(run.id);
+      if (count === 0) {
+        return errorResult(
+          `Run '${runId}' has no downloadable files to archive.`
+        );
+      }
+
+      const archivePath = `/api/v1/instruments/${encodeURIComponent(
+        instrumentId
+      )}/runs/${encodeURIComponent(runId)}/download-archive`;
+
+      return textResult({
+        instrumentId,
+        runId,
+        archivePath,
+        contentType: "application/zip",
+      });
+    }
+  );
+
+  server.registerTool(
+    "reprocess_file",
+    {
+      title: "Reprocess File",
+      description:
+        "Re-run the Lambda processing workflow for a failed or completed file. Clears prior report data and transitions the file back to 'processing'. Use this to retry after a parser fix or transient Lambda failure.",
+      inputSchema: {
+        fileId: z.number().int().describe("Numeric file ID"),
+      },
+      // destructiveHint is true because the tool DELETEs prior run_report_data
+      // rows and resets status/errorMessage/processedAt. The data is usually
+      // re-populated by the Lambda, but the mutation is irreversible from
+      // the tool's perspective and clients should confirm with the user.
+      annotations: { readOnlyHint: false, destructiveHint: true },
+    },
+    async ({ fileId }) => {
+      const result = await reprocessFile(fileId);
+      if (!result.ok) {
+        return errorResult(`[${result.code}] ${result.message}`);
+      }
+      return textResult({ status: "processing", fileId: result.fileId });
+    }
+  );
+
+  server.registerTool(
+    "get_watcher_heartbeats",
+    {
+      title: "Get Watcher Heartbeats",
+      description:
+        "Get recent heartbeat history for a watcher agent, useful for diagnosing connectivity gaps and error trends. Returns up to 100 most recent heartbeats within the lookback window.",
+      inputSchema: {
+        watcherId: z.string().describe("Watcher UUID"),
+        hours: z
+          .number()
+          .int()
+          .min(1)
+          .max(168)
+          .optional()
+          .describe("Lookback window in hours (default: 24, max: 168)"),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ watcherId, hours }) => {
+      const lookbackHours = hours ?? 24;
+      const since = new Date(Date.now() - lookbackHours * 60 * 60 * 1000);
+      const { rows, total } = await getWatcherHeartbeats(watcherId, {
+        since,
+        page: 1,
+        pageSize: 100,
+      });
+      return textResult({
+        watcherId,
+        sinceIso: since.toISOString(),
+        lookbackHours,
+        total,
+        heartbeats: rows,
+      });
     }
   );
 }
