@@ -360,8 +360,7 @@ def _create_service_class() -> type | None:
             )
 
             detector = RunDetector(
-                method=inst.run_detection.method,
-                prefix_pattern=inst.run_detection.prefix_pattern,
+                pattern=inst.run_detection.pattern,
                 instrument_id=inst.id,
                 watcher_id=cfg.watcher_id or "",
                 client=client,
@@ -372,14 +371,13 @@ def _create_service_class() -> type | None:
                 watch_directory=inst.watch_directory,
             )
 
-            is_recursive = inst.run_detection.method == "directory" and not is_auto
             monitor = FileMonitor(
                 watch_directory=inst.watch_directory,
                 file_patterns=inst.file_patterns,
                 stability_period=inst.stability_period_seconds,
                 on_stable_file=detector.on_stable_file,
                 state_db=state_db,
-                recursive=is_recursive,
+                recursive=inst.run_detection.recursive,
             )
 
             reporter.queue_event(
