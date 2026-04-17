@@ -62,7 +62,6 @@ class DataHubClient:
         key = api_key or os.environ.get("DATA_HUB_API_KEY", "")
         if key:
             self._session.headers["Authorization"] = f"Bearer {key}"
-        self._session.headers["Content-Type"] = "application/json"
 
     # ------------------------------------------------------------------
     # Internal helpers
