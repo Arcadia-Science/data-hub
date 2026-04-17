@@ -54,7 +54,6 @@ def instrument_id() -> str:
 # ---------------------------------------------------------------------------
 
 _WATCHER_TABLES = [
-    "run_report_data",
     "files",
     "instrument_runs",
     "watcher_events",

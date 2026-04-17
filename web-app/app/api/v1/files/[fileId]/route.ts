@@ -7,7 +7,7 @@ import {
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
 import { db } from "@/lib/db";
-import { files, instrumentRuns, runReportData } from "@/lib/db/schema";
+import { files, instrumentRuns } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 
@@ -33,8 +33,7 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
 //
 // Serves multiple callers:
 //   - Watcher: detected/upload_requested → uploaded (with S3 info)
-//   - Lambda: uploaded → processing → completed/failed (with metadata +
-//     report_data)
+//   - Lambda: uploaded → processing → completed/failed (with metadata)
 //
 // Enforces the file status state machine and rejects mutations on
 // soft-deleted files or files whose parent run is soft-deleted.
@@ -117,7 +116,6 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     ) {
       updates.processedAt = null;
       updates.errorMessage = null;
-      await db.delete(runReportData).where(eq(runReportData.fileId, numericId));
     }
   }
 
@@ -145,24 +143,6 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 
   if (Object.keys(updates).length > 0) {
     await db.update(files).set(updates).where(eq(files.id, numericId));
-  }
-
-  // Report data — array of { data_type, data } objects inserted into
-  // run_report_data, linked to both the file and its parent run. Dual linkage
-  // allows querying report data both per-file and per-run. The data_type field
-  // (e.g., "raw_well_data", "plate_map") identifies the dataset shape so the
-  // UI can render the appropriate visualization.
-  if (Array.isArray(body.report_data) && body.report_data.length > 0) {
-    const reportValues = body.report_data.map(
-      (rd: { data_type: string; data: unknown }) => ({
-        instrumentRunId: file.instrumentRunId,
-        fileId: numericId,
-        dataType: rd.data_type,
-        data: rd.data,
-      })
-    );
-
-    await db.insert(runReportData).values(reportValues);
   }
 
   // Re-fetch the updated file to return current state.

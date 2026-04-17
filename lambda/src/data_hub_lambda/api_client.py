@@ -177,22 +177,17 @@ class DataHubClient:
         *,
         status: str | None = None,
         metadata: dict[str, Any] | None = None,
-        report_data: list[dict[str, Any]] | None = None,
         error_message: str | None = None,
     ) -> FileResponse:
-        """Update a file record (status transition, metadata, report data).
+        """Update a file record (status transition, metadata).
 
         The API enforces a state machine: uploaded → processing → completed|failed.
-        `report_data` is a list of `{data_type, data}` objects inserted into
-        `run_report_data` for instruments that produce tabular data (e.g., plate reader).
         """
         payload: dict[str, Any] = {}
         if status is not None:
             payload["status"] = status
         if metadata is not None:
             payload["metadata"] = metadata
-        if report_data is not None:
-            payload["report_data"] = report_data
         if error_message is not None:
             payload["error_message"] = error_message
 

@@ -6,17 +6,15 @@ import { RunDetail } from "@/components/runs/run-detail";
 export function DefaultRunDetail({
   run,
   files,
-  reportData,
   instrumentId,
   runId,
 }: RunDetailProps) {
   const isDeleted = run.deletedAt !== null;
   const canRestore = isDeleted && run.filesPurgedAt === null;
   const activeFileCount = files.filter((f) => f.deletedAt === null).length;
-  const hasReportData = reportData.length > 0;
-
-  const analysisData = reportData.filter((r) => r.fileId === null);
-  const fileReportData = reportData.filter((r) => r.fileId !== null);
+  const hasProcessedFiles =
+    files.filter((f) => f.category === "processed" && f.deletedAt === null)
+      .length > 0;
 
   return (
     <>
@@ -26,7 +24,7 @@ export function DefaultRunDetail({
             instrumentId={instrumentId}
             runId={runId}
             fileCount={activeFileCount}
-            hasReportData={hasReportData}
+            hasProcessedFiles={hasProcessedFiles}
           />
         )}
         {canRestore && (
@@ -46,9 +44,9 @@ export function DefaultRunDetail({
         />
       </RunDetail.FilesMetadataLayout>
 
-      <RunDetail.Report reportData={fileReportData} files={files} />
+      <RunDetail.Report files={files} />
 
-      <RunDetail.Analysis analysisData={analysisData} />
+      <RunDetail.Analysis />
     </>
   );
 }

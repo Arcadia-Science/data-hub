@@ -94,7 +94,6 @@ vi.mock("@/lib/api/instrument-runs", () => ({
         : null
     ),
   getRunFiles: vi.fn().mockResolvedValue([]),
-  getRunReportData: vi.fn().mockResolvedValue({ sections: [] }),
   getPlateReaderFilterOptions: vi.fn().mockResolvedValue({
     wavelengths: ["450"],
     measurementModes: ["Absorbance"],
@@ -223,7 +222,6 @@ describe("MCP Protocol (in-memory)", () => {
     "get_instrument",
     "search_runs",
     "get_run",
-    "get_run_report_data",
     "list_run_files",
     "get_system_status",
     "list_watchers",
@@ -442,14 +440,6 @@ describe("MCP Protocol (in-memory)", () => {
     const text = (result.content as Array<{ type: string; text: string }>)[0]
       .text;
     expect(text).toContain("not found");
-  });
-
-  it("get_run_report_data returns error for nonexistent run", async () => {
-    const result = await client.callTool({
-      name: "get_run_report_data",
-      arguments: { instrumentId: "test-plate-reader", runId: "nonexistent" },
-    });
-    expect(result.isError).toBe(true);
   });
 
   it("list_run_files returns error for nonexistent run", async () => {

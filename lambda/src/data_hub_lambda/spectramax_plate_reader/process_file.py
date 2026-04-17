@@ -55,17 +55,27 @@ def process_file(instrument_id: InstrumentType, run_id: str, filename: str) -> s
         well_data = parse_raw_well_data(local_file_path)
         logger.info("Parsed %d well data rows.", len(well_data))
 
-        client.update_run(instrument_id, run_id, metadata=metadata)
-        client.update_file(
-            file_id,
-            status="completed",
-            report_data=[
-                {
-                    "data_type": "raw_well_data",
-                    "data": well_data.to_dict(orient="records"),
-                },
-            ],
+        processed_bucket = config.AWS_S3_PROCESSED_DATA_BUCKET
+        csv_filename = f"{run_id}_raw_well_data.csv"
+        csv_path = config.LOCAL_PROCESSED_DATA_DIRPATH / instrument_id / run_id / csv_filename
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        well_data.to_csv(csv_path, index=False)
+
+        csv_s3_key = f"{instrument_id}/{run_id}/{csv_filename}"
+        s3_utils.upload_file(csv_path, f"s3://{processed_bucket}/{csv_s3_key}")
+        logger.info("Uploaded processed CSV to s3://%s/%s", processed_bucket, csv_s3_key)
+
+        client.create_file(
+            instrument_id=instrument_id,
+            run_id=run_id,
+            s3_bucket=processed_bucket or "",
+            s3_key=csv_s3_key,
+            filename=csv_filename,
+            category="processed",
         )
+
+        client.update_run(instrument_id, run_id, metadata=metadata)
+        client.update_file(file_id, status="completed")
         logger.info("File %s marked as completed.", filename)
 
     except Exception as e:

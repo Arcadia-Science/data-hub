@@ -44,7 +44,7 @@ See the [watcher reference](../watcher.md) for details on upload modes, run dete
 
 If the new instrument needs automated preprocessing (metadata extraction, image processing, etc.), you'll need to add a processor to the Lambda function. This requires changes to the codebase.
 
-### 1. Register the instrument in the shared library
+### 4.1 Register the instrument in the shared library
 
 Add the instrument to `packages/shared/src/data_hub_shared/enums.py`:
 
@@ -63,7 +63,7 @@ INSTRUMENT_ID_TO_NAME_MAP: dict[str, str] = {
 }
 ```
 
-### 2. Create a processor module
+### 4.2 Create a processor module
 
 Create a new directory and `process_file.py` under `lambda/src/data_hub_lambda/`:
 
@@ -85,15 +85,16 @@ A typical processor:
 
 1. Gets an API client and the S3 bucket from config.
 2. Calls `client.ensure_run()` to create or find the run.
-3. Calls `client.create_file()` to register the file.
+3. Calls `client.create_file()` to register the raw file.
 4. Downloads the raw file from S3.
 5. Performs instrument-specific preprocessing (parsing, metadata extraction, etc.).
-6. Updates the file status to `completed`.
-7. Returns the web app URL for the run.
+6. Optionally uploads processed artifacts (CSV, images) to the S3 processed bucket and registers them via `client.create_file(..., category="processed")`. This is the pattern used by the SpectraMax plate reader (processed CSV) and Azure 600 Gel Doc (contrast-enhanced PNG).
+7. Updates the raw file status to `completed`.
+8. Returns the web app URL for the run.
 
-See any existing processor (e.g., `lambda/src/data_hub_lambda/azure_cielo_qpcr/process_file.py`) for a complete example.
+See any existing processor (e.g., `lambda/src/data_hub_lambda/azure_cielo_qpcr/process_file.py` for simple metadata extraction, or `lambda/src/data_hub_lambda/spectramax_plate_reader/process_file.py` for the processed-artifact pattern) for complete examples.
 
-### 3. Register the dispatch
+### 4.3 Register the dispatch
 
 Add an `elif` branch in the `lambda_handler` function in `lambda/src/data_hub_lambda/handler.py`:
 
@@ -107,11 +108,11 @@ elif instrument_id == Instrument.BIO_RAD_CFX96.value:
 
 Don't forget to add the import at the top of `handler.py`.
 
-### 4. Add tests
+### 4.4 Add tests
 
 Add unit tests in `lambda/tests/` for the new processor. Integration tests will automatically cover the new instrument if it's registered in the shared library.
 
-### 5. Configure the S3 trigger
+### 4.5 Configure the S3 trigger
 
 Add a `LambdaConfiguration` entry to the `RawDataBucket` resource's `NotificationConfiguration` in `infra/template.yaml`. Each entry specifies a prefix (the instrument ID) and a suffix (the file extension):
 

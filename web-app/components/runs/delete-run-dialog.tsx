@@ -23,21 +23,21 @@ export function DeleteRunDialog({
   instrumentId,
   runId,
   fileCount,
-  hasReportData,
+  hasProcessedFiles,
 }: {
   instrumentId: string;
   runId: string;
   fileCount: number;
-  hasReportData: boolean;
+  hasProcessedFiles: boolean;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [confirmValue, setConfirmValue] = useState("");
   const [open, setOpen] = useState(false);
 
-  // Runs with report data require typing the run ID to confirm deletion because
-  // regenerating parsed results (plate maps, analysis) is expensive.
-  const requiresConfirmation = hasReportData;
+  // Runs with processed files require typing the run ID to confirm deletion
+  // because regenerating them (plate maps, images) is expensive.
+  const requiresConfirmation = hasProcessedFiles;
   const isConfirmed = !requiresConfirmation || confirmValue === runId;
 
   function handleDelete(e: React.MouseEvent) {

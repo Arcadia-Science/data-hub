@@ -4,23 +4,27 @@ import {
   PlateMapGrid,
   type PlateWellData,
 } from "@/components/runs/plate-map-grid";
-import { ReportDataTable } from "@/components/runs/report-data-table";
 import { RestoreRunButton } from "@/components/runs/restore-run-button";
 import type { RunDetailProps } from "@/components/runs/run-detail";
 import { RunDetail } from "@/components/runs/run-detail";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { RunReportEntry } from "@/lib/api/instrument-runs";
+import type { RawWellRow } from "@/lib/api/instrument-runs";
 
-const PLATE_MAP_DATA_TYPES = new Set(["plate_map", "raw_well_data"]);
-
+/** Measurement types whose well values are numeric and benefit from color-coded heatmaps. */
 const HEATMAP_MEASUREMENT_TYPES = new Set(["Endpoint", "Well Scan", "Kinetic"]);
 
-type RawWellRow = Record<string, unknown> & {
-  well_position?: string;
-  well?: string;
-  value?: unknown;
-};
+/**
+ * CSV parsing (csv-parse) returns all cell values as strings. The heatmap grid
+ * relies on `typeof value === "number"` to apply the Plasma colorscale, so we
+ * coerce numeric-looking strings (e.g. "0.649") to real numbers at the
+ * PlateWellData boundary.
+ */
+function coerceNumeric(value: unknown): unknown {
+  if (typeof value === "number") return value;
+  if (typeof value !== "string" || value === "") return value;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : value;
+}
 
 type PlateMapGroup =
   | { mode: "static"; label: string; wells: PlateWellData[] }
@@ -31,6 +35,11 @@ type PlateMapGroup =
       frames: PlateWellData[][];
     };
 
+/**
+ * Sort time-point keys so kinetic slider frames appear in chronological order.
+ * Numeric timestamps (e.g. seconds) are sorted numerically; non-numeric labels
+ * fall back to locale-aware natural sort.
+ */
 function sortTimeKeys(keys: string[]): string[] {
   const unique = [...new Set(keys)];
   const allNumeric = unique.every((k) => {
@@ -52,10 +61,17 @@ function buildPlateWaveLabel(plate: string, wavelength: string): string {
   return parts.join(" · ");
 }
 
+/**
+ * Groups kinetic CSV rows into time-indexed plate map frames, one group per
+ * unique plate + wavelength combination. Each group becomes either a single
+ * static plate map (if only one time-point exists) or a kinetic slider with
+ * one frame per time-point.
+ */
 function extractKineticPlateMapGroups(
   rows: RawWellRow[],
   wellKey: "well_position" | "well"
 ): PlateMapGroup[] {
+  // First pass: bucket rows by plate + wavelength.
   const byPlateWave = new Map<string, RawWellRow[]>();
   for (const row of rows) {
     const pw = `${row.plate_name ?? ""}|${row.wavelength ?? ""}`;
@@ -66,6 +82,7 @@ function extractKineticPlateMapGroups(
 
   const results: PlateMapGroup[] = [];
   for (const [pw, subset] of byPlateWave) {
+    // Second pass within each plate+wavelength: bucket by time-point.
     const byTime = new Map<string, RawWellRow[]>();
     for (const row of subset) {
       const tk = String(row.time ?? "");
@@ -77,6 +94,7 @@ function extractKineticPlateMapGroups(
     const [plate = "", wavelength = ""] = pw.split("|");
     const label = buildPlateWaveLabel(plate, wavelength);
 
+    // Only one time-point — degenerate to a static map instead of a slider.
     if (byTime.size < 2) {
       const flat = [...byTime.values()].flat();
       results.push({
@@ -84,7 +102,7 @@ function extractKineticPlateMapGroups(
         label,
         wells: flat.map((r) => ({
           well: String(r[wellKey]),
-          value: r.value,
+          value: coerceNumeric(r.value),
         })),
       });
       continue;
@@ -94,7 +112,7 @@ function extractKineticPlateMapGroups(
     const frames = timeKeysSorted.map((tk) =>
       byTime.get(tk)!.map((r) => ({
         well: String(r[wellKey]),
-        value: r.value,
+        value: coerceNumeric(r.value),
       }))
     );
     results.push({
@@ -107,26 +125,24 @@ function extractKineticPlateMapGroups(
   return results;
 }
 
+/**
+ * Main entry point: converts flat CSV rows into renderable plate map groups.
+ *
+ * Strategy depends on measurement type:
+ *  - Kinetic with multiple time-points → time-slider groups (one per plate+wavelength)
+ *  - Single combination of (plate, wavelength, time) → one unlabelled static map
+ *  - Multiple combinations → separate labelled static maps (e.g. multi-wavelength endpoint)
+ *
+ * The CSV may use either "well_position" (SpectraMax) or "well" as the column
+ * name for well coordinates — we auto-detect from the first row.
+ */
 function extractPlateMaps(
-  entry: RunReportEntry,
+  rows: RawWellRow[],
   options: { kinetic: boolean }
 ): PlateMapGroup[] {
-  if (!Array.isArray(entry.data)) return [];
-  const rows = entry.data as RawWellRow[];
   if (rows.length === 0) return [];
 
-  if (entry.dataType === "plate_map") {
-    return [
-      {
-        mode: "static",
-        label: "",
-        wells: rows as PlateWellData[],
-      },
-    ];
-  }
-
-  // raw_well_data: rows have well_position + value, possibly varying by
-  // plate_name / wavelength / time. Group into one grid per combination.
+  // Auto-detect the well-address column name across CSV export formats.
   const wellKey =
     rows[0].well_position !== undefined ? "well_position" : "well";
   if (rows[0][wellKey] === undefined) return [];
@@ -135,9 +151,13 @@ function extractPlateMaps(
   const hasTimeVariation = uniqueTimes.size > 1;
 
   if (options.kinetic && hasTimeVariation) {
-    return extractKineticPlateMapGroups(rows, wellKey);
+    return extractKineticPlateMapGroups(
+      rows,
+      wellKey as "well_position" | "well"
+    );
   }
 
+  // Check whether all rows belong to the same (plate, wavelength, time) group.
   const hasMultiple =
     new Set(rows.map((r) => `${r.plate_name}|${r.wavelength}|${r.time}`)).size >
     1;
@@ -149,12 +169,13 @@ function extractPlateMaps(
         label: "",
         wells: rows.map((r) => ({
           well: String(r[wellKey]),
-          value: r.value,
+          value: coerceNumeric(r.value),
         })),
       },
     ];
   }
 
+  // Multiple groups — split by (plate, wavelength, time) and label each one.
   const grouped = new Map<string, RawWellRow[]>();
   for (const row of rows) {
     const key = `${row.plate_name ?? ""}|${row.wavelength ?? ""}|${row.time ?? ""}`;
@@ -174,38 +195,24 @@ function extractPlateMaps(
       label: parts.join(" · "),
       wells: group.map((r) => ({
         well: String(r[wellKey]),
-        value: r.value,
+        value: coerceNumeric(r.value),
       })),
     };
   });
 }
 
 function PlateMapSection({
-  entries,
+  rows,
   heatmap,
   kineticLayout,
 }: {
-  entries: RunReportEntry[];
+  rows: RawWellRow[];
   heatmap: boolean;
   kineticLayout: boolean;
 }) {
-  const byFile = new Map<number | null, RunReportEntry[]>();
-  for (const entry of entries) {
-    const group = byFile.get(entry.fileId) ?? [];
-    group.push(entry);
-    byFile.set(entry.fileId, group);
-  }
+  const groups = extractPlateMaps(rows, { kinetic: kineticLayout });
 
-  let totalMaps = 0;
-  const sections = Array.from(byFile.entries()).map(([fileId, fileEntries]) => {
-    const groups = fileEntries.flatMap((e) =>
-      extractPlateMaps(e, { kinetic: kineticLayout })
-    );
-    totalMaps += groups.length;
-    return { fileId, groups };
-  });
-
-  if (totalMaps === 0) return null;
+  if (groups.length === 0) return null;
 
   return (
     <Card size="sm">
@@ -213,76 +220,31 @@ function PlateMapSection({
         <CardTitle>
           Plate Maps{" "}
           <span className="ml-1 font-mono text-xs font-normal text-muted-foreground">
-            {totalMaps} map(s)
+            {groups.length} map(s)
           </span>
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-6">
-        {sections.map(({ fileId, groups }) => (
-          <div key={fileId ?? "run-level"} className="flex flex-col gap-10">
-            {groups.map((g, i) => (
-              <div key={i} className="flex flex-col gap-2">
-                {g.label && (
-                  <h4 className="font-mono text-sm leading-snug font-medium text-foreground">
-                    {g.label}
-                  </h4>
-                )}
-                {g.mode === "kinetic" ? (
-                  <KineticPlateMapWithTimeSlider
-                    timeLabels={g.timeLabels}
-                    frames={g.frames}
-                    heatmap={heatmap}
-                  />
-                ) : (
-                  <PlateMapGrid data={g.wells} heatmap={heatmap} />
-                )}
-              </div>
-            ))}
-          </div>
-        ))}
-      </CardContent>
-    </Card>
-  );
-}
-
-function OtherReportData({ entries }: { entries: RunReportEntry[] }) {
-  if (entries.length === 0) return null;
-
-  const byFile = new Map<number | null, RunReportEntry[]>();
-  for (const entry of entries) {
-    const group = byFile.get(entry.fileId) ?? [];
-    group.push(entry);
-    byFile.set(entry.fileId, group);
-  }
-
-  return (
-    <Card size="sm">
-      <CardHeader>
-        <CardTitle>
-          Other Report Data{" "}
-          <span className="ml-1 font-mono text-xs font-normal text-muted-foreground">
-            {entries.length} dataset(s)
-          </span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-6">
-        {Array.from(byFile.entries()).map(([fileId, items]) => {
-          return (
-            <div key={fileId ?? "run-level"} className="flex flex-col gap-3">
-              {items.map((entry) => (
-                <div key={entry.id} className="flex flex-col gap-1.5">
-                  <Badge
-                    variant="outline"
-                    className="w-fit font-mono text-[10px]"
-                  >
-                    {entry.dataType}
-                  </Badge>
-                  <ReportDataTable data={entry.data} />
-                </div>
-              ))}
+        <div className="flex flex-col gap-10">
+          {groups.map((g, i) => (
+            <div key={i} className="flex flex-col gap-2">
+              {g.label && (
+                <h4 className="font-mono text-sm leading-snug font-medium text-foreground">
+                  {g.label}
+                </h4>
+              )}
+              {g.mode === "kinetic" ? (
+                <KineticPlateMapWithTimeSlider
+                  timeLabels={g.timeLabels}
+                  frames={g.frames}
+                  heatmap={heatmap}
+                />
+              ) : (
+                <PlateMapGrid data={g.wells} heatmap={heatmap} />
+              )}
             </div>
-          );
-        })}
+          ))}
+        </div>
       </CardContent>
     </Card>
   );
@@ -291,31 +253,28 @@ function OtherReportData({ entries }: { entries: RunReportEntry[] }) {
 export function PlateReaderRunDetail({
   run,
   files,
-  reportData,
+  wellData,
   instrumentId,
   runId,
 }: RunDetailProps) {
   const isDeleted = run.deletedAt !== null;
   const canRestore = isDeleted && run.filesPurgedAt === null;
   const activeFileCount = files.filter((f) => f.deletedAt === null).length;
-  const hasReportData = reportData.length > 0;
+  const hasProcessedFiles =
+    files.filter((f) => f.category === "processed" && f.deletedAt === null)
+      .length > 0;
 
   const metadata = run.metadata as Record<string, unknown>;
   const measurementType =
     typeof metadata.measurement_type === "string"
       ? metadata.measurement_type
       : "";
-  const heatmap = HEATMAP_MEASUREMENT_TYPES.has(measurementType);
-
-  const analysisData = reportData.filter((r) => r.fileId === null);
-  const fileReportData = reportData.filter((r) => r.fileId !== null);
-
-  const plateMapEntries = fileReportData.filter((r) =>
-    PLATE_MAP_DATA_TYPES.has(r.dataType)
-  );
-  const otherEntries = fileReportData.filter(
-    (r) => !PLATE_MAP_DATA_TYPES.has(r.dataType)
-  );
+  // Enable heatmap coloring if the measurement type is known-numeric, or if
+  // any well value looks numeric (handles runs where measurement_type metadata
+  // was not captured by the ingestion pipeline).
+  const heatmap =
+    HEATMAP_MEASUREMENT_TYPES.has(measurementType) ||
+    wellData.some((r) => Number.isFinite(Number(r.value)));
 
   return (
     <>
@@ -325,7 +284,7 @@ export function PlateReaderRunDetail({
             instrumentId={instrumentId}
             runId={runId}
             fileCount={activeFileCount}
-            hasReportData={hasReportData}
+            hasProcessedFiles={hasProcessedFiles}
           />
         )}
         {canRestore && (
@@ -346,14 +305,12 @@ export function PlateReaderRunDetail({
       </RunDetail.FilesMetadataLayout>
 
       <PlateMapSection
-        entries={plateMapEntries}
+        rows={wellData}
         heatmap={heatmap}
         kineticLayout={measurementType === "Kinetic"}
       />
 
-      <OtherReportData entries={otherEntries} />
-
-      <RunDetail.Analysis analysisData={analysisData} />
+      <RunDetail.Analysis />
     </>
   );
 }

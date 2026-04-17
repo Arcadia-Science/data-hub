@@ -1,10 +1,8 @@
+import { parse } from "csv-parse/sync";
+
 import { db } from "@/lib/db";
-import {
-  files,
-  instrumentRuns,
-  instruments,
-  runReportData,
-} from "@/lib/db/schema";
+import { files, instrumentRuns, instruments } from "@/lib/db/schema";
+import { getS3ObjectStream } from "@/lib/s3";
 import type { SQL } from "drizzle-orm";
 import {
   and,
@@ -274,13 +272,6 @@ export type RunDetail = NonNullable<
 
 export type RunFile = typeof files.$inferSelect;
 
-export type RunReportEntry = {
-  id: number;
-  dataType: string;
-  fileId: number | null;
-  data: unknown;
-};
-
 // ---------------------------------------------------------------------------
 // Per-run file list — all files (including soft-deleted) ordered by creation.
 // ---------------------------------------------------------------------------
@@ -294,24 +285,53 @@ export async function getRunFiles(runInternalId: string): Promise<RunFile[]> {
 }
 
 // ---------------------------------------------------------------------------
-// Per-run report data — all report entries for a run, ordered by id.
+// Per-run processed CSV data — fetches CSV files from S3 and parses them.
 // ---------------------------------------------------------------------------
 
-export async function getRunReportData(
-  runInternalId: string
-): Promise<RunReportEntry[]> {
-  const rows = await db
-    .select({
-      id: runReportData.id,
-      dataType: runReportData.dataType,
-      fileId: runReportData.fileId,
-      data: runReportData.data,
-    })
-    .from(runReportData)
-    .where(eq(runReportData.instrumentRunId, runInternalId))
-    .orderBy(runReportData.id);
+export type RawWellRow = Record<string, string>;
 
-  return rows;
+async function streamToBuffer(
+  stream: import("node:stream").Readable
+): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
+
+export async function getProcessedCsvData(
+  runFiles: RunFile[]
+): Promise<RawWellRow[]> {
+  const csvFiles = runFiles.filter(
+    (f) =>
+      f.category === "processed" &&
+      f.deletedAt === null &&
+      f.filename.endsWith(".csv") &&
+      f.s3Bucket &&
+      f.s3Key
+  );
+
+  if (csvFiles.length === 0) return [];
+
+  const results = await Promise.all(
+    csvFiles.map(async (file) => {
+      try {
+        const stream = await getS3ObjectStream(file.s3Bucket!, file.s3Key!);
+        const buf = await streamToBuffer(stream);
+        return parse(buf, {
+          columns: true,
+          skip_empty_lines: true,
+          trim: true,
+        }) as RawWellRow[];
+      } catch (err) {
+        console.error(`Failed to fetch processed CSV ${file.s3Key}:`, err);
+        return [];
+      }
+    })
+  );
+
+  return results.flat();
 }
 
 // ---------------------------------------------------------------------------
