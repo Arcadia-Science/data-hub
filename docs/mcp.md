@@ -77,8 +77,7 @@ All tools return JSON encoded as a single text content block. Error cases set `i
 | --- | --- |
 | `search_runs` | Paginated search across runs with filtering, sorting, and date range. Supports plate-reader metadata filters (`wavelength`, `measurementMode`, `measurementType`). |
 | `get_run` | Get a single run by its natural key (`instrumentId` + `runId`). |
-| `get_run_report_data` | Get structured experimental results for a run — plate maps, well data, kinetic traces, spectra, etc. This is the primary tool for accessing results. |
-| `list_run_files` | List all files attached to a run, including processing status and metadata. |
+| `list_run_files` | List all files attached to a run, including processing status and metadata. Use `get_file_download_url` on processed CSV files to access experimental results. |
 | `get_run_archive_path` | Get the API path that streams a ZIP archive of all uploaded files for a run. Prepend the Data Hub origin and authenticate with the same Bearer token to download. |
 
 ### Files
@@ -87,7 +86,7 @@ All tools return JSON encoded as a single text content block. Error cases set `i
 | --- | --- |
 | `get_file` | Get detailed metadata for a single file by numeric ID. |
 | `get_file_download_url` | Get a pre-signed S3 URL for downloading a file's raw contents. URLs expire after 15 minutes and can be fetched without additional authentication. |
-| `reprocess_file` | **Write tool.** Re-run the Lambda processing workflow for a `failed` or `completed` file. Clears prior report data and transitions the file back to `processing`. Annotated `destructiveHint: true` so clients can warn before invoking. |
+| `reprocess_file` | **Write tool.** Re-run the Lambda processing workflow for a `failed` or `completed` file. Transitions the file back to `processing`. Annotated `destructiveHint: true` so clients can warn before invoking. |
 
 ### Watchers and system status
 
@@ -123,7 +122,7 @@ Once installed, ask your client questions like:
 
 - *"What instruments are active right now?"* → `list_instruments` with `status="active"`
 - *"Show me all SpectraMax runs from last Friday."* → `search_runs` with an `instrumentId` and date range
-- *"Summarize the well data from run `2026-03-26_experiment` on the plate reader."* → `run_analysis` prompt, which chains `get_run`, `get_run_report_data`, and `list_run_files`
+- *"Summarize the well data from run `2026-03-26_experiment` on the plate reader."* → `run_analysis` prompt, which chains `get_run`, `list_run_files`, and `get_file_download_url` for processed CSVs
 - *"The gel-doc in Lab 3 stopped uploading — what's wrong?"* → `troubleshoot_instrument` prompt, which inspects the watcher list and heartbeat history
 - *"Re-run processing for file 4217, we pushed a parser fix."* → `reprocess_file`. Clients typically confirm the destructive action with the user first.
 

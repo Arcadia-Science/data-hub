@@ -476,31 +476,3 @@ export const files = pgTable(
     index("idx_files_metadata_gin").using("gin", file.metadata),
   ]
 );
-
-export const runReportData = pgTable(
-  "run_report_data",
-  {
-    id: bigserial("id", { mode: "number" }).primaryKey(),
-    instrumentRunId: uuid("instrument_run_id")
-      .notNull()
-      .references(() => instrumentRuns.id),
-    // The source file this data was extracted from. NULL for data produced by
-    // run-level analyses (which may aggregate across multiple files).
-    fileId: bigint("file_id", { mode: "number" }).references(() => files.id),
-    // Identifies the dataset (e.g., `raw_well_data`, `plate_map`,
-    // `kinetic_data`, `spectrum_data`, `sample_table`).
-    dataType: text("data_type").notNull(),
-    // The structured data as a JSON array of row objects.
-    data: jsonb("data").notNull(),
-    createdAt: timestamp("created_at", {
-      withTimezone: true,
-      mode: "date",
-    })
-      .notNull()
-      .defaultNow(),
-  },
-  (report) => [
-    index("idx_run_report_data_instrument_run_id").on(report.instrumentRunId),
-    index("idx_run_report_data_file_id").on(report.fileId),
-  ]
-);

@@ -87,8 +87,8 @@ class TestQPCRHappyPath:
         # and stored as run-level metadata.
         assert run["metadata"]["dye_channels"] == ["ORANGE 560", "TAMRA", "ROX"]
 
-        # qPCR files don't produce tabular report_data (unlike plate readers).
-        assert run["report_data"] == []
+        # qPCR files don't produce processed CSV files (unlike plate readers).
+        assert all(f["category"] == "raw" for f in run["files"])
 
         mock_slack.assert_called_once()
         slack_msg = mock_slack.call_args[0][0]
@@ -97,13 +97,13 @@ class TestQPCRHappyPath:
 
 
 # ------------------------------------------------------------------
-# Test 4b: SpectraMax plate reader — happy path with report_data
+# Test 4b: SpectraMax plate reader — happy path with processed CSV
 # ------------------------------------------------------------------
 
 
 class TestSpectraMaxHappyPath:
     @pytest.mark.parametrize(
-        ("fixture_file", "run_id", "expected_metadata", "expected_first_plate"),
+        ("fixture_file", "run_id", "expected_metadata"),
         [
             pytest.param(
                 "spectramax_plate_reader_endpoint.xls",
@@ -113,7 +113,6 @@ class TestSpectraMaxHappyPath:
                     "measurement_type": "Endpoint",
                     "wavelength": "750 nm",
                 },
-                "Plate2",
                 id="endpoint",
             ),
             pytest.param(
@@ -124,7 +123,6 @@ class TestSpectraMaxHappyPath:
                     "measurement_type": "Well Scan",
                     "wavelength": "595 nm",
                 },
-                "Plate1",
                 id="well-scan",
             ),
             pytest.param(
@@ -135,33 +133,29 @@ class TestSpectraMaxHappyPath:
                     "measurement_type": "Kinetic",
                     "wavelength": "595 nm",
                 },
-                "Plate4",
                 id="kinetic",
             ),
         ],
     )
-    def test_xls_completes_with_report_data(
+    def test_xls_completes_with_processed_csv(
         self,
         integration_env: IntegrationEnv,
         make_s3_event: Callable[..., dict[str, Any]],
         s3_fixture_files: dict[str, Path],
         mock_context: MagicMock,
         mock_slack: MagicMock,
+        mock_s3_upload: MagicMock,
         fixture_file: str,
         run_id: str,
         expected_metadata: dict[str, str],
-        expected_first_plate: str,
     ) -> None:
-        # Register the real fixture CSV so the patched S3 download can find it.
         filename = f"{run_id}.xls"
         s3_key = f"spectramax-id3-plate-reader/{run_id}/{filename}"
         s3_fixture_files[s3_key] = _FIXTURES_DIR / fixture_file
 
-        # Fire the event to trigger the pipeline.
         event = make_s3_event("spectramax-id3-plate-reader", run_id, filename)
         lambda_handler(event, mock_context)
 
-        # Verify via the real API that the full pipeline wrote correct data.
         run = _api_get(
             integration_env.base_url,
             integration_env.api_token,
@@ -171,36 +165,26 @@ class TestSpectraMaxHappyPath:
         assert run["source"] == "lambda"
         assert run["run_id"] == run_id
 
-        assert len(run["files"]) == 1
-        file = run["files"][0]
-        assert file["status"] == "completed"
+        # Two files: the raw .xls and the processed CSV.
+        assert len(run["files"]) == 2
 
-        # Verify the run-level metadata.
+        raw_file = next(f for f in run["files"] if f["category"] == "raw")
+        processed_file = next(f for f in run["files"] if f["category"] == "processed")
+
+        assert raw_file["status"] == "completed"
+        assert processed_file["filename"] == f"{run_id}_raw_well_data.csv"
+        assert processed_file["status"] == "uploaded"
+
         for key, value in expected_metadata.items():
             assert run["metadata"][key] == value
 
-        # Verify the raw well data.
-        assert len(run["report_data"]) == 1
-        run_report_data = run["report_data"][0]
-        assert run_report_data["data_type"] == "raw_well_data"
-        assert isinstance(run_report_data["data"], list)
-        assert len(run_report_data["data"]) > 0
+        # The pipeline uploads the processed CSV to the processed bucket.
+        mock_s3_upload.assert_called_once()
+        upload_dest = mock_s3_upload.call_args[0][1]
+        assert upload_dest == (
+            f"s3://test-processed-bucket/spectramax-id3-plate-reader/{run_id}/{run_id}_raw_well_data.csv"
+        )
 
-        first_row = run_report_data["data"][0]
-        expected_columns = {
-            "time",
-            "plate_name",
-            "well_position",
-            "temperature_c",
-            "value",
-            "row_label",
-            "column_label",
-            "wavelength",
-        }
-        assert set(first_row.keys()) == expected_columns
-        assert first_row["plate_name"] == expected_first_plate
-
-        # Verify the Slack notification.
         mock_slack.assert_called_once()
         slack_msg = mock_slack.call_args[0][0]
         assert run_id in slack_msg
@@ -262,8 +246,8 @@ class TestAzure600GelDocHappyPath:
         assert processed_file["filename"] == f"{run_id}.png"
         assert processed_file["status"] == "uploaded"
 
-        # Gel Doc files don't produce tabular report_data.
-        assert run["report_data"] == []
+        # Gel Doc files don't produce additional CSV report data.
+        assert len([f for f in run["files"] if f["filename"].endswith(".csv")]) == 0
 
         # The pipeline uploads the contrast-enhanced PNG to the processed bucket.
         mock_s3_upload.assert_called_once()
@@ -489,42 +473,41 @@ class TestFileReprocessing:
         assert "View CloudWatch logs" in mock_slack.call_args_list[0][0][0]
         assert "View in Data Hub" in mock_slack.call_args_list[1][0][0]
 
-    def test_reprocess_does_not_duplicate_report_data(
+    def test_reprocess_does_not_duplicate_processed_csv(
         self,
         integration_env: IntegrationEnv,
         make_s3_event: Callable[..., dict[str, Any]],
         s3_fixture_files: dict[str, Path],
         mock_context: MagicMock,
         mock_slack: MagicMock,
+        mock_s3_upload: MagicMock,
     ) -> None:
-        """Reprocessing a plate reader file must not double the report_data.
+        """Reprocessing a plate reader file must not duplicate the CSV file record.
 
-        The PATCH endpoint deletes existing run_report_data rows for the file
-        when transitioning back to "processing", so the second invocation
-        replaces rather than appends.
+        The create_file API is idempotent on s3_key, so the second invocation
+        returns the existing processed file rather than creating a duplicate.
         """
         run_id = "033126_CM_Od750"
         filename = f"{run_id}.xls"
         s3_key = f"spectramax-id3-plate-reader/{run_id}/{filename}"
         s3_fixture_files[s3_key] = _FIXTURES_DIR / "spectramax_plate_reader_endpoint.xls"
 
-        # Fire the event twice.
         event = make_s3_event("spectramax-id3-plate-reader", run_id, filename)
         lambda_handler(event, mock_context)
         lambda_handler(event, mock_context)
 
-        # Verify via the real API that the full pipeline wrote correct data.
         run = _api_get(
             integration_env.base_url,
             integration_env.api_token,
             f"/api/v1/instruments/spectramax-id3-plate-reader/runs/{run_id}",
         )
 
-        # Verify that the report_data was not duplicated.
-        assert len(run["report_data"]) == 1
-        assert run["report_data"][0]["data_type"] == "raw_well_data"
+        # Two files: one raw .xls and one processed CSV (not duplicated).
+        assert len(run["files"]) == 2
+        processed_files = [f for f in run["files"] if f["category"] == "processed"]
+        assert len(processed_files) == 1
+        assert processed_files[0]["filename"] == f"{run_id}_raw_well_data.csv"
 
-        # Verify the Slack notifications.
         assert mock_slack.call_count == 2
         for call in mock_slack.call_args_list:
             slack_msg = call[0][0]

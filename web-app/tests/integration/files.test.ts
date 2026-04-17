@@ -197,25 +197,13 @@ describe("Files API", () => {
     expect((await res.json()).status).toBe("processing");
   });
 
-  // The Lambda function calls this after successfully parsing the file.
-  // report_data is inserted into the run_report_data table, linked to both
-  // the file and its parent run for querying from either direction.
-  it("PATCH transitions processing → completed with metadata and report_data", async () => {
+  it("PATCH transitions processing → completed with metadata", async () => {
     const res = await api(`/api/v1/files/${fileId}`, {
       method: "PATCH",
       token,
       body: {
         status: "completed",
         metadata: { plate_type: "96-well", read_mode: "absorbance" },
-        report_data: [
-          {
-            data_type: "raw_well_data",
-            data: [
-              { well: "A1", value: 0.123 },
-              { well: "A2", value: 0.456 },
-            ],
-          },
-        ],
       },
     });
     expect(res.status).toBe(200);

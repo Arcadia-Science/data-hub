@@ -20,7 +20,7 @@ The Lambda has two invocation paths that converge on the same processing logic:
 When a file fails processing (or needs to be re-run), users can trigger reprocessing from the run detail page in the web app. This invokes the Lambda's Function URL instead of going through S3:
 
 1. The user clicks **Reprocess** on a failed or completed file in the web dashboard.
-2. The web app's `POST /api/v1/files/:fileId/reprocess` endpoint transitions the file to `processing` status, clears any previous error and report data, and sends a POST request to the Lambda Function URL.
+2. The web app's `POST /api/v1/files/:fileId/reprocess` endpoint transitions the file to `processing` status, clears any previous error, and sends a POST request to the Lambda Function URL.
 3. The request includes an `Authorization: Bearer <LAMBDA_INVOKE_TOKEN>` header and a JSON body containing a synthetic S3 event payload.
 4. The Lambda handler detects the Function URL invocation (via `requestContext` in the event), verifies the Bearer token against the `LAMBDA_INVOKE_TOKEN` environment variable using constant-time comparison, and parses the S3 event from the request body.
 5. From here, processing follows the same dispatch logic as the S3 trigger path (steps 2–6 above).

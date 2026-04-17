@@ -9,6 +9,7 @@ flowchart LR
     W[Watcher] -->|raw files| S3[S3]
     S3 -->|trigger| L[Lambda]
     W -->|heartbeats, runs| API[API]
+    L -->|processed data| S3
     L -->|results| API
     API -->|presigned URLs| S3
     API --> DB[(PostgreSQL)]

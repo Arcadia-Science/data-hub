@@ -8,7 +8,7 @@ import {
 } from "@/lib/api/errors";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { db } from "@/lib/db";
-import { files, instrumentRuns, runReportData } from "@/lib/db/schema";
+import { files, instrumentRuns } from "@/lib/db/schema";
 import { getPresignedDownloadUrl } from "@/lib/s3";
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
@@ -20,9 +20,8 @@ type RouteContext = {
 // ---------------------------------------------------------------------------
 // GET /api/v1/instruments/:instrumentId/runs/:runId
 //
-// Full run detail — files (with pre-signed download URLs), report_data, and
-// run-level metadata. Files and report data are fetched in parallel to
-// minimize response latency.
+// Full run detail — files (with pre-signed download URLs) and run-level
+// metadata.
 // ---------------------------------------------------------------------------
 
 export async function GET(request: NextRequest, { params }: RouteContext) {
@@ -42,22 +41,11 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     );
   }
 
-  // Fetch files and report data concurrently — no dependency between them.
-  const [fileRows, reportRows] = await Promise.all([
-    db
-      .select()
-      .from(files)
-      .where(eq(files.instrumentRunId, run.id))
-      .orderBy(files.createdAt),
-    db
-      .select({
-        data_type: runReportData.dataType,
-        file_id: runReportData.fileId,
-        data: runReportData.data,
-      })
-      .from(runReportData)
-      .where(eq(runReportData.instrumentRunId, run.id)),
-  ]);
+  const fileRows = await db
+    .select()
+    .from(files)
+    .where(eq(files.instrumentRunId, run.id))
+    .orderBy(files.createdAt);
 
   // Generate short-lived pre-signed URLs only for files that have been
   // uploaded to S3 (s3Key is non-null). Detected/queued files get null.
@@ -97,7 +85,6 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     deleted_at: run.deletedAt,
     metadata: run.metadata,
     files: filesWithUrls,
-    report_data: reportRows,
   });
 }
 

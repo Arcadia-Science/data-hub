@@ -5,9 +5,9 @@ import { RunHeader } from "@/components/runs/run-header";
 import { RunMetadata } from "@/components/runs/run-metadata";
 import { RunReportSection } from "@/components/runs/run-report-section";
 import type {
+  RawWellRow,
   RunDetail as RunDetailType,
   RunFile,
-  RunReportEntry,
 } from "@/lib/api/instrument-runs";
 
 export const RunDetail = {
@@ -22,7 +22,7 @@ export const RunDetail = {
 export type RunDetailProps = {
   run: RunDetailType;
   files: RunFile[];
-  reportData: RunReportEntry[];
+  wellData: RawWellRow[];
   instrumentId: string;
   runId: string;
 };

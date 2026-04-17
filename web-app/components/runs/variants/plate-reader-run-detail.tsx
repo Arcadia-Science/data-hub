@@ -8,19 +8,10 @@ import { ReportDataTable } from "@/components/runs/report-data-table";
 import { RestoreRunButton } from "@/components/runs/restore-run-button";
 import type { RunDetailProps } from "@/components/runs/run-detail";
 import { RunDetail } from "@/components/runs/run-detail";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { RunReportEntry } from "@/lib/api/instrument-runs";
-
-const PLATE_MAP_DATA_TYPES = new Set(["plate_map", "raw_well_data"]);
+import type { RawWellRow } from "@/lib/api/instrument-runs";
 
 const HEATMAP_MEASUREMENT_TYPES = new Set(["Endpoint", "Well Scan", "Kinetic"]);
-
-type RawWellRow = Record<string, unknown> & {
-  well_position?: string;
-  well?: string;
-  value?: unknown;
-};
 
 type PlateMapGroup =
   | { mode: "static"; label: string; wells: PlateWellData[] }
@@ -108,25 +99,11 @@ function extractKineticPlateMapGroups(
 }
 
 function extractPlateMaps(
-  entry: RunReportEntry,
+  rows: RawWellRow[],
   options: { kinetic: boolean }
 ): PlateMapGroup[] {
-  if (!Array.isArray(entry.data)) return [];
-  const rows = entry.data as RawWellRow[];
   if (rows.length === 0) return [];
 
-  if (entry.dataType === "plate_map") {
-    return [
-      {
-        mode: "static",
-        label: "",
-        wells: rows as PlateWellData[],
-      },
-    ];
-  }
-
-  // raw_well_data: rows have well_position + value, possibly varying by
-  // plate_name / wavelength / time. Group into one grid per combination.
   const wellKey =
     rows[0].well_position !== undefined ? "well_position" : "well";
   if (rows[0][wellKey] === undefined) return [];
@@ -135,7 +112,10 @@ function extractPlateMaps(
   const hasTimeVariation = uniqueTimes.size > 1;
 
   if (options.kinetic && hasTimeVariation) {
-    return extractKineticPlateMapGroups(rows, wellKey);
+    return extractKineticPlateMapGroups(
+      rows,
+      wellKey as "well_position" | "well"
+    );
   }
 
   const hasMultiple =
@@ -181,31 +161,17 @@ function extractPlateMaps(
 }
 
 function PlateMapSection({
-  entries,
+  rows,
   heatmap,
   kineticLayout,
 }: {
-  entries: RunReportEntry[];
+  rows: RawWellRow[];
   heatmap: boolean;
   kineticLayout: boolean;
 }) {
-  const byFile = new Map<number | null, RunReportEntry[]>();
-  for (const entry of entries) {
-    const group = byFile.get(entry.fileId) ?? [];
-    group.push(entry);
-    byFile.set(entry.fileId, group);
-  }
+  const groups = extractPlateMaps(rows, { kinetic: kineticLayout });
 
-  let totalMaps = 0;
-  const sections = Array.from(byFile.entries()).map(([fileId, fileEntries]) => {
-    const groups = fileEntries.flatMap((e) =>
-      extractPlateMaps(e, { kinetic: kineticLayout })
-    );
-    totalMaps += groups.length;
-    return { fileId, groups };
-  });
-
-  if (totalMaps === 0) return null;
+  if (groups.length === 0) return null;
 
   return (
     <Card size="sm">
@@ -213,92 +179,54 @@ function PlateMapSection({
         <CardTitle>
           Plate Maps{" "}
           <span className="ml-1 font-mono text-xs font-normal text-muted-foreground">
-            {totalMaps} map(s)
+            {groups.length} map(s)
           </span>
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-6">
-        {sections.map(({ fileId, groups }) => (
-          <div key={fileId ?? "run-level"} className="flex flex-col gap-10">
-            {groups.map((g, i) => (
-              <div key={i} className="flex flex-col gap-2">
-                {g.label && (
-                  <h4 className="font-mono text-sm leading-snug font-medium text-foreground">
-                    {g.label}
-                  </h4>
-                )}
-                {g.mode === "kinetic" ? (
-                  <KineticPlateMapWithTimeSlider
-                    timeLabels={g.timeLabels}
-                    frames={g.frames}
-                    heatmap={heatmap}
-                  />
-                ) : (
-                  <PlateMapGrid data={g.wells} heatmap={heatmap} />
-                )}
-              </div>
-            ))}
-          </div>
-        ))}
+        <div className="flex flex-col gap-10">
+          {groups.map((g, i) => (
+            <div key={i} className="flex flex-col gap-2">
+              {g.label && (
+                <h4 className="font-mono text-sm leading-snug font-medium text-foreground">
+                  {g.label}
+                </h4>
+              )}
+              {g.mode === "kinetic" ? (
+                <KineticPlateMapWithTimeSlider
+                  timeLabels={g.timeLabels}
+                  frames={g.frames}
+                  heatmap={heatmap}
+                />
+              ) : (
+                <PlateMapGrid data={g.wells} heatmap={heatmap} />
+              )}
+            </div>
+          ))}
+        </div>
       </CardContent>
     </Card>
   );
 }
 
-function OtherReportData({ entries }: { entries: RunReportEntry[] }) {
-  if (entries.length === 0) return null;
-
-  const byFile = new Map<number | null, RunReportEntry[]>();
-  for (const entry of entries) {
-    const group = byFile.get(entry.fileId) ?? [];
-    group.push(entry);
-    byFile.set(entry.fileId, group);
-  }
-
-  return (
-    <Card size="sm">
-      <CardHeader>
-        <CardTitle>
-          Other Report Data{" "}
-          <span className="ml-1 font-mono text-xs font-normal text-muted-foreground">
-            {entries.length} dataset(s)
-          </span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-6">
-        {Array.from(byFile.entries()).map(([fileId, items]) => {
-          return (
-            <div key={fileId ?? "run-level"} className="flex flex-col gap-3">
-              {items.map((entry) => (
-                <div key={entry.id} className="flex flex-col gap-1.5">
-                  <Badge
-                    variant="outline"
-                    className="w-fit font-mono text-[10px]"
-                  >
-                    {entry.dataType}
-                  </Badge>
-                  <ReportDataTable data={entry.data} />
-                </div>
-              ))}
-            </div>
-          );
-        })}
-      </CardContent>
-    </Card>
-  );
+function WellDataTable({ rows }: { rows: RawWellRow[] }) {
+  if (rows.length === 0) return null;
+  return <ReportDataTable data={rows} />;
 }
 
 export function PlateReaderRunDetail({
   run,
   files,
-  reportData,
+  wellData,
   instrumentId,
   runId,
 }: RunDetailProps) {
   const isDeleted = run.deletedAt !== null;
   const canRestore = isDeleted && run.filesPurgedAt === null;
   const activeFileCount = files.filter((f) => f.deletedAt === null).length;
-  const hasReportData = reportData.length > 0;
+  const hasProcessedFiles =
+    files.filter((f) => f.category === "processed" && f.deletedAt === null)
+      .length > 0;
 
   const metadata = run.metadata as Record<string, unknown>;
   const measurementType =
@@ -306,16 +234,6 @@ export function PlateReaderRunDetail({
       ? metadata.measurement_type
       : "";
   const heatmap = HEATMAP_MEASUREMENT_TYPES.has(measurementType);
-
-  const analysisData = reportData.filter((r) => r.fileId === null);
-  const fileReportData = reportData.filter((r) => r.fileId !== null);
-
-  const plateMapEntries = fileReportData.filter((r) =>
-    PLATE_MAP_DATA_TYPES.has(r.dataType)
-  );
-  const otherEntries = fileReportData.filter(
-    (r) => !PLATE_MAP_DATA_TYPES.has(r.dataType)
-  );
 
   return (
     <>
@@ -325,7 +243,7 @@ export function PlateReaderRunDetail({
             instrumentId={instrumentId}
             runId={runId}
             fileCount={activeFileCount}
-            hasReportData={hasReportData}
+            hasProcessedFiles={hasProcessedFiles}
           />
         )}
         {canRestore && (
@@ -346,14 +264,14 @@ export function PlateReaderRunDetail({
       </RunDetail.FilesMetadataLayout>
 
       <PlateMapSection
-        entries={plateMapEntries}
+        rows={wellData}
         heatmap={heatmap}
         kineticLayout={measurementType === "Kinetic"}
       />
 
-      <OtherReportData entries={otherEntries} />
+      <WellDataTable rows={wellData} />
 
-      <RunDetail.Analysis analysisData={analysisData} />
+      <RunDetail.Analysis />
     </>
   );
 }

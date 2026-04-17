@@ -1,7 +1,5 @@
 "use client";
 
-import { ReportDataTable } from "@/components/runs/report-data-table";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -9,14 +7,9 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import type { RunReportEntry } from "@/lib/api/instrument-runs";
 import { FlaskConical } from "lucide-react";
 
-export function RunAnalysisSection({
-  analysisData,
-}: {
-  analysisData: RunReportEntry[];
-}) {
+export function RunAnalysisSection() {
   return (
     <Card size="sm">
       <CardHeader>
@@ -41,25 +34,9 @@ export function RunAnalysisSection({
         </CardTitle>
       </CardHeader>
       <CardContent>
-        {analysisData.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No analysis results yet. The analysis pipeline is not yet available.
-          </p>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {analysisData.map((entry) => (
-              <div key={entry.id} className="flex flex-col gap-1.5">
-                <Badge
-                  variant="outline"
-                  className="w-fit font-mono text-[10px]"
-                >
-                  {entry.dataType}
-                </Badge>
-                <ReportDataTable data={entry.data} />
-              </div>
-            ))}
-          </div>
-        )}
+        <p className="text-sm text-muted-foreground">
+          No analysis results yet. The analysis pipeline is not yet available.
+        </p>
       </CardContent>
     </Card>
   );

@@ -1,7 +1,7 @@
 import { RunDetailVariant } from "@/components/runs/variants";
 import {
+  getProcessedCsvData,
   getRunFiles,
-  getRunReportData,
   lookupRunByNaturalKey,
 } from "@/lib/api/instrument-runs";
 import { auth } from "@/lib/auth";
@@ -30,17 +30,15 @@ export default async function RunDetailPage({ params }: Props) {
   const run = await lookupRunByNaturalKey(instrumentId, runId);
   if (!run) notFound();
 
-  const [files, reportData] = await Promise.all([
-    getRunFiles(run.id),
-    getRunReportData(run.id),
-  ]);
+  const runFiles = await getRunFiles(run.id);
+  const wellData = await getProcessedCsvData(runFiles);
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6 p-6">
       <RunDetailVariant
         run={run}
-        files={files}
-        reportData={reportData}
+        files={runFiles}
+        wellData={wellData}
         instrumentId={instrumentId}
         runId={runId}
       />

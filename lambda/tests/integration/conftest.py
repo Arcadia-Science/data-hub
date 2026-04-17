@@ -108,7 +108,7 @@ def integration_env(
 # Leaf-first (children before parents) to respect FK ordering.
 # Session-scoped rows (instruments, user, personal_access_tokens) are
 # intentionally excluded so tests don't need to re-seed them.
-_DATA_TABLES = ["run_report_data", "files", "instrument_runs"]
+_DATA_TABLES = ["files", "instrument_runs"]
 
 
 @pytest.fixture(autouse=True)

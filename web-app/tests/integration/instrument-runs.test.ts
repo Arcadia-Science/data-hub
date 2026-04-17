@@ -185,7 +185,6 @@ describe("Instrument Runs API", () => {
     expect(data.run_id).toBe("run-001");
     expect(data.instrument_id).toBe(instrumentId);
     expect(data).toHaveProperty("files");
-    expect(data).toHaveProperty("report_data");
     expect(data).toHaveProperty("metadata");
   });
 

@@ -8,7 +8,6 @@ import {
 import {
   buildRunListQuery,
   getRunFiles,
-  getRunReportData,
   lookupRunByNaturalKey,
 } from "@/lib/api/instrument-runs";
 import {
@@ -197,30 +196,6 @@ export function registerTools(server: McpServer) {
   );
 
   server.registerTool(
-    "get_run_report_data",
-    {
-      title: "Get Run Report Data",
-      description:
-        "Get structured report data for a run (plate maps, well data, kinetic data, spectrum data, etc.). This is the primary tool for accessing experimental results.",
-      inputSchema: {
-        instrumentId: z.string().describe("Instrument identifier"),
-        runId: z.string().describe("Run identifier within the instrument"),
-      },
-      annotations: { readOnlyHint: true },
-    },
-    async ({ instrumentId, runId }) => {
-      const run = await lookupRunByNaturalKey(instrumentId, runId);
-      if (!run) {
-        return errorResult(
-          `Run '${runId}' not found for instrument '${instrumentId}'.`
-        );
-      }
-      const reportData = await getRunReportData(run.id);
-      return textResult(reportData);
-    }
-  );
-
-  server.registerTool(
     "list_run_files",
     {
       title: "List Run Files",
@@ -386,14 +361,13 @@ export function registerTools(server: McpServer) {
     {
       title: "Reprocess File",
       description:
-        "Re-run the Lambda processing workflow for a failed or completed file. Clears prior report data and transitions the file back to 'processing'. Use this to retry after a parser fix or transient Lambda failure.",
+        "Re-run the Lambda processing workflow for a failed or completed file. Transitions the file back to 'processing'. Use this to retry after a parser fix or transient Lambda failure.",
       inputSchema: {
         fileId: z.number().int().describe("Numeric file ID"),
       },
-      // destructiveHint is true because the tool DELETEs prior run_report_data
-      // rows and resets status/errorMessage/processedAt. The data is usually
-      // re-populated by the Lambda, but the mutation is irreversible from
-      // the tool's perspective and clients should confirm with the user.
+      // destructiveHint is true because the tool resets status/errorMessage/
+      // processedAt. The Lambda re-processes the file, but the mutation is
+      // irreversible from the tool's perspective and clients should confirm.
       annotations: { readOnlyHint: false, destructiveHint: true },
     },
     async ({ fileId }) => {

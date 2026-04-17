@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { files, instrumentRuns, runReportData } from "@/lib/db/schema";
+import { files, instrumentRuns } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { after } from "next/server";
 
@@ -25,9 +25,9 @@ export type ReprocessResult =
 // Shared core for file reprocessing, used by both the REST route
 // (/api/v1/files/:fileId/reprocess) and the MCP `reprocess_file` tool.
 //
-// Validates the file state machine, clears prior report data, transitions
-// status to "processing", and schedules a Lambda invocation via `after()`
-// so it runs after the response is sent but while the runtime stays warm.
+// Validates the file state machine, transitions status to "processing",
+// and schedules a Lambda invocation via `after()` so it runs after the
+// response is sent but while the runtime stays warm.
 export async function reprocessFile(fileId: number): Promise<ReprocessResult> {
   const [file] = await db
     .select()
@@ -96,18 +96,14 @@ export async function reprocessFile(fileId: number): Promise<ReprocessResult> {
     };
   }
 
-  // Transition to "processing": clear previous error and report data.
-  await db.transaction(async (tx) => {
-    await tx.delete(runReportData).where(eq(runReportData.fileId, fileId));
-    await tx
-      .update(files)
-      .set({
-        status: "processing",
-        processedAt: null,
-        errorMessage: null,
-      })
-      .where(eq(files.id, fileId));
-  });
+  await db
+    .update(files)
+    .set({
+      status: "processing",
+      processedAt: null,
+      errorMessage: null,
+    })
+    .where(eq(files.id, fileId));
 
   // Build a synthetic S3 event matching the shape parse_s3_event expects.
   // Real S3 events use application/x-www-form-urlencoded encoding for the
