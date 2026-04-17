@@ -116,7 +116,7 @@ describe("MCP Server (HTTP)", () => {
     expect(toolNames).toContain("list_watchers");
     expect(toolNames).toContain("get_watcher_heartbeats");
     expect(toolNames).toContain("reprocess_file");
-    expect(toolNames).toHaveLength(13);
+    expect(toolNames).toHaveLength(12);
   });
 
   // ---- Tool execution (end-to-end) -----------------------------------------

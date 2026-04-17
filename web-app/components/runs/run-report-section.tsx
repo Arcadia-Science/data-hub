@@ -34,18 +34,12 @@ function ProcessedImagePreview({ file }: { file: RunFile }) {
   );
 }
 
-export function RunReportSection({
-  reportData,
-  files,
-}: {
-  reportData: unknown[];
-  files: RunFile[];
-}) {
+export function RunReportSection({ files }: { files: RunFile[] }) {
   const processedImages = files.filter(
     (f) => f.category === "processed" && f.deletedAt === null && isImageFile(f)
   );
 
-  if (reportData.length === 0 && processedImages.length === 0) {
+  if (processedImages.length === 0) {
     return (
       <Card size="sm">
         <CardHeader>

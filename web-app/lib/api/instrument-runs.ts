@@ -1,3 +1,5 @@
+import { parse } from "csv-parse/sync";
+
 import { db } from "@/lib/db";
 import { files, instrumentRuns, instruments } from "@/lib/db/schema";
 import { getS3ObjectStream } from "@/lib/s3";
@@ -288,28 +290,14 @@ export async function getRunFiles(runInternalId: string): Promise<RunFile[]> {
 
 export type RawWellRow = Record<string, string>;
 
-function parseCsv(text: string): RawWellRow[] {
-  const lines = text.trim().split("\n");
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(",").map((h) => h.trim());
-  return lines.slice(1).map((line) => {
-    const values = line.split(",").map((v) => v.trim());
-    const row: RawWellRow = {};
-    for (let i = 0; i < headers.length; i++) {
-      row[headers[i]] = values[i] ?? "";
-    }
-    return row;
-  });
-}
-
-async function streamToString(
+async function streamToBuffer(
   stream: import("node:stream").Readable
-): Promise<string> {
+): Promise<Buffer> {
   const chunks: Buffer[] = [];
   for await (const chunk of stream) {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
-  return Buffer.concat(chunks).toString("utf-8");
+  return Buffer.concat(chunks);
 }
 
 export async function getProcessedCsvData(
@@ -326,18 +314,24 @@ export async function getProcessedCsvData(
 
   if (csvFiles.length === 0) return [];
 
-  const allRows: RawWellRow[] = [];
-  for (const file of csvFiles) {
-    try {
-      const stream = await getS3ObjectStream(file.s3Bucket!, file.s3Key!);
-      const text = await streamToString(stream);
-      allRows.push(...parseCsv(text));
-    } catch (err) {
-      console.error(`Failed to fetch processed CSV ${file.s3Key}:`, err);
-    }
-  }
+  const results = await Promise.all(
+    csvFiles.map(async (file) => {
+      try {
+        const stream = await getS3ObjectStream(file.s3Bucket!, file.s3Key!);
+        const buf = await streamToBuffer(stream);
+        return parse(buf, {
+          columns: true,
+          skip_empty_lines: true,
+          trim: true,
+        }) as RawWellRow[];
+      } catch (err) {
+        console.error(`Failed to fetch processed CSV ${file.s3Key}:`, err);
+        return [];
+      }
+    })
+  );
 
-  return allRows;
+  return results.flat();
 }
 
 // ---------------------------------------------------------------------------
