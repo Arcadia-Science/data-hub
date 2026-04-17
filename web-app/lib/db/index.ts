@@ -4,6 +4,10 @@ import * as schema from "./schema";
 
 const connectionString = process.env.DATABASE_URL!;
 
-const client = postgres(connectionString);
+const globalForDb = globalThis as unknown as {
+  dbClient: ReturnType<typeof postgres>;
+};
+globalForDb.dbClient ??= postgres(connectionString);
+const client = globalForDb.dbClient;
 
 export const db = drizzle(client, { schema });
