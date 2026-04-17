@@ -283,18 +283,34 @@ def _prompt_run_detection(
     choice = click.prompt("Select", type=click.IntRange(1, custom_idx), default=1)
 
     if choice == custom_idx:
-        pattern = click.prompt(
-            "Run detection pattern (regex with 1 capture group)",
-            default=current_pattern or RUN_DETECTION_PRESETS[0][2],
-        )
-        recursive_default = current_recursive if current_recursive is not None else True
+        prompt_default = current_pattern or RUN_DETECTION_PRESETS[0][2]
+        while True:
+            pattern = click.prompt(
+                "Run detection pattern (regex with 1 capture group)",
+                default=prompt_default,
+            )
+            try:
+                compiled = re.compile(pattern)
+            except re.error as exc:
+                click.echo(click.style(f"  Invalid regex: {exc}", fg="red"))
+                continue
+            if compiled.groups != 1:
+                click.echo(
+                    click.style(
+                        f"  Pattern must have exactly 1 capture group, got {compiled.groups}",
+                        fg="red",
+                    )
+                )
+                continue
+            break
+        default_rec = current_recursive if current_recursive is not None else True
     else:
-        _key, _desc, pattern, recursive_default = RUN_DETECTION_PRESETS[choice - 1]
+        _key, _desc, pattern, default_rec = RUN_DETECTION_PRESETS[choice - 1]
         click.echo(f"  Pattern: {pattern}")
 
     recursive = click.confirm(
         "Watch subdirectories recursively?",
-        default=recursive_default if current_recursive is None else current_recursive,
+        default=default_rec,
     )
 
     _preview_run_pattern(pattern, watch_dir, recursive)
