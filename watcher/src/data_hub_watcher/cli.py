@@ -144,17 +144,20 @@ def init(ctx: click.Context) -> None:
     if not api_key:
         api_key = click.prompt("DATA_HUB_API_KEY", hide_input=True)
 
-    env_path = save_api_key(api_key)
-    click.echo(f"API key saved to {env_path}")
-
     client = _make_client(environment, api_key=api_key, api_base_url=api_base_url)
 
-    # 3. Instruments
+    # 3. Instruments (also validates the API key before we persist it)
     click.echo("\nFetching instruments…")
     try:
         instruments = client.list_instruments()
     except ApiError as exc:
-        raise click.ClickException(f"Failed to fetch instruments: {exc.message}") from exc
+        raise click.ClickException(
+            f"Failed to fetch instruments: {exc.message}\n"
+            "The API key was not saved. Please re-run init with a valid key."
+        ) from exc
+
+    env_path = save_api_key(api_key)
+    click.echo(f"API key saved to {env_path}")
 
     if instruments:
         click.echo("\nExisting instruments:")
