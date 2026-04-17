@@ -194,9 +194,9 @@ function extractPlateMaps(
       mode: "static" as const,
       label: parts.join(" · "),
       wells: group.map((r) => ({
-          well: String(r[wellKey]),
-          value: coerceNumeric(r.value),
-        })),
+        well: String(r[wellKey]),
+        value: coerceNumeric(r.value),
+      })),
     };
   });
 }
