@@ -103,7 +103,7 @@ Resources:
                   - Name: prefix
                     Value: azure-cielo-qpcr/
                   - Name: suffix
-                    Value: .csv
+                    Value: _Cq Values.csv
             Function: !GetAtt DataHubFunction.Arn
           - Event: s3:ObjectCreated:*
             Filter:
