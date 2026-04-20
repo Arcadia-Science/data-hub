@@ -131,7 +131,6 @@ export type InstrumentDetail = {
   status: "pending" | "active" | "inactive";
   instrumentType: InstrumentType;
   filePatterns: string[];
-  s3TriggerSuffix: string | null;
   createdAt: Date;
   updatedAt: Date;
   runCount: number;
@@ -202,7 +201,6 @@ export const getInstrumentById = cache(async function getInstrumentById(
     status: instrument.status,
     instrumentType: instrument.instrumentType,
     filePatterns: mergeFilePatterns(watcherRows.map((w) => w.configYaml)),
-    s3TriggerSuffix: instrument.s3TriggerSuffix,
     createdAt: instrument.createdAt,
     updatedAt: instrument.updatedAt,
     runCount: runCountResult[0].value,

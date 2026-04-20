@@ -116,7 +116,6 @@ class InstrumentResponse(BaseModel):
     display_name: str
     status: Literal["pending", "active", "inactive"]
     file_patterns: list[str] | None = None
-    s3_trigger_suffix: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

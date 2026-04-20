@@ -36,6 +36,13 @@
       "when": 1776458188295,
       "tag": "0004_keen_gorilla_man",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1776726428193,
+      "tag": "0005_drop_s3_trigger_suffix",
+      "breakpoints": true
     }
   ]
 }
