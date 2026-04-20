@@ -4,8 +4,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EventLog } from "@/components/watchers/event-log";
 import { EventLogToolbar } from "@/components/watchers/event-log-toolbar";
 import { HeartbeatChart } from "@/components/watchers/heartbeat-chart";
+import { StatusToolbar } from "@/components/watchers/status-toolbar";
 import type { WatcherEventRow, WatcherHeartbeatRow } from "@/lib/api/watchers";
-import { parseAsString, useQueryState } from "nuqs";
+import { todayDateString } from "@/lib/date";
+import { watcherDetailSearchParams } from "@/lib/search-params";
+import { parseAsString, useQueryState, useQueryStates } from "nuqs";
 
 export function WatcherDetailTabs({
   configTab,
@@ -26,6 +29,11 @@ export function WatcherDetailTabs({
     "tab",
     parseAsString.withDefault("logs").withOptions({ shallow: false })
   );
+
+  const [{ since }] = useQueryStates(watcherDetailSearchParams);
+
+  const effectiveSince = since ?? todayDateString();
+  const statusSubtitle = `Activity and connectivity for ${new Date(effectiveSince + "T00:00:00").toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}`;
 
   return (
     <Tabs value={tab} onValueChange={setTab}>
@@ -55,13 +63,14 @@ export function WatcherDetailTabs({
       </TabsContent>
 
       <TabsContent value="status" className="flex flex-col gap-4">
-        <div>
-          <h3 className="text-sm font-medium">Watcher Status</h3>
-          <p className="text-xs text-muted-foreground">
-            Activity and connectivity (last 24 hours)
-          </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-medium">Watcher Status</h3>
+            <p className="text-xs text-muted-foreground">{statusSubtitle}</p>
+          </div>
+          <StatusToolbar />
         </div>
-        <HeartbeatChart heartbeats={heartbeats} />
+        <HeartbeatChart heartbeats={heartbeats} since={effectiveSince} />
       </TabsContent>
 
       <TabsContent value="configuration" className="flex flex-col gap-4">

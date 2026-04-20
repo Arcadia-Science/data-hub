@@ -1,54 +1,27 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
+import type { ReactNode } from "react";
 
-function formatValue(value: unknown): string {
-  if (Array.isArray(value)) return value.join(", ");
-  if (value === null || value === undefined) return "—";
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
-}
-
-export function RunMetadata({
-  metadata,
-}: {
-  metadata: Record<string, unknown>;
-}) {
-  const entries = Object.entries(metadata);
-
-  if (entries.length === 0) {
+export function RunMetadata({ children }: { children?: ReactNode }) {
+  if (!children) {
     return (
-      <Card size="sm">
-        <CardHeader>
-          <CardTitle>Instrument Metadata</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">No metadata recorded.</p>
-        </CardContent>
-      </Card>
+      <div className="flex flex-col gap-2">
+        <h2 className="text-sm font-semibold">Metadata</h2>
+        <div className="flex items-center rounded-lg border px-4 py-3">
+          <p className="text-xs text-muted-foreground">
+            No metadata recorded yet
+          </p>
+        </div>
+      </div>
     );
   }
 
   return (
-    <Card size="sm">
-      <CardHeader>
-        <CardTitle>Instrument Metadata</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <Table>
-          <TableBody>
-            {entries.map(([key, value]) => (
-              <TableRow key={key}>
-                <TableCell className="w-[40%] align-top font-mono text-xs whitespace-nowrap text-muted-foreground">
-                  {key}
-                </TableCell>
-                <TableCell className="min-w-0 align-top break-all whitespace-normal">
-                  {formatValue(value)}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
+    <div className="flex flex-col gap-2">
+      <h2 className="text-sm font-semibold">Metadata</h2>
+      <div className="rounded-lg border">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3">
+          {children}
+        </div>
+      </div>
+    </div>
   );
 }

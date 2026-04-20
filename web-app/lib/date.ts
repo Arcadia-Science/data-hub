@@ -24,3 +24,8 @@ export function formatDateTime(date: Date): string {
 export function toDateInputValue(date: Date): string {
   return formatInTimeZone(date, getTimeZone(), "yyyy-MM-dd");
 }
+
+/** Returns today's date as a `"yyyy-MM-dd"` string in the local timezone. */
+export function todayDateString(): string {
+  return toDateInputValue(new Date());
+}

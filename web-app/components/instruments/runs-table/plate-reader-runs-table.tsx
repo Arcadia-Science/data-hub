@@ -9,6 +9,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { PlateReaderFilterOptions } from "@/lib/api/instrument-runs";
+import {
+  MEASUREMENT_MODE_COLORS,
+  MEASUREMENT_TYPE_COLORS,
+  buildWavelengthColorMap,
+} from "@/lib/instrument-colors";
 import { cn, formatBytes } from "@/lib/utils";
 
 import type { RunRow } from ".";
@@ -16,46 +21,6 @@ import { ClickableRow } from "./clickable-row";
 import { FilterableColumnHeader } from "./filterable-column-header";
 import { MetadataFieldBadge, getMetadataField } from "./metadata-utils";
 import { RunStatusIcon } from "./run-status-icon";
-
-const MEASUREMENT_TYPE_COLORS: Record<string, string> = {
-  Kinetic:
-    "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300",
-  Endpoint:
-    "border-teal-200 bg-teal-50 text-teal-600 dark:border-teal-700 dark:bg-teal-900 dark:text-teal-400",
-  "Well Scan":
-    "border-purple-200 bg-purple-50 text-purple-700 dark:border-purple-800 dark:bg-purple-950 dark:text-purple-300",
-};
-
-const MEASUREMENT_MODE_COLORS: Record<string, string> = {
-  Absorbance:
-    "border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-800 dark:bg-orange-950 dark:text-orange-300",
-  Fluorescence:
-    "border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-300",
-};
-
-const WAVELENGTH_COLOR_CYCLE = [
-  "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-300",
-  "border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-800 dark:bg-teal-950 dark:text-teal-300",
-  "border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950 dark:text-indigo-300",
-  "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-300",
-  "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300",
-  "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
-  "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700 dark:border-fuchsia-800 dark:bg-fuchsia-950 dark:text-fuchsia-300",
-  "border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-800 dark:bg-cyan-950 dark:text-cyan-300",
-];
-
-function buildWavelengthColorMap(
-  wavelengths: string[]
-): Record<string, string> {
-  const sorted = [...wavelengths].sort((a, b) =>
-    a.localeCompare(b, undefined, { numeric: true })
-  );
-  const map: Record<string, string> = {};
-  for (let i = 0; i < sorted.length; i++) {
-    map[sorted[i]] = WAVELENGTH_COLOR_CYCLE[i % WAVELENGTH_COLOR_CYCLE.length];
-  }
-  return map;
-}
 
 export function PlateReaderRunsTable({
   data,

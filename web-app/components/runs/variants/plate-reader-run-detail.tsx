@@ -7,7 +7,8 @@ import {
 import { RestoreRunButton } from "@/components/runs/restore-run-button";
 import type { RunDetailProps } from "@/components/runs/run-detail";
 import { RunDetail } from "@/components/runs/run-detail";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PlateReaderRunBadges } from "@/components/runs/run-metadata-badges";
+import { Card, CardContent } from "@/components/ui/card";
 import type { RawWellRow } from "@/lib/api/instrument-runs";
 
 /** Measurement types whose well values are numeric and benefit from color-coded heatmaps. */
@@ -27,10 +28,16 @@ function coerceNumeric(value: unknown): unknown {
 }
 
 type PlateMapGroup =
-  | { mode: "static"; label: string; wells: PlateWellData[] }
+  | {
+      mode: "static";
+      plateName: string;
+      wavelength: string;
+      wells: PlateWellData[];
+    }
   | {
       mode: "kinetic";
-      label: string;
+      plateName: string;
+      wavelength: string;
       timeLabels: string[];
       frames: PlateWellData[][];
     };
@@ -52,13 +59,6 @@ function sortTimeKeys(keys: string[]): string[] {
   return unique.sort((a, b) =>
     a.localeCompare(b, undefined, { numeric: true })
   );
-}
-
-function buildPlateWaveLabel(plate: string, wavelength: string): string {
-  const parts: string[] = [];
-  if (plate) parts.push(plate);
-  if (wavelength) parts.push(`${wavelength} nm`);
-  return parts.join(" · ");
 }
 
 /**
@@ -91,15 +91,15 @@ function extractKineticPlateMapGroups(
       byTime.set(tk, g);
     }
 
-    const [plate = "", wavelength = ""] = pw.split("|");
-    const label = buildPlateWaveLabel(plate, wavelength);
+    const [plateName = "", wavelength = ""] = pw.split("|");
 
     // Only one time-point — degenerate to a static map instead of a slider.
     if (byTime.size < 2) {
       const flat = [...byTime.values()].flat();
       results.push({
         mode: "static",
-        label,
+        plateName,
+        wavelength,
         wells: flat.map((r) => ({
           well: String(r[wellKey]),
           value: coerceNumeric(r.value),
@@ -117,7 +117,8 @@ function extractKineticPlateMapGroups(
     );
     results.push({
       mode: "kinetic",
-      label,
+      plateName,
+      wavelength,
       timeLabels: timeKeysSorted,
       frames,
     });
@@ -166,7 +167,8 @@ function extractPlateMaps(
     return [
       {
         mode: "static",
-        label: "",
+        plateName: "",
+        wavelength: "",
         wells: rows.map((r) => ({
           well: String(r[wellKey]),
           value: coerceNumeric(r.value),
@@ -185,14 +187,14 @@ function extractPlateMaps(
   }
 
   return Array.from(grouped.entries()).map(([key, group]) => {
-    const [plate, wavelength, time] = key.split("|");
-    const parts: string[] = [];
-    if (plate) parts.push(plate);
-    if (wavelength) parts.push(`${wavelength} nm`);
-    if (time) parts.push(`t=${time}`);
+    const [plate = "", wavelength = "", time = ""] = key.split("|");
+    const titleParts: string[] = [];
+    if (plate) titleParts.push(plate);
+    if (time) titleParts.push(`t=${time}`);
     return {
       mode: "static" as const,
-      label: parts.join(" · "),
+      plateName: titleParts.join(" · "),
+      wavelength,
       wells: group.map((r) => ({
         well: String(r[wellKey]),
         value: coerceNumeric(r.value),
@@ -215,38 +217,40 @@ function PlateMapSection({
   if (groups.length === 0) return null;
 
   return (
-    <Card size="sm">
-      <CardHeader>
-        <CardTitle>
-          Plate Maps{" "}
-          <span className="ml-1 font-mono text-xs font-normal text-muted-foreground">
-            {groups.length} map(s)
-          </span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-6">
-        <div className="flex flex-col gap-10">
-          {groups.map((g, i) => (
-            <div key={i} className="flex flex-col gap-2">
-              {g.label && (
-                <h4 className="font-mono text-sm leading-snug font-medium text-foreground">
-                  {g.label}
-                </h4>
-              )}
-              {g.mode === "kinetic" ? (
+    <div className="flex flex-col gap-2">
+      <h2 className="text-sm font-semibold">
+        Plate Maps{" "}
+        <span className="ml-1 font-mono text-xs font-normal text-muted-foreground">
+          {groups.length} map(s)
+        </span>
+      </h2>
+      <Card size="sm">
+        <CardContent className="flex flex-col gap-6">
+          <div className="flex flex-col gap-10">
+            {groups.map((g, i) =>
+              g.mode === "kinetic" ? (
                 <KineticPlateMapWithTimeSlider
+                  key={i}
                   timeLabels={g.timeLabels}
                   frames={g.frames}
                   heatmap={heatmap}
+                  plateName={g.plateName}
+                  wavelength={g.wavelength}
                 />
               ) : (
-                <PlateMapGrid data={g.wells} heatmap={heatmap} />
-              )}
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
+                <PlateMapGrid
+                  key={i}
+                  data={g.wells}
+                  heatmap={heatmap}
+                  plateName={g.plateName}
+                  wavelength={g.wavelength}
+                />
+              )
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
@@ -293,14 +297,16 @@ export function PlateReaderRunDetail({
       </RunDetail.Header>
 
       <RunDetail.FilesMetadataLayout>
+        <RunDetail.Metadata>
+          <PlateReaderRunBadges
+            metadata={run.metadata as Record<string, unknown>}
+          />
+        </RunDetail.Metadata>
         <RunDetail.Files
           files={files}
           instrumentId={instrumentId}
           runId={runId}
           isDeleted={isDeleted}
-        />
-        <RunDetail.Metadata
-          metadata={run.metadata as Record<string, unknown>}
         />
       </RunDetail.FilesMetadataLayout>
 

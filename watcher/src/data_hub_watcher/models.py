@@ -83,11 +83,12 @@ class WatcherConfig(BaseModel):
         watch_dir = self.instrument.watch_directory
         if watch_dir.exists():
             patterns = self.instrument.file_patterns
+            if self.instrument.run_detection.recursive:
+                file_iter = (e for e in watch_dir.rglob("*") if e.is_file())
+            else:
+                file_iter = (e for e in watch_dir.iterdir() if e.is_file())
             has_match = any(
-                fnmatch.fnmatch(entry.name, pat)
-                for entry in watch_dir.iterdir()
-                if entry.is_file()
-                for pat in patterns
+                fnmatch.fnmatch(entry.name, pat) for entry in file_iter for pat in patterns
             )
             if not has_match:
                 logger.warning(
