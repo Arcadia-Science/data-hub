@@ -31,11 +31,13 @@ const STATUS_COLORS: Record<string, string> = {
 
 const BUCKET_COUNT = 48;
 
+const FIVE_MIN = 5 * 60 * 1000;
+
 function computeWindow(since: string): {
   windowStart: Date;
   windowEnd: Date;
 } {
-  const now = Date.now();
+  const now = Math.floor(Date.now() / FIVE_MIN) * FIVE_MIN;
   const windowStart = new Date(since + "T00:00:00");
   const endOfDay = new Date(since + "T00:00:00");
   endOfDay.setDate(endOfDay.getDate() + 1);
