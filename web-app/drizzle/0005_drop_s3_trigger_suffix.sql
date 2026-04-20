@@ -1,0 +1,1 @@
+ALTER TABLE "instruments" DROP COLUMN "s3_trigger_suffix";

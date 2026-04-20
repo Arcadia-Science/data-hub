@@ -60,7 +60,6 @@ export async function GET(
     display_name: instrument.displayName,
     status: instrument.status,
     instrument_type: instrument.instrumentType,
-    s3_trigger_suffix: instrument.s3TriggerSuffix,
     created_at: instrument.createdAt,
     updated_at: instrument.updatedAt,
     run_count: runCountResult[0].value,
@@ -155,7 +154,6 @@ export async function PATCH(
       display_name: instruments.displayName,
       status: instruments.status,
       instrument_type: instruments.instrumentType,
-      s3_trigger_suffix: instruments.s3TriggerSuffix,
       created_at: instruments.createdAt,
       updated_at: instruments.updatedAt,
     });

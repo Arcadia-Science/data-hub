@@ -108,11 +108,11 @@ export async function reprocessFile(fileId: number): Promise<ReprocessResult> {
   // Build a synthetic S3 event matching the shape parse_s3_event expects.
   // Real S3 events use application/x-www-form-urlencoded encoding for the
   // object key: "+" → "%2B", spaces → "+", and "/" stays literal.
-  // We replicate that with encodeURIComponent (which gives "%2B" for "+")
-  // then restore literal "/" to match S3's format. The Lambda decodes
-  // with urllib.parse.unquote, which handles both "%2F" and "/" correctly,
-  // but keeping "/" literal makes the event payload identical to what S3
-  // would actually send.
+  // encodeURIComponent gets most of the way there ("%2B" for "+", "%20"
+  // for space, "%2F" for "/"), and we restore literal "/" to match S3's
+  // format. The Lambda decodes with urllib.parse.unquote_plus, which
+  // turns both "+" and "%20" back into a space, so this payload
+  // round-trips identically to a real S3 event notification.
   const s3Event = {
     Records: [
       {

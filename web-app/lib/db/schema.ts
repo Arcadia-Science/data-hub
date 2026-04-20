@@ -175,9 +175,6 @@ export const instruments = pgTable("instruments", {
   instrumentType: instrumentTypeEnum("instrument_type")
     .notNull()
     .default("generic"),
-  // The file extension suffix configured on the S3→Lambda trigger (e.g.,
-  // `.xls`). Used for validation warnings in the watcher.
-  s3TriggerSuffix: text("s3_trigger_suffix"),
   createdAt: timestamp("created_at", {
     withTimezone: true,
     mode: "date",
