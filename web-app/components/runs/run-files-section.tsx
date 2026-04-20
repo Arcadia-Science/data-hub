@@ -82,7 +82,7 @@ function StatusBadge({ file }: { file: RunFile }) {
         </Badge>
       );
     case "Uploaded":
-      return <Badge variant="secondary">{label}</Badge>;
+      return <Badge variant="outline">{label}</Badge>;
     case "Processing":
       return (
         <Badge

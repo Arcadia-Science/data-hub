@@ -28,10 +28,16 @@ function coerceNumeric(value: unknown): unknown {
 }
 
 type PlateMapGroup =
-  | { mode: "static"; label: string; wells: PlateWellData[] }
+  | {
+      mode: "static";
+      plateName: string;
+      wavelength: string;
+      wells: PlateWellData[];
+    }
   | {
       mode: "kinetic";
-      label: string;
+      plateName: string;
+      wavelength: string;
       timeLabels: string[];
       frames: PlateWellData[][];
     };
@@ -55,11 +61,11 @@ function sortTimeKeys(keys: string[]): string[] {
   );
 }
 
-function buildPlateWaveLabel(plate: string, wavelength: string): string {
-  const parts: string[] = [];
-  if (plate) parts.push(plate);
-  if (wavelength) parts.push(`${wavelength} nm`);
-  return parts.join(" · ");
+function buildPlateWaveParts(
+  plate: string,
+  wavelength: string
+): { plateName: string; wavelength: string } {
+  return { plateName: plate, wavelength };
 }
 
 /**
@@ -93,14 +99,14 @@ function extractKineticPlateMapGroups(
     }
 
     const [plate = "", wavelength = ""] = pw.split("|");
-    const label = buildPlateWaveLabel(plate, wavelength);
+    const parts = buildPlateWaveParts(plate, wavelength);
 
     // Only one time-point — degenerate to a static map instead of a slider.
     if (byTime.size < 2) {
       const flat = [...byTime.values()].flat();
       results.push({
         mode: "static",
-        label,
+        ...parts,
         wells: flat.map((r) => ({
           well: String(r[wellKey]),
           value: coerceNumeric(r.value),
@@ -118,7 +124,7 @@ function extractKineticPlateMapGroups(
     );
     results.push({
       mode: "kinetic",
-      label,
+      ...parts,
       timeLabels: timeKeysSorted,
       frames,
     });
@@ -167,7 +173,8 @@ function extractPlateMaps(
     return [
       {
         mode: "static",
-        label: "",
+        plateName: "",
+        wavelength: "",
         wells: rows.map((r) => ({
           well: String(r[wellKey]),
           value: coerceNumeric(r.value),
@@ -186,14 +193,14 @@ function extractPlateMaps(
   }
 
   return Array.from(grouped.entries()).map(([key, group]) => {
-    const [plate, wavelength, time] = key.split("|");
-    const parts: string[] = [];
-    if (plate) parts.push(plate);
-    if (wavelength) parts.push(`${wavelength} nm`);
-    if (time) parts.push(`t=${time}`);
+    const [plate = "", wavelength = "", time = ""] = key.split("|");
+    const titleParts: string[] = [];
+    if (plate) titleParts.push(plate);
+    if (time) titleParts.push(`t=${time}`);
     return {
       mode: "static" as const,
-      label: parts.join(" · "),
+      plateName: titleParts.join(" · "),
+      wavelength,
       wells: group.map((r) => ({
         well: String(r[wellKey]),
         value: coerceNumeric(r.value),
@@ -227,24 +234,26 @@ function PlateMapSection({
       </CardHeader>
       <CardContent className="flex flex-col gap-6">
         <div className="flex flex-col gap-10">
-          {groups.map((g, i) => (
-            <div key={i} className="flex flex-col gap-2">
-              {g.label && (
-                <h4 className="font-mono text-sm leading-snug font-medium text-foreground">
-                  {g.label}
-                </h4>
-              )}
-              {g.mode === "kinetic" ? (
-                <KineticPlateMapWithTimeSlider
-                  timeLabels={g.timeLabels}
-                  frames={g.frames}
-                  heatmap={heatmap}
-                />
-              ) : (
-                <PlateMapGrid data={g.wells} heatmap={heatmap} />
-              )}
-            </div>
-          ))}
+          {groups.map((g, i) =>
+            g.mode === "kinetic" ? (
+              <KineticPlateMapWithTimeSlider
+                key={i}
+                timeLabels={g.timeLabels}
+                frames={g.frames}
+                heatmap={heatmap}
+                plateName={g.plateName}
+                wavelength={g.wavelength}
+              />
+            ) : (
+              <PlateMapGrid
+                key={i}
+                data={g.wells}
+                heatmap={heatmap}
+                plateName={g.plateName}
+                wavelength={g.wavelength}
+              />
+            )
+          )}
         </div>
       </CardContent>
     </Card>

@@ -81,12 +81,16 @@ type PlateMapGridProps = {
   heatmap?: boolean;
   /** When heatmap is on, use this scale instead of inferring min/max from `data`. */
   heatmapRange?: { min: number; max: number };
+  plateName?: string;
+  wavelength?: string;
 };
 
 export function PlateMapGrid({
   data,
   heatmap = false,
   heatmapRange,
+  plateName,
+  wavelength,
 }: PlateMapGridProps) {
   if (!Array.isArray(data)) return null;
 
@@ -131,10 +135,22 @@ export function PlateMapGrid({
   const colLabels = Array.from({ length: cols }, (_, i) => String(i + 1));
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex w-fit flex-col gap-3">
+      {(plateName || wavelength) && (
+        <div className="flex items-baseline justify-between gap-4">
+          <h4 className="font-mono text-sm leading-snug font-medium text-foreground">
+            {plateName}
+          </h4>
+          {wavelength && (
+            <span className="font-mono text-sm text-muted-foreground">
+              {wavelength} nm
+            </span>
+          )}
+        </div>
+      )}
       <div className="overflow-x-auto">
         <div
-          className="inline-grid gap-px text-center"
+          className="inline-grid gap-0.5 text-center"
           style={{
             gridTemplateColumns: `2rem repeat(${cols}, minmax(3rem, 1fr))`,
           }}
@@ -178,8 +194,8 @@ export function PlateMapGrid({
                       <div
                         className={
                           useHeatmap
-                            ? "flex items-center justify-center rounded px-1 py-2.5 font-mono text-[10px] transition-colors"
-                            : `flex items-center justify-center rounded border px-2.5 py-2.5 font-mono text-xs ${
+                            ? "flex aspect-square items-center justify-center rounded font-mono text-[10px] transition-colors"
+                            : `flex aspect-square items-center justify-center rounded border font-mono text-xs ${
                                 hasValue
                                   ? "border-border bg-muted/50"
                                   : "border-transparent"
@@ -212,19 +228,23 @@ export function PlateMapGrid({
         </div>
       </div>
 
-      {/* Color legend */}
-      {heatmap && hasRange && (
-        <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-          <span className="font-mono">{formatCellValue(vMin)}</span>
-          <div
-            className="h-2 w-24 rounded-sm"
-            style={{
-              background: `linear-gradient(to right, rgb(13,8,135), rgb(189,55,134), rgb(253,202,38), rgb(240,249,33))`,
-            }}
-          />
-          <span className="font-mono">{formatCellValue(vMax)}</span>
-        </div>
-      )}
+      {heatmap && hasRange && <PlasmaColorBar min={vMin} max={vMax} />}
+    </div>
+  );
+}
+
+function PlasmaColorBar({ min, max }: { min: number; max: number }) {
+  return (
+    <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+      <span className="font-mono">{formatCellValue(min)}</span>
+      <div
+        className="h-3 flex-1 rounded-sm"
+        style={{
+          background:
+            "linear-gradient(to right, rgb(13,8,135), rgb(189,55,134), rgb(253,202,38), rgb(240,249,33))",
+        }}
+      />
+      <span className="font-mono">{formatCellValue(max)}</span>
     </div>
   );
 }
@@ -250,6 +270,8 @@ type KineticPlateMapWithTimeSliderProps = {
   timeLabels: string[];
   frames: PlateWellData[][];
   heatmap: boolean;
+  plateName?: string;
+  wavelength?: string;
 };
 
 /**
@@ -260,6 +282,8 @@ export function KineticPlateMapWithTimeSlider({
   timeLabels,
   frames,
   heatmap,
+  plateName,
+  wavelength,
 }: KineticPlateMapWithTimeSliderProps) {
   const [index, setIndex] = useState(0);
   const maxIdx = Math.max(0, frames.length - 1);
@@ -278,6 +302,8 @@ export function KineticPlateMapWithTimeSlider({
         data={frames[selectedIndex]}
         heatmap={heatmap}
         heatmapRange={heatmapRange}
+        plateName={plateName}
+        wavelength={wavelength}
       />
       {frames.length > 1 && (
         <div className="flex flex-col gap-2">
