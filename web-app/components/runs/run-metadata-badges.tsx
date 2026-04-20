@@ -143,6 +143,48 @@ export function GelDocRunBadges({
 }
 
 // ---------------------------------------------------------------------------
+// qPCR
+// ---------------------------------------------------------------------------
+
+export function QpcrRunBadges({
+  metadata,
+}: {
+  metadata: Record<string, unknown>;
+}) {
+  const dyeChannels = getMetadataArray(metadata, "dye_channels");
+
+  if (dyeChannels.length === 0) return null;
+
+  return (
+    <MetadataRow label="Dye Channels">
+      {dyeChannels.map((ch) => (
+        <ColorBadge key={ch} value={ch} />
+      ))}
+    </MetadataRow>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// TapeStation
+// ---------------------------------------------------------------------------
+
+export function TapeStationRunBadges({
+  metadata,
+}: {
+  metadata: Record<string, unknown>;
+}) {
+  const tapeType = getMetadataField(metadata, "Tape Type");
+
+  if (!tapeType) return null;
+
+  return (
+    <MetadataRow label="Tape Type">
+      <ColorBadge value={tapeType} />
+    </MetadataRow>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Default / generic — each key gets a row with outline badge value(s)
 // ---------------------------------------------------------------------------
 

@@ -3,6 +3,8 @@ import type { RunDetailProps } from "@/components/runs/run-detail";
 import { DefaultRunDetail } from "./default-run-detail";
 import { GelDocRunDetail } from "./gel-doc-run-detail";
 import { PlateReaderRunDetail } from "./plate-reader-run-detail";
+import { QpcrRunDetail } from "./qpcr-run-detail";
+import { TapeStationRunDetail } from "./tape-station-run-detail";
 
 export type RunDetailVariantProps = RunDetailProps;
 
@@ -12,6 +14,10 @@ export function RunDetailVariant(props: RunDetailVariantProps) {
       return <PlateReaderRunDetail {...props} />;
     case "gel_doc":
       return <GelDocRunDetail {...props} />;
+    case "qpcr":
+      return <QpcrRunDetail {...props} />;
+    case "tape_station":
+      return <TapeStationRunDetail {...props} />;
     default:
       return <DefaultRunDetail {...props} />;
   }
