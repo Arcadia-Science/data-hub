@@ -13,7 +13,7 @@ from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
-from urllib.parse import quote
+from urllib.parse import quote_plus
 
 import pytest
 
@@ -141,9 +141,11 @@ def make_s3_event() -> Callable[..., dict[str, Any]]:
         bucket: str = "test-bucket",
     ) -> dict[str, Any]:
         s3_key = f"{instrument_id}/{run_id}/{filename}"
-        # Real S3 events URL-encode the object key.  Use quote() (matching
-        # the Lambda's unquote() decoder) so "+" → "%2B" round-trips safely.
-        encoded_key = quote(s3_key, safe="/")
+        # Real S3 event notifications form-encode object keys: spaces
+        # become "+" and literal "+" becomes "%2B".  Match that exactly
+        # with quote_plus so the event round-trips through the Lambda's
+        # unquote_plus decoder the same way production events do.
+        encoded_key = quote_plus(s3_key, safe="/")
         return {
             "Records": [
                 {
