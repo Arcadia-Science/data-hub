@@ -1,6 +1,3 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
-
 function formatValue(value: unknown): string {
   if (Array.isArray(value)) return value.join(", ");
   if (value === null || value === undefined) return "—";
@@ -17,38 +14,30 @@ export function RunMetadata({
 
   if (entries.length === 0) {
     return (
-      <Card size="sm">
-        <CardHeader>
-          <CardTitle>Instrument Metadata</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">No metadata recorded.</p>
-        </CardContent>
-      </Card>
+      <div className="flex items-center rounded-lg border px-4 py-3">
+        <div>
+          <p className="text-sm font-semibold">Instrument metadata</p>
+          <p className="text-xs text-muted-foreground">
+            No metadata recorded yet
+          </p>
+        </div>
+      </div>
     );
   }
 
   return (
-    <Card size="sm">
-      <CardHeader>
-        <CardTitle>Instrument Metadata</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <Table>
-          <TableBody>
-            {entries.map(([key, value]) => (
-              <TableRow key={key}>
-                <TableCell className="w-[40%] align-top font-mono text-xs whitespace-nowrap text-muted-foreground">
-                  {key}
-                </TableCell>
-                <TableCell className="min-w-0 align-top break-all whitespace-normal">
-                  {formatValue(value)}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
+    <div className="rounded-lg border">
+      <div className="px-4 py-3">
+        <p className="text-sm font-semibold">Instrument metadata</p>
+      </div>
+      <div className="flex flex-wrap gap-x-6 gap-y-1 border-t px-4 py-3">
+        {entries.map(([key, value]) => (
+          <span key={key} className="text-xs text-muted-foreground">
+            <span className="font-mono">{key}</span>:{" "}
+            <span className="text-foreground">{formatValue(value)}</span>
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }
