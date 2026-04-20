@@ -103,7 +103,9 @@ Resources:
                   - Name: prefix
                     Value: azure-cielo-qpcr/
                   - Name: suffix
-                    Value: _Cq Values.csv
+                    # S3 requires spaces in filter values to be replaced
+                    # with `+` — this matches keys ending in `_Cq Values.csv`.
+                    Value: _Cq+Values.csv
             Function: !GetAtt DataHubFunction.Arn
           - Event: s3:ObjectCreated:*
             Filter:
