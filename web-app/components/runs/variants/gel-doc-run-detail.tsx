@@ -34,7 +34,7 @@ export function GelDocRunDetail({
       </RunDetail.Header>
 
       <RunDetail.FilesMetadataLayout>
-        <RunDetail.Metadata metadata={run.metadata as Record<string, unknown>}>
+        <RunDetail.Metadata>
           <GelDocRunBadges metadata={run.metadata as Record<string, unknown>} />
         </RunDetail.Metadata>
         <RunDetail.Files

@@ -34,7 +34,7 @@ export function DefaultRunDetail({
       </RunDetail.Header>
 
       <RunDetail.FilesMetadataLayout>
-        <RunDetail.Metadata metadata={run.metadata as Record<string, unknown>}>
+        <RunDetail.Metadata>
           <DefaultRunBadges
             metadata={run.metadata as Record<string, unknown>}
           />

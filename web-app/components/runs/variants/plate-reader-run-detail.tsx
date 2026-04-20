@@ -61,13 +61,6 @@ function sortTimeKeys(keys: string[]): string[] {
   );
 }
 
-function buildPlateWaveParts(
-  plate: string,
-  wavelength: string
-): { plateName: string; wavelength: string } {
-  return { plateName: plate, wavelength };
-}
-
 /**
  * Groups kinetic CSV rows into time-indexed plate map frames, one group per
  * unique plate + wavelength combination. Each group becomes either a single
@@ -98,15 +91,15 @@ function extractKineticPlateMapGroups(
       byTime.set(tk, g);
     }
 
-    const [plate = "", wavelength = ""] = pw.split("|");
-    const parts = buildPlateWaveParts(plate, wavelength);
+    const [plateName = "", wavelength = ""] = pw.split("|");
 
     // Only one time-point — degenerate to a static map instead of a slider.
     if (byTime.size < 2) {
       const flat = [...byTime.values()].flat();
       results.push({
         mode: "static",
-        ...parts,
+        plateName,
+        wavelength,
         wells: flat.map((r) => ({
           well: String(r[wellKey]),
           value: coerceNumeric(r.value),
@@ -124,7 +117,8 @@ function extractKineticPlateMapGroups(
     );
     results.push({
       mode: "kinetic",
-      ...parts,
+      plateName,
+      wavelength,
       timeLabels: timeKeysSorted,
       frames,
     });
@@ -303,7 +297,7 @@ export function PlateReaderRunDetail({
       </RunDetail.Header>
 
       <RunDetail.FilesMetadataLayout>
-        <RunDetail.Metadata metadata={run.metadata as Record<string, unknown>}>
+        <RunDetail.Metadata>
           <PlateReaderRunBadges
             metadata={run.metadata as Record<string, unknown>}
           />

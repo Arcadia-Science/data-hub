@@ -5,7 +5,7 @@ import {
   IMAGING_MODE_COLORS,
   MEASUREMENT_MODE_COLORS,
   MEASUREMENT_TYPE_COLORS,
-  WAVELENGTH_COLOR_CYCLE,
+  buildWavelengthColorMap,
 } from "@/lib/instrument-colors";
 import { cn } from "@/lib/utils";
 
@@ -45,17 +45,6 @@ function ColorBadge({
       {value}
     </Badge>
   );
-}
-
-function buildWavelengthColors(wavelengths: string[]): Record<string, string> {
-  const sorted = [...new Set(wavelengths)].sort((a, b) =>
-    a.localeCompare(b, undefined, { numeric: true })
-  );
-  const map: Record<string, string> = {};
-  for (let i = 0; i < sorted.length; i++) {
-    map[sorted[i]] = WAVELENGTH_COLOR_CYCLE[i % WAVELENGTH_COLOR_CYCLE.length];
-  }
-  return map;
 }
 
 // ---------------------------------------------------------------------------
@@ -111,7 +100,7 @@ export function GelDocRunBadges({
   if (!captureType && !imagingMode && !wavelengths.length && !colors.length)
     return null;
 
-  const wavelengthColors = buildWavelengthColors(wavelengths);
+  const wavelengthColors = buildWavelengthColorMap(wavelengths);
 
   return (
     <>

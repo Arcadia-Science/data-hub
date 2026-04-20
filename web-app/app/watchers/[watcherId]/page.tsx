@@ -8,8 +8,8 @@ import {
   getWatcherEvents,
 } from "@/lib/api/watchers";
 import { auth } from "@/lib/auth";
-import { watcherDetailParamsCache } from "@/lib/search-params";
 import { todayDateString } from "@/lib/date";
+import { watcherDetailParamsCache } from "@/lib/search-params";
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next/types";
 

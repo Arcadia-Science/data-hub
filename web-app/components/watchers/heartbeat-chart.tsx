@@ -199,12 +199,11 @@ export function HeartbeatChart({
 
   return (
     <div>
-      <div
-        ref={scrollRef}
-        className={cn(needsScroll && "overflow-x-auto")}
-      >
+      <div ref={scrollRef} className={cn(needsScroll && "overflow-x-auto")}>
         <div
-          style={needsScroll ? { minWidth: `${widthMultiplier * 100}%` } : undefined}
+          style={
+            needsScroll ? { minWidth: `${widthMultiplier * 100}%` } : undefined
+          }
         >
           <ChartContainer
             config={chartConfig}

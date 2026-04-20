@@ -1,11 +1,6 @@
 import type { ReactNode } from "react";
 
-export function RunMetadata({
-  children,
-}: {
-  metadata: Record<string, unknown>;
-  children?: ReactNode;
-}) {
+export function RunMetadata({ children }: { children?: ReactNode }) {
   if (!children) {
     return (
       <div className="flex flex-col gap-2">

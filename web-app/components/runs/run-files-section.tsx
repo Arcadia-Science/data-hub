@@ -30,12 +30,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { RunFile } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
 import { formatBytes } from "@/lib/utils";
-import { Download, Loader2, Search, Upload, X } from "lucide-react";
+import { Download, Loader2, RotateCw, Search, Upload, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 
 type StatusFilter =
@@ -102,8 +107,20 @@ function StatusBadge({ file }: { file: RunFile }) {
           {label}
         </Badge>
       );
-    case "Failed":
-      return <Badge variant="destructive">{label}</Badge>;
+    case "Failed": {
+      const badge = <Badge variant="destructive">{label}</Badge>;
+      if (!file.errorMessage) return badge;
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span tabIndex={0}>{badge}</span>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="max-w-sm">
+            {file.errorMessage}
+          </TooltipContent>
+        </Tooltip>
+      );
+    }
     case "Dismissed":
       return (
         <Badge variant="secondary" className="opacity-60">
@@ -167,6 +184,15 @@ export function RunFilesSection({
     () => files.filter((f) => f.deletedAt !== null),
     [files]
   );
+
+  // Auto-refresh while any file is processing so the UI picks up status
+  // transitions (e.g. processing → completed) without a manual reload.
+  const hasProcessing = activeFiles.some((f) => f.status === "processing");
+  useEffect(() => {
+    if (!hasProcessing) return;
+    const id = setInterval(() => router.refresh(), 3000);
+    return () => clearInterval(id);
+  }, [hasProcessing, router]);
 
   const baseFiles = showDismissed ? files : activeFiles;
 
@@ -333,6 +359,21 @@ export function RunFilesSection({
     });
   }
 
+  function handleReprocess(fileId: number) {
+    startTransition(async () => {
+      const res = await fetch(`/api/v1/files/${fileId}/reprocess`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        toast.error(body?.error?.message ?? "Failed to start reprocessing");
+        return;
+      }
+      toast.success("Reprocessing started");
+      router.refresh();
+    });
+  }
+
   const filterLabel =
     statusFilter === "all" ? `All (${activeFiles.length})` : undefined;
 
@@ -340,322 +381,369 @@ export function RunFilesSection({
     <div className="flex flex-col gap-2">
       <h2 className="text-sm font-semibold">Files</h2>
       <div className="rounded-lg border">
-      {/* Toolbar: search, filter, sort */}
-      <div className="flex items-center gap-2 border-b px-3 py-2">
-        <div className="relative flex-1">
-          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Search files..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="h-8 pl-8 text-xs"
-          />
-        </div>
-        <Select
-          value={statusFilter}
-          onValueChange={(v) => setStatusFilter(v as StatusFilter)}
-        >
-          <SelectTrigger size="sm" className="h-8 text-xs">
-            <SelectValue>{filterLabel}</SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all" className="text-xs">
-              All ({activeFiles.length})
-            </SelectItem>
-            <SelectItem value="pending" className="text-xs">
-              Pending
-            </SelectItem>
-            <SelectItem value="uploaded" className="text-xs">
-              Uploaded
-            </SelectItem>
-            <SelectItem value="processing" className="text-xs">
-              Processing
-            </SelectItem>
-            <SelectItem value="completed" className="text-xs">
-              Completed
-            </SelectItem>
-            <SelectItem value="failed" className="text-xs">
-              Failed
-            </SelectItem>
-          </SelectContent>
-        </Select>
-        <Select
-          value={sortField}
-          onValueChange={(v) => setSortField(v as SortField)}
-        >
-          <SelectTrigger size="sm" className="h-8 text-xs">
-            <SelectValue>
-              Sort:{" "}
-              {sortField === "name"
-                ? "Name"
-                : sortField === "size"
-                  ? "Size"
-                  : sortField === "date"
-                    ? "Date"
-                    : "Status"}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="name" className="text-xs">
-              Sort: Name
-            </SelectItem>
-            <SelectItem value="size" className="text-xs">
-              Sort: Size
-            </SelectItem>
-            <SelectItem value="date" className="text-xs">
-              Sort: Date
-            </SelectItem>
-            <SelectItem value="status" className="text-xs">
-              Sort: Status
-            </SelectItem>
-          </SelectContent>
-        </Select>
-        {dismissedFiles.length > 0 && (
-          <Button
-            variant={showDismissed ? "secondary" : "ghost"}
-            size="sm"
-            className="h-8 text-xs"
-            onClick={() => setShowDismissed((p) => !p)}
-          >
-            {showDismissed ? "Hide dismissed" : "Show dismissed"}
-          </Button>
-        )}
-        {downloadableFiles.length > 0 && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 gap-1 text-xs"
-            asChild
-          >
-            <a
-              href={`/api/v1/instruments/${instrumentId}/runs/${runId}/download-archive`}
-            >
-              <Download className="size-3" />
-              Download all
-            </a>
-          </Button>
-        )}
-      </div>
-
-      {/* Bulk action bar */}
-      {selectedDetectedIds.length > 0 && !isDeleted && (
-        <div className="flex items-center gap-2 border-b bg-primary/10 px-3 py-1.5 text-sm">
-          <span className="font-medium">
-            {selectedDetectedIds.length} selected
-          </span>
-          <div className="ml-auto flex gap-1">
-            <Button
-              variant="default"
-              size="sm"
-              className="h-7 gap-1 text-xs"
-              onClick={handleBulkUpload}
-              disabled={isPending}
-            >
-              {isPending ? (
-                <Loader2 className="size-3 animate-spin" />
-              ) : (
-                <Upload className="size-3" />
-              )}
-              Upload {selectedDetectedIds.length}
-            </Button>
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 gap-1 text-xs"
-                  disabled={isPending}
-                >
-                  <X className="size-3" />
-                  Dismiss {selectedDetectedIds.length}
-                </Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>
-                    Dismiss {selectedDetectedIds.length} file(s)?
-                  </AlertDialogTitle>
-                  <AlertDialogDescription>
-                    The selected files will be soft-deleted. The watcher will
-                    skip them on future scans.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleBulkDismiss}>
-                    Dismiss
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
+        {/* Toolbar: search, filter, sort */}
+        <div className="flex items-center gap-2 border-b px-3 py-2">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search files..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-8 pl-8 text-xs"
+            />
           </div>
+          <Select
+            value={statusFilter}
+            onValueChange={(v) => setStatusFilter(v as StatusFilter)}
+          >
+            <SelectTrigger size="sm" className="h-8 text-xs">
+              <SelectValue>{filterLabel}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all" className="text-xs">
+                All ({activeFiles.length})
+              </SelectItem>
+              <SelectItem value="pending" className="text-xs">
+                Pending
+              </SelectItem>
+              <SelectItem value="uploaded" className="text-xs">
+                Uploaded
+              </SelectItem>
+              <SelectItem value="processing" className="text-xs">
+                Processing
+              </SelectItem>
+              <SelectItem value="completed" className="text-xs">
+                Completed
+              </SelectItem>
+              <SelectItem value="failed" className="text-xs">
+                Failed
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={sortField}
+            onValueChange={(v) => setSortField(v as SortField)}
+          >
+            <SelectTrigger size="sm" className="h-8 text-xs">
+              <SelectValue>
+                Sort:{" "}
+                {sortField === "name"
+                  ? "Name"
+                  : sortField === "size"
+                    ? "Size"
+                    : sortField === "date"
+                      ? "Date"
+                      : "Status"}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="name" className="text-xs">
+                Sort: Name
+              </SelectItem>
+              <SelectItem value="size" className="text-xs">
+                Sort: Size
+              </SelectItem>
+              <SelectItem value="date" className="text-xs">
+                Sort: Date
+              </SelectItem>
+              <SelectItem value="status" className="text-xs">
+                Sort: Status
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          {dismissedFiles.length > 0 && (
+            <Button
+              variant={showDismissed ? "secondary" : "ghost"}
+              size="sm"
+              className="h-8 text-xs"
+              onClick={() => setShowDismissed((p) => !p)}
+            >
+              {showDismissed ? "Hide dismissed" : "Show dismissed"}
+            </Button>
+          )}
+          {downloadableFiles.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1 text-xs"
+              asChild
+            >
+              <a
+                href={`/api/v1/instruments/${instrumentId}/runs/${runId}/download-archive`}
+              >
+                <Download className="size-3" />
+                Download all
+              </a>
+            </Button>
+          )}
         </div>
-      )}
 
-      {/* Dense file table */}
-      {filteredFiles.length === 0 ? (
-        <p className="py-8 text-center text-sm text-muted-foreground">
-          No files match your filters.
-        </p>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              {!isDeleted && visibleSelectableIds.size > 0 && (
-                <TableHead className="w-10 pr-0 pl-3">
-                  <Checkbox
-                    checked={
-                      allVisibleSelected
-                        ? true
-                        : someVisibleSelected
-                          ? "indeterminate"
-                          : false
-                    }
-                    onCheckedChange={toggleAll}
-                  />
+        {/* Bulk action bar */}
+        {selectedDetectedIds.length > 0 && !isDeleted && (
+          <div className="flex items-center gap-2 border-b bg-primary/10 px-3 py-1.5 text-sm">
+            <span className="font-medium">
+              {selectedDetectedIds.length} selected
+            </span>
+            <div className="ml-auto flex gap-1">
+              <Button
+                variant="default"
+                size="sm"
+                className="h-7 gap-1 text-xs"
+                onClick={handleBulkUpload}
+                disabled={isPending}
+              >
+                {isPending ? (
+                  <Loader2 className="size-3 animate-spin" />
+                ) : (
+                  <Upload className="size-3" />
+                )}
+                Upload {selectedDetectedIds.length}
+              </Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 gap-1 text-xs"
+                    disabled={isPending}
+                  >
+                    <X className="size-3" />
+                    Dismiss {selectedDetectedIds.length}
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>
+                      Dismiss {selectedDetectedIds.length} file(s)?
+                    </AlertDialogTitle>
+                    <AlertDialogDescription>
+                      The selected files will be soft-deleted. The watcher will
+                      skip them on future scans.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleBulkDismiss}>
+                      Dismiss
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
+          </div>
+        )}
+
+        {/* Dense file table */}
+        {filteredFiles.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            No files match your filters.
+          </p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                {!isDeleted && visibleSelectableIds.size > 0 && (
+                  <TableHead className="w-10 pr-0 pl-3">
+                    <Checkbox
+                      checked={
+                        allVisibleSelected
+                          ? true
+                          : someVisibleSelected
+                            ? "indeterminate"
+                            : false
+                      }
+                      onCheckedChange={toggleAll}
+                    />
+                  </TableHead>
+                )}
+                <TableHead className="text-sm font-medium text-muted-foreground">
+                  File name
                 </TableHead>
-              )}
-              <TableHead className="text-sm font-medium text-muted-foreground">
-                File name
-              </TableHead>
-              <TableHead className="text-sm font-medium text-muted-foreground">
-                Size
-              </TableHead>
-              <TableHead className="text-sm font-medium text-muted-foreground">
-                Created
-              </TableHead>
-              <TableHead className="text-sm font-medium text-muted-foreground">
-                Status
-              </TableHead>
-              <TableHead className="w-0" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredFiles.map((file) => {
-              const isDismissed = file.deletedAt !== null;
-              const isSelectable =
-                !isDeleted && file.status === "detected" && !isDismissed;
-              const isSelected = selectedIds.has(file.id);
-              const showRowActions =
-                !isDeleted &&
-                !isDismissed &&
-                file.status === "detected" &&
-                selectedDetectedIds.length === 0;
+                <TableHead className="text-sm font-medium text-muted-foreground">
+                  Size
+                </TableHead>
+                <TableHead className="text-sm font-medium text-muted-foreground">
+                  Created
+                </TableHead>
+                <TableHead className="text-sm font-medium text-muted-foreground">
+                  Status
+                </TableHead>
+                <TableHead className="w-0" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredFiles.map((file) => {
+                const isDismissed = file.deletedAt !== null;
+                const isSelectable =
+                  !isDeleted && file.status === "detected" && !isDismissed;
+                const isSelected = selectedIds.has(file.id);
+                const showRowActions =
+                  !isDeleted &&
+                  !isDismissed &&
+                  file.status === "detected" &&
+                  selectedDetectedIds.length === 0;
 
-              return (
-                <TableRow
-                  key={file.id}
-                  data-state={isSelected ? "selected" : undefined}
-                  className={`group ${isDismissed ? "opacity-50" : ""}`}
-                >
-                  {!isDeleted && visibleSelectableIds.size > 0 && (
-                    <TableCell className="py-2 pr-0 pl-3">
-                      {isSelectable ? (
-                        <Checkbox
-                          checked={isSelected}
-                          onCheckedChange={() => toggleFile(file.id)}
-                        />
+                return (
+                  <TableRow
+                    key={file.id}
+                    data-state={isSelected ? "selected" : undefined}
+                    className={`group ${isDismissed ? "opacity-50" : ""}`}
+                  >
+                    {!isDeleted && visibleSelectableIds.size > 0 && (
+                      <TableCell className="py-2 pr-0 pl-3">
+                        {isSelectable ? (
+                          <Checkbox
+                            checked={isSelected}
+                            onCheckedChange={() => toggleFile(file.id)}
+                          />
+                        ) : (
+                          <div className="size-4" />
+                        )}
+                      </TableCell>
+                    )}
+                    <TableCell className="py-2 font-mono text-sm">
+                      <span className="flex items-center gap-1.5">
+                        {file.filename}
+                        {[
+                          "uploaded",
+                          "processing",
+                          "completed",
+                          "failed",
+                        ].includes(file.status) && (
+                          <a
+                            href={`/api/v1/files/${file.id}/download`}
+                            className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+                          >
+                            <Download className="size-4" />
+                          </a>
+                        )}
+                      </span>
+                    </TableCell>
+                    <TableCell className="py-2 text-sm text-muted-foreground">
+                      {formatBytes(file.sizeBytes)}
+                    </TableCell>
+                    <TableCell className="py-2 text-sm text-muted-foreground">
+                      {file.createdAt ? formatDateTime(file.createdAt) : "—"}
+                    </TableCell>
+                    <TableCell className="py-2">
+                      <StatusBadge file={file} />
+                    </TableCell>
+                    <TableCell className="py-2 pr-3">
+                      {showRowActions ? (
+                        <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-6 gap-1 px-2 text-xs"
+                            onClick={() => handleSingleUpload(file.id)}
+                            disabled={isPending}
+                          >
+                            <Upload className="size-3" />
+                            Upload
+                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 gap-1 px-2 text-xs text-muted-foreground"
+                                disabled={isPending}
+                              >
+                                <X className="size-3" />
+                                Dismiss
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>
+                                  Dismiss file?
+                                </AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  <strong className="font-mono">
+                                    {file.filename}
+                                  </strong>{" "}
+                                  will be soft-deleted. The watcher will skip it
+                                  on future scans.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => handleSingleDismiss(file.id)}
+                                >
+                                  Dismiss
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
                       ) : (
-                        <div className="size-4" />
+                        !isDismissed &&
+                        file.status === "failed" &&
+                        file.s3Key !== null && (
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-6 gap-1 px-2 text-xs"
+                                disabled={isPending}
+                              >
+                                {isPending ? (
+                                  <Loader2 className="size-3 animate-spin" />
+                                ) : (
+                                  <RotateCw className="size-3" />
+                                )}
+                                Reprocess
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>
+                                  Reprocess file?
+                                </AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  <strong className="font-mono">
+                                    {file.filename}
+                                  </strong>{" "}
+                                  will be sent to the Lambda function for
+                                  reprocessing. Any existing report data for
+                                  this file will be cleared.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => handleReprocess(file.id)}
+                                >
+                                  Reprocess
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        )
                       )}
                     </TableCell>
-                  )}
-                  <TableCell className="py-2 font-mono text-sm">
-                    <span className="flex items-center gap-1.5">
-                      {file.filename}
-                      {[
-                        "uploaded",
-                        "processing",
-                        "completed",
-                        "failed",
-                      ].includes(file.status) && (
-                        <a
-                          href={`/api/v1/files/${file.id}/download`}
-                          className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
-                        >
-                          <Download className="size-4" />
-                        </a>
-                      )}
-                    </span>
-                  </TableCell>
-                  <TableCell className="py-2 text-sm text-muted-foreground">
-                    {formatBytes(file.sizeBytes)}
-                  </TableCell>
-                  <TableCell className="py-2 text-sm text-muted-foreground">
-                    {file.createdAt ? formatDateTime(file.createdAt) : "—"}
-                  </TableCell>
-                  <TableCell className="py-2">
-                    <StatusBadge file={file} />
-                  </TableCell>
-                  <TableCell className="py-2 pr-3">
-                    {showRowActions && (
-                      <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-6 gap-1 px-2 text-xs"
-                          onClick={() => handleSingleUpload(file.id)}
-                          disabled={isPending}
-                        >
-                          <Upload className="size-3" />
-                          Upload
-                        </Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 gap-1 px-2 text-xs text-muted-foreground"
-                              disabled={isPending}
-                            >
-                              <X className="size-3" />
-                              Dismiss
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Dismiss file?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                <strong className="font-mono">
-                                  {file.filename}
-                                </strong>{" "}
-                                will be soft-deleted. The watcher will skip it
-                                on future scans.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction
-                                onClick={() => handleSingleDismiss(file.id)}
-                              >
-                                Dismiss
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </div>
-                    )}
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      )}
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
 
-      {/* Summary footer */}
-      <div className="flex items-center justify-between border-t px-3 py-2 text-sm text-muted-foreground">
-        <span>
-          Showing {filteredFiles.length} of {activeFiles.length}
-          {dismissedFiles.length > 0 && showDismissed
-            ? ` (+${dismissedFiles.length} dismissed)`
-            : ""}
-        </span>
-        <span>
-          {pendingCount} pending &middot; {uploadedCount} uploaded
-        </span>
+        {/* Summary footer */}
+        <div className="flex items-center justify-between border-t px-3 py-2 text-sm text-muted-foreground">
+          <span>
+            Showing {filteredFiles.length} of {activeFiles.length}
+            {dismissedFiles.length > 0 && showDismissed
+              ? ` (+${dismissedFiles.length} dismissed)`
+              : ""}
+          </span>
+          <span>
+            {pendingCount} pending &middot; {uploadedCount} uploaded
+          </span>
+        </div>
       </div>
-    </div>
     </div>
   );
 }
