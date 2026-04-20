@@ -1,18 +1,12 @@
-function formatValue(value: unknown): string {
-  if (Array.isArray(value)) return value.join(", ");
-  if (value === null || value === undefined) return "—";
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
-}
+import type { ReactNode } from "react";
 
 export function RunMetadata({
-  metadata,
+  children,
 }: {
   metadata: Record<string, unknown>;
+  children?: ReactNode;
 }) {
-  const entries = Object.entries(metadata);
-
-  if (entries.length === 0) {
+  if (!children) {
     return (
       <div className="flex items-center rounded-lg border px-4 py-3">
         <div>
@@ -30,13 +24,8 @@ export function RunMetadata({
       <div className="px-4 py-3">
         <p className="text-sm font-semibold">Instrument metadata</p>
       </div>
-      <div className="flex flex-wrap gap-x-6 gap-y-1 border-t px-4 py-3">
-        {entries.map(([key, value]) => (
-          <span key={key} className="text-xs text-muted-foreground">
-            <span className="font-mono">{key}</span>:{" "}
-            <span className="text-foreground">{formatValue(value)}</span>
-          </span>
-        ))}
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t px-4 py-3">
+        {children}
       </div>
     </div>
   );
