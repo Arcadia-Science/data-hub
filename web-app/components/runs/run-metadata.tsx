@@ -8,9 +8,9 @@ export function RunMetadata({
 }) {
   if (!children) {
     return (
-      <div className="flex items-center rounded-lg border px-4 py-3">
-        <div>
-          <p className="text-sm font-semibold">Instrument metadata</p>
+      <div className="flex flex-col gap-2">
+        <h2 className="text-sm font-semibold">Metadata</h2>
+        <div className="flex items-center rounded-lg border px-4 py-3">
           <p className="text-xs text-muted-foreground">
             No metadata recorded yet
           </p>
@@ -20,12 +20,12 @@ export function RunMetadata({
   }
 
   return (
-    <div className="rounded-lg border">
-      <div className="px-4 py-3">
-        <p className="text-sm font-semibold">Instrument metadata</p>
-      </div>
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t px-4 py-3">
-        {children}
+    <div className="flex flex-col gap-2">
+      <h2 className="text-sm font-semibold">Metadata</h2>
+      <div className="rounded-lg border">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3">
+          {children}
+        </div>
       </div>
     </div>
   );

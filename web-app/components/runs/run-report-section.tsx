@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import type { RunFile } from "@/lib/api/instrument-runs";
 import { ExternalLink } from "lucide-react";
 
@@ -41,34 +41,34 @@ export function RunReportSection({ files }: { files: RunFile[] }) {
 
   if (processedImages.length === 0) {
     return (
-      <Card size="sm">
-        <CardHeader>
-          <CardTitle>Report Data</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">
-            No report data has been generated for this run.
-          </p>
-        </CardContent>
-      </Card>
+      <div className="flex flex-col gap-2">
+        <h2 className="text-sm font-semibold">Report Data</h2>
+        <Card size="sm">
+          <CardContent>
+            <p className="text-sm text-muted-foreground">
+              No report data has been generated for this run.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
   return (
-    <Card size="sm">
-      <CardHeader>
-        <CardTitle>
-          Report Data{" "}
-          <span className="ml-1 font-mono text-xs font-normal text-muted-foreground">
-            {processedImages.length} image(s)
-          </span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-6">
-        {processedImages.map((file) => (
-          <ProcessedImagePreview key={file.id} file={file} />
-        ))}
-      </CardContent>
-    </Card>
+    <div className="flex flex-col gap-2">
+      <h2 className="text-sm font-semibold">
+        Report Data{" "}
+        <span className="ml-1 font-mono text-xs font-normal text-muted-foreground">
+          {processedImages.length} image(s)
+        </span>
+      </h2>
+      <Card size="sm">
+        <CardContent className="flex flex-col gap-6">
+          {processedImages.map((file) => (
+            <ProcessedImagePreview key={file.id} file={file} />
+          ))}
+        </CardContent>
+      </Card>
+    </div>
   );
 }

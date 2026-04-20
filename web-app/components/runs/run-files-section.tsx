@@ -337,7 +337,9 @@ export function RunFilesSection({
     statusFilter === "all" ? `All (${activeFiles.length})` : undefined;
 
   return (
-    <div className="rounded-lg border">
+    <div className="flex flex-col gap-2">
+      <h2 className="text-sm font-semibold">Files</h2>
+      <div className="rounded-lg border">
       {/* Toolbar: search, filter, sort */}
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <div className="relative flex-1">
@@ -653,6 +655,7 @@ export function RunFilesSection({
           {pendingCount} pending &middot; {uploadedCount} uploaded
         </span>
       </div>
+    </div>
     </div>
   );
 }

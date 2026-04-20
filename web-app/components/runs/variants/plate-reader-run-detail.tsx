@@ -8,7 +8,7 @@ import { RestoreRunButton } from "@/components/runs/restore-run-button";
 import type { RunDetailProps } from "@/components/runs/run-detail";
 import { RunDetail } from "@/components/runs/run-detail";
 import { PlateReaderRunBadges } from "@/components/runs/run-metadata-badges";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import type { RawWellRow } from "@/lib/api/instrument-runs";
 
 /** Measurement types whose well values are numeric and benefit from color-coded heatmaps. */
@@ -223,40 +223,40 @@ function PlateMapSection({
   if (groups.length === 0) return null;
 
   return (
-    <Card size="sm">
-      <CardHeader>
-        <CardTitle>
-          Plate Maps{" "}
-          <span className="ml-1 font-mono text-xs font-normal text-muted-foreground">
-            {groups.length} map(s)
-          </span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-6">
-        <div className="flex flex-col gap-10">
-          {groups.map((g, i) =>
-            g.mode === "kinetic" ? (
-              <KineticPlateMapWithTimeSlider
-                key={i}
-                timeLabels={g.timeLabels}
-                frames={g.frames}
-                heatmap={heatmap}
-                plateName={g.plateName}
-                wavelength={g.wavelength}
-              />
-            ) : (
-              <PlateMapGrid
-                key={i}
-                data={g.wells}
-                heatmap={heatmap}
-                plateName={g.plateName}
-                wavelength={g.wavelength}
-              />
-            )
-          )}
-        </div>
-      </CardContent>
-    </Card>
+    <div className="flex flex-col gap-2">
+      <h2 className="text-sm font-semibold">
+        Plate Maps{" "}
+        <span className="ml-1 font-mono text-xs font-normal text-muted-foreground">
+          {groups.length} map(s)
+        </span>
+      </h2>
+      <Card size="sm">
+        <CardContent className="flex flex-col gap-6">
+          <div className="flex flex-col gap-10">
+            {groups.map((g, i) =>
+              g.mode === "kinetic" ? (
+                <KineticPlateMapWithTimeSlider
+                  key={i}
+                  timeLabels={g.timeLabels}
+                  frames={g.frames}
+                  heatmap={heatmap}
+                  plateName={g.plateName}
+                  wavelength={g.wavelength}
+                />
+              ) : (
+                <PlateMapGrid
+                  key={i}
+                  data={g.wells}
+                  heatmap={heatmap}
+                  plateName={g.plateName}
+                  wavelength={g.wavelength}
+                />
+              )
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
