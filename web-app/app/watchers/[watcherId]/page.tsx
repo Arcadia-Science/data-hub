@@ -9,6 +9,7 @@ import {
 } from "@/lib/api/watchers";
 import { auth } from "@/lib/auth";
 import { watcherDetailParamsCache } from "@/lib/search-params";
+import { todayDateString } from "@/lib/date";
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next/types";
 
@@ -35,7 +36,8 @@ export default async function WatcherDetailPage({
   const { watcherId } = await params;
   const filters = watcherDetailParamsCache.parse(await searchParams);
 
-  const heartbeatSince = filters.since ? new Date(filters.since) : undefined;
+  const effectiveSince = filters.since ?? todayDateString();
+  const heartbeatSince = new Date(effectiveSince + "T00:00:00");
   const eventsSince = filters.events_since
     ? new Date(filters.events_since)
     : undefined;
