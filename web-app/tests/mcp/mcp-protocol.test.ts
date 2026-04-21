@@ -105,6 +105,27 @@ vi.mock("@/lib/api/instrument-runs", () => ({
     wavelengths: ["520"],
     colors: ["Green"],
   }),
+  getAttributionsByRunIds: vi.fn().mockResolvedValue(new Map()),
+  getRanByFilterOptions: vi
+    .fn()
+    .mockResolvedValue([{ userId: "u-1", displayName: "Alice" }]),
+}));
+
+// The write-tool happy path goes through the raw Drizzle client. Stub out
+// the chainable methods that `claim_run` / `unclaim_run` use so the tools
+// can be invoked without a real database. A real end-to-end write test
+// lives in the HTTP integration suite.
+vi.mock("@/lib/db", () => ({
+  db: {
+    insert: () => ({
+      values: () => ({
+        onConflictDoNothing: () => Promise.resolve(),
+      }),
+    }),
+    delete: () => ({
+      where: () => Promise.resolve(),
+    }),
+  },
 }));
 
 vi.mock("@/lib/api/dashboard", () => ({
@@ -230,9 +251,12 @@ describe("MCP Protocol (in-memory)", () => {
     "get_run_archive_path",
     "reprocess_file",
     "get_watcher_heartbeats",
+    "claim_run",
+    "unclaim_run",
+    "list_run_attributors",
   ] as const;
 
-  const WRITE_TOOLS = new Set(["reprocess_file"]);
+  const WRITE_TOOLS = new Set(["reprocess_file", "claim_run", "unclaim_run"]);
 
   it("registers all expected tools", async () => {
     const { tools } = await client.listTools();
@@ -282,6 +306,46 @@ describe("MCP Protocol (in-memory)", () => {
 
     const heartbeats = tools.find((t) => t.name === "get_watcher_heartbeats")!;
     expect(heartbeats.inputSchema.properties).toHaveProperty("watcherId");
+
+    // Attribution tools intentionally do NOT expose a `userId` argument — the
+    // authenticated user is pulled from `authInfo.extra.userId` on the server
+    // so the wire API has no spoofable slot.
+    const claimRun = tools.find((t) => t.name === "claim_run")!;
+    expect(claimRun.inputSchema.properties).toHaveProperty("instrumentId");
+    expect(claimRun.inputSchema.properties).toHaveProperty("runId");
+    expect(claimRun.inputSchema.properties).not.toHaveProperty("userId");
+
+    const unclaimRun = tools.find((t) => t.name === "unclaim_run")!;
+    expect(unclaimRun.inputSchema.properties).toHaveProperty("instrumentId");
+    expect(unclaimRun.inputSchema.properties).toHaveProperty("runId");
+    expect(unclaimRun.inputSchema.properties).not.toHaveProperty("userId");
+
+    const listAttributors = tools.find(
+      (t) => t.name === "list_run_attributors"
+    )!;
+    expect(listAttributors.inputSchema.properties).toHaveProperty(
+      "instrumentId"
+    );
+
+    // search_runs gained a `ranBy` filter alongside the new attribution tools.
+    const searchRuns = tools.find((t) => t.name === "search_runs")!;
+    expect(searchRuns.inputSchema.properties).toHaveProperty("ranBy");
+  });
+
+  it("claim_run is annotated as write / non-destructive / idempotent", async () => {
+    const { tools } = await client.listTools();
+    const tool = tools.find((t) => t.name === "claim_run")!;
+    expect(tool.annotations?.readOnlyHint).toBe(false);
+    expect(tool.annotations?.destructiveHint).toBe(false);
+    expect(tool.annotations?.idempotentHint).toBe(true);
+  });
+
+  it("unclaim_run is annotated as write / destructive / idempotent", async () => {
+    const { tools } = await client.listTools();
+    const tool = tools.find((t) => t.name === "unclaim_run")!;
+    expect(tool.annotations?.readOnlyHint).toBe(false);
+    expect(tool.annotations?.destructiveHint).toBe(true);
+    expect(tool.annotations?.idempotentHint).toBe(true);
   });
 
   // ---- Tool execution (happy path) ----------------------------------------
@@ -488,6 +552,44 @@ describe("MCP Protocol (in-memory)", () => {
     const tool = tools.find((t) => t.name === "reprocess_file")!;
     expect(tool.annotations?.readOnlyHint).toBe(false);
     expect(tool.annotations?.destructiveHint).toBe(true);
+  });
+
+  it("list_run_attributors returns the mocked list", async () => {
+    const result = await client.callTool({
+      name: "list_run_attributors",
+      arguments: { instrumentId: "test-plate-reader" },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as Array<{
+      userId: string;
+      displayName: string;
+    }>;
+    expect(parsed).toEqual([{ userId: "u-1", displayName: "Alice" }]);
+  });
+
+  // The in-memory transport does not supply `authInfo`, so the tool must
+  // refuse to attribute anything. The happy path lives in the HTTP suite
+  // where a real Bearer token resolves `authInfo.extra.userId`.
+  it("claim_run without authInfo reports an authenticated-user error", async () => {
+    const result = await client.callTool({
+      name: "claim_run",
+      arguments: { instrumentId: "test-plate-reader", runId: "run-1" },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ type: string; text: string }>)[0]
+      .text;
+    expect(text).toContain("Authenticated user not available");
+  });
+
+  it("unclaim_run without authInfo reports an authenticated-user error", async () => {
+    const result = await client.callTool({
+      name: "unclaim_run",
+      arguments: { instrumentId: "test-plate-reader", runId: "run-1" },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ type: string; text: string }>)[0]
+      .text;
+    expect(text).toContain("Authenticated user not available");
   });
 
   // ---- Resources -----------------------------------------------------------

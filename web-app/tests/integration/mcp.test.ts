@@ -6,7 +6,7 @@ import {
   resetDb,
   seedTestUser,
 } from "@/tests/integration/helpers";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 function jsonRpc(method: string, params: unknown = {}, id: number = 1) {
   return {
@@ -37,23 +37,63 @@ async function parseSseResponse(res: Response) {
 
 describe("MCP Server (HTTP)", () => {
   let token: string;
+  let userId: string;
+  let tokenB: string;
+
+  const instrumentId = "mcp-test-instrument";
+  const runId = "mcp-test-run";
 
   beforeAll(async () => {
     await resetDb();
-    ({ token } = await seedTestUser());
+    ({ token, userId } = await seedTestUser());
+    ({ token: tokenB } = await seedTestUser());
 
     const db = getTestDb();
     await db.insert(schema.instruments).values({
-      id: "mcp-test-instrument",
+      id: instrumentId,
       displayName: "MCP Test Instrument",
       status: "active",
       instrumentType: "plate_reader",
     });
+
+    await db.insert(schema.instrumentRuns).values({
+      instrumentId,
+      runId,
+      source: "lambda",
+    });
+  });
+
+  // Wipe attributions between tool-call tests so each one controls the state
+  // it asserts against. The seeded run cascades from `instrument_runs` and
+  // survives the delete.
+  beforeEach(async () => {
+    const db = getTestDb();
+    await db.delete(schema.runAttributions);
   });
 
   afterAll(async () => {
     await closeTestDb();
   });
+
+  // Helper — POST a tools/call request and return the parsed JSON-RPC result.
+  async function callTool(
+    name: string,
+    args: Record<string, unknown>,
+    bearer: string = token
+  ): Promise<{
+    isError?: boolean;
+    content: Array<{ type: string; text: string }>;
+  }> {
+    const res = await api("/api/v1/mcp", {
+      method: "POST",
+      token: bearer,
+      headers: MCP_HEADERS,
+      body: jsonRpc("tools/call", { name, arguments: args }),
+    });
+    expect(res.status).toBe(200);
+    const data = await parseSseResponse(res);
+    return data.result;
+  }
 
   // ---- Auth ----------------------------------------------------------------
 
@@ -116,7 +156,10 @@ describe("MCP Server (HTTP)", () => {
     expect(toolNames).toContain("list_watchers");
     expect(toolNames).toContain("get_watcher_heartbeats");
     expect(toolNames).toContain("reprocess_file");
-    expect(toolNames).toHaveLength(12);
+    expect(toolNames).toContain("claim_run");
+    expect(toolNames).toContain("unclaim_run");
+    expect(toolNames).toContain("list_run_attributors");
+    expect(toolNames).toHaveLength(15);
   });
 
   // ---- Tool execution (end-to-end) -----------------------------------------
@@ -137,9 +180,119 @@ describe("MCP Server (HTTP)", () => {
     const text = data.result.content[0].text;
     const instruments = JSON.parse(text);
     expect(instruments).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: "mcp-test-instrument" }),
-      ])
+      expect.arrayContaining([expect.objectContaining({ id: instrumentId })])
     );
+  });
+
+  // ---- Attribution tools (end-to-end) --------------------------------------
+
+  // These tests exercise the auth wiring: `authInfo.extra.userId` is the only
+  // user id ever written, regardless of what the client sneaks into
+  // arguments. They also cover idempotency and the `ranBy` filter that
+  // `search_runs` now accepts.
+
+  it("claim_run attributes the run to the token's user and is idempotent", async () => {
+    const first = await callTool("claim_run", {
+      instrumentId,
+      runId,
+    });
+    expect(first.isError).toBeFalsy();
+    const firstParsed = JSON.parse(first.content[0].text);
+    expect(firstParsed.attributions).toHaveLength(1);
+    expect(firstParsed.attributions[0].userId).toBe(userId);
+
+    const second = await callTool("claim_run", { instrumentId, runId });
+    expect(second.isError).toBeFalsy();
+    const secondParsed = JSON.parse(second.content[0].text);
+    expect(secondParsed.attributions).toHaveLength(1);
+    expect(secondParsed.attributions[0].userId).toBe(userId);
+  });
+
+  it("claim_run ignores a spoofed userId argument — the token's user is the attributor", async () => {
+    const result = await callTool("claim_run", {
+      instrumentId,
+      runId,
+      userId: "some-other-user",
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.attributions).toHaveLength(1);
+    expect(parsed.attributions[0].userId).toBe(userId);
+    expect(parsed.attributions[0].userId).not.toBe("some-other-user");
+  });
+
+  it("claim_run on a nonexistent run returns an error", async () => {
+    const result = await callTool("claim_run", {
+      instrumentId,
+      runId: "nonexistent-run",
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text.toLowerCase()).toContain("not found");
+  });
+
+  it("unclaim_run removes attribution and is idempotent", async () => {
+    await callTool("claim_run", { instrumentId, runId });
+
+    const first = await callTool("unclaim_run", { instrumentId, runId });
+    expect(first.isError).toBeFalsy();
+    const firstParsed = JSON.parse(first.content[0].text);
+    expect(firstParsed.attributions).toEqual([]);
+
+    const second = await callTool("unclaim_run", { instrumentId, runId });
+    expect(second.isError).toBeFalsy();
+    const secondParsed = JSON.parse(second.content[0].text);
+    expect(secondParsed.attributions).toEqual([]);
+  });
+
+  it("search_runs ranBy=<userId> filters runs to that user's attributions", async () => {
+    // User A claims the seeded run, then user B searches by user A's id.
+    await callTool("claim_run", { instrumentId, runId });
+
+    const ranByA = await callTool(
+      "search_runs",
+      { instrumentId, ranBy: userId },
+      tokenB
+    );
+    expect(ranByA.isError).toBeFalsy();
+    const ranByAParsed = JSON.parse(ranByA.content[0].text);
+    const ranByARunIds = ranByAParsed.data.map(
+      (r: { run_id: string }) => r.run_id
+    );
+    expect(ranByARunIds).toContain(runId);
+
+    const unattributed = await callTool(
+      "search_runs",
+      { instrumentId, ranBy: "unattributed" },
+      tokenB
+    );
+    expect(unattributed.isError).toBeFalsy();
+    const unattributedParsed = JSON.parse(unattributed.content[0].text);
+    const unattributedRunIds = unattributedParsed.data.map(
+      (r: { run_id: string }) => r.run_id
+    );
+    expect(unattributedRunIds).not.toContain(runId);
+  });
+
+  it("list_run_attributors returns the set of attributors for an instrument", async () => {
+    await callTool("claim_run", { instrumentId, runId });
+
+    const result = await callTool("list_run_attributors", { instrumentId });
+    expect(result.isError).toBeFalsy();
+    const parsed = JSON.parse(result.content[0].text) as Array<{
+      userId: string;
+      displayName: string;
+    }>;
+    expect(parsed.map((p) => p.userId)).toContain(userId);
+  });
+
+  it("get_run response includes the attributions array", async () => {
+    await callTool("claim_run", { instrumentId, runId });
+
+    const result = await callTool("get_run", { instrumentId, runId });
+    expect(result.isError).toBeFalsy();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(Array.isArray(parsed.attributions)).toBe(true);
+    expect(parsed.attributions).toHaveLength(1);
+    expect(parsed.attributions[0].userId).toBe(userId);
   });
 });
