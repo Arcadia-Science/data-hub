@@ -55,8 +55,8 @@ function ColorBadge({
 export function hasPlateReaderMetadata(metadata: Record<string, unknown>) {
   return Boolean(
     getMetadataField(metadata, "wavelength") ||
-      getMetadataField(metadata, "measurement_mode") ||
-      getMetadataField(metadata, "measurement_type"),
+    getMetadataField(metadata, "measurement_mode") ||
+    getMetadataField(metadata, "measurement_type")
   );
 }
 
@@ -99,9 +99,9 @@ export function PlateReaderRunBadges({
 export function hasGelDocMetadata(metadata: Record<string, unknown>) {
   return Boolean(
     getMetadataField(metadata, "capture_type") ||
-      getMetadataField(metadata, "imaging_mode") ||
-      getMetadataArray(metadata, "wavelengths").length ||
-      getMetadataArray(metadata, "colors").length,
+    getMetadataField(metadata, "imaging_mode") ||
+    getMetadataArray(metadata, "wavelengths").length ||
+    getMetadataArray(metadata, "colors").length
   );
 }
 
