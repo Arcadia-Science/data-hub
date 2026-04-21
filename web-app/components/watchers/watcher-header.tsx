@@ -1,10 +1,17 @@
 import { Badge } from "@/components/ui/badge";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
 import { DeregisterDialog } from "@/components/watchers/deregister-dialog";
 import { statusBadge } from "@/components/watchers/status-badge";
 import type { WatcherDetail } from "@/lib/api/watchers";
 import { formatDate } from "@/lib/date";
 import { formatRelativeTime } from "@/lib/utils";
-import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
 
 export function WatcherHeader({ watcher }: { watcher: WatcherDetail }) {
@@ -13,13 +20,21 @@ export function WatcherHeader({ watcher }: { watcher: WatcherDetail }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <Link
-        href="/watchers"
-        className="flex w-fit items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <ArrowLeft className="size-3.5" />
-        Back to watchers
-      </Link>
+      <Breadcrumb>
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <BreadcrumbLink asChild>
+              <Link href="/watchers">Watchers</Link>
+            </BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbPage>
+              {watcher.hostname ?? "Unnamed Watcher"}
+            </BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
 
       {/* Deregistered watchers get a muted, dashed-border treatment to
           visually signal that this is historical data. The deregister action
