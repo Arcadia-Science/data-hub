@@ -1,5 +1,6 @@
 "use client";
 
+import { useTablePending } from "@/components/table-pending";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -33,9 +34,11 @@ export function FilterableColumnHeader({
   paramKey: FilterParamKey;
   options: string[];
 }) {
+  const { startTransition } = useTablePending();
   const [filters, setFilters] = useQueryStates(instrumentDetailSearchParams, {
     shallow: false,
     throttleMs: 300,
+    startTransition,
   });
 
   const currentValue = filters[paramKey];

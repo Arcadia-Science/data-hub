@@ -3,6 +3,10 @@ import { InstrumentRunsToolbar } from "@/components/instruments/instrument-runs-
 import { InstrumentRunsTable } from "@/components/instruments/runs-table";
 import { PaginationNav } from "@/components/pagination-nav";
 import {
+  TablePendingBoundary,
+  TablePendingProvider,
+} from "@/components/table-pending";
+import {
   buildRunListQuery,
   getGelDocFilterOptions,
   getPlateReaderFilterOptions,
@@ -91,21 +95,25 @@ export default async function InstrumentDetailPage({
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6 p-6">
       <InstrumentHeader instrument={instrument} />
-      <InstrumentRunsToolbar />
-      <InstrumentRunsTable
-        data={runResult.data}
-        instrumentId={instrumentId}
-        instrumentType={instrument.instrumentType}
-        hasFilters={hasFilters}
-        filterOptions={filterOptions}
-        gelDocFilterOptions={gelDocFilterOptions}
-        qpcrFilterOptions={qpcrFilterOptions}
-      />
-      <PaginationNav
-        page={runResult.pagination.page}
-        totalPages={runResult.pagination.total_pages}
-        pageParam="page"
-      />
+      <TablePendingProvider>
+        <InstrumentRunsToolbar />
+        <TablePendingBoundary>
+          <InstrumentRunsTable
+            data={runResult.data}
+            instrumentId={instrumentId}
+            instrumentType={instrument.instrumentType}
+            hasFilters={hasFilters}
+            filterOptions={filterOptions}
+            gelDocFilterOptions={gelDocFilterOptions}
+            qpcrFilterOptions={qpcrFilterOptions}
+          />
+        </TablePendingBoundary>
+        <PaginationNav
+          page={runResult.pagination.page}
+          totalPages={runResult.pagination.total_pages}
+          pageParam="page"
+        />
+      </TablePendingProvider>
     </div>
   );
 }

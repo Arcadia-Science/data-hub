@@ -5,6 +5,10 @@ import {
 import { RunsTable } from "@/components/dashboard/runs-table";
 import { RunsToolbar } from "@/components/dashboard/runs-toolbar";
 import { PaginationNav } from "@/components/pagination-nav";
+import {
+  TablePendingBoundary,
+  TablePendingProvider,
+} from "@/components/table-pending";
 import { getInstruments } from "@/lib/api/dashboard";
 import { buildRunListQuery } from "@/lib/api/instrument-runs";
 import { auth } from "@/lib/auth";
@@ -65,14 +69,18 @@ export default async function DashboardPage({
         <InstrumentCards />
       </Suspense>
 
-      <RunsToolbar instruments={instruments} />
+      <TablePendingProvider>
+        <RunsToolbar instruments={instruments} />
 
-      <RunsTable data={runResult.data} hasFilters={hasFilters} />
-      <PaginationNav
-        page={runResult.pagination.page}
-        totalPages={runResult.pagination.total_pages}
-        pageParam="page"
-      />
+        <TablePendingBoundary>
+          <RunsTable data={runResult.data} hasFilters={hasFilters} />
+        </TablePendingBoundary>
+        <PaginationNav
+          page={runResult.pagination.page}
+          totalPages={runResult.pagination.total_pages}
+          pageParam="page"
+        />
+      </TablePendingProvider>
     </div>
   );
 }

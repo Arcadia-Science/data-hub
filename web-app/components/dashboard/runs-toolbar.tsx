@@ -1,5 +1,6 @@
 "use client";
 
+import { useTablePending } from "@/components/table-pending";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -58,9 +59,11 @@ function resolvePreset(dateFrom: string | null): string {
 }
 
 export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
+  const { startTransition } = useTablePending();
   const [filters, setFilters] = useQueryStates(dashboardSearchParams, {
     shallow: false,
     throttleMs: 300,
+    startTransition,
   });
 
   const [instrumentOpen, setInstrumentOpen] = useState(false);
