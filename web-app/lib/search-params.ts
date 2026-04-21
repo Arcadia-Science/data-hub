@@ -41,6 +41,8 @@ export const instrumentDetailSearchParams = {
   imaging_mode: parseAsString,
   gel_wavelength: parseAsString,
   gel_color: parseAsString,
+  // qPCR metadata column filters.
+  dye_channel: parseAsString,
 };
 
 export const instrumentDetailParamsCache = createSearchParamsCache(

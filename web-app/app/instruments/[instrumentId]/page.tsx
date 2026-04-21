@@ -6,6 +6,7 @@ import {
   buildRunListQuery,
   getGelDocFilterOptions,
   getPlateReaderFilterOptions,
+  getQpcrFilterOptions,
 } from "@/lib/api/instrument-runs";
 import { getInstrumentById } from "@/lib/api/instruments";
 import { auth } from "@/lib/auth";
@@ -55,6 +56,7 @@ export default async function InstrumentDetailPage({
       imagingMode: filters.imaging_mode ?? undefined,
       gelWavelength: filters.gel_wavelength ?? undefined,
       gelColor: filters.gel_color ?? undefined,
+      dyeChannel: filters.dye_channel ?? undefined,
     }),
   ]);
 
@@ -62,12 +64,15 @@ export default async function InstrumentDetailPage({
 
   const isPlateReader = instrument.instrumentType === "plate_reader";
   const isGelDoc = instrument.instrumentType === "gel_doc";
+  const isQpcr = instrument.instrumentType === "qpcr";
 
   // Fetch distinct metadata values for instrument-specific column filter dropdowns.
-  const [filterOptions, gelDocFilterOptions] = await Promise.all([
-    isPlateReader ? getPlateReaderFilterOptions(instrumentId) : undefined,
-    isGelDoc ? getGelDocFilterOptions(instrumentId) : undefined,
-  ]);
+  const [filterOptions, gelDocFilterOptions, qpcrFilterOptions] =
+    await Promise.all([
+      isPlateReader ? getPlateReaderFilterOptions(instrumentId) : undefined,
+      isGelDoc ? getGelDocFilterOptions(instrumentId) : undefined,
+      isQpcr ? getQpcrFilterOptions(instrumentId) : undefined,
+    ]);
 
   const hasFilters =
     filters.search !== "" ||
@@ -80,7 +85,8 @@ export default async function InstrumentDetailPage({
     filters.capture_type !== null ||
     filters.imaging_mode !== null ||
     filters.gel_wavelength !== null ||
-    filters.gel_color !== null;
+    filters.gel_color !== null ||
+    filters.dye_channel !== null;
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6 p-6">
@@ -93,6 +99,7 @@ export default async function InstrumentDetailPage({
         hasFilters={hasFilters}
         filterOptions={filterOptions}
         gelDocFilterOptions={gelDocFilterOptions}
+        qpcrFilterOptions={qpcrFilterOptions}
       />
       <PaginationNav
         page={runResult.pagination.page}

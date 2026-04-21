@@ -56,6 +56,20 @@ export const MEASUREMENT_MODE_COLORS: Record<string, string> = {
     "border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-300",
 };
 
+// ---------- qPCR ----------
+
+// Known qPCR dye channels. Unknown values fall through to the hash-based cycle
+// below so the same label always maps to the same color across the table and
+// the run-detail metadata section.
+export const DYE_CHANNEL_COLORS: Record<string, string> = {
+  HEX: "border-stone-200 bg-stone-50 text-stone-700 dark:border-stone-800 dark:bg-stone-950 dark:text-stone-300",
+  TAMRA:
+    "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300",
+  ROX: "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300",
+  "ORANGE 560":
+    "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300",
+};
+
 // ---------- Shared wavelength cycle ----------
 
 export const WAVELENGTH_COLOR_CYCLE = [
@@ -81,4 +95,29 @@ export function buildWavelengthColorMap(
     map[sorted[i]] = WAVELENGTH_COLOR_CYCLE[i % WAVELENGTH_COLOR_CYCLE.length];
   }
   return map;
+}
+
+/**
+ * Deterministic djb2-style hash for stable color assignment. Using a hash
+ * (rather than sorted-index) means a label gets the same cycle color no matter
+ * which subset of labels it appears alongside.
+ */
+function hashLabel(s: string): number {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+  }
+  return h;
+}
+
+/**
+ * Stable color for a qPCR dye channel: named entries from
+ * `DYE_CHANNEL_COLORS`, otherwise a deterministic slot from
+ * `WAVELENGTH_COLOR_CYCLE` keyed by the label itself.
+ */
+export function getDyeChannelColor(channel: string): string {
+  return (
+    DYE_CHANNEL_COLORS[channel] ??
+    WAVELENGTH_COLOR_CYCLE[hashLabel(channel) % WAVELENGTH_COLOR_CYCLE.length]
+  );
 }

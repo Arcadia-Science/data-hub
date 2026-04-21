@@ -6,6 +6,7 @@ import {
   MEASUREMENT_MODE_COLORS,
   MEASUREMENT_TYPE_COLORS,
   buildWavelengthColorMap,
+  getDyeChannelColor,
 } from "@/lib/instrument-colors";
 import { cn } from "@/lib/utils";
 
@@ -158,7 +159,7 @@ export function QpcrRunBadges({
   return (
     <MetadataRow label="Dye Channels">
       {dyeChannels.map((ch) => (
-        <ColorBadge key={ch} value={ch} />
+        <ColorBadge key={ch} value={ch} colorClass={getDyeChannelColor(ch)} />
       ))}
     </MetadataRow>
   );

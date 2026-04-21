@@ -21,7 +21,8 @@ type FilterParamKey =
   | "capture_type"
   | "imaging_mode"
   | "gel_wavelength"
-  | "gel_color";
+  | "gel_color"
+  | "dye_channel";
 
 export function FilterableColumnHeader({
   label,
