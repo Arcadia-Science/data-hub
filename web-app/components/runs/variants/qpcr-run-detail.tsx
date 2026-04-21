@@ -3,11 +3,11 @@ import { RestoreRunButton } from "@/components/runs/restore-run-button";
 import type { RunDetailProps } from "@/components/runs/run-detail";
 import { RunDetail } from "@/components/runs/run-detail";
 import {
-  GelDocRunBadges,
-  hasGelDocMetadata,
+  hasQpcrMetadata,
+  QpcrRunBadges,
 } from "@/components/runs/run-metadata-badges";
 
-export function GelDocRunDetail({
+export function QpcrRunDetail({
   run,
   files,
   instrumentId,
@@ -37,11 +37,9 @@ export function GelDocRunDetail({
       </RunDetail.Header>
 
       <RunDetail.FilesMetadataLayout>
-        {hasGelDocMetadata(run.metadata as Record<string, unknown>) && (
+        {hasQpcrMetadata(run.metadata as Record<string, unknown>) && (
           <RunDetail.Metadata>
-            <GelDocRunBadges
-              metadata={run.metadata as Record<string, unknown>}
-            />
+            <QpcrRunBadges metadata={run.metadata as Record<string, unknown>} />
           </RunDetail.Metadata>
         )}
         <RunDetail.Files

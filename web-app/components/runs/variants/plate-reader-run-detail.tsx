@@ -7,7 +7,10 @@ import {
 import { RestoreRunButton } from "@/components/runs/restore-run-button";
 import type { RunDetailProps } from "@/components/runs/run-detail";
 import { RunDetail } from "@/components/runs/run-detail";
-import { PlateReaderRunBadges } from "@/components/runs/run-metadata-badges";
+import {
+  hasPlateReaderMetadata,
+  PlateReaderRunBadges,
+} from "@/components/runs/run-metadata-badges";
 import { Card, CardContent } from "@/components/ui/card";
 import type { RawWellRow } from "@/lib/api/instrument-runs";
 
@@ -297,11 +300,13 @@ export function PlateReaderRunDetail({
       </RunDetail.Header>
 
       <RunDetail.FilesMetadataLayout>
-        <RunDetail.Metadata>
-          <PlateReaderRunBadges
-            metadata={run.metadata as Record<string, unknown>}
-          />
-        </RunDetail.Metadata>
+        {hasPlateReaderMetadata(run.metadata as Record<string, unknown>) && (
+          <RunDetail.Metadata>
+            <PlateReaderRunBadges
+              metadata={run.metadata as Record<string, unknown>}
+            />
+          </RunDetail.Metadata>
+        )}
         <RunDetail.Files
           files={files}
           instrumentId={instrumentId}

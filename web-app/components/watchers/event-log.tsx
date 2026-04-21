@@ -2,6 +2,7 @@
 
 import { CopyButton } from "@/components/copy-button";
 import { PaginationNav } from "@/components/pagination-nav";
+import { TablePendingBoundary } from "@/components/table-pending";
 import {
   Accordion,
   AccordionContent,
@@ -87,22 +88,26 @@ export function EventLog({
 }) {
   if (events.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center gap-2 py-8">
-        <Inbox className="size-6 text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">
-          No events in this time range.
-        </p>
-      </div>
+      <TablePendingBoundary>
+        <div className="flex flex-col items-center justify-center gap-2 py-8">
+          <Inbox className="size-6 text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">
+            No events in this time range.
+          </p>
+        </div>
+      </TablePendingBoundary>
     );
   }
 
   return (
     <div className="rounded-md border">
-      <Accordion type="multiple" className="divide-y">
-        {events.map((event) => (
-          <EventEntry key={event.id} event={event} />
-        ))}
-      </Accordion>
+      <TablePendingBoundary>
+        <Accordion type="multiple" className="divide-y">
+          {events.map((event) => (
+            <EventEntry key={event.id} event={event} />
+          ))}
+        </Accordion>
+      </TablePendingBoundary>
       <PaginationNav
         page={page}
         totalPages={totalPages}

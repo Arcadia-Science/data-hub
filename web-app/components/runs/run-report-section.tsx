@@ -4,11 +4,18 @@ import type { RunFile } from "@/lib/api/instrument-runs";
 import { ExternalLink } from "lucide-react";
 
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|svg|tiff?)$/i;
+const PDF_EXTENSION = /\.pdf$/i;
 
 function isImageFile(file: RunFile): boolean {
   return (
     file.contentType?.startsWith("image/") === true ||
     IMAGE_EXTENSIONS.test(file.filename)
+  );
+}
+
+function isPdfFile(file: RunFile): boolean {
+  return (
+    file.contentType === "application/pdf" || PDF_EXTENSION.test(file.filename)
   );
 }
 
@@ -34,12 +41,41 @@ function ProcessedImagePreview({ file }: { file: RunFile }) {
   );
 }
 
+function PdfPreview({ file }: { file: RunFile }) {
+  const downloadUrl = `/api/v1/files/${file.id}/download`;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-medium">{file.filename}</h3>
+        <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" asChild>
+          <a href={downloadUrl} target="_blank" rel="noopener noreferrer">
+            <ExternalLink className="size-3" />
+            Open in new tab
+          </a>
+        </Button>
+      </div>
+      <div className="overflow-hidden rounded-md border">
+        <iframe
+          src={downloadUrl}
+          title={file.filename}
+          className="h-[80vh] w-full"
+        />
+      </div>
+    </div>
+  );
+}
+
 export function RunReportSection({ files }: { files: RunFile[] }) {
   const processedImages = files.filter(
     (f) => f.category === "processed" && f.deletedAt === null && isImageFile(f)
   );
 
-  if (processedImages.length === 0) {
+  const pdfFiles = files.filter((f) => f.deletedAt === null && isPdfFile(f));
+
+  const totalCount = processedImages.length + pdfFiles.length;
+
+  if (totalCount === 0) {
     return (
       <div className="flex flex-col gap-2">
         <h2 className="text-sm font-semibold">Report Data</h2>
@@ -59,13 +95,16 @@ export function RunReportSection({ files }: { files: RunFile[] }) {
       <h2 className="text-sm font-semibold">
         Report Data{" "}
         <span className="ml-1 font-mono text-xs font-normal text-muted-foreground">
-          {processedImages.length} image(s)
+          {totalCount} file(s)
         </span>
       </h2>
       <Card size="sm">
         <CardContent className="flex flex-col gap-6">
           {processedImages.map((file) => (
             <ProcessedImagePreview key={file.id} file={file} />
+          ))}
+          {pdfFiles.map((file) => (
+            <PdfPreview key={file.id} file={file} />
           ))}
         </CardContent>
       </Card>

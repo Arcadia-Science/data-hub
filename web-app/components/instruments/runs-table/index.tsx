@@ -1,6 +1,7 @@
 import type {
   GelDocFilterOptions,
   PlateReaderFilterOptions,
+  QpcrFilterOptions,
 } from "@/lib/api/instrument-runs";
 import type { InstrumentType } from "@/lib/db/schema";
 import { SearchX } from "lucide-react";
@@ -8,6 +9,7 @@ import { SearchX } from "lucide-react";
 import { DefaultRunsTable } from "./default-runs-table";
 import { GelDocRunsTable } from "./gel-doc-runs-table";
 import { PlateReaderRunsTable } from "./plate-reader-runs-table";
+import { QpcrRunsTable } from "./qpcr-runs-table";
 
 export type RunRow = {
   id: string;
@@ -39,6 +41,7 @@ export function InstrumentRunsTable({
   hasFilters,
   filterOptions,
   gelDocFilterOptions,
+  qpcrFilterOptions,
 }: {
   data: RunRow[];
   instrumentId: string;
@@ -46,6 +49,7 @@ export function InstrumentRunsTable({
   hasFilters: boolean;
   filterOptions?: PlateReaderFilterOptions;
   gelDocFilterOptions?: GelDocFilterOptions;
+  qpcrFilterOptions?: QpcrFilterOptions;
 }) {
   if (data.length === 0) {
     return (
@@ -75,6 +79,14 @@ export function InstrumentRunsTable({
           data={data}
           instrumentId={instrumentId}
           filterOptions={gelDocFilterOptions!}
+        />
+      );
+    case "qpcr":
+      return (
+        <QpcrRunsTable
+          data={data}
+          instrumentId={instrumentId}
+          filterOptions={qpcrFilterOptions!}
         />
       );
     default:

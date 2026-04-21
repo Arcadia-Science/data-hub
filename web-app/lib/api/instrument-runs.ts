@@ -81,6 +81,7 @@ type RunListFilters = {
   imagingMode?: string;
   gelWavelength?: string;
   gelColor?: string;
+  dyeChannel?: string;
 };
 
 const MAX_PER_PAGE = 100;
@@ -173,6 +174,13 @@ export async function buildRunListQuery(filters: RunListFilters) {
   if (filters.gelColor) {
     conditions.push(
       sql`${instrumentRuns.metadata}->'colors' @> ${JSON.stringify([filters.gelColor])}::jsonb`
+    );
+  }
+
+  // qPCR metadata column filters (leverages the GIN index).
+  if (filters.dyeChannel) {
+    conditions.push(
+      sql`${instrumentRuns.metadata}->'dye_channels' @> ${JSON.stringify([filters.dyeChannel])}::jsonb`
     );
   }
 
@@ -400,7 +408,11 @@ export type GelDocFilterOptions = {
   colors: string[];
 };
 
-const ALLOWED_METADATA_ARRAY_KEYS = new Set(["wavelengths", "colors"]);
+const ALLOWED_METADATA_ARRAY_KEYS = new Set([
+  "wavelengths",
+  "colors",
+  "dye_channels",
+]);
 
 async function distinctMetadataArrayValues(
   instrumentId: string,
@@ -432,4 +444,22 @@ export async function getGelDocFilterOptions(
     distinctMetadataArrayValues(instrumentId, "colors"),
   ]);
   return { captureTypes, imagingModes, wavelengths, colors };
+}
+
+// ---------------------------------------------------------------------------
+// Distinct metadata values for qPCR column filters.
+// ---------------------------------------------------------------------------
+
+export type QpcrFilterOptions = {
+  dyeChannels: string[];
+};
+
+export async function getQpcrFilterOptions(
+  instrumentId: string
+): Promise<QpcrFilterOptions> {
+  const dyeChannels = await distinctMetadataArrayValues(
+    instrumentId,
+    "dye_channels"
+  );
+  return { dyeChannels };
 }

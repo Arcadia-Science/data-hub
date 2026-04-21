@@ -1,5 +1,6 @@
 "use client";
 
+import { useTablePending } from "@/components/table-pending";
 import {
   Pagination,
   PaginationContent,
@@ -9,6 +10,7 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination";
+import { cn } from "@/lib/utils";
 import { parseAsInteger, useQueryState } from "nuqs";
 import type { MouseEvent } from "react";
 
@@ -43,9 +45,15 @@ export function PaginationNav({
   totalPages: number;
   pageParam: string;
 }) {
+  // When used inside a TablePendingProvider, URL updates are wrapped in a
+  // React transition so the sibling table can render a "stale" treatment
+  // until the new RSC payload streams in.
+  const { isPending, isPendingVisible, startTransition } = useTablePending();
   const [, setPage] = useQueryState(
     pageParam,
-    parseAsInteger.withDefault(1).withOptions({ shallow: false })
+    parseAsInteger
+      .withDefault(1)
+      .withOptions({ shallow: false, startTransition })
   );
 
   if (totalPages <= 1) return null;
@@ -60,15 +68,25 @@ export function PaginationNav({
     };
   }
 
+  const atPrev = page <= 1;
+  const atNext = page >= totalPages;
+
   return (
-    <Pagination className="py-3">
+    <Pagination
+      aria-busy={isPending}
+      className={cn(
+        "py-3 transition-opacity duration-150",
+        isPending && "pointer-events-none cursor-wait",
+        isPendingVisible && "opacity-60"
+      )}
+    >
       <PaginationContent>
         <PaginationItem>
           <PaginationPrevious
             href="#"
             onClick={go(page - 1)}
-            aria-disabled={page <= 1}
-            className={page <= 1 ? "pointer-events-none opacity-50" : undefined}
+            aria-disabled={atPrev}
+            className={atPrev ? "pointer-events-none opacity-50" : undefined}
           />
         </PaginationItem>
 
@@ -90,10 +108,8 @@ export function PaginationNav({
           <PaginationNext
             href="#"
             onClick={go(page + 1)}
-            aria-disabled={page >= totalPages}
-            className={
-              page >= totalPages ? "pointer-events-none opacity-50" : undefined
-            }
+            aria-disabled={atNext}
+            className={atNext ? "pointer-events-none opacity-50" : undefined}
           />
         </PaginationItem>
       </PaginationContent>

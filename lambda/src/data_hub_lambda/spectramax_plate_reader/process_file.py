@@ -71,6 +71,7 @@ def process_file(instrument_id: InstrumentType, run_id: str, filename: str) -> s
             s3_bucket=processed_bucket or "",
             s3_key=csv_s3_key,
             filename=csv_filename,
+            size_bytes=csv_path.stat().st_size,
             category="processed",
         )
 

@@ -11,9 +11,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -22,26 +20,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import type { RunFile } from "@/lib/api/instrument-runs";
-import { formatDateTime } from "@/lib/date";
-import { formatBytes } from "@/lib/utils";
-import { Download, Loader2, RotateCw, Search, Upload, X } from "lucide-react";
+import { Download, Loader2, Search, Upload, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { RunFilesTable, statusLabel } from "./run-files-table";
 
 type StatusFilter =
   | "all"
@@ -54,91 +38,20 @@ type SortField = "name" | "size" | "date" | "status";
 
 const PENDING_STATUSES = new Set(["detected", "upload_requested"]);
 
-function statusLabel(file: RunFile): string {
-  if (file.deletedAt !== null) return "Dismissed";
-  switch (file.status) {
-    case "detected":
-    case "upload_requested":
-      return "Pending";
-    case "uploaded":
-      return "Uploaded";
-    case "processing":
-      return "Processing";
-    case "completed":
-      return "Completed";
-    case "failed":
-      return "Failed";
-    default:
-      return file.status;
-  }
-}
-
-function StatusBadge({ file }: { file: RunFile }) {
-  const label = statusLabel(file);
-
-  switch (label) {
-    case "Pending":
-      return (
-        <Badge
-          variant="outline"
-          className="border-amber-500/40 bg-amber-500/10 text-amber-400"
-        >
-          {label}
-        </Badge>
-      );
-    case "Uploaded":
-      return <Badge variant="outline">{label}</Badge>;
-    case "Processing":
-      return (
-        <Badge
-          variant="outline"
-          className="gap-1 border-blue-500/40 bg-blue-500/10 text-blue-400"
-        >
-          <Loader2 className="size-3 animate-spin" />
-          {label}
-        </Badge>
-      );
-    case "Completed":
-      return (
-        <Badge
-          variant="outline"
-          className="border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
-        >
-          {label}
-        </Badge>
-      );
-    case "Failed": {
-      const badge = <Badge variant="destructive">{label}</Badge>;
-      if (!file.errorMessage) return badge;
-      return (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span tabIndex={0}>{badge}</span>
-          </TooltipTrigger>
-          <TooltipContent side="top" className="max-w-sm">
-            {file.errorMessage}
-          </TooltipContent>
-        </Tooltip>
-      );
-    }
-    case "Dismissed":
-      return (
-        <Badge variant="secondary" className="opacity-60">
-          {label}
-        </Badge>
-      );
-    default:
-      return <Badge variant="secondary">{label}</Badge>;
-  }
-}
-
 function matchesFilter(file: RunFile, filter: StatusFilter): boolean {
   if (filter === "all") return true;
   if (filter === "pending") return PENDING_STATUSES.has(file.status);
   return file.status === filter;
 }
 
-function compareFiles(a: RunFile, b: RunFile, field: SortField): number {
+// Raw files always come before processed files; the user-selected field
+// breaks ties within each category.
+function compareByCategory(a: RunFile, b: RunFile): number {
+  if (a.category === b.category) return 0;
+  return a.category === "raw" ? -1 : 1;
+}
+
+function compareByField(a: RunFile, b: RunFile, field: SortField): number {
   switch (field) {
     case "name":
       return a.filename.localeCompare(b.filename);
@@ -154,6 +67,10 @@ function compareFiles(a: RunFile, b: RunFile, field: SortField): number {
     default:
       return 0;
   }
+}
+
+function compareFiles(a: RunFile, b: RunFile, field: SortField): number {
+  return compareByCategory(a, b) || compareByField(a, b, field);
 }
 
 export function RunFilesSection({
@@ -539,196 +456,23 @@ export function RunFilesSection({
             No files match your filters.
           </p>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                {!isDeleted && visibleSelectableIds.size > 0 && (
-                  <TableHead className="w-10 pr-0 pl-3">
-                    <Checkbox
-                      checked={
-                        allVisibleSelected
-                          ? true
-                          : someVisibleSelected
-                            ? "indeterminate"
-                            : false
-                      }
-                      onCheckedChange={toggleAll}
-                    />
-                  </TableHead>
-                )}
-                <TableHead className="text-sm font-medium text-muted-foreground">
-                  File name
-                </TableHead>
-                <TableHead className="text-sm font-medium text-muted-foreground">
-                  Size
-                </TableHead>
-                <TableHead className="text-sm font-medium text-muted-foreground">
-                  Created
-                </TableHead>
-                <TableHead className="text-sm font-medium text-muted-foreground">
-                  Status
-                </TableHead>
-                <TableHead className="w-0" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredFiles.map((file) => {
-                const isDismissed = file.deletedAt !== null;
-                const isSelectable =
-                  !isDeleted && file.status === "detected" && !isDismissed;
-                const isSelected = selectedIds.has(file.id);
-                const showRowActions =
-                  !isDeleted &&
-                  !isDismissed &&
-                  file.status === "detected" &&
-                  selectedDetectedIds.length === 0;
-
-                return (
-                  <TableRow
-                    key={file.id}
-                    data-state={isSelected ? "selected" : undefined}
-                    className={`group ${isDismissed ? "opacity-50" : ""}`}
-                  >
-                    {!isDeleted && visibleSelectableIds.size > 0 && (
-                      <TableCell className="py-2 pr-0 pl-3">
-                        {isSelectable ? (
-                          <Checkbox
-                            checked={isSelected}
-                            onCheckedChange={() => toggleFile(file.id)}
-                          />
-                        ) : (
-                          <div className="size-4" />
-                        )}
-                      </TableCell>
-                    )}
-                    <TableCell className="py-2 font-mono text-sm">
-                      <span className="flex items-center gap-1.5">
-                        {file.filename}
-                        {[
-                          "uploaded",
-                          "processing",
-                          "completed",
-                          "failed",
-                        ].includes(file.status) && (
-                          <a
-                            href={`/api/v1/files/${file.id}/download`}
-                            className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
-                          >
-                            <Download className="size-4" />
-                          </a>
-                        )}
-                      </span>
-                    </TableCell>
-                    <TableCell className="py-2 text-sm text-muted-foreground">
-                      {formatBytes(file.sizeBytes)}
-                    </TableCell>
-                    <TableCell className="py-2 text-sm text-muted-foreground">
-                      {file.createdAt ? formatDateTime(file.createdAt) : "—"}
-                    </TableCell>
-                    <TableCell className="py-2">
-                      <StatusBadge file={file} />
-                    </TableCell>
-                    <TableCell className="py-2 pr-3">
-                      {showRowActions ? (
-                        <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-6 gap-1 px-2 text-xs"
-                            onClick={() => handleSingleUpload(file.id)}
-                            disabled={isPending}
-                          >
-                            <Upload className="size-3" />
-                            Upload
-                          </Button>
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 gap-1 px-2 text-xs text-muted-foreground"
-                                disabled={isPending}
-                              >
-                                <X className="size-3" />
-                                Dismiss
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>
-                                  Dismiss file?
-                                </AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  <strong className="font-mono">
-                                    {file.filename}
-                                  </strong>{" "}
-                                  will be soft-deleted. The watcher will skip it
-                                  on future scans.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction
-                                  onClick={() => handleSingleDismiss(file.id)}
-                                >
-                                  Dismiss
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        </div>
-                      ) : (
-                        !isDismissed &&
-                        file.status === "failed" &&
-                        file.s3Key !== null && (
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-6 gap-1 px-2 text-xs"
-                                disabled={isPending}
-                              >
-                                {isPending ? (
-                                  <Loader2 className="size-3 animate-spin" />
-                                ) : (
-                                  <RotateCw className="size-3" />
-                                )}
-                                Reprocess
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>
-                                  Reprocess file?
-                                </AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  <strong className="font-mono">
-                                    {file.filename}
-                                  </strong>{" "}
-                                  will be sent to the Lambda function for
-                                  reprocessing. Any existing report data for
-                                  this file will be cleared.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction
-                                  onClick={() => handleReprocess(file.id)}
-                                >
-                                  Reprocess
-                                </AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        )
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+          <RunFilesTable
+            files={filteredFiles}
+            isDeleted={isDeleted}
+            isPending={isPending}
+            selection={{
+              selectedIds,
+              visibleSelectableIds,
+              allVisibleSelected,
+              someVisibleSelected,
+              hasBulkSelection: selectedDetectedIds.length > 0,
+              onToggleFile: toggleFile,
+              onToggleAll: toggleAll,
+            }}
+            onUpload={handleSingleUpload}
+            onDismiss={handleSingleDismiss}
+            onReprocess={handleReprocess}
+          />
         )}
 
         {/* Summary footer */}

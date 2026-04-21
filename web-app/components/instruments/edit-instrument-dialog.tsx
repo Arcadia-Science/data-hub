@@ -29,6 +29,8 @@ const TYPE_LABELS: Record<string, string> = {
   generic: "Generic",
   plate_reader: "Plate Reader",
   gel_doc: "Gel Doc",
+  qpcr: "qPCR",
+  tape_station: "TapeStation",
 };
 
 const INSTRUMENT_TYPE_OPTIONS = VALID_INSTRUMENT_TYPES.map((value) => ({

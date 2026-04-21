@@ -1,5 +1,6 @@
 "use client";
 
+import { useTablePending } from "@/components/table-pending";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,9 +12,12 @@ import { useQueryStates } from "nuqs";
 export function InstrumentRunsToolbar() {
   // shallow: false triggers a server-side re-fetch on every URL change so the
   // table data stays in sync. throttleMs debounces rapid keystrokes in search.
+  // startTransition ties the refetch to the table's pending/stale treatment.
+  const { startTransition } = useTablePending();
   const [filters, setFilters] = useQueryStates(instrumentDetailSearchParams, {
     shallow: false,
     throttleMs: 300,
+    startTransition,
   });
 
   const hasFilters =

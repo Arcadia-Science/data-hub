@@ -1,5 +1,6 @@
 "use client";
 
+import { useTablePending } from "@/components/table-pending";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -25,9 +26,12 @@ const EVENT_TYPES = [
 export function EventLogToolbar() {
   // shallow: false pushes filter changes to the URL and triggers a full
   // server-side re-render, so the event list refetches with the new filters.
+  // startTransition ties the refetch to the surrounding table's pending UI.
+  const { startTransition } = useTablePending();
   const [filters, setFilters] = useQueryStates(watcherDetailSearchParams, {
     shallow: false,
     throttleMs: 300,
+    startTransition,
   });
 
   const hasFilters =

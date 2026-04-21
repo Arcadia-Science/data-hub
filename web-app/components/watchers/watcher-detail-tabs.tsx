@@ -1,5 +1,6 @@
 "use client";
 
+import { TablePendingProvider } from "@/components/table-pending";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EventLog } from "@/components/watchers/event-log";
 import { EventLogToolbar } from "@/components/watchers/event-log-toolbar";
@@ -44,22 +45,24 @@ export function WatcherDetailTabs({
       </TabsList>
 
       <TabsContent value="logs" className="flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-medium">Event Log</h3>
-            {eventsTotal > 0 && (
-              <p className="text-xs text-muted-foreground">
-                {eventsTotal} event{eventsTotal !== 1 && "s"}
-              </p>
-            )}
+        <TablePendingProvider>
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-medium">Event Log</h3>
+              {eventsTotal > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {eventsTotal} event{eventsTotal !== 1 && "s"}
+                </p>
+              )}
+            </div>
+            <EventLogToolbar />
           </div>
-          <EventLogToolbar />
-        </div>
-        <EventLog
-          events={events}
-          page={eventsPage}
-          totalPages={eventsTotalPages}
-        />
+          <EventLog
+            events={events}
+            page={eventsPage}
+            totalPages={eventsTotalPages}
+          />
+        </TablePendingProvider>
       </TabsContent>
 
       <TabsContent value="status" className="flex flex-col gap-4">

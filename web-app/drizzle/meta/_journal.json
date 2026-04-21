@@ -43,6 +43,13 @@
       "when": 1776726428193,
       "tag": "0005_drop_s3_trigger_suffix",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1776988800000,
+      "tag": "0006_qpcr_tape_station",
+      "breakpoints": true
     }
   ]
 }
