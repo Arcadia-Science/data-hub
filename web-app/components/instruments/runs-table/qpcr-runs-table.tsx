@@ -16,6 +16,9 @@ import type { RunRow } from ".";
 import { ClickableRow } from "./clickable-row";
 import { FilterableColumnHeader } from "./filterable-column-header";
 import { MetadataArrayBadges, getMetadataArray } from "./metadata-utils";
+import { RanByCell } from "./ran-by-cell";
+import { RunSelectAllCheckbox, RunSelectCheckbox } from "./run-select-checkbox";
+import type { RunRef } from "./run-selection-provider";
 import { RunStatusIcon } from "./run-status-icon";
 
 export function QpcrRunsTable({
@@ -27,11 +30,20 @@ export function QpcrRunsTable({
   instrumentId: string;
   filterOptions: QpcrFilterOptions;
 }) {
+  const runRefs: RunRef[] = data.map((row) => ({
+    id: row.id,
+    instrumentId: row.instrument_id,
+    runId: row.run_id,
+  }));
+
   return (
     <div className="rounded-lg border">
       <Table>
         <TableHeader>
           <TableRow>
+            <TableHead className="w-10">
+              <RunSelectAllCheckbox refs={runRefs} />
+            </TableHead>
             <TableHead>Run ID</TableHead>
             <TableHead>Files</TableHead>
             <TableHead className="text-right">Total Size</TableHead>
@@ -42,6 +54,7 @@ export function QpcrRunsTable({
                 options={filterOptions.dyeChannels}
               />
             </TableHead>
+            <TableHead>Ran by</TableHead>
             <TableHead className="text-right">Created</TableHead>
           </TableRow>
         </TableHeader>
@@ -58,6 +71,15 @@ export function QpcrRunsTable({
                 href={`/instruments/${instrumentId}/runs/${encodeURIComponent(row.run_id)}`}
                 className={cn(isDeleted && "opacity-50")}
               >
+                <TableCell>
+                  <RunSelectCheckbox
+                    runRef={{
+                      id: row.id,
+                      instrumentId: row.instrument_id,
+                      runId: row.run_id,
+                    }}
+                  />
+                </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-2.5">
                     <RunStatusIcon
@@ -86,6 +108,13 @@ export function QpcrRunsTable({
                   <MetadataArrayBadges
                     values={dyeChannels}
                     colorMap={dyeChannelColors}
+                  />
+                </TableCell>
+                <TableCell>
+                  <RanByCell
+                    instrumentId={row.instrument_id}
+                    runId={row.run_id}
+                    attributions={row.attributions}
                   />
                 </TableCell>
                 <TableCell className="text-right">

@@ -12,6 +12,7 @@ export function DefaultRunDetail({
   files,
   instrumentId,
   runId,
+  attributionsSlot,
 }: RunDetailProps) {
   const isDeleted = run.deletedAt !== null;
   const canRestore = isDeleted && run.filesPurgedAt === null;
@@ -35,6 +36,8 @@ export function DefaultRunDetail({
           <RestoreRunButton instrumentId={instrumentId} runId={runId} />
         )}
       </RunDetail.Header>
+
+      {attributionsSlot}
 
       <RunDetail.FilesMetadataLayout>
         {hasDefaultMetadata(run.metadata as Record<string, unknown>) && (

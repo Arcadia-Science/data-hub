@@ -1,4 +1,11 @@
 import { RelativeTime } from "@/components/dashboard/relative-time";
+import { ClickableRow } from "@/components/instruments/runs-table/clickable-row";
+import { RanByCell } from "@/components/instruments/runs-table/ran-by-cell";
+import {
+  RunSelectAllCheckbox,
+  RunSelectCheckbox,
+} from "@/components/instruments/runs-table/run-select-checkbox";
+import type { RunRef } from "@/components/instruments/runs-table/run-selection-provider";
 import { RunStatusIcon } from "@/components/instruments/runs-table/run-status-icon";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -10,9 +17,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { RunAttribution } from "@/lib/api/instrument-runs";
 import { cn, formatBytes } from "@/lib/utils";
 import { FlaskConical, SearchX } from "lucide-react";
-import Link from "next/link";
 
 type RunRow = {
   id: string;
@@ -30,6 +37,7 @@ type RunRow = {
   files_pending_upload: number;
   total_size_bytes: number;
   error_messages: string[];
+  attributions: RunAttribution[];
 };
 
 export function RunsTable({
@@ -52,15 +60,25 @@ export function RunsTable({
     );
   }
 
+  const runRefs: RunRef[] = data.map((row) => ({
+    id: row.id,
+    instrumentId: row.instrument_id,
+    runId: row.run_id,
+  }));
+
   return (
     <div className="rounded-lg border">
       <Table>
         <TableHeader>
           <TableRow>
+            <TableHead className="w-10">
+              <RunSelectAllCheckbox refs={runRefs} />
+            </TableHead>
             <TableHead>Instrument</TableHead>
             <TableHead>Run ID</TableHead>
             <TableHead>Files</TableHead>
             <TableHead className="text-right">Total Size</TableHead>
+            <TableHead>Ran by</TableHead>
             <TableHead className="text-right">Created</TableHead>
           </TableRow>
         </TableHeader>
@@ -69,14 +87,21 @@ export function RunsTable({
             const isDeleted = row.deleted_at !== null;
             const href = `/instruments/${row.instrument_id}/runs/${encodeURIComponent(row.run_id)}`;
             return (
-              <TableRow
+              <ClickableRow
                 key={row.id}
-                className={cn("group relative", isDeleted && "opacity-50")}
+                href={href}
+                className={cn(isDeleted && "opacity-50")}
               >
                 <TableCell>
-                  <Link href={href} className="absolute inset-0" tabIndex={-1}>
-                    <span className="sr-only">View run {row.run_id}</span>
-                  </Link>
+                  <RunSelectCheckbox
+                    runRef={{
+                      id: row.id,
+                      instrumentId: row.instrument_id,
+                      runId: row.run_id,
+                    }}
+                  />
+                </TableCell>
+                <TableCell>
                   <div className="flex items-center gap-1.5">
                     <FlaskConical className="size-3.5 shrink-0 text-muted-foreground" />
                     <span className="text-sm font-medium">
@@ -98,14 +123,14 @@ export function RunsTable({
                     >
                       {row.run_id}
                     </span>
-                    {isDeleted && (
+                    {isDeleted ? (
                       <Badge
                         variant="outline"
                         className="ml-1.5 text-[10px] font-normal"
                       >
                         deleted
                       </Badge>
-                    )}
+                    ) : null}
                   </div>
                 </TableCell>
                 <TableCell className="text-sm tabular-nums">
@@ -114,10 +139,17 @@ export function RunsTable({
                 <TableCell className="text-right text-sm tabular-nums">
                   {formatBytes(row.total_size_bytes)}
                 </TableCell>
+                <TableCell>
+                  <RanByCell
+                    instrumentId={row.instrument_id}
+                    runId={row.run_id}
+                    attributions={row.attributions}
+                  />
+                </TableCell>
                 <TableCell className="text-right">
                   <RelativeTime date={new Date(row.created_at).toISOString()} />
                 </TableCell>
-              </TableRow>
+              </ClickableRow>
             );
           })}
         </TableBody>
@@ -132,16 +164,21 @@ export function RunsTableSkeleton() {
       <Table>
         <TableHeader>
           <TableRow>
+            <TableHead className="w-10" />
             <TableHead>Instrument</TableHead>
             <TableHead>Run ID</TableHead>
             <TableHead>Files</TableHead>
             <TableHead className="text-right">Total Size</TableHead>
+            <TableHead>Ran by</TableHead>
             <TableHead className="text-right">Created</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {Array.from({ length: 5 }).map((_, i) => (
             <TableRow key={i}>
+              <TableCell>
+                <Skeleton className="size-4" />
+              </TableCell>
               <TableCell>
                 <Skeleton className="h-4 w-28" />
               </TableCell>
@@ -153,6 +190,9 @@ export function RunsTableSkeleton() {
               </TableCell>
               <TableCell className="text-right">
                 <Skeleton className="ml-auto h-4 w-16" />
+              </TableCell>
+              <TableCell>
+                <Skeleton className="h-6 w-16" />
               </TableCell>
               <TableCell className="text-right">
                 <Skeleton className="ml-auto h-4 w-20" />

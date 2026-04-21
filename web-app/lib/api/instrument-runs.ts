@@ -1,7 +1,13 @@
 import { parse } from "csv-parse/sync";
 
 import { db } from "@/lib/db";
-import { files, instrumentRuns, instruments } from "@/lib/db/schema";
+import {
+  files,
+  instrumentRuns,
+  instruments,
+  runAttributions,
+  users,
+} from "@/lib/db/schema";
 import { getS3ObjectStream } from "@/lib/s3";
 import type { SQL } from "drizzle-orm";
 import {
@@ -16,6 +22,59 @@ import {
   lte,
   sql,
 } from "drizzle-orm";
+
+// ---------------------------------------------------------------------------
+// Run attributions: users who claimed they ran a given run. Wire shape is
+// deliberately minimal to keep RSC -> client payloads small; `initials` is
+// computed server-side so the client doesn't recompute per render.
+// ---------------------------------------------------------------------------
+
+export type RunAttribution = {
+  userId: string;
+  displayName: string;
+  initials: string;
+  avatarUrl: string | null;
+};
+
+function toInitials(displayName: string): string {
+  const parts = displayName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+export async function getAttributionsByRunIds(
+  runIds: string[]
+): Promise<Map<string, RunAttribution[]>> {
+  const byRun = new Map<string, RunAttribution[]>();
+  if (runIds.length === 0) return byRun;
+
+  const rows = await db
+    .select({
+      runId: runAttributions.runId,
+      userId: users.id,
+      name: users.name,
+      email: users.email,
+      image: users.image,
+    })
+    .from(runAttributions)
+    .innerJoin(users, eq(users.id, runAttributions.userId))
+    .where(inArray(runAttributions.runId, runIds))
+    .orderBy(runAttributions.createdAt);
+
+  for (const row of rows) {
+    const displayName = row.name ?? row.email ?? "Unknown";
+    const list = byRun.get(row.runId) ?? [];
+    list.push({
+      userId: row.userId,
+      displayName,
+      initials: toInitials(displayName),
+      avatarUrl: row.image,
+    });
+    byRun.set(row.runId, list);
+  }
+  return byRun;
+}
 
 // ---------------------------------------------------------------------------
 // Run lookup by natural key (instrumentId, runId) — shared across detail,
@@ -55,7 +114,10 @@ export async function lookupRunByNaturalKey(
     )
     .limit(1);
 
-  return row ?? null;
+  if (!row) return null;
+
+  const byRun = await getAttributionsByRunIds([row.id]);
+  return { ...row, attributions: byRun.get(row.id) ?? [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -259,8 +321,18 @@ export async function buildRunListQuery(filters: RunListFilters) {
     .limit(perPage)
     .offset(offset);
 
+  // Fetch attributions in a separate query so the join doesn't cross-multiply
+  // with the files left-join and break the aggregate counts above.
+  const attributionsByRun = await getAttributionsByRunIds(
+    rows.map((r) => r.id)
+  );
+  const data = rows.map((row) => ({
+    ...row,
+    attributions: attributionsByRun.get(row.id) ?? [],
+  }));
+
   return {
-    data: rows,
+    data,
     pagination: {
       page: filters.page,
       per_page: perPage,

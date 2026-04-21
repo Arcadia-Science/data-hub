@@ -475,3 +475,29 @@ export const files = pgTable(
     index("idx_files_metadata_gin").using("gin", file.metadata),
   ]
 );
+
+// Many-to-many link between users and runs: a user "claims" a run they
+// personally performed. Attribution is self-service — users create and remove
+// only their own row. Composite PK enforces one row per (run, user).
+export const runAttributions = pgTable(
+  "run_attributions",
+  {
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => instrumentRuns.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow(),
+  },
+  (attribution) => [
+    primaryKey({ columns: [attribution.runId, attribution.userId] }),
+    index("idx_run_attributions_run_id").on(attribution.runId),
+    index("idx_run_attributions_user_id").on(attribution.userId),
+  ]
+);

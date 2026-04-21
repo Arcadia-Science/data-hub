@@ -12,6 +12,7 @@ export function TapeStationRunDetail({
   files,
   instrumentId,
   runId,
+  attributionsSlot,
 }: RunDetailProps) {
   const isDeleted = run.deletedAt !== null;
   const canRestore = isDeleted && run.filesPurgedAt === null;
@@ -35,6 +36,8 @@ export function TapeStationRunDetail({
           <RestoreRunButton instrumentId={instrumentId} runId={runId} />
         )}
       </RunDetail.Header>
+
+      {attributionsSlot}
 
       <RunDetail.FilesMetadataLayout>
         {hasTapeStationMetadata(run.metadata as Record<string, unknown>) && (

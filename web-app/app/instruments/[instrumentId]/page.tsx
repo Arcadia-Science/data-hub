@@ -1,6 +1,8 @@
 import { InstrumentHeader } from "@/components/instruments/instrument-header";
 import { InstrumentRunsToolbar } from "@/components/instruments/instrument-runs-toolbar";
 import { InstrumentRunsTable } from "@/components/instruments/runs-table";
+import { BulkAttributionBar } from "@/components/instruments/runs-table/bulk-attribution-bar";
+import { RunSelectionProvider } from "@/components/instruments/runs-table/run-selection-provider";
 import { PaginationNav } from "@/components/pagination-nav";
 import {
   TablePendingBoundary,
@@ -92,28 +94,54 @@ export default async function InstrumentDetailPage({
     filters.gel_color !== null ||
     filters.dye_channel !== null;
 
+  const currentUserId = session.user?.id ?? null;
+  const unattributedCount = runResult.data.filter(
+    (row) => row.attributions.length === 0
+  ).length;
+  const ranByYouCount = currentUserId
+    ? runResult.data.filter((row) =>
+        row.attributions.some((a) => a.userId === currentUserId)
+      ).length
+    : 0;
+
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6 p-6">
       <InstrumentHeader instrument={instrument} />
-      <TablePendingProvider>
-        <InstrumentRunsToolbar />
-        <TablePendingBoundary>
-          <InstrumentRunsTable
-            data={runResult.data}
-            instrumentId={instrumentId}
-            instrumentType={instrument.instrumentType}
-            hasFilters={hasFilters}
-            filterOptions={filterOptions}
-            gelDocFilterOptions={gelDocFilterOptions}
-            qpcrFilterOptions={qpcrFilterOptions}
+      <RunSelectionProvider>
+        <TablePendingProvider>
+          <InstrumentRunsToolbar />
+          <BulkAttributionBar />
+          <TablePendingBoundary>
+            <InstrumentRunsTable
+              data={runResult.data}
+              instrumentId={instrumentId}
+              instrumentType={instrument.instrumentType}
+              hasFilters={hasFilters}
+              filterOptions={filterOptions}
+              gelDocFilterOptions={gelDocFilterOptions}
+              qpcrFilterOptions={qpcrFilterOptions}
+            />
+          </TablePendingBoundary>
+          <PaginationNav
+            page={runResult.pagination.page}
+            totalPages={runResult.pagination.total_pages}
+            pageParam="page"
           />
-        </TablePendingBoundary>
-        <PaginationNav
-          page={runResult.pagination.page}
-          totalPages={runResult.pagination.total_pages}
-          pageParam="page"
-        />
-      </TablePendingProvider>
+          {runResult.data.length > 0 ? (
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <p>
+                Hover any row to reveal &ldquo;I ran this&rdquo;. Check multiple
+                rows to attribute them together.
+              </p>
+              <p>
+                <span className="tabular-nums">{unattributedCount}</span>{" "}
+                unattributed ·{" "}
+                <span className="tabular-nums">{ranByYouCount}</span> ran by you
+              </p>
+            </div>
+          ) : null}
+        </TablePendingProvider>
+      </RunSelectionProvider>
     </div>
   );
 }

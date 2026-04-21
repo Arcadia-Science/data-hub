@@ -25,4 +25,7 @@ export type RunDetailProps = {
   wellData: RawWellRow[];
   instrumentId: string;
   runId: string;
+  // Rendered below the header on every variant. Parent composes the
+  // attribution UI so server-only user/session wiring stays at the page.
+  attributionsSlot: React.ReactNode;
 };

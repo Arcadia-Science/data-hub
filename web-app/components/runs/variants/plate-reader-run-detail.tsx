@@ -263,6 +263,7 @@ export function PlateReaderRunDetail({
   wellData,
   instrumentId,
   runId,
+  attributionsSlot,
 }: RunDetailProps) {
   const isDeleted = run.deletedAt !== null;
   const canRestore = isDeleted && run.filesPurgedAt === null;
@@ -298,6 +299,8 @@ export function PlateReaderRunDetail({
           <RestoreRunButton instrumentId={instrumentId} runId={runId} />
         )}
       </RunDetail.Header>
+
+      {attributionsSlot}
 
       <RunDetail.FilesMetadataLayout>
         {hasPlateReaderMetadata(run.metadata as Record<string, unknown>) && (

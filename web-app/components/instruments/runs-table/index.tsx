@@ -2,6 +2,7 @@ import type {
   GelDocFilterOptions,
   PlateReaderFilterOptions,
   QpcrFilterOptions,
+  RunAttribution,
 } from "@/lib/api/instrument-runs";
 import type { InstrumentType } from "@/lib/db/schema";
 import { SearchX } from "lucide-react";
@@ -27,6 +28,7 @@ export type RunRow = {
   files_pending_upload: number;
   total_size_bytes: number;
   error_messages: string[];
+  attributions: RunAttribution[];
 };
 
 export type RunsTableProps = {
