@@ -78,7 +78,7 @@ export function RunsTable({
             <TableHead>Run ID</TableHead>
             <TableHead>Files</TableHead>
             <TableHead className="text-right">Total Size</TableHead>
-            <TableHead>Ran by</TableHead>
+            <TableHead>Ran By</TableHead>
             <TableHead className="text-right">Created</TableHead>
           </TableRow>
         </TableHeader>
@@ -169,7 +169,7 @@ export function RunsTableSkeleton() {
             <TableHead>Run ID</TableHead>
             <TableHead>Files</TableHead>
             <TableHead className="text-right">Total Size</TableHead>
-            <TableHead>Ran by</TableHead>
+            <TableHead>Ran By</TableHead>
             <TableHead className="text-right">Created</TableHead>
           </TableRow>
         </TableHeader>

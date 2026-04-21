@@ -23,7 +23,7 @@ export function TapeStationRunDetail({
 
   return (
     <>
-      <RunDetail.Header run={run}>
+      <RunDetail.Header run={run} attributionsSlot={attributionsSlot}>
         {!isDeleted && (
           <DeleteRunDialog
             instrumentId={instrumentId}
@@ -36,8 +36,6 @@ export function TapeStationRunDetail({
           <RestoreRunButton instrumentId={instrumentId} runId={runId} />
         )}
       </RunDetail.Header>
-
-      {attributionsSlot}
 
       <RunDetail.FilesMetadataLayout>
         {hasTapeStationMetadata(run.metadata as Record<string, unknown>) && (

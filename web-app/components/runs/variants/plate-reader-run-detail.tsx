@@ -286,7 +286,7 @@ export function PlateReaderRunDetail({
 
   return (
     <>
-      <RunDetail.Header run={run}>
+      <RunDetail.Header run={run} attributionsSlot={attributionsSlot}>
         {!isDeleted && (
           <DeleteRunDialog
             instrumentId={instrumentId}
@@ -299,8 +299,6 @@ export function PlateReaderRunDetail({
           <RestoreRunButton instrumentId={instrumentId} runId={runId} />
         )}
       </RunDetail.Header>
-
-      {attributionsSlot}
 
       <RunDetail.FilesMetadataLayout>
         {hasPlateReaderMetadata(run.metadata as Record<string, unknown>) && (

@@ -23,7 +23,7 @@ export function DefaultRunDetail({
 
   return (
     <>
-      <RunDetail.Header run={run}>
+      <RunDetail.Header run={run} attributionsSlot={attributionsSlot}>
         {!isDeleted && (
           <DeleteRunDialog
             instrumentId={instrumentId}
@@ -36,8 +36,6 @@ export function DefaultRunDetail({
           <RestoreRunButton instrumentId={instrumentId} runId={runId} />
         )}
       </RunDetail.Header>
-
-      {attributionsSlot}
 
       <RunDetail.FilesMetadataLayout>
         {hasDefaultMetadata(run.metadata as Record<string, unknown>) && (

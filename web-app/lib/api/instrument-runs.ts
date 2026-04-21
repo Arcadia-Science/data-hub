@@ -144,7 +144,12 @@ type RunListFilters = {
   gelWavelength?: string;
   gelColor?: string;
   dyeChannel?: string;
+  // Either a userId (match runs attributed to that user) or the reserved
+  // sentinel "unattributed" (match runs with no attributions).
+  ranBy?: string;
 };
+
+const UNATTRIBUTED_SENTINEL = "unattributed";
 
 const MAX_PER_PAGE = 100;
 
@@ -243,6 +248,17 @@ export async function buildRunListQuery(filters: RunListFilters) {
   if (filters.dyeChannel) {
     conditions.push(
       sql`${instrumentRuns.metadata}->'dye_channels' @> ${JSON.stringify([filters.dyeChannel])}::jsonb`
+    );
+  }
+
+  // Attribution filter — correlated (NOT) EXISTS against run_attributions.
+  if (filters.ranBy === UNATTRIBUTED_SENTINEL) {
+    conditions.push(
+      sql`not exists (select 1 from ${runAttributions} where ${runAttributions.runId} = ${instrumentRuns.id})`
+    );
+  } else if (filters.ranBy) {
+    conditions.push(
+      sql`exists (select 1 from ${runAttributions} where ${runAttributions.runId} = ${instrumentRuns.id} and ${runAttributions.userId} = ${filters.ranBy})`
     );
   }
 
@@ -534,4 +550,40 @@ export async function getQpcrFilterOptions(
     "dye_channels"
   );
   return { dyeChannels };
+}
+
+// ---------------------------------------------------------------------------
+// Distinct users who have attributed any (non-deleted) run for this
+// instrument — used to populate the "Ran by" column filter dropdown.
+// ---------------------------------------------------------------------------
+
+export type RanByFilterOption = {
+  userId: string;
+  displayName: string;
+};
+
+export async function getRanByFilterOptions(
+  instrumentId: string
+): Promise<RanByFilterOption[]> {
+  const rows = await db
+    .selectDistinct({
+      userId: users.id,
+      name: users.name,
+      email: users.email,
+    })
+    .from(runAttributions)
+    .innerJoin(users, eq(users.id, runAttributions.userId))
+    .innerJoin(instrumentRuns, eq(instrumentRuns.id, runAttributions.runId))
+    .where(
+      and(
+        eq(instrumentRuns.instrumentId, instrumentId),
+        isNull(instrumentRuns.deletedAt)
+      )
+    )
+    .orderBy(users.name);
+
+  return rows.map((r) => ({
+    userId: r.userId,
+    displayName: r.name ?? r.email ?? "Unknown",
+  }));
 }

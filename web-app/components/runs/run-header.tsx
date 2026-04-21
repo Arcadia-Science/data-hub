@@ -6,9 +6,11 @@ import Link from "next/link";
 export function RunHeader({
   run,
   children,
+  attributionsSlot,
 }: {
   run: RunDetail;
   children?: React.ReactNode;
+  attributionsSlot?: React.ReactNode;
 }) {
   return (
     <div className="flex flex-col gap-4">
@@ -44,6 +46,12 @@ export function RunHeader({
         <span>Created {formatDateTime(run.createdAt)}</span>
         <span className="text-muted-foreground/40">&middot;</span>
         <span>Updated {formatDateTime(run.updatedAt)}</span>
+        {attributionsSlot && (
+          <>
+            <span className="text-muted-foreground/40">&middot;</span>
+            {attributionsSlot}
+          </>
+        )}
       </div>
     </div>
   );

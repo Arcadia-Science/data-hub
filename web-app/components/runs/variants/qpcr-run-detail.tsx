@@ -23,7 +23,7 @@ export function QpcrRunDetail({
 
   return (
     <>
-      <RunDetail.Header run={run}>
+      <RunDetail.Header run={run} attributionsSlot={attributionsSlot}>
         {!isDeleted && (
           <DeleteRunDialog
             instrumentId={instrumentId}
@@ -36,8 +36,6 @@ export function QpcrRunDetail({
           <RestoreRunButton instrumentId={instrumentId} runId={runId} />
         )}
       </RunDetail.Header>
-
-      {attributionsSlot}
 
       <RunDetail.FilesMetadataLayout>
         {hasQpcrMetadata(run.metadata as Record<string, unknown>) && (

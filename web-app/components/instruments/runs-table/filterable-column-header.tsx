@@ -23,7 +23,20 @@ type FilterParamKey =
   | "imaging_mode"
   | "gel_wavelength"
   | "gel_color"
-  | "dye_channel";
+  | "dye_channel"
+  | "ran_by";
+
+// Options accept either plain strings (value == label) or { value, label }
+// pairs for cases where the URL-stable value and the display label differ
+// (e.g., `ran_by` stores a userId but renders the user's display name).
+export type FilterOption = string | { value: string; label: string };
+
+function normalizeOption(option: FilterOption): {
+  value: string;
+  label: string;
+} {
+  return typeof option === "string" ? { value: option, label: option } : option;
+}
 
 export function FilterableColumnHeader({
   label,
@@ -32,7 +45,7 @@ export function FilterableColumnHeader({
 }: {
   label: string;
   paramKey: FilterParamKey;
-  options: string[];
+  options: FilterOption[];
 }) {
   const { startTransition } = useTablePending();
   const [filters, setFilters] = useQueryStates(instrumentDetailSearchParams, {
@@ -71,11 +84,14 @@ export function FilterableColumnHeader({
         >
           <DropdownMenuRadioItem value="">All</DropdownMenuRadioItem>
           <DropdownMenuSeparator />
-          {options.map((option) => (
-            <DropdownMenuRadioItem key={option} value={option}>
-              {option}
-            </DropdownMenuRadioItem>
-          ))}
+          {options.map((option) => {
+            const { value, label } = normalizeOption(option);
+            return (
+              <DropdownMenuRadioItem key={value} value={value}>
+                {label}
+              </DropdownMenuRadioItem>
+            );
+          })}
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>

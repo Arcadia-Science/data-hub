@@ -43,6 +43,8 @@ export const instrumentDetailSearchParams = {
   gel_color: parseAsString,
   // qPCR metadata column filters.
   dye_channel: parseAsString,
+  // Attribution filter: either a userId or the reserved sentinel "unattributed".
+  ran_by: parseAsString,
 };
 
 export const instrumentDetailParamsCache = createSearchParamsCache(

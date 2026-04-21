@@ -23,7 +23,7 @@ export function GelDocRunDetail({
 
   return (
     <>
-      <RunDetail.Header run={run}>
+      <RunDetail.Header run={run} attributionsSlot={attributionsSlot}>
         {!isDeleted && (
           <DeleteRunDialog
             instrumentId={instrumentId}
@@ -36,8 +36,6 @@ export function GelDocRunDetail({
           <RestoreRunButton instrumentId={instrumentId} runId={runId} />
         )}
       </RunDetail.Header>
-
-      {attributionsSlot}
 
       <RunDetail.FilesMetadataLayout>
         {hasGelDocMetadata(run.metadata as Record<string, unknown>) && (

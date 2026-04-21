@@ -121,38 +121,37 @@ export function RanByCell({
     });
   }
 
-  // Unattributed state: muted UserPlus icon normally; ghost "I ran this"
-  // button on row hover. Pure CSS group-hover: no React hover state needed.
+  // Each action is an icon-only button; its label lives in a tooltip so the
+  // cell width is naturally fixed.
   return optimistic.length === 0 ? (
     <div className="flex items-center">
       {currentUserId ? (
-        <>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span
-                aria-hidden="true"
-                className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground/60 group-hover:hidden"
-              >
-                <UserPlus className="size-4" />
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>Unattributed</TooltipContent>
-          </Tooltip>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            disabled={isPending}
-            onClick={handleClaim}
-            className="hidden h-7 px-2 text-xs font-medium group-hover:inline-flex"
-          >
-            I ran this
-          </Button>
-        </>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              disabled={isPending}
+              onClick={handleClaim}
+              aria-label="I ran this"
+              className="size-7 text-muted-foreground/70 hover:text-foreground"
+            >
+              <UserPlus className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>I ran this</TooltipContent>
+        </Tooltip>
       ) : (
-        <span className="inline-flex size-7 items-center justify-center text-muted-foreground/60">
-          <UserPlus className="size-4" />
-        </span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex size-7 items-center justify-center text-muted-foreground/60">
+              <UserPlus className="size-4" aria-hidden="true" />
+              <span className="sr-only">Unattributed</span>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>Unattributed</TooltipContent>
+        </Tooltip>
       )}
     </div>
   ) : (
@@ -184,28 +183,39 @@ export function RanByCell({
         ))}
       </div>
       {isSelfAttributed ? (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={isPending}
-          onClick={handleRemove}
-          className="hidden h-6 gap-1 px-2 text-xs font-medium group-hover:inline-flex"
-        >
-          <X className="size-3" />
-          Remove
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              disabled={isPending}
+              onClick={handleRemove}
+              aria-label="Remove"
+              className="size-6 text-muted-foreground/70 hover:text-foreground"
+            >
+              <X className="size-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Remove</TooltipContent>
+        </Tooltip>
       ) : currentUserId ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={isPending}
-          onClick={handleClaim}
-          className="hidden h-6 px-2 text-xs font-medium group-hover:inline-flex"
-        >
-          I ran this too
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              disabled={isPending}
+              onClick={handleClaim}
+              aria-label="I ran this too"
+              className="size-6 text-muted-foreground/70 hover:text-foreground"
+            >
+              <UserPlus className="size-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>I ran this too</TooltipContent>
+        </Tooltip>
       ) : null}
     </div>
   );
