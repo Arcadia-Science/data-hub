@@ -12,12 +12,7 @@ import { cn } from "@/lib/utils";
 import { UserPlus, X } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import {
-  startTransition,
-  useOptimistic,
-  useTransition,
-  type MouseEvent,
-} from "react";
+import { useOptimistic, useTransition, type MouseEvent } from "react";
 import { toast } from "sonner";
 
 // A small, deterministic palette keyed by userId hash so the same user always
@@ -40,6 +35,16 @@ function avatarColor(userId: string): string {
     hash = (hash * 31 + userId.charCodeAt(i)) | 0;
   }
   return AVATAR_PALETTE[Math.abs(hash) % AVATAR_PALETTE.length];
+}
+
+// Mirrors the server-side helper in lib/api/instrument-runs.ts so optimistic
+// attributions render with the same initials the server will echo back,
+// avoiding a fallback flip on reconcile.
+function toInitials(displayName: string): string {
+  const parts = displayName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
 type Action =
@@ -84,22 +89,24 @@ export function RanByCell({
   function handleClaim(event: MouseEvent) {
     event.stopPropagation();
     if (!currentUserId) return;
-    // Optimistically add "me" using a placeholder shape; the server response
-    // via router.refresh() will reconcile the real display name / avatar.
+    // Optimistic shape mirrors what the server will send back so the avatar
+    // bubble doesn't flip from a colored "YO" fallback to the real photo on
+    // reconcile. Pulls displayName / image straight from the session.
+    const displayName = session?.user?.name ?? session?.user?.email ?? "You";
     const me: RunAttribution = {
       userId: currentUserId,
-      displayName: "You",
-      initials: "YO",
-      avatarUrl: null,
+      displayName,
+      initials: toInitials(displayName),
+      avatarUrl: session?.user?.image ?? null,
     };
-    startTransition(() => dispatch({ kind: "claim", user: me }));
     startMutation(async () => {
+      dispatch({ kind: "claim", user: me });
       try {
         const res = await fetch(baseUrl, { method: "PUT" });
         if (!res.ok) throw new Error(await res.text());
-        router.refresh();
       } catch {
         toast.error("Couldn't claim this run. Try again?");
+      } finally {
         router.refresh();
       }
     });
@@ -108,14 +115,14 @@ export function RanByCell({
   function handleRemove(event: MouseEvent) {
     event.stopPropagation();
     if (!currentUserId) return;
-    startTransition(() => dispatch({ kind: "remove", userId: currentUserId }));
     startMutation(async () => {
+      dispatch({ kind: "remove", userId: currentUserId });
       try {
         const res = await fetch(baseUrl, { method: "DELETE" });
         if (!res.ok) throw new Error(await res.text());
-        router.refresh();
       } catch {
         toast.error("Couldn't remove attribution. Try again?");
+      } finally {
         router.refresh();
       }
     });
