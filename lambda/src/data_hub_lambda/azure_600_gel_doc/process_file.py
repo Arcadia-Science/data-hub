@@ -62,14 +62,18 @@ def process_file(run_id: str, filename: str) -> str:
         s3_utils.upload_file(png_file_path, f"s3://{processed_bucket}/{png_s3_key}")
         logger.info("Uploaded processed image to s3://%s/%s", processed_bucket, png_s3_key)
 
-        client.create_file(
+        processed_file = client.create_file(
             instrument_id=INSTRUMENT_ID,
             run_id=run_id,
             s3_bucket=processed_bucket or "",
             s3_key=png_s3_key,
             filename=png_file_path.name,
-            size_bytes=png_file_path.stat().st_size,
             category="processed",
+        )
+        client.update_file(
+            processed_file.id,
+            size_bytes=png_file_path.stat().st_size,
+            content_type="image/png",
         )
 
         metadata = parse_metadata(local_file_path)
