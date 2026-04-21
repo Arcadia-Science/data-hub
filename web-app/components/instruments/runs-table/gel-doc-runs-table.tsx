@@ -92,7 +92,7 @@ export function GelDocRunsTable({
           </TableHead>
           <TableHead>
             <FilterableColumnHeader
-              label="Ran by"
+              label="Ran By"
               paramKey="ran_by"
               options={ranByOptions}
             />

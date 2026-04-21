@@ -554,7 +554,7 @@ export async function getQpcrFilterOptions(
 
 // ---------------------------------------------------------------------------
 // Distinct users who have attributed any (non-deleted) run for this
-// instrument — used to populate the "Ran by" column filter dropdown.
+// instrument — used to populate the "Ran By" column filter dropdown.
 // ---------------------------------------------------------------------------
 
 export type RanByFilterOption = {
