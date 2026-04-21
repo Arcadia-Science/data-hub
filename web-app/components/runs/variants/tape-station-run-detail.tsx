@@ -2,7 +2,10 @@ import { DeleteRunDialog } from "@/components/runs/delete-run-dialog";
 import { RestoreRunButton } from "@/components/runs/restore-run-button";
 import type { RunDetailProps } from "@/components/runs/run-detail";
 import { RunDetail } from "@/components/runs/run-detail";
-import { TapeStationRunBadges } from "@/components/runs/run-metadata-badges";
+import {
+  hasTapeStationMetadata,
+  TapeStationRunBadges,
+} from "@/components/runs/run-metadata-badges";
 
 export function TapeStationRunDetail({
   run,
@@ -34,11 +37,13 @@ export function TapeStationRunDetail({
       </RunDetail.Header>
 
       <RunDetail.FilesMetadataLayout>
-        <RunDetail.Metadata>
-          <TapeStationRunBadges
-            metadata={run.metadata as Record<string, unknown>}
-          />
-        </RunDetail.Metadata>
+        {hasTapeStationMetadata(run.metadata as Record<string, unknown>) && (
+          <RunDetail.Metadata>
+            <TapeStationRunBadges
+              metadata={run.metadata as Record<string, unknown>}
+            />
+          </RunDetail.Metadata>
+        )}
         <RunDetail.Files
           files={files}
           instrumentId={instrumentId}

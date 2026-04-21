@@ -2,7 +2,10 @@ import { DeleteRunDialog } from "@/components/runs/delete-run-dialog";
 import { RestoreRunButton } from "@/components/runs/restore-run-button";
 import type { RunDetailProps } from "@/components/runs/run-detail";
 import { RunDetail } from "@/components/runs/run-detail";
-import { GelDocRunBadges } from "@/components/runs/run-metadata-badges";
+import {
+  GelDocRunBadges,
+  hasGelDocMetadata,
+} from "@/components/runs/run-metadata-badges";
 
 export function GelDocRunDetail({
   run,
@@ -34,9 +37,13 @@ export function GelDocRunDetail({
       </RunDetail.Header>
 
       <RunDetail.FilesMetadataLayout>
-        <RunDetail.Metadata>
-          <GelDocRunBadges metadata={run.metadata as Record<string, unknown>} />
-        </RunDetail.Metadata>
+        {hasGelDocMetadata(run.metadata as Record<string, unknown>) && (
+          <RunDetail.Metadata>
+            <GelDocRunBadges
+              metadata={run.metadata as Record<string, unknown>}
+            />
+          </RunDetail.Metadata>
+        )}
         <RunDetail.Files
           files={files}
           instrumentId={instrumentId}

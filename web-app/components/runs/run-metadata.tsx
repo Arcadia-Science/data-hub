@@ -2,16 +2,7 @@ import type { ReactNode } from "react";
 
 export function RunMetadata({ children }: { children?: ReactNode }) {
   if (!children) {
-    return (
-      <div className="flex flex-col gap-2">
-        <h2 className="text-sm font-semibold">Metadata</h2>
-        <div className="flex items-center rounded-lg border px-4 py-3">
-          <p className="text-xs text-muted-foreground">
-            No metadata recorded yet
-          </p>
-        </div>
-      </div>
-    );
+    return null;
   }
 
   return (

@@ -2,7 +2,10 @@ import { DeleteRunDialog } from "@/components/runs/delete-run-dialog";
 import { RestoreRunButton } from "@/components/runs/restore-run-button";
 import type { RunDetailProps } from "@/components/runs/run-detail";
 import { RunDetail } from "@/components/runs/run-detail";
-import { QpcrRunBadges } from "@/components/runs/run-metadata-badges";
+import {
+  hasQpcrMetadata,
+  QpcrRunBadges,
+} from "@/components/runs/run-metadata-badges";
 
 export function QpcrRunDetail({
   run,
@@ -34,9 +37,11 @@ export function QpcrRunDetail({
       </RunDetail.Header>
 
       <RunDetail.FilesMetadataLayout>
-        <RunDetail.Metadata>
-          <QpcrRunBadges metadata={run.metadata as Record<string, unknown>} />
-        </RunDetail.Metadata>
+        {hasQpcrMetadata(run.metadata as Record<string, unknown>) && (
+          <RunDetail.Metadata>
+            <QpcrRunBadges metadata={run.metadata as Record<string, unknown>} />
+          </RunDetail.Metadata>
+        )}
         <RunDetail.Files
           files={files}
           instrumentId={instrumentId}
