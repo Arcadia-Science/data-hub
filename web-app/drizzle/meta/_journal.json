@@ -50,6 +50,13 @@
       "when": 1776988800000,
       "tag": "0006_qpcr_tape_station",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1776804297734,
+      "tag": "0007_dazzling_hercules",
+      "breakpoints": true
     }
   ]
 }

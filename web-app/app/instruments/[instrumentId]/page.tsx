@@ -1,6 +1,8 @@
 import { InstrumentHeader } from "@/components/instruments/instrument-header";
 import { InstrumentRunsToolbar } from "@/components/instruments/instrument-runs-toolbar";
 import { InstrumentRunsTable } from "@/components/instruments/runs-table";
+import { BulkAttributionBar } from "@/components/instruments/runs-table/bulk-attribution-bar";
+import { RunSelectionProvider } from "@/components/instruments/runs-table/run-selection-provider";
 import { PaginationNav } from "@/components/pagination-nav";
 import {
   TablePendingBoundary,
@@ -11,6 +13,7 @@ import {
   getGelDocFilterOptions,
   getPlateReaderFilterOptions,
   getQpcrFilterOptions,
+  getRanByFilterOptions,
 } from "@/lib/api/instrument-runs";
 import { getInstrumentById } from "@/lib/api/instruments";
 import { auth } from "@/lib/auth";
@@ -61,6 +64,7 @@ export default async function InstrumentDetailPage({
       gelWavelength: filters.gel_wavelength ?? undefined,
       gelColor: filters.gel_color ?? undefined,
       dyeChannel: filters.dye_channel ?? undefined,
+      ranBy: filters.ran_by ?? undefined,
     }),
   ]);
 
@@ -71,11 +75,13 @@ export default async function InstrumentDetailPage({
   const isQpcr = instrument.instrumentType === "qpcr";
 
   // Fetch distinct metadata values for instrument-specific column filter dropdowns.
-  const [filterOptions, gelDocFilterOptions, qpcrFilterOptions] =
+  // `ranByOptions` applies to every instrument type.
+  const [filterOptions, gelDocFilterOptions, qpcrFilterOptions, ranByUsers] =
     await Promise.all([
       isPlateReader ? getPlateReaderFilterOptions(instrumentId) : undefined,
       isGelDoc ? getGelDocFilterOptions(instrumentId) : undefined,
       isQpcr ? getQpcrFilterOptions(instrumentId) : undefined,
+      getRanByFilterOptions(instrumentId),
     ]);
 
   const hasFilters =
@@ -90,30 +96,62 @@ export default async function InstrumentDetailPage({
     filters.imaging_mode !== null ||
     filters.gel_wavelength !== null ||
     filters.gel_color !== null ||
-    filters.dye_channel !== null;
+    filters.dye_channel !== null ||
+    filters.ran_by !== null;
+
+  const currentUserId = session.user?.id ?? null;
+  const unattributedCount = runResult.data.filter(
+    (row) => row.attributions.length === 0
+  ).length;
+  const ranByYouCount = currentUserId
+    ? runResult.data.filter((row) =>
+        row.attributions.some((a) => a.userId === currentUserId)
+      ).length
+    : 0;
+
+  // Build the "Ran by" dropdown options: the current user (labelled "You"),
+  // pinned to the top if they've attributed anything here, followed by other
+  // attributors by display name, then the "Unattributed" sentinel.
+  const meOption = currentUserId
+    ? ranByUsers.find((u) => u.userId === currentUserId)
+    : undefined;
+  const ranByOptions = [
+    ...(meOption ? [{ value: meOption.userId, label: "You" }] : []),
+    ...ranByUsers
+      .filter((u) => u.userId !== currentUserId)
+      .map((u) => ({ value: u.userId, label: u.displayName })),
+    { value: "unattributed", label: "Unattributed" },
+  ];
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6 p-6">
       <InstrumentHeader instrument={instrument} />
-      <TablePendingProvider>
-        <InstrumentRunsToolbar />
-        <TablePendingBoundary>
-          <InstrumentRunsTable
-            data={runResult.data}
-            instrumentId={instrumentId}
-            instrumentType={instrument.instrumentType}
-            hasFilters={hasFilters}
-            filterOptions={filterOptions}
-            gelDocFilterOptions={gelDocFilterOptions}
-            qpcrFilterOptions={qpcrFilterOptions}
+      <RunSelectionProvider>
+        <TablePendingProvider>
+          <InstrumentRunsToolbar />
+          <BulkAttributionBar />
+          <TablePendingBoundary>
+            <InstrumentRunsTable
+              data={runResult.data}
+              instrumentId={instrumentId}
+              instrumentType={instrument.instrumentType}
+              hasFilters={hasFilters}
+              filterOptions={filterOptions}
+              gelDocFilterOptions={gelDocFilterOptions}
+              qpcrFilterOptions={qpcrFilterOptions}
+              ranByOptions={ranByOptions}
+              totalCount={runResult.pagination.total}
+              unattributedCount={unattributedCount}
+              ranByYouCount={ranByYouCount}
+            />
+          </TablePendingBoundary>
+          <PaginationNav
+            page={runResult.pagination.page}
+            totalPages={runResult.pagination.total_pages}
+            pageParam="page"
           />
-        </TablePendingBoundary>
-        <PaginationNav
-          page={runResult.pagination.page}
-          totalPages={runResult.pagination.total_pages}
-          pageParam="page"
-        />
-      </TablePendingProvider>
+        </TablePendingProvider>
+      </RunSelectionProvider>
     </div>
   );
 }

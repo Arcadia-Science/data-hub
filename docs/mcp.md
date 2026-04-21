@@ -75,10 +75,20 @@ All tools return JSON encoded as a single text content block. Error cases set `i
 
 | Tool | Description |
 | --- | --- |
-| `search_runs` | Paginated search across runs with filtering, sorting, and date range. Supports plate-reader metadata filters (`wavelength`, `measurementMode`, `measurementType`). |
+| `search_runs` | Paginated search across runs with filtering, sorting, and date range. Supports plate-reader metadata filters (`wavelength`, `measurementMode`, `measurementType`) and attribution filtering via `ranBy` (a user id or the literal `"unattributed"`). |
 | `get_run` | Get a single run by its natural key (`instrumentId` + `runId`). |
 | `list_run_files` | List all files attached to a run, including processing status and metadata. Use `get_file_download_url` on processed CSV files to access experimental results. |
 | `get_run_archive_path` | Get the API path that streams a ZIP archive of all uploaded files for a run. Prepend the Data Hub origin and authenticate with the same Bearer token to download. |
+
+Both `get_run` and `search_runs` responses embed an `attributions` array on each run, listing the users who have claimed it (user id, display name, initials, avatar URL). No separate read tool is needed to inspect who ran a run.
+
+### Run attribution
+
+| Tool | Description |
+| --- | --- |
+| `claim_run` | **Write tool.** Mark a run as performed by the authenticated user. Idempotent. Only self-attribution is supported — the user id comes from the session token, never from an argument, so you cannot claim a run on behalf of another user. |
+| `unclaim_run` | **Write tool.** Remove the authenticated user's attribution from a run. Idempotent. Annotated `destructiveHint: true` because removing attribution is user-visible across the dashboard and runs tables. |
+| `list_run_attributors` | List distinct users who have claimed at least one run on a given instrument. Use the returned `userId` values to construct a `search_runs` call with `ranBy=<userId>`. |
 
 ### Files
 
@@ -125,6 +135,7 @@ Once installed, ask your client questions like:
 - *"Summarize the well data from run `2026-03-26_experiment` on the plate reader."* → `run_analysis` prompt, which chains `get_run`, `list_run_files`, and `get_file_download_url` for processed CSVs
 - *"The gel-doc in Lab 3 stopped uploading — what's wrong?"* → `troubleshoot_instrument` prompt, which inspects the watcher list and heartbeat history
 - *"Re-run processing for file 4217, we pushed a parser fix."* → `reprocess_file`. Clients typically confirm the destructive action with the user first.
+- *"Claim run `2026-03-26_experiment` on the SpectraMax — I ran it this morning."* → `claim_run`. To find runs you've already claimed, use `search_runs` with `ranBy` set to your user id (discoverable via `list_run_attributors`).
 
 ## Troubleshooting
 

@@ -1,24 +1,48 @@
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
 import type { RunDetail } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
-import { ArrowLeft, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import Link from "next/link";
 
 export function RunHeader({
   run,
   children,
+  attributionsSlot,
 }: {
   run: RunDetail;
   children?: React.ReactNode;
+  attributionsSlot?: React.ReactNode;
 }) {
   return (
     <div className="flex flex-col gap-4">
-      <Link
-        href={`/instruments/${run.instrumentId}`}
-        className="flex w-fit items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <ArrowLeft className="size-3.5" />
-        {run.instrumentDisplayName}
-      </Link>
+      <Breadcrumb>
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <BreadcrumbLink asChild>
+              <Link href="/instruments">Instruments</Link>
+            </BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbLink asChild>
+              <Link href={`/instruments/${run.instrumentId}`}>
+                {run.instrumentDisplayName}
+              </Link>
+            </BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbPage className="font-mono">{run.runId}</BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
 
       {run.deletedAt && (
         <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">
@@ -44,6 +68,12 @@ export function RunHeader({
         <span>Created {formatDateTime(run.createdAt)}</span>
         <span className="text-muted-foreground/40">&middot;</span>
         <span>Updated {formatDateTime(run.updatedAt)}</span>
+        {attributionsSlot && (
+          <>
+            <span className="text-muted-foreground/40">&middot;</span>
+            {attributionsSlot}
+          </>
+        )}
       </div>
     </div>
   );

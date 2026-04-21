@@ -7,6 +7,8 @@ import {
 } from "@/lib/api/files";
 import {
   buildRunListQuery,
+  getAttributionsByRunIds,
+  getRanByFilterOptions,
   getRunFiles,
   lookupRunByNaturalKey,
 } from "@/lib/api/instrument-runs";
@@ -15,8 +17,12 @@ import {
   getInstrumentListWithCounts,
 } from "@/lib/api/instruments";
 import { getWatcherHeartbeats, getWatcherList } from "@/lib/api/watchers";
+import { db } from "@/lib/db";
+import { runAttributions } from "@/lib/db/schema";
 import { getPresignedDownloadUrl } from "@/lib/s3";
+import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 // Pre-signed URLs issued via the MCP server use the same default window as
@@ -35,6 +41,38 @@ function errorResult(message: string) {
     content: [{ type: "text" as const, text: message }],
     isError: true,
   };
+}
+
+type AttributionResolution =
+  | { ok: true; userId: string; runUuid: string }
+  | { ok: false; error: ReturnType<typeof errorResult> };
+
+// Shared resolution step for claim_run / unclaim_run. The authenticated user
+// id is pulled only from authInfo — never from an argument — to preserve the
+// "no spoofable user id" invariant the REST route at
+// /api/v1/instruments/:instrumentId/runs/:runId/attributions/me enforces.
+async function resolveAttributionTarget(
+  authInfo: AuthInfo | undefined,
+  instrumentId: string,
+  runId: string
+): Promise<AttributionResolution> {
+  const userId = authInfo?.extra?.userId as string | undefined;
+  if (!userId) {
+    return {
+      ok: false,
+      error: errorResult("Authenticated user not available on this session."),
+    };
+  }
+  const run = await lookupRunByNaturalKey(instrumentId, runId);
+  if (!run) {
+    return {
+      ok: false,
+      error: errorResult(
+        `Run '${runId}' not found for instrument '${instrumentId}'.`
+      ),
+    };
+  }
+  return { ok: true, userId, runUuid: run.id };
 }
 
 export function registerTools(server: McpServer) {
@@ -149,6 +187,12 @@ export function registerTools(server: McpServer) {
           .string()
           .optional()
           .describe("Plate reader: filter by measurement type"),
+        ranBy: z
+          .string()
+          .optional()
+          .describe(
+            'Filter by attributor. Pass a user id to match runs attributed to that user, or the literal "unattributed" to match runs with no attributions. Use list_run_attributors to discover valid user ids.'
+          ),
       },
       annotations: { readOnlyHint: true },
     },
@@ -167,6 +211,7 @@ export function registerTools(server: McpServer) {
         wavelength: args.wavelength,
         measurementMode: args.measurementMode,
         measurementType: args.measurementType,
+        ranBy: args.ranBy,
       });
       return textResult(result);
     }
@@ -412,6 +457,105 @@ export function registerTools(server: McpServer) {
         total,
         heartbeats: rows,
       });
+    }
+  );
+
+  server.registerTool(
+    "claim_run",
+    {
+      title: "Claim Run",
+      description:
+        "Mark a run as performed by the authenticated user. Idempotent — claiming a run you already claimed is a no-op. Only self-attribution is supported; you cannot claim a run on behalf of another user.",
+      inputSchema: {
+        instrumentId: z.string().describe("Instrument identifier"),
+        runId: z.string().describe("Run identifier within the instrument"),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
+    },
+    async ({ instrumentId, runId }, { authInfo }) => {
+      const resolved = await resolveAttributionTarget(
+        authInfo,
+        instrumentId,
+        runId
+      );
+      if (!resolved.ok) return resolved.error;
+
+      await db
+        .insert(runAttributions)
+        .values({ runId: resolved.runUuid, userId: resolved.userId })
+        .onConflictDoNothing();
+
+      const byRun = await getAttributionsByRunIds([resolved.runUuid]);
+      return textResult({
+        instrumentId,
+        runId,
+        attributions: byRun.get(resolved.runUuid) ?? [],
+      });
+    }
+  );
+
+  server.registerTool(
+    "unclaim_run",
+    {
+      title: "Unclaim Run",
+      description:
+        "Remove the authenticated user's attribution from a run. Idempotent — unclaiming a run you don't currently claim is a no-op. Only self-attribution is supported; you cannot remove another user's attribution.",
+      inputSchema: {
+        instrumentId: z.string().describe("Instrument identifier"),
+        runId: z.string().describe("Run identifier within the instrument"),
+      },
+      // destructiveHint because removing an attribution is user-visible across
+      // dashboards and the runs table; clients should confirm before calling.
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+      },
+    },
+    async ({ instrumentId, runId }, { authInfo }) => {
+      const resolved = await resolveAttributionTarget(
+        authInfo,
+        instrumentId,
+        runId
+      );
+      if (!resolved.ok) return resolved.error;
+
+      await db
+        .delete(runAttributions)
+        .where(
+          and(
+            eq(runAttributions.runId, resolved.runUuid),
+            eq(runAttributions.userId, resolved.userId)
+          )
+        );
+
+      const byRun = await getAttributionsByRunIds([resolved.runUuid]);
+      return textResult({
+        instrumentId,
+        runId,
+        attributions: byRun.get(resolved.runUuid) ?? [],
+      });
+    }
+  );
+
+  server.registerTool(
+    "list_run_attributors",
+    {
+      title: "List Run Attributors",
+      description:
+        "List distinct users who have claimed at least one run on a given instrument. Use the returned userId with search_runs ranBy=<userId>.",
+      inputSchema: {
+        instrumentId: z.string().describe("Instrument identifier"),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ instrumentId }) => {
+      const attributors = await getRanByFilterOptions(instrumentId);
+      return textResult(attributors);
     }
   );
 }

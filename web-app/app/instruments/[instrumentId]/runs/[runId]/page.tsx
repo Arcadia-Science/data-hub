@@ -1,3 +1,4 @@
+import { RunAttributionsSection } from "@/components/runs/run-attributions-section";
 import { RunDetailVariant } from "@/components/runs/variants";
 import {
   getProcessedCsvData,
@@ -41,6 +42,13 @@ export default async function RunDetailPage({ params }: Props) {
         wellData={wellData}
         instrumentId={instrumentId}
         runId={runId}
+        attributionsSlot={
+          <RunAttributionsSection
+            instrumentId={run.instrumentId}
+            runId={run.runId}
+            attributions={run.attributions}
+          />
+        }
       />
     </div>
   );

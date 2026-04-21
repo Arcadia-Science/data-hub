@@ -84,6 +84,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     updated_at: run.updatedAt,
     deleted_at: run.deletedAt,
     metadata: run.metadata,
+    attributions: run.attributions,
     files: filesWithUrls,
   });
 }

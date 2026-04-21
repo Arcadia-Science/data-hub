@@ -1,6 +1,14 @@
 import { Badge } from "@/components/ui/badge";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
 import type { InstrumentDetail } from "@/lib/api/instruments";
-import { Activity, ArrowLeft, Radio, WifiOff } from "lucide-react";
+import { Activity, Radio, WifiOff } from "lucide-react";
 import Link from "next/link";
 
 type WatcherVariant = "online" | "offline" | "no_watcher";
@@ -36,13 +44,19 @@ export function InstrumentHeader({
 
   return (
     <div className="flex flex-col gap-2">
-      <Link
-        href="/instruments"
-        className="mb-2 flex w-fit items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <ArrowLeft className="size-3.5" />
-        Back to instruments
-      </Link>
+      <Breadcrumb className="mb-2">
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <BreadcrumbLink asChild>
+              <Link href="/instruments">Instruments</Link>
+            </BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbPage>{instrument.displayName}</BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">

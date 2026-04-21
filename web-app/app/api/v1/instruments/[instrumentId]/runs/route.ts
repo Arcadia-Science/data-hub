@@ -210,6 +210,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       max: 100,
     }),
     includeDeleted: searchParams.get("include_deleted") === "true",
+    ranBy: searchParams.get("ran_by") ?? undefined,
   });
 
   return Response.json(result);

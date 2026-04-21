@@ -4,6 +4,8 @@ import {
 } from "@/components/dashboard/instrument-cards";
 import { RunsTable } from "@/components/dashboard/runs-table";
 import { RunsToolbar } from "@/components/dashboard/runs-toolbar";
+import { BulkAttributionBar } from "@/components/instruments/runs-table/bulk-attribution-bar";
+import { RunSelectionProvider } from "@/components/instruments/runs-table/run-selection-provider";
 import { PaginationNav } from "@/components/pagination-nav";
 import {
   TablePendingBoundary,
@@ -62,6 +64,15 @@ export default async function DashboardPage({
   ]);
 
   const hasFilters = hasActiveFilters(params);
+  const currentUserId = session.user?.id ?? null;
+  const unattributedCount = runResult.data.filter(
+    (row) => row.attributions.length === 0
+  ).length;
+  const ranByYouCount = currentUserId
+    ? runResult.data.filter((row) =>
+        row.attributions.some((a) => a.userId === currentUserId)
+      ).length
+    : 0;
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6 p-6">
@@ -69,18 +80,33 @@ export default async function DashboardPage({
         <InstrumentCards />
       </Suspense>
 
-      <TablePendingProvider>
-        <RunsToolbar instruments={instruments} />
-
-        <TablePendingBoundary>
-          <RunsTable data={runResult.data} hasFilters={hasFilters} />
-        </TablePendingBoundary>
-        <PaginationNav
-          page={runResult.pagination.page}
-          totalPages={runResult.pagination.total_pages}
-          pageParam="page"
-        />
-      </TablePendingProvider>
+      <RunSelectionProvider>
+        <TablePendingProvider>
+          <RunsToolbar instruments={instruments} />
+          <BulkAttributionBar />
+          <TablePendingBoundary>
+            <RunsTable data={runResult.data} hasFilters={hasFilters} />
+          </TablePendingBoundary>
+          <PaginationNav
+            page={runResult.pagination.page}
+            totalPages={runResult.pagination.total_pages}
+            pageParam="page"
+          />
+          {runResult.data.length > 0 ? (
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <p>
+                Hover any row to reveal &ldquo;I ran this&rdquo;. Check multiple
+                rows to attribute them together.
+              </p>
+              <p>
+                <span className="tabular-nums">{unattributedCount}</span>{" "}
+                unattributed ·{" "}
+                <span className="tabular-nums">{ranByYouCount}</span> ran by you
+              </p>
+            </div>
+          ) : null}
+        </TablePendingProvider>
+      </RunSelectionProvider>
     </div>
   );
 }

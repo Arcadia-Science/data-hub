@@ -12,6 +12,7 @@ export function QpcrRunDetail({
   files,
   instrumentId,
   runId,
+  attributionsSlot,
 }: RunDetailProps) {
   const isDeleted = run.deletedAt !== null;
   const canRestore = isDeleted && run.filesPurgedAt === null;
@@ -22,7 +23,7 @@ export function QpcrRunDetail({
 
   return (
     <>
-      <RunDetail.Header run={run}>
+      <RunDetail.Header run={run} attributionsSlot={attributionsSlot}>
         {!isDeleted && (
           <DeleteRunDialog
             instrumentId={instrumentId}

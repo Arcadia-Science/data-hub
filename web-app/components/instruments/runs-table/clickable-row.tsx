@@ -16,7 +16,7 @@ export function ClickableRow({
 
   return (
     <TableRow
-      className={`cursor-pointer ${className ?? ""}`}
+      className={`group cursor-pointer ${className ?? ""}`}
       onClick={() => router.push(href)}
     >
       {children}

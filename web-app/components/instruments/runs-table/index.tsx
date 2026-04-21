@@ -2,6 +2,7 @@ import type {
   GelDocFilterOptions,
   PlateReaderFilterOptions,
   QpcrFilterOptions,
+  RunAttribution,
 } from "@/lib/api/instrument-runs";
 import type { InstrumentType } from "@/lib/db/schema";
 import { SearchX } from "lucide-react";
@@ -10,6 +11,7 @@ import { DefaultRunsTable } from "./default-runs-table";
 import { GelDocRunsTable } from "./gel-doc-runs-table";
 import { PlateReaderRunsTable } from "./plate-reader-runs-table";
 import { QpcrRunsTable } from "./qpcr-runs-table";
+import { RunsTableFooter } from "./runs-table-footer";
 
 export type RunRow = {
   id: string;
@@ -27,11 +29,15 @@ export type RunRow = {
   files_pending_upload: number;
   total_size_bytes: number;
   error_messages: string[];
+  attributions: RunAttribution[];
 };
+
+export type RanByOption = { value: string; label: string };
 
 export type RunsTableProps = {
   data: RunRow[];
   instrumentId: string;
+  ranByOptions: RanByOption[];
 };
 
 export function InstrumentRunsTable({
@@ -42,6 +48,10 @@ export function InstrumentRunsTable({
   filterOptions,
   gelDocFilterOptions,
   qpcrFilterOptions,
+  ranByOptions,
+  totalCount,
+  unattributedCount,
+  ranByYouCount,
 }: {
   data: RunRow[];
   instrumentId: string;
@@ -50,6 +60,10 @@ export function InstrumentRunsTable({
   filterOptions?: PlateReaderFilterOptions;
   gelDocFilterOptions?: GelDocFilterOptions;
   qpcrFilterOptions?: QpcrFilterOptions;
+  ranByOptions: RanByOption[];
+  totalCount: number;
+  unattributedCount: number;
+  ranByYouCount: number;
 }) {
   if (data.length === 0) {
     return (
@@ -64,32 +78,57 @@ export function InstrumentRunsTable({
     );
   }
 
+  let table;
   switch (instrumentType) {
     case "plate_reader":
-      return (
+      table = (
         <PlateReaderRunsTable
           data={data}
           instrumentId={instrumentId}
           filterOptions={filterOptions!}
+          ranByOptions={ranByOptions}
         />
       );
+      break;
     case "gel_doc":
-      return (
+      table = (
         <GelDocRunsTable
           data={data}
           instrumentId={instrumentId}
           filterOptions={gelDocFilterOptions!}
+          ranByOptions={ranByOptions}
         />
       );
+      break;
     case "qpcr":
-      return (
+      table = (
         <QpcrRunsTable
           data={data}
           instrumentId={instrumentId}
           filterOptions={qpcrFilterOptions!}
+          ranByOptions={ranByOptions}
         />
       );
+      break;
     default:
-      return <DefaultRunsTable data={data} instrumentId={instrumentId} />;
+      table = (
+        <DefaultRunsTable
+          data={data}
+          instrumentId={instrumentId}
+          ranByOptions={ranByOptions}
+        />
+      );
   }
+
+  return (
+    <div className="rounded-lg border">
+      {table}
+      <RunsTableFooter
+        shownCount={data.length}
+        totalCount={totalCount}
+        unattributedCount={unattributedCount}
+        ranByYouCount={ranByYouCount}
+      />
+    </div>
+  );
 }

@@ -36,6 +36,7 @@ export async function closeTestDb() {
 // Quoted names match Drizzle-generated tables that use camelCase identifiers.
 const TRUNCATE_ORDER = [
   "files",
+  "run_attributions",
   "instrument_runs",
   "watcher_events",
   "watcher_heartbeats",

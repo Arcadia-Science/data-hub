@@ -178,10 +178,15 @@ class DataHubClient:
         status: str | None = None,
         metadata: dict[str, Any] | None = None,
         error_message: str | None = None,
+        size_bytes: int | None = None,
+        content_type: str | None = None,
     ) -> FileResponse:
-        """Update a file record (status transition, metadata).
+        """Update a file record (status transition, metadata, S3 object properties).
 
         The API enforces a state machine: uploaded → processing → completed|failed.
+        `size_bytes` and `content_type` are objective properties of the S3 object
+        and may be PATCHed after the record is created (e.g. for processed
+        artifacts whose size is only known post-upload).
         """
         payload: dict[str, Any] = {}
         if status is not None:
@@ -190,6 +195,10 @@ class DataHubClient:
             payload["metadata"] = metadata
         if error_message is not None:
             payload["error_message"] = error_message
+        if size_bytes is not None:
+            payload["size_bytes"] = size_bytes
+        if content_type is not None:
+            payload["content_type"] = content_type
 
         resp = self._request("PATCH", f"/files/{file_id}", json=payload)
         return FileResponse.model_validate(resp.json())

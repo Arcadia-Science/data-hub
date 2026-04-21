@@ -44,7 +44,7 @@ export default async function RootLayout({
       )}
     >
       <body>
-        <SessionProvider>
+        <SessionProvider session={session}>
           <ThemeProvider>
             <NuqsAdapter>
               <TooltipProvider>

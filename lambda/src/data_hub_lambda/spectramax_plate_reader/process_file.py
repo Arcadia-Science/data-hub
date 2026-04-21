@@ -65,14 +65,18 @@ def process_file(instrument_id: InstrumentType, run_id: str, filename: str) -> s
         s3_utils.upload_file(csv_path, f"s3://{processed_bucket}/{csv_s3_key}")
         logger.info("Uploaded processed CSV to s3://%s/%s", processed_bucket, csv_s3_key)
 
-        client.create_file(
+        processed_file = client.create_file(
             instrument_id=instrument_id,
             run_id=run_id,
             s3_bucket=processed_bucket or "",
             s3_key=csv_s3_key,
             filename=csv_filename,
-            size_bytes=csv_path.stat().st_size,
             category="processed",
+        )
+        client.update_file(
+            processed_file.id,
+            size_bytes=csv_path.stat().st_size,
+            content_type="text/csv",
         )
 
         client.update_run(instrument_id, run_id, metadata=metadata)
