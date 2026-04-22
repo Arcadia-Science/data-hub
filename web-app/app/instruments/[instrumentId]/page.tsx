@@ -109,7 +109,7 @@ export default async function InstrumentDetailPage({
       ).length
     : 0;
 
-  // Build the "Ran by" dropdown options: the current user (labelled "You"),
+  // Build the "Ran By" dropdown options: the current user (labelled "You"),
   // pinned to the top if they've attributed anything here, followed by other
   // attributors by display name, then the "Unattributed" sentinel.
   const meOption = currentUserId

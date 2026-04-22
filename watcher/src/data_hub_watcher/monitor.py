@@ -7,8 +7,8 @@ unchanged for the configured period), then invokes a callback.
 
 from __future__ import annotations
 import fnmatch
-import hashlib
 import logging
+import os
 import threading
 import time
 from collections.abc import Callable
@@ -27,15 +27,6 @@ from data_hub_watcher.constants import MAX_STABILITY_WAIT_SECONDS
 from data_hub_watcher.state import StateDB
 
 logger = logging.getLogger(__name__)
-
-
-def file_sha256(path: Path) -> str:
-    """Return the hex SHA-256 digest of *path*."""
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 @dataclass
@@ -165,43 +156,100 @@ class FileMonitor:
 
         This catches files that appeared while the watcher was stopped (e.g.
         between a crash and restart, or overnight when running as a service).
+
+        Identity for "already uploaded" is `(relative_path, size, mtime)` —
+        a cheap `stat()` rather than a full-content SHA-256. The path is
+        relative to the watch directory, so same-named files in different
+        subdirectories don't collide. For write-once instrument output this
+        is a safe and much faster heuristic. The uploader still computes a
+        real SHA-256 on its way out, so content integrity is not
+        compromised. See also: `StateDB.has_stat_match`.
+
+        In addition to `uploaded_files`, files recorded in `detected_files`
+        (i.e. already part of a reported run's manifest) are also skipped.
+        This matters in manual mode where the uploader never runs locally
+        and `uploaded_files` stays empty — without this, every restart
+        would re-POST / PATCH the full manifest.
+        See also: `StateDB.has_detected_stat_match`.
         """
+        logger.info(
+            "Initial scan starting (dir=%s, patterns=%s, recursive=%s)…",
+            self._watch_dir,
+            self._patterns,
+            self._recursive,
+        )
         iterator = self._watch_dir.rglob("*") if self._recursive else self._watch_dir.iterdir()
-        count = 0
+        total = 0
+        queued = 0
+        skipped = 0
         for entry in iterator:
             if not entry.is_file():
                 continue
             if not any(fnmatch.fnmatch(entry.name, pat) for pat in self._patterns):
                 continue
-            sha = file_sha256(entry)
-            if self._state_db.has_any_upload(entry.name, sha):
+            total += 1
+            try:
+                st = entry.stat()
+            except OSError:
                 continue
-            self._enqueue(entry)
-            count += 1
+            try:
+                rel_path = entry.relative_to(self._watch_dir).as_posix()
+            except ValueError:
+                # Symlinks or oddities outside the watch dir: fall back to
+                # basename so the lookup degrades gracefully instead of
+                # raising.
+                rel_path = entry.name
+            if self._state_db.has_stat_match(
+                rel_path, st.st_size, st.st_mtime
+            ) or self._state_db.has_detected_stat_match(rel_path, st.st_size, st.st_mtime):
+                skipped += 1
+                continue
+            # Pass `st` through so `_enqueue` doesn't issue a redundant
+            # stat() syscall — halves the stat cost on initial scans of
+            # large directories.
+            self._enqueue(entry, stat_result=st)
+            queued += 1
+            if total % 100 == 0:
+                logger.info(
+                    "Initial scan progress: %d scanned, %d queued, %d skipped",
+                    total,
+                    queued,
+                    skipped,
+                )
 
-        if count:
-            logger.info("Initial scan queued %d file(s) for stability check", count)
+        logger.info(
+            "Initial scan complete: %d scanned, %d queued, %d skipped",
+            total,
+            queued,
+            skipped,
+        )
 
     # ------------------------------------------------------------------
     # stability tracking
     # ------------------------------------------------------------------
 
-    def _enqueue(self, path: Path) -> None:
-        """Add or refresh a file in the pending-stability dict."""
-        try:
-            stat = path.stat()
-        except OSError:
-            return
+    def _enqueue(self, path: Path, *, stat_result: os.stat_result | None = None) -> None:
+        """Add or refresh a file in the pending-stability dict.
+
+        *stat_result* lets callers that already hold a fresh `stat()`
+        (notably `_initial_scan`) avoid a redundant syscall. Watchdog
+        event callbacks don't have one and pass `None`.
+        """
+        if stat_result is None:
+            try:
+                stat_result = path.stat()
+            except OSError:
+                return
         with self._lock:
             existing = self._pending.get(path)
             if existing is None:
                 self._pending[path] = _PendingFile(
-                    path=path, size=stat.st_size, mtime=stat.st_mtime
+                    path=path, size=stat_result.st_size, mtime=stat_result.st_mtime
                 )
             else:
-                if stat.st_size != existing.size or stat.st_mtime != existing.mtime:
-                    existing.size = stat.st_size
-                    existing.mtime = stat.st_mtime
+                if stat_result.st_size != existing.size or stat_result.st_mtime != existing.mtime:
+                    existing.size = stat_result.st_size
+                    existing.mtime = stat_result.st_mtime
                     existing.last_changed = time.monotonic()
 
     def _stability_loop(self) -> None:

@@ -19,8 +19,6 @@ from data_hub_watcher.constants import (
     API_URLS,
     DEFAULT_CONFIG_DIR,
     DEFAULT_STABILITY_PERIOD_SECONDS,
-    HEARTBEAT_INTERVAL_SECONDS,
-    PRUNE_DAYS,
     RUN_DETECTION_PRESETS,
     STATE_DB_FILENAME,
     load_env,
@@ -28,14 +26,13 @@ from data_hub_watcher.constants import (
     save_api_key,
 )
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
-from data_hub_watcher.heartbeat import HeartbeatLoop, WatcherCounters
+from data_hub_watcher.heartbeat import WatcherCounters
 from data_hub_watcher.models import (
     InstrumentConfig,
     RunDetectionConfig,
     WatcherConfig,
 )
-from data_hub_watcher.monitor import FileMonitor
-from data_hub_watcher.run_detector import RunDetector
+from data_hub_watcher.runtime import build_runtime, start_runtime, stop_runtime
 from data_hub_watcher.state import StateDB
 from data_hub_watcher.uploader import Uploader
 
@@ -641,100 +638,21 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
     # Step 3: File logging
     _setup_file_logging()
 
-    # Step 4: State DB + pruning
+    # Step 4: Build the shared runtime (state DB, uploader, detector,
+    # monitor, heartbeat — all wired identically to the Windows-service
+    # path via data_hub_watcher.runtime).
     db_path = DEFAULT_CONFIG_DIR / STATE_DB_FILENAME
-    state_db = StateDB(db_path)
-    state_db.prune_uploaded_files(PRUNE_DAYS)
+    rt = build_runtime(client=client, cfg=cfg, db_path=db_path)
 
-    # Step 5: Core services
-    counters = WatcherCounters()
-    reporter = EventReporter(client, cfg.watcher_id)
-
-    is_auto = inst.upload_mode == "auto"
-
-    uploader = Uploader(
-        client=client,
-        state_db=state_db,
-        event_reporter=reporter,
-        counters=counters,
-        instrument_id=inst.id,
-        watcher_id=cfg.watcher_id,
-        watch_directory=inst.watch_directory,
-    )
-
-    detector = RunDetector(
-        pattern=inst.run_detection.pattern,
-        instrument_id=inst.id,
-        watcher_id=cfg.watcher_id,
-        client=client,
-        state_db=state_db,
-        event_reporter=reporter,
-        counters=counters,
-        upload_callback=uploader.upload_files if is_auto else None,
-        watch_directory=inst.watch_directory,
-    )
-
-    monitor = FileMonitor(
-        watch_directory=inst.watch_directory,
-        file_patterns=inst.file_patterns,
-        stability_period=inst.stability_period_seconds,
-        on_stable_file=detector.on_stable_file,
-        state_db=state_db,
-        recursive=inst.run_detection.recursive,
-    )
-
-    # In manual mode the server controls which files to upload. We piggyback
-    # on the heartbeat tick to poll the server's upload queue, so uploads
-    # happen at the same cadence as heartbeats without a separate timer.
-    def _poll_upload_queue() -> None:
-        try:
-            uploader.poll_upload_queue()
-        except Exception:
-            logger.exception("Upload queue poll failed")
-
-    heartbeat = HeartbeatLoop(
-        client=client,
-        watcher_id=cfg.watcher_id,
-        interval_seconds=HEARTBEAT_INTERVAL_SECONDS,
-        event_reporter=reporter,
-        instrument_id=inst.id,
-        watch_directory=str(inst.watch_directory),
-        upload_mode=inst.upload_mode,
-        counters=counters,
-        on_tick=_poll_upload_queue if not is_auto else None,
-    )
-
-    reporter.queue_event(
-        WatcherEvent(
-            event_type=EventType.WATCHER_STARTED,
-            message=f"Watcher started on {platform.node()}",
-        )
-    )
-
-    # If the watcher crashed mid-session, some runs may have been detected but
-    # never successfully POSTed to the API. Retry those before starting the
-    # normal event loop so they aren't silently lost.
-    detector.retry_unreported_runs()
-
-    # Step 8: Start everything
-    heartbeat.start()
-    monitor.start()
+    click.echo(f"Scanning {inst.watch_directory} for existing files…")
+    start_runtime(rt, started_message=f"Watcher started on {platform.node()}")
 
     click.echo(f"Watcher is running (instrument={inst.id}, dir={inst.watch_directory})…")
     click.echo("Press Ctrl+C to stop.")
 
     def _shutdown(signum: int, frame: Any) -> None:
         click.echo("\nShutting down…")
-        monitor.stop()
-        reporter.queue_event(
-            WatcherEvent(
-                event_type=EventType.WATCHER_STOPPED,
-                message="Watcher stopped by user",
-            )
-        )
-        heartbeat.stop()
-        reporter.flush()
-        state_db.close()
+        stop_runtime(rt, stopped_message="Watcher stopped by user")
         raise SystemExit(0)
 
     signal.signal(signal.SIGINT, _shutdown)

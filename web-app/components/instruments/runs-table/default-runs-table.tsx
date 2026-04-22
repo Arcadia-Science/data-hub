@@ -41,7 +41,7 @@ export function DefaultRunsTable({
           <TableHead className="text-right">Total Size</TableHead>
           <TableHead>
             <FilterableColumnHeader
-              label="Ran by"
+              label="Ran By"
               paramKey="ran_by"
               options={ranByOptions}
             />

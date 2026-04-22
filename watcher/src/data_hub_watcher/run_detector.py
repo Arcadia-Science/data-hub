@@ -28,6 +28,10 @@ class FileInfo:
     path: Path
     filename: str
     size_bytes: int
+    # mtime at stability time. Persisted alongside the run manifest so a
+    # future restart's initial scan can cheaply stat-match against it
+    # (see `StateDB.has_detected_stat_match`) and skip re-reporting.
+    mtime: float = 0.0
 
 
 @dataclass
@@ -109,12 +113,12 @@ class RunDetector:
             return
 
         try:
-            size = path.stat().st_size
+            st = path.stat()
         except OSError:
             logger.warning("File disappeared before run detection: %s", path)
             return
 
-        info = FileInfo(path=path, filename=path.name, size_bytes=size)
+        info = FileInfo(path=path, filename=path.name, size_bytes=st.st_size, mtime=st.st_mtime)
 
         run = self._runs.get(run_id)
         if run is None:
@@ -163,6 +167,30 @@ class RunDetector:
             "size_bytes": info.size_bytes,
         }
 
+    def _relative_path(self, info: FileInfo) -> str:
+        try:
+            return info.path.relative_to(self._watch_dir).as_posix()
+        except ValueError:
+            return info.filename
+
+    def _persist_detected_files(self, run: RunState) -> None:
+        """Record the current `run.files` manifest in the state DB.
+
+        Called after every successful POST / PATCH so that on restart
+        the initial scan can skip these files and the run can be
+        hydrated back into `_runs` without re-reporting.
+        """
+        rows = [
+            (
+                self._relative_path(info),
+                info.filename,
+                info.size_bytes,
+                info.mtime,
+            )
+            for info in run.files
+        ]
+        self._state_db.record_detected_files(run.run_id, rows)
+
     def _report_new_run(self, run: RunState) -> None:
         payload = {
             "run_id": run.run_id,
@@ -175,13 +203,14 @@ class RunDetector:
             run.reported = True
             run.api_run_id = resp.id
             self._state_db.record_run_reported(run.run_id)
+            self._persist_detected_files(run)
             self._counters.runs_reported += 1
 
             self._reporter.queue_event(
                 WatcherEvent(
                     event_type=EventType.RUN_REPORTED,
-                    message=f"Run {run.run_id} reported with {len(run.files)} file(s)",
-                    details={"run_id": run.run_id, "file_count": len(run.files)},
+                    message=f"Run {run.run_id} reported",
+                    details={"run_id": run.run_id},
                 )
             )
             logger.info("Reported new run %s (%d files)", run.run_id, len(run.files))
@@ -208,6 +237,7 @@ class RunDetector:
         }
         try:
             self._client.update_run(self._instrument_id, run.run_id, payload)
+            self._persist_detected_files(run)
             logger.info("Updated run %s (now %d files)", run.run_id, len(run.files))
         except ApiError as exc:
             logger.warning("Failed to update run %s: %s", run.run_id, exc.message)
@@ -222,12 +252,50 @@ class RunDetector:
             run.uploaded_file_count = len(run.files)
 
     # ------------------------------------------------------------------
-    # crash recovery
+    # hydration
     # ------------------------------------------------------------------
 
-    def retry_unreported_runs(self) -> None:
-        """Attempt to re-report any runs that failed their initial POST."""
-        for run in self._runs.values():
-            if not run.reported and run.files:
-                logger.info("Retrying unreported run %s", run.run_id)
-                self._report_new_run(run)
+    def hydrate_from_state_db(self) -> None:
+        """Rebuild `_runs` from the `detected_files` table on startup.
+
+        Without this, every restart starts with `_runs = {}` and the
+        first stable file per previously-reported run triggers a
+        duplicate POST, with subsequent files triggering a storm of
+        PATCHes. After hydration, `_runs` already knows about every run
+        we've reported, and any genuinely-new file coming through the
+        initial scan + watcher correctly routes to `_update_run` (PATCH)
+        instead of `_report_new_run` (POST).
+
+        Only runs with a recorded manifest are hydrated. Legacy runs
+        that exist in the `runs` table but predate the `detected_files`
+        schema fall back to the pre-hydration path — they will
+        re-report once, after which their manifest will be persisted
+        and future restarts will skip them.
+        """
+        count = 0
+        for run_id in self._state_db.get_reported_run_ids_with_files():
+            records = self._state_db.get_detected_files_for_run(run_id)
+            if not records:
+                continue
+            files = [
+                FileInfo(
+                    path=self._watch_dir / rec.relative_path,
+                    filename=rec.filename,
+                    size_bytes=rec.size_bytes,
+                    mtime=rec.mtime,
+                )
+                for rec in records
+            ]
+            self._runs[run_id] = RunState(
+                run_id=run_id,
+                files=files,
+                reported=True,
+                # On restart every hydrated file is either already
+                # uploaded (auto mode, uploader-side dedup will skip it
+                # anyway if not) or server-driven (manual mode, where
+                # `_upload_cb` is None and this counter is unused).
+                uploaded_file_count=len(files),
+            )
+            count += 1
+        if count:
+            logger.info("Hydrated %d run(s) from state DB", count)

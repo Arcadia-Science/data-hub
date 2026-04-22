@@ -272,16 +272,13 @@ def _create_service_class() -> type | None:
             from data_hub_watcher.config_io import config_checksum, load_config
             from data_hub_watcher.constants import (
                 API_URLS,
-                HEARTBEAT_INTERVAL_SECONDS,
-                PRUNE_DAYS,
                 STATE_DB_FILENAME,
             )
-            from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
-            from data_hub_watcher.heartbeat import HeartbeatLoop, WatcherCounters
-            from data_hub_watcher.monitor import FileMonitor
-            from data_hub_watcher.run_detector import RunDetector
-            from data_hub_watcher.state import StateDB
-            from data_hub_watcher.uploader import Uploader
+            from data_hub_watcher.runtime import (
+                build_runtime,
+                start_runtime,
+                stop_runtime,
+            )
 
             servicemanager.LogInfoMsg(f"{SERVICE_DISPLAY_NAME} starting")
 
@@ -329,81 +326,25 @@ def _create_service_class() -> type | None:
                 except ApiError as exc:
                     servicemanager.LogWarningMsg(f"Could not sync config to API: {exc.message}")
 
-            db_path = path.parent / STATE_DB_FILENAME
-            state_db = StateDB(db_path)
-            state_db.prune_uploaded_files(PRUNE_DAYS)
-
-            counters = WatcherCounters()
-            reporter = EventReporter(client, cfg.watcher_id or "")
-
-            heartbeat = HeartbeatLoop(
-                client=client,
-                watcher_id=cfg.watcher_id or "",
-                interval_seconds=HEARTBEAT_INTERVAL_SECONDS,
-                event_reporter=reporter,
-                instrument_id=inst.id,
-                watch_directory=str(inst.watch_directory),
-                upload_mode=inst.upload_mode,
-                counters=counters,
-            )
-
-            is_auto = inst.upload_mode == "auto"
-
-            uploader = Uploader(
-                client=client,
-                state_db=state_db,
-                event_reporter=reporter,
-                counters=counters,
-                instrument_id=inst.id,
-                watcher_id=cfg.watcher_id or "",
-                watch_directory=inst.watch_directory,
-            )
-
-            detector = RunDetector(
-                pattern=inst.run_detection.pattern,
-                instrument_id=inst.id,
-                watcher_id=cfg.watcher_id or "",
-                client=client,
-                state_db=state_db,
-                event_reporter=reporter,
-                counters=counters,
-                upload_callback=uploader.upload_files if is_auto else None,
-                watch_directory=inst.watch_directory,
-            )
-
-            monitor = FileMonitor(
-                watch_directory=inst.watch_directory,
-                file_patterns=inst.file_patterns,
-                stability_period=inst.stability_period_seconds,
-                on_stable_file=detector.on_stable_file,
-                state_db=state_db,
-                recursive=inst.run_detection.recursive,
-            )
-
-            reporter.queue_event(
-                WatcherEvent(
-                    event_type=EventType.WATCHER_STARTED,
-                    message=f"Service started on {platform.node()}",
+            # build_runtime asserts cfg.watcher_id is set; surface that as
+            # a service-manager error rather than a hard crash so operators
+            # see a clear message in the Windows event log.
+            if not cfg.watcher_id:
+                servicemanager.LogErrorMsg(
+                    "No watcher_id in config. Run 'data-hub-watcher init' first."
                 )
-            )
+                return
 
-            heartbeat.start()
-            monitor.start()
+            db_path = path.parent / STATE_DB_FILENAME
+            rt = build_runtime(client=client, cfg=cfg, db_path=db_path)
+
+            start_runtime(rt, started_message=f"Service started on {platform.node()}")
 
             servicemanager.LogInfoMsg(f"{SERVICE_DISPLAY_NAME} is running")
 
             self._stop_event.wait()
 
-            monitor.stop()
-            reporter.queue_event(
-                WatcherEvent(
-                    event_type=EventType.WATCHER_STOPPED,
-                    message="Service stopped",
-                )
-            )
-            heartbeat.stop()
-            reporter.flush()
-            state_db.close()
+            stop_runtime(rt, stopped_message="Service stopped")
 
             servicemanager.LogInfoMsg(f"{SERVICE_DISPLAY_NAME} stopped")
 

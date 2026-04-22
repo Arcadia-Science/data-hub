@@ -22,9 +22,9 @@ from data_hub_watcher.constants import (
 )
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import WatcherCounters
-from data_hub_watcher.monitor import file_sha256
 from data_hub_watcher.run_detector import FileInfo
 from data_hub_watcher.state import StateDB
+from data_hub_watcher.util import file_sha256
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,19 @@ logger = logging.getLogger(__name__)
 def _guess_content_type(path: Path) -> str | None:
     content_type, _ = mimetypes.guess_type(str(path))
     return content_type
+
+
+def _relative_path(path: Path, watch_dir: Path) -> str:
+    """Return *path* as a forward-slash relative to *watch_dir*.
+
+    Falls back to the basename for paths outside the watch directory
+    (e.g. one-shot `upload --file /abs/path`) so we never raise during
+    upload recording.
+    """
+    try:
+        return path.relative_to(watch_dir).as_posix()
+    except ValueError:
+        return path.name
 
 
 class Uploader:
@@ -163,6 +176,8 @@ class Uploader:
         """
         content_type = _guess_content_type(path)
         sha = file_sha256(path)
+        stat = path.stat()
+        rel_path = _relative_path(path, self._watch_dir)
 
         # Request a presigned upload URL from the API. This also creates or
         # locates the server-side file record.
@@ -172,7 +187,7 @@ class Uploader:
                 run_id,
                 path.name,
                 content_type=content_type,
-                size_bytes=path.stat().st_size,
+                size_bytes=stat.st_size,
             )
         except ApiError as exc:
             logger.error("Failed to get presigned URL for %s: %s", path.name, exc.message)
@@ -192,7 +207,14 @@ class Uploader:
 
         if presigned.already_uploaded:
             logger.debug("Server says already uploaded, skipping: %s", path.name)
-            self._state_db.record_upload(path.name, sha, s3_key)
+            self._state_db.record_upload(
+                path.name,
+                sha,
+                s3_key,
+                relative_path=rel_path,
+                size_bytes=stat.st_size,
+                mtime=stat.st_mtime,
+            )
             return True
 
         if self._state_db.is_uploaded(path.name, sha, s3_key):
@@ -256,7 +278,14 @@ class Uploader:
             )
             return False
 
-        self._state_db.record_upload(path.name, sha, s3_key)
+        self._state_db.record_upload(
+            path.name,
+            sha,
+            s3_key,
+            relative_path=rel_path,
+            size_bytes=stat.st_size,
+            mtime=stat.st_mtime,
+        )
         self._counters.files_uploaded += 1
         self._reporter.queue_event(
             WatcherEvent(
