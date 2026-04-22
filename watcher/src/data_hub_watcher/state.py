@@ -60,6 +60,19 @@ class StateDB:
             );
             """
         )
+        # Additive migration: older state DBs predate the stat-based initial
+        # scan and have no size/mtime columns. Add them as nullable so legacy
+        # rows remain valid; has_stat_match simply misses them and the scan
+        # falls back to enqueuing (uploader-side dedup prevents re-upload).
+        cols = {row[1] for row in self._conn.execute("PRAGMA table_info(uploaded_files)")}
+        if "size_bytes" not in cols:
+            self._conn.execute("ALTER TABLE uploaded_files ADD COLUMN size_bytes INTEGER")
+        if "mtime" not in cols:
+            self._conn.execute("ALTER TABLE uploaded_files ADD COLUMN mtime REAL")
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_uploaded_files_stat "
+            "ON uploaded_files (filename, size_bytes, mtime)"
+        )
         self._conn.commit()
 
     # ------------------------------------------------------------------
@@ -104,13 +117,39 @@ class StateDB:
             )
             return cur.fetchone() is not None
 
-    def record_upload(self, filename: str, sha256: str, s3_key: str) -> None:
+    def has_stat_match(self, filename: str, size_bytes: int, mtime: float) -> bool:
+        """Cheap identity check for the initial scan.
+
+        Returns True if any prior upload record matches `(filename, size, mtime)`.
+        The mtime comparison uses a ~1s tolerance to absorb filesystem timestamp
+        resolution differences (FAT = 2s, NTFS = 100ns, ext4 = ns) and minor
+        float rounding between Python versions / platforms.
+        """
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT 1 FROM uploaded_files "
+                "WHERE filename = ? AND size_bytes = ? AND ABS(mtime - ?) < 1.0 "
+                "LIMIT 1",
+                (filename, size_bytes, mtime),
+            )
+            return cur.fetchone() is not None
+
+    def record_upload(
+        self,
+        filename: str,
+        sha256: str,
+        s3_key: str,
+        *,
+        size_bytes: int,
+        mtime: float,
+    ) -> None:
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:
             self._conn.execute(
-                "INSERT OR REPLACE INTO uploaded_files (filename, sha256, uploaded_at, s3_key) "
-                "VALUES (?, ?, ?, ?)",
-                (filename, sha256, now, s3_key),
+                "INSERT OR REPLACE INTO uploaded_files "
+                "(filename, sha256, uploaded_at, s3_key, size_bytes, mtime) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (filename, sha256, now, s3_key, size_bytes, mtime),
             )
             self._conn.commit()
 

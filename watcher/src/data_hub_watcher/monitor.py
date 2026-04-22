@@ -165,22 +165,52 @@ class FileMonitor:
 
         This catches files that appeared while the watcher was stopped (e.g.
         between a crash and restart, or overnight when running as a service).
+
+        Identity for "already uploaded" is `(filename, size, mtime)` — a cheap
+        `stat()` rather than a full-content SHA-256. For write-once instrument
+        output this is a safe and much faster heuristic. The uploader still
+        computes a real SHA-256 on its way out, so content integrity is not
+        compromised. See also: `StateDB.has_stat_match`.
         """
+        logger.info(
+            "Initial scan starting (dir=%s, patterns=%s, recursive=%s)…",
+            self._watch_dir,
+            self._patterns,
+            self._recursive,
+        )
         iterator = self._watch_dir.rglob("*") if self._recursive else self._watch_dir.iterdir()
-        count = 0
+        total = 0
+        queued = 0
+        skipped = 0
         for entry in iterator:
             if not entry.is_file():
                 continue
             if not any(fnmatch.fnmatch(entry.name, pat) for pat in self._patterns):
                 continue
-            sha = file_sha256(entry)
-            if self._state_db.has_any_upload(entry.name, sha):
+            total += 1
+            try:
+                st = entry.stat()
+            except OSError:
+                continue
+            if self._state_db.has_stat_match(entry.name, st.st_size, st.st_mtime):
+                skipped += 1
                 continue
             self._enqueue(entry)
-            count += 1
+            queued += 1
+            if total % 100 == 0:
+                logger.info(
+                    "Initial scan progress: %d scanned, %d queued, %d skipped",
+                    total,
+                    queued,
+                    skipped,
+                )
 
-        if count:
-            logger.info("Initial scan queued %d file(s) for stability check", count)
+        logger.info(
+            "Initial scan complete: %d scanned, %d queued, %d skipped",
+            total,
+            queued,
+            skipped,
+        )
 
     # ------------------------------------------------------------------
     # stability tracking

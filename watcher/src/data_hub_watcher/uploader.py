@@ -163,6 +163,7 @@ class Uploader:
         """
         content_type = _guess_content_type(path)
         sha = file_sha256(path)
+        stat = path.stat()
 
         # Request a presigned upload URL from the API. This also creates or
         # locates the server-side file record.
@@ -172,7 +173,7 @@ class Uploader:
                 run_id,
                 path.name,
                 content_type=content_type,
-                size_bytes=path.stat().st_size,
+                size_bytes=stat.st_size,
             )
         except ApiError as exc:
             logger.error("Failed to get presigned URL for %s: %s", path.name, exc.message)
@@ -192,7 +193,9 @@ class Uploader:
 
         if presigned.already_uploaded:
             logger.debug("Server says already uploaded, skipping: %s", path.name)
-            self._state_db.record_upload(path.name, sha, s3_key)
+            self._state_db.record_upload(
+                path.name, sha, s3_key, size_bytes=stat.st_size, mtime=stat.st_mtime
+            )
             return True
 
         if self._state_db.is_uploaded(path.name, sha, s3_key):
@@ -256,7 +259,9 @@ class Uploader:
             )
             return False
 
-        self._state_db.record_upload(path.name, sha, s3_key)
+        self._state_db.record_upload(
+            path.name, sha, s3_key, size_bytes=stat.st_size, mtime=stat.st_mtime
+        )
         self._counters.files_uploaded += 1
         self._reporter.queue_event(
             WatcherEvent(

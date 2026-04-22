@@ -718,6 +718,7 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
 
     # Step 8: Start everything
     heartbeat.start()
+    click.echo(f"Scanning {inst.watch_directory} for existing files…")
     monitor.start()
 
     click.echo(f"Watcher is running (instrument={inst.id}, dir={inst.watch_directory})…")

@@ -53,6 +53,7 @@ class TestUploadSingle:
         uploader: Uploader,
         mock_client: MagicMock,
         tmp_file: Path,
+        state_db: StateDB,
     ) -> None:
         mock_client.request_upload_url.return_value = PresignedUploadResponse(
             upload_url="https://s3.example.com/presigned",
@@ -79,6 +80,11 @@ class TestUploadSingle:
             },
         )
         assert uploader._counters.files_uploaded == 1
+
+        # Stat columns must be populated so subsequent initial scans can
+        # skip this file without re-hashing its contents.
+        st = tmp_file.stat()
+        assert state_db.has_stat_match(tmp_file.name, st.st_size, st.st_mtime) is True
 
     def test_already_uploaded_skips(
         self,
