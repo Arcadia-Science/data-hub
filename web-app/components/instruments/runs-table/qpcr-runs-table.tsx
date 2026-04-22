@@ -18,6 +18,7 @@ import { ClickableRow } from "./clickable-row";
 import { FilterableColumnHeader } from "./filterable-column-header";
 import { MetadataArrayBadges, getMetadataArray } from "./metadata-utils";
 import { RanByCell } from "./ran-by-cell";
+import { RawFileColumnHeader } from "./raw-file-column-header";
 import { RunIdLabel } from "./run-id-label";
 import { RunRowActions } from "./run-row-actions";
 import { RunSelectAllCheckbox, RunSelectCheckbox } from "./run-select-checkbox";
@@ -45,8 +46,12 @@ export function QpcrRunsTable({
             <RunSelectAllCheckbox refs={runRefs} />
           </TableHead>
           <TableHead>Run ID</TableHead>
-          <TableHead>Files</TableHead>
-          <TableHead className="text-right">Total Size</TableHead>
+          <TableHead>
+            <RawFileColumnHeader label="Files" />
+          </TableHead>
+          <TableHead className="text-right">
+            <RawFileColumnHeader label="Size" />
+          </TableHead>
           <TableHead>
             <FilterableColumnHeader
               label="Dye Channels"

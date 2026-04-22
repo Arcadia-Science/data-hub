@@ -1,6 +1,7 @@
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import { ClickableRow } from "@/components/instruments/runs-table/clickable-row";
 import { RanByCell } from "@/components/instruments/runs-table/ran-by-cell";
+import { RawFileColumnHeader } from "@/components/instruments/runs-table/raw-file-column-header";
 import { RunIdLabel } from "@/components/instruments/runs-table/run-id-label";
 import { RunRowActions } from "@/components/instruments/runs-table/run-row-actions";
 import {
@@ -86,8 +87,12 @@ export function RunsTable({
             </TableHead>
             <TableHead>Instrument</TableHead>
             <TableHead>Run ID</TableHead>
-            <TableHead>Files</TableHead>
-            <TableHead className="text-right">Total Size</TableHead>
+            <TableHead>
+              <RawFileColumnHeader label="Files" />
+            </TableHead>
+            <TableHead className="text-right">
+              <RawFileColumnHeader label="Size" />
+            </TableHead>
             <TableHead>Ran By</TableHead>
             <TableHead className="text-right">Created</TableHead>
             <TableHead className="w-[132px]">
@@ -186,8 +191,12 @@ export function RunsTableSkeleton() {
             <TableHead className="w-10" />
             <TableHead>Instrument</TableHead>
             <TableHead>Run ID</TableHead>
-            <TableHead>Files</TableHead>
-            <TableHead className="text-right">Total Size</TableHead>
+            <TableHead>
+              <RawFileColumnHeader label="Files" />
+            </TableHead>
+            <TableHead className="text-right">
+              <RawFileColumnHeader label="Size" />
+            </TableHead>
             <TableHead>Ran By</TableHead>
             <TableHead className="text-right">Created</TableHead>
             <TableHead className="w-[132px]" />
