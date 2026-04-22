@@ -1,5 +1,6 @@
 "use client";
 
+import { RunFiltersCombobox } from "@/components/runs/run-filters-combobox";
 import { RunsDateFilter } from "@/components/runs/runs-date-filter";
 import { useTablePending } from "@/components/table-pending";
 import { Badge } from "@/components/ui/badge";
@@ -135,9 +136,9 @@ export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
               variant="ghost"
               size="sm"
               onClick={clearFilters}
-              className="h-8 gap-1 text-xs"
+              className="h-9 gap-1.5 text-sm font-normal"
             >
-              <X className="size-3" />
+              <X className="size-3.5" />
               Clear
             </Button>
           )}
@@ -152,6 +153,14 @@ export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
               })
             }
             align="end"
+            defaultPreset="24h"
+          />
+
+          <RunFiltersCombobox
+            values={{ includeDeleted: filters.include_deleted }}
+            onChange={({ includeDeleted }) =>
+              setFilters({ include_deleted: includeDeleted, page: 1 })
+            }
           />
         </div>
       </div>

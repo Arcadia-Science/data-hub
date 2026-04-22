@@ -42,10 +42,9 @@ export default async function DashboardPage({
   const instrumentIds =
     params.instrument_id.length > 0 ? params.instrument_id : undefined;
 
-  // When no date_from is in the URL, default to a 24-hour lookback using a
-  // full ISO timestamp so the cutoff is timezone-agnostic. A bare date string
-  // like "2026-04-15" would be parsed as midnight UTC, which can be "tomorrow"
-  // relative to the user's local timezone — hiding today's runs on first load.
+  // When no explicit date filter is set, default to a 24-hour lookback. This
+  // matches the "Last 24 hours" label surfaced by the dashboard's
+  // RunsDateFilter and keeps the initial payload bounded.
   const defaultDateFrom = last24hISOString();
 
   // Fetch the instrument list (for the toolbar combobox) and the filtered run
@@ -88,24 +87,20 @@ export default async function DashboardPage({
           <RunsToolbar instruments={instruments} />
           <RunBulkActionBar />
           <TablePendingBoundary>
-            <RunsTable data={runResult.data} hasFilters={hasFilters} />
+            <RunsTable
+              data={runResult.data}
+              hasFilters={hasFilters}
+              totalCount={runResult.pagination.total}
+              pendingUploadCount={pendingUploadCount}
+              unattributedCount={unattributedCount}
+              ranByYouCount={ranByYouCount}
+            />
           </TablePendingBoundary>
           <PaginationNav
             page={runResult.pagination.page}
             totalPages={runResult.pagination.total_pages}
             pageParam="page"
           />
-          {runResult.data.length > 0 ? (
-            <div className="flex items-center justify-end text-xs text-muted-foreground">
-              <p>
-                <span className="tabular-nums">{pendingUploadCount}</span>{" "}
-                pending upload ·{" "}
-                <span className="tabular-nums">{unattributedCount}</span>{" "}
-                unattributed ·{" "}
-                <span className="tabular-nums">{ranByYouCount}</span> ran by you
-              </p>
-            </div>
-          ) : null}
         </TablePendingProvider>
       </RunSelectionProvider>
     </div>

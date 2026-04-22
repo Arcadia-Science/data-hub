@@ -1,13 +1,12 @@
 "use client";
 
+import { RunFiltersCombobox } from "@/components/runs/run-filters-combobox";
 import { RunsDateFilter } from "@/components/runs/runs-date-filter";
 import { useTablePending } from "@/components/table-pending";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { instrumentDetailSearchParams } from "@/lib/search-params";
-import { Search, Trash2, X } from "lucide-react";
+import { Search, X } from "lucide-react";
 import { useQueryStates } from "nuqs";
 
 export function InstrumentRunsToolbar() {
@@ -62,9 +61,9 @@ export function InstrumentRunsToolbar() {
               variant="ghost"
               size="sm"
               onClick={clearFilters}
-              className="h-8 gap-1 text-xs"
+              className="h-9 gap-1.5 text-sm font-normal"
             >
-              <X className="size-3" />
+              <X className="size-3.5" />
               Clear
             </Button>
           )}
@@ -81,22 +80,12 @@ export function InstrumentRunsToolbar() {
             align="end"
           />
 
-          <div className="flex items-center gap-2">
-            <Switch
-              id="include-deleted-detail"
-              checked={filters.include_deleted}
-              onCheckedChange={(checked) =>
-                setFilters({ include_deleted: checked, page: 1 })
-              }
-            />
-            <Label
-              htmlFor="include-deleted-detail"
-              className="flex cursor-pointer items-center gap-1 text-xs"
-            >
-              <Trash2 className="size-3" />
-              Deleted
-            </Label>
-          </div>
+          <RunFiltersCombobox
+            values={{ includeDeleted: filters.include_deleted }}
+            onChange={({ includeDeleted }) =>
+              setFilters({ include_deleted: includeDeleted, page: 1 })
+            }
+          />
         </div>
       </div>
     </div>

@@ -198,13 +198,13 @@ export function RanByCell({
               size="icon"
               disabled={isPending}
               onClick={handleRemove}
-              aria-label="Remove"
+              aria-label="Remove my attribution"
               className="size-6 text-muted-foreground/70 hover:text-foreground"
             >
               <X className="size-3.5" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Remove</TooltipContent>
+          <TooltipContent>Remove my attribution</TooltipContent>
         </Tooltip>
       ) : currentUserId ? (
         <Tooltip>

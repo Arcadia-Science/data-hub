@@ -37,11 +37,14 @@ export function RunStatusIcon({
   const hasPending = filesPendingUpload > 0;
   const hasCompleted = filesCompleted > 0;
 
-  // Icon priority: Error > Processing > Uploaded > Pending upload > Completed.
+  // Icon priority: Error > Processing > Completed > Uploaded > Pending upload.
+  // Fallback (no files at all) shows the healthy "completed" icon.
   const icon = hasFailed ? (
     <CircleX className="size-4 text-destructive" />
   ) : hasProcessing ? (
     <LoaderCircle className="size-4 animate-spin text-sky-500" />
+  ) : hasCompleted ? (
+    <CircleCheck className="size-4 text-green-600 dark:text-green-500" />
   ) : hasUploaded ? (
     <CircleDashed className="size-4 text-muted-foreground" />
   ) : hasPending ? (

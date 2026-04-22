@@ -15,7 +15,7 @@ import { useMemo, useState } from "react";
 
 export type DateRange = { from: string | null; to: string | null };
 
-type PresetId = "24h" | "3d" | "1w" | "2w" | "1m";
+export type PresetId = "24h" | "3d" | "1w" | "2w" | "1m";
 
 type Preset = {
   id: PresetId;
@@ -58,18 +58,20 @@ function resolveActivePreset(value: DateRange): PresetId | null {
   return best;
 }
 
-function resolveLabel(value: DateRange): string {
+function presetLabel(id: PresetId): string {
+  return PRESETS.find((p) => p.id === id)?.label ?? "Date range";
+}
+
+function resolveLabel(value: DateRange, defaultPreset?: PresetId): string {
   const preset = resolveActivePreset(value);
-  if (preset) {
-    return PRESETS.find((p) => p.id === preset)?.label ?? "Date range";
-  }
+  if (preset) return presetLabel(preset);
   if (value.from && value.to) {
     return formatDateRange(new Date(value.from), new Date(value.to));
   }
   if (value.from) {
     return formatDateRange(new Date(value.from), new Date());
   }
-  return "Last 24 hours";
+  return defaultPreset ? presetLabel(defaultPreset) : "All time";
 }
 
 // Calendar pulls in react-day-picker; load it only when the user opens the
@@ -92,16 +94,33 @@ export function RunsDateFilter({
   value,
   onChange,
   align = "end",
+  defaultPreset,
 }: {
   value: DateRange;
   onChange: (next: DateRange) => void;
   align?: "start" | "end" | "center";
+  /**
+   * The preset that represents the page's server-side default when no filter
+   * is in the URL. When set, the trigger label reflects it and the preset is
+   * highlighted in the popover; the "All time" item is hidden since clearing
+   * the filter would not actually show all runs.
+   */
+  defaultPreset?: PresetId;
 }) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<"presets" | "custom">("presets");
 
-  const activePreset = useMemo(() => resolveActivePreset(value), [value]);
-  const label = useMemo(() => resolveLabel(value), [value]);
+  const isEmpty = value.from === null && value.to === null;
+  const activePreset = useMemo(() => {
+    const resolved = resolveActivePreset(value);
+    if (resolved) return resolved;
+    if (isEmpty && defaultPreset) return defaultPreset;
+    return null;
+  }, [value, isEmpty, defaultPreset]);
+  const label = useMemo(
+    () => resolveLabel(value, defaultPreset),
+    [value, defaultPreset]
+  );
   const isCustom =
     activePreset === null && (value.from !== null || value.to !== null);
 
@@ -113,6 +132,11 @@ export function RunsDateFilter({
 
   function applyPreset(preset: Preset) {
     onChange({ from: isoDaysAgo(preset.days), to: null });
+    setOpen(false);
+  }
+
+  function clearRange() {
+    onChange({ from: null, to: null });
     setOpen(false);
   }
 
@@ -136,7 +160,7 @@ export function RunsDateFilter({
           aria-label="Date range"
         >
           <CalendarIcon className="size-3.5 text-muted-foreground" />
-          <span className="text-xs">{label}</span>
+          <span className="text-sm">{label}</span>
           <ChevronDown className="size-3.5 opacity-50" />
         </Button>
       </PopoverTrigger>
@@ -150,7 +174,9 @@ export function RunsDateFilter({
           <PresetList
             activePreset={activePreset}
             isCustom={isCustom}
+            showAllTime={!defaultPreset}
             onSelectPreset={applyPreset}
+            onClear={clearRange}
             onOpenCustom={() => setView("custom")}
           />
         ) : (
@@ -168,47 +194,65 @@ export function RunsDateFilter({
 function PresetList({
   activePreset,
   isCustom,
+  showAllTime,
   onSelectPreset,
+  onClear,
   onOpenCustom,
 }: {
   activePreset: PresetId | null;
   isCustom: boolean;
+  showAllTime: boolean;
   onSelectPreset: (preset: Preset) => void;
+  onClear: () => void;
   onOpenCustom: () => void;
 }) {
+  const isAllTime = activePreset === null && !isCustom;
   return (
     <div className="flex w-56 flex-col py-1">
-      {PRESETS.map((preset) => {
-        const active = preset.id === activePreset;
-        return (
-          <button
-            key={preset.id}
-            type="button"
-            onClick={() => onSelectPreset(preset)}
-            className={cn(
-              "flex items-center justify-between px-3 py-1.5 text-left text-sm outline-none hover:bg-accent focus-visible:bg-accent",
-              active && "font-medium"
-            )}
-          >
-            <span>{preset.label}</span>
-            {active ? (
-              <Check className="size-3.5 text-muted-foreground" />
-            ) : null}
-          </button>
-        );
-      })}
+      {showAllTime ? (
+        <>
+          <PresetItem label="All time" active={isAllTime} onSelect={onClear} />
+          <Separator className="my-1" />
+        </>
+      ) : null}
+      {PRESETS.map((preset) => (
+        <PresetItem
+          key={preset.id}
+          label={preset.label}
+          active={preset.id === activePreset}
+          onSelect={() => onSelectPreset(preset)}
+        />
+      ))}
       <Separator className="my-1" />
-      <button
-        type="button"
-        onClick={onOpenCustom}
-        className={cn(
-          "flex items-center justify-between px-3 py-1.5 text-left text-sm outline-none hover:bg-accent focus-visible:bg-accent",
-          isCustom && "font-medium"
-        )}
-      >
-        <span>Custom range…</span>
-        {isCustom ? <Check className="size-3.5 text-muted-foreground" /> : null}
-      </button>
+      <PresetItem
+        label="Custom range…"
+        active={isCustom}
+        onSelect={onOpenCustom}
+      />
     </div>
+  );
+}
+
+function PresetItem({
+  label,
+  active,
+  onSelect,
+}: {
+  label: string;
+  active: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={cn(
+        "flex items-center justify-between px-3 py-1.5 text-left text-sm outline-none hover:bg-accent focus-visible:bg-accent",
+        active && "font-medium"
+      )}
+    >
+      <span>{label}</span>
+      {active ? <Check className="size-3.5 text-muted-foreground" /> : null}
+    </button>
   );
 }
