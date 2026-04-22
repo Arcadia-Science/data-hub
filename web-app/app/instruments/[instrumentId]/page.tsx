@@ -1,7 +1,7 @@
 import { InstrumentHeader } from "@/components/instruments/instrument-header";
 import { InstrumentRunsToolbar } from "@/components/instruments/instrument-runs-toolbar";
 import { InstrumentRunsTable } from "@/components/instruments/runs-table";
-import { BulkAttributionBar } from "@/components/instruments/runs-table/bulk-attribution-bar";
+import { RunBulkActionBar } from "@/components/instruments/runs-table/run-bulk-action-bar";
 import { RunSelectionProvider } from "@/components/instruments/runs-table/run-selection-provider";
 import { PaginationNav } from "@/components/pagination-nav";
 import {
@@ -129,7 +129,7 @@ export default async function InstrumentDetailPage({
       <RunSelectionProvider>
         <TablePendingProvider>
           <InstrumentRunsToolbar />
-          <BulkAttributionBar />
+          <RunBulkActionBar />
           <TablePendingBoundary>
             <InstrumentRunsTable
               data={runResult.data}

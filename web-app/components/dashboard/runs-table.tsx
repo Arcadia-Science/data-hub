@@ -1,6 +1,7 @@
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import { ClickableRow } from "@/components/instruments/runs-table/clickable-row";
 import { RanByCell } from "@/components/instruments/runs-table/ran-by-cell";
+import { RunRowActions } from "@/components/instruments/runs-table/run-row-actions";
 import {
   RunSelectAllCheckbox,
   RunSelectCheckbox,
@@ -18,6 +19,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { RunAttribution } from "@/lib/api/instrument-runs";
+import { runRowToRef } from "@/lib/runs/row-actions";
 import { cn, formatBytes } from "@/lib/utils";
 import { FlaskConical, SearchX } from "lucide-react";
 
@@ -60,11 +62,7 @@ export function RunsTable({
     );
   }
 
-  const runRefs: RunRef[] = data.map((row) => ({
-    id: row.id,
-    instrumentId: row.instrument_id,
-    runId: row.run_id,
-  }));
+  const runRefs: RunRef[] = data.map(runRowToRef);
 
   return (
     <div className="rounded-lg border">
@@ -80,6 +78,9 @@ export function RunsTable({
             <TableHead className="text-right">Total Size</TableHead>
             <TableHead>Ran By</TableHead>
             <TableHead className="text-right">Created</TableHead>
+            <TableHead className="w-[132px]">
+              <span className="sr-only">Actions</span>
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -93,13 +94,7 @@ export function RunsTable({
                 className={cn(isDeleted && "opacity-50")}
               >
                 <TableCell>
-                  <RunSelectCheckbox
-                    runRef={{
-                      id: row.id,
-                      instrumentId: row.instrument_id,
-                      runId: row.run_id,
-                    }}
-                  />
+                  <RunSelectCheckbox runRef={runRowToRef(row)} />
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-1.5">
@@ -149,6 +144,9 @@ export function RunsTable({
                 <TableCell className="text-right">
                   <RelativeTime date={new Date(row.created_at).toISOString()} />
                 </TableCell>
+                <TableCell className="py-1">
+                  <RunRowActions row={row} />
+                </TableCell>
               </ClickableRow>
             );
           })}
@@ -171,6 +169,7 @@ export function RunsTableSkeleton() {
             <TableHead className="text-right">Total Size</TableHead>
             <TableHead>Ran By</TableHead>
             <TableHead className="text-right">Created</TableHead>
+            <TableHead className="w-[132px]" />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -197,6 +196,7 @@ export function RunsTableSkeleton() {
               <TableCell className="text-right">
                 <Skeleton className="ml-auto h-4 w-20" />
               </TableCell>
+              <TableCell />
             </TableRow>
           ))}
         </TableBody>

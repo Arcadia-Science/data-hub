@@ -14,6 +14,7 @@ import {
   MEASUREMENT_TYPE_COLORS,
   buildWavelengthColorMap,
 } from "@/lib/instrument-colors";
+import { runRowToRef } from "@/lib/runs/row-actions";
 import { cn, formatBytes } from "@/lib/utils";
 
 import type { RunRow } from ".";
@@ -27,6 +28,7 @@ import {
   sortWavelengths,
 } from "./metadata-utils";
 import { RanByCell } from "./ran-by-cell";
+import { RunRowActions } from "./run-row-actions";
 import { RunSelectAllCheckbox, RunSelectCheckbox } from "./run-select-checkbox";
 import type { RunRef } from "./run-selection-provider";
 import { RunStatusIcon } from "./run-status-icon";
@@ -44,11 +46,7 @@ export function PlateReaderRunsTable({
 }) {
   const wavelengthColors = buildWavelengthColorMap(filterOptions.wavelengths);
   const sortedWavelengthOptions = sortWavelengths(filterOptions.wavelengths);
-  const runRefs: RunRef[] = data.map((row) => ({
-    id: row.id,
-    instrumentId: row.instrument_id,
-    runId: row.run_id,
-  }));
+  const runRefs: RunRef[] = data.map(runRowToRef);
 
   return (
     <Table>
@@ -89,6 +87,9 @@ export function PlateReaderRunsTable({
             />
           </TableHead>
           <TableHead className="text-right">Created</TableHead>
+          <TableHead className="w-[132px]">
+            <span className="sr-only">Actions</span>
+          </TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -106,13 +107,7 @@ export function PlateReaderRunsTable({
               className={cn(isDeleted && "opacity-50")}
             >
               <TableCell>
-                <RunSelectCheckbox
-                  runRef={{
-                    id: row.id,
-                    instrumentId: row.instrument_id,
-                    runId: row.run_id,
-                  }}
-                />
+                <RunSelectCheckbox runRef={runRowToRef(row)} />
               </TableCell>
               <TableCell>
                 <div className="flex items-center gap-2.5">
@@ -166,6 +161,9 @@ export function PlateReaderRunsTable({
               </TableCell>
               <TableCell className="text-right">
                 <RelativeTime date={row.created_at.toISOString()} />
+              </TableCell>
+              <TableCell className="py-1">
+                <RunRowActions row={row} />
               </TableCell>
             </ClickableRow>
           );

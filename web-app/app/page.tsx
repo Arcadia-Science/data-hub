@@ -4,7 +4,7 @@ import {
 } from "@/components/dashboard/instrument-cards";
 import { RunsTable } from "@/components/dashboard/runs-table";
 import { RunsToolbar } from "@/components/dashboard/runs-toolbar";
-import { BulkAttributionBar } from "@/components/instruments/runs-table/bulk-attribution-bar";
+import { RunBulkActionBar } from "@/components/instruments/runs-table/run-bulk-action-bar";
 import { RunSelectionProvider } from "@/components/instruments/runs-table/run-selection-provider";
 import { PaginationNav } from "@/components/pagination-nav";
 import {
@@ -83,7 +83,7 @@ export default async function DashboardPage({
       <RunSelectionProvider>
         <TablePendingProvider>
           <RunsToolbar instruments={instruments} />
-          <BulkAttributionBar />
+          <RunBulkActionBar />
           <TablePendingBoundary>
             <RunsTable data={runResult.data} hasFilters={hasFilters} />
           </TablePendingBoundary>

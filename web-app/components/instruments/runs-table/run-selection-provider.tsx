@@ -2,10 +2,28 @@
 
 import { createContext, use, useCallback, useMemo, useState } from "react";
 
+export type RunCaps = {
+  upload: boolean;
+  download: boolean;
+  reprocess: boolean;
+  delete: boolean;
+};
+
+// Minimal per-row counts the bulk bar needs to populate confirmation
+// dialogs without refetching — covers the "soft-delete 4 runs and their
+// 44 files" and "reprocess 12 eligible files" messaging.
+export type RunStats = {
+  fileCount: number;
+  filesCompleted: number;
+  filesFailed: number;
+};
+
 export type RunRef = {
   id: string;
   instrumentId: string;
   runId: string;
+  caps: RunCaps;
+  stats: RunStats;
 };
 
 // Explicit context interface: state / actions / meta. Consumers never touch
@@ -22,6 +40,13 @@ type RunSelectionContextValue = {
     count: number;
     isSelected: (runInternalId: string) => boolean;
     allSelected: (refs: RunRef[]) => boolean;
+    // Capability roll-ups: true iff every selected run supports the action.
+    // Consumers use these to hide bulk buttons when the selection is mixed
+    // — e.g. one run still needs upload and another is already uploaded.
+    allCanUpload: boolean;
+    allCanDownload: boolean;
+    allCanReprocess: boolean;
+    allCanDelete: boolean;
   };
 };
 
@@ -67,19 +92,24 @@ export function RunSelectionProvider({
     setSelected(new Map());
   }, []);
 
-  const value = useMemo<RunSelectionContextValue>(
-    () => ({
+  const value = useMemo<RunSelectionContextValue>(() => {
+    const refs = Array.from(selected.values());
+    const count = refs.length;
+    return {
       state: { selected },
       actions: { toggle, selectMany, clear },
       meta: {
-        count: selected.size,
+        count,
         isSelected: (id) => selected.has(id),
         allSelected: (refs) =>
           refs.length > 0 && refs.every((r) => selected.has(r.id)),
+        allCanUpload: count > 0 && refs.every((r) => r.caps.upload),
+        allCanDownload: count > 0 && refs.every((r) => r.caps.download),
+        allCanReprocess: count > 0 && refs.every((r) => r.caps.reprocess),
+        allCanDelete: count > 0 && refs.every((r) => r.caps.delete),
       },
-    }),
-    [selected, toggle, selectMany, clear]
-  );
+    };
+  }, [selected, toggle, selectMany, clear]);
 
   return (
     <RunSelectionContext.Provider value={value}>
