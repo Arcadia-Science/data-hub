@@ -21,10 +21,11 @@ import type { RunRow } from ".";
 import { ClickableRow } from "./clickable-row";
 import { FilterableColumnHeader } from "./filterable-column-header";
 import {
-  MetadataArrayBadges,
   MetadataFieldBadge,
+  TruncatedBadges,
   getMetadataArray,
   getMetadataField,
+  sortWavelengths,
 } from "./metadata-utils";
 import { RanByCell } from "./ran-by-cell";
 import { RunSelectAllCheckbox, RunSelectCheckbox } from "./run-select-checkbox";
@@ -46,6 +47,7 @@ export function GelDocRunsTable({
     getMetadataArray(row.metadata, "wavelengths")
   );
   const wavelengthColors = buildWavelengthColorMap(allWavelengths);
+  const sortedWavelengthOptions = sortWavelengths(filterOptions.wavelengths);
   const runRefs: RunRef[] = data.map((row) => ({
     id: row.id,
     instrumentId: row.instrument_id,
@@ -80,7 +82,7 @@ export function GelDocRunsTable({
             <FilterableColumnHeader
               label="Wavelengths"
               paramKey="gel_wavelength"
-              options={filterOptions.wavelengths}
+              options={sortedWavelengthOptions}
             />
           </TableHead>
           <TableHead>
@@ -105,7 +107,9 @@ export function GelDocRunsTable({
           const isDeleted = row.deleted_at !== null;
           const captureType = getMetadataField(row.metadata, "capture_type");
           const imagingMode = getMetadataField(row.metadata, "imaging_mode");
-          const wavelengths = getMetadataArray(row.metadata, "wavelengths");
+          const wavelengths = sortWavelengths(
+            getMetadataArray(row.metadata, "wavelengths")
+          );
           const wavelengthColorLabels = getMetadataArray(
             row.metadata,
             "colors"
@@ -166,15 +170,17 @@ export function GelDocRunsTable({
                 />
               </TableCell>
               <TableCell>
-                <MetadataArrayBadges
+                <TruncatedBadges
                   values={wavelengths}
                   colorMap={wavelengthColors}
+                  maxVisible={1}
                 />
               </TableCell>
               <TableCell>
-                <MetadataArrayBadges
+                <TruncatedBadges
                   values={wavelengthColorLabels}
                   colorMap={CHANNEL_COLOR_STYLES}
+                  maxVisible={2}
                 />
               </TableCell>
               <TableCell>

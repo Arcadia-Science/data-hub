@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import {
   getMetadataArray,
   getMetadataField,
+  sortWavelengths,
 } from "@/components/runs/metadata-badges";
 
 // ---------------------------------------------------------------------------
@@ -54,7 +55,7 @@ function ColorBadge({
 
 export function hasPlateReaderMetadata(metadata: Record<string, unknown>) {
   return Boolean(
-    getMetadataField(metadata, "wavelength") ||
+    getMetadataArray(metadata, "wavelengths").length ||
     getMetadataField(metadata, "measurement_mode") ||
     getMetadataField(metadata, "measurement_type")
   );
@@ -65,11 +66,15 @@ export function PlateReaderRunBadges({
 }: {
   metadata: Record<string, unknown>;
 }) {
-  const wavelength = getMetadataField(metadata, "wavelength");
+  const wavelengths = sortWavelengths(
+    getMetadataArray(metadata, "wavelengths")
+  );
   const mode = getMetadataField(metadata, "measurement_mode");
   const type = getMetadataField(metadata, "measurement_type");
 
-  if (!wavelength && !mode && !type) return null;
+  if (!wavelengths.length && !mode && !type) return null;
+
+  const wavelengthColors = buildWavelengthColorMap(wavelengths);
 
   return (
     <>
@@ -83,9 +88,13 @@ export function PlateReaderRunBadges({
           <ColorBadge value={mode} colorClass={MEASUREMENT_MODE_COLORS[mode]} />
         </MetadataRow>
       )}
-      {wavelength && (
-        <MetadataRow label="Wavelength">
-          <ColorBadge value={wavelength} />
+      {wavelengths.length > 0 && (
+        <MetadataRow
+          label={wavelengths.length === 1 ? "Wavelength" : "Wavelengths"}
+        >
+          {wavelengths.map((w) => (
+            <ColorBadge key={w} value={w} colorClass={wavelengthColors[w]} />
+          ))}
         </MetadataRow>
       )}
     </>
@@ -112,7 +121,9 @@ export function GelDocRunBadges({
 }) {
   const captureType = getMetadataField(metadata, "capture_type");
   const imagingMode = getMetadataField(metadata, "imaging_mode");
-  const wavelengths = getMetadataArray(metadata, "wavelengths");
+  const wavelengths = sortWavelengths(
+    getMetadataArray(metadata, "wavelengths")
+  );
   const colors = getMetadataArray(metadata, "colors");
 
   if (!captureType && !imagingMode && !wavelengths.length && !colors.length)
