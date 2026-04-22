@@ -61,17 +61,24 @@ class StateDB:
             """
         )
         # Additive migration: older state DBs predate the stat-based initial
-        # scan and have no size/mtime columns. Add them as nullable so legacy
-        # rows remain valid; has_stat_match simply misses them and the scan
-        # falls back to enqueuing (uploader-side dedup prevents re-upload).
+        # scan and have no size/mtime/relative_path columns. Add them as
+        # nullable so legacy rows remain valid; has_stat_match simply misses
+        # them and the scan falls back to enqueuing (uploader-side dedup
+        # prevents re-upload).
+        #
+        # relative_path is keyed instead of just `filename` so same-named
+        # files in different subdirectories (common in recursive watches)
+        # don't collide on the cheap stat check.
         cols = {row[1] for row in self._conn.execute("PRAGMA table_info(uploaded_files)")}
         if "size_bytes" not in cols:
             self._conn.execute("ALTER TABLE uploaded_files ADD COLUMN size_bytes INTEGER")
         if "mtime" not in cols:
             self._conn.execute("ALTER TABLE uploaded_files ADD COLUMN mtime REAL")
+        if "relative_path" not in cols:
+            self._conn.execute("ALTER TABLE uploaded_files ADD COLUMN relative_path TEXT")
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_uploaded_files_stat "
-            "ON uploaded_files (filename, size_bytes, mtime)"
+            "ON uploaded_files (relative_path, size_bytes, mtime)"
         )
         self._conn.commit()
 
@@ -117,20 +124,24 @@ class StateDB:
             )
             return cur.fetchone() is not None
 
-    def has_stat_match(self, filename: str, size_bytes: int, mtime: float) -> bool:
+    def has_stat_match(self, relative_path: str, size_bytes: int, mtime: float) -> bool:
         """Cheap identity check for the initial scan.
 
-        Returns True if any prior upload record matches `(filename, size, mtime)`.
-        The mtime comparison uses a ~1s tolerance to absorb filesystem timestamp
-        resolution differences (FAT = 2s, NTFS = 100ns, ext4 = ns) and minor
-        float rounding between Python versions / platforms.
+        Returns True if any prior upload record matches
+        `(relative_path, size, mtime)`. We key on the watch-dir-relative
+        path rather than basename so same-named files in different
+        subdirectories (common in recursive watches) don't collide.
+
+        The mtime comparison uses a ~1s tolerance to absorb filesystem
+        timestamp resolution differences (FAT = 2s, NTFS = 100ns, ext4 = ns)
+        and minor float rounding between Python versions / platforms.
         """
         with self._lock:
             cur = self._conn.execute(
                 "SELECT 1 FROM uploaded_files "
-                "WHERE filename = ? AND size_bytes = ? AND ABS(mtime - ?) < 1.0 "
+                "WHERE relative_path = ? AND size_bytes = ? AND ABS(mtime - ?) < 1.0 "
                 "LIMIT 1",
-                (filename, size_bytes, mtime),
+                (relative_path, size_bytes, mtime),
             )
             return cur.fetchone() is not None
 
@@ -140,6 +151,7 @@ class StateDB:
         sha256: str,
         s3_key: str,
         *,
+        relative_path: str,
         size_bytes: int,
         mtime: float,
     ) -> None:
@@ -147,9 +159,9 @@ class StateDB:
         with self._lock:
             self._conn.execute(
                 "INSERT OR REPLACE INTO uploaded_files "
-                "(filename, sha256, uploaded_at, s3_key, size_bytes, mtime) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (filename, sha256, now, s3_key, size_bytes, mtime),
+                "(filename, sha256, uploaded_at, s3_key, relative_path, size_bytes, mtime) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (filename, sha256, now, s3_key, relative_path, size_bytes, mtime),
             )
             self._conn.commit()
 

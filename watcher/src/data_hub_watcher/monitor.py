@@ -166,10 +166,12 @@ class FileMonitor:
         This catches files that appeared while the watcher was stopped (e.g.
         between a crash and restart, or overnight when running as a service).
 
-        Identity for "already uploaded" is `(filename, size, mtime)` — a cheap
-        `stat()` rather than a full-content SHA-256. For write-once instrument
-        output this is a safe and much faster heuristic. The uploader still
-        computes a real SHA-256 on its way out, so content integrity is not
+        Identity for "already uploaded" is `(relative_path, size, mtime)` —
+        a cheap `stat()` rather than a full-content SHA-256. The path is
+        relative to the watch directory, so same-named files in different
+        subdirectories don't collide. For write-once instrument output this
+        is a safe and much faster heuristic. The uploader still computes a
+        real SHA-256 on its way out, so content integrity is not
         compromised. See also: `StateDB.has_stat_match`.
         """
         logger.info(
@@ -192,7 +194,14 @@ class FileMonitor:
                 st = entry.stat()
             except OSError:
                 continue
-            if self._state_db.has_stat_match(entry.name, st.st_size, st.st_mtime):
+            try:
+                rel_path = entry.relative_to(self._watch_dir).as_posix()
+            except ValueError:
+                # Symlinks or oddities outside the watch dir: fall back to
+                # basename so the lookup degrades gracefully instead of
+                # raising.
+                rel_path = entry.name
+            if self._state_db.has_stat_match(rel_path, st.st_size, st.st_mtime):
                 skipped += 1
                 continue
             self._enqueue(entry)

@@ -34,6 +34,19 @@ def _guess_content_type(path: Path) -> str | None:
     return content_type
 
 
+def _relative_path(path: Path, watch_dir: Path) -> str:
+    """Return *path* as a forward-slash relative to *watch_dir*.
+
+    Falls back to the basename for paths outside the watch directory
+    (e.g. one-shot `upload --file /abs/path`) so we never raise during
+    upload recording.
+    """
+    try:
+        return path.relative_to(watch_dir).as_posix()
+    except ValueError:
+        return path.name
+
+
 class Uploader:
     """Uploads files via presigned S3 PUT URLs and notifies the Data Hub API.
 
@@ -164,6 +177,7 @@ class Uploader:
         content_type = _guess_content_type(path)
         sha = file_sha256(path)
         stat = path.stat()
+        rel_path = _relative_path(path, self._watch_dir)
 
         # Request a presigned upload URL from the API. This also creates or
         # locates the server-side file record.
@@ -194,7 +208,12 @@ class Uploader:
         if presigned.already_uploaded:
             logger.debug("Server says already uploaded, skipping: %s", path.name)
             self._state_db.record_upload(
-                path.name, sha, s3_key, size_bytes=stat.st_size, mtime=stat.st_mtime
+                path.name,
+                sha,
+                s3_key,
+                relative_path=rel_path,
+                size_bytes=stat.st_size,
+                mtime=stat.st_mtime,
             )
             return True
 
@@ -260,7 +279,12 @@ class Uploader:
             return False
 
         self._state_db.record_upload(
-            path.name, sha, s3_key, size_bytes=stat.st_size, mtime=stat.st_mtime
+            path.name,
+            sha,
+            s3_key,
+            relative_path=rel_path,
+            size_bytes=stat.st_size,
+            mtime=stat.st_mtime,
         )
         self._counters.files_uploaded += 1
         self._reporter.queue_event(

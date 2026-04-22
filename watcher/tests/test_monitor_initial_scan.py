@@ -26,49 +26,85 @@ def watch_dir(tmp_path: Path) -> Path:
     return d
 
 
-def _make_monitor(watch_dir: Path, state_db: StateDB) -> FileMonitor:
+def _make_monitor(
+    watch_dir: Path,
+    state_db: StateDB,
+    *,
+    recursive: bool = False,
+) -> FileMonitor:
     return FileMonitor(
         watch_directory=watch_dir,
         file_patterns=["*.nd2"],
         stability_period=1,
         on_stable_file=MagicMock(),
         state_db=state_db,
-        recursive=False,
+        recursive=recursive,
     )
 
 
 class TestHasStatMatch:
     def test_match_on_exact_stat(self, state_db: StateDB) -> None:
         state_db.record_upload(
-            "sample.nd2", "sha-a", "s3/sample.nd2", size_bytes=1024, mtime=1_700_000_000.0
+            "sample.nd2",
+            "sha-a",
+            "s3/sample.nd2",
+            relative_path="sample.nd2",
+            size_bytes=1024,
+            mtime=1_700_000_000.0,
         )
 
         assert state_db.has_stat_match("sample.nd2", 1024, 1_700_000_000.0) is True
 
     def test_miss_on_different_size(self, state_db: StateDB) -> None:
         state_db.record_upload(
-            "sample.nd2", "sha-a", "s3/sample.nd2", size_bytes=1024, mtime=1_700_000_000.0
+            "sample.nd2",
+            "sha-a",
+            "s3/sample.nd2",
+            relative_path="sample.nd2",
+            size_bytes=1024,
+            mtime=1_700_000_000.0,
         )
 
         assert state_db.has_stat_match("sample.nd2", 2048, 1_700_000_000.0) is False
 
-    def test_miss_on_different_filename(self, state_db: StateDB) -> None:
+    def test_miss_on_different_relative_path(self, state_db: StateDB) -> None:
+        """Same basename in a different subfolder must NOT match.
+
+        This is the main reason has_stat_match keys on relative path rather
+        than basename: two runs that both emit `output.nd2` must each be
+        uploaded.
+        """
         state_db.record_upload(
-            "sample.nd2", "sha-a", "s3/sample.nd2", size_bytes=1024, mtime=1_700_000_000.0
+            "output.nd2",
+            "sha-a",
+            "s3/run-a/output.nd2",
+            relative_path="run-a/output.nd2",
+            size_bytes=1024,
+            mtime=1_700_000_000.0,
         )
 
-        assert state_db.has_stat_match("other.nd2", 1024, 1_700_000_000.0) is False
+        assert state_db.has_stat_match("run-b/output.nd2", 1024, 1_700_000_000.0) is False
 
     def test_mtime_within_tolerance_matches(self, state_db: StateDB) -> None:
         state_db.record_upload(
-            "sample.nd2", "sha-a", "s3/sample.nd2", size_bytes=1024, mtime=1_700_000_000.0
+            "sample.nd2",
+            "sha-a",
+            "s3/sample.nd2",
+            relative_path="sample.nd2",
+            size_bytes=1024,
+            mtime=1_700_000_000.0,
         )
 
         assert state_db.has_stat_match("sample.nd2", 1024, 1_700_000_000.5) is True
 
     def test_mtime_outside_tolerance_misses(self, state_db: StateDB) -> None:
         state_db.record_upload(
-            "sample.nd2", "sha-a", "s3/sample.nd2", size_bytes=1024, mtime=1_700_000_000.0
+            "sample.nd2",
+            "sha-a",
+            "s3/sample.nd2",
+            relative_path="sample.nd2",
+            size_bytes=1024,
+            mtime=1_700_000_000.0,
         )
 
         assert state_db.has_stat_match("sample.nd2", 1024, 1_700_000_100.0) is False
@@ -90,7 +126,12 @@ class TestInitialScan:
         f.write_bytes(b"x" * 2048)
         st = f.stat()
         state_db.record_upload(
-            "seen.nd2", "sha-seen", "s3/seen.nd2", size_bytes=st.st_size, mtime=st.st_mtime
+            "seen.nd2",
+            "sha-seen",
+            "s3/seen.nd2",
+            relative_path="seen.nd2",
+            size_bytes=st.st_size,
+            mtime=st.st_mtime,
         )
 
         monitor = _make_monitor(watch_dir, state_db)
@@ -106,6 +147,7 @@ class TestInitialScan:
             "grew.nd2",
             "sha-old",
             "s3/grew.nd2",
+            relative_path="grew.nd2",
             size_bytes=st.st_size - 1,
             mtime=st.st_mtime,
         )
@@ -123,6 +165,7 @@ class TestInitialScan:
             "touched.nd2",
             "sha-old",
             "s3/touched.nd2",
+            relative_path="touched.nd2",
             size_bytes=st.st_size,
             mtime=st.st_mtime - 10.0,
         )
@@ -174,3 +217,36 @@ class TestInitialScan:
             os.chmod(f, original_mode)
 
         assert f in monitor._pending
+
+    def test_same_basename_in_different_subdirs_both_enqueued(
+        self, state_db: StateDB, watch_dir: Path
+    ) -> None:
+        """Regression guard for basename collisions in recursive watches.
+
+        Two runs both emit `output.nd2` with identical size and mtime (think
+        `cp -p` from one run folder into another). Run-a has been uploaded;
+        run-b must still be enqueued because its relative path differs.
+        """
+        (watch_dir / "run-a").mkdir()
+        (watch_dir / "run-b").mkdir()
+        a = watch_dir / "run-a" / "output.nd2"
+        b = watch_dir / "run-b" / "output.nd2"
+        a.write_bytes(b"x" * 2048)
+        b.write_bytes(b"x" * 2048)
+        os.utime(b, (a.stat().st_atime, a.stat().st_mtime))
+
+        st_a = a.stat()
+        state_db.record_upload(
+            "output.nd2",
+            "sha-a",
+            "s3/run-a/output.nd2",
+            relative_path="run-a/output.nd2",
+            size_bytes=st_a.st_size,
+            mtime=st_a.st_mtime,
+        )
+
+        monitor = _make_monitor(watch_dir, state_db, recursive=True)
+        monitor._initial_scan()
+
+        assert a not in monitor._pending
+        assert b in monitor._pending

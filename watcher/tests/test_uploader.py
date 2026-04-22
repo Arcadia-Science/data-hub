@@ -81,10 +81,12 @@ class TestUploadSingle:
         )
         assert uploader._counters.files_uploaded == 1
 
-        # Stat columns must be populated so subsequent initial scans can
-        # skip this file without re-hashing its contents.
+        # Stat columns must be populated (keyed on the watch-dir-relative
+        # path) so subsequent initial scans can skip this file without
+        # re-hashing its contents.
         st = tmp_file.stat()
-        assert state_db.has_stat_match(tmp_file.name, st.st_size, st.st_mtime) is True
+        rel_path = tmp_file.relative_to(uploader._watch_dir).as_posix()
+        assert state_db.has_stat_match(rel_path, st.st_size, st.st_mtime) is True
 
     def test_already_uploaded_skips(
         self,
