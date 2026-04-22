@@ -99,18 +99,6 @@ class TestHydrateFromStateDb:
         assert list(detector._runs.keys()) == ["run-1"]
         assert len(detector._runs["run-1"].files) == 1
 
-    def test_retry_unreported_runs_skips_hydrated_runs(
-        self, state_db: StateDB, watch_dir: Path
-    ) -> None:
-        state_db.record_detected_files("run-1", [("run-1/a.nd2", "a.nd2", 10, 1_700_000_000.0)])
-
-        client = MagicMock()
-        detector = _make_detector(watch_dir, state_db, client=client)
-        detector.hydrate_from_state_db()
-        detector.retry_unreported_runs()
-
-        client.report_run.assert_not_called()
-
 
 class TestNewFileAfterHydrationTriggersPatch:
     def test_new_file_patches_instead_of_posting(self, state_db: StateDB, watch_dir: Path) -> None:

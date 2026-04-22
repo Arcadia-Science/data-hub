@@ -7,8 +7,8 @@ unchanged for the configured period), then invokes a callback.
 
 from __future__ import annotations
 import fnmatch
-import hashlib
 import logging
+import os
 import threading
 import time
 from collections.abc import Callable
@@ -27,15 +27,6 @@ from data_hub_watcher.constants import MAX_STABILITY_WAIT_SECONDS
 from data_hub_watcher.state import StateDB
 
 logger = logging.getLogger(__name__)
-
-
-def file_sha256(path: Path) -> str:
-    """Return the hex SHA-256 digest of *path*."""
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 @dataclass
@@ -213,7 +204,10 @@ class FileMonitor:
             ) or self._state_db.has_detected_stat_match(rel_path, st.st_size, st.st_mtime):
                 skipped += 1
                 continue
-            self._enqueue(entry)
+            # Pass `st` through so `_enqueue` doesn't issue a redundant
+            # stat() syscall — halves the stat cost on initial scans of
+            # large directories.
+            self._enqueue(entry, stat_result=st)
             queued += 1
             if total % 100 == 0:
                 logger.info(
@@ -234,22 +228,28 @@ class FileMonitor:
     # stability tracking
     # ------------------------------------------------------------------
 
-    def _enqueue(self, path: Path) -> None:
-        """Add or refresh a file in the pending-stability dict."""
-        try:
-            stat = path.stat()
-        except OSError:
-            return
+    def _enqueue(self, path: Path, *, stat_result: os.stat_result | None = None) -> None:
+        """Add or refresh a file in the pending-stability dict.
+
+        *stat_result* lets callers that already hold a fresh `stat()`
+        (notably `_initial_scan`) avoid a redundant syscall. Watchdog
+        event callbacks don't have one and pass `None`.
+        """
+        if stat_result is None:
+            try:
+                stat_result = path.stat()
+            except OSError:
+                return
         with self._lock:
             existing = self._pending.get(path)
             if existing is None:
                 self._pending[path] = _PendingFile(
-                    path=path, size=stat.st_size, mtime=stat.st_mtime
+                    path=path, size=stat_result.st_size, mtime=stat_result.st_mtime
                 )
             else:
-                if stat.st_size != existing.size or stat.st_mtime != existing.mtime:
-                    existing.size = stat.st_size
-                    existing.mtime = stat.st_mtime
+                if stat_result.st_size != existing.size or stat_result.st_mtime != existing.mtime:
+                    existing.size = stat_result.st_size
+                    existing.mtime = stat_result.st_mtime
                     existing.last_changed = time.monotonic()
 
     def _stability_loop(self) -> None:

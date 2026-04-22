@@ -149,15 +149,9 @@ def start_runtime(rt: WatcherRuntime, *, started_message: str) -> None:
     # events fire. Without this, every restart starts with an empty
     # `_runs` dict and the initial scan would re-POST / re-PATCH runs
     # that were already reported in a previous session. Must happen
-    # before `monitor.start()` (which runs the initial scan and may
-    # enqueue files) and before `retry_unreported_runs()` (which is
-    # unaffected by hydration but cheaper to call on a populated dict).
+    # before `monitor.start()`, which runs the initial scan and may
+    # route files through `_update_run` based on hydrated state.
     rt.detector.hydrate_from_state_db()
-
-    # If the watcher crashed mid-session, some runs may have been detected
-    # but never successfully POSTed to the API. Retry those before the
-    # normal event loop kicks in so they aren't silently lost.
-    rt.detector.retry_unreported_runs()
 
     rt.heartbeat.start()
     rt.monitor.start()

@@ -299,14 +299,3 @@ class RunDetector:
             count += 1
         if count:
             logger.info("Hydrated %d run(s) from state DB", count)
-
-    # ------------------------------------------------------------------
-    # crash recovery
-    # ------------------------------------------------------------------
-
-    def retry_unreported_runs(self) -> None:
-        """Attempt to re-report any runs that failed their initial POST."""
-        for run in self._runs.values():
-            if not run.reported and run.files:
-                logger.info("Retrying unreported run %s", run.run_id)
-                self._report_new_run(run)

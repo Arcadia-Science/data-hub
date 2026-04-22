@@ -50,7 +50,7 @@ Starts the file monitoring loop. Before entering the loop it:
 - Validates the config and checks that the instrument is active (not pending).
 - Syncs the config checksum with the API.
 - Initializes the local state database (`~/.data-hub/watcher.db`).
-- Retries any runs that were detected but not successfully reported (crash recovery).
+- Hydrates in-memory run state from the local DB so the initial scan skips files that were already reported in a previous session.
 
 While running:
 

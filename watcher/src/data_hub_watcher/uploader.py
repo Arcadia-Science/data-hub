@@ -22,9 +22,9 @@ from data_hub_watcher.constants import (
 )
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import WatcherCounters
-from data_hub_watcher.monitor import file_sha256
 from data_hub_watcher.run_detector import FileInfo
 from data_hub_watcher.state import StateDB
+from data_hub_watcher.util import file_sha256
 
 logger = logging.getLogger(__name__)
 

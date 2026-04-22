@@ -138,19 +138,6 @@ class StateDB:
             )
             return cur.fetchone() is not None
 
-    def has_any_upload(self, filename: str, sha256: str) -> bool:
-        """Check whether this file content has been uploaded to *any* destination.
-
-        Used by the file monitor's initial scan to skip files that have already
-        been processed, before the S3 key is known.
-        """
-        with self._lock:
-            cur = self._conn.execute(
-                "SELECT 1 FROM uploaded_files WHERE filename = ? AND sha256 = ?",
-                (filename, sha256),
-            )
-            return cur.fetchone() is not None
-
     def has_stat_match(self, relative_path: str, size_bytes: int, mtime: float) -> bool:
         """Cheap identity check for the initial scan.
 
