@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import threading
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -23,11 +24,25 @@ class RunRecord:
     uploaded_at: str | None
 
 
+@dataclass
+class DetectedFileRecord:
+    """A single file recorded as already-detected-and-reported for a run."""
+
+    relative_path: str
+    filename: str
+    size_bytes: int
+    mtime: float
+
+
 class StateDB:
-    """Thin wrapper around a SQLite database with two tables.
+    """Thin wrapper around a SQLite database with three tables.
 
     - `uploaded_files` — tracks files already sent to S3.
     - `runs` — tracks runs reported to and uploaded via the API.
+    - `detected_files` — tracks the file manifest for every run we have
+      reported to the API, so subsequent restarts can hydrate
+      `RunDetector._runs` and skip files in the initial scan even in
+      manual mode (where `uploaded_files` stays empty).
     """
 
     def __init__(self, db_path: Path) -> None:
@@ -58,6 +73,18 @@ class StateDB:
                 reported_at TEXT NOT NULL,
                 uploaded_at TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS detected_files (
+                run_id        TEXT NOT NULL,
+                relative_path TEXT NOT NULL,
+                filename      TEXT NOT NULL,
+                size_bytes    INTEGER NOT NULL,
+                mtime         REAL NOT NULL,
+                PRIMARY KEY (run_id, relative_path)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_detected_files_stat
+                ON detected_files (relative_path, size_bytes, mtime);
             """
         )
         # Additive migration: older state DBs predate the stat-based initial
@@ -164,6 +191,89 @@ class StateDB:
                 (filename, sha256, now, s3_key, relative_path, size_bytes, mtime),
             )
             self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # detected_files
+    # ------------------------------------------------------------------
+
+    def record_detected_files(
+        self,
+        run_id: str,
+        files: Iterable[tuple[str, str, int, float]],
+    ) -> None:
+        """Persist the file manifest for a reported run.
+
+        *files* is an iterable of `(relative_path, filename, size_bytes,
+        mtime)` tuples. Rows are upserted so repeated calls for the same
+        run (e.g. as more files stabilise and PATCHes are issued) keep
+        the table consistent with the in-memory `RunState`.
+        """
+        rows = [
+            (run_id, rel_path, filename, size_bytes, mtime)
+            for rel_path, filename, size_bytes, mtime in files
+        ]
+        if not rows:
+            return
+        with self._lock:
+            self._conn.executemany(
+                "INSERT OR REPLACE INTO detected_files "
+                "(run_id, relative_path, filename, size_bytes, mtime) "
+                "VALUES (?, ?, ?, ?, ?)",
+                rows,
+            )
+            self._conn.commit()
+
+    def has_detected_stat_match(self, relative_path: str, size_bytes: int, mtime: float) -> bool:
+        """Return True if this file was already reported as part of some run.
+
+        Mirrors `has_stat_match` but targets the `detected_files` table
+        so the initial scan can skip files that are already represented
+        in a reported run's manifest — even when they haven't been
+        uploaded yet (manual mode).
+
+        Uses the same ~1s mtime tolerance as `has_stat_match` for
+        consistency across filesystem timestamp resolutions.
+        """
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT 1 FROM detected_files "
+                "WHERE relative_path = ? AND size_bytes = ? AND ABS(mtime - ?) < 1.0 "
+                "LIMIT 1",
+                (relative_path, size_bytes, mtime),
+            )
+            return cur.fetchone() is not None
+
+    def get_detected_files_for_run(self, run_id: str) -> list[DetectedFileRecord]:
+        """Return the persisted file manifest for *run_id*, ordered by path."""
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT relative_path, filename, size_bytes, mtime "
+                "FROM detected_files WHERE run_id = ? ORDER BY relative_path",
+                (run_id,),
+            )
+            rows = cur.fetchall()
+        return [
+            DetectedFileRecord(
+                relative_path=row[0],
+                filename=row[1],
+                size_bytes=row[2],
+                mtime=row[3],
+            )
+            for row in rows
+        ]
+
+    def get_reported_run_ids_with_files(self) -> list[str]:
+        """Return every run_id that has at least one recorded detected file.
+
+        Runs present in the legacy `runs` table but absent from
+        `detected_files` (pre-upgrade rows) are intentionally excluded:
+        they fall back to the pre-hydration code path and re-report once,
+        after which their manifest will be recorded and future restarts
+        will skip them.
+        """
+        with self._lock:
+            cur = self._conn.execute("SELECT DISTINCT run_id FROM detected_files ORDER BY run_id")
+            return [row[0] for row in cur.fetchall()]
 
     # ------------------------------------------------------------------
     # runs

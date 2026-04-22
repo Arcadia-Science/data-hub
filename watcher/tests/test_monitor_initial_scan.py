@@ -1,4 +1,11 @@
-"""Unit tests for FileMonitor._initial_scan and StateDB.has_stat_match."""
+"""Unit tests for FileMonitor._initial_scan and StateDB stat-match helpers.
+
+Covers both `StateDB.has_stat_match` (uploaded_files) and
+`StateDB.has_detected_stat_match` / `record_detected_files` /
+`get_detected_files_for_run` / `get_reported_run_ids_with_files`
+(detected_files) — the two tables feed the same initial-scan skip
+path.
+"""
 
 from __future__ import annotations
 import os
@@ -218,6 +225,57 @@ class TestInitialScan:
 
         assert f in monitor._pending
 
+    def test_skips_file_recorded_in_detected_files(
+        self, state_db: StateDB, watch_dir: Path
+    ) -> None:
+        """Initial scan must also honor `detected_files` records.
+
+        In manual mode `uploaded_files` is never populated locally, so
+        without this skip path every restart would re-POST / re-PATCH
+        the full manifest.
+        """
+        f = watch_dir / "run-42.nd2"
+        f.write_bytes(b"x" * 4096)
+        st = f.stat()
+        state_db.record_detected_files(
+            "run-42",
+            [("run-42.nd2", "run-42.nd2", st.st_size, st.st_mtime)],
+        )
+
+        monitor = _make_monitor(watch_dir, state_db)
+        monitor._initial_scan()
+
+        assert f not in monitor._pending
+
+    def test_skips_union_of_uploaded_and_detected(self, state_db: StateDB, watch_dir: Path) -> None:
+        uploaded = watch_dir / "uploaded.nd2"
+        detected = watch_dir / "detected.nd2"
+        fresh = watch_dir / "fresh.nd2"
+        for p in (uploaded, detected, fresh):
+            p.write_bytes(b"x" * 1024)
+
+        st_up = uploaded.stat()
+        state_db.record_upload(
+            "uploaded.nd2",
+            "sha-up",
+            "s3/uploaded.nd2",
+            relative_path="uploaded.nd2",
+            size_bytes=st_up.st_size,
+            mtime=st_up.st_mtime,
+        )
+        st_det = detected.stat()
+        state_db.record_detected_files(
+            "run-1",
+            [("detected.nd2", "detected.nd2", st_det.st_size, st_det.st_mtime)],
+        )
+
+        monitor = _make_monitor(watch_dir, state_db)
+        monitor._initial_scan()
+
+        assert uploaded not in monitor._pending
+        assert detected not in monitor._pending
+        assert fresh in monitor._pending
+
     def test_same_basename_in_different_subdirs_both_enqueued(
         self, state_db: StateDB, watch_dir: Path
     ) -> None:
@@ -250,3 +308,68 @@ class TestInitialScan:
 
         assert a not in monitor._pending
         assert b in monitor._pending
+
+
+class TestDetectedFilesApi:
+    """Unit tests for the `detected_files` table helpers on `StateDB`."""
+
+    def test_record_and_lookup_roundtrip(self, state_db: StateDB) -> None:
+        state_db.record_detected_files(
+            "run-1",
+            [
+                ("a/one.nd2", "one.nd2", 1024, 1_700_000_000.0),
+                ("a/two.nd2", "two.nd2", 2048, 1_700_000_001.0),
+            ],
+        )
+
+        records = state_db.get_detected_files_for_run("run-1")
+        assert [(r.relative_path, r.filename, r.size_bytes, r.mtime) for r in records] == [
+            ("a/one.nd2", "one.nd2", 1024, 1_700_000_000.0),
+            ("a/two.nd2", "two.nd2", 2048, 1_700_000_001.0),
+        ]
+
+    def test_record_is_idempotent_upsert(self, state_db: StateDB) -> None:
+        """Re-recording the same (run_id, relative_path) must upsert, not dup."""
+        state_db.record_detected_files("run-1", [("a.nd2", "a.nd2", 1024, 1_700_000_000.0)])
+        state_db.record_detected_files("run-1", [("a.nd2", "a.nd2", 2048, 1_700_000_050.0)])
+
+        records = state_db.get_detected_files_for_run("run-1")
+        assert len(records) == 1
+        assert records[0].size_bytes == 2048
+        assert records[0].mtime == pytest.approx(1_700_000_050.0)
+
+    def test_record_empty_iterable_is_noop(self, state_db: StateDB) -> None:
+        state_db.record_detected_files("run-empty", [])
+        assert state_db.get_detected_files_for_run("run-empty") == []
+        assert state_db.get_reported_run_ids_with_files() == []
+
+    def test_has_detected_stat_match_hit(self, state_db: StateDB) -> None:
+        state_db.record_detected_files("run-1", [("x.nd2", "x.nd2", 1024, 1_700_000_000.0)])
+        assert state_db.has_detected_stat_match("x.nd2", 1024, 1_700_000_000.0) is True
+
+    def test_has_detected_stat_match_respects_mtime_tolerance(self, state_db: StateDB) -> None:
+        state_db.record_detected_files("run-1", [("x.nd2", "x.nd2", 1024, 1_700_000_000.0)])
+        assert state_db.has_detected_stat_match("x.nd2", 1024, 1_700_000_000.5) is True
+        assert state_db.has_detected_stat_match("x.nd2", 1024, 1_700_000_100.0) is False
+
+    def test_has_detected_stat_match_miss_on_different_path(self, state_db: StateDB) -> None:
+        state_db.record_detected_files(
+            "run-a", [("run-a/out.nd2", "out.nd2", 1024, 1_700_000_000.0)]
+        )
+        assert state_db.has_detected_stat_match("run-b/out.nd2", 1024, 1_700_000_000.0) is False
+
+    def test_get_reported_run_ids_with_files_distinct_and_scoped(self, state_db: StateDB) -> None:
+        state_db.record_detected_files(
+            "run-1",
+            [
+                ("run-1/a.nd2", "a.nd2", 1, 1_700_000_000.0),
+                ("run-1/b.nd2", "b.nd2", 2, 1_700_000_001.0),
+            ],
+        )
+        state_db.record_detected_files("run-2", [("run-2/a.nd2", "a.nd2", 3, 1_700_000_002.0)])
+        state_db.record_run_reported("run-legacy")
+
+        ids = state_db.get_reported_run_ids_with_files()
+
+        assert ids == ["run-1", "run-2"]
+        assert "run-legacy" not in ids

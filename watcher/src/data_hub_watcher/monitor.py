@@ -173,6 +173,13 @@ class FileMonitor:
         is a safe and much faster heuristic. The uploader still computes a
         real SHA-256 on its way out, so content integrity is not
         compromised. See also: `StateDB.has_stat_match`.
+
+        In addition to `uploaded_files`, files recorded in `detected_files`
+        (i.e. already part of a reported run's manifest) are also skipped.
+        This matters in manual mode where the uploader never runs locally
+        and `uploaded_files` stays empty — without this, every restart
+        would re-POST / PATCH the full manifest.
+        See also: `StateDB.has_detected_stat_match`.
         """
         logger.info(
             "Initial scan starting (dir=%s, patterns=%s, recursive=%s)…",
@@ -201,7 +208,9 @@ class FileMonitor:
                 # basename so the lookup degrades gracefully instead of
                 # raising.
                 rel_path = entry.name
-            if self._state_db.has_stat_match(rel_path, st.st_size, st.st_mtime):
+            if self._state_db.has_stat_match(
+                rel_path, st.st_size, st.st_mtime
+            ) or self._state_db.has_detected_stat_match(rel_path, st.st_size, st.st_mtime):
                 skipped += 1
                 continue
             self._enqueue(entry)
