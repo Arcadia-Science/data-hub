@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import {
   getMetadataArray,
   getMetadataField,
+  sortWavelengths,
 } from "@/components/runs/metadata-badges";
 
 // ---------------------------------------------------------------------------
@@ -65,7 +66,9 @@ export function PlateReaderRunBadges({
 }: {
   metadata: Record<string, unknown>;
 }) {
-  const wavelengths = getMetadataArray(metadata, "wavelengths");
+  const wavelengths = sortWavelengths(
+    getMetadataArray(metadata, "wavelengths")
+  );
   const mode = getMetadataField(metadata, "measurement_mode");
   const type = getMetadataField(metadata, "measurement_type");
 
@@ -118,7 +121,9 @@ export function GelDocRunBadges({
 }) {
   const captureType = getMetadataField(metadata, "capture_type");
   const imagingMode = getMetadataField(metadata, "imaging_mode");
-  const wavelengths = getMetadataArray(metadata, "wavelengths");
+  const wavelengths = sortWavelengths(
+    getMetadataArray(metadata, "wavelengths")
+  );
   const colors = getMetadataArray(metadata, "colors");
 
   if (!captureType && !imagingMode && !wavelengths.length && !colors.length)

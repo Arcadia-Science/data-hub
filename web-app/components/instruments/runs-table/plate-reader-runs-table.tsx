@@ -20,10 +20,11 @@ import type { RunRow } from ".";
 import { ClickableRow } from "./clickable-row";
 import { FilterableColumnHeader } from "./filterable-column-header";
 import {
-  MetadataArrayBadges,
   MetadataFieldBadge,
+  TruncatedBadges,
   getMetadataArray,
   getMetadataField,
+  sortWavelengths,
 } from "./metadata-utils";
 import { RanByCell } from "./ran-by-cell";
 import { RunSelectAllCheckbox, RunSelectCheckbox } from "./run-select-checkbox";
@@ -41,13 +42,8 @@ export function PlateReaderRunsTable({
   filterOptions: PlateReaderFilterOptions;
   ranByOptions: { value: string; label: string }[];
 }) {
-  const allWavelengths = data.flatMap((row) =>
-    getMetadataArray(row.metadata, "wavelengths")
-  );
-  const wavelengthColors = buildWavelengthColorMap([
-    ...filterOptions.wavelengths,
-    ...allWavelengths,
-  ]);
+  const wavelengthColors = buildWavelengthColorMap(filterOptions.wavelengths);
+  const sortedWavelengthOptions = sortWavelengths(filterOptions.wavelengths);
   const runRefs: RunRef[] = data.map((row) => ({
     id: row.id,
     instrumentId: row.instrument_id,
@@ -68,7 +64,7 @@ export function PlateReaderRunsTable({
             <FilterableColumnHeader
               label="Wavelengths"
               paramKey="wavelength"
-              options={filterOptions.wavelengths}
+              options={sortedWavelengthOptions}
             />
           </TableHead>
           <TableHead>
@@ -98,7 +94,9 @@ export function PlateReaderRunsTable({
       <TableBody>
         {data.map((row) => {
           const isDeleted = row.deleted_at !== null;
-          const wavelengths = getMetadataArray(row.metadata, "wavelengths");
+          const wavelengths = sortWavelengths(
+            getMetadataArray(row.metadata, "wavelengths")
+          );
           const mode = getMetadataField(row.metadata, "measurement_mode");
           const type = getMetadataField(row.metadata, "measurement_type");
           return (
@@ -141,9 +139,10 @@ export function PlateReaderRunsTable({
                 {formatBytes(row.total_size_bytes)}
               </TableCell>
               <TableCell>
-                <MetadataArrayBadges
+                <TruncatedBadges
                   values={wavelengths}
                   colorMap={wavelengthColors}
+                  maxVisible={1}
                 />
               </TableCell>
               <TableCell>
