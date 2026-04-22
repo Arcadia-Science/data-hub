@@ -12,8 +12,8 @@ import {
 export const dashboardSearchParams = {
   search: parseAsString.withDefault(""),
   instrument_id: parseAsArrayOf(parseAsString).withDefault([]),
-  date_from: parseAsString,
-  date_to: parseAsString,
+  date_from: parseAsString.withOptions({ clearOnDefault: true }),
+  date_to: parseAsString.withOptions({ clearOnDefault: true }),
   include_deleted: parseAsBoolean.withDefault(false),
   page: parseAsInteger.withDefault(1),
   per_page: parseAsInteger.withDefault(25),
@@ -27,8 +27,8 @@ export const dashboardParamsCache = createSearchParamsCache(
 // route segment) and sort/order (defaults to created_at desc).
 export const instrumentDetailSearchParams = {
   search: parseAsString.withDefault(""),
-  date_from: parseAsString,
-  date_to: parseAsString,
+  date_from: parseAsString.withOptions({ clearOnDefault: true }),
+  date_to: parseAsString.withOptions({ clearOnDefault: true }),
   include_deleted: parseAsBoolean.withDefault(false),
   page: parseAsInteger.withDefault(1),
   per_page: parseAsInteger.withDefault(25),

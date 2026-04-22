@@ -29,3 +29,21 @@ export function toDateInputValue(date: Date): string {
 export function todayDateString(): string {
   return toDateInputValue(new Date());
 }
+
+/**
+ * Formats a date range as `"MMM d – MMM d, yyyy"` when both ends share a year,
+ * otherwise `"MMM d, yyyy – MMM d, yyyy"`.
+ */
+export function formatDateRange(from: Date, to: Date): string {
+  const tz = getTimeZone();
+  const fromYear = formatInTimeZone(from, tz, "yyyy");
+  const toYear = formatInTimeZone(to, tz, "yyyy");
+  if (fromYear === toYear) {
+    return `${formatInTimeZone(from, tz, "MMM d")} – ${formatInTimeZone(
+      to,
+      tz,
+      "MMM d, yyyy"
+    )}`;
+  }
+  return `${formatDate(from)} – ${formatDate(to)}`;
+}
