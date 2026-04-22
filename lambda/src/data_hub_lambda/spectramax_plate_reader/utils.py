@@ -183,17 +183,20 @@ def _parse_column_layout(col_header_line: str) -> _ColumnLayout:
     raise ValueError("Could not determine column layout from header row")
 
 
-def parse_metadata(file_path: Path) -> dict[str, str]:
+def parse_metadata(file_path: Path) -> dict[str, object]:
     """Extract measurement metadata from a SpectraMax `.xls` file.
 
     Returns:
         A dict with keys `measurement_mode`, `measurement_type`, and
-        `wavelength`.  Example::
+        `wavelengths`.  Wavelengths are returned as a list of numeric
+        strings (without the ``nm`` suffix) to mirror the shape used by
+        other multi-wavelength instruments (e.g. Azure 600 Gel Doc) and
+        let the UI layer own display formatting.  Example::
 
             {
                 "measurement_mode": "Absorbance",
                 "measurement_type": "Endpoint",
-                "wavelength": "750 nm",
+                "wavelengths": ["750", "700", "650", "600"],
             }
 
     Raises:
@@ -223,7 +226,7 @@ def parse_metadata(file_path: Path) -> dict[str, str]:
         return {
             "measurement_mode": header.measurement_mode,
             "measurement_type": header.measurement_type,
-            "wavelength": ", ".join(f"{w} nm" for w in wavelengths),
+            "wavelengths": [str(w) for w in wavelengths],
         }
 
     raise ValueError(f"No 'Plate:' header line found in {file_path}")

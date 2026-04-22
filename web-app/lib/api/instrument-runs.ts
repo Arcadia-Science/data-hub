@@ -208,7 +208,7 @@ export async function buildRunListQuery(filters: RunListFilters) {
   // Plate-reader metadata column filters (leverages the GIN index).
   if (filters.wavelength) {
     conditions.push(
-      sql`${instrumentRuns.metadata}->>'wavelength' = ${filters.wavelength}`
+      sql`${instrumentRuns.metadata}->'wavelengths' @> ${JSON.stringify([filters.wavelength])}::jsonb`
     );
   }
   if (filters.measurementMode) {
@@ -441,7 +441,6 @@ export type PlateReaderFilterOptions = {
 };
 
 const ALLOWED_METADATA_KEYS = new Set([
-  "wavelength",
   "measurement_mode",
   "measurement_type",
   "capture_type",
@@ -478,7 +477,7 @@ export async function getPlateReaderFilterOptions(
   instrumentId: string
 ): Promise<PlateReaderFilterOptions> {
   const [wavelengths, measurementModes, measurementTypes] = await Promise.all([
-    distinctMetadataValues(instrumentId, "wavelength"),
+    distinctMetadataArrayValues(instrumentId, "wavelengths"),
     distinctMetadataValues(instrumentId, "measurement_mode"),
     distinctMetadataValues(instrumentId, "measurement_type"),
   ]);

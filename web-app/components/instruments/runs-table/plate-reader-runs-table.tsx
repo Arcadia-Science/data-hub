@@ -19,7 +19,12 @@ import { cn, formatBytes } from "@/lib/utils";
 import type { RunRow } from ".";
 import { ClickableRow } from "./clickable-row";
 import { FilterableColumnHeader } from "./filterable-column-header";
-import { MetadataFieldBadge, getMetadataField } from "./metadata-utils";
+import {
+  MetadataArrayBadges,
+  MetadataFieldBadge,
+  getMetadataArray,
+  getMetadataField,
+} from "./metadata-utils";
 import { RanByCell } from "./ran-by-cell";
 import { RunSelectAllCheckbox, RunSelectCheckbox } from "./run-select-checkbox";
 import type { RunRef } from "./run-selection-provider";
@@ -36,7 +41,13 @@ export function PlateReaderRunsTable({
   filterOptions: PlateReaderFilterOptions;
   ranByOptions: { value: string; label: string }[];
 }) {
-  const wavelengthColors = buildWavelengthColorMap(filterOptions.wavelengths);
+  const allWavelengths = data.flatMap((row) =>
+    getMetadataArray(row.metadata, "wavelengths")
+  );
+  const wavelengthColors = buildWavelengthColorMap([
+    ...filterOptions.wavelengths,
+    ...allWavelengths,
+  ]);
   const runRefs: RunRef[] = data.map((row) => ({
     id: row.id,
     instrumentId: row.instrument_id,
@@ -55,7 +66,7 @@ export function PlateReaderRunsTable({
           <TableHead className="text-right">Total Size</TableHead>
           <TableHead>
             <FilterableColumnHeader
-              label="Wavelength"
+              label="Wavelengths"
               paramKey="wavelength"
               options={filterOptions.wavelengths}
             />
@@ -87,7 +98,7 @@ export function PlateReaderRunsTable({
       <TableBody>
         {data.map((row) => {
           const isDeleted = row.deleted_at !== null;
-          const wavelength = getMetadataField(row.metadata, "wavelength");
+          const wavelengths = getMetadataArray(row.metadata, "wavelengths");
           const mode = getMetadataField(row.metadata, "measurement_mode");
           const type = getMetadataField(row.metadata, "measurement_type");
           return (
@@ -130,11 +141,9 @@ export function PlateReaderRunsTable({
                 {formatBytes(row.total_size_bytes)}
               </TableCell>
               <TableCell>
-                <MetadataFieldBadge
-                  value={wavelength}
-                  colorClass={
-                    wavelength ? wavelengthColors[wavelength] : undefined
-                  }
+                <MetadataArrayBadges
+                  values={wavelengths}
+                  colorMap={wavelengthColors}
                 />
               </TableCell>
               <TableCell>

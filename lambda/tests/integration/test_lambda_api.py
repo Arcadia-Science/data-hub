@@ -111,7 +111,7 @@ class TestSpectraMaxHappyPath:
                 {
                     "measurement_mode": "Absorbance",
                     "measurement_type": "Endpoint",
-                    "wavelength": "750 nm",
+                    "wavelengths": ["750"],
                 },
                 id="endpoint",
             ),
@@ -121,7 +121,7 @@ class TestSpectraMaxHappyPath:
                 {
                     "measurement_mode": "Absorbance",
                     "measurement_type": "Well Scan",
-                    "wavelength": "595 nm",
+                    "wavelengths": ["595"],
                 },
                 id="well-scan",
             ),
@@ -131,7 +131,7 @@ class TestSpectraMaxHappyPath:
                 {
                     "measurement_mode": "Absorbance",
                     "measurement_type": "Kinetic",
-                    "wavelength": "595 nm",
+                    "wavelengths": ["595"],
                 },
                 id="kinetic",
             ),
@@ -147,7 +147,7 @@ class TestSpectraMaxHappyPath:
         mock_s3_upload: MagicMock,
         fixture_file: str,
         run_id: str,
-        expected_metadata: dict[str, str],
+        expected_metadata: dict[str, object],
     ) -> None:
         filename = f"{run_id}.xls"
         s3_key = f"spectramax-id3-plate-reader/{run_id}/{filename}"

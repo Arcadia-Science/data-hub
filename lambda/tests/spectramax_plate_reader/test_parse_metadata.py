@@ -77,7 +77,7 @@ class TestRealFixtures:
         assert result == {
             "measurement_mode": "Absorbance",
             "measurement_type": "Endpoint",
-            "wavelength": "750 nm",
+            "wavelengths": ["750"],
         }
 
     def test_well_scan_absorbance(self) -> None:
@@ -85,7 +85,7 @@ class TestRealFixtures:
         assert result == {
             "measurement_mode": "Absorbance",
             "measurement_type": "Well Scan",
-            "wavelength": "595 nm",
+            "wavelengths": ["595"],
         }
 
     def test_endpoint_fluorescence(self) -> None:
@@ -93,7 +93,7 @@ class TestRealFixtures:
         assert result == {
             "measurement_mode": "Fluorescence",
             "measurement_type": "Endpoint",
-            "wavelength": "512 nm",
+            "wavelengths": ["512"],
         }
 
     def test_endpoint_sparse_absorbance(self) -> None:
@@ -101,7 +101,7 @@ class TestRealFixtures:
         assert result == {
             "measurement_mode": "Absorbance",
             "measurement_type": "Endpoint",
-            "wavelength": "600 nm",
+            "wavelengths": ["600"],
         }
 
     def test_kinetic_absorbance(self) -> None:
@@ -109,7 +109,7 @@ class TestRealFixtures:
         assert result == {
             "measurement_mode": "Absorbance",
             "measurement_type": "Kinetic",
-            "wavelength": "595 nm",
+            "wavelengths": ["595"],
         }
 
     def test_endpoint_flat(self) -> None:
@@ -117,7 +117,7 @@ class TestRealFixtures:
         assert result == {
             "measurement_mode": "Absorbance",
             "measurement_type": "Endpoint",
-            "wavelength": "595 nm",
+            "wavelengths": ["595"],
         }
 
 
@@ -138,7 +138,7 @@ class TestParseMetadataHappyPath:
         assert result == {
             "measurement_mode": "Absorbance",
             "measurement_type": "Endpoint",
-            "wavelength": "750 nm",
+            "wavelengths": ["750"],
         }
 
     def test_fluorescence_kinetic(self, tmp_path: Path) -> None:
@@ -152,7 +152,7 @@ class TestParseMetadataHappyPath:
         assert result == {
             "measurement_mode": "Fluorescence",
             "measurement_type": "Kinetic",
-            "wavelength": "488 nm",
+            "wavelengths": ["488"],
         }
 
     def test_reduced_anchor(self, tmp_path: Path) -> None:
@@ -167,7 +167,7 @@ class TestParseMetadataHappyPath:
         assert result == {
             "measurement_mode": "Absorbance",
             "measurement_type": "Endpoint",
-            "wavelength": "600 nm",
+            "wavelengths": ["600"],
         }
 
 
@@ -198,7 +198,16 @@ class TestParseMetadataValidation:
         assert result == {
             "measurement_mode": "Absorbance",
             "measurement_type": "Endpoint",
-            "wavelength": "750 nm, 600 nm",
+            "wavelengths": ["750", "600"],
+        }
+
+    def test_four_wavelengths(self, tmp_path: Path) -> None:
+        path = _build_xls(tmp_path, wavelength="750 700 650 600")
+        result = parse_metadata(path)
+        assert result == {
+            "measurement_mode": "Absorbance",
+            "measurement_type": "Endpoint",
+            "wavelengths": ["750", "700", "650", "600"],
         }
 
     def test_missing_plate_header(self, tmp_path: Path) -> None:
