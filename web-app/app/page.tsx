@@ -65,6 +65,9 @@ export default async function DashboardPage({
 
   const hasFilters = hasActiveFilters(params);
   const currentUserId = session.user?.id ?? null;
+  const pendingUploadCount = runResult.data.filter(
+    (row) => row.files_pending_upload > 0
+  ).length;
   const unattributedCount = runResult.data.filter(
     (row) => row.attributions.length === 0
   ).length;
@@ -93,12 +96,10 @@ export default async function DashboardPage({
             pageParam="page"
           />
           {runResult.data.length > 0 ? (
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <div className="flex items-center justify-end text-xs text-muted-foreground">
               <p>
-                Hover any row to reveal &ldquo;I ran this&rdquo;. Check multiple
-                rows to attribute them together.
-              </p>
-              <p>
+                <span className="tabular-nums">{pendingUploadCount}</span>{" "}
+                pending upload ·{" "}
                 <span className="tabular-nums">{unattributedCount}</span>{" "}
                 unattributed ·{" "}
                 <span className="tabular-nums">{ranByYouCount}</span> ran by you

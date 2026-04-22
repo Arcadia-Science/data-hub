@@ -1,6 +1,7 @@
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import { ClickableRow } from "@/components/instruments/runs-table/clickable-row";
 import { RanByCell } from "@/components/instruments/runs-table/ran-by-cell";
+import { RunIdLabel } from "@/components/instruments/runs-table/run-id-label";
 import { RunRowActions } from "@/components/instruments/runs-table/run-row-actions";
 import {
   RunSelectAllCheckbox,
@@ -37,6 +38,8 @@ type RunRow = {
   files_completed: number;
   files_failed: number;
   files_pending_upload: number;
+  files_uploaded: number;
+  files_processing: number;
   total_size_bytes: number;
   error_messages: string[];
   attributions: RunAttribution[];
@@ -107,17 +110,19 @@ export function RunsTable({
                 <TableCell>
                   <div className="flex items-center gap-2.5">
                     <RunStatusIcon
+                      fileCount={row.file_count}
+                      filesCompleted={row.files_completed}
                       filesFailed={row.files_failed}
+                      filesPendingUpload={row.files_pending_upload}
+                      filesUploaded={row.files_uploaded}
+                      filesProcessing={row.files_processing}
                       errorMessages={row.error_messages}
                     />
-                    <span
-                      className={cn(
-                        "font-mono text-sm",
-                        isDeleted && "line-through"
-                      )}
-                    >
-                      {row.run_id}
-                    </span>
+                    <RunIdLabel
+                      runId={row.run_id}
+                      isDeleted={isDeleted}
+                      className="text-sm"
+                    />
                     {isDeleted ? (
                       <Badge
                         variant="outline"

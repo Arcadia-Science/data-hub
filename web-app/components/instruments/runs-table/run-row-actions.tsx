@@ -22,10 +22,7 @@ import {
   MoreHorizontal,
   RotateCw,
   Trash2,
-  UserRoundPlus,
-  UserRoundX,
 } from "lucide-react";
-import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition, type MouseEvent } from "react";
 import { toast } from "sonner";
@@ -49,7 +46,6 @@ function swallow(e: MouseEvent) {
 export function RunRowActions({ row }: { row: RunRow }) {
   const caps = computeRunCaps(row);
   const router = useRouter();
-  const { data: session } = useSession();
   const [isPending, startTransition] = useTransition();
   const [menuOpen, setMenuOpen] = useState(false);
   const [reprocessOpen, setReprocessOpen] = useState(false);
@@ -58,34 +54,9 @@ export function RunRowActions({ row }: { row: RunRow }) {
   // Deleted rows get no actions — the row is read-only.
   if (row.deleted_at !== null) return null;
 
-  const currentUserId = session?.user?.id ?? null;
-  const isSelfAttributed =
-    currentUserId !== null &&
-    row.attributions.some((a) => a.userId === currentUserId);
-
   const baseUrl = `/api/v1/instruments/${row.instrument_id}/runs/${encodeURIComponent(
     row.run_id
   )}`;
-
-  function handleAttributionToggle(e: MouseEvent) {
-    e.stopPropagation();
-    if (!currentUserId) return;
-    const method = isSelfAttributed ? "DELETE" : "PUT";
-    startTransition(async () => {
-      try {
-        const res = await fetch(`${baseUrl}/attributions/me`, { method });
-        if (!res.ok) throw new Error(await res.text());
-      } catch {
-        toast.error(
-          isSelfAttributed
-            ? "Couldn't remove attribution. Try again?"
-            : "Couldn't claim this run. Try again?"
-        );
-      } finally {
-        router.refresh();
-      }
-    });
-  }
 
   function handleUpload(e: MouseEvent) {
     e.stopPropagation();
@@ -137,33 +108,6 @@ export function RunRowActions({ row }: { row: RunRow }) {
       )}
       onClick={swallow}
     >
-      {currentUserId && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              className="size-7"
-              disabled={isPending}
-              onClick={handleAttributionToggle}
-              aria-label={
-                isSelfAttributed ? "Remove my attribution" : "I ran this"
-              }
-            >
-              {isSelfAttributed ? (
-                <UserRoundX className="size-3.5" />
-              ) : (
-                <UserRoundPlus className="size-3.5" />
-              )}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            {isSelfAttributed ? "Remove my attribution" : "I ran this"}
-          </TooltipContent>
-        </Tooltip>
-      )}
-
       {caps.upload && (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -218,7 +162,7 @@ export function RunRowActions({ row }: { row: RunRow }) {
             <MoreHorizontal className="size-3.5" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" onClick={swallow}>
+        <DropdownMenuContent align="end" className="min-w-40" onClick={swallow}>
           {caps.reprocess && (
             <DropdownMenuItem
               onSelect={(e) => {

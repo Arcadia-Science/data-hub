@@ -18,6 +18,7 @@ import { ClickableRow } from "./clickable-row";
 import { FilterableColumnHeader } from "./filterable-column-header";
 import { MetadataArrayBadges, getMetadataArray } from "./metadata-utils";
 import { RanByCell } from "./ran-by-cell";
+import { RunIdLabel } from "./run-id-label";
 import { RunRowActions } from "./run-row-actions";
 import { RunSelectAllCheckbox, RunSelectCheckbox } from "./run-select-checkbox";
 import type { RunRef } from "./run-selection-provider";
@@ -85,14 +86,15 @@ export function QpcrRunsTable({
               <TableCell>
                 <div className="flex items-center gap-2.5">
                   <RunStatusIcon
+                    fileCount={row.file_count}
+                    filesCompleted={row.files_completed}
                     filesFailed={row.files_failed}
+                    filesPendingUpload={row.files_pending_upload}
+                    filesUploaded={row.files_uploaded}
+                    filesProcessing={row.files_processing}
                     errorMessages={row.error_messages}
                   />
-                  <span
-                    className={cn("font-mono", isDeleted && "line-through")}
-                  >
-                    {row.run_id}
-                  </span>
+                  <RunIdLabel runId={row.run_id} isDeleted={isDeleted} />
                   {isDeleted && (
                     <Badge variant="outline" className="ml-1.5 font-normal">
                       deleted

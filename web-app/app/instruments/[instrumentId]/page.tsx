@@ -100,6 +100,9 @@ export default async function InstrumentDetailPage({
     filters.ran_by !== null;
 
   const currentUserId = session.user?.id ?? null;
+  const pendingUploadCount = runResult.data.filter(
+    (row) => row.files_pending_upload > 0
+  ).length;
   const unattributedCount = runResult.data.filter(
     (row) => row.attributions.length === 0
   ).length;
@@ -141,6 +144,7 @@ export default async function InstrumentDetailPage({
               qpcrFilterOptions={qpcrFilterOptions}
               ranByOptions={ranByOptions}
               totalCount={runResult.pagination.total}
+              pendingUploadCount={pendingUploadCount}
               unattributedCount={unattributedCount}
               ranByYouCount={ranByYouCount}
             />

@@ -265,7 +265,8 @@ export async function buildRunListQuery(filters: RunListFilters) {
   const where = conditions.length > 0 ? and(...conditions) : undefined;
 
   // Single-query aggregation: counts per-run file stats using FILTER (WHERE ...)
-  // to avoid N+1 queries. All non-deleted files are counted.
+  // to avoid N+1 queries. Only raw (instrument-produced) files are counted;
+  // processed/derived files are excluded via the LEFT JOIN condition below.
   const fileCount = sql<number>`cast(count(${files.id}) filter (where ${files.deletedAt} is null) as int)`;
 
   const filesCompleted = sql<number>`cast(count(${files.id}) filter (where ${files.status} = 'completed' and ${files.deletedAt} is null) as int)`;
@@ -275,6 +276,13 @@ export async function buildRunListQuery(filters: RunListFilters) {
   // "Pending upload" = files on the instrument PC that haven't reached S3 yet.
   // A non-zero count signals the run has files requiring manual upload action.
   const filesPendingUpload = sql<number>`cast(count(${files.id}) filter (where ${files.status} in ('detected', 'upload_requested') and ${files.deletedAt} is null) as int)`;
+
+  // "Uploaded" = files in S3 waiting in the processing queue (not yet picked
+  // up). Distinct from "Processing" so the UI can show a different state.
+  const filesUploaded = sql<number>`cast(count(${files.id}) filter (where ${files.status} = 'uploaded' and ${files.deletedAt} is null) as int)`;
+
+  // "Processing" = files actively being processed server-side.
+  const filesProcessing = sql<number>`cast(count(${files.id}) filter (where ${files.status} = 'processing' and ${files.deletedAt} is null) as int)`;
 
   const totalSizeBytes = sql<number>`cast(coalesce(sum(${files.sizeBytes}) filter (where ${files.deletedAt} is null), 0) as bigint)`;
 
@@ -325,12 +333,20 @@ export async function buildRunListQuery(filters: RunListFilters) {
       files_completed: filesCompleted,
       files_failed: filesFailed,
       files_pending_upload: filesPendingUpload,
+      files_uploaded: filesUploaded,
+      files_processing: filesProcessing,
       total_size_bytes: totalSizeBytes,
       error_messages: errorMessages,
     })
     .from(instrumentRuns)
     .innerJoin(instruments, eq(instrumentRuns.instrumentId, instruments.id))
-    .leftJoin(files, eq(files.instrumentRunId, instrumentRuns.id))
+    .leftJoin(
+      files,
+      and(
+        eq(files.instrumentRunId, instrumentRuns.id),
+        eq(files.category, "raw")
+      )
+    )
     .where(where)
     .groupBy(instrumentRuns.id, instruments.displayName)
     .orderBy(orderFn(sortCol))

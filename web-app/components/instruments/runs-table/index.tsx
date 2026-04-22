@@ -27,6 +27,8 @@ export type RunRow = {
   files_completed: number;
   files_failed: number;
   files_pending_upload: number;
+  files_uploaded: number;
+  files_processing: number;
   total_size_bytes: number;
   error_messages: string[];
   attributions: RunAttribution[];
@@ -50,6 +52,7 @@ export function InstrumentRunsTable({
   qpcrFilterOptions,
   ranByOptions,
   totalCount,
+  pendingUploadCount,
   unattributedCount,
   ranByYouCount,
 }: {
@@ -62,6 +65,7 @@ export function InstrumentRunsTable({
   qpcrFilterOptions?: QpcrFilterOptions;
   ranByOptions: RanByOption[];
   totalCount: number;
+  pendingUploadCount: number;
   unattributedCount: number;
   ranByYouCount: number;
 }) {
@@ -126,6 +130,7 @@ export function InstrumentRunsTable({
       <RunsTableFooter
         shownCount={data.length}
         totalCount={totalCount}
+        pendingUploadCount={pendingUploadCount}
         unattributedCount={unattributedCount}
         ranByYouCount={ranByYouCount}
       />
