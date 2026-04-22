@@ -21,7 +21,6 @@ import type { RunRow } from ".";
 import { ClickableRow } from "./clickable-row";
 import { FilterableColumnHeader } from "./filterable-column-header";
 import {
-  MetadataArrayBadges,
   MetadataFieldBadge,
   TruncatedBadges,
   getMetadataArray,
@@ -178,9 +177,10 @@ export function GelDocRunsTable({
                 />
               </TableCell>
               <TableCell>
-                <MetadataArrayBadges
+                <TruncatedBadges
                   values={wavelengthColorLabels}
                   colorMap={CHANNEL_COLOR_STYLES}
+                  maxVisible={2}
                 />
               </TableCell>
               <TableCell>
