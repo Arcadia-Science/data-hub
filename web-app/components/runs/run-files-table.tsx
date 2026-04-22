@@ -45,8 +45,9 @@ export function statusLabel(file: RunFile): string {
   if (file.deletedAt !== null) return "Dismissed";
   switch (file.status) {
     case "detected":
-    case "upload_requested":
       return "Pending";
+    case "upload_requested":
+      return "Uploading";
     case "uploaded":
       return "Uploaded";
     case "processing":
@@ -70,6 +71,16 @@ function StatusBadge({ file }: { file: RunFile }) {
           variant="outline"
           className="border-amber-500/40 bg-amber-500/10 text-amber-400"
         >
+          {label}
+        </Badge>
+      );
+    case "Uploading":
+      return (
+        <Badge
+          variant="outline"
+          className="gap-1 border-sky-500/40 bg-sky-500/10 text-sky-400"
+        >
+          <Loader2 className="size-3 animate-spin" />
           {label}
         </Badge>
       );
