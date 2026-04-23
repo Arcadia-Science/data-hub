@@ -23,6 +23,31 @@ export function getMetadataArray(metadata: unknown, key: string): string[] {
   return [];
 }
 
+export function getMetadataRecord(
+  metadata: unknown,
+  key: string
+): Record<string, unknown> | null {
+  if (!metadata || typeof metadata !== "object") return null;
+  const value = (metadata as Record<string, unknown>)[key];
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return null;
+}
+
+export function getMetadataObjectArray(
+  metadata: unknown,
+  key: string
+): Record<string, unknown>[] {
+  if (!metadata || typeof metadata !== "object") return [];
+  const value = (metadata as Record<string, unknown>)[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (v): v is Record<string, unknown> =>
+      v !== null && typeof v === "object" && !Array.isArray(v)
+  );
+}
+
 /**
  * Sort a list of wavelength strings (e.g. `"750"`) in ascending numerical
  * order. Non-numeric entries are pushed to the end, preserving their

@@ -31,6 +31,7 @@ const TYPE_LABELS: Record<string, string> = {
   gel_doc: "Gel Doc",
   qpcr: "qPCR",
   tape_station: "TapeStation",
+  hina_microscope: "Hina Microscope",
 };
 
 const INSTRUMENT_TYPE_OPTIONS = VALID_INSTRUMENT_TYPES.map((value) => ({

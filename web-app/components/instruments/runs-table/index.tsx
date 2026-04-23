@@ -9,6 +9,7 @@ import { SearchX } from "lucide-react";
 
 import { DefaultRunsTable } from "./default-runs-table";
 import { GelDocRunsTable } from "./gel-doc-runs-table";
+import { HinaRunsTable } from "./hina-runs-table";
 import { PlateReaderRunsTable } from "./plate-reader-runs-table";
 import { QpcrRunsTable } from "./qpcr-runs-table";
 import { RunsTableFooter } from "./runs-table-footer";
@@ -94,6 +95,15 @@ export function InstrumentRunsTable({
           data={data}
           instrumentId={instrumentId}
           filterOptions={qpcrFilterOptions!}
+          ranByOptions={ranByOptions}
+        />
+      );
+      break;
+    case "hina_microscope":
+      table = (
+        <HinaRunsTable
+          data={data}
+          instrumentId={instrumentId}
           ranByOptions={ranByOptions}
         />
       );
