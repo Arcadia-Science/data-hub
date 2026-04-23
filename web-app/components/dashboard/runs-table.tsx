@@ -21,31 +21,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { RunAttribution } from "@/lib/api/instrument-runs";
+import type { RunListRow } from "@/lib/api/instrument-runs";
 import { runRowToRef } from "@/lib/runs/row-actions";
 import { cn, formatBytes } from "@/lib/utils";
 import { FlaskConical, SearchX } from "lucide-react";
-
-type RunRow = {
-  id: string;
-  instrument_id: string;
-  instrument_display_name: string;
-  run_id: string;
-  source: string;
-  metadata: unknown;
-  created_at: Date;
-  updated_at: Date;
-  deleted_at: Date | null;
-  file_count: number;
-  files_completed: number;
-  files_failed: number;
-  files_pending_upload: number;
-  files_uploaded: number;
-  files_processing: number;
-  total_size_bytes: number;
-  error_messages: string[];
-  attributions: RunAttribution[];
-};
 
 export function RunsTable({
   data,
@@ -55,7 +34,7 @@ export function RunsTable({
   unattributedCount,
   ranByYouCount,
 }: {
-  data: RunRow[];
+  data: RunListRow[];
   hasFilters: boolean;
   totalCount: number;
   pendingUploadCount: number;

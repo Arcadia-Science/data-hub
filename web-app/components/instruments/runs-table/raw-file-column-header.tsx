@@ -11,10 +11,11 @@ import {
 export function RawFileColumnHeader({ label }: { label: string }) {
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="cursor-help border-b border-dashed border-muted-foreground/40">
-          {label}
-        </span>
+      <TooltipTrigger
+        type="button"
+        className="cursor-help border-b border-dashed border-muted-foreground/40 bg-transparent p-0 font-medium text-foreground"
+      >
+        {label}
       </TooltipTrigger>
       <TooltipContent side="top">
         Counts raw instrument files only. Files derived by the processing

@@ -384,6 +384,14 @@ export type RunDetail = NonNullable<
 
 export type RunFile = typeof files.$inferSelect;
 
+// Server-truth row shape for the paginated runs list. Derived from
+// buildRunListQuery's return type so any column added to the Drizzle
+// select (counts, metadata, etc.) automatically flows through to every
+// client-side table that renders these rows.
+export type RunListRow = Awaited<
+  ReturnType<typeof buildRunListQuery>
+>["data"][number];
+
 // ---------------------------------------------------------------------------
 // Per-run file list — all files (including soft-deleted) ordered by creation.
 // ---------------------------------------------------------------------------
