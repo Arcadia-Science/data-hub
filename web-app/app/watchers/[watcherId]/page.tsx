@@ -36,11 +36,23 @@ export default async function WatcherDetailPage({
   const { watcherId } = await params;
   const filters = watcherDetailParamsCache.parse(await searchParams);
 
+  // The server and browser may be in different timezones, so the local-midnight
+  // moment of a "yyyy-MM-dd" date can differ by up to ~14 hours from the
+  // server's interpretation. Parse both date filters as UTC and step back one
+  // day so the DB query is guaranteed to cover the user's full local day;
+  // <HeartbeatChart> clips the chart precisely on the client, and the event log
+  // already orders by timestamp so a slightly wider window is harmless.
+  function toTzSafeSince(dateString: string): Date {
+    const d = new Date(dateString + "T00:00:00Z");
+    d.setUTCDate(d.getUTCDate() - 1);
+    return d;
+  }
+
   const effectiveSince = filters.since ?? todayDateString();
-  const heartbeatSince = new Date(effectiveSince + "T00:00:00");
-  const eventsSince = filters.events_since
-    ? new Date(filters.events_since)
-    : undefined;
+  const heartbeatSince = toTzSafeSince(effectiveSince);
+
+  const effectiveEventsSince = filters.events_since ?? todayDateString();
+  const eventsSince = toTzSafeSince(effectiveEventsSince);
 
   const [watcher, heartbeats, eventResult] = await Promise.all([
     getWatcherById(watcherId),

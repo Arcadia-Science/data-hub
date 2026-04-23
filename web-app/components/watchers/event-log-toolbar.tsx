@@ -9,6 +9,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { todayDateString } from "@/lib/date";
 import { watcherDetailSearchParams } from "@/lib/search-params";
 import { CalendarDays, Filter, X } from "lucide-react";
 import { useQueryStates } from "nuqs";
@@ -34,8 +35,10 @@ export function EventLogToolbar() {
     startTransition,
   });
 
+  const today = todayDateString();
   const hasFilters =
-    filters.event_type.length > 0 || filters.events_since !== null;
+    filters.event_type.length > 0 ||
+    (filters.events_since !== null && filters.events_since !== today);
 
   function toggleEventType(type: string) {
     const current = filters.event_type;
@@ -55,9 +58,21 @@ export function EventLogToolbar() {
 
   return (
     <div className="flex flex-wrap items-center gap-2">
+      {hasFilters && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={clearFilters}
+          className="h-8 gap-1 text-xs"
+        >
+          <X className="size-3" />
+          Clear
+        </Button>
+      )}
+
       <Popover>
         <PopoverTrigger asChild>
-          <Button variant="outline" size="sm" className="h-8 gap-1 text-xs">
+          <Button variant="outline" size="sm" className="h-8 gap-1 text-sm">
             <Filter className="size-3" />
             Event Type
             {filters.event_type.length > 0 && (
@@ -89,7 +104,7 @@ export function EventLogToolbar() {
         <CalendarDays className="size-3.5 text-muted-foreground" />
         <Input
           type="date"
-          value={filters.events_since ?? ""}
+          value={filters.events_since ?? today}
           onChange={(e) =>
             setFilters({
               events_since: e.target.value || null,
@@ -100,18 +115,6 @@ export function EventLogToolbar() {
           aria-label="Events since"
         />
       </div>
-
-      {hasFilters && (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={clearFilters}
-          className="h-8 gap-1 text-xs"
-        >
-          <X className="size-3" />
-          Clear
-        </Button>
-      )}
     </div>
   );
 }
