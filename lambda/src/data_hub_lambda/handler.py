@@ -189,6 +189,11 @@ def lambda_handler(event: dict[str, Any], context: Context) -> dict[str, Any] | 
     logger.info("Run ID: '%s'", run_id)
     instrument_name = INSTRUMENT_ID_TO_NAME_MAP[instrument_id]
 
+    # Pre-cleanup: if the previous invocation on this warm container was
+    # SIGKILL'd (e.g. OOM), the `finally` block below didn't run and stale
+    # downloads may still be sitting in /tmp. Wipe them before we start.
+    _cleanup_tmp()
+
     try:
         logger.info("Processing file %s...", event_info.filename)
 
