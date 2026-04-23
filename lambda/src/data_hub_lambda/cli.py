@@ -52,6 +52,46 @@ def gel_doc(file: Path, output_dir: Path | None) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Hina microscope (Nikon ND2)
+# ---------------------------------------------------------------------------
+
+
+@cli.command("hina")
+@click.argument("file", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option(
+    "--output-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=None,
+    help="Directory for the exported JPG (default: same directory as FILE).",
+)
+def hina(file: Path, output_dir: Path | None) -> None:
+    """Convert a Hina microscope ND2 file to a JPG overlay.
+
+    Loads the ND2 via `arcadia-microscopy-tools`, produces a composite
+    JPG overlay (per-channel percentile-stretched intensities blended onto
+    a brightfield/zero background using each channel's native color), and
+    prints the parsed run-level metadata.
+    """
+    from data_hub_lambda.hina_microscope.image_processing import ND2Processor
+    from data_hub_lambda.hina_microscope.parse_metadata import parse_metadata
+
+    processor = ND2Processor(file)
+    processor.load()
+    jpg_path = processor.export_jpg()
+
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        dest = output_dir / jpg_path.name
+        shutil.move(str(jpg_path), str(dest))
+        jpg_path = dest
+
+    click.echo(f"Exported JPG: {jpg_path}")
+
+    metadata = parse_metadata(processor.image)
+    click.echo(json.dumps(metadata, indent=2))
+
+
+# ---------------------------------------------------------------------------
 # Azure Cielo qPCR
 # ---------------------------------------------------------------------------
 

@@ -7,6 +7,7 @@ INSTRUMENT_ID_TO_NAME_MAP: dict[str, str] = {
     Instrument.AKTA_FPLC.value: "Akta FPLC",
     Instrument.AZURE_600_GEL_DOC.value: "Azure 600 Gel Doc",
     Instrument.AZURE_CIELO_QPCR.value: "Azure Cielo qPCR",
+    Instrument.HINA_MICROSCOPE.value: "Hina Microscope",
     Instrument.SPECTRAMAX_ID3_PLATE_READER.value: "SpectraMax iD3 Plate Reader",
     Instrument.SPECTRAMAX_ID5_PLATE_READER.value: "SpectraMax iD5 Plate Reader",
 }

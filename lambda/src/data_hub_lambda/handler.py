@@ -17,6 +17,7 @@ from data_hub_lambda import (
     akta_fplc,
     azure_600_gel_doc,
     azure_cielo_qpcr,
+    hina_microscope,
     spectramax_plate_reader,
 )
 from data_hub_shared import slack
@@ -211,6 +212,12 @@ def lambda_handler(event: dict[str, Any], context: Context) -> dict[str, Any] | 
 
         elif instrument_id == Instrument.AZURE_CIELO_QPCR.value:
             result_url = azure_cielo_qpcr.process_file(
+                run_id=event_info.run_id,
+                filename=event_info.filename,
+            )
+
+        elif instrument_id == Instrument.HINA_MICROSCOPE.value:
+            result_url = hina_microscope.process_file(
                 run_id=event_info.run_id,
                 filename=event_info.filename,
             )

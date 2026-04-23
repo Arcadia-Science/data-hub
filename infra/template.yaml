@@ -112,6 +112,15 @@ Resources:
               S3Key:
                 Rules:
                   - Name: prefix
+                    Value: hina-microscope/
+                  - Name: suffix
+                    Value: .nd2
+            Function: !GetAtt DataHubFunction.Arn
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
                     Value: spectramax-id3-plate-reader/
                   - Name: suffix
                     Value: .xls
