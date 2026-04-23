@@ -4,7 +4,7 @@ import {
 } from "@/components/dashboard/instrument-cards";
 import { RunsTable } from "@/components/dashboard/runs-table";
 import { RunsToolbar } from "@/components/dashboard/runs-toolbar";
-import { BulkAttributionBar } from "@/components/instruments/runs-table/bulk-attribution-bar";
+import { RunBulkActionBar } from "@/components/instruments/runs-table/run-bulk-action-bar";
 import { RunSelectionProvider } from "@/components/instruments/runs-table/run-selection-provider";
 import { PaginationNav } from "@/components/pagination-nav";
 import {
@@ -42,10 +42,9 @@ export default async function DashboardPage({
   const instrumentIds =
     params.instrument_id.length > 0 ? params.instrument_id : undefined;
 
-  // When no date_from is in the URL, default to a 24-hour lookback using a
-  // full ISO timestamp so the cutoff is timezone-agnostic. A bare date string
-  // like "2026-04-15" would be parsed as midnight UTC, which can be "tomorrow"
-  // relative to the user's local timezone — hiding today's runs on first load.
+  // When no explicit date filter is set, default to a 24-hour lookback. This
+  // matches the "Last 24 hours" label surfaced by the dashboard's
+  // RunsDateFilter and keeps the initial payload bounded.
   const defaultDateFrom = last24hISOString();
 
   // Fetch the instrument list (for the toolbar combobox) and the filtered run
@@ -65,6 +64,9 @@ export default async function DashboardPage({
 
   const hasFilters = hasActiveFilters(params);
   const currentUserId = session.user?.id ?? null;
+  const pendingUploadCount = runResult.data.filter(
+    (row) => row.files_pending_upload > 0
+  ).length;
   const unattributedCount = runResult.data.filter(
     (row) => row.attributions.length === 0
   ).length;
@@ -83,28 +85,22 @@ export default async function DashboardPage({
       <RunSelectionProvider>
         <TablePendingProvider>
           <RunsToolbar instruments={instruments} />
-          <BulkAttributionBar />
+          <RunBulkActionBar />
           <TablePendingBoundary>
-            <RunsTable data={runResult.data} hasFilters={hasFilters} />
+            <RunsTable
+              data={runResult.data}
+              hasFilters={hasFilters}
+              totalCount={runResult.pagination.total}
+              pendingUploadCount={pendingUploadCount}
+              unattributedCount={unattributedCount}
+              ranByYouCount={ranByYouCount}
+            />
           </TablePendingBoundary>
           <PaginationNav
             page={runResult.pagination.page}
             totalPages={runResult.pagination.total_pages}
             pageParam="page"
           />
-          {runResult.data.length > 0 ? (
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <p>
-                Hover any row to reveal &ldquo;I ran this&rdquo;. Check multiple
-                rows to attribute them together.
-              </p>
-              <p>
-                <span className="tabular-nums">{unattributedCount}</span>{" "}
-                unattributed ·{" "}
-                <span className="tabular-nums">{ranByYouCount}</span> ran by you
-              </p>
-            </div>
-          ) : null}
         </TablePendingProvider>
       </RunSelectionProvider>
     </div>

@@ -1,12 +1,16 @@
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import { ClickableRow } from "@/components/instruments/runs-table/clickable-row";
 import { RanByCell } from "@/components/instruments/runs-table/ran-by-cell";
+import { RawFileColumnHeader } from "@/components/instruments/runs-table/raw-file-column-header";
+import { RunIdLabel } from "@/components/instruments/runs-table/run-id-label";
+import { RunRowActions } from "@/components/instruments/runs-table/run-row-actions";
 import {
   RunSelectAllCheckbox,
   RunSelectCheckbox,
 } from "@/components/instruments/runs-table/run-select-checkbox";
 import type { RunRef } from "@/components/instruments/runs-table/run-selection-provider";
 import { RunStatusIcon } from "@/components/instruments/runs-table/run-status-icon";
+import { RunsTableFooter } from "@/components/instruments/runs-table/runs-table-footer";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -17,35 +21,25 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { RunAttribution } from "@/lib/api/instrument-runs";
+import type { RunListRow } from "@/lib/api/instrument-runs";
+import { runRowToRef } from "@/lib/runs/row-actions";
 import { cn, formatBytes } from "@/lib/utils";
 import { FlaskConical, SearchX } from "lucide-react";
-
-type RunRow = {
-  id: string;
-  instrument_id: string;
-  instrument_display_name: string;
-  run_id: string;
-  source: string;
-  metadata: unknown;
-  created_at: Date;
-  updated_at: Date;
-  deleted_at: Date | null;
-  file_count: number;
-  files_completed: number;
-  files_failed: number;
-  files_pending_upload: number;
-  total_size_bytes: number;
-  error_messages: string[];
-  attributions: RunAttribution[];
-};
 
 export function RunsTable({
   data,
   hasFilters,
+  totalCount,
+  pendingUploadCount,
+  unattributedCount,
+  ranByYouCount,
 }: {
-  data: RunRow[];
+  data: RunListRow[];
   hasFilters: boolean;
+  totalCount: number;
+  pendingUploadCount: number;
+  unattributedCount: number;
+  ranByYouCount: number;
 }) {
   if (data.length === 0) {
     return (
@@ -60,11 +54,7 @@ export function RunsTable({
     );
   }
 
-  const runRefs: RunRef[] = data.map((row) => ({
-    id: row.id,
-    instrumentId: row.instrument_id,
-    runId: row.run_id,
-  }));
+  const runRefs: RunRef[] = data.map(runRowToRef);
 
   return (
     <div className="rounded-lg border">
@@ -76,10 +66,17 @@ export function RunsTable({
             </TableHead>
             <TableHead>Instrument</TableHead>
             <TableHead>Run ID</TableHead>
-            <TableHead>Files</TableHead>
-            <TableHead className="text-right">Total Size</TableHead>
+            <TableHead>
+              <RawFileColumnHeader label="Files" />
+            </TableHead>
+            <TableHead className="text-right">
+              <RawFileColumnHeader label="Size" />
+            </TableHead>
             <TableHead>Ran By</TableHead>
             <TableHead className="text-right">Created</TableHead>
+            <TableHead className="w-[132px]">
+              <span className="sr-only">Actions</span>
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -93,13 +90,7 @@ export function RunsTable({
                 className={cn(isDeleted && "opacity-50")}
               >
                 <TableCell>
-                  <RunSelectCheckbox
-                    runRef={{
-                      id: row.id,
-                      instrumentId: row.instrument_id,
-                      runId: row.run_id,
-                    }}
-                  />
+                  <RunSelectCheckbox runRef={runRowToRef(row)} />
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-1.5">
@@ -112,17 +103,19 @@ export function RunsTable({
                 <TableCell>
                   <div className="flex items-center gap-2.5">
                     <RunStatusIcon
+                      fileCount={row.file_count}
+                      filesCompleted={row.files_completed}
                       filesFailed={row.files_failed}
+                      filesPendingUpload={row.files_pending_upload}
+                      filesUploaded={row.files_uploaded}
+                      filesProcessing={row.files_processing}
                       errorMessages={row.error_messages}
                     />
-                    <span
-                      className={cn(
-                        "font-mono text-sm",
-                        isDeleted && "line-through"
-                      )}
-                    >
-                      {row.run_id}
-                    </span>
+                    <RunIdLabel
+                      runId={row.run_id}
+                      isDeleted={isDeleted}
+                      className="text-sm"
+                    />
                     {isDeleted ? (
                       <Badge
                         variant="outline"
@@ -149,11 +142,21 @@ export function RunsTable({
                 <TableCell className="text-right">
                   <RelativeTime date={new Date(row.created_at).toISOString()} />
                 </TableCell>
+                <TableCell className="py-1">
+                  <RunRowActions row={row} />
+                </TableCell>
               </ClickableRow>
             );
           })}
         </TableBody>
       </Table>
+      <RunsTableFooter
+        shownCount={data.length}
+        totalCount={totalCount}
+        pendingUploadCount={pendingUploadCount}
+        unattributedCount={unattributedCount}
+        ranByYouCount={ranByYouCount}
+      />
     </div>
   );
 }
@@ -167,10 +170,15 @@ export function RunsTableSkeleton() {
             <TableHead className="w-10" />
             <TableHead>Instrument</TableHead>
             <TableHead>Run ID</TableHead>
-            <TableHead>Files</TableHead>
-            <TableHead className="text-right">Total Size</TableHead>
+            <TableHead>
+              <RawFileColumnHeader label="Files" />
+            </TableHead>
+            <TableHead className="text-right">
+              <RawFileColumnHeader label="Size" />
+            </TableHead>
             <TableHead>Ran By</TableHead>
             <TableHead className="text-right">Created</TableHead>
+            <TableHead className="w-[132px]" />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -197,6 +205,7 @@ export function RunsTableSkeleton() {
               <TableCell className="text-right">
                 <Skeleton className="ml-auto h-4 w-20" />
               </TableCell>
+              <TableCell />
             </TableRow>
           ))}
         </TableBody>

@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { todayDateString } from "@/lib/date";
 import { watcherDetailSearchParams } from "@/lib/search-params";
-import { CalendarDays, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useQueryStates } from "nuqs";
 
 export function StatusToolbar() {
@@ -18,7 +18,6 @@ export function StatusToolbar() {
 
   return (
     <div className="flex items-center gap-2">
-      <CalendarDays className="size-3.5 text-muted-foreground" />
       <Input
         type="date"
         value={filters.since ?? today}

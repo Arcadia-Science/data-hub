@@ -14,6 +14,15 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -23,9 +32,34 @@ import {
 import type { RunFile } from "@/lib/api/instrument-runs";
 import { Download, Loader2, Search, Upload, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import {
+  type MouseEvent,
+  useEffect,
+  useMemo,
+  useState,
+  useTransition,
+} from "react";
 import { toast } from "sonner";
 import { RunFilesTable, statusLabel } from "./run-files-table";
+
+const PAGE_SIZE = 10;
+
+function getVisiblePages(
+  page: number,
+  totalPages: number
+): (number | "ellipsis")[] {
+  if (totalPages <= 7)
+    return Array.from({ length: totalPages }, (_, i) => i + 1);
+
+  const pages: (number | "ellipsis")[] = [1];
+  if (page > 3) pages.push("ellipsis");
+  const start = Math.max(2, page - 1);
+  const end = Math.min(totalPages - 1, page + 1);
+  for (let i = start; i <= end; i++) pages.push(i);
+  if (page < totalPages - 2) pages.push("ellipsis");
+  if (totalPages > 1) pages.push(totalPages);
+  return pages;
+}
 
 type StatusFilter =
   | "all"
@@ -91,6 +125,7 @@ export function RunFilesSection({
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [sortField, setSortField] = useState<SortField>("name");
+  const [page, setPage] = useState(1);
 
   const activeFiles = useMemo(
     () => files.filter((f) => f.deletedAt === null),
@@ -102,14 +137,17 @@ export function RunFilesSection({
     [files]
   );
 
-  // Auto-refresh while any file is processing so the UI picks up status
-  // transitions (e.g. processing → completed) without a manual reload.
-  const hasProcessing = activeFiles.some((f) => f.status === "processing");
+  // Auto-refresh while any file is in a transient state so the UI picks up
+  // status transitions (e.g. upload_requested → uploaded, processing →
+  // completed) without a manual reload.
+  const hasInFlight = activeFiles.some(
+    (f) => f.status === "processing" || f.status === "upload_requested"
+  );
   useEffect(() => {
-    if (!hasProcessing) return;
+    if (!hasInFlight) return;
     const id = setInterval(() => router.refresh(), 3000);
     return () => clearInterval(id);
-  }, [hasProcessing, router]);
+  }, [hasInFlight, router]);
 
   const baseFiles = showDismissed ? files : activeFiles;
 
@@ -124,6 +162,18 @@ export function RunFilesSection({
     }
     return [...result].sort((a, b) => compareFiles(a, b, sortField));
   }, [baseFiles, searchQuery, statusFilter, sortField]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredFiles.length / PAGE_SIZE));
+  const currentPage = Math.min(Math.max(1, page), totalPages);
+
+  const paginatedFiles = useMemo(
+    () =>
+      filteredFiles.slice(
+        (currentPage - 1) * PAGE_SIZE,
+        currentPage * PAGE_SIZE
+      ),
+    [filteredFiles, currentPage]
+  );
 
   const selectableFiles = useMemo(
     () => activeFiles.filter((f) => f.status === "detected"),
@@ -146,11 +196,11 @@ export function RunFilesSection({
   const visibleSelectableIds = useMemo(
     () =>
       new Set(
-        filteredFiles
+        paginatedFiles
           .filter((f) => f.status === "detected" && f.deletedAt === null)
           .map((f) => f.id)
       ),
-    [filteredFiles]
+    [paginatedFiles]
   );
 
   const allVisibleSelected =
@@ -305,13 +355,19 @@ export function RunFilesSection({
             <Input
               placeholder="Search files..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setPage(1);
+              }}
               className="h-8 pl-8 text-xs"
             />
           </div>
           <Select
             value={statusFilter}
-            onValueChange={(v) => setStatusFilter(v as StatusFilter)}
+            onValueChange={(v) => {
+              setStatusFilter(v as StatusFilter);
+              setPage(1);
+            }}
           >
             <SelectTrigger size="sm" className="h-8 text-xs">
               <SelectValue>{filterLabel}</SelectValue>
@@ -339,7 +395,10 @@ export function RunFilesSection({
           </Select>
           <Select
             value={sortField}
-            onValueChange={(v) => setSortField(v as SortField)}
+            onValueChange={(v) => {
+              setSortField(v as SortField);
+              setPage(1);
+            }}
           >
             <SelectTrigger size="sm" className="h-8 text-xs">
               <SelectValue>
@@ -373,7 +432,10 @@ export function RunFilesSection({
               variant={showDismissed ? "secondary" : "ghost"}
               size="sm"
               className="h-8 text-xs"
-              onClick={() => setShowDismissed((p) => !p)}
+              onClick={() => {
+                setShowDismissed((p) => !p);
+                setPage(1);
+              }}
             >
               {showDismissed ? "Hide dismissed" : "Show dismissed"}
             </Button>
@@ -401,6 +463,16 @@ export function RunFilesSection({
             <span className="font-medium">
               {selectedDetectedIds.length} selected
             </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1 text-xs text-muted-foreground"
+              onClick={() => setSelectedIds(new Set())}
+              disabled={isPending}
+            >
+              <X className="size-3" />
+              Clear selection
+            </Button>
             <div className="ml-auto flex gap-1">
               <Button
                 variant="default"
@@ -457,7 +529,7 @@ export function RunFilesSection({
           </p>
         ) : (
           <RunFilesTable
-            files={filteredFiles}
+            files={paginatedFiles}
             isDeleted={isDeleted}
             isPending={isPending}
             selection={{
@@ -476,13 +548,77 @@ export function RunFilesSection({
         )}
 
         {/* Summary footer */}
-        <div className="flex items-center justify-between border-t px-3 py-2 text-sm text-muted-foreground">
+        <div className="flex items-center justify-between gap-2 border-t px-3 py-2 text-sm text-muted-foreground">
           <span>
-            Showing {filteredFiles.length} of {activeFiles.length}
+            {filteredFiles.length === 0
+              ? `Showing 0 of ${activeFiles.length}`
+              : `Showing ${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(
+                  currentPage * PAGE_SIZE,
+                  filteredFiles.length
+                )} of ${filteredFiles.length}`}
             {dismissedFiles.length > 0 && showDismissed
               ? ` (+${dismissedFiles.length} dismissed)`
               : ""}
           </span>
+          {totalPages > 1 && (
+            <Pagination className="mx-0 w-auto justify-end">
+              <PaginationContent>
+                {(() => {
+                  const atPrev = currentPage <= 1;
+                  const atNext = currentPage >= totalPages;
+                  const go = (target: number) => (e: MouseEvent) => {
+                    e.preventDefault();
+                    setPage(Math.min(Math.max(1, target), totalPages));
+                  };
+                  return (
+                    <>
+                      <PaginationItem>
+                        <PaginationPrevious
+                          href="#"
+                          onClick={go(currentPage - 1)}
+                          aria-disabled={atPrev}
+                          className={
+                            atPrev
+                              ? "pointer-events-none opacity-50"
+                              : undefined
+                          }
+                        />
+                      </PaginationItem>
+                      {getVisiblePages(currentPage, totalPages).map((p, i) =>
+                        p === "ellipsis" ? (
+                          <PaginationItem key={`ellipsis-${i}`}>
+                            <PaginationEllipsis />
+                          </PaginationItem>
+                        ) : (
+                          <PaginationItem key={p}>
+                            <PaginationLink
+                              href="#"
+                              isActive={p === currentPage}
+                              onClick={go(p)}
+                            >
+                              {p}
+                            </PaginationLink>
+                          </PaginationItem>
+                        )
+                      )}
+                      <PaginationItem>
+                        <PaginationNext
+                          href="#"
+                          onClick={go(currentPage + 1)}
+                          aria-disabled={atNext}
+                          className={
+                            atNext
+                              ? "pointer-events-none opacity-50"
+                              : undefined
+                          }
+                        />
+                      </PaginationItem>
+                    </>
+                  );
+                })()}
+              </PaginationContent>
+            </Pagination>
+          )}
           <span>
             {pendingCount} pending &middot; {uploadedCount} uploaded
           </span>

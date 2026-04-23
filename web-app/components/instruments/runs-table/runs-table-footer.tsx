@@ -1,11 +1,13 @@
 export function RunsTableFooter({
   shownCount,
   totalCount,
+  pendingUploadCount,
   unattributedCount,
   ranByYouCount,
 }: {
   shownCount: number;
   totalCount: number;
+  pendingUploadCount: number;
   unattributedCount: number;
   ranByYouCount: number;
 }) {
@@ -16,8 +18,10 @@ export function RunsTableFooter({
         <span className="tabular-nums">{totalCount}</span>
       </p>
       <p>
-        <span className="tabular-nums">{unattributedCount}</span> unattributed ·{" "}
-        <span className="tabular-nums">{ranByYouCount}</span> ran by you
+        <span className="tabular-nums">{pendingUploadCount}</span> pending
+        upload · <span className="tabular-nums">{unattributedCount}</span>{" "}
+        unattributed · <span className="tabular-nums">{ranByYouCount}</span> ran
+        by you
       </p>
     </div>
   );

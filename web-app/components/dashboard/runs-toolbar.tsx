@@ -1,5 +1,7 @@
 "use client";
 
+import { RunFiltersCombobox } from "@/components/runs/run-filters-combobox";
+import { RunsDateFilter } from "@/components/runs/runs-date-filter";
 import { useTablePending } from "@/components/table-pending";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,46 +19,16 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { toDateInputValue } from "@/lib/date";
 import { dashboardSearchParams, hasActiveFilters } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 import { Check, ChevronsUpDown, Search, X } from "lucide-react";
 import { useQueryStates } from "nuqs";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 type Instrument = {
   id: string;
   displayName: string;
 };
-
-const DATE_PRESETS = [
-  { value: "today", label: "Last 24 hours", days: 0 },
-  { value: "3d", label: "Last 3 days", days: 3 },
-  { value: "1w", label: "Last week", days: 7 },
-  { value: "2w", label: "Last 2 weeks", days: 14 },
-  { value: "1m", label: "Last month", days: 30 },
-] as const;
-
-function dateFromDaysAgo(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  return toDateInputValue(d);
-}
-
-function resolvePreset(dateFrom: string | null): string {
-  if (!dateFrom) return "today";
-  for (const preset of DATE_PRESETS) {
-    if (dateFrom === dateFromDaysAgo(preset.days)) return preset.value;
-  }
-  return "";
-}
 
 export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
   const { startTransition } = useTablePending();
@@ -70,12 +42,6 @@ export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
 
   const hasFilters = hasActiveFilters(filters);
 
-  const activePreset = useMemo(
-    () => resolvePreset(filters.date_from),
-    [filters.date_from]
-  );
-
-  // Reset to page 1 whenever filters change to avoid landing on an empty page.
   function toggleInstrument(id: string) {
     const current = filters.instrument_id;
     const next = current.includes(id)
@@ -121,7 +87,7 @@ export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
                 aria-expanded={instrumentOpen}
               >
                 <ChevronsUpDown className="size-3.5 opacity-50" />
-                Instrument
+                Instruments
                 {filters.instrument_id.length > 0 && (
                   <Badge
                     variant="secondary"
@@ -132,7 +98,7 @@ export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
                 )}
               </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-56 p-0" align="start">
+            <PopoverContent className="w-72 p-0" align="start">
               <Command>
                 <CommandInput placeholder="Filter instruments..." />
                 <CommandList>
@@ -170,38 +136,32 @@ export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
               variant="ghost"
               size="sm"
               onClick={clearFilters}
-              className="h-8 gap-1 text-xs"
+              className="h-9 gap-1.5 text-sm font-normal"
             >
-              <X className="size-3" />
+              <X className="size-3.5" />
               Clear
             </Button>
           )}
 
-          {/* Date range preset */}
-          <Select
-            value={activePreset}
-            onValueChange={(value) => {
-              const preset = DATE_PRESETS.find((p) => p.value === value);
-              if (preset) {
-                setFilters({
-                  date_from: dateFromDaysAgo(preset.days),
-                  date_to: null,
-                  page: 1,
-                });
-              }
-            }}
-          >
-            <SelectTrigger className="min-h-8.5 w-40 text-sm">
-              <SelectValue placeholder="Date range" />
-            </SelectTrigger>
-            <SelectContent>
-              {DATE_PRESETS.map((p) => (
-                <SelectItem key={p.value} value={p.value} className="text-sm">
-                  {p.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <RunsDateFilter
+            value={{ from: filters.date_from, to: filters.date_to }}
+            onChange={(range) =>
+              setFilters({
+                date_from: range.from,
+                date_to: range.to,
+                page: 1,
+              })
+            }
+            align="end"
+            defaultPreset="24h"
+          />
+
+          <RunFiltersCombobox
+            values={{ includeDeleted: filters.include_deleted }}
+            onChange={({ includeDeleted }) =>
+              setFilters({ include_deleted: includeDeleted, page: 1 })
+            }
+          />
         </div>
       </div>
     </div>

@@ -1,7 +1,7 @@
 import { InstrumentHeader } from "@/components/instruments/instrument-header";
 import { InstrumentRunsToolbar } from "@/components/instruments/instrument-runs-toolbar";
 import { InstrumentRunsTable } from "@/components/instruments/runs-table";
-import { BulkAttributionBar } from "@/components/instruments/runs-table/bulk-attribution-bar";
+import { RunBulkActionBar } from "@/components/instruments/runs-table/run-bulk-action-bar";
 import { RunSelectionProvider } from "@/components/instruments/runs-table/run-selection-provider";
 import { PaginationNav } from "@/components/pagination-nav";
 import {
@@ -100,6 +100,9 @@ export default async function InstrumentDetailPage({
     filters.ran_by !== null;
 
   const currentUserId = session.user?.id ?? null;
+  const pendingUploadCount = runResult.data.filter(
+    (row) => row.files_pending_upload > 0
+  ).length;
   const unattributedCount = runResult.data.filter(
     (row) => row.attributions.length === 0
   ).length;
@@ -129,7 +132,7 @@ export default async function InstrumentDetailPage({
       <RunSelectionProvider>
         <TablePendingProvider>
           <InstrumentRunsToolbar />
-          <BulkAttributionBar />
+          <RunBulkActionBar />
           <TablePendingBoundary>
             <InstrumentRunsTable
               data={runResult.data}
@@ -141,6 +144,7 @@ export default async function InstrumentDetailPage({
               qpcrFilterOptions={qpcrFilterOptions}
               ranByOptions={ranByOptions}
               totalCount={runResult.pagination.total}
+              pendingUploadCount={pendingUploadCount}
               unattributedCount={unattributedCount}
               ranByYouCount={ranByYouCount}
             />

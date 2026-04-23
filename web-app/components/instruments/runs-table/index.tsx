@@ -2,7 +2,7 @@ import type {
   GelDocFilterOptions,
   PlateReaderFilterOptions,
   QpcrFilterOptions,
-  RunAttribution,
+  RunListRow,
 } from "@/lib/api/instrument-runs";
 import type { InstrumentType } from "@/lib/db/schema";
 import { SearchX } from "lucide-react";
@@ -13,24 +13,10 @@ import { PlateReaderRunsTable } from "./plate-reader-runs-table";
 import { QpcrRunsTable } from "./qpcr-runs-table";
 import { RunsTableFooter } from "./runs-table-footer";
 
-export type RunRow = {
-  id: string;
-  instrument_id: string;
-  instrument_display_name: string;
-  run_id: string;
-  source: string;
-  metadata: unknown;
-  created_at: Date;
-  updated_at: Date;
-  deleted_at: Date | null;
-  file_count: number;
-  files_completed: number;
-  files_failed: number;
-  files_pending_upload: number;
-  total_size_bytes: number;
-  error_messages: string[];
-  attributions: RunAttribution[];
-};
+// Re-export under the historical name so imports like
+// `import type { RunRow } from "@/components/instruments/runs-table"`
+// keep working. The type itself is now derived server-side.
+export type RunRow = RunListRow;
 
 export type RanByOption = { value: string; label: string };
 
@@ -50,6 +36,7 @@ export function InstrumentRunsTable({
   qpcrFilterOptions,
   ranByOptions,
   totalCount,
+  pendingUploadCount,
   unattributedCount,
   ranByYouCount,
 }: {
@@ -62,6 +49,7 @@ export function InstrumentRunsTable({
   qpcrFilterOptions?: QpcrFilterOptions;
   ranByOptions: RanByOption[];
   totalCount: number;
+  pendingUploadCount: number;
   unattributedCount: number;
   ranByYouCount: number;
 }) {
@@ -126,6 +114,7 @@ export function InstrumentRunsTable({
       <RunsTableFooter
         shownCount={data.length}
         totalCount={totalCount}
+        pendingUploadCount={pendingUploadCount}
         unattributedCount={unattributedCount}
         ranByYouCount={ranByYouCount}
       />

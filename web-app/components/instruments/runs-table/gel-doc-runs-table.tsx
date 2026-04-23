@@ -15,6 +15,7 @@ import {
   IMAGING_MODE_COLORS,
   buildWavelengthColorMap,
 } from "@/lib/instrument-colors";
+import { runRowToRef } from "@/lib/runs/row-actions";
 import { cn, formatBytes } from "@/lib/utils";
 
 import type { RunRow } from ".";
@@ -28,6 +29,9 @@ import {
   sortWavelengths,
 } from "./metadata-utils";
 import { RanByCell } from "./ran-by-cell";
+import { RawFileColumnHeader } from "./raw-file-column-header";
+import { RunIdLabel } from "./run-id-label";
+import { RunRowActions } from "./run-row-actions";
 import { RunSelectAllCheckbox, RunSelectCheckbox } from "./run-select-checkbox";
 import type { RunRef } from "./run-selection-provider";
 import { RunStatusIcon } from "./run-status-icon";
@@ -48,11 +52,7 @@ export function GelDocRunsTable({
   );
   const wavelengthColors = buildWavelengthColorMap(allWavelengths);
   const sortedWavelengthOptions = sortWavelengths(filterOptions.wavelengths);
-  const runRefs: RunRef[] = data.map((row) => ({
-    id: row.id,
-    instrumentId: row.instrument_id,
-    runId: row.run_id,
-  }));
+  const runRefs: RunRef[] = data.map(runRowToRef);
 
   return (
     <Table>
@@ -62,8 +62,12 @@ export function GelDocRunsTable({
             <RunSelectAllCheckbox refs={runRefs} />
           </TableHead>
           <TableHead>Run ID</TableHead>
-          <TableHead>Files</TableHead>
-          <TableHead className="text-right">Total Size</TableHead>
+          <TableHead>
+            <RawFileColumnHeader label="Files" />
+          </TableHead>
+          <TableHead className="text-right">
+            <RawFileColumnHeader label="Size" />
+          </TableHead>
           <TableHead>
             <FilterableColumnHeader
               label="Capture Type"
@@ -100,6 +104,9 @@ export function GelDocRunsTable({
             />
           </TableHead>
           <TableHead className="text-right">Created</TableHead>
+          <TableHead className="w-[132px]">
+            <span className="sr-only">Actions</span>
+          </TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -121,25 +128,20 @@ export function GelDocRunsTable({
               className={cn(isDeleted && "opacity-50")}
             >
               <TableCell>
-                <RunSelectCheckbox
-                  runRef={{
-                    id: row.id,
-                    instrumentId: row.instrument_id,
-                    runId: row.run_id,
-                  }}
-                />
+                <RunSelectCheckbox runRef={runRowToRef(row)} />
               </TableCell>
               <TableCell>
                 <div className="flex items-center gap-2.5">
                   <RunStatusIcon
+                    fileCount={row.file_count}
+                    filesCompleted={row.files_completed}
                     filesFailed={row.files_failed}
+                    filesPendingUpload={row.files_pending_upload}
+                    filesUploaded={row.files_uploaded}
+                    filesProcessing={row.files_processing}
                     errorMessages={row.error_messages}
                   />
-                  <span
-                    className={cn("font-mono", isDeleted && "line-through")}
-                  >
-                    {row.run_id}
-                  </span>
+                  <RunIdLabel runId={row.run_id} isDeleted={isDeleted} />
                   {isDeleted && (
                     <Badge variant="outline" className="ml-1.5 font-normal">
                       deleted
@@ -192,6 +194,9 @@ export function GelDocRunsTable({
               </TableCell>
               <TableCell className="text-right">
                 <RelativeTime date={row.created_at.toISOString()} />
+              </TableCell>
+              <TableCell className="py-1">
+                <RunRowActions row={row} />
               </TableCell>
             </ClickableRow>
           );
