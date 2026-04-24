@@ -7,10 +7,8 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import {
-  getWatcherOnlineStatus,
-  WatcherStatusBadge,
-} from "@/components/watchers/watcher-status-badge";
+import { getWatcherOnlineStatus } from "@/components/watchers/watcher-online-status";
+import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type { InstrumentDetail } from "@/lib/api/instruments";
 import Link from "next/link";
 

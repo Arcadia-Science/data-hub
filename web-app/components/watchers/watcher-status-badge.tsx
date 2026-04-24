@@ -1,22 +1,14 @@
+"use client";
+
 import { Badge } from "@/components/ui/badge";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import type { WatcherOnlineStatus } from "@/components/watchers/watcher-online-status";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { Radio, WifiOff } from "lucide-react";
-
-/**
- * Rolled-up watcher status for an instrument:
- *  - `online`     — at least one watcher is actively heartbeating
- *  - `offline`    — watchers are registered but none are heartbeating
- *  - `no_watcher` — no watchers registered for the instrument
- *
- * This is distinct from the per-watcher `EffectiveStatus` in
- * `lib/api/watchers.ts`, which describes a single watcher's lifecycle.
- */
-export type WatcherOnlineStatus = "online" | "offline" | "no_watcher";
 
 const STATUS_CONFIG: Record<
   WatcherOnlineStatus,
@@ -44,17 +36,6 @@ const STATUS_CONFIG: Record<
     className: "border-border text-muted-foreground",
   },
 };
-
-export function getWatcherOnlineStatus({
-  watcherCount,
-  watchersOnline,
-}: {
-  watcherCount: number;
-  watchersOnline: number;
-}): WatcherOnlineStatus {
-  if (watcherCount === 0) return "no_watcher";
-  return watchersOnline > 0 ? "online" : "offline";
-}
 
 export function WatcherStatusBadge({
   status,
@@ -94,15 +75,7 @@ export function WatcherStatusBadge({
 
   return (
     <Tooltip>
-      {/*
-       * The Badge is wrapped in a plain <span> so Radix's `asChild` Slot
-       * forwards the trigger's data-state / aria attributes onto a raw DOM
-       * element rather than into the Badge function component. Cloning into
-       * Badge surfaced as an SSR/hydration mismatch on table rows.
-       */}
-      <TooltipTrigger asChild>
-        <span tabIndex={0}>{badge}</span>
-      </TooltipTrigger>
+      <TooltipTrigger asChild>{badge}</TooltipTrigger>
       <TooltipContent className="flex flex-col gap-1">
         <div>Last online {formatRelativeTime(lastOnlineAt)}</div>
       </TooltipContent>

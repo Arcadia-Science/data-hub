@@ -12,10 +12,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  getWatcherOnlineStatus,
-  WatcherStatusBadge,
-} from "@/components/watchers/watcher-status-badge";
+import { getWatcherOnlineStatus } from "@/components/watchers/watcher-online-status";
+import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type { InstrumentListItem } from "@/lib/api/instruments";
 import { SearchX } from "lucide-react";
 import type { ReactNode } from "react";
