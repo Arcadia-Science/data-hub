@@ -1,5 +1,10 @@
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { cn, formatRelativeTime } from "@/lib/utils";
 import { Radio, WifiOff } from "lucide-react";
 
 /**
@@ -53,10 +58,17 @@ export function getWatcherOnlineStatus({
 
 export function WatcherStatusBadge({
   status,
+  lastOnlineAt,
   verbose = false,
   className,
 }: {
   status: WatcherOnlineStatus;
+  /**
+   * Most recent watcher heartbeat for the instrument. When the badge is in
+   * `offline` state and this is provided, it's surfaced via tooltip so users
+   * can tell at a glance how long the instrument has been silent.
+   */
+  lastOnlineAt?: Date | null;
   /**
    * When true, prefixes the label with "Watcher" (e.g. "Watcher Online").
    * Useful in headers where the badge stands alone outside a status column.
@@ -69,10 +81,23 @@ export function WatcherStatusBadge({
   const fullLabel =
     verbose && status !== "no_watcher" ? `Watcher ${label}` : label;
 
-  return (
+  const badge = (
     <Badge className={cn(variantClassName, className)}>
       <Icon />
       {fullLabel}
     </Badge>
+  );
+
+  if (status !== "offline" || !lastOnlineAt) {
+    return badge;
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{badge}</TooltipTrigger>
+      <TooltipContent className="flex flex-col gap-1">
+        <div>Last online {formatRelativeTime(lastOnlineAt)}</div>
+      </TooltipContent>
+    </Tooltip>
   );
 }

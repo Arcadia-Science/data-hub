@@ -20,6 +20,8 @@ export type InstrumentListItem = {
   lastRunAt: Date | null;
   watcherCount: number;
   watchersOnline: number;
+  /** Most recent heartbeat from any watcher attached to this instrument. */
+  lastWatcherHeartbeatAt: Date | null;
   createdAt: Date;
 };
 
@@ -85,6 +87,9 @@ export async function getInstrumentListWithCounts(): Promise<
         sql<number>`cast(count(*) filter (where ${watchers.status} = 'watching' and ${watchers.lastHeartbeatAt} > now() - interval '${sql.raw(String(HEARTBEAT_STALE_MINUTES))} minutes') as int)`.as(
           "online_count"
         ),
+      lastHeartbeatAt: sql<Date | null>`max(${watchers.lastHeartbeatAt})`.as(
+        "last_heartbeat_at"
+      ),
     })
     .from(watchers)
     .where(isNull(watchers.deletedAt))
@@ -104,6 +109,7 @@ export async function getInstrumentListWithCounts(): Promise<
         lastRunAt: runCountSq.lastRunAt,
         watcherCount: sql<number>`coalesce(${watcherCountSq.count}, 0)`,
         watchersOnline: sql<number>`coalesce(${watcherCountSq.online}, 0)`,
+        lastWatcherHeartbeatAt: watcherCountSq.lastHeartbeatAt,
       })
       .from(instruments)
       .leftJoin(runCountSq, eq(runCountSq.instrumentId, instruments.id))
@@ -127,10 +133,13 @@ export async function getInstrumentListWithCounts(): Promise<
 
   return rows.map((row) => ({
     ...row,
-    // The aggregated `max(created_at)` flows through drizzle's raw `sql`
-    // template, which doesn't apply the timestamp parser the column would
-    // — coerce to Date so callers can safely call Date methods on it.
+    // Aggregates flow through drizzle's raw `sql` template, which doesn't
+    // apply the timestamp parser the column would — coerce to Date so callers
+    // can safely call Date methods on the result.
     lastRunAt: row.lastRunAt ? new Date(row.lastRunAt) : null,
+    lastWatcherHeartbeatAt: row.lastWatcherHeartbeatAt
+      ? new Date(row.lastWatcherHeartbeatAt)
+      : null,
     filePatterns: mergeFilePatterns(configsByInstrument.get(row.id) ?? []),
   }));
 }
@@ -147,6 +156,8 @@ export type InstrumentDetail = {
   watcherCount: number;
   watchersOnline: number;
   watchersOffline: number;
+  /** Most recent heartbeat from any watcher attached to this instrument. */
+  lastWatcherHeartbeatAt: Date | null;
   activeWatcherId: string | null;
 };
 
@@ -191,6 +202,7 @@ export const getInstrumentById = cache(async function getInstrumentById(
   let watchersOnline = 0;
   let watchersOffline = 0;
   let activeWatcherId: string | null = null;
+  let lastWatcherHeartbeatAt: Date | null = null;
   for (const w of watcherRows) {
     const isOnline =
       w.status === "watching" &&
@@ -201,6 +213,12 @@ export const getInstrumentById = cache(async function getInstrumentById(
       activeWatcherId ??= w.id;
     } else {
       watchersOffline++;
+    }
+    if (
+      w.lastHeartbeatAt &&
+      (!lastWatcherHeartbeatAt || w.lastHeartbeatAt > lastWatcherHeartbeatAt)
+    ) {
+      lastWatcherHeartbeatAt = w.lastHeartbeatAt;
     }
   }
   activeWatcherId ??= watcherRows[0]?.id ?? null;
@@ -217,6 +235,7 @@ export const getInstrumentById = cache(async function getInstrumentById(
     watcherCount: watcherRows.length,
     watchersOnline,
     watchersOffline,
+    lastWatcherHeartbeatAt,
     activeWatcherId,
   };
 });

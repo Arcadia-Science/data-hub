@@ -55,6 +55,7 @@ export function InstrumentHeader({
             <Link href={`/watchers/${instrument.activeWatcherId}`}>
               <WatcherStatusBadge
                 status={watcherStatus}
+                lastOnlineAt={instrument.lastWatcherHeartbeatAt}
                 verbose
                 className="px-2 py-3 transition-colors hover:opacity-80"
               />
@@ -62,6 +63,7 @@ export function InstrumentHeader({
           ) : (
             <WatcherStatusBadge
               status={watcherStatus}
+              lastOnlineAt={instrument.lastWatcherHeartbeatAt}
               verbose
               className="px-2 py-3"
             />

@@ -1,5 +1,6 @@
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import { EditInstrumentDialog } from "@/components/instruments/edit-instrument-dialog";
+import { RowActionsCell } from "@/components/instruments/row-actions-cell";
 import { ClickableRow } from "@/components/instruments/runs-table/clickable-row";
 import { StatusActions } from "@/components/instruments/status-actions";
 import { Badge } from "@/components/ui/badge";
@@ -17,13 +18,7 @@ import {
 } from "@/components/watchers/watcher-status-badge";
 import type { InstrumentListItem } from "@/lib/api/instruments";
 import { SearchX } from "lucide-react";
-import type { MouseEvent, ReactNode } from "react";
-
-// Prevent row navigation when the user interacts with controls inside an
-// action cell (edit dialog trigger, approve/reject buttons, etc.).
-function swallow(e: MouseEvent) {
-  e.stopPropagation();
-}
+import type { ReactNode } from "react";
 
 /**
  * Default row actions used by the management page: an approval action for
@@ -102,7 +97,10 @@ export function InstrumentsTable({
                   </span>
                 </TableCell>
                 <TableCell>
-                  <WatcherStatusBadge status={watcherStatus} />
+                  <WatcherStatusBadge
+                    status={watcherStatus}
+                    lastOnlineAt={row.lastWatcherHeartbeatAt}
+                  />
                 </TableCell>
                 <TableCell>
                   {row.filePatterns.length > 0 ? (
@@ -130,9 +128,7 @@ export function InstrumentsTable({
                   )}
                 </TableCell>
                 {renderRowActions ? (
-                  <TableCell onClick={swallow}>
-                    {renderRowActions(row)}
-                  </TableCell>
+                  <RowActionsCell>{renderRowActions(row)}</RowActionsCell>
                 ) : null}
               </ClickableRow>
             );
