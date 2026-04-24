@@ -200,8 +200,8 @@ describe("Instrument Runs API", () => {
   // PATCH /api/v1/instruments/:instrumentId/runs/:runId
   // -------------------------------------------------------------------------
 
-  // Metadata is a full replacement (not a deep merge). The Lambda or analysis
-  // pipeline writes the complete metadata object after processing all files.
+  // Metadata is a full replacement (not a deep merge). The Lambda writes the
+  // complete metadata object after processing all files.
   it("PATCH updates run metadata", async () => {
     const res = await api(`/api/v1/instruments/${instrumentId}/runs/run-001`, {
       method: "PATCH",

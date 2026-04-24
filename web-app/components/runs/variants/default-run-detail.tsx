@@ -54,8 +54,6 @@ export function DefaultRunDetail({
       </RunDetail.FilesMetadataLayout>
 
       <RunDetail.Report files={files} />
-
-      <RunDetail.Analysis />
     </>
   );
 }

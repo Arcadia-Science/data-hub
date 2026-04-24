@@ -126,10 +126,9 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     return apiError(400, VALIDATION_ERROR, "Invalid JSON body");
   }
 
-  // Metadata is a full replacement (not a deep merge). The Lambda or analysis
-  // pipeline writes the complete metadata object after processing. Patch-by-key
-  // would require a read-then-merge cycle that adds complexity with no benefit
-  // at current scale.
+  // Metadata is a full replacement (not a deep merge). The Lambda writes the
+  // complete metadata object after processing. Patch-by-key would require a
+  // read-then-merge cycle that adds complexity with no benefit at current scale.
   if ("metadata" in body) {
     if (
       typeof body.metadata !== "object" ||

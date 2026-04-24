@@ -321,8 +321,6 @@ export function PlateReaderRunDetail({
         heatmap={heatmap}
         kineticLayout={measurementType === "Kinetic"}
       />
-
-      <RunDetail.Analysis />
     </>
   );
 }

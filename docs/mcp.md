@@ -122,7 +122,6 @@ Prompts are scripted workflows the client surfaces to the user. Each prompt asse
 | Prompt | Args | Description |
 | --- | --- | --- |
 | `daily_summary` | `date` (optional, YYYY-MM-DD) | Summarize all instrument activity for a given day — run counts, failures, and system health. |
-| `run_analysis` | `instrumentId`, `runId` | Fetch and interpret the experimental results for a specific run. |
 | `troubleshoot_instrument` | `instrumentId` | Diagnose connectivity or processing issues for an instrument by inspecting its status, watcher heartbeats, and recent runs. |
 | `compare_runs` | `instrumentId`, `runId1`, `runId2` | Compare two runs on the same instrument side by side, highlighting differences in conditions and outcomes. |
 
@@ -132,7 +131,6 @@ Once installed, ask your client questions like:
 
 - *"What instruments are active right now?"* → `list_instruments` with `status="active"`
 - *"Show me all SpectraMax runs from last Friday."* → `search_runs` with an `instrumentId` and date range
-- *"Summarize the well data from run `2026-03-26_experiment` on the plate reader."* → `run_analysis` prompt, which chains `get_run`, `list_run_files`, and `get_file_download_url` for processed CSVs
 - *"The gel-doc in Lab 3 stopped uploading — what's wrong?"* → `troubleshoot_instrument` prompt, which inspects the watcher list and heartbeat history
 - *"Re-run processing for file 4217, we pushed a parser fix."* → `reprocess_file`. Clients typically confirm the destructive action with the user first.
 - *"Claim run `2026-03-26_experiment` on the SpectraMax — I ran it this morning."* → `claim_run`. To find runs you've already claimed, use `search_runs` with `ranBy` set to your user id (discoverable via `list_run_attributors`).

@@ -54,8 +54,6 @@ export function GelDocRunDetail({
       </RunDetail.FilesMetadataLayout>
 
       <RunDetail.Report files={files} />
-
-      <RunDetail.Analysis />
     </>
   );
 }
