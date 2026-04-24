@@ -163,32 +163,36 @@ export function RanByCell({
       )}
     </div>
   ) : (
-    <div className="flex h-7 items-center gap-2">
+    <div className="group/ranby flex h-7 items-center gap-1">
       <div className="flex -space-x-1.5">
-        {optimistic.map((attribution) => (
-          <Tooltip key={attribution.userId}>
-            <TooltipTrigger asChild>
-              <Avatar
-                size="sm"
-                className={cn(
-                  "ring-2 ring-background",
-                  attribution.userId === currentUserId && "ring-primary/30"
-                )}
-              >
-                {attribution.avatarUrl ? (
-                  <AvatarImage
-                    src={attribution.avatarUrl}
-                    alt={attribution.displayName}
-                  />
-                ) : null}
-                <AvatarFallback className={avatarColor(attribution.userId)}>
-                  {attribution.initials}
-                </AvatarFallback>
-              </Avatar>
-            </TooltipTrigger>
-            <TooltipContent>{attribution.displayName}</TooltipContent>
-          </Tooltip>
-        ))}
+        {optimistic.map((attribution) => {
+          const isSelf = attribution.userId === currentUserId;
+          return (
+            <Tooltip key={attribution.userId}>
+              <TooltipTrigger asChild>
+                <Avatar
+                  size="sm"
+                  data-self-attribution={isSelf || undefined}
+                  className={cn(
+                    "ring-2 ring-background",
+                    isSelf && "ring-primary/30"
+                  )}
+                >
+                  {attribution.avatarUrl ? (
+                    <AvatarImage
+                      src={attribution.avatarUrl}
+                      alt={attribution.displayName}
+                    />
+                  ) : null}
+                  <AvatarFallback className={avatarColor(attribution.userId)}>
+                    {attribution.initials}
+                  </AvatarFallback>
+                </Avatar>
+              </TooltipTrigger>
+              <TooltipContent>{attribution.displayName}</TooltipContent>
+            </Tooltip>
+          );
+        })}
       </div>
       {isSelfAttributed ? (
         <Tooltip>
@@ -200,7 +204,12 @@ export function RanByCell({
               disabled={isPending}
               onClick={handleRemove}
               aria-label="Remove my attribution"
-              className="size-6 text-muted-foreground/70 hover:text-foreground"
+              className={cn(
+                "size-6 text-muted-foreground/70 hover:text-foreground",
+                "opacity-0 transition-opacity",
+                "group-has-[[data-self-attribution]:hover]/ranby:opacity-100",
+                "hover:opacity-100 focus-visible:opacity-100"
+              )}
             >
               <X className="size-3.5" />
             </Button>
