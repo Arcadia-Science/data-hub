@@ -1,5 +1,10 @@
 import { Badge } from "@/components/ui/badge";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   CAPTURE_TYPE_COLORS,
   CHANNEL_COLOR_STYLES,
   IMAGING_MODE_COLORS,
@@ -391,15 +396,73 @@ function ChannelBadge({ name, color }: HinaChannel) {
   );
 }
 
-export function HinaChannelBadges({ channels }: { channels: HinaChannel[] }) {
+// Tooltip variant of `ChannelBadge`. The default tooltip surface uses
+// `bg-foreground` + `text-background`, which inverts per theme — so the
+// badge's border and label inherit `currentColor` to stay readable on both
+// the light-mode dark tooltip and the dark-mode light tooltip. The dot keeps
+// the channel hex so the color cue is preserved.
+function TooltipChannelBadge({ name, color }: HinaChannel) {
+  return (
+    <Badge variant="outline" className="border-current font-mono text-current">
+      {color && (
+        <span
+          aria-hidden="true"
+          className="inline-block size-2 rounded-full"
+          style={{ backgroundColor: color }}
+        />
+      )}
+      {name}
+    </Badge>
+  );
+}
+
+export function HinaChannelBadges({
+  channels,
+  maxVisible,
+}: {
+  channels: HinaChannel[];
+  maxVisible?: number;
+}) {
   if (channels.length === 0)
     return <span className="text-foreground">&mdash;</span>;
+
+  if (maxVisible === undefined || channels.length <= maxVisible) {
+    return (
+      <div className="flex flex-wrap gap-1">
+        {channels.map((c) => (
+          <ChannelBadge key={c.name} name={c.name} color={c.color} />
+        ))}
+      </div>
+    );
+  }
+
+  const visible = channels.slice(0, maxVisible);
+  const hiddenCount = channels.length - maxVisible;
+
   return (
-    <div className="flex flex-wrap gap-1">
-      {channels.map((c) => (
-        <ChannelBadge key={c.name} name={c.name} color={c.color} />
-      ))}
-    </div>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="flex flex-wrap gap-1">
+          {visible.map((c) => (
+            <ChannelBadge key={c.name} name={c.name} color={c.color} />
+          ))}
+          <Badge
+            variant="outline"
+            className="font-mono text-muted-foreground"
+            aria-label={`${hiddenCount} more`}
+          >
+            +{hiddenCount}
+          </Badge>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-none">
+        <div className="flex flex-nowrap gap-1">
+          {channels.map((c) => (
+            <TooltipChannelBadge key={c.name} name={c.name} color={c.color} />
+          ))}
+        </div>
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

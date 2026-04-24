@@ -136,7 +136,7 @@ export function HinaRunsTable({
                 {formatBytes(row.total_size_bytes)}
               </TableCell>
               <TableCell>
-                <HinaChannelBadges channels={channels} />
+                <HinaChannelBadges channels={channels} maxVisible={1} />
               </TableCell>
               <TableCell>
                 <MetadataArrayBadges values={dimensions} />

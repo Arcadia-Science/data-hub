@@ -250,26 +250,26 @@ function RunFilesSectionContent({
               setPage(1);
             }}
           >
-            <SelectTrigger size="sm" className="h-8 text-xs">
+            <SelectTrigger size="sm" className="h-8 text-sm">
               <SelectValue>{filterLabel}</SelectValue>
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all" className="text-xs">
+              <SelectItem value="all" className="text-sm">
                 All ({activeFiles.length})
               </SelectItem>
-              <SelectItem value="pending" className="text-xs">
+              <SelectItem value="pending" className="text-sm">
                 Pending
               </SelectItem>
-              <SelectItem value="uploaded" className="text-xs">
+              <SelectItem value="uploaded" className="text-sm">
                 Uploaded
               </SelectItem>
-              <SelectItem value="processing" className="text-xs">
+              <SelectItem value="processing" className="text-sm">
                 Processing
               </SelectItem>
-              <SelectItem value="completed" className="text-xs">
+              <SelectItem value="completed" className="text-sm">
                 Completed
               </SelectItem>
-              <SelectItem value="failed" className="text-xs">
+              <SelectItem value="failed" className="text-sm">
                 Failed
               </SelectItem>
             </SelectContent>
@@ -281,7 +281,7 @@ function RunFilesSectionContent({
               setPage(1);
             }}
           >
-            <SelectTrigger size="sm" className="h-8 text-xs">
+            <SelectTrigger size="sm" className="h-8 text-sm">
               <SelectValue>
                 Sort:{" "}
                 {sortField === "name"
@@ -294,16 +294,16 @@ function RunFilesSectionContent({
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="name" className="text-xs">
+              <SelectItem value="name" className="text-sm">
                 Sort: Name
               </SelectItem>
-              <SelectItem value="size" className="text-xs">
+              <SelectItem value="size" className="text-sm">
                 Sort: Size
               </SelectItem>
-              <SelectItem value="date" className="text-xs">
+              <SelectItem value="date" className="text-sm">
                 Sort: Date
               </SelectItem>
-              <SelectItem value="status" className="text-xs">
+              <SelectItem value="status" className="text-sm">
                 Sort: Status
               </SelectItem>
             </SelectContent>
@@ -312,7 +312,7 @@ function RunFilesSectionContent({
             <Button
               variant={showDismissed ? "secondary" : "ghost"}
               size="sm"
-              className="h-8 text-xs"
+              className="h-8 text-sm"
               onClick={() => {
                 setShowDismissed((p) => !p);
                 setPage(1);
@@ -325,7 +325,7 @@ function RunFilesSectionContent({
             <Button
               variant="outline"
               size="sm"
-              className="h-8 gap-1 text-xs"
+              className="h-8 gap-1 text-sm"
               asChild
             >
               <a
