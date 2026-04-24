@@ -110,16 +110,14 @@ export type DashboardStats = {
     filesCompleted: number;
     filesFailed: number;
   };
-  instruments: {
-    online: number;
-    activeTotal: number;
-    offline: number;
-  };
   pendingUploads: {
     count: number;
     totalBytes: number;
   };
   runsThisWeek: {
+    total: number;
+    filesCompleted: number;
+    filesFailed: number;
     mine: number;
     unattributed: number;
   };
@@ -138,8 +136,6 @@ export async function getDashboardStats(
   const [
     [runsTodayRow],
     [filesProcessedTodayRow],
-    [instrumentsRow],
-    [watcherRow],
     [pendingRow],
     [runsThisWeekRow],
   ] = await Promise.all([
@@ -154,46 +150,22 @@ export async function getDashboardStats(
           sql`${instrumentRuns.createdAt} >= date_trunc('day', now())`
         )
       ),
+    // Span today + the past 7 days in a single pass; the today metrics are a
+    // subset of the weekly window, so FILTER clauses give us both with one
+    // index scan instead of two near-identical queries.
     db
       .select({
-        completed: sql<number>`cast(count(*) filter (where ${files.status} = 'completed') as int)`,
-        failed: sql<number>`cast(count(*) filter (where ${files.status} = 'failed') as int)`,
+        completedToday: sql<number>`cast(count(*) filter (where ${files.status} = 'completed' and ${files.processedAt} >= date_trunc('day', now())) as int)`,
+        failedToday: sql<number>`cast(count(*) filter (where ${files.status} = 'failed' and ${files.processedAt} >= date_trunc('day', now())) as int)`,
+        completedWeek: sql<number>`cast(count(*) filter (where ${files.status} = 'completed') as int)`,
+        failedWeek: sql<number>`cast(count(*) filter (where ${files.status} = 'failed') as int)`,
       })
       .from(files)
       .where(
         and(
           isNull(files.deletedAt),
-          sql`${files.processedAt} >= date_trunc('day', now())`
+          sql`${files.processedAt} > now() - interval '7 days'`
         )
-      ),
-    db
-      .select({
-        activeTotal: sql<number>`cast(count(*) filter (where ${instruments.status} = 'active') as int)`,
-      })
-      .from(instruments),
-    // Roll watchers up by instrument so an instrument with multiple watchers
-    // only counts once toward online/offline totals.
-    db
-      .select({
-        online: sql<number>`cast(count(*) filter (where has_online) as int)`,
-      })
-      .from(
-        db
-          .select({
-            instrumentId: watchers.instrumentId,
-            // Use a SQL interval rather than binding a JS Date — drizzle
-            // serialises the Date with `.toString()` here (instead of ISO), and
-            // Postgres rejects "Fri Apr 24 2026 15:42:41 GMT-0700 (..)" as a
-            // timestamp. The interval form mirrors getInstrumentListWithCounts.
-            hasOnline:
-              sql<boolean>`bool_or(${watchers.status} = 'watching' and ${watchers.lastHeartbeatAt} > now() - interval '${sql.raw(String(HEARTBEAT_STALE_MINUTES))} minutes')`.as(
-                "has_online"
-              ),
-          })
-          .from(watchers)
-          .where(isNull(watchers.deletedAt))
-          .groupBy(watchers.instrumentId)
-          .as("watcher_rollup")
       ),
     db
       .select({
@@ -211,6 +183,7 @@ export async function getDashboardStats(
     // independent of the viewer.
     db
       .select({
+        total: sql<number>`cast(count(*) as int)`,
         mine: currentUserId
           ? sql<number>`cast(count(*) filter (where exists (select 1 from ${runAttributions} where ${runAttributions.runId} = ${instrumentRuns.id} and ${runAttributions.userId} = ${currentUserId})) as int)`
           : sql<number>`cast(0 as int)`,
@@ -225,21 +198,11 @@ export async function getDashboardStats(
       ),
   ]);
 
-  const online = Number(watcherRow?.online ?? 0);
-  const activeTotal = instrumentsRow?.activeTotal ?? 0;
-
   return {
     runsToday: {
       total: runsTodayRow?.total ?? 0,
-      filesCompleted: filesProcessedTodayRow?.completed ?? 0,
-      filesFailed: filesProcessedTodayRow?.failed ?? 0,
-    },
-    instruments: {
-      online,
-      activeTotal,
-      // "Offline" rolls up everything not actively heartbeating — both
-      // registered-but-stale watchers and instruments with no watcher at all.
-      offline: Math.max(0, activeTotal - online),
+      filesCompleted: filesProcessedTodayRow?.completedToday ?? 0,
+      filesFailed: filesProcessedTodayRow?.failedToday ?? 0,
     },
     pendingUploads: {
       count: pendingRow?.count ?? 0,
@@ -247,6 +210,9 @@ export async function getDashboardStats(
       totalBytes: Number(pendingRow?.totalBytes ?? 0),
     },
     runsThisWeek: {
+      total: runsThisWeekRow?.total ?? 0,
+      filesCompleted: filesProcessedTodayRow?.completedWeek ?? 0,
+      filesFailed: filesProcessedTodayRow?.failedWeek ?? 0,
       mine: runsThisWeekRow?.mine ?? 0,
       unattributed: runsThisWeekRow?.unattributed ?? 0,
     },

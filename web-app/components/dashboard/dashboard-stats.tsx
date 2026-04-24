@@ -38,55 +38,63 @@ function StatCard({
   );
 }
 
+function FilesProcessedSubline({
+  completed,
+  failed,
+  emptyLabel,
+}: {
+  completed: number;
+  failed: number;
+  emptyLabel: string;
+}) {
+  if (completed === 0 && failed === 0) {
+    return <span>{emptyLabel}</span>;
+  }
+  return (
+    <>
+      <span className="text-foreground">{formatNumber(completed)}</span>{" "}
+      processed
+      {failed > 0 ? (
+        <>
+          {" · "}
+          <span className="text-destructive">
+            {formatNumber(failed)} failed
+          </span>
+        </>
+      ) : null}
+    </>
+  );
+}
+
 export function DashboardStatsCards({ stats }: { stats: DashboardStats }) {
-  const { runsToday, instruments, pendingUploads, runsThisWeek } = stats;
+  const { runsToday, pendingUploads, runsThisWeek } = stats;
 
   // Highlight pending uploads in red once a backlog forms — a non-zero queue
   // is a routine signal of attention, not an error.
   const pendingHasBacklog = pendingUploads.count > 0;
-
-  const filesProcessedSubline =
-    runsToday.filesCompleted === 0 && runsToday.filesFailed === 0 ? (
-      <span>No files processed yet today</span>
-    ) : (
-      <>
-        <span className="text-foreground">
-          {formatNumber(runsToday.filesCompleted)}
-        </span>{" "}
-        processed
-        {runsToday.filesFailed > 0 ? (
-          <>
-            {" · "}
-            <span className="text-destructive">
-              {formatNumber(runsToday.filesFailed)} failed
-            </span>
-          </>
-        ) : null}
-      </>
-    );
 
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <StatCard
         label="Runs today"
         value={formatNumber(runsToday.total)}
-        subline={filesProcessedSubline}
+        subline={
+          <FilesProcessedSubline
+            completed={runsToday.filesCompleted}
+            failed={runsToday.filesFailed}
+            emptyLabel="No files processed yet today"
+          />
+        }
       />
       <StatCard
-        label="Instruments online"
-        value={
-          <>
-            {formatNumber(instruments.online)}
-            <span className="text-muted-foreground">
-              {" / "}
-              {formatNumber(instruments.activeTotal)}
-            </span>
-          </>
-        }
+        label="Runs this week"
+        value={formatNumber(runsThisWeek.total)}
         subline={
-          instruments.offline > 0
-            ? `${formatNumber(instruments.offline)} offline`
-            : "All instruments online"
+          <FilesProcessedSubline
+            completed={runsThisWeek.filesCompleted}
+            failed={runsThisWeek.filesFailed}
+            emptyLabel="No files processed this week"
+          />
         }
       />
       <StatCard
