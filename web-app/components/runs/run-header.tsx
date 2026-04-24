@@ -26,6 +26,12 @@ export function RunHeader({
         <BreadcrumbList>
           <BreadcrumbItem>
             <BreadcrumbLink asChild>
+              <Link href="/">Home</Link>
+            </BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbLink asChild>
               <Link href="/instruments">Instruments</Link>
             </BreadcrumbLink>
           </BreadcrumbItem>

@@ -20,7 +20,7 @@ import type { Metadata } from "next/types";
 import { Suspense } from "react";
 
 export const metadata: Metadata = {
-  title: "Dashboard",
+  title: "Data Hub",
 };
 
 function last24hISOString(): string {

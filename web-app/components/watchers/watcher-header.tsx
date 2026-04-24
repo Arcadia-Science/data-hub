@@ -24,6 +24,12 @@ export function WatcherHeader({ watcher }: { watcher: WatcherDetail }) {
         <BreadcrumbList>
           <BreadcrumbItem>
             <BreadcrumbLink asChild>
+              <Link href="/">Home</Link>
+            </BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbLink asChild>
               <Link href="/watchers">Watchers</Link>
             </BreadcrumbLink>
           </BreadcrumbItem>
