@@ -1,5 +1,6 @@
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import { EditInstrumentDialog } from "@/components/instruments/edit-instrument-dialog";
+import { ClickableRow } from "@/components/instruments/runs-table/clickable-row";
 import { StatusActions } from "@/components/instruments/status-actions";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -16,8 +17,13 @@ import {
 } from "@/components/watchers/watcher-status-badge";
 import type { InstrumentListItem } from "@/lib/api/instruments";
 import { SearchX } from "lucide-react";
-import Link from "next/link";
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
+
+// Prevent row navigation when the user interacts with controls inside an
+// action cell (edit dialog trigger, approve/reject buttons, etc.).
+function swallow(e: MouseEvent) {
+  e.stopPropagation();
+}
 
 /**
  * Default row actions used by the management page: an approval action for
@@ -84,14 +90,13 @@ export function InstrumentsTable({
           {data.map((row) => {
             const watcherStatus = getWatcherOnlineStatus(row);
             return (
-              <TableRow key={row.id} className="text-sm">
+              <ClickableRow
+                key={row.id}
+                href={`/instruments/${row.id}`}
+                className="text-sm"
+              >
                 <TableCell>
-                  <Link
-                    href={`/instruments/${row.id}`}
-                    className="font-medium hover:underline"
-                  >
-                    {row.displayName}
-                  </Link>
+                  <span className="font-medium">{row.displayName}</span>
                   <span className="mt-0.5 block text-xs text-muted-foreground">
                     {row.runCount} total {row.runCount === 1 ? "run" : "runs"}
                   </span>
@@ -125,9 +130,11 @@ export function InstrumentsTable({
                   )}
                 </TableCell>
                 {renderRowActions ? (
-                  <TableCell>{renderRowActions(row)}</TableCell>
+                  <TableCell onClick={swallow}>
+                    {renderRowActions(row)}
+                  </TableCell>
                 ) : null}
-              </TableRow>
+              </ClickableRow>
             );
           })}
         </TableBody>

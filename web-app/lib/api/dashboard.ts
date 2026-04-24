@@ -1,6 +1,12 @@
 import { db } from "@/lib/db";
-import { files, instrumentRuns, instruments, watchers } from "@/lib/db/schema";
-import { eq, isNull, sql } from "drizzle-orm";
+import {
+  files,
+  instrumentRuns,
+  instruments,
+  runAttributions,
+  watchers,
+} from "@/lib/db/schema";
+import { and, eq, isNull, sql } from "drizzle-orm";
 
 export type InstrumentSummary = {
   id: string;
@@ -96,4 +102,153 @@ export async function getInstruments() {
     })
     .from(instruments)
     .orderBy(instruments.displayName);
+}
+
+export type DashboardStats = {
+  runsToday: {
+    total: number;
+    filesCompleted: number;
+    filesFailed: number;
+  };
+  instruments: {
+    online: number;
+    activeTotal: number;
+    offline: number;
+  };
+  pendingUploads: {
+    count: number;
+    totalBytes: number;
+  };
+  runsThisWeek: {
+    mine: number;
+    unattributed: number;
+  };
+};
+
+/**
+ * Aggregates the four dashboard summary metrics surfaced above the instruments
+ * table. Each metric is a single COUNT/SUM, so we issue them in parallel rather
+ * than as one mega-join — that keeps the per-query plans simple and avoids the
+ * row-multiplication problems we'd hit joining instruments × runs × files ×
+ * attributions in a single statement.
+ */
+export async function getDashboardStats(
+  currentUserId: string | null
+): Promise<DashboardStats> {
+  const [
+    [runsTodayRow],
+    [filesProcessedTodayRow],
+    [instrumentsRow],
+    [watcherRow],
+    [pendingRow],
+    [runsThisWeekRow],
+  ] = await Promise.all([
+    db
+      .select({
+        total: sql<number>`cast(count(*) as int)`,
+      })
+      .from(instrumentRuns)
+      .where(
+        and(
+          isNull(instrumentRuns.deletedAt),
+          sql`${instrumentRuns.createdAt} >= date_trunc('day', now())`
+        )
+      ),
+    db
+      .select({
+        completed: sql<number>`cast(count(*) filter (where ${files.status} = 'completed') as int)`,
+        failed: sql<number>`cast(count(*) filter (where ${files.status} = 'failed') as int)`,
+      })
+      .from(files)
+      .where(
+        and(
+          isNull(files.deletedAt),
+          sql`${files.processedAt} >= date_trunc('day', now())`
+        )
+      ),
+    db
+      .select({
+        activeTotal: sql<number>`cast(count(*) filter (where ${instruments.status} = 'active') as int)`,
+      })
+      .from(instruments),
+    // Roll watchers up by instrument so an instrument with multiple watchers
+    // only counts once toward online/offline totals.
+    db
+      .select({
+        online: sql<number>`cast(count(*) filter (where has_online) as int)`,
+      })
+      .from(
+        db
+          .select({
+            instrumentId: watchers.instrumentId,
+            // Use a SQL interval rather than binding a JS Date — drizzle
+            // serialises the Date with `.toString()` here (instead of ISO), and
+            // Postgres rejects "Fri Apr 24 2026 15:42:41 GMT-0700 (..)" as a
+            // timestamp. The interval form mirrors getInstrumentListWithCounts.
+            hasOnline:
+              sql<boolean>`bool_or(${watchers.status} = 'watching' and ${watchers.lastHeartbeatAt} > now() - interval '${sql.raw(String(HEARTBEAT_STALE_MINUTES))} minutes')`.as(
+                "has_online"
+              ),
+          })
+          .from(watchers)
+          .where(isNull(watchers.deletedAt))
+          .groupBy(watchers.instrumentId)
+          .as("watcher_rollup")
+      ),
+    db
+      .select({
+        count: sql<number>`cast(count(*) as int)`,
+        totalBytes: sql<number>`cast(coalesce(sum(${files.sizeBytes}), 0) as bigint)`,
+      })
+      .from(files)
+      .where(
+        and(
+          isNull(files.deletedAt),
+          sql`${files.status} in ('detected', 'upload_requested')`
+        )
+      ),
+    // "Mine" requires a user; the unattributed count is fleet-wide and
+    // independent of the viewer.
+    db
+      .select({
+        mine: currentUserId
+          ? sql<number>`cast(count(*) filter (where exists (select 1 from ${runAttributions} where ${runAttributions.runId} = ${instrumentRuns.id} and ${runAttributions.userId} = ${currentUserId})) as int)`
+          : sql<number>`cast(0 as int)`,
+        unattributed: sql<number>`cast(count(*) filter (where not exists (select 1 from ${runAttributions} where ${runAttributions.runId} = ${instrumentRuns.id})) as int)`,
+      })
+      .from(instrumentRuns)
+      .where(
+        and(
+          isNull(instrumentRuns.deletedAt),
+          sql`${instrumentRuns.createdAt} > now() - interval '7 days'`
+        )
+      ),
+  ]);
+
+  const online = Number(watcherRow?.online ?? 0);
+  const activeTotal = instrumentsRow?.activeTotal ?? 0;
+
+  return {
+    runsToday: {
+      total: runsTodayRow?.total ?? 0,
+      filesCompleted: filesProcessedTodayRow?.completed ?? 0,
+      filesFailed: filesProcessedTodayRow?.failed ?? 0,
+    },
+    instruments: {
+      online,
+      activeTotal,
+      // "Offline" rolls up everything not actively heartbeating — both
+      // registered-but-stale watchers and instruments with no watcher at all.
+      offline: Math.max(0, activeTotal - online),
+    },
+    pendingUploads: {
+      count: pendingRow?.count ?? 0,
+      // bigint sums come back as strings from pg; coerce explicitly.
+      totalBytes: Number(pendingRow?.totalBytes ?? 0),
+    },
+    runsThisWeek: {
+      mine: runsThisWeekRow?.mine ?? 0,
+      unattributed: runsThisWeekRow?.unattributed ?? 0,
+    },
+  };
 }

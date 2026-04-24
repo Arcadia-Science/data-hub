@@ -1,3 +1,4 @@
+import { DashboardStatsCards } from "@/components/dashboard/dashboard-stats";
 import { RunsTable } from "@/components/dashboard/runs-table";
 import { RunsToolbar } from "@/components/dashboard/runs-toolbar";
 import { InstrumentsTable } from "@/components/instruments/instruments-table";
@@ -8,7 +9,7 @@ import {
   TablePendingBoundary,
   TablePendingProvider,
 } from "@/components/table-pending";
-import { getInstruments } from "@/lib/api/dashboard";
+import { getDashboardStats, getInstruments } from "@/lib/api/dashboard";
 import { buildRunListQuery } from "@/lib/api/instrument-runs";
 import { getInstrumentListWithCounts } from "@/lib/api/instruments";
 import { auth } from "@/lib/auth";
@@ -46,21 +47,26 @@ export default async function DashboardPage({
   // RunsDateFilter and keeps the initial payload bounded.
   const defaultDateFrom = last24hISOString();
 
-  // Fetch the toolbar instrument list, the dashboard instrument summary, and
-  // the filtered run page in parallel since none depend on the others.
-  const [instruments, instrumentsWithCounts, runResult] = await Promise.all([
-    getInstruments(),
-    getInstrumentListWithCounts(),
-    buildRunListQuery({
-      instrumentId: instrumentIds,
-      search: params.search || undefined,
-      dateFrom: params.date_from ?? defaultDateFrom,
-      dateTo: params.date_to ?? undefined,
-      page: params.page,
-      perPage: params.per_page,
-      includeDeleted: params.include_deleted,
-    }),
-  ]);
+  const currentUserId = session.user?.id ?? null;
+
+  // Fetch the toolbar instrument list, the dashboard instrument summary, the
+  // filtered run page, and the summary stats in parallel since none depend on
+  // the others.
+  const [instruments, instrumentsWithCounts, runResult, stats] =
+    await Promise.all([
+      getInstruments(),
+      getInstrumentListWithCounts(),
+      buildRunListQuery({
+        instrumentId: instrumentIds,
+        search: params.search || undefined,
+        dateFrom: params.date_from ?? defaultDateFrom,
+        dateTo: params.date_to ?? undefined,
+        page: params.page,
+        perPage: params.per_page,
+        includeDeleted: params.include_deleted,
+      }),
+      getDashboardStats(currentUserId),
+    ]);
 
   // Surface the three most recently active instruments. Pending/inactive
   // instruments are filtered out so the dashboard reflects the live fleet;
@@ -76,7 +82,6 @@ export default async function DashboardPage({
   ).length;
 
   const hasFilters = hasActiveFilters(params);
-  const currentUserId = session.user?.id ?? null;
   const pendingUploadCount = runResult.data.filter(
     (row) => row.files_pending_upload > 0
   ).length;
@@ -91,6 +96,8 @@ export default async function DashboardPage({
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-8 p-6">
+      <DashboardStatsCards stats={stats} />
+
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-medium tracking-tight">Instruments</h2>
         <InstrumentsTable
