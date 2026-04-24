@@ -7,40 +7,19 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+import {
+  getWatcherOnlineStatus,
+  WatcherStatusBadge,
+} from "@/components/watchers/watcher-status-badge";
 import type { InstrumentDetail } from "@/lib/api/instruments";
-import { Activity, Radio, WifiOff } from "lucide-react";
 import Link from "next/link";
-
-type WatcherVariant = "online" | "offline" | "no_watcher";
-
-const watcherBadge: Record<
-  WatcherVariant,
-  {
-    label: string;
-    variant: "default" | "destructive" | "outline";
-    icon: typeof Activity;
-  }
-> = {
-  online: { label: "Watcher Online", variant: "default", icon: Radio },
-  offline: { label: "Watcher Offline", variant: "destructive", icon: WifiOff },
-  no_watcher: { label: "No Watcher", variant: "outline", icon: WifiOff },
-};
-
-// An instrument is "online" if at least one watcher is actively heartbeating.
-// Registered watchers that have gone silent are treated as "offline".
-function getWatcherVariant(instrument: InstrumentDetail): WatcherVariant {
-  if (instrument.watcherCount === 0) return "no_watcher";
-  return instrument.watchersOnline > 0 ? "online" : "offline";
-}
 
 export function InstrumentHeader({
   instrument,
 }: {
   instrument: InstrumentDetail;
 }) {
-  const wv = getWatcherVariant(instrument);
-  const wb = watcherBadge[wv];
-  const WatcherIcon = wb.icon;
+  const watcherStatus = getWatcherOnlineStatus(instrument);
 
   return (
     <div className="flex flex-col gap-2">
@@ -74,19 +53,18 @@ export function InstrumentHeader({
         <div className="flex items-center gap-2">
           {instrument.activeWatcherId ? (
             <Link href={`/watchers/${instrument.activeWatcherId}`}>
-              <Badge
-                variant={wb.variant}
-                className="gap-1 px-2 py-3 text-xs transition-colors hover:opacity-80"
-              >
-                <WatcherIcon className="size-3" />
-                {wb.label}
-              </Badge>
+              <WatcherStatusBadge
+                status={watcherStatus}
+                verbose
+                className="px-2 py-3 transition-colors hover:opacity-80"
+              />
             </Link>
           ) : (
-            <Badge variant={wb.variant} className="gap-1 px-2 py-3 text-xs">
-              <WatcherIcon className="size-3" />
-              {wb.label}
-            </Badge>
+            <WatcherStatusBadge
+              status={watcherStatus}
+              verbose
+              className="px-2 py-3"
+            />
           )}
           <Badge variant="outline" className="px-2 py-3 font-mono text-xs">
             {instrument.runCount} {instrument.runCount === 1 ? "run" : "runs"}

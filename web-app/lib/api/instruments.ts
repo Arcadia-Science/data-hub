@@ -16,6 +16,7 @@ export type InstrumentListItem = {
   instrumentType: InstrumentType;
   filePatterns: string[];
   runCount: number;
+  runsThisWeek: number;
   lastRunAt: Date | null;
   watcherCount: number;
   watchersOnline: number;
@@ -63,6 +64,10 @@ export async function getInstrumentListWithCounts(): Promise<
     .select({
       instrumentId: instrumentRuns.instrumentId,
       count: sql<number>`cast(count(*) as int)`.as("run_count"),
+      countThisWeek:
+        sql<number>`cast(count(*) filter (where ${instrumentRuns.createdAt} > now() - interval '7 days') as int)`.as(
+          "run_count_this_week"
+        ),
       lastRunAt: sql<Date | null>`max(${instrumentRuns.createdAt})`.as(
         "last_run_at"
       ),
@@ -95,6 +100,7 @@ export async function getInstrumentListWithCounts(): Promise<
         instrumentType: instruments.instrumentType,
         createdAt: instruments.createdAt,
         runCount: sql<number>`coalesce(${runCountSq.count}, 0)`,
+        runsThisWeek: sql<number>`coalesce(${runCountSq.countThisWeek}, 0)`,
         lastRunAt: runCountSq.lastRunAt,
         watcherCount: sql<number>`coalesce(${watcherCountSq.count}, 0)`,
         watchersOnline: sql<number>`coalesce(${watcherCountSq.online}, 0)`,
@@ -121,6 +127,10 @@ export async function getInstrumentListWithCounts(): Promise<
 
   return rows.map((row) => ({
     ...row,
+    // The aggregated `max(created_at)` flows through drizzle's raw `sql`
+    // template, which doesn't apply the timestamp parser the column would
+    // — coerce to Date so callers can safely call Date methods on it.
+    lastRunAt: row.lastRunAt ? new Date(row.lastRunAt) : null,
     filePatterns: mergeFilePatterns(configsByInstrument.get(row.id) ?? []),
   }));
 }
