@@ -53,8 +53,6 @@ export function HinaMicroscopeRunDetail({
       </RunDetail.FilesMetadataLayout>
 
       <HinaReportSection files={files} />
-
-      <RunDetail.Analysis />
     </>
   );
 }

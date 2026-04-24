@@ -44,12 +44,6 @@ Tokens are hashed with SHA-256 before storage. The plaintext token is shown once
 | `POST` | `/api/v1/instruments/:instrumentId/runs/:runId/request-upload` | Request file upload (manual mode) |
 | `POST` | `/api/v1/instruments/:instrumentId/runs/:runId/request-upload-url` | Get a pre-signed S3 upload URL for a file |
 
-### Analyses
-
-| Method | Path | Description |
-| --- | --- | --- |
-| `POST` | `/api/v1/instruments/:instrumentId/runs/:runId/analyses` | Create an analysis record |
-
 ### Watchers
 
 | Method | Path | Description |

@@ -44,44 +44,6 @@ export function registerPrompts(server: McpServer) {
   );
 
   server.registerPrompt(
-    "run_analysis",
-    {
-      title: "Run Analysis",
-      description:
-        "Fetch and interpret the experimental results for a specific instrument run.",
-      argsSchema: {
-        instrumentId: z.string().describe("Instrument identifier"),
-        runId: z.string().describe("Run identifier"),
-      },
-    },
-    async ({ instrumentId, runId }) => {
-      return {
-        messages: [
-          {
-            role: "user" as const,
-            content: {
-              type: "text" as const,
-              text: [
-                `Analyze the results for run "${runId}" on instrument "${instrumentId}".`,
-                "",
-                "Steps:",
-                `1. Call get_run with instrumentId="${instrumentId}" and runId="${runId}" to get run metadata.`,
-                `2. Call list_run_files to see all associated files and their processing status.`,
-                `3. For any processed CSV files (category "processed", .csv extension), call get_file_download_url to download and inspect the data.`,
-                `4. Interpret the results:`,
-                `   - Describe what type of experiment this was (based on metadata and file types)`,
-                `   - Summarize key findings from the processed data`,
-                `   - Note any anomalies, failed files, or missing data`,
-                `   - If plate reader data is present, describe the plate layout and measurements`,
-              ].join("\n"),
-            },
-          },
-        ],
-      };
-    }
-  );
-
-  server.registerPrompt(
     "troubleshoot_instrument",
     {
       title: "Troubleshoot Instrument",

@@ -24,7 +24,7 @@ import {
 import type { RunListRow } from "@/lib/api/instrument-runs";
 import { runRowToRef } from "@/lib/runs/row-actions";
 import { cn, formatBytes } from "@/lib/utils";
-import { FlaskConical, SearchX } from "lucide-react";
+import { SearchX } from "lucide-react";
 
 export function RunsTable({
   data,
@@ -93,11 +93,8 @@ export function RunsTable({
                   <RunSelectCheckbox runRef={runRowToRef(row)} />
                 </TableCell>
                 <TableCell>
-                  <div className="flex items-center gap-1.5">
-                    <FlaskConical className="size-3.5 shrink-0 text-muted-foreground" />
-                    <span className="text-sm font-medium">
-                      {row.instrument_display_name}
-                    </span>
+                  <div className="flex items-center gap-1.5 text-sm font-medium">
+                    {row.instrument_display_name}
                   </div>
                 </TableCell>
                 <TableCell>

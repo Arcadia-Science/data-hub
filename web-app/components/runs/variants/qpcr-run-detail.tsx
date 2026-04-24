@@ -52,8 +52,6 @@ export function QpcrRunDetail({
       </RunDetail.FilesMetadataLayout>
 
       <RunDetail.Report files={files} />
-
-      <RunDetail.Analysis />
     </>
   );
 }

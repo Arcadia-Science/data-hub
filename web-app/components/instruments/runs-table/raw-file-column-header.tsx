@@ -1,3 +1,5 @@
+import { CircleHelp } from "lucide-react";
+
 import {
   Tooltip,
   TooltipContent,
@@ -13,9 +15,14 @@ export function RawFileColumnHeader({ label }: { label: string }) {
     <Tooltip>
       <TooltipTrigger
         type="button"
-        className="cursor-help border-b border-dashed border-muted-foreground/40 bg-transparent p-0 font-medium text-foreground"
+        aria-label={`About the ${label} column`}
+        className="inline-flex h-8 cursor-help items-center gap-1.5 font-medium text-foreground"
       >
         {label}
+        <CircleHelp
+          className="size-3 text-muted-foreground"
+          aria-hidden="true"
+        />
       </TooltipTrigger>
       <TooltipContent side="top">
         Counts raw instrument files only. Files derived by the processing

@@ -1,4 +1,7 @@
-import { InstrumentsTable } from "@/components/instruments/instruments-table";
+import {
+  InstrumentRowManagementActions,
+  InstrumentsTable,
+} from "@/components/instruments/instruments-table";
 import { getInstrumentListWithCounts } from "@/lib/api/instruments";
 import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
@@ -19,7 +22,10 @@ export default async function InstrumentsPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Instruments</h1>
       </div>
-      <InstrumentsTable data={instruments} />
+      <InstrumentsTable
+        data={instruments}
+        renderRowActions={InstrumentRowManagementActions}
+      />
     </div>
   );
 }

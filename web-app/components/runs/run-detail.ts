@@ -1,4 +1,3 @@
-import { RunAnalysisSection } from "@/components/runs/run-analysis-section";
 import { RunFilesMetadataLayout } from "@/components/runs/run-files-metadata-layout";
 import { RunFilesSection } from "@/components/runs/run-files-section";
 import { RunHeader } from "@/components/runs/run-header";
@@ -16,7 +15,6 @@ export const RunDetail = {
   Files: RunFilesSection,
   FilesMetadataLayout: RunFilesMetadataLayout,
   Report: RunReportSection,
-  Analysis: RunAnalysisSection,
 };
 
 export type RunDetailProps = {

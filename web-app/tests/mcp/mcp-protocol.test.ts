@@ -687,7 +687,6 @@ describe("MCP Protocol (in-memory)", () => {
 
   const EXPECTED_PROMPTS = [
     "daily_summary",
-    "run_analysis",
     "troubleshoot_instrument",
     "compare_runs",
   ] as const;
@@ -719,17 +718,6 @@ describe("MCP Protocol (in-memory)", () => {
     expect((result.messages[0].content as { text: string }).text).toContain(
       "2025-06-01"
     );
-  });
-
-  it("run_analysis prompt includes instrument and run in message", async () => {
-    const result = await client.getPrompt({
-      name: "run_analysis",
-      arguments: { instrumentId: "my-inst", runId: "run-42" },
-    });
-    expect(result.messages).toHaveLength(1);
-    const text = (result.messages[0].content as { text: string }).text;
-    expect(text).toContain("my-inst");
-    expect(text).toContain("run-42");
   });
 
   it("troubleshoot_instrument prompt references heartbeat tool", async () => {

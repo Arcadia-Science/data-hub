@@ -13,7 +13,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
   TableBody,
@@ -31,6 +30,11 @@ import type { RunFile } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
 import { formatBytes } from "@/lib/utils";
 import { Download, Loader2, RotateCw, Upload, X } from "lucide-react";
+import {
+  FileSelectAllCheckbox,
+  FileSelectCheckbox,
+} from "./file-select-checkbox";
+import { buildFileRef, useFileSelection } from "./file-selection-provider";
 import { WatcherGatedUploadButton } from "./watcher-gated-upload-button";
 
 const DOWNLOADABLE_STATUSES = new Set([
@@ -354,25 +358,16 @@ export function ReadOnlyRunFilesTable({
 }
 
 // ---------------------------------------------------------------------------
-// Editable variant: adds a selection column (for bulk upload/dismiss flows)
-// and per-row upload/dismiss buttons on detected files. Falls back to the
-// reprocess action for completed/failed files, matching the read-only table.
+// Editable variant: adds a selection column (for bulk upload/dismiss/reprocess
+// /download flows) and per-row upload/dismiss/reprocess buttons. Selection
+// state is read from FileSelectionProvider so the table doesn't carry a
+// prop bag — consumers compose the table inside a provider and the bulk
+// action bar reads from the same context.
 // ---------------------------------------------------------------------------
-
-export type RunFilesTableSelection = {
-  selectedIds: Set<number>;
-  visibleSelectableIds: Set<number>;
-  allVisibleSelected: boolean;
-  someVisibleSelected: boolean;
-  hasBulkSelection: boolean;
-  onToggleFile: (id: number) => void;
-  onToggleAll: () => void;
-};
 
 export type EditableRunFilesTableProps = {
   files: RunFile[];
   isPending: boolean;
-  selection: RunFilesTableSelection;
   onUpload: (id: number) => void;
   onDismiss: (id: number) => void;
   onReprocess: (id: number) => void;
@@ -381,22 +376,26 @@ export type EditableRunFilesTableProps = {
 export function EditableRunFilesTable({
   files,
   isPending,
-  selection,
   onUpload,
   onDismiss,
   onReprocess,
 }: EditableRunFilesTableProps) {
-  const {
-    selectedIds,
-    visibleSelectableIds,
-    allVisibleSelected,
-    someVisibleSelected,
-    hasBulkSelection,
-    onToggleFile,
-    onToggleAll,
-  } = selection;
+  const { meta } = useFileSelection();
 
-  const showSelectionColumn = visibleSelectableIds.size > 0;
+  // Pre-compute the FileRef for each visible row once so the select-all
+  // header, the per-row checkbox, and the row-state styling all see the
+  // same selectable set.
+  const refsByFileId = new Map<number, ReturnType<typeof buildFileRef>>();
+  const visibleSelectableRefs: NonNullable<ReturnType<typeof buildFileRef>>[] =
+    [];
+  for (const file of files) {
+    const ref = buildFileRef(file);
+    refsByFileId.set(file.id, ref);
+    if (ref) visibleSelectableRefs.push(ref);
+  }
+
+  const showSelectionColumn = visibleSelectableRefs.length > 0;
+  const hasBulkSelection = meta.count > 0;
 
   return (
     <Table>
@@ -404,16 +403,7 @@ export function EditableRunFilesTable({
         <TableRow className="hover:bg-transparent">
           {showSelectionColumn && (
             <TableHead className="w-10 pr-0 pl-3">
-              <Checkbox
-                checked={
-                  allVisibleSelected
-                    ? true
-                    : someVisibleSelected
-                      ? "indeterminate"
-                      : false
-                }
-                onCheckedChange={onToggleAll}
-              />
+              <FileSelectAllCheckbox refs={visibleSelectableRefs} />
             </TableHead>
           )}
           <FileColumnHeaders />
@@ -423,10 +413,23 @@ export function EditableRunFilesTable({
       <TableBody>
         {files.map((file) => {
           const isDismissed = file.deletedAt !== null;
-          const isSelectable = file.status === "detected" && !isDismissed;
-          const isSelected = selectedIds.has(file.id);
-          const showUploadDismiss =
-            !isDismissed && file.status === "detected" && !hasBulkSelection;
+          const ref = refsByFileId.get(file.id) ?? null;
+          const isSelected = ref ? meta.isSelected(ref.id) : false;
+          const canDoUploadDismiss = !isDismissed && file.status === "detected";
+          const canDoReprocess = canReprocess(file);
+
+          // Reveal classes: hide per-row actions while a bulk selection is
+          // active (the bar is the single entry point) but keep the JSX
+          // mounted so the actions column doesn't collapse and shift
+          // sibling columns. We stay in the opacity-0 baseline in both
+          // states — the only thing that changes is whether the hover/
+          // focus reveal rules are in the class list — so the browser
+          // never has to interpolate between an in-flight hover fade-in
+          // and a different hide mechanism, which is what was producing
+          // a brief "all actions visible" flash on the click frame.
+          const revealClass = hasBulkSelection
+            ? "opacity-0 pointer-events-none"
+            : "opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity";
 
           return (
             <TableRow
@@ -436,11 +439,8 @@ export function EditableRunFilesTable({
             >
               {showSelectionColumn && (
                 <TableCell className="py-2 pr-0 pl-3">
-                  {isSelectable ? (
-                    <Checkbox
-                      checked={isSelected}
-                      onCheckedChange={() => onToggleFile(file.id)}
-                    />
+                  {ref ? (
+                    <FileSelectCheckbox fileRef={ref} />
                   ) : (
                     <div className="size-4" />
                   )}
@@ -448,8 +448,8 @@ export function EditableRunFilesTable({
               )}
               <FileInfoCells file={file} />
               <TableCell className="py-2 pr-3">
-                {showUploadDismiss ? (
-                  <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                {canDoUploadDismiss ? (
+                  <div className={`flex items-center gap-1 ${revealClass}`}>
                     <UploadDismissActions
                       file={file}
                       isPending={isPending}
@@ -457,17 +457,15 @@ export function EditableRunFilesTable({
                       onDismiss={onDismiss}
                     />
                   </div>
-                ) : (
-                  canReprocess(file) && (
-                    <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                      <ReprocessAction
-                        file={file}
-                        isPending={isPending}
-                        onReprocess={onReprocess}
-                      />
-                    </div>
-                  )
-                )}
+                ) : canDoReprocess ? (
+                  <div className={`flex items-center gap-1 ${revealClass}`}>
+                    <ReprocessAction
+                      file={file}
+                      isPending={isPending}
+                      onReprocess={onReprocess}
+                    />
+                  </div>
+                ) : null}
               </TableCell>
             </TableRow>
           );
