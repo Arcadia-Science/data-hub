@@ -129,9 +129,10 @@ export function RanByCell({
   }
 
   // Each action is an icon-only button; its label lives in a tooltip so the
-  // cell width is naturally fixed.
+  // cell width is naturally fixed. Both branches share the same wrapper height
+  // so rows don't reflow depending on whether a run has attributions.
   return optimistic.length === 0 ? (
-    <div className="flex items-center">
+    <div className="flex h-7 items-center">
       {currentUserId ? (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -162,7 +163,7 @@ export function RanByCell({
       )}
     </div>
   ) : (
-    <div className="flex items-center gap-2">
+    <div className="flex h-7 items-center gap-2">
       <div className="flex -space-x-1.5">
         {optimistic.map((attribution) => (
           <Tooltip key={attribution.userId}>
