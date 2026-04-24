@@ -5,7 +5,7 @@ import {
   type InstrumentType,
   watchers,
 } from "@/lib/db/schema";
-import { and, count, eq, isNull, sql } from "drizzle-orm";
+import { and, count, eq, inArray, isNull, sql } from "drizzle-orm";
 import { cache } from "react";
 import YAML from "yaml";
 
@@ -57,12 +57,12 @@ function mergeFilePatterns(configs: (string | null)[]): string[] {
   return [...set].sort();
 }
 
-// Uses pre-aggregated sub-selects instead of direct joins to avoid row
-// multiplication (instruments × runs × watchers would inflate counts).
-export async function getInstrumentListWithCounts(): Promise<
-  InstrumentListItem[]
-> {
-  const runCountSq = db
+// Pre-aggregated sub-select builders used by both the full list and the
+// focused dashboard query. Inlined helpers (rather than module-level
+// constants) so each caller gets a fresh drizzle alias and the queries can
+// be composed independently.
+function buildRunCountSubquery() {
+  return db
     .select({
       instrumentId: instrumentRuns.instrumentId,
       count: sql<number>`cast(count(*) as int)`.as("run_count"),
@@ -78,8 +78,10 @@ export async function getInstrumentListWithCounts(): Promise<
     .where(isNull(instrumentRuns.deletedAt))
     .groupBy(instrumentRuns.instrumentId)
     .as("run_counts");
+}
 
-  const watcherCountSq = db
+function buildWatcherCountSubquery() {
+  return db
     .select({
       instrumentId: watchers.instrumentId,
       count: sql<number>`cast(count(*) as int)`.as("watcher_count"),
@@ -95,54 +97,180 @@ export async function getInstrumentListWithCounts(): Promise<
     .where(isNull(watchers.deletedAt))
     .groupBy(watchers.instrumentId)
     .as("watcher_counts");
+}
 
-  const [rows, watcherConfigs] = await Promise.all([
-    db
-      .select({
-        id: instruments.id,
-        displayName: instruments.displayName,
-        status: instruments.status,
-        instrumentType: instruments.instrumentType,
-        createdAt: instruments.createdAt,
-        runCount: sql<number>`coalesce(${runCountSq.count}, 0)`,
-        runsThisWeek: sql<number>`coalesce(${runCountSq.countThisWeek}, 0)`,
-        lastRunAt: runCountSq.lastRunAt,
-        watcherCount: sql<number>`coalesce(${watcherCountSq.count}, 0)`,
-        watchersOnline: sql<number>`coalesce(${watcherCountSq.online}, 0)`,
-        lastWatcherHeartbeatAt: watcherCountSq.lastHeartbeatAt,
-      })
-      .from(instruments)
-      .leftJoin(runCountSq, eq(runCountSq.instrumentId, instruments.id))
-      .leftJoin(watcherCountSq, eq(watcherCountSq.instrumentId, instruments.id))
-      .orderBy(instruments.displayName),
-    db
-      .select({
-        instrumentId: watchers.instrumentId,
-        configYaml: watchers.configYaml,
-      })
-      .from(watchers)
-      .where(isNull(watchers.deletedAt)),
-  ]);
+// Coerces drizzle's raw-sql aggregate output into the InstrumentListItem
+// shape callers expect. Aggregates flow through the `sql` template without
+// the timestamp parser the column would apply, so we re-wrap dates here.
+type InstrumentListRow = {
+  id: string;
+  displayName: string;
+  status: "pending" | "active" | "inactive";
+  instrumentType: InstrumentType;
+  createdAt: Date;
+  runCount: number;
+  runsThisWeek: number;
+  lastRunAt: Date | null;
+  watcherCount: number;
+  watchersOnline: number;
+  lastWatcherHeartbeatAt: Date | null;
+};
 
-  const configsByInstrument = new Map<string, (string | null)[]>();
-  for (const w of watcherConfigs) {
-    const arr = configsByInstrument.get(w.instrumentId) ?? [];
-    arr.push(w.configYaml);
-    configsByInstrument.set(w.instrumentId, arr);
-  }
-
-  return rows.map((row) => ({
+function hydrateInstrumentRow(
+  row: InstrumentListRow,
+  configsByInstrument: Map<string, (string | null)[]>
+): InstrumentListItem {
+  return {
     ...row,
-    // Aggregates flow through drizzle's raw `sql` template, which doesn't
-    // apply the timestamp parser the column would — coerce to Date so callers
-    // can safely call Date methods on the result.
     lastRunAt: row.lastRunAt ? new Date(row.lastRunAt) : null,
     lastWatcherHeartbeatAt: row.lastWatcherHeartbeatAt
       ? new Date(row.lastWatcherHeartbeatAt)
       : null,
     filePatterns: mergeFilePatterns(configsByInstrument.get(row.id) ?? []),
-  }));
+  };
 }
+
+function indexConfigsByInstrument(
+  rows: { instrumentId: string; configYaml: string | null }[]
+): Map<string, (string | null)[]> {
+  const configsByInstrument = new Map<string, (string | null)[]>();
+  for (const w of rows) {
+    const arr = configsByInstrument.get(w.instrumentId) ?? [];
+    arr.push(w.configYaml);
+    configsByInstrument.set(w.instrumentId, arr);
+  }
+  return configsByInstrument;
+}
+
+// Uses pre-aggregated sub-selects instead of direct joins to avoid row
+// multiplication (instruments × runs × watchers would inflate counts).
+//
+// Wrapped in `cache()` so concurrent server components on the same request
+// (e.g. layout + page) share a single result.
+export const getInstrumentListWithCounts = cache(
+  async function getInstrumentListWithCounts(): Promise<InstrumentListItem[]> {
+    const runCountSq = buildRunCountSubquery();
+    const watcherCountSq = buildWatcherCountSubquery();
+
+    const [rows, watcherConfigs] = await Promise.all([
+      db
+        .select({
+          id: instruments.id,
+          displayName: instruments.displayName,
+          status: instruments.status,
+          instrumentType: instruments.instrumentType,
+          createdAt: instruments.createdAt,
+          runCount: sql<number>`coalesce(${runCountSq.count}, 0)`,
+          runsThisWeek: sql<number>`coalesce(${runCountSq.countThisWeek}, 0)`,
+          lastRunAt: runCountSq.lastRunAt,
+          watcherCount: sql<number>`coalesce(${watcherCountSq.count}, 0)`,
+          watchersOnline: sql<number>`coalesce(${watcherCountSq.online}, 0)`,
+          lastWatcherHeartbeatAt: watcherCountSq.lastHeartbeatAt,
+        })
+        .from(instruments)
+        .leftJoin(runCountSq, eq(runCountSq.instrumentId, instruments.id))
+        .leftJoin(
+          watcherCountSq,
+          eq(watcherCountSq.instrumentId, instruments.id)
+        )
+        .orderBy(instruments.displayName),
+      db
+        .select({
+          instrumentId: watchers.instrumentId,
+          configYaml: watchers.configYaml,
+        })
+        .from(watchers)
+        .where(isNull(watchers.deletedAt)),
+    ]);
+
+    const configsByInstrument = indexConfigsByInstrument(watcherConfigs);
+    return rows.map((row) => hydrateInstrumentRow(row, configsByInstrument));
+  }
+);
+
+export type DashboardInstrumentSummary = {
+  rows: InstrumentListItem[];
+  totalActive: number;
+};
+
+/**
+ * Focused query for the dashboard's truncated instruments table: pulls only
+ * the N most-recently-active instruments and the active total. Avoids
+ * loading every instrument just to discard the long tail in JS.
+ *
+ * Watcher configs are loaded in parallel for the resulting instrument IDs
+ * after the row query resolves; this keeps the focused query truly bounded
+ * while still avoiding an instruments × watchers join.
+ */
+export const getRecentActiveInstrumentsForDashboard = cache(
+  async function getRecentActiveInstrumentsForDashboard(
+    limit: number
+  ): Promise<DashboardInstrumentSummary> {
+    const runCountSq = buildRunCountSubquery();
+    const watcherCountSq = buildWatcherCountSubquery();
+
+    // Row fetch and the active-count run in parallel; they share no data.
+    const [rows, totalActiveResult] = await Promise.all([
+      db
+        .select({
+          id: instruments.id,
+          displayName: instruments.displayName,
+          status: instruments.status,
+          instrumentType: instruments.instrumentType,
+          createdAt: instruments.createdAt,
+          runCount: sql<number>`coalesce(${runCountSq.count}, 0)`,
+          runsThisWeek: sql<number>`coalesce(${runCountSq.countThisWeek}, 0)`,
+          lastRunAt: runCountSq.lastRunAt,
+          watcherCount: sql<number>`coalesce(${watcherCountSq.count}, 0)`,
+          watchersOnline: sql<number>`coalesce(${watcherCountSq.online}, 0)`,
+          lastWatcherHeartbeatAt: watcherCountSq.lastHeartbeatAt,
+        })
+        .from(instruments)
+        .leftJoin(runCountSq, eq(runCountSq.instrumentId, instruments.id))
+        .leftJoin(
+          watcherCountSq,
+          eq(watcherCountSq.instrumentId, instruments.id)
+        )
+        .where(eq(instruments.status, "active"))
+        // `nulls last` so instruments that have never run sink to the bottom
+        // rather than dominating the top with a NULL `lastRunAt`.
+        .orderBy(sql`${runCountSq.lastRunAt} desc nulls last`)
+        .limit(limit),
+      db
+        .select({ count: sql<number>`cast(count(*) as int)` })
+        .from(instruments)
+        .where(eq(instruments.status, "active")),
+    ]);
+
+    const totalActive = totalActiveResult[0]?.count ?? 0;
+
+    if (rows.length === 0) {
+      return { rows: [], totalActive };
+    }
+
+    // Configs only for the selected instruments — bounded by `limit` rather
+    // than by total fleet size.
+    const instrumentIds = rows.map((r) => r.id);
+    const watcherConfigs = await db
+      .select({
+        instrumentId: watchers.instrumentId,
+        configYaml: watchers.configYaml,
+      })
+      .from(watchers)
+      .where(
+        and(
+          isNull(watchers.deletedAt),
+          inArray(watchers.instrumentId, instrumentIds)
+        )
+      );
+
+    const configsByInstrument = indexConfigsByInstrument(watcherConfigs);
+    return {
+      rows: rows.map((row) => hydrateInstrumentRow(row, configsByInstrument)),
+      totalActive,
+    };
+  }
+);
 
 export type InstrumentDetail = {
   id: string;

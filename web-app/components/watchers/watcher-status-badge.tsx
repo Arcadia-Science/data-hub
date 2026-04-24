@@ -94,7 +94,15 @@ export function WatcherStatusBadge({
 
   return (
     <Tooltip>
-      <TooltipTrigger asChild>{badge}</TooltipTrigger>
+      {/*
+       * The Badge is wrapped in a plain <span> so Radix's `asChild` Slot
+       * forwards the trigger's data-state / aria attributes onto a raw DOM
+       * element rather than into the Badge function component. Cloning into
+       * Badge surfaced as an SSR/hydration mismatch on table rows.
+       */}
+      <TooltipTrigger asChild>
+        <span tabIndex={0}>{badge}</span>
+      </TooltipTrigger>
       <TooltipContent className="flex flex-col gap-1">
         <div>Last online {formatRelativeTime(lastOnlineAt)}</div>
       </TooltipContent>

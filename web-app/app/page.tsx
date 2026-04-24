@@ -11,7 +11,7 @@ import {
 } from "@/components/table-pending";
 import { getDashboardStats, getInstruments } from "@/lib/api/dashboard";
 import { buildRunListQuery } from "@/lib/api/instrument-runs";
-import { getInstrumentListWithCounts } from "@/lib/api/instruments";
+import { getRecentActiveInstrumentsForDashboard } from "@/lib/api/instruments";
 import { auth } from "@/lib/auth";
 import { dashboardParamsCache, hasActiveFilters } from "@/lib/search-params";
 import { ArrowRight } from "lucide-react";
@@ -49,37 +49,32 @@ export default async function DashboardPage({
 
   const currentUserId = session.user?.id ?? null;
 
+  // Surface the three most recently active instruments on the dashboard. The
+  // focused query returns just those rows + the active total used by the
+  // "View all N" link, so we don't fetch the entire fleet to discard the
+  // long tail in JS. Pending/inactive instruments are filtered server-side.
+  const RECENT_INSTRUMENTS_LIMIT = 3;
+
   // Fetch the toolbar instrument list, the dashboard instrument summary, the
   // filtered run page, and the summary stats in parallel since none depend on
   // the others.
-  const [instruments, instrumentsWithCounts, runResult, stats] =
-    await Promise.all([
-      getInstruments(),
-      getInstrumentListWithCounts(),
-      buildRunListQuery({
-        instrumentId: instrumentIds,
-        search: params.search || undefined,
-        dateFrom: params.date_from ?? defaultDateFrom,
-        dateTo: params.date_to ?? undefined,
-        page: params.page,
-        perPage: params.per_page,
-        includeDeleted: params.include_deleted,
-      }),
-      getDashboardStats(currentUserId),
-    ]);
+  const [instruments, recentInstruments, runResult, stats] = await Promise.all([
+    getInstruments(),
+    getRecentActiveInstrumentsForDashboard(RECENT_INSTRUMENTS_LIMIT),
+    buildRunListQuery({
+      instrumentId: instrumentIds,
+      search: params.search || undefined,
+      dateFrom: params.date_from ?? defaultDateFrom,
+      dateTo: params.date_to ?? undefined,
+      page: params.page,
+      perPage: params.per_page,
+      includeDeleted: params.include_deleted,
+    }),
+    getDashboardStats(currentUserId),
+  ]);
 
-  // Surface the three most recently active instruments. Pending/inactive
-  // instruments are filtered out so the dashboard reflects the live fleet;
-  // a "View all" link routes to the full management page.
-  const recentActiveInstruments = instrumentsWithCounts
-    .filter((i) => i.status === "active")
-    .sort(
-      (a, b) => (b.lastRunAt?.getTime() ?? 0) - (a.lastRunAt?.getTime() ?? 0)
-    )
-    .slice(0, 3);
-  const totalActiveInstruments = instrumentsWithCounts.filter(
-    (i) => i.status === "active"
-  ).length;
+  const { rows: recentActiveInstruments, totalActive: totalActiveInstruments } =
+    recentInstruments;
 
   const hasFilters = hasActiveFilters(params);
   const pendingUploadCount = runResult.data.filter(
