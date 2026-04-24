@@ -1,16 +1,5 @@
 "use client";
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -30,7 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { RunFile } from "@/lib/api/instrument-runs";
-import { Download, Loader2, Search, Upload, X } from "lucide-react";
+import { Download, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
   type MouseEvent,
@@ -40,12 +29,17 @@ import {
   useTransition,
 } from "react";
 import { toast } from "sonner";
+import { FileBulkActionBar } from "./file-bulk-action-bar";
+import {
+  type FileRef,
+  FileSelectionProvider,
+  useFileSelection,
+} from "./file-selection-provider";
 import {
   EditableRunFilesTable,
   ReadOnlyRunFilesTable,
   statusLabel,
 } from "./run-files-table";
-import { WatcherGatedUploadButton } from "./watcher-gated-upload-button";
 
 const PAGE_SIZE = 10;
 
@@ -83,8 +77,6 @@ function matchesFilter(file: RunFile, filter: StatusFilter): boolean {
   return file.status === filter;
 }
 
-// Raw files always come before processed files; the user-selected field
-// breaks ties within each category.
 function compareByCategory(a: RunFile, b: RunFile): number {
   if (a.category === b.category) return 0;
   return a.category === "raw" ? -1 : 1;
@@ -112,7 +104,42 @@ function compareFiles(a: RunFile, b: RunFile, field: SortField): number {
   return compareByCategory(a, b) || compareByField(a, b, field);
 }
 
-export function RunFilesSection({
+// Synchronously trigger one anchor-click per file so the browser treats
+// them all as the same user gesture (Chrome silently drops downloads
+// scheduled via setTimeout). The `download` attribute prompts a save —
+// the server's Content-Disposition still wins for the actual filename.
+function fanOutFileDownload(refs: FileRef[]) {
+  for (const ref of refs) {
+    const a = document.createElement("a");
+    a.href = `/api/v1/files/${ref.id}/download`;
+    a.download = ref.filename;
+    a.rel = "noopener";
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+}
+
+export function RunFilesSection(props: {
+  files: RunFile[];
+  instrumentId: string;
+  runId: string;
+  isDeleted: boolean;
+}) {
+  // The read-only path doesn't need selection at all. Skip the provider so
+  // we don't pay for the context for runs that can't be modified anyway.
+  if (props.isDeleted) {
+    return <RunFilesSectionContent {...props} />;
+  }
+  return (
+    <FileSelectionProvider>
+      <RunFilesSectionContent {...props} />
+    </FileSelectionProvider>
+  );
+}
+
+function RunFilesSectionContent({
   files,
   instrumentId,
   runId,
@@ -126,7 +153,6 @@ export function RunFilesSection({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [showDismissed, setShowDismissed] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [sortField, setSortField] = useState<SortField>("name");
@@ -180,11 +206,6 @@ export function RunFilesSection({
     [filteredFiles, currentPage]
   );
 
-  const selectableFiles = useMemo(
-    () => activeFiles.filter((f) => f.status === "detected"),
-    [activeFiles]
-  );
-
   const downloadableFiles = useMemo(
     () =>
       activeFiles.filter((f) =>
@@ -193,30 +214,6 @@ export function RunFilesSection({
     [activeFiles]
   );
 
-  const selectedDetectedIds = useMemo(
-    () => selectableFiles.filter((f) => selectedIds.has(f.id)).map((f) => f.id),
-    [selectableFiles, selectedIds]
-  );
-
-  const visibleSelectableIds = useMemo(
-    () =>
-      new Set(
-        paginatedFiles
-          .filter((f) => f.status === "detected" && f.deletedAt === null)
-          .map((f) => f.id)
-      ),
-    [paginatedFiles]
-  );
-
-  const allVisibleSelected =
-    visibleSelectableIds.size > 0 &&
-    [...visibleSelectableIds].every((id) => selectedIds.has(id));
-
-  const someVisibleSelected =
-    visibleSelectableIds.size > 0 &&
-    [...visibleSelectableIds].some((id) => selectedIds.has(id)) &&
-    !allVisibleSelected;
-
   // Summary counts
   const pendingCount = activeFiles.filter((f) =>
     PENDING_STATUSES.has(f.status)
@@ -224,127 +221,6 @@ export function RunFilesSection({
   const uploadedCount = activeFiles.filter(
     (f) => !PENDING_STATUSES.has(f.status) && f.status !== "processing"
   ).length;
-
-  function toggleFile(fileId: number) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(fileId)) next.delete(fileId);
-      else next.add(fileId);
-      return next;
-    });
-  }
-
-  function toggleAll() {
-    if (allVisibleSelected) {
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        for (const id of visibleSelectableIds) next.delete(id);
-        return next;
-      });
-    } else {
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        for (const id of visibleSelectableIds) next.add(id);
-        return next;
-      });
-    }
-  }
-
-  function handleBulkUpload() {
-    if (selectedDetectedIds.length === 0) return;
-    startTransition(async () => {
-      const res = await fetch(
-        `/api/v1/instruments/${instrumentId}/runs/${runId}/request-upload`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ file_ids: selectedDetectedIds }),
-        }
-      );
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        toast.error(body?.error?.message ?? "Failed to request uploads");
-        return;
-      }
-      toast.success(
-        `Upload requested for ${selectedDetectedIds.length} file(s)`
-      );
-      setSelectedIds(new Set());
-      router.refresh();
-    });
-  }
-
-  function handleBulkDismiss() {
-    if (selectedDetectedIds.length === 0) return;
-    startTransition(async () => {
-      const results = await Promise.allSettled(
-        selectedDetectedIds.map((fid) =>
-          fetch(`/api/v1/files/${fid}`, { method: "DELETE" })
-        )
-      );
-      const failed = results.filter(
-        (r) =>
-          r.status === "rejected" || (r.status === "fulfilled" && !r.value.ok)
-      ).length;
-      if (failed > 0) {
-        toast.error(`${failed} file(s) failed to dismiss`);
-      } else {
-        toast.success(`Dismissed ${selectedDetectedIds.length} file(s)`);
-      }
-      setSelectedIds(new Set());
-      router.refresh();
-    });
-  }
-
-  function handleSingleUpload(fileId: number) {
-    startTransition(async () => {
-      const res = await fetch(
-        `/api/v1/instruments/${instrumentId}/runs/${runId}/request-upload`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ file_ids: [fileId] }),
-        }
-      );
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        toast.error(body?.error?.message ?? "Failed to request upload");
-        return;
-      }
-      toast.success("Upload requested");
-      router.refresh();
-    });
-  }
-
-  function handleSingleDismiss(fileId: number) {
-    startTransition(async () => {
-      const res = await fetch(`/api/v1/files/${fileId}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        toast.error(body?.error?.message ?? "Failed to dismiss file");
-        return;
-      }
-      toast.success("File dismissed");
-      router.refresh();
-    });
-  }
-
-  function handleReprocess(fileId: number) {
-    startTransition(async () => {
-      const res = await fetch(`/api/v1/files/${fileId}/reprocess`, {
-        method: "POST",
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        toast.error(body?.error?.message ?? "Failed to start reprocessing");
-        return;
-      }
-      toast.success("Reprocessing started");
-      router.refresh();
-    });
-  }
 
   const filterLabel =
     statusFilter === "all" ? `All (${activeFiles.length})` : undefined;
@@ -462,69 +338,15 @@ export function RunFilesSection({
           )}
         </div>
 
-        {/* Bulk action bar */}
-        {selectedDetectedIds.length > 0 && !isDeleted && (
-          <div className="flex items-center gap-2 border-b bg-primary/10 px-3 py-1.5 text-sm">
-            <span className="font-medium">
-              {selectedDetectedIds.length} selected
-            </span>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 gap-1 text-xs text-muted-foreground"
-              onClick={() => setSelectedIds(new Set())}
-              disabled={isPending}
-            >
-              <X className="size-3" />
-              Clear selection
-            </Button>
-            <div className="ml-auto flex gap-1">
-              <WatcherGatedUploadButton
-                variant="default"
-                size="sm"
-                className="h-7 gap-1 text-xs"
-                onClick={handleBulkUpload}
-                disabled={isPending}
-              >
-                {isPending ? (
-                  <Loader2 className="size-3 animate-spin" />
-                ) : (
-                  <Upload className="size-3" />
-                )}
-                Upload {selectedDetectedIds.length}
-              </WatcherGatedUploadButton>
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 gap-1 text-xs"
-                    disabled={isPending}
-                  >
-                    <X className="size-3" />
-                    Dismiss {selectedDetectedIds.length}
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>
-                      Dismiss {selectedDetectedIds.length} file(s)?
-                    </AlertDialogTitle>
-                    <AlertDialogDescription>
-                      The selected files will be soft-deleted. The watcher will
-                      skip them on future scans.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={handleBulkDismiss}>
-                      Dismiss
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            </div>
-          </div>
+        {/* Bulk action bar — provider-driven, only renders when something
+            is selected. Read-only runs skip the provider entirely above. */}
+        {!isDeleted && (
+          <BulkActionBarHost
+            instrumentId={instrumentId}
+            runId={runId}
+            isPending={isPending}
+            startTransition={startTransition}
+          />
         )}
 
         {/* Dense file table */}
@@ -536,24 +358,27 @@ export function RunFilesSection({
           <ReadOnlyRunFilesTable
             files={paginatedFiles}
             isPending={isPending}
-            onReprocess={handleReprocess}
+            onReprocess={(id) =>
+              handleSingleReprocess(id, startTransition, router)
+            }
           />
         ) : (
           <EditableRunFilesTable
             files={paginatedFiles}
             isPending={isPending}
-            selection={{
-              selectedIds,
-              visibleSelectableIds,
-              allVisibleSelected,
-              someVisibleSelected,
-              hasBulkSelection: selectedDetectedIds.length > 0,
-              onToggleFile: toggleFile,
-              onToggleAll: toggleAll,
-            }}
-            onUpload={handleSingleUpload}
-            onDismiss={handleSingleDismiss}
-            onReprocess={handleReprocess}
+            onUpload={(id) =>
+              handleSingleUpload(
+                id,
+                instrumentId,
+                runId,
+                startTransition,
+                router
+              )
+            }
+            onDismiss={(id) => handleSingleDismiss(id, startTransition, router)}
+            onReprocess={(id) =>
+              handleSingleReprocess(id, startTransition, router)
+            }
           />
         )}
 
@@ -636,4 +461,182 @@ export function RunFilesSection({
       </div>
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Bulk handlers — fan out side effects, toast aggregated results, and clear
+// the selection. Live in a child component so we can read `actions.clear`
+// from the FileSelectionProvider once the operation completes.
+// ---------------------------------------------------------------------------
+
+function BulkActionBarHost({
+  instrumentId,
+  runId,
+  isPending,
+  startTransition,
+}: {
+  instrumentId: string;
+  runId: string;
+  isPending: boolean;
+  startTransition: React.TransitionStartFunction;
+}) {
+  const router = useRouter();
+  const { actions } = useFileSelection();
+
+  function handleBulkUpload(ids: number[]) {
+    if (ids.length === 0) return;
+    startTransition(async () => {
+      const res = await fetch(
+        `/api/v1/instruments/${instrumentId}/runs/${runId}/request-upload`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ file_ids: ids }),
+        }
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        toast.error(body?.error?.message ?? "Failed to request uploads");
+        return;
+      }
+      toast.success(`Upload requested for ${ids.length} file(s)`);
+      actions.clear();
+      router.refresh();
+    });
+  }
+
+  function handleBulkDismiss(ids: number[]) {
+    if (ids.length === 0) return;
+    startTransition(async () => {
+      const results = await Promise.allSettled(
+        ids.map((fid) => fetch(`/api/v1/files/${fid}`, { method: "DELETE" }))
+      );
+      const failed = results.filter(
+        (r) =>
+          r.status === "rejected" || (r.status === "fulfilled" && !r.value.ok)
+      ).length;
+      if (failed > 0) {
+        toast.error(`${failed} file(s) failed to dismiss`);
+      } else {
+        toast.success(`Dismissed ${ids.length} file(s)`);
+      }
+      actions.clear();
+      router.refresh();
+    });
+  }
+
+  function handleBulkReprocess(ids: number[]) {
+    if (ids.length === 0) return;
+    startTransition(async () => {
+      const results = await Promise.allSettled(
+        ids.map((fid) =>
+          fetch(`/api/v1/files/${fid}/reprocess`, { method: "POST" })
+        )
+      );
+      const failed = results.filter(
+        (r) =>
+          r.status === "rejected" || (r.status === "fulfilled" && !r.value.ok)
+      ).length;
+      const ok = ids.length - failed;
+      if (failed === 0) {
+        toast.success(`Reprocessing ${ok} file${ok === 1 ? "" : "s"}`);
+      } else if (ok === 0) {
+        toast.error(`Failed to reprocess ${failed} file(s)`);
+      } else {
+        toast.warning(
+          `Reprocessing ${ok} file${ok === 1 ? "" : "s"}, ${failed} failed`
+        );
+      }
+      actions.clear();
+      router.refresh();
+    });
+  }
+
+  function handleBulkDownload(refs: FileRef[]) {
+    if (refs.length === 0) return;
+    fanOutFileDownload(refs);
+    toast.success(
+      `Downloading ${refs.length} file${refs.length === 1 ? "" : "s"}`
+    );
+  }
+
+  return (
+    <FileBulkActionBar
+      isPending={isPending}
+      onUpload={handleBulkUpload}
+      onDismiss={handleBulkDismiss}
+      onReprocess={handleBulkReprocess}
+      onDownload={handleBulkDownload}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Per-row single-file handlers. Kept as standalone functions (no closures
+// over component state) so the table receives stable callback identities
+// across renders.
+// ---------------------------------------------------------------------------
+
+function handleSingleUpload(
+  fileId: number,
+  instrumentId: string,
+  runId: string,
+  startTransition: React.TransitionStartFunction,
+  router: ReturnType<typeof useRouter>
+) {
+  startTransition(async () => {
+    const res = await fetch(
+      `/api/v1/instruments/${instrumentId}/runs/${runId}/request-upload`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file_ids: [fileId] }),
+      }
+    );
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      toast.error(body?.error?.message ?? "Failed to request upload");
+      return;
+    }
+    toast.success("Upload requested");
+    router.refresh();
+  });
+}
+
+function handleSingleDismiss(
+  fileId: number,
+  startTransition: React.TransitionStartFunction,
+  router: ReturnType<typeof useRouter>
+) {
+  startTransition(async () => {
+    const res = await fetch(`/api/v1/files/${fileId}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      toast.error(body?.error?.message ?? "Failed to dismiss file");
+      return;
+    }
+    toast.success("File dismissed");
+    router.refresh();
+  });
+}
+
+function handleSingleReprocess(
+  fileId: number,
+  startTransition: React.TransitionStartFunction,
+  router: ReturnType<typeof useRouter>
+) {
+  startTransition(async () => {
+    const res = await fetch(`/api/v1/files/${fileId}/reprocess`, {
+      method: "POST",
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      toast.error(body?.error?.message ?? "Failed to start reprocessing");
+      return;
+    }
+    toast.success("Reprocessing started");
+    router.refresh();
+  });
 }
