@@ -2,6 +2,7 @@ import { parse } from "csv-parse/sync";
 
 import { formatHinaSizes } from "@/components/runs/run-metadata-badges";
 import { db } from "@/lib/db";
+import type { InstrumentType } from "@/lib/db/schema";
 import {
   files,
   instrumentRuns,
@@ -665,6 +666,52 @@ export async function getHinaFilterOptions(
     .sort((a, b) => a.label.localeCompare(b.label));
 
   return { channels, dimensions, sizes };
+}
+
+// ---------------------------------------------------------------------------
+// Dispatcher: fetch whichever per-instrument filter options apply to this
+// instrument type. The discriminated return shape lets the caller narrow to
+// the correct variant component without non-null assertions, and TS
+// exhaustiveness-checks the switch so a newly added `InstrumentType` won't
+// compile until it's handled here.
+// ---------------------------------------------------------------------------
+
+export type InstrumentFilterOptionsByType =
+  | { kind: "plate_reader"; options: PlateReaderFilterOptions }
+  | { kind: "gel_doc"; options: GelDocFilterOptions }
+  | { kind: "qpcr"; options: QpcrFilterOptions }
+  | { kind: "hina_microscope"; options: HinaFilterOptions }
+  | { kind: "default" };
+
+export async function getInstrumentFilterOptions(
+  instrumentType: InstrumentType,
+  instrumentId: string
+): Promise<InstrumentFilterOptionsByType> {
+  switch (instrumentType) {
+    case "plate_reader":
+      return {
+        kind: "plate_reader",
+        options: await getPlateReaderFilterOptions(instrumentId),
+      };
+    case "gel_doc":
+      return {
+        kind: "gel_doc",
+        options: await getGelDocFilterOptions(instrumentId),
+      };
+    case "qpcr":
+      return {
+        kind: "qpcr",
+        options: await getQpcrFilterOptions(instrumentId),
+      };
+    case "hina_microscope":
+      return {
+        kind: "hina_microscope",
+        options: await getHinaFilterOptions(instrumentId),
+      };
+    case "generic":
+    case "tape_station":
+      return { kind: "default" };
+  }
 }
 
 // ---------------------------------------------------------------------------

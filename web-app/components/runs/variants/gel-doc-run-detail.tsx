@@ -12,7 +12,6 @@ export function GelDocRunDetail({
   files,
   instrumentId,
   runId,
-  isWatcherOnline,
   attributionsSlot,
 }: RunDetailProps) {
   const isDeleted = run.deletedAt !== null;
@@ -51,7 +50,6 @@ export function GelDocRunDetail({
           instrumentId={instrumentId}
           runId={runId}
           isDeleted={isDeleted}
-          isWatcherOnline={isWatcherOnline}
         />
       </RunDetail.FilesMetadataLayout>
 

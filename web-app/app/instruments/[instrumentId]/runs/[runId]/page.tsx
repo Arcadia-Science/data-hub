@@ -1,5 +1,6 @@
 import { RunAttributionsSection } from "@/components/runs/run-attributions-section";
 import { RunDetailVariant } from "@/components/runs/variants";
+import { WatcherStatusProvider } from "@/components/runs/watcher-status-provider";
 import {
   getProcessedCsvData,
   getRunFiles,
@@ -43,21 +44,22 @@ export default async function RunDetailPage({ params }: Props) {
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6 p-6">
-      <RunDetailVariant
-        run={run}
-        files={runFiles}
-        wellData={wellData}
-        instrumentId={instrumentId}
-        runId={runId}
-        isWatcherOnline={isWatcherOnline}
-        attributionsSlot={
-          <RunAttributionsSection
-            instrumentId={run.instrumentId}
-            runId={run.runId}
-            attributions={run.attributions}
-          />
-        }
-      />
+      <WatcherStatusProvider isWatcherOnline={isWatcherOnline}>
+        <RunDetailVariant
+          run={run}
+          files={runFiles}
+          wellData={wellData}
+          instrumentId={instrumentId}
+          runId={runId}
+          attributionsSlot={
+            <RunAttributionsSection
+              instrumentId={run.instrumentId}
+              runId={run.runId}
+              attributions={run.attributions}
+            />
+          }
+        />
+      </WatcherStatusProvider>
     </div>
   );
 }

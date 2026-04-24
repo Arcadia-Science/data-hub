@@ -29,11 +29,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import type { RunFile } from "@/lib/api/instrument-runs";
 import { Download, Loader2, Search, Upload, X } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -45,7 +40,12 @@ import {
   useTransition,
 } from "react";
 import { toast } from "sonner";
-import { RunFilesTable, statusLabel } from "./run-files-table";
+import {
+  EditableRunFilesTable,
+  ReadOnlyRunFilesTable,
+  statusLabel,
+} from "./run-files-table";
+import { WatcherGatedUploadButton } from "./watcher-gated-upload-button";
 
 const PAGE_SIZE = 10;
 
@@ -112,21 +112,16 @@ function compareFiles(a: RunFile, b: RunFile, field: SortField): number {
   return compareByCategory(a, b) || compareByField(a, b, field);
 }
 
-const WATCHER_OFFLINE_UPLOAD_TOOLTIP =
-  "Watcher is offline. Bring the watcher online before requesting uploads — otherwise nothing will transfer the files to S3.";
-
 export function RunFilesSection({
   files,
   instrumentId,
   runId,
   isDeleted,
-  isWatcherOnline,
 }: {
   files: RunFile[];
   instrumentId: string;
   runId: string;
   isDeleted: boolean;
-  isWatcherOnline: boolean;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -484,43 +479,20 @@ export function RunFilesSection({
               Clear selection
             </Button>
             <div className="ml-auto flex gap-1">
-              {isWatcherOnline ? (
-                <Button
-                  variant="default"
-                  size="sm"
-                  className="h-7 gap-1 text-xs"
-                  onClick={handleBulkUpload}
-                  disabled={isPending}
-                >
-                  {isPending ? (
-                    <Loader2 className="size-3 animate-spin" />
-                  ) : (
-                    <Upload className="size-3" />
-                  )}
-                  Upload {selectedDetectedIds.length}
-                </Button>
-              ) : (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    {/* Wrapping span keeps the tooltip reachable while the
-                        underlying button is disabled. */}
-                    <span tabIndex={0}>
-                      <Button
-                        variant="default"
-                        size="sm"
-                        className="pointer-events-none h-7 gap-1 text-xs"
-                        disabled
-                      >
-                        <Upload className="size-3" />
-                        Upload {selectedDetectedIds.length}
-                      </Button>
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" className="max-w-xs">
-                    {WATCHER_OFFLINE_UPLOAD_TOOLTIP}
-                  </TooltipContent>
-                </Tooltip>
-              )}
+              <WatcherGatedUploadButton
+                variant="default"
+                size="sm"
+                className="h-7 gap-1 text-xs"
+                onClick={handleBulkUpload}
+                disabled={isPending}
+              >
+                {isPending ? (
+                  <Loader2 className="size-3 animate-spin" />
+                ) : (
+                  <Upload className="size-3" />
+                )}
+                Upload {selectedDetectedIds.length}
+              </WatcherGatedUploadButton>
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <Button
@@ -560,12 +532,16 @@ export function RunFilesSection({
           <p className="py-8 text-center text-sm text-muted-foreground">
             No files match your filters.
           </p>
-        ) : (
-          <RunFilesTable
+        ) : isDeleted ? (
+          <ReadOnlyRunFilesTable
             files={paginatedFiles}
-            isDeleted={isDeleted}
             isPending={isPending}
-            isWatcherOnline={isWatcherOnline}
+            onReprocess={handleReprocess}
+          />
+        ) : (
+          <EditableRunFilesTable
+            files={paginatedFiles}
+            isPending={isPending}
             selection={{
               selectedIds,
               visibleSelectableIds,

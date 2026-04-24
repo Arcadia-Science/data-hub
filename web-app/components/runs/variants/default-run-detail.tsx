@@ -12,7 +12,6 @@ export function DefaultRunDetail({
   files,
   instrumentId,
   runId,
-  isWatcherOnline,
   attributionsSlot,
 }: RunDetailProps) {
   const isDeleted = run.deletedAt !== null;
@@ -51,7 +50,6 @@ export function DefaultRunDetail({
           instrumentId={instrumentId}
           runId={runId}
           isDeleted={isDeleted}
-          isWatcherOnline={isWatcherOnline}
         />
       </RunDetail.FilesMetadataLayout>
 

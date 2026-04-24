@@ -2,7 +2,7 @@ import { RelativeTime } from "@/components/dashboard/relative-time";
 import {
   extractHinaChannels,
   formatHinaSizes,
-  getHinaChannelBadgeStyle,
+  HinaChannelBadges,
 } from "@/components/runs/run-metadata-badges";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -21,9 +21,9 @@ import type { RunRow } from ".";
 import { ClickableRow } from "./clickable-row";
 import { FilterableColumnHeader } from "./filterable-column-header";
 import {
-  MetadataArrayBadges,
   getMetadataArray,
   getMetadataRecord,
+  MetadataArrayBadges,
 } from "./metadata-utils";
 import { RanByCell } from "./ran-by-cell";
 import { RawFileColumnHeader } from "./raw-file-column-header";
@@ -136,32 +136,7 @@ export function HinaRunsTable({
                 {formatBytes(row.total_size_bytes)}
               </TableCell>
               <TableCell>
-                {channels.length === 0 ? (
-                  <span className="text-muted-foreground">&mdash;</span>
-                ) : (
-                  <div className="flex flex-wrap gap-1">
-                    {channels.map((c) => {
-                      const { badge, dot } = getHinaChannelBadgeStyle(c.color);
-                      return (
-                        <Badge
-                          key={c.name}
-                          variant="outline"
-                          className="font-mono"
-                          style={badge}
-                        >
-                          {c.color && (
-                            <span
-                              aria-hidden="true"
-                              className="inline-block size-2 rounded-full"
-                              style={dot}
-                            />
-                          )}
-                          {c.name}
-                        </Badge>
-                      );
-                    })}
-                  </div>
-                )}
+                <HinaChannelBadges channels={channels} />
               </TableCell>
               <TableCell>
                 <MetadataArrayBadges values={dimensions} />

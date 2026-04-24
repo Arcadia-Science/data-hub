@@ -31,6 +31,7 @@ import type { RunFile } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
 import { formatBytes } from "@/lib/utils";
 import { Download, Loader2, RotateCw, Upload, X } from "lucide-react";
+import { WatcherGatedUploadButton } from "./watcher-gated-upload-button";
 
 const DOWNLOADABLE_STATUSES = new Set([
   "uploaded",
@@ -130,6 +131,234 @@ function StatusBadge({ file }: { file: RunFile }) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Shared table pieces used by both the editable and read-only variants.
+// ---------------------------------------------------------------------------
+
+function FileColumnHeaders() {
+  return (
+    <>
+      <TableHead className="text-sm font-medium text-muted-foreground">
+        File name
+      </TableHead>
+      <TableHead className="text-sm font-medium text-muted-foreground">
+        Type
+      </TableHead>
+      <TableHead className="text-sm font-medium text-muted-foreground">
+        Size
+      </TableHead>
+      <TableHead className="text-sm font-medium text-muted-foreground">
+        Created
+      </TableHead>
+      <TableHead className="text-sm font-medium text-muted-foreground">
+        Status
+      </TableHead>
+    </>
+  );
+}
+
+function FileInfoCells({ file }: { file: RunFile }) {
+  return (
+    <>
+      <TableCell className="py-2 font-mono text-sm">
+        <span className="flex items-center gap-1.5">
+          {file.filename}
+          {DOWNLOADABLE_STATUSES.has(file.status) && (
+            <a
+              href={`/api/v1/files/${file.id}/download`}
+              className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <Download className="size-4" />
+            </a>
+          )}
+        </span>
+      </TableCell>
+      <TableCell className="py-2">
+        <Badge variant="outline" className="capitalize">
+          {file.category}
+        </Badge>
+      </TableCell>
+      <TableCell className="py-2 text-sm text-muted-foreground">
+        {formatBytes(file.sizeBytes)}
+      </TableCell>
+      <TableCell className="py-2 text-sm text-muted-foreground">
+        {file.createdAt ? formatDateTime(file.createdAt) : "—"}
+      </TableCell>
+      <TableCell className="py-2">
+        <StatusBadge file={file} />
+      </TableCell>
+    </>
+  );
+}
+
+function ReprocessAction({
+  file,
+  isPending,
+  onReprocess,
+}: {
+  file: RunFile;
+  isPending: boolean;
+  onReprocess: (id: number) => void;
+}) {
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-6 gap-1 px-2 text-xs"
+          disabled={isPending}
+        >
+          {isPending ? (
+            <Loader2 className="size-3 animate-spin" />
+          ) : (
+            <RotateCw className="size-3" />
+          )}
+          Reprocess
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Reprocess file?</AlertDialogTitle>
+          <AlertDialogDescription>
+            <strong className="font-mono">{file.filename}</strong> will be sent
+            to the Lambda function for reprocessing. Any existing report data
+            for this file will be cleared.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={() => onReprocess(file.id)}>
+            Reprocess
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+function UploadDismissActions({
+  file,
+  isPending,
+  onUpload,
+  onDismiss,
+}: {
+  file: RunFile;
+  isPending: boolean;
+  onUpload: (id: number) => void;
+  onDismiss: (id: number) => void;
+}) {
+  return (
+    <>
+      <WatcherGatedUploadButton
+        variant="outline"
+        size="sm"
+        className="h-6 gap-1 px-2 text-xs"
+        onClick={() => onUpload(file.id)}
+        disabled={isPending}
+      >
+        <Upload className="size-3" />
+        Upload
+      </WatcherGatedUploadButton>
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 gap-1 px-2 text-xs text-muted-foreground"
+            disabled={isPending}
+          >
+            <X className="size-3" />
+            Dismiss
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Dismiss file?</AlertDialogTitle>
+            <AlertDialogDescription>
+              <strong className="font-mono">{file.filename}</strong> will be
+              soft-deleted. The watcher will skip it on future scans.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => onDismiss(file.id)}>
+              Dismiss
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
+
+function canReprocess(file: RunFile): boolean {
+  return (
+    file.deletedAt === null &&
+    REPROCESSABLE_STATUSES.has(file.status) &&
+    file.s3Key !== null
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Read-only variant: no selection column, no upload/dismiss. Reprocessing is
+// still allowed for completed/failed files so operators can recover report
+// data without restoring the run.
+// ---------------------------------------------------------------------------
+
+export type ReadOnlyRunFilesTableProps = {
+  files: RunFile[];
+  isPending: boolean;
+  onReprocess: (id: number) => void;
+};
+
+export function ReadOnlyRunFilesTable({
+  files,
+  isPending,
+  onReprocess,
+}: ReadOnlyRunFilesTableProps) {
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow className="hover:bg-transparent">
+          <FileColumnHeaders />
+          <TableHead className="w-0" />
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {files.map((file) => {
+          const isDismissed = file.deletedAt !== null;
+          return (
+            <TableRow
+              key={file.id}
+              className={`group ${isDismissed ? "opacity-50" : ""}`}
+            >
+              <FileInfoCells file={file} />
+              <TableCell className="py-2 pr-3">
+                {canReprocess(file) && (
+                  <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                    <ReprocessAction
+                      file={file}
+                      isPending={isPending}
+                      onReprocess={onReprocess}
+                    />
+                  </div>
+                )}
+              </TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Editable variant: adds a selection column (for bulk upload/dismiss flows)
+// and per-row upload/dismiss buttons on detected files. Falls back to the
+// reprocess action for completed/failed files, matching the read-only table.
+// ---------------------------------------------------------------------------
+
 export type RunFilesTableSelection = {
   selectedIds: Set<number>;
   visibleSelectableIds: Set<number>;
@@ -140,32 +369,23 @@ export type RunFilesTableSelection = {
   onToggleAll: () => void;
 };
 
-export type RunFilesTableProps = {
+export type EditableRunFilesTableProps = {
   files: RunFile[];
-  isDeleted: boolean;
   isPending: boolean;
-  // When false, per-row "Upload" actions are disabled so users can't queue
-  // a transition to `upload_requested` that no agent would pick up.
-  isWatcherOnline: boolean;
   selection: RunFilesTableSelection;
   onUpload: (id: number) => void;
   onDismiss: (id: number) => void;
   onReprocess: (id: number) => void;
 };
 
-const WATCHER_OFFLINE_UPLOAD_TOOLTIP =
-  "Watcher is offline. Bring the watcher online before requesting uploads — otherwise nothing will transfer this file to S3.";
-
-export function RunFilesTable({
+export function EditableRunFilesTable({
   files,
-  isDeleted,
   isPending,
-  isWatcherOnline,
   selection,
   onUpload,
   onDismiss,
   onReprocess,
-}: RunFilesTableProps) {
+}: EditableRunFilesTableProps) {
   const {
     selectedIds,
     visibleSelectableIds,
@@ -176,7 +396,7 @@ export function RunFilesTable({
     onToggleAll,
   } = selection;
 
-  const showSelectionColumn = !isDeleted && visibleSelectableIds.size > 0;
+  const showSelectionColumn = visibleSelectableIds.size > 0;
 
   return (
     <Table>
@@ -196,35 +416,17 @@ export function RunFilesTable({
               />
             </TableHead>
           )}
-          <TableHead className="text-sm font-medium text-muted-foreground">
-            File name
-          </TableHead>
-          <TableHead className="text-sm font-medium text-muted-foreground">
-            Type
-          </TableHead>
-          <TableHead className="text-sm font-medium text-muted-foreground">
-            Size
-          </TableHead>
-          <TableHead className="text-sm font-medium text-muted-foreground">
-            Created
-          </TableHead>
-          <TableHead className="text-sm font-medium text-muted-foreground">
-            Status
-          </TableHead>
+          <FileColumnHeaders />
           <TableHead className="w-0" />
         </TableRow>
       </TableHeader>
       <TableBody>
         {files.map((file) => {
           const isDismissed = file.deletedAt !== null;
-          const isSelectable =
-            !isDeleted && file.status === "detected" && !isDismissed;
+          const isSelectable = file.status === "detected" && !isDismissed;
           const isSelected = selectedIds.has(file.id);
-          const showRowActions =
-            !isDeleted &&
-            !isDismissed &&
-            file.status === "detected" &&
-            !hasBulkSelection;
+          const showUploadDismiss =
+            !isDismissed && file.status === "detected" && !hasBulkSelection;
 
           return (
             <TableRow
@@ -244,144 +446,25 @@ export function RunFilesTable({
                   )}
                 </TableCell>
               )}
-              <TableCell className="py-2 font-mono text-sm">
-                <span className="flex items-center gap-1.5">
-                  {file.filename}
-                  {DOWNLOADABLE_STATUSES.has(file.status) && (
-                    <a
-                      href={`/api/v1/files/${file.id}/download`}
-                      className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
-                    >
-                      <Download className="size-4" />
-                    </a>
-                  )}
-                </span>
-              </TableCell>
-              <TableCell className="py-2">
-                <Badge variant="outline" className="capitalize">
-                  {file.category}
-                </Badge>
-              </TableCell>
-              <TableCell className="py-2 text-sm text-muted-foreground">
-                {formatBytes(file.sizeBytes)}
-              </TableCell>
-              <TableCell className="py-2 text-sm text-muted-foreground">
-                {file.createdAt ? formatDateTime(file.createdAt) : "—"}
-              </TableCell>
-              <TableCell className="py-2">
-                <StatusBadge file={file} />
-              </TableCell>
+              <FileInfoCells file={file} />
               <TableCell className="py-2 pr-3">
-                {showRowActions ? (
+                {showUploadDismiss ? (
                   <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                    {isWatcherOnline ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-6 gap-1 px-2 text-xs"
-                        onClick={() => onUpload(file.id)}
-                        disabled={isPending}
-                      >
-                        <Upload className="size-3" />
-                        Upload
-                      </Button>
-                    ) : (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          {/* Wrapping span keeps the tooltip reachable while
-                              the underlying button is disabled. */}
-                          <span tabIndex={0}>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="pointer-events-none h-6 gap-1 px-2 text-xs"
-                              disabled
-                            >
-                              <Upload className="size-3" />
-                              Upload
-                            </Button>
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent side="top" className="max-w-xs">
-                          {WATCHER_OFFLINE_UPLOAD_TOOLTIP}
-                        </TooltipContent>
-                      </Tooltip>
-                    )}
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 gap-1 px-2 text-xs text-muted-foreground"
-                          disabled={isPending}
-                        >
-                          <X className="size-3" />
-                          Dismiss
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Dismiss file?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            <strong className="font-mono">
-                              {file.filename}
-                            </strong>{" "}
-                            will be soft-deleted. The watcher will skip it on
-                            future scans.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Cancel</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => onDismiss(file.id)}>
-                            Dismiss
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
+                    <UploadDismissActions
+                      file={file}
+                      isPending={isPending}
+                      onUpload={onUpload}
+                      onDismiss={onDismiss}
+                    />
                   </div>
                 ) : (
-                  !isDismissed &&
-                  REPROCESSABLE_STATUSES.has(file.status) &&
-                  file.s3Key !== null && (
+                  canReprocess(file) && (
                     <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-6 gap-1 px-2 text-xs"
-                            disabled={isPending}
-                          >
-                            {isPending ? (
-                              <Loader2 className="size-3 animate-spin" />
-                            ) : (
-                              <RotateCw className="size-3" />
-                            )}
-                            Reprocess
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Reprocess file?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              <strong className="font-mono">
-                                {file.filename}
-                              </strong>{" "}
-                              will be sent to the Lambda function for
-                              reprocessing. Any existing report data for this
-                              file will be cleared.
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction
-                              onClick={() => onReprocess(file.id)}
-                            >
-                              Reprocess
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
+                      <ReprocessAction
+                        file={file}
+                        isPending={isPending}
+                        onReprocess={onReprocess}
+                      />
                     </div>
                   )
                 )}

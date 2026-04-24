@@ -263,7 +263,6 @@ export function PlateReaderRunDetail({
   wellData,
   instrumentId,
   runId,
-  isWatcherOnline,
   attributionsSlot,
 }: RunDetailProps) {
   const isDeleted = run.deletedAt !== null;
@@ -314,7 +313,6 @@ export function PlateReaderRunDetail({
           instrumentId={instrumentId}
           runId={runId}
           isDeleted={isDeleted}
-          isWatcherOnline={isWatcherOnline}
         />
       </RunDetail.FilesMetadataLayout>
 

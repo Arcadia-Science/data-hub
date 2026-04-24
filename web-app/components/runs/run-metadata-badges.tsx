@@ -279,10 +279,12 @@ function relativeLuminance({
   return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
 }
 
-// Channel colors come straight from instrument metadata, so any value is
-// possible — including white, which disappears against the light theme's
-// white surface. For near-white colors we blend with `--foreground` so the
-// border/text remain visible in light mode while staying vivid in dark mode.
+// Channel colors come straight from instrument metadata. To keep channel
+// badges visually consistent with the other metadata badges, we always use
+// the default outline border and carry the channel's identity on the dot and
+// text color alone. Near-white colors are blended with `--foreground` so the
+// text remains readable on light surfaces while staying vivid on dark ones,
+// and the dot is ringed with `--border` so a white swatch is still visible.
 const NEAR_WHITE_LUMINANCE = 0.85;
 
 export type ChannelBadgeStyle = {
@@ -297,21 +299,15 @@ export function getHinaChannelBadgeStyle(
   const rgb = parseColorToRgb(color);
   const isNearWhite =
     rgb !== null && relativeLuminance(rgb) > NEAR_WHITE_LUMINANCE;
-  if (isNearWhite) {
-    const adapted = `color-mix(in oklab, ${color}, var(--foreground) 45%)`;
-    return {
-      badge: { borderColor: adapted, color: adapted },
-      // Keep the true channel color on the dot so the swatch still reads as
-      // "white", but ring it with the theme border so it stays visible.
-      dot: {
-        backgroundColor: color,
-        boxShadow: "inset 0 0 0 1px var(--border)",
-      },
-    };
-  }
+  const textColor = isNearWhite ? "text-foreground" : color;
   return {
-    badge: { borderColor: color, color },
-    dot: { backgroundColor: color },
+    badge: { color: textColor },
+    dot: isNearWhite
+      ? {
+          backgroundColor: color,
+          boxShadow: "inset 0 0 0 1px var(--border)",
+        }
+      : { backgroundColor: color },
   };
 }
 
@@ -397,7 +393,7 @@ function ChannelBadge({ name, color }: HinaChannel) {
 
 export function HinaChannelBadges({ channels }: { channels: HinaChannel[] }) {
   if (channels.length === 0)
-    return <span className="text-muted-foreground">&mdash;</span>;
+    return <span className="text-foreground">&mdash;</span>;
   return (
     <div className="flex flex-wrap gap-1">
       {channels.map((c) => (

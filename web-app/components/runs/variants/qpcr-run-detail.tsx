@@ -12,7 +12,6 @@ export function QpcrRunDetail({
   files,
   instrumentId,
   runId,
-  isWatcherOnline,
   attributionsSlot,
 }: RunDetailProps) {
   const isDeleted = run.deletedAt !== null;
@@ -49,7 +48,6 @@ export function QpcrRunDetail({
           instrumentId={instrumentId}
           runId={runId}
           isDeleted={isDeleted}
-          isWatcherOnline={isWatcherOnline}
         />
       </RunDetail.FilesMetadataLayout>
 

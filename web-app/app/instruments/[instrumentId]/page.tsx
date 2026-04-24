@@ -1,6 +1,15 @@
 import { InstrumentHeader } from "@/components/instruments/instrument-header";
 import { InstrumentRunsToolbar } from "@/components/instruments/instrument-runs-toolbar";
-import { InstrumentRunsTable } from "@/components/instruments/runs-table";
+import {
+  InstrumentRunsTableShell,
+  type RanByOption,
+  type RunRow,
+} from "@/components/instruments/runs-table";
+import { DefaultRunsTable } from "@/components/instruments/runs-table/default-runs-table";
+import { GelDocRunsTable } from "@/components/instruments/runs-table/gel-doc-runs-table";
+import { HinaRunsTable } from "@/components/instruments/runs-table/hina-runs-table";
+import { PlateReaderRunsTable } from "@/components/instruments/runs-table/plate-reader-runs-table";
+import { QpcrRunsTable } from "@/components/instruments/runs-table/qpcr-runs-table";
 import { RunBulkActionBar } from "@/components/instruments/runs-table/run-bulk-action-bar";
 import { RunSelectionProvider } from "@/components/instruments/runs-table/run-selection-provider";
 import { PaginationNav } from "@/components/pagination-nav";
@@ -10,11 +19,9 @@ import {
 } from "@/components/table-pending";
 import {
   buildRunListQuery,
-  getGelDocFilterOptions,
-  getHinaFilterOptions,
-  getPlateReaderFilterOptions,
-  getQpcrFilterOptions,
+  getInstrumentFilterOptions,
   getRanByFilterOptions,
+  type InstrumentFilterOptionsByType,
 } from "@/lib/api/instrument-runs";
 import { getInstrumentById } from "@/lib/api/instruments";
 import { auth } from "@/lib/auth";
@@ -33,6 +40,65 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return {
     title: instrument?.displayName ?? instrumentId,
   };
+}
+
+/**
+ * Render the per-instrument runs table variant for the given filter-options
+ * discriminator. Narrowing on `filterOptions.kind` removes the per-variant
+ * optional-prop + `!` pattern that used to live in `InstrumentRunsTable`.
+ */
+function renderRunsTableVariant(
+  filterOptions: InstrumentFilterOptionsByType,
+  data: RunRow[],
+  instrumentId: string,
+  ranByOptions: RanByOption[]
+) {
+  switch (filterOptions.kind) {
+    case "plate_reader":
+      return (
+        <PlateReaderRunsTable
+          data={data}
+          instrumentId={instrumentId}
+          filterOptions={filterOptions.options}
+          ranByOptions={ranByOptions}
+        />
+      );
+    case "gel_doc":
+      return (
+        <GelDocRunsTable
+          data={data}
+          instrumentId={instrumentId}
+          filterOptions={filterOptions.options}
+          ranByOptions={ranByOptions}
+        />
+      );
+    case "qpcr":
+      return (
+        <QpcrRunsTable
+          data={data}
+          instrumentId={instrumentId}
+          filterOptions={filterOptions.options}
+          ranByOptions={ranByOptions}
+        />
+      );
+    case "hina_microscope":
+      return (
+        <HinaRunsTable
+          data={data}
+          instrumentId={instrumentId}
+          filterOptions={filterOptions.options}
+          ranByOptions={ranByOptions}
+        />
+      );
+    case "default":
+      return (
+        <DefaultRunsTable
+          data={data}
+          instrumentId={instrumentId}
+          ranByOptions={ranByOptions}
+        />
+      );
+  }
 }
 
 export default async function InstrumentDetailPage({
@@ -74,24 +140,10 @@ export default async function InstrumentDetailPage({
 
   if (!instrument) notFound();
 
-  const isPlateReader = instrument.instrumentType === "plate_reader";
-  const isGelDoc = instrument.instrumentType === "gel_doc";
-  const isQpcr = instrument.instrumentType === "qpcr";
-  const isHina = instrument.instrumentType === "hina_microscope";
-
-  // Fetch distinct metadata values for instrument-specific column filter dropdowns.
-  // `ranByOptions` applies to every instrument type.
-  const [
-    filterOptions,
-    gelDocFilterOptions,
-    qpcrFilterOptions,
-    hinaFilterOptions,
-    ranByUsers,
-  ] = await Promise.all([
-    isPlateReader ? getPlateReaderFilterOptions(instrumentId) : undefined,
-    isGelDoc ? getGelDocFilterOptions(instrumentId) : undefined,
-    isQpcr ? getQpcrFilterOptions(instrumentId) : undefined,
-    isHina ? getHinaFilterOptions(instrumentId) : undefined,
+  // Fetch whichever per-instrument filter options apply, in parallel with
+  // the attribution dropdown options.
+  const [filterOptions, ranByUsers] = await Promise.all([
+    getInstrumentFilterOptions(instrument.instrumentType, instrumentId),
     getRanByFilterOptions(instrumentId),
   ]);
 
@@ -148,21 +200,22 @@ export default async function InstrumentDetailPage({
           <InstrumentRunsToolbar />
           <RunBulkActionBar />
           <TablePendingBoundary>
-            <InstrumentRunsTable
-              data={runResult.data}
-              instrumentId={instrumentId}
-              instrumentType={instrument.instrumentType}
+            <InstrumentRunsTableShell
+              isEmpty={runResult.data.length === 0}
               hasFilters={hasFilters}
-              filterOptions={filterOptions}
-              gelDocFilterOptions={gelDocFilterOptions}
-              qpcrFilterOptions={qpcrFilterOptions}
-              hinaFilterOptions={hinaFilterOptions}
-              ranByOptions={ranByOptions}
+              shownCount={runResult.data.length}
               totalCount={runResult.pagination.total}
               pendingUploadCount={pendingUploadCount}
               unattributedCount={unattributedCount}
               ranByYouCount={ranByYouCount}
-            />
+            >
+              {renderRunsTableVariant(
+                filterOptions,
+                runResult.data,
+                instrumentId,
+                ranByOptions
+              )}
+            </InstrumentRunsTableShell>
           </TablePendingBoundary>
           <PaginationNav
             page={runResult.pagination.page}

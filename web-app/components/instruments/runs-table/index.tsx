@@ -1,23 +1,11 @@
-import type {
-  GelDocFilterOptions,
-  HinaFilterOptions,
-  PlateReaderFilterOptions,
-  QpcrFilterOptions,
-  RunListRow,
-} from "@/lib/api/instrument-runs";
-import type { InstrumentType } from "@/lib/db/schema";
+import type { RunListRow } from "@/lib/api/instrument-runs";
 import { SearchX } from "lucide-react";
 
-import { DefaultRunsTable } from "./default-runs-table";
-import { GelDocRunsTable } from "./gel-doc-runs-table";
-import { HinaRunsTable } from "./hina-runs-table";
-import { PlateReaderRunsTable } from "./plate-reader-runs-table";
-import { QpcrRunsTable } from "./qpcr-runs-table";
 import { RunsTableFooter } from "./runs-table-footer";
 
 // Re-export under the historical name so imports like
 // `import type { RunRow } from "@/components/instruments/runs-table"`
-// keep working. The type itself is now derived server-side.
+// keep working. The type itself is derived server-side.
 export type RunRow = RunListRow;
 
 export type RanByOption = { value: string; label: string };
@@ -28,36 +16,40 @@ export type RunsTableProps = {
   ranByOptions: RanByOption[];
 };
 
-export function InstrumentRunsTable({
-  data,
-  instrumentId,
-  instrumentType,
+/**
+ * Thin wrapper around the per-instrument table variants.
+ *
+ * Previously this component owned a big `switch (instrumentType)` with one
+ * optional `filterOptions` prop per instrument type (plus a non-null assertion
+ * at every call site). That scaled poorly — every new instrument forced a new
+ * optional prop here and a new `!` in the caller.
+ *
+ * The shell is now purely structural: the empty-state card when there are no
+ * rows, otherwise the bordered frame + footer around whichever table variant
+ * the caller chose to render as `children`. Picking the variant is the
+ * caller's job, which lets each page compose the right discriminated
+ * filter-options narrowing without routing them through this shell.
+ */
+export function InstrumentRunsTableShell({
+  isEmpty,
   hasFilters,
-  filterOptions,
-  gelDocFilterOptions,
-  qpcrFilterOptions,
-  hinaFilterOptions,
-  ranByOptions,
+  shownCount,
   totalCount,
   pendingUploadCount,
   unattributedCount,
   ranByYouCount,
+  children,
 }: {
-  data: RunRow[];
-  instrumentId: string;
-  instrumentType: InstrumentType;
+  isEmpty: boolean;
   hasFilters: boolean;
-  filterOptions?: PlateReaderFilterOptions;
-  gelDocFilterOptions?: GelDocFilterOptions;
-  qpcrFilterOptions?: QpcrFilterOptions;
-  hinaFilterOptions?: HinaFilterOptions;
-  ranByOptions: RanByOption[];
+  shownCount: number;
   totalCount: number;
   pendingUploadCount: number;
   unattributedCount: number;
   ranByYouCount: number;
+  children: React.ReactNode;
 }) {
-  if (data.length === 0) {
+  if (isEmpty) {
     return (
       <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed py-16">
         <SearchX className="size-8 text-muted-foreground" />
@@ -70,63 +62,11 @@ export function InstrumentRunsTable({
     );
   }
 
-  let table;
-  switch (instrumentType) {
-    case "plate_reader":
-      table = (
-        <PlateReaderRunsTable
-          data={data}
-          instrumentId={instrumentId}
-          filterOptions={filterOptions!}
-          ranByOptions={ranByOptions}
-        />
-      );
-      break;
-    case "gel_doc":
-      table = (
-        <GelDocRunsTable
-          data={data}
-          instrumentId={instrumentId}
-          filterOptions={gelDocFilterOptions!}
-          ranByOptions={ranByOptions}
-        />
-      );
-      break;
-    case "qpcr":
-      table = (
-        <QpcrRunsTable
-          data={data}
-          instrumentId={instrumentId}
-          filterOptions={qpcrFilterOptions!}
-          ranByOptions={ranByOptions}
-        />
-      );
-      break;
-    case "hina_microscope":
-      table = (
-        <HinaRunsTable
-          data={data}
-          instrumentId={instrumentId}
-          filterOptions={hinaFilterOptions!}
-          ranByOptions={ranByOptions}
-        />
-      );
-      break;
-    default:
-      table = (
-        <DefaultRunsTable
-          data={data}
-          instrumentId={instrumentId}
-          ranByOptions={ranByOptions}
-        />
-      );
-  }
-
   return (
     <div className="rounded-lg border">
-      {table}
+      {children}
       <RunsTableFooter
-        shownCount={data.length}
+        shownCount={shownCount}
         totalCount={totalCount}
         pendingUploadCount={pendingUploadCount}
         unattributedCount={unattributedCount}
