@@ -144,16 +144,23 @@ export type RunFilesTableProps = {
   files: RunFile[];
   isDeleted: boolean;
   isPending: boolean;
+  // When false, per-row "Upload" actions are disabled so users can't queue
+  // a transition to `upload_requested` that no agent would pick up.
+  isWatcherOnline: boolean;
   selection: RunFilesTableSelection;
   onUpload: (id: number) => void;
   onDismiss: (id: number) => void;
   onReprocess: (id: number) => void;
 };
 
+const WATCHER_OFFLINE_UPLOAD_TOOLTIP =
+  "Watcher is offline. Bring the watcher online before requesting uploads — otherwise nothing will transfer this file to S3.";
+
 export function RunFilesTable({
   files,
   isDeleted,
   isPending,
+  isWatcherOnline,
   selection,
   onUpload,
   onDismiss,
@@ -267,16 +274,39 @@ export function RunFilesTable({
               <TableCell className="py-2 pr-3">
                 {showRowActions ? (
                   <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-6 gap-1 px-2 text-xs"
-                      onClick={() => onUpload(file.id)}
-                      disabled={isPending}
-                    >
-                      <Upload className="size-3" />
-                      Upload
-                    </Button>
+                    {isWatcherOnline ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-6 gap-1 px-2 text-xs"
+                        onClick={() => onUpload(file.id)}
+                        disabled={isPending}
+                      >
+                        <Upload className="size-3" />
+                        Upload
+                      </Button>
+                    ) : (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          {/* Wrapping span keeps the tooltip reachable while
+                              the underlying button is disabled. */}
+                          <span tabIndex={0}>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="pointer-events-none h-6 gap-1 px-2 text-xs"
+                              disabled
+                            >
+                              <Upload className="size-3" />
+                              Upload
+                            </Button>
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-xs">
+                          {WATCHER_OFFLINE_UPLOAD_TOOLTIP}
+                        </TooltipContent>
+                      </Tooltip>
+                    )}
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button

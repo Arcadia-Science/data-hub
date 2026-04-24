@@ -25,6 +25,10 @@ export type RunDetailProps = {
   wellData: RawWellRow[];
   instrumentId: string;
   runId: string;
+  // True when at least one watcher for this instrument is actively
+  // heartbeating. Gates actions (e.g. requesting uploads) that are
+  // meaningless while the on-prem agent is offline.
+  isWatcherOnline: boolean;
   // Rendered below the header on every variant. Parent composes the
   // attribution UI so server-only user/session wiring stays at the page.
   attributionsSlot: React.ReactNode;

@@ -13,6 +13,7 @@ export function HinaMicroscopeRunDetail({
   files,
   instrumentId,
   runId,
+  isWatcherOnline,
   attributionsSlot,
 }: RunDetailProps) {
   const isDeleted = run.deletedAt !== null;
@@ -49,6 +50,7 @@ export function HinaMicroscopeRunDetail({
           instrumentId={instrumentId}
           runId={runId}
           isDeleted={isDeleted}
+          isWatcherOnline={isWatcherOnline}
         />
       </RunDetail.FilesMetadataLayout>
 
