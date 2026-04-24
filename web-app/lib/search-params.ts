@@ -43,6 +43,12 @@ export const instrumentDetailSearchParams = {
   gel_color: parseAsString,
   // qPCR metadata column filters.
   dye_channel: parseAsString,
+  // Hina microscope metadata column filters. `hina_size` stores the raw sizes
+  // JSONB object (url-encoded) so different dimension permutations collapse to
+  // a single canonical value server-side via jsonb equality.
+  hina_channel: parseAsString,
+  hina_dimension: parseAsString,
+  hina_size: parseAsString,
   // Attribution filter: either a userId or the reserved sentinel "unattributed".
   ran_by: parseAsString,
 };

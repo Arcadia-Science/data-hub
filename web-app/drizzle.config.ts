@@ -7,4 +7,6 @@ export default defineConfig({
   dbCredentials: {
     url: process.env.DATABASE_URL!,
   },
+  schemaFilter: ["public"],
+  tablesFilter: ["!pg_stat_statements", "!pg_stat_statements_info"],
 });

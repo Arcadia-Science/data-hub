@@ -51,6 +51,7 @@ export const instrumentTypeEnum = pgEnum("instrument_type", [
   "gel_doc",
   "qpcr",
   "tape_station",
+  "hina_microscope",
 ]);
 
 export const VALID_INSTRUMENT_TYPES = instrumentTypeEnum.enumValues;

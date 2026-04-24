@@ -14,17 +14,25 @@ import { instrumentDetailSearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 import { ChevronsUpDown, ListFilter } from "lucide-react";
 import { useQueryStates } from "nuqs";
+import type { inferParserType } from "nuqs/server";
 
-type FilterParamKey =
-  | "wavelength"
-  | "measurement_mode"
-  | "measurement_type"
-  | "capture_type"
-  | "imaging_mode"
-  | "gel_wavelength"
-  | "gel_color"
-  | "dye_channel"
-  | "ran_by";
+type InstrumentDetailFilters = inferParserType<
+  typeof instrumentDetailSearchParams
+>;
+
+// Filter-column params are the nullable-string entries in the nuqs map
+// (`parseAsString` without a default). Keys whose parser carries a default
+// — page/per_page/search/include_deleted — aren't column filters and get
+// excluded automatically here. Adding a new `parseAsString` filter to
+// `instrumentDetailSearchParams` makes it a valid `paramKey` with no
+// hand-maintenance needed at this boundary.
+export type FilterParamKey = {
+  [K in keyof InstrumentDetailFilters]: null extends InstrumentDetailFilters[K]
+    ? InstrumentDetailFilters[K] extends string | null
+      ? K
+      : never
+    : never;
+}[keyof InstrumentDetailFilters];
 
 // Options accept either plain strings (value == label) or { value, label }
 // pairs for cases where the URL-stable value and the display label differ

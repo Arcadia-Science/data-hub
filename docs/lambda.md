@@ -33,6 +33,7 @@ When a file fails processing (or needs to be re-run), users can trigger reproces
 | Akta FPLC | `akta_fplc` | `akta-fplc` |
 | Azure 600 Gel Doc | `azure_600_gel_doc` | `azure-600-gel-doc` |
 | Azure Cielo qPCR | `azure_cielo_qpcr` | `azure-cielo-qpcr` |
+| Hina Microscope | `hina_microscope` | `hina-microscope` |
 | SpectraMax iD3 Plate Reader | `spectramax_plate_reader` | `spectramax-id3-plate-reader` |
 | SpectraMax iD5 Plate Reader | `spectramax_plate_reader` | `spectramax-id5-plate-reader` |
 
@@ -67,6 +68,7 @@ Available commands:
 | Command | Description |
 | --- | --- |
 | `gel-doc` | Process an Azure 600 Gel Doc TIFF (contrast-enhanced PNG + metadata) |
+| `hina` | Convert a Hina microscope ND2 file to a JPG overlay + metadata |
 | `qpcr` | Parse dye channels from an Azure Cielo qPCR Cq Values CSV |
 | `spectramax` | Parse metadata and raw well data from a SpectraMax `.xls` export |
 | `tapestation` | Extract the tape type from a TapeStation CSV filename |
@@ -102,6 +104,7 @@ The Lambda function depends on a scientific Python stack:
 - `matplotlib` — plotting
 - `scikit-image` — image processing
 - `tifffile` — TIFF file reading
+- `arcadia-microscopy-tools` — ND2 reading, channel handling, and multi-channel compositing for the Hina microscope
 - `pydantic` — data validation
 - `requests` — HTTP client for the Data Hub API
 - `aws-lambda-typing` — type stubs for Lambda events/context

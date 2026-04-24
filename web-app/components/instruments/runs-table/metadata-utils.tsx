@@ -4,5 +4,7 @@ export {
   TruncatedBadges,
   getMetadataArray,
   getMetadataField,
+  getMetadataObjectArray,
+  getMetadataRecord,
   sortWavelengths,
 } from "@/components/runs/metadata-badges";

@@ -33,6 +33,7 @@ from data_hub_shared.testing import (
 _INSTRUMENTS: dict[str, str] = {
     "azure-cielo-qpcr": "Azure Cielo qPCR",
     "azure-600-gel-doc": "Azure 600 Gel Doc",
+    "hina-microscope": "Hina Microscope",
     "spectramax-id3-plate-reader": "SpectraMax iD3 Plate Reader",
     "spectramax-id5-plate-reader": "SpectraMax iD5 Plate Reader",
 }

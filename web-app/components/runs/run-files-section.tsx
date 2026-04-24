@@ -40,7 +40,12 @@ import {
   useTransition,
 } from "react";
 import { toast } from "sonner";
-import { RunFilesTable, statusLabel } from "./run-files-table";
+import {
+  EditableRunFilesTable,
+  ReadOnlyRunFilesTable,
+  statusLabel,
+} from "./run-files-table";
+import { WatcherGatedUploadButton } from "./watcher-gated-upload-button";
 
 const PAGE_SIZE = 10;
 
@@ -474,7 +479,7 @@ export function RunFilesSection({
               Clear selection
             </Button>
             <div className="ml-auto flex gap-1">
-              <Button
+              <WatcherGatedUploadButton
                 variant="default"
                 size="sm"
                 className="h-7 gap-1 text-xs"
@@ -487,7 +492,7 @@ export function RunFilesSection({
                   <Upload className="size-3" />
                 )}
                 Upload {selectedDetectedIds.length}
-              </Button>
+              </WatcherGatedUploadButton>
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <Button
@@ -527,10 +532,15 @@ export function RunFilesSection({
           <p className="py-8 text-center text-sm text-muted-foreground">
             No files match your filters.
           </p>
-        ) : (
-          <RunFilesTable
+        ) : isDeleted ? (
+          <ReadOnlyRunFilesTable
             files={paginatedFiles}
-            isDeleted={isDeleted}
+            isPending={isPending}
+            onReprocess={handleReprocess}
+          />
+        ) : (
+          <EditableRunFilesTable
+            files={paginatedFiles}
             isPending={isPending}
             selection={{
               selectedIds,

@@ -52,8 +52,12 @@ Parameters:
 
 Globals:
   Function:
-    Timeout: 300
-    MemorySize: 1024
+    # Large files (e.g. 3-4 GB Hina microscope ND2s) force us near Lambda's
+    # hard limits: 10 GB RAM to hold the decoded image array, 900 s to
+    # download + process, and 10 GB of /tmp (set per-function below) to
+    # land the raw file plus the generated JPG.
+    Timeout: 900
+    MemorySize: 10240
 
 Resources:
   # ---- S3 buckets ----
@@ -112,6 +116,15 @@ Resources:
               S3Key:
                 Rules:
                   - Name: prefix
+                    Value: hina-microscope/
+                  - Name: suffix
+                    Value: .nd2
+            Function: !GetAtt DataHubFunction.Arn
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
                     Value: spectramax-id3-plate-reader/
                   - Name: suffix
                     Value: .xls
@@ -150,7 +163,9 @@ Resources:
       PackageType: Image
       ImageUri: !Ref EcrImageUri
       EphemeralStorage:
-        Size: 512
+        # 10 GB (the Lambda max) — large Hina ND2 uploads need room for the
+        # raw download, the decoded working copy, and the generated JPG.
+        Size: 10240
       Role: !GetAtt LambdaExecutionRole.Arn
       FunctionUrlConfig:
         AuthType: NONE
