@@ -62,6 +62,8 @@ function getVisiblePages(
 
 type StatusFilter =
   | "all"
+  | "raw"
+  | "processed"
   | "pending"
   | "uploaded"
   | "processing"
@@ -73,6 +75,8 @@ const PENDING_STATUSES = new Set(["detected", "upload_requested"]);
 
 function matchesFilter(file: RunFile, filter: StatusFilter): boolean {
   if (filter === "all") return true;
+  if (filter === "raw") return file.category === "raw";
+  if (filter === "processed") return file.category === "processed";
   if (filter === "pending") return PENDING_STATUSES.has(file.status);
   return file.status === filter;
 }
@@ -206,13 +210,26 @@ function RunFilesSectionContent({
     [filteredFiles, currentPage]
   );
 
-  const downloadableFiles = useMemo(
-    () =>
-      activeFiles.filter((f) =>
-        ["uploaded", "processing", "completed", "failed"].includes(f.status)
-      ),
-    [activeFiles]
+  const isDownloadable = (f: RunFile) =>
+    ["uploaded", "processing", "completed", "failed"].includes(f.status);
+
+  // Files in the *currently filtered* view that are eligible for the
+  // archive download. The "Download all" button reflects this set so
+  // status/search filters narrow the zip to match what's on screen.
+  const filteredDownloadableFiles = useMemo(
+    () => filteredFiles.filter(isDownloadable),
+    [filteredFiles]
   );
+
+  // When no filters are active, omit `file_ids` so the URL stays short and
+  // the archive route falls back to its "all downloadable files in run"
+  // path. Otherwise serialize the filtered set so the server zips exactly
+  // what the user sees.
+  const isFilterActive =
+    searchQuery.trim() !== "" || statusFilter !== "all" || showDismissed;
+  const downloadHref = isFilterActive
+    ? `/api/v1/instruments/${instrumentId}/runs/${runId}/download-archive?file_ids=${filteredDownloadableFiles.map((f) => f.id).join(",")}`
+    : `/api/v1/instruments/${instrumentId}/runs/${runId}/download-archive`;
 
   // Summary counts
   const pendingCount = activeFiles.filter((f) =>
@@ -256,6 +273,12 @@ function RunFilesSectionContent({
             <SelectContent>
               <SelectItem value="all" className="text-sm">
                 All ({activeFiles.length})
+              </SelectItem>
+              <SelectItem value="raw" className="text-sm">
+                Raw
+              </SelectItem>
+              <SelectItem value="processed" className="text-sm">
+                Processed
               </SelectItem>
               <SelectItem value="pending" className="text-sm">
                 Pending
@@ -321,18 +344,16 @@ function RunFilesSectionContent({
               {showDismissed ? "Hide dismissed" : "Show dismissed"}
             </Button>
           )}
-          {downloadableFiles.length > 0 && (
+          {filteredDownloadableFiles.length > 0 && (
             <Button
               variant="outline"
               size="sm"
               className="h-8 gap-1 text-sm"
               asChild
             >
-              <a
-                href={`/api/v1/instruments/${instrumentId}/runs/${runId}/download-archive`}
-              >
+              <a href={downloadHref}>
                 <Download className="size-3" />
-                Download all
+                Download all ({filteredDownloadableFiles.length})
               </a>
             </Button>
           )}

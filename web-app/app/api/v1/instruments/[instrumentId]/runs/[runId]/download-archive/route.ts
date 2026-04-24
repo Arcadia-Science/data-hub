@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
 import { getS3ObjectStream } from "@/lib/s3";
 import archiver from "archiver";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { PassThrough, Readable } from "node:stream";
 
@@ -13,12 +13,33 @@ type RouteContext = {
   params: Promise<{ instrumentId: string; runId: string }>;
 };
 
+// Parse `?file_ids=1,2,3` (or repeated `?file_ids=1&file_ids=2`) into a
+// deduped array of positive integers. Anything malformed is silently dropped
+// so the request still resolves against whatever valid IDs were supplied.
+function parseFileIdsParam(searchParams: URLSearchParams): number[] | null {
+  const raw = searchParams.getAll("file_ids");
+  if (raw.length === 0) return null;
+  const ids = new Set<number>();
+  for (const entry of raw) {
+    for (const part of entry.split(",")) {
+      const n = Number.parseInt(part.trim(), 10);
+      if (Number.isInteger(n) && n > 0) ids.add(n);
+    }
+  }
+  return ids.size > 0 ? Array.from(ids) : [];
+}
+
 // ---------------------------------------------------------------------------
 // GET /api/v1/instruments/:instrumentId/runs/:runId/download-archive
 //
 // Streams a zip archive containing all active, uploaded files for a run.
 // Files are fetched from S3 and piped directly into the archive without
 // buffering entire objects in memory.
+//
+// Optional `?file_ids=1,2,3` narrows the archive to a specific subset (used
+// by the UI's "Download all" button to honor active table filters). IDs are
+// always intersected with the run's own files, so callers can't reach files
+// belonging to other runs.
 // ---------------------------------------------------------------------------
 
 export async function GET(request: NextRequest, { params }: RouteContext) {
@@ -38,6 +59,19 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     );
   }
 
+  const fileIdsFilter = parseFileIdsParam(request.nextUrl.searchParams);
+
+  const conditions = [
+    eq(files.instrumentRunId, run.id),
+    isNull(files.deletedAt),
+  ];
+  if (fileIdsFilter !== null) {
+    if (fileIdsFilter.length === 0) {
+      return apiError(404, NOT_FOUND, "No downloadable files for this run");
+    }
+    conditions.push(inArray(files.id, fileIdsFilter));
+  }
+
   const fileRows = await db
     .select({
       id: files.id,
@@ -46,7 +80,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       s3Key: files.s3Key,
     })
     .from(files)
-    .where(and(eq(files.instrumentRunId, run.id), isNull(files.deletedAt)));
+    .where(and(...conditions));
 
   const downloadable = fileRows.filter((f) => f.s3Bucket && f.s3Key);
 
