@@ -24,6 +24,9 @@ type FilterParamKey =
   | "gel_wavelength"
   | "gel_color"
   | "dye_channel"
+  | "hina_channel"
+  | "hina_dimension"
+  | "hina_size"
   | "ran_by";
 
 // Options accept either plain strings (value == label) or { value, label }

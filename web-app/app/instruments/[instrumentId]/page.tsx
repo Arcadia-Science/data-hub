@@ -11,6 +11,7 @@ import {
 import {
   buildRunListQuery,
   getGelDocFilterOptions,
+  getHinaFilterOptions,
   getPlateReaderFilterOptions,
   getQpcrFilterOptions,
   getRanByFilterOptions,
@@ -64,6 +65,9 @@ export default async function InstrumentDetailPage({
       gelWavelength: filters.gel_wavelength ?? undefined,
       gelColor: filters.gel_color ?? undefined,
       dyeChannel: filters.dye_channel ?? undefined,
+      hinaChannel: filters.hina_channel ?? undefined,
+      hinaDimension: filters.hina_dimension ?? undefined,
+      hinaSize: filters.hina_size ?? undefined,
       ranBy: filters.ran_by ?? undefined,
     }),
   ]);
@@ -73,16 +77,23 @@ export default async function InstrumentDetailPage({
   const isPlateReader = instrument.instrumentType === "plate_reader";
   const isGelDoc = instrument.instrumentType === "gel_doc";
   const isQpcr = instrument.instrumentType === "qpcr";
+  const isHina = instrument.instrumentType === "hina_microscope";
 
   // Fetch distinct metadata values for instrument-specific column filter dropdowns.
   // `ranByOptions` applies to every instrument type.
-  const [filterOptions, gelDocFilterOptions, qpcrFilterOptions, ranByUsers] =
-    await Promise.all([
-      isPlateReader ? getPlateReaderFilterOptions(instrumentId) : undefined,
-      isGelDoc ? getGelDocFilterOptions(instrumentId) : undefined,
-      isQpcr ? getQpcrFilterOptions(instrumentId) : undefined,
-      getRanByFilterOptions(instrumentId),
-    ]);
+  const [
+    filterOptions,
+    gelDocFilterOptions,
+    qpcrFilterOptions,
+    hinaFilterOptions,
+    ranByUsers,
+  ] = await Promise.all([
+    isPlateReader ? getPlateReaderFilterOptions(instrumentId) : undefined,
+    isGelDoc ? getGelDocFilterOptions(instrumentId) : undefined,
+    isQpcr ? getQpcrFilterOptions(instrumentId) : undefined,
+    isHina ? getHinaFilterOptions(instrumentId) : undefined,
+    getRanByFilterOptions(instrumentId),
+  ]);
 
   const hasFilters =
     filters.search !== "" ||
@@ -97,6 +108,9 @@ export default async function InstrumentDetailPage({
     filters.gel_wavelength !== null ||
     filters.gel_color !== null ||
     filters.dye_channel !== null ||
+    filters.hina_channel !== null ||
+    filters.hina_dimension !== null ||
+    filters.hina_size !== null ||
     filters.ran_by !== null;
 
   const currentUserId = session.user?.id ?? null;
@@ -142,6 +156,7 @@ export default async function InstrumentDetailPage({
               filterOptions={filterOptions}
               gelDocFilterOptions={gelDocFilterOptions}
               qpcrFilterOptions={qpcrFilterOptions}
+              hinaFilterOptions={hinaFilterOptions}
               ranByOptions={ranByOptions}
               totalCount={runResult.pagination.total}
               pendingUploadCount={pendingUploadCount}

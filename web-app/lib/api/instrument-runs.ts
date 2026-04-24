@@ -1,5 +1,6 @@
 import { parse } from "csv-parse/sync";
 
+import { formatHinaSizes } from "@/components/runs/run-metadata-badges";
 import { db } from "@/lib/db";
 import {
   files,
@@ -144,6 +145,12 @@ type RunListFilters = {
   gelWavelength?: string;
   gelColor?: string;
   dyeChannel?: string;
+  hinaChannel?: string;
+  hinaDimension?: string;
+  // Raw sizes JSONB object serialized as a string; compared via jsonb equality
+  // so key ordering differences between client serialization and stored value
+  // don't matter.
+  hinaSize?: string;
   // Either a userId (match runs attributed to that user) or the reserved
   // sentinel "unattributed" (match runs with no attributions).
   ranBy?: string;
@@ -248,6 +255,23 @@ export async function buildRunListQuery(filters: RunListFilters) {
   if (filters.dyeChannel) {
     conditions.push(
       sql`${instrumentRuns.metadata}->'dye_channels' @> ${JSON.stringify([filters.dyeChannel])}::jsonb`
+    );
+  }
+
+  // Hina microscope metadata column filters (leverages the GIN index).
+  if (filters.hinaChannel) {
+    conditions.push(
+      sql`${instrumentRuns.metadata}->'channels' @> ${JSON.stringify([{ name: filters.hinaChannel }])}::jsonb`
+    );
+  }
+  if (filters.hinaDimension) {
+    conditions.push(
+      sql`${instrumentRuns.metadata}->'dimensions' @> ${JSON.stringify([filters.hinaDimension])}::jsonb`
+    );
+  }
+  if (filters.hinaSize) {
+    conditions.push(
+      sql`${instrumentRuns.metadata}->'sizes' = ${filters.hinaSize}::jsonb`
     );
   }
 
@@ -523,6 +547,7 @@ const ALLOWED_METADATA_ARRAY_KEYS = new Set([
   "wavelengths",
   "colors",
   "dye_channels",
+  "dimensions",
 ]);
 
 async function distinctMetadataArrayValues(
@@ -573,6 +598,73 @@ export async function getQpcrFilterOptions(
     "dye_channels"
   );
   return { dyeChannels };
+}
+
+// ---------------------------------------------------------------------------
+// Distinct metadata values for Hina microscope column filters.
+// ---------------------------------------------------------------------------
+
+// Sizes are stored as a JSONB object keyed by dimension (e.g.
+// `{"C":4,"X":256,"Y":256}`). We return the raw jsonb object for equality
+// filtering together with a pre-formatted label so the client doesn't need to
+// reimplement the formatting rules.
+export type HinaSizeOption = { value: string; label: string };
+
+export type HinaFilterOptions = {
+  channels: string[];
+  dimensions: string[];
+  sizes: HinaSizeOption[];
+};
+
+async function distinctHinaChannelNames(
+  instrumentId: string
+): Promise<string[]> {
+  const rows = await db.execute<{ value: string }>(
+    sql`select distinct elem->>'name' as value
+        from ${instrumentRuns},
+             lateral jsonb_array_elements(${instrumentRuns.metadata}->'channels') as elem
+        where ${instrumentRuns.instrumentId} = ${instrumentId}
+          and ${instrumentRuns.deletedAt} is null
+          and jsonb_typeof(${instrumentRuns.metadata}->'channels') = 'array'
+          and elem->>'name' is not null
+        order by value`
+  );
+  return Array.from(rows, (r) => r.value).filter(Boolean);
+}
+
+async function distinctHinaSizeObjects(
+  instrumentId: string
+): Promise<Record<string, unknown>[]> {
+  const rows = await db.execute<{ value: Record<string, unknown> }>(
+    sql`select distinct ${instrumentRuns.metadata}->'sizes' as value
+        from ${instrumentRuns}
+        where ${instrumentRuns.instrumentId} = ${instrumentId}
+          and ${instrumentRuns.deletedAt} is null
+          and jsonb_typeof(${instrumentRuns.metadata}->'sizes') = 'object'`
+  );
+  return Array.from(rows, (r) => r.value).filter(
+    (v): v is Record<string, unknown> => v !== null && typeof v === "object"
+  );
+}
+
+export async function getHinaFilterOptions(
+  instrumentId: string
+): Promise<HinaFilterOptions> {
+  const [channels, dimensions, sizeObjects] = await Promise.all([
+    distinctHinaChannelNames(instrumentId),
+    distinctMetadataArrayValues(instrumentId, "dimensions"),
+    distinctHinaSizeObjects(instrumentId),
+  ]);
+
+  const sizes = sizeObjects
+    .map((obj) => ({
+      value: JSON.stringify(obj),
+      label: formatHinaSizes(obj),
+    }))
+    .filter((s) => s.label.length > 0)
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  return { channels, dimensions, sizes };
 }
 
 // ---------------------------------------------------------------------------

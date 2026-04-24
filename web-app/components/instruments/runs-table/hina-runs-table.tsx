@@ -2,6 +2,7 @@ import { RelativeTime } from "@/components/dashboard/relative-time";
 import {
   extractHinaChannels,
   formatHinaSizes,
+  getHinaChannelBadgeStyle,
 } from "@/components/runs/run-metadata-badges";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -12,10 +13,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { HinaFilterOptions } from "@/lib/api/instrument-runs";
 import { runRowToRef } from "@/lib/runs/row-actions";
 import { cn, formatBytes } from "@/lib/utils";
 
-import type { RunsTableProps } from ".";
+import type { RunRow } from ".";
 import { ClickableRow } from "./clickable-row";
 import { FilterableColumnHeader } from "./filterable-column-header";
 import {
@@ -34,8 +36,14 @@ import { RunStatusIcon } from "./run-status-icon";
 export function HinaRunsTable({
   data,
   instrumentId,
+  filterOptions,
   ranByOptions,
-}: RunsTableProps) {
+}: {
+  data: RunRow[];
+  instrumentId: string;
+  filterOptions: HinaFilterOptions;
+  ranByOptions: { value: string; label: string }[];
+}) {
   const runRefs: RunRef[] = data.map(runRowToRef);
 
   return (
@@ -52,9 +60,27 @@ export function HinaRunsTable({
           <TableHead className="text-right">
             <RawFileColumnHeader label="Size" />
           </TableHead>
-          <TableHead>Channels</TableHead>
-          <TableHead>Dimensions</TableHead>
-          <TableHead>Sizes</TableHead>
+          <TableHead>
+            <FilterableColumnHeader
+              label="Channels"
+              paramKey="hina_channel"
+              options={filterOptions.channels}
+            />
+          </TableHead>
+          <TableHead>
+            <FilterableColumnHeader
+              label="Dimensions"
+              paramKey="hina_dimension"
+              options={filterOptions.dimensions}
+            />
+          </TableHead>
+          <TableHead>
+            <FilterableColumnHeader
+              label="Sizes"
+              paramKey="hina_size"
+              options={filterOptions.sizes}
+            />
+          </TableHead>
           <TableHead>
             <FilterableColumnHeader
               label="Ran By"
@@ -115,21 +141,19 @@ export function HinaRunsTable({
                 ) : (
                   <div className="flex flex-wrap gap-1">
                     {channels.map((c) => {
-                      const style = c.color
-                        ? { borderColor: c.color, color: c.color }
-                        : undefined;
+                      const { badge, dot } = getHinaChannelBadgeStyle(c.color);
                       return (
                         <Badge
                           key={c.name}
                           variant="outline"
                           className="font-mono"
-                          style={style}
+                          style={badge}
                         >
                           {c.color && (
                             <span
                               aria-hidden="true"
                               className="inline-block size-2 rounded-full"
-                              style={{ backgroundColor: c.color }}
+                              style={dot}
                             />
                           )}
                           {c.name}

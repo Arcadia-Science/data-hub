@@ -232,6 +232,89 @@ export type HinaChannel = {
   color: string | null;
 };
 
+// Parse `#rgb`, `#rrggbb`, `rgb(...)`, or the `white` literal into RGB. Anything
+// else (named colors beyond `white`, hsl(), etc.) returns null and the caller
+// falls back to using the raw color as-is.
+function parseColorToRgb(
+  color: string
+): { r: number; g: number; b: number } | null {
+  const trimmed = color.trim();
+  const hex = trimmed.replace(/^#/, "");
+  if (/^[0-9a-f]{3}$/i.test(hex)) {
+    const [r, g, b] = hex.split("").map((c) => Number.parseInt(c + c, 16));
+    return { r, g, b };
+  }
+  if (/^[0-9a-f]{6}$/i.test(hex)) {
+    return {
+      r: Number.parseInt(hex.slice(0, 2), 16),
+      g: Number.parseInt(hex.slice(2, 4), 16),
+      b: Number.parseInt(hex.slice(4, 6), 16),
+    };
+  }
+  const rgbMatch = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/.exec(trimmed);
+  if (rgbMatch) {
+    return {
+      r: Number.parseInt(rgbMatch[1], 10),
+      g: Number.parseInt(rgbMatch[2], 10),
+      b: Number.parseInt(rgbMatch[3], 10),
+    };
+  }
+  if (trimmed.toLowerCase() === "white") return { r: 255, g: 255, b: 255 };
+  return null;
+}
+
+function relativeLuminance({
+  r,
+  g,
+  b,
+}: {
+  r: number;
+  g: number;
+  b: number;
+}): number {
+  const linear = (v: number) => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
+}
+
+// Channel colors come straight from instrument metadata, so any value is
+// possible — including white, which disappears against the light theme's
+// white surface. For near-white colors we blend with `--foreground` so the
+// border/text remain visible in light mode while staying vivid in dark mode.
+const NEAR_WHITE_LUMINANCE = 0.85;
+
+export type ChannelBadgeStyle = {
+  badge: React.CSSProperties | undefined;
+  dot: React.CSSProperties;
+};
+
+export function getHinaChannelBadgeStyle(
+  color: string | null
+): ChannelBadgeStyle {
+  if (!color) return { badge: undefined, dot: {} };
+  const rgb = parseColorToRgb(color);
+  const isNearWhite =
+    rgb !== null && relativeLuminance(rgb) > NEAR_WHITE_LUMINANCE;
+  if (isNearWhite) {
+    const adapted = `color-mix(in oklab, ${color}, var(--foreground) 45%)`;
+    return {
+      badge: { borderColor: adapted, color: adapted },
+      // Keep the true channel color on the dot so the swatch still reads as
+      // "white", but ring it with the theme border so it stays visible.
+      dot: {
+        backgroundColor: color,
+        boxShadow: "inset 0 0 0 1px var(--border)",
+      },
+    };
+  }
+  return {
+    badge: { borderColor: color, color },
+    dot: { backgroundColor: color },
+  };
+}
+
 // Preferred dimension order for the `sizes` badge. ND2 files commonly include
 // C (channels), Z (z-slices), T (time), Y (height), X (width); we render them
 // in this order when present and append any unrecognised keys at the end so
@@ -297,14 +380,14 @@ export function hasHinaMetadata(metadata: Record<string, unknown>) {
 // Used for Hina channels since channel color is run-specific and can't be
 // baked into a static Tailwind palette.
 function ChannelBadge({ name, color }: HinaChannel) {
-  const style = color ? { borderColor: color, color } : undefined;
+  const { badge, dot } = getHinaChannelBadgeStyle(color);
   return (
-    <Badge variant="outline" className="font-mono" style={style}>
+    <Badge variant="outline" className="font-mono" style={badge}>
       {color && (
         <span
           aria-hidden="true"
           className="inline-block size-2 rounded-full"
-          style={{ backgroundColor: color }}
+          style={dot}
         />
       )}
       {name}

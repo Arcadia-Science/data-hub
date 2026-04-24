@@ -1,5 +1,6 @@
 import type {
   GelDocFilterOptions,
+  HinaFilterOptions,
   PlateReaderFilterOptions,
   QpcrFilterOptions,
   RunListRow,
@@ -35,6 +36,7 @@ export function InstrumentRunsTable({
   filterOptions,
   gelDocFilterOptions,
   qpcrFilterOptions,
+  hinaFilterOptions,
   ranByOptions,
   totalCount,
   pendingUploadCount,
@@ -48,6 +50,7 @@ export function InstrumentRunsTable({
   filterOptions?: PlateReaderFilterOptions;
   gelDocFilterOptions?: GelDocFilterOptions;
   qpcrFilterOptions?: QpcrFilterOptions;
+  hinaFilterOptions?: HinaFilterOptions;
   ranByOptions: RanByOption[];
   totalCount: number;
   pendingUploadCount: number;
@@ -104,6 +107,7 @@ export function InstrumentRunsTable({
         <HinaRunsTable
           data={data}
           instrumentId={instrumentId}
+          filterOptions={hinaFilterOptions!}
           ranByOptions={ranByOptions}
         />
       );
