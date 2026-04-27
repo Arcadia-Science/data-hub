@@ -51,7 +51,7 @@ export function InstrumentRunsTableShell({
 }) {
   if (isEmpty) {
     return (
-      <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed py-16">
+      <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-background py-16 dark:bg-muted">
         <SearchX className="size-8 text-muted-foreground" />
         <p className="text-sm text-muted-foreground">
           {hasFilters
@@ -63,7 +63,7 @@ export function InstrumentRunsTableShell({
   }
 
   return (
-    <div className="rounded-lg border">
+    <div className="rounded-lg border bg-background dark:bg-muted">
       {children}
       <RunsTableFooter
         shownCount={shownCount}

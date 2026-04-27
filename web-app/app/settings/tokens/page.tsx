@@ -56,7 +56,7 @@ export default async function TokensPage() {
 
       <div className="mt-6">
         {tokens.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12">
+          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed bg-background py-12 dark:bg-muted">
             <KeyRound className="size-10 text-muted-foreground/50" />
             <p className="mt-3 text-sm font-medium text-muted-foreground">
               No access tokens yet
@@ -66,7 +66,7 @@ export default async function TokensPage() {
             </p>
           </div>
         ) : (
-          <div className="rounded-lg border">
+          <div className="rounded-lg border bg-background dark:bg-muted">
             <Table>
               <TableHeader>
                 <TableRow>

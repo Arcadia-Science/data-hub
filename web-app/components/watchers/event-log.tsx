@@ -89,7 +89,7 @@ export function EventLog({
   if (events.length === 0) {
     return (
       <TablePendingBoundary>
-        <div className="flex flex-col items-center justify-center gap-2 py-8">
+        <div className="flex flex-col items-center justify-center gap-2 rounded-md border border-dashed bg-background py-8 dark:bg-muted">
           <Inbox className="size-6 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">
             No events in this time range.
@@ -100,7 +100,7 @@ export function EventLog({
   }
 
   return (
-    <div className="rounded-md border">
+    <div className="rounded-md border bg-background dark:bg-muted">
       <TablePendingBoundary>
         <Accordion type="multiple" className="divide-y">
           {events.map((event) => (

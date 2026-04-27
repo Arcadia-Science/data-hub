@@ -245,7 +245,7 @@ function RunFilesSectionContent({
   return (
     <div className="flex flex-col gap-2">
       <h2 className="text-sm font-semibold">Files</h2>
-      <div className="rounded-lg border">
+      <div className="rounded-lg border bg-background dark:bg-muted">
         {/* Toolbar: search, filter, sort */}
         <div className="flex items-center gap-2 border-b px-3 py-2">
           <div className="relative flex-1">
