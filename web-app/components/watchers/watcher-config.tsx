@@ -9,7 +9,7 @@ export async function WatcherConfig({
 }) {
   if (!configYaml) {
     return (
-      <div className="flex flex-col items-center justify-center gap-2 py-8">
+      <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-background py-8 dark:bg-muted">
         <FileText className="size-6 text-muted-foreground" />
         <p className="text-sm text-muted-foreground">No config pushed yet.</p>
       </div>
@@ -27,7 +27,7 @@ export async function WatcherConfig({
       <CodeBlock
         code={configYaml}
         lang="yaml"
-        className="overflow-x-auto rounded-md bg-muted text-sm [&_pre]:p-4"
+        className="overflow-x-auto rounded-md border bg-background text-sm dark:bg-muted [&_pre]:p-4"
       />
     </div>
   );

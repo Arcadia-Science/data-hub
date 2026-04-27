@@ -57,7 +57,7 @@ export function InstrumentsTable({
 }) {
   if (data.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed py-16">
+      <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-background py-16 dark:bg-muted">
         <SearchX className="size-8 text-muted-foreground" />
         <p className="text-sm text-muted-foreground">
           No instruments configured yet.
@@ -67,7 +67,7 @@ export function InstrumentsTable({
   }
 
   return (
-    <div className="rounded-lg border">
+    <div className="rounded-lg border bg-background dark:bg-muted">
       <Table>
         <TableHeader>
           <TableRow>

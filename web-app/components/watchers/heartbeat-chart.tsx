@@ -188,7 +188,7 @@ export function HeartbeatChart({
 
   if (data.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center gap-2 py-8">
+      <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-background py-8 dark:bg-muted">
         <HeartPulse className="size-6 text-muted-foreground" />
         <p className="text-sm text-muted-foreground">
           No heartbeats in this time range.
@@ -198,7 +198,7 @@ export function HeartbeatChart({
   }
 
   return (
-    <div>
+    <div className="rounded-lg border bg-background p-4 dark:bg-muted">
       <div ref={scrollRef} className={cn(needsScroll && "overflow-x-auto")}>
         <div
           style={

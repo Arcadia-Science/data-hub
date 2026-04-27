@@ -38,7 +38,7 @@ export function WatcherDetailTabs({
 
   return (
     <Tabs value={tab} onValueChange={setTab}>
-      <TabsList className="mb-4">
+      <TabsList className="mb-4" variant="line">
         <TabsTrigger value="logs">Logs</TabsTrigger>
         <TabsTrigger value="status">Status</TabsTrigger>
         <TabsTrigger value="configuration">Configuration</TabsTrigger>
