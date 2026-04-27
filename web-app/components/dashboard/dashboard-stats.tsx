@@ -76,7 +76,7 @@ export function DashboardStatsCards({ stats }: { stats: DashboardStats }) {
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <StatCard
-        label="Runs today"
+        label="Runs in the last 24 hours"
         value={formatNumber(runsToday.total)}
         subline={
           <FilesProcessedSubline
@@ -87,7 +87,7 @@ export function DashboardStatsCards({ stats }: { stats: DashboardStats }) {
         }
       />
       <StatCard
-        label="Runs this week"
+        label="Runs in the last 7 days"
         value={formatNumber(runsThisWeek.total)}
         subline={
           <FilesProcessedSubline

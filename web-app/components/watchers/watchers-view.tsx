@@ -1,6 +1,6 @@
 "use client";
 
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WatchersTable } from "@/components/watchers/watchers-table";
 import type { WatcherListItem } from "@/lib/api/watchers";
 import { useState } from "react";
@@ -20,29 +20,19 @@ export function WatchersView({
   const [tab, setTab] = useState<Tab>("active");
 
   return (
-    <>
-      <div className="flex items-center gap-2">
-        <ToggleGroup
-          type="single"
-          value={tab}
-          onValueChange={(v) => {
-            if (v) setTab(v as Tab);
-          }}
-          variant="outline"
-          size="sm"
-        >
-          <ToggleGroupItem value="active">
-            Active ({activeData.length})
-          </ToggleGroupItem>
-          <ToggleGroupItem value="deregistered">
-            Deregistered ({deregisteredData.length})
-          </ToggleGroupItem>
-        </ToggleGroup>
-      </div>
-      <WatchersTable
-        data={tab === "active" ? activeData : deregisteredData}
-        isDeregisteredView={tab === "deregistered"}
-      />
-    </>
+    <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
+      <TabsList variant="line">
+        <TabsTrigger value="active">Active ({activeData.length})</TabsTrigger>
+        <TabsTrigger value="deregistered">
+          Deregistered ({deregisteredData.length})
+        </TabsTrigger>
+      </TabsList>
+      <TabsContent value="active" className="mt-2">
+        <WatchersTable data={activeData} />
+      </TabsContent>
+      <TabsContent value="deregistered" className="mt-2">
+        <WatchersTable data={deregisteredData} isDeregisteredView />
+      </TabsContent>
+    </Tabs>
   );
 }
