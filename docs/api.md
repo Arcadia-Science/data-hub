@@ -49,8 +49,9 @@ Tokens are hashed with SHA-256 before storage. The plaintext token is shown once
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/api/v1/watchers` | List all watchers |
-| `POST` | `/api/v1/watchers/register` | Register a new watcher |
+| `POST` | `/api/v1/watchers/register` | Register a new watcher (returns `409 CONFLICT` if the instrument already has an active watcher; the existing watcher's id is included in `error.details.existing_watcher_id`) |
 | `GET` | `/api/v1/watchers/:watcherId` | Get watcher details |
+| `DELETE` | `/api/v1/watchers/:watcherId` | Deregister (soft-delete) a watcher |
 | `POST` | `/api/v1/watchers/:watcherId/heartbeat` | Send a heartbeat |
 | `GET` | `/api/v1/watchers/:watcherId/heartbeats` | Get heartbeat history |
 | `POST` | `/api/v1/watchers/:watcherId/events` | Submit watcher events |

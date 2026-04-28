@@ -70,6 +70,43 @@ class TestRegisterWatcher:
         detail = client.get_instrument(instrument_id)
         assert detail.watcher_count == 1
 
+    def test_register_watcher_active_conflict_409(
+        self, client: DataHubClient, instrument_id: str
+    ) -> None:
+        """A second registration for an instrument with an active watcher must
+        be rejected with 409 and surface the existing watcher id in details."""
+        first = client.register_watcher(instrument_id, hostname="LAB-PC-01")
+
+        with pytest.raises(ApiError) as exc_info:
+            client.register_watcher(instrument_id, hostname="LAB-PC-02")
+
+        assert exc_info.value.status_code == 409
+        detail = exc_info.value.detail
+        assert detail is not None
+        assert detail.code == "CONFLICT"
+        assert detail.details is not None
+        assert detail.details.get("existing_watcher_id") == first.watcher_id
+
+    def test_register_watcher_succeeds_after_deregister(
+        self,
+        client: DataHubClient,
+        instrument_id: str,
+        integration_env: IntegrationEnv,
+    ) -> None:
+        """Once the prior active watcher is soft-deleted, a fresh registration
+        for the same instrument should succeed and return a new watcher id."""
+        first = client.register_watcher(instrument_id, hostname="LAB-PC-01")
+
+        db_update(
+            integration_env.db_dsn,
+            "UPDATE watchers SET deleted_at = now() WHERE id = %s",
+            (first.watcher_id,),
+        )
+
+        second = client.register_watcher(instrument_id, hostname="LAB-PC-02")
+        assert second.watcher_id
+        assert second.watcher_id != first.watcher_id
+
 
 # ------------------------------------------------------------------
 # Config push / checksum

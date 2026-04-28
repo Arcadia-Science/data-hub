@@ -71,6 +71,13 @@
       "when": 1777404985691,
       "tag": "0009_clammy_tyger_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1777414700388,
+      "tag": "0010_enforce_active_watcher_unique",
+      "breakpoints": true
     }
   ]
 }

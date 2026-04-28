@@ -238,7 +238,9 @@ export const watchers = pgTable(
     }),
   },
   (watcher) => [
-    index("idx_watchers_instrument_id")
+    // Partial unique index — at most one active watcher per instrument.
+    // Doubles as the lookup index used by getWatcherList / findActiveWatcher.
+    uniqueIndex("uq_watchers_active_instrument_id")
       .on(watcher.instrumentId)
       .where(sql`${watcher.deletedAt} is null`),
   ]
