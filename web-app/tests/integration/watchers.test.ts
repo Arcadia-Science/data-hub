@@ -53,6 +53,48 @@ describe("Watchers API", () => {
     watcherId = data.watcher_id;
   });
 
+  // Enforces the 1:1 active-watcher-per-instrument invariant. The DB-level
+  // partial unique index on `watchers (instrument_id) WHERE deleted_at IS
+  // NULL` is the actual safety net; the route returns 409 with the existing
+  // watcher id so the CLI can point the operator at the deregister flow.
+  it("POST /api/v1/watchers/register rejects when active watcher exists for instrument", async () => {
+    const res = await api("/api/v1/watchers/register", {
+      method: "POST",
+      token,
+      body: {
+        instrument_id: instrumentId,
+        hostname: "lab-pc-02",
+      },
+    });
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error.code).toBe("CONFLICT");
+    expect(body.error.details?.existing_watcher_id).toBe(watcherId);
+  });
+
+  it("POST /api/v1/watchers/register allows registration for a different instrument", async () => {
+    const otherInstrumentId = "watcher-test-instrument-other";
+    const db = getTestDb();
+    await db.insert(instruments).values({
+      id: otherInstrumentId,
+      displayName: "Watcher Test Instrument (Other)",
+      status: "active",
+    });
+
+    const res = await api("/api/v1/watchers/register", {
+      method: "POST",
+      token,
+      body: {
+        instrument_id: otherInstrumentId,
+        hostname: "lab-pc-other",
+      },
+    });
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.watcher_id).toBeTruthy();
+    expect(data.watcher_id).not.toBe(watcherId);
+  });
+
   it("POST /api/v1/watchers/register rejects missing instrument_id", async () => {
     const res = await api("/api/v1/watchers/register", {
       method: "POST",
@@ -345,5 +387,22 @@ describe("Watchers API", () => {
     const found = body.data.find((w: { id: string }) => w.id === watcherId);
     expect(found).toBeTruthy();
     expect(found.deleted_at).toBeTruthy();
+  });
+
+  // Round-trip: once the original watcher is deregistered, the partial
+  // unique index permits a fresh registration for the same instrument.
+  it("POST /api/v1/watchers/register succeeds again after the previous watcher is deregistered", async () => {
+    const res = await api("/api/v1/watchers/register", {
+      method: "POST",
+      token,
+      body: {
+        instrument_id: instrumentId,
+        hostname: "lab-pc-replacement",
+      },
+    });
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.watcher_id).toBeTruthy();
+    expect(data.watcher_id).not.toBe(watcherId);
   });
 });

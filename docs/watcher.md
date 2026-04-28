@@ -40,7 +40,7 @@ Interactive setup wizard that:
 2. Prompts for an API key (or reads `DATA_HUB_API_KEY` from the environment). The key is saved to a per-environment file at `~/.data-hub/.env.<environment>` (e.g. `.env.staging`), so switching between environments later doesn't require re-entering it.
 3. Fetches existing instruments from the API or registers a new one.
 4. Prompts for the watch directory, file patterns, run detection pattern, stability period, and upload mode.
-5. Registers the watcher with the API.
+5. Registers the watcher with the API. An instrument can have at most one active (non-deregistered) watcher at a time — registration fails if one already exists, and the CLI prints the existing watcher's id along with the deregister command needed to free it up.
 6. Saves the config to `~/.data-hub/config.yaml`, the API key to `~/.data-hub/.env.<environment>`, and syncs the config to the API.
 
 ### `watch`

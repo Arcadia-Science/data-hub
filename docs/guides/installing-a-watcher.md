@@ -148,6 +148,15 @@ Add `--dry-run` to preview without uploading.
 
 The instrument was registered but hasn't been confirmed by an admin yet. Ask your admin to click "Confirm" on the instrument in the web app's Instruments page.
 
+### "Instrument already has an active watcher"
+
+Each instrument can have at most one active watcher at a time. If `init` fails with this error, an earlier install (often on a different PC, or before a reimage) is still registered against the instrument. The CLI prints the existing watcher's id; deregister it before re-running `init`:
+
+- **Web UI** — go to **Watchers**, open the existing watcher, and click **Deregister**.
+- **API** — `curl -X DELETE -H "Authorization: Bearer $DATA_HUB_API_KEY" https://<host>/api/v1/watchers/<existing_watcher_id>`
+
+Deregistration is a soft-delete: heartbeats, events, and runs reported by the old watcher remain visible in the **Deregistered** tab for auditing.
+
 ### "Connection error" or "Request timed out"
 
 The watcher can't reach the Data Hub API. Check:

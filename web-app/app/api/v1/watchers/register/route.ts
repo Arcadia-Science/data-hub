@@ -1,13 +1,14 @@
 import { authenticateRequest } from "@/lib/api/auth";
 import {
   apiError,
+  CONFLICT,
   NOT_FOUND,
   UNAUTHORIZED,
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
 import { db } from "@/lib/db";
 import { instruments, watchers } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 
 export async function POST(request: NextRequest) {
@@ -50,6 +51,27 @@ export async function POST(request: NextRequest) {
       400,
       VALIDATION_ERROR,
       `Instrument '${instrumentId}' is ${instrument.status} and cannot accept new watchers`
+    );
+  }
+
+  // Enforce 1:1 active watcher per instrument. The partial unique index on
+  // `watchers (instrument_id) WHERE deleted_at IS NULL` is the actual safety
+  // net; this lookup gives the CLI a friendlier error with the existing
+  // watcher id so the operator can deregister it.
+  const [existing] = await db
+    .select({ id: watchers.id, hostname: watchers.hostname })
+    .from(watchers)
+    .where(
+      and(eq(watchers.instrumentId, instrumentId), isNull(watchers.deletedAt))
+    )
+    .limit(1);
+
+  if (existing) {
+    return apiError(
+      409,
+      CONFLICT,
+      `Instrument '${instrumentId}' already has an active watcher (id: ${existing.id}). Deregister it before registering a new one.`,
+      { existing_watcher_id: existing.id, hostname: existing.hostname }
     );
   }
 

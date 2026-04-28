@@ -288,6 +288,21 @@ def init(ctx: click.Context, show_key: bool) -> None:
             os_info=f"{platform.system()} {platform.release()}",
         )
     except ApiError as exc:
+        # 409 means another active watcher is already registered for this
+        # instrument. Surface an actionable message pointing the operator at
+        # the deregister flow rather than the raw API error text.
+        if exc.status_code == 409:
+            existing_id = ""
+            if exc.detail and exc.detail.details:
+                existing_id = str(exc.detail.details.get("existing_watcher_id") or "")
+            id_suffix = f" (id: {existing_id})" if existing_id else ""
+            raise click.ClickException(
+                f"Instrument '{selected.id}' already has an active watcher{id_suffix}.\n"
+                "If this is a replacement install, deregister the existing watcher first:\n"
+                "  - In the web UI: Watchers → open the existing watcher → Deregister\n"
+                f"  - Or via API: DELETE /api/v1/watchers/{existing_id or '<watcher_id>'}\n"
+                "Then re-run `data-hub-watcher init`."
+            ) from exc
         raise click.ClickException(f"Failed to register watcher: {exc.message}") from exc
 
     watcher_id = reg.watcher_id
