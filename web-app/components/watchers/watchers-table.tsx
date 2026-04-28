@@ -1,5 +1,4 @@
 import { ClickableRow } from "@/components/instruments/runs-table/clickable-row";
-import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -9,7 +8,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { DeregisterDialog } from "@/components/watchers/deregister-dialog";
-import { statusBadge } from "@/components/watchers/status-badge";
+import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type { WatcherListItem } from "@/lib/api/watchers";
 import { cn, formatRelativeTime } from "@/lib/utils";
 import { SearchX } from "lucide-react";
@@ -49,7 +48,6 @@ export function WatchersTable({
         </TableHeader>
         <TableBody>
           {data.map((row) => {
-            const sb = statusBadge[row.effectiveStatus];
             return (
               <ClickableRow
                 key={row.id}
@@ -78,9 +76,7 @@ export function WatchersTable({
                   </span>
                 </TableCell>
                 <TableCell>
-                  <Badge variant={sb.variant} className="text-[10px]">
-                    {sb.label}
-                  </Badge>
+                  <WatcherStatusBadge status={row.effectiveStatus} />
                 </TableCell>
                 <TableCell>
                   <span className="text-xs text-muted-foreground">
