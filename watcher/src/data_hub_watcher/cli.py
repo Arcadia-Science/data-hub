@@ -21,6 +21,7 @@ from data_hub_watcher.constants import (
     DEFAULT_STABILITY_PERIOD_SECONDS,
     RUN_DETECTION_PRESETS,
     STATE_DB_FILENAME,
+    SUPPORTED_ENVIRONMENTS,
     env_file_path,
     load_env,
     resolve_config_path,
@@ -181,7 +182,7 @@ def init(ctx: click.Context, show_key: bool) -> None:
     # 1. Environment
     environment = click.prompt(
         "Environment",
-        type=click.Choice(["staging", "production", "preview"], case_sensitive=False),
+        type=click.Choice(list(SUPPORTED_ENVIRONMENTS), case_sensitive=False),
     )
 
     api_base_url: str | None = None

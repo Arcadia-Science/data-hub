@@ -301,6 +301,7 @@ def _create_service_class() -> type | None:
             from data_hub_watcher.constants import (
                 API_URLS,
                 STATE_DB_FILENAME,
+                env_file_path,
             )
             from data_hub_watcher.runtime import (
                 build_runtime,
@@ -327,7 +328,18 @@ def _create_service_class() -> type | None:
                 )
                 raise SystemExit(1) from exc
 
-            load_dotenv(env_path)
+            # Mirror the CLI's ``load_env`` semantics: load the base
+            # ``~/.data-hub/.env`` first (for any shared, non-secret values
+            # an operator may keep there), then overlay the registered
+            # env file (typically ``.env.<environment>``, or a custom path
+            # supplied via ``service install --env-path``) so its values
+            # win. Without the base-file load, an operator that splits
+            # shared config from per-environment secrets would see the
+            # service silently miss the shared half.
+            base_env = env_file_path()
+            if base_env != env_path and base_env.exists():
+                load_dotenv(base_env)
+            load_dotenv(env_path, override=True)
             cfg = load_config(path)
             inst = cfg.instrument
 
