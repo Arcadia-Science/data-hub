@@ -32,6 +32,9 @@ class DetectedFileRecord:
     filename: str
     size_bytes: int
     mtime: float
+    # On-disk creation time at the moment the file was reported. NULL for
+    # rows persisted before this column was added (legacy state DBs).
+    file_created_at: float | None = None
 
 
 class StateDB:
@@ -107,6 +110,12 @@ class StateDB:
             "CREATE INDEX IF NOT EXISTS idx_uploaded_files_stat "
             "ON uploaded_files (relative_path, size_bytes, mtime)"
         )
+        # detected_files predates the file_created_at column; add it as
+        # nullable so legacy rows survive the migration. New rows always
+        # populate it (record_detected_files passes the value through).
+        detected_cols = {row[1] for row in self._conn.execute("PRAGMA table_info(detected_files)")}
+        if "file_created_at" not in detected_cols:
+            self._conn.execute("ALTER TABLE detected_files ADD COLUMN file_created_at REAL")
         self._conn.commit()
 
     # ------------------------------------------------------------------
@@ -186,26 +195,27 @@ class StateDB:
     def record_detected_files(
         self,
         run_id: str,
-        files: Iterable[tuple[str, str, int, float]],
+        files: Iterable[tuple[str, str, int, float, float | None]],
     ) -> None:
         """Persist the file manifest for a reported run.
 
         *files* is an iterable of `(relative_path, filename, size_bytes,
-        mtime)` tuples. Rows are upserted so repeated calls for the same
-        run (e.g. as more files stabilise and PATCHes are issued) keep
-        the table consistent with the in-memory `RunState`.
+        mtime, file_created_at)` tuples. Rows are upserted so repeated
+        calls for the same run (e.g. as more files stabilise and PATCHes
+        are issued) keep the table consistent with the in-memory
+        `RunState`. *file_created_at* may be `None` for legacy callers.
         """
         rows = [
-            (run_id, rel_path, filename, size_bytes, mtime)
-            for rel_path, filename, size_bytes, mtime in files
+            (run_id, rel_path, filename, size_bytes, mtime, file_created_at)
+            for rel_path, filename, size_bytes, mtime, file_created_at in files
         ]
         if not rows:
             return
         with self._lock:
             self._conn.executemany(
                 "INSERT OR REPLACE INTO detected_files "
-                "(run_id, relative_path, filename, size_bytes, mtime) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "(run_id, relative_path, filename, size_bytes, mtime, file_created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 rows,
             )
             self._conn.commit()
@@ -234,7 +244,7 @@ class StateDB:
         """Return the persisted file manifest for *run_id*, ordered by path."""
         with self._lock:
             cur = self._conn.execute(
-                "SELECT relative_path, filename, size_bytes, mtime "
+                "SELECT relative_path, filename, size_bytes, mtime, file_created_at "
                 "FROM detected_files WHERE run_id = ? ORDER BY relative_path",
                 (run_id,),
             )
@@ -245,6 +255,7 @@ class StateDB:
                 filename=row[1],
                 size_bytes=row[2],
                 mtime=row[3],
+                file_created_at=row[4],
             )
             for row in rows
         ]

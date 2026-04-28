@@ -186,7 +186,11 @@ function FileInfoCells({ file }: { file: RunFile }) {
         {formatBytes(file.sizeBytes)}
       </TableCell>
       <TableCell className="py-2 text-sm text-muted-foreground">
-        {file.createdAt ? formatDateTime(file.createdAt) : "—"}
+        {file.fileCreatedAt
+          ? formatDateTime(file.fileCreatedAt)
+          : file.createdAt
+            ? formatDateTime(file.createdAt)
+            : "—"}
       </TableCell>
       <TableCell className="py-2">
         <StatusBadge file={file} />

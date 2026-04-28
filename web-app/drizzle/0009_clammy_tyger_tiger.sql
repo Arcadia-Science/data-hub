@@ -1,0 +1,1 @@
+ALTER TABLE "files" ADD COLUMN "file_created_at" timestamp with time zone;

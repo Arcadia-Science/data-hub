@@ -170,6 +170,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     uploaded_at: updated.uploadedAt,
     processed_at: updated.processedAt,
     created_at: updated.createdAt,
+    file_created_at: updated.fileCreatedAt,
   });
 }
 

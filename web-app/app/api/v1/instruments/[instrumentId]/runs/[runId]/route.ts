@@ -70,6 +70,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
           ? await getPresignedDownloadUrl(f.s3Bucket, f.s3Key)
           : null,
       created_at: f.createdAt,
+      file_created_at: f.fileCreatedAt,
     }))
   );
 
@@ -156,6 +157,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
         relative_path: string;
         filename: string;
         size_bytes?: number;
+        file_created_at?: string;
       }) => ({
         instrumentRunId: run.id,
         relativePath: f.relative_path,
@@ -163,6 +165,10 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
         sizeBytes: f.size_bytes ?? null,
         status: "detected" as const,
         detectedAt: now,
+        fileCreatedAt:
+          typeof f.file_created_at === "string"
+            ? new Date(f.file_created_at)
+            : null,
       })
     );
 

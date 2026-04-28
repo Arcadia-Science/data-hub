@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from data_hub_watcher.run_detector import RunDetector
+from data_hub_watcher.run_detector import RunDetector, file_created_at
 from data_hub_watcher.state import StateDB
 
 
@@ -50,13 +50,39 @@ def _make_detector(
     )
 
 
+class TestFileCreatedAtHelper:
+    """Unit tests for the platform-portable `file_created_at` helper."""
+
+    def test_prefers_st_birthtime_when_present(self) -> None:
+        st = MagicMock(st_birthtime=1_700_000_100.0, st_mtime=1_700_000_200.0)
+        assert file_created_at(st) == 1_700_000_100.0
+
+    def test_falls_back_to_st_mtime_when_birthtime_missing(self) -> None:
+        # Linux stat results don't expose st_birthtime; spec= constrains the
+        # mock to exactly the attributes a real stat_result would have.
+        import os
+
+        spec_attrs = [a for a in dir(os.stat_result) if a.startswith("st_")]
+        # Force-remove st_birthtime from the spec so getattr() returns None.
+        if "st_birthtime" in spec_attrs:
+            spec_attrs.remove("st_birthtime")
+        st = MagicMock(spec=spec_attrs)
+        st.st_mtime = 1_700_000_500.0
+        assert file_created_at(st) == 1_700_000_500.0
+
+    def test_falls_back_when_st_birthtime_is_zero(self) -> None:
+        """A zero birthtime (some FUSE / network filesystems) should fall through."""
+        st = MagicMock(st_birthtime=0.0, st_mtime=1_700_000_777.0)
+        assert file_created_at(st) == 1_700_000_777.0
+
+
 class TestHydrateFromStateDb:
     def test_populates_runs_with_reported_true(self, state_db: StateDB, watch_dir: Path) -> None:
         state_db.record_detected_files(
             "run-alpha",
             [
-                ("run-alpha/a.nd2", "a.nd2", 1024, 1_700_000_000.0),
-                ("run-alpha/b.nd2", "b.nd2", 2048, 1_700_000_001.0),
+                ("run-alpha/a.nd2", "a.nd2", 1024, 1_700_000_000.0, 1_699_999_900.0),
+                ("run-alpha/b.nd2", "b.nd2", 2048, 1_700_000_001.0, None),
             ],
         )
 
@@ -74,6 +100,10 @@ class TestHydrateFromStateDb:
         ]
         assert run.files[0].size_bytes == 1024
         assert run.files[0].mtime == pytest.approx(1_700_000_000.0)
+        assert run.files[0].file_created_at == pytest.approx(1_699_999_900.0)
+        # Legacy rows with NULL file_created_at hydrate to 0.0 so the wire
+        # payload omits the field rather than emitting a bogus epoch time.
+        assert run.files[1].file_created_at == 0.0
 
     def test_skips_runs_without_detected_files(self, state_db: StateDB, watch_dir: Path) -> None:
         """Legacy runs (in `runs` but not `detected_files`) must not hydrate.
@@ -90,7 +120,9 @@ class TestHydrateFromStateDb:
         assert detector._runs == {}
 
     def test_hydration_is_idempotent(self, state_db: StateDB, watch_dir: Path) -> None:
-        state_db.record_detected_files("run-1", [("run-1/a.nd2", "a.nd2", 10, 1_700_000_000.0)])
+        state_db.record_detected_files(
+            "run-1", [("run-1/a.nd2", "a.nd2", 10, 1_700_000_000.0, 1_700_000_000.0)]
+        )
 
         detector = _make_detector(watch_dir, state_db)
         detector.hydrate_from_state_db()
@@ -114,7 +146,15 @@ class TestNewFileAfterHydrationTriggersPatch:
         st = existing.stat()
         state_db.record_detected_files(
             "run-42",
-            [("run-42/existing.nd2", "existing.nd2", st.st_size, st.st_mtime)],
+            [
+                (
+                    "run-42/existing.nd2",
+                    "existing.nd2",
+                    st.st_size,
+                    st.st_mtime,
+                    st.st_mtime,
+                )
+            ],
         )
 
         client = MagicMock()
@@ -142,7 +182,9 @@ class TestNewFileAfterHydrationTriggersPatch:
         existing = watch_dir / "run-7" / "a.nd2"
         existing.write_bytes(b"x" * 1024)
         st = existing.stat()
-        state_db.record_detected_files("run-7", [("run-7/a.nd2", "a.nd2", st.st_size, st.st_mtime)])
+        state_db.record_detected_files(
+            "run-7", [("run-7/a.nd2", "a.nd2", st.st_size, st.st_mtime, st.st_mtime)]
+        )
 
         client = MagicMock()
         detector = _make_detector(watch_dir, state_db, client=client)
@@ -173,6 +215,33 @@ class TestReportNewRunPersistsManifest:
         assert [r.relative_path for r in records] == ["run-new/first.nd2"]
         assert records[0].filename == "first.nd2"
         assert records[0].size_bytes == 42
+        # On-disk creation time is captured and persisted alongside the
+        # rest of the manifest (st_birthtime where supported, mtime
+        # fallback otherwise — both produce a positive float here).
+        assert records[0].file_created_at is not None
+        assert records[0].file_created_at > 0
+
+    def test_post_payload_includes_file_created_at(
+        self, state_db: StateDB, watch_dir: Path
+    ) -> None:
+        """The wire payload sent to POST /runs must include file_created_at as ISO 8601."""
+        client = MagicMock()
+        client.report_run.return_value = MagicMock(id="api-run-id")
+        detector = _make_detector(watch_dir, state_db, client=client)
+
+        (watch_dir / "run-iso").mkdir()
+        f = watch_dir / "run-iso" / "data.nd2"
+        f.write_bytes(b"q" * 8)
+        detector.on_stable_file(f)
+
+        client.report_run.assert_called_once()
+        _, payload = client.report_run.call_args.args
+        detected_files = payload["detected_files"]
+        assert len(detected_files) == 1
+        # ISO 8601 UTC string with timezone offset (e.g. "+00:00").
+        iso = detected_files[0]["file_created_at"]
+        assert isinstance(iso, str)
+        assert iso.endswith("+00:00")
 
     def test_manifest_not_recorded_if_post_fails(self, state_db: StateDB, watch_dir: Path) -> None:
         from data_hub_watcher.api_client import ApiError

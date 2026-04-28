@@ -239,7 +239,7 @@ class TestInitialScan:
         st = f.stat()
         state_db.record_detected_files(
             "run-42",
-            [("run-42.nd2", "run-42.nd2", st.st_size, st.st_mtime)],
+            [("run-42.nd2", "run-42.nd2", st.st_size, st.st_mtime, st.st_mtime)],
         )
 
         monitor = _make_monitor(watch_dir, state_db)
@@ -266,7 +266,15 @@ class TestInitialScan:
         st_det = detected.stat()
         state_db.record_detected_files(
             "run-1",
-            [("detected.nd2", "detected.nd2", st_det.st_size, st_det.st_mtime)],
+            [
+                (
+                    "detected.nd2",
+                    "detected.nd2",
+                    st_det.st_size,
+                    st_det.st_mtime,
+                    st_det.st_mtime,
+                )
+            ],
         )
 
         monitor = _make_monitor(watch_dir, state_db)
@@ -317,21 +325,27 @@ class TestDetectedFilesApi:
         state_db.record_detected_files(
             "run-1",
             [
-                ("a/one.nd2", "one.nd2", 1024, 1_700_000_000.0),
-                ("a/two.nd2", "two.nd2", 2048, 1_700_000_001.0),
+                ("a/one.nd2", "one.nd2", 1024, 1_700_000_000.0, 1_699_999_900.0),
+                ("a/two.nd2", "two.nd2", 2048, 1_700_000_001.0, None),
             ],
         )
 
         records = state_db.get_detected_files_for_run("run-1")
-        assert [(r.relative_path, r.filename, r.size_bytes, r.mtime) for r in records] == [
-            ("a/one.nd2", "one.nd2", 1024, 1_700_000_000.0),
-            ("a/two.nd2", "two.nd2", 2048, 1_700_000_001.0),
+        assert [
+            (r.relative_path, r.filename, r.size_bytes, r.mtime, r.file_created_at) for r in records
+        ] == [
+            ("a/one.nd2", "one.nd2", 1024, 1_700_000_000.0, 1_699_999_900.0),
+            ("a/two.nd2", "two.nd2", 2048, 1_700_000_001.0, None),
         ]
 
     def test_record_is_idempotent_upsert(self, state_db: StateDB) -> None:
         """Re-recording the same (run_id, relative_path) must upsert, not dup."""
-        state_db.record_detected_files("run-1", [("a.nd2", "a.nd2", 1024, 1_700_000_000.0)])
-        state_db.record_detected_files("run-1", [("a.nd2", "a.nd2", 2048, 1_700_000_050.0)])
+        state_db.record_detected_files(
+            "run-1", [("a.nd2", "a.nd2", 1024, 1_700_000_000.0, 1_700_000_000.0)]
+        )
+        state_db.record_detected_files(
+            "run-1", [("a.nd2", "a.nd2", 2048, 1_700_000_050.0, 1_700_000_000.0)]
+        )
 
         records = state_db.get_detected_files_for_run("run-1")
         assert len(records) == 1
@@ -344,17 +358,21 @@ class TestDetectedFilesApi:
         assert state_db.get_reported_run_ids_with_files() == []
 
     def test_has_detected_stat_match_hit(self, state_db: StateDB) -> None:
-        state_db.record_detected_files("run-1", [("x.nd2", "x.nd2", 1024, 1_700_000_000.0)])
+        state_db.record_detected_files(
+            "run-1", [("x.nd2", "x.nd2", 1024, 1_700_000_000.0, 1_700_000_000.0)]
+        )
         assert state_db.has_detected_stat_match("x.nd2", 1024, 1_700_000_000.0) is True
 
     def test_has_detected_stat_match_respects_mtime_tolerance(self, state_db: StateDB) -> None:
-        state_db.record_detected_files("run-1", [("x.nd2", "x.nd2", 1024, 1_700_000_000.0)])
+        state_db.record_detected_files(
+            "run-1", [("x.nd2", "x.nd2", 1024, 1_700_000_000.0, 1_700_000_000.0)]
+        )
         assert state_db.has_detected_stat_match("x.nd2", 1024, 1_700_000_000.5) is True
         assert state_db.has_detected_stat_match("x.nd2", 1024, 1_700_000_100.0) is False
 
     def test_has_detected_stat_match_miss_on_different_path(self, state_db: StateDB) -> None:
         state_db.record_detected_files(
-            "run-a", [("run-a/out.nd2", "out.nd2", 1024, 1_700_000_000.0)]
+            "run-a", [("run-a/out.nd2", "out.nd2", 1024, 1_700_000_000.0, 1_700_000_000.0)]
         )
         assert state_db.has_detected_stat_match("run-b/out.nd2", 1024, 1_700_000_000.0) is False
 
@@ -362,11 +380,13 @@ class TestDetectedFilesApi:
         state_db.record_detected_files(
             "run-1",
             [
-                ("run-1/a.nd2", "a.nd2", 1, 1_700_000_000.0),
-                ("run-1/b.nd2", "b.nd2", 2, 1_700_000_001.0),
+                ("run-1/a.nd2", "a.nd2", 1, 1_700_000_000.0, 1_700_000_000.0),
+                ("run-1/b.nd2", "b.nd2", 2, 1_700_000_001.0, 1_700_000_001.0),
             ],
         )
-        state_db.record_detected_files("run-2", [("run-2/a.nd2", "a.nd2", 3, 1_700_000_002.0)])
+        state_db.record_detected_files(
+            "run-2", [("run-2/a.nd2", "a.nd2", 3, 1_700_000_002.0, 1_700_000_002.0)]
+        )
         state_db.record_run_reported("run-legacy")
 
         ids = state_db.get_reported_run_ids_with_files()

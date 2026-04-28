@@ -8,9 +8,11 @@ auto mode — hands them off to an upload callback immediately after reporting.
 
 from __future__ import annotations
 import logging
+import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 from data_hub_watcher.api_client import ApiError, DataHubClient
@@ -19,6 +21,17 @@ from data_hub_watcher.heartbeat import WatcherCounters
 from data_hub_watcher.state import StateDB
 
 logger = logging.getLogger(__name__)
+
+
+def file_created_at(st: os.stat_result) -> float:
+    """Best-effort on-disk creation time for *st*.
+
+    Prefers `st_birthtime` (macOS, Windows, BSD), which is the true
+    creation time. Falls back to `st_mtime` on platforms that don't
+    expose birthtime (most Linux filesystems through the legacy stat
+    interface) — this is the closest universally-available approximation.
+    """
+    return getattr(st, "st_birthtime", None) or st.st_mtime
 
 
 @dataclass
@@ -32,6 +45,11 @@ class FileInfo:
     # future restart's initial scan can cheaply stat-match against it
     # (see `StateDB.has_detected_stat_match`) and skip re-reporting.
     mtime: float = 0.0
+    # On-disk creation time (st_birthtime when available, else mtime).
+    # Sent to the API and persisted in the state DB so it survives
+    # restarts and reflects the original creation time even after the
+    # file has been re-stat'd or partially modified.
+    file_created_at: float = 0.0
 
 
 @dataclass
@@ -118,7 +136,13 @@ class RunDetector:
             logger.warning("File disappeared before run detection: %s", path)
             return
 
-        info = FileInfo(path=path, filename=path.name, size_bytes=st.st_size, mtime=st.st_mtime)
+        info = FileInfo(
+            path=path,
+            filename=path.name,
+            size_bytes=st.st_size,
+            mtime=st.st_mtime,
+            file_created_at=file_created_at(st),
+        )
 
         run = self._runs.get(run_id)
         if run is None:
@@ -161,11 +185,16 @@ class RunDetector:
             relative_path = info.path.relative_to(self._watch_dir).as_posix()
         except ValueError:
             relative_path = info.filename
-        return {
+        payload: dict[str, object] = {
             "relative_path": relative_path,
             "filename": info.filename,
             "size_bytes": info.size_bytes,
         }
+        if info.file_created_at:
+            payload["file_created_at"] = datetime.fromtimestamp(
+                info.file_created_at, tz=timezone.utc
+            ).isoformat()
+        return payload
 
     def _relative_path(self, info: FileInfo) -> str:
         try:
@@ -186,6 +215,7 @@ class RunDetector:
                 info.filename,
                 info.size_bytes,
                 info.mtime,
+                info.file_created_at or None,
             )
             for info in run.files
         ]
@@ -283,6 +313,7 @@ class RunDetector:
                     filename=rec.filename,
                     size_bytes=rec.size_bytes,
                     mtime=rec.mtime,
+                    file_created_at=rec.file_created_at or 0.0,
                 )
                 for rec in records
             ]

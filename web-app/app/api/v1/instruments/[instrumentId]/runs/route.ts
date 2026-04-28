@@ -141,6 +141,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
         relative_path: string;
         filename: string;
         size_bytes?: number;
+        file_created_at?: string;
       }) => ({
         instrumentRunId: run.id,
         relativePath: f.relative_path,
@@ -148,6 +149,10 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
         sizeBytes: f.size_bytes ?? null,
         status: "detected" as const,
         detectedAt: now,
+        fileCreatedAt:
+          typeof f.file_created_at === "string"
+            ? new Date(f.file_created_at)
+            : null,
       })
     );
 
