@@ -103,23 +103,23 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
   if (existing) {
     if (PRE_UPLOAD_STATUSES.has(existing.status)) {
-      await db
+      const [updated] = await db
         .update(files)
         .set({
           s3Bucket,
           s3Key,
           contentType,
           sizeBytes,
+          // Honour the Lambda-supplied category when adopting a row. The
+          // watcher always inserts with the default ("raw"), so without
+          // this the insert vs. reconcile branches would diverge for
+          // Lambda-classified processed files.
+          category,
           status: "uploaded",
           uploadedAt: now,
         })
-        .where(eq(files.id, existing.id));
-
-      const [updated] = await db
-        .select()
-        .from(files)
         .where(eq(files.id, existing.id))
-        .limit(1);
+        .returning();
 
       return Response.json(formatFileResponse(updated), { status: 200 });
     }
