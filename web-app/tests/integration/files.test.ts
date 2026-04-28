@@ -90,6 +90,9 @@ describe("Files API", () => {
 
   // Lambda creates files already in S3, so they start in "uploaded" status
   // rather than "detected". The s3_bucket/s3_key identify the S3 object.
+  // We also write relative_path = filename so subsequent watcher detected_files
+  // reports for the same path can dedup against the existing
+  // (instrument_run_id, relative_path) partial unique index.
   it("POST creates a file with uploaded status (Lambda path)", async () => {
     const res = await api(
       `/api/v1/instruments/${instrumentId}/runs/${runId}/files`,
@@ -111,7 +114,122 @@ describe("Files API", () => {
     expect(data.status).toBe("uploaded");
     expect(data.s3_bucket).toBe("test-bucket");
     expect(data.category).toBe("processed");
+    expect(data.relative_path).toBe("processed_output.csv");
     lambdaFileId = data.id;
+  });
+
+  // Reconcile case 1: the watcher reported a detected row first, then the
+  // Lambda fires after the file lands in S3. The Lambda path must adopt the
+  // existing row (UPDATE in place) instead of inserting a parallel one — this
+  // is the duplicate-row bug fix.
+  it("POST adopts an existing detected row (reconcile in place)", async () => {
+    const reconcileRunId = "files-reconcile-detected-run";
+    const filename = "reconcile_detected.csv";
+
+    // Watcher path: create a run with a detected file.
+    await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: {
+        run_id: reconcileRunId,
+        source: "watcher",
+        detected_files: [
+          {
+            relative_path: `subfolder/${filename}`,
+            filename,
+            size_bytes: 256,
+          },
+        ],
+      },
+    });
+
+    const detail = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${reconcileRunId}`,
+      { token }
+    );
+    const detailData = await detail.json();
+    const detectedFile = detailData.files.find(
+      (f: { filename: string }) => f.filename === filename
+    );
+    expect(detectedFile.status).toBe("detected");
+    expect(detectedFile.s3_key).toBeNull();
+    const detectedFileId = detectedFile.id;
+
+    // Lambda path: same filename. Should UPDATE the detected row, not insert.
+    const res = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${reconcileRunId}/files`,
+      {
+        method: "POST",
+        token,
+        body: {
+          s3_bucket: "test-bucket",
+          s3_key: `${instrumentId}/${reconcileRunId}/${filename}`,
+          filename,
+          content_type: "text/csv",
+          size_bytes: 256,
+        },
+      }
+    );
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.id).toBe(detectedFileId);
+    expect(data.status).toBe("uploaded");
+    expect(data.s3_key).toBe(`${instrumentId}/${reconcileRunId}/${filename}`);
+    expect(data.uploaded_at).toBeTruthy();
+    // The watcher's relative_path is preserved, not overwritten.
+    expect(data.relative_path).toBe(`subfolder/${filename}`);
+
+    // Verify only one active row exists for this (run, filename) pair.
+    const after = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${reconcileRunId}`,
+      { token }
+    );
+    const afterData = await after.json();
+    const matching = afterData.files.filter(
+      (f: { filename: string }) => f.filename === filename
+    );
+    expect(matching).toHaveLength(1);
+    expect(matching[0].id).toBe(detectedFileId);
+  });
+
+  // Reconcile case 2: a Lambda retry hits an already-uploaded row. Status
+  // must not regress and the same id must be returned (idempotent).
+  it("POST returns existing row unchanged when already uploaded (Lambda retry)", async () => {
+    // Drive the previously-adopted row to "processing" so we can verify the
+    // reconcile path doesn't regress beyond uploaded either.
+    const reconcileRunId = "files-reconcile-detected-run";
+    const filename = "reconcile_detected.csv";
+
+    // Find the existing row's id.
+    const detail = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${reconcileRunId}`,
+      { token }
+    );
+    const detailData = await detail.json();
+    const existing = detailData.files.find(
+      (f: { filename: string }) => f.filename === filename
+    );
+    expect(existing.status).toBe("uploaded");
+
+    // Re-POST with the same filename — simulating a Lambda retry.
+    const res = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${reconcileRunId}/files`,
+      {
+        method: "POST",
+        token,
+        body: {
+          s3_bucket: "test-bucket",
+          s3_key: `${instrumentId}/${reconcileRunId}/${filename}`,
+          filename,
+        },
+      }
+    );
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.id).toBe(existing.id);
+    expect(data.status).toBe("uploaded");
   });
 
   // Idempotent on s3_key via a partial unique index. This prevents duplicate

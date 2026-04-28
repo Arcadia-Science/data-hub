@@ -9,8 +9,13 @@ import {
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { NextRequest } from "next/server";
+
+// Statuses where a row is "pre-S3" — safe for the Lambda path to overwrite
+// when adopting a watcher-created row. Anything beyond uploaded is left
+// untouched so Lambda retries don't regress in-progress / completed work.
+const PRE_UPLOAD_STATUSES = new Set(["detected", "upload_requested"]);
 
 type RouteContext = {
   params: Promise<{ instrumentId: string; runId: string }>;
@@ -78,13 +83,63 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
   const now = new Date();
 
-  // Insert with "uploaded" status — the Lambda already has the file in S3 by
-  // the time it calls this endpoint. The partial unique index on s3_key
-  // prevents duplicate file records when the Lambda retries after a timeout.
+  // Reconcile against any active row the watcher may have already created
+  // for this file. Both writers now share the partial unique index on
+  // (instrument_run_id, filename) WHERE deleted_at IS NULL, so we look up
+  // by that key and adopt the existing row in place rather than inserting
+  // a parallel one. Without this, a watcher-reported "detected" row would
+  // be left orphaned forever after the Lambda fired.
+  const [existing] = await db
+    .select()
+    .from(files)
+    .where(
+      and(
+        eq(files.instrumentRunId, run.id),
+        eq(files.filename, filename),
+        isNull(files.deletedAt)
+      )
+    )
+    .limit(1);
+
+  if (existing) {
+    if (PRE_UPLOAD_STATUSES.has(existing.status)) {
+      const [updated] = await db
+        .update(files)
+        .set({
+          s3Bucket,
+          s3Key,
+          contentType,
+          sizeBytes,
+          // Honour the Lambda-supplied category when adopting a row. The
+          // watcher always inserts with the default ("raw"), so without
+          // this the insert vs. reconcile branches would diverge for
+          // Lambda-classified processed files.
+          category,
+          status: "uploaded",
+          uploadedAt: now,
+        })
+        .where(eq(files.id, existing.id))
+        .returning();
+
+      return Response.json(formatFileResponse(updated), { status: 200 });
+    }
+
+    // Already uploaded / processing / completed / failed: Lambda is calling
+    // again (likely a retry after a warm-container timeout). Don't regress
+    // status — return the existing record as-is.
+    return Response.json(formatFileResponse(existing), { status: 200 });
+  }
+
+  // No matching row yet — insert one. Set relativePath = filename so that
+  // future watcher reports also dedup against this row via the existing
+  // (instrument_run_id, relative_path) partial unique index. The
+  // onConflictDoNothing() guards against concurrent retries that race past
+  // the lookup above.
   const [inserted] = await db
     .insert(files)
     .values({
       instrumentRunId: run.id,
+      relativePath: filename,
       s3Bucket,
       s3Key,
       filename,
@@ -97,15 +152,33 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     .onConflictDoNothing()
     .returning();
 
-  // If onConflictDoNothing fired, the row already exists — return it.
   if (!inserted) {
-    const [existing] = await db
+    // Another concurrent insert won — fetch and return that row. Look up
+    // by s3_key first (the most specific dedup key here) and fall back to
+    // the (run, filename) key.
+    const [raced] = await db
       .select()
       .from(files)
       .where(eq(files.s3Key, s3Key))
       .limit(1);
 
-    return Response.json(formatFileResponse(existing), { status: 200 });
+    if (raced) {
+      return Response.json(formatFileResponse(raced), { status: 200 });
+    }
+
+    const [racedByName] = await db
+      .select()
+      .from(files)
+      .where(
+        and(
+          eq(files.instrumentRunId, run.id),
+          eq(files.filename, filename),
+          isNull(files.deletedAt)
+        )
+      )
+      .limit(1);
+
+    return Response.json(formatFileResponse(racedByName), { status: 200 });
   }
 
   return Response.json(formatFileResponse(inserted), { status: 201 });
@@ -115,6 +188,7 @@ function formatFileResponse(f: typeof files.$inferSelect) {
   return {
     id: f.id,
     instrument_run_id: f.instrumentRunId,
+    relative_path: f.relativePath,
     s3_bucket: f.s3Bucket,
     s3_key: f.s3Key,
     filename: f.filename,

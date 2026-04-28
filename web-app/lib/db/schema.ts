@@ -397,8 +397,10 @@ export const files = pgTable(
       .notNull()
       .references(() => instrumentRuns.id),
     // Path relative to the watcher's watch directory (e.g.,
-    // `20260325_data_file_1.csv` or `20260325_testing/data_file_1.csv`). NULL
-    // for Lambda-created files (they skip the detection phase).
+    // `20260325_data_file_1.csv` or `20260325_testing/data_file_1.csv`). For
+    // Lambda-created files this is set to `filename` so both writers dedup
+    // against the same `(instrument_run_id, relative_path)` partial unique
+    // index. May be NULL for very old rows predating that contract.
     relativePath: text("relative_path"),
     // NULL until the file is uploaded to S3.
     s3Bucket: text("s3_bucket"),
@@ -466,6 +468,14 @@ export const files = pgTable(
     uniqueIndex("uq_files_instrument_run_id_relative_path")
       .on(file.instrumentRunId, file.relativePath)
       .where(sql`${file.relativePath} is not null`),
+    // Shared dedup key between watcher and Lambda writers: filenames are
+    // unique per active row within a run. The watcher's request-upload-url
+    // already keys lookups on (instrument_run_id, filename); this index
+    // enforces uniqueness so the Lambda path cannot insert a parallel row
+    // when the watcher has already reported a detected file.
+    uniqueIndex("uq_files_active_instrument_run_id_filename")
+      .on(file.instrumentRunId, file.filename)
+      .where(sql`${file.deletedAt} is null`),
     uniqueIndex("uq_files_s3_key")
       .on(file.s3Key)
       .where(sql`${file.s3Key} is not null`),
@@ -474,9 +484,11 @@ export const files = pgTable(
       file.status,
       file.instrumentRunId
     ),
-    index("idx_files_active")
-      .on(file.instrumentRunId)
-      .where(sql`${file.deletedAt} is null`),
+    // NOTE: A non-unique partial index on (instrument_run_id) WHERE
+    // deleted_at IS NULL was previously named `idx_files_active`. It was
+    // dropped in migration 0012 because the leading column of
+    // `uq_files_active_instrument_run_id_filename` (same predicate) covers
+    // the same lookup pattern.
     index("idx_files_upload_queue")
       .on(file.uploadRequestedAt)
       .where(
