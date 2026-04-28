@@ -78,6 +78,13 @@
       "when": 1777414700388,
       "tag": "0010_enforce_active_watcher_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1777417050955,
+      "tag": "0011_clever_power_pack",
+      "breakpoints": true
     }
   ]
 }

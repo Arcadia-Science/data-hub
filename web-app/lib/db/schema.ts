@@ -466,6 +466,14 @@ export const files = pgTable(
     uniqueIndex("uq_files_instrument_run_id_relative_path")
       .on(file.instrumentRunId, file.relativePath)
       .where(sql`${file.relativePath} is not null`),
+    // Shared dedup key between watcher and Lambda writers: filenames are
+    // unique per active row within a run. The watcher's request-upload-url
+    // already keys lookups on (instrument_run_id, filename); this index
+    // enforces uniqueness so the Lambda path cannot insert a parallel row
+    // when the watcher has already reported a detected file.
+    uniqueIndex("uq_files_active_instrument_run_id_filename")
+      .on(file.instrumentRunId, file.filename)
+      .where(sql`${file.deletedAt} is null`),
     uniqueIndex("uq_files_s3_key")
       .on(file.s3Key)
       .where(sql`${file.s3Key} is not null`),
