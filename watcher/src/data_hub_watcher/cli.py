@@ -77,6 +77,49 @@ def _resolve_path(ctx: click.Context) -> Path:
     return resolve_config_path(ctx.obj.get("config_path"))
 
 
+API_KEY_PREFIX = "dhub_"
+
+# Invisible characters that some Windows clipboards (Outlook, Teams, Word, etc.)
+# silently inject when an operator copies an API key. Stripping them here
+# avoids 401s caused by a hash mismatch on the server.
+_INVISIBLE_CHARS = (
+    "\u00a0",  # non-breaking space
+    "\u200b",  # zero-width space
+    "\u200c",  # zero-width non-joiner
+    "\u200d",  # zero-width joiner
+    "\ufeff",  # BOM / zero-width no-break space
+)
+
+
+def _clean_api_key(value: str) -> str:
+    """Normalize and validate an API key entered by the operator.
+
+    Pasting into a hidden ``click.prompt`` on Windows frequently introduces
+    stray whitespace (CR, LF, NBSP) or zero-width characters from rich-text
+    clipboards. We strip those defensively and then verify the value still
+    looks like a Data Hub PAT before any network call so the operator sees a
+    clear error instead of a confusing 401.
+    """
+    cleaned = value
+    for ch in _INVISIBLE_CHARS:
+        cleaned = cleaned.replace(ch, "")
+    cleaned = cleaned.strip()
+
+    if not cleaned:
+        raise click.ClickException("API key is empty.")
+    if any(c.isspace() for c in cleaned):
+        raise click.ClickException(
+            "API key contains whitespace. Re-copy the key — your clipboard "
+            "may have included a line break or non-breaking space."
+        )
+    if not cleaned.startswith(API_KEY_PREFIX):
+        raise click.ClickException(
+            f"API key must start with '{API_KEY_PREFIX}'. Re-copy the key from "
+            "the Data Hub UI; the value may have been truncated on paste."
+        )
+    return cleaned
+
+
 def _make_client(
     environment: str, api_key: str | None = None, api_base_url: str | None = None
 ) -> DataHubClient:
@@ -119,8 +162,16 @@ def _setup_file_logging() -> None:
 
 
 @cli.command()
+@click.option(
+    "--show-key",
+    is_flag=True,
+    help=(
+        "Echo the API key as it is typed/pasted. Useful on Windows terminals "
+        "where hidden input is unreliable for paste."
+    ),
+)
 @click.pass_context
-def init(ctx: click.Context) -> None:
+def init(ctx: click.Context, show_key: bool) -> None:
     """Interactive setup wizard + API registration."""
     path = _resolve_path(ctx)
     if path.exists():
@@ -145,16 +196,19 @@ def init(ctx: click.Context) -> None:
     load_env(environment)
     existing_key = os.environ.get("DATA_HUB_API_KEY", "")
     env_specific_path = env_file_path(environment)
+    hide_input = not show_key
     if existing_key and env_specific_path.exists():
         click.echo(f"Found saved API key for {environment} at {env_specific_path}.")
         if click.confirm("Use the saved key?", default=True):
             api_key = existing_key
         else:
-            api_key = click.prompt("DATA_HUB_API_KEY", hide_input=True)
+            api_key = click.prompt("DATA_HUB_API_KEY", hide_input=hide_input)
     elif existing_key:
         api_key = existing_key
     else:
-        api_key = click.prompt("DATA_HUB_API_KEY", hide_input=True)
+        api_key = click.prompt("DATA_HUB_API_KEY", hide_input=hide_input)
+
+    api_key = _clean_api_key(api_key)
 
     client = _make_client(environment, api_key=api_key, api_base_url=api_base_url)
 
