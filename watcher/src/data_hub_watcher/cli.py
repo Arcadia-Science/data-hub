@@ -21,6 +21,7 @@ from data_hub_watcher.constants import (
     DEFAULT_STABILITY_PERIOD_SECONDS,
     RUN_DETECTION_PRESETS,
     STATE_DB_FILENAME,
+    env_file_path,
     load_env,
     resolve_config_path,
     save_api_key,
@@ -92,6 +93,9 @@ def _load_and_client(ctx: click.Context) -> tuple[WatcherConfig, DataHubClient, 
     """Load config and build a matching API client. Returns (config, client, path)."""
     path = _resolve_path(ctx)
     cfg = load_config(path)
+    # Overlay the env-specific file (e.g. ``.env.staging``) so the API key
+    # picked up by ``DataHubClient`` always matches the configured environment.
+    load_env(cfg.environment)
     client = _make_client(cfg.environment, api_base_url=cfg.api_base_url)
     return cfg, client, path
 
@@ -136,9 +140,20 @@ def init(ctx: click.Context) -> None:
         )
         api_base_url = raw_url.rstrip("/")
 
-    # 2. API key
-    api_key = os.environ.get("DATA_HUB_API_KEY", "")
-    if not api_key:
+    # 2. API key — overlay any existing per-environment env file so the user
+    # doesn't have to re-enter a key they've already saved for this target.
+    load_env(environment)
+    existing_key = os.environ.get("DATA_HUB_API_KEY", "")
+    env_specific_path = env_file_path(environment)
+    if existing_key and env_specific_path.exists():
+        click.echo(f"Found saved API key for {environment} at {env_specific_path}.")
+        if click.confirm("Use the saved key?", default=True):
+            api_key = existing_key
+        else:
+            api_key = click.prompt("DATA_HUB_API_KEY", hide_input=True)
+    elif existing_key:
+        api_key = existing_key
+    else:
         api_key = click.prompt("DATA_HUB_API_KEY", hide_input=True)
 
     client = _make_client(environment, api_key=api_key, api_base_url=api_base_url)
@@ -153,7 +168,7 @@ def init(ctx: click.Context) -> None:
             "The API key was not saved. Please re-run init with a valid key."
         ) from exc
 
-    env_path = save_api_key(api_key)
+    env_path = save_api_key(api_key, environment)
     click.echo(f"API key saved to {env_path}")
 
     if instruments:
@@ -779,29 +794,27 @@ def _windows_only() -> None:
     "env_path_override",
     type=click.Path(dir_okay=False),
     default=None,
-    help="Path to the .env file. Defaults to ~/.data-hub/.env.",
+    help="Path to the .env file. Defaults to ~/.data-hub/.env.<environment>.",
 )
 @click.pass_context
 def service_install(ctx: click.Context, env_path_override: str | None) -> None:
     """Install the watcher as a Windows service."""
     _windows_only()
     path = _resolve_path(ctx)
-    load_config(path)
+    cfg = load_config(path)
 
     from data_hub_watcher.service import install_service
 
     if env_path_override is not None:
         env_path = Path(env_path_override).resolve()
     else:
-        from data_hub_watcher.constants import DEFAULT_CONFIG_DIR, ENV_FILENAME
-
-        env_path = (DEFAULT_CONFIG_DIR / ENV_FILENAME).resolve()
+        env_path = env_file_path(cfg.environment).resolve()
 
     if not env_path.exists():
         click.echo(
             click.style(
                 f"⚠ Warning: {env_path} does not exist. "
-                "Run 'data-hub-watcher login' first or pass --env-path.",
+                "Run 'data-hub-watcher init' first or pass --env-path.",
                 fg="yellow",
             ),
             err=True,

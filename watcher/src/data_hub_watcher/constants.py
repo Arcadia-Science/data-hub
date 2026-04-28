@@ -13,6 +13,7 @@ API_URLS: dict[str, str] = {
 DEFAULT_CONFIG_DIR = Path("~/.data-hub").expanduser()
 DEFAULT_CONFIG_FILENAME = "config.yaml"
 ENV_FILENAME = ".env"
+SUPPORTED_ENVIRONMENTS: tuple[str, ...] = ("staging", "production", "preview")
 
 HEARTBEAT_INTERVAL_SECONDS = 60
 DEFAULT_STABILITY_PERIOD_SECONDS = 5
@@ -68,24 +69,47 @@ SERVICE_NAME = "DataHubWatcher"
 CONFIG_PATH_ENV_VAR = "DATA_HUB_CONFIG_PATH"
 
 
-def load_env() -> None:
-    """Load ``~/.data-hub/.env`` into the process environment.
+def env_file_path(environment: str | None = None) -> Path:
+    """Return the env file path for *environment* (or the base file if ``None``).
 
-    Existing environment variables take precedence (``override=False``),
-    so an explicit ``DATA_HUB_API_KEY`` export still wins.
+    Examples:
+        ``env_file_path()``           -> ``~/.data-hub/.env``
+        ``env_file_path("staging")``  -> ``~/.data-hub/.env.staging``
     """
-    env_path = DEFAULT_CONFIG_DIR / ENV_FILENAME
-    load_dotenv(env_path)
+    if environment:
+        return DEFAULT_CONFIG_DIR / f"{ENV_FILENAME}.{environment}"
+    return DEFAULT_CONFIG_DIR / ENV_FILENAME
 
 
-def save_api_key(api_key: str) -> Path:
-    """Persist *api_key* to ``~/.data-hub/.env`` and return the file path.
+def load_env(environment: str | None = None) -> None:
+    """Load env files from ``~/.data-hub/`` into the process environment.
+
+    Always loads the base ``.env`` first. If *environment* is provided,
+    overlays ``.env.<environment>`` on top so its values take precedence.
+    Existing process-level environment variables (e.g. an explicit
+    ``DATA_HUB_API_KEY`` export) still win over the base file but are
+    overridden by the env-specific file when one is supplied — this lets
+    operators switch environments simply by changing the config without
+    re-exporting their key.
+    """
+    load_dotenv(env_file_path())
+    if environment:
+        load_dotenv(env_file_path(environment), override=True)
+
+
+def save_api_key(api_key: str, environment: str | None = None) -> Path:
+    """Persist *api_key* to the env file for *environment* and return its path.
+
+    When *environment* is provided the key is written to
+    ``~/.data-hub/.env.<environment>`` so each deployment target keeps its
+    own credentials. Without *environment* the legacy ``~/.data-hub/.env``
+    file is used.
 
     Preserves any other variables already present in the file and
     single-quotes the value to guard against special characters
     (``#``, ``=``, whitespace) that would confuse dotenv parsers.
     """
-    env_path = DEFAULT_CONFIG_DIR / ENV_FILENAME
+    env_path = env_file_path(environment)
     env_path.parent.mkdir(parents=True, exist_ok=True)
 
     key_line = f"DATA_HUB_API_KEY='{api_key}'\n"
