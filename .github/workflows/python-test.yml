@@ -9,6 +9,7 @@ on:
       - .github/workflows/python-test.yml
       - lambda/**
       - packages/**
+      - watcher/**
       - pyproject.toml
       - uv.lock
       - Makefile
@@ -20,6 +21,7 @@ on:
       - .github/workflows/python-test.yml
       - lambda/**
       - packages/**
+      - watcher/**
       - pyproject.toml
       - uv.lock
       - Makefile

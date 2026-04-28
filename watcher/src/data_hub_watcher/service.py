@@ -17,13 +17,11 @@ environment created by ``uv``).
 from __future__ import annotations
 import logging
 import sys
+import threading
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from data_hub_watcher.constants import SERVICE_NAME
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -266,6 +264,122 @@ def query_service_status() -> dict[str, Any]:
         ws.CloseServiceHandle(hscm)
 
 
+def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
+    """Run the watcher service loop until *stop_event* is set.
+
+    This is the testable body of ``DataHubWatcherService.SvcDoRun``.
+    Extracted as a top-level function so unit tests can exercise the
+    full startup sequence (registry read, env loading, API health
+    check, checksum sync, runtime build/start/stop) on any platform
+    by injecting a mock *sm* (servicemanager) and patching the
+    dependencies it pulls in. ``SvcDoRun`` itself becomes a thin
+    wrapper that imports ``servicemanager`` lazily and delegates here.
+
+    Any controlled failure exits the process with a non-zero status
+    via ``raise SystemExit(1)``. Combined with the
+    ``SERVICE_CONFIG_FAILURE_ACTIONS_FLAG`` set by
+    ``_configure_recovery``, the SCM treats such exits as service
+    failures and runs the configured restart actions. This is what
+    allows the service to recover from a transient API error at boot
+    -- the most common reason a freshly-rebooted lab PC fails to
+    bring the watcher back up.
+    """
+    import platform
+
+    from dotenv import load_dotenv
+
+    from data_hub_watcher.api_client import ApiError, DataHubClient
+    from data_hub_watcher.config_io import config_checksum, load_config
+    from data_hub_watcher.constants import (
+        API_URLS,
+        STATE_DB_FILENAME,
+        env_file_path,
+    )
+    from data_hub_watcher.runtime import build_runtime, start_runtime, stop_runtime
+
+    sm.LogInfoMsg(f"{SERVICE_DISPLAY_NAME} starting")
+
+    try:
+        path, env_path = _read_paths_from_registry()
+    except Exception as exc:
+        sm.LogErrorMsg(
+            f"Cannot read config/env paths from registry: {exc}. "
+            "Re-run 'data-hub-watcher service install'."
+        )
+        raise SystemExit(1) from exc
+
+    # Mirror the CLI's ``load_env`` semantics: load the base
+    # ``~/.data-hub/.env`` first (for any shared, non-secret values
+    # an operator may keep there), then overlay the registered env
+    # file (typically ``.env.<environment>``, or a custom path
+    # supplied via ``service install --env-path``) so its values win.
+    # Without the base-file load, an operator that splits shared
+    # config from per-environment secrets would see the service
+    # silently miss the shared half.
+    base_env = env_file_path()
+    if base_env != env_path and base_env.exists():
+        load_dotenv(base_env)
+    load_dotenv(env_path, override=True)
+    cfg = load_config(path)
+    inst = cfg.instrument
+
+    if cfg.environment == "preview":
+        # WatcherConfig's model validator guarantees api_base_url is
+        # set whenever environment is "preview"; the assertion is here
+        # to make that invariant visible to pyright.
+        assert cfg.api_base_url is not None
+        base_url = cfg.api_base_url
+    else:
+        base_url = API_URLS[cfg.environment]
+    client = DataHubClient(base_url)
+
+    # Step 1: Check instrument status (mirrors CLI watch startup)
+    try:
+        detail = client.get_instrument(inst.id)
+    except ApiError as exc:
+        sm.LogErrorMsg(f"Cannot reach API during startup: {exc.message}")
+        raise SystemExit(1) from exc
+
+    if detail.status == "pending":
+        sm.LogErrorMsg(
+            f"Instrument {inst.id!r} is still pending activation. "
+            "Service cannot start until the instrument is activated."
+        )
+        raise SystemExit(1)
+
+    # Step 2: Sync config checksum
+    if cfg.watcher_id:
+        local_cs = config_checksum(path)
+        try:
+            remote = client.get_config_checksum(cfg.watcher_id)
+            if remote is None or remote.config_checksum != local_cs:
+                yaml_content = path.read_text(encoding="utf-8")
+                client.push_config(cfg.watcher_id, yaml_content, local_cs)
+                sm.LogInfoMsg("Config synced to Data Hub")
+        except ApiError as exc:
+            sm.LogWarningMsg(f"Could not sync config to API: {exc.message}")
+
+    # build_runtime asserts cfg.watcher_id is set; surface that as
+    # a service-manager error rather than a hard crash so operators
+    # see a clear message in the Windows event log.
+    if not cfg.watcher_id:
+        sm.LogErrorMsg("No watcher_id in config. Run 'data-hub-watcher init' first.")
+        raise SystemExit(1)
+
+    db_path = path.parent / STATE_DB_FILENAME
+    rt = build_runtime(client=client, cfg=cfg, db_path=db_path)
+
+    start_runtime(rt, started_message=f"Service started on {platform.node()}")
+
+    sm.LogInfoMsg(f"{SERVICE_DISPLAY_NAME} is running")
+
+    stop_event.wait()
+
+    stop_runtime(rt, stopped_message="Service stopped")
+
+    sm.LogInfoMsg(f"{SERVICE_DISPLAY_NAME} stopped")
+
+
 def _create_service_class() -> type | None:
     """Dynamically create the ServiceFramework subclass on Windows only.
 
@@ -286,116 +400,12 @@ def _create_service_class() -> type | None:
 
         def __init__(self, args: list[str]) -> None:
             super().__init__(args)
-            import threading
-
             self._stop_event = threading.Event()
 
         def SvcDoRun(self) -> None:
-            import platform
-
             import servicemanager  # type: ignore[import-untyped]
-            from dotenv import load_dotenv
 
-            from data_hub_watcher.api_client import ApiError, DataHubClient
-            from data_hub_watcher.config_io import config_checksum, load_config
-            from data_hub_watcher.constants import (
-                API_URLS,
-                STATE_DB_FILENAME,
-                env_file_path,
-            )
-            from data_hub_watcher.runtime import (
-                build_runtime,
-                start_runtime,
-                stop_runtime,
-            )
-
-            servicemanager.LogInfoMsg(f"{SERVICE_DISPLAY_NAME} starting")
-
-            # Any failure below exits the process with a non-zero status
-            # via ``raise SystemExit(1)``. Combined with the
-            # ``SERVICE_CONFIG_FAILURE_ACTIONS_FLAG`` set by
-            # ``_configure_recovery``, the SCM will treat such exits as
-            # service failures and run the configured restart actions.
-            # This is what allows the service to recover from a
-            # transient API error at boot (the most common reason a
-            # freshly-rebooted lab PC fails to bring the watcher back up).
-            try:
-                path, env_path = _read_paths_from_registry()
-            except Exception as exc:
-                servicemanager.LogErrorMsg(
-                    f"Cannot read config/env paths from registry: {exc}. "
-                    "Re-run 'data-hub-watcher service install'."
-                )
-                raise SystemExit(1) from exc
-
-            # Mirror the CLI's ``load_env`` semantics: load the base
-            # ``~/.data-hub/.env`` first (for any shared, non-secret values
-            # an operator may keep there), then overlay the registered
-            # env file (typically ``.env.<environment>``, or a custom path
-            # supplied via ``service install --env-path``) so its values
-            # win. Without the base-file load, an operator that splits
-            # shared config from per-environment secrets would see the
-            # service silently miss the shared half.
-            base_env = env_file_path()
-            if base_env != env_path and base_env.exists():
-                load_dotenv(base_env)
-            load_dotenv(env_path, override=True)
-            cfg = load_config(path)
-            inst = cfg.instrument
-
-            if cfg.environment == "preview":
-                base_url = cfg.api_base_url
-            else:
-                base_url = API_URLS[cfg.environment]
-            client = DataHubClient(base_url)
-
-            # Step 1: Check instrument status (mirrors CLI watch startup)
-            try:
-                detail = client.get_instrument(inst.id)
-            except ApiError as exc:
-                servicemanager.LogErrorMsg(f"Cannot reach API during startup: {exc.message}")
-                raise SystemExit(1) from exc
-
-            if detail.status == "pending":
-                servicemanager.LogErrorMsg(
-                    f"Instrument {inst.id!r} is still pending activation. "
-                    "Service cannot start until the instrument is activated."
-                )
-                raise SystemExit(1)
-
-            # Step 2: Sync config checksum
-            if cfg.watcher_id:
-                local_cs = config_checksum(path)
-                try:
-                    remote = client.get_config_checksum(cfg.watcher_id)
-                    if remote is None or remote.config_checksum != local_cs:
-                        yaml_content = path.read_text(encoding="utf-8")
-                        client.push_config(cfg.watcher_id, yaml_content, local_cs)
-                        servicemanager.LogInfoMsg("Config synced to Data Hub")
-                except ApiError as exc:
-                    servicemanager.LogWarningMsg(f"Could not sync config to API: {exc.message}")
-
-            # build_runtime asserts cfg.watcher_id is set; surface that as
-            # a service-manager error rather than a hard crash so operators
-            # see a clear message in the Windows event log.
-            if not cfg.watcher_id:
-                servicemanager.LogErrorMsg(
-                    "No watcher_id in config. Run 'data-hub-watcher init' first."
-                )
-                raise SystemExit(1)
-
-            db_path = path.parent / STATE_DB_FILENAME
-            rt = build_runtime(client=client, cfg=cfg, db_path=db_path)
-
-            start_runtime(rt, started_message=f"Service started on {platform.node()}")
-
-            servicemanager.LogInfoMsg(f"{SERVICE_DISPLAY_NAME} is running")
-
-            self._stop_event.wait()
-
-            stop_runtime(rt, stopped_message="Service stopped")
-
-            servicemanager.LogInfoMsg(f"{SERVICE_DISPLAY_NAME} stopped")
+            _run_service_loop(self._stop_event, servicemanager)
 
         def SvcStop(self) -> None:
             self.ReportServiceStatus(ws.SERVICE_STOP_PENDING)

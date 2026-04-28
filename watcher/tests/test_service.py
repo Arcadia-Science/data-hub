@@ -1,0 +1,671 @@
+"""Unit tests for the Windows service module.
+
+The service module imports ``win32service``, ``win32serviceutil``,
+``winreg``, and ``servicemanager`` lazily inside each function so it can
+be imported on any platform. These tests exploit that by injecting
+``MagicMock`` stand-ins via ``sys.modules`` *before* importing
+``data_hub_watcher.service``, then exercise:
+
+* the SCM-facing helpers (``install_service``, ``uninstall_service``,
+  ``start_service``, ``stop_service``, ``_configure_recovery``,
+  ``query_service_status``) by asserting on the arguments passed to the
+  fake win32 modules; and
+* the testable startup body ``_run_service_loop`` by patching the
+  side-effecting collaborators (config loader, ``DataHubClient``,
+  ``build_runtime`` / ``start_runtime`` / ``stop_runtime``) and a fake
+  ``servicemanager`` object.
+
+This locks in regressions of the kind that have historically shipped to
+production lab PCs (delayed-start + non-crash failure flags, network
+dependencies, manual-mode wiring) without needing a Windows runner.
+"""
+
+from __future__ import annotations
+import importlib
+import sys
+import threading
+from collections.abc import Iterator
+from pathlib import Path
+from types import ModuleType
+from typing import Any
+from unittest.mock import MagicMock
+
+import pytest
+
+from data_hub_watcher.api_client import ApiError
+from data_hub_watcher.models import (
+    InstrumentConfig,
+    InstrumentDetailResponse,
+    RunDetectionConfig,
+    WatcherConfig,
+)
+
+# Real winreg.REG_SZ and win32service.SERVICE_RUNNING values. Using the
+# real numeric values lets ``query_service_status`` look them up in its
+# state_map keyed on those constants without having to special-case the
+# fakes.
+_REG_SZ = 1
+_SERVICE_RUNNING = 4
+_SERVICE_STOPPED = 1
+
+
+def _make_win32_fakes() -> dict[str, ModuleType]:
+    """Build ``sys.modules`` stand-ins for the four win32 modules.
+
+    Each returned mock pre-populates the constants the service module
+    actually reads (e.g. ``ws.SERVICE_AUTO_START``, ``winreg.REG_SZ``)
+    with concrete values so callers can assert on them.
+    """
+    winreg = MagicMock(name="winreg")
+    winreg.HKEY_LOCAL_MACHINE = "HKLM"
+    winreg.KEY_SET_VALUE = "KEY_SET_VALUE"
+    winreg.KEY_QUERY_VALUE = "KEY_QUERY_VALUE"
+    winreg.REG_SZ = _REG_SZ
+
+    ws = MagicMock(name="win32service")
+    ws.SERVICE_AUTO_START = "SERVICE_AUTO_START"
+    ws.SC_MANAGER_ALL_ACCESS = "SC_MANAGER_ALL_ACCESS"
+    ws.SC_MANAGER_CONNECT = "SC_MANAGER_CONNECT"
+    ws.SERVICE_ALL_ACCESS = "SERVICE_ALL_ACCESS"
+    ws.SERVICE_QUERY_STATUS = "SERVICE_QUERY_STATUS"
+    ws.SERVICE_CONFIG_FAILURE_ACTIONS = "SERVICE_CONFIG_FAILURE_ACTIONS"
+    ws.SERVICE_CONFIG_FAILURE_ACTIONS_FLAG = "SERVICE_CONFIG_FAILURE_ACTIONS_FLAG"
+    ws.SERVICE_STOPPED = _SERVICE_STOPPED
+    ws.SERVICE_START_PENDING = 2
+    ws.SERVICE_STOP_PENDING = 3
+    ws.SERVICE_RUNNING = _SERVICE_RUNNING
+    ws.SERVICE_CONTINUE_PENDING = 5
+    ws.SERVICE_PAUSE_PENDING = 6
+    ws.SERVICE_PAUSED = 7
+
+    win32serviceutil = MagicMock(name="win32serviceutil")
+    servicemanager = MagicMock(name="servicemanager")
+
+    return {
+        "winreg": winreg,
+        "win32service": ws,
+        "win32serviceutil": win32serviceutil,
+        "servicemanager": servicemanager,
+    }
+
+
+@pytest.fixture
+def service_module(monkeypatch: pytest.MonkeyPatch) -> Iterator[ModuleType]:
+    """Reload ``data_hub_watcher.service`` with fresh win32 fakes.
+
+    Each test gets its own set of fakes so call counts and recorded
+    arguments are isolated. The fakes are injected into ``sys.modules``
+    before the reload so that the lazy ``import`` statements inside
+    each function pick them up.
+    """
+    fakes = _make_win32_fakes()
+    for name, mod in fakes.items():
+        monkeypatch.setitem(sys.modules, name, mod)
+
+    import data_hub_watcher.service as svc
+
+    reloaded = importlib.reload(svc)
+    yield reloaded
+    # Reload once more on teardown with the real (or absent) win32
+    # modules popped so other tests don't see stale state. monkeypatch
+    # automatically restores sys.modules.
+    importlib.reload(svc)
+
+
+# --- Registry round-trip + helpers ------------------------------------------
+
+
+class TestRegistryRoundTrip:
+    """``_store_paths_in_registry`` + ``_read_paths_from_registry`` form a pair."""
+
+    def test_store_then_read_returns_same_paths(self, service_module: ModuleType) -> None:
+        winreg = sys.modules["winreg"]
+        config_path = Path("C:/data-hub/config.yaml")
+        env_path = Path("C:/data-hub/.env.staging")
+
+        # Build a fake registry key that records writes and replays them
+        # for the corresponding read.
+        stored: dict[str, str] = {}
+        fake_key = MagicMock(name="reg_key")
+        winreg.OpenKey.return_value = fake_key
+
+        def _set(key: Any, name: str, _reserved: int, _type: int, value: str) -> None:
+            stored[name] = value
+
+        def _query(key: Any, name: str) -> tuple[str, int]:
+            return stored[name], _REG_SZ
+
+        winreg.SetValueEx.side_effect = _set
+        winreg.QueryValueEx.side_effect = _query
+
+        service_module._store_paths_in_registry(config_path, env_path)
+        got_cfg, got_env = service_module._read_paths_from_registry()
+
+        assert got_cfg == config_path
+        assert got_env == env_path
+
+    def test_store_writes_under_hklm_with_set_value_access(
+        self, service_module: ModuleType
+    ) -> None:
+        winreg = sys.modules["winreg"]
+        winreg.OpenKey.return_value = MagicMock()
+
+        service_module._store_paths_in_registry(Path("c.yaml"), Path("e.env"))
+
+        winreg.OpenKey.assert_called_once_with(
+            "HKLM",
+            service_module._REG_KEY,
+            0,
+            "KEY_SET_VALUE",
+        )
+        names_written = [call.args[1] for call in winreg.SetValueEx.call_args_list]
+        assert names_written == [
+            service_module._REG_CONFIG_PATH,
+            service_module._REG_ENV_PATH,
+        ]
+        # Both writes use the string registry value type.
+        for call in winreg.SetValueEx.call_args_list:
+            assert call.args[3] == _REG_SZ
+
+    def test_delete_paths_silently_ignores_missing_key(self, service_module: ModuleType) -> None:
+        winreg = sys.modules["winreg"]
+        winreg.OpenKey.side_effect = OSError("key not found")
+
+        # Must not raise even if the key doesn't exist.
+        service_module._delete_paths_from_registry()
+
+        winreg.DeleteValue.assert_not_called()
+
+    def test_delete_paths_removes_both_values(self, service_module: ModuleType) -> None:
+        winreg = sys.modules["winreg"]
+        winreg.OpenKey.return_value = MagicMock()
+
+        service_module._delete_paths_from_registry()
+
+        deleted_names = [call.args[1] for call in winreg.DeleteValue.call_args_list]
+        assert deleted_names == [
+            service_module._REG_CONFIG_PATH,
+            service_module._REG_ENV_PATH,
+        ]
+
+
+# --- install_service argument shape -----------------------------------------
+
+
+class TestInstallService:
+    """``install_service`` must register the service with very specific kwargs.
+
+    The exact shape is what makes a freshly-rebooted lab PC bring the
+    watcher back up reliably (delayed start + network deps + recovery).
+    Regressions here have repeatedly broken production.
+    """
+
+    def test_install_passes_expected_kwargs_to_win32serviceutil(
+        self, service_module: ModuleType
+    ) -> None:
+        win32serviceutil = sys.modules["win32serviceutil"]
+        sys.modules["winreg"].OpenKey.return_value = MagicMock()
+
+        service_module.install_service(Path("c.yaml"), Path("e.env"))
+
+        win32serviceutil.InstallService.assert_called_once()
+        kwargs = win32serviceutil.InstallService.call_args.kwargs
+        assert kwargs["pythonClassString"] == ("data_hub_watcher.service.DataHubWatcherService")
+        assert kwargs["serviceName"] == service_module.SERVICE_NAME
+        assert kwargs["displayName"] == service_module.SERVICE_DISPLAY_NAME
+        assert kwargs["startType"] == "SERVICE_AUTO_START"
+        assert kwargs["serviceDeps"] == ["Tcpip", "Dnscache"]
+        assert kwargs["exeArgs"] == "-m data_hub_watcher.service"
+        assert kwargs["delayedstart"] is True
+        assert kwargs["description"] == service_module.SERVICE_DESCRIPTION
+
+    def test_install_persists_paths_and_configures_recovery(
+        self,
+        service_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        sys.modules["winreg"].OpenKey.return_value = MagicMock()
+        store_calls: list[tuple[Path, Path]] = []
+        recovery_calls: list[None] = []
+
+        monkeypatch.setattr(
+            service_module,
+            "_store_paths_in_registry",
+            lambda p, e: store_calls.append((p, e)),
+        )
+        monkeypatch.setattr(
+            service_module,
+            "_configure_recovery",
+            lambda: recovery_calls.append(None),
+        )
+
+        service_module.install_service(Path("c.yaml"), Path("e.env"))
+
+        assert store_calls == [(Path("c.yaml"), Path("e.env"))]
+        assert recovery_calls == [None]
+
+
+# --- _configure_recovery actions + non-crash failure flag --------------------
+
+
+class TestConfigureRecovery:
+    """Lock in the recovery contract added in commit 1712c70.
+
+    The watcher's two-restart-then-stop policy + the
+    ``fFailureActionsOnNonCrashFailures`` flag are what make a lab PC
+    survive a transient API outage at boot. Without the flag, the SCM
+    treats our ``SystemExit(1)`` as a graceful stop.
+    """
+
+    def test_configure_recovery_sets_two_restarts_then_no_action(
+        self, service_module: ModuleType
+    ) -> None:
+        ws = sys.modules["win32service"]
+        fake_scm = MagicMock(name="scm_handle")
+        fake_svc = MagicMock(name="service_handle")
+        ws.OpenSCManager.return_value = fake_scm
+        ws.OpenService.return_value = fake_svc
+
+        service_module._configure_recovery()
+
+        ws.OpenSCManager.assert_called_once_with(None, None, "SC_MANAGER_ALL_ACCESS")
+        ws.OpenService.assert_called_once_with(
+            fake_scm, service_module.SERVICE_NAME, "SERVICE_ALL_ACCESS"
+        )
+
+        # Two ChangeServiceConfig2 calls: one for the actions, one for the flag.
+        assert ws.ChangeServiceConfig2.call_count == 2
+        actions_call, flag_call = ws.ChangeServiceConfig2.call_args_list
+
+        # First call: failure-actions list.
+        assert actions_call.args[1] == "SERVICE_CONFIG_FAILURE_ACTIONS"
+        actions_payload = actions_call.args[2]
+        assert actions_payload["ResetPeriod"] == 86400
+        assert actions_payload["Actions"] == [
+            (1, 60_000),
+            (1, 120_000),
+            (0, 0),
+        ]
+
+        # Second call: the non-crash failure flag must be enabled. This
+        # is the bit that makes the SCM honour our SystemExit(1) as a
+        # failure and trigger the actions above.
+        assert flag_call.args[1] == "SERVICE_CONFIG_FAILURE_ACTIONS_FLAG"
+        assert flag_call.args[2] == {"fFailureActionsOnNonCrashFailures": True}
+
+    def test_configure_recovery_closes_handles(self, service_module: ModuleType) -> None:
+        ws = sys.modules["win32service"]
+        fake_scm = MagicMock()
+        fake_svc = MagicMock()
+        ws.OpenSCManager.return_value = fake_scm
+        ws.OpenService.return_value = fake_svc
+
+        service_module._configure_recovery()
+
+        # Both handles must be closed even on the happy path.
+        closed = [call.args[0] for call in ws.CloseServiceHandle.call_args_list]
+        assert fake_svc in closed
+        assert fake_scm in closed
+
+
+# --- uninstall / start / stop ------------------------------------------------
+
+
+class TestServiceLifecycle:
+    def test_uninstall_stops_clears_registry_and_removes(
+        self,
+        service_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        win32serviceutil = sys.modules["win32serviceutil"]
+        delete_calls: list[None] = []
+        monkeypatch.setattr(
+            service_module,
+            "_delete_paths_from_registry",
+            lambda: delete_calls.append(None),
+        )
+
+        service_module.uninstall_service()
+
+        win32serviceutil.StopService.assert_called_once_with(service_module.SERVICE_NAME)
+        assert delete_calls == [None]
+        win32serviceutil.RemoveService.assert_called_once_with(service_module.SERVICE_NAME)
+
+    def test_uninstall_swallows_stop_errors(
+        self,
+        service_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        win32serviceutil = sys.modules["win32serviceutil"]
+        win32serviceutil.StopService.side_effect = RuntimeError("not running")
+        monkeypatch.setattr(service_module, "_delete_paths_from_registry", lambda: None)
+
+        # Even if StopService raises (e.g. service already stopped or
+        # doesn't exist), uninstall must still proceed to RemoveService.
+        service_module.uninstall_service()
+
+        win32serviceutil.RemoveService.assert_called_once()
+
+    def test_start_service_delegates(self, service_module: ModuleType) -> None:
+        win32serviceutil = sys.modules["win32serviceutil"]
+        service_module.start_service()
+        win32serviceutil.StartService.assert_called_once_with(service_module.SERVICE_NAME)
+
+    def test_stop_service_delegates(self, service_module: ModuleType) -> None:
+        win32serviceutil = sys.modules["win32serviceutil"]
+        service_module.stop_service()
+        win32serviceutil.StopService.assert_called_once_with(service_module.SERVICE_NAME)
+
+
+# --- query_service_status ----------------------------------------------------
+
+
+class TestQueryServiceStatus:
+    def test_running_state_returns_pid(self, service_module: ModuleType) -> None:
+        ws = sys.modules["win32service"]
+        ws.OpenSCManager.return_value = MagicMock()
+        ws.OpenService.return_value = MagicMock()
+        ws.QueryServiceStatusEx.return_value = {
+            "CurrentState": _SERVICE_RUNNING,
+            "ProcessId": 4321,
+        }
+
+        result = service_module.query_service_status()
+
+        assert result == {
+            "service_name": service_module.SERVICE_NAME,
+            "state": "running",
+            "pid": 4321,
+        }
+
+    def test_stopped_state_returns_none_pid(self, service_module: ModuleType) -> None:
+        ws = sys.modules["win32service"]
+        ws.OpenSCManager.return_value = MagicMock()
+        ws.OpenService.return_value = MagicMock()
+        # Real services often report a stale pid even when stopped; the
+        # code must zero it out so callers don't show a phantom process.
+        ws.QueryServiceStatusEx.return_value = {
+            "CurrentState": _SERVICE_STOPPED,
+            "ProcessId": 9999,
+        }
+
+        result = service_module.query_service_status()
+
+        assert result["state"] == "stopped"
+        assert result["pid"] is None
+
+
+# --- _run_service_loop -------------------------------------------------------
+
+
+def _make_config(
+    tmp_path: Path,
+    *,
+    watcher_id: str | None = "w-test",
+    environment: str = "staging",
+) -> WatcherConfig:
+    """Build a minimal valid `WatcherConfig` rooted in *tmp_path*.
+
+    Mirrors the helper in ``test_runtime.py`` so the two suites share
+    the same fixture shape.
+    """
+    watch_dir = tmp_path / "data"
+    watch_dir.mkdir()
+    (watch_dir / "RUN001_sample.csv").write_text("a,b\n1,2\n")
+    instrument = InstrumentConfig(
+        id="test-instrument",
+        watch_directory=watch_dir,
+        file_patterns=["*.csv"],
+        upload_mode="auto",
+        run_detection=RunDetectionConfig(pattern=r"^([^_]+)", recursive=False),
+    )
+    return WatcherConfig(
+        version=1,
+        environment=environment,  # type: ignore[arg-type]
+        watcher_id=watcher_id,
+        instrument=instrument,
+    )
+
+
+def _make_instrument_detail(status: str = "active") -> InstrumentDetailResponse:
+    return InstrumentDetailResponse(
+        id="test-instrument",
+        display_name="Test Instrument",
+        status=status,  # type: ignore[arg-type]
+        run_count=0,
+        watcher_count=1,
+    )
+
+
+class _LoopHarness:
+    """Patches the collaborators of ``_run_service_loop``.
+
+    Keeps the patches in one place so each test only needs to override
+    the one thing it cares about (failing API call, missing watcher_id,
+    etc.). Returns a populated ``servicemanager`` mock so tests can
+    assert which log functions were called.
+    """
+
+    def __init__(
+        self,
+        service_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        self.svc = service_module
+        self.monkeypatch = monkeypatch
+        self.tmp_path = tmp_path
+        self.config_path = tmp_path / "config.yaml"
+        self.env_path = tmp_path / ".env.staging"
+        self.config_path.write_text("# placeholder, content is mocked away\n")
+        self.env_path.write_text("")
+        self.cfg = _make_config(tmp_path)
+        self.client = MagicMock(name="DataHubClient")
+        self.client.get_instrument.return_value = _make_instrument_detail("active")
+        self.client.get_config_checksum.return_value = None
+        self.runtime = MagicMock(name="WatcherRuntime")
+        self.start_calls: list[Any] = []
+        self.stop_calls: list[Any] = []
+        self.sm = MagicMock(name="servicemanager")
+
+        # Patch the registry read at the service-module level so the
+        # winreg fake doesn't need to participate.
+        monkeypatch.setattr(
+            service_module,
+            "_read_paths_from_registry",
+            lambda: (self.config_path, self.env_path),
+        )
+
+        # Patch source modules of the lazy imports inside _run_service_loop.
+        from data_hub_watcher import api_client, config_io, constants, runtime
+
+        monkeypatch.setattr(api_client, "DataHubClient", lambda *_a, **_kw: self.client)
+        monkeypatch.setattr(config_io, "load_config", lambda _p: self.cfg)
+        monkeypatch.setattr(config_io, "config_checksum", lambda _p: "deadbeef")
+        # env_file_path is called with no argument in _run_service_loop;
+        # return a path that's not on disk so the "if base_env != env_path
+        # and base_env.exists()" branch short-circuits.
+        monkeypatch.setattr(
+            constants,
+            "env_file_path",
+            lambda environment=None: tmp_path / ".env.nonexistent",
+        )
+        monkeypatch.setattr(
+            runtime,
+            "build_runtime",
+            lambda **_kw: self.runtime,
+        )
+        monkeypatch.setattr(
+            runtime,
+            "start_runtime",
+            lambda rt, started_message="": self.start_calls.append((rt, started_message)),
+        )
+        monkeypatch.setattr(
+            runtime,
+            "stop_runtime",
+            lambda rt, stopped_message="": self.stop_calls.append((rt, stopped_message)),
+        )
+
+        # load_dotenv is imported directly inside the function from
+        # `dotenv`, so patch it on the dotenv module.
+        import dotenv
+
+        self.dotenv_calls: list[Any] = []
+        monkeypatch.setattr(
+            dotenv,
+            "load_dotenv",
+            lambda *args, **kwargs: self.dotenv_calls.append((args, kwargs)),
+        )
+
+
+@pytest.fixture
+def harness(
+    service_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> _LoopHarness:
+    return _LoopHarness(service_module, monkeypatch, tmp_path)
+
+
+class TestRunServiceLoopHappyPath:
+    def test_full_startup_through_stop(self, harness: _LoopHarness) -> None:
+        stop_event = threading.Event()
+        # Pre-set the stop event so loop returns immediately after start.
+        stop_event.set()
+
+        harness.svc._run_service_loop(stop_event, harness.sm)
+
+        # The full sequence ran in order:
+        harness.client.get_instrument.assert_called_once_with("test-instrument")
+        # Checksum sync was attempted (remote was None -> push_config).
+        harness.client.get_config_checksum.assert_called_once_with("w-test")
+        harness.client.push_config.assert_called_once()
+        assert len(harness.start_calls) == 1
+        assert len(harness.stop_calls) == 1
+        # Sanity-check the start/stop messages reach the runtime so the
+        # API event log shows the boot/shutdown.
+        assert "Service started" in harness.start_calls[0][1]
+        assert harness.stop_calls[0][1] == "Service stopped"
+        # No error logs.
+        harness.sm.LogErrorMsg.assert_not_called()
+
+    def test_overlays_env_files_in_order(self, harness: _LoopHarness) -> None:
+        # base_env defaults to a non-existent path in the harness, so
+        # only the registered env_path should be loaded. Make the base
+        # exist to verify the overlay behaviour.
+        from data_hub_watcher import constants
+
+        base_env = harness.tmp_path / ".env.base"
+        base_env.write_text("")
+        harness.monkeypatch.setattr(constants, "env_file_path", lambda environment=None: base_env)
+
+        stop_event = threading.Event()
+        stop_event.set()
+        harness.svc._run_service_loop(stop_event, harness.sm)
+
+        # Two load_dotenv calls: base first (no override), then registered
+        # env_path with override=True.
+        assert len(harness.dotenv_calls) == 2
+        first_args, first_kwargs = harness.dotenv_calls[0]
+        second_args, second_kwargs = harness.dotenv_calls[1]
+        assert first_args == (base_env,)
+        assert "override" not in first_kwargs or first_kwargs["override"] is False
+        assert second_args == (harness.env_path,)
+        assert second_kwargs == {"override": True}
+
+
+class TestRunServiceLoopFailures:
+    def test_registry_read_failure_exits_with_error_log(self, harness: _LoopHarness) -> None:
+        def boom() -> tuple[Path, Path]:
+            raise OSError("registry key missing")
+
+        harness.monkeypatch.setattr(harness.svc, "_read_paths_from_registry", boom)
+
+        with pytest.raises(SystemExit) as excinfo:
+            harness.svc._run_service_loop(threading.Event(), harness.sm)
+
+        assert excinfo.value.code == 1
+        harness.sm.LogErrorMsg.assert_called_once()
+        msg = harness.sm.LogErrorMsg.call_args.args[0]
+        assert "registry" in msg.lower()
+        assert "service install" in msg
+        # No runtime should have been built.
+        assert harness.start_calls == []
+
+    def test_api_unreachable_at_startup_exits(self, harness: _LoopHarness) -> None:
+        # This is the boot-before-network failure mode that the
+        # SERVICE_CONFIG_FAILURE_ACTIONS_FLAG exists to recover from.
+        harness.client.get_instrument.side_effect = ApiError("connection refused", status_code=0)
+
+        with pytest.raises(SystemExit) as excinfo:
+            harness.svc._run_service_loop(threading.Event(), harness.sm)
+
+        assert excinfo.value.code == 1
+        harness.sm.LogErrorMsg.assert_called_once()
+        assert "API" in harness.sm.LogErrorMsg.call_args.args[0]
+        assert harness.start_calls == []
+
+    def test_pending_instrument_exits(self, harness: _LoopHarness) -> None:
+        harness.client.get_instrument.return_value = _make_instrument_detail("pending")
+
+        with pytest.raises(SystemExit) as excinfo:
+            harness.svc._run_service_loop(threading.Event(), harness.sm)
+
+        assert excinfo.value.code == 1
+        harness.sm.LogErrorMsg.assert_called_once()
+        assert "pending" in harness.sm.LogErrorMsg.call_args.args[0]
+        assert harness.start_calls == []
+
+    def test_missing_watcher_id_exits_after_status_check(self, harness: _LoopHarness) -> None:
+        # Rebuild config without a watcher_id. The startup must reach
+        # the explicit guard (not crash inside build_runtime's assert)
+        # so operators get a clear log line.
+        from data_hub_watcher import config_io
+
+        extra = harness.tmp_path / "extra"
+        extra.mkdir()
+        cfg = _make_config(extra, watcher_id=None)
+        harness.monkeypatch.setattr(config_io, "load_config", lambda _p: cfg)
+
+        with pytest.raises(SystemExit) as excinfo:
+            harness.svc._run_service_loop(threading.Event(), harness.sm)
+
+        assert excinfo.value.code == 1
+        harness.sm.LogErrorMsg.assert_called_once()
+        assert "watcher_id" in harness.sm.LogErrorMsg.call_args.args[0]
+        assert harness.start_calls == []
+
+
+class TestRunServiceLoopChecksumSync:
+    def test_checksum_api_error_is_a_warning_not_a_fatal(self, harness: _LoopHarness) -> None:
+        # If the API is reachable enough to answer get_instrument but
+        # the checksum endpoint blips, the service must still come up.
+        # This is an explicit design choice: don't punish operators for
+        # transient sync failures, the next heartbeat will retry.
+        harness.client.get_config_checksum.side_effect = ApiError("transient 500", status_code=500)
+
+        stop_event = threading.Event()
+        stop_event.set()
+        harness.svc._run_service_loop(stop_event, harness.sm)
+
+        harness.sm.LogWarningMsg.assert_called_once()
+        assert "sync" in harness.sm.LogWarningMsg.call_args.args[0].lower()
+        assert len(harness.start_calls) == 1
+        harness.sm.LogErrorMsg.assert_not_called()
+
+    def test_matching_checksum_skips_push(self, harness: _LoopHarness) -> None:
+        # When the remote checksum already matches, push_config must
+        # NOT be called -- otherwise every reboot would no-op rewrite
+        # the config and flood the audit log.
+        from data_hub_watcher.models import ConfigChecksumResponse
+
+        harness.client.get_config_checksum.return_value = ConfigChecksumResponse(
+            config_checksum="deadbeef"
+        )
+
+        stop_event = threading.Event()
+        stop_event.set()
+        harness.svc._run_service_loop(stop_event, harness.sm)
+
+        harness.client.push_config.assert_not_called()
+        assert len(harness.start_calls) == 1
