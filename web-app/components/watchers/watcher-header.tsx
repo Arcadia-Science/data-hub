@@ -8,14 +8,13 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { DeregisterDialog } from "@/components/watchers/deregister-dialog";
-import { statusBadge } from "@/components/watchers/status-badge";
+import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type { WatcherDetail } from "@/lib/api/watchers";
 import { formatDate } from "@/lib/date";
 import { formatRelativeTime } from "@/lib/utils";
 import Link from "next/link";
 
 export function WatcherHeader({ watcher }: { watcher: WatcherDetail }) {
-  const sb = statusBadge[watcher.effectiveStatus];
   const isDeregistered = !!watcher.deletedAt;
 
   return (
@@ -57,9 +56,10 @@ export function WatcherHeader({ watcher }: { watcher: WatcherDetail }) {
             <h1 className="text-2xl font-semibold tracking-tight">
               {watcher.hostname ?? "Unnamed Watcher"}
             </h1>
-            <Badge variant={sb.variant} className="text-[10px]">
-              {sb.label}
-            </Badge>
+            <WatcherStatusBadge
+              status={watcher.effectiveStatus}
+              lastOnlineAt={watcher.lastHeartbeatAt}
+            />
             {isDeregistered && (
               <Badge variant="secondary" className="text-[10px]">
                 Deregistered

@@ -64,6 +64,13 @@
       "when": 1776986418967,
       "tag": "0008_chilly_princess_powerful",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1777404985691,
+      "tag": "0009_clammy_tyger_tiger",
+      "breakpoints": true
     }
   ]
 }

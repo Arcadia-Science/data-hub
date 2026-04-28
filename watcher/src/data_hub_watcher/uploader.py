@@ -22,7 +22,7 @@ from data_hub_watcher.constants import (
 )
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import WatcherCounters
-from data_hub_watcher.run_detector import FileInfo
+from data_hub_watcher.run_detector import FileInfo, file_created_at
 from data_hub_watcher.state import StateDB
 from data_hub_watcher.util import file_sha256
 
@@ -188,6 +188,7 @@ class Uploader:
                 path.name,
                 content_type=content_type,
                 size_bytes=stat.st_size,
+                file_created_at_ts=file_created_at(stat),
             )
         except ApiError as exc:
             logger.error("Failed to get presigned URL for %s: %s", path.name, exc.message)

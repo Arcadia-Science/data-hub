@@ -41,7 +41,7 @@ The wizard will walk you through:
 
 1. **Environment** — choose `staging` (for testing), `production`, or `preview` (for testing against a Vercel preview deployment). If you choose `preview`, you'll be prompted for the deployment's API base URL (e.g. `https://data-hub-git-my-branch.vercel.app/api/v1`).
 
-2. **API key** — paste the personal access token. The key is saved to `~/.data-hub/.env`. You can also set the `DATA_HUB_API_KEY` environment variable before running `init` to skip this prompt.
+2. **API key** — paste the personal access token. The key is saved to `~/.data-hub/.env.<environment>` (e.g. `~/.data-hub/.env.staging`), so each environment keeps its own key and you can switch between them by re-running `init` without re-entering credentials. You can also set the `DATA_HUB_API_KEY` environment variable before running `init` to skip this prompt.
 
 3. **Instrument** — select an existing instrument from the list, or register a new one by choosing the last option. New instruments start as `pending` and must be activated by an admin in the web app before the watcher can start.
 
@@ -59,7 +59,7 @@ The wizard will walk you through:
    - **`auto`** — files are uploaded to S3 immediately after detection.
    - **`manual`** — files are reported to the server but not uploaded until an admin approves them via the upload queue.
 
-The wizard saves configuration to `~/.data-hub/config.yaml`, the API key to `~/.data-hub/.env`, and syncs the config to the server.
+The wizard saves configuration to `~/.data-hub/config.yaml`, the API key to `~/.data-hub/.env.<environment>`, and syncs the config to the server.
 
 ## Starting the watcher
 

@@ -74,6 +74,10 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     typeof body.content_type === "string" ? body.content_type : undefined;
   const sizeBytes =
     typeof body.size_bytes === "number" ? body.size_bytes : undefined;
+  const fileCreatedAt =
+    typeof body.file_created_at === "string"
+      ? new Date(body.file_created_at)
+      : null;
 
   // Look up existing file record by run + filename.  The file may have been
   // created by report_run with a full relative_path (e.g. "EXP-001/data.csv"),
@@ -113,6 +117,15 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   if (existingFile) {
     // File exists in detected / upload_requested — reuse the record.
     fileId = existingFile.id;
+    // Backfill file_created_at if the watcher started reporting it after
+    // the row was first inserted (e.g. a queue-mode upload following an
+    // earlier detected_files report that predated this column).
+    if (fileCreatedAt && !existingFile.fileCreatedAt) {
+      await db
+        .update(files)
+        .set({ fileCreatedAt })
+        .where(eq(files.id, existingFile.id));
+    }
   } else {
     const now = new Date();
     const [inserted] = await db
@@ -125,6 +138,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
         sizeBytes: sizeBytes ?? null,
         status: "detected",
         detectedAt: now,
+        fileCreatedAt,
       })
       .returning({ id: files.id });
 

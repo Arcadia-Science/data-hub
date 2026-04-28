@@ -441,6 +441,13 @@ export const files = pgTable(
       withTimezone: true,
       mode: "date",
     }),
+    // On-disk creation time of the file, reported by the watcher
+    // (st_birthtime where available, else st_mtime). NULL for
+    // Lambda-created files and rows predating this column.
+    fileCreatedAt: timestamp("file_created_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
     createdAt: timestamp("created_at", {
       withTimezone: true,
       mode: "date",

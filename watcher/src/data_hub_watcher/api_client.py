@@ -1,6 +1,7 @@
 from __future__ import annotations
 import logging
 import os
+from datetime import datetime, timezone
 from typing import Any
 
 import requests
@@ -203,12 +204,17 @@ class DataHubClient:
         filename: str,
         content_type: str | None = None,
         size_bytes: int | None = None,
+        file_created_at_ts: float | None = None,
     ) -> PresignedUploadResponse:
         payload: dict[str, Any] = {"filename": filename}
         if content_type:
             payload["content_type"] = content_type
         if size_bytes is not None:
             payload["size_bytes"] = size_bytes
+        if file_created_at_ts:
+            payload["file_created_at"] = datetime.fromtimestamp(
+                file_created_at_ts, tz=timezone.utc
+            ).isoformat()
         resp = self._request(
             "POST",
             f"/instruments/{instrument_id}/runs/{run_id}/request-upload-url",

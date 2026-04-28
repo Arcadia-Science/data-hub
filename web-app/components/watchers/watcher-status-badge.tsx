@@ -7,35 +7,74 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import type { WatcherOnlineStatus } from "@/components/watchers/watcher-online-status";
+import type { EffectiveStatus } from "@/lib/api/watchers";
 import { cn, formatRelativeTime } from "@/lib/utils";
-import { Radio, WifiOff } from "lucide-react";
+import { Clock, Power, Radio, WifiOff } from "lucide-react";
+
+/**
+ * Union of every status this badge can render:
+ *   - `WatcherOnlineStatus` is the instrument-level aggregate (any watcher
+ *     online vs none) used in the instruments table and instrument header.
+ *   - `EffectiveStatus` is the per-watcher state used in the watchers table
+ *     and watcher detail header.
+ *
+ * `watching` and `online` collapse to the same green "Online" treatment;
+ * `stale` and `offline` collapse to the same destructive treatment but with
+ * different labels ("Unresponsive" vs "Offline") since the aggregate badge
+ * can't tell why an instrument's watchers are silent, while the per-watcher
+ * badge can.
+ */
+export type WatcherBadgeStatus = WatcherOnlineStatus | EffectiveStatus;
+
+const ONLINE_CLASSNAME =
+  "border-transparent bg-green-500/10 text-green-700 dark:bg-green-500/15 dark:text-green-400";
+
+const OFFLINE_CLASSNAME =
+  "border-transparent bg-destructive/10 text-destructive dark:bg-destructive/20";
+
+const MUTED_FILLED_CLASSNAME =
+  "border-transparent bg-muted text-muted-foreground";
+
+const MUTED_OUTLINED_CLASSNAME = "border-border text-muted-foreground";
 
 const STATUS_CONFIG: Record<
-  WatcherOnlineStatus,
+  WatcherBadgeStatus,
   {
     label: string;
     Icon: typeof Radio;
     className: string;
   }
 > = {
-  online: {
-    label: "Online",
-    Icon: Radio,
-    className:
-      "border-transparent bg-green-500/10 text-green-700 dark:bg-green-500/15 dark:text-green-400",
-  },
-  offline: {
-    label: "Offline",
-    Icon: WifiOff,
-    className:
-      "border-transparent bg-destructive/10 text-destructive dark:bg-destructive/20",
-  },
+  // Instrument-level aggregate
+  online: { label: "Online", Icon: Radio, className: ONLINE_CLASSNAME },
+  offline: { label: "Offline", Icon: WifiOff, className: OFFLINE_CLASSNAME },
   no_watcher: {
     label: "No Watcher",
     Icon: WifiOff,
-    className: "border-border text-muted-foreground",
+    className: MUTED_OUTLINED_CLASSNAME,
+  },
+  // Per-watcher
+  watching: { label: "Online", Icon: Radio, className: ONLINE_CLASSNAME },
+  stale: {
+    label: "Unresponsive",
+    Icon: WifiOff,
+    className: OFFLINE_CLASSNAME,
+  },
+  // Distinct from `stale`: someone (or the host) shut the watcher down
+  // gracefully, so it's expected to be silent and shouldn't read as an alarm.
+  stopped: { label: "Stopped", Icon: Power, className: MUTED_FILLED_CLASSNAME },
+  // Registered but hasn't sent its first heartbeat yet — transient.
+  registered: {
+    label: "Registered",
+    Icon: Clock,
+    className: MUTED_OUTLINED_CLASSNAME,
   },
 };
+
+// Statuses where a "last online at" tooltip makes sense — i.e. the watcher
+// *should* be reporting but isn't. Excludes `stopped` (intentional) and
+// `registered` (no heartbeat history yet).
+const TOOLTIP_STATUSES = new Set<WatcherBadgeStatus>(["offline", "stale"]);
 
 export function WatcherStatusBadge({
   status,
@@ -43,24 +82,28 @@ export function WatcherStatusBadge({
   verbose = false,
   className,
 }: {
-  status: WatcherOnlineStatus;
+  status: WatcherBadgeStatus;
   /**
-   * Most recent watcher heartbeat for the instrument. When the badge is in
-   * `offline` state and this is provided, it's surfaced via tooltip so users
-   * can tell at a glance how long the instrument has been silent.
+   * Most recent watcher heartbeat. When the badge is in an "unexpected
+   * silence" state (`offline` / `stale`) and this is provided, it's
+   * surfaced via tooltip so users can tell at a glance how long the
+   * watcher has been silent.
    */
   lastOnlineAt?: Date | null;
   /**
-   * When true, prefixes the label with "Watcher" (e.g. "Watcher Online").
-   * Useful in headers where the badge stands alone outside a status column.
-   * The `no_watcher` label ("No Watcher") is never prefixed.
+   * When true, prefixes the aggregate online/offline labels with "Watcher"
+   * (e.g. "Watcher Online"). Useful in headers where the badge stands alone
+   * outside a status column. Has no effect on per-watcher labels or on
+   * `no_watcher`, where prefixing would be redundant or wrong.
    */
   verbose?: boolean;
   className?: string;
 }) {
   const { label, Icon, className: variantClassName } = STATUS_CONFIG[status];
   const fullLabel =
-    verbose && status !== "no_watcher" ? `Watcher ${label}` : label;
+    verbose && (status === "online" || status === "offline")
+      ? `Watcher ${label}`
+      : label;
 
   const badge = (
     <Badge className={cn(variantClassName, className)}>
@@ -69,7 +112,7 @@ export function WatcherStatusBadge({
     </Badge>
   );
 
-  if (status !== "offline" || !lastOnlineAt) {
+  if (!TOOLTIP_STATUSES.has(status) || !lastOnlineAt) {
     return badge;
   }
 

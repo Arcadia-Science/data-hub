@@ -127,5 +127,6 @@ function formatFileResponse(f: typeof files.$inferSelect) {
     uploaded_at: f.uploadedAt,
     processed_at: f.processedAt,
     created_at: f.createdAt,
+    file_created_at: f.fileCreatedAt,
   };
 }
