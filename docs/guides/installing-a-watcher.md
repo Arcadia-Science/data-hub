@@ -19,15 +19,6 @@ uv tool install data-hub-watcher
 
 This installs the `data-hub-watcher` CLI into an isolated venv managed by `uv`, on PATH for any shell.
 
-Until the package ships to PyPI, install from TestPyPI instead. TestPyPI doesn't mirror our runtime deps, so pull those from the real PyPI via `--extra-index-url`:
-
-```sh
-uv tool install \
-  --index-url https://test.pypi.org/simple/ \
-  --extra-index-url https://pypi.org/simple/ \
-  data-hub-watcher
-```
-
 After installation, every example below that says `data-hub-watcher …` runs the installed CLI directly. `data-hub-watcher` (used by developers working from a checkout) also works.
 
 ### Windows service support
@@ -174,6 +165,43 @@ After a successful upgrade you must restart the watcher (or the Windows
 service) for the new code to take effect — `self-update` does not restart
 the running process. To run upgrades unattended, schedule the command via
 Windows Task Scheduler (e.g. weekly).
+
+### Automatic background updates
+
+When the watcher runs as a Windows service it also polls the Data Hub
+API roughly once an hour and applies new releases on its own — no
+operator action and no Task Scheduler entry required. The service:
+
+1. Calls `GET /api/v1/watchers/<watcher-id>/update-check` and compares
+   the server's `latest_version` against its own.
+2. Only attempts an upgrade if **all** of these are true:
+   - a newer version is available;
+   - no files have been uploaded for several heartbeats in a row; and
+   - no run has been reported within roughly 5× the configured
+     `stability_period_seconds`.
+3. Runs the same `uv tool install --reinstall` (or `pip install -U`)
+   command described above. While the subprocess is running the
+   service emits an `update_started` event you can see in the Watchers
+   page.
+4. On success, exits non-zero so the Windows SCM restarts the service
+   into the new wheel. The new process emits `update_succeeded` once
+   it confirms the new version is actually loaded; if something went
+   wrong (e.g. the new code crashes at startup) you'll see
+   `update_failed` instead.
+
+When the server flags a release as **mandatory**, the activity-window
+guard is skipped and the upgrade fires on the next hourly check
+regardless of in-flight uploads — use this only for security fixes or
+wire-protocol changes where running known-bad code is worse than a
+brief outage.
+
+Auto-update is **disabled** in the `preview` environment so PR
+preview deployments can never push code to production lab PCs.
+
+If you'd rather pin a specific version, run `data-hub-watcher
+self-update --check` to see the server's target and follow up with a
+manual `uv tool install data-hub-watcher==<pinned>` — the next
+auto-update tick will see the pin matches the server's target and skip.
 
 ## Manual uploads
 

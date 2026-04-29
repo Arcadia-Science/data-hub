@@ -373,9 +373,24 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
 
     sm.LogInfoMsg(f"{SERVICE_DISPLAY_NAME} is running")
 
-    stop_event.wait()
+    # Wait for either the SCM's stop_event (operator-initiated stop, or
+    # OS shutdown) or the runtime's shutdown_event (in-process updater
+    # finished installing a new wheel and wants the SCM to restart us).
+    # Polling on a 1-second tick keeps wakeup latency low for both paths.
+    while not stop_event.is_set():
+        if rt.shutdown_event.wait(timeout=1.0):
+            break
 
     stop_runtime(rt, stopped_message="Service stopped")
+
+    if rt.upgrade_restart_event.is_set():
+        sm.LogInfoMsg(f"{SERVICE_DISPLAY_NAME} restarting to load upgraded watcher")
+        # Exit non-zero so the SCM's failure-actions config kicks in and
+        # restarts the service on the configured 60 s delay. Without
+        # SERVICE_CONFIG_FAILURE_ACTIONS_FLAG this would look like a
+        # graceful exit and the SCM wouldn't restart us — see the long
+        # comment on `_configure_recovery` for details.
+        raise SystemExit(1)
 
     sm.LogInfoMsg(f"{SERVICE_DISPLAY_NAME} stopped")
 

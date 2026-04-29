@@ -99,6 +99,13 @@
       "when": 1777490067215,
       "tag": "0013_add_watcher_version",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1777493318455,
+      "tag": "0014_add_watcher_update_events",
+      "breakpoints": true
     }
   ]
 }

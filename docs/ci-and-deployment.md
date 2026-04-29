@@ -2,7 +2,7 @@
 
 ## GitHub Actions
 
-Four workflows run on pushes to `staging`/`production` and on pull requests targeting those branches.
+Four workflows run on pushes to `staging`/`production` and on pull requests targeting those branches. A fifth (`publish-watcher.yml`) runs only on `watcher-v*` tag pushes and manual dispatch.
 
 ### Python lint and typecheck (`python-lint.yml`)
 
@@ -28,6 +28,16 @@ Four workflows run on pushes to `staging`/`production` and on pull requests targ
 - Starts a Postgres 17 service container and Node.js 24.
 - `make fe-test-mcp` — runs in-memory MCP protocol tests (mocked data layer, no database).
 - `make fe-test-integration` — runs Vitest integration tests that test the API routes and MCP server over HTTP against a real database.
+
+### Publish watcher (`publish-watcher.yml`)
+
+Triggered on `watcher-v*` tag pushes and manual `workflow_dispatch`. Builds the `data-hub-watcher` package, publishes it to PyPI via OIDC trusted publishing, and verifies the upload by installing the freshly published wheel into a clean venv. Three sequential jobs:
+
+1. **build** — Verifies the git tag matches `watcher/pyproject.toml` (`make py-check-watcher-version`), builds the wheel and sdist with `uv build --package data-hub-watcher`, and uploads them as a workflow artifact.
+2. **publish** — Downloads the artifact and uploads it to PyPI with [`pypa/gh-action-pypi-publish`](https://github.com/pypa/gh-action-pypi-publish) using OIDC trusted publishing. Gated on the `pypi` GitHub deployment environment so reviewer-required releases can be enforced from the GitHub UI without editing the workflow file.
+3. **verify** — In a fresh `uv venv`, installs `data-hub-watcher==<tag-version>` from PyPI and runs `data-hub-watcher --version` plus `python -c "import data_hub_watcher"` as a smoke test. Catches stale-mirror shadows and module-level import side-effect crashes.
+
+See the [Watcher (PyPI)](#watcher-pypi) deployment section for the operator-facing release flow.
 
 ## Branch strategy
 
@@ -211,6 +221,29 @@ make docker-push-lambda ENV=staging
 # Deploy to staging (loads infra/.env.staging automatically).
 make sam-deploy ENV=staging
 ```
+
+### Watcher (PyPI)
+
+The `data-hub-watcher` Python package is published to [PyPI](https://pypi.org/project/data-hub-watcher/) so lab PCs can install and self-update via `uv tool install data-hub-watcher` (see the [installing-a-watcher](guides/installing-a-watcher.md) guide for the operator path).
+
+Releases are tag-driven. To cut a new version:
+
+1. Bump `[project].version` in `watcher/pyproject.toml` on `staging` (or a release branch) and merge to `production` once the change has been smoke-tested.
+2. Tag the release commit with the matching `watcher-vX.Y.Z` tag and push the tag:
+
+   ```sh
+   git tag watcher-v0.3.0
+   git push origin watcher-v0.3.0
+   ```
+
+3. The `publish-watcher.yml` workflow runs automatically. Its `build` job refuses to proceed if the tag and `pyproject.toml` version disagree, so a typo in either fails fast before anything reaches PyPI.
+4. Approve the `pypi` deployment in GitHub if reviewer protection is enabled. Once approved, `publish` uploads to PyPI and `verify` smoke-tests the wheel from a clean venv.
+
+To re-run the publish + verify pipeline against an already-tagged build (e.g. after a transient PyPI outage), use **Actions → Publish watcher → Run workflow** on the `production` branch. `skip-existing: true` on the publish step makes the retry safe — files already uploaded with the same hash are skipped rather than failing the run.
+
+Trusted publishing is configured under **Project → Publishing** on PyPI for `Arcadia-Science/data-hub` and the workflow `publish-watcher.yml`; no API token lives in repo secrets. If trust is ever revoked or rotated, update it there and re-run the workflow.
+
+After a release lands on PyPI, bump the server-side `WATCHER_LATEST_VERSION` env var in Vercel (per environment) so the `/update-check` endpoint advertises the new target. Lab PCs running an auto-update-capable build will pick it up on their next hourly tick (see the [auto-update section](guides/installing-a-watcher.md#automatic-background-updates) of the install guide). Do **not** bump `WATCHER_LATEST_VERSION` ahead of the PyPI publish — the watcher's upgrade subprocess will fail to resolve a version that doesn't yet exist on the index. Set `WATCHER_MANDATORY_UPDATE=true` only for security or wire-protocol fixes; otherwise the activity-window guard suffices.
 
 ## Running checks locally
 

@@ -237,13 +237,15 @@ class TestBuildUpgradeCommand:
         ]
 
     def test_custom_index_url_is_propagated(self) -> None:
+        # Exercises the `index_url` passthrough that an internal PyPI
+        # mirror or air-gapped lab proxy would set.
         cmd = build_upgrade_command(
             InstallMethod.PIP,
             target_version="0.3.0",
-            index_url="https://test.pypi.org/simple/",
+            index_url="https://pypi.example.com/simple/",
             python_executable="python",
         )
-        assert "https://test.pypi.org/simple/" in cmd
+        assert "https://pypi.example.com/simple/" in cmd
 
     @pytest.mark.parametrize("method", [InstallMethod.EDITABLE, InstallMethod.UNKNOWN])
     def test_unsupported_methods_raise(self, method: InstallMethod) -> None:

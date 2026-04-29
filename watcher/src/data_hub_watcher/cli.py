@@ -7,7 +7,6 @@ import re
 import signal
 import subprocess
 import sys
-import time
 from pathlib import Path
 from typing import Any
 
@@ -750,8 +749,20 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    while True:
-        time.sleep(1)
+    # Block on the runtime's shutdown event so the in-process auto-updater
+    # can request a restart from the heartbeat thread without needing a
+    # signal. Ctrl+C still works because the SIGINT handler raises
+    # SystemExit(0) directly out of `Event.wait` (Python interrupts the
+    # blocking call to deliver the signal).
+    while not rt.shutdown_event.wait(timeout=1.0):
+        pass
+
+    click.echo("\nUpgrade installed; restarting to load the new version…")
+    stop_runtime(rt, stopped_message="Watcher restarting for auto-update")
+    # Exit non-zero so any supervisor (or the operator's wrapper script)
+    # restarts us. The `data-hub-watcher service` Windows path uses the
+    # SCM's failure-actions config to do this automatically.
+    raise SystemExit(1)
 
 
 # ---------------------------------------------------------------------------

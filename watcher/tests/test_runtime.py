@@ -7,9 +7,10 @@ forgot to wire `on_tick` on the `HeartbeatLoop`. These tests lock in the
 wiring contract per `upload_mode` so any future drift fails loudly:
 
 * auto mode    -> `detector._upload_cb` is `uploader.upload_files`
-                  and `heartbeat._on_tick` is `None`
+                  and `heartbeat._on_tick` ticks the auto-updater only
 * manual mode  -> `detector._upload_cb` is `None`
                   and `heartbeat._on_tick` polls `uploader.poll_upload_queue`
+                  *and* ticks the auto-updater
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from data_hub_watcher.monitor import FileMonitor
 from data_hub_watcher.run_detector import RunDetector
 from data_hub_watcher.runtime import build_runtime
 from data_hub_watcher.state import StateDB
+from data_hub_watcher.updater import Updater
 from data_hub_watcher.uploader import Uploader
 
 
@@ -83,14 +85,22 @@ class TestBuildRuntimeAutoMode:
         finally:
             rt.state_db.close()
 
-    def test_heartbeat_on_tick_is_none(self, tmp_path: Path, db_path: Path) -> None:
+    def test_heartbeat_on_tick_only_drives_updater(self, tmp_path: Path, db_path: Path) -> None:
         cfg = _make_config(tmp_path, upload_mode="auto")
         rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
 
         try:
-            # Auto mode has no server-driven upload queue to poll, so the
-            # heartbeat tick must not invoke any extra callback.
-            assert rt.heartbeat._on_tick is None
+            # Auto mode has no server-driven upload queue to poll, but
+            # the in-process updater still needs a tick on every
+            # heartbeat — it gates auto-updates on the cumulative idle
+            # window across many heartbeats. So the hook is non-None
+            # and ticking it must not call `poll_upload_queue`.
+            assert rt.heartbeat._on_tick is not None
+            rt.uploader.poll_upload_queue = MagicMock()  # type: ignore[method-assign]
+            rt.updater.on_tick = MagicMock(return_value=None)  # type: ignore[method-assign]
+            rt.heartbeat._on_tick()
+            rt.uploader.poll_upload_queue.assert_not_called()
+            rt.updater.on_tick.assert_called_once_with()
         finally:
             rt.state_db.close()
 
@@ -119,8 +129,12 @@ class TestBuildRuntimeManualMode:
             assert rt.heartbeat._on_tick is not None
 
             rt.uploader.poll_upload_queue = MagicMock()  # type: ignore[method-assign]
+            rt.updater.on_tick = MagicMock(return_value=None)  # type: ignore[method-assign]
             rt.heartbeat._on_tick()
             rt.uploader.poll_upload_queue.assert_called_once_with()
+            # The same hook must also feed the auto-updater so its idle
+            # counter advances regardless of upload_mode.
+            rt.updater.on_tick.assert_called_once_with()
         finally:
             rt.state_db.close()
 
@@ -135,9 +149,30 @@ class TestBuildRuntimeManualMode:
             rt.uploader.poll_upload_queue = MagicMock(  # type: ignore[method-assign]
                 side_effect=RuntimeError("boom")
             )
+            rt.updater.on_tick = MagicMock(return_value=None)  # type: ignore[method-assign]
             assert rt.heartbeat._on_tick is not None
             rt.heartbeat._on_tick()
             rt.uploader.poll_upload_queue.assert_called_once_with()
+            # Updater must still tick even when the upload-queue poll
+            # blew up, otherwise a permanently-failing manual-mode
+            # poll would also disable auto-updates.
+            rt.updater.on_tick.assert_called_once_with()
+        finally:
+            rt.state_db.close()
+
+    def test_on_tick_swallows_updater_exceptions(self, tmp_path: Path, db_path: Path) -> None:
+        """Same containment guarantee for the updater half of the hook:
+        a buggy update check must not kill the heartbeat thread."""
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+
+        try:
+            rt.updater.on_tick = MagicMock(  # type: ignore[method-assign]
+                side_effect=RuntimeError("update broke")
+            )
+            assert rt.heartbeat._on_tick is not None
+            rt.heartbeat._on_tick()
+            rt.updater.on_tick.assert_called_once_with()
         finally:
             rt.state_db.close()
 
@@ -159,6 +194,7 @@ class TestBuildRuntimeSharedDependencies:
             assert isinstance(rt.detector, RunDetector)
             assert isinstance(rt.monitor, FileMonitor)
             assert isinstance(rt.heartbeat, HeartbeatLoop)
+            assert isinstance(rt.updater, Updater)
         finally:
             rt.state_db.close()
 

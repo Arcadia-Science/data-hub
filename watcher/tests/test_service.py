@@ -464,6 +464,11 @@ class _LoopHarness:
         self.client.get_instrument.return_value = _make_instrument_detail("active")
         self.client.get_config_checksum.return_value = None
         self.runtime = MagicMock(name="WatcherRuntime")
+        # Replace the auto-update plumbing fields with real Events so the
+        # service loop's wait-and-test sequence behaves naturally rather
+        # than always seeing truthy MagicMock attributes.
+        self.runtime.shutdown_event = threading.Event()
+        self.runtime.upgrade_restart_event = threading.Event()
         self.start_calls: list[Any] = []
         self.stop_calls: list[Any] = []
         self.sm = MagicMock(name="servicemanager")
@@ -634,6 +639,33 @@ class TestRunServiceLoopFailures:
         harness.sm.LogErrorMsg.assert_called_once()
         assert "watcher_id" in harness.sm.LogErrorMsg.call_args.args[0]
         assert harness.start_calls == []
+
+
+class TestRunServiceLoopUpgradeRestart:
+    """The in-process auto-updater asks the runtime to exit non-zero on
+    success so the SCM's failure-actions config restarts the service
+    into the new wheel. Lock that contract in here."""
+
+    def test_upgrade_restart_event_causes_systemexit_one(self, harness: _LoopHarness) -> None:
+        # Simulate the heartbeat-thread Updater finishing a successful
+        # upgrade by pre-setting both events. The loop should bail out
+        # of the wait, run stop_runtime, then raise SystemExit(1) so the
+        # SCM treats this as a failure and applies its restart policy.
+        harness.runtime.shutdown_event.set()
+        harness.runtime.upgrade_restart_event.set()
+        stop_event = threading.Event()  # NOT pre-set
+
+        with pytest.raises(SystemExit) as excinfo:
+            harness.svc._run_service_loop(stop_event, harness.sm)
+
+        assert excinfo.value.code == 1
+        # Cleanup must still run before the non-zero exit so the heartbeat
+        # thread, file monitor, etc. have a chance to flush their state.
+        assert len(harness.stop_calls) == 1
+        # And the operator-facing log line must distinguish this from a
+        # normal stop so the Windows event log shows what happened.
+        log_messages = [c.args[0] for c in harness.sm.LogInfoMsg.call_args_list]
+        assert any("upgraded" in m.lower() for m in log_messages)
 
 
 class TestRunServiceLoopChecksumSync:

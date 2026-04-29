@@ -36,6 +36,11 @@ export const watcherEventTypeEnum = pgEnum("watcher_event_type", [
   "run_reported",
   "config_synced",
   "error",
+  // Auto-update lifecycle events emitted by the in-process updater. See
+  // `watcher/src/data_hub_watcher/updater.py` for the state machine.
+  "update_started",
+  "update_succeeded",
+  "update_failed",
 ]);
 
 export const uploadModeEnum = pgEnum("upload_mode", ["auto", "manual"]);
