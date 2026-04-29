@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from data_hub_watcher.api_client import ApiError, DataHubClient
+from data_hub_watcher.constants import WATCHER_VERSION
 from data_hub_watcher.events import EventReporter
 
 logger = logging.getLogger(__name__)
@@ -99,6 +100,7 @@ class HeartbeatLoop:
             "instrument_id": self._instrument_id,
             "watch_directory": self._watch_directory,
             "upload_mode": self._upload_mode,
+            "watcher_version": WATCHER_VERSION,
             "files_uploaded_since_last_heartbeat": self.counters.files_uploaded,
             "runs_reported_since_last_heartbeat": self.counters.runs_reported,
             "errors_since_last_heartbeat": self.counters.errors,

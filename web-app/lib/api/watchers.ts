@@ -54,6 +54,7 @@ export type WatcherListItem = {
   instrumentId: string;
   instrumentDisplayName: string | null;
   hostname: string | null;
+  watcherVersion: string | null;
   effectiveStatus: EffectiveStatus;
   lastHeartbeatAt: Date | null;
   createdAt: Date;
@@ -74,6 +75,7 @@ export async function getWatcherList(opts: {
       instrumentId: watchers.instrumentId,
       instrumentDisplayName: instruments.displayName,
       hostname: watchers.hostname,
+      watcherVersion: watchers.watcherVersion,
       status: watchers.status,
       lastHeartbeatAt: watchers.lastHeartbeatAt,
       createdAt: watchers.createdAt,
@@ -89,6 +91,7 @@ export async function getWatcherList(opts: {
     instrumentId: row.instrumentId,
     instrumentDisplayName: row.instrumentDisplayName,
     hostname: row.hostname,
+    watcherVersion: row.watcherVersion,
     // Deregistered watchers always show as "stopped" regardless of their
     // last DB status — they can no longer heartbeat so staleness is moot.
     effectiveStatus: row.deletedAt ? "stopped" : computeEffectiveStatus(row),
@@ -121,6 +124,7 @@ export const getWatcherById = cache(async function getWatcherById(
       instrumentDisplayName: instruments.displayName,
       hostname: watchers.hostname,
       osInfo: watchers.osInfo,
+      watcherVersion: watchers.watcherVersion,
       status: watchers.status,
       lastHeartbeatAt: watchers.lastHeartbeatAt,
       configYaml: watchers.configYaml,
@@ -144,6 +148,7 @@ export const getWatcherById = cache(async function getWatcherById(
     instrumentDisplayName: row.instrumentDisplayName,
     hostname: row.hostname,
     osInfo: row.osInfo,
+    watcherVersion: row.watcherVersion,
     effectiveStatus: row.deletedAt ? "stopped" : computeEffectiveStatus(row),
     lastHeartbeatAt: row.lastHeartbeatAt,
     configYaml: row.configYaml,

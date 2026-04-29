@@ -1,6 +1,7 @@
 from __future__ import annotations
 import os
 import re
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -9,6 +10,21 @@ API_URLS: dict[str, str] = {
     "staging": "https://data-hub-env-staging-arcadia-science.vercel.app/api/v1",
     "production": "https://data-hub.arcadiascience.com/api/v1",
 }
+
+
+def _read_watcher_version() -> str:
+    # Resolve the installed distribution version once at import time so the
+    # value can be embedded in heartbeats. When the watcher is being run from
+    # an editable checkout outside its own metadata (e.g. some test contexts)
+    # the dist may not be importable; fall back to a sentinel rather than
+    # crashing the heartbeat loop.
+    try:
+        return version("data-hub-watcher")
+    except PackageNotFoundError:
+        return "0.0.0+unknown"
+
+
+WATCHER_VERSION: str = _read_watcher_version()
 
 DEFAULT_CONFIG_DIR = Path("~/.data-hub").expanduser()
 DEFAULT_CONFIG_FILENAME = "config.yaml"
