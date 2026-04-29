@@ -757,12 +757,22 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
     while not rt.shutdown_event.wait(timeout=1.0):
         pass
 
-    click.echo("\nUpgrade installed; restarting to load the new version…")
-    stop_runtime(rt, stopped_message="Watcher restarting for auto-update")
-    # Exit non-zero so any supervisor (or the operator's wrapper script)
-    # restarts us. The `data-hub-watcher service` Windows path uses the
-    # SCM's failure-actions config to do this automatically.
-    raise SystemExit(1)
+    # Distinguish an upgrade-driven shutdown from a generic one by
+    # checking the dedicated event — mirrors the Windows-service main
+    # loop in `service._run_service_loop`. This keeps the operator-
+    # facing message accurate if any future code path ever sets
+    # `shutdown_event` for a non-upgrade reason.
+    if rt.upgrade_restart_event.is_set():
+        click.echo("\nUpgrade installed; restarting to load the new version…")
+        stop_runtime(rt, stopped_message="Watcher restarting for auto-update")
+        # Exit non-zero so any supervisor (or the operator's wrapper
+        # script) restarts us. The `data-hub-watcher service` Windows
+        # path uses the SCM's failure-actions config to do this
+        # automatically.
+        raise SystemExit(1)
+
+    stop_runtime(rt, stopped_message="Watcher stopped")
+    raise SystemExit(0)
 
 
 # ---------------------------------------------------------------------------
