@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 dependencies = [
     "click>=8.2.1",
     "data-hub-shared",
+    "packaging>=24.0",
     "pydantic>=2.11.9",
     "pyyaml>=6.0",
     "python-dotenv>=1.0",

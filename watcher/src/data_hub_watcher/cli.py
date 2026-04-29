@@ -22,6 +22,7 @@ from data_hub_watcher.constants import (
     RUN_DETECTION_PRESETS,
     STATE_DB_FILENAME,
     SUPPORTED_ENVIRONMENTS,
+    WATCHER_VERSION,
     env_file_path,
     load_env,
     resolve_config_path,
@@ -35,6 +36,12 @@ from data_hub_watcher.models import (
     WatcherConfig,
 )
 from data_hub_watcher.runtime import build_runtime, start_runtime, stop_runtime
+from data_hub_watcher.self_update import (
+    InstallMethod,
+    detect_install_method,
+    evaluate_update,
+    run_upgrade,
+)
 from data_hub_watcher.state import StateDB
 from data_hub_watcher.uploader import Uploader
 
@@ -840,6 +847,91 @@ def upload(ctx: click.Context, file_path: str | None, run_id: str | None, dry_ru
         reporter.flush()
         click.echo(click.style(f"✓ Processed {len(queue.files)} file(s).", fg="green"))
         state_db.close()
+
+
+# ---------------------------------------------------------------------------
+# self-update command
+# ---------------------------------------------------------------------------
+
+
+@cli.command("self-update")
+@click.option(
+    "--check",
+    is_flag=True,
+    help="Print the server-reported target version without performing the upgrade.",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Run the upgrade subprocess even if the local version already matches the target.",
+)
+@click.pass_context
+def self_update(ctx: click.Context, check: bool, force: bool) -> None:
+    """Check the server for a newer watcher release and upgrade in place.
+
+    Designed for unattended use — schedule via Windows Task Scheduler
+    (e.g. weekly) so lab PCs converge on the latest published version
+    without operator intervention.
+    """
+    cfg, client, _path = _load_and_client(ctx)
+    if not cfg.watcher_id:
+        raise click.ClickException("No watcher_id in config. Run 'data-hub-watcher init' first.")
+
+    click.echo(f"Current version: {WATCHER_VERSION}")
+
+    try:
+        info = client.get_update_info(cfg.watcher_id)
+    except ApiError as exc:
+        raise click.ClickException(f"Failed to fetch update info: {exc.message}") from exc
+
+    target_label = info.latest_version or "(none configured)"
+    mandatory_label = " [mandatory]" if info.mandatory else ""
+    click.echo(f"Server target:   {target_label} (channel={info.channel}){mandatory_label}")
+
+    decision = evaluate_update(info, force=force)
+
+    if check:
+        verb = "Would upgrade" if decision.should_update else "No upgrade needed"
+        click.echo(f"{verb}: {decision.reason}.")
+        return
+
+    if not decision.should_update:
+        click.echo(f"Already up to date: {decision.reason}.")
+        return
+
+    method = detect_install_method()
+    click.echo(f"Install method:  {method.value}")
+    if method in (InstallMethod.EDITABLE, InstallMethod.UNKNOWN):
+        raise click.ClickException(
+            "Refusing to self-update an editable / unknown install. "
+            "Upgrade manually with 'git pull && uv sync' from your checkout."
+        )
+
+    click.echo(f"Upgrading {decision.current_version} -> {decision.target_version}…")
+    try:
+        result = run_upgrade(method, target_version=decision.target_version)
+    except RuntimeError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    if result.stdout:
+        click.echo(result.stdout.rstrip())
+    if result.stderr:
+        click.echo(result.stderr.rstrip(), err=True)
+
+    if result.returncode != 0:
+        raise click.ClickException(
+            f"Upgrade subprocess exited with code {result.returncode}. "
+            "The previous installation should still be functional; review "
+            "the output above and try again."
+        )
+
+    click.echo(
+        click.style(
+            f"\u2713 Upgrade to {decision.target_version} complete. "
+            "Restart the watcher (or the Windows service) to load the new code.",
+            fg="green",
+        )
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -250,6 +250,12 @@ def start_test_server() -> Generator[IntegrationEnv, None, None]:
         "AWS_SECRET_ACCESS_KEY": os.environ.get("AWS_SECRET_ACCESS_KEY", "test-secret"),
         "AWS_REGION": os.environ.get("AWS_REGION", "us-east-1"),
         "S3_RAW_DATA_BUCKET": os.environ.get("S3_RAW_DATA_BUCKET", "data-hub-test-raw"),
+        # Stable defaults for the watcher update-check endpoint so Python
+        # integration tests can assert on a known target version.
+        "WATCHER_LATEST_VERSION": os.environ.get("WATCHER_LATEST_VERSION", "9.9.9"),
+        "WATCHER_MIN_SUPPORTED_VERSION": os.environ.get("WATCHER_MIN_SUPPORTED_VERSION", "0.1.0"),
+        "WATCHER_RELEASE_CHANNEL": os.environ.get("WATCHER_RELEASE_CHANNEL", "stable"),
+        "WATCHER_MANDATORY_UPDATE": os.environ.get("WATCHER_MANDATORY_UPDATE", "false"),
     }
 
     build_result = subprocess.run(

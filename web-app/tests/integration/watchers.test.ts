@@ -348,6 +348,48 @@ describe("Watchers API", () => {
   });
 
   // -------------------------------------------------------------------------
+  // GET /api/v1/watchers/:watcherId/update-check
+  // -------------------------------------------------------------------------
+
+  // Update-check is the foundation for the auto-update flow. The exact
+  // response values come from `WATCHER_*` env vars seeded in
+  // `tests/integration/global-setup.ts` so the assertions stay stable as
+  // the real release line moves on.
+  it("GET /api/v1/watchers/:id/update-check returns server-reported release info", async () => {
+    const res = await api(`/api/v1/watchers/${watcherId}/update-check`, {
+      token,
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data).toEqual({
+      latest_version: "9.9.9",
+      min_supported_version: "0.1.0",
+      channel: "stable",
+      mandatory: false,
+    });
+  });
+
+  it("GET /api/v1/watchers/:id/update-check requires authentication", async () => {
+    const res = await api(`/api/v1/watchers/${watcherId}/update-check`);
+    expect(res.status).toBe(401);
+  });
+
+  it("GET /api/v1/watchers/:id/update-check rejects invalid UUID", async () => {
+    const res = await api("/api/v1/watchers/not-a-uuid/update-check", {
+      token,
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("GET /api/v1/watchers/:id/update-check returns 404 for unknown watcher", async () => {
+    const res = await api(
+      "/api/v1/watchers/00000000-0000-0000-0000-000000000000/update-check",
+      { token }
+    );
+    expect(res.status).toBe(404);
+  });
+
+  // -------------------------------------------------------------------------
   // DELETE /api/v1/watchers/:watcherId
   // -------------------------------------------------------------------------
 
@@ -370,6 +412,13 @@ describe("Watchers API", () => {
       token,
     });
     expect(res.status).toBe(409);
+  });
+
+  it("GET /api/v1/watchers/:id/update-check returns 404 for soft-deleted watcher", async () => {
+    const res = await api(`/api/v1/watchers/${watcherId}/update-check`, {
+      token,
+    });
+    expect(res.status).toBe(404);
   });
 
   it("GET /api/v1/watchers excludes deleted watchers by default", async () => {

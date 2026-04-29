@@ -126,6 +126,33 @@ uv run data-hub-watcher config show
 
 Changes are automatically synced to the server after editing.
 
+## Upgrading the watcher
+
+If the watcher was installed from PyPI (recommended for lab PCs), it can
+upgrade itself in place:
+
+```sh
+data-hub-watcher self-update            # check + upgrade if needed
+data-hub-watcher self-update --check    # report status only, no upgrade
+data-hub-watcher self-update --force    # re-run the upgrade subprocess
+                                         # even if the version already matches
+```
+
+The command asks the Data Hub API for the latest published version, compares
+it to the locally installed version, and runs the appropriate upgrade
+command for your install method:
+
+- **`uv tool install` installs** → `uv tool install --reinstall data-hub-watcher==<latest>`
+- **plain venv pip installs** → `<python> -m pip install -U data-hub-watcher==<latest>`
+- **editable / `uv sync` checkouts** → refused with a clear error; upgrade
+  these manually with `git pull && uv sync` since auto-upgrading would
+  shadow your source tree.
+
+After a successful upgrade you must restart the watcher (or the Windows
+service) for the new code to take effect — `self-update` does not restart
+the running process. To run upgrades unattended, schedule the command via
+Windows Task Scheduler (e.g. weekly).
+
 ## Manual uploads
 
 To upload a specific file outside the normal watch loop:

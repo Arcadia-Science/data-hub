@@ -236,3 +236,19 @@ class ApiErrorDetail(BaseModel):
     code: str
     message: str
     details: dict | None = None
+
+
+class WatcherUpdateInfoResponse(BaseModel):
+    """Server-reported release metadata for the `data-hub-watcher` package.
+
+    `latest_version` is `None` when the server has not been configured with a
+    target version yet — clients should treat this as "no update info
+    available" and skip the upgrade attempt rather than erroring out.
+    """
+
+    model_config = _API_MODEL_CONFIG
+
+    latest_version: str | None = None
+    min_supported_version: str | None = None
+    channel: str = "stable"
+    mandatory: bool = False
