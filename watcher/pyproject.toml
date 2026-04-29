@@ -37,7 +37,11 @@ windows-service = ["pywin32"]
 
 [project.urls]
 Homepage = "https://github.com/Arcadia-Science/data-hub"
-Documentation = "https://github.com/Arcadia-Science/data-hub/blob/main/docs/watcher.md"
+# Operator-facing install + auto-update guide — what someone landing on
+# the PyPI page actually needs. The developer-facing `docs/watcher.md`
+# describes the editable-checkout workflow and is reachable from the
+# repository link below.
+Documentation = "https://github.com/Arcadia-Science/data-hub/blob/production/docs/guides/installing-a-watcher.md"
 Repository = "https://github.com/Arcadia-Science/data-hub"
 Issues = "https://github.com/Arcadia-Science/data-hub/issues"
 
