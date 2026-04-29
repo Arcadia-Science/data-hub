@@ -180,9 +180,11 @@ operator action and no Task Scheduler entry required. The service:
    - no run has been reported within roughly 5× the configured
      `stability_period_seconds`.
 3. Runs the same `uv tool install --reinstall` (or `pip install -U`)
-   command described above. While the subprocess is running the
-   service emits an `update_started` event you can see in the Watchers
-   page.
+   command described above on a dedicated background thread, so
+   heartbeats keep flowing while the install executes (which can
+   take 30–60 s on slow links). The service emits an `update_started`
+   event before the subprocess starts, so you'll see the upgrade
+   begin in the Watchers page even if the install itself is slow.
 4. On success, exits non-zero so the Windows SCM restarts the service
    into the new wheel. The new process emits `update_succeeded` once
    it confirms the new version is actually loaded; if something went

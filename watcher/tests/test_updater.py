@@ -10,6 +10,9 @@ without spinning up a real heartbeat loop or hitting the network.
 from __future__ import annotations
 import json
 import subprocess
+import threading
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -100,6 +103,16 @@ class _UpdaterHarness:
     request_restart: MagicMock
 
 
+def _inline_executor(fn: Callable[[], None]) -> None:
+    """Synchronous executor used by the test harness.
+
+    Calling ``fn()`` inline (instead of spawning a daemon thread)
+    keeps assertions that depend on subprocess outcomes deterministic
+    without explicit thread joins.
+    """
+    fn()
+
+
 def _make_updater(
     tmp_path: Path,
     *,
@@ -107,6 +120,7 @@ def _make_updater(
     client: MagicMock | None = None,
     upgrade_runner: Any = None,
     updater_cfg: UpdaterConfig | None = None,
+    upgrade_executor: Callable[[Callable[[], None]], None] = _inline_executor,
 ) -> _UpdaterHarness:
     cfg = cfg or _make_config(tmp_path)
     client = client or MagicMock()
@@ -116,6 +130,10 @@ def _make_updater(
     state_db.last_run_reported_at.return_value = None
     request_restart = MagicMock()
 
+    # Default to an inline (synchronous) upgrade executor so the
+    # majority of tests can assert on subprocess outcomes without
+    # threading. Tests that exercise the async dispatch path opt in
+    # by passing the production threading executor explicitly.
     updater = Updater(
         client=client,
         reporter=reporter,
@@ -131,6 +149,7 @@ def _make_updater(
             min_run_age_seconds=10.0,
         ),
         upgrade_runner=upgrade_runner,
+        upgrade_executor=upgrade_executor,
     )
     return _UpdaterHarness(
         updater=updater,
@@ -451,3 +470,149 @@ class TestUpdaterOnTick:
         # index build.
         runner.assert_not_called()
         h.request_restart.assert_not_called()
+
+
+class TestUpdaterAsyncDispatch:
+    """The upgrade subprocess runs off the heartbeat thread.
+
+    Locks in the contract added to keep heartbeats flowing during a
+    slow ``uv tool install`` (which can take 30–60 s and would
+    otherwise wedge the heartbeat loop long enough for the dashboard
+    to flag the watcher as stale).
+    """
+
+    def test_on_tick_returns_immediately_while_subprocess_runs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A runner that blocks until the test releases it. Using the
+        # real threading executor (not the inline test default) so the
+        # subprocess is on a worker thread and `on_tick` doesn't wait.
+        release = threading.Event()
+        finished = threading.Event()
+
+        def slow_runner(method: Any, *, target_version: str) -> Any:
+            release.wait(timeout=5.0)
+            finished.set()
+            return _success_completed_process()
+
+        h = _make_updater(
+            tmp_path,
+            upgrade_runner=slow_runner,
+            upgrade_executor=lambda fn: threading.Thread(
+                target=fn, daemon=True, name="upgrade-worker-test"
+            ).start(),
+        )
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+        monkeypatch.setattr(
+            "data_hub_watcher.updater.detect_install_method",
+            lambda: InstallMethod.UV_TOOL,
+        )
+
+        h.counters.last_files_uploaded = 0
+        h.updater.on_tick()
+        h.updater.on_tick()
+
+        # The blocking subprocess must not delay this call. We cap the
+        # wall-clock cost at well under the 5 s upper bound of the
+        # blocked runner, so a regression that ran the subprocess
+        # synchronously would fail this assertion loudly rather than
+        # passing on a fast machine.
+        start = time.monotonic()
+        result = h.updater.on_tick()
+        elapsed = time.monotonic() - start
+        assert elapsed < 1.0, f"on_tick took {elapsed:.2f}s — subprocess must run off-thread"
+
+        # The dispatched-but-not-finished placeholder.
+        assert result is not None
+        assert result.attempted is True
+        assert result.succeeded is None
+        assert "dispatched" in result.reason
+        assert result.target_version == "9.9.9"
+        # Marker is on disk pre-dispatch (so a crashed-mid-upgrade
+        # process still leaves a trail for the next startup).
+        assert (tmp_path / ".data-hub" / UPGRADE_MARKER_FILENAME).exists()
+
+        # Now let the worker complete and verify the post-conditions.
+        release.set()
+        assert finished.wait(timeout=5.0)
+        # Wait for the worker to drop the in-progress flag and call
+        # request_restart — request_restart is the runtime-side hook
+        # whose call signals the heartbeat loop to exit.
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            if h.request_restart.call_count == 1:
+                break
+            time.sleep(0.01)
+        h.request_restart.assert_called_once_with("9.9.9")
+
+    def test_concurrent_tick_during_upgrade_is_a_noop(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # While an upgrade is in flight, a follow-up tick must not
+        # spawn a second subprocess or hit /update-check again.
+        release = threading.Event()
+        runner_calls = 0
+
+        def slow_runner(method: Any, *, target_version: str) -> Any:
+            nonlocal runner_calls
+            runner_calls += 1
+            release.wait(timeout=5.0)
+            return _success_completed_process()
+
+        h = _make_updater(
+            tmp_path,
+            upgrade_runner=slow_runner,
+            upgrade_executor=lambda fn: threading.Thread(
+                target=fn, daemon=True, name="upgrade-worker-test"
+            ).start(),
+        )
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+        monkeypatch.setattr(
+            "data_hub_watcher.updater.detect_install_method",
+            lambda: InstallMethod.UV_TOOL,
+        )
+
+        h.counters.last_files_uploaded = 0
+        h.updater.on_tick()
+        h.updater.on_tick()
+        first = h.updater.on_tick()
+        assert first is not None
+        assert first.succeeded is None
+
+        # Wait briefly for the worker to flip _upgrade_in_progress=True
+        # before the next tick (the worker reaches the runner
+        # immediately, the flag is set on the dispatch path).
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if h.updater._upgrade_in_progress:
+                break
+            time.sleep(0.01)
+
+        second = h.updater.on_tick()
+        assert second is not None
+        assert second.attempted is False
+        assert "in progress" in second.reason
+        # Critical: no second API call, no second subprocess.
+        assert h.client.get_update_info.call_count == 1
+        assert runner_calls == 1
+
+        release.set()
+
+    def test_default_executor_is_threading_based(self, tmp_path: Path) -> None:
+        # Smoke check that the production default actually offloads to
+        # a background thread named for log-readability. Catches a
+        # regression where someone might "simplify" the default back
+        # to inline execution.
+        from data_hub_watcher.updater import _default_upgrade_executor
+
+        seen_threads: list[str] = []
+        done = threading.Event()
+
+        def record() -> None:
+            seen_threads.append(threading.current_thread().name)
+            done.set()
+
+        _default_upgrade_executor(record)
+        assert done.wait(timeout=2.0)
+        assert seen_threads == ["upgrade-worker"]
+        assert seen_threads[0] != threading.current_thread().name

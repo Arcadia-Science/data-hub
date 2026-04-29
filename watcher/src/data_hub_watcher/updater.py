@@ -83,10 +83,15 @@ class UpdateAttemptResult:
 
     Returned (rather than only logged) so unit tests can assert the
     exact decision path without monkeypatching logging.
+
+    ``succeeded`` is ``True`` / ``False`` for finished decisions, and
+    ``None`` when an upgrade subprocess was dispatched off-thread but
+    its result isn't available yet (the heartbeat-thread caller
+    returns immediately rather than blocking on the subprocess).
     """
 
     attempted: bool
-    succeeded: bool
+    succeeded: bool | None
     reason: str
     target_version: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
@@ -257,13 +262,28 @@ def should_attempt_update(
 # ---------------------------------------------------------------------------
 
 
+def _default_upgrade_executor(fn: Callable[[], None]) -> None:
+    """Run *fn* on a daemon thread named ``upgrade-worker``.
+
+    The default executor used by :class:`Updater`. Detaching the
+    upgrade subprocess from the heartbeat thread is what lets
+    heartbeats keep flowing during a slow ``uv tool install``
+    (which can take 30–60 s and would otherwise wedge the loop
+    long enough for the dashboard to flag the watcher as stale).
+    Daemon=True so an interpreter shutdown doesn't block on a
+    pending subprocess.
+    """
+    threading.Thread(target=fn, daemon=True, name="upgrade-worker").start()
+
+
 class Updater:
     """Heartbeat-tick callback that polls for and applies updates.
 
     Construction is intentionally side-effect-free — wiring happens in
-    :mod:`data_hub_watcher.runtime`. The only state held here is two
-    counters (idle-ticks observed, ticks-since-last-check) plus
-    references to collaborators.
+    :mod:`data_hub_watcher.runtime`. State held: two counters (idle
+    ticks observed, ticks-since-last-check), an ``_upgrade_in_progress``
+    flag that gates concurrent dispatches, and references to the
+    collaborators.
     """
 
     def __init__(
@@ -278,6 +298,7 @@ class Updater:
         request_upgrade_restart: Callable[[str], None],
         updater_cfg: UpdaterConfig | None = None,
         upgrade_runner: Callable[..., Any] | None = None,
+        upgrade_executor: Callable[[Callable[[], None]], None] | None = None,
     ) -> None:
         self._client = client
         self._reporter = reporter
@@ -298,9 +319,15 @@ class Updater:
         # inject a stub that returns a synthetic CompletedProcess so they
         # don't have to monkeypatch a module-level symbol.
         self._upgrade_runner = upgrade_runner or run_upgrade
+        # Default executor spawns a daemon thread so the heartbeat
+        # loop returns immediately. Tests pass an inline executor
+        # (``lambda fn: fn()``) to make the dispatch synchronous and
+        # keep their assertions deterministic.
+        self._upgrade_executor = upgrade_executor or _default_upgrade_executor
 
         self._idle_ticks = 0
         self._ticks_since_check = 0
+        self._upgrade_in_progress = False
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
@@ -320,6 +347,18 @@ class Updater:
                 # Preview deployments are short-lived URL-suffixed builds
                 # and must never push code to production lab PCs.
                 return None
+
+            if self._upgrade_in_progress:
+                # A previous tick dispatched an upgrade to the executor
+                # and the subprocess hasn't returned yet. Skip the API
+                # call and counter advancement so we don't double-spawn
+                # or spam the dashboard with redundant decisions while
+                # the worker is still running.
+                return UpdateAttemptResult(
+                    attempted=False,
+                    succeeded=None,
+                    reason="upgrade subprocess already in progress",
+                )
 
             if self._counters.last_files_uploaded == 0:
                 self._idle_ticks += 1
@@ -397,8 +436,11 @@ class Updater:
                 details=details_started,
             )
         )
-        # Flush immediately so the dashboard sees UPDATE_STARTED even if
-        # the upgrade subprocess hangs or wedges the heartbeat thread.
+        # Flush immediately so the dashboard sees UPDATE_STARTED before
+        # the upgrade subprocess even starts. The subprocess itself runs
+        # off-thread (see executor below) so heartbeats keep flowing,
+        # but flushing here also covers the corner case where a slow
+        # subprocess delays the next heartbeat.
         self._reporter.flush()
 
         write_upgrade_marker(
@@ -407,31 +449,78 @@ class Updater:
             previous_version=WATCHER_VERSION,
         )
 
-        try:
-            result = self._upgrade_runner(method, target_version=target)
-        except Exception as exc:
-            logger.exception("Upgrade subprocess raised")
-            self._emit_failure(target, f"subprocess raised: {exc}")
-            return UpdateAttemptResult(True, False, str(exc), target)
+        with self._lock:
+            self._upgrade_in_progress = True
 
-        if result.returncode != 0:
-            stdout = (result.stdout or "")[-1000:]
-            stderr = (result.stderr or "")[-1000:]
-            self._emit_failure(
-                target,
-                f"subprocess exited {result.returncode}",
-                extra={"stdout_tail": stdout, "stderr_tail": stderr},
-            )
-            return UpdateAttemptResult(True, False, f"exit code {result.returncode}", target)
+        # Mutable cell capturing the subprocess outcome. When the
+        # executor runs synchronously (test default), the worker fills
+        # this in before we return and we surface the real result. When
+        # the executor dispatches to a thread (production default), the
+        # cell stays empty and we return a "dispatched" placeholder so
+        # the heartbeat-thread caller can record what happened on this
+        # tick without blocking on the subprocess.
+        outcome: list[UpdateAttemptResult] = []
 
-        # The new wheel is installed but the running interpreter still
-        # has the old code loaded. UPDATE_SUCCEEDED is emitted from the
-        # *next* startup once the marker confirms the new version is
-        # actually running — see `evaluate_upgrade_marker`. Here we just
-        # request the runtime to exit non-zero so the SCM restarts us.
-        logger.info("Upgrade subprocess succeeded; requesting service restart")
-        self._request_upgrade_restart(target)
-        return UpdateAttemptResult(True, True, "upgrade subprocess succeeded", target)
+        def _run_upgrade() -> None:
+            try:
+                try:
+                    result = self._upgrade_runner(method, target_version=target)
+                except Exception as exc:
+                    logger.exception("Upgrade subprocess raised")
+                    self._emit_failure(target, f"subprocess raised: {exc}")
+                    outcome.append(UpdateAttemptResult(True, False, str(exc), target))
+                    return
+
+                if result.returncode != 0:
+                    stdout = (result.stdout or "")[-1000:]
+                    stderr = (result.stderr or "")[-1000:]
+                    self._emit_failure(
+                        target,
+                        f"subprocess exited {result.returncode}",
+                        extra={"stdout_tail": stdout, "stderr_tail": stderr},
+                    )
+                    outcome.append(
+                        UpdateAttemptResult(True, False, f"exit code {result.returncode}", target)
+                    )
+                    return
+
+                # The new wheel is installed but the running interpreter
+                # still has the old code loaded. UPDATE_SUCCEEDED is
+                # emitted from the *next* startup once the marker
+                # confirms the new version is actually running — see
+                # `evaluate_upgrade_marker`. Here we just request the
+                # runtime to exit non-zero so the SCM restarts us.
+                logger.info("Upgrade subprocess succeeded; requesting service restart")
+                self._request_upgrade_restart(target)
+                outcome.append(
+                    UpdateAttemptResult(True, True, "upgrade subprocess succeeded", target)
+                )
+            finally:
+                # Always clear the in-progress flag so a one-shot failure
+                # doesn't permanently disable future update attempts.
+                # On success, the runtime is about to be torn down by
+                # `request_upgrade_restart` so the flag's value past
+                # this point is moot.
+                with self._lock:
+                    self._upgrade_in_progress = False
+
+        self._upgrade_executor(_run_upgrade)
+
+        if outcome:
+            return outcome[0]
+
+        # Async dispatch: the worker is still running. Return a
+        # placeholder reflecting that we kicked off the subprocess on
+        # this tick; the actual success/failure will be reported via
+        # `request_upgrade_restart` (success) or queued
+        # ``UPDATE_FAILED`` events (failure) once the worker finishes.
+        return UpdateAttemptResult(
+            attempted=True,
+            succeeded=None,
+            reason="upgrade subprocess dispatched (running off-thread)",
+            target_version=target,
+            extra={"in_progress": True, "method": method.value},
+        )
 
     def _emit_failure(
         self,
