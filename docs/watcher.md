@@ -30,6 +30,8 @@ uv run data-hub-watcher init
 uv run data-hub-watcher watch
 ```
 
+For lab-PC installs (PyPI), see [Installing a watcher](guides/installing-a-watcher.md). For releasing new versions and how the in-place upgrade flow works (CLI `self-update` and the Windows-service auto-updater), see [Upgrading the watcher](guides/upgrading-the-watcher.md).
+
 ## Commands
 
 ### `init`
@@ -102,6 +104,10 @@ Manage the watcher as a Windows service:
 | `service start` | Start the service |
 | `service stop` | Stop the service |
 | `service status` | Show service status |
+
+### `self-update`
+
+Checks the API for a newer published version and runs the appropriate `uv tool install --reinstall` (or `pip install -U`) subprocess in place. See [Upgrading the watcher](guides/upgrading-the-watcher.md) for the supported install methods, the activity-window guard, mandatory updates, and rollback flow.
 
 ## Configuration
 

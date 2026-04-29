@@ -224,26 +224,9 @@ make sam-deploy ENV=staging
 
 ### Watcher (PyPI)
 
-The `data-hub-watcher` Python package is published to [PyPI](https://pypi.org/project/data-hub-watcher/) so lab PCs can install and self-update via `uv tool install data-hub-watcher` (see the [installing-a-watcher](guides/installing-a-watcher.md) guide for the operator path).
-
-Releases are tag-driven. To cut a new version:
-
-1. Bump `[project].version` in `watcher/pyproject.toml` on `staging` (or a release branch) and merge to `production` once the change has been smoke-tested.
-2. Tag the release commit with the matching `watcher-vX.Y.Z` tag and push the tag:
-
-   ```sh
-   git tag watcher-v0.3.0
-   git push origin watcher-v0.3.0
-   ```
-
-3. The `publish-watcher.yml` workflow runs automatically. Its `build` job refuses to proceed if the tag and `pyproject.toml` version disagree, so a typo in either fails fast before anything reaches PyPI.
-4. Approve the `pypi` deployment in GitHub if reviewer protection is enabled. Once approved, `publish` uploads to PyPI and `verify` smoke-tests the wheel from a clean venv.
-
-To re-run the publish + verify pipeline against an already-tagged build (e.g. after a transient PyPI outage), use **Actions → Publish watcher → Run workflow** on the `production` branch. `skip-existing: true` on the publish step makes the retry safe — files already uploaded with the same hash are skipped rather than failing the run.
+The `data-hub-watcher` Python package is published to [PyPI](https://pypi.org/project/data-hub-watcher/) so lab PCs can install and self-update via `uv tool install data-hub-watcher`. The full release flow — version bump, tag, approval, env-var roll-out, mandatory updates, and rollback — is documented in the operator-facing [Upgrading the watcher](guides/upgrading-the-watcher.md) guide; this section is intentionally a pointer rather than a second source of truth so the two can't drift.
 
 Trusted publishing is configured under **Project → Publishing** on PyPI for `Arcadia-Science/data-hub` and the workflow `publish-watcher.yml`; no API token lives in repo secrets. If trust is ever revoked or rotated, update it there and re-run the workflow.
-
-After a release lands on PyPI, bump the server-side `WATCHER_LATEST_VERSION` env var in Vercel (per environment) so the `/update-check` endpoint advertises the new target. Lab PCs running an auto-update-capable build will pick it up on their next hourly tick (see the [auto-update section](guides/installing-a-watcher.md#automatic-background-updates) of the install guide). Do **not** bump `WATCHER_LATEST_VERSION` ahead of the PyPI publish — the watcher's upgrade subprocess will fail to resolve a version that doesn't yet exist on the index. Set `WATCHER_MANDATORY_UPDATE=true` only for security or wire-protocol fixes; otherwise the activity-window guard suffices.
 
 ## Running checks locally
 

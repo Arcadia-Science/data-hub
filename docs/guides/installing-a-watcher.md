@@ -141,69 +141,17 @@ Changes are automatically synced to the server after editing.
 
 ## Upgrading the watcher
 
-If the watcher was installed from PyPI (recommended for lab PCs), it can
-upgrade itself in place:
+The watcher can upgrade itself in place, either on demand via `data-hub-watcher self-update` or — when running as a Windows service — automatically on an hourly background tick. The full release flow, mandatory-update behavior, rollback steps, and operator troubleshooting all live in [Upgrading the watcher](upgrading-the-watcher.md).
+
+If you just want the quick command:
 
 ```sh
 data-hub-watcher self-update            # check + upgrade if needed
 data-hub-watcher self-update --check    # report status only, no upgrade
-data-hub-watcher self-update --force    # re-run the upgrade subprocess
-                                         # even if the version already matches
+data-hub-watcher self-update --force    # re-run the upgrade subprocess even if the version already matches
 ```
 
-The command asks the Data Hub API for the latest published version, compares
-it to the locally installed version, and runs the appropriate upgrade
-command for your install method:
-
-- **`uv tool install` installs** → `uv tool install --reinstall data-hub-watcher==<latest>`
-- **plain venv pip installs** → `<python> -m pip install -U data-hub-watcher==<latest>`
-- **editable / `uv sync` checkouts** → refused with a clear error; upgrade
-  these manually with `git pull && uv sync` since auto-upgrading would
-  shadow your source tree.
-
-After a successful upgrade you must restart the watcher (or the Windows
-service) for the new code to take effect — `self-update` does not restart
-the running process. To run upgrades unattended, schedule the command via
-Windows Task Scheduler (e.g. weekly).
-
-### Automatic background updates
-
-When the watcher runs as a Windows service it also polls the Data Hub
-API roughly once an hour and applies new releases on its own — no
-operator action and no Task Scheduler entry required. The service:
-
-1. Calls `GET /api/v1/watchers/<watcher-id>/update-check` and compares
-   the server's `latest_version` against its own.
-2. Only attempts an upgrade if **all** of these are true:
-   - a newer version is available;
-   - no files have been uploaded for several heartbeats in a row; and
-   - no run has been reported within roughly 5× the configured
-     `stability_period_seconds`.
-3. Runs the same `uv tool install --reinstall` (or `pip install -U`)
-   command described above on a dedicated background thread, so
-   heartbeats keep flowing while the install executes (which can
-   take 30–60 s on slow links). The service emits an `update_started`
-   event before the subprocess starts, so you'll see the upgrade
-   begin in the Watchers page even if the install itself is slow.
-4. On success, exits non-zero so the Windows SCM restarts the service
-   into the new wheel. The new process emits `update_succeeded` once
-   it confirms the new version is actually loaded; if something went
-   wrong (e.g. the new code crashes at startup) you'll see
-   `update_failed` instead.
-
-When the server flags a release as **mandatory**, the activity-window
-guard is skipped and the upgrade fires on the next hourly check
-regardless of in-flight uploads — use this only for security fixes or
-wire-protocol changes where running known-bad code is worse than a
-brief outage.
-
-Auto-update is **disabled** in the `preview` environment so PR
-preview deployments can never push code to production lab PCs.
-
-If you'd rather pin a specific version, run `data-hub-watcher
-self-update --check` to see the server's target and follow up with a
-manual `uv tool install data-hub-watcher==<pinned>` — the next
-auto-update tick will see the pin matches the server's target and skip.
+After a successful upgrade you must restart the watcher (or the Windows service) for the new code to take effect — `self-update` does not restart the running process. Lab PCs running the Windows service get auto-restart for free via the SCM's failure-actions policy; see the upgrade guide for details.
 
 ## Manual uploads
 
