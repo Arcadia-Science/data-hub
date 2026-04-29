@@ -1,0 +1,139 @@
+name: Publish watcher
+
+# Two trigger paths:
+#   * `watcher-v*` git tag → publish to TestPyPI by default. The version
+#     in `watcher/pyproject.toml` must match the tag (enforced by the
+#     `py-check-watcher-version` Make target before we build).
+#   * Manual dispatch → operator chooses TestPyPI or PyPI. Useful for
+#     re-running the verification job, or for promoting a TestPyPI build
+#     to PyPI once it's been smoke-tested.
+#
+# Authentication is OIDC trusted publishing (no API token in repo
+# secrets); the matching publisher must be configured on TestPyPI / PyPI
+# under Project → Publishing for `Arcadia-Science/data-hub` and the
+# workflow `publish-watcher.yml`.
+on:
+  push:
+    tags:
+      - "watcher-v*"
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: "Index to publish to"
+        type: choice
+        required: true
+        default: testpypi
+        options:
+          - testpypi
+          - pypi
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build wheel + sdist
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      # Refuse to publish unless the git tag and the package version line
+      # up — guards against shipping `watcher-v0.3.0` from a repo whose
+      # `[project].version` is still `0.2.9`.
+      - name: Verify tag matches watcher/pyproject.toml version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: make py-check-watcher-version
+
+      - name: Read package version
+        id: version
+        run: |
+          VERSION=$(awk -F'"' '/^version[[:space:]]*=/{print $2; exit}' watcher/pyproject.toml)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building data-hub-watcher==$VERSION"
+
+      - name: Build wheel + sdist
+        run: uv build --package data-hub-watcher --out-dir dist
+
+      - name: List built artifacts
+        run: ls -la dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: Publish to ${{ (github.event_name == 'workflow_dispatch' && inputs.repository == 'pypi') && 'PyPI' || 'TestPyPI' }}
+    needs: build
+    runs-on: ubuntu-latest
+    # Distinct deployment environments per index so publishing rules
+    # (required reviewers, allowed branches/tags) can be tightened on
+    # PyPI without slowing down TestPyPI iteration.
+    environment:
+      name: ${{ (github.event_name == 'workflow_dispatch' && inputs.repository == 'pypi') && 'pypi' || 'testpypi' }}
+    permissions:
+      # OIDC trusted publishing requires `id-token: write`. No secrets
+      # required — pypa's action exchanges the GitHub OIDC token for a
+      # short-lived API token at the index.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to TestPyPI
+        if: github.event_name != 'workflow_dispatch' || inputs.repository == 'testpypi'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          # TestPyPI sometimes lags on metadata indexing; allow re-runs
+          # by skipping files that already exist with the same hash.
+          skip-existing: true
+
+      - name: Publish to PyPI
+        if: github.event_name == 'workflow_dispatch' && inputs.repository == 'pypi'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+
+  verify:
+    name: Smoke-test the published wheel
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+
+      # Pinning the install to the exact version we just published catches
+      # the (rare) case where a stale prior release shadows the build via
+      # a slow-propagating mirror.
+      - name: Install from index
+        env:
+          TARGET_VERSION: ${{ needs.build.outputs.version }}
+          INDEX_URL: ${{ (github.event_name == 'workflow_dispatch' && inputs.repository == 'pypi') && 'https://pypi.org/simple/' || 'https://test.pypi.org/simple/' }}
+        run: |
+          uv venv .verify
+          # TestPyPI does not mirror our runtime dependencies; pull those
+          # from the real PyPI via --extra-index-url so the smoke install
+          # can resolve `pydantic`, `click`, etc. on the test path too.
+          uv pip install \
+            --python .verify/bin/python \
+            --index-url "$INDEX_URL" \
+            --extra-index-url https://pypi.org/simple/ \
+            "data-hub-watcher==$TARGET_VERSION"
+
+      # Both invocations must succeed — `--version` exercises Click + the
+      # importlib.metadata version reader, and the explicit Python import
+      # ensures no module-level side-effect crashes the package on first
+      # import (a common source of "works on my machine" PyPI failures).
+      - name: Smoke-test CLI
+        run: |
+          .verify/bin/data-hub-watcher --version
+          .verify/bin/python -c "import data_hub_watcher; print('import OK')"

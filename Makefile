@@ -30,6 +30,22 @@ py-test-integration:
 py-test:
 	uv run pytest -v
 
+# Used by the publish-watcher workflow to refuse releases where the git tag
+# (e.g. `watcher-v0.3.0`) doesn't match `[project].version` in
+# watcher/pyproject.toml. Reads the tag from the GITHUB_REF / TAG env var
+# so it can be invoked from CI without parsing argv. Locally, run
+# `TAG=watcher-v0.1.0 make py-check-watcher-version` to verify a tag.
+.PHONY: py-check-watcher-version
+py-check-watcher-version:
+	@TAG="$${TAG:-$${GITHUB_REF##refs/tags/}}"; \
+	VERSION=$$(uv run python -c 'import tomllib, pathlib; print(tomllib.loads(pathlib.Path("watcher/pyproject.toml").read_text())["project"]["version"])'); \
+	EXPECTED="watcher-v$$VERSION"; \
+	if [ "$$TAG" != "$$EXPECTED" ]; then \
+		echo "Tag mismatch: git tag '$$TAG' does not match watcher/pyproject.toml version '$$VERSION' (expected tag '$$EXPECTED')."; \
+		exit 1; \
+	fi; \
+	echo "OK: tag $$TAG matches watcher/pyproject.toml version $$VERSION"
+
 # Web app.
 .PHONY: fe-format
 fe-format:
