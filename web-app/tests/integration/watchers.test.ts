@@ -281,6 +281,42 @@ describe("Watchers API", () => {
     expect(res.status).toBe(400);
   });
 
+  // Regression: the auto-update lifecycle event types are defined on the
+  // Drizzle enum but a hand-maintained allow-list in the route handler
+  // used to omit them, so the watcher's batched flush would 400 and drop
+  // the entire batch. Exercising one of each new type here keeps the
+  // handler honest if the enum grows again.
+  it("POST /api/v1/watchers/:id/events accepts auto-update lifecycle events", async () => {
+    const res = await api(`/api/v1/watchers/${watcherId}/events`, {
+      method: "POST",
+      token,
+      body: {
+        events: [
+          {
+            event_type: "update_started",
+            timestamp: new Date().toISOString(),
+            message: "Upgrading watcher 0.1.0 -> 0.3.0",
+            details: { current_version: "0.1.0", target_version: "0.3.0" },
+          },
+          {
+            event_type: "update_succeeded",
+            timestamp: new Date().toISOString(),
+            message: "Restarted into watcher 0.3.0",
+          },
+          {
+            event_type: "update_failed",
+            timestamp: new Date().toISOString(),
+            message: "Watcher upgrade to 0.3.0 failed: subprocess exited 1",
+            details: { reason: "subprocess exited 1" },
+          },
+        ],
+      },
+    });
+    expect(res.status).toBe(201);
+    const data = await res.json();
+    expect(data.received).toBe(3);
+  });
+
   // -------------------------------------------------------------------------
   // GET /api/v1/watchers/:watcherId/events
   // -------------------------------------------------------------------------

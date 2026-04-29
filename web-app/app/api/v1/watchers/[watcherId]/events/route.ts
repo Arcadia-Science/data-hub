@@ -12,19 +12,15 @@ import {
 } from "@/lib/api/validators";
 import { findActiveWatcher } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
-import { watcherEvents } from "@/lib/db/schema";
+import { watcherEvents, watcherEventTypeEnum } from "@/lib/db/schema";
 import { and, desc, eq, gte, inArray } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 
-const VALID_EVENT_TYPES = new Set([
-  "watcher_started",
-  "watcher_stopped",
-  "file_uploaded",
-  "upload_failed",
-  "run_reported",
-  "config_synced",
-  "error",
-]);
+// Derived from the Drizzle enum so adding a new event type is a one-line
+// schema change — historically this was a hand-maintained Set and drifted
+// from the DB enum (the auto-update events were defined in the schema but
+// silently 400'd here, dropping the entire batch they appeared in).
+const VALID_EVENT_TYPES = new Set<string>(watcherEventTypeEnum.enumValues);
 
 export async function POST(
   request: NextRequest,
