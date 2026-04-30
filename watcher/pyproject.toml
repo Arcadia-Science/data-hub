@@ -1,6 +1,6 @@
 [project]
 name = "data-hub-watcher"
-version = "0.1.0"
+version = "0.1.1"
 description = "File-watcher agent for lab instrument PCs that ingests data into the Arcadia Science Data Hub."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -29,6 +29,7 @@ dependencies = [
     "pydantic>=2.11.9",
     "pyyaml>=6.0",
     "python-dotenv>=1.0",
+    "requests>=2.32.0",
     "watchdog>=4.0.0",
 ]
 
