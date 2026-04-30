@@ -295,7 +295,12 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
         STATE_DB_FILENAME,
         env_file_path,
     )
-    from data_hub_watcher.runtime import build_runtime, start_runtime, stop_runtime
+    from data_hub_watcher.runtime import (
+        build_runtime,
+        classify_shutdown,
+        start_runtime,
+        stop_runtime,
+    )
 
     sm.LogInfoMsg(f"{SERVICE_DISPLAY_NAME} starting")
 
@@ -381,9 +386,14 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
         if rt.shutdown_event.wait(timeout=1.0):
             break
 
-    stop_runtime(rt, stopped_message="Service stopped")
+    # Classify before tearing the runtime down so the WATCHER_STOPPED
+    # event message reflects whether this is an upgrade-driven restart
+    # or a normal stop. Shared with the CLI ``watch`` path via
+    # ``classify_shutdown`` so the two entrypoints can't drift.
+    decision = classify_shutdown(rt, role="Service")
+    stop_runtime(rt, stopped_message=decision.stopped_message)
 
-    if rt.upgrade_restart_event.is_set():
+    if decision.is_upgrade_restart:
         sm.LogInfoMsg(f"{SERVICE_DISPLAY_NAME} restarting to load upgraded watcher")
         # Exit non-zero so the SCM's failure-actions config kicks in and
         # restarts the service on the configured 60 s delay. Without

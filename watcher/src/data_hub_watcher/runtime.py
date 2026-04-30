@@ -54,6 +54,47 @@ class WatcherRuntime:
     upgrade_restart_event: threading.Event = field(default_factory=threading.Event)
 
 
+@dataclass(frozen=True)
+class ShutdownReason:
+    """Why the runtime is shutting down + the matching WATCHER_STOPPED message.
+
+    The CLI ``watch`` command and the Windows service both poll the
+    runtime's ``shutdown_event`` and need to attribute the resulting
+    ``WATCHER_STOPPED`` event to either a normal stop or an
+    auto-update-driven restart. Centralising the message text here keeps
+    the two paths in sync — historically the service path always logged
+    "Service stopped" even on auto-update restarts, which made it
+    impossible to correlate an ``update_started`` event with the
+    matching ``watcher_stopped`` event in the dashboard.
+    """
+
+    is_upgrade_restart: bool
+    stopped_message: str
+
+
+def classify_shutdown(rt: WatcherRuntime, *, role: str) -> ShutdownReason:
+    """Pick the right ``stopped_message`` for the WATCHER_STOPPED event.
+
+    *role* is the human-readable noun for this entrypoint
+    (``"Watcher"`` for the CLI, ``"Service"`` for the Windows service)
+    so the message reads naturally in the events stream regardless of
+    which path triggered the shutdown.
+
+    Note: the CLI's signal-initiated stop has its own "stopped by user"
+    message and does not go through this helper — at that point we
+    already know the cause is an operator signal, not the auto-updater.
+    """
+    if rt.upgrade_restart_event.is_set():
+        return ShutdownReason(
+            is_upgrade_restart=True,
+            stopped_message=f"{role} restarting for auto-update",
+        )
+    return ShutdownReason(
+        is_upgrade_restart=False,
+        stopped_message=f"{role} stopped",
+    )
+
+
 def build_runtime(
     *,
     client: DataHubClient,

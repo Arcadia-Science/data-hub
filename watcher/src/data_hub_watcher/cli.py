@@ -34,7 +34,7 @@ from data_hub_watcher.models import (
     RunDetectionConfig,
     WatcherConfig,
 )
-from data_hub_watcher.runtime import build_runtime, start_runtime, stop_runtime
+from data_hub_watcher.runtime import build_runtime, classify_shutdown, start_runtime, stop_runtime
 from data_hub_watcher.self_update import (
     InstallMethod,
     detect_install_method,
@@ -758,21 +758,28 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
         pass
 
     # Distinguish an upgrade-driven shutdown from a generic one by
-    # checking the dedicated event — mirrors the Windows-service main
-    # loop in `service._run_service_loop`. This keeps the operator-
-    # facing message accurate if any future code path ever sets
-    # `shutdown_event` for a non-upgrade reason.
-    if rt.upgrade_restart_event.is_set():
-        click.echo("\nUpgrade installed; restarting to load the new version…")
-        stop_runtime(rt, stopped_message="Watcher restarting for auto-update")
-        # Exit non-zero so any supervisor (or the operator's wrapper
-        # script) restarts us. The `data-hub-watcher service` Windows
-        # path uses the SCM's failure-actions config to do this
-        # automatically.
-        raise SystemExit(1)
-
-    stop_runtime(rt, stopped_message="Watcher stopped")
-    raise SystemExit(0)
+    # delegating to `classify_shutdown` — the same helper used by the
+    # Windows service path in `service._run_service_loop`, so the two
+    # entrypoints can't drift on the WATCHER_STOPPED message text.
+    decision = classify_shutdown(rt, role="Watcher")
+    if decision.is_upgrade_restart:
+        # Foreground `data-hub-watcher watch` doesn't have an SCM to
+        # auto-restart it, so the message has to cover both audiences:
+        # Windows-service operators (whose SCM picks the new wheel up
+        # via the failure-actions policy on the non-zero exit below)
+        # and console / macOS / Linux operators (who need to re-run
+        # the command manually). The previous "restarting…" wording
+        # was only accurate under the SCM.
+        click.echo(
+            "\nUpgrade installed. Re-run data-hub-watcher watch to load the new "
+            "version (or install the service for automatic restart)."
+        )
+    stop_runtime(rt, stopped_message=decision.stopped_message)
+    # Exit non-zero on upgrade restart so any supervisor (or the
+    # operator's wrapper script) restarts us. The `data-hub-watcher
+    # service` Windows path uses the SCM's failure-actions config to
+    # do this automatically.
+    raise SystemExit(1 if decision.is_upgrade_restart else 0)
 
 
 # ---------------------------------------------------------------------------

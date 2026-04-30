@@ -136,6 +136,12 @@ The upgrade subprocess started but didn't end up running the new version on the 
 - **`subprocess exited <N>`** — the upgrade command itself failed. The event details include the last 1000 bytes of stdout/stderr; the most common cause is a transient PyPI / mirror failure or the version not yet existing on the index (see the "don't bump ahead of publish" note above).
 - **`expected '<target>' after upgrade, running '<current>'`** — the subprocess succeeded, the service restarted, but the running interpreter still imports the old version. Almost always means a stale `__pycache__` or a separate copy of the package on `sys.path`. Run `uv tool uninstall data-hub-watcher && uv tool install data-hub-watcher==<target>` as the service account.
 
+### `update_failed` without a preceding `update_started`
+
+When `details.attempted_subprocess` is `false`, the auto-updater never ran the upgrade command — it refused before starting one. The `details.reason` field tells you why:
+
+- **`install method '<editable|unknown>' not eligible for auto-update`** — the watcher detected a development-style install (editable `uv sync`, or a distribution whose metadata couldn't be located) and refused so it wouldn't silently shadow the source tree with an index build. Resolve by switching the host to a PyPI install (`uv tool install data-hub-watcher`) or, on a developer machine, ignoring the event. To avoid spamming the events stream, the watcher emits this at most once per server target — a rebump of `WATCHER_LATEST_VERSION` will trigger one fresh event per stuck PC.
+
 ### Auto-update never fires
 
 Check, in order:

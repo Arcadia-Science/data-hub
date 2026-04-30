@@ -470,6 +470,84 @@ class TestUpdaterOnTick:
         # index build.
         runner.assert_not_called()
         h.request_restart.assert_not_called()
+        # And the dashboard must still see *something* — otherwise an
+        # admin pushing a (possibly mandatory) rollout has no signal
+        # that this PC is stuck on a dev install. Exactly one
+        # UPDATE_FAILED event with the install-method reason.
+        emitted_events = [c.args[0] for c in h.reporter.queue_event.call_args_list]
+        update_failed = [e for e in emitted_events if e.event_type is EventType.UPDATE_FAILED]
+        assert len(update_failed) == 1
+        evt = update_failed[0]
+        assert evt.details["target_version"] == "9.9.9"
+        assert evt.details["install_method"] == "editable"
+        assert evt.details["attempted_subprocess"] is False
+        assert "not eligible" in evt.details["reason"]
+
+    def test_editable_refusal_throttled_to_one_event_per_target(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # An editable install will hit the refusal path on every
+        # hourly tick for the whole life of the dev box. We must
+        # still notify the dashboard once per *new* target version,
+        # but not on every tick — that would drown the events stream
+        # for the whole fleet of dev machines.
+        h = _make_updater(tmp_path)
+        monkeypatch.setattr(
+            "data_hub_watcher.updater.detect_install_method",
+            lambda: InstallMethod.EDITABLE,
+        )
+
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+        h.counters.last_files_uploaded = 0
+        # Drive enough ticks to pass the check interval *twice* so two
+        # full /update-check calls land — emulating the hourly tick
+        # firing across multiple hours with the same server target.
+        for _ in range(6):
+            h.updater.on_tick()
+
+        # Both ticks called the API (so the throttle isn't hiding a
+        # missed check) but only one UPDATE_FAILED reached the queue.
+        assert h.client.get_update_info.call_count == 2
+        emitted = [
+            c.args[0]
+            for c in h.reporter.queue_event.call_args_list
+            if c.args[0].event_type is EventType.UPDATE_FAILED
+        ]
+        assert len(emitted) == 1
+
+    def test_editable_refusal_re_emits_when_target_advances(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # When the server bumps `WATCHER_LATEST_VERSION` to a new
+        # release, we *do* want to re-notify — the dashboard event for
+        # the old target doesn't tell the admin this PC is missing the
+        # new one. Throttling is per-target, not "fire at most once
+        # ever".
+        h = _make_updater(tmp_path)
+        monkeypatch.setattr(
+            "data_hub_watcher.updater.detect_install_method",
+            lambda: InstallMethod.UNKNOWN,
+        )
+
+        h.counters.last_files_uploaded = 0
+        # First rollout target.
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+        for _ in range(3):
+            h.updater.on_tick()
+        # Server bumps the target.
+        h.client.get_update_info.return_value = _info(latest="9.9.10")
+        for _ in range(3):
+            h.updater.on_tick()
+
+        emitted = [
+            c.args[0]
+            for c in h.reporter.queue_event.call_args_list
+            if c.args[0].event_type is EventType.UPDATE_FAILED
+        ]
+        assert [e.details["target_version"] for e in emitted] == ["9.9.9", "9.9.10"]
+        # Both events must carry the install_method so the dashboard
+        # can render the "stuck on dev install" filter.
+        assert all(e.details["install_method"] == "unknown" for e in emitted)
 
 
 class TestUpdaterAsyncDispatch:

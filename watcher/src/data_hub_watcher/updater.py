@@ -328,6 +328,14 @@ class Updater:
         self._idle_ticks = 0
         self._ticks_since_check = 0
         self._upgrade_in_progress = False
+        # Per-target memo for the "ineligible install method" refusal
+        # path: we want one ``UPDATE_FAILED`` event per *new* server
+        # target so admins can spot lab PCs stuck on a dev install
+        # during a (possibly mandatory) rollout, but not every hourly
+        # tick — which would spam the dashboard for the whole life of
+        # the dev install. Reset to ``None`` on process restart so the
+        # next start re-establishes state with the server.
+        self._last_refused_target: str | None = None
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
@@ -418,8 +426,22 @@ class Updater:
 
         method = detect_install_method()
         if method in (InstallMethod.EDITABLE, InstallMethod.UNKNOWN):
-            reason = f"refusing auto-update for install method {method.value!r}"
-            logger.info(reason)
+            reason = f"install method {method.value!r} not eligible for auto-update"
+            logger.info("Refusing auto-update: %s", reason)
+            # Emit one UPDATE_FAILED per new server target so the
+            # dashboard surfaces stuck dev/unknown installs — critical
+            # during a mandatory rollout where the operator needs to
+            # know which PCs aren't going to apply the release. The
+            # `_last_refused_target` memo throttles repeats: a developer
+            # box on an editable install would otherwise generate one
+            # event per hourly tick for the entire life of the install.
+            if self._last_refused_target != target:
+                self._emit_failure(
+                    target,
+                    reason,
+                    extra={"install_method": method.value, "attempted_subprocess": False},
+                )
+                self._last_refused_target = target
             return UpdateAttemptResult(True, False, reason, target, {"method": method.value})
 
         details_started: dict[str, Any] = {

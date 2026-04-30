@@ -25,7 +25,11 @@ from data_hub_watcher.heartbeat import HeartbeatLoop, WatcherCounters
 from data_hub_watcher.models import InstrumentConfig, RunDetectionConfig, WatcherConfig
 from data_hub_watcher.monitor import FileMonitor
 from data_hub_watcher.run_detector import RunDetector
-from data_hub_watcher.runtime import build_runtime
+from data_hub_watcher.runtime import (
+    ShutdownReason,
+    build_runtime,
+    classify_shutdown,
+)
 from data_hub_watcher.state import StateDB
 from data_hub_watcher.updater import Updater
 from data_hub_watcher.uploader import Uploader
@@ -235,3 +239,56 @@ class TestBuildRuntimeErrors:
         cfg = _make_config(tmp_path, upload_mode="auto", watcher_id=None)
         with pytest.raises(ValueError, match="watcher_id"):
             build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+
+
+class TestClassifyShutdown:
+    """Pin the WATCHER_STOPPED message text shared by the CLI ``watch``
+    command and the Windows service. Both call sites used to hard-code
+    their own strings, which made the service path's WATCHER_STOPPED
+    indistinguishable from a normal stop on auto-update restarts —
+    breaking dashboard correlation with the matching ``update_started``
+    event.
+    """
+
+    def test_normal_stop_uses_role_stopped(self, tmp_path: Path, db_path: Path) -> None:
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+        try:
+            decision = classify_shutdown(rt, role="Watcher")
+            assert decision == ShutdownReason(
+                is_upgrade_restart=False,
+                stopped_message="Watcher stopped",
+            )
+        finally:
+            rt.state_db.close()
+
+    def test_upgrade_restart_uses_role_specific_message(
+        self, tmp_path: Path, db_path: Path
+    ) -> None:
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+        try:
+            rt.upgrade_restart_event.set()
+            decision = classify_shutdown(rt, role="Service")
+            assert decision.is_upgrade_restart is True
+            # The message is keyed on the *role* so the CLI and the
+            # service produce naturally-readable but distinct text in
+            # the events stream — a single "Watcher restarting…" log
+            # would look weird on Windows where the dashboard already
+            # shows the watcher's host as a service.
+            assert decision.stopped_message == "Service restarting for auto-update"
+        finally:
+            rt.state_db.close()
+
+    def test_role_is_substituted_into_both_messages(self, tmp_path: Path, db_path: Path) -> None:
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+        try:
+            assert classify_shutdown(rt, role="Watcher").stopped_message == "Watcher stopped"
+            rt.upgrade_restart_event.set()
+            assert (
+                classify_shutdown(rt, role="Watcher").stopped_message
+                == "Watcher restarting for auto-update"
+            )
+        finally:
+            rt.state_db.close()

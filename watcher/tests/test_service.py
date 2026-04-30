@@ -662,6 +662,12 @@ class TestRunServiceLoopUpgradeRestart:
         # Cleanup must still run before the non-zero exit so the heartbeat
         # thread, file monitor, etc. have a chance to flush their state.
         assert len(harness.stop_calls) == 1
+        # The WATCHER_STOPPED event must distinguish an upgrade restart
+        # from a normal stop, otherwise the dashboard can't correlate it
+        # with the preceding update_started event. The message is
+        # produced by `classify_shutdown` and shared with the CLI watch
+        # path so the two entrypoints can't drift.
+        assert harness.stop_calls[0][1] == "Service restarting for auto-update"
         # And the operator-facing log line must distinguish this from a
         # normal stop so the Windows event log shows what happened.
         log_messages = [c.args[0] for c in harness.sm.LogInfoMsg.call_args_list]
