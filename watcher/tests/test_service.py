@@ -680,16 +680,24 @@ class TestRunServiceLoopChecksumSync:
         # the checksum endpoint blips, the service must still come up.
         # This is an explicit design choice: don't punish operators for
         # transient sync failures, the next heartbeat will retry.
+        # The failure now surfaces as a kind=config_sync_failed event
+        # on the runtime's reporter rather than only as a Windows event
+        # log warning, so the dashboard can flag stale configs across
+        # the fleet.
         harness.client.get_config_checksum.side_effect = ApiError("transient 500", status_code=500)
 
         stop_event = threading.Event()
         stop_event.set()
         harness.svc._run_service_loop(stop_event, harness.sm)
 
-        harness.sm.LogWarningMsg.assert_called_once()
-        assert "sync" in harness.sm.LogWarningMsg.call_args.args[0].lower()
+        # Service still came up.
         assert len(harness.start_calls) == 1
         harness.sm.LogErrorMsg.assert_not_called()
+        # And the structured event was queued so the failure is
+        # visible centrally.
+        report_error_calls = harness.runtime.reporter.report_error.call_args_list
+        kinds = [c.args[0] for c in report_error_calls]
+        assert "config_sync_failed" in kinds
 
     def test_matching_checksum_skips_push(self, harness: _LoopHarness) -> None:
         # When the remote checksum already matches, push_config must

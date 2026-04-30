@@ -115,6 +115,14 @@ class RunDetector:
         self._watch_dir = watch_directory
 
         self._runs: dict[str, RunState] = {}
+        # Set of parent-directory POSIX paths we've already surfaced a
+        # ``kind=pattern_mismatch`` event for. Pattern misses are
+        # routine for excluded files, so without throttling a
+        # misconfigured pattern (or a deeply nested directory of
+        # ignored output) would flood the queue. One event per
+        # parent-directory per process is enough for an operator to
+        # spot the problem in the dashboard.
+        self._pattern_mismatch_dirs: set[str] = set()
 
     # ------------------------------------------------------------------
     # public entry point (called by FileMonitor)
@@ -172,7 +180,20 @@ class RunDetector:
             return None
         m = self._pattern.search(rel)
         if not m or not m.group(1):
-            logger.warning("File %s did not match run_detection.pattern — skipping", rel)
+            # Pattern misses are routine (excluded files inside the
+            # watch tree), so this is a debug-level local log. The
+            # surfaced event is throttled to one per parent directory
+            # per process — that's enough for an operator to catch a
+            # misconfigured pattern without flooding the dashboard.
+            logger.debug("File %s did not match run_detection.pattern — skipping", rel)
+            parent = Path(rel).parent.as_posix()
+            if parent not in self._pattern_mismatch_dirs:
+                self._pattern_mismatch_dirs.add(parent)
+                self._reporter.report_error(
+                    "pattern_mismatch",
+                    f"File {rel} did not match run_detection.pattern",
+                    relative_path=rel,
+                )
             return None
         return m.group(1)
 
@@ -247,6 +268,15 @@ class RunDetector:
         except ApiError as exc:
             logger.warning("Failed to report run %s: %s (will retry)", run.run_id, exc.message)
             self._counters.errors += 1
+            self._reporter.report_error(
+                "run_report_failed",
+                f"Failed to report run {run.run_id}: {exc.message}",
+                run_id=run.run_id,
+                operation="create",
+                status_code=exc.status_code,
+                error=exc.message,
+                file_count=len(run.files),
+            )
             return
 
         if self._upload_cb:
@@ -272,6 +302,15 @@ class RunDetector:
         except ApiError as exc:
             logger.warning("Failed to update run %s: %s", run.run_id, exc.message)
             self._counters.errors += 1
+            self._reporter.report_error(
+                "run_report_failed",
+                f"Failed to update run {run.run_id}: {exc.message}",
+                run_id=run.run_id,
+                operation="update",
+                status_code=exc.status_code,
+                error=exc.message,
+                file_count=len(run.files),
+            )
             return
 
         new_files = run.files[run.uploaded_file_count :]

@@ -239,3 +239,128 @@ class TestRunIdExtractionWindows:
                 self.WATCH_DIR,
                 r"C:\Other\file.csv",
             )
+
+
+# ==================================================================
+# Pattern-mismatch event throttling
+# ==================================================================
+
+
+class TestPatternMismatchThrottling:
+    """A misconfigured pattern shouldn't flood the event queue.
+
+    The detector reports at most one ``kind=pattern_mismatch`` event per
+    parent directory per process lifetime. Two files in the same
+    directory must coalesce to a single event; two files in different
+    directories must each emit.
+    """
+
+    def test_emits_once_per_directory(self, tmp_path: Path) -> None:
+        from unittest.mock import MagicMock
+
+        from data_hub_watcher.events import EventReporter
+
+        reporter = MagicMock(spec=EventReporter)
+        d = RunDetector(
+            pattern=r"^MAGIC_(\d+)",  # nothing in tmp_path matches
+            instrument_id="i",
+            watcher_id="w",
+            client=MagicMock(),
+            state_db=MagicMock(),
+            event_reporter=reporter,
+            counters=MagicMock(),
+            watch_directory=tmp_path,
+        )
+
+        # Two files in the same parent directory.
+        d._extract_run_id(tmp_path / "subdir" / "a.csv")
+        d._extract_run_id(tmp_path / "subdir" / "b.csv")
+        # And one in a different directory.
+        d._extract_run_id(tmp_path / "other" / "c.csv")
+
+        kinds = [call.args[0] for call in reporter.report_error.call_args_list]
+        assert kinds.count("pattern_mismatch") == 2  # one per parent dir
+
+
+# ==================================================================
+# Run-report API failures emit kind=run_report_failed
+# ==================================================================
+
+
+class TestRunReportFailures:
+    def _run_state_with_one_file(self, tmp_path: Path):  # type: ignore[no-untyped-def]
+        from data_hub_watcher.run_detector import FileInfo, RunState
+
+        f = tmp_path / "RUN-A.csv"
+        f.write_text("x")
+        st = f.stat()
+        run = RunState(run_id="RUN-A")
+        run.files = [
+            FileInfo(
+                path=f,
+                filename=f.name,
+                size_bytes=st.st_size,
+                mtime=st.st_mtime,
+                file_created_at=st.st_mtime,
+            )
+        ]
+        return run
+
+    def test_create_failure_emits_event(self, tmp_path: Path) -> None:
+        from unittest.mock import MagicMock
+
+        from data_hub_watcher.api_client import ApiError
+        from data_hub_watcher.events import EventReporter
+
+        client = MagicMock()
+        client.report_run.side_effect = ApiError("boom", status_code=500)
+        reporter = MagicMock(spec=EventReporter)
+        d = RunDetector(
+            pattern=r"^([^_.]+)",
+            instrument_id="i",
+            watcher_id="w",
+            client=client,
+            state_db=MagicMock(),
+            event_reporter=reporter,
+            counters=MagicMock(errors=0),
+            watch_directory=tmp_path,
+        )
+        run = self._run_state_with_one_file(tmp_path)
+        d._report_new_run(run)
+
+        # report_error called once with the right kind + operation.
+        assert reporter.report_error.call_count == 1
+        call = reporter.report_error.call_args
+        assert call.args[0] == "run_report_failed"
+        assert call.kwargs["operation"] == "create"
+        assert call.kwargs["status_code"] == 500
+        assert call.kwargs["run_id"] == "RUN-A"
+        assert call.kwargs["file_count"] == 1
+
+    def test_update_failure_emits_event(self, tmp_path: Path) -> None:
+        from unittest.mock import MagicMock
+
+        from data_hub_watcher.api_client import ApiError
+        from data_hub_watcher.events import EventReporter
+
+        client = MagicMock()
+        client.update_run.side_effect = ApiError("nope", status_code=409)
+        reporter = MagicMock(spec=EventReporter)
+        d = RunDetector(
+            pattern=r"^([^_.]+)",
+            instrument_id="i",
+            watcher_id="w",
+            client=client,
+            state_db=MagicMock(),
+            event_reporter=reporter,
+            counters=MagicMock(errors=0),
+            watch_directory=tmp_path,
+        )
+        run = self._run_state_with_one_file(tmp_path)
+        d._update_run(run)
+
+        assert reporter.report_error.call_count == 1
+        call = reporter.report_error.call_args
+        assert call.args[0] == "run_report_failed"
+        assert call.kwargs["operation"] == "update"
+        assert call.kwargs["status_code"] == 409

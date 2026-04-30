@@ -373,6 +373,67 @@ class TestUpdaterOnTick:
         assert result.succeeded is False
         assert "API error" in result.reason
 
+    def test_update_check_failed_event_after_three_consecutive_failures(
+        self, tmp_path: Path
+    ) -> None:
+        """A single API blip should not page anyone — but a sustained
+        outage that blocks 3 consecutive hourly checks (~3h dark on
+        the update channel) must be visible centrally so an admin can
+        unblock mandatory rollouts."""
+        h = _make_updater(
+            tmp_path,
+            updater_cfg=UpdaterConfig(
+                idle_ticks_required=0,
+                check_interval_ticks=1,  # fire on every tick
+                min_run_age_seconds=0.0,
+            ),
+        )
+        h.client.get_update_info.side_effect = ApiError("dead", status_code=502)
+        h.counters.last_files_uploaded = 0
+
+        h.updater.on_tick()  # failure 1 -> no event
+        h.updater.on_tick()  # failure 2 -> no event
+        # No throttled event yet.
+        kinds_so_far = [c.args[0] for c in h.reporter.report_error.call_args_list]
+        assert "update_check_failed" not in kinds_so_far
+
+        h.updater.on_tick()  # failure 3 -> emits
+
+        kinds_after = [c.args[0] for c in h.reporter.report_error.call_args_list]
+        assert kinds_after.count("update_check_failed") == 1
+        call = next(
+            c for c in h.reporter.report_error.call_args_list if c.args[0] == "update_check_failed"
+        )
+        assert call.kwargs["consecutive_failures"] == 3
+        assert "dead" in call.kwargs["error"]
+
+    def test_update_check_failure_counter_resets_on_success(self, tmp_path: Path) -> None:
+        h = _make_updater(
+            tmp_path,
+            updater_cfg=UpdaterConfig(
+                idle_ticks_required=0,
+                check_interval_ticks=1,
+                min_run_age_seconds=0.0,
+            ),
+        )
+        # 2 failures, then a success, then 2 more failures.
+        h.client.get_update_info.side_effect = [
+            ApiError("dead", status_code=502),
+            ApiError("dead", status_code=502),
+            _info(latest="0.0.0+unknown"),
+            ApiError("dead", status_code=502),
+            ApiError("dead", status_code=502),
+        ]
+        h.counters.last_files_uploaded = 0
+
+        for _ in range(5):
+            h.updater.on_tick()
+
+        # The post-success burst is only 2 failures so no event yet —
+        # the success in between resets the consecutive counter.
+        kinds = [c.args[0] for c in h.reporter.report_error.call_args_list]
+        assert "update_check_failed" not in kinds
+
     def test_successful_upgrade_writes_marker_and_requests_restart(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -6,6 +6,7 @@ Tests the watcher's ongoing lifecycle — heartbeat-driven status transitions
 
 from __future__ import annotations
 from datetime import datetime, timezone
+from typing import Any, cast
 
 import pytest
 
@@ -190,3 +191,45 @@ class TestEvents:
         with pytest.raises(ApiError) as exc_info:
             client.send_events(watcher.watcher_id, [])
         assert exc_info.value.status_code == 400
+
+    def test_send_kind_heartbeat_recovered_event(
+        self,
+        client: DataHubClient,
+        instrument_id: str,
+        integration_env: IntegrationEnv,
+    ) -> None:
+        """Round-trip a structured ``kind=heartbeat_recovered`` event.
+
+        The DB enum stores this as ``error`` and the
+        ``details.kind`` discriminator is what the dashboard groups
+        on. Asserting both round-trip correctly catches regressions in
+        either the API validator or the JSONB column.
+        """
+        watcher = client.register_watcher(instrument_id)
+        now = datetime.now(timezone.utc).isoformat()
+        client.send_events(
+            watcher.watcher_id,
+            [
+                {
+                    "event_type": "error",
+                    "timestamp": now,
+                    "message": "Heartbeat recovered after 3 consecutive failure(s)",
+                    "details": {
+                        "kind": "heartbeat_recovered",
+                        "consecutive_failures": 3,
+                        "gap_seconds": 180,
+                    },
+                }
+            ],
+        )
+
+        rows = db_query(
+            integration_env.db_dsn,
+            "SELECT event_type, details FROM watcher_events WHERE watcher_id = %s",
+            (watcher.watcher_id,),
+        )
+        assert len(rows) == 1
+        assert rows[0][0] == "error"
+        details = cast(dict[str, Any], rows[0][1])
+        assert details["kind"] == "heartbeat_recovered"
+        assert details["consecutive_failures"] == 3
