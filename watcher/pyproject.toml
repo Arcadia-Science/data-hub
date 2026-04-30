@@ -1,7 +1,7 @@
 [project]
 name = "data-hub-watcher"
 version = "0.1.2"
-description = "File-watcher agent for lab instrument PCs that ingests data into the Arcadia Science Data Hub."
+description = "File-watcher agent for lab instrument PCs that ingests data into Data Hub."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
