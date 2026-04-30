@@ -93,6 +93,14 @@ export async function setup() {
     AWS_REGION: process.env.AWS_REGION ?? "us-east-1",
     S3_RAW_DATA_BUCKET:
       process.env.S3_RAW_DATA_BUCKET ?? "test-raw-data-bucket",
+    // Stable watcher release-info defaults so the `update-check` endpoint
+    // returns deterministic values during integration tests. Individual
+    // tests assert against these exact strings.
+    WATCHER_LATEST_VERSION: process.env.WATCHER_LATEST_VERSION ?? "9.9.9",
+    WATCHER_MIN_SUPPORTED_VERSION:
+      process.env.WATCHER_MIN_SUPPORTED_VERSION ?? "0.1.0",
+    WATCHER_RELEASE_CHANNEL: process.env.WATCHER_RELEASE_CHANNEL ?? "stable",
+    WATCHER_MANDATORY_UPDATE: process.env.WATCHER_MANDATORY_UPDATE ?? "false",
   };
   // Strip Lambda config so "not configured" test cases work regardless of
   // the developer's local .env. Tests that need Lambda stubbed should mock

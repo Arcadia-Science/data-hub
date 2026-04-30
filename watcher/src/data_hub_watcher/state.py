@@ -303,6 +303,20 @@ class StateDB:
             )
             self._conn.commit()
 
+    def last_run_reported_at(self) -> str | None:
+        """Most recent ``reported_at`` timestamp across all runs, or None.
+
+        Used by the updater to gate auto-updates on a quiet-instrument
+        window: we don't want to take down the watcher in the middle of
+        an actively-running experiment.
+        """
+        with self._lock:
+            cur = self._conn.execute("SELECT MAX(reported_at) FROM runs")
+            row = cur.fetchone()
+        if row is None or row[0] is None:
+            return None
+        return str(row[0])
+
     def record_run_uploaded(self, run_id: str) -> None:
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:

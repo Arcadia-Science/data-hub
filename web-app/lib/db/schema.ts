@@ -36,6 +36,11 @@ export const watcherEventTypeEnum = pgEnum("watcher_event_type", [
   "run_reported",
   "config_synced",
   "error",
+  // Auto-update lifecycle events emitted by the in-process updater. See
+  // `watcher/src/data_hub_watcher/updater.py` for the state machine.
+  "update_started",
+  "update_succeeded",
+  "update_failed",
 ]);
 
 export const uploadModeEnum = pgEnum("upload_mode", ["auto", "manual"]);
@@ -205,6 +210,9 @@ export const watchers = pgTable(
     hostname: text("hostname"),
     // OS description (e.g., "Windows 11 23H2").
     osInfo: text("os_info"),
+    // Installed watcher package version (PEP 440, e.g. "0.2.0"). Reported on
+    // every heartbeat. NULL until a watcher running >= 0.3.0 first checks in.
+    watcherVersion: text("watcher_version"),
     // SHA-256 of the last-pushed config YAML.
     configChecksum: text("config_checksum"),
     // The raw YAML text of the watcher's config file, stored verbatim as

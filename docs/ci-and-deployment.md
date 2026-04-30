@@ -2,7 +2,7 @@
 
 ## GitHub Actions
 
-Four workflows run on pushes to `staging`/`production` and on pull requests targeting those branches.
+Four workflows run on pushes to `staging`/`production` and on pull requests targeting those branches. A fifth (`publish-watcher.yml`) runs only on `watcher-v*` tag pushes and manual dispatch.
 
 ### Python lint and typecheck (`python-lint.yml`)
 
@@ -28,6 +28,16 @@ Four workflows run on pushes to `staging`/`production` and on pull requests targ
 - Starts a Postgres 17 service container and Node.js 24.
 - `make fe-test-mcp` — runs in-memory MCP protocol tests (mocked data layer, no database).
 - `make fe-test-integration` — runs Vitest integration tests that test the API routes and MCP server over HTTP against a real database.
+
+### Publish watcher (`publish-watcher.yml`)
+
+Triggered on `watcher-v*` tag pushes and manual `workflow_dispatch` from `production`. The `build` job's `if:` guard refuses dispatches from any other branch so a feature branch can't accidentally publish whatever version is in its `pyproject.toml`. Builds the `data-hub-watcher` package, publishes it to PyPI via OIDC trusted publishing, and verifies the upload by installing the freshly published wheel into a clean venv. Three sequential jobs:
+
+1. **build** — Verifies the git tag matches `watcher/pyproject.toml` (`make py-check-watcher-version`), builds the wheel and sdist with `uv build --package data-hub-watcher`, and uploads them as a workflow artifact.
+2. **publish** — Downloads the artifact and uploads it to PyPI with [`pypa/gh-action-pypi-publish`](https://github.com/pypa/gh-action-pypi-publish) using OIDC trusted publishing. Gated on the `pypi` GitHub deployment environment so reviewer-required releases can be enforced from the GitHub UI without editing the workflow file.
+3. **verify** — In a fresh `uv venv`, installs `data-hub-watcher==<tag-version>` from PyPI and runs `data-hub-watcher --version` plus `python -c "import data_hub_watcher"` as a smoke test. Catches stale-mirror shadows and module-level import side-effect crashes.
+
+See the [Watcher (PyPI)](#watcher-pypi) deployment section for the operator-facing release flow.
 
 ## Branch strategy
 
@@ -211,6 +221,12 @@ make docker-push-lambda ENV=staging
 # Deploy to staging (loads infra/.env.staging automatically).
 make sam-deploy ENV=staging
 ```
+
+### Watcher (PyPI)
+
+The `data-hub-watcher` Python package is published to [PyPI](https://pypi.org/project/data-hub-watcher/) so lab PCs can install and self-update via `uv tool install data-hub-watcher`. The full release flow — version bump, tag, approval, env-var roll-out, mandatory updates, and rollback — is documented in the operator-facing [Upgrading the watcher](guides/upgrading-the-watcher.md) guide; this section is intentionally a pointer rather than a second source of truth so the two can't drift.
+
+Trusted publishing is configured under **Project → Publishing** on PyPI for `Arcadia-Science/data-hub` and the workflow `publish-watcher.yml`; no API token lives in repo secrets. If trust is ever revoked or rotated, update it there and re-run the workflow.
 
 ## Running checks locally
 

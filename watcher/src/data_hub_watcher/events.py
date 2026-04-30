@@ -19,6 +19,13 @@ class EventType(str, Enum):
     RUN_REPORTED = "run_reported"
     CONFIG_SYNCED = "config_synced"
     ERROR = "error"
+    # Auto-update lifecycle. UPDATE_STARTED is emitted when the in-process
+    # updater begins running the upgrade subprocess; UPDATE_SUCCEEDED /
+    # UPDATE_FAILED are emitted after the new version starts up (or
+    # doesn't), keyed off the on-disk upgrade marker.
+    UPDATE_STARTED = "update_started"
+    UPDATE_SUCCEEDED = "update_succeeded"
+    UPDATE_FAILED = "update_failed"
 
 
 @dataclass

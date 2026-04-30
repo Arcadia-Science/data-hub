@@ -1,10 +1,31 @@
 [project]
 name = "data-hub-watcher"
-version = "0.2.0"
+version = "0.1.0"
+description = "File-watcher agent for lab instrument PCs that ingests data into the Arcadia Science Data Hub."
+readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Arcadia Science", email = "engineering@arcadiascience.com" },
+]
+keywords = ["arcadia", "data-hub", "lab", "instruments", "watcher", "uploader"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: System :: Filesystems",
+    "Topic :: System :: Monitoring",
+]
 dependencies = [
     "click>=8.2.1",
-    "data-hub-shared",
+    "packaging>=24.0",
     "pydantic>=2.11.9",
     "pyyaml>=6.0",
     "python-dotenv>=1.0",
@@ -14,6 +35,24 @@ dependencies = [
 [project.optional-dependencies]
 windows-service = ["pywin32"]
 
+[project.urls]
+Homepage = "https://github.com/Arcadia-Science/data-hub"
+# Operator-facing install + auto-update guide — what someone landing on
+# the PyPI page actually needs. The developer-facing `docs/watcher.md`
+# describes the editable-checkout workflow and is reachable from the
+# repository link below.
+Documentation = "https://github.com/Arcadia-Science/data-hub/blob/production/docs/guides/installing-a-watcher.md"
+Repository = "https://github.com/Arcadia-Science/data-hub"
+Issues = "https://github.com/Arcadia-Science/data-hub/issues"
+
+# Test-only deps live in a PEP 735 group instead of `[project].dependencies`
+# so the published wheel does not advertise `data-hub-shared` as a runtime
+# requirement — the integration suite imports it (see `watcher/tests/integration/*`)
+# but no runtime watcher code does, and the package is not published to PyPI.
+# `uv sync` includes this group by default for local development.
+[dependency-groups]
+test = ["data-hub-shared"]
+
 [tool.uv.sources]
 data-hub-shared = { workspace = true }
 
@@ -21,7 +60,7 @@ data-hub-shared = { workspace = true }
 data-hub-watcher = "data_hub_watcher.cli:cli"
 
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=77.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

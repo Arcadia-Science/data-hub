@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from data_hub_watcher.api_client import ApiError, DataHubClient
+from data_hub_watcher.constants import WATCHER_VERSION
 from data_hub_watcher.events import EventReporter
 
 logger = logging.getLogger(__name__)
@@ -15,11 +16,21 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class WatcherCounters:
-    """Mutable counters reset after each heartbeat."""
+    """Mutable counters reset after each heartbeat.
+
+    The ``last_*`` snapshots persist across resets so consumers that run
+    *after* a heartbeat (e.g. the updater on the post-heartbeat tick
+    callback) can still observe the activity from the just-elapsed
+    interval. Without these the post-reset value is always zero, which
+    would falsely look like an idle window.
+    """
 
     files_uploaded: int = 0
     runs_reported: int = 0
     errors: int = 0
+    last_files_uploaded: int = 0
+    last_runs_reported: int = 0
+    last_errors: int = 0
 
 
 class HeartbeatLoop:
@@ -86,8 +97,13 @@ class HeartbeatLoop:
         except (ApiError, Exception) as exc:
             logger.warning("Heartbeat failed: %s", exc)
 
-        # Reset counters after every attempt (success or failure) so the next
-        # heartbeat only reports activity since the previous one, not cumulative.
+        # Snapshot the just-sent values into the `last_*` fields so post-reset
+        # consumers (e.g. the updater) can still see the most recent interval's
+        # activity. Then reset the live counters so the next heartbeat only
+        # reports activity since the previous one, not cumulative.
+        self.counters.last_files_uploaded = self.counters.files_uploaded
+        self.counters.last_runs_reported = self.counters.runs_reported
+        self.counters.last_errors = self.counters.errors
         self.counters.files_uploaded = 0
         self.counters.runs_reported = 0
         self.counters.errors = 0
@@ -99,6 +115,7 @@ class HeartbeatLoop:
             "instrument_id": self._instrument_id,
             "watch_directory": self._watch_directory,
             "upload_mode": self._upload_mode,
+            "watcher_version": WATCHER_VERSION,
             "files_uploaded_since_last_heartbeat": self.counters.files_uploaded,
             "runs_reported_since_last_heartbeat": self.counters.runs_reported,
             "errors_since_last_heartbeat": self.counters.errors,

@@ -415,11 +415,11 @@ requires-dist = [
 
 [[package]]
 name = "data-hub-watcher"
-version = "0.2.0"
+version = "0.1.0"
 source = { editable = "watcher" }
 dependencies = [
     { name = "click" },
-    { name = "data-hub-shared" },
+    { name = "packaging" },
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
@@ -431,10 +431,15 @@ windows-service = [
     { name = "pywin32" },
 ]
 
+[package.dev-dependencies]
+test = [
+    { name = "data-hub-shared" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.2.1" },
-    { name = "data-hub-shared", editable = "packages/shared" },
+    { name = "packaging", specifier = ">=24.0" },
     { name = "pydantic", specifier = ">=2.11.9" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "pywin32", marker = "extra == 'windows-service'" },
@@ -442,6 +447,9 @@ requires-dist = [
     { name = "watchdog", specifier = ">=4.0.0" },
 ]
 provides-extras = ["windows-service"]
+
+[package.metadata.requires-dev]
+test = [{ name = "data-hub-shared", editable = "packages/shared" }]
 
 [[package]]
 name = "distlib"

@@ -19,6 +19,7 @@ from data_hub_watcher.models import (
     RunDetailResponse,
     RunResponse,
     UploadQueueResponse,
+    WatcherUpdateInfoResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -174,6 +175,15 @@ class DataHubClient:
     def send_events(self, watcher_id: str, events: list[dict[str, Any]]) -> EventsResponse:
         resp = self._request("POST", f"/watchers/{watcher_id}/events", json={"events": events})
         return EventsResponse.model_validate(resp.json())
+
+    def get_update_info(self, watcher_id: str) -> WatcherUpdateInfoResponse:
+        """Fetch server-reported watcher release metadata.
+
+        Used by `self-update` and the in-process updater to decide whether
+        the running watcher should upgrade itself.
+        """
+        resp = self._request("GET", f"/watchers/{watcher_id}/update-check")
+        return WatcherUpdateInfoResponse.model_validate(resp.json())
 
     # ------------------------------------------------------------------
     # Runs

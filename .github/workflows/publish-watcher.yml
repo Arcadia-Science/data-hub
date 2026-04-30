@@ -1,0 +1,135 @@
+name: Publish watcher
+
+# Two trigger paths:
+#   * `watcher-v*` git tag → publish to PyPI. The version in
+#     `watcher/pyproject.toml` must match the tag (enforced by the
+#     `py-check-watcher-version` Make target before we build).
+#   * Manual dispatch from `production` or `staging` → re-run the
+#     publish + verify pipeline against PyPI for an already-built tag
+#     (e.g. to retry after a transient index outage, or to test the
+#     release pipeline from staging). The `pypi` deployment environment
+#     additionally gates the publish step on its own approvers.
+#
+# TODO: restrict manual dispatch back to `production` only once staging
+# testing is complete. Allowing `staging` here is temporary to let us
+# exercise the release pipeline without cutting a production release.
+#
+# Authentication is OIDC trusted publishing (no API token in repo
+# secrets); the matching publisher must be configured on PyPI under
+# Project → Publishing for `Arcadia-Science/data-hub` and the workflow
+# `publish-watcher.yml`.
+on:
+  push:
+    tags:
+      - "watcher-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build wheel + sdist
+    runs-on: ubuntu-latest
+    # Tag pushes always pass this guard (their ref is `refs/tags/...`,
+    # never `refs/heads/...`). Manual dispatch must come from
+    # `production` or `staging` (staging is temporary — see TODO above).
+    # `publish` and `verify` depend on `build` via `needs:`, so
+    # skipping `build` skips the whole pipeline.
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && (
+        github.ref == 'refs/heads/production' ||
+        github.ref == 'refs/heads/staging'
+      ))
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      # Refuse to publish unless the git tag and the package version line
+      # up — guards against shipping `watcher-v0.3.0` from a repo whose
+      # `[project].version` is still `0.2.9`.
+      - name: Verify tag matches watcher/pyproject.toml version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: make py-check-watcher-version
+
+      - name: Read package version
+        id: version
+        run: |
+          VERSION=$(awk -F'"' '/^version[[:space:]]*=/{print $2; exit}' watcher/pyproject.toml)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building data-hub-watcher==$VERSION"
+
+      - name: Build wheel + sdist
+        run: uv build --package data-hub-watcher --out-dir dist
+
+      - name: List built artifacts
+        run: ls -la dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    # Gate PyPI publishes on a deployment environment so we can attach
+    # required reviewers / branch protection to the release pipeline
+    # without touching this workflow file.
+    environment:
+      name: pypi
+      url: https://pypi.org/project/data-hub-watcher/${{ needs.build.outputs.version }}/
+    permissions:
+      # OIDC trusted publishing requires `id-token: write`. No secrets
+      # required — pypa's action exchanges the GitHub OIDC token for a
+      # short-lived API token at the index.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Allow re-runs against an existing version (same hash) so a
+          # mid-pipeline retry doesn't fail with `400: file already
+          # exists`. Mismatched hashes still fail the upload.
+          skip-existing: true
+
+  verify:
+    name: Smoke-test the published wheel
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+
+      # Pinning the install to the exact version we just published catches
+      # the (rare) case where a stale prior release shadows the build via
+      # a slow-propagating mirror.
+      - name: Install from PyPI
+        env:
+          TARGET_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          uv venv .verify
+          uv pip install \
+            --python .verify/bin/python \
+            "data-hub-watcher==$TARGET_VERSION"
+
+      # Both invocations must succeed — `--version` exercises Click + the
+      # importlib.metadata version reader, and the explicit Python import
+      # ensures no module-level side-effect crashes the package on first
+      # import (a common source of "works on my machine" PyPI failures).
+      - name: Smoke-test CLI
+        run: |
+          .verify/bin/data-hub-watcher --version
+          .verify/bin/python -c "import data_hub_watcher; print('import OK')"

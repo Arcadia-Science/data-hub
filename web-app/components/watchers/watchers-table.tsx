@@ -41,6 +41,7 @@ export function WatchersTable({
             <TableHead>Watcher ID</TableHead>
             <TableHead>Instrument</TableHead>
             <TableHead>Hostname</TableHead>
+            <TableHead>Version</TableHead>
             <TableHead>Status</TableHead>
             <TableHead>Last Heartbeat</TableHead>
             {!isDeregisteredView && <TableHead className="w-[80px]" />}
@@ -74,6 +75,15 @@ export function WatchersTable({
                       <span className="text-muted-foreground">—</span>
                     )}
                   </span>
+                </TableCell>
+                <TableCell>
+                  {row.watcherVersion ? (
+                    <span className="font-mono text-xs">
+                      {row.watcherVersion}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
                 </TableCell>
                 <TableCell>
                   <WatcherStatusBadge status={row.effectiveStatus} />

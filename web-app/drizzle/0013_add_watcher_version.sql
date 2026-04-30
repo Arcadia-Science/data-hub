@@ -1,0 +1,1 @@
+ALTER TABLE "watchers" ADD COLUMN "watcher_version" text;

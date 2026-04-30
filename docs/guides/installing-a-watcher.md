@@ -11,30 +11,43 @@ This guide is for lab operators setting up the Data Hub Watcher on an instrument
 
 ## Installation
 
-Clone the repository and sync dependencies with `uv`:
+The watcher is published as a versioned package on PyPI. For use on lab PCs, install it directly from PyPI:
 
 ```sh
-git clone <repo-url>
-cd data-hub
-uv sync --all-packages
+uv tool install data-hub-watcher
 ```
 
-All `data-hub-watcher` commands below should be run from the `data-hub` project directory using `uv run`, which ensures the correct virtual environment is used.
+This installs the `data-hub-watcher` CLI into an isolated venv managed by `uv`, on PATH for any shell.
+
+After installation, every example below that says `data-hub-watcher …` runs the installed CLI directly.
 
 ### Windows service support
 
-If you want the watcher to run as a Windows service, install the extra dependency:
+The watcher can run as a Windows service. Install it with the `windows-service` extra so the `pywin32` dependency is included:
 
 ```sh
-uv sync --all-packages --extra windows-service
+uv tool install "data-hub-watcher[windows-service]"
 ```
+
+### Developer install (from a checkout)
+
+If you're modifying the watcher itself, install in editable mode from the repo so your local edits are reflected immediately:
+
+```sh
+git clone https://github.com/Arcadia-Science/data-hub
+cd data-hub
+uv sync --all-packages --extra windows-service
+uv run data-hub-watcher --help
+```
+
+When working from the checkout, prefix every example below with `uv run` (e.g. `uv run data-hub-watcher init`) so the editable install in `.venv/` is used.
 
 ## Setup
 
 Run the interactive setup wizard:
 
 ```sh
-uv run data-hub-watcher init
+data-hub-watcher init
 ```
 
 The wizard will walk you through:
@@ -66,7 +79,7 @@ The wizard saves configuration to `~/.data-hub/config.yaml`, the API key to `~/.
 First, verify your setup with a dry run:
 
 ```sh
-uv run data-hub-watcher watch --dry-run
+data-hub-watcher watch --dry-run
 ```
 
 This validates the config, checks that the API is reachable and the instrument is active, and previews what files would be uploaded — without actually starting the monitor.
@@ -74,7 +87,7 @@ This validates the config, checks that the API is reachable and the instrument i
 When you're ready:
 
 ```sh
-uv run data-hub-watcher watch
+data-hub-watcher watch
 ```
 
 The watcher will now:
@@ -92,16 +105,16 @@ Press `Ctrl+C` to stop.
 On Windows, you can install the watcher as a service so it starts automatically:
 
 ```sh
-uv run data-hub-watcher service install
-uv run data-hub-watcher service start
+data-hub-watcher service install
+data-hub-watcher service start
 ```
 
 Other service commands:
 
 ```sh
-uv run data-hub-watcher service status    # Check if the service is running
-uv run data-hub-watcher service stop      # Stop the service
-uv run data-hub-watcher service uninstall # Remove the service
+data-hub-watcher service status    # Check if the service is running
+data-hub-watcher service stop      # Stop the service
+data-hub-watcher service uninstall # Remove the service
 ```
 
 ## Changing configuration
@@ -109,35 +122,49 @@ uv run data-hub-watcher service uninstall # Remove the service
 To re-prompt each config field with current values as defaults:
 
 ```sh
-uv run data-hub-watcher config edit
+data-hub-watcher config edit
 ```
 
 To open the YAML file directly in your editor:
 
 ```sh
-uv run data-hub-watcher config open
+data-hub-watcher config open
 ```
 
 To view the current config:
 
 ```sh
-uv run data-hub-watcher config show
+data-hub-watcher config show
 ```
 
 Changes are automatically synced to the server after editing.
+
+## Upgrading the watcher
+
+The watcher can upgrade itself in place, either on demand via `data-hub-watcher self-update` or — when running as a Windows service — automatically on an hourly background tick. The full release flow, mandatory-update behavior, rollback steps, and operator troubleshooting all live in [Upgrading the watcher](upgrading-the-watcher.md).
+
+If you just want the quick command:
+
+```sh
+data-hub-watcher self-update            # check + upgrade if needed
+data-hub-watcher self-update --check    # report status only, no upgrade
+data-hub-watcher self-update --force    # re-run the upgrade subprocess even if the version already matches
+```
+
+After a successful upgrade you must restart the watcher (or the Windows service) for the new code to take effect — `self-update` does not restart the running process. Lab PCs running the Windows service get auto-restart for free via the SCM's failure-actions policy; see the [upgrade guide](./upgrading-the-watcher.md) for details.
 
 ## Manual uploads
 
 To upload a specific file outside the normal watch loop:
 
 ```sh
-uv run data-hub-watcher upload --file /path/to/file.csv --run-id RUN001
+data-hub-watcher upload --file /path/to/file.csv --run-id RUN001
 ```
 
 To process the server-side upload queue (manual mode):
 
 ```sh
-uv run data-hub-watcher upload
+data-hub-watcher upload
 ```
 
 Add `--dry-run` to preview without uploading.
@@ -155,7 +182,7 @@ Each instrument can have at most one active watcher at a time. If `init` fails w
 - **Web UI** — go to **Watchers**, open the existing watcher, and click **Deregister**.
 - **API** — `curl -X DELETE -H "Authorization: Bearer $DATA_HUB_API_KEY" https://<host>/api/v1/watchers/<existing_watcher_id>`
 
-Deregistration is a soft-delete: heartbeats, events, and runs reported by the old watcher remain visible in the **Deregistered** tab for auditing.
+Deregistration is a soft-delete: heartbeats, events, and runs reported by the old watcher remain visible in **Watchers > Deregistered** (in the web app) for auditing.
 
 ### "Connection error" or "Request timed out"
 
@@ -167,9 +194,9 @@ The watcher can't reach the Data Hub API. Check:
 
 ### Files aren't being detected
 
-- Verify the watch directory is correct: `uv run data-hub-watcher config show`
+- Verify the watch directory is correct: `data-hub-watcher config show`
 - Check that file patterns match your files. The watcher uses glob matching (e.g., `*.csv` matches `data.csv` but not `data.CSV` on case-sensitive systems).
-- Run `uv run data-hub-watcher watch --dry-run` to see what files the watcher would pick up.
+- Run `data-hub-watcher watch --dry-run` to see what files the watcher would pick up.
 
 ### Files are detected but not uploading
 
@@ -182,5 +209,5 @@ The watcher can't reach the Data Hub API. Check:
 The watcher writes rotating logs to `~/.data-hub/watcher.log` (10 MB, 5 backups). Check this file for detailed error information. You can also run with `--verbose` for debug-level console output:
 
 ```sh
-uv run data-hub-watcher --verbose watch
+data-hub-watcher --verbose watch
 ```

@@ -59,6 +59,7 @@ Tokens are hashed with SHA-256 before storage. The plaintext token is shown once
 | `PUT` | `/api/v1/watchers/:watcherId/config` | Push config YAML and checksum |
 | `GET` | `/api/v1/watchers/:watcherId/config-checksum` | Get the config checksum |
 | `GET` | `/api/v1/watchers/:watcherId/upload-queue` | Get pending upload queue |
+| `GET` | `/api/v1/watchers/:watcherId/update-check` | Get server-advertised release info (latest version, channel, mandatory flag); used by the watcher's self-update CLI and background auto-updater. See [Upgrading the watcher](guides/upgrading-the-watcher.md). |
 
 ### Tokens
 

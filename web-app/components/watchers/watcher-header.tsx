@@ -60,6 +60,11 @@ export function WatcherHeader({ watcher }: { watcher: WatcherDetail }) {
               status={watcher.effectiveStatus}
               lastOnlineAt={watcher.lastHeartbeatAt}
             />
+            {watcher.watcherVersion && (
+              <Badge variant="outline" className="font-mono text-[10px]">
+                v{watcher.watcherVersion}
+              </Badge>
+            )}
             {isDeregistered && (
               <Badge variant="secondary" className="text-[10px]">
                 Deregistered

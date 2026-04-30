@@ -7,9 +7,10 @@ forgot to wire `on_tick` on the `HeartbeatLoop`. These tests lock in the
 wiring contract per `upload_mode` so any future drift fails loudly:
 
 * auto mode    -> `detector._upload_cb` is `uploader.upload_files`
-                  and `heartbeat._on_tick` is `None`
+                  and `heartbeat._on_tick` ticks the auto-updater only
 * manual mode  -> `detector._upload_cb` is `None`
                   and `heartbeat._on_tick` polls `uploader.poll_upload_queue`
+                  *and* ticks the auto-updater
 """
 
 from __future__ import annotations
@@ -24,8 +25,13 @@ from data_hub_watcher.heartbeat import HeartbeatLoop, WatcherCounters
 from data_hub_watcher.models import InstrumentConfig, RunDetectionConfig, WatcherConfig
 from data_hub_watcher.monitor import FileMonitor
 from data_hub_watcher.run_detector import RunDetector
-from data_hub_watcher.runtime import build_runtime
+from data_hub_watcher.runtime import (
+    ShutdownReason,
+    build_runtime,
+    classify_shutdown,
+)
 from data_hub_watcher.state import StateDB
+from data_hub_watcher.updater import Updater
 from data_hub_watcher.uploader import Uploader
 
 
@@ -83,14 +89,22 @@ class TestBuildRuntimeAutoMode:
         finally:
             rt.state_db.close()
 
-    def test_heartbeat_on_tick_is_none(self, tmp_path: Path, db_path: Path) -> None:
+    def test_heartbeat_on_tick_only_drives_updater(self, tmp_path: Path, db_path: Path) -> None:
         cfg = _make_config(tmp_path, upload_mode="auto")
         rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
 
         try:
-            # Auto mode has no server-driven upload queue to poll, so the
-            # heartbeat tick must not invoke any extra callback.
-            assert rt.heartbeat._on_tick is None
+            # Auto mode has no server-driven upload queue to poll, but
+            # the in-process updater still needs a tick on every
+            # heartbeat — it gates auto-updates on the cumulative idle
+            # window across many heartbeats. So the hook is non-None
+            # and ticking it must not call `poll_upload_queue`.
+            assert rt.heartbeat._on_tick is not None
+            rt.uploader.poll_upload_queue = MagicMock()  # type: ignore[method-assign]
+            rt.updater.on_tick = MagicMock(return_value=None)  # type: ignore[method-assign]
+            rt.heartbeat._on_tick()
+            rt.uploader.poll_upload_queue.assert_not_called()
+            rt.updater.on_tick.assert_called_once_with()
         finally:
             rt.state_db.close()
 
@@ -119,8 +133,12 @@ class TestBuildRuntimeManualMode:
             assert rt.heartbeat._on_tick is not None
 
             rt.uploader.poll_upload_queue = MagicMock()  # type: ignore[method-assign]
+            rt.updater.on_tick = MagicMock(return_value=None)  # type: ignore[method-assign]
             rt.heartbeat._on_tick()
             rt.uploader.poll_upload_queue.assert_called_once_with()
+            # The same hook must also feed the auto-updater so its idle
+            # counter advances regardless of upload_mode.
+            rt.updater.on_tick.assert_called_once_with()
         finally:
             rt.state_db.close()
 
@@ -135,9 +153,30 @@ class TestBuildRuntimeManualMode:
             rt.uploader.poll_upload_queue = MagicMock(  # type: ignore[method-assign]
                 side_effect=RuntimeError("boom")
             )
+            rt.updater.on_tick = MagicMock(return_value=None)  # type: ignore[method-assign]
             assert rt.heartbeat._on_tick is not None
             rt.heartbeat._on_tick()
             rt.uploader.poll_upload_queue.assert_called_once_with()
+            # Updater must still tick even when the upload-queue poll
+            # blew up, otherwise a permanently-failing manual-mode
+            # poll would also disable auto-updates.
+            rt.updater.on_tick.assert_called_once_with()
+        finally:
+            rt.state_db.close()
+
+    def test_on_tick_swallows_updater_exceptions(self, tmp_path: Path, db_path: Path) -> None:
+        """Same containment guarantee for the updater half of the hook:
+        a buggy update check must not kill the heartbeat thread."""
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+
+        try:
+            rt.updater.on_tick = MagicMock(  # type: ignore[method-assign]
+                side_effect=RuntimeError("update broke")
+            )
+            assert rt.heartbeat._on_tick is not None
+            rt.heartbeat._on_tick()
+            rt.updater.on_tick.assert_called_once_with()
         finally:
             rt.state_db.close()
 
@@ -159,6 +198,7 @@ class TestBuildRuntimeSharedDependencies:
             assert isinstance(rt.detector, RunDetector)
             assert isinstance(rt.monitor, FileMonitor)
             assert isinstance(rt.heartbeat, HeartbeatLoop)
+            assert isinstance(rt.updater, Updater)
         finally:
             rt.state_db.close()
 
@@ -199,3 +239,56 @@ class TestBuildRuntimeErrors:
         cfg = _make_config(tmp_path, upload_mode="auto", watcher_id=None)
         with pytest.raises(ValueError, match="watcher_id"):
             build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+
+
+class TestClassifyShutdown:
+    """Pin the WATCHER_STOPPED message text shared by the CLI ``watch``
+    command and the Windows service. Both call sites used to hard-code
+    their own strings, which made the service path's WATCHER_STOPPED
+    indistinguishable from a normal stop on auto-update restarts —
+    breaking dashboard correlation with the matching ``update_started``
+    event.
+    """
+
+    def test_normal_stop_uses_role_stopped(self, tmp_path: Path, db_path: Path) -> None:
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+        try:
+            decision = classify_shutdown(rt, role="Watcher")
+            assert decision == ShutdownReason(
+                is_upgrade_restart=False,
+                stopped_message="Watcher stopped",
+            )
+        finally:
+            rt.state_db.close()
+
+    def test_upgrade_restart_uses_role_specific_message(
+        self, tmp_path: Path, db_path: Path
+    ) -> None:
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+        try:
+            rt.upgrade_restart_event.set()
+            decision = classify_shutdown(rt, role="Service")
+            assert decision.is_upgrade_restart is True
+            # The message is keyed on the *role* so the CLI and the
+            # service produce naturally-readable but distinct text in
+            # the events stream — a single "Watcher restarting…" log
+            # would look weird on Windows where the dashboard already
+            # shows the watcher's host as a service.
+            assert decision.stopped_message == "Service restarting for auto-update"
+        finally:
+            rt.state_db.close()
+
+    def test_role_is_substituted_into_both_messages(self, tmp_path: Path, db_path: Path) -> None:
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+        try:
+            assert classify_shutdown(rt, role="Watcher").stopped_message == "Watcher stopped"
+            rt.upgrade_restart_event.set()
+            assert (
+                classify_shutdown(rt, role="Watcher").stopped_message
+                == "Watcher restarting for auto-update"
+            )
+        finally:
+            rt.state_db.close()

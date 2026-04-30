@@ -7,7 +7,6 @@ import re
 import signal
 import subprocess
 import sys
-import time
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +21,7 @@ from data_hub_watcher.constants import (
     RUN_DETECTION_PRESETS,
     STATE_DB_FILENAME,
     SUPPORTED_ENVIRONMENTS,
+    WATCHER_VERSION,
     env_file_path,
     load_env,
     resolve_config_path,
@@ -34,7 +34,13 @@ from data_hub_watcher.models import (
     RunDetectionConfig,
     WatcherConfig,
 )
-from data_hub_watcher.runtime import build_runtime, start_runtime, stop_runtime
+from data_hub_watcher.runtime import build_runtime, classify_shutdown, start_runtime, stop_runtime
+from data_hub_watcher.self_update import (
+    InstallMethod,
+    detect_install_method,
+    evaluate_update,
+    run_upgrade,
+)
 from data_hub_watcher.state import StateDB
 from data_hub_watcher.uploader import Uploader
 
@@ -743,8 +749,37 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    while True:
-        time.sleep(1)
+    # Block on the runtime's shutdown event so the in-process auto-updater
+    # can request a restart from the heartbeat thread without needing a
+    # signal. Ctrl+C still works because the SIGINT handler raises
+    # SystemExit(0) directly out of `Event.wait` (Python interrupts the
+    # blocking call to deliver the signal).
+    while not rt.shutdown_event.wait(timeout=1.0):
+        pass
+
+    # Distinguish an upgrade-driven shutdown from a generic one by
+    # delegating to `classify_shutdown` — the same helper used by the
+    # Windows service path in `service._run_service_loop`, so the two
+    # entrypoints can't drift on the WATCHER_STOPPED message text.
+    decision = classify_shutdown(rt, role="Watcher")
+    if decision.is_upgrade_restart:
+        # Foreground `data-hub-watcher watch` doesn't have an SCM to
+        # auto-restart it, so the message has to cover both audiences:
+        # Windows-service operators (whose SCM picks the new wheel up
+        # via the failure-actions policy on the non-zero exit below)
+        # and console / macOS / Linux operators (who need to re-run
+        # the command manually). The previous "restarting…" wording
+        # was only accurate under the SCM.
+        click.echo(
+            "\nUpgrade installed. Re-run data-hub-watcher watch to load the new "
+            "version (or install the service for automatic restart)."
+        )
+    stop_runtime(rt, stopped_message=decision.stopped_message)
+    # Exit non-zero on upgrade restart so any supervisor (or the
+    # operator's wrapper script) restarts us. The `data-hub-watcher
+    # service` Windows path uses the SCM's failure-actions config to
+    # do this automatically.
+    raise SystemExit(1 if decision.is_upgrade_restart else 0)
 
 
 # ---------------------------------------------------------------------------
@@ -840,6 +875,91 @@ def upload(ctx: click.Context, file_path: str | None, run_id: str | None, dry_ru
         reporter.flush()
         click.echo(click.style(f"✓ Processed {len(queue.files)} file(s).", fg="green"))
         state_db.close()
+
+
+# ---------------------------------------------------------------------------
+# self-update command
+# ---------------------------------------------------------------------------
+
+
+@cli.command("self-update")
+@click.option(
+    "--check",
+    is_flag=True,
+    help="Print the server-reported target version without performing the upgrade.",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Run the upgrade subprocess even if the local version already matches the target.",
+)
+@click.pass_context
+def self_update(ctx: click.Context, check: bool, force: bool) -> None:
+    """Check the server for a newer watcher release and upgrade in place.
+
+    Designed for unattended use — schedule via Windows Task Scheduler
+    (e.g. weekly) so lab PCs converge on the latest published version
+    without operator intervention.
+    """
+    cfg, client, _path = _load_and_client(ctx)
+    if not cfg.watcher_id:
+        raise click.ClickException("No watcher_id in config. Run 'data-hub-watcher init' first.")
+
+    click.echo(f"Current version: {WATCHER_VERSION}")
+
+    try:
+        info = client.get_update_info(cfg.watcher_id)
+    except ApiError as exc:
+        raise click.ClickException(f"Failed to fetch update info: {exc.message}") from exc
+
+    target_label = info.latest_version or "(none configured)"
+    mandatory_label = " [mandatory]" if info.mandatory else ""
+    click.echo(f"Server target:   {target_label} (channel={info.channel}){mandatory_label}")
+
+    decision = evaluate_update(info, force=force)
+
+    if check:
+        verb = "Would upgrade" if decision.should_update else "No upgrade needed"
+        click.echo(f"{verb}: {decision.reason}.")
+        return
+
+    if not decision.should_update:
+        click.echo(f"Already up to date: {decision.reason}.")
+        return
+
+    method = detect_install_method()
+    click.echo(f"Install method:  {method.value}")
+    if method in (InstallMethod.EDITABLE, InstallMethod.UNKNOWN):
+        raise click.ClickException(
+            "Refusing to self-update an editable / unknown install. "
+            "Upgrade manually with 'git pull && uv sync' from your checkout."
+        )
+
+    click.echo(f"Upgrading {decision.current_version} -> {decision.target_version}…")
+    try:
+        result = run_upgrade(method, target_version=decision.target_version)
+    except RuntimeError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    if result.stdout:
+        click.echo(result.stdout.rstrip())
+    if result.stderr:
+        click.echo(result.stderr.rstrip(), err=True)
+
+    if result.returncode != 0:
+        raise click.ClickException(
+            f"Upgrade subprocess exited with code {result.returncode}. "
+            "The previous installation should still be functional; review "
+            "the output above and try again."
+        )
+
+    click.echo(
+        click.style(
+            f"\u2713 Upgrade to {decision.target_version} complete. "
+            "Restart the watcher (or the Windows service) to load the new code.",
+            fg="green",
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
