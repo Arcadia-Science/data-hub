@@ -11,7 +11,7 @@ This guide is for lab operators setting up the Data Hub Watcher on an instrument
 
 ## Installation
 
-The watcher is published as a versioned package — for production lab PCs, install it directly from the index without cloning the repo:
+The watcher is published as a versioned package on PyPI. For use on lab PCs, install it directly from PyPI:
 
 ```sh
 uv tool install data-hub-watcher
@@ -19,7 +19,7 @@ uv tool install data-hub-watcher
 
 This installs the `data-hub-watcher` CLI into an isolated venv managed by `uv`, on PATH for any shell.
 
-After installation, every example below that says `data-hub-watcher …` runs the installed CLI directly. `data-hub-watcher` (used by developers working from a checkout) also works.
+After installation, every example below that says `data-hub-watcher …` runs the installed CLI directly.
 
 ### Windows service support
 
@@ -36,7 +36,7 @@ If you're modifying the watcher itself, install in editable mode from the repo s
 ```sh
 git clone https://github.com/Arcadia-Science/data-hub
 cd data-hub
-uv sync --all-packages
+uv sync --all-packages --extra windows-service
 uv run data-hub-watcher --help
 ```
 
@@ -151,7 +151,7 @@ data-hub-watcher self-update --check    # report status only, no upgrade
 data-hub-watcher self-update --force    # re-run the upgrade subprocess even if the version already matches
 ```
 
-After a successful upgrade you must restart the watcher (or the Windows service) for the new code to take effect — `self-update` does not restart the running process. Lab PCs running the Windows service get auto-restart for free via the SCM's failure-actions policy; see the upgrade guide for details.
+After a successful upgrade you must restart the watcher (or the Windows service) for the new code to take effect — `self-update` does not restart the running process. Lab PCs running the Windows service get auto-restart for free via the SCM's failure-actions policy; see the [upgrade guide](./upgrading-the-watcher.md) for details.
 
 ## Manual uploads
 
@@ -182,7 +182,7 @@ Each instrument can have at most one active watcher at a time. If `init` fails w
 - **Web UI** — go to **Watchers**, open the existing watcher, and click **Deregister**.
 - **API** — `curl -X DELETE -H "Authorization: Bearer $DATA_HUB_API_KEY" https://<host>/api/v1/watchers/<existing_watcher_id>`
 
-Deregistration is a soft-delete: heartbeats, events, and runs reported by the old watcher remain visible in the **Deregistered** tab for auditing.
+Deregistration is a soft-delete: heartbeats, events, and runs reported by the old watcher remain visible in **Watchers > Deregistered** (in the web app) for auditing.
 
 ### "Connection error" or "Request timed out"
 

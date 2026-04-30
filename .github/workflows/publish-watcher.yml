@@ -4,12 +4,15 @@ name: Publish watcher
 #   * `watcher-v*` git tag → publish to PyPI. The version in
 #     `watcher/pyproject.toml` must match the tag (enforced by the
 #     `py-check-watcher-version` Make target before we build).
-#   * Manual dispatch from `production` → re-run the publish + verify
-#     pipeline against PyPI for an already-built tag (e.g. to retry
-#     after a transient index outage). Restricted to `production` so
-#     a feature branch can't accidentally publish whatever version is
-#     in its `pyproject.toml`; the `pypi` deployment environment
+#   * Manual dispatch from `production` or `staging` → re-run the
+#     publish + verify pipeline against PyPI for an already-built tag
+#     (e.g. to retry after a transient index outage, or to test the
+#     release pipeline from staging). The `pypi` deployment environment
 #     additionally gates the publish step on its own approvers.
+#
+# TODO: restrict manual dispatch back to `production` only once staging
+# testing is complete. Allowing `staging` here is temporary to let us
+# exercise the release pipeline without cutting a production release.
 #
 # Authentication is OIDC trusted publishing (no API token in repo
 # secrets); the matching publisher must be configured on PyPI under
@@ -30,11 +33,15 @@ jobs:
     runs-on: ubuntu-latest
     # Tag pushes always pass this guard (their ref is `refs/tags/...`,
     # never `refs/heads/...`). Manual dispatch must come from
-    # `production`. `publish` and `verify` depend on `build` via
-    # `needs:`, so skipping `build` skips the whole pipeline.
+    # `production` or `staging` (staging is temporary — see TODO above).
+    # `publish` and `verify` depend on `build` via `needs:`, so
+    # skipping `build` skips the whole pipeline.
     if: >-
       github.event_name == 'push' ||
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/production')
+      (github.event_name == 'workflow_dispatch' && (
+        github.ref == 'refs/heads/production' ||
+        github.ref == 'refs/heads/staging'
+      ))
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:

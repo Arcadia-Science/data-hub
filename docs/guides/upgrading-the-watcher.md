@@ -16,6 +16,7 @@ On each tick the service:
 
 1. Calls `GET /api/v1/watchers/<watcher-id>/update-check` and compares the server's `latest_version` against its own.
 2. Only attempts an upgrade if **all** of these are true: a newer version is available, no files have been uploaded for several heartbeats in a row, and no run has been reported within roughly 5× the configured `stability_period_seconds`. The activity-window guard exists so the watcher never takes itself down mid-acquisition.
+    - **Exception:** releases flagged as `mandatory` on the server skip the activity-window check entirely and are applied immediately — this is reserved for security fixes or breaking wire-protocol changes where leaving the old version running is worse than a brief interruption.
 3. Runs `uv tool install --reinstall data-hub-watcher==<latest>` (or the `pip install -U` equivalent for non-uv installs) on a dedicated background thread, so heartbeats keep flowing while the install executes — which can take 30–60 s on slow links. Before the subprocess starts, the service emits an `update_started` event you can see in the **Watchers** page.
 4. On success, exits non-zero so the Windows SCM restarts the service into the new wheel via its configured failure-actions policy. The new process emits `update_succeeded` once it confirms the new version is actually loaded; if the new code crashes at startup or otherwise doesn't take effect, you'll see `update_failed` instead.
 
@@ -44,7 +45,7 @@ After a successful CLI upgrade you must restart the watcher (or the Windows serv
 
 ### Editable / developer checkouts
 
-If the watcher is installed editable from a checkout (`uv sync --all-packages`), both the auto-updater and `self-update` will refuse to act and tell you to upgrade manually with `git pull && uv sync`. Auto-upgrading would silently shadow your source tree with an index build, which has burned us before — the refusal is intentional.
+If the watcher is installed editable from a checkout (`uv sync --all-packages`), both the auto-updater and `self-update` will refuse to act and tell you to upgrade manually with `git pull && uv sync`. The refusal is intentional, since auto-upgrading would silently shadow your source tree with an index build.
 
 The detection lives in `data_hub_watcher.self_update.detect_install_method` and reads `direct_url.json` from the dist's metadata; the editable check takes precedence over every other heuristic, so even an editable install whose `.venv` happens to live under a `uv/tools/` directory still gets refused.
 
@@ -81,9 +82,13 @@ The `publish-watcher.yml` workflow runs automatically. Its `build` job calls `ma
 
 ### 3. Approve the `pypi` deployment
 
-`publish-watcher.yml` is gated on the `pypi` GitHub deployment environment. Approve it under **Actions → Publish watcher** in the GitHub UI. Once approved, the `publish` job uploads the wheel + sdist to PyPI via OIDC trusted publishing (no API token in repo secrets), and the `verify` job installs `data-hub-watcher==<tag-version>` from PyPI into a clean venv and runs `data-hub-watcher --version` plus `python -c "import data_hub_watcher"` as a smoke test. The verify step catches stale-mirror shadows and module-level import side-effects that would otherwise only surface on a lab PC.
+`publish-watcher.yml` is gated on the `pypi` GitHub deployment environment. Approve it under **Actions → Publish watcher** in the GitHub UI.
 
-If a transient PyPI outage breaks one of those steps after a successful build, you can re-run the workflow from the GitHub UI: **Actions → Publish watcher → Run workflow** on the `production` branch. The `skip-existing: true` flag on the publish step makes the retry safe — files already uploaded with the same hash are skipped rather than failing the run with `400: file already exists`. Manual dispatch from any branch other than `production` is refused by the workflow's `if:` guard.
+Once approved, the `publish` job uploads the wheel + sdist to PyPI via OIDC trusted publishing (no API token in repo secrets), and the `verify` job installs `data-hub-watcher==<tag-version>` from PyPI into a clean venv and runs `data-hub-watcher --version` plus `python -c "import data_hub_watcher"` as a smoke test. The verify step catches stale-mirror shadows and module-level import side-effects that would otherwise only surface on a lab PC.
+
+If a transient PyPI outage breaks one of those steps after a successful build, you can re-run the workflow from the GitHub UI: **Actions → Publish watcher → Run workflow** on the `production` branch. The `skip-existing: true` flag on the publish step makes the retry safe — files already uploaded with the same hash are skipped rather than failing the run with `400: file already exists`.
+
+Manual dispatch from any branch other than `production` is refused by the workflow's `if:` guard.
 
 ### 4. Roll the release out
 
