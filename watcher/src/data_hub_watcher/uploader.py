@@ -86,6 +86,12 @@ class Uploader:
         self._instrument_id = instrument_id
         self._watcher_id = watcher_id
         self._watch_dir = watch_directory
+        # Track consecutive upload-queue poll failures so the watcher
+        # surfaces a ``kind=upload_queue_poll_failed`` event on the
+        # 1st failure and every 10th repeat. The unthrottled case
+        # would emit one event per heartbeat tick during an outage,
+        # crowding out other signals on the dashboard.
+        self._consecutive_queue_poll_failures = 0
 
     # ------------------------------------------------------------------
     # Auto-mode: upload a batch of files for a reported run
@@ -128,8 +134,24 @@ class Uploader:
         except ApiError as exc:
             logger.warning("Failed to fetch upload queue: %s", exc.message)
             self._counters.errors += 1
+            self._consecutive_queue_poll_failures += 1
+            # Emit on first failure, then every 10th, so a sustained
+            # outage stays visible without flooding the queue.
+            if (
+                self._consecutive_queue_poll_failures == 1
+                or self._consecutive_queue_poll_failures % 10 == 0
+            ):
+                self._reporter.report_error(
+                    "upload_queue_poll_failed",
+                    f"Failed to fetch upload queue: {exc.message}",
+                    error=exc.message,
+                    consecutive_failures=self._consecutive_queue_poll_failures,
+                )
             return
 
+        # Reset on any success -- the next failure starts a fresh
+        # outage window so the throttled emissions are accurate.
+        self._consecutive_queue_poll_failures = 0
         if not queue.files:
             return
 

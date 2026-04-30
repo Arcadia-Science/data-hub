@@ -15,7 +15,7 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from data_hub_watcher.api_client import DataHubClient
+from data_hub_watcher.api_client import ApiError, DataHubClient
 from data_hub_watcher.constants import (
     DEFAULT_CONFIG_DIR,
     HEARTBEAT_INTERVAL_SECONDS,
@@ -172,6 +172,7 @@ def build_runtime(
         on_stable_file=detector.on_stable_file,
         state_db=state_db,
         recursive=inst.run_detection.recursive,
+        event_reporter=reporter,
     )
 
     # The heartbeat's `on_tick` hook is now multi-purpose:
@@ -276,6 +277,71 @@ def start_runtime(rt: WatcherRuntime, *, started_message: str) -> None:
 
     rt.heartbeat.start()
     rt.monitor.start()
+
+
+def sync_config_to_api(
+    client: DataHubClient,
+    watcher_id: str,
+    path: Path,
+    reporter: EventReporter,
+    *,
+    trigger: str = "startup",
+) -> bool:
+    """Push the local config to the API if it differs from the remote.
+
+    Reporter-aware sibling of ``cli._push_config_to_api`` used by the
+    long-running ``watch`` and Windows-service entrypoints. On a
+    successful push it queues ``EventType.CONFIG_SYNCED`` (mirroring
+    the operator-facing CLI helper) so a dashboard observer can tell
+    the watcher caught up to a freshly-edited config. On any API
+    failure -- the checksum probe or the push itself -- it queues a
+    structured ``kind=config_sync_failed`` ``ERROR`` event so the
+    failure is visible centrally rather than only as a yellow startup
+    message that nobody reads on a headless lab PC.
+
+    Returns ``True`` if the remote was updated (push attempted),
+    ``False`` if the remote already matched and no push was issued.
+    """
+    # Lazy import so monkey-patching ``config_io.config_checksum`` in
+    # tests is observed inside this function (a top-level
+    # ``from config_io import config_checksum`` would bind the original
+    # at import time and miss the patch).
+    from data_hub_watcher.config_io import config_checksum
+
+    try:
+        local_checksum = config_checksum(path)
+        remote = client.get_config_checksum(watcher_id)
+    except ApiError as exc:
+        reporter.report_error(
+            "config_sync_failed",
+            f"Could not check remote config checksum: {exc.message}",
+            error=exc.message,
+        )
+        return False
+
+    if remote is not None and remote.config_checksum == local_checksum:
+        return False
+
+    try:
+        yaml_content = path.read_text(encoding="utf-8")
+        client.push_config(watcher_id, yaml_content, local_checksum)
+    except ApiError as exc:
+        reporter.report_error(
+            "config_sync_failed",
+            f"Could not push config to API: {exc.message}",
+            checksum=local_checksum,
+            error=exc.message,
+        )
+        return True
+
+    reporter.queue_event(
+        WatcherEvent(
+            event_type=EventType.CONFIG_SYNCED,
+            message=f"Config synced (trigger={trigger})",
+            details={"trigger": trigger},
+        )
+    )
+    return True
 
 
 def stop_runtime(rt: WatcherRuntime, *, stopped_message: str) -> None:

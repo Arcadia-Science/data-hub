@@ -336,6 +336,12 @@ class Updater:
         # the dev install. Reset to ``None`` on process restart so the
         # next start re-establishes state with the server.
         self._last_refused_target: str | None = None
+        # Track consecutive ``/update-check`` failures so we surface a
+        # ``kind=update_check_failed`` event after 3 consecutive misses
+        # (~3 hours of going dark on the update channel). One isolated
+        # blip is uninteresting but a sustained inability to check
+        # blocks all auto-updates, including mandatory rollouts.
+        self._consecutive_update_check_failures = 0
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
@@ -395,10 +401,16 @@ class Updater:
             info = self._client.get_update_info(watcher_id)
         except ApiError as exc:
             logger.warning("Update-check API call failed: %s", exc)
+            self._note_update_check_failure(exc.message)
             return UpdateAttemptResult(False, False, f"update-check API error: {exc.message}", None)
         except Exception as exc:  # pragma: no cover - defensive
             logger.exception("Unexpected error fetching update info")
+            self._note_update_check_failure(str(exc))
             return UpdateAttemptResult(False, False, f"unexpected error: {exc}", None)
+
+        # Reset the failure counter on any successful fetch so the next
+        # outage's "3 consecutive failures" window is accurate.
+        self._consecutive_update_check_failures = 0
 
         last_run_age = self._last_run_age_seconds()
         ok, reason = should_attempt_update(
@@ -570,6 +582,29 @@ class Updater:
         # event — we already reported it here.
         clear_upgrade_marker(self._config_dir)
         self._reporter.flush()
+
+    def _note_update_check_failure(self, error: str) -> None:
+        """Bump the consecutive-failure counter and emit on the 3rd miss.
+
+        Update checks run roughly hourly, so 3 consecutive failures
+        represents ~3 hours of going dark on the update channel — long
+        enough to indicate a real problem (network ACL, server bug)
+        but short enough to flag mandatory rollouts before they're
+        meaningfully delayed. Emitting on the 1st failure would alert
+        on routine API blips that auto-recover on the next hour.
+        """
+        self._consecutive_update_check_failures += 1
+        if self._consecutive_update_check_failures == 3:
+            self._reporter.report_error(
+                "update_check_failed",
+                (
+                    "Update check failed for "
+                    f"{self._consecutive_update_check_failures} consecutive attempts: "
+                    f"{error}"
+                ),
+                error=error,
+                consecutive_failures=self._consecutive_update_check_failures,
+            )
 
     def _last_run_age_seconds(self) -> float | None:
         ts = self._state_db.last_run_reported_at()

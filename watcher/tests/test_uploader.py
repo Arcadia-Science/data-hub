@@ -3,6 +3,7 @@
 from __future__ import annotations
 from collections.abc import Generator
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -177,6 +178,59 @@ class TestUploadSingle:
 
         assert result is False
         assert uploader._counters.errors == 1
+
+
+class TestUploadQueuePollFailures:
+    """Manual-mode upload-queue poll failures must be visible in the dashboard.
+
+    Today the failure only bumps an opaque counter, so a sustained
+    ACL/network outage looks identical to a healthy queue. The fix
+    surfaces a ``kind=upload_queue_poll_failed`` event on the 1st
+    failure and every 10th repeat. Throttling matters because the
+    poll fires every heartbeat (~60 s) — without it a half-day outage
+    would emit 720 events.
+    """
+
+    def test_emits_on_first_and_every_tenth_failure(
+        self, uploader: Uploader, mock_client: MagicMock
+    ) -> None:
+        mock_client.get_upload_queue.side_effect = ApiError("ACL", status_code=403)
+
+        # 25 failures: events emitted at attempts 1, 10, 20.
+        for _ in range(25):
+            uploader.poll_upload_queue()
+
+        reporter_mock = cast(MagicMock, uploader._reporter)
+        kinds = [c.args[0] for c in reporter_mock.report_error.call_args_list]
+        assert kinds.count("upload_queue_poll_failed") == 3
+        # And the consecutive-failure count is reported correctly.
+        consec = [
+            c.kwargs["consecutive_failures"]
+            for c in reporter_mock.report_error.call_args_list
+            if c.args[0] == "upload_queue_poll_failed"
+        ]
+        assert consec == [1, 10, 20]
+
+    def test_recovery_resets_counter(self, uploader: Uploader, mock_client: MagicMock) -> None:
+        from data_hub_watcher.models import UploadQueueResponse
+
+        mock_client.get_upload_queue.side_effect = [
+            ApiError("ACL", status_code=403),
+            UploadQueueResponse(files=[]),
+            ApiError("ACL", status_code=403),
+        ]
+
+        uploader.poll_upload_queue()  # fail 1 -> emits
+        uploader.poll_upload_queue()  # success -> resets counter
+        uploader.poll_upload_queue()  # fail again, treated as 1st of new outage -> emits
+
+        reporter_mock = cast(MagicMock, uploader._reporter)
+        consec = [
+            c.kwargs["consecutive_failures"]
+            for c in reporter_mock.report_error.call_args_list
+            if c.args[0] == "upload_queue_poll_failed"
+        ]
+        assert consec == [1, 1]
 
 
 class TestPutToPresignedUrl:

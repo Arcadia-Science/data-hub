@@ -34,7 +34,13 @@ from data_hub_watcher.models import (
     RunDetectionConfig,
     WatcherConfig,
 )
-from data_hub_watcher.runtime import build_runtime, classify_shutdown, start_runtime, stop_runtime
+from data_hub_watcher.runtime import (
+    build_runtime,
+    classify_shutdown,
+    start_runtime,
+    stop_runtime,
+    sync_config_to_api,
+)
 from data_hub_watcher.self_update import (
     InstallMethod,
     detect_install_method,
@@ -709,14 +715,17 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
             "Please wait for it to be activated before starting the watcher."
         )
 
-    # Step 2: Sync config checksum
-    local_checksum = config_checksum(path)
-    remote = client.get_config_checksum(cfg.watcher_id)
-    if remote is None or remote.config_checksum != local_checksum:
-        click.echo("Syncing config to Data Hub…")
-        _push_config_to_api(client, cfg.watcher_id, path, trigger="startup")
-
+    # Step 2 (dry-run only): sync config checksum without a reporter
+    # so dry-run still validates the API path. The watch path defers
+    # its sync until *after* build_runtime so we have a reporter to
+    # surface failures via kind=config_sync_failed.
     if dry_run:
+        local_checksum = config_checksum(path)
+        remote = client.get_config_checksum(cfg.watcher_id)
+        if remote is None or remote.config_checksum != local_checksum:
+            click.echo("Syncing config to Data Hub…")
+            _push_config_to_api(client, cfg.watcher_id, path, trigger="startup")
+
         _dry_run_scan(cfg)
         click.echo(
             click.style(
@@ -734,6 +743,12 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
     # path via data_hub_watcher.runtime).
     db_path = DEFAULT_CONFIG_DIR / STATE_DB_FILENAME
     rt = build_runtime(client=client, cfg=cfg, db_path=db_path)
+
+    # Step 5: sync config (now that we have a reporter, failures are
+    # surfaced to the dashboard as kind=config_sync_failed instead of
+    # only being printed to the local console).
+    click.echo("Syncing config to Data Hub…")
+    sync_config_to_api(client, cfg.watcher_id, path, rt.reporter, trigger="startup")
 
     click.echo(f"Scanning {inst.watch_directory} for existing files…")
     start_runtime(rt, started_message=f"Watcher started on {platform.node()}")

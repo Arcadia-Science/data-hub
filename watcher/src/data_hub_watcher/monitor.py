@@ -24,6 +24,7 @@ from watchdog.events import (
 from watchdog.observers import Observer
 
 from data_hub_watcher.constants import MAX_STABILITY_WAIT_SECONDS
+from data_hub_watcher.events import EventReporter
 from data_hub_watcher.state import StateDB
 
 logger = logging.getLogger(__name__)
@@ -99,6 +100,7 @@ class FileMonitor:
         on_stable_file: Callable[[Path], None],
         state_db: StateDB,
         recursive: bool = False,
+        event_reporter: EventReporter | None = None,
     ) -> None:
         self._watch_dir = watch_directory
         self._patterns = file_patterns
@@ -106,6 +108,10 @@ class FileMonitor:
         self._on_stable = on_stable_file
         self._state_db = state_db
         self._recursive = recursive
+        # Optional so unit tests that build a FileMonitor in isolation
+        # don't have to construct a full reporter graph. In production
+        # the reporter is always wired by ``runtime.build_runtime``.
+        self._reporter = event_reporter
 
         self._pending: dict[Path, _PendingFile] = {}
         self._lock = threading.Lock()
@@ -297,10 +303,24 @@ class FileMonitor:
                 path,
                 MAX_STABILITY_WAIT_SECONDS,
             )
+            if self._reporter is not None:
+                self._reporter.report_error(
+                    "stability_timeout",
+                    f"File {path.name} did not stabilise within {MAX_STABILITY_WAIT_SECONDS}s",
+                    path=str(path),
+                    max_wait_seconds=MAX_STABILITY_WAIT_SECONDS,
+                )
 
         for path in stable:
             logger.info("File stable: %s", path)
             try:
                 self._on_stable(path)
-            except Exception:
+            except Exception as exc:
                 logger.exception("Callback failed for %s", path)
+                if self._reporter is not None:
+                    self._reporter.report_error(
+                        "stable_callback_failed",
+                        f"Stable-file callback failed for {path.name}: {exc}",
+                        path=str(path),
+                        error=str(exc),
+                    )

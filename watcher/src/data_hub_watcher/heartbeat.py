@@ -61,6 +61,13 @@ class HeartbeatLoop:
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._start_time: float = 0.0
+        # Track consecutive heartbeat failures so we can emit a
+        # ``kind=heartbeat_recovered`` event on the first success after
+        # an outage. Emitting *during* the outage would itself fail
+        # (the network is the very thing that's down) so the recovery
+        # event is the only reliable signal.
+        self._consecutive_heartbeat_failures = 0
+        self._first_failure_at: float | None = None
 
     def start(self) -> None:
         self._start_time = time.monotonic()
@@ -96,6 +103,30 @@ class HeartbeatLoop:
             self._client.send_heartbeat(self._watcher_id, payload)
         except (ApiError, Exception) as exc:
             logger.warning("Heartbeat failed: %s", exc)
+            if self._consecutive_heartbeat_failures == 0:
+                self._first_failure_at = time.monotonic()
+            self._consecutive_heartbeat_failures += 1
+        else:
+            if self._consecutive_heartbeat_failures > 0:
+                # Recovery — emit a single event covering the full
+                # outage so the dashboard can correlate the gap with
+                # whatever was happening on the network at the time.
+                gap_seconds = (
+                    int(time.monotonic() - self._first_failure_at)
+                    if self._first_failure_at is not None
+                    else 0
+                )
+                self._event_reporter.report_error(
+                    "heartbeat_recovered",
+                    (
+                        f"Heartbeat recovered after "
+                        f"{self._consecutive_heartbeat_failures} consecutive failure(s)"
+                    ),
+                    consecutive_failures=self._consecutive_heartbeat_failures,
+                    gap_seconds=gap_seconds,
+                )
+                self._consecutive_heartbeat_failures = 0
+                self._first_failure_at = None
 
         # Snapshot the just-sent values into the `last_*` fields so post-reset
         # consumers (e.g. the updater) can still see the most recent interval's

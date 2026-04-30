@@ -289,7 +289,7 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
     from dotenv import load_dotenv
 
     from data_hub_watcher.api_client import ApiError, DataHubClient
-    from data_hub_watcher.config_io import config_checksum, load_config
+    from data_hub_watcher.config_io import load_config
     from data_hub_watcher.constants import (
         API_URLS,
         STATE_DB_FILENAME,
@@ -300,6 +300,7 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
         classify_shutdown,
         start_runtime,
         stop_runtime,
+        sync_config_to_api,
     )
 
     sm.LogInfoMsg(f"{SERVICE_DISPLAY_NAME} starting")
@@ -352,18 +353,6 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
         )
         raise SystemExit(1)
 
-    # Step 2: Sync config checksum
-    if cfg.watcher_id:
-        local_cs = config_checksum(path)
-        try:
-            remote = client.get_config_checksum(cfg.watcher_id)
-            if remote is None or remote.config_checksum != local_cs:
-                yaml_content = path.read_text(encoding="utf-8")
-                client.push_config(cfg.watcher_id, yaml_content, local_cs)
-                sm.LogInfoMsg("Config synced to Data Hub")
-        except ApiError as exc:
-            sm.LogWarningMsg(f"Could not sync config to API: {exc.message}")
-
     # build_runtime asserts cfg.watcher_id is set; surface that as
     # a service-manager error rather than a hard crash so operators
     # see a clear message in the Windows event log.
@@ -373,6 +362,13 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
 
     db_path = path.parent / STATE_DB_FILENAME
     rt = build_runtime(client=client, cfg=cfg, db_path=db_path)
+
+    # Step 2: sync config checksum (now that we have a reporter, any
+    # failure surfaces as kind=config_sync_failed in the dashboard
+    # instead of only as a Windows-event-log warning that operators
+    # rarely read).
+    if sync_config_to_api(client, cfg.watcher_id, path, rt.reporter, trigger="startup"):
+        sm.LogInfoMsg("Config synced to Data Hub")
 
     start_runtime(rt, started_message=f"Service started on {platform.node()}")
 
