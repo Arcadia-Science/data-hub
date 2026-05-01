@@ -24,7 +24,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { RunCommentDto } from "@/lib/api/run-comments";
 import { Loader2, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
 // Comment timestamps may arrive as Date objects (server-rendered initial
@@ -51,67 +51,55 @@ const MAX_BODY_LENGTH = 10_000;
 
 export function RunCommentItem({
   comment,
-  instrumentId,
-  runId,
   currentUserId,
-  onUpdated,
-  onDeleted,
+  onUpdate,
+  onDelete,
 }: {
   comment: RunCommentDto;
-  instrumentId: string;
-  runId: string;
   currentUserId: string | null;
-  onUpdated: (next: RunCommentDto) => void;
-  onDeleted: (commentId: string) => void;
+  onUpdate: (commentId: string, body: string) => Promise<void>;
+  onDelete: (commentId: string) => Promise<void>;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(comment.body);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [isSaving, startSavingTransition] = useTransition();
+  const [isDeleting, startDeletingTransition] = useTransition();
 
   const isAuthor = currentUserId !== null && comment.user.id === currentUserId;
-  const detailUrl = `/api/v1/instruments/${instrumentId}/runs/${encodeURIComponent(
-    runId
-  )}/comments/${comment.id}`;
 
   const trimmed = draft.trim();
   const tooLong = draft.length > MAX_BODY_LENGTH;
   const canSave = trimmed.length > 0 && !tooLong && !isSaving;
 
-  async function handleSave() {
+  function handleSave() {
     if (!canSave) return;
-    setIsSaving(true);
-    try {
-      const res = await fetch(detailUrl, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ body: draft }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      const updated = (await res.json()) as RunCommentDto;
-      onUpdated(updated);
-      setIsEditing(false);
-    } catch {
-      toast.error("Couldn't save changes. Try again?");
-    } finally {
-      setIsSaving(false);
-    }
+    const submitted = draft;
+    // Close the editor immediately — the optimistic state shows the new
+    // body. If the action throws, re-open with the draft preserved.
+    setIsEditing(false);
+    startSavingTransition(async () => {
+      try {
+        await onUpdate(comment.id, submitted);
+      } catch {
+        toast.error("Couldn't save changes. Try again?");
+        setIsEditing(true);
+      }
+    });
   }
 
-  async function handleDelete(event: React.MouseEvent) {
+  function handleDelete(event: React.MouseEvent) {
+    // Radix auto-closes on action click; we close manually after success
+    // so the dialog stays around if the action throws below.
     event.preventDefault();
-    setIsDeleting(true);
-    try {
-      const res = await fetch(detailUrl, { method: "DELETE" });
-      if (!res.ok) throw new Error(await res.text());
-      onDeleted(comment.id);
-      setDeleteOpen(false);
-    } catch {
-      toast.error("Couldn't delete comment. Try again?");
-    } finally {
-      setIsDeleting(false);
-    }
+    setDeleteOpen(false);
+    startDeletingTransition(async () => {
+      try {
+        await onDelete(comment.id);
+      } catch {
+        toast.error("Couldn't delete comment. Try again?");
+      }
+    });
   }
 
   return (

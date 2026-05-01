@@ -4,13 +4,13 @@ import { RunCommentForm } from "@/components/runs/run-comment-form";
 import { RunCommentItem } from "@/components/runs/run-comment-item";
 import { Card } from "@/components/ui/card";
 import type { RunCommentDto } from "@/lib/api/run-comments";
+import { toInitials } from "@/lib/utils";
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
-import { useOptimistic, useState, useTransition } from "react";
+import { useOptimistic, useState } from "react";
 
 type Action =
   | { kind: "create"; comment: RunCommentDto }
-  | { kind: "update"; comment: RunCommentDto }
+  | { kind: "update"; commentId: string; body: string; editedAt: Date }
   | { kind: "delete"; commentId: string };
 
 function applyOptimistic(
@@ -23,16 +23,25 @@ function applyOptimistic(
       return [...current, action.comment];
     case "update":
       return current.map((c) =>
-        c.id === action.comment.id ? action.comment : c
+        c.id === action.commentId
+          ? { ...c, body: action.body, edited_at: action.editedAt }
+          : c
       );
     case "delete":
       return current.filter((c) => c.id !== action.commentId);
   }
 }
 
-// Owns the optimistic state for create/update/delete and reconciles by
-// calling `router.refresh()` after each mutation. The server-rendered
-// `initialComments` props feed the optimistic store.
+// Owns the create/update/delete actions and the optimistic store. Each
+// action dispatches the optimistic state synchronously, then awaits the
+// network call. On success, `committed` is updated. On failure, the action
+// throws — `useOptimistic` then reverts to `committed` once the calling
+// transition unwinds, and the child shows a toast.
+//
+// `committed` is initialized once from the server-rendered `initialComments`
+// prop. We deliberately do not call `router.refresh()` after mutations:
+// the local source of truth is `committed`, and refreshing would not
+// re-feed it (state is decoupled from props after first render).
 export function RunCommentsList({
   instrumentId,
   runId,
@@ -44,39 +53,81 @@ export function RunCommentsList({
 }) {
   const { data: session } = useSession();
   const currentUserId = session?.user?.id ?? null;
-  const router = useRouter();
-  const [, startTransition] = useTransition();
 
-  // Server reconciliations land here; optimistic dispatches layer on top.
   const [committed, setCommitted] = useState(initialComments);
   const [optimistic, dispatch] = useOptimistic(committed, applyOptimistic);
 
-  function handleCreated(comment: RunCommentDto) {
-    startTransition(() => {
-      dispatch({ kind: "create", comment });
-      setCommitted((prev) =>
-        prev.some((c) => c.id === comment.id) ? prev : [...prev, comment]
-      );
-      router.refresh();
-    });
+  // Build a comment-shaped object for the optimistic create. The id is a
+  // client-generated `temp-…` so the row is keyable; the real id replaces
+  // it once the POST resolves and `committed` updates.
+  function buildOptimisticComment(body: string): RunCommentDto {
+    if (!session?.user?.id) {
+      throw new Error("Not authenticated");
+    }
+    const displayName = session.user.name ?? session.user.email ?? "Unknown";
+    return {
+      id: `temp-${crypto.randomUUID()}`,
+      body,
+      user: {
+        id: session.user.id,
+        displayName,
+        initials: toInitials(displayName),
+        avatarUrl: session.user.image ?? null,
+      },
+      created_at: new Date(),
+      edited_at: null,
+    };
   }
 
-  function handleUpdated(comment: RunCommentDto) {
-    startTransition(() => {
-      dispatch({ kind: "update", comment });
-      setCommitted((prev) =>
-        prev.map((c) => (c.id === comment.id ? comment : c))
-      );
-      router.refresh();
-    });
+  async function createCommentAction(body: string): Promise<void> {
+    const optimisticComment = buildOptimisticComment(body);
+    dispatch({ kind: "create", comment: optimisticComment });
+
+    const res = await fetch(
+      `/api/v1/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}/comments`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ body }),
+      }
+    );
+    if (!res.ok) throw new Error(await res.text());
+    const created = (await res.json()) as RunCommentDto;
+    setCommitted((prev) =>
+      prev.some((c) => c.id === created.id) ? prev : [...prev, created]
+    );
   }
 
-  function handleDeleted(commentId: string) {
-    startTransition(() => {
-      dispatch({ kind: "delete", commentId });
-      setCommitted((prev) => prev.filter((c) => c.id !== commentId));
-      router.refresh();
-    });
+  async function updateCommentAction(
+    commentId: string,
+    body: string
+  ): Promise<void> {
+    dispatch({ kind: "update", commentId, body, editedAt: new Date() });
+
+    const res = await fetch(
+      `/api/v1/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}/comments/${commentId}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ body }),
+      }
+    );
+    if (!res.ok) throw new Error(await res.text());
+    const updated = (await res.json()) as RunCommentDto;
+    setCommitted((prev) =>
+      prev.map((c) => (c.id === updated.id ? updated : c))
+    );
+  }
+
+  async function deleteCommentAction(commentId: string): Promise<void> {
+    dispatch({ kind: "delete", commentId });
+
+    const res = await fetch(
+      `/api/v1/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}/comments/${commentId}`,
+      { method: "DELETE" }
+    );
+    if (!res.ok) throw new Error(await res.text());
+    setCommitted((prev) => prev.filter((c) => c.id !== commentId));
   }
 
   // Empty + form-only: when there are no comments and no logged-in user,
@@ -99,11 +150,9 @@ export function RunCommentsList({
             <div key={comment.id} className={rowClass}>
               <RunCommentItem
                 comment={comment}
-                instrumentId={instrumentId}
-                runId={runId}
                 currentUserId={currentUserId}
-                onUpdated={handleUpdated}
-                onDeleted={handleDeleted}
+                onUpdate={updateCommentAction}
+                onDelete={deleteCommentAction}
               />
             </div>
           ))
@@ -111,11 +160,7 @@ export function RunCommentsList({
 
         {currentUserId && (
           <div className={rowClass}>
-            <RunCommentForm
-              instrumentId={instrumentId}
-              runId={runId}
-              onCreated={handleCreated}
-            />
+            <RunCommentForm onSubmit={createCommentAction} />
           </div>
         )}
       </div>

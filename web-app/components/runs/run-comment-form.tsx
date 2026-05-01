@@ -2,56 +2,47 @@
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import type { RunCommentDto } from "@/lib/api/run-comments";
-import { useState, type FormEvent } from "react";
+import { useState, useTransition, type FormEvent } from "react";
 import { toast } from "sonner";
 
 const MAX_BODY_LENGTH = 10_000;
 
 // Standalone form for posting a new comment. Owns only its own draft text
-// (per `rerender-defer-reads` — list state stays in the parent provider).
-// On success the parent reconciles via the supplied callback; we don't call
-// `router.refresh()` here so optimistic state reads aren't blown away.
+// and pending state; the create action is supplied by the parent so the
+// form is decoupled from how comments are persisted (per
+// `state-decouple-implementation`).
+//
+// Submitting wraps the parent's action in a transition so its `dispatch`
+// to the optimistic store has an enclosing transition to attach to —
+// without that, `useOptimistic` has nothing to revert when the action
+// throws.
 export function RunCommentForm({
-  instrumentId,
-  runId,
-  onCreated,
+  onSubmit,
 }: {
-  instrumentId: string;
-  runId: string;
-  onCreated: (comment: RunCommentDto) => void;
+  onSubmit: (body: string) => Promise<void>;
 }) {
   const [body, setBody] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isPending, startTransition] = useTransition();
 
   const trimmed = body.trim();
   const tooLong = body.length > MAX_BODY_LENGTH;
-  const canSubmit = trimmed.length > 0 && !tooLong && !isSubmitting;
+  const canSubmit = trimmed.length > 0 && !tooLong && !isPending;
 
-  async function handleSubmit(event: FormEvent) {
+  function handleSubmit(event: FormEvent) {
     event.preventDefault();
     if (!canSubmit) return;
-    setIsSubmitting(true);
-    try {
-      const res = await fetch(
-        `/api/v1/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}/comments`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ body }),
-        }
-      );
-      if (!res.ok) {
-        throw new Error(await res.text());
+    const submitted = body;
+    // Clear immediately for a snappy feel; the optimistic comment carries
+    // the text. Restore on failure so the user can retry.
+    setBody("");
+    startTransition(async () => {
+      try {
+        await onSubmit(submitted);
+      } catch {
+        toast.error("Couldn't post comment. Try again?");
+        setBody(submitted);
       }
-      const created = (await res.json()) as RunCommentDto;
-      onCreated(created);
-      setBody("");
-    } catch {
-      toast.error("Couldn't post comment. Try again?");
-    } finally {
-      setIsSubmitting(false);
-    }
+    });
   }
 
   return (
@@ -60,7 +51,7 @@ export function RunCommentForm({
         placeholder="Add a comment"
         value={body}
         onChange={(e) => setBody(e.target.value)}
-        disabled={isSubmitting}
+        disabled={isPending}
         rows={3}
         aria-label="Comment body"
         aria-invalid={tooLong || undefined}
@@ -75,7 +66,7 @@ export function RunCommentForm({
           <span aria-hidden="true" />
         )}
         <Button type="submit" size="sm" disabled={!canSubmit}>
-          {isSubmitting ? "Posting…" : "Post comment"}
+          {isPending ? "Posting…" : "Post comment"}
         </Button>
       </div>
     </form>

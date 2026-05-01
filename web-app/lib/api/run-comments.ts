@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { runComments, users } from "@/lib/db/schema";
+import { toInitials } from "@/lib/utils";
 import { and, asc, eq, isNull } from "drizzle-orm";
 
 // ---------------------------------------------------------------------------
@@ -22,16 +23,6 @@ export type RunCommentDto = {
   created_at: Date;
   edited_at: Date | null;
 };
-
-// Mirrors the helper in `lib/api/instrument-runs.ts`. Duplicated rather than
-// extracted to keep that file's surface area unchanged; if a third caller
-// appears, hoist it to `lib/utils.ts`.
-function toInitials(displayName: string): string {
-  const parts = displayName.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
 
 function toDto(row: {
   id: string;
