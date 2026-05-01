@@ -33,6 +33,17 @@ Tokens are hashed with SHA-256 before storage. The plaintext token is shown once
 | `POST` | `/api/v1/instruments/:instrumentId/runs/:runId/restore` | Restore a soft-deleted run |
 | `GET` | `/api/v1/instrument-runs` | List runs across all instruments |
 
+### Comments
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/api/v1/instruments/:instrumentId/runs/:runId/comments` | List active comments on a run (oldest first) |
+| `POST` | `/api/v1/instruments/:instrumentId/runs/:runId/comments` | Create a markdown comment on a run |
+| `PATCH` | `/api/v1/instruments/:instrumentId/runs/:runId/comments/:commentId` | Edit a comment (author only; sets `edited_at`) |
+| `DELETE` | `/api/v1/instruments/:instrumentId/runs/:runId/comments/:commentId` | Soft-delete a comment (author only) |
+
+Comment bodies are markdown source, capped at 10 000 characters. Author-only mutations are enforced server-side and return `403 FORBIDDEN` for cross-user edit/delete attempts. Mutations on comments whose parent run has been soft-deleted return `409 CONFLICT`.
+
 ### Files
 
 | Method | Path | Description |
