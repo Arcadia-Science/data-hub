@@ -21,7 +21,7 @@ export default async function WatchersPage() {
   const deregistered = allWatchers.filter((w) => w.deletedAt);
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Watchers</h1>
       </div>

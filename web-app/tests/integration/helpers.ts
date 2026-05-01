@@ -37,6 +37,7 @@ export async function closeTestDb() {
 const TRUNCATE_ORDER = [
   "files",
   "run_attributions",
+  "run_comments",
   "instrument_runs",
   "watcher_events",
   "watcher_heartbeats",

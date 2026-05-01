@@ -90,7 +90,7 @@ export default async function DashboardPage({
     : 0;
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-8 p-6 2xl:w-7xl">
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 p-6 2xl:w-7xl">
       <DashboardStatsCards stats={stats} />
 
       <section className="flex flex-col gap-3">
