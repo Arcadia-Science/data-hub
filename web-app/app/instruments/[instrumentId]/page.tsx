@@ -193,7 +193,7 @@ export default async function InstrumentDetailPage({
   ];
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-6 p-6">
+    <div className="mx-auto flex w-6xl max-w-7xl flex-col gap-6 p-6">
       <InstrumentHeader instrument={instrument} />
       <RunSelectionProvider>
         <TablePendingProvider>

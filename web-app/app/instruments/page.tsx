@@ -18,7 +18,7 @@ export default async function InstrumentsPage() {
   const instruments = await getInstrumentListWithCounts();
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-6 p-6">
+    <div className="mx-auto flex w-6xl max-w-7xl flex-col gap-6 p-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Instruments</h1>
       </div>
