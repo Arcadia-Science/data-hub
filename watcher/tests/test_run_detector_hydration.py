@@ -173,8 +173,11 @@ class TestNewFileAfterHydrationTriggersPatch:
         assert args[1] == "run-42"
         payload = args[2]
         rel_paths = [f["relative_path"] for f in payload["detected_files"]]
-        assert "run-42/existing.nd2" in rel_paths
-        assert "run-42/new.nd2" in rel_paths
+        # Hydrated files start with the PATCH cursor at the end of the
+        # manifest, so only the genuinely-new file is sent — the server
+        # dedups regardless, but resending the existing entry would be
+        # the O(N^2) regression this test pins down.
+        assert rel_paths == ["run-42/new.nd2"]
 
     def test_update_run_persists_new_manifest(self, state_db: StateDB, watch_dir: Path) -> None:
         """After a successful PATCH the new file is recorded in `detected_files`."""
@@ -257,3 +260,114 @@ class TestReportNewRunPersistsManifest:
 
         assert state_db.get_detected_files_for_run("run-fail") == []
         assert state_db.get_reported_run_ids_with_files() == []
+
+
+class TestUpdateRunSendsDeltaOnly:
+    """Pin down the delta-PATCH semantics: each `_update_run` call only
+    transmits files that haven't been successfully PATCHed yet."""
+
+    def test_each_patch_sends_only_new_files(self, state_db: StateDB, watch_dir: Path) -> None:
+        client = MagicMock()
+        client.report_run.return_value = MagicMock(id="api-run-id")
+        detector = _make_detector(watch_dir, state_db, client=client)
+
+        run_dir = watch_dir / "run-delta"
+        run_dir.mkdir()
+        f1 = run_dir / "a.nd2"
+        f1.write_bytes(b"a" * 10)
+        f2 = run_dir / "b.nd2"
+        f2.write_bytes(b"b" * 20)
+        f3 = run_dir / "c.nd2"
+        f3.write_bytes(b"c" * 30)
+
+        detector.on_stable_file(f1)
+        detector.on_stable_file(f2)
+        detector.on_stable_file(f3)
+
+        client.report_run.assert_called_once()
+        _, post_payload = client.report_run.call_args.args
+        assert [f["relative_path"] for f in post_payload["detected_files"]] == [
+            "run-delta/a.nd2",
+        ]
+
+        assert client.update_run.call_count == 2
+        first_patch = client.update_run.call_args_list[0].args[2]
+        second_patch = client.update_run.call_args_list[1].args[2]
+        assert [f["relative_path"] for f in first_patch["detected_files"]] == [
+            "run-delta/b.nd2",
+        ]
+        assert [f["relative_path"] for f in second_patch["detected_files"]] == [
+            "run-delta/c.nd2",
+        ]
+
+        rel_paths = {r.relative_path for r in state_db.get_detected_files_for_run("run-delta")}
+        assert rel_paths == {"run-delta/a.nd2", "run-delta/b.nd2", "run-delta/c.nd2"}
+
+    def test_empty_delta_skips_api_call(self, state_db: StateDB, watch_dir: Path) -> None:
+        """Re-firing `on_stable_file` for a known file must not PATCH again.
+
+        `on_stable_file` already dedups by `f.path == path`, so this
+        scenario only happens via direct hydration + a no-op trigger,
+        but the same delta-empty short-circuit guards both paths.
+        """
+        run_dir = watch_dir / "run-empty"
+        run_dir.mkdir()
+        existing = run_dir / "only.nd2"
+        existing.write_bytes(b"x" * 16)
+        st = existing.stat()
+        state_db.record_detected_files(
+            "run-empty",
+            [("run-empty/only.nd2", "only.nd2", st.st_size, st.st_mtime, st.st_mtime)],
+        )
+
+        client = MagicMock()
+        detector = _make_detector(watch_dir, state_db, client=client)
+        detector.hydrate_from_state_db()
+
+        detector._update_run(detector._runs["run-empty"])
+
+        client.update_run.assert_not_called()
+
+    def test_failed_patch_resends_backlog_on_next_call(
+        self, state_db: StateDB, watch_dir: Path
+    ) -> None:
+        """A failed PATCH must not advance the cursor; the backlog plus
+        the next stable file are sent together on the next attempt."""
+        from data_hub_watcher.api_client import ApiError
+
+        client = MagicMock()
+        client.report_run.return_value = MagicMock(id="api-run-id")
+        # First PATCH fails, second PATCH succeeds.
+        client.update_run.side_effect = [ApiError("boom", 500), MagicMock()]
+        detector = _make_detector(watch_dir, state_db, client=client)
+
+        run_dir = watch_dir / "run-retry"
+        run_dir.mkdir()
+        f1 = run_dir / "a.nd2"
+        f1.write_bytes(b"a" * 10)
+        f2 = run_dir / "b.nd2"
+        f2.write_bytes(b"b" * 20)
+        f3 = run_dir / "c.nd2"
+        f3.write_bytes(b"c" * 30)
+
+        detector.on_stable_file(f1)
+        detector.on_stable_file(f2)
+        detector.on_stable_file(f3)
+
+        assert client.update_run.call_count == 2
+        first_patch = client.update_run.call_args_list[0].args[2]
+        second_patch = client.update_run.call_args_list[1].args[2]
+        # First (failed) PATCH carries just b.nd2.
+        assert [f["relative_path"] for f in first_patch["detected_files"]] == [
+            "run-retry/b.nd2",
+        ]
+        # Second (successful) PATCH carries the previously-failed b.nd2
+        # plus the newly-stable c.nd2 — cursor was left at 1 by the
+        # failure so files[1:] now spans both.
+        assert [f["relative_path"] for f in second_patch["detected_files"]] == [
+            "run-retry/b.nd2",
+            "run-retry/c.nd2",
+        ]
+
+        rel_paths = {r.relative_path for r in state_db.get_detected_files_for_run("run-retry")}
+        assert rel_paths == {"run-retry/a.nd2", "run-retry/b.nd2", "run-retry/c.nd2"}

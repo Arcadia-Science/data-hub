@@ -61,6 +61,12 @@ class RunState:
     reported: bool = False
     api_run_id: str | None = None
     uploaded_file_count: int = 0
+    # Number of files at the head of `files` that have been successfully
+    # PATCHed to the API. Used as a cursor so `_update_run` can send only
+    # newly-stable files instead of re-transmitting the full manifest on
+    # every call. On a failed PATCH the cursor is left untouched so the
+    # next stable file's PATCH carries the backlog plus the new entry.
+    patched_file_count: int = 0
 
 
 class RunDetector:
@@ -253,6 +259,7 @@ class RunDetector:
             resp = self._client.report_run(self._instrument_id, payload)
             run.reported = True
             run.api_run_id = resp.id
+            run.patched_file_count = len(run.files)
             self._state_db.record_run_reported(run.run_id)
             self._persist_detected_files(run)
             self._counters.runs_reported += 1
@@ -286,19 +293,37 @@ class RunDetector:
             run.uploaded_file_count = len(run.files)
 
     def _update_run(self, run: RunState) -> None:
-        """PATCH the run with the full file list, then upload only new files.
+        """PATCH the run with files added since the last successful PATCH.
 
-        The API receives the complete file manifest each time so it can
-        reconcile its own state, but the upload callback only gets the files
-        that weren't in the previous snapshot to avoid re-uploading.
+        Only un-PATCHed entries are sent — the server dedups on
+        `(instrument_run_id, relative_path)` via a partial unique index,
+        so the full manifest carries no extra information. Skipping the
+        API call entirely when the delta is empty avoids a needless round
+        trip if `on_stable_file` re-fires for an already-reported file.
+
+        On failure the PATCH cursor is left untouched, so the next
+        stable file's PATCH naturally carries the backlog plus the new
+        entry. The upload callback continues to receive only files the
+        uploader hasn't seen yet (`uploaded_file_count` is independent
+        of the PATCH cursor).
         """
+        new_files = run.files[run.patched_file_count :]
+        if not new_files:
+            return
+
         payload = {
-            "detected_files": [self._file_payload(f) for f in run.files],
+            "detected_files": [self._file_payload(f) for f in new_files],
         }
         try:
             self._client.update_run(self._instrument_id, run.run_id, payload)
+            run.patched_file_count = len(run.files)
             self._persist_detected_files(run)
-            logger.info("Updated run %s (now %d files)", run.run_id, len(run.files))
+            logger.info(
+                "Updated run %s (sent %d new file(s), %d total)",
+                run.run_id,
+                len(new_files),
+                len(run.files),
+            )
         except ApiError as exc:
             logger.warning("Failed to update run %s: %s", run.run_id, exc.message)
             self._counters.errors += 1
@@ -313,9 +338,9 @@ class RunDetector:
             )
             return
 
-        new_files = run.files[run.uploaded_file_count :]
-        if self._upload_cb and new_files:
-            succeeded = self._upload_cb(run.run_id, new_files)
+        upload_new = run.files[run.uploaded_file_count :]
+        if self._upload_cb and upload_new:
+            succeeded = self._upload_cb(run.run_id, upload_new)
             run.uploaded_file_count += succeeded
         else:
             run.uploaded_file_count = len(run.files)
@@ -365,6 +390,10 @@ class RunDetector:
                 # anyway if not) or server-driven (manual mode, where
                 # `_upload_cb` is None and this counter is unused).
                 uploaded_file_count=len(files),
+                # Every hydrated file came from `detected_files`, which
+                # is only written after a successful POST/PATCH — so the
+                # PATCH cursor starts at the end of the manifest.
+                patched_file_count=len(files),
             )
             count += 1
         if count:

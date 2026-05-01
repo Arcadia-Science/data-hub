@@ -34,6 +34,11 @@ For lab-PC installs (PyPI), see [Installing a watcher](guides/installing-a-watch
 
 ## Commands
 
+All commands accept two global flags:
+
+- `--config PATH` (or the `DATA_HUB_CONFIG_PATH` env var): override the config file path.
+- `--verbose`: enable debug-level logging on stderr.
+
 ### `init`
 
 Interactive setup wizard that:
@@ -44,6 +49,8 @@ Interactive setup wizard that:
 4. Prompts for the watch directory, file patterns, run detection pattern, stability period, and upload mode.
 5. Registers the watcher with the API. An instrument can have at most one active (non-deregistered) watcher at a time — registration fails if one already exists, and the CLI prints the existing watcher's id along with the deregister command needed to free it up.
 6. Saves the config to `~/.data-hub/config.yaml`, the API key to `~/.data-hub/.env.<environment>`, and syncs the config to the API.
+
+The wizard normalizes the pasted API key (stripping zero-width and non-breaking-space characters that Windows clipboards routinely inject) and rejects values that don't start with `dhub_`, so a paste mistake surfaces as a clear error rather than a confusing 401 later. Pass `--show-key` if your terminal mangles hidden input on paste.
 
 ### `watch`
 
@@ -56,11 +63,12 @@ Starts the file monitoring loop. Before entering the loop it:
 
 While running:
 
-- **File monitor** watches the directory for new/modified files using `watchdog` and waits for each file to stabilize (size + mtime unchanged for the configured stability period).
-- **Run detector** groups stable files into runs by applying the configured regex to each file's relative path.
-- **Uploader** requests a presigned S3 URL from the API and uploads each file via HTTP PUT (auto mode), or polls the server's upload queue (manual mode). The watcher does not need AWS credentials.
-- **Heartbeat loop** sends periodic heartbeats (every 60 seconds) to the API. In manual mode, it also polls the upload queue on each tick.
-- **Event reporter** batches and flushes lifecycle events (started, stopped, file uploaded, errors) to the API.
+- **File monitor** watches the directory for new/modified files using `watchdog` and waits for each file to stabilize (size + mtime unchanged for the configured stability period). Files that keep changing for longer than 5 minutes are abandoned and surface as a `stability_timeout` error event.
+- **Run detector** groups stable files into runs by applying the configured regex to each file's relative path. The first file for a run triggers `POST /instruments/:id/runs`; subsequent files for the same run incrementally `PATCH` only the new entries onto the manifest. Files inside the watch tree that don't match the pattern emit a `pattern_mismatch` event (throttled to one per parent directory) so misconfigured patterns surface in the dashboard.
+- **Uploader** requests a presigned S3 URL from the API and uploads each file via HTTP PUT (auto mode), or polls the server's upload queue (manual mode). The watcher does not need AWS credentials. Each upload retries up to 3 times with exponential backoff (1, 2, 4 s) and is recorded locally with its SHA-256 so retries and restarts don't re-upload the same bytes. In manual mode, queue-poll failures are throttled (1st failure, then every 10th) to keep a sustained outage visible without flooding the events stream.
+- **Heartbeat loop** sends periodic heartbeats (every 60 seconds) to the API. The payload includes the watcher version, instrument ID, watch directory, upload mode, per-interval activity counters, and process uptime; a final `status="stopped"` heartbeat is sent on graceful shutdown. In manual mode, the tick also polls the upload queue.
+- **Event reporter** batches and flushes lifecycle events (started, stopped, file uploaded, errors) to the API. See [Observability](#observability) for the full taxonomy.
+- **Auto-updater** runs from the same heartbeat tick on every platform — not only Windows services. It polls `GET /watchers/:id/update-check` roughly hourly and applies new releases when the watcher has been idle long enough not to clobber an in-flight run. The full activity-window guard, mandatory-update behavior, and rollback flow are documented in [Upgrading the watcher](guides/upgrading-the-watcher.md); auto-update is hard-disabled in the `preview` environment.
 
 Use `--dry-run` to validate config and preview what would happen without starting the monitor.
 
@@ -104,6 +112,12 @@ Manage the watcher as a Windows service:
 | `service start` | Start the service |
 | `service stop` | Stop the service |
 | `service status` | Show service status |
+
+`service install` accepts `--env-path PATH` to override which `.env` file the SCM-launched process loads (defaults to `~/.data-hub/.env.<environment>`). The installer:
+
+- Registers the service with `Tcpip` and `Dnscache` as start dependencies and `delayedstart=True` so it does not race the boot-time network stack.
+- Configures recovery actions (restart after 60 s on first failure, 120 s on second) with `SERVICE_CONFIG_FAILURE_ACTIONS_FLAG` set, so a non-zero `SystemExit` from the runtime — notably the upgrade-driven restart request — is treated as a failure and the SCM picks the new wheel up automatically.
+- Persists the config and env-file paths under `HKLM\SYSTEM\CurrentControlSet\Services\DataHubWatcher\{ConfigPath,EnvPath}` so `SvcDoRun` can locate them regardless of which account the service runs under.
 
 ### `self-update`
 
@@ -159,7 +173,13 @@ In YAML, prefer single-quoted strings for patterns so that backslash sequences l
 
 ## Local state
 
-The watcher maintains a SQLite database at `~/.data-hub/watcher.db` to track which files have been uploaded. Records older than 90 days are pruned automatically. Logs are written to `~/.data-hub/watcher.log` (10 MB rotating, 5 backups).
+The watcher maintains a SQLite database at `~/.data-hub/watcher.db` with three tables:
+
+- `uploaded_files` — one row per successful S3 upload, keyed on `(filename, sha256, s3_key)`. Used by the uploader to skip re-uploads on retry and by the initial scan to skip files that have already been sent. Records older than 90 days are pruned automatically.
+- `runs` — tracks which run IDs have been reported and (in auto mode) when their files finished uploading. The most recent `reported_at` timestamp is what the auto-updater consults to gate restarts on a quiet-instrument window.
+- `detected_files` — the file manifest for every reported run, keyed on `(run_id, relative_path)`. Lets the initial scan skip files that are already part of a reported run even in manual mode (where `uploaded_files` stays empty), and lets the run detector hydrate its in-memory state on startup so a restart doesn't re-POST runs the API has already seen.
+
+Logs are written to `~/.data-hub/watcher.log` (10 MB rotating, 5 backups).
 
 ### Initial scan identity
 
@@ -173,3 +193,38 @@ Practical consequences:
 - If an external tool (antivirus, OneDrive/Dropbox sync, backup restore) rewrites a file's mtime without changing its contents, the watcher will re-enqueue it. The server-side dedup (keyed on SHA-256) prevents a duplicate S3 object.
 - If a run's parent folder is renamed or moved, its files look "new" to the next scan and will be re-enqueued. The uploader's own SHA-based dedup prevents a redundant S3 PUT, but it will pay the cost of hashing each affected file once.
 - Upgrading from a pre-`relative_path`/`size_bytes`/`mtime` state DB is a silent, self-healing migration: legacy rows miss the stat lookup, so files are re-enqueued once and then recorded with full stat data on their next upload.
+
+## Observability
+
+The watcher's primary observability surface is the per-watcher event log served by `POST /watchers/:id/events`. Events are queued in memory by the long-running components (uploader, run detector, monitor, heartbeat, updater) and flushed in batches on every heartbeat tick. The queue is bounded to 500 events; on overflow the oldest are dropped (FIFO) and surfaced via a synthetic `events_dropped` event prepended to the next successful flush, so an outage that loses observability data is itself observable when the link recovers.
+
+### Event types
+
+| Event type | When |
+| --- | --- |
+| `watcher_started` / `watcher_stopped` | Process lifecycle. The stopped message distinguishes a normal stop from an upgrade-driven restart. |
+| `config_synced` | Local config differed from the remote checksum and was pushed. Triggered by `init`, `config edit`, `config open`, and on watcher startup. |
+| `run_reported` | A run was POSTed to the API for the first time. |
+| `file_uploaded` / `upload_failed` | Per-file upload outcome. `upload_failed` carries the S3 key and last error. |
+| `update_started` / `update_succeeded` / `update_failed` | Auto-update lifecycle. `update_succeeded` is emitted from the *next* process startup once the new version is confirmed to be loaded. |
+| `error` | Generic bucket; use `details.kind` to discriminate (table below). |
+
+### Error kinds
+
+`error` events use a `details.kind` discriminator so new failure modes can be added without a database migration. Known kinds:
+
+| Kind | Meaning |
+| --- | --- |
+| `run_report_failed` | POST/PATCH against `/instruments/:id/runs[/:run_id]` failed. `details` includes `operation`, `status_code`, `file_count`. |
+| `config_sync_failed` | The startup `PUT /watchers/:id/config` (or its checksum probe) failed. |
+| `stability_timeout` | A file kept changing past 5 minutes and was abandoned. |
+| `stable_callback_failed` | The on-stable-file callback raised. |
+| `pattern_mismatch` | A file inside the watch tree did not match `run_detection.pattern`. Throttled to one emission per parent directory per process. |
+| `events_dropped` | Synthetic event prepended after one or more prior batches were dropped. `details.dropped_count` reports the gap size. |
+| `heartbeat_recovered` | First successful heartbeat after one or more consecutive failures. `details.gap_seconds` reports the outage length. |
+| `upload_queue_poll_failed` | `GET /watchers/:id/upload-queue` failed in manual mode. Emitted on the 1st failure and every 10th repeat. |
+| `update_check_failed` | `GET /watchers/:id/update-check` failed for 3 consecutive attempts (~3 hours of going dark on the update channel). |
+
+### File timestamps
+
+Each file's on-disk creation time (`st_birthtime` where the OS provides it, otherwise `st_mtime`) is captured at stabilization, persisted in `detected_files`, and sent to the API on every run report and presigned-URL request. This lets the dashboard order events by when the instrument actually wrote the file rather than when the watcher uploaded it — useful when an initial scan or backfill uploads files long after their original write time.
