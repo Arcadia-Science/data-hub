@@ -43,7 +43,7 @@ export default async function RunDetailPage({ params }: Props) {
   const isWatcherOnline = (instrument?.watchersOnline ?? 0) > 0;
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-6 p-6">
+    <div className="mx-auto flex max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
       <WatcherStatusProvider isWatcherOnline={isWatcherOnline}>
         <RunDetailVariant
           run={run}
