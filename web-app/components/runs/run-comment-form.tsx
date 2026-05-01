@@ -57,13 +57,14 @@ export function RunCommentForm({
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-2">
       <Textarea
-        placeholder="Add a comment…"
+        placeholder="Add a comment"
         value={body}
         onChange={(e) => setBody(e.target.value)}
         disabled={isSubmitting}
         rows={3}
         aria-label="Comment body"
         aria-invalid={tooLong || undefined}
+        className="resize-none border-0 px-0 shadow-none focus-visible:ring-0"
       />
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         {tooLong ? (

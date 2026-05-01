@@ -2,6 +2,7 @@
 
 import { RunCommentForm } from "@/components/runs/run-comment-form";
 import { RunCommentItem } from "@/components/runs/run-comment-item";
+import { Card } from "@/components/ui/card";
 import type { RunCommentDto } from "@/lib/api/run-comments";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
@@ -78,14 +79,24 @@ export function RunCommentsList({
     });
   }
 
+  // Empty + form-only: when there are no comments and no logged-in user,
+  // the empty-state message stands alone outside the card stack.
+  if (optimistic.length === 0 && !currentUserId) {
+    return <p className="text-sm text-muted-foreground">No comments yet.</p>;
+  }
+
+  const rowClass = "px-4 py-4 first:pt-1 last:pb-1";
+
   return (
-    <div className="flex flex-col gap-4">
-      {optimistic.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No comments yet.</p>
-      ) : (
-        <ul className="flex flex-col gap-4">
-          {optimistic.map((comment) => (
-            <li key={comment.id}>
+    <Card size="sm" className="gap-0 py-0">
+      <div className="flex flex-col divide-y divide-border">
+        {optimistic.length === 0 ? (
+          <p className={`${rowClass} text-sm text-muted-foreground`}>
+            No comments yet.
+          </p>
+        ) : (
+          optimistic.map((comment) => (
+            <div key={comment.id} className={rowClass}>
               <RunCommentItem
                 comment={comment}
                 instrumentId={instrumentId}
@@ -94,18 +105,20 @@ export function RunCommentsList({
                 onUpdated={handleUpdated}
                 onDeleted={handleDeleted}
               />
-            </li>
-          ))}
-        </ul>
-      )}
+            </div>
+          ))
+        )}
 
-      {currentUserId && (
-        <RunCommentForm
-          instrumentId={instrumentId}
-          runId={runId}
-          onCreated={handleCreated}
-        />
-      )}
-    </div>
+        {currentUserId && (
+          <div className={rowClass}>
+            <RunCommentForm
+              instrumentId={instrumentId}
+              runId={runId}
+              onCreated={handleCreated}
+            />
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }

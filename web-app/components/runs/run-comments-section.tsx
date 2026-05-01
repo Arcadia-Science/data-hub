@@ -1,5 +1,4 @@
 import { RunCommentsList } from "@/components/runs/run-comments-list";
-import { Card, CardContent } from "@/components/ui/card";
 import type { RunCommentDto } from "@/lib/api/run-comments";
 
 // Server component. The page fetches `initialComments` in parallel with
@@ -7,7 +6,11 @@ import type { RunCommentDto } from "@/lib/api/run-comments";
 // hands them in here, so this component itself is pure presentation.
 //
 // Layout matches the other run-detail sections (Report Data, Files): the
-// heading sits outside the card with an inline file/comment count.
+// heading sits outside the card stack with an inline comment count.
+// Each comment and the new-comment form get their own card inside
+// `RunCommentsList` to match the conversational stacked-cards design.
+// The whole stack is capped to half the container width so prose
+// doesn't sprawl across wide screens.
 export function RunCommentsSection({
   instrumentId,
   runId,
@@ -27,15 +30,13 @@ export function RunCommentsSection({
           </span>
         )}
       </h2>
-      <Card size="sm">
-        <CardContent>
-          <RunCommentsList
-            instrumentId={instrumentId}
-            runId={runId}
-            initialComments={comments}
-          />
-        </CardContent>
-      </Card>
+      <div>
+        <RunCommentsList
+          instrumentId={instrumentId}
+          runId={runId}
+          initialComments={comments}
+        />
+      </div>
     </div>
   );
 }

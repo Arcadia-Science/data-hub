@@ -1,10 +1,28 @@
 "use client";
 
 import { RelativeTime } from "@/components/dashboard/relative-time";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import type { RunCommentDto } from "@/lib/api/run-comments";
+import { Loader2, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -50,6 +68,7 @@ export function RunCommentItem({
   const [draft, setDraft] = useState(comment.body);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const isAuthor = currentUserId !== null && comment.user.id === currentUserId;
   const detailUrl = `/api/v1/instruments/${instrumentId}/runs/${encodeURIComponent(
@@ -80,13 +99,14 @@ export function RunCommentItem({
     }
   }
 
-  async function handleDelete() {
-    if (!confirm("Delete this comment?")) return;
+  async function handleDelete(event: React.MouseEvent) {
+    event.preventDefault();
     setIsDeleting(true);
-    onDeleted(comment.id);
     try {
       const res = await fetch(detailUrl, { method: "DELETE" });
       if (!res.ok) throw new Error(await res.text());
+      onDeleted(comment.id);
+      setDeleteOpen(false);
     } catch {
       toast.error("Couldn't delete comment. Try again?");
     } finally {
@@ -95,96 +115,136 @@ export function RunCommentItem({
   }
 
   return (
-    <article className="flex gap-3">
-      <Avatar size="sm" className="mt-0.5 shrink-0">
-        {comment.user.avatarUrl ? (
-          <AvatarImage
-            src={comment.user.avatarUrl}
-            alt={comment.user.displayName}
-          />
-        ) : null}
-        <AvatarFallback>{comment.user.initials}</AvatarFallback>
-      </Avatar>
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm text-muted-foreground">
-          <span className="font-medium text-foreground">
-            {comment.user.displayName}
-          </span>
-          <RelativeTime date={toIsoString(comment.created_at)} />
-          {comment.edited_at && (
-            <span className="inline-flex items-center gap-1 italic">
-              (edited <RelativeTime date={toIsoString(comment.edited_at)} />)
-            </span>
-          )}
-        </div>
-
-        {isEditing ? (
-          <div className="flex flex-col gap-2">
-            <Textarea
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              disabled={isSaving}
-              rows={3}
-              aria-label="Edit comment"
-              aria-invalid={tooLong || undefined}
+    <>
+      <article className="flex gap-3">
+        <Avatar size="sm" className="mt-0.5 shrink-0">
+          {comment.user.avatarUrl ? (
+            <AvatarImage
+              src={comment.user.avatarUrl}
+              alt={comment.user.displayName}
             />
-            <div className="flex items-center justify-between text-sm text-muted-foreground">
-              {tooLong ? (
-                <span className="text-destructive">
-                  {draft.length}/{MAX_BODY_LENGTH.toLocaleString()} characters
+          ) : null}
+          <AvatarFallback>{comment.user.initials}</AvatarFallback>
+        </Avatar>
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">
+                {comment.user.displayName}
+              </span>
+              <RelativeTime date={toIsoString(comment.created_at)} />
+              {comment.edited_at && (
+                <span>
+                  (edited <RelativeTime date={toIsoString(comment.edited_at)} />
+                  )
                 </span>
-              ) : (
-                <span aria-hidden="true" />
               )}
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setDraft(comment.body);
-                    setIsEditing(false);
-                  }}
-                  disabled={isSaving}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={handleSave}
-                  disabled={!canSave}
-                >
-                  {isSaving ? "Saving…" : "Save"}
-                </Button>
+            </div>
+            {isAuthor && !isEditing && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="-mt-1 -mr-1 size-7 shrink-0 text-muted-foreground/70 hover:text-foreground"
+                    aria-label="Comment actions"
+                    disabled={isDeleting}
+                  >
+                    <MoreHorizontal className="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-32">
+                  <DropdownMenuItem onSelect={() => setIsEditing(true)}>
+                    <Pencil className="size-3.5" />
+                    Edit
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onSelect={(e) => {
+                      e.preventDefault();
+                      setDeleteOpen(true);
+                    }}
+                  >
+                    <Trash2 className="size-3.5" />
+                    Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
+
+          {isEditing ? (
+            <div className="flex flex-col gap-2">
+              <Textarea
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                disabled={isSaving}
+                rows={3}
+                aria-label="Edit comment"
+                aria-invalid={tooLong || undefined}
+              />
+              <div className="flex items-center justify-between text-sm text-muted-foreground">
+                {tooLong ? (
+                  <span className="text-destructive">
+                    {draft.length}/{MAX_BODY_LENGTH.toLocaleString()} characters
+                  </span>
+                ) : (
+                  <span aria-hidden="true" />
+                )}
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setDraft(comment.body);
+                      setIsEditing(false);
+                    }}
+                    disabled={isSaving}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={handleSave}
+                    disabled={!canSave}
+                  >
+                    {isSaving ? "Saving…" : "Save"}
+                  </Button>
+                </div>
               </div>
             </div>
-          </div>
-        ) : (
-          <>
+          ) : (
             <CommentMarkdown body={comment.body} />
-            {isAuthor && (
-              <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                <button
-                  type="button"
-                  onClick={() => setIsEditing(true)}
-                  className="cursor-pointer hover:text-foreground hover:underline"
-                >
-                  Edit
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDelete}
-                  disabled={isDeleting}
-                  className="cursor-pointer hover:text-destructive hover:underline disabled:opacity-50"
-                >
-                  Delete
-                </button>
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </article>
+          )}
+        </div>
+      </article>
+
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete comment?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently remove your comment. This action cannot be
+              undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={isDeleting}
+            >
+              {isDeleting && <Loader2 className="size-4 animate-spin" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
