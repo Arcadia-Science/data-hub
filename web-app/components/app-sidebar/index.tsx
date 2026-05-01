@@ -39,12 +39,21 @@ export function AppSidebar({
             >
               <Link href="/">
                 <Image
-                  src="/arcadia-logo-xs.svg"
-                  alt="Arcadia"
+                  src="/data-hub-logo.svg"
+                  alt="Data Hub"
                   width={26}
                   height={26}
                   priority
-                  className="size-6 shrink-0 dark:invert"
+                  className="size-6 shrink-0 dark:hidden"
+                />
+                <Image
+                  src="/data-hub-logo-on-dark.svg"
+                  alt=""
+                  aria-hidden
+                  width={26}
+                  height={26}
+                  priority
+                  className="hidden size-6 shrink-0 dark:block"
                 />
                 <span className="text-base font-medium">Data Hub</span>
               </Link>
