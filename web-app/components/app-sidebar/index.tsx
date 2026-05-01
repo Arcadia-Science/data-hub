@@ -44,16 +44,7 @@ export function AppSidebar({
                   width={26}
                   height={26}
                   priority
-                  className="size-6 shrink-0 dark:hidden"
-                />
-                <Image
-                  src="/data-hub-logo-on-dark.svg"
-                  alt=""
-                  aria-hidden
-                  width={26}
-                  height={26}
-                  priority
-                  className="hidden size-6 shrink-0 dark:block"
+                  className="size-5.5 shrink-0"
                 />
                 <span className="text-base font-medium">Data Hub</span>
               </Link>
