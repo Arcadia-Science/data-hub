@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/sidebar";
 import { ChevronLeft } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 
 type SettingsSection = {
   href: string;
@@ -20,20 +20,15 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   { href: "/settings/tokens", label: "Access Tokens" },
 ];
 
-export function SettingsNav() {
-  const router = useRouter();
-  const pathname = usePathname();
+// Single, predictable destination for the "leave settings" affordance. A
+// real `router.back()` is unreliable because `window.history.length` doesn't
+// distinguish a fresh tab from one with prior in-app history, and back can
+// land the user on an off-domain referrer. Always send them to the
+// dashboard so middle-click / cmd-click / "Copy link" all behave too.
+const EXIT_SETTINGS_HREF = "/";
 
-  const handleBack = () => {
-    // history.length is 1 on a fresh tab landing directly on /settings/*. In
-    // that case there's nothing to go back to, so we send the user to the
-    // dashboard instead of leaving them stuck.
-    if (typeof window !== "undefined" && window.history.length > 1) {
-      router.back();
-    } else {
-      router.push("/");
-    }
-  };
+export function SettingsNav() {
+  const pathname = usePathname();
 
   return (
     <>
@@ -45,12 +40,14 @@ export function SettingsNav() {
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton
-                onClick={handleBack}
-                tooltip="Back"
+                asChild
+                tooltip="Exit settings"
                 className="relative justify-center font-medium"
               >
-                <ChevronLeft className="absolute left-2" />
-                <span>Settings</span>
+                <Link href={EXIT_SETTINGS_HREF}>
+                  <ChevronLeft className="absolute left-2" />
+                  <span>Settings</span>
+                </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>

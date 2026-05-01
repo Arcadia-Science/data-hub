@@ -15,7 +15,6 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
-  useSidebar,
 } from "@/components/ui/sidebar";
 import type { SidebarInstrument, SidebarWatcher } from "@/lib/api/sidebar";
 import { ChevronRight, Cpu, Home, Radio, type LucideIcon } from "lucide-react";
@@ -108,13 +107,6 @@ function CollapsibleNavSection({
   const isWithinSection =
     currentPath === basePath || currentPath.startsWith(`${basePath}/`);
 
-  // When the rail is collapsed to icons, the submenu is hidden anyway, so the
-  // expand/collapse trigger is dead UI. Demote the trigger to a plain link to
-  // the section's index page so a single click navigates instead of doing
-  // nothing visible.
-  const { state, isMobile } = useSidebar();
-  const isIconRail = state === "collapsed" && !isMobile;
-
   return (
     <Collapsible
       asChild
@@ -122,22 +114,13 @@ function CollapsibleNavSection({
       className="group/collapsible"
     >
       <SidebarMenuItem>
-        {isIconRail ? (
-          <SidebarMenuButton asChild isActive={isWithinSection} tooltip={label}>
-            <Link href={viewAllHref}>
-              <Icon />
-              <span>{label}</span>
-            </Link>
+        <CollapsibleTrigger asChild>
+          <SidebarMenuButton tooltip={label}>
+            <Icon />
+            <span>{label}</span>
+            <ChevronRight className="ml-auto transition-transform group-data-[state=open]/collapsible:rotate-90" />
           </SidebarMenuButton>
-        ) : (
-          <CollapsibleTrigger asChild>
-            <SidebarMenuButton tooltip={label}>
-              <Icon />
-              <span>{label}</span>
-              <ChevronRight className="ml-auto transition-transform group-data-[state=open]/collapsible:rotate-90" />
-            </SidebarMenuButton>
-          </CollapsibleTrigger>
-        )}
+        </CollapsibleTrigger>
         <CollapsibleContent>
           <SidebarMenuSub>
             {items.map((item) => (

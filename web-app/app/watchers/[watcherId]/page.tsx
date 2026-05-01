@@ -70,7 +70,7 @@ export default async function WatcherDetailPage({
   const logsTotalPages = Math.ceil(eventResult.total / WATCHER_PAGE_SIZE);
 
   return (
-    <div className="mx-auto flex w-6xl max-w-7xl flex-col gap-6 p-6">
+    <div className="mx-auto flex max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
       <WatcherHeader watcher={watcher} />
       <WatcherDetailTabs
         configTab={<WatcherConfig configYaml={watcher.configYaml} />}

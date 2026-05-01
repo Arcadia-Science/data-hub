@@ -4,6 +4,7 @@ import "@/app/globals.css";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ThemeProvider } from "@/components/theme-provider";
 import {
+  SIDEBAR_COOKIE_NAME,
   SidebarInset,
   SidebarProvider,
   SidebarTrigger,
@@ -15,6 +16,7 @@ import { auth, signOut } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import type { Metadata } from "next";
 import { SessionProvider } from "next-auth/react";
+import { cookies } from "next/headers";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 
 const fontSans = Geist({ subsets: ["latin"], variable: "--font-sans" });
@@ -46,6 +48,12 @@ export default async function RootLayout({
     ? await Promise.all([getSidebarInstruments(), getSidebarWatchers()])
     : [[], []];
 
+  // Hydrate the sidebar's open/collapsed state from the cookie that
+  // `SidebarProvider` writes on toggle. Defaulting to `true` keeps the
+  // first-visit experience expanded.
+  const sidebarCookie = (await cookies()).get(SIDEBAR_COOKIE_NAME)?.value;
+  const sidebarDefaultOpen = sidebarCookie !== "false";
+
   return (
     <html
       lang="en"
@@ -63,7 +71,7 @@ export default async function RootLayout({
             <NuqsAdapter>
               <TooltipProvider>
                 {session ? (
-                  <SidebarProvider>
+                  <SidebarProvider defaultOpen={sidebarDefaultOpen}>
                     <AppSidebar
                       session={session}
                       instruments={instruments}
