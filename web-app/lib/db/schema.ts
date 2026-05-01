@@ -506,6 +506,59 @@ export const files = pgTable(
   ]
 );
 
+// User-authored markdown notes on a run. Any authenticated user can read
+// and create comments; only the author may edit or soft-delete their own
+// row (enforced both in the SQL `where` clause and in the route handler).
+// Soft-delete via `deletedAt` matches the run/file model so historical
+// comments aren't lost. `editedAt` is set on body edits so the UI can
+// label edited comments without a separate audit table.
+export const runComments = pgTable(
+  "run_comments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => instrumentRuns.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // Markdown source. Length-capped at the route layer (10 000 chars) as a
+    // cheap guard against abuse; no DB-side limit so we can raise it later
+    // without a migration.
+    body: text("body").notNull(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+    // Distinct from updatedAt so we can render an "edited" affordance only
+    // for body changes (a future column-level edit wouldn't trip this).
+    editedAt: timestamp("edited_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    deletedAt: timestamp("deleted_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+  },
+  (comment) => [
+    index("idx_run_comments_run_id_created_at").on(
+      comment.runId,
+      comment.createdAt.desc()
+    ),
+    index("idx_run_comments_user_id").on(comment.userId),
+  ]
+);
+
 // Many-to-many link between users and runs: a user "claims" a run they
 // personally performed. Attribution is self-service — users create and remove
 // only their own row. Composite PK enforces one row per (run, user).

@@ -1,4 +1,5 @@
 import { RunAttributionsSection } from "@/components/runs/run-attributions-section";
+import { RunCommentsSection } from "@/components/runs/run-comments-section";
 import { RunDetailVariant } from "@/components/runs/variants";
 import { WatcherStatusProvider } from "@/components/runs/watcher-status-provider";
 import {
@@ -7,6 +8,7 @@ import {
   lookupRunByNaturalKey,
 } from "@/lib/api/instrument-runs";
 import { getInstrumentById } from "@/lib/api/instruments";
+import { listCommentsForRun } from "@/lib/api/run-comments";
 import { auth } from "@/lib/auth";
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next/types";
@@ -33,9 +35,10 @@ export default async function RunDetailPage({ params }: Props) {
   const run = await lookupRunByNaturalKey(instrumentId, runId);
   if (!run) notFound();
 
-  const [runFiles, instrument] = await Promise.all([
+  const [runFiles, instrument, comments] = await Promise.all([
     getRunFiles(run.id),
     getInstrumentById(instrumentId),
+    listCommentsForRun(run.id),
   ]);
   const wellData = await getProcessedCsvData(runFiles);
   // Gate client-side upload actions on watcher availability — a queued
@@ -58,6 +61,11 @@ export default async function RunDetailPage({ params }: Props) {
               attributions={run.attributions}
             />
           }
+        />
+        <RunCommentsSection
+          instrumentId={run.instrumentId}
+          runId={run.runId}
+          comments={comments}
         />
       </WatcherStatusProvider>
     </div>
