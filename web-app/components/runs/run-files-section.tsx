@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useArchiveDownload } from "@/hooks/use-archive-download";
 import type { RunFile } from "@/lib/api/instrument-runs";
 import { Download, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -155,6 +156,7 @@ function RunFilesSectionContent({
   isDeleted: boolean;
 }) {
   const router = useRouter();
+  const { actions: archiveActions } = useArchiveDownload();
   const [isPending, startTransition] = useTransition();
   const [showDismissed, setShowDismissed] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -349,12 +351,16 @@ function RunFilesSectionContent({
               variant="outline"
               size="sm"
               className="h-8 gap-1 text-sm"
-              asChild
+              onClick={() =>
+                archiveActions.start({
+                  archiveUrl: downloadHref,
+                  runId,
+                  defaultFilename: `${runId}.zip`,
+                })
+              }
             >
-              <a href={downloadHref}>
-                <Download className="size-3" />
-                Download all ({filteredDownloadableFiles.length})
-              </a>
+              <Download className="size-3" />
+              Download all ({filteredDownloadableFiles.length})
             </Button>
           )}
         </div>

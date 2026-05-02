@@ -1,7 +1,10 @@
 import {
   GetObjectCommand,
+  HeadObjectCommand,
+  NotFound,
   PutObjectCommand,
   S3Client,
+  S3ServiceException,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { awsCredentialsProvider } from "@vercel/oidc-aws-credentials-provider";
@@ -26,6 +29,47 @@ export function getS3RawDataBucket(): string {
     throw new Error("S3_RAW_DATA_BUCKET environment variable is not set");
   }
   return bucket;
+}
+
+// Archives bucket holds run-zip artifacts built by the Lambda. The web app
+// reads (HEAD + presign) but never writes — Lambda is the only writer.
+export function getS3ArchivesBucket(): string {
+  const bucket = process.env.S3_ARCHIVES_BUCKET;
+  if (!bucket) {
+    throw new Error("S3_ARCHIVES_BUCKET environment variable is not set");
+  }
+  return bucket;
+}
+
+export type S3HeadResult =
+  | { exists: true; sizeBytes: number | null }
+  | { exists: false };
+
+// HeadObject wrapper that translates a 404 into a clean { exists: false }.
+// Other failures (auth, network) propagate so the caller can decide whether to
+// fall back to a fresh build or surface a 5xx.
+export async function headS3Object(
+  bucket: string,
+  key: string
+): Promise<S3HeadResult> {
+  try {
+    const response = await s3.send(
+      new HeadObjectCommand({ Bucket: bucket, Key: key })
+    );
+    return {
+      exists: true,
+      sizeBytes: response.ContentLength ?? null,
+    };
+  } catch (err) {
+    if (err instanceof NotFound) return { exists: false };
+    if (
+      err instanceof S3ServiceException &&
+      err.$metadata?.httpStatusCode === 404
+    ) {
+      return { exists: false };
+    }
+    throw err;
+  }
 }
 
 export async function getPresignedDownloadUrl(

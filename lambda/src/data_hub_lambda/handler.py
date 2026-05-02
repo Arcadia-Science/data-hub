@@ -15,6 +15,7 @@ from aws_lambda_typing.events.s3 import S3Event
 from data_hub_lambda import (
     agilent_4150_tapestation,
     akta_fplc,
+    archive_builder,
     azure_600_gel_doc,
     azure_cielo_qpcr,
     hina_microscope,
@@ -160,6 +161,110 @@ def _cleanup_tmp() -> None:
 
 
 # ------------------------------------------------------------------
+# Archive-build dispatch
+# ------------------------------------------------------------------
+
+
+def _handle_build_archive(payload: dict[str, Any]) -> dict[str, Any]:
+    """Run the archive builder and (optionally) PATCH the originating job.
+
+    Sync callers (``payload["job_id"]`` absent) get the build result inline.
+    Async callers send ``"job_id"`` so the web-app job row gets PATCHed when
+    the build finishes — the HTTP response is the ack of acceptance and the
+    actual outcome is delivered out-of-band.
+    """
+    job_id = payload.get("job_id")
+    try:
+        request = archive_builder.parse_build_request(payload)
+    except ValueError as exc:
+        logger.warning("Invalid build_archive payload: %s", exc)
+        if isinstance(job_id, str):
+            _post_archive_job_status(job_id, status="failed", error_message=str(exc))
+        return {"statusCode": 400, "body": json.dumps({"error": str(exc)})}
+
+    try:
+        result = archive_builder.build_run_archive(request)
+    except Exception as exc:
+        logger.exception(
+            "Failed to build archive for run %s/%s",
+            request.instrument_id,
+            request.run_id,
+        )
+        if isinstance(job_id, str):
+            _post_archive_job_status(job_id, status="failed", error_message=str(exc))
+        return {"statusCode": 500, "body": json.dumps({"error": str(exc)})}
+
+    body: dict[str, Any] = {
+        "archive_bucket": result.archive_bucket,
+        "archive_key": result.archive_key,
+        "size_bytes": result.size_bytes,
+    }
+    if isinstance(job_id, str):
+        _post_archive_job_status(
+            job_id,
+            status="ready",
+            archive_bucket=result.archive_bucket,
+            archive_key=result.archive_key,
+            size_bytes=result.size_bytes,
+        )
+    return {
+        "statusCode": 200,
+        "headers": {"content-type": "application/json"},
+        "body": json.dumps(body),
+    }
+
+
+def _post_archive_job_status(
+    job_id: str,
+    *,
+    status: str,
+    archive_bucket: str | None = None,
+    archive_key: str | None = None,
+    size_bytes: int | None = None,
+    error_message: str | None = None,
+) -> None:
+    """PATCH the archive-job row in the web app with the final build outcome.
+
+    Failures here are logged but never re-raised — the build itself succeeded
+    or failed for its own reasons, and we don't want a callback failure to
+    mask that.
+    """
+    from data_hub_lambda.config import lambda_config
+
+    base_url = lambda_config.DATA_HUB_API_URL
+    api_key = lambda_config.DATA_HUB_API_KEY
+    if not base_url or not api_key:
+        logger.error("DATA_HUB_API_URL/KEY not configured; cannot PATCH archive job %s", job_id)
+        return
+
+    payload: dict[str, Any] = {"status": status}
+    if archive_bucket is not None:
+        payload["archive_bucket"] = archive_bucket
+    if archive_key is not None:
+        payload["archive_key"] = archive_key
+    if size_bytes is not None:
+        payload["size_bytes"] = size_bytes
+    if error_message is not None:
+        payload["error_message"] = error_message
+
+    import requests
+
+    try:
+        resp = requests.patch(
+            f"{base_url.rstrip('/')}/archive-jobs/{job_id}",
+            json=payload,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=(5, 30),
+        )
+        if not resp.ok:
+            logger.error(
+                "PATCH /archive-jobs/%s returned %d: %s", job_id, resp.status_code, resp.text
+            )
+    except Exception:
+        logger.exception("Failed to PATCH archive-job %s", job_id)
+
+
+# ------------------------------------------------------------------
 # Main handler
 # ------------------------------------------------------------------
 
@@ -169,13 +274,21 @@ def lambda_handler(event: dict[str, Any], context: Context) -> dict[str, Any] | 
     logger.info("Received event: %s", pformat(event))
 
     # Function URL invocations carry a requestContext with an http key.
-    # Verify the Bearer token and unwrap the S3 event from the body.
+    # Verify the Bearer token and unwrap the inner JSON payload.
     if _is_function_url_event(event):
-        s3_event = _authenticate_function_url(event)
-        if s3_event is None:
+        payload = _authenticate_function_url(event)
+        if payload is None:
             logger.warning("Unauthorized Function URL invocation")
             return {"statusCode": 401, "body": "Unauthorized"}
-        event = s3_event
+
+        # Discriminator: explicit "type" routes to non-S3-event handlers (today
+        # just the archive builder); absent type means a manually-constructed
+        # S3 event (used by the file-reprocess flow on the web app).
+        payload_type = payload.get("type") if isinstance(payload, dict) else None
+        if payload_type == "build_archive":
+            return _handle_build_archive(payload)
+
+        event = payload
 
     try:
         event_info = parse_s3_event(event)  # type: ignore[arg-type]

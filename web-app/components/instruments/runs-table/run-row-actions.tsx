@@ -13,6 +13,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useArchiveDownload } from "@/hooks/use-archive-download";
 import { computeRunCaps } from "@/lib/runs/row-actions";
 import { cn } from "@/lib/utils";
 import {
@@ -46,6 +47,7 @@ function swallow(e: MouseEvent) {
 export function RunRowActions({ row }: { row: RunRow }) {
   const caps = computeRunCaps(row);
   const router = useRouter();
+  const { actions: archiveActions } = useArchiveDownload();
   const [isPending, startTransition] = useTransition();
   const [menuOpen, setMenuOpen] = useState(false);
   const [reprocessOpen, setReprocessOpen] = useState(false);
@@ -82,21 +84,16 @@ export function RunRowActions({ row }: { row: RunRow }) {
     });
   }
 
-  // The download endpoint streams a zip; let the browser handle it as a
-  // normal navigation via an anchor we construct on the fly. Using a real
-  // <a> (vs fetch) preserves Content-Disposition and lets the browser name
-  // the file correctly. The `download` attribute forces download semantics
-  // even when Content-Disposition is missing on a failed response.
+  // The download is delegated to `ArchiveDownloadProvider`: small/cached
+  // archives stream to the browser inside the same user gesture (302/JSON
+  // path); large archives surface a status dialog and notify when ready.
   function handleDownload(e: MouseEvent) {
     e.stopPropagation();
-    const a = document.createElement("a");
-    a.href = `${baseUrl}/download-archive`;
-    a.download = `${row.run_id}.zip`;
-    a.rel = "noopener";
-    a.style.display = "none";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    void archiveActions.start({
+      archiveUrl: `${baseUrl}/download-archive`,
+      runId: row.run_id,
+      defaultFilename: `${row.run_id}.zip`,
+    });
   }
 
   return (

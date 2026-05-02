@@ -1,12 +1,30 @@
+import {
+  fingerprintFiles,
+  getArchiveKey,
+  getSyncArchiveThresholdBytes,
+  invokeBuildArchive,
+  isArchiveBuilderEnabled,
+} from "@/lib/api/archive-builder";
 import { authenticateRequest } from "@/lib/api/auth";
-import { apiError, NOT_FOUND, UNAUTHORIZED } from "@/lib/api/errors";
+import {
+  apiError,
+  INTERNAL_ERROR,
+  NOT_FOUND,
+  UNAUTHORIZED,
+} from "@/lib/api/errors";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { db } from "@/lib/db";
-import { files } from "@/lib/db/schema";
-import { getS3ObjectStream } from "@/lib/s3";
+import { archiveJobs, files } from "@/lib/db/schema";
+import {
+  getPresignedDownloadUrl,
+  getS3ArchivesBucket,
+  getS3ObjectStream,
+  headS3Object,
+} from "@/lib/s3";
 import archiver from "archiver";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { NextRequest } from "next/server";
+import { after } from "next/server";
 import { PassThrough, Readable } from "node:stream";
 
 type RouteContext = {
@@ -29,17 +47,36 @@ function parseFileIdsParam(searchParams: URLSearchParams): number[] | null {
   return ids.size > 0 ? Array.from(ids) : [];
 }
 
+type DownloadableFile = {
+  id: number;
+  filename: string;
+  s3Bucket: string;
+  s3Key: string;
+  sizeBytes: number | null;
+};
+
 // ---------------------------------------------------------------------------
 // GET /api/v1/instruments/:instrumentId/runs/:runId/download-archive
 //
-// Streams a zip archive containing all active, uploaded files for a run.
-// Files are fetched from S3 and piped directly into the archive without
-// buffering entire objects in memory.
+// Returns a downloadable zip of every active, uploaded file in a run. Two
+// implementations sit behind this route:
+//
+//  - Builder mode (preferred): Lambda zips files from the raw bucket directly
+//    into the archives bucket via S3 multipart upload, and the route 302s
+//    the browser to a short-lived presigned URL. Bytes never traverse Vercel.
+//    Below `SYNC_ARCHIVE_THRESHOLD_GB` the route awaits the build inline; at
+//    or above the threshold it returns `202 { job_id }` so the UI can poll
+//    `GET /api/v1/archive-jobs/:id` and follow the redirect when ready.
+//
+//  - Streaming fallback: when `ARCHIVE_BUILDER_ENABLED` is unset or the
+//    Lambda is unavailable, the route falls back to streaming the zip
+//    through the function as before. This keeps the rollout reversible.
 //
 // Optional `?file_ids=1,2,3` narrows the archive to a specific subset (used
 // by the UI's "Download all" button to honor active table filters). IDs are
 // always intersected with the run's own files, so callers can't reach files
-// belonging to other runs.
+// belonging to other runs. The fingerprint includes those IDs, so a filtered
+// archive caches independently of a full-run archive.
 // ---------------------------------------------------------------------------
 
 export async function GET(request: NextRequest, { params }: RouteContext) {
@@ -78,16 +115,313 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       filename: files.filename,
       s3Bucket: files.s3Bucket,
       s3Key: files.s3Key,
+      sizeBytes: files.sizeBytes,
     })
     .from(files)
     .where(and(...conditions));
 
-  const downloadable = fileRows.filter((f) => f.s3Bucket && f.s3Key);
+  const downloadable: DownloadableFile[] = fileRows
+    .filter((f): f is DownloadableFile & { s3Bucket: string; s3Key: string } =>
+      Boolean(f.s3Bucket && f.s3Key)
+    )
+    .map((f) => ({
+      id: f.id,
+      filename: f.filename,
+      s3Bucket: f.s3Bucket,
+      s3Key: f.s3Key,
+      sizeBytes: f.sizeBytes,
+    }));
 
   if (downloadable.length === 0) {
     return apiError(404, NOT_FOUND, "No downloadable files for this run");
   }
 
+  if (isArchiveBuilderEnabled()) {
+    const wantsJson = clientWantsJson(request);
+    const result = await handleViaArchiveBuilder({
+      instrumentId,
+      runId,
+      runInternalId: run.id,
+      downloadable,
+      createdBy: authResult.authMethod === "session" ? authResult.userId : null,
+      wantsJson,
+    });
+    if (result) return result;
+    // Lambda not configured (e.g. preview env) — fall through to legacy path.
+  }
+
+  return streamArchiveResponse(downloadable, runId);
+}
+
+// JS callers send `Accept: application/json` so they can poll async builds;
+// direct browser navigation (e.g. a shared link) gets 302 / streaming.
+function clientWantsJson(request: NextRequest): boolean {
+  const accept = request.headers.get("accept") ?? "";
+  return accept.includes("application/json");
+}
+
+// ---------------------------------------------------------------------------
+// Builder-mode helpers
+// ---------------------------------------------------------------------------
+
+async function handleViaArchiveBuilder(args: {
+  instrumentId: string;
+  runId: string;
+  runInternalId: string;
+  downloadable: DownloadableFile[];
+  createdBy: string | null;
+  wantsJson: boolean;
+}): Promise<Response | null> {
+  const {
+    instrumentId,
+    runId,
+    runInternalId,
+    downloadable,
+    createdBy,
+    wantsJson,
+  } = args;
+
+  const fingerprint = fingerprintFiles(
+    downloadable.map((f) => ({
+      id: f.id,
+      s3Key: f.s3Key,
+      filename: f.filename,
+    }))
+  );
+  const archiveBucket = getS3ArchivesBucket();
+  const archiveKey = getArchiveKey(instrumentId, runId, fingerprint);
+
+  // Cache hit: Lambda already produced a zip with the same fingerprint and
+  // it hasn't aged past the 7 day lifecycle expiry. Skip the build entirely.
+  const head = await headS3Object(archiveBucket, archiveKey);
+  if (head.exists) {
+    const url = await getPresignedDownloadUrl(archiveBucket, archiveKey);
+    return wantsJson
+      ? readyJsonResponse(url, head.sizeBytes)
+      : redirectResponse(url);
+  }
+
+  // The route can't proceed if the Lambda env vars aren't present in this
+  // deployment — return null so the caller falls back to the streaming path.
+  if (!process.env.LAMBDA_FUNCTION_URL || !process.env.LAMBDA_INVOKE_TOKEN) {
+    return null;
+  }
+
+  const sourceBucket = downloadable[0].s3Bucket;
+  // Belt-and-braces: every file in a run should live in the same bucket, but
+  // if a stray legacy row points elsewhere, refusing the build is safer than
+  // sending the wrong bucket to Lambda.
+  for (const f of downloadable) {
+    if (f.s3Bucket !== sourceBucket) {
+      return apiError(
+        500,
+        INTERNAL_ERROR,
+        "Run has files in multiple S3 buckets; archive builder cannot proceed"
+      );
+    }
+  }
+
+  const totalSize = sumKnownSizes(downloadable);
+  const threshold = getSyncArchiveThresholdBytes();
+  const goAsync = totalSize === null || totalSize >= threshold;
+
+  // Reuse an in-flight job for the same (run, fingerprint) so two simultaneous
+  // clicks don't double-invoke the Lambda. The partial unique index on
+  // archive_jobs handles the race: ON CONFLICT DO NOTHING returns no row, and
+  // we then SELECT the existing one.
+  const inserted = await db
+    .insert(archiveJobs)
+    .values({
+      instrumentRunId: runInternalId,
+      fingerprint,
+      status: "building",
+      archiveBucket,
+      createdBy,
+    })
+    .onConflictDoNothing()
+    .returning();
+
+  let job = inserted[0];
+  if (!job) {
+    [job] = await db
+      .select()
+      .from(archiveJobs)
+      .where(
+        and(
+          eq(archiveJobs.instrumentRunId, runInternalId),
+          eq(archiveJobs.fingerprint, fingerprint),
+          inArray(archiveJobs.status, ["pending", "building"])
+        )
+      )
+      .limit(1);
+  }
+
+  if (!job) {
+    // Index ruled out concurrent insert but no in-flight row remained — most
+    // likely the prior job already finished. Fall through to async polling
+    // by inserting a fresh row outside the inflight predicate.
+    [job] = await db
+      .insert(archiveJobs)
+      .values({
+        instrumentRunId: runInternalId,
+        fingerprint,
+        status: "building",
+        archiveBucket,
+        createdBy,
+      })
+      .returning();
+  }
+
+  if (goAsync) {
+    after(async () => {
+      const result = await invokeBuildArchive(
+        {
+          jobId: job.id,
+          instrumentId,
+          runId,
+          sourceBucket,
+          files: downloadable.map((f) => ({
+            s3Key: f.s3Key,
+            filename: f.filename,
+          })),
+        },
+        fingerprint
+      );
+      if (!result || !result.ok) {
+        await db
+          .update(archiveJobs)
+          .set({
+            status: "failed",
+            errorMessage:
+              result === null ? "Lambda not configured" : result.message,
+            completedAt: new Date(),
+          })
+          .where(eq(archiveJobs.id, job.id));
+      }
+      // The Lambda PATCH callback handles the success path so the row's
+      // completed_at lines up with the actual upload finish time. We don't
+      // mark `ready` here to avoid racing the callback.
+    });
+    return Response.json(
+      {
+        job_id: job.id,
+        status: "building",
+        poll_url: `/api/v1/archive-jobs/${job.id}`,
+      },
+      { status: 202 }
+    );
+  }
+
+  const result = await invokeBuildArchive(
+    {
+      jobId: job.id,
+      instrumentId,
+      runId,
+      sourceBucket,
+      files: downloadable.map((f) => ({
+        s3Key: f.s3Key,
+        filename: f.filename,
+      })),
+    },
+    fingerprint
+  );
+
+  if (!result) {
+    await db
+      .update(archiveJobs)
+      .set({
+        status: "failed",
+        errorMessage: "Lambda not configured",
+        completedAt: new Date(),
+      })
+      .where(eq(archiveJobs.id, job.id));
+    return apiError(503, INTERNAL_ERROR, "Archive builder is not configured");
+  }
+  if (!result.ok) {
+    await db
+      .update(archiveJobs)
+      .set({
+        status: "failed",
+        errorMessage: result.message,
+        completedAt: new Date(),
+      })
+      .where(eq(archiveJobs.id, job.id));
+    return apiError(
+      502,
+      INTERNAL_ERROR,
+      `Archive builder failed: ${result.message}`
+    );
+  }
+
+  await db
+    .update(archiveJobs)
+    .set({
+      status: "ready",
+      archiveBucket: result.archiveBucket,
+      archiveKey: result.archiveKey,
+      sizeBytes: result.sizeBytes,
+      completedAt: new Date(),
+    })
+    .where(eq(archiveJobs.id, job.id));
+
+  const url = await getPresignedDownloadUrl(
+    result.archiveBucket,
+    result.archiveKey
+  );
+  return wantsJson
+    ? readyJsonResponse(url, result.sizeBytes)
+    : redirectResponse(url);
+}
+
+function sumKnownSizes(downloadable: DownloadableFile[]): number | null {
+  let sum = 0;
+  for (const f of downloadable) {
+    if (f.sizeBytes === null || f.sizeBytes === undefined) return null;
+    sum += f.sizeBytes;
+  }
+  return sum;
+}
+
+function redirectResponse(url: string): Response {
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: url,
+      // Don't let intermediaries cache the 302 — the presigned URL inside
+      // expires in 15 minutes, and a stale Location header would 403 the
+      // user well after.
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
+function readyJsonResponse(url: string, sizeBytes: number | null): Response {
+  return Response.json(
+    {
+      status: "ready",
+      download_url: url,
+      size_bytes: sizeBytes,
+    },
+    {
+      // Same no-store rationale as the 302 — the embedded URL is short-lived.
+      headers: { "Cache-Control": "no-store" },
+    }
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Legacy streaming fallback (gated off by default once builder is enabled).
+//
+// Kept temporarily so a misconfiguration of `ARCHIVE_BUILDER_ENABLED` or
+// `LAMBDA_FUNCTION_URL` doesn't break downloads. After the builder has been
+// stable in production for ~1 week, remove this path and the `archiver`
+// dependency along with `getS3ObjectStream`.
+// ---------------------------------------------------------------------------
+
+function streamArchiveResponse(
+  downloadable: DownloadableFile[],
+  runId: string
+): Response {
   const passthrough = new PassThrough();
   const archive = archiver("zip", { store: true });
   archive.pipe(passthrough);
@@ -97,7 +431,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
   (async () => {
     try {
       for (const file of downloadable) {
-        const stream = await getS3ObjectStream(file.s3Bucket!, file.s3Key!);
+        const stream = await getS3ObjectStream(file.s3Bucket, file.s3Key);
         archive.append(stream, { name: file.filename });
       }
       await archive.finalize();

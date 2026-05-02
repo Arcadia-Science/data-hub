@@ -70,8 +70,27 @@ export async function lookupFileForDownload(
 export async function countDownloadableRunFiles(
   runInternalId: string
 ): Promise<number> {
-  const [{ count }] = await db
-    .select({ count: sql<number>`cast(count(*) as int)` })
+  const summary = await summarizeDownloadableRunFiles(runInternalId);
+  return summary.count;
+}
+
+export type DownloadableRunFilesSummary = {
+  count: number;
+  // Sum of `size_bytes` across all matching files, or null when at least one
+  // file is missing its size. The UI uses this to decide whether to expect
+  // a sync 302 or an async 202 from the archive route.
+  totalSizeBytes: number | null;
+};
+
+export async function summarizeDownloadableRunFiles(
+  runInternalId: string
+): Promise<DownloadableRunFilesSummary> {
+  const [row] = await db
+    .select({
+      count: sql<number>`cast(count(*) as int)`,
+      totalSize: sql<string | null>`sum(${files.sizeBytes})`,
+      anyNull: sql<boolean>`bool_or(${files.sizeBytes} is null)`,
+    })
     .from(files)
     .where(
       and(
@@ -81,5 +100,11 @@ export async function countDownloadableRunFiles(
         isNotNull(files.s3Key)
       )
     );
-  return count ?? 0;
+  const count = row?.count ?? 0;
+  if (count === 0) return { count: 0, totalSizeBytes: 0 };
+  const totalSizeBytes =
+    row?.anyNull || row?.totalSize === null
+      ? null
+      : Number.parseInt(row.totalSize as string, 10);
+  return { count, totalSizeBytes };
 }

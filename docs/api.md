@@ -72,6 +72,16 @@ Comment bodies are markdown source, capped at 10 000 characters. Author-only mut
 | `GET` | `/api/v1/watchers/:watcherId/upload-queue` | Get pending upload queue |
 | `GET` | `/api/v1/watchers/:watcherId/update-check` | Get server-advertised release info (latest version, channel, mandatory flag); used by the watcher's self-update CLI and background auto-updater. See [Upgrading the watcher](guides/upgrading-the-watcher.md). |
 
+### Archive jobs
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/api/v1/instruments/:instrumentId/runs/:runId/download-archive` | Download the run archive. Returns `302` with a presigned S3 URL on cache hits and small builds. With `Accept: application/json`, returns `200 { status: "ready", download_url }` for cache hits / small builds and `202 { job_id, poll_url, status: "building" }` for large async builds. Optional `?file_ids=1,2,3` narrows the archive to a subset of files (always intersected with the run's own files). |
+| `GET` | `/api/v1/archive-jobs/:id` | Status of an asynchronous archive build. Returns `{ status, archive_bucket, archive_key, size_bytes, error_message, completed_at, download_url }`. `download_url` is a fresh presigned GET URL whenever `status === 'ready'`; `null` otherwise. |
+| `PATCH` | `/api/v1/archive-jobs/:id` | Lambda callback: marks an async build as `ready` (with `archive_bucket`, `archive_key`, `size_bytes`) or `failed` (with `error_message`). Stamps `completed_at` on terminal transitions. Authenticates via the same PAT mechanism as other endpoints. |
+
+The download-archive endpoint sits in front of a Lambda-driven builder pipeline that produces zips in S3 and serves them via presigned URLs, so download bytes never travel through Vercel. The legacy in-process streaming path remains as a fallback when `ARCHIVE_BUILDER_ENABLED` is unset (or `LAMBDA_FUNCTION_URL` is missing in a given deployment).
+
 ### Tokens
 
 | Method | Path | Description |

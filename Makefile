@@ -97,6 +97,11 @@ check-all:
 	make py-check
 	make fe-check
 
+.PHONY: test
+test:
+	make py-test
+	make fe-test
+
 # Lambda.
 .PHONY: docker-build-lambda
 docker-build-lambda:
