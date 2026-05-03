@@ -165,6 +165,20 @@ def _cleanup_tmp() -> None:
 # ------------------------------------------------------------------
 
 
+def _archive_error_response(status_code: int, message: str) -> dict[str, Any]:
+    """Shape a JSON error response for the build_archive Function URL path.
+
+    Centralised so the ``Content-Type`` header stays consistent with the
+    success response — the web app reads the body as JSON regardless of the
+    status code.
+    """
+    return {
+        "statusCode": status_code,
+        "headers": {"content-type": "application/json"},
+        "body": json.dumps({"error": message}),
+    }
+
+
 def _handle_build_archive(payload: dict[str, Any]) -> dict[str, Any]:
     """Run the archive builder and (optionally) PATCH the originating job.
 
@@ -173,6 +187,8 @@ def _handle_build_archive(payload: dict[str, Any]) -> dict[str, Any]:
     the build finishes — the HTTP response is the ack of acceptance and the
     actual outcome is delivered out-of-band.
     """
+    from data_hub_lambda.config import lambda_config
+
     job_id = payload.get("job_id")
     try:
         request = archive_builder.parse_build_request(payload)
@@ -180,7 +196,22 @@ def _handle_build_archive(payload: dict[str, Any]) -> dict[str, Any]:
         logger.warning("Invalid build_archive payload: %s", exc)
         if isinstance(job_id, str):
             _post_archive_job_status(job_id, status="failed", error_message=str(exc))
-        return {"statusCode": 400, "body": json.dumps({"error": str(exc)})}
+        return _archive_error_response(400, str(exc))
+
+    # Allow-list the destination bucket against the Lambda's own configured
+    # archives bucket. Even though the web app generates the payload, an
+    # attacker with the invoke token shouldn't be able to redirect writes at
+    # an arbitrary bucket the Lambda role happens to have PutObject on.
+    expected_bucket = lambda_config.AWS_S3_ARCHIVES_BUCKET
+    if expected_bucket and request.destination_bucket != expected_bucket:
+        message = (
+            f"destination_bucket '{request.destination_bucket}' does not match "
+            f"this Lambda's configured archives bucket"
+        )
+        logger.warning(message)
+        if isinstance(job_id, str):
+            _post_archive_job_status(job_id, status="failed", error_message=message)
+        return _archive_error_response(400, message)
 
     try:
         result = archive_builder.build_run_archive(request)
@@ -192,7 +223,7 @@ def _handle_build_archive(payload: dict[str, Any]) -> dict[str, Any]:
         )
         if isinstance(job_id, str):
             _post_archive_job_status(job_id, status="failed", error_message=str(exc))
-        return {"statusCode": 500, "body": json.dumps({"error": str(exc)})}
+        return _archive_error_response(500, str(exc))
 
     body: dict[str, Any] = {
         "archive_bucket": result.archive_bucket,

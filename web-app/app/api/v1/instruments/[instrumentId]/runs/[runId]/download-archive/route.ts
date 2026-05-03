@@ -27,6 +27,16 @@ type RouteContext = {
   params: Promise<{ instrumentId: string; runId: string }>;
 };
 
+// Vercel Pro's default function timeout is 15s, which is too short for any
+// real sync build. The Lambda builder runs serially and sustains ~100–150
+// MB/s in-region, so a fresh archive at the 25 GB sync ceiling takes ~3–4
+// minutes of wall time. We give the route 5 minutes (Vercel Pro's hard max)
+// so a fresh build right at `SYNC_ARCHIVE_THRESHOLD_GB` has a comfortable
+// margin and the user gets a 302 instead of a timeout-then-cache-hit retry
+// dance. Larger builds skip the inline await entirely (see
+// `archive-builder.ts`), so this ceiling never bounds them.
+export const maxDuration = 300;
+
 // Parse `?file_ids=1,2,3` (or repeated `?file_ids=1&file_ids=2`) into a
 // deduped array of positive integers. Anything malformed is silently dropped
 // so the request still resolves against whatever valid IDs were supplied.
@@ -196,9 +206,9 @@ async function handleViaArchiveBuilder(args: {
     }
   }
 
-  const totalSize = sumKnownSizes(downloadable);
+  const totalSize = estimateTotalSize(downloadable);
   const threshold = getSyncArchiveThresholdBytes();
-  const goAsync = totalSize === null || totalSize >= threshold;
+  const goAsync = totalSize >= threshold;
 
   // Reuse an in-flight job for the same (run, fingerprint) so two simultaneous
   // clicks don't double-invoke the Lambda. The partial unique index on
@@ -336,11 +346,26 @@ async function handleViaArchiveBuilder(args: {
     : redirectResponse(url);
 }
 
-function sumKnownSizes(downloadable: DownloadableFile[]): number | null {
+// Per-file fallback used to estimate archive size when `files.size_bytes` is
+// NULL (legacy rows from before the column existed, or Lambda-created
+// processed outputs that skipped recording size). 64 MB is comfortably above
+// the typical processed artifact (CSVs, JSON, plot PNGs ≪ 5 MB) and small
+// enough that even hundreds of unsized files don't push a normal run past the
+// sync threshold. Tuning point: too low and we risk a sync timeout on a
+// hidden whale; too high and we send legitimately small archives down the
+// async polling path for no reason.
+const UNKNOWN_SIZE_FALLBACK_BYTES = 64 * 1024 * 1024;
+
+// Estimated total archive size in bytes. Files with NULL `size_bytes` get
+// charged at `UNKNOWN_SIZE_FALLBACK_BYTES` so a single legacy row can't flip
+// the entire request to the async polling UX. Going async when sync would
+// have worked is harmless (extra dialog), but going sync on a true 100 GB
+// build wastes a Vercel function — the Lambda still finishes regardless and
+// the next click resolves from cache.
+function estimateTotalSize(downloadable: DownloadableFile[]): number {
   let sum = 0;
   for (const f of downloadable) {
-    if (f.sizeBytes === null || f.sizeBytes === undefined) return null;
-    sum += f.sizeBytes;
+    sum += f.sizeBytes ?? UNKNOWN_SIZE_FALLBACK_BYTES;
   }
   return sum;
 }

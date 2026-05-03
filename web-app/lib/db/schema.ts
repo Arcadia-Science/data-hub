@@ -570,7 +570,7 @@ export const runComments = pgTable(
 // share rows on the partial unique `(instrument_run_id, fingerprint)` index
 // while a build is in flight, so two simultaneous "Download all" clicks
 // attach to the same job and only invoke the Lambda once. The fingerprint
-// is sha1 over the sorted `(file_id, s3_key)` pairs the archive will
+// is sha256 over the sorted `(file_id, s3_key)` pairs the archive will
 // contain, so adding/removing a file produces a fresh job + fresh cached
 // object instead of accidentally serving a stale zip.
 export const archiveJobs = pgTable(

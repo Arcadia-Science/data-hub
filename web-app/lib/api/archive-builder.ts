@@ -2,12 +2,15 @@ import { getS3ArchivesBucket } from "@/lib/s3";
 import crypto from "node:crypto";
 
 // Threshold below which we await the Lambda response inside the request
-// handler and 302 directly. Above this size, we kick the build into the
-// background and return a job ID so the UI can poll.
+// handler and 302 directly. Above this size, we skip the inline await and
+// return a job ID up front so the UI can poll.
 //
-// Tuned to ~80% of Vercel Pro's 5 minute function cap at ~500 MB/s in-region
-// S3-to-S3 throughput so even a slow source bucket has headroom.
-const DEFAULT_SYNC_THRESHOLD_BYTES = 100 * 1024 * 1024 * 1024; // 100 GB
+// The route's `maxDuration` is 300s (Vercel Pro's hard cap). The Lambda
+// builder runs serially (one GetObject + one UploadPart at a time) and in
+// practice sustains ~100–150 MB/s, so 25 GB lands inside the 5-minute
+// budget with margin to spare. Anything larger goes straight to async so
+// we never block on a request that can't finish.
+const DEFAULT_SYNC_THRESHOLD_BYTES = 25 * 1024 * 1024 * 1024; // 25 GB
 
 export function getSyncArchiveThresholdBytes(): number {
   const raw = process.env.SYNC_ARCHIVE_THRESHOLD_GB;
@@ -29,12 +32,17 @@ export type ArchiveFileInput = {
 // or removing a file changes the fingerprint, so the route never serves a
 // stale zip after a run's contents change. Sorting by id keeps the value
 // stable regardless of database ordering.
+//
+// SHA-256 is overkill for what is effectively a cache key — but it's the
+// project's house default, costs nothing at this input size, and avoids
+// triggering "why is SHA-1 here" review noise. The full digest is kept (no
+// truncation) so the value collides only on actual SHA-256 collisions.
 export function fingerprintFiles(files: ArchiveFileInput[]): string {
   const canonical = [...files]
     .map((f) => `${f.id}:${f.s3Key}`)
     .sort()
     .join("|");
-  return crypto.createHash("sha1").update(canonical).digest("hex");
+  return crypto.createHash("sha256").update(canonical).digest("hex");
 }
 
 export function getArchiveKey(
@@ -126,11 +134,10 @@ export async function invokeBuildArchive(
   }
 
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
     return {
       ok: false,
       status: res.status,
-      message: text || `Archive builder returned ${res.status}`,
+      message: await readLambdaErrorMessage(res),
     };
   }
 
@@ -159,4 +166,25 @@ export async function invokeBuildArchive(
     archiveKey: body.archive_key,
     sizeBytes: body.size_bytes,
   };
+}
+
+// Pulls a human-readable error string off a non-2xx Lambda response. The
+// builder always returns `{ "error": "..." }` JSON for build failures, so we
+// prefer that field; if the body isn't JSON (e.g. a Function URL platform
+// error before our handler ran) we fall back to the raw text. Trimmed and
+// length-capped so a stray Python traceback doesn't end up rendered in a
+// toast.
+async function readLambdaErrorMessage(res: Response): Promise<string> {
+  const fallback = `Archive builder returned ${res.status}`;
+  const text = await res.text().catch(() => "");
+  if (!text) return fallback;
+  try {
+    const parsed = JSON.parse(text) as { error?: unknown };
+    if (typeof parsed?.error === "string" && parsed.error.trim()) {
+      return parsed.error.trim().slice(0, 500);
+    }
+  } catch {
+    // Body wasn't JSON — fall through and use the raw text.
+  }
+  return text.trim().slice(0, 500) || fallback;
 }

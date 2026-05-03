@@ -27,7 +27,7 @@ Browser → /download-archive (web app)
                       └─ When status=ready, UI follows download_url to the presigned URL
 ```
 
-The sync/async split exists because Vercel functions cap at ~5 minutes. Archives smaller than `SYNC_ARCHIVE_THRESHOLD_GB` (default 100 GB; tune per project) finish well inside that budget; larger archives need the async path so the HTTP response can return before the build does.
+The sync/async split exists because the route is pinned to `maxDuration = 300s` (Vercel Pro's hard cap). Archives smaller than `SYNC_ARCHIVE_THRESHOLD_GB` (default 25 GB; tune per project) finish inside that budget at the Lambda builder's ~100–150 MB/s serial throughput; larger archives skip the inline await entirely so the HTTP response can return before the build does. Inline builds that exceptionally still time out the route are safe — the Lambda keeps running and PATCHes the row to `ready`, so a retry resolves from the cache.
 
 ## S3 layout
 
@@ -44,7 +44,7 @@ Archives live in a separate bucket per environment, provisioned by [`infra/templ
 
 ### Fingerprint = cache key
 
-The fingerprint is a sorted SHA-1 of `(file_id, s3_key)` pairs:
+The fingerprint is a sorted SHA-256 of `(file_id, s3_key)` pairs:
 
 ```ts
 // web-app/lib/api/archive-builder.ts
@@ -56,7 +56,7 @@ Properties this gives us:
 - **Adding or removing a file** changes the fingerprint, so a stale archive can never be served — the next request will HEAD a different key and miss.
 - **Reprocessing** that rewrites `files.s3_key` invalidates the archive.
 - **Filtered downloads** (`?file_ids=1,2,3`) cache independently of the unfiltered archive because their input set differs.
-- **No collision risk** in practice: SHA-1 of a sorted run manifest is unique enough; an attacker would need preimage capability and write access to the source bucket to weaponize this.
+- **No collision risk** in practice: SHA-256 of a sorted run manifest is far more than unique enough; an attacker would need preimage capability and write access to the source bucket to weaponize this.
 
 ### `archive_jobs` table dedups in-flight builds
 
@@ -78,7 +78,7 @@ The route `INSERT … ON CONFLICT DO NOTHING`s; on conflict it `SELECT`s the exi
 | `S3_ARCHIVES_BUCKET` | Vercel | Bucket the route HEADs and presigns from. Must match the SAM-provisioned bucket for the env. |
 | `LAMBDA_FUNCTION_URL` | Vercel | Function URL of the Data Hub Lambda. Required — missing env vars throw at request time. |
 | `LAMBDA_INVOKE_TOKEN` | Vercel + SAM | Shared bearer token for Function URL auth. Must match the Lambda's `LAMBDA_INVOKE_TOKEN` env. |
-| `SYNC_ARCHIVE_THRESHOLD_GB` | Vercel (optional) | Sync vs async cutover. Defaults to 100 GB. Set to a small number (e.g. `0.001`) to force-test the async path. |
+| `SYNC_ARCHIVE_THRESHOLD_GB` | Vercel (optional) | Sync vs async cutover. Defaults to 25 GB. Set to a small number (e.g. `0.001`) to force-test the async path. |
 | `AWS_S3_ARCHIVES_BUCKET` | Lambda | Set automatically by SAM via `!Ref ArchivesBucket`. The Lambda only writes to this bucket. |
 | `DATA_HUB_API_URL` + `DATA_HUB_API_KEY` | Lambda | Used by the PATCH callback to `/api/v1/archive-jobs/:id` on async builds. |
 
@@ -123,7 +123,7 @@ The partial unique index makes deletion safe — concurrent clicks just insert a
 This shouldn't be possible by construction (fingerprint includes every file's `id` + `s3_key`), but to confirm:
 
 1. Pull the current `files` rows for the run.
-2. Compute the fingerprint locally with the same `id:s3_key` sort + SHA-1.
+2. Compute the fingerprint locally with the same `id:s3_key` sort + SHA-256.
 3. Compare to the cached object key in the archives bucket. If the fingerprints differ, the route would HEAD a different key and miss — the user is hitting a different archive than they think (likely a filtered "Download all" they triggered earlier).
 4. If the fingerprints match and the archive contents are wrong, that's a real bug in the Lambda builder — capture the `archive_jobs` row and the source bucket listing and file an issue.
 

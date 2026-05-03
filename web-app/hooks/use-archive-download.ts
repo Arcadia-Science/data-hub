@@ -8,10 +8,10 @@ import {
 import { use } from "react";
 
 // Hook for triggering archive downloads. Sync/cache hits are silent (browser
-// downloads immediately); async builds (>~100 GB or otherwise slow) surface
-// in a status dialog rendered by `ArchiveDownloadProvider`. Components are
-// expected to be rendered under the provider; calling outside of it throws
-// to fail loud rather than silently dropping clicks.
+// downloads immediately); async builds (≥SYNC_ARCHIVE_THRESHOLD_GB, default
+// 25 GB) surface in a status dialog rendered by `ArchiveDownloadProvider`.
+// Components are expected to be rendered under the provider; calling outside
+// of it throws to fail loud rather than silently dropping clicks.
 export function useArchiveDownload(): {
   jobs: ArchiveDownloadJob[];
   actions: ArchiveDownloadActions;

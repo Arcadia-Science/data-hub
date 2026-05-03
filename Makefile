@@ -166,4 +166,5 @@ endif
 	@echo "Removing retained S3 buckets..."
 	-aws s3 rb s3://arcadia-data-hub-raw-$(ENV) --force
 	-aws s3 rb s3://arcadia-data-hub-processed-$(ENV) --force
+	-aws s3 rb s3://arcadia-data-hub-archives-$(ENV) --force
 	@echo "Teardown complete."
