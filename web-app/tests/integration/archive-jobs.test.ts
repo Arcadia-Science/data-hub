@@ -1,3 +1,8 @@
+import {
+  expireStaleArchiveJobs,
+  STUCK_BUILD_ERROR_MESSAGE,
+  STUCK_BUILD_TIMEOUT_MS,
+} from "@/lib/api/archive-jobs";
 import { archiveJobs, instrumentRuns, instruments } from "@/lib/db/schema";
 import {
   api,
@@ -6,7 +11,7 @@ import {
   resetDb,
   seedTestUser,
 } from "@/tests/integration/helpers";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // Tests for the /api/v1/archive-jobs/:id endpoints. These cover the surface
@@ -281,5 +286,151 @@ describe("Archive Jobs API", () => {
           eq(archiveJobs.fingerprint, fingerprint)
         )
       );
+  });
+
+  // --------------------------------------------------------------------
+  // Stale-row expiry (`expireStaleArchiveJobs`)
+  // --------------------------------------------------------------------
+
+  it("expireStaleArchiveJobs flips an old `building` row to `failed`", async () => {
+    const db = getTestDb();
+    const fingerprint = "fp-stale";
+    const ancient = new Date(Date.now() - STUCK_BUILD_TIMEOUT_MS - 60_000);
+    const [job] = await db
+      .insert(archiveJobs)
+      .values({
+        instrumentRunId: runInternalId,
+        fingerprint,
+        status: "building",
+        createdAt: ancient,
+      })
+      .returning();
+
+    const expired = await expireStaleArchiveJobs(runInternalId, fingerprint, {
+      db,
+    });
+    expect(expired).toBe(1);
+
+    const [stored] = await db
+      .select()
+      .from(archiveJobs)
+      .where(eq(archiveJobs.id, job.id));
+    expect(stored.status).toBe("failed");
+    expect(stored.errorMessage).toBe(STUCK_BUILD_ERROR_MESSAGE);
+    expect(stored.completedAt).not.toBeNull();
+
+    // Cleanup.
+    await db.delete(archiveJobs).where(eq(archiveJobs.id, job.id));
+  });
+
+  it("expireStaleArchiveJobs leaves a fresh `building` row alone", async () => {
+    const db = getTestDb();
+    const fingerprint = "fp-fresh";
+    const [job] = await db
+      .insert(archiveJobs)
+      .values({
+        instrumentRunId: runInternalId,
+        fingerprint,
+        status: "building",
+        // createdAt defaults to now() — well inside the timeout window.
+      })
+      .returning();
+
+    const expired = await expireStaleArchiveJobs(runInternalId, fingerprint, {
+      db,
+    });
+    expect(expired).toBe(0);
+
+    const [stored] = await db
+      .select()
+      .from(archiveJobs)
+      .where(eq(archiveJobs.id, job.id));
+    expect(stored.status).toBe("building");
+
+    await db.delete(archiveJobs).where(eq(archiveJobs.id, job.id));
+  });
+
+  it("expireStaleArchiveJobs ignores rows for other (run, fingerprint) pairs", async () => {
+    const db = getTestDb();
+    const ancient = new Date(Date.now() - STUCK_BUILD_TIMEOUT_MS - 60_000);
+    const [otherRun] = await db
+      .insert(instrumentRuns)
+      .values({
+        instrumentId,
+        runId: "other-run-for-expiry",
+        source: "watcher",
+      })
+      .returning({ id: instrumentRuns.id });
+
+    // A stale row under a different run + a stale row with the same run but
+    // a different fingerprint. Neither should be touched by an expiry call
+    // scoped to (runInternalId, "fp-target").
+    const [otherRunRow] = await db
+      .insert(archiveJobs)
+      .values({
+        instrumentRunId: otherRun.id,
+        fingerprint: "fp-target",
+        status: "building",
+        createdAt: ancient,
+      })
+      .returning();
+    const [wrongFpRow] = await db
+      .insert(archiveJobs)
+      .values({
+        instrumentRunId: runInternalId,
+        fingerprint: "fp-not-target",
+        status: "building",
+        createdAt: ancient,
+      })
+      .returning();
+
+    const expired = await expireStaleArchiveJobs(runInternalId, "fp-target", {
+      db,
+    });
+    expect(expired).toBe(0);
+
+    for (const id of [otherRunRow.id, wrongFpRow.id]) {
+      const [row] = await db
+        .select()
+        .from(archiveJobs)
+        .where(eq(archiveJobs.id, id));
+      expect(row.status).toBe("building");
+    }
+
+    await db
+      .delete(archiveJobs)
+      .where(inArray(archiveJobs.id, [otherRunRow.id, wrongFpRow.id]));
+    await db.delete(instrumentRuns).where(eq(instrumentRuns.id, otherRun.id));
+  });
+
+  it("expireStaleArchiveJobs is a no-op against a terminal `ready` row even if old", async () => {
+    const db = getTestDb();
+    const fingerprint = "fp-old-ready";
+    const ancient = new Date(Date.now() - STUCK_BUILD_TIMEOUT_MS - 60_000);
+    const [job] = await db
+      .insert(archiveJobs)
+      .values({
+        instrumentRunId: runInternalId,
+        fingerprint,
+        status: "ready",
+        archiveBucket: "test-archives-bucket",
+        archiveKey: "runs/x/y/old.zip",
+        completedAt: ancient,
+        createdAt: ancient,
+      })
+      .returning();
+
+    const expired = await expireStaleArchiveJobs(runInternalId, fingerprint, {
+      db,
+    });
+    expect(expired).toBe(0);
+
+    const [stored] = await db
+      .select()
+      .from(archiveJobs)
+      .where(eq(archiveJobs.id, job.id));
+    expect(stored.status).toBe("ready");
+
+    await db.delete(archiveJobs).where(eq(archiveJobs.id, job.id));
   });
 });

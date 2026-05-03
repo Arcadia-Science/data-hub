@@ -220,6 +220,26 @@ class TestBuildRunArchiveFailures:
         assert s3.aborted, "expected abort_multipart_upload to be called"
         assert ("archives-bucket", "runs/akta-fplc/RUN001/abc.zip") not in s3.uploaded_objects
 
+    def test_refuses_to_exceed_max_parts(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # With a 256-byte part size and a 4-part cap, an 8 KB file forces the
+        # writer past the cap mid-stream. We expect a clear ValueError before
+        # S3 would ever return InvalidArgument, and the upload to be aborted.
+        import data_hub_lambda.archive_builder as ab
+
+        monkeypatch.setattr(ab, "_PART_SIZE_BYTES", 256)
+        monkeypatch.setattr(ab, "_MAX_PARTS", 4)
+        # _MAX_TOTAL_BYTES is derived at module load; recompute so the
+        # inter-file byte guard doesn't fire first.
+        monkeypatch.setattr(ab, "_MAX_TOTAL_BYTES", 256 * 4)
+        s3 = StubS3Client({("raw-bucket", "akta-fplc/RUN001/big.bin"): b"x" * 8192})
+        request = _make_request([ArchiveFile(key="akta-fplc/RUN001/big.bin", name="big.bin")])
+
+        with pytest.raises(ValueError, match="multipart upload cap"):
+            build_run_archive(request, s3_client=s3)
+
+        assert s3.aborted, "expected abort_multipart_upload to be called"
+        assert ("archives-bucket", "runs/akta-fplc/RUN001/abc.zip") not in s3.uploaded_objects
+
 
 # ---------------------------------------------------------------------------
 # parse_build_request validation

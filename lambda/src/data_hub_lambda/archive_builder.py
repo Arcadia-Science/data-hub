@@ -30,9 +30,8 @@ logger = logging.getLogger(__name__)
 
 
 # S3 multipart minimum non-final part size is 5 MB; we use 16 MB to keep the
-# part count low (max parts/upload is 10 000, so 16 MB × 10 000 = 156 GB,
-# safely above any current run). Each part is held in memory once before being
-# flushed, so the resident set stays around ~32 MB for an in-flight build.
+# part count low. Each part is held in memory once before being flushed, so
+# the resident set stays around ~32 MB for an in-flight build.
 _PART_SIZE_BYTES = 16 * 1024 * 1024
 
 # Block size used when piping bytes from a source S3 GetObject body into the
@@ -40,11 +39,19 @@ _PART_SIZE_BYTES = 16 * 1024 * 1024
 # entire part in a single read buffer.
 _COPY_BLOCK_SIZE_BYTES = 1 * 1024 * 1024
 
-# Maximum total size the builder will attempt. The Lambda Function URL caps
-# synchronous responses at 15 minutes; at ~500 MB/s in-region S3-to-S3 that
-# translates to ~450 GB worth of zipping per invocation. We bound conservatively
-# at 400 GB so a slow source bucket can't push us into the timeout.
-_MAX_TOTAL_BYTES = 400 * 1024 * 1024 * 1024
+# S3 enforces a hard cap of 10 000 parts per multipart upload. We treat this
+# as the architectural ceiling for a single archive — exceeding it means
+# either the part size is too small or the run is genuinely too large to zip
+# in one Lambda invocation. With the default 16 MB parts that's a 156 GB
+# total cap, well above the ~25–30 GB real-world archives we see today.
+_MAX_PARTS = 10_000
+
+# Maximum total size the builder will attempt, derived from the part size +
+# S3's part-count cap so the byte and part limits never disagree. The check
+# in ``build_run_archive`` aborts between files; the per-part guard in
+# ``_MultipartUploadStream._upload_part`` catches the within-a-single-file
+# case before it reaches S3.
+_MAX_TOTAL_BYTES = _PART_SIZE_BYTES * _MAX_PARTS
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +165,15 @@ class _MultipartUploadStream:
             logger.exception("Failed to abort multipart upload s3://%s/%s", self._bucket, self._key)
 
     def _upload_part(self, body: bytes) -> None:
+        # Fail fast before the request would be rejected by S3 with an
+        # opaque ``InvalidArgument`` — the inter-file ``_MAX_TOTAL_BYTES``
+        # check in ``build_run_archive`` won't catch a single huge file
+        # that crosses the 10 000-part boundary mid-stream.
+        if self._part_number > _MAX_PARTS:
+            raise ValueError(
+                f"Archive would exceed S3's {_MAX_PARTS}-part multipart upload cap "
+                f"(part size = {self._part_size} bytes); refusing to continue"
+            )
         response = self._s3.upload_part(
             Bucket=self._bucket,
             Key=self._key,
@@ -285,7 +301,9 @@ def build_run_archive(
                 _append_file_to_zip(s3, request.source_bucket, file, zf)
                 if stream.tell() > _MAX_TOTAL_BYTES:
                     raise ValueError(
-                        f"Archive exceeded {_MAX_TOTAL_BYTES} bytes; refusing to continue"
+                        f"Archive exceeded the {_MAX_TOTAL_BYTES}-byte cap "
+                        f"({_MAX_PARTS} S3 parts × {_PART_SIZE_BYTES} bytes); "
+                        f"refusing to continue"
                     )
     except Exception:
         stream.abort()

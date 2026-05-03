@@ -69,7 +69,7 @@ CREATE UNIQUE INDEX archive_jobs_inflight_unique_idx
   WHERE status IN ('pending', 'building');
 ```
 
-The route `INSERT … ON CONFLICT DO NOTHING`s; on conflict it `SELECT`s the existing row and reuses the existing job. Once the row transitions to `ready` or `failed`, the predicate stops applying and a future request can insert a new job.
+The route `INSERT … ON CONFLICT DO NOTHING`s; on conflict it `SELECT`s the existing row and reuses it. The request that *won* the insert (or had to insert a fresh row because the prior job had already terminated) is the only one that calls the Lambda — losing requests skip the invocation entirely and return `202 { job_id, poll_url }` so the UI polls the existing build to completion. This keeps Lambda spend and S3 part uploads from doubling on rapid concurrent clicks. Once the row transitions to `ready` or `failed`, the partial-index predicate stops applying and a future request can insert a new job.
 
 ## Configuration
 
@@ -96,15 +96,11 @@ Likely causes, in order of frequency:
 
 1. **Lambda errored before the PATCH fired.** Check CloudWatch logs for `_handle_build_archive` failures around the job's `created_at`. Typical culprits: source object deleted between row insert and Lambda fetch (404 from `GetObject`), or a multipart upload that exceeded the function timeout.
 2. **PATCH callback failed.** The Lambda logs `Failed to PATCH archive-job %s` if the web app rejected the update (auth issue, web app down). The build itself may have succeeded — check the archives bucket for the expected key. If the object exists, manually PATCH the row to `ready` or just `DELETE` it so the next click serves from cache.
-3. **Async path lost the `after()` callback.** Vercel `next/server` `after()` is best-effort; in rare cases (SIGTERM during scale-down) it can drop. The row will sit in `building` forever. Safe to delete — the next click will rebuild.
+3. **Async path lost the `after()` callback.** Vercel `next/server` `after()` is best-effort; in rare cases (SIGTERM during scale-down) it can drop. The row will sit in `building` until a new download-archive request for the same fingerprint arrives — see "Self-healing" below.
 
-To force a rebuild on the next click:
+#### Self-healing
 
-```sql
-DELETE FROM archive_jobs WHERE id = '...';
-```
-
-The partial unique index makes deletion safe — concurrent clicks just insert a fresh row.
+The download-archive route runs `expireStaleArchiveJobs` on every request: any `pending`/`building` row older than `STUCK_BUILD_TIMEOUT_MS` (20 minutes) is flipped to `failed` with `error_message = "Build did not report completion within the expected window..."` before the dedup INSERT runs. So in practice a stuck row only blocks new builds for the first 20 minutes after the Lambda death, and the user's next click after that automatically rebuilds. To force this manually without waiting for traffic, just `UPDATE archive_jobs SET status='failed' WHERE id = '...'` or `DELETE` the row — both are safe. The partial unique index makes either path race-free.
 
 ### Downloads are returning 502
 

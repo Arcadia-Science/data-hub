@@ -3,7 +3,9 @@ import {
   getArchiveKey,
   getSyncArchiveThresholdBytes,
   invokeBuildArchive,
+  type InvokeBuildArchiveInput,
 } from "@/lib/api/archive-builder";
+import { expireStaleArchiveJobs } from "@/lib/api/archive-jobs";
 import { authenticateRequest } from "@/lib/api/auth";
 import {
   apiError,
@@ -210,10 +212,22 @@ async function handleViaArchiveBuilder(args: {
   const threshold = getSyncArchiveThresholdBytes();
   const goAsync = totalSize >= threshold;
 
-  // Reuse an in-flight job for the same (run, fingerprint) so two simultaneous
-  // clicks don't double-invoke the Lambda. The partial unique index on
-  // archive_jobs handles the race: ON CONFLICT DO NOTHING returns no row, and
-  // we then SELECT the existing one.
+  // Heal any stuck row for this (run, fingerprint) before the dedup INSERT.
+  // A Lambda that crashed mid-build leaves the row in `building` forever;
+  // without this sweep the partial unique index keeps rejecting new inserts
+  // and the user sees endless polling timeouts. See `archive-jobs.ts`.
+  const expired = await expireStaleArchiveJobs(runInternalId, fingerprint);
+  if (expired > 0) {
+    console.warn(
+      `Expired ${expired} stale archive_jobs row(s) for run ${runInternalId} (fingerprint ${fingerprint})`
+    );
+  }
+
+  // Reuse an in-flight job for the same (run, fingerprint) so two
+  // simultaneous clicks don't double-invoke the Lambda. The partial unique
+  // index on archive_jobs handles the race: ON CONFLICT DO NOTHING returns
+  // no row, we SELECT the existing one, and `weOwnBuild` tells us whether
+  // *this* request is responsible for actually invoking the builder.
   const inserted = await db
     .insert(archiveJobs)
     .values({
@@ -227,6 +241,7 @@ async function handleViaArchiveBuilder(args: {
     .returning();
 
   let job = inserted[0];
+  let weOwnBuild = job !== undefined;
   if (!job) {
     [job] = await db
       .select()
@@ -242,9 +257,11 @@ async function handleViaArchiveBuilder(args: {
   }
 
   if (!job) {
-    // Index ruled out concurrent insert but no in-flight row remained — most
-    // likely the prior job already finished. Fall through to async polling
-    // by inserting a fresh row outside the inflight predicate.
+    // Partial unique index rejected the first INSERT but the SELECT found
+    // no in-flight row — the prior job must have finished between those
+    // two queries. Insert again (no conflict possible now since the
+    // existing row is in a terminal state) and mark this request as the
+    // owner of the new build.
     [job] = await db
       .insert(archiveJobs)
       .values({
@@ -255,60 +272,32 @@ async function handleViaArchiveBuilder(args: {
         createdBy,
       })
       .returning();
+    weOwnBuild = true;
   }
+
+  // If we lost the race we MUST NOT invoke the Lambda — the existing build
+  // will PATCH the row and write the same destination key, so kicking off
+  // a parallel multipart upload would just double-spend Lambda + S3 PUT for
+  // a byte-identical result. Fall through to the polling path so the UI
+  // (or a JSON API caller) waits on the existing build instead.
+  if (!weOwnBuild) {
+    return buildingJsonResponse(job.id);
+  }
+
+  const buildInput: InvokeBuildArchiveInput = {
+    jobId: job.id,
+    instrumentId,
+    runId,
+    sourceBucket,
+    files: downloadable.map((f) => ({ s3Key: f.s3Key, filename: f.filename })),
+  };
 
   if (goAsync) {
-    after(async () => {
-      const result = await invokeBuildArchive(
-        {
-          jobId: job.id,
-          instrumentId,
-          runId,
-          sourceBucket,
-          files: downloadable.map((f) => ({
-            s3Key: f.s3Key,
-            filename: f.filename,
-          })),
-        },
-        fingerprint
-      );
-      if (!result.ok) {
-        await db
-          .update(archiveJobs)
-          .set({
-            status: "failed",
-            errorMessage: result.message,
-            completedAt: new Date(),
-          })
-          .where(eq(archiveJobs.id, job.id));
-      }
-      // The Lambda PATCH callback handles the success path so the row's
-      // completed_at lines up with the actual upload finish time. We don't
-      // mark `ready` here to avoid racing the callback.
-    });
-    return Response.json(
-      {
-        job_id: job.id,
-        status: "building",
-        poll_url: `/api/v1/archive-jobs/${job.id}`,
-      },
-      { status: 202 }
-    );
+    after(() => runArchiveBuildInBackground(job.id, buildInput, fingerprint));
+    return buildingJsonResponse(job.id);
   }
 
-  const result = await invokeBuildArchive(
-    {
-      jobId: job.id,
-      instrumentId,
-      runId,
-      sourceBucket,
-      files: downloadable.map((f) => ({
-        s3Key: f.s3Key,
-        filename: f.filename,
-      })),
-    },
-    fingerprint
-  );
+  const result = await invokeBuildArchive(buildInput, fingerprint);
 
   if (!result.ok) {
     await db
@@ -344,6 +333,43 @@ async function handleViaArchiveBuilder(args: {
   return wantsJson
     ? readyJsonResponse(url, result.sizeBytes)
     : redirectResponse(url);
+}
+
+// Fire-and-forget invocation used by the async path. The Lambda PATCHes the
+// row to `ready` on success; we only need to mark `failed` if the invocation
+// itself never reached the builder (transport error, 5xx). This callback
+// runs after the 202 response is flushed; if Vercel terminates the function
+// before it completes, the Lambda's own failure-path PATCH still covers us.
+async function runArchiveBuildInBackground(
+  jobId: string,
+  input: InvokeBuildArchiveInput,
+  fingerprint: string
+): Promise<void> {
+  const result = await invokeBuildArchive(input, fingerprint);
+  if (!result.ok) {
+    await db
+      .update(archiveJobs)
+      .set({
+        status: "failed",
+        errorMessage: result.message,
+        completedAt: new Date(),
+      })
+      .where(eq(archiveJobs.id, jobId));
+  }
+}
+
+function buildingJsonResponse(jobId: string): Response {
+  return Response.json(
+    {
+      job_id: jobId,
+      status: "building",
+      poll_url: `/api/v1/archive-jobs/${jobId}`,
+    },
+    {
+      status: 202,
+      headers: { "Cache-Control": "no-store" },
+    }
+  );
 }
 
 // Per-file fallback used to estimate archive size when `files.size_bytes` is
