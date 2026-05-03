@@ -45,9 +45,18 @@ export type S3HeadResult =
   | { exists: true; sizeBytes: number | null }
   | { exists: false };
 
-// HeadObject wrapper that translates a 404 into a clean { exists: false }.
-// Other failures (auth, network) propagate so the caller can decide whether to
-// fall back to a fresh build or surface a 5xx.
+// HeadObject wrapper that translates a "not in cache" response into a clean
+// { exists: false }. Real failures (network, malformed request) propagate so
+// the caller can surface a 5xx.
+//
+// Both 404 and 403 are treated as "not in cache":
+//   - 404 is the normal missing-object response when the caller has
+//     `s3:ListBucket` on the bucket-level ARN.
+//   - 403 is what S3 returns for a missing key when the caller only has
+//     `s3:GetObject` on `bucket/*` (S3 deliberately won't reveal key
+//     existence without ListBucket). The IAM policy in `infra/template.yaml`
+//     grants ListBucket so this shouldn't happen, but treating 403 as a
+//     cache miss makes the route resilient to future policy drift.
 export async function headS3Object(
   bucket: string,
   key: string
@@ -62,11 +71,9 @@ export async function headS3Object(
     };
   } catch (err) {
     if (err instanceof NotFound) return { exists: false };
-    if (
-      err instanceof S3ServiceException &&
-      err.$metadata?.httpStatusCode === 404
-    ) {
-      return { exists: false };
+    if (err instanceof S3ServiceException) {
+      const status = err.$metadata?.httpStatusCode;
+      if (status === 404 || status === 403) return { exists: false };
     }
     throw err;
   }

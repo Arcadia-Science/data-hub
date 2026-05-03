@@ -404,10 +404,18 @@ Resources:
               # Read-only access to the archives bucket so the web app can
               # HeadObject (cache-hit check) and presign GETs. Lambda is the
               # only writer.
+              #
+              # `s3:ListBucket` is required on the bucket-level ARN: without
+              # it, HeadObject on a missing key returns 403 instead of 404
+              # (S3 won't reveal key existence to a caller that can't list).
+              # That breaks the cache-miss path, since the route relies on
+              # 404 to fall through to a fresh Lambda build.
               - Effect: Allow
                 Action:
                   - s3:GetObject
+                  - s3:ListBucket
                 Resource:
+                  - !Sub "arn:aws:s3:::arcadia-data-hub-archives-${Environment}"
                   - !Sub "arn:aws:s3:::arcadia-data-hub-archives-${Environment}/*"
 
 Outputs:
