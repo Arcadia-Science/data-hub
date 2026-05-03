@@ -10,9 +10,8 @@ Design notes:
   that buffers writes into ~16 MB parts and flushes each via ``UploadPart``.
   This keeps memory bounded regardless of total archive size, so a 200 GB
   microscope run zips inside the Lambda's standard 10 GB memory budget.
-- ``ZIP_STORED`` matches the legacy ``archiver({ store: true })`` behavior on
-  the web app side — instrument output is rarely compressible and we don't
-  want to spend Lambda CPU on deflate.
+- ``ZIP_STORED`` skips deflate entirely — instrument output is rarely
+  compressible and we don't want to spend Lambda CPU on it.
 - ``force_zip64=True`` on every ``ZipFile.open`` call so the writer always
   emits ZIP64 headers; without it, a single ≥4 GB entry would raise.
 - Every input ``key`` is required to live under ``{instrument_id}/{run_id}/``

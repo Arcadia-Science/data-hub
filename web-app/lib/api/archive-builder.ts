@@ -19,13 +19,6 @@ export function getSyncArchiveThresholdBytes(): number {
   return Math.floor(parsed * 1024 * 1024 * 1024);
 }
 
-export function isArchiveBuilderEnabled(): boolean {
-  return (
-    process.env.ARCHIVE_BUILDER_ENABLED === "1" ||
-    process.env.ARCHIVE_BUILDER_ENABLED === "true"
-  );
-}
-
 export type ArchiveFileInput = {
   id: number;
   s3Key: string;
@@ -57,10 +50,14 @@ export function getArchiveKey(
 
 type LambdaConfig = { url: string; token: string };
 
-function getLambdaConfig(): LambdaConfig | null {
+function getLambdaConfig(): LambdaConfig {
   const url = process.env.LAMBDA_FUNCTION_URL;
   const token = process.env.LAMBDA_INVOKE_TOKEN;
-  if (!url || !token) return null;
+  if (!url || !token) {
+    throw new Error(
+      "LAMBDA_FUNCTION_URL and LAMBDA_INVOKE_TOKEN must be set to build archives"
+    );
+  }
   return { url, token };
 }
 
@@ -82,15 +79,15 @@ export type InvokeBuildArchiveResult =
   | { ok: false; status: number; message: string };
 
 // Issues a synchronous archive-build request to the Lambda Function URL and
-// awaits the result. Mirrors the patterns in `file-reprocessing.ts`. Returns
-// `null` when Lambda is not configured, so the caller can fall back to the
-// legacy streaming path while the env vars roll out.
+// awaits the result. Mirrors the patterns in `file-reprocessing.ts`. Throws
+// if Lambda env vars are missing — the route is fully dependent on the
+// builder, so a misconfigured deploy should fail loudly rather than silently
+// degrade.
 export async function invokeBuildArchive(
   input: InvokeBuildArchiveInput,
   fingerprint: string
-): Promise<InvokeBuildArchiveResult | null> {
+): Promise<InvokeBuildArchiveResult> {
   const lambda = getLambdaConfig();
-  if (!lambda) return null;
 
   const archiveBucket = getS3ArchivesBucket();
   const archiveKey = getArchiveKey(
