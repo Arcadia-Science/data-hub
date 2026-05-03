@@ -1,10 +1,10 @@
 # Lambda
 
-The Data Hub Lambda function preprocesses raw instrument data uploaded to S3. It can be triggered automatically by S3 events or manually via the web app for reprocessing. It runs an instrument-specific preprocessing pipeline and reports results back through the API and Slack.
+The Data Hub Lambda function preprocesses raw instrument data uploaded to S3 and builds run-archive zips on demand for the web app's "Download all" actions. It can be triggered automatically by S3 events or manually via Function URL invocations from the web app. It runs an instrument-specific preprocessing pipeline (or the archive builder) and reports results back through the API and Slack.
 
 ## How it works
 
-The Lambda has two invocation paths that converge on the same processing logic:
+The Lambda has three invocation paths:
 
 ### S3 trigger (automatic)
 
@@ -24,6 +24,17 @@ When a file fails processing (or needs to be re-run), users can trigger reproces
 3. The request includes an `Authorization: Bearer <LAMBDA_INVOKE_TOKEN>` header and a JSON body containing a synthetic S3 event payload.
 4. The Lambda handler detects the Function URL invocation (via `requestContext` in the event), verifies the Bearer token against the `LAMBDA_INVOKE_TOKEN` environment variable using constant-time comparison, and parses the S3 event from the request body.
 5. From here, processing follows the same dispatch logic as the S3 trigger path (steps 2–6 above).
+
+### Function URL (archive build)
+
+The web app's `GET /api/v1/instruments/:instrumentId/runs/:runId/download-archive` route delegates zip building to the Lambda so download bytes never traverse Vercel. This shares the Function URL with manual reprocessing and is distinguished by a `type: "build_archive"` field in the request body:
+
+1. The web app POSTs `{ type: "build_archive", instrument_id, run_id, source_bucket, destination_bucket, destination_key, files: [{ key, name }, ...], job_id? }` to the Function URL with the same `Authorization: Bearer <LAMBDA_INVOKE_TOKEN>` header used by reprocessing.
+2. The handler dispatches on the `type` discriminator and calls `archive_builder.build_run_archive`. Every input `key` is required to live under `{instrument_id}/{run_id}/` in the source bucket — the validator rejects keys that escape the run's prefix so a leaked invoke token cannot be used to exfiltrate unrelated S3 prefixes.
+3. The builder streams each S3 object through `zipfile.ZipFile` into an `_MultipartUploadStream` that buffers writes into ~16 MB parts and flushes each via `UploadPart`. Memory stays bounded regardless of total archive size, so a 200+ GB run zips inside the Lambda's standard memory budget. Entries are written `ZIP_STORED` (no compression — instrument output rarely compresses) with `force_zip64=True` (so individual entries ≥ 4 GB don't blow up the writer).
+4. On success, the Lambda returns `{ archive_bucket, archive_key, size_bytes }`. If `job_id` was supplied (async path), it also PATCHes `/api/v1/archive-jobs/:job_id` with the same fields and `status: "ready"` so the web app can serve a presigned URL on the next poll. On failure it PATCHes `status: "failed"` with `error_message`.
+
+See [Run archives](run-archives.md) for the full flow, S3 bucket layout, cache semantics, and operator runbook.
 
 ## Supported instruments
 

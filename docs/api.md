@@ -80,7 +80,7 @@ Comment bodies are markdown source, capped at 10 000 characters. Author-only mut
 | `GET` | `/api/v1/archive-jobs/:id` | Status of an asynchronous archive build. Returns `{ status, archive_bucket, archive_key, size_bytes, error_message, completed_at, download_url }`. `download_url` is a fresh presigned GET URL whenever `status === 'ready'`; `null` otherwise. |
 | `PATCH` | `/api/v1/archive-jobs/:id` | Lambda callback: marks an async build as `ready` (with `archive_bucket`, `archive_key`, `size_bytes`) or `failed` (with `error_message`). Stamps `completed_at` on terminal transitions. Authenticates via the same PAT mechanism as other endpoints. |
 
-The download-archive endpoint sits in front of a Lambda-driven builder pipeline that produces zips in S3 and serves them via presigned URLs, so download bytes never travel through Vercel.
+The download-archive endpoint sits in front of a Lambda-driven builder pipeline that produces zips in S3 and serves them via presigned URLs, so download bytes never travel through Vercel. See [Run archives](run-archives.md) for the full flow, cache semantics, and operator runbook.
 
 ### Tokens
 
