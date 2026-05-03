@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import type { ArchiveDownloadJob } from "./archive-download-provider";
 
@@ -18,12 +19,34 @@ import type { ArchiveDownloadJob } from "./archive-download-provider";
 // jobs after a short delay, so the only sticky rows are async builds and
 // failures. Multiple concurrent jobs (e.g. bulk download) are stacked.
 
-function formatElapsed(startedAt: number): string {
-  const seconds = Math.floor((Date.now() - startedAt) / 1000);
+function formatElapsed(startedAt: number, now: number): string {
+  const seconds = Math.max(0, Math.floor((now - startedAt) / 1000));
   if (seconds < 60) return `${seconds}s`;
   const mins = Math.floor(seconds / 60);
   const rem = seconds - mins * 60;
   return rem === 0 ? `${mins}m` : `${mins}m ${rem}s`;
+}
+
+// Drives a once-per-second re-render so the elapsed counter on building rows
+// actually ticks. Without this, the dialog only re-renders on status
+// transitions (which for a long async build is essentially never between
+// `pending → building` and `building → ready/failed`), so the counter would
+// freeze at "0s" for the entire wait. Skips the interval entirely when no
+// rows are building to keep the steady-state cost zero.
+//
+// When `active` flips false → true after a long idle (the provider keeps
+// this dialog mounted for the whole session, so `now` may be stale by
+// hours), the displayed value is briefly clamped to "0s" by `formatElapsed`'s
+// `Math.max(0, …)` until the first interval tick lands ≤ 1 s later — which
+// matches reality, since the row is brand new at that point.
+function useNowTick(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const id = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(id);
+  }, [active]);
+  return now;
 }
 
 export function ArchiveDownloadDialog({
@@ -39,6 +62,8 @@ export function ArchiveDownloadDialog({
     (j) => j.status === "building" || j.status === "failed"
   );
   const open = visible.length > 0;
+  const hasBuilding = visible.some((j) => j.status === "building");
+  const now = useNowTick(hasBuilding);
 
   return (
     <Dialog
@@ -82,7 +107,7 @@ export function ArchiveDownloadDialog({
                   <div className="truncate font-medium">{job.runId}</div>
                   <div className="truncate text-xs text-muted-foreground">
                     {job.status === "building"
-                      ? `Building... ${formatElapsed(job.startedAt)}`
+                      ? `Building... ${formatElapsed(job.startedAt, now)}`
                       : (job.errorMessage ?? "Failed")}
                   </div>
                 </div>
