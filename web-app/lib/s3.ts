@@ -57,6 +57,12 @@ export type S3HeadResult =
 //     existence without ListBucket). The IAM policy in `infra/template.yaml`
 //     grants ListBucket so this shouldn't happen, but treating 403 as a
 //     cache miss makes the route resilient to future policy drift.
+//
+// 403 is logged as a warning rather than silently swallowed: a real
+// permissions regression (bucket policy change, role drift) would otherwise
+// look like every download is a cache miss, with operators only noticing
+// via "downloads slow / Lambda spend high" symptoms. The warning makes the
+// drift visible without changing the behavior the route depends on.
 export async function headS3Object(
   bucket: string,
   key: string
@@ -73,7 +79,15 @@ export async function headS3Object(
     if (err instanceof NotFound) return { exists: false };
     if (err instanceof S3ServiceException) {
       const status = err.$metadata?.httpStatusCode;
-      if (status === 404 || status === 403) return { exists: false };
+      if (status === 404) return { exists: false };
+      if (status === 403) {
+        console.warn(
+          `headS3Object: 403 from S3 on s3://${bucket}/${key} — treating as cache miss. ` +
+            `If this is steady-state, check that the caller's IAM grants s3:ListBucket ` +
+            `on the bucket ARN (without it, S3 returns 403 for missing keys instead of 404).`
+        );
+        return { exists: false };
+      }
     }
     throw err;
   }

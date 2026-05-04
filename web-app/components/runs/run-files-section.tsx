@@ -229,9 +229,10 @@ function RunFilesSectionContent({
   // what the user sees.
   const isFilterActive =
     searchQuery.trim() !== "" || statusFilter !== "all" || showDismissed;
+  const archiveBaseHref = `/api/v1/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}/download-archive`;
   const downloadHref = isFilterActive
-    ? `/api/v1/instruments/${instrumentId}/runs/${runId}/download-archive?file_ids=${filteredDownloadableFiles.map((f) => f.id).join(",")}`
-    : `/api/v1/instruments/${instrumentId}/runs/${runId}/download-archive`;
+    ? `${archiveBaseHref}?file_ids=${filteredDownloadableFiles.map((f) => f.id).join(",")}`
+    : archiveBaseHref;
 
   // Summary counts
   const pendingCount = activeFiles.filter((f) =>

@@ -30,18 +30,17 @@ type RouteContext = {
   params: Promise<{ instrumentId: string; runId: string }>;
 };
 
-// Vercel Pro's hard cap for serverless function lifetime. The route itself
-// returns its 202 response in a couple of round-trips (cache HEAD, dedup
-// INSERT), but the `after()` callback that POSTs the Lambda Function URL
-// awaits the Lambda's synchronous response so we can log transport-level
-// failures and mark the archive_jobs row `failed` for the dialog to
-// surface. Builds shorter than this window land that callback cleanly;
-// longer builds get the function killed and rely on the Lambda's own
-// PATCH-on-failure path plus the polling client's S3 HEAD short-circuit
-// to recover. We don't need to size this for sync builds — the route
-// always goes async — but we still want a generous budget so transient
-// Lambda transport errors get surfaced as terminal job failures rather
-// than silent polling timeouts.
+// The route itself returns its 202 response in a couple of round-trips
+// (cache HEAD, dedup INSERT), but the `after()` callback that POSTs the
+// Lambda Function URL awaits the Lambda's synchronous response so we can
+// log transport-level failures and mark the archive_jobs row `failed` for
+// the dialog to surface. Builds shorter than this window land that
+// callback cleanly; longer builds get the function killed and rely on the
+// Lambda's own PATCH-on-failure path plus the polling client's S3 HEAD
+// short-circuit to recover. We don't need to size this for sync builds —
+// the route always goes async — but we still want a generous budget so
+// transient Lambda transport errors get surfaced as terminal job failures
+// rather than silent polling timeouts.
 export const maxDuration = 300;
 
 // Parse `?file_ids=1,2,3` (or repeated `?file_ids=1&file_ids=2`) into a
