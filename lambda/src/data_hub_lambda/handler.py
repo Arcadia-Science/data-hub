@@ -233,7 +233,7 @@ def _handle_build_archive(payload: dict[str, Any]) -> dict[str, Any]:
         result = archive_builder.build_run_archive(request)
     except Exception as exc:
         logger.exception(
-            "Failed to build archive for run %s/%s",
+            "Failed to build zip archive for run %s/%s",
             request.instrument_id,
             request.run_id,
         )

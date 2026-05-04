@@ -1,9 +1,4 @@
 import {
-  getArchiveDownloadFilename,
-  parseArchiveKey,
-} from "@/lib/api/archive-builder";
-import { authenticateRequest } from "@/lib/api/auth";
-import {
   apiError,
   INTERNAL_ERROR,
   NOT_FOUND,
@@ -13,7 +8,6 @@ import {
 import { isValidUUID } from "@/lib/api/validators";
 import { db } from "@/lib/db";
 import { archiveJobs } from "@/lib/db/schema";
-import { getPresignedDownloadUrl } from "@/lib/s3";
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { timingSafeEqual } from "node:crypto";
@@ -21,66 +15,6 @@ import { timingSafeEqual } from "node:crypto";
 type RouteContext = {
   params: Promise<{ id: string }>;
 };
-
-// ---------------------------------------------------------------------------
-// GET /api/v1/archive-jobs/:id
-//
-// Status polling for asynchronous archive builds. The UI calls this every
-// few seconds while the Download dialog is open and follows `download_url`
-// once `status === 'ready'`. The presigned URL is generated fresh on every
-// poll so it never expires from under a slow user.
-// ---------------------------------------------------------------------------
-
-export async function GET(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authenticateRequest(request);
-  if (!authResult) {
-    return apiError(401, UNAUTHORIZED, "Authentication required");
-  }
-
-  const { id } = await params;
-  if (!isValidUUID(id)) {
-    return apiError(400, VALIDATION_ERROR, "Invalid job ID format");
-  }
-
-  const [job] = await db
-    .select()
-    .from(archiveJobs)
-    .where(eq(archiveJobs.id, id))
-    .limit(1);
-
-  if (!job) {
-    return apiError(404, NOT_FOUND, `Archive job '${id}' not found`);
-  }
-
-  let downloadUrl: string | null = null;
-  if (job.status === "ready" && job.archiveBucket && job.archiveKey) {
-    // Derive a friendly download filename from the canonical archive key
-    // (`runs/{instr}/{run}/{fp}.zip`). Browsers ignore the `<a download>`
-    // hint for cross-origin URLs unless the response carries an explicit
-    // `Content-Disposition`, so without this the browser would save the
-    // file as `{fingerprint}.zip` (a hex string).
-    const parsed = parseArchiveKey(job.archiveKey);
-    downloadUrl = await getPresignedDownloadUrl(
-      job.archiveBucket,
-      job.archiveKey,
-      { filename: getArchiveDownloadFilename(parsed?.runId ?? null) }
-    );
-  }
-
-  return Response.json({
-    id: job.id,
-    instrument_run_id: job.instrumentRunId,
-    fingerprint: job.fingerprint,
-    status: job.status,
-    archive_bucket: job.archiveBucket,
-    archive_key: job.archiveKey,
-    size_bytes: job.sizeBytes,
-    error_message: job.errorMessage,
-    created_at: job.createdAt,
-    completed_at: job.completedAt,
-    download_url: downloadUrl,
-  });
-}
 
 // ---------------------------------------------------------------------------
 // PATCH /api/v1/archive-jobs/:id

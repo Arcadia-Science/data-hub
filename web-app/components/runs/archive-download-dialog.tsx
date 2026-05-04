@@ -77,11 +77,11 @@ export function ArchiveDownloadDialog({
     >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Preparing archive download</DialogTitle>
+          <DialogTitle>Preparing zip archive download(s)</DialogTitle>
           <DialogDescription>
-            Large archives are built on the server and downloaded directly from
-            S3 once ready. This dialog will close automatically when the
-            download starts.
+            Large run archives can take a few minutes to build. You can hide
+            this dialog and keep using the app — each download starts
+            automatically as soon as its archive is ready.
           </DialogDescription>
         </DialogHeader>
 
@@ -107,7 +107,7 @@ export function ArchiveDownloadDialog({
                   <div className="truncate font-medium">{job.runId}</div>
                   <div className="text-xs text-muted-foreground">
                     {job.status === "building"
-                      ? `Building... ${formatElapsed(job.startedAt, now)}`
+                      ? `Building zip archive... ${formatElapsed(job.startedAt, now)}`
                       : (job.errorMessage ?? "Failed")}
                   </div>
                 </div>

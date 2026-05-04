@@ -15,29 +15,17 @@ Browser → /download-archive (web app)
                 │   ├─ exists  → 302 presigned URL (cache hit, no Lambda)
                 │   └─ missing → continue
                 │
-                ├─ totalSize <  SYNC_ARCHIVE_THRESHOLD_GB
-                │     │ POST Lambda Function URL (type=build_archive)
-                │     │ Lambda streams raw S3 → multipart → archives S3
-                │     │ Returns { archive_bucket, archive_key, size_bytes }
-                │     └─ 302 presigned URL (or 200 JSON if Accept: application/json)
-                │
-                └─ totalSize >= SYNC_ARCHIVE_THRESHOLD_GB (or unknown)
-                      │ Insert archive_jobs row (status=building) — partial unique index dedupes
-                      │ next/server `after()` POSTs Lambda; route returns 202 immediately
-                      │ Lambda PATCHes /api/v1/archive-jobs/:id with status=ready (or failed)
-                      │ UI polls /download-archive every few seconds (NOT /archive-jobs/:id)
-                      │   ├─ HEAD hit → 200 { status: ready, download_url } → trigger download
-                      │   └─ HEAD miss → 202 { job_id, status: building } → keep polling
-                      └─ When ready, UI follows download_url to the presigned URL
+                ├─ Insert archive_jobs row (status=building) — partial unique index dedupes
+                │ next/server `after()` POSTs Lambda; route returns 202 immediately
+                │ Lambda PATCHes /api/v1/archive-jobs/:id with status=ready (or failed)
+                │ UI re-issues /download-archive every few seconds; each poll re-runs the
+                │ S3 HEAD short-circuit, so the cache hit is what unlocks the download
+                │   ├─ HEAD hit → 200 { status: ready, download_url } → trigger download
+                │   └─ HEAD miss → 202 { job_id, status: building } → keep polling
+                └─ When ready, UI follows download_url to the presigned URL
 ```
 
-The sync/async split exists because the route is pinned to `maxDuration = 300s` (Vercel Pro's hard cap). Archives smaller than `SYNC_ARCHIVE_THRESHOLD_GB` (default 25 GB; tune per project) finish inside that budget at the Lambda builder's ~100–150 MB/s serial throughput; larger archives skip the inline await entirely so the HTTP response can return before the build does. Inline builds that exceptionally still time out the route are safe — the Lambda keeps running and PATCHes the row to `ready`, so a retry resolves from the cache.
-
-### Why the UI polls `/download-archive` and not `/archive-jobs/:id`
-
-The dialog's poll target is the *original* `/download-archive` URL, not the `archive-jobs` GET endpoint. The route's first action on every request is a HEAD against the canonical archive key in S3, so the artifact in S3 is the source of truth for "ready" — the row's `status` is just a hint. This means the UI recovers automatically from a class of failures that would otherwise wedge it forever: if the Lambda's `PATCH /api/v1/archive-jobs/:id` callback never lands (network blip, a stale `DATA_HUB_API_URL`, a Vercel deploy that doesn't have the `archive-jobs/[id]` route yet, etc.) the row stays `building` indefinitely, but the next poll's HEAD will see the multipart upload completed and return `200 { status: "ready", download_url }`. The `archive-jobs/:id` GET endpoint is still around for diagnostics and ad-hoc inspection, the UI just doesn't depend on it.
-
-The dialog tracks the `job_id` from its first 202 response. If a later poll returns a *different* `job_id`, that means the route's dedup INSERT created a new row — which only happens after the previous attempt was marked `failed` or aged out of the stuck-row sweep. The UI surfaces that as a failure with a "Click Download again to retry" message rather than silently chasing a build that already failed once. As a final safety net, the dialog gives up after `POLL_TIMEOUT_MS` (30 minutes) if neither outcome arrives.
+Every cache miss goes async, regardless of archive size. The route does the cheap stuff inline — cache HEAD, dedup INSERT into `archive_jobs` — then schedules the Lambda Function URL POST via `next/server`'s `after()` and returns `202 { job_id }` to the client immediately. The `after()` callback awaits the Lambda's synchronous response so transport-level failures (Function URL unreachable, 5xx, misconfigured IAM) get logged and reflected back into the row as `status='failed'`. Builds shorter than `maxDuration` (300s, Vercel Pro's hard cap) land that callback cleanly; longer builds get the function killed before the callback finishes, and we rely on the Lambda's own PATCH-on-failure path plus the dialog's S3 HEAD polling to recover.
 
 ## S3 layout
 
@@ -79,7 +67,7 @@ CREATE UNIQUE INDEX archive_jobs_inflight_unique_idx
   WHERE status IN ('pending', 'building');
 ```
 
-The route `INSERT … ON CONFLICT DO NOTHING`s; on conflict it `SELECT`s the existing row and reuses it. The request that *won* the insert (or had to insert a fresh row because the prior job had already terminated) is the only one that calls the Lambda — losing requests skip the invocation entirely and return `202 { job_id, poll_url }`, attaching their own polling to the existing build. This keeps Lambda spend and S3 part uploads from doubling on rapid concurrent clicks. Once the row transitions to `ready` or `failed`, the partial-index predicate stops applying and a future request can insert a new job.
+The route `INSERT … ON CONFLICT DO NOTHING`s; on conflict it `SELECT`s the existing row and reuses it. The request that *won* the insert (or had to insert a fresh row because the prior job had already terminated) is the only one that calls the Lambda — losing requests skip the invocation entirely and return `202 { job_id }`, attaching their own polling (re-issues of `/download-archive`) to the existing build. This keeps Lambda spend and S3 part uploads from doubling on rapid concurrent clicks. Once the row transitions to `ready` or `failed`, the partial-index predicate stops applying and a future request can insert a new job.
 
 ## Configuration
 
@@ -88,7 +76,6 @@ The route `INSERT … ON CONFLICT DO NOTHING`s; on conflict it `SELECT`s the exi
 | `S3_ARCHIVES_BUCKET` | Vercel | Bucket the route HEADs and presigns from. Must match the SAM-provisioned bucket for the env. |
 | `LAMBDA_FUNCTION_URL` | Vercel | Function URL of the Data Hub Lambda. Required — the route returns `503` if either Lambda env var is missing. |
 | `LAMBDA_INVOKE_TOKEN` | Vercel + SAM | Shared bearer token. Used both by Vercel → Lambda (`Authorization: Bearer …` on the Function URL POST) **and** by Lambda → Vercel (the same header on the `PATCH /api/v1/archive-jobs/:id` callback). The PATCH endpoint deliberately rejects regular user PATs so a signed-in user can't hijack another user's in-flight build. |
-| `SYNC_ARCHIVE_THRESHOLD_GB` | Vercel (optional) | Sync vs async cutover. Defaults to 25 GB. Set to a small number (e.g. `0.001`) to force-test the async path. |
 | `AWS_S3_ARCHIVES_BUCKET` | Lambda | Set automatically by SAM via `!Ref ArchivesBucket`. The Lambda only writes to this bucket. |
 | `DATA_HUB_API_URL` | Lambda | Base URL of the web API (including `/api/v1`). The `_post_archive_job_status` callback PATCHes `/archive-jobs/:id` against this. |
 
@@ -105,7 +92,7 @@ WHERE status = 'building' AND created_at < now() - interval '15 minutes';
 Likely causes, in order of frequency:
 
 1. **Lambda errored before the PATCH fired.** Check CloudWatch logs for `_handle_build_archive` failures around the job's `created_at`. Typical culprits: source object deleted between row insert and Lambda fetch (404 from `GetObject`), or a multipart upload that exceeded the function timeout.
-2. **PATCH callback failed.** The Lambda logs `Failed to PATCH archive-job %s` if the web app rejected the update (auth issue, web app down, `DATA_HUB_API_URL` pointing at a deploy that doesn't have the `archive-jobs/[id]` route yet). The build itself may have succeeded — check the archives bucket for the expected key. **The UI tolerates this case:** the dialog polls `/download-archive` (which HEADs S3 first), not `/archive-jobs/:id`, so a finished build is downloaded the moment the multipart upload completes regardless of whether the row was ever flipped to `ready`. The stuck row only blocks future *new* builds for the same fingerprint until the 20-minute stale-row sweep kicks in. If you want to clean up immediately, `UPDATE archive_jobs SET status='ready', archive_bucket='…', archive_key='…' WHERE id = '…'` (the `PATCH` endpoint requires the `LAMBDA_INVOKE_TOKEN`, not a user PAT, so going through Postgres is the easiest manual path) or just `DELETE` it.
+2. **PATCH callback failed.** The Lambda logs `Failed to PATCH archive-job %s` if the web app rejected the update (auth issue, web app down, `DATA_HUB_API_URL` pointing at a deploy that doesn't have the `archive-jobs/[id]` route yet). The build itself may have succeeded — check the archives bucket for the expected key. **The UI tolerates this case:** the dialog re-issues `/download-archive` (which HEADs S3 first) on every poll rather than reading the row's `status`, so a finished build is downloaded the moment the multipart upload completes regardless of whether the row was ever flipped to `ready`. The stuck row only blocks future *new* builds for the same fingerprint until the 20-minute stale-row sweep kicks in. If you want to clean up immediately, `UPDATE archive_jobs SET status='ready', archive_bucket='…', archive_key='…' WHERE id = '…'` (the `PATCH` endpoint requires the `LAMBDA_INVOKE_TOKEN`, not a user PAT, so going through Postgres is the easiest manual path) or just `DELETE` it.
 3. **Async path lost the `after()` callback.** Vercel `next/server` `after()` is best-effort; in rare cases (SIGTERM during scale-down) it can drop. The row will sit in `building` until a new download-archive request for the same fingerprint arrives — see "Self-healing" below.
 
 #### Self-healing

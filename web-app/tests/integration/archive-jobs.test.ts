@@ -15,10 +15,12 @@ import {
 import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-// Tests for the /api/v1/archive-jobs/:id endpoints. These cover the surface
-// the Lambda PATCHes when a build finishes and the UI polls while it waits.
-// The actual zip building is exercised by Lambda unit tests; here we focus
-// on auth, validation, and state transitions.
+// Tests for the /api/v1/archive-jobs/:id PATCH callback the Lambda fires
+// when a build finishes. The UI doesn't poll this endpoint — it re-issues
+// /download-archive instead — so there is no GET handler on this route;
+// only the Lambda → web-app callback. The actual zip building is exercised
+// by Lambda unit tests; here we focus on auth, validation, state
+// transitions, the partial-unique-index dedup, and the stuck-row sweep.
 describe("Archive Jobs API", () => {
   let token: string;
   // PATCH is gated on the shared LAMBDA_INVOKE_TOKEN, not user PATs, so the
@@ -69,83 +71,6 @@ describe("Archive Jobs API", () => {
 
   afterAll(async () => {
     await closeTestDb();
-  });
-
-  // --------------------------------------------------------------------
-  // GET
-  // --------------------------------------------------------------------
-
-  it("GET requires authentication", async () => {
-    const fakeId = "00000000-0000-0000-0000-000000000000";
-    const res = await api(`/api/v1/archive-jobs/${fakeId}`);
-    expect(res.status).toBe(401);
-  });
-
-  it("GET returns 400 for non-uuid ids", async () => {
-    const res = await api(`/api/v1/archive-jobs/not-a-uuid`, { token });
-    expect(res.status).toBe(400);
-  });
-
-  it("GET returns 404 for unknown jobs", async () => {
-    const fakeId = "11111111-1111-1111-1111-111111111111";
-    const res = await api(`/api/v1/archive-jobs/${fakeId}`, { token });
-    expect(res.status).toBe(404);
-  });
-
-  it("GET returns building status without a download_url", async () => {
-    const db = getTestDb();
-    const [job] = await db
-      .insert(archiveJobs)
-      .values({
-        instrumentRunId: runInternalId,
-        fingerprint: "fp-building",
-        status: "building",
-      })
-      .returning();
-
-    const res = await api(`/api/v1/archive-jobs/${job.id}`, { token });
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.status).toBe("building");
-    expect(body.download_url).toBeNull();
-  });
-
-  it("GET returns a presigned download_url when ready", async () => {
-    const db = getTestDb();
-    const [job] = await db
-      .insert(archiveJobs)
-      .values({
-        instrumentRunId: runInternalId,
-        fingerprint: "fp-ready",
-        status: "ready",
-        archiveBucket: "test-archives-bucket",
-        archiveKey:
-          "runs/archive-jobs-test-instrument/archive-jobs-test-run/fp-ready.zip",
-        sizeBytes: 12345,
-        completedAt: new Date(),
-      })
-      .returning();
-
-    const res = await api(`/api/v1/archive-jobs/${job.id}`, { token });
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.status).toBe("ready");
-    expect(body.size_bytes).toBe(12345);
-    expect(body.download_url).toContain("test-archives-bucket");
-    // Presigned URL should embed the canonical archive key.
-    expect(body.download_url).toContain("fp-ready.zip");
-    // It should also embed a `response-content-disposition` query param so
-    // browsers save the file as `<run_id>.zip` instead of the hex
-    // fingerprint. The presigner URL-encodes the value, so we check the
-    // (encoded) attachment hint plus the runId is present somewhere in
-    // the disposition value. Without this, cross-origin downloads land
-    // with whatever filename S3's URL ends with.
-    expect(body.download_url).toContain("response-content-disposition");
-    const url = new URL(body.download_url);
-    const cd = url.searchParams.get("response-content-disposition");
-    expect(cd).not.toBeNull();
-    expect(cd).toMatch(/attachment/);
-    expect(cd).toContain("archive-jobs-test-run.zip");
   });
 
   // --------------------------------------------------------------------

@@ -2,7 +2,6 @@ import {
   fingerprintFiles,
   getArchiveDownloadFilename,
   getArchiveKey,
-  getSyncArchiveThresholdBytes,
   invokeBuildArchive,
   isArchiveBuilderConfigured,
   type InvokeBuildArchiveInput,
@@ -31,14 +30,18 @@ type RouteContext = {
   params: Promise<{ instrumentId: string; runId: string }>;
 };
 
-// Vercel Pro's default function timeout is 15s, which is too short for any
-// real sync build. The Lambda builder runs serially and sustains ~100–150
-// MB/s in-region, so a fresh archive at the 25 GB sync ceiling takes ~3–4
-// minutes of wall time. We give the route 5 minutes (Vercel Pro's hard max)
-// so a fresh build right at `SYNC_ARCHIVE_THRESHOLD_GB` has a comfortable
-// margin and the user gets a 302 instead of a timeout-then-cache-hit retry
-// dance. Larger builds skip the inline await entirely (see
-// `archive-builder.ts`), so this ceiling never bounds them.
+// Vercel Pro's hard cap for serverless function lifetime. The route itself
+// returns its 202 response in a couple of round-trips (cache HEAD, dedup
+// INSERT), but the `after()` callback that POSTs the Lambda Function URL
+// awaits the Lambda's synchronous response so we can log transport-level
+// failures and mark the archive_jobs row `failed` for the dialog to
+// surface. Builds shorter than this window land that callback cleanly;
+// longer builds get the function killed and rely on the Lambda's own
+// PATCH-on-failure path plus the polling client's S3 HEAD short-circuit
+// to recover. We don't need to size this for sync builds — the route
+// always goes async — but we still want a generous budget so transient
+// Lambda transport errors get surfaced as terminal job failures rather
+// than silent polling timeouts.
 export const maxDuration = 300;
 
 // Parse `?file_ids=1,2,3` (or repeated `?file_ids=1&file_ids=2`) into a
@@ -62,20 +65,24 @@ type DownloadableFile = {
   filename: string;
   s3Bucket: string;
   s3Key: string;
-  sizeBytes: number | null;
 };
 
 // ---------------------------------------------------------------------------
 // GET /api/v1/instruments/:instrumentId/runs/:runId/download-archive
 //
 // Returns a downloadable zip of every active, uploaded file in a run. The
-// Lambda builder zips files from the raw bucket directly into the archives
-// bucket via S3 multipart upload, and this route 302s the browser to a
-// short-lived presigned URL — bytes never traverse Vercel.
+// Lambda builder zips files from the raw + processed buckets directly into
+// the archives bucket via S3 multipart upload, and this route 302s the
+// browser to a short-lived presigned URL on the result — bytes never
+// traverse Vercel.
 //
-// Below `SYNC_ARCHIVE_THRESHOLD_GB` the route awaits the build inline; at or
-// above the threshold it returns `202 { job_id }` so the UI can poll
-// `GET /api/v1/archive-jobs/:id` and follow the redirect when ready.
+// Cache hits short-circuit on an S3 HEAD against the canonical archive key
+// and return immediately. Misses always go async: the route inserts an
+// `archive_jobs` row, schedules the Lambda invocation via `after()`, and
+// returns `202 { job_id }`. The UI polls this same URL — not
+// `/api/v1/archive-jobs/:id` — so the cache-HEAD short-circuit is the
+// canonical "is it ready?" signal regardless of whether the Lambda's PATCH
+// callback to flip the row to `ready` ever lands.
 //
 // Optional `?file_ids=1,2,3` narrows the archive to a specific subset (used
 // by the UI's "Download all" button to honor active table filters). IDs are
@@ -120,7 +127,6 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       filename: files.filename,
       s3Bucket: files.s3Bucket,
       s3Key: files.s3Key,
-      sizeBytes: files.sizeBytes,
     })
     .from(files)
     .where(and(...conditions));
@@ -134,7 +140,6 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       filename: f.filename,
       s3Bucket: f.s3Bucket,
       s3Key: f.s3Key,
-      sizeBytes: f.sizeBytes,
     }));
 
   if (downloadable.length === 0) {
@@ -212,14 +217,10 @@ async function handleViaArchiveBuilder(args: {
 
   // Files in a run can legitimately span the raw and processed buckets
   // (e.g. SpectraMax: raw `.xls` in the raw bucket + Lambda-produced CSV
-  // in the processed bucket). The Lambda payload now carries each file's
+  // in the processed bucket). The Lambda payload carries each file's
   // bucket per-entry and the Lambda enforces an allow-list against its
   // configured raw + processed env vars, so a stray row pointing at an
   // unexpected bucket fails closed at the builder, not here.
-
-  const totalSize = estimateTotalSize(downloadable);
-  const threshold = getSyncArchiveThresholdBytes();
-  const goAsync = totalSize >= threshold;
 
   // Heal any stuck row for this (run, fingerprint) before the dedup INSERT.
   // A Lambda that crashed mid-build leaves the row in `building` forever;
@@ -304,51 +305,14 @@ async function handleViaArchiveBuilder(args: {
     })),
   };
 
-  if (goAsync) {
-    after(() => runArchiveBuildInBackground(job.id, buildInput, fingerprint));
-    return buildingJsonResponse(job.id);
-  }
-
-  let result;
-  try {
-    result = await invokeBuildArchive(buildInput, fingerprint);
-  } catch (err) {
-    const message =
-      err instanceof Error
-        ? err.message
-        : "Archive builder invocation threw an unexpected error";
-    await markJobFailed(job.id, message);
-    return apiError(502, INTERNAL_ERROR, `Archive builder failed: ${message}`);
-  }
-
-  if (!result.ok) {
-    await markJobFailed(job.id, result.message);
-    return apiError(
-      502,
-      INTERNAL_ERROR,
-      `Archive builder failed: ${result.message}`
-    );
-  }
-
-  await db
-    .update(archiveJobs)
-    .set({
-      status: "ready",
-      archiveBucket: result.archiveBucket,
-      archiveKey: result.archiveKey,
-      sizeBytes: result.sizeBytes,
-      completedAt: new Date(),
-    })
-    .where(eq(archiveJobs.id, job.id));
-
-  const url = await getPresignedDownloadUrl(
-    result.archiveBucket,
-    result.archiveKey,
-    { filename: downloadFilename }
-  );
-  return wantsJson
-    ? readyJsonResponse(url, result.sizeBytes)
-    : redirectResponse(url);
+  // Every miss is async. The Lambda builder runs serially at ~100–150 MB/s
+  // and we don't want a "Download all" click to block on a multi-minute
+  // request — even small archives are dispatched here so the response time
+  // is uniform and the UI is always driven by the same polling state
+  // machine. `after()` returns the 202 to the client immediately and lets
+  // the Lambda invocation complete in the function's tail lifecycle.
+  after(() => runArchiveBuildInBackground(job.id, buildInput, fingerprint));
+  return buildingJsonResponse(job.id);
 }
 
 // Fire-and-forget invocation used by the async path. The Lambda PATCHes the
@@ -406,37 +370,12 @@ function buildingJsonResponse(jobId: string): Response {
     {
       job_id: jobId,
       status: "building",
-      poll_url: `/api/v1/archive-jobs/${jobId}`,
     },
     {
       status: 202,
       headers: { "Cache-Control": "no-store" },
     }
   );
-}
-
-// Per-file fallback used to estimate archive size when `files.size_bytes` is
-// NULL (legacy rows from before the column existed, or Lambda-created
-// processed outputs that skipped recording size). 64 MB is comfortably above
-// the typical processed artifact (CSVs, JSON, plot PNGs ≪ 5 MB) and small
-// enough that even hundreds of unsized files don't push a normal run past the
-// sync threshold. Tuning point: too low and we risk a sync timeout on a
-// hidden whale; too high and we send legitimately small archives down the
-// async polling path for no reason.
-const UNKNOWN_SIZE_FALLBACK_BYTES = 64 * 1024 * 1024;
-
-// Estimated total archive size in bytes. Files with NULL `size_bytes` get
-// charged at `UNKNOWN_SIZE_FALLBACK_BYTES` so a single legacy row can't flip
-// the entire request to the async polling UX. Going async when sync would
-// have worked is harmless (extra dialog), but going sync on a true 100 GB
-// build wastes a Vercel function — the Lambda still finishes regardless and
-// the next click resolves from cache.
-function estimateTotalSize(downloadable: DownloadableFile[]): number {
-  let sum = 0;
-  for (const f of downloadable) {
-    sum += f.sizeBytes ?? UNKNOWN_SIZE_FALLBACK_BYTES;
-  }
-  return sum;
 }
 
 function redirectResponse(url: string): Response {

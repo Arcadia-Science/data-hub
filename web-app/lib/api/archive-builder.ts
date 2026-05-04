@@ -1,27 +1,6 @@
 import { getS3ArchivesBucket } from "@/lib/s3";
 import crypto from "node:crypto";
 
-// Threshold below which we await the Lambda response inside the request
-// handler and 302 directly. Above this size, we skip the inline await and
-// return a job ID up front so the UI can poll.
-//
-// The route's `maxDuration` is 300s (Vercel Pro's hard cap). The Lambda
-// builder runs serially (one GetObject + one UploadPart at a time) and in
-// practice sustains ~100–150 MB/s, so 25 GB lands inside the 5-minute
-// budget with margin to spare. Anything larger goes straight to async so
-// we never block on a request that can't finish.
-const DEFAULT_SYNC_THRESHOLD_BYTES = 25 * 1024 * 1024 * 1024; // 25 GB
-
-export function getSyncArchiveThresholdBytes(): number {
-  const raw = process.env.SYNC_ARCHIVE_THRESHOLD_GB;
-  if (!raw) return DEFAULT_SYNC_THRESHOLD_BYTES;
-  const parsed = Number.parseFloat(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return DEFAULT_SYNC_THRESHOLD_BYTES;
-  }
-  return Math.floor(parsed * 1024 * 1024 * 1024);
-}
-
 // Inputs to `fingerprintFiles`. Only the fields that participate in the
 // hash are accepted — adding extra fields here would suggest they affect
 // cache identity when they don't.
@@ -60,28 +39,10 @@ export function getArchiveKey(
   return `${ARCHIVE_KEY_PREFIX}${instrumentId}/${runId}/${fingerprint}.zip`;
 }
 
-// Inverse of `getArchiveKey`. Returns `null` if the key doesn't match the
-// canonical layout (e.g. legacy / hand-edited rows). Used by the polling
-// endpoint to derive a human-readable download filename without joining
-// against `instrument_runs` on every poll.
-export function parseArchiveKey(
-  key: string
-): { instrumentId: string; runId: string; fingerprint: string } | null {
-  if (!key.startsWith(ARCHIVE_KEY_PREFIX)) return null;
-  const parts = key.slice(ARCHIVE_KEY_PREFIX.length).split("/");
-  if (parts.length !== 3) return null;
-  const [instrumentId, runId, tail] = parts;
-  if (!instrumentId || !runId || !tail.endsWith(".zip")) return null;
-  const fingerprint = tail.slice(0, -".zip".length);
-  if (!fingerprint) return null;
-  return { instrumentId, runId, fingerprint };
-}
-
 // Derives the filename a browser should save the downloaded archive under.
-// Centralised here so the sync (download-archive route) and async
-// (archive-jobs poll) paths produce the same name, and the helper accepts a
-// missing `runId` (e.g. malformed archive_key) by falling back to a generic
-// "archive.zip".
+// The helper accepts a missing `runId` (e.g. malformed archive_key) by
+// falling back to a generic "archive.zip" so a corrupt row never produces
+// a broken `Content-Disposition` header.
 export function getArchiveDownloadFilename(runId: string | null): string {
   return runId ? `${runId}.zip` : "archive.zip";
 }
