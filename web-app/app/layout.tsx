@@ -2,6 +2,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 
 import "@/app/globals.css";
 import { AppSidebar } from "@/components/app-sidebar";
+import { ArchiveDownloadProvider } from "@/components/runs/archive-download-provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import {
   SIDEBAR_COOKIE_NAME,
@@ -71,23 +72,25 @@ export default async function RootLayout({
             <NuqsAdapter>
               <TooltipProvider>
                 {session ? (
-                  <SidebarProvider defaultOpen={sidebarDefaultOpen}>
-                    <AppSidebar
-                      session={session}
-                      instruments={instruments}
-                      watchers={watchers}
-                      signOutAction={async () => {
-                        "use server";
-                        await signOut({ redirectTo: "/login" });
-                      }}
-                    />
-                    <SidebarInset>
-                      <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
-                        <SidebarTrigger />
-                      </header>
-                      {children}
-                    </SidebarInset>
-                  </SidebarProvider>
+                  <ArchiveDownloadProvider>
+                    <SidebarProvider defaultOpen={sidebarDefaultOpen}>
+                      <AppSidebar
+                        session={session}
+                        instruments={instruments}
+                        watchers={watchers}
+                        signOutAction={async () => {
+                          "use server";
+                          await signOut({ redirectTo: "/login" });
+                        }}
+                      />
+                      <SidebarInset>
+                        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+                          <SidebarTrigger />
+                        </header>
+                        {children}
+                      </SidebarInset>
+                    </SidebarProvider>
+                  </ArchiveDownloadProvider>
                 ) : (
                   children
                 )}

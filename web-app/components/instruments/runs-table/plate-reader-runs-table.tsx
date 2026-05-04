@@ -18,7 +18,6 @@ import { runRowToRef } from "@/lib/runs/row-actions";
 import { cn, formatBytes } from "@/lib/utils";
 
 import type { RunRow } from ".";
-import { ClickableRow } from "./clickable-row";
 import { FilterableColumnHeader } from "./filterable-column-header";
 import {
   MetadataFieldBadge,
@@ -107,10 +106,9 @@ export function PlateReaderRunsTable({
           const mode = getMetadataField(row.metadata, "measurement_mode");
           const type = getMetadataField(row.metadata, "measurement_type");
           return (
-            <ClickableRow
+            <TableRow
               key={row.id}
-              href={`/instruments/${instrumentId}/runs/${encodeURIComponent(row.run_id)}`}
-              className={cn(isDeleted && "opacity-50")}
+              className={cn("group", isDeleted && "opacity-50")}
             >
               <TableCell>
                 <RunSelectCheckbox runRef={runRowToRef(row)} />
@@ -126,7 +124,11 @@ export function PlateReaderRunsTable({
                     filesProcessing={row.files_processing}
                     errorMessages={row.error_messages}
                   />
-                  <RunIdLabel runId={row.run_id} isDeleted={isDeleted} />
+                  <RunIdLabel
+                    runId={row.run_id}
+                    href={`/instruments/${instrumentId}/runs/${encodeURIComponent(row.run_id)}`}
+                    isDeleted={isDeleted}
+                  />
                   {isDeleted && (
                     <Badge variant="outline" className="ml-1.5 font-normal">
                       deleted
@@ -172,7 +174,7 @@ export function PlateReaderRunsTable({
               <TableCell className="py-1">
                 <RunRowActions row={row} />
               </TableCell>
-            </ClickableRow>
+            </TableRow>
           );
         })}
       </TableBody>

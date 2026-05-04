@@ -73,6 +73,13 @@ export const fileStatusEnum = pgEnum("file_status", [
   "failed",
 ]);
 
+export const archiveJobStatusEnum = pgEnum("archive_job_status", [
+  "pending",
+  "building",
+  "ready",
+  "failed",
+]);
+
 export const users = pgTable("user", {
   // Auth.js-generated user ID.
   id: text("id")
@@ -556,6 +563,58 @@ export const runComments = pgTable(
       comment.createdAt.desc()
     ),
     index("idx_run_comments_user_id").on(comment.userId),
+  ]
+);
+
+// Cached run-archive zip builds. Producers (Vercel route + Lambda callback)
+// share rows on the partial unique `(instrument_run_id, fingerprint)` index
+// while a build is in flight, so two simultaneous "Download all" clicks
+// attach to the same job and only invoke the Lambda once. The fingerprint
+// is sha256 over the sorted `(file_id, s3_key)` pairs the archive will
+// contain, so adding/removing a file produces a fresh job + fresh cached
+// object instead of accidentally serving a stale zip.
+export const archiveJobs = pgTable(
+  "archive_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    instrumentRunId: uuid("instrument_run_id")
+      .notNull()
+      .references(() => instrumentRuns.id, { onDelete: "cascade" }),
+    fingerprint: text("fingerprint").notNull(),
+    archiveBucket: text("archive_bucket"),
+    archiveKey: text("archive_key"),
+    sizeBytes: bigint("size_bytes", { mode: "number" }),
+    status: archiveJobStatusEnum("status").notNull().default("pending"),
+    errorMessage: text("error_message"),
+    // The user who triggered the build, if invoked via session auth. NULL
+    // for token-authenticated callers (MCP, watcher, etc).
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow(),
+    completedAt: timestamp("completed_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+  },
+  (job) => [
+    // At most one in-flight job per (run, fingerprint). Concurrent callers
+    // ON CONFLICT DO NOTHING and then SELECT the existing row.
+    uniqueIndex("uq_archive_jobs_inflight")
+      .on(job.instrumentRunId, job.fingerprint)
+      .where(sql`${job.status} in ('pending', 'building')`),
+    // Lookup path used by the route's cache check (find an existing ready
+    // archive without hitting S3).
+    index("idx_archive_jobs_run_fingerprint_status").on(
+      job.instrumentRunId,
+      job.fingerprint,
+      job.status
+    ),
   ]
 );
 

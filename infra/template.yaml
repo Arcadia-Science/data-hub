@@ -154,6 +154,35 @@ Resources:
         - Key: project
           Value: arcadia-data-hub
 
+  # Cache bucket for run-archive zips built by the Lambda. Objects expire
+  # automatically so the bucket stays cheap; users (or the web app) can always
+  # rebuild on demand. Public access is blocked — the web app issues short-lived
+  # presigned URLs and 302-redirects browsers directly to S3, bypassing Vercel's
+  # Fast Origin Transfer entirely.
+  ArchivesBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "arcadia-data-hub-archives-${Environment}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireBuiltArchives
+            Status: Enabled
+            ExpirationInDays: 7
+          - Id: AbortStaleMultipartUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+      Tags:
+        - Key: project
+          Value: arcadia-data-hub
+
   # ---- Lambda function ----
 
   DataHubFunction:
@@ -173,6 +202,7 @@ Resources:
         Variables:
           AWS_S3_RAW_DATA_BUCKET: !Sub "arcadia-data-hub-raw-${Environment}"
           AWS_S3_PROCESSED_DATA_BUCKET: !Sub "arcadia-data-hub-processed-${Environment}"
+          AWS_S3_ARCHIVES_BUCKET: !Sub "arcadia-data-hub-archives-${Environment}"
           DATA_HUB_API_URL: !Ref DataHubApiUrl
           DATA_HUB_API_KEY: !Ref DataHubApiKey
           SLACK_WEBHOOK_URL: !Ref SlackWebhookUrl
@@ -226,6 +256,19 @@ Resources:
                 Resource:
                   - !Sub "arn:aws:s3:::arcadia-data-hub-processed-${Environment}"
                   - !Sub "arn:aws:s3:::arcadia-data-hub-processed-${Environment}/*"
+              # Lambda is the only writer for the archives bucket: it builds
+              # run zips via S3 multipart uploads streamed directly out of the
+              # raw bucket. AbortMultipartUpload is required so failed builds
+              # don't leak storage.
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:AbortMultipartUpload
+                  - s3:ListBucketMultipartUploads
+                  - s3:ListMultipartUploadParts
+                Resource:
+                  - !Sub "arn:aws:s3:::arcadia-data-hub-archives-${Environment}"
+                  - !Sub "arn:aws:s3:::arcadia-data-hub-archives-${Environment}/*"
 
   # ---- IAM: GitHub Actions deploy role ----
   # Scoped for routine image-update deploys only.  Initial stack creation and
@@ -358,6 +401,22 @@ Resources:
                   - s3:GetObject
                 Resource:
                   - !Sub "arn:aws:s3:::arcadia-data-hub-processed-${Environment}/*"
+              # Read-only access to the archives bucket so the web app can
+              # HeadObject (cache-hit check) and presign GETs. Lambda is the
+              # only writer.
+              #
+              # `s3:ListBucket` is required on the bucket-level ARN: without
+              # it, HeadObject on a missing key returns 403 instead of 404
+              # (S3 won't reveal key existence to a caller that can't list).
+              # That breaks the cache-miss path, since the route relies on
+              # 404 to fall through to a fresh Lambda build.
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::arcadia-data-hub-archives-${Environment}"
+                  - !Sub "arn:aws:s3:::arcadia-data-hub-archives-${Environment}/*"
 
 Outputs:
   DataHubFunctionArn:
@@ -379,6 +438,10 @@ Outputs:
   ProcessedDataBucketName:
     Description: Processed data S3 bucket name
     Value: !Ref ProcessedDataBucket
+
+  ArchivesBucketName:
+    Description: Archives S3 bucket name (run-zip cache, 7-day expiry)
+    Value: !Ref ArchivesBucket
 
   DeployRoleArn:
     Description: GitHub Actions deploy role ARN

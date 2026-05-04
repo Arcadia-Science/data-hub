@@ -1,7 +1,10 @@
 import {
   GetObjectCommand,
+  HeadObjectCommand,
+  NotFound,
   PutObjectCommand,
   S3Client,
+  S3ServiceException,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { awsCredentialsProvider } from "@vercel/oidc-aws-credentials-provider";
@@ -28,12 +31,107 @@ export function getS3RawDataBucket(): string {
   return bucket;
 }
 
+// Archives bucket holds run-zip artifacts built by the Lambda. The web app
+// reads (HEAD + presign) but never writes — Lambda is the only writer.
+export function getS3ArchivesBucket(): string {
+  const bucket = process.env.S3_ARCHIVES_BUCKET;
+  if (!bucket) {
+    throw new Error("S3_ARCHIVES_BUCKET environment variable is not set");
+  }
+  return bucket;
+}
+
+export type S3HeadResult =
+  | { exists: true; sizeBytes: number | null }
+  | { exists: false };
+
+// HeadObject wrapper that translates a "not in cache" response into a clean
+// { exists: false }. Real failures (network, malformed request) propagate so
+// the caller can surface a 5xx.
+//
+// Both 404 and 403 are treated as "not in cache":
+//   - 404 is the normal missing-object response when the caller has
+//     `s3:ListBucket` on the bucket-level ARN.
+//   - 403 is what S3 returns for a missing key when the caller only has
+//     `s3:GetObject` on `bucket/*` (S3 deliberately won't reveal key
+//     existence without ListBucket). The IAM policy in `infra/template.yaml`
+//     grants ListBucket so this shouldn't happen, but treating 403 as a
+//     cache miss makes the route resilient to future policy drift.
+//
+// 403 is logged as a warning rather than silently swallowed: a real
+// permissions regression (bucket policy change, role drift) would otherwise
+// look like every download is a cache miss, with operators only noticing
+// via "downloads slow / Lambda spend high" symptoms. The warning makes the
+// drift visible without changing the behavior the route depends on.
+export async function headS3Object(
+  bucket: string,
+  key: string
+): Promise<S3HeadResult> {
+  try {
+    const response = await s3.send(
+      new HeadObjectCommand({ Bucket: bucket, Key: key })
+    );
+    return {
+      exists: true,
+      sizeBytes: response.ContentLength ?? null,
+    };
+  } catch (err) {
+    if (err instanceof NotFound) return { exists: false };
+    if (err instanceof S3ServiceException) {
+      const status = err.$metadata?.httpStatusCode;
+      if (status === 404) return { exists: false };
+      if (status === 403) {
+        console.warn(
+          `headS3Object: 403 from S3 on s3://${bucket}/${key} — treating as cache miss. ` +
+            `If this is steady-state, check that the caller's IAM grants s3:ListBucket ` +
+            `on the bucket ARN (without it, S3 returns 403 for missing keys instead of 404).`
+        );
+        return { exists: false };
+      }
+    }
+    throw err;
+  }
+}
+
+export type PresignedDownloadOptions = {
+  expiresIn?: number;
+  // Override the filename the browser saves the response under. Browsers
+  // ignore the `<a download="…">` attribute on cross-origin URLs unless the
+  // response carries an explicit `Content-Disposition: attachment` header,
+  // so for archive downloads (S3 origin → user) we sign the URL with a
+  // `response-content-disposition` query param. S3 echoes that header back
+  // on the GET response, and the browser uses it as the saved filename.
+  filename?: string;
+};
+
+// Sanitize a filename for use inside a `Content-Disposition` header. Strips
+// CR/LF (header injection) and quotes (which would terminate the filename
+// param early), then trims to a length S3 will accept.
+function sanitizeContentDispositionFilename(name: string): string {
+  const cleaned = name
+    .replaceAll(/[\r\n"\\]/g, "")
+    .replaceAll(/[\x00-\x1f\x7f]/g, "")
+    .trim();
+  return cleaned.slice(0, 200) || "download";
+}
+
 export async function getPresignedDownloadUrl(
   bucket: string,
   key: string,
-  expiresIn: number = DEFAULT_DOWNLOAD_EXPIRY_SECONDS
+  options: PresignedDownloadOptions | number = {}
 ): Promise<string> {
-  const command = new GetObjectCommand({ Bucket: bucket, Key: key });
+  // Backwards-compat: callers that passed a bare `expiresIn` number still work.
+  const opts: PresignedDownloadOptions =
+    typeof options === "number" ? { expiresIn: options } : options;
+  const expiresIn = opts.expiresIn ?? DEFAULT_DOWNLOAD_EXPIRY_SECONDS;
+
+  const command = new GetObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    ...(opts.filename && {
+      ResponseContentDisposition: `attachment; filename="${sanitizeContentDispositionFilename(opts.filename)}"`,
+    }),
+  });
   return getSignedUrl(s3, command, { expiresIn });
 }
 

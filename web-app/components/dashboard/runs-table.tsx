@@ -1,5 +1,4 @@
 import { RelativeTime } from "@/components/dashboard/relative-time";
-import { ClickableRow } from "@/components/instruments/runs-table/clickable-row";
 import { RanByCell } from "@/components/instruments/runs-table/ran-by-cell";
 import { RawFileColumnHeader } from "@/components/instruments/runs-table/raw-file-column-header";
 import { RunIdLabel } from "@/components/instruments/runs-table/run-id-label";
@@ -84,10 +83,9 @@ export function RunsTable({
             const isDeleted = row.deleted_at !== null;
             const href = `/instruments/${row.instrument_id}/runs/${encodeURIComponent(row.run_id)}`;
             return (
-              <ClickableRow
+              <TableRow
                 key={row.id}
-                href={href}
-                className={cn(isDeleted && "opacity-50")}
+                className={cn("group", isDeleted && "opacity-50")}
               >
                 <TableCell>
                   <RunSelectCheckbox runRef={runRowToRef(row)} />
@@ -110,6 +108,7 @@ export function RunsTable({
                     />
                     <RunIdLabel
                       runId={row.run_id}
+                      href={href}
                       isDeleted={isDeleted}
                       className="text-sm"
                     />
@@ -142,7 +141,7 @@ export function RunsTable({
                 <TableCell className="py-1">
                   <RunRowActions row={row} />
                 </TableCell>
-              </ClickableRow>
+              </TableRow>
             );
           })}
         </TableBody>

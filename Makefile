@@ -97,6 +97,11 @@ check-all:
 	make py-check
 	make fe-check
 
+.PHONY: test
+test:
+	make py-test
+	make fe-test
+
 # Lambda.
 .PHONY: docker-build-lambda
 docker-build-lambda:
@@ -161,4 +166,5 @@ endif
 	@echo "Removing retained S3 buckets..."
 	-aws s3 rb s3://arcadia-data-hub-raw-$(ENV) --force
 	-aws s3 rb s3://arcadia-data-hub-processed-$(ENV) --force
+	-aws s3 rb s3://arcadia-data-hub-archives-$(ENV) --force
 	@echo "Teardown complete."

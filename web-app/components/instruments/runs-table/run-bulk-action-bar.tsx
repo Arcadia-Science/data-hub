@@ -8,6 +8,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useArchiveDownload } from "@/hooks/use-archive-download";
 import { ArrowDownToLine, ArrowUpToLine, RotateCw, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
@@ -77,30 +78,10 @@ async function fanOutUpload(
   return { ok, failed, filesQueued };
 }
 
-// Trigger the archive download for each selected run via a throwaway
-// anchor. All clicks must fire synchronously inside the same user-gesture
-// stack — if we defer with setTimeout, browsers treat the later clicks as
-// programmatic and silently drop them (Chrome was cancelling all but the
-// last one). The `download` attribute tells the browser "always download",
-// while the server's Content-Disposition supplies the real filename.
-function fanOutDownload(refs: RunRef[]) {
-  for (const ref of refs) {
-    const a = document.createElement("a");
-    a.href = `/api/v1/instruments/${ref.instrumentId}/runs/${encodeURIComponent(
-      ref.runId
-    )}/download-archive`;
-    a.download = `${ref.runId}.zip`;
-    a.rel = "noopener";
-    a.style.display = "none";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-  }
-}
-
 export function RunBulkActionBar() {
   const { state, actions, meta } = useRunSelection();
   const router = useRouter();
+  const { actions: archiveActions } = useArchiveDownload();
   const [isPending, startTransition] = useTransition();
   const [reprocessOpen, setReprocessOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -149,10 +130,33 @@ export function RunBulkActionBar() {
     });
   }
 
+  // Bulk download fans the start() calls out one-after-another. Awaiting
+  // each kickoff serializes the route's HEAD + INSERT + Lambda-POST so a
+  // 50-run selection doesn't thunder the API with parallel requests; the
+  // actual S3 builds still happen concurrently inside Lambda once each
+  // kickoff returns. We also swallow individual failures so one bad ref
+  // can't abort the rest of the bulk download.
+  //
+  // `void` on the IIFE is intentional: React event handlers can't return
+  // promises without a wrapper.
   function handleDownload() {
-    fanOutDownload(refs);
+    void (async () => {
+      for (const ref of refs) {
+        try {
+          await archiveActions.start({
+            archiveUrl: `/api/v1/instruments/${ref.instrumentId}/runs/${encodeURIComponent(
+              ref.runId
+            )}/download-archive`,
+            runId: ref.runId,
+            defaultFilename: `${ref.runId}.zip`,
+          });
+        } catch (err) {
+          console.error(`Failed to start download for ${ref.runId}:`, err);
+        }
+      }
+    })();
     toast.success(
-      `Downloading ${refs.length} ${refs.length === 1 ? "archive" : "archives"}`
+      `Preparing ${refs.length} ${refs.length === 1 ? "archive" : "archives"}`
     );
   }
 
@@ -232,7 +236,7 @@ export function RunBulkActionBar() {
                   Download
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Download archive for each run</TooltipContent>
+              <TooltipContent>Download zip archive for each run</TooltipContent>
             </Tooltip>
           )}
 
