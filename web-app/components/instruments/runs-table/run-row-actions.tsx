@@ -37,8 +37,8 @@ import type { RunRow } from ".";
 // and individual icons are conditionally rendered based on the run's
 // capabilities so we never show an action the server will reject.
 //
-// All buttons stop click propagation so interacting with them doesn't
-// trigger the row-level navigation on ClickableRow.
+// Buttons stop click propagation as a defensive measure so dropdown / dialog
+// triggers inside the cell don't bubble to ancestor click handlers.
 
 function swallow(e: MouseEvent) {
   e.stopPropagation();

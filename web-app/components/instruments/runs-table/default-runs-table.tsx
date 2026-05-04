@@ -12,7 +12,6 @@ import { runRowToRef } from "@/lib/runs/row-actions";
 import { cn, formatBytes } from "@/lib/utils";
 
 import type { RunsTableProps } from ".";
-import { ClickableRow } from "./clickable-row";
 import { FilterableColumnHeader } from "./filterable-column-header";
 import { RanByCell } from "./ran-by-cell";
 import { RawFileColumnHeader } from "./raw-file-column-header";
@@ -60,10 +59,9 @@ export function DefaultRunsTable({
         {data.map((row) => {
           const isDeleted = row.deleted_at !== null;
           return (
-            <ClickableRow
+            <TableRow
               key={row.id}
-              href={`/instruments/${instrumentId}/runs/${encodeURIComponent(row.run_id)}`}
-              className={cn(isDeleted && "opacity-50")}
+              className={cn("group", isDeleted && "opacity-50")}
             >
               <TableCell>
                 <RunSelectCheckbox runRef={runRowToRef(row)} />
@@ -79,7 +77,11 @@ export function DefaultRunsTable({
                     filesProcessing={row.files_processing}
                     errorMessages={row.error_messages}
                   />
-                  <RunIdLabel runId={row.run_id} isDeleted={isDeleted} />
+                  <RunIdLabel
+                    runId={row.run_id}
+                    href={`/instruments/${instrumentId}/runs/${encodeURIComponent(row.run_id)}`}
+                    isDeleted={isDeleted}
+                  />
                   {isDeleted && (
                     <Badge variant="outline" className="ml-1.5 font-normal">
                       deleted
@@ -106,7 +108,7 @@ export function DefaultRunsTable({
               <TableCell className="py-1">
                 <RunRowActions row={row} />
               </TableCell>
-            </ClickableRow>
+            </TableRow>
           );
         })}
       </TableBody>
