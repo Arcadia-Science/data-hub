@@ -112,8 +112,9 @@ Manage the watcher as a Windows service:
 | `service start` | Start the service |
 | `service stop` | Stop the service |
 | `service status` | Show service status |
+| `service reinstall` | Stop, uninstall, install, and start in one go |
 
-`service install` accepts `--env-path PATH` to override which `.env` file the SCM-launched process loads (defaults to `~/.data-hub/.env.<environment>`). The installer:
+`service install` (and `service reinstall`) accept `--env-path PATH` to override which `.env` file the SCM-launched process loads (defaults to `~/.data-hub/.env.<environment>`). `service reinstall` is the right command after an out-of-band wheel swap (e.g. `pip install -U data-hub-watcher` from an Administrator shell): the stop and uninstall steps are best-effort so it works equally well when the service is already gone. The installer:
 
 - Registers the service with `Tcpip` and `Dnscache` as start dependencies and `delayedstart=True` so it does not race the boot-time network stack.
 - Configures recovery actions (restart after 60 s on first failure, 120 s on second) with `SERVICE_CONFIG_FAILURE_ACTIONS_FLAG` set, so a non-zero `SystemExit` from the runtime — notably the upgrade-driven restart request — is treated as a failure and the SCM picks the new wheel up automatically.

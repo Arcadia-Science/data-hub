@@ -1089,3 +1089,75 @@ def service_status_cmd() -> None:
             click.echo(f"  PID:   {info['pid']}")
     except Exception as exc:
         raise click.ClickException(f"Failed to query service status: {exc}") from exc
+
+
+@service.command("reinstall")
+@click.option(
+    "--env-path",
+    "env_path_override",
+    type=click.Path(dir_okay=False),
+    default=None,
+    help="Path to the .env file. Defaults to ~/.data-hub/.env.<environment>.",
+)
+@click.pass_context
+def service_reinstall(ctx: click.Context, env_path_override: str | None) -> None:
+    """Stop, uninstall, install, and start the watcher Windows service.
+
+    Useful after upgrading the watcher wheel from an Administrator shell so
+    the SCM picks up the new ``data_hub_watcher.service`` entrypoint without
+    needing four separate ``service`` invocations.
+    """
+    _windows_only()
+    path = _resolve_path(ctx)
+    cfg = load_config(path)
+
+    from data_hub_watcher.service import (
+        install_service,
+        start_service,
+        stop_service,
+        uninstall_service,
+    )
+
+    if env_path_override is not None:
+        env_path = Path(env_path_override).resolve()
+    else:
+        env_path = env_file_path(cfg.environment).resolve()
+
+    if not env_path.exists():
+        click.echo(
+            click.style(
+                f"⚠ Warning: {env_path} does not exist. "
+                "Run 'data-hub-watcher init' first or pass --env-path.",
+                fg="yellow",
+            ),
+            err=True,
+        )
+
+    # Stop and uninstall are best-effort: a fresh install (or a half-uninstalled
+    # service) shouldn't block the reinstall from progressing to install+start.
+    # ``uninstall_service`` already swallows StopService errors internally, but
+    # we still call ``stop_service`` first so the operator gets a clear log
+    # line about which step succeeded.
+    try:
+        stop_service()
+        click.echo(click.style("✓ Service stopped.", fg="green"))
+    except Exception as exc:
+        click.echo(f"  (stop skipped: {exc})")
+
+    try:
+        uninstall_service()
+        click.echo(click.style("✓ Service uninstalled.", fg="green"))
+    except Exception as exc:
+        click.echo(f"  (uninstall skipped: {exc})")
+
+    try:
+        install_service(config_path=path.resolve(), env_path=env_path)
+        click.echo(click.style("✓ Service installed.", fg="green"))
+    except Exception as exc:
+        raise click.ClickException(f"Failed to install service: {exc}") from exc
+
+    try:
+        start_service()
+        click.echo(click.style("✓ Service started.", fg="green"))
+    except Exception as exc:
+        raise click.ClickException(f"Failed to start service: {exc}") from exc
