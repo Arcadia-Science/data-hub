@@ -85,7 +85,7 @@ export function ArchiveDownloadDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <ul className="min-w-0 space-y-3 py-2">
+        <ul className="-mx-1 max-h-[50vh] min-w-0 space-y-3 overflow-y-auto px-1 py-2">
           {visible.map((job) => (
             <li
               key={job.id}
