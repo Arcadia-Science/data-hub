@@ -115,6 +115,7 @@ Other service commands:
 data-hub-watcher service status    # Check if the service is running
 data-hub-watcher service stop      # Stop the service
 data-hub-watcher service uninstall # Remove the service
+data-hub-watcher service reinstall # Stop, uninstall, install, and start (e.g. after a manual wheel upgrade)
 ```
 
 ## Changing configuration
