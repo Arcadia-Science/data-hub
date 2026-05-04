@@ -508,6 +508,118 @@ class TestUpdaterOnTick:
         emitted = [c.args[0].event_type for c in h.reporter.queue_event.call_args_list]
         assert EventType.UPDATE_FAILED in emitted
 
+    def test_upgrade_runner_raising_file_not_found_is_classified(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Reproduces the failure that prompted this change: on a Windows
+        # LocalSystem service `subprocess.run(["uv", ...])` raises
+        # FileNotFoundError because the service account's PATH doesn't
+        # see the user's uv install. Previously this surfaced as the
+        # opaque `subprocess raised: [WinError 2] ...` reason with no
+        # argv or error class attached — now we classify the branch and
+        # attach both so operators can diagnose from the dashboard
+        # without needing to open `watcher.log` on the PC.
+        winerror2 = FileNotFoundError("[WinError 2] The system cannot find the file specified")
+        runner = MagicMock(side_effect=winerror2)
+        h = _make_updater(tmp_path, upgrade_runner=runner)
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+        monkeypatch.setattr(
+            "data_hub_watcher.updater.detect_install_method",
+            lambda: InstallMethod.UV_TOOL,
+        )
+        # Force the command-build to succeed regardless of whether the
+        # test host has `uv` on PATH, so we're testing the FileNotFound
+        # branch from the subprocess call — not the pre-flight
+        # UvExecutableNotFoundError branch (which is exercised in the
+        # next test).
+        monkeypatch.setattr(
+            "data_hub_watcher.updater.build_upgrade_command",
+            lambda method, target_version=None: [
+                "/fake/bin/uv",
+                "tool",
+                "install",
+                "--reinstall",
+                "--index-url",
+                "https://pypi.org/simple/",
+                f"data-hub-watcher=={target_version}",
+            ],
+        )
+
+        h.counters.last_files_uploaded = 0
+        h.updater.on_tick()
+        h.updater.on_tick()
+        result = h.updater.on_tick()
+
+        assert result is not None
+        assert result.attempted is True
+        assert result.succeeded is False
+        h.request_restart.assert_not_called()
+
+        emitted_events = [c.args[0] for c in h.reporter.queue_event.call_args_list]
+        update_failed = [e for e in emitted_events if e.event_type is EventType.UPDATE_FAILED]
+        assert len(update_failed) == 1
+        details = update_failed[0].details
+        # Reason must be classified (not the generic `subprocess raised:` prefix)
+        # so the dashboard row is immediately diagnosable.
+        assert details["reason"].startswith("upgrade command not executable:")
+        assert details["error_class"] == "FileNotFoundError"
+        assert details["command"][0] == "/fake/bin/uv"
+        assert details["command"][1:4] == ["tool", "install", "--reinstall"]
+        assert details["install_method"] == "uv-tool"
+
+    def test_uv_not_found_refuses_before_update_started(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # When no `uv` binary is locatable we must fail fast: no
+        # UPDATE_STARTED, no on-disk marker, just a single UPDATE_FAILED
+        # carrying the paths we probed so the operator knows where to
+        # drop a binary (or what PATH to fix) on the lab PC.
+        from data_hub_watcher.self_update import UvExecutableNotFoundError
+
+        runner = MagicMock()  # must not be called
+        h = _make_updater(tmp_path, upgrade_runner=runner)
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+        monkeypatch.setattr(
+            "data_hub_watcher.updater.detect_install_method",
+            lambda: InstallMethod.UV_TOOL,
+        )
+
+        def _raise(method: Any, target_version: str | None = None) -> list[str]:
+            raise UvExecutableNotFoundError(
+                [r"C:\Users\lab\.local\bin\uv.exe", r"C:\ProgramData\uv\uv.exe"]
+            )
+
+        monkeypatch.setattr("data_hub_watcher.updater.build_upgrade_command", _raise)
+
+        h.counters.last_files_uploaded = 0
+        h.updater.on_tick()
+        h.updater.on_tick()
+        result = h.updater.on_tick()
+
+        assert result is not None
+        assert result.attempted is True
+        assert result.succeeded is False
+        runner.assert_not_called()
+        h.request_restart.assert_not_called()
+        # No marker: we refused before dispatching the subprocess, so
+        # there's nothing for the next process startup to evaluate.
+        assert not (tmp_path / ".data-hub" / UPGRADE_MARKER_FILENAME).exists()
+
+        emitted_events = [c.args[0] for c in h.reporter.queue_event.call_args_list]
+        types = [e.event_type for e in emitted_events]
+        # Critical: no UPDATE_STARTED for a subprocess that never ran.
+        assert EventType.UPDATE_STARTED not in types
+        update_failed = [e for e in emitted_events if e.event_type is EventType.UPDATE_FAILED]
+        assert len(update_failed) == 1
+        details = update_failed[0].details
+        assert details["reason"] == "uv executable not found"
+        assert details["error_class"] == "UvExecutableNotFoundError"
+        assert details["attempted_subprocess"] is False
+        assert details["candidates_tried"] == [
+            r"C:\Users\lab\.local\bin\uv.exe",
+            r"C:\ProgramData\uv\uv.exe",
+        ]
+
     def test_editable_install_refuses_auto_update(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
