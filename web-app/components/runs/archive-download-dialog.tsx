@@ -105,7 +105,7 @@ export function ArchiveDownloadDialog({
                 )}
                 <div className="min-w-0 flex-1">
                   <div className="truncate font-medium">{job.runId}</div>
-                  <div className="truncate text-xs text-muted-foreground">
+                  <div className="text-xs text-muted-foreground">
                     {job.status === "building"
                       ? `Building... ${formatElapsed(job.startedAt, now)}`
                       : (job.errorMessage ?? "Failed")}
