@@ -120,8 +120,12 @@ export type InvokeBuildArchiveInput = {
   jobId?: string;
   instrumentId: string;
   runId: string;
-  sourceBucket: string;
-  files: { s3Key: string; filename: string }[];
+  // Per-file source bucket so a single archive can mix files from the raw
+  // bucket and the processed bucket (e.g. SpectraMax raw .xls + Lambda-
+  // produced processed CSV). The Lambda allow-lists each bucket against its
+  // own configured raw + processed env vars, so this is not a pivot point
+  // for an invoke-token leak.
+  files: { s3Key: string; filename: string; sourceBucket: string }[];
 };
 
 export type InvokeBuildArchiveResult =
@@ -155,10 +159,13 @@ export async function invokeBuildArchive(
     type: "build_archive",
     instrument_id: input.instrumentId,
     run_id: input.runId,
-    source_bucket: input.sourceBucket,
     destination_bucket: archiveBucket,
     destination_key: archiveKey,
-    files: input.files.map((f) => ({ key: f.s3Key, name: f.filename })),
+    files: input.files.map((f) => ({
+      key: f.s3Key,
+      name: f.filename,
+      source_bucket: f.sourceBucket,
+    })),
   };
   if (input.jobId) payload.job_id = input.jobId;
 

@@ -121,18 +121,20 @@ def _make_request(
     *,
     instrument_id: str = "akta-fplc",
     run_id: str = "RUN001",
-    source_bucket: str = "raw-bucket",
     destination_bucket: str = "archives-bucket",
 ) -> BuildArchiveRequest:
     destination_key = f"runs/{instrument_id}/{run_id}/abc.zip"
     return BuildArchiveRequest(
         instrument_id=instrument_id,
         run_id=run_id,
-        source_bucket=source_bucket,
         destination_bucket=destination_bucket,
         destination_key=destination_key,
         files=files,
     )
+
+
+def _file(key: str, name: str, source_bucket: str = "raw-bucket") -> ArchiveFile:
+    return ArchiveFile(key=key, name=name, source_bucket=source_bucket)
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +146,7 @@ class TestBuildRunArchive:
     def test_single_small_file(self) -> None:
         body = b"hello, world\n" * 10
         s3 = StubS3Client({("raw-bucket", "akta-fplc/RUN001/data.csv"): body})
-        request = _make_request([ArchiveFile(key="akta-fplc/RUN001/data.csv", name="data.csv")])
+        request = _make_request([_file("akta-fplc/RUN001/data.csv", "data.csv")])
 
         result = build_run_archive(request, s3_client=s3)
 
@@ -165,9 +167,9 @@ class TestBuildRunArchive:
         )
         request = _make_request(
             [
-                ArchiveFile(key="akta-fplc/RUN001/a.csv", name="a.csv"),
-                ArchiveFile(key="akta-fplc/RUN001/b.csv", name="b.csv"),
-                ArchiveFile(key="akta-fplc/RUN001/c.bin", name="c.bin"),
+                _file("akta-fplc/RUN001/a.csv", "a.csv"),
+                _file("akta-fplc/RUN001/b.csv", "b.csv"),
+                _file("akta-fplc/RUN001/c.bin", "c.bin"),
             ]
         )
 
@@ -180,6 +182,56 @@ class TestBuildRunArchive:
             assert zf.read("b.csv") == b"bravo bravo bravo"
             assert zf.read("c.bin") == bytes(range(256))
 
+    def test_files_from_multiple_source_buckets(self) -> None:
+        # Mixed-bucket runs are the common case for instruments that produce
+        # processed artifacts (SpectraMax CSVs, Hina JPGs, Azure 600 PNGs):
+        # raw inputs live in the raw bucket, processor output in the
+        # processed bucket. A single archive must zip across both.
+        s3 = StubS3Client(
+            {
+                ("raw-bucket", "spectramax-id3-plate-reader/RUN42/plate.xls"): b"raw-bytes",
+                (
+                    "processed-bucket",
+                    "spectramax-id3-plate-reader/RUN42/RUN42_raw_well_data.csv",
+                ): b"processed-bytes",
+            }
+        )
+        request = _make_request(
+            [
+                ArchiveFile(
+                    key="spectramax-id3-plate-reader/RUN42/plate.xls",
+                    name="plate.xls",
+                    source_bucket="raw-bucket",
+                ),
+                ArchiveFile(
+                    key="spectramax-id3-plate-reader/RUN42/RUN42_raw_well_data.csv",
+                    name="RUN42_raw_well_data.csv",
+                    source_bucket="processed-bucket",
+                ),
+            ],
+            instrument_id="spectramax-id3-plate-reader",
+            run_id="RUN42",
+        )
+
+        build_run_archive(request, s3_client=s3)
+
+        zipped = s3.uploaded_objects[
+            ("archives-bucket", "runs/spectramax-id3-plate-reader/RUN42/abc.zip")
+        ]
+        with zipfile.ZipFile(io.BytesIO(zipped)) as zf:
+            assert sorted(zf.namelist()) == [
+                "RUN42_raw_well_data.csv",
+                "plate.xls",
+            ]
+            assert zf.read("plate.xls") == b"raw-bytes"
+            assert zf.read("RUN42_raw_well_data.csv") == b"processed-bytes"
+
+        # Each get_object call must target the bucket the file declared,
+        # not a single shared source bucket.
+        get_calls = [c for c in s3.calls if c[0] == "get_object"]
+        buckets = {c[1]["Bucket"] for c in get_calls}
+        assert buckets == {"raw-bucket", "processed-bucket"}
+
     def test_large_file_spans_multiple_parts(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Drop the part size to 1 KB so we can verify multipart spanning
         # without allocating the production 16 MB threshold.
@@ -188,7 +240,7 @@ class TestBuildRunArchive:
         monkeypatch.setattr(ab, "_PART_SIZE_BYTES", 1024)
         body = b"abcdefghij" * 1000  # 10 KB → at least 10 parts
         s3 = StubS3Client({("raw-bucket", "akta-fplc/RUN001/big.bin"): body})
-        request = _make_request([ArchiveFile(key="akta-fplc/RUN001/big.bin", name="big.bin")])
+        request = _make_request([_file("akta-fplc/RUN001/big.bin", "big.bin")])
 
         build_run_archive(request, s3_client=s3)
 
@@ -211,7 +263,7 @@ class TestBuildRunArchiveFailures:
         monkeypatch.setattr(ab, "_PART_SIZE_BYTES", 512)
         s3 = StubS3Client({("raw-bucket", "akta-fplc/RUN001/x.bin"): b"x" * 4096})
         s3.fail_part_at = 2  # fail on the second part flush
-        request = _make_request([ArchiveFile(key="akta-fplc/RUN001/x.bin", name="x.bin")])
+        request = _make_request([_file("akta-fplc/RUN001/x.bin", "x.bin")])
 
         with pytest.raises(RuntimeError):
             build_run_archive(request, s3_client=s3)
@@ -232,7 +284,7 @@ class TestBuildRunArchiveFailures:
         # inter-file byte guard doesn't fire first.
         monkeypatch.setattr(ab, "_MAX_TOTAL_BYTES", 256 * 4)
         s3 = StubS3Client({("raw-bucket", "akta-fplc/RUN001/big.bin"): b"x" * 8192})
-        request = _make_request([ArchiveFile(key="akta-fplc/RUN001/big.bin", name="big.bin")])
+        request = _make_request([_file("akta-fplc/RUN001/big.bin", "big.bin")])
 
         with pytest.raises(ValueError, match="multipart upload cap"):
             build_run_archive(request, s3_client=s3)
@@ -251,15 +303,56 @@ class TestParseBuildRequest:
         return {
             "instrument_id": "akta-fplc",
             "run_id": "RUN001",
-            "source_bucket": "raw-bucket",
             "destination_bucket": "archives-bucket",
             "destination_key": "runs/akta-fplc/RUN001/abc.zip",
-            "files": [{"key": "akta-fplc/RUN001/data.csv", "name": "data.csv"}],
+            "files": [
+                {
+                    "key": "akta-fplc/RUN001/data.csv",
+                    "name": "data.csv",
+                    "source_bucket": "raw-bucket",
+                }
+            ],
         }
 
     def test_accepts_valid_payload(self) -> None:
         request = parse_build_request(self._base_payload())
-        assert request.files == [ArchiveFile(key="akta-fplc/RUN001/data.csv", name="data.csv")]
+        assert request.files == [
+            ArchiveFile(
+                key="akta-fplc/RUN001/data.csv",
+                name="data.csv",
+                source_bucket="raw-bucket",
+            )
+        ]
+
+    def test_accepts_per_file_buckets_for_multi_bucket_runs(self) -> None:
+        payload = self._base_payload()
+        payload["files"] = [
+            {
+                "key": "akta-fplc/RUN001/raw.csv",
+                "name": "raw.csv",
+                "source_bucket": "raw-bucket",
+            },
+            {
+                "key": "akta-fplc/RUN001/processed.csv",
+                "name": "processed.csv",
+                "source_bucket": "processed-bucket",
+            },
+        ]
+        request = parse_build_request(payload)
+        assert [f.source_bucket for f in request.files] == [
+            "raw-bucket",
+            "processed-bucket",
+        ]
+
+    def test_falls_back_to_top_level_source_bucket_when_per_file_omitted(self) -> None:
+        # Backward-compat: pre-migration callers (and the web app while it's
+        # mid-rollout) send a top-level `source_bucket` and no per-file
+        # field. Each file should inherit it.
+        payload = self._base_payload()
+        payload["source_bucket"] = "raw-bucket"
+        payload["files"] = [{"key": "akta-fplc/RUN001/data.csv", "name": "data.csv"}]
+        request = parse_build_request(payload)
+        assert request.files[0].source_bucket == "raw-bucket"
 
     def test_rejects_missing_field(self) -> None:
         payload = self._base_payload()
@@ -273,16 +366,73 @@ class TestParseBuildRequest:
         with pytest.raises(ValueError, match="non-empty array"):
             parse_build_request(payload)
 
+    def test_rejects_files_without_source_bucket_and_no_fallback(self) -> None:
+        payload = self._base_payload()
+        payload["files"] = [{"key": "akta-fplc/RUN001/data.csv", "name": "data.csv"}]
+        # No top-level fallback either.
+        with pytest.raises(ValueError, match="source_bucket"):
+            parse_build_request(payload)
+
+    def test_rejects_source_bucket_outside_allow_list(self) -> None:
+        # An invoke token holder shouldn't be able to redirect the builder
+        # at an arbitrary bucket the Lambda role might happen to have
+        # GetObject on. The handler always passes its allow-list.
+        payload = self._base_payload()
+        payload["files"] = [
+            {
+                "key": "akta-fplc/RUN001/data.csv",
+                "name": "data.csv",
+                "source_bucket": "evil-bucket",
+            }
+        ]
+        with pytest.raises(ValueError, match="not in this Lambda's allow-list"):
+            parse_build_request(
+                payload,
+                allowed_source_buckets={"raw-bucket", "processed-bucket"},
+            )
+
+    def test_accepts_source_buckets_within_allow_list(self) -> None:
+        payload = self._base_payload()
+        payload["files"] = [
+            {
+                "key": "akta-fplc/RUN001/raw.csv",
+                "name": "raw.csv",
+                "source_bucket": "raw-bucket",
+            },
+            {
+                "key": "akta-fplc/RUN001/processed.csv",
+                "name": "processed.csv",
+                "source_bucket": "processed-bucket",
+            },
+        ]
+        request = parse_build_request(
+            payload,
+            allowed_source_buckets={"raw-bucket", "processed-bucket"},
+        )
+        assert len(request.files) == 2
+
     def test_rejects_key_outside_run_prefix(self) -> None:
         payload = self._base_payload()
         # Try to slip a key from a different run into the archive — must fail
         # so a leaked invoke token can't exfiltrate cross-run data.
-        payload["files"] = [{"key": "other-instrument/RUN999/data.csv", "name": "data.csv"}]
+        payload["files"] = [
+            {
+                "key": "other-instrument/RUN999/data.csv",
+                "name": "data.csv",
+                "source_bucket": "raw-bucket",
+            }
+        ]
         with pytest.raises(ValueError, match="does not belong to run"):
             parse_build_request(payload)
 
     def test_rejects_name_with_path_traversal(self) -> None:
         payload = self._base_payload()
-        payload["files"] = [{"key": "akta-fplc/RUN001/data.csv", "name": "../escape.csv"}]
+        payload["files"] = [
+            {
+                "key": "akta-fplc/RUN001/data.csv",
+                "name": "../escape.csv",
+                "source_bucket": "raw-bucket",
+            }
+        ]
         with pytest.raises(ValueError, match="Invalid archive entry name"):
             parse_build_request(payload)

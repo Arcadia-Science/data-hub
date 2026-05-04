@@ -15,8 +15,14 @@ Design notes:
 - ``force_zip64=True`` on every ``ZipFile.open`` call so the writer always
   emits ZIP64 headers; without it, a single ≥4 GB entry would raise.
 - Every input ``key`` is required to live under ``{instrument_id}/{run_id}/``
-  in the *raw* bucket. This keeps a leaked invoke token from being usable to
-  build archives of unrelated S3 prefixes.
+  in its source bucket. This keeps a leaked invoke token from being usable
+  to build archives of unrelated S3 prefixes.
+- Each input file carries its own ``source_bucket`` so a single archive can
+  zip files that live across the raw and processed buckets (e.g. a run with
+  both raw instrument output and Lambda-produced processed artifacts). The
+  caller's allow-list is enforced via ``allowed_source_buckets`` in
+  ``parse_build_request`` — a leaked invoke token can't redirect the builder
+  at an arbitrary bucket the Lambda role happens to have GetObject on.
 """
 
 from __future__ import annotations
@@ -199,17 +205,22 @@ class _MultipartUploadStream:
 
 @dataclass
 class ArchiveFile:
-    """A single file to include in a run archive."""
+    """A single file to include in a run archive.
+
+    ``source_bucket`` is per-file so the builder can zip across the raw and
+    processed buckets in a single archive — the web app sends each file's
+    bucket alongside its key.
+    """
 
     key: str
     name: str
+    source_bucket: str
 
 
 @dataclass
 class BuildArchiveRequest:
     instrument_id: str
     run_id: str
-    source_bucket: str
     destination_bucket: str
     destination_key: str
     files: list[ArchiveFile]
@@ -222,9 +233,25 @@ class BuildArchiveResult:
     size_bytes: int
 
 
-def parse_build_request(payload: dict[str, Any]) -> BuildArchiveRequest:
-    """Validate and parse a ``build_archive`` payload from the Function URL."""
-    required = ("instrument_id", "run_id", "source_bucket", "destination_bucket", "destination_key")
+def parse_build_request(
+    payload: dict[str, Any],
+    *,
+    allowed_source_buckets: set[str] | None = None,
+) -> BuildArchiveRequest:
+    """Validate and parse a ``build_archive`` payload from the Function URL.
+
+    ``allowed_source_buckets``, when supplied, restricts the set of buckets
+    files may reference. The handler passes the Lambda's configured raw +
+    processed bucket names so a leaked invoke token can't be used to read
+    arbitrary buckets the Lambda role might otherwise be able to GetObject
+    on. Tests pass ``None`` to skip the check.
+
+    Each file may specify its own ``source_bucket``. For backward compat
+    with the older single-bucket payload, a top-level ``source_bucket`` is
+    accepted as a fallback for files that omit it. New callers should always
+    set the per-file field.
+    """
+    required = ("instrument_id", "run_id", "destination_bucket", "destination_key")
     for field in required:
         if not payload.get(field):
             raise ValueError(f"Missing required field: {field}")
@@ -232,6 +259,10 @@ def parse_build_request(payload: dict[str, Any]) -> BuildArchiveRequest:
     raw_files = payload.get("files")
     if not isinstance(raw_files, list) or not raw_files:
         raise ValueError("'files' must be a non-empty array")
+
+    fallback_bucket = payload.get("source_bucket")
+    if fallback_bucket is not None and not isinstance(fallback_bucket, str):
+        raise ValueError("'source_bucket' must be a string when provided")
 
     instrument_id = str(payload["instrument_id"])
     run_id = str(payload["run_id"])
@@ -245,6 +276,20 @@ def parse_build_request(payload: dict[str, Any]) -> BuildArchiveRequest:
         name = entry.get("name")
         if not isinstance(key, str) or not isinstance(name, str):
             raise ValueError("Each 'files' entry must have string 'key' and 'name'")
+
+        # Per-file `source_bucket` wins; fall back to the top-level field for
+        # legacy clients that haven't migrated yet.
+        bucket = entry.get("source_bucket", fallback_bucket)
+        if not isinstance(bucket, str) or not bucket:
+            raise ValueError(
+                "Each 'files' entry must specify a non-empty 'source_bucket' "
+                "(or a top-level 'source_bucket' must be provided as a fallback)"
+            )
+        if allowed_source_buckets is not None and bucket not in allowed_source_buckets:
+            raise ValueError(
+                f"source_bucket '{bucket}' is not in this Lambda's allow-list of source buckets"
+            )
+
         # Reject keys that escape the run's prefix. This makes the invoke
         # token useless for cross-run/cross-tenant archive exfiltration even
         # if an attacker controls the rest of the payload.
@@ -252,12 +297,11 @@ def parse_build_request(payload: dict[str, Any]) -> BuildArchiveRequest:
             raise ValueError(f"File key '{key}' does not belong to run '{expected_prefix}'")
         if "/" in name or name in ("", ".", ".."):
             raise ValueError(f"Invalid archive entry name: {name!r}")
-        parsed_files.append(ArchiveFile(key=key, name=name))
+        parsed_files.append(ArchiveFile(key=key, name=name, source_bucket=bucket))
 
     return BuildArchiveRequest(
         instrument_id=instrument_id,
         run_id=run_id,
-        source_bucket=str(payload["source_bucket"]),
         destination_bucket=str(payload["destination_bucket"]),
         destination_key=str(payload["destination_key"]),
         files=parsed_files,
@@ -298,7 +342,7 @@ def build_run_archive(
             allowZip64=True,
         ) as zf:
             for file in request.files:
-                _append_file_to_zip(s3, request.source_bucket, file, zf)
+                _append_file_to_zip(s3, file, zf)
                 if stream.tell() > _MAX_TOTAL_BYTES:
                     raise ValueError(
                         f"Archive exceeded the {_MAX_TOTAL_BYTES}-byte cap "
@@ -318,8 +362,8 @@ def build_run_archive(
     )
 
 
-def _append_file_to_zip(s3_client: Any, source_bucket: str, file: ArchiveFile, zf: Any) -> None:
-    obj = s3_client.get_object(Bucket=source_bucket, Key=file.key)
+def _append_file_to_zip(s3_client: Any, file: ArchiveFile, zf: Any) -> None:
+    obj = s3_client.get_object(Bucket=file.source_bucket, Key=file.key)
     body = obj["Body"]
     try:
         # force_zip64=True makes the per-entry header ZIP64-capable so files

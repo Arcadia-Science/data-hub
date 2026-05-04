@@ -210,19 +210,12 @@ async function handleViaArchiveBuilder(args: {
       : redirectResponse(url);
   }
 
-  const sourceBucket = downloadable[0].s3Bucket;
-  // Belt-and-braces: every file in a run should live in the same bucket, but
-  // if a stray legacy row points elsewhere, refusing the build is safer than
-  // sending the wrong bucket to Lambda.
-  for (const f of downloadable) {
-    if (f.s3Bucket !== sourceBucket) {
-      return apiError(
-        500,
-        INTERNAL_ERROR,
-        "Run has files in multiple S3 buckets; archive builder cannot proceed"
-      );
-    }
-  }
+  // Files in a run can legitimately span the raw and processed buckets
+  // (e.g. SpectraMax: raw `.xls` in the raw bucket + Lambda-produced CSV
+  // in the processed bucket). The Lambda payload now carries each file's
+  // bucket per-entry and the Lambda enforces an allow-list against its
+  // configured raw + processed env vars, so a stray row pointing at an
+  // unexpected bucket fails closed at the builder, not here.
 
   const totalSize = estimateTotalSize(downloadable);
   const threshold = getSyncArchiveThresholdBytes();
@@ -304,8 +297,11 @@ async function handleViaArchiveBuilder(args: {
     jobId: job.id,
     instrumentId,
     runId,
-    sourceBucket,
-    files: downloadable.map((f) => ({ s3Key: f.s3Key, filename: f.filename })),
+    files: downloadable.map((f) => ({
+      s3Key: f.s3Key,
+      filename: f.filename,
+      sourceBucket: f.s3Bucket,
+    })),
   };
 
   if (goAsync) {

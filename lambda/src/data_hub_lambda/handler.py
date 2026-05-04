@@ -188,10 +188,26 @@ def _handle_build_archive(payload: dict[str, Any]) -> dict[str, Any]:
     actual outcome is delivered out-of-band.
     """
     from data_hub_lambda.config import lambda_config
+    from data_hub_shared.config import config
 
     job_id = payload.get("job_id")
+    # Build the source-bucket allow-list from the Lambda's configured raw +
+    # processed bucket env vars. Both are set by SAM (`AWS_S3_RAW_DATA_BUCKET`
+    # / `AWS_S3_PROCESSED_DATA_BUCKET`); if neither is configured (e.g. a
+    # broken deploy), skip the check rather than refuse every build — the
+    # destination_bucket allow-list below still prevents writes from being
+    # redirected.
+    allowed_source_buckets: set[str] = set()
+    if config.AWS_S3_RAW_DATA_BUCKET:
+        allowed_source_buckets.add(config.AWS_S3_RAW_DATA_BUCKET)
+    if config.AWS_S3_PROCESSED_DATA_BUCKET:
+        allowed_source_buckets.add(config.AWS_S3_PROCESSED_DATA_BUCKET)
+
     try:
-        request = archive_builder.parse_build_request(payload)
+        request = archive_builder.parse_build_request(
+            payload,
+            allowed_source_buckets=allowed_source_buckets or None,
+        )
     except ValueError as exc:
         logger.warning("Invalid build_archive payload: %s", exc)
         if isinstance(job_id, str):

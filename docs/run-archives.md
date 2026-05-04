@@ -2,6 +2,8 @@
 
 The "Download all" actions on the run detail page and the runs table deliver every active file in a run as a single zip. Rather than streaming the zip through the Vercel function (which previously drove ~100 GB/day of [Fast Origin Transfer](https://vercel.com/docs/manage-cdn-usage#fast-origin-transfer)), the web app delegates building to the Lambda and serves the result via a presigned S3 URL — bytes never traverse Vercel.
 
+Each archive can mix files from the raw bucket and the processed bucket in a single zip. This matters for instruments that produce processed artifacts via Lambda preprocessing (SpectraMax raw `.xls` → processed CSV; Hina `.nd2` → processed JPG; Azure 600 Gel Doc `.tif` → processed PNG): the run's file rows reference both buckets, and "Download all" zips them together.
+
 This page covers the end-to-end flow, the cache + dedup model, and the on-call runbook. For the Lambda invocation contract, see [Lambda → Function URL (archive build)](lambda.md#function-url-archive-build). For the HTTP endpoints, see [REST API → Archive jobs](api.md#archive-jobs).
 
 ## Flow
