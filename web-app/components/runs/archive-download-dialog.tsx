@@ -85,13 +85,13 @@ export function ArchiveDownloadDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <ul className="space-y-3 py-2">
+        <ul className="min-w-0 space-y-3 py-2">
           {visible.map((job) => (
             <li
               key={job.id}
               className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2 text-sm"
             >
-              <div className="flex min-w-0 items-center gap-2">
+              <div className="flex min-w-0 flex-1 items-center gap-2">
                 {job.status === "building" ? (
                   <Loader2
                     className="size-4 shrink-0 animate-spin text-muted-foreground"
@@ -103,7 +103,7 @@ export function ArchiveDownloadDialog({
                     aria-hidden
                   />
                 )}
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <div className="truncate font-medium">{job.runId}</div>
                   <div className="truncate text-xs text-muted-foreground">
                     {job.status === "building"
@@ -116,6 +116,7 @@ export function ArchiveDownloadDialog({
                 type="button"
                 variant="ghost"
                 size="sm"
+                className="shrink-0"
                 onClick={() => onDismiss(job.id)}
               >
                 {job.status === "building" ? "Hide" : "Dismiss"}
