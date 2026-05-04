@@ -15,11 +15,25 @@ import { ArchiveDownloadDialog } from "./archive-download-dialog";
 
 // One in-progress archive download. Identified by `id` so the dialog can
 // keep separate progress per build (e.g. bulk fan-out across runs).
+//
+// `archiveUrl` is the original `/download-archive` URL the user invoked.
+// We re-issue it as our polling target instead of hitting
+// `/api/v1/archive-jobs/:id` because the download-archive route does an
+// S3 HEAD on the canonical archive key *before* doing anything else and
+// 200s on a hit. That makes the artifact in S3 — not the row's status —
+// the source of truth for "ready", so we recover automatically even if
+// the Lambda's PATCH callback to flip the row to `ready` never lands.
 export type ArchiveDownloadJob = {
   id: string;
   runId: string;
-  jobId?: string;
-  pollUrl?: string;
+  archiveUrl: string;
+  defaultFilename: string;
+  // `job_id` returned by the very first 202. Subsequent polls compare
+  // their own `job_id` against this; if it changes, the route's dedup
+  // INSERT created a new row, which only happens after the previous
+  // attempt was marked failed (or expired by the stuck-row sweep). We
+  // surface that as a failure rather than silently chase a fresh build.
+  initialJobId?: string;
   status: "pending" | "building" | "ready" | "failed";
   errorMessage?: string;
   downloadUrl?: string;
@@ -66,6 +80,91 @@ function triggerDownload(url: string, filename: string) {
   a.remove();
 }
 
+// Outcome of a single fetch against `/download-archive`. Both the initial
+// click and the polling effect parse the response into one of these so the
+// state-update logic is shared.
+type ProbeResult =
+  | { kind: "ready"; downloadUrl: string; sizeBytes: number | null }
+  | { kind: "building"; jobId: string }
+  | { kind: "redirect"; url: string }
+  | { kind: "failed"; message: string };
+
+// Fetch `/download-archive` with `Accept: application/json` and translate
+// the response into a `ProbeResult`. Both `start()` (initial click) and
+// the polling effect use this — there is no separate "is the build
+// finished?" endpoint. The route's S3 HEAD short-circuit means a finished
+// build is visible to us regardless of whether the Lambda's PATCH callback
+// to the web app fired.
+//
+// `redirect: "manual"` is intentional: when the caller doesn't (or can't)
+// honor the JSON Accept and 302s straight to S3, we don't want `fetch`
+// to silently follow into binary bytes; we want to detect the redirect
+// and either navigate the page (initial click) or ignore it (polling).
+async function probeArchiveUrl(archiveUrl: string): Promise<ProbeResult> {
+  let res: Response;
+  try {
+    res = await fetch(archiveUrl, {
+      headers: { Accept: "application/json" },
+      redirect: "manual",
+      cache: "no-store",
+    });
+  } catch (err) {
+    return {
+      kind: "failed",
+      message: err instanceof Error ? err.message : "Network request failed",
+    };
+  }
+
+  // `redirect: "manual"` surfaces a 3xx as an opaque redirect rather than
+  // following it. The route only returns a 302 if the client didn't ask
+  // for JSON — we always do — so reaching here usually means an
+  // intermediary stripped the Accept header. Fall back to a navigation.
+  if (res.type === "opaqueredirect") {
+    return { kind: "redirect", url: archiveUrl };
+  }
+
+  if (!res.ok && res.status !== 202) {
+    const body = (await res.json().catch(() => null)) as {
+      error?: { message?: string };
+    } | null;
+    return {
+      kind: "failed",
+      message:
+        body?.error?.message ?? `Archive download failed (${res.status})`,
+    };
+  }
+
+  const body = (await res.json().catch(() => null)) as {
+    status?: "ready" | "building";
+    download_url?: string;
+    size_bytes?: number | null;
+    job_id?: string;
+  } | null;
+  if (!body) {
+    return {
+      kind: "failed",
+      message: "Archive route returned a malformed response",
+    };
+  }
+
+  if (body.status === "ready" && body.download_url) {
+    return {
+      kind: "ready",
+      downloadUrl: body.download_url,
+      sizeBytes: body.size_bytes ?? null,
+    };
+  }
+
+  if (!body.job_id) {
+    return {
+      kind: "failed",
+      message: "Archive route did not return a job id",
+    };
+  }
+
+  return { kind: "building", jobId: body.job_id };
+}
+
 export function ArchiveDownloadProvider({ children }: { children: ReactNode }) {
   const [jobs, setJobs] = useState<ArchiveDownloadJob[]>([]);
   // Persist the latest jobs in a ref so polling closures don't capture stale
@@ -90,112 +189,81 @@ export function ArchiveDownloadProvider({ children }: { children: ReactNode }) {
     setJobs((prev) => prev.filter((j) => j.id !== id));
   }, []);
 
+  // Mark a job ready, kick the browser into the download, and schedule
+  // auto-dismiss. Centralised so the initial click and the polling effect
+  // produce identical state transitions.
+  const completeReady = useCallback(
+    (
+      id: string,
+      filename: string,
+      downloadUrl: string,
+      sizeBytes: number | null
+    ) => {
+      updateJob(id, { status: "ready", downloadUrl, sizeBytes });
+      triggerDownload(downloadUrl, filename);
+      // Auto-dismiss the row a moment later so the dialog doesn't linger
+      // when the build was actually a cache hit.
+      window.setTimeout(() => dismiss(id), 1_500);
+    },
+    [dismiss, updateJob]
+  );
+
   const start = useCallback<ArchiveDownloadActions["start"]>(
     async ({ archiveUrl, runId, defaultFilename }) => {
       const id =
         typeof crypto !== "undefined" && "randomUUID" in crypto
           ? crypto.randomUUID()
           : `${Date.now()}-${Math.random()}`;
+      const filename = defaultFilename ?? `${runId}.zip`;
       setJobs((prev) => [
         ...prev,
         {
           id,
           runId,
+          archiveUrl,
+          defaultFilename: filename,
           status: "pending",
           startedAt: Date.now(),
         },
       ]);
 
-      let res: Response;
-      try {
-        res = await fetch(archiveUrl, {
-          headers: { Accept: "application/json" },
-          // Direct nav would 302 — we want the JSON envelope so we can poll.
-          redirect: "manual",
-        });
-      } catch (err) {
-        updateJob(id, {
-          status: "failed",
-          errorMessage:
-            err instanceof Error ? err.message : "Network request failed",
-        });
-        return;
-      }
+      const result = await probeArchiveUrl(archiveUrl);
 
-      // Some browsers return `type === "opaqueredirect"` when redirect is
-      // manual — that means the route 302'd directly, so just open the URL.
-      if (res.type === "opaqueredirect") {
-        window.location.href = archiveUrl;
-        dismiss(id);
-        return;
+      switch (result.kind) {
+        case "redirect":
+          window.location.href = result.url;
+          dismiss(id);
+          return;
+        case "ready":
+          completeReady(id, filename, result.downloadUrl, result.sizeBytes);
+          return;
+        case "failed":
+          updateJob(id, { status: "failed", errorMessage: result.message });
+          return;
+        case "building":
+          updateJob(id, {
+            status: "building",
+            initialJobId: result.jobId,
+          });
+          return;
       }
-
-      if (!res.ok && res.status !== 202) {
-        const body = (await res.json().catch(() => null)) as {
-          error?: { message?: string };
-        } | null;
-        updateJob(id, {
-          status: "failed",
-          errorMessage:
-            body?.error?.message ?? `Archive download failed (${res.status})`,
-        });
-        return;
-      }
-
-      const body = (await res.json().catch(() => null)) as {
-        status?: "ready" | "building";
-        download_url?: string;
-        size_bytes?: number | null;
-        job_id?: string;
-        poll_url?: string;
-      } | null;
-      if (!body) {
-        updateJob(id, {
-          status: "failed",
-          errorMessage: "Archive route returned a malformed response",
-        });
-        return;
-      }
-
-      if (body.status === "ready" && body.download_url) {
-        updateJob(id, {
-          status: "ready",
-          downloadUrl: body.download_url,
-          sizeBytes: body.size_bytes ?? null,
-        });
-        triggerDownload(body.download_url, defaultFilename ?? `${runId}.zip`);
-        // Auto-dismiss the row a moment later so the dialog doesn't linger
-        // when the build was actually a cache hit.
-        window.setTimeout(() => dismiss(id), 1_500);
-        return;
-      }
-
-      if (!body.job_id) {
-        updateJob(id, {
-          status: "failed",
-          errorMessage: "Archive route did not return a job id",
-        });
-        return;
-      }
-
-      updateJob(id, {
-        status: "building",
-        jobId: body.job_id,
-        pollUrl: body.poll_url ?? `/api/v1/archive-jobs/${body.job_id}`,
-      });
     },
-    [dismiss, updateJob]
+    [completeReady, dismiss, updateJob]
   );
 
-  // Poll any building job until it reaches a terminal state. Single shared
-  // interval handles all in-flight jobs so we don't spin up N timers.
+  // Poll any building job by re-issuing the original `/download-archive`
+  // URL (NOT `/api/v1/archive-jobs/:id`). The route's S3 HEAD short-circuit
+  // is the canonical "is it ready?" signal — much more robust than reading
+  // the row's status, which only flips after the Lambda's PATCH callback
+  // succeeds. A single shared interval handles all in-flight jobs so we
+  // don't spin up N timers.
   useEffect(() => {
     const building = jobs.filter((j) => j.status === "building");
     if (building.length === 0) return;
 
     const interval = window.setInterval(async () => {
       for (const job of jobsRef.current) {
-        if (job.status !== "building" || !job.pollUrl) continue;
+        if (job.status !== "building") continue;
         if (Date.now() - job.startedAt > POLL_TIMEOUT_MS) {
           updateJob(job.id, {
             status: "failed",
@@ -204,42 +272,51 @@ export function ArchiveDownloadProvider({ children }: { children: ReactNode }) {
           });
           continue;
         }
-        try {
-          const res = await fetch(job.pollUrl, {
-            headers: { Accept: "application/json" },
-          });
-          if (!res.ok) continue;
-          const body = (await res.json().catch(() => null)) as {
-            status?: string;
-            download_url?: string;
-            size_bytes?: number | null;
-            error_message?: string;
-          } | null;
-          if (!body) continue;
-          if (body.status === "ready" && body.download_url) {
-            updateJob(job.id, {
-              status: "ready",
-              downloadUrl: body.download_url,
-              sizeBytes: body.size_bytes ?? null,
-            });
-            triggerDownload(body.download_url, `${job.runId}.zip`);
+
+        const result = await probeArchiveUrl(job.archiveUrl);
+        switch (result.kind) {
+          case "ready":
+            completeReady(
+              job.id,
+              job.defaultFilename,
+              result.downloadUrl,
+              result.sizeBytes
+            );
             toast.success(`Archive for ${job.runId} is ready`);
-            window.setTimeout(() => dismiss(job.id), 1_500);
-          } else if (body.status === "failed") {
+            break;
+          case "failed":
             updateJob(job.id, {
               status: "failed",
-              errorMessage:
-                body.error_message ?? "Archive build failed on the server",
+              errorMessage: result.message,
             });
-          }
-        } catch {
-          // Transient network failure — keep polling.
+            break;
+          case "building":
+            // A different `job_id` than the one we got at start time means
+            // the previous attempt was marked failed (or aged out via the
+            // stuck-row sweep) and the route's dedup INSERT created a
+            // fresh row to start a new build. Surface that to the user
+            // instead of silently chasing a build that already failed
+            // once — they can retry explicitly if they want another shot.
+            if (job.initialJobId && result.jobId !== job.initialJobId) {
+              updateJob(job.id, {
+                status: "failed",
+                errorMessage:
+                  "The previous build attempt failed. Click Download again to retry.",
+              });
+            }
+            // Otherwise: same job_id, still building — keep polling.
+            break;
+          case "redirect":
+            // Polling is a background activity; don't navigate the user.
+            // Try again on the next interval — by then the route will
+            // hopefully be honoring the JSON Accept header again.
+            break;
         }
       }
     }, POLL_INTERVAL_MS);
 
     return () => window.clearInterval(interval);
-  }, [jobs, dismiss, updateJob]);
+  }, [jobs, completeReady, updateJob]);
 
   const value = useMemo(
     () => ({ jobs, actions: { start, dismiss } }),

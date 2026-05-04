@@ -25,11 +25,19 @@ Browser → /download-archive (web app)
                       │ Insert archive_jobs row (status=building) — partial unique index dedupes
                       │ next/server `after()` POSTs Lambda; route returns 202 immediately
                       │ Lambda PATCHes /api/v1/archive-jobs/:id with status=ready (or failed)
-                      │ UI polls GET /api/v1/archive-jobs/:id every few seconds
-                      └─ When status=ready, UI follows download_url to the presigned URL
+                      │ UI polls /download-archive every few seconds (NOT /archive-jobs/:id)
+                      │   ├─ HEAD hit → 200 { status: ready, download_url } → trigger download
+                      │   └─ HEAD miss → 202 { job_id, status: building } → keep polling
+                      └─ When ready, UI follows download_url to the presigned URL
 ```
 
 The sync/async split exists because the route is pinned to `maxDuration = 300s` (Vercel Pro's hard cap). Archives smaller than `SYNC_ARCHIVE_THRESHOLD_GB` (default 25 GB; tune per project) finish inside that budget at the Lambda builder's ~100–150 MB/s serial throughput; larger archives skip the inline await entirely so the HTTP response can return before the build does. Inline builds that exceptionally still time out the route are safe — the Lambda keeps running and PATCHes the row to `ready`, so a retry resolves from the cache.
+
+### Why the UI polls `/download-archive` and not `/archive-jobs/:id`
+
+The dialog's poll target is the *original* `/download-archive` URL, not the `archive-jobs` GET endpoint. The route's first action on every request is a HEAD against the canonical archive key in S3, so the artifact in S3 is the source of truth for "ready" — the row's `status` is just a hint. This means the UI recovers automatically from a class of failures that would otherwise wedge it forever: if the Lambda's `PATCH /api/v1/archive-jobs/:id` callback never lands (network blip, a stale `DATA_HUB_API_URL`, a Vercel deploy that doesn't have the `archive-jobs/[id]` route yet, etc.) the row stays `building` indefinitely, but the next poll's HEAD will see the multipart upload completed and return `200 { status: "ready", download_url }`. The `archive-jobs/:id` GET endpoint is still around for diagnostics and ad-hoc inspection, the UI just doesn't depend on it.
+
+The dialog tracks the `job_id` from its first 202 response. If a later poll returns a *different* `job_id`, that means the route's dedup INSERT created a new row — which only happens after the previous attempt was marked `failed` or aged out of the stuck-row sweep. The UI surfaces that as a failure with a "Click Download again to retry" message rather than silently chasing a build that already failed once. As a final safety net, the dialog gives up after `POLL_TIMEOUT_MS` (30 minutes) if neither outcome arrives.
 
 ## S3 layout
 
@@ -71,7 +79,7 @@ CREATE UNIQUE INDEX archive_jobs_inflight_unique_idx
   WHERE status IN ('pending', 'building');
 ```
 
-The route `INSERT … ON CONFLICT DO NOTHING`s; on conflict it `SELECT`s the existing row and reuses it. The request that *won* the insert (or had to insert a fresh row because the prior job had already terminated) is the only one that calls the Lambda — losing requests skip the invocation entirely and return `202 { job_id, poll_url }` so the UI polls the existing build to completion. This keeps Lambda spend and S3 part uploads from doubling on rapid concurrent clicks. Once the row transitions to `ready` or `failed`, the partial-index predicate stops applying and a future request can insert a new job.
+The route `INSERT … ON CONFLICT DO NOTHING`s; on conflict it `SELECT`s the existing row and reuses it. The request that *won* the insert (or had to insert a fresh row because the prior job had already terminated) is the only one that calls the Lambda — losing requests skip the invocation entirely and return `202 { job_id, poll_url }`, attaching their own polling to the existing build. This keeps Lambda spend and S3 part uploads from doubling on rapid concurrent clicks. Once the row transitions to `ready` or `failed`, the partial-index predicate stops applying and a future request can insert a new job.
 
 ## Configuration
 
@@ -97,7 +105,7 @@ WHERE status = 'building' AND created_at < now() - interval '15 minutes';
 Likely causes, in order of frequency:
 
 1. **Lambda errored before the PATCH fired.** Check CloudWatch logs for `_handle_build_archive` failures around the job's `created_at`. Typical culprits: source object deleted between row insert and Lambda fetch (404 from `GetObject`), or a multipart upload that exceeded the function timeout.
-2. **PATCH callback failed.** The Lambda logs `Failed to PATCH archive-job %s` if the web app rejected the update (auth issue, web app down). The build itself may have succeeded — check the archives bucket for the expected key. If the object exists, manually `UPDATE archive_jobs SET status='ready', archive_bucket='…', archive_key='…' WHERE id = '…'` (the `PATCH` endpoint requires the `LAMBDA_INVOKE_TOKEN`, not a user PAT, so going through Postgres is the easiest manual path) or just `DELETE` it so the next click serves from cache.
+2. **PATCH callback failed.** The Lambda logs `Failed to PATCH archive-job %s` if the web app rejected the update (auth issue, web app down, `DATA_HUB_API_URL` pointing at a deploy that doesn't have the `archive-jobs/[id]` route yet). The build itself may have succeeded — check the archives bucket for the expected key. **The UI tolerates this case:** the dialog polls `/download-archive` (which HEADs S3 first), not `/archive-jobs/:id`, so a finished build is downloaded the moment the multipart upload completes regardless of whether the row was ever flipped to `ready`. The stuck row only blocks future *new* builds for the same fingerprint until the 20-minute stale-row sweep kicks in. If you want to clean up immediately, `UPDATE archive_jobs SET status='ready', archive_bucket='…', archive_key='…' WHERE id = '…'` (the `PATCH` endpoint requires the `LAMBDA_INVOKE_TOKEN`, not a user PAT, so going through Postgres is the easiest manual path) or just `DELETE` it.
 3. **Async path lost the `after()` callback.** Vercel `next/server` `after()` is best-effort; in rare cases (SIGTERM during scale-down) it can drop. The row will sit in `building` until a new download-archive request for the same fingerprint arrives — see "Self-healing" below.
 
 #### Self-healing
