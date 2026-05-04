@@ -113,17 +113,58 @@ jobs:
         with:
           python-version: "3.12"
 
+      # PyPI's publish → index-visibility path is eventually consistent:
+      # the wheel is on object storage within seconds but the Simple /
+      # JSON indexes and their CDN mirrors can lag by up to a couple of
+      # minutes, especially when digital-attestation generation stretches
+      # the publish step. Poll the JSON API until the exact version we
+      # just uploaded is visible so the `uv pip install` below isn't
+      # racing a stale index listing. Generally faster than retrying the
+      # full install because it hits only a small JSON document.
+      - name: Wait for PyPI to expose target version
+        env:
+          TARGET_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -fsS "https://pypi.org/pypi/data-hub-watcher/$TARGET_VERSION/json" >/dev/null; then
+              echo "data-hub-watcher==$TARGET_VERSION is visible on the PyPI JSON API (attempt $attempt)"
+              exit 0
+            fi
+            echo "Attempt $attempt: not yet visible; sleeping 10s"
+            sleep 10
+          done
+          echo "Timed out waiting for data-hub-watcher==$TARGET_VERSION on PyPI"
+          exit 1
+
       # Pinning the install to the exact version we just published catches
       # the (rare) case where a stale prior release shadows the build via
-      # a slow-propagating mirror.
+      # a slow-propagating mirror. The retry loop covers the Simple-index
+      # / CDN propagation lag that the JSON-API wait above doesn't always
+      # fully eliminate: `--no-cache` + `--refresh` force uv to re-fetch
+      # the index listing on each attempt (without them the in-run cache
+      # keeps returning the stale view), and the progressive backoff
+      # (15 / 30 / 45 / 60 / 75s) comfortably covers typical propagation
+      # windows without masking a genuinely broken release for long.
       - name: Install from PyPI
         env:
           TARGET_VERSION: ${{ needs.build.outputs.version }}
         run: |
           uv venv .verify
-          uv pip install \
-            --python .verify/bin/python \
-            "data-hub-watcher==$TARGET_VERSION"
+          for attempt in 1 2 3 4 5; do
+            if uv pip install \
+              --python .verify/bin/python \
+              --no-cache \
+              --refresh \
+              "data-hub-watcher==$TARGET_VERSION"; then
+              echo "Install succeeded on attempt $attempt"
+              exit 0
+            fi
+            sleep_for=$((attempt * 15))
+            echo "Attempt $attempt failed; sleeping ${sleep_for}s before retry"
+            sleep "$sleep_for"
+          done
+          echo "Install from PyPI failed after 5 attempts"
+          exit 1
 
       # Both invocations must succeed — `--version` exercises Click + the
       # importlib.metadata version reader, and the explicit Python import
