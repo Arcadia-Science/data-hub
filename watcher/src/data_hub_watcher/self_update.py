@@ -17,12 +17,14 @@ spinning up a Click context or a real Windows service.
 from __future__ import annotations
 import json
 import logging
+import os
 import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
 from enum import Enum
 from importlib.metadata import PackageNotFoundError, distribution
+from pathlib import Path
 from typing import Any
 
 from packaging.version import InvalidVersion, Version
@@ -37,6 +39,25 @@ PACKAGE_NAME = "data-hub-watcher"
 # Default index for `pip install` invocations. PyPI is hard-coded for now;
 # can be made configurable per channel later.
 DEFAULT_INDEX_URL = "https://pypi.org/simple/"
+
+
+class UvExecutableNotFoundError(RuntimeError):
+    """Raised when the self-updater can't locate a `uv` binary.
+
+    Carries the list of candidate paths we probed so callers can attach
+    it to the ``UPDATE_FAILED`` event for operator-side diagnosis — the
+    single most useful data point for a stuck lab PC is knowing exactly
+    where we looked and didn't find anything.
+    """
+
+    def __init__(self, candidates: list[str]) -> None:
+        self.candidates = list(candidates)
+        hint = (
+            "Install uv for the service account or re-run "
+            "`data-hub-watcher self-update` from a shell where `uv` is on PATH."
+        )
+        joined = ", ".join(candidates) if candidates else "(none)"
+        super().__init__(f"Could not locate `uv` executable; tried: {joined}. {hint}")
 
 
 class InstallMethod(str, Enum):
@@ -210,6 +231,103 @@ def evaluate_update(
 # ---------------------------------------------------------------------------
 
 
+def _uv_binary_name() -> str:
+    """Filename of the `uv` executable for the current platform.
+
+    Windows services don't inherit the `.EXE` shim resolution the user
+    shell gets via `PATHEXT`, so we look for the fully-qualified filename.
+    """
+    return "uv.exe" if sys.platform == "win32" else "uv"
+
+
+def _sys_prefix_uv_candidates(prefix: str) -> list[Path]:
+    """Derive likely `uv` binary locations from an install prefix.
+
+    When the watcher runs as a Windows LocalSystem service the user's
+    PATH isn't inherited, so `shutil.which("uv")` misses the `uv.exe`
+    dropped at ``%USERPROFILE%\\.local\\bin\\uv.exe`` by the standalone
+    installer. An `uv tool` install's ``sys.prefix`` lives under the same
+    user profile, so we can walk up to it and probe the standard install
+    location without hitting the SYSTEM-scope PATH.
+
+    Layouts we recognise:
+
+    - Windows: ``<home>\\AppData\\Roaming\\uv\\tools\\data-hub-watcher``
+      → probe ``<home>\\.local\\bin\\uv.exe``.
+    - POSIX:   ``<home>/.local/share/uv/tools/data-hub-watcher``
+      → probe ``<home>/.local/bin/uv``.
+    """
+    binary = _uv_binary_name()
+    candidates: list[Path] = []
+    prefix_posix = prefix.replace("\\", "/")
+
+    # Windows uv-tool layout: <home>/AppData/Roaming/uv/tools/data-hub-watcher
+    marker = "/AppData/Roaming/uv/tools/"
+    idx = prefix_posix.find(marker)
+    if idx != -1:
+        home = prefix_posix[:idx]
+        candidates.append(Path(home) / ".local" / "bin" / binary)
+
+    # POSIX uv-tool layout: <home>/.local/share/uv/tools/data-hub-watcher
+    marker = "/.local/share/uv/tools/"
+    idx = prefix_posix.find(marker)
+    if idx != -1:
+        home = prefix_posix[:idx]
+        candidates.append(Path(home) / ".local" / "bin" / binary)
+
+    # Last-ditch: whatever the current user's home directory is, even if
+    # the prefix doesn't match a known layout (covers relocated installs).
+    home_env = os.environ.get("USERPROFILE") or os.environ.get("HOME")
+    if home_env:
+        candidates.append(Path(home_env) / ".local" / "bin" / binary)
+
+    return candidates
+
+
+def _resolve_uv_executable(
+    override: str | None = None,
+    *,
+    prefix: str | None = None,
+) -> tuple[str | None, list[str]]:
+    """Locate `uv`, PATH-first then `sys.prefix`-derived.
+
+    Returns ``(resolved_path, candidates_tried)``. The candidates list is
+    always populated even on success so callers can log what was tried.
+
+    Precedence:
+    1. *override* (explicit caller-supplied path, e.g. from a test or a
+       future registry-stored config value).
+    2. ``shutil.which("uv")`` — covers the common case where the service
+       account's PATH is correct.
+    3. ``sys.prefix``-derived candidate — covers Windows LocalSystem, where
+       the user's ``~/.local/bin`` isn't on the SYSTEM PATH.
+    """
+    tried: list[str] = []
+
+    # An explicit override wins unconditionally. Callers (tests, future
+    # registry-stored service config) are trusted to pass a path they
+    # actually want us to use; validating existence here would break
+    # the historical `uv_executable="/usr/local/bin/uv"` contract that
+    # unit tests rely on to assert the generated argv without mocking
+    # the filesystem.
+    if override:
+        tried.append(override)
+        return override, tried
+
+    which_hit = shutil.which("uv")
+    if which_hit:
+        tried.append(which_hit)
+        return which_hit, tried
+
+    raw_prefix = prefix or sys.prefix
+    for candidate in _sys_prefix_uv_candidates(raw_prefix):
+        tried.append(str(candidate))
+        if candidate.exists():
+            return str(candidate), tried
+
+    return None, tried
+
+
 def build_upgrade_command(
     method: InstallMethod,
     *,
@@ -223,12 +341,21 @@ def build_upgrade_command(
     Pinning *target_version* lets the server roll a specific release out
     rather than always landing on whatever the index calls "latest" — which
     matters when we want to roll back by re-pinning to an older version.
+
+    Raises :class:`UvExecutableNotFoundError` when *method* is
+    ``UV_TOOL`` but no ``uv`` binary can be located. Previously this
+    fell back to the literal bare string ``"uv"``, which produced an
+    opaque ``[WinError 2] The system cannot find the file specified``
+    from ``subprocess.run`` — raising a typed error here lets the
+    caller emit a diagnosable ``UPDATE_FAILED`` event instead.
     """
     pkg_spec = PACKAGE_NAME if not target_version else f"{PACKAGE_NAME}=={target_version}"
     index = index_url or DEFAULT_INDEX_URL
 
     if method is InstallMethod.UV_TOOL:
-        uv_path = uv_executable or shutil.which("uv") or "uv"
+        uv_path, tried = _resolve_uv_executable(uv_executable)
+        if uv_path is None:
+            raise UvExecutableNotFoundError(tried)
         # `uv tool install --reinstall` is more deterministic than `upgrade`
         # — it works whether or not the previous version is already at the
         # target, and it lets us pin to an explicit version for rollback.

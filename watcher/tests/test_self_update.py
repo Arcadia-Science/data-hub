@@ -22,6 +22,7 @@ from data_hub_watcher.self_update import (
     PACKAGE_NAME,
     InstallMethod,
     UpdateDecision,
+    UvExecutableNotFoundError,
     build_upgrade_command,
     detect_install_method,
     evaluate_update,
@@ -251,6 +252,65 @@ class TestBuildUpgradeCommand:
     def test_unsupported_methods_raise(self, method: InstallMethod) -> None:
         with pytest.raises(ValueError, match="Cannot build an upgrade command"):
             build_upgrade_command(method, target_version="0.3.0")
+
+    def test_uv_tool_uses_path_lookup_when_no_override(self) -> None:
+        # Without an explicit `uv_executable` the builder must fall back
+        # to `shutil.which("uv")`. Patching it here also guards against a
+        # test runner that happens to have a stale `uv` on PATH — we
+        # want the argv to reflect the resolver's output deterministically.
+        with patch("data_hub_watcher.self_update.shutil.which", return_value="/tmp/fake/uv"):
+            cmd = build_upgrade_command(
+                InstallMethod.UV_TOOL,
+                target_version="0.3.0",
+            )
+        assert cmd[0] == "/tmp/fake/uv"
+        assert cmd[1:4] == ["tool", "install", "--reinstall"]
+
+    def test_uv_tool_falls_back_to_sys_prefix_derived_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Reproduces the Windows LocalSystem service failure mode: PATH
+        # has no `uv`, but the uv-tool install lives under the user
+        # profile and we can derive `<home>\.local\bin\uv.exe` from it.
+        fake_home = tmp_path / "lab-user"
+        fake_bin = fake_home / ".local" / "bin"
+        fake_bin.mkdir(parents=True)
+        uv_exe = fake_bin / "uv.exe"
+        uv_exe.write_text("")
+
+        fake_prefix = str(fake_home / "AppData" / "Roaming" / "uv" / "tools" / "data-hub-watcher")
+        monkeypatch.setattr("data_hub_watcher.self_update.sys.prefix", fake_prefix)
+        monkeypatch.setattr("data_hub_watcher.self_update.sys.platform", "win32")
+        monkeypatch.setattr("data_hub_watcher.self_update.shutil.which", lambda _: None)
+
+        cmd = build_upgrade_command(InstallMethod.UV_TOOL, target_version="0.3.0")
+        assert cmd[0] == str(uv_exe)
+
+    def test_uv_tool_raises_when_nothing_resolves(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # No override, nothing on PATH, no uv-tool-shaped prefix, no
+        # ~/.local/bin/uv — the builder must raise the typed error and
+        # surface the candidates it tried so the caller can attach them
+        # to a dashboard event.
+        monkeypatch.setattr("data_hub_watcher.self_update.shutil.which", lambda _: None)
+        monkeypatch.setattr(
+            "data_hub_watcher.self_update.sys.prefix",
+            str(tmp_path / "unrelated" / "prefix"),
+        )
+        # Point HOME / USERPROFILE at an empty dir so the final
+        # last-ditch probe also misses.
+        empty_home = tmp_path / "empty-home"
+        empty_home.mkdir()
+        monkeypatch.setenv("HOME", str(empty_home))
+        monkeypatch.setenv("USERPROFILE", str(empty_home))
+
+        with pytest.raises(UvExecutableNotFoundError) as excinfo:
+            build_upgrade_command(InstallMethod.UV_TOOL, target_version="0.3.0")
+        # The candidates list is the single most useful artifact for an
+        # operator debugging a stuck lab PC; pin its shape.
+        assert excinfo.value.candidates
+        assert all(isinstance(c, str) for c in excinfo.value.candidates)
 
 
 # ---------------------------------------------------------------------------

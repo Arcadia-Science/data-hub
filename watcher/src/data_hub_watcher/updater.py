@@ -37,6 +37,8 @@ from data_hub_watcher.heartbeat import WatcherCounters
 from data_hub_watcher.models import WatcherConfig, WatcherUpdateInfoResponse
 from data_hub_watcher.self_update import (
     InstallMethod,
+    UvExecutableNotFoundError,
+    build_upgrade_command,
     detect_install_method,
     evaluate_update,
     run_upgrade,
@@ -456,6 +458,30 @@ class Updater:
                 self._last_refused_target = target
             return UpdateAttemptResult(True, False, reason, target, {"method": method.value})
 
+        # Resolve the upgrade argv up-front. Doing this before we emit
+        # UPDATE_STARTED / write the marker means a missing `uv` binary
+        # (the Windows-service / LocalSystem PATH failure mode) becomes
+        # a single diagnosable UPDATE_FAILED with the paths we probed —
+        # rather than an UPDATE_STARTED followed by an opaque
+        # `[WinError 2] The system cannot find the file specified`
+        # from inside subprocess.run.
+        try:
+            command = build_upgrade_command(method, target_version=target)
+        except UvExecutableNotFoundError as exc:
+            reason = "uv executable not found"
+            logger.warning("Refusing auto-update: %s (%s)", reason, exc)
+            self._emit_failure(
+                target,
+                reason,
+                extra={
+                    "install_method": method.value,
+                    "attempted_subprocess": False,
+                    "error_class": type(exc).__name__,
+                    "candidates_tried": exc.candidates,
+                },
+            )
+            return UpdateAttemptResult(True, False, reason, target, {"method": method.value})
+
         details_started: dict[str, Any] = {
             "current_version": WATCHER_VERSION,
             "target_version": target,
@@ -499,9 +525,36 @@ class Updater:
             try:
                 try:
                     result = self._upgrade_runner(method, target_version=target)
+                except FileNotFoundError as exc:
+                    # CreateProcess / execve couldn't find the program.
+                    # Usually means `uv` slipped off PATH between our
+                    # resolver and the subprocess call (or a permission
+                    # error masquerading as one). Classify separately
+                    # from the generic `subprocess raised:` branch so
+                    # operators don't have to decode `[WinError 2]`.
+                    logger.exception("Upgrade subprocess could not start")
+                    self._emit_failure(
+                        target,
+                        f"upgrade command not executable: {exc}",
+                        extra={
+                            "install_method": method.value,
+                            "error_class": type(exc).__name__,
+                            "command": command,
+                        },
+                    )
+                    outcome.append(UpdateAttemptResult(True, False, str(exc), target))
+                    return
                 except Exception as exc:
                     logger.exception("Upgrade subprocess raised")
-                    self._emit_failure(target, f"subprocess raised: {exc}")
+                    self._emit_failure(
+                        target,
+                        f"subprocess raised: {exc}",
+                        extra={
+                            "install_method": method.value,
+                            "error_class": type(exc).__name__,
+                            "command": command,
+                        },
+                    )
                     outcome.append(UpdateAttemptResult(True, False, str(exc), target))
                     return
 
@@ -511,7 +564,12 @@ class Updater:
                     self._emit_failure(
                         target,
                         f"subprocess exited {result.returncode}",
-                        extra={"stdout_tail": stdout, "stderr_tail": stderr},
+                        extra={
+                            "install_method": method.value,
+                            "command": command,
+                            "stdout_tail": stdout,
+                            "stderr_tail": stderr,
+                        },
                     )
                     outcome.append(
                         UpdateAttemptResult(True, False, f"exit code {result.returncode}", target)
