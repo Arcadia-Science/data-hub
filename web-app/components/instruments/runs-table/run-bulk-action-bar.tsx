@@ -151,10 +151,7 @@ export function RunBulkActionBar() {
             defaultFilename: `${ref.runId}.zip`,
           });
         } catch (err) {
-          console.error(
-            `Failed to start archive download for ${ref.runId}:`,
-            err
-          );
+          console.error(`Failed to start download for ${ref.runId}:`, err);
         }
       }
     })();
@@ -239,7 +236,7 @@ export function RunBulkActionBar() {
                   Download
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Download archive for each run</TooltipContent>
+              <TooltipContent>Download zip archive for each run</TooltipContent>
             </Tooltip>
           )}
 
