@@ -1,8 +1,10 @@
 import {
   fingerprintFiles,
+  getArchiveDownloadFilename,
   getArchiveKey,
   getSyncArchiveThresholdBytes,
   invokeBuildArchive,
+  isArchiveBuilderConfigured,
   type InvokeBuildArchiveInput,
 } from "@/lib/api/archive-builder";
 import { expireStaleArchiveJobs } from "@/lib/api/archive-jobs";
@@ -174,13 +176,25 @@ async function handleViaArchiveBuilder(args: {
   } = args;
   const wantsJson = clientWantsJson(request);
 
+  // Bail early with 503 if the deploy is missing any of the env vars the
+  // archive pipeline depends on (LAMBDA_FUNCTION_URL, LAMBDA_INVOKE_TOKEN,
+  // S3_ARCHIVES_BUCKET). Without this, downstream calls like
+  // `getS3ArchivesBucket()` and `invokeBuildArchive` would throw unhandled
+  // and Vercel would surface an opaque 500 — and the async `after()`
+  // callback would leave the row in `building` until the 20-minute stale
+  // sweep noticed. Mirrors the pattern in `file-reprocessing.ts`.
+  if (!isArchiveBuilderConfigured()) {
+    return apiError(
+      503,
+      INTERNAL_ERROR,
+      "Archive builder is not configured (LAMBDA_FUNCTION_URL, LAMBDA_INVOKE_TOKEN, and S3_ARCHIVES_BUCKET must all be set)"
+    );
+  }
+
   const fingerprint = fingerprintFiles(
-    downloadable.map((f) => ({
-      id: f.id,
-      s3Key: f.s3Key,
-      filename: f.filename,
-    }))
+    downloadable.map((f) => ({ id: f.id, s3Key: f.s3Key }))
   );
+  const downloadFilename = getArchiveDownloadFilename(runId);
   const archiveBucket = getS3ArchivesBucket();
   const archiveKey = getArchiveKey(instrumentId, runId, fingerprint);
 
@@ -188,7 +202,9 @@ async function handleViaArchiveBuilder(args: {
   // it hasn't aged past the 7 day lifecycle expiry. Skip the build entirely.
   const head = await headS3Object(archiveBucket, archiveKey);
   if (head.exists) {
-    const url = await getPresignedDownloadUrl(archiveBucket, archiveKey);
+    const url = await getPresignedDownloadUrl(archiveBucket, archiveKey, {
+      filename: downloadFilename,
+    });
     return wantsJson
       ? readyJsonResponse(url, head.sizeBytes)
       : redirectResponse(url);
@@ -297,17 +313,20 @@ async function handleViaArchiveBuilder(args: {
     return buildingJsonResponse(job.id);
   }
 
-  const result = await invokeBuildArchive(buildInput, fingerprint);
+  let result;
+  try {
+    result = await invokeBuildArchive(buildInput, fingerprint);
+  } catch (err) {
+    const message =
+      err instanceof Error
+        ? err.message
+        : "Archive builder invocation threw an unexpected error";
+    await markJobFailed(job.id, message);
+    return apiError(502, INTERNAL_ERROR, `Archive builder failed: ${message}`);
+  }
 
   if (!result.ok) {
-    await db
-      .update(archiveJobs)
-      .set({
-        status: "failed",
-        errorMessage: result.message,
-        completedAt: new Date(),
-      })
-      .where(eq(archiveJobs.id, job.id));
+    await markJobFailed(job.id, result.message);
     return apiError(
       502,
       INTERNAL_ERROR,
@@ -328,7 +347,8 @@ async function handleViaArchiveBuilder(args: {
 
   const url = await getPresignedDownloadUrl(
     result.archiveBucket,
-    result.archiveKey
+    result.archiveKey,
+    { filename: downloadFilename }
   );
   return wantsJson
     ? readyJsonResponse(url, result.sizeBytes)
@@ -337,25 +357,52 @@ async function handleViaArchiveBuilder(args: {
 
 // Fire-and-forget invocation used by the async path. The Lambda PATCHes the
 // row to `ready` on success; we only need to mark `failed` if the invocation
-// itself never reached the builder (transport error, 5xx). This callback
-// runs after the 202 response is flushed; if Vercel terminates the function
-// before it completes, the Lambda's own failure-path PATCH still covers us.
+// itself never reached the builder (transport error, 5xx, misconfig). This
+// callback runs after the 202 response is flushed; if Vercel terminates the
+// function before it completes, the Lambda's own failure-path PATCH still
+// covers us.
+//
+// The outer try/catch is load-bearing: `invokeBuildArchive` throws when
+// `LAMBDA_FUNCTION_URL` / `LAMBDA_INVOKE_TOKEN` are unset (or any other
+// synchronous error happens before the fetch is dispatched). Without
+// catching it, an `after()` exception leaves the row in `building` until
+// `expireStaleArchiveJobs` notices 20 minutes later, and the user sees an
+// indefinite spinner in the meantime.
 async function runArchiveBuildInBackground(
   jobId: string,
   input: InvokeBuildArchiveInput,
   fingerprint: string
 ): Promise<void> {
-  const result = await invokeBuildArchive(input, fingerprint);
-  if (!result.ok) {
-    await db
-      .update(archiveJobs)
-      .set({
-        status: "failed",
-        errorMessage: result.message,
-        completedAt: new Date(),
-      })
-      .where(eq(archiveJobs.id, jobId));
+  try {
+    const result = await invokeBuildArchive(input, fingerprint);
+    if (!result.ok) {
+      await markJobFailed(jobId, result.message);
+    }
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Archive builder invocation failed";
+    console.error(
+      `Archive builder threw while invoking Lambda for job ${jobId}:`,
+      err
+    );
+    await markJobFailed(jobId, message).catch((dbErr) => {
+      console.error(
+        `Also failed to mark archive job ${jobId} as failed:`,
+        dbErr
+      );
+    });
   }
+}
+
+async function markJobFailed(jobId: string, message: string): Promise<void> {
+  await db
+    .update(archiveJobs)
+    .set({
+      status: "failed",
+      errorMessage: message,
+      completedAt: new Date(),
+    })
+    .where(eq(archiveJobs.id, jobId));
 }
 
 function buildingJsonResponse(jobId: string): Response {

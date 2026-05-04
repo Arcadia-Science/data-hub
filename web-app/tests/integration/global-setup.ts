@@ -101,12 +101,19 @@ export async function setup() {
       process.env.WATCHER_MIN_SUPPORTED_VERSION ?? "0.1.0",
     WATCHER_RELEASE_CHANNEL: process.env.WATCHER_RELEASE_CHANNEL ?? "stable",
     WATCHER_MANDATORY_UPDATE: process.env.WATCHER_MANDATORY_UPDATE ?? "false",
+    // Stable Lambda invoke token so the archive-jobs PATCH callback
+    // (Lambda → web app) can be exercised in integration tests. Tests use
+    // `process.env.__TEST_LAMBDA_INVOKE_TOKEN` to authenticate. The
+    // LAMBDA_FUNCTION_URL is intentionally left unset so the
+    // "not configured" 503 paths in `file-reprocessing.ts` and
+    // `download-archive/route.ts` still trigger.
+    LAMBDA_INVOKE_TOKEN:
+      process.env.LAMBDA_INVOKE_TOKEN ?? "test-lambda-invoke-token",
   };
-  // Strip Lambda config so "not configured" test cases work regardless of
-  // the developer's local .env. Tests that need Lambda stubbed should mock
-  // the fetch call instead of relying on ambient env.
+  // Strip the Lambda Function URL so "not configured" test cases work
+  // regardless of the developer's local .env. Tests that need a stubbed
+  // Lambda HTTP call should mock fetch rather than set this URL.
   delete serverEnv.LAMBDA_FUNCTION_URL;
-  delete serverEnv.LAMBDA_INVOKE_TOKEN;
 
   execSync("npx next build", {
     cwd: import.meta.dirname ? import.meta.dirname + "/../.." : process.cwd(),
@@ -134,6 +141,8 @@ export async function setup() {
   // which Vitest propagates to test workers automatically.
   process.env.__TEST_BASE_URL = baseUrl;
   process.env.__TEST_DATABASE_URL = databaseUrl;
+  process.env.__TEST_LAMBDA_INVOKE_TOKEN =
+    serverEnv.LAMBDA_INVOKE_TOKEN ?? "test-lambda-invoke-token";
 
   return async () => {
     if (serverProcess) {

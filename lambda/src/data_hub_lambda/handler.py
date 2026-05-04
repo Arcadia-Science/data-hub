@@ -256,6 +256,13 @@ def _post_archive_job_status(
 ) -> None:
     """PATCH the archive-job row in the web app with the final build outcome.
 
+    Authenticates with ``LAMBDA_INVOKE_TOKEN`` (the same shared secret the
+    Function URL uses), *not* with the regular ``DATA_HUB_API_KEY`` PAT.
+    The PATCH lets the caller mark a job ``ready`` with arbitrary
+    ``archive_bucket``/``archive_key``, so allowing user PATs would let any
+    signed-in user redirect another user's archive download. Restricting
+    callbacks to a server-only secret keeps Lambda as the sole writer.
+
     Failures here are logged but never re-raised — the build itself succeeded
     or failed for its own reasons, and we don't want a callback failure to
     mask that.
@@ -263,9 +270,12 @@ def _post_archive_job_status(
     from data_hub_lambda.config import lambda_config
 
     base_url = lambda_config.DATA_HUB_API_URL
-    api_key = lambda_config.DATA_HUB_API_KEY
-    if not base_url or not api_key:
-        logger.error("DATA_HUB_API_URL/KEY not configured; cannot PATCH archive job %s", job_id)
+    invoke_token = lambda_config.LAMBDA_INVOKE_TOKEN
+    if not base_url or not invoke_token:
+        logger.error(
+            "DATA_HUB_API_URL/LAMBDA_INVOKE_TOKEN not configured; cannot PATCH archive job %s",
+            job_id,
+        )
         return
 
     payload: dict[str, Any] = {"status": status}
@@ -284,7 +294,7 @@ def _post_archive_job_status(
         resp = requests.patch(
             f"{base_url.rstrip('/')}/archive-jobs/{job_id}",
             json=payload,
-            headers={"Authorization": f"Bearer {api_key}"},
+            headers={"Authorization": f"Bearer {invoke_token}"},
             timeout=(5, 30),
         )
         if not resp.ok:

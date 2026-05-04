@@ -1,6 +1,6 @@
 # Run archives
 
-The "Download all" actions on the run detail page and the runs table deliver every active file in a run as a single zip. Rather than streaming the zip through the Vercel function (which previously drove ~100 GB/day of [Fast Origin Transfer](https://vercel.com/docs/pricing#fast-origin-transfer)), the web app delegates building to the Lambda and serves the result via a presigned S3 URL — bytes never traverse Vercel.
+The "Download all" actions on the run detail page and the runs table deliver every active file in a run as a single zip. Rather than streaming the zip through the Vercel function (which previously drove ~100 GB/day of [Fast Origin Transfer](https://vercel.com/docs/manage-cdn-usage#fast-origin-transfer)), the web app delegates building to the Lambda and serves the result via a presigned S3 URL — bytes never traverse Vercel.
 
 This page covers the end-to-end flow, the cache + dedup model, and the on-call runbook. For the Lambda invocation contract, see [Lambda → Function URL (archive build)](lambda.md#function-url-archive-build). For the HTTP endpoints, see [REST API → Archive jobs](api.md#archive-jobs).
 
@@ -76,11 +76,11 @@ The route `INSERT … ON CONFLICT DO NOTHING`s; on conflict it `SELECT`s the exi
 | Variable | Where | Purpose |
 | --- | --- | --- |
 | `S3_ARCHIVES_BUCKET` | Vercel | Bucket the route HEADs and presigns from. Must match the SAM-provisioned bucket for the env. |
-| `LAMBDA_FUNCTION_URL` | Vercel | Function URL of the Data Hub Lambda. Required — missing env vars throw at request time. |
-| `LAMBDA_INVOKE_TOKEN` | Vercel + SAM | Shared bearer token for Function URL auth. Must match the Lambda's `LAMBDA_INVOKE_TOKEN` env. |
+| `LAMBDA_FUNCTION_URL` | Vercel | Function URL of the Data Hub Lambda. Required — the route returns `503` if either Lambda env var is missing. |
+| `LAMBDA_INVOKE_TOKEN` | Vercel + SAM | Shared bearer token. Used both by Vercel → Lambda (`Authorization: Bearer …` on the Function URL POST) **and** by Lambda → Vercel (the same header on the `PATCH /api/v1/archive-jobs/:id` callback). The PATCH endpoint deliberately rejects regular user PATs so a signed-in user can't hijack another user's in-flight build. |
 | `SYNC_ARCHIVE_THRESHOLD_GB` | Vercel (optional) | Sync vs async cutover. Defaults to 25 GB. Set to a small number (e.g. `0.001`) to force-test the async path. |
 | `AWS_S3_ARCHIVES_BUCKET` | Lambda | Set automatically by SAM via `!Ref ArchivesBucket`. The Lambda only writes to this bucket. |
-| `DATA_HUB_API_URL` + `DATA_HUB_API_KEY` | Lambda | Used by the PATCH callback to `/api/v1/archive-jobs/:id` on async builds. |
+| `DATA_HUB_API_URL` | Lambda | Base URL of the web API (including `/api/v1`). The `_post_archive_job_status` callback PATCHes `/archive-jobs/:id` against this. |
 
 ## Runbook
 
@@ -95,7 +95,7 @@ WHERE status = 'building' AND created_at < now() - interval '15 minutes';
 Likely causes, in order of frequency:
 
 1. **Lambda errored before the PATCH fired.** Check CloudWatch logs for `_handle_build_archive` failures around the job's `created_at`. Typical culprits: source object deleted between row insert and Lambda fetch (404 from `GetObject`), or a multipart upload that exceeded the function timeout.
-2. **PATCH callback failed.** The Lambda logs `Failed to PATCH archive-job %s` if the web app rejected the update (auth issue, web app down). The build itself may have succeeded — check the archives bucket for the expected key. If the object exists, manually PATCH the row to `ready` or just `DELETE` it so the next click serves from cache.
+2. **PATCH callback failed.** The Lambda logs `Failed to PATCH archive-job %s` if the web app rejected the update (auth issue, web app down). The build itself may have succeeded — check the archives bucket for the expected key. If the object exists, manually `UPDATE archive_jobs SET status='ready', archive_bucket='…', archive_key='…' WHERE id = '…'` (the `PATCH` endpoint requires the `LAMBDA_INVOKE_TOKEN`, not a user PAT, so going through Postgres is the easiest manual path) or just `DELETE` it so the next click serves from cache.
 3. **Async path lost the `after()` callback.** Vercel `next/server` `after()` is best-effort; in rare cases (SIGTERM during scale-down) it can drop. The row will sit in `building` until a new download-archive request for the same fingerprint arrives — see "Self-healing" below.
 
 #### Self-healing

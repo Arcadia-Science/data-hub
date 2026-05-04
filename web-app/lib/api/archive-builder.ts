@@ -22,10 +22,12 @@ export function getSyncArchiveThresholdBytes(): number {
   return Math.floor(parsed * 1024 * 1024 * 1024);
 }
 
+// Inputs to `fingerprintFiles`. Only the fields that participate in the
+// hash are accepted — adding extra fields here would suggest they affect
+// cache identity when they don't.
 export type ArchiveFileInput = {
   id: number;
   s3Key: string;
-  filename: string;
 };
 
 // Stable hash of the (file_id, s3_key) pairs that compose an archive. Adding
@@ -45,6 +47,8 @@ export function fingerprintFiles(files: ArchiveFileInput[]): string {
   return crypto.createHash("sha256").update(canonical).digest("hex");
 }
 
+const ARCHIVE_KEY_PREFIX = "runs/";
+
 export function getArchiveKey(
   instrumentId: string,
   runId: string,
@@ -53,10 +57,53 @@ export function getArchiveKey(
   // Keep the instrument and run id in the path so a stray `aws s3 ls` is
   // self-explanatory. The fingerprint disambiguates filtered ("?file_ids=")
   // archives from full-run archives.
-  return `runs/${instrumentId}/${runId}/${fingerprint}.zip`;
+  return `${ARCHIVE_KEY_PREFIX}${instrumentId}/${runId}/${fingerprint}.zip`;
+}
+
+// Inverse of `getArchiveKey`. Returns `null` if the key doesn't match the
+// canonical layout (e.g. legacy / hand-edited rows). Used by the polling
+// endpoint to derive a human-readable download filename without joining
+// against `instrument_runs` on every poll.
+export function parseArchiveKey(
+  key: string
+): { instrumentId: string; runId: string; fingerprint: string } | null {
+  if (!key.startsWith(ARCHIVE_KEY_PREFIX)) return null;
+  const parts = key.slice(ARCHIVE_KEY_PREFIX.length).split("/");
+  if (parts.length !== 3) return null;
+  const [instrumentId, runId, tail] = parts;
+  if (!instrumentId || !runId || !tail.endsWith(".zip")) return null;
+  const fingerprint = tail.slice(0, -".zip".length);
+  if (!fingerprint) return null;
+  return { instrumentId, runId, fingerprint };
+}
+
+// Derives the filename a browser should save the downloaded archive under.
+// Centralised here so the sync (download-archive route) and async
+// (archive-jobs poll) paths produce the same name, and the helper accepts a
+// missing `runId` (e.g. malformed archive_key) by falling back to a generic
+// "archive.zip".
+export function getArchiveDownloadFilename(runId: string | null): string {
+  return runId ? `${runId}.zip` : "archive.zip";
 }
 
 type LambdaConfig = { url: string; token: string };
+
+// Cheap, side-effect-free check used by the route to short-circuit with a
+// 503 *before* it inserts an `archive_jobs` row or fires `after()`. Checks
+// every env var the build pipeline needs — the Lambda Function URL + token
+// for the dispatch, and `S3_ARCHIVES_BUCKET` for the cache-hit HEAD and
+// presign — so a misconfigured deploy fails uniformly with one clear
+// error rather than half-failing inside `getS3ArchivesBucket`.
+//
+// The throwing `getLambdaConfig` / `getS3ArchivesBucket` helpers are still
+// used downstream — this check is the entry-point gate.
+export function isArchiveBuilderConfigured(): boolean {
+  return Boolean(
+    process.env.LAMBDA_FUNCTION_URL &&
+    process.env.LAMBDA_INVOKE_TOKEN &&
+    process.env.S3_ARCHIVES_BUCKET
+  );
+}
 
 function getLambdaConfig(): LambdaConfig {
   const url = process.env.LAMBDA_FUNCTION_URL;

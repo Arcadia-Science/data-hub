@@ -79,12 +79,45 @@ export async function headS3Object(
   }
 }
 
+export type PresignedDownloadOptions = {
+  expiresIn?: number;
+  // Override the filename the browser saves the response under. Browsers
+  // ignore the `<a download="…">` attribute on cross-origin URLs unless the
+  // response carries an explicit `Content-Disposition: attachment` header,
+  // so for archive downloads (S3 origin → user) we sign the URL with a
+  // `response-content-disposition` query param. S3 echoes that header back
+  // on the GET response, and the browser uses it as the saved filename.
+  filename?: string;
+};
+
+// Sanitize a filename for use inside a `Content-Disposition` header. Strips
+// CR/LF (header injection) and quotes (which would terminate the filename
+// param early), then trims to a length S3 will accept.
+function sanitizeContentDispositionFilename(name: string): string {
+  const cleaned = name
+    .replaceAll(/[\r\n"\\]/g, "")
+    .replaceAll(/[\x00-\x1f\x7f]/g, "")
+    .trim();
+  return cleaned.slice(0, 200) || "download";
+}
+
 export async function getPresignedDownloadUrl(
   bucket: string,
   key: string,
-  expiresIn: number = DEFAULT_DOWNLOAD_EXPIRY_SECONDS
+  options: PresignedDownloadOptions | number = {}
 ): Promise<string> {
-  const command = new GetObjectCommand({ Bucket: bucket, Key: key });
+  // Backwards-compat: callers that passed a bare `expiresIn` number still work.
+  const opts: PresignedDownloadOptions =
+    typeof options === "number" ? { expiresIn: options } : options;
+  const expiresIn = opts.expiresIn ?? DEFAULT_DOWNLOAD_EXPIRY_SECONDS;
+
+  const command = new GetObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    ...(opts.filename && {
+      ResponseContentDisposition: `attachment; filename="${sanitizeContentDispositionFilename(opts.filename)}"`,
+    }),
+  });
   return getSignedUrl(s3, command, { expiresIn });
 }
 

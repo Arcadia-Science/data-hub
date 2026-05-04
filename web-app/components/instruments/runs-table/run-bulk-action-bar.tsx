@@ -130,21 +130,34 @@ export function RunBulkActionBar() {
     });
   }
 
-  // Bulk download fans the start() calls out one-after-another. Each call
-  // either triggers an immediate download (sync/cache) or registers a job
-  // with the dialog (async). Sequencing the kickoffs avoids overwhelming
-  // the database with N parallel insert+head requests for huge selections;
-  // the actual S3 builds happen in Lambda independently.
+  // Bulk download fans the start() calls out one-after-another. Awaiting
+  // each kickoff serializes the route's HEAD + INSERT + Lambda-POST so a
+  // 50-run selection doesn't thunder the API with parallel requests; the
+  // actual S3 builds still happen concurrently inside Lambda once each
+  // kickoff returns. We also swallow individual failures so one bad ref
+  // can't abort the rest of the bulk download.
+  //
+  // `void` on the IIFE is intentional: React event handlers can't return
+  // promises without a wrapper.
   function handleDownload() {
-    for (const ref of refs) {
-      void archiveActions.start({
-        archiveUrl: `/api/v1/instruments/${ref.instrumentId}/runs/${encodeURIComponent(
-          ref.runId
-        )}/download-archive`,
-        runId: ref.runId,
-        defaultFilename: `${ref.runId}.zip`,
-      });
-    }
+    void (async () => {
+      for (const ref of refs) {
+        try {
+          await archiveActions.start({
+            archiveUrl: `/api/v1/instruments/${ref.instrumentId}/runs/${encodeURIComponent(
+              ref.runId
+            )}/download-archive`,
+            runId: ref.runId,
+            defaultFilename: `${ref.runId}.zip`,
+          });
+        } catch (err) {
+          console.error(
+            `Failed to start archive download for ${ref.runId}:`,
+            err
+          );
+        }
+      }
+    })();
     toast.success(
       `Preparing ${refs.length} ${refs.length === 1 ? "archive" : "archives"}`
     );

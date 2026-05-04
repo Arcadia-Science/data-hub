@@ -256,6 +256,12 @@ def start_test_server() -> Generator[IntegrationEnv, None, None]:
         "WATCHER_MIN_SUPPORTED_VERSION": os.environ.get("WATCHER_MIN_SUPPORTED_VERSION", "0.1.0"),
         "WATCHER_RELEASE_CHANNEL": os.environ.get("WATCHER_RELEASE_CHANNEL", "stable"),
         "WATCHER_MANDATORY_UPDATE": os.environ.get("WATCHER_MANDATORY_UPDATE", "false"),
+        # Shared bearer token for Lambda → web-app callbacks (e.g. the
+        # ``PATCH /api/v1/archive-jobs/:id`` callback issued by the
+        # archive-builder code path). Defaulted to the same value the
+        # Lambda conftest sets so both sides validate against each other
+        # without the parent process needing to plumb anything.
+        "LAMBDA_INVOKE_TOKEN": os.environ.get("LAMBDA_INVOKE_TOKEN", "test-invoke-token"),
     }
 
     build_result = subprocess.run(
