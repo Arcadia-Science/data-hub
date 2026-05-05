@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,12 @@ SERVICE_DESCRIPTION = "Monitors instrument directories and uploads data files to
 _REG_KEY = rf"SYSTEM\CurrentControlSet\Services\{SERVICE_NAME}"
 _REG_CONFIG_PATH = "ConfigPath"
 _REG_ENV_PATH = "EnvPath"
+
+# Win32 system error codes returned by ``OpenService`` / ``CreateService``
+# while a service is in the asynchronous DeleteService teardown window.
+# Documented at https://learn.microsoft.com/windows/win32/debug/system-error-codes--1000-1299-.
+_ERROR_SERVICE_DOES_NOT_EXIST = 1060
+_ERROR_SERVICE_MARKED_FOR_DELETE = 1072
 
 # Windows services that must be running before the watcher can usefully
 # contact the Data Hub API. Declaring these as dependencies makes the SCM
@@ -210,6 +217,60 @@ def uninstall_service() -> None:
     _delete_paths_from_registry()
     win32serviceutil.RemoveService(SERVICE_NAME)
     logger.info("Service '%s' removed", SERVICE_NAME)
+
+
+def wait_for_service_removed(
+    *,
+    timeout_seconds: float = 30.0,
+    poll_interval_seconds: float = 0.5,
+) -> bool:
+    """Block until the service is fully removed from the SCM, or *timeout* elapses.
+
+    ``DeleteService`` (called via ``win32serviceutil.RemoveService``) is
+    asynchronous: Windows only *marks* the service for deletion, and the
+    actual record is removed once every open handle to it is closed —
+    including handles held by ``services.msc``, Event Viewer's "Services"
+    pane, Task Manager, and some antivirus / EDR agents that enumerate
+    services.  Until that happens, ``CreateService`` with the same name
+    fails with ``ERROR_SERVICE_MARKED_FOR_DELETE`` (1072), which is the
+    confusing error operators see when ``service reinstall`` runs back-to-
+    back uninstall + install on a host with the Services console open.
+
+    We poll the SCM with ``OpenService``: the service is fully gone the
+    moment that call raises ``ERROR_SERVICE_DOES_NOT_EXIST`` (1060).
+    Returns ``True`` if the service disappeared inside the deadline,
+    ``False`` if it's still hanging around — callers should treat the
+    latter as actionable (close ``services.msc`` and retry) rather than
+    a fatal SCM error.
+    """
+    import pywintypes  # type: ignore[import-untyped]
+    import win32service as ws  # type: ignore[import-untyped]
+
+    deadline = time.monotonic() + timeout_seconds
+    hscm = ws.OpenSCManager(None, None, ws.SC_MANAGER_CONNECT)
+    try:
+        while True:
+            try:
+                hs = ws.OpenService(hscm, SERVICE_NAME, ws.SERVICE_QUERY_STATUS)
+            except pywintypes.error as exc:
+                # winerror lives at index 0 of the (code, func, msg) tuple
+                # but pywintypes.error also exposes it as an attribute on
+                # modern pywin32. Prefer the attribute, fall back to args
+                # so this works against the MagicMock-based test fakes.
+                code = getattr(exc, "winerror", None)
+                if code is None and exc.args:
+                    code = exc.args[0]
+                if code == _ERROR_SERVICE_DOES_NOT_EXIST:
+                    return True
+                raise
+            else:
+                ws.CloseServiceHandle(hs)
+
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(poll_interval_seconds)
+    finally:
+        ws.CloseServiceHandle(hscm)
 
 
 def start_service() -> None:

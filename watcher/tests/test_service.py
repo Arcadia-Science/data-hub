@@ -81,11 +81,27 @@ def _make_win32_fakes() -> dict[str, ModuleType]:
     win32serviceutil = MagicMock(name="win32serviceutil")
     servicemanager = MagicMock(name="servicemanager")
 
+    # ``pywintypes.error`` is the base SCM exception type. The real class
+    # is ``(winerror, funcname, strerror)`` and exposes ``.winerror`` as
+    # an attribute. Using a real subclass of Exception (rather than a
+    # MagicMock) means the service module's ``except pywintypes.error``
+    # actually catches it instead of letting it through as a plain Mock.
+    class _PyWinError(Exception):
+        def __init__(self, winerror: int, funcname: str = "", strerror: str = "") -> None:
+            super().__init__(winerror, funcname, strerror)
+            self.winerror = winerror
+            self.funcname = funcname
+            self.strerror = strerror
+
+    pywintypes = MagicMock(name="pywintypes")
+    pywintypes.error = _PyWinError
+
     return {
         "winreg": winreg,
         "win32service": ws,
         "win32serviceutil": win32serviceutil,
         "servicemanager": servicemanager,
+        "pywintypes": pywintypes,
     }
 
 
@@ -355,6 +371,146 @@ class TestServiceLifecycle:
         win32serviceutil = sys.modules["win32serviceutil"]
         service_module.stop_service()
         win32serviceutil.StopService.assert_called_once_with(service_module.SERVICE_NAME)
+
+
+# --- wait_for_service_removed -----------------------------------------------
+
+
+class TestWaitForServiceRemoved:
+    """Polls SCM until DeleteService finalises.
+
+    The SCM marks the service for deletion synchronously but only
+    finishes the delete once every open handle is closed.  Without the
+    poll, ``service reinstall`` races into ``CreateService`` and dies
+    with the inscrutable error 1072 ("marked for deletion") whenever a
+    Services console (services.msc) or AV agent has the service open on
+    the host.
+    """
+
+    @staticmethod
+    def _patch_clock(monkeypatch: pytest.MonkeyPatch, service_module: ModuleType) -> list[float]:
+        """Replace ``time.monotonic`` / ``time.sleep`` with a deterministic clock.
+
+        Returns the list backing the clock so individual tests can
+        observe how many "ticks" the loop ran for.
+        """
+        clock = [0.0]
+
+        def fake_monotonic() -> float:
+            return clock[0]
+
+        def fake_sleep(seconds: float) -> None:
+            clock[0] += seconds
+
+        monkeypatch.setattr(service_module.time, "monotonic", fake_monotonic)
+        monkeypatch.setattr(service_module.time, "sleep", fake_sleep)
+        return clock
+
+    def test_returns_true_immediately_when_service_does_not_exist(
+        self,
+        service_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        ws = sys.modules["win32service"]
+        pywintypes = sys.modules["pywintypes"]
+        ws.OpenSCManager.return_value = MagicMock(name="scm")
+        ws.OpenService.side_effect = pywintypes.error(1060, "OpenService", "does not exist")
+
+        clock = self._patch_clock(monkeypatch, service_module)
+        result = service_module.wait_for_service_removed(timeout_seconds=5.0)
+
+        assert result is True
+        assert ws.OpenService.call_count == 1
+        # No retries needed -> no time spent waiting.
+        assert clock[0] == 0.0
+        # SCM handle must be closed even on the fast-path success.
+        ws.CloseServiceHandle.assert_called_once_with(ws.OpenSCManager.return_value)
+
+    def test_polls_until_service_disappears(
+        self,
+        service_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        ws = sys.modules["win32service"]
+        pywintypes = sys.modules["pywintypes"]
+        scm_handle = MagicMock(name="scm")
+        svc_handle = MagicMock(name="svc")
+        ws.OpenSCManager.return_value = scm_handle
+
+        # Three "still marked for deletion" responses, then the service
+        # is finally gone. The loop must close its OpenService handle on
+        # each successful open so it doesn't itself become the thing
+        # holding deletion open.
+        responses: list[Any] = [
+            svc_handle,
+            svc_handle,
+            svc_handle,
+            pywintypes.error(1060, "OpenService", "does not exist"),
+        ]
+
+        def open_service(*_args: Any, **_kwargs: Any) -> Any:
+            r = responses.pop(0)
+            if isinstance(r, Exception):
+                raise r
+            return r
+
+        ws.OpenService.side_effect = open_service
+
+        self._patch_clock(monkeypatch, service_module)
+        result = service_module.wait_for_service_removed(
+            timeout_seconds=10.0, poll_interval_seconds=0.5
+        )
+
+        assert result is True
+        assert ws.OpenService.call_count == 4
+        # Service handle closed once per successful open (3) + SCM
+        # handle closed once at the end = 4 total.
+        close_targets = [c.args[0] for c in ws.CloseServiceHandle.call_args_list]
+        assert close_targets.count(svc_handle) == 3
+        assert close_targets.count(scm_handle) == 1
+
+    def test_returns_false_after_timeout(
+        self,
+        service_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        ws = sys.modules["win32service"]
+        ws.OpenSCManager.return_value = MagicMock(name="scm")
+        # Service stays openable forever -> we should give up cleanly.
+        ws.OpenService.return_value = MagicMock(name="svc")
+
+        self._patch_clock(monkeypatch, service_module)
+        result = service_module.wait_for_service_removed(
+            timeout_seconds=2.0, poll_interval_seconds=0.5
+        )
+
+        assert result is False
+        # SCM handle must still be released so we don't leak it back to
+        # the caller (who will likely retry).
+        assert any(
+            c.args[0] is ws.OpenSCManager.return_value for c in ws.CloseServiceHandle.call_args_list
+        )
+
+    def test_unrelated_pywin_error_propagates(
+        self,
+        service_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Access denied (5) is the kind of error operators need to see —
+        # silently swallowing it would mask a permissions problem.
+        ws = sys.modules["win32service"]
+        pywintypes = sys.modules["pywintypes"]
+        ws.OpenSCManager.return_value = MagicMock(name="scm")
+        ws.OpenService.side_effect = pywintypes.error(5, "OpenService", "Access is denied")
+
+        self._patch_clock(monkeypatch, service_module)
+
+        with pytest.raises(pywintypes.error) as excinfo:
+            service_module.wait_for_service_removed(timeout_seconds=2.0)
+
+        assert excinfo.value.winerror == 5
+        # Even on the error path the SCM handle must be released.
+        ws.CloseServiceHandle.assert_called_once_with(ws.OpenSCManager.return_value)
 
 
 # --- query_service_status ----------------------------------------------------

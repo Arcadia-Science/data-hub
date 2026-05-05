@@ -1116,6 +1116,7 @@ def service_reinstall(ctx: click.Context, env_path_override: str | None) -> None
         start_service,
         stop_service,
         uninstall_service,
+        wait_for_service_removed,
     )
 
     if env_path_override is not None:
@@ -1149,6 +1150,22 @@ def service_reinstall(ctx: click.Context, env_path_override: str | None) -> None
         click.echo(click.style("✓ Service uninstalled.", fg="green"))
     except Exception as exc:
         click.echo(f"  (uninstall skipped: {exc})")
+
+    # ``RemoveService`` only marks the service for deletion; the SCM
+    # finalises the delete asynchronously once every open handle is
+    # closed. Polling here turns the otherwise inscrutable
+    # ``(1072, 'CreateService', 'The specified service has been marked
+    # for deletion.')`` error into either (a) a transparent retry that
+    # succeeds within a few seconds in the common case, or (b) a clear,
+    # actionable message when something is genuinely holding a handle.
+    if not wait_for_service_removed(timeout_seconds=30.0):
+        raise click.ClickException(
+            "Service is still marked for deletion after 30 s. Close any open "
+            "Services consoles (services.msc), Event Viewer windows, or "
+            "Task Manager 'Services' tabs, then re-run "
+            "'data-hub-watcher service install && data-hub-watcher service start'. "
+            "If that doesn't help, reboot to force-clear the SCM handle."
+        )
 
     try:
         install_service(config_path=path.resolve(), env_path=env_path)

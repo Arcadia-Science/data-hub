@@ -118,6 +118,13 @@ data-hub-watcher service uninstall # Remove the service
 data-hub-watcher service reinstall # Stop, uninstall, install, and start (e.g. after a manual wheel upgrade)
 ```
 
+> **Tip:** Close `services.msc` (and any open Event Viewer / Task Manager
+> "Services" tabs) before running `service reinstall`. The Windows SCM
+> defers `DeleteService` until every open handle is closed; if a console
+> is still pointing at `DataHubWatcher`, the reinstall waits up to 30 s
+> for the SCM to finish and then aborts with an actionable error rather
+> than the raw `(1072, 'CreateService', 'marked for deletion')` failure.
+
 ## Changing configuration
 
 To re-prompt each config field with current values as defaults:
