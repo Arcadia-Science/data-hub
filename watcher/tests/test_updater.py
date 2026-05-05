@@ -478,6 +478,52 @@ class TestUpdaterOnTick:
         # marker evaluation, not emitted here.
         assert EventType.UPDATE_SUCCEEDED not in emitted
 
+    def test_subprocess_output_is_logged_at_info_even_on_success(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # Defence in depth: a partial install can update some Python
+        # files (fooling the post-restart marker comparison) while
+        # uv exits with a non-zero code or prints a meaningful
+        # warning to stderr. Even on the apparent-success path we
+        # MUST mirror the captured output to ``watcher.log`` so an
+        # operator can recover the actual installer transcript when
+        # the dashboard event is misleading. Historically this gap
+        # is what made the "Scripts directory locked" failure
+        # invisible until someone ran the upgrade by hand.
+        runner = MagicMock(
+            return_value=subprocess.CompletedProcess(
+                args=["uv"],
+                returncode=0,
+                stdout="Installed 17 packages\n+ data-hub-watcher==9.9.9",
+                stderr="warning: index format is deprecated",
+            )
+        )
+        h = _make_updater(tmp_path, upgrade_runner=runner)
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+        monkeypatch.setattr(
+            "data_hub_watcher.updater.detect_install_method",
+            lambda: InstallMethod.UV_TOOL,
+        )
+
+        h.counters.last_files_uploaded = 0
+        with caplog.at_level("INFO", logger="data_hub_watcher.updater"):
+            h.updater.on_tick()
+            h.updater.on_tick()
+            h.updater.on_tick()
+
+        log_text = "\n".join(r.getMessage() for r in caplog.records)
+        assert "Installed 17 packages" in log_text
+        # stderr is logged separately so a regression that only
+        # captured one stream surfaces here.
+        assert "warning: index format is deprecated" in log_text
+        # On success we still emit the "requesting service restart"
+        # line — these tests are specifically that the output is
+        # *also* logged.
+        assert "requesting service restart" in log_text
+
     def test_failed_upgrade_subprocess_emits_update_failed(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -867,3 +913,275 @@ class TestUpdaterAsyncDispatch:
         assert done.wait(timeout=2.0)
         assert seen_threads == ["upgrade-worker"]
         assert seen_threads[0] != threading.current_thread().name
+
+
+# ---------------------------------------------------------------------------
+# Updater worker-dispatch branch (Windows uv-tool)
+# ---------------------------------------------------------------------------
+
+
+class TestUpdaterWorkerDispatch:
+    """On Windows uv-tool installs ``_apply`` routes through the worker.
+
+    Locks in the contract: the in-process subprocess path must NOT
+    fire (it would just re-hit the ``Scripts\\python.exe`` lock issue
+    that motivated this whole change), the request sentinel must
+    land on disk with the right pkg_spec, and ``schtasks /Run``
+    failures must surface as ``UPDATE_FAILED`` rather than a silent
+    no-op.
+    """
+
+    def _force_windows_uv_tool(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("data_hub_watcher.updater.sys.platform", "win32")
+        monkeypatch.setattr(
+            "data_hub_watcher.updater.detect_install_method",
+            lambda: InstallMethod.UV_TOOL,
+        )
+        monkeypatch.setattr(
+            "data_hub_watcher.updater._resolve_uv_executable",
+            lambda override=None, prefix=None: ("/fake/bin/uv.exe", ["/fake/bin/uv.exe"]),
+        )
+        # Pretend pywin32 is installed so the extras detection picks
+        # up the [windows-service] extra, exercising the regression
+        # where pywin32 used to silently disappear after a reinstall.
+        # The function is imported into the ``updater`` namespace, so
+        # we patch it there rather than at the source module.
+        monkeypatch.setattr(
+            "data_hub_watcher.updater.detect_installed_extras",
+            lambda: ["windows-service"],
+        )
+
+    def test_writes_request_sentinel_and_triggers_task(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from data_hub_watcher.upgrade_worker import (
+            read_upgrade_request,
+        )
+
+        runner = MagicMock()  # must not be called on the worker path
+        h = _make_updater(tmp_path, upgrade_runner=runner)
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+
+        self._force_windows_uv_tool(monkeypatch)
+
+        trigger_calls: list[None] = []
+        monkeypatch.setattr(
+            "data_hub_watcher.scheduled_task.trigger_upgrade_task",
+            lambda **_kw: trigger_calls.append(None),
+        )
+
+        h.counters.last_files_uploaded = 0
+        h.updater.on_tick()
+        h.updater.on_tick()
+        result = h.updater.on_tick()
+
+        assert result is not None
+        assert result.attempted is True
+        # Worker dispatch leaves succeeded=None; the real outcome is
+        # surfaced from the post-restart event evaluation, not here.
+        assert result.succeeded is None
+        assert result.extra.get("via_worker") is True
+
+        # Request sentinel must be on disk with the right spec.
+        req = read_upgrade_request(tmp_path / ".data-hub")
+        assert req is not None
+        assert req.target_version == "9.9.9"
+        assert req.pkg_spec == "data-hub-watcher[windows-service]==9.9.9"
+        assert req.uv_executable == "/fake/bin/uv.exe"
+        assert req.install_method == "uv-tool"
+
+        # Marker is also on disk so the post-restart evaluation can
+        # tell whether the new version actually loaded.
+        assert (tmp_path / ".data-hub" / UPGRADE_MARKER_FILENAME).exists()
+        # schtasks /Run was triggered exactly once.
+        assert trigger_calls == [None]
+        # Critical: the in-process subprocess path must NOT fire on
+        # Windows uv-tool — that would re-hit the lock issue the
+        # whole change is designed to avoid.
+        runner.assert_not_called()
+        h.request_restart.assert_not_called()
+
+        # UPDATE_STARTED must have been queued so the dashboard shows
+        # the dispatch even if the worker takes the service down
+        # before the next heartbeat would normally flush.
+        emitted = [c.args[0] for c in h.reporter.queue_event.call_args_list]
+        types = [e.event_type for e in emitted]
+        assert EventType.UPDATE_STARTED in types
+        # The success / final-failure event is deferred to the
+        # post-restart marker evaluation, never emitted from here.
+        assert EventType.UPDATE_SUCCEEDED not in types
+
+    def test_uv_not_found_surfaces_update_failed_without_started(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Same invariant as the in-process path: a missing uv binary
+        # must NOT emit UPDATE_STARTED, must NOT write the marker,
+        # and must surface a single UPDATE_FAILED with the candidates
+        # we probed so the operator can drop a binary in the right
+        # place.
+        h = _make_updater(tmp_path)
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+
+        monkeypatch.setattr("data_hub_watcher.updater.sys.platform", "win32")
+        monkeypatch.setattr(
+            "data_hub_watcher.updater.detect_install_method",
+            lambda: InstallMethod.UV_TOOL,
+        )
+        monkeypatch.setattr(
+            "data_hub_watcher.updater._resolve_uv_executable",
+            lambda override=None, prefix=None: (None, [r"C:\Users\lab\.local\bin\uv.exe"]),
+        )
+
+        trigger_calls: list[None] = []
+        monkeypatch.setattr(
+            "data_hub_watcher.scheduled_task.trigger_upgrade_task",
+            lambda **_kw: trigger_calls.append(None),
+        )
+
+        h.counters.last_files_uploaded = 0
+        h.updater.on_tick()
+        h.updater.on_tick()
+        result = h.updater.on_tick()
+
+        assert result is not None
+        assert result.attempted is True
+        assert result.succeeded is False
+        assert trigger_calls == []
+        assert not (tmp_path / ".data-hub" / UPGRADE_MARKER_FILENAME).exists()
+
+        emitted = [c.args[0] for c in h.reporter.queue_event.call_args_list]
+        types = [e.event_type for e in emitted]
+        assert EventType.UPDATE_STARTED not in types
+        update_failed = [e for e in emitted if e.event_type is EventType.UPDATE_FAILED]
+        assert len(update_failed) == 1
+        details = update_failed[0].details
+        assert details["reason"] == "uv executable not found"
+        assert details["attempted_subprocess"] is False
+        assert details["via_worker"] is True
+        assert details["candidates_tried"] == [r"C:\Users\lab\.local\bin\uv.exe"]
+
+    def test_schtasks_failure_clears_sentinels_and_emits_update_failed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Most likely cause: the scheduled task isn't registered (a
+        # fleet PC that auto-updated into worker-aware code without
+        # re-running ``service install``). The dispatch must:
+        #   1. Clear its own request sentinel + marker so the next
+        #      tick can try again from a clean slate.
+        #   2. Surface UPDATE_FAILED with a reason that points at
+        #      the recovery command.
+        #   3. NOT call request_restart (the worker is what stops
+        #      the service; without it firing we must stay alive).
+        from data_hub_watcher.scheduled_task import ScheduledTaskError
+        from data_hub_watcher.upgrade_worker import (
+            UPGRADE_REQUEST_FILENAME,
+            UPGRADE_RESULT_FILENAME,
+        )
+
+        h = _make_updater(tmp_path)
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+        self._force_windows_uv_tool(monkeypatch)
+
+        def boom(**_kw: Any) -> None:
+            raise ScheduledTaskError(
+                "schtasks /Run failed for 'DataHubWatcherUpgrade'",
+                argv=["schtasks.exe", "/Run", "/TN", "DataHubWatcherUpgrade"],
+                stderr="ERROR: The system cannot find the file specified.",
+                returncode=1,
+            )
+
+        monkeypatch.setattr("data_hub_watcher.scheduled_task.trigger_upgrade_task", boom)
+
+        h.counters.last_files_uploaded = 0
+        h.updater.on_tick()
+        h.updater.on_tick()
+        result = h.updater.on_tick()
+
+        assert result is not None
+        assert result.attempted is True
+        assert result.succeeded is False
+        assert "scheduled task" in result.reason
+        # Sentinels must be cleared so the next tick isn't gated on
+        # a stale request file from a failed dispatch.
+        assert not (tmp_path / ".data-hub" / UPGRADE_REQUEST_FILENAME).exists()
+        assert not (tmp_path / ".data-hub" / UPGRADE_MARKER_FILENAME).exists()
+        # And of course there's no result sentinel — the worker
+        # never ran.
+        assert not (tmp_path / ".data-hub" / UPGRADE_RESULT_FILENAME).exists()
+
+        h.request_restart.assert_not_called()
+
+        emitted = [c.args[0] for c in h.reporter.queue_event.call_args_list]
+        update_failed = [e for e in emitted if e.event_type is EventType.UPDATE_FAILED]
+        assert len(update_failed) == 1
+        details = update_failed[0].details
+        assert details["via_worker"] is True
+        assert details["attempted_subprocess"] is False
+        assert "schtasks_stderr" in details
+        assert details["schtasks_returncode"] == 1
+        assert "service reinstall" in details["reason"]
+
+    def test_posix_uv_tool_still_uses_in_process_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The worker dispatch is gated on Windows specifically. POSIX
+        # uv-tool installs continue to use the inline subprocess
+        # because they don't have the file-lock issue and the inline
+        # path gives the dashboard live UPDATE_STARTED -> succeeded
+        # event pairing without an extra hop.
+        runner = MagicMock(return_value=_success_completed_process())
+        h = _make_updater(tmp_path, upgrade_runner=runner)
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+
+        monkeypatch.setattr("data_hub_watcher.updater.sys.platform", "linux")
+        monkeypatch.setattr(
+            "data_hub_watcher.updater.detect_install_method",
+            lambda: InstallMethod.UV_TOOL,
+        )
+        # If anything tried to dispatch through the worker, this
+        # would explode loudly rather than passing silently.
+        monkeypatch.setattr(
+            "data_hub_watcher.scheduled_task.trigger_upgrade_task",
+            lambda **_kw: pytest.fail("POSIX uv-tool must not route through the worker"),
+        )
+
+        h.counters.last_files_uploaded = 0
+        h.updater.on_tick()
+        h.updater.on_tick()
+        result = h.updater.on_tick()
+
+        assert result is not None
+        assert result.attempted is True
+        assert result.succeeded is True
+        runner.assert_called_once()
+        h.request_restart.assert_called_once_with("9.9.9")
+
+    def test_windows_pip_install_still_uses_in_process_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Windows pip-installed watchers don't have the lock issue
+        # because pip rewrites individual files in site-packages
+        # rather than recreating Scripts\\. They keep using the
+        # inline subprocess path.
+        runner = MagicMock(return_value=_success_completed_process())
+        h = _make_updater(tmp_path, upgrade_runner=runner)
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+
+        monkeypatch.setattr("data_hub_watcher.updater.sys.platform", "win32")
+        monkeypatch.setattr(
+            "data_hub_watcher.updater.detect_install_method",
+            lambda: InstallMethod.PIP,
+        )
+        monkeypatch.setattr(
+            "data_hub_watcher.scheduled_task.trigger_upgrade_task",
+            lambda **_kw: pytest.fail("Windows pip installs must not route through the worker"),
+        )
+
+        h.counters.last_files_uploaded = 0
+        h.updater.on_tick()
+        h.updater.on_tick()
+        result = h.updater.on_tick()
+
+        assert result is not None
+        assert result.succeeded is True
+        runner.assert_called_once()

@@ -125,6 +125,21 @@ data-hub-watcher service reinstall # Stop, uninstall, install, and start (e.g. a
 > for the SCM to finish and then aborts with an actionable error rather
 > than the raw `(1072, 'CreateService', 'marked for deletion')` failure.
 
+> **Note (auto-update):** `service install` also drops a small PowerShell
+> worker under `~/.data-hub/upgrade-worker.ps1` and registers it as the
+> `DataHubWatcherUpgrade` Scheduled Task running as `SYSTEM`. The
+> auto-updater and `data-hub-watcher self-update` both route Windows
+> uv-tool upgrades through that task — the watcher's own
+> `Scripts\python.exe` is mapped into the running service process and
+> Windows refuses to let `uv` replace it in place, so the upgrade is
+> driven from a process tree that doesn't include the service. **Lab PCs
+> already running an older watcher build must be upgraded once with
+> `data-hub-watcher service reinstall` after they auto-update into
+> v0.2.0 or later** — that one-time reinstall is what registers the
+> Scheduled Task. The next service start lazily re-registers a missing
+> task on its own, so most fleet PCs will self-heal without operator
+> intervention.
+
 ## Changing configuration
 
 To re-prompt each config field with current values as defaults:

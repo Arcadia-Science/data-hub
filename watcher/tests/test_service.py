@@ -217,10 +217,16 @@ class TestInstallService:
     """
 
     def test_install_passes_expected_kwargs_to_win32serviceutil(
-        self, service_module: ModuleType
+        self,
+        service_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         win32serviceutil = sys.modules["win32serviceutil"]
         sys.modules["winreg"].OpenKey.return_value = MagicMock()
+        # The upgrade-worker registration is exercised in its own
+        # test below; this test only cares about the SCM kwargs and
+        # would otherwise try to invoke the real `schtasks.exe`.
+        monkeypatch.setattr(service_module, "_install_upgrade_worker", lambda: None)
 
         service_module.install_service(Path("c.yaml"), Path("e.env"))
 
@@ -243,6 +249,7 @@ class TestInstallService:
         sys.modules["winreg"].OpenKey.return_value = MagicMock()
         store_calls: list[tuple[Path, Path]] = []
         recovery_calls: list[None] = []
+        worker_calls: list[None] = []
 
         monkeypatch.setattr(
             service_module,
@@ -254,11 +261,197 @@ class TestInstallService:
             "_configure_recovery",
             lambda: recovery_calls.append(None),
         )
+        monkeypatch.setattr(
+            service_module,
+            "_install_upgrade_worker",
+            lambda: worker_calls.append(None),
+        )
 
         service_module.install_service(Path("c.yaml"), Path("e.env"))
 
         assert store_calls == [(Path("c.yaml"), Path("e.env"))]
         assert recovery_calls == [None]
+        # Critical regression guard: `install_service` must always
+        # register the upgrade worker. A fleet PC installed without
+        # it would silently fall back to the broken in-process
+        # upgrade path on the next auto-update tick.
+        assert worker_calls == [None]
+
+
+class TestInstallUpgradeWorker:
+    """The upgrade-worker scheduled task is wired in alongside the SCM bits.
+
+    These tests exercise the small ``_install_upgrade_worker`` /
+    ``_uninstall_upgrade_worker`` helpers directly, mocking out the
+    schtasks + filesystem side-effects so we assert on the call
+    contract rather than touching the real system.
+    """
+
+    def test_install_writes_script_and_registers_task(
+        self,
+        service_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        # Redirect the well-known config dir into a temp dir so the
+        # rendered script lands somewhere we can inspect.
+        monkeypatch.setattr(service_module, "DEFAULT_CONFIG_DIR", tmp_path)
+
+        install_calls: list[Path] = []
+        monkeypatch.setattr(
+            "data_hub_watcher.scheduled_task.install_upgrade_task",
+            lambda script_path: install_calls.append(script_path),
+        )
+
+        service_module._install_upgrade_worker()
+
+        # Script is on disk under the patched config dir.
+        from data_hub_watcher.upgrade_worker import upgrade_worker_script_path
+
+        script_path = upgrade_worker_script_path(tmp_path)
+        assert script_path.exists()
+        assert "Stop-Service" in script_path.read_text(encoding="utf-8")
+        # Task installer was handed the same path.
+        assert install_calls == [script_path]
+
+    def test_uninstall_removes_task_and_script(
+        self,
+        service_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        monkeypatch.setattr(service_module, "DEFAULT_CONFIG_DIR", tmp_path)
+
+        from data_hub_watcher.upgrade_worker import upgrade_worker_script_path
+
+        script_path = upgrade_worker_script_path(tmp_path)
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        script_path.write_text("# stub", encoding="utf-8")
+
+        uninstall_calls: list[None] = []
+        monkeypatch.setattr(
+            "data_hub_watcher.scheduled_task.uninstall_upgrade_task",
+            lambda: uninstall_calls.append(None),
+        )
+
+        service_module._uninstall_upgrade_worker()
+
+        assert uninstall_calls == [None]
+        assert not script_path.exists()
+
+    def test_uninstall_swallows_scheduled_task_errors(
+        self,
+        service_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        # A half-installed host or one where Task Scheduler refuses to
+        # talk to us must not block ``service uninstall`` — leaving
+        # the host with a partially-uninstalled service is strictly
+        # worse than silently missing the worker cleanup.
+        monkeypatch.setattr(service_module, "DEFAULT_CONFIG_DIR", tmp_path)
+
+        from data_hub_watcher.scheduled_task import ScheduledTaskError
+
+        def boom() -> None:
+            raise ScheduledTaskError("nope", argv=["schtasks.exe"], stderr="rpc dead")
+
+        monkeypatch.setattr(
+            "data_hub_watcher.scheduled_task.uninstall_upgrade_task",
+            boom,
+        )
+        # Must not raise.
+        service_module._uninstall_upgrade_worker()
+
+
+class TestRepairUpgradeWorkerOnStartup:
+    """The startup self-repair re-installs the task when it goes missing.
+
+    Lab PCs that auto-update into the worker-aware code without an
+    explicit ``service install`` first won't have the task registered.
+    The startup hook fixes this on the next service tick so the next
+    auto-update can succeed.
+    """
+
+    def test_repair_skipped_when_task_already_registered(
+        self,
+        service_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        sm = MagicMock(name="servicemanager")
+        monkeypatch.setattr("data_hub_watcher.scheduled_task.task_exists", lambda: True)
+        install_calls: list[Path] = []
+        monkeypatch.setattr(
+            "data_hub_watcher.scheduled_task.install_upgrade_task",
+            lambda script_path: install_calls.append(script_path),
+        )
+
+        service_module._repair_upgrade_worker_if_missing(sm)
+
+        assert install_calls == []
+
+    def test_repair_re_registers_when_task_missing(
+        self,
+        service_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        monkeypatch.setattr(service_module, "DEFAULT_CONFIG_DIR", tmp_path)
+        sm = MagicMock(name="servicemanager")
+        monkeypatch.setattr("data_hub_watcher.scheduled_task.task_exists", lambda: False)
+        install_calls: list[Path] = []
+        monkeypatch.setattr(
+            "data_hub_watcher.scheduled_task.install_upgrade_task",
+            lambda script_path: install_calls.append(script_path),
+        )
+
+        service_module._repair_upgrade_worker_if_missing(sm)
+
+        from data_hub_watcher.upgrade_worker import upgrade_worker_script_path
+
+        assert install_calls == [upgrade_worker_script_path(tmp_path)]
+        assert upgrade_worker_script_path(tmp_path).exists()
+
+    def test_repair_swallows_query_errors(
+        self,
+        service_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # If we can't even query Task Scheduler we should NOT block
+        # service startup — the host should keep running its current
+        # version and surface the issue via LogWarningMsg + the next
+        # auto-update event.
+        from data_hub_watcher.scheduled_task import ScheduledTaskError
+
+        sm = MagicMock(name="servicemanager")
+
+        def boom() -> bool:
+            raise ScheduledTaskError("rpc dead")
+
+        monkeypatch.setattr("data_hub_watcher.scheduled_task.task_exists", boom)
+        # Must not raise.
+        service_module._repair_upgrade_worker_if_missing(sm)
+        sm.LogWarningMsg.assert_called_once()
+
+    def test_repair_swallows_install_failures(
+        self,
+        service_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        from data_hub_watcher.scheduled_task import ScheduledTaskError
+
+        monkeypatch.setattr(service_module, "DEFAULT_CONFIG_DIR", tmp_path)
+        sm = MagicMock(name="servicemanager")
+        monkeypatch.setattr("data_hub_watcher.scheduled_task.task_exists", lambda: False)
+
+        def boom(script_path: Path) -> None:
+            raise ScheduledTaskError("Access is denied")
+
+        monkeypatch.setattr("data_hub_watcher.scheduled_task.install_upgrade_task", boom)
+        # Must not raise even when re-registration fails.
+        service_module._repair_upgrade_worker_if_missing(sm)
+        sm.LogWarningMsg.assert_called_once()
 
 
 # --- _configure_recovery actions + non-crash failure flag --------------------
@@ -335,16 +528,25 @@ class TestServiceLifecycle:
     ) -> None:
         win32serviceutil = sys.modules["win32serviceutil"]
         delete_calls: list[None] = []
+        worker_calls: list[None] = []
         monkeypatch.setattr(
             service_module,
             "_delete_paths_from_registry",
             lambda: delete_calls.append(None),
+        )
+        monkeypatch.setattr(
+            service_module,
+            "_uninstall_upgrade_worker",
+            lambda: worker_calls.append(None),
         )
 
         service_module.uninstall_service()
 
         win32serviceutil.StopService.assert_called_once_with(service_module.SERVICE_NAME)
         assert delete_calls == [None]
+        # Uninstall must also tear down the upgrade worker so a
+        # subsequent reinstall starts from a clean slate.
+        assert worker_calls == [None]
         win32serviceutil.RemoveService.assert_called_once_with(service_module.SERVICE_NAME)
 
     def test_uninstall_swallows_stop_errors(
@@ -355,6 +557,7 @@ class TestServiceLifecycle:
         win32serviceutil = sys.modules["win32serviceutil"]
         win32serviceutil.StopService.side_effect = RuntimeError("not running")
         monkeypatch.setattr(service_module, "_delete_paths_from_registry", lambda: None)
+        monkeypatch.setattr(service_module, "_uninstall_upgrade_worker", lambda: None)
 
         # Even if StopService raises (e.g. service already stopped or
         # doesn't exist), uninstall must still proceed to RemoveService.
@@ -635,6 +838,16 @@ class _LoopHarness:
             service_module,
             "_read_paths_from_registry",
             lambda: (self.config_path, self.env_path),
+        )
+
+        # Stub out the upgrade-worker self-repair so existing
+        # ``_run_service_loop`` tests don't try to invoke ``schtasks.exe``
+        # — that helper has its own dedicated test class above.
+        self.repair_calls: list[Any] = []
+        monkeypatch.setattr(
+            service_module,
+            "_repair_upgrade_worker_if_missing",
+            lambda sm: self.repair_calls.append(sm),
         )
 
         # Patch source modules of the lazy imports inside _run_service_loop.

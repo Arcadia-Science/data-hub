@@ -42,7 +42,10 @@ from data_hub_watcher.runtime import (
     sync_config_to_api,
 )
 from data_hub_watcher.self_update import (
+    DEFAULT_INDEX_URL,
     InstallMethod,
+    UvExecutableNotFoundError,
+    _resolve_uv_executable,
     detect_install_method,
     evaluate_update,
     run_upgrade,
@@ -950,6 +953,20 @@ def self_update(ctx: click.Context, check: bool, force: bool) -> None:
             "Upgrade manually with 'git pull && uv sync' from your checkout."
         )
 
+    # Windows uv-tool installs cannot reinstall in-process: the
+    # operator's own ``data-hub-watcher.exe`` shim has loaded the
+    # venv's ``Scripts\\python.exe`` into the parent process, so
+    # ``uv tool install --reinstall`` would fail with
+    # ``Access is denied. (os error 5)`` when it tries to remove
+    # ``Scripts\\``. Route through the SYSTEM-owned scheduled task
+    # instead, which stops the service before invoking ``uv``.
+    if sys.platform == "win32" and method is InstallMethod.UV_TOOL:
+        _dispatch_self_update_via_worker(
+            target_version=decision.target_version,
+            current_version=decision.current_version,
+        )
+        return
+
     click.echo(f"Upgrading {decision.current_version} -> {decision.target_version}…")
     try:
         result = run_upgrade(method, target_version=decision.target_version)
@@ -974,6 +991,118 @@ def self_update(ctx: click.Context, check: bool, force: bool) -> None:
             "Restart the watcher (or the Windows service) to load the new code.",
             fg="green",
         )
+    )
+
+
+def _dispatch_self_update_via_worker(
+    *,
+    target_version: str | None,
+    current_version: str,
+) -> None:
+    """Trigger the SYSTEM-owned upgrade worker on Windows uv-tool installs.
+
+    Writes the request sentinel + on-disk marker (so the post-restart
+    event evaluation has something to merge) and asks Task Scheduler
+    to run the worker. The CLI then exits — the worker stops the
+    service, runs ``uv``, drops a result sentinel, and starts the
+    service again. The operator watches via ``data-hub-watcher
+    service status`` or by tailing
+    ``~/.data-hub/upgrade-worker.log``.
+
+    Pre-flight failures (no ``uv`` on disk, no scheduled task
+    registered) raise :class:`click.ClickException` with an
+    actionable next step rather than silently returning success.
+    """
+    from data_hub_watcher.scheduled_task import (
+        ScheduledTaskError,
+        task_exists,
+        trigger_upgrade_task,
+    )
+    from data_hub_watcher.updater import write_upgrade_marker
+    from data_hub_watcher.upgrade_worker import (
+        build_pkg_spec,
+        clear_upgrade_request,
+        clear_upgrade_result,
+        detect_installed_extras,
+        upgrade_worker_log_path,
+        write_upgrade_request,
+    )
+
+    if target_version is None:  # pragma: no cover - guarded upstream
+        raise click.ClickException("No target version available for upgrade dispatch.")
+
+    try:
+        uv_path, candidates = _resolve_uv_executable()
+    except UvExecutableNotFoundError as exc:  # pragma: no cover - defensive
+        raise click.ClickException(str(exc)) from exc
+    if uv_path is None:
+        raise click.ClickException(
+            "Could not locate `uv` executable for the upgrade worker. "
+            "Install uv for the service account or pin a known path. "
+            f"Probed: {', '.join(candidates) if candidates else '(none)'}."
+        )
+
+    if not task_exists():
+        # Most likely cause: this PC was upgraded into worker-aware
+        # code from auto-update without re-running ``service install``.
+        raise click.ClickException(
+            "Upgrade scheduled task 'DataHubWatcherUpgrade' is not registered. "
+            "Run 'data-hub-watcher service reinstall' as Administrator (or "
+            "'data-hub-watcher service install' if no service is currently "
+            "registered) and then retry 'data-hub-watcher self-update'."
+        )
+
+    extras = detect_installed_extras()
+    pkg_spec = build_pkg_spec(InstallMethod.UV_TOOL, target_version=target_version, extras=extras)
+
+    # Defensively clear any stale result sentinel from a prior
+    # upgrade so the post-restart evaluation can't misattribute an
+    # old result to this dispatch.
+    clear_upgrade_result(DEFAULT_CONFIG_DIR)
+
+    write_upgrade_marker(
+        DEFAULT_CONFIG_DIR,
+        target_version=target_version,
+        previous_version=current_version,
+    )
+    req = write_upgrade_request(
+        DEFAULT_CONFIG_DIR,
+        target_version=target_version,
+        pkg_spec=pkg_spec,
+        uv_executable=uv_path,
+        index_url=DEFAULT_INDEX_URL,
+        previous_version=current_version,
+        install_method=InstallMethod.UV_TOOL.value,
+    )
+
+    click.echo(
+        f"Dispatching upgrade {current_version} -> {target_version} via worker "
+        f"(request_id={req.request_id})..."
+    )
+    try:
+        trigger_upgrade_task()
+    except ScheduledTaskError as exc:
+        # Roll back the sentinels so a follow-up retry doesn't see a
+        # stale request lying around.
+        from data_hub_watcher.updater import clear_upgrade_marker
+
+        clear_upgrade_marker(DEFAULT_CONFIG_DIR)
+        clear_upgrade_request(DEFAULT_CONFIG_DIR)
+        raise click.ClickException(
+            f"Could not trigger the upgrade scheduled task: {exc}. "
+            "Run 'data-hub-watcher service reinstall' as Administrator and retry."
+        ) from exc
+
+    click.echo(
+        click.style(
+            f"\u2713 Upgrade dispatched. The service will stop, install "
+            f"{target_version}, and restart automatically.",
+            fg="green",
+        )
+    )
+    click.echo(
+        f"  Watch: data-hub-watcher service status\n"
+        f"  Tail:  {upgrade_worker_log_path(DEFAULT_CONFIG_DIR)}"
     )
 
 

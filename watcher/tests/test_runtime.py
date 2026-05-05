@@ -14,13 +14,15 @@ wiring contract per `upload_mode` so any future drift fails loudly:
 """
 
 from __future__ import annotations
+import json
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from unittest.mock import MagicMock
 
 import pytest
 
 from data_hub_watcher.constants import HEARTBEAT_INTERVAL_SECONDS
+from data_hub_watcher.events import EventType
 from data_hub_watcher.heartbeat import HeartbeatLoop, WatcherCounters
 from data_hub_watcher.models import InstrumentConfig, RunDetectionConfig, WatcherConfig
 from data_hub_watcher.monitor import FileMonitor
@@ -29,9 +31,14 @@ from data_hub_watcher.runtime import (
     ShutdownReason,
     build_runtime,
     classify_shutdown,
+    start_runtime,
 )
 from data_hub_watcher.state import StateDB
-from data_hub_watcher.updater import Updater
+from data_hub_watcher.updater import Updater, write_upgrade_marker
+from data_hub_watcher.upgrade_worker import (
+    UpgradeResult,
+    upgrade_result_path,
+)
 from data_hub_watcher.uploader import Uploader
 
 
@@ -290,5 +297,283 @@ class TestClassifyShutdown:
                 classify_shutdown(rt, role="Watcher").stopped_message
                 == "Watcher restarting for auto-update"
             )
+        finally:
+            rt.state_db.close()
+
+
+class TestStartRuntimePostUpgradeMerge:
+    """Post-restart event evaluation merges the worker's result sentinel.
+
+    The Windows uv-tool worker writes ``.upgrade-result.json`` with the
+    captured ``uv`` stdout/stderr/returncode. ``start_runtime`` reads
+    both the marker AND the result, merging the worker fields into the
+    emitted ``UPDATE_SUCCEEDED`` / ``UPDATE_FAILED`` event so the
+    dashboard sees the same level of detail it used to get from the
+    in-process subprocess.
+    """
+
+    def _make_runtime_with_reporter(self, tmp_path: Path) -> tuple[Any, MagicMock]:
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=tmp_path / "state.sqlite")
+        # Replace the real reporter with a mock so we can inspect
+        # which events were queued without round-tripping the API
+        # client.
+        mock_reporter = MagicMock()
+        rt.reporter = mock_reporter
+        # Stop monitor + heartbeat from really starting since this
+        # test only cares about the pre-startup event evaluation.
+        rt.monitor = MagicMock()
+        rt.heartbeat = MagicMock()
+        rt.detector = MagicMock()
+        return rt, mock_reporter
+
+    def _patch_default_config_dir(self, monkeypatch: pytest.MonkeyPatch, target: Path) -> None:
+        import data_hub_watcher.runtime as rt_module
+
+        monkeypatch.setattr(rt_module, "DEFAULT_CONFIG_DIR", target)
+
+    def test_success_merges_worker_result_into_event(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Pretend we just restarted into the upgraded version:
+        # write the marker, drop a successful result sentinel,
+        # invoke start_runtime, and assert the emitted event
+        # carries the worker fields.
+        config_dir = tmp_path / ".data-hub"
+        config_dir.mkdir()
+        self._patch_default_config_dir(monkeypatch, config_dir)
+        # Pretend we're on Windows so the "result missing" branch
+        # behaves correctly even though that branch is exercised in
+        # a separate test.
+        monkeypatch.setattr("data_hub_watcher.runtime.sys.platform", "win32")
+
+        # Marker says "we asked for 9.9.9". The current version
+        # comes from importlib.metadata; pin both ends to the same
+        # value so evaluate_upgrade_marker classifies it as success.
+        from data_hub_watcher.constants import WATCHER_VERSION
+
+        write_upgrade_marker(
+            config_dir,
+            target_version=WATCHER_VERSION,
+            previous_version="0.1.4",
+        )
+        # Worker drops the result sentinel after `uv` exits.
+        result = UpgradeResult(
+            request_id="abcd-1234",
+            target_version=WATCHER_VERSION,
+            succeeded=True,
+            returncode=0,
+            stdout_tail="installed 17 packages",
+            stderr_tail="",
+            finished_at="2026-05-04T22:30:00+00:00",
+            error=None,
+        )
+        upgrade_result_path(config_dir).write_text(json.dumps(result.to_dict()), encoding="utf-8")
+
+        rt, mock_reporter = self._make_runtime_with_reporter(tmp_path)
+        try:
+            start_runtime(rt, started_message="Watcher started on test")
+
+            queued = [c.args[0] for c in mock_reporter.queue_event.call_args_list]
+            update_events = [e for e in queued if e.event_type is EventType.UPDATE_SUCCEEDED]
+            assert len(update_events) == 1
+            details = update_events[0].details
+            assert details["target_version"] == WATCHER_VERSION
+            assert details["previous_version"] == "0.1.4"
+            assert details["via_worker"] is True
+            assert details["worker_returncode"] == 0
+            assert details["worker_stdout_tail"] == "installed 17 packages"
+            assert details["worker_request_id"] == "abcd-1234"
+        finally:
+            rt.state_db.close()
+
+        # Sentinel must have been consumed so the next restart
+        # doesn't re-emit it.
+        assert not upgrade_result_path(config_dir).exists()
+
+    def test_failure_with_worker_result_carries_returncode_and_stderr(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config_dir = tmp_path / ".data-hub"
+        config_dir.mkdir()
+        self._patch_default_config_dir(monkeypatch, config_dir)
+
+        # Marker says we tried to install 99.99.99 but the running
+        # version is whatever WATCHER_VERSION resolves to — that
+        # mismatch is what makes evaluate_upgrade_marker classify
+        # this as a failure.
+        write_upgrade_marker(
+            config_dir,
+            target_version="99.99.99",
+            previous_version="0.1.4",
+        )
+        result = UpgradeResult(
+            request_id="abcd",
+            target_version="99.99.99",
+            succeeded=False,
+            returncode=2,
+            stdout_tail="",
+            stderr_tail="error: Access is denied. (os error 5)",
+            finished_at="2026-05-04T22:30:00+00:00",
+            error=None,
+        )
+        upgrade_result_path(config_dir).write_text(json.dumps(result.to_dict()), encoding="utf-8")
+
+        rt, mock_reporter = self._make_runtime_with_reporter(tmp_path)
+        try:
+            start_runtime(rt, started_message="Watcher started on test")
+
+            queued = [c.args[0] for c in mock_reporter.queue_event.call_args_list]
+            failures = [e for e in queued if e.event_type is EventType.UPDATE_FAILED]
+            assert len(failures) == 1
+            details = failures[0].details
+            assert details["target_version"] == "99.99.99"
+            assert details["worker_returncode"] == 2
+            assert "Access is denied" in details["worker_stderr_tail"]
+            assert details["via_worker"] is True
+            # `worker_result_missing` must NOT be set when we have
+            # a real result sentinel — that flag is only for the
+            # "worker crashed before writing" case.
+            assert "worker_result_missing" not in details
+        finally:
+            rt.state_db.close()
+
+    def test_worker_failure_overrides_apparent_marker_success(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The most important regression guard: a partial install where
+        # uv exits non-zero AFTER updating enough Python source to
+        # fool the marker version comparison must STILL surface as
+        # UPDATE_FAILED with the actual installer error. Historically
+        # this masqueraded as success because we trusted the marker
+        # version comparison alone.
+        from data_hub_watcher.constants import WATCHER_VERSION
+
+        config_dir = tmp_path / ".data-hub"
+        config_dir.mkdir()
+        self._patch_default_config_dir(monkeypatch, config_dir)
+
+        # Marker says success (version comparison would match).
+        write_upgrade_marker(
+            config_dir,
+            target_version=WATCHER_VERSION,
+            previous_version="0.1.4",
+        )
+        # But the worker reports failure with a real uv error message.
+        result = UpgradeResult(
+            request_id="abcd",
+            target_version=WATCHER_VERSION,
+            succeeded=False,
+            returncode=2,
+            stdout_tail="Installed 17 packages",
+            stderr_tail=(
+                "error: failed to remove directory `C:\\...\\Scripts`: "
+                "Access is denied. (os error 5)"
+            ),
+            finished_at="2026-05-04T22:30:00+00:00",
+            error=None,
+        )
+        upgrade_result_path(config_dir).write_text(json.dumps(result.to_dict()), encoding="utf-8")
+
+        rt, mock_reporter = self._make_runtime_with_reporter(tmp_path)
+        try:
+            start_runtime(rt, started_message="Watcher started on test")
+
+            queued = [c.args[0] for c in mock_reporter.queue_event.call_args_list]
+            # Must emit UPDATE_FAILED, NOT UPDATE_SUCCEEDED, even
+            # though the version comparison would have said success.
+            failures = [e for e in queued if e.event_type is EventType.UPDATE_FAILED]
+            successes = [e for e in queued if e.event_type is EventType.UPDATE_SUCCEEDED]
+            assert len(failures) == 1
+            assert len(successes) == 0
+            details = failures[0].details
+            # The reason should be derived from the worker's
+            # stderr — the actual uv error, not the generic marker
+            # classification.
+            assert "Access is denied" in details["reason"] or "denied" in details["reason"].lower()
+            assert details["worker_returncode"] == 2
+            assert "Access is denied" in details["worker_stderr_tail"]
+            # The marker's own classification is preserved so the
+            # dashboard can show both signals when they disagree.
+            assert details["marker_succeeded"] is True
+            assert "marker_reason" in details
+        finally:
+            rt.state_db.close()
+
+    def test_worker_warning_flag_set_when_success_with_dirty_stderr(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # uv occasionally prints deprecation/info warnings to stderr
+        # even on a clean install. The worker reports success in that
+        # case but we still want the dashboard to flag the event so
+        # an operator can investigate the warning text.
+        from data_hub_watcher.constants import WATCHER_VERSION
+
+        config_dir = tmp_path / ".data-hub"
+        config_dir.mkdir()
+        self._patch_default_config_dir(monkeypatch, config_dir)
+
+        write_upgrade_marker(
+            config_dir,
+            target_version=WATCHER_VERSION,
+            previous_version="0.1.4",
+        )
+        result = UpgradeResult(
+            request_id="abcd",
+            target_version=WATCHER_VERSION,
+            succeeded=True,
+            returncode=3,  # non-zero but worker overrode succeeded=True
+            stdout_tail="installed",
+            stderr_tail="warning: deprecated index format",
+            finished_at="2026-05-04T22:30:00+00:00",
+            error=None,
+        )
+        upgrade_result_path(config_dir).write_text(json.dumps(result.to_dict()), encoding="utf-8")
+
+        rt, mock_reporter = self._make_runtime_with_reporter(tmp_path)
+        try:
+            start_runtime(rt, started_message="Watcher started on test")
+            queued = [c.args[0] for c in mock_reporter.queue_event.call_args_list]
+            successes = [e for e in queued if e.event_type is EventType.UPDATE_SUCCEEDED]
+            assert len(successes) == 1
+            details = successes[0].details
+            # Soft warning flag so the dashboard can surface "look
+            # at this even though it succeeded".
+            assert details.get("worker_warning") is True
+            assert "deprecated" in details["worker_stderr_tail"]
+        finally:
+            rt.state_db.close()
+
+    def test_failure_without_worker_result_flags_missing_on_windows(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Worker crashed between Stop-Service and writing the result
+        # sentinel — the marker is on disk but no result. On Windows
+        # this should set `worker_result_missing=True` so the
+        # operator knows to look at the upgrade-worker log, not at
+        # the in-process subprocess output (which doesn't exist).
+        config_dir = tmp_path / ".data-hub"
+        config_dir.mkdir()
+        self._patch_default_config_dir(monkeypatch, config_dir)
+        monkeypatch.setattr("data_hub_watcher.runtime.sys.platform", "win32")
+
+        write_upgrade_marker(
+            config_dir,
+            target_version="99.99.99",
+            previous_version="0.1.4",
+        )
+        # No result sentinel.
+
+        rt, mock_reporter = self._make_runtime_with_reporter(tmp_path)
+        try:
+            start_runtime(rt, started_message="Watcher started on test")
+
+            queued = [c.args[0] for c in mock_reporter.queue_event.call_args_list]
+            failures = [e for e in queued if e.event_type is EventType.UPDATE_FAILED]
+            assert len(failures) == 1
+            details = failures[0].details
+            assert details.get("worker_result_missing") is True
+            # No worker fields since there's no sentinel to merge from.
+            assert "worker_returncode" not in details
         finally:
             rt.state_db.close()

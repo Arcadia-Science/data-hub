@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from data_hub_watcher.constants import SERVICE_NAME
+from data_hub_watcher.constants import DEFAULT_CONFIG_DIR, SERVICE_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,26 @@ def install_service(config_path: Path, env_path: Path) -> None:
 
     _store_paths_in_registry(config_path, env_path)
     _configure_recovery()
+    _install_upgrade_worker()
     logger.info("Service '%s' installed successfully", SERVICE_NAME)
+
+
+def _install_upgrade_worker() -> None:
+    """Drop the upgrade-worker PowerShell script and register the task.
+
+    Splits cleanly from ``install_service`` so unit tests can patch
+    just this function out (the SCM bits don't need to know about the
+    upgrade worker, and the upgrade-worker bits don't need a real
+    ``win32serviceutil`` to test). Failure here is logged but
+    re-raised so the operator running ``service install`` sees a clear
+    error rather than a silently-broken auto-update path.
+    """
+    from data_hub_watcher.scheduled_task import install_upgrade_task
+    from data_hub_watcher.upgrade_worker import write_worker_script
+
+    script_path = write_worker_script(DEFAULT_CONFIG_DIR, service_name=SERVICE_NAME)
+    install_upgrade_task(script_path)
+    logger.info("Upgrade worker script + scheduled task registered")
 
 
 def _store_paths_in_registry(config_path: Path, env_path: Path) -> None:
@@ -214,9 +233,36 @@ def uninstall_service() -> None:
     except Exception:
         pass  # already stopped or doesn't exist
 
+    _uninstall_upgrade_worker()
     _delete_paths_from_registry()
     win32serviceutil.RemoveService(SERVICE_NAME)
     logger.info("Service '%s' removed", SERVICE_NAME)
+
+
+def _uninstall_upgrade_worker() -> None:
+    """Best-effort removal of the upgrade-worker scheduled task + script.
+
+    Idempotent (the underlying ``schtasks /Delete`` swallows
+    "task does not exist") and tolerant of older installs that never
+    registered the task — we don't want to block ``uninstall_service``
+    on a clean slate that's already clean.
+    """
+    from data_hub_watcher.scheduled_task import (
+        ScheduledTaskError,
+        uninstall_upgrade_task,
+    )
+    from data_hub_watcher.upgrade_worker import upgrade_worker_script_path
+
+    try:
+        uninstall_upgrade_task()
+    except ScheduledTaskError as exc:
+        logger.warning("Could not remove upgrade scheduled task: %s", exc)
+
+    script_path = upgrade_worker_script_path(DEFAULT_CONFIG_DIR)
+    try:
+        script_path.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning("Could not remove upgrade worker script %s: %s", script_path, exc)
 
 
 def wait_for_service_removed(
@@ -325,6 +371,61 @@ def query_service_status() -> dict[str, Any]:
         ws.CloseServiceHandle(hscm)
 
 
+def _repair_upgrade_worker_if_missing(sm: Any) -> None:
+    """Re-install the upgrade scheduled task on startup if it has gone missing.
+
+    Lab PCs that auto-update into the version that introduced the
+    out-of-process worker won't have run ``service install`` with the
+    new code, so the scheduled task simply isn't there — and the next
+    auto-update tick would fail loudly. Repairing on each service
+    startup means the host self-heals on the very next service restart
+    (which the auto-updater triggers anyway), without any operator
+    intervention.
+
+    Failures are logged via the Windows event log but do not raise:
+    a host that can't register the task should still be able to run
+    the watcher in its current version. The next auto-update attempt
+    will surface the missing task as an ``UPDATE_FAILED`` event with
+    a clearer reason.
+    """
+    try:
+        from data_hub_watcher.scheduled_task import (
+            ScheduledTaskError,
+            install_upgrade_task,
+            task_exists,
+        )
+        from data_hub_watcher.upgrade_worker import write_worker_script
+    except Exception as exc:
+        sm.LogWarningMsg(f"Cannot import upgrade worker modules during startup: {exc}")
+        return
+
+    try:
+        present = task_exists()
+    except ScheduledTaskError as exc:
+        sm.LogWarningMsg(
+            f"Could not query upgrade scheduled task: {exc}. "
+            "Auto-update may be unavailable until 'data-hub-watcher service "
+            "reinstall' is run."
+        )
+        return
+
+    if present:
+        return
+
+    sm.LogInfoMsg(
+        "Upgrade scheduled task missing; re-registering it now (one-time "
+        "self-repair after auto-update into worker-aware code)."
+    )
+    try:
+        script_path = write_worker_script(DEFAULT_CONFIG_DIR, service_name=SERVICE_NAME)
+        install_upgrade_task(script_path)
+    except (OSError, ScheduledTaskError) as exc:
+        sm.LogWarningMsg(
+            f"Failed to register upgrade scheduled task: {exc}. "
+            "Run 'data-hub-watcher service reinstall' as Administrator to retry."
+        )
+
+
 def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
     """Run the watcher service loop until *stop_event* is set.
 
@@ -365,6 +466,8 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
     )
 
     sm.LogInfoMsg(f"{SERVICE_DISPLAY_NAME} starting")
+
+    _repair_upgrade_worker_if_missing(sm)
 
     try:
         path, env_path = _read_paths_from_registry()
