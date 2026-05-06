@@ -12,6 +12,7 @@ class Instrument(Enum):
     AKTA_FPLC = "akta-fplc"
     AZURE_600_GEL_DOC = "azure-600-gel-doc"
     AZURE_CIELO_QPCR = "azure-cielo-qpcr"
+    EPSON_V700_SCANNER = "epson-v700-scanner"
     HINA_MICROSCOPE = "hina-microscope"
     SPECTRAMAX_ID3_PLATE_READER = "spectramax-id3-plate-reader"
     SPECTRAMAX_ID5_PLATE_READER = "spectramax-id5-plate-reader"
