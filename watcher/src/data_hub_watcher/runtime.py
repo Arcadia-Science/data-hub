@@ -52,6 +52,21 @@ class WatcherRuntime:
     monitor: FileMonitor
     heartbeat: HeartbeatLoop
     updater: Updater
+    # Directory the upgrade machinery uses for its on-disk sentinels
+    # (``.upgrade-request.json`` / ``.upgrade-result.json`` / the
+    # ``.upgrade-in-progress`` marker). The CLI and the Windows service
+    # resolve this differently: the CLI runs as the operator user, so
+    # ``DEFAULT_CONFIG_DIR`` resolves to ``~/.data-hub`` and is correct;
+    # the service runs as LocalSystem, where ``~`` is the SYSTEM profile
+    # rather than the operator's home, so the service reads its config
+    # path from the registry and threads ``config_path.parent`` through
+    # here. Without that handoff the service would write sentinels to
+    # ``C:\Windows\System32\config\systemprofile\.data-hub\`` while the
+    # SYSTEM-owned upgrade worker (whose paths are baked in at install
+    # time as the operator user) reads from the operator's profile —
+    # the two never meet, the worker logs "no request sentinel", and
+    # every auto-update tick silently no-ops.
+    config_dir: Path
     # Set when the in-process updater has successfully installed a new
     # watcher version and wants the main loop to exit non-zero so the
     # Windows SCM (or a foreground operator running ``watch``) restarts
@@ -177,6 +192,7 @@ def build_runtime(
     client: DataHubClient,
     cfg: WatcherConfig,
     db_path: Path,
+    config_dir: Path | None = None,
 ) -> WatcherRuntime:
     """Construct the full runtime graph from a validated config.
 
@@ -184,9 +200,18 @@ def build_runtime(
     CLI does this explicitly via a click error, and the service does it
     via a registry lookup. We assert here as a safety net so a silent
     misconfiguration becomes a loud crash.
+
+    *config_dir* is the directory used by the auto-update machinery
+    for its on-disk sentinels. Defaults to ``DEFAULT_CONFIG_DIR`` for
+    the CLI ``watch`` entrypoint (where ``~`` resolves to the operator's
+    home). The Windows service must pass an explicit value derived from
+    its registry-stored config path — see the field-level comment on
+    :class:`WatcherRuntime` for why.
     """
     if not cfg.watcher_id:
         raise ValueError("cfg.watcher_id must be set before building the runtime")
+
+    effective_config_dir = config_dir if config_dir is not None else DEFAULT_CONFIG_DIR
 
     inst = cfg.instrument
     watcher_id = cfg.watcher_id
@@ -214,7 +239,7 @@ def build_runtime(
         counters=counters,
         state_db=state_db,
         cfg=cfg,
-        config_dir=DEFAULT_CONFIG_DIR,
+        config_dir=effective_config_dir,
         request_upgrade_restart=_request_upgrade_restart,
     )
 
@@ -291,6 +316,7 @@ def build_runtime(
         monitor=monitor,
         heartbeat=heartbeat,
         updater=updater,
+        config_dir=effective_config_dir,
         shutdown_event=shutdown_event,
         upgrade_restart_event=upgrade_restart_event,
     )
@@ -315,7 +341,7 @@ def start_runtime(rt: WatcherRuntime, *, started_message: str) -> None:
         )
     )
 
-    outcome = evaluate_upgrade_marker(DEFAULT_CONFIG_DIR)
+    outcome = evaluate_upgrade_marker(rt.config_dir)
     if outcome.found:
         # Out-of-process upgrades (the Windows uv-tool worker) drop a
         # ``.upgrade-result.json`` sentinel alongside the marker. The
@@ -327,7 +353,7 @@ def start_runtime(rt: WatcherRuntime, *, started_message: str) -> None:
         # and the actual installer error never surfaced to the
         # dashboard. Trust the worker's ``succeeded`` flag whenever
         # it's present.
-        worker_result = read_upgrade_result(DEFAULT_CONFIG_DIR)
+        worker_result = read_upgrade_result(rt.config_dir)
 
         worker_failed = worker_result is not None and not worker_result.succeeded
         worker_warned = (
@@ -432,8 +458,8 @@ def start_runtime(rt: WatcherRuntime, *, started_message: str) -> None:
         # inspection so a stale result from a prior upgrade can't
         # leak into the next one. Mirrors the marker's "consumed on
         # read" lifecycle in ``evaluate_upgrade_marker``.
-        clear_upgrade_result(DEFAULT_CONFIG_DIR)
-        clear_upgrade_request(DEFAULT_CONFIG_DIR)
+        clear_upgrade_result(rt.config_dir)
+        clear_upgrade_request(rt.config_dir)
 
     # Rebuild in-memory run state from the local DB before any file
     # events fire. Without this, every restart starts with an empty
