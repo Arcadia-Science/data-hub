@@ -67,7 +67,7 @@ function FilesProcessedSubline({
 }
 
 export function DashboardStatsCards({ stats }: { stats: DashboardStats }) {
-  const { runsToday, pendingUploads, runsThisWeek } = stats;
+  const { runsLast24Hours, pendingUploads, runsThisWeek } = stats;
 
   // Highlight pending uploads in red once a backlog forms — a non-zero queue
   // is a routine signal of attention, not an error.
@@ -76,13 +76,13 @@ export function DashboardStatsCards({ stats }: { stats: DashboardStats }) {
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <StatCard
-        label="Runs today"
-        value={formatNumber(runsToday.total)}
+        label="Runs in the last 24 hours"
+        value={formatNumber(runsLast24Hours.total)}
         subline={
           <FilesProcessedSubline
-            completed={runsToday.filesCompleted}
-            failed={runsToday.filesFailed}
-            emptyLabel="No files processed yet today"
+            completed={runsLast24Hours.filesCompleted}
+            failed={runsLast24Hours.filesFailed}
+            emptyLabel="No files processed in the last 24 hours"
           />
         }
       />

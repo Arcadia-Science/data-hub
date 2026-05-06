@@ -108,7 +108,7 @@ export const getInstruments = cache(async function getInstruments() {
 });
 
 export type DashboardStats = {
-  runsToday: {
+  runsLast24Hours: {
     total: number;
     filesCompleted: number;
     filesFailed: number;
@@ -141,8 +141,8 @@ export const getDashboardStats = cache(async function getDashboardStats(
   currentUserId: string | null
 ): Promise<DashboardStats> {
   const [
-    [runsTodayRow],
-    [filesProcessedTodayRow],
+    [runsLast24HoursRow],
+    [filesProcessedRow],
     [pendingRow],
     [runsThisWeekRow],
   ] = await Promise.all([
@@ -154,16 +154,16 @@ export const getDashboardStats = cache(async function getDashboardStats(
       .where(
         and(
           isNull(instrumentRuns.deletedAt),
-          sql`${instrumentRuns.createdAt} >= date_trunc('day', now())`
+          sql`${instrumentRuns.createdAt} > now() - interval '24 hours'`
         )
       ),
-    // Span today + the past 7 days in a single pass; the today metrics are a
-    // subset of the weekly window, so FILTER clauses give us both with one
-    // index scan instead of two near-identical queries.
+    // Span the last 24 hours + the past 7 days in a single pass; the 24-hour
+    // metrics are a subset of the weekly window, so FILTER clauses give us
+    // both with one index scan instead of two near-identical queries.
     db
       .select({
-        completedToday: sql<number>`cast(count(*) filter (where ${files.status} = 'completed' and ${files.processedAt} >= date_trunc('day', now())) as int)`,
-        failedToday: sql<number>`cast(count(*) filter (where ${files.status} = 'failed' and ${files.processedAt} >= date_trunc('day', now())) as int)`,
+        completedLast24Hours: sql<number>`cast(count(*) filter (where ${files.status} = 'completed' and ${files.processedAt} > now() - interval '24 hours') as int)`,
+        failedLast24Hours: sql<number>`cast(count(*) filter (where ${files.status} = 'failed' and ${files.processedAt} > now() - interval '24 hours') as int)`,
         completedWeek: sql<number>`cast(count(*) filter (where ${files.status} = 'completed') as int)`,
         failedWeek: sql<number>`cast(count(*) filter (where ${files.status} = 'failed') as int)`,
       })
@@ -206,10 +206,10 @@ export const getDashboardStats = cache(async function getDashboardStats(
   ]);
 
   return {
-    runsToday: {
-      total: runsTodayRow?.total ?? 0,
-      filesCompleted: filesProcessedTodayRow?.completedToday ?? 0,
-      filesFailed: filesProcessedTodayRow?.failedToday ?? 0,
+    runsLast24Hours: {
+      total: runsLast24HoursRow?.total ?? 0,
+      filesCompleted: filesProcessedRow?.completedLast24Hours ?? 0,
+      filesFailed: filesProcessedRow?.failedLast24Hours ?? 0,
     },
     pendingUploads: {
       count: pendingRow?.count ?? 0,
@@ -218,8 +218,8 @@ export const getDashboardStats = cache(async function getDashboardStats(
     },
     runsThisWeek: {
       total: runsThisWeekRow?.total ?? 0,
-      filesCompleted: filesProcessedTodayRow?.completedWeek ?? 0,
-      filesFailed: filesProcessedTodayRow?.failedWeek ?? 0,
+      filesCompleted: filesProcessedRow?.completedWeek ?? 0,
+      filesFailed: filesProcessedRow?.failedWeek ?? 0,
       mine: runsThisWeekRow?.mine ?? 0,
       unattributed: runsThisWeekRow?.unattributed ?? 0,
     },
