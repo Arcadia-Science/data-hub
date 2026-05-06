@@ -335,12 +335,18 @@ def build_upgrade_command(
     index_url: str | None = None,
     python_executable: str | None = None,
     uv_executable: str | None = None,
+    extras: list[str] | None = None,
 ) -> list[str]:
     """Translate an install method into the concrete subprocess argv.
 
     Pinning *target_version* lets the server roll a specific release out
     rather than always landing on whatever the index calls "latest" — which
     matters when we want to roll back by re-pinning to an older version.
+
+    *extras* preserves any optional dependencies the original install
+    requested (e.g. ``["windows-service"]`` so ``pywin32`` survives a
+    reinstall). Defaults to ``None`` for back-compat with the legacy
+    in-process call sites that don't yet pass it.
 
     Raises :class:`UvExecutableNotFoundError` when *method* is
     ``UV_TOOL`` but no ``uv`` binary can be located. Previously this
@@ -349,7 +355,12 @@ def build_upgrade_command(
     from ``subprocess.run`` — raising a typed error here lets the
     caller emit a diagnosable ``UPDATE_FAILED`` event instead.
     """
-    pkg_spec = PACKAGE_NAME if not target_version else f"{PACKAGE_NAME}=={target_version}"
+    # Build the package spec inline rather than importing from
+    # ``upgrade_worker`` to avoid a circular import (the worker module
+    # imports from this one for ``PACKAGE_NAME`` / ``InstallMethod``).
+    extras_part = f"[{','.join(sorted(extras))}]" if extras else ""
+    base_spec = f"{PACKAGE_NAME}{extras_part}"
+    pkg_spec = base_spec if not target_version else f"{base_spec}=={target_version}"
     index = index_url or DEFAULT_INDEX_URL
 
     if method is InstallMethod.UV_TOOL:
@@ -381,6 +392,7 @@ def run_upgrade(
     *,
     target_version: str | None = None,
     index_url: str | None = None,
+    extras: list[str] | None = None,
     runner: Any = subprocess.run,
 ) -> subprocess.CompletedProcess[str]:
     """Execute the upgrade subprocess and capture stdout/stderr.
@@ -396,6 +408,11 @@ def run_upgrade(
             "Upgrade manually with `git pull && uv sync` instead."
         )
 
-    cmd = build_upgrade_command(method, target_version=target_version, index_url=index_url)
+    cmd = build_upgrade_command(
+        method,
+        target_version=target_version,
+        index_url=index_url,
+        extras=extras,
+    )
     logger.info("Running watcher self-update: %s", " ".join(cmd))
     return runner(cmd, capture_output=True, text=True, check=False)

@@ -18,10 +18,11 @@ from __future__ import annotations
 import logging
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
-from data_hub_watcher.constants import SERVICE_NAME
+from data_hub_watcher.constants import DEFAULT_CONFIG_DIR, SERVICE_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,12 @@ SERVICE_DESCRIPTION = "Monitors instrument directories and uploads data files to
 _REG_KEY = rf"SYSTEM\CurrentControlSet\Services\{SERVICE_NAME}"
 _REG_CONFIG_PATH = "ConfigPath"
 _REG_ENV_PATH = "EnvPath"
+
+# Win32 system error codes returned by ``OpenService`` / ``CreateService``
+# while a service is in the asynchronous DeleteService teardown window.
+# Documented at https://learn.microsoft.com/windows/win32/debug/system-error-codes--1000-1299-.
+_ERROR_SERVICE_DOES_NOT_EXIST = 1060
+_ERROR_SERVICE_MARKED_FOR_DELETE = 1072
 
 # Windows services that must be running before the watcher can usefully
 # contact the Data Hub API. Declaring these as dependencies makes the SCM
@@ -78,7 +85,26 @@ def install_service(config_path: Path, env_path: Path) -> None:
 
     _store_paths_in_registry(config_path, env_path)
     _configure_recovery()
+    _install_upgrade_worker()
     logger.info("Service '%s' installed successfully", SERVICE_NAME)
+
+
+def _install_upgrade_worker() -> None:
+    """Drop the upgrade-worker PowerShell script and register the task.
+
+    Splits cleanly from ``install_service`` so unit tests can patch
+    just this function out (the SCM bits don't need to know about the
+    upgrade worker, and the upgrade-worker bits don't need a real
+    ``win32serviceutil`` to test). Failure here is logged but
+    re-raised so the operator running ``service install`` sees a clear
+    error rather than a silently-broken auto-update path.
+    """
+    from data_hub_watcher.scheduled_task import install_upgrade_task
+    from data_hub_watcher.upgrade_worker import write_worker_script
+
+    script_path = write_worker_script(DEFAULT_CONFIG_DIR, service_name=SERVICE_NAME)
+    install_upgrade_task(script_path)
+    logger.info("Upgrade worker script + scheduled task registered")
 
 
 def _store_paths_in_registry(config_path: Path, env_path: Path) -> None:
@@ -207,9 +233,90 @@ def uninstall_service() -> None:
     except Exception:
         pass  # already stopped or doesn't exist
 
+    _uninstall_upgrade_worker()
     _delete_paths_from_registry()
     win32serviceutil.RemoveService(SERVICE_NAME)
     logger.info("Service '%s' removed", SERVICE_NAME)
+
+
+def _uninstall_upgrade_worker() -> None:
+    """Best-effort removal of the upgrade-worker scheduled task + script.
+
+    Idempotent (the underlying ``schtasks /Delete`` swallows
+    "task does not exist") and tolerant of older installs that never
+    registered the task — we don't want to block ``uninstall_service``
+    on a clean slate that's already clean.
+    """
+    from data_hub_watcher.scheduled_task import (
+        ScheduledTaskError,
+        uninstall_upgrade_task,
+    )
+    from data_hub_watcher.upgrade_worker import upgrade_worker_script_path
+
+    try:
+        uninstall_upgrade_task()
+    except ScheduledTaskError as exc:
+        logger.warning("Could not remove upgrade scheduled task: %s", exc)
+
+    script_path = upgrade_worker_script_path(DEFAULT_CONFIG_DIR)
+    try:
+        script_path.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning("Could not remove upgrade worker script %s: %s", script_path, exc)
+
+
+def wait_for_service_removed(
+    *,
+    timeout_seconds: float = 30.0,
+    poll_interval_seconds: float = 0.5,
+) -> bool:
+    """Block until the service is fully removed from the SCM, or *timeout* elapses.
+
+    ``DeleteService`` (called via ``win32serviceutil.RemoveService``) is
+    asynchronous: Windows only *marks* the service for deletion, and the
+    actual record is removed once every open handle to it is closed —
+    including handles held by ``services.msc``, Event Viewer's "Services"
+    pane, Task Manager, and some antivirus / EDR agents that enumerate
+    services.  Until that happens, ``CreateService`` with the same name
+    fails with ``ERROR_SERVICE_MARKED_FOR_DELETE`` (1072), which is the
+    confusing error operators see when ``service reinstall`` runs back-to-
+    back uninstall + install on a host with the Services console open.
+
+    We poll the SCM with ``OpenService``: the service is fully gone the
+    moment that call raises ``ERROR_SERVICE_DOES_NOT_EXIST`` (1060).
+    Returns ``True`` if the service disappeared inside the deadline,
+    ``False`` if it's still hanging around — callers should treat the
+    latter as actionable (close ``services.msc`` and retry) rather than
+    a fatal SCM error.
+    """
+    import pywintypes  # type: ignore[import-untyped]
+    import win32service as ws  # type: ignore[import-untyped]
+
+    deadline = time.monotonic() + timeout_seconds
+    hscm = ws.OpenSCManager(None, None, ws.SC_MANAGER_CONNECT)
+    try:
+        while True:
+            try:
+                hs = ws.OpenService(hscm, SERVICE_NAME, ws.SERVICE_QUERY_STATUS)
+            except pywintypes.error as exc:
+                # winerror lives at index 0 of the (code, func, msg) tuple
+                # but pywintypes.error also exposes it as an attribute on
+                # modern pywin32. Prefer the attribute, fall back to args
+                # so this works against the MagicMock-based test fakes.
+                code = getattr(exc, "winerror", None)
+                if code is None and exc.args:
+                    code = exc.args[0]
+                if code == _ERROR_SERVICE_DOES_NOT_EXIST:
+                    return True
+                raise
+            else:
+                ws.CloseServiceHandle(hs)
+
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(poll_interval_seconds)
+    finally:
+        ws.CloseServiceHandle(hscm)
 
 
 def start_service() -> None:
@@ -264,6 +371,61 @@ def query_service_status() -> dict[str, Any]:
         ws.CloseServiceHandle(hscm)
 
 
+def _repair_upgrade_worker_if_missing(sm: Any) -> None:
+    """Re-install the upgrade scheduled task on startup if it has gone missing.
+
+    Lab PCs that auto-update into the version that introduced the
+    out-of-process worker won't have run ``service install`` with the
+    new code, so the scheduled task simply isn't there — and the next
+    auto-update tick would fail loudly. Repairing on each service
+    startup means the host self-heals on the very next service restart
+    (which the auto-updater triggers anyway), without any operator
+    intervention.
+
+    Failures are logged via the Windows event log but do not raise:
+    a host that can't register the task should still be able to run
+    the watcher in its current version. The next auto-update attempt
+    will surface the missing task as an ``UPDATE_FAILED`` event with
+    a clearer reason.
+    """
+    try:
+        from data_hub_watcher.scheduled_task import (
+            ScheduledTaskError,
+            install_upgrade_task,
+            task_exists,
+        )
+        from data_hub_watcher.upgrade_worker import write_worker_script
+    except Exception as exc:
+        sm.LogWarningMsg(f"Cannot import upgrade worker modules during startup: {exc}")
+        return
+
+    try:
+        present = task_exists()
+    except ScheduledTaskError as exc:
+        sm.LogWarningMsg(
+            f"Could not query upgrade scheduled task: {exc}. "
+            "Auto-update may be unavailable until 'data-hub-watcher service "
+            "reinstall' is run."
+        )
+        return
+
+    if present:
+        return
+
+    sm.LogInfoMsg(
+        "Upgrade scheduled task missing; re-registering it now (one-time "
+        "self-repair after auto-update into worker-aware code)."
+    )
+    try:
+        script_path = write_worker_script(DEFAULT_CONFIG_DIR, service_name=SERVICE_NAME)
+        install_upgrade_task(script_path)
+    except (OSError, ScheduledTaskError) as exc:
+        sm.LogWarningMsg(
+            f"Failed to register upgrade scheduled task: {exc}. "
+            "Run 'data-hub-watcher service reinstall' as Administrator to retry."
+        )
+
+
 def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
     """Run the watcher service loop until *stop_event* is set.
 
@@ -304,6 +466,8 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
     )
 
     sm.LogInfoMsg(f"{SERVICE_DISPLAY_NAME} starting")
+
+    _repair_upgrade_worker_if_missing(sm)
 
     try:
         path, env_path = _read_paths_from_registry()

@@ -11,6 +11,8 @@ and thereby silently skipping manual-mode upload-queue polling.
 
 from __future__ import annotations
 import logging
+import re
+import sys
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,6 +30,11 @@ from data_hub_watcher.monitor import FileMonitor
 from data_hub_watcher.run_detector import RunDetector
 from data_hub_watcher.state import StateDB
 from data_hub_watcher.updater import Updater, evaluate_upgrade_marker
+from data_hub_watcher.upgrade_worker import (
+    clear_upgrade_request,
+    clear_upgrade_result,
+    read_upgrade_result,
+)
 from data_hub_watcher.uploader import Uploader
 
 logger = logging.getLogger(__name__)
@@ -70,6 +77,76 @@ class ShutdownReason:
 
     is_upgrade_restart: bool
     stopped_message: str
+
+
+# uv's diagnostic lines start with ``error:`` (or ``Error:`` on a few
+# legacy code paths). Anchoring on the prefix lets us pick the actual
+# failure headline rather than picking up an incidental "error" /
+# "failed" inside an informational stderr line — e.g. progress chatter
+# from a vendored library that mentions "no errors so far".
+_UV_ERROR_LINE_RE = re.compile(r"^\s*error\s*:\s*(.+)$", re.IGNORECASE)
+
+
+def _summarize_worker_failure(result: object) -> str:
+    """Produce a short, human-readable reason from an :class:`UpgradeResult`.
+
+    The dashboard event message is one line wide. We try, in order:
+
+    1. The first stderr line matching uv's ``error: <msg>`` convention —
+       this is uv's own headline for the actual failure.
+    2. As a fallback, the first stderr line whose lowercase text
+       contains ``error`` / ``failed`` / ``denied``. Covers tools that
+       don't follow the ``error:`` convention (PowerShell traps,
+       Windows API errors echoed by the worker).
+    3. The worker's own ``error`` field, populated when uv couldn't
+       even be launched (e.g. ENOENT) so PowerShell trapped the
+       exception.
+    4. A generic ``uv exited <N>`` if all we have is the returncode.
+
+    The full stdout/stderr tails are still attached to the event
+    details — this helper only picks the headline.
+    """
+    from data_hub_watcher.upgrade_worker import UpgradeResult
+
+    if not isinstance(result, UpgradeResult):
+        return "worker reported failure"
+
+    if result.stderr_tail:
+        # Cap each candidate line so the event message stays one line
+        # wide — the full text is still in ``worker_stderr_tail`` for
+        # the dashboard expand.
+        for line in result.stderr_tail.splitlines():
+            stripped = line.strip()
+            match = _UV_ERROR_LINE_RE.match(stripped)
+            if match:
+                return stripped[:200]
+
+        for line in result.stderr_tail.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            lowered = stripped.lower()
+            if "error" in lowered or "failed" in lowered or "denied" in lowered:
+                return stripped[:200]
+
+    if result.error:
+        return f"worker exception: {result.error[:200]}"
+
+    if result.returncode not in (0, None):
+        return f"uv exited {result.returncode}"
+
+    return "worker reported failure"
+
+
+def _expecting_worker_result(outcome: object) -> bool:
+    """Return whether the marker we just consumed was a worker dispatch.
+
+    Today this is only true on Windows (the worker is the sole
+    out-of-process upgrade path). Pulled out as a helper so we can
+    grow it later (e.g. a per-marker ``via_worker`` flag) without
+    duplicating the gating logic at every call site.
+    """
+    return sys.platform == "win32"
 
 
 def classify_shutdown(rt: WatcherRuntime, *, role: str) -> ShutdownReason:
@@ -240,7 +317,75 @@ def start_runtime(rt: WatcherRuntime, *, started_message: str) -> None:
 
     outcome = evaluate_upgrade_marker(DEFAULT_CONFIG_DIR)
     if outcome.found:
-        if outcome.succeeded:
+        # Out-of-process upgrades (the Windows uv-tool worker) drop a
+        # ``.upgrade-result.json`` sentinel alongside the marker. The
+        # worker's exit code is more authoritative than the marker
+        # comparison: a partial install can update some files (and
+        # even report a matching version on restart) while uv itself
+        # exited non-zero halfway through — historically those
+        # "partial" failures masqueraded as "expected X, running Y"
+        # and the actual installer error never surfaced to the
+        # dashboard. Trust the worker's ``succeeded`` flag whenever
+        # it's present.
+        worker_result = read_upgrade_result(DEFAULT_CONFIG_DIR)
+
+        worker_failed = worker_result is not None and not worker_result.succeeded
+        worker_warned = (
+            worker_result is not None
+            and worker_result.succeeded
+            and (worker_result.returncode not in (0, None) or worker_result.error)
+        )
+
+        if worker_failed:
+            assert worker_result is not None
+            # Worker explicitly reported failure. Build a concrete
+            # reason from its captured output so the dashboard event
+            # tells the operator exactly which uv error fired,
+            # rather than the generic "expected X, running Y" that
+            # the marker comparison alone would produce.
+            reason = _summarize_worker_failure(worker_result)
+            details: dict[str, object] = {
+                "previous_version": outcome.previous_version,
+                "target_version": outcome.target_version,
+                "reason": reason,
+                "via_worker": True,
+                "worker_returncode": worker_result.returncode,
+                "worker_stdout_tail": worker_result.stdout_tail,
+                "worker_stderr_tail": worker_result.stderr_tail,
+                "worker_error": worker_result.error,
+                "worker_request_id": worker_result.request_id,
+                # The marker's own classification is preserved as
+                # ``marker_reason`` so the dashboard can show "uv
+                # said: X / marker said: Y" when they disagree.
+                "marker_succeeded": outcome.succeeded,
+                "marker_reason": outcome.reason,
+            }
+            rt.reporter.queue_event(
+                WatcherEvent(
+                    event_type=EventType.UPDATE_FAILED,
+                    message=f"Watcher upgrade to {outcome.target_version} failed: {reason}",
+                    details=details,
+                )
+            )
+        elif outcome.succeeded:
+            details = {
+                "previous_version": outcome.previous_version,
+                "target_version": outcome.target_version,
+            }
+            if worker_result is not None:
+                details["via_worker"] = True
+                details["worker_returncode"] = worker_result.returncode
+                details["worker_stdout_tail"] = worker_result.stdout_tail
+                details["worker_stderr_tail"] = worker_result.stderr_tail
+                details["worker_request_id"] = worker_result.request_id
+                # If the worker reported success but had non-empty
+                # stderr or a non-zero returncode that we tolerated
+                # (e.g. uv printing a deprecation warning to stderr),
+                # surface that as a soft warning alongside the
+                # success event so an operator can investigate
+                # without being paged.
+                if worker_warned:
+                    details["worker_warning"] = True
             rt.reporter.queue_event(
                 WatcherEvent(
                     event_type=EventType.UPDATE_SUCCEEDED,
@@ -248,24 +393,47 @@ def start_runtime(rt: WatcherRuntime, *, started_message: str) -> None:
                         f"Restarted into upgraded watcher "
                         f"{outcome.previous_version} -> {outcome.target_version}"
                     ),
-                    details={
-                        "previous_version": outcome.previous_version,
-                        "target_version": outcome.target_version,
-                    },
+                    details=details,
                 )
             )
         else:
+            # No worker result OR worker said success but the
+            # restart didn't actually load the new version. In
+            # either case the marker's "expected X, running Y"
+            # classification is the most informative signal.
+            details = {
+                "previous_version": outcome.previous_version,
+                "target_version": outcome.target_version,
+                "reason": outcome.reason,
+            }
+            if worker_result is not None:
+                details["via_worker"] = True
+                details["worker_returncode"] = worker_result.returncode
+                details["worker_stdout_tail"] = worker_result.stdout_tail
+                details["worker_stderr_tail"] = worker_result.stderr_tail
+                details["worker_error"] = worker_result.error
+                details["worker_request_id"] = worker_result.request_id
+            elif _expecting_worker_result(outcome):
+                # Marker says we dispatched via the worker (target
+                # known, this is a Windows host) but no result
+                # sentinel landed. Either the worker crashed mid-run
+                # or never started. Surface that explicitly so an
+                # operator knows to check ``upgrade-worker.log``.
+                details["worker_result_missing"] = True
             rt.reporter.queue_event(
                 WatcherEvent(
                     event_type=EventType.UPDATE_FAILED,
                     message=f"Watcher upgrade did not take effect: {outcome.reason}",
-                    details={
-                        "previous_version": outcome.previous_version,
-                        "target_version": outcome.target_version,
-                        "reason": outcome.reason,
-                    },
+                    details=details,
                 )
             )
+
+        # Always clear both worker sentinels on the post-restart
+        # inspection so a stale result from a prior upgrade can't
+        # leak into the next one. Mirrors the marker's "consumed on
+        # read" lifecycle in ``evaluate_upgrade_marker``.
+        clear_upgrade_result(DEFAULT_CONFIG_DIR)
+        clear_upgrade_request(DEFAULT_CONFIG_DIR)
 
     # Rebuild in-memory run state from the local DB before any file
     # events fire. Without this, every restart starts with an empty

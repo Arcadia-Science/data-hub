@@ -253,6 +253,31 @@ class TestBuildUpgradeCommand:
         with pytest.raises(ValueError, match="Cannot build an upgrade command"):
             build_upgrade_command(method, target_version="0.3.0")
 
+    def test_extras_are_preserved_in_pkg_spec(self) -> None:
+        # Regression guard: the original PowerShell output that
+        # surfaced the Windows-uv-tool failure mode also revealed
+        # that the in-process upgrade silently dropped pywin32 — the
+        # ``[windows-service]`` extra wasn't carried through. The
+        # ``extras`` parameter exists exactly so callers (the worker
+        # path and a future hardened in-process path) can preserve
+        # it.
+        cmd = build_upgrade_command(
+            InstallMethod.UV_TOOL,
+            target_version="0.3.0",
+            uv_executable="/usr/local/bin/uv",
+            extras=["windows-service"],
+        )
+        assert cmd[-1] == "data-hub-watcher[windows-service]==0.3.0"
+
+    def test_extras_are_sorted_for_pip(self) -> None:
+        cmd = build_upgrade_command(
+            InstallMethod.PIP,
+            target_version="0.3.0",
+            python_executable="python",
+            extras=["zeta", "alpha"],
+        )
+        assert cmd[-1] == "data-hub-watcher[alpha,zeta]==0.3.0"
+
     def test_uv_tool_uses_path_lookup_when_no_override(self) -> None:
         # Without an explicit `uv_executable` the builder must fall back
         # to `shutil.which("uv")`. Patching it here also guards against a
