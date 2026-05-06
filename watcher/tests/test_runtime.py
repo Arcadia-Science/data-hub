@@ -249,6 +249,70 @@ class TestBuildRuntimeErrors:
             build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
 
 
+class TestBuildRuntimeConfigDir:
+    """Plumbing of the explicit ``config_dir`` parameter through the runtime.
+
+    Regression guard for the auto-update silent no-op on Windows: the
+    Windows service runs as LocalSystem (so ``Path("~/.data-hub")``
+    inside the service process resolves to the SYSTEM profile, not
+    the operator's profile) but the upgrade worker has its sentinel
+    paths baked in at install time under the operator's profile.
+    Letting the running service fall back to ``DEFAULT_CONFIG_DIR``
+    rather than the registry-resolved directory caused the service to
+    write the request sentinel into a directory the worker never
+    reads from, so every auto-update tick fired ``update_started``
+    and the worker logged "no request sentinel" without doing
+    anything.
+    """
+
+    def test_explicit_config_dir_overrides_default(
+        self, tmp_path: Path, db_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Patch DEFAULT_CONFIG_DIR to a *different* path so we can
+        # tell apart "fell back to the default" from "honoured the
+        # explicit argument".
+        import data_hub_watcher.runtime as rt_module
+
+        wrong_dir = tmp_path / "system-profile"
+        right_dir = tmp_path / "operator-profile"
+        wrong_dir.mkdir()
+        right_dir.mkdir()
+        monkeypatch.setattr(rt_module, "DEFAULT_CONFIG_DIR", wrong_dir)
+
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path, config_dir=right_dir)
+        try:
+            assert rt.config_dir == right_dir
+            # The Updater MUST receive the same dir we passed in;
+            # this is what makes ``write_upgrade_request`` land in
+            # the directory the SYSTEM-owned worker reads from.
+            assert rt.updater._config_dir == right_dir
+        finally:
+            rt.state_db.close()
+
+    def test_omitted_config_dir_falls_back_to_module_default(
+        self, tmp_path: Path, db_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The CLI ``watch`` command relies on this fallback: it runs
+        # as the operator user, so ``DEFAULT_CONFIG_DIR`` resolves
+        # correctly and the CLI doesn't need to thread the argument
+        # through. Pin the behaviour so a future refactor doesn't
+        # silently make the argument required.
+        import data_hub_watcher.runtime as rt_module
+
+        fake_default = tmp_path / "operator-profile"
+        fake_default.mkdir()
+        monkeypatch.setattr(rt_module, "DEFAULT_CONFIG_DIR", fake_default)
+
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+        try:
+            assert rt.config_dir == fake_default
+            assert rt.updater._config_dir == fake_default
+        finally:
+            rt.state_db.close()
+
+
 class TestClassifyShutdown:
     """Pin the WATCHER_STOPPED message text shared by the CLI ``watch``
     command and the Windows service. Both call sites used to hard-code
@@ -578,6 +642,81 @@ class TestStartRuntimePostUpgradeMerge:
             assert "worker_returncode" not in details
         finally:
             rt.state_db.close()
+
+    def test_post_restart_inspection_uses_runtime_config_dir_not_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Regression guard for the Windows-service silent no-op:
+        # under LocalSystem ``DEFAULT_CONFIG_DIR`` resolves to the
+        # SYSTEM profile, but the upgrade marker / result / request
+        # all live in the operator's profile (where the worker reads
+        # from). ``start_runtime`` MUST consult ``rt.config_dir`` —
+        # not the module-level ``DEFAULT_CONFIG_DIR`` — so a service
+        # that's been threaded the right directory at construction
+        # time picks up its own marker.
+        from data_hub_watcher.constants import WATCHER_VERSION
+
+        wrong_dir = tmp_path / "system-profile-data-hub"
+        right_dir = tmp_path / "operator-profile-data-hub"
+        wrong_dir.mkdir()
+        right_dir.mkdir()
+
+        # Marker + result land in the *right* (registry-resolved)
+        # directory, mirroring what the running service writes when
+        # it calls ``write_upgrade_marker(rt.config_dir, ...)``.
+        write_upgrade_marker(
+            right_dir,
+            target_version=WATCHER_VERSION,
+            previous_version="0.1.4",
+        )
+        result = UpgradeResult(
+            request_id="rid",
+            target_version=WATCHER_VERSION,
+            succeeded=True,
+            returncode=0,
+            stdout_tail="installed 17 packages",
+            stderr_tail="",
+            finished_at="2026-05-06T11:54:22+00:00",
+            error=None,
+        )
+        upgrade_result_path(right_dir).write_text(json.dumps(result.to_dict()), encoding="utf-8")
+
+        # Patch ``DEFAULT_CONFIG_DIR`` to the *wrong* directory so
+        # an accidental fallback would silently miss the marker
+        # and emit no UPDATE_SUCCEEDED event at all.
+        self._patch_default_config_dir(monkeypatch, wrong_dir)
+        monkeypatch.setattr("data_hub_watcher.runtime.sys.platform", "win32")
+
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        rt = build_runtime(
+            client=MagicMock(),
+            cfg=cfg,
+            db_path=tmp_path / "state.sqlite",
+            config_dir=right_dir,
+        )
+        mock_reporter = MagicMock()
+        rt.reporter = mock_reporter
+        rt.monitor = MagicMock()
+        rt.heartbeat = MagicMock()
+        rt.detector = MagicMock()
+        try:
+            start_runtime(rt, started_message="Service started on test")
+
+            queued = [c.args[0] for c in mock_reporter.queue_event.call_args_list]
+            successes = [e for e in queued if e.event_type is EventType.UPDATE_SUCCEEDED]
+            assert len(successes) == 1, (
+                "start_runtime fell back to DEFAULT_CONFIG_DIR — the marker in "
+                "the registry-resolved config_dir was missed entirely."
+            )
+            details = successes[0].details
+            assert details["worker_request_id"] == "rid"
+            assert details["worker_stdout_tail"] == "installed 17 packages"
+        finally:
+            rt.state_db.close()
+
+        # Sentinel must be consumed from the *right* directory; the
+        # wrong directory is irrelevant and unchanged.
+        assert not upgrade_result_path(right_dir).exists()
 
 
 class TestSummarizeWorkerFailure:
