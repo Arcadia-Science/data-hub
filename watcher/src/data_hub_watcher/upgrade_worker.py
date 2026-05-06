@@ -40,6 +40,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
 import sys
 import uuid
 from dataclasses import dataclass
@@ -356,6 +357,82 @@ def build_pkg_spec(
 
 
 # ---------------------------------------------------------------------------
+# uv tool directory resolution
+# ---------------------------------------------------------------------------
+
+
+class UvToolDirResolutionError(RuntimeError):
+    """Raised when ``uv tool dir`` / ``uv tool dir --bin`` can't be resolved.
+
+    Carries the failing argv and uv's stderr so the caller can surface a
+    diagnosable error rather than silently rendering a worker template
+    against an empty path.
+    """
+
+    def __init__(self, argv: list[str], *, stderr: str = "", returncode: int = -1) -> None:
+        super().__init__(
+            f"`{' '.join(argv)}` failed (exit {returncode}): {stderr.strip() or '<no stderr>'}"
+        )
+        self.argv = argv
+        self.stderr = stderr
+        self.returncode = returncode
+
+
+def resolve_uv_tool_dirs(uv_executable: str) -> tuple[Path, Path]:
+    """Return ``(tool_dir, tool_bin_dir)`` for the operator's uv install.
+
+    Captured at install time so the worker template can bake them in
+    explicitly. The worker runs as LocalSystem via the scheduled task,
+    and uv resolves its install directories from ``$env:USERPROFILE``
+    plus the platform-specific defaults — under SYSTEM that resolves
+    to ``C:\\Windows\\System32\\config\\systemprofile\\.local\\share\\
+    uv\\tools`` (and ``…\\.local\\bin``), which is **not** where the
+    running watcher service was originally installed from. Without
+    this override uv happily installs a *second* copy of the package
+    into SYSTEM's profile while the operator's profile (where the
+    Windows-service registered ``ImagePath`` actually points) keeps
+    serving the old version. The next service restart loads the old
+    code and the marker comparison fails with "expected X, running Y".
+
+    By shelling out to ``uv tool dir`` from the install context (where
+    ``$env:USERPROFILE`` correctly points at the operator's home),
+    we capture the *operator's* tool directories and bake them in so
+    the SYSTEM-running worker can force ``uv`` to install in place at
+    the right location via ``UV_TOOL_DIR`` / ``UV_TOOL_BIN_DIR``.
+
+    Raises :class:`UvToolDirResolutionError` on a non-zero exit. The
+    caller (``_install_upgrade_worker``) treats this as fatal so a
+    silent miss surfaces during ``service install`` — by far the
+    cheapest place to catch it.
+    """
+    tool_dir = _run_uv_tool_dir(uv_executable, [])
+    tool_bin_dir = _run_uv_tool_dir(uv_executable, ["--bin"])
+    return tool_dir, tool_bin_dir
+
+
+def _run_uv_tool_dir(uv_executable: str, extra_args: list[str]) -> Path:
+    argv = [uv_executable, "tool", "dir", *extra_args]
+    try:
+        proc = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise UvToolDirResolutionError(argv, stderr=str(exc)) from exc
+
+    if proc.returncode != 0:
+        raise UvToolDirResolutionError(argv, stderr=proc.stderr, returncode=proc.returncode)
+
+    raw = proc.stdout.strip()
+    if not raw:
+        raise UvToolDirResolutionError(argv, stderr="empty stdout", returncode=proc.returncode)
+    return Path(raw)
+
+
+# ---------------------------------------------------------------------------
 # PowerShell worker template
 # ---------------------------------------------------------------------------
 
@@ -385,6 +462,18 @@ $ServiceName  = "{service_name}"
 $RequestPath  = "{request_path}"
 $ResultPath   = "{result_path}"
 $LogPath      = "{log_path}"
+# Operator-context paths captured at install time. The scheduled task
+# runs as LocalSystem, so without these overrides `uv tool install`
+# would resolve UV_TOOL_DIR / UV_TOOL_BIN_DIR against
+# C:\\Windows\\System32\\config\\systemprofile\\.local\\... and install
+# a SECOND copy of the package into SYSTEM's profile while the
+# operator's tool venv (which the Windows-service ImagePath actually
+# points at) is left at the old version. The env-var assignments
+# below force uv to reinstall *in place* at the operator's tool dir
+# so the existing service binary path resolves to the new wheel on
+# the next service restart.
+$ToolDir      = "{tool_dir}"
+$ToolBinDir   = "{tool_bin_dir}"
 
 function Write-Log($msg) {{
     $ts = (Get-Date).ToUniversalTime().ToString("o")
@@ -393,8 +482,19 @@ function Write-Log($msg) {{
 }}
 
 function Write-ResultJson($payload) {{
+    # PowerShell 5.1 (the default on Windows 10/11) emits UTF-8 *with*
+    # a BOM when invoked as `Set-Content -Encoding UTF8`. Python's
+    # `json.loads(path.read_text(encoding="utf-8"))` then fails on the
+    # leading U+FEFF and `read_upgrade_result` silently swallows the
+    # JSONDecodeError, returning None. The post-restart inspection in
+    # runtime.py then flags `worker_result_missing=True` even though
+    # the file was written successfully — the operator sees no actual
+    # error context in the failure event and has to remote in to find
+    # it. Use the .NET API with an explicit BOM-less UTF-8 encoder so
+    # the result sentinel is readable on every supported PowerShell.
     $tmp = "$ResultPath.tmp"
-    $payload | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $tmp -Encoding UTF8
+    $json = $payload | ConvertTo-Json -Depth 4
+    [System.IO.File]::WriteAllText($tmp, $json, [System.Text.UTF8Encoding]::new($false))
     Move-Item -LiteralPath $tmp -Destination $ResultPath -Force
 }}
 
@@ -452,6 +552,16 @@ try {{
     # ``build_upgrade_command``'s argv shape exactly so the worker and
     # the in-process path produce equivalent uv invocations.
     $uvArgs = @("tool", "install", "--reinstall", "--index-url", $IndexUrl, $PkgSpec)
+
+    # Pin uv's view of the tool directories to the operator's profile,
+    # not LocalSystem's. See the comment on `$ToolDir` / `$ToolBinDir`
+    # above for why this matters. We set them on the process
+    # environment so the subprocess `uv` inherits them; setting via
+    # `Start-Process -Environment` would be cleaner but is not
+    # available on Windows PowerShell 5.1.
+    $env:UV_TOOL_DIR     = $ToolDir
+    $env:UV_TOOL_BIN_DIR = $ToolBinDir
+    Write-Log "uv env: UV_TOOL_DIR=$ToolDir UV_TOOL_BIN_DIR=$ToolBinDir"
 
     Write-Log "running: $UvExe $($uvArgs -join ' ')"
 
@@ -531,6 +641,8 @@ def render_worker_script(
     request_path: Path,
     result_path: Path,
     log_path: Path,
+    tool_dir: Path,
+    tool_bin_dir: Path,
     generated_at: str | None = None,
 ) -> str:
     """Render :data:`WORKER_SCRIPT_TEMPLATE` with concrete paths.
@@ -539,6 +651,13 @@ def render_worker_script(
     The actual ``uv`` path is not baked in — the worker reads it from
     the request sentinel so a post-install relocation of ``uv.exe``
     doesn't require regenerating the script.
+
+    *tool_dir* and *tool_bin_dir* MUST be the paths reported by
+    ``uv tool dir`` / ``uv tool dir --bin`` from the operator's
+    install context. See :func:`resolve_uv_tool_dirs` for the full
+    rationale; the short version is that without these baked into
+    the SYSTEM-running worker, ``uv`` installs into the wrong profile
+    and the auto-update silently no-ops.
 
     The ``.upgrade-in-progress`` marker is intentionally not handed to
     the worker: its full lifecycle (write before dispatch, evaluate
@@ -551,6 +670,8 @@ def render_worker_script(
         request_path=str(request_path),
         result_path=str(result_path),
         log_path=str(log_path),
+        tool_dir=str(tool_dir),
+        tool_bin_dir=str(tool_bin_dir),
     )
 
 
@@ -558,12 +679,21 @@ def write_worker_script(
     config_dir: Path,
     *,
     service_name: str,
+    tool_dir: Path,
+    tool_bin_dir: Path,
     generated_at: str | None = None,
 ) -> Path:
     """Render the worker script and drop it under *config_dir*.
 
     Returns the resulting path so callers (the service installer) can
     hand it to ``schtasks`` as the action target.
+
+    *tool_dir* / *tool_bin_dir* are required because rendering against
+    a default that resolves under LocalSystem (the account the worker
+    later runs as) silently produces a worker that installs to the
+    wrong profile. Forcing the caller to supply them at install time
+    — when the operator-context :func:`resolve_uv_tool_dirs` lookup
+    is available — keeps the failure mode loud rather than silent.
     """
     script_path = upgrade_worker_script_path(config_dir)
     script = render_worker_script(
@@ -571,6 +701,8 @@ def write_worker_script(
         request_path=upgrade_request_path(config_dir),
         result_path=upgrade_result_path(config_dir),
         log_path=upgrade_worker_log_path(config_dir),
+        tool_dir=tool_dir,
+        tool_bin_dir=tool_bin_dir,
         generated_at=generated_at,
     )
     script_path.parent.mkdir(parents=True, exist_ok=True)

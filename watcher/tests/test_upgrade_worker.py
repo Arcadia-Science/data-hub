@@ -10,6 +10,7 @@ that breaks the contract surfaces here rather than as a stuck
 
 from __future__ import annotations
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -259,6 +260,8 @@ class TestRenderWorkerScript:
             request_path=tmp_path / ".upgrade-request.json",
             result_path=tmp_path / ".upgrade-result.json",
             log_path=tmp_path / "upgrade-worker.log",
+            tool_dir=Path(r"C:\Users\op\AppData\Roaming\uv\tools"),
+            tool_bin_dir=Path(r"C:\Users\op\.local\bin"),
             generated_at="2026-05-04T22:30:00+00:00",
         )
 
@@ -313,7 +316,12 @@ class TestRenderWorkerScript:
         assert "Start-Service" in finally_block
 
     def test_write_worker_script_drops_file_at_expected_path(self, tmp_path: Path) -> None:
-        path = write_worker_script(tmp_path, service_name="DataHubWatcher")
+        path = write_worker_script(
+            tmp_path,
+            service_name="DataHubWatcher",
+            tool_dir=Path(r"C:\Users\op\AppData\Roaming\uv\tools"),
+            tool_bin_dir=Path(r"C:\Users\op\.local\bin"),
+        )
         assert path == upgrade_worker_script_path(tmp_path)
         assert path.exists()
         assert path.name == UPGRADE_WORKER_SCRIPT_FILENAME
@@ -370,6 +378,90 @@ class TestRenderWorkerScript:
         # uv emits on the host.
         assert "`r?`n" in script or "\\r?\\n" in script
 
+    def test_uv_tool_dir_overrides_are_baked_in(self, tmp_path: Path) -> None:
+        # Regression guard for the silent "uv installed into SYSTEM
+        # profile" failure mode: the worker runs as LocalSystem via
+        # the scheduled task, and uv resolves UV_TOOL_DIR /
+        # UV_TOOL_BIN_DIR from $env:USERPROFILE which under SYSTEM
+        # is C:\Windows\System32\config\systemprofile\.local\... —
+        # NOT where the running watcher service was originally
+        # installed from. The rendered worker MUST set both env
+        # vars to the operator-context paths captured at install
+        # time so uv reinstalls in place at the operator's tool
+        # dir; otherwise the upgrade succeeds (uv exits 0) but
+        # produces a SECOND copy of the package that the running
+        # service never loads, and the marker comparison fails
+        # with "expected X, running Y" on the next restart.
+        script = render_worker_script(
+            service_name="DataHubWatcher",
+            request_path=tmp_path / ".upgrade-request.json",
+            result_path=tmp_path / ".upgrade-result.json",
+            log_path=tmp_path / "upgrade-worker.log",
+            tool_dir=Path(r"C:\Users\op\AppData\Roaming\uv\tools"),
+            tool_bin_dir=Path(r"C:\Users\op\.local\bin"),
+            generated_at="2026-05-04T22:30:00+00:00",
+        )
+
+        # The literal paths are baked in as PowerShell variables…
+        assert r'$ToolDir      = "C:\Users\op\AppData\Roaming\uv\tools"' in script
+        assert r'$ToolBinDir   = "C:\Users\op\.local\bin"' in script
+        # …and assigned to the env vars uv actually consults BEFORE
+        # the uv invocation. Order matters: setting them after
+        # `Start-Process -FilePath $UvExe` would have no effect on
+        # the subprocess.
+        env_idx = script.find("$env:UV_TOOL_DIR")
+        uv_invoke_idx = script.find("Start-Process -FilePath $UvExe")
+        assert env_idx != -1, "worker must set $env:UV_TOOL_DIR"
+        assert uv_invoke_idx != -1, "worker must invoke uv via Start-Process"
+        assert env_idx < uv_invoke_idx, (
+            "$env:UV_TOOL_DIR must be set BEFORE uv is invoked, "
+            "otherwise the override has no effect on the subprocess"
+        )
+        # Both env vars present.
+        assert "$env:UV_TOOL_DIR     = $ToolDir" in script
+        assert "$env:UV_TOOL_BIN_DIR = $ToolBinDir" in script
+
+    def test_result_sentinel_is_written_without_utf8_bom(self, tmp_path: Path) -> None:
+        # Regression guard for the secondary symptom of the silent
+        # auto-update failure: PowerShell 5.1's `Set-Content -Encoding
+        # UTF8` writes a UTF-8 BOM, and Python's `json.loads(
+        # path.read_text(encoding="utf-8"))` raises JSONDecodeError on
+        # the leading U+FEFF. `read_upgrade_result` then swallows the
+        # error and returns None, causing the post-restart inspection
+        # to flag `worker_result_missing=True` even though the file
+        # was written successfully — the operator sees no actual
+        # error context in the failure event.
+        #
+        # The fix uses [System.IO.File]::WriteAllText with an explicit
+        # UTF8Encoding($false) so the BOM is omitted on every supported
+        # PowerShell version. Pin the encoder choice here.
+        script = render_worker_script(
+            service_name="DataHubWatcher",
+            request_path=tmp_path / ".upgrade-request.json",
+            result_path=tmp_path / ".upgrade-result.json",
+            log_path=tmp_path / "upgrade-worker.log",
+            tool_dir=tmp_path / "tools",
+            tool_bin_dir=tmp_path / "bin",
+            generated_at="2026-05-04T22:30:00+00:00",
+        )
+        # The .NET UTF8Encoding constructor takes a bool encoderShouldEmitUTF8Identifier
+        # — `$false` means "no BOM". We pin both the type and the
+        # `$false` argument so a future refactor can't accidentally
+        # flip it back to BOM-emitting.
+        assert "[System.IO.File]::WriteAllText" in script
+        assert "[System.Text.UTF8Encoding]::new($false)" in script
+        # The original BOM-emitting `Set-Content` invocation must
+        # not appear as an actual command anywhere in the rendered
+        # template. Search line-by-line, ignoring lines that start
+        # with `#` (PowerShell comments) so the regression-context
+        # commentary describing the *old* behaviour doesn't trip
+        # the assertion.
+        for line in script.splitlines():
+            stripped = line.lstrip()
+            if stripped.startswith("#"):
+                continue
+            assert "Set-Content -LiteralPath $tmp -Encoding UTF8" not in stripped
+
 
 # ---------------------------------------------------------------------------
 # Filename constants
@@ -384,3 +476,99 @@ def test_sentinel_filenames_are_dotfiles_under_config_dir(tmp_path: Path) -> Non
     assert upgrade_result_path(tmp_path).name == UPGRADE_RESULT_FILENAME
     assert UPGRADE_REQUEST_FILENAME.startswith(".")
     assert UPGRADE_RESULT_FILENAME.startswith(".")
+
+
+# ---------------------------------------------------------------------------
+# resolve_uv_tool_dirs
+# ---------------------------------------------------------------------------
+
+
+class TestResolveUvToolDirs:
+    """Capture the operator's uv tool directories at install time.
+
+    Required because the worker later runs as LocalSystem and uv would
+    otherwise resolve UV_TOOL_DIR / UV_TOOL_BIN_DIR against the SYSTEM
+    profile rather than the operator's profile — silently installing
+    upgrades into the wrong location.
+    """
+
+    def test_returns_paths_from_uv_tool_dir_invocations(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from data_hub_watcher import upgrade_worker as worker_mod
+
+        invocations: list[list[str]] = []
+
+        def fake_run(argv: list[str], **_kw: object) -> subprocess.CompletedProcess[str]:
+            invocations.append(argv)
+            if "--bin" in argv:
+                stdout = r"C:\Users\op\.local\bin"
+            else:
+                stdout = r"C:\Users\op\AppData\Roaming\uv\tools"
+            return subprocess.CompletedProcess(argv, returncode=0, stdout=stdout, stderr="")
+
+        monkeypatch.setattr(worker_mod.subprocess, "run", fake_run)
+
+        tool_dir, tool_bin_dir = worker_mod.resolve_uv_tool_dirs(r"C:\Users\op\.local\bin\uv.exe")
+
+        assert tool_dir == Path(r"C:\Users\op\AppData\Roaming\uv\tools")
+        assert tool_bin_dir == Path(r"C:\Users\op\.local\bin")
+        # Both invocations must use the supplied uv path (not e.g. a
+        # PATH-resolved fallback) so the helper reflects the same uv
+        # the worker will eventually drive.
+        assert invocations[0] == [r"C:\Users\op\.local\bin\uv.exe", "tool", "dir"]
+        assert invocations[1] == [r"C:\Users\op\.local\bin\uv.exe", "tool", "dir", "--bin"]
+
+    def test_nonzero_exit_raises_with_stderr_attached(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from data_hub_watcher import upgrade_worker as worker_mod
+
+        def fake_run(argv: list[str], **_kw: object) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(
+                argv, returncode=2, stdout="", stderr="uv: command does not exist"
+            )
+
+        monkeypatch.setattr(worker_mod.subprocess, "run", fake_run)
+
+        with pytest.raises(worker_mod.UvToolDirResolutionError) as excinfo:
+            worker_mod.resolve_uv_tool_dirs("uv")
+
+        # Operator-facing message must include the failing argv and
+        # uv's stderr — diagnostically those are the two pieces an
+        # operator needs to recover from a stuck install.
+        msg = str(excinfo.value)
+        assert "uv tool dir" in msg
+        assert "command does not exist" in msg
+
+    def test_empty_stdout_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # An exit-0 with empty stdout would otherwise silently bake
+        # `Path("")` into the worker template, which uv interprets
+        # as "use the default" — i.e. the very SYSTEM-profile path
+        # we're trying to override. Treat it as a hard failure.
+        from data_hub_watcher import upgrade_worker as worker_mod
+
+        def fake_run(argv: list[str], **_kw: object) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(argv, returncode=0, stdout="\n", stderr="")
+
+        monkeypatch.setattr(worker_mod.subprocess, "run", fake_run)
+
+        with pytest.raises(worker_mod.UvToolDirResolutionError):
+            worker_mod.resolve_uv_tool_dirs("uv")
+
+    def test_oserror_raises_uv_tool_dir_resolution_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # uv.exe missing from disk surfaces as FileNotFoundError from
+        # subprocess.run; the helper must convert that to its typed
+        # error so callers don't have to know about subprocess
+        # internals.
+        from data_hub_watcher import upgrade_worker as worker_mod
+
+        def boom(argv: list[str], **_kw: object) -> subprocess.CompletedProcess[str]:
+            raise FileNotFoundError("uv.exe not found")
+
+        monkeypatch.setattr(worker_mod.subprocess, "run", boom)
+
+        with pytest.raises(worker_mod.UvToolDirResolutionError):
+            worker_mod.resolve_uv_tool_dirs("uv")
