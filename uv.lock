@@ -415,7 +415,7 @@ requires-dist = [
 
 [[package]]
 name = "data-hub-watcher"
-version = "0.2.1"
+version = "0.2.2"
 source = { editable = "watcher" }
 dependencies = [
     { name = "click" },
