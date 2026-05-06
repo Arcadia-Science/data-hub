@@ -29,6 +29,7 @@ from data_hub_watcher.monitor import FileMonitor
 from data_hub_watcher.run_detector import RunDetector
 from data_hub_watcher.runtime import (
     ShutdownReason,
+    _summarize_worker_failure,
     build_runtime,
     classify_shutdown,
     start_runtime,
@@ -577,3 +578,121 @@ class TestStartRuntimePostUpgradeMerge:
             assert "worker_returncode" not in details
         finally:
             rt.state_db.close()
+
+
+class TestSummarizeWorkerFailure:
+    """Direct coverage for the dashboard-headline picker.
+
+    The full stderr_tail is always preserved on the event details, so
+    this helper only chooses the one-liner reason. The selection
+    priority is:
+
+    1. The first ``error: <msg>`` (uv's own convention).
+    2. The first stderr line containing ``error`` / ``failed`` /
+       ``denied`` (covers tools that don't follow uv's convention,
+       e.g. PowerShell traps echoed to stderr by the worker).
+    3. The worker's PowerShell-trap ``error`` field.
+    4. ``uv exited <N>`` if all we have is a non-zero returncode.
+    """
+
+    def _result(
+        self,
+        *,
+        stderr: str = "",
+        returncode: int | None = 1,
+        error: str | None = None,
+    ) -> UpgradeResult:
+        return UpgradeResult(
+            request_id="rid",
+            target_version="9.9.9",
+            succeeded=False,
+            returncode=returncode,
+            stdout_tail="",
+            stderr_tail=stderr,
+            finished_at="2026-05-04T22:30:00+00:00",
+            error=error,
+        )
+
+    def test_picks_uv_error_prefix_line(self) -> None:
+        # uv's actual headline lives behind the ``error:`` prefix.
+        # We must surface it verbatim (truncated to 200) rather than
+        # the surrounding informational chatter.
+        result = self._result(
+            stderr=(
+                "Resolved 17 packages in 12ms\n"
+                "Prepared 17 packages in 800ms\n"
+                "error: failed to remove directory `C:\\...\\Scripts`: "
+                "Access is denied. (os error 5)\n"
+                "Suggestion: stop the service and retry.\n"
+            )
+        )
+        assert _summarize_worker_failure(result) == (
+            "error: failed to remove directory `C:\\...\\Scripts`: Access is denied. (os error 5)"
+        )
+
+    def test_uv_error_prefix_takes_priority_over_substring_match(self) -> None:
+        # Without the prefix-anchoring, the historical substring
+        # heuristic would pick "Resolution failed for 17 packages"
+        # because it appears first and contains "failed". The
+        # ``error:`` line further down is the actual diagnostic and
+        # must win.
+        result = self._result(
+            stderr=(
+                "Resolution failed for 17 packages (this is informational)\n"
+                "error: HTTP 503 from upstream index\n"
+            )
+        )
+        assert _summarize_worker_failure(result) == "error: HTTP 503 from upstream index"
+
+    def test_falls_back_to_substring_when_no_uv_error_prefix(self) -> None:
+        # Worker captured a PowerShell trap or Windows API error that
+        # didn't go through uv's `error:` formatter. The historical
+        # heuristic still fires so we don't fall through to the
+        # generic "uv exited N" message.
+        result = self._result(
+            stderr="Stop-Service : Access is denied (CategoryInfo: PermissionDenied)\n"
+        )
+        assert _summarize_worker_failure(result).startswith("Stop-Service")
+        assert "Access is denied" in _summarize_worker_failure(result)
+
+    def test_skips_innocuous_substring_match_when_better_line_follows(self) -> None:
+        # An informational line that mentions "no errors so far" must
+        # NOT be picked as the headline when a real ``error:`` line
+        # is also present. This is the regression the prefix-anchor
+        # exists to prevent.
+        result = self._result(
+            stderr=("Pre-flight: no errors so far\nerror: PyPI returned 503 Service Unavailable\n")
+        )
+        assert _summarize_worker_failure(result) == ("error: PyPI returned 503 Service Unavailable")
+
+    def test_caps_long_lines_at_200_chars(self) -> None:
+        long_msg = "x" * 500
+        result = self._result(stderr=f"error: {long_msg}\n")
+        summary = _summarize_worker_failure(result)
+        # Cap is enforced so the dashboard one-liner doesn't blow
+        # up; the full 500-char tail is still on the event details.
+        assert len(summary) == 200
+        assert summary.startswith("error: ")
+
+    def test_uses_worker_exception_field_when_stderr_empty(self) -> None:
+        # PowerShell trapped before uv could even start (e.g. ENOENT
+        # on the binary). The worker stamps the exception text into
+        # `error` and we surface that as the headline.
+        result = self._result(stderr="", error="Cannot find path 'uv.exe'")
+        assert _summarize_worker_failure(result) == ("worker exception: Cannot find path 'uv.exe'")
+
+    def test_falls_back_to_returncode_when_no_other_signal(self) -> None:
+        result = self._result(stderr="", returncode=137)
+        assert _summarize_worker_failure(result) == "uv exited 137"
+
+    def test_returns_generic_text_when_all_signals_empty(self) -> None:
+        # No stderr, no error, returncode is 0 (worker reported
+        # failure with succeeded=False but no useful diagnostics).
+        # We still need *some* string for the dashboard message.
+        result = self._result(stderr="", returncode=0, error=None)
+        assert _summarize_worker_failure(result) == "worker reported failure"
+
+    def test_non_upgrade_result_returns_generic_text(self) -> None:
+        # Defensive: callers shouldn't pass non-UpgradeResult values,
+        # but the helper must not raise when they do.
+        assert _summarize_worker_failure(object()) == "worker reported failure"

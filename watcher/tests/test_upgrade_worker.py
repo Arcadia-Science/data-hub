@@ -259,7 +259,6 @@ class TestRenderWorkerScript:
             request_path=tmp_path / ".upgrade-request.json",
             result_path=tmp_path / ".upgrade-result.json",
             log_path=tmp_path / "upgrade-worker.log",
-            marker_path=tmp_path / ".upgrade-in-progress",
             generated_at="2026-05-04T22:30:00+00:00",
         )
 
@@ -321,6 +320,34 @@ class TestRenderWorkerScript:
         contents = path.read_text(encoding="utf-8")
         assert "Stop-Service" in contents
         assert "DataHubWatcher" in contents
+
+    def test_no_marker_path_baked_into_template(self, tmp_path: Path) -> None:
+        # The ``.upgrade-in-progress`` marker is owned end-to-end on
+        # the Python side (written before dispatch in ``updater``,
+        # consumed in ``runtime.start_runtime``). The worker has no
+        # business touching it — leaking ``$MarkerPath`` into the
+        # rendered script invites a future change to start mutating
+        # it from PowerShell, which would race with the post-restart
+        # evaluation. Pin the contract here.
+        script = self._render(tmp_path)
+        assert "$MarkerPath" not in script
+        assert ".upgrade-in-progress" not in script
+
+    def test_uv_invocation_always_passes_index_url(self, tmp_path: Path) -> None:
+        # The dispatch-side code (``_apply_via_worker`` /
+        # ``_dispatch_self_update_via_worker``) only ever writes a
+        # request sentinel for a pinned target version, so the worker
+        # is guaranteed to have an index URL to forward. Mirroring
+        # ``build_upgrade_command``'s argv shape unconditionally keeps
+        # the two install paths byte-equivalent and means a future
+        # change to one needs to update the other — rather than
+        # silently drifting because a conditional in the worker
+        # was a no-op for the only call site that ever hit it.
+        script = self._render(tmp_path)
+        assert "--index-url" in script
+        # No conditional gating the index-url addition; the args list
+        # is constructed in a single literal.
+        assert "if ($Target)" not in script
 
     def test_uv_stdout_and_stderr_are_echoed_to_worker_log(self, tmp_path: Path) -> None:
         # Regression guard against the symptom that prompted this

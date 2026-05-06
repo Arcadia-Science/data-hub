@@ -385,7 +385,6 @@ $ServiceName  = "{service_name}"
 $RequestPath  = "{request_path}"
 $ResultPath   = "{result_path}"
 $LogPath      = "{log_path}"
-$MarkerPath   = "{marker_path}"
 
 function Write-Log($msg) {{
     $ts = (Get-Date).ToUniversalTime().ToString("o")
@@ -446,11 +445,13 @@ try {{
     # after the service control manager reports the service as stopped.
     Start-Sleep -Seconds 2
 
-    $uvArgs = @("tool", "install", "--reinstall")
-    if ($Target) {{
-        $uvArgs += @("--index-url", $IndexUrl)
-    }}
-    $uvArgs += @($PkgSpec)
+    # `--index-url` is always passed because the worker is only ever
+    # triggered for a pinned target version (the dispatch-side guards
+    # in ``_apply_via_worker`` and ``_dispatch_self_update_via_worker``
+    # both refuse to write a request without one). Mirrors
+    # ``build_upgrade_command``'s argv shape exactly so the worker and
+    # the in-process path produce equivalent uv invocations.
+    $uvArgs = @("tool", "install", "--reinstall", "--index-url", $IndexUrl, $PkgSpec)
 
     Write-Log "running: $UvExe $($uvArgs -join ' ')"
 
@@ -530,7 +531,6 @@ def render_worker_script(
     request_path: Path,
     result_path: Path,
     log_path: Path,
-    marker_path: Path,
     generated_at: str | None = None,
 ) -> str:
     """Render :data:`WORKER_SCRIPT_TEMPLATE` with concrete paths.
@@ -539,6 +539,11 @@ def render_worker_script(
     The actual ``uv`` path is not baked in — the worker reads it from
     the request sentinel so a post-install relocation of ``uv.exe``
     doesn't require regenerating the script.
+
+    The ``.upgrade-in-progress`` marker is intentionally not handed to
+    the worker: its full lifecycle (write before dispatch, evaluate
+    and clear on the next process start) lives on the Python side in
+    :mod:`data_hub_watcher.updater` and :mod:`data_hub_watcher.runtime`.
     """
     return WORKER_SCRIPT_TEMPLATE.format(
         generated_at=(generated_at or datetime.now(timezone.utc).isoformat()),
@@ -546,7 +551,6 @@ def render_worker_script(
         request_path=str(request_path),
         result_path=str(result_path),
         log_path=str(log_path),
-        marker_path=str(marker_path),
     )
 
 
@@ -561,15 +565,12 @@ def write_worker_script(
     Returns the resulting path so callers (the service installer) can
     hand it to ``schtasks`` as the action target.
     """
-    from data_hub_watcher.updater import upgrade_marker_path
-
     script_path = upgrade_worker_script_path(config_dir)
     script = render_worker_script(
         service_name=service_name,
         request_path=upgrade_request_path(config_dir),
         result_path=upgrade_result_path(config_dir),
         log_path=upgrade_worker_log_path(config_dir),
-        marker_path=upgrade_marker_path(config_dir),
         generated_at=generated_at,
     )
     script_path.parent.mkdir(parents=True, exist_ok=True)

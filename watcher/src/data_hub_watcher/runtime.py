@@ -11,6 +11,7 @@ and thereby silently skipping manual-mode upload-queue polling.
 
 from __future__ import annotations
 import logging
+import re
 import sys
 import threading
 from dataclasses import dataclass, field
@@ -78,18 +79,29 @@ class ShutdownReason:
     stopped_message: str
 
 
+# uv's diagnostic lines start with ``error:`` (or ``Error:`` on a few
+# legacy code paths). Anchoring on the prefix lets us pick the actual
+# failure headline rather than picking up an incidental "error" /
+# "failed" inside an informational stderr line — e.g. progress chatter
+# from a vendored library that mentions "no errors so far".
+_UV_ERROR_LINE_RE = re.compile(r"^\s*error\s*:\s*(.+)$", re.IGNORECASE)
+
+
 def _summarize_worker_failure(result: object) -> str:
     """Produce a short, human-readable reason from an :class:`UpgradeResult`.
 
     The dashboard event message is one line wide. We try, in order:
 
-    1. The first non-empty line of stderr that mentions "error" or
-       "failed" — typically the actual ``uv`` error.
-    2. The worker's own ``error`` field, populated when uv couldn't
+    1. The first stderr line matching uv's ``error: <msg>`` convention —
+       this is uv's own headline for the actual failure.
+    2. As a fallback, the first stderr line whose lowercase text
+       contains ``error`` / ``failed`` / ``denied``. Covers tools that
+       don't follow the ``error:`` convention (PowerShell traps,
+       Windows API errors echoed by the worker).
+    3. The worker's own ``error`` field, populated when uv couldn't
        even be launched (e.g. ENOENT) so PowerShell trapped the
        exception.
-    3. A generic "subprocess exited <N>" if all we have is the
-       returncode.
+    4. A generic ``uv exited <N>`` if all we have is the returncode.
 
     The full stdout/stderr tails are still attached to the event
     details — this helper only picks the headline.
@@ -100,16 +112,22 @@ def _summarize_worker_failure(result: object) -> str:
         return "worker reported failure"
 
     if result.stderr_tail:
+        # Cap each candidate line so the event message stays one line
+        # wide — the full text is still in ``worker_stderr_tail`` for
+        # the dashboard expand.
         for line in result.stderr_tail.splitlines():
-            line = line.strip()
-            if not line:
+            stripped = line.strip()
+            match = _UV_ERROR_LINE_RE.match(stripped)
+            if match:
+                return stripped[:200]
+
+        for line in result.stderr_tail.splitlines():
+            stripped = line.strip()
+            if not stripped:
                 continue
-            lowered = line.lower()
+            lowered = stripped.lower()
             if "error" in lowered or "failed" in lowered or "denied" in lowered:
-                # Cap the line so it doesn't blow up the event
-                # message — the full text is still in
-                # ``worker_stderr_tail`` for the dashboard expand.
-                return line[:200]
+                return stripped[:200]
 
     if result.error:
         return f"worker exception: {result.error[:200]}"
