@@ -155,6 +155,70 @@ class TestServiceReinstallHappyPath:
         fake_service_module.start_service.assert_not_called()
 
 
+class TestServiceReinstallMarkedForDeletion:
+    """Lock in the recovery from Windows error 1072 ("marked for deletion").
+
+    DeleteService is asynchronous: a Services console (services.msc) or
+    AV agent holding an open handle keeps the service alive long enough
+    that a back-to-back ``CreateService`` fails. We must (a) actually
+    call ``wait_for_service_removed`` between uninstall and install,
+    and (b) surface a clear, actionable message when the wait times out
+    instead of letting the operator see the raw 1072 error.
+    """
+
+    def test_reinstall_polls_between_uninstall_and_install(
+        self,
+        windows_platform: None,
+        fake_service_module: MagicMock,
+        configured_path: Path,
+        tmp_path: Path,
+    ) -> None:
+        (tmp_path / ".env.staging").write_text("")
+
+        manager = MagicMock()
+        manager.attach_mock(fake_service_module.uninstall_service, "uninstall_service")
+        manager.attach_mock(
+            fake_service_module.wait_for_service_removed,
+            "wait_for_service_removed",
+        )
+        manager.attach_mock(fake_service_module.install_service, "install_service")
+
+        runner = CliRunner()
+        result = runner.invoke(cli_module.cli, ["service", "reinstall"])
+
+        assert result.exit_code == 0, result.output
+        call_names = [c[0] for c in manager.mock_calls]
+        # The poll MUST happen after uninstall and before install,
+        # otherwise the "marked for deletion" race is unfixed.
+        assert call_names.index("uninstall_service") < call_names.index("wait_for_service_removed")
+        assert call_names.index("wait_for_service_removed") < call_names.index("install_service")
+
+    def test_marked_for_deletion_timeout_raises_actionable_error(
+        self,
+        windows_platform: None,
+        fake_service_module: MagicMock,
+        configured_path: Path,
+        tmp_path: Path,
+    ) -> None:
+        (tmp_path / ".env.staging").write_text("")
+        fake_service_module.wait_for_service_removed.return_value = False
+
+        runner = CliRunner()
+        result = runner.invoke(cli_module.cli, ["service", "reinstall"])
+
+        assert result.exit_code != 0
+        # Operators should see exactly what to do — the raw "(1072,
+        # 'CreateService', ...)" error is what motivated this guard, so
+        # the message must mention services.msc and the manual recovery
+        # path. Don't pin the entire string; just the actionable bits.
+        assert "marked for deletion" in result.output
+        assert "services.msc" in result.output
+        # And install/start must NOT have run -- otherwise we'd produce
+        # the original confusing 1072 error on top of our nice message.
+        fake_service_module.install_service.assert_not_called()
+        fake_service_module.start_service.assert_not_called()
+
+
 class TestServiceReinstallPlatformGuard:
     def test_non_windows_platform_exits_one(
         self,

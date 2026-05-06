@@ -147,6 +147,15 @@ def _make_updater(
             idle_ticks_required=2,
             check_interval_ticks=3,
             min_run_age_seconds=10.0,
+            # Opt out of the production-default "fire /update-check
+            # on the very first tick" fast path so the existing
+            # ``for _ in range(N): on_tick(); then trigger on the
+            # (N+1)th tick`` cadence assertions throughout this file
+            # keep working unchanged. The on-start fast path has its
+            # own dedicated test class below — pinning the default-on
+            # behaviour separately keeps each test focused on the
+            # specific behaviour it's exercising.
+            check_on_start=False,
         ),
         upgrade_runner=upgrade_runner,
         upgrade_executor=upgrade_executor,
@@ -328,9 +337,16 @@ class TestUpdaterOnTick:
         h.request_restart.assert_not_called()
         h.reporter.queue_event.assert_not_called()
 
-    def test_first_ticks_are_no_op_until_check_interval(self, tmp_path: Path) -> None:
+    def test_first_ticks_are_no_op_until_check_interval_when_check_on_start_disabled(
+        self, tmp_path: Path
+    ) -> None:
+        # The default test helper opts out of the on-start fast path
+        # (see comment in ``_make_updater``) so this still pins the
+        # cadence-only behaviour: with ``check_interval_ticks=3``,
+        # ticks 1 and 2 are no-ops and tick 3 fires the API call.
+        # The on-start fast path's effect on this same shape is
+        # pinned in ``TestUpdaterChecksOnStart`` below.
         h = _make_updater(tmp_path)
-        # Below check_interval_ticks=3 we should not call the API at all.
         h.counters.last_files_uploaded = 0
         assert h.updater.on_tick() is None
         assert h.updater.on_tick() is None
@@ -345,6 +361,10 @@ class TestUpdaterOnTick:
                 idle_ticks_required=2,
                 check_interval_ticks=2,
                 min_run_age_seconds=1.0,
+                # See helper-level comment in ``_make_updater`` for
+                # why cadence-focused tests opt out of the on-start
+                # fast path.
+                check_on_start=False,
             ),
         )
         h.client.get_update_info.return_value = _info(latest="9.9.9")
@@ -386,6 +406,12 @@ class TestUpdaterOnTick:
                 idle_ticks_required=0,
                 check_interval_ticks=1,  # fire on every tick
                 min_run_age_seconds=0.0,
+                # ``check_interval_ticks=1`` already fires on every
+                # tick so the on-start fast path would be a no-op
+                # here anyway, but pin the opt-out so the test's
+                # "exactly 3 invocations → exactly 3 failures"
+                # arithmetic stays explicit.
+                check_on_start=False,
             ),
         )
         h.client.get_update_info.side_effect = ApiError("dead", status_code=502)
@@ -414,6 +440,10 @@ class TestUpdaterOnTick:
                 idle_ticks_required=0,
                 check_interval_ticks=1,
                 min_run_age_seconds=0.0,
+                # See sibling test for why we pin the opt-out even
+                # though check_interval_ticks=1 makes the on-start
+                # fast path effectively a no-op here.
+                check_on_start=False,
             ),
         )
         # 2 failures, then a success, then 2 more failures.
@@ -477,6 +507,52 @@ class TestUpdaterOnTick:
         # UPDATE_SUCCEEDED is intentionally deferred to the post-restart
         # marker evaluation, not emitted here.
         assert EventType.UPDATE_SUCCEEDED not in emitted
+
+    def test_subprocess_output_is_logged_at_info_even_on_success(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # Defence in depth: a partial install can update some Python
+        # files (fooling the post-restart marker comparison) while
+        # uv exits with a non-zero code or prints a meaningful
+        # warning to stderr. Even on the apparent-success path we
+        # MUST mirror the captured output to ``watcher.log`` so an
+        # operator can recover the actual installer transcript when
+        # the dashboard event is misleading. Historically this gap
+        # is what made the "Scripts directory locked" failure
+        # invisible until someone ran the upgrade by hand.
+        runner = MagicMock(
+            return_value=subprocess.CompletedProcess(
+                args=["uv"],
+                returncode=0,
+                stdout="Installed 17 packages\n+ data-hub-watcher==9.9.9",
+                stderr="warning: index format is deprecated",
+            )
+        )
+        h = _make_updater(tmp_path, upgrade_runner=runner)
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+        monkeypatch.setattr(
+            "data_hub_watcher.updater.detect_install_method",
+            lambda: InstallMethod.UV_TOOL,
+        )
+
+        h.counters.last_files_uploaded = 0
+        with caplog.at_level("INFO", logger="data_hub_watcher.updater"):
+            h.updater.on_tick()
+            h.updater.on_tick()
+            h.updater.on_tick()
+
+        log_text = "\n".join(r.getMessage() for r in caplog.records)
+        assert "Installed 17 packages" in log_text
+        # stderr is logged separately so a regression that only
+        # captured one stream surfaces here.
+        assert "warning: index format is deprecated" in log_text
+        # On success we still emit the "requesting service restart"
+        # line — these tests are specifically that the output is
+        # *also* logged.
+        assert "requesting service restart" in log_text
 
     def test_failed_upgrade_subprocess_emits_update_failed(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -723,6 +799,219 @@ class TestUpdaterOnTick:
         assert all(e.details["install_method"] == "unknown" for e in emitted)
 
 
+class TestUpdaterChecksOnStart:
+    """Pin the production-default ``check_on_start=True`` behaviour.
+
+    Why this matters: lab PCs only run ``/update-check`` once an hour
+    by default, so a fresh ``service install`` / ``service reinstall``
+    / boot would otherwise wait up to 60 minutes before noticing a
+    pending release. That latency is fine in steady state but
+    disastrous during fix-forward iteration on the auto-update path
+    itself: the operator pushes a release, manually reinstalls the
+    watcher, then twiddles their thumbs for an hour to see if the
+    next auto-update tick works. Seeding ``_ticks_since_check`` to
+    ``check_interval_ticks`` at construction collapses that wait to
+    one heartbeat (~60 s) without disturbing the steady-state
+    cadence — and without bypassing the activity-window safety
+    gates, which still defer the actual upgrade dispatch as designed.
+    """
+
+    def _make_updater_with_on_start(
+        self,
+        tmp_path: Path,
+        *,
+        idle_ticks_required: int = 0,
+        check_interval_ticks: int = 60,
+        last_run_age_seconds: float | None = None,
+    ) -> _UpdaterHarness:
+        # ``check_on_start=True`` is the production default but the
+        # default helper opts out, so build directly here. Tests in
+        # this class want the production wiring exactly.
+        h = _make_updater(
+            tmp_path,
+            updater_cfg=UpdaterConfig(
+                idle_ticks_required=idle_ticks_required,
+                check_interval_ticks=check_interval_ticks,
+                min_run_age_seconds=10.0,
+                check_on_start=True,
+            ),
+        )
+        if last_run_age_seconds is not None:
+            from datetime import datetime, timedelta, timezone
+
+            # ``state_db.last_run_reported_at`` returns an ISO-8601
+            # string (it's a SQLite TEXT column), not a datetime —
+            # ``_last_run_age_seconds`` parses it via ``fromisoformat``.
+            past = datetime.now(timezone.utc) - timedelta(seconds=last_run_age_seconds)
+            h.state_db.last_run_reported_at.return_value = past.isoformat()
+        return h
+
+    def test_default_config_enables_check_on_start(self) -> None:
+        # Pin the production default explicitly so a future refactor
+        # that flips the default to False (and only updates the
+        # docstring) trips here rather than silently regressing the
+        # cold-start latency back to ~60 minutes.
+        cfg = UpdaterConfig()
+        assert cfg.check_on_start is True
+
+    def test_first_tick_fires_update_check_immediately(self, tmp_path: Path) -> None:
+        # The headline behaviour: with the production-default
+        # ``check_on_start=True`` and the production-default
+        # ``check_interval_ticks=60``, the very first tick after
+        # construction calls ``/update-check`` rather than waiting 59
+        # more ticks. Without this, an operator who just ran
+        # ``service reinstall`` to apply a fix-forward release would
+        # have to wait up to an hour to confirm whether the fix
+        # actually unblocked the auto-update path.
+        h = self._make_updater_with_on_start(tmp_path)
+        h.client.get_update_info.return_value = _info(latest="0.0.0+unknown")
+        h.counters.last_files_uploaded = 0
+
+        result = h.updater.on_tick()
+
+        assert result is not None, (
+            "first tick must call /update-check when check_on_start=True; "
+            "got None which means we waited for the cadence window"
+        )
+        h.client.get_update_info.assert_called_once()
+
+    def test_subsequent_ticks_resume_normal_cadence(self, tmp_path: Path) -> None:
+        # The on-start fast path is one-shot: tick 1 fires, then
+        # ticks 2..(check_interval_ticks) are no-ops, then the
+        # check_interval_ticks+1-th tick fires again. Otherwise we'd
+        # be calling /update-check every single heartbeat which
+        # would 60x the load on the watcher-update endpoint.
+        h = self._make_updater_with_on_start(tmp_path, check_interval_ticks=3)
+        h.client.get_update_info.return_value = _info(latest="0.0.0+unknown")
+        h.counters.last_files_uploaded = 0
+
+        # Tick 1 — on-start fast path fires.
+        assert h.updater.on_tick() is not None
+        assert h.client.get_update_info.call_count == 1
+
+        # Ticks 2 and 3 — within the cadence window after the reset.
+        assert h.updater.on_tick() is None
+        assert h.updater.on_tick() is None
+        assert h.client.get_update_info.call_count == 1
+
+        # Tick 4 — cadence window elapsed, fires again.
+        assert h.updater.on_tick() is not None
+        assert h.client.get_update_info.call_count == 2
+
+    def test_opt_out_preserves_pre_existing_cadence(self, tmp_path: Path) -> None:
+        # The opt-out path must produce exactly the historical
+        # behaviour: ticks 1 and 2 are no-ops with check_interval=3,
+        # tick 3 fires the API call. This is what every other test
+        # class in this file relies on, so a regression here would
+        # cascade into many false failures.
+        h = _make_updater(
+            tmp_path,
+            updater_cfg=UpdaterConfig(
+                idle_ticks_required=0,
+                check_interval_ticks=3,
+                min_run_age_seconds=10.0,
+                check_on_start=False,
+            ),
+        )
+        h.client.get_update_info.return_value = _info(latest="0.0.0+unknown")
+        h.counters.last_files_uploaded = 0
+
+        assert h.updater.on_tick() is None
+        assert h.updater.on_tick() is None
+        assert h.client.get_update_info.call_count == 0
+        assert h.updater.on_tick() is not None
+        assert h.client.get_update_info.call_count == 1
+
+    def test_on_start_check_still_respects_idle_gate(self, tmp_path: Path) -> None:
+        # Critical safety pin: the on-start fast path short-circuits
+        # the *cadence* window, NOT the activity-window safety gate.
+        # If the operator restarts the service while uploads are
+        # actively flowing, the first tick should DO the API call
+        # (we want the operator to see "yes, an upgrade is pending"
+        # in the logs / dashboard immediately) but DEFER the actual
+        # upgrade dispatch until the upload activity quiets down —
+        # exactly as the steady-state cadence would. Without this
+        # pin a future refactor could conflate the two and start
+        # interrupting in-flight uploads on every restart.
+        h = self._make_updater_with_on_start(
+            tmp_path,
+            idle_ticks_required=5,
+            check_interval_ticks=60,
+        )
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+        # Simulate active upload activity: the heartbeat reports
+        # files uploaded on this tick.
+        h.counters.last_files_uploaded = 3
+
+        result = h.updater.on_tick()
+
+        # API was called (the fast path's job)…
+        h.client.get_update_info.assert_called_once()
+        # …but the dispatch was deferred (the safety gate's job).
+        assert result is not None
+        assert result.attempted is False
+        assert "idle ticks" in result.reason
+        h.request_restart.assert_not_called()
+
+    def test_on_start_check_still_respects_recent_run_gate(self, tmp_path: Path) -> None:
+        # Same shape as the idle-gate pin above, but for the
+        # ``last_run_age_seconds`` half of the activity-window
+        # check. A run reported 5 seconds before service restart
+        # (operator restarted mid-experiment to apply a fix) must
+        # NOT trigger an immediate upgrade just because the on-start
+        # fast path enabled the API call.
+        h = self._make_updater_with_on_start(
+            tmp_path,
+            idle_ticks_required=0,  # Idle gate disabled.
+            last_run_age_seconds=5.0,  # Recent run, gate active.
+        )
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+        h.counters.last_files_uploaded = 0
+
+        result = h.updater.on_tick()
+
+        h.client.get_update_info.assert_called_once()
+        assert result is not None
+        assert result.attempted is False
+        assert "recent run" in result.reason
+        h.request_restart.assert_not_called()
+
+    def test_on_start_check_dispatches_when_safety_gates_pass(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The flip side of the safety pins above: when nothing's
+        # happening (clean restart on an idle host with no recent
+        # runs and no pending uploads — the common case), the
+        # on-start fast path SHOULD result in an immediate dispatch.
+        # This is the behaviour the operator-facing testing-iteration
+        # win actually depends on.
+        runner = MagicMock(return_value=_success_completed_process())
+        h = _make_updater(
+            tmp_path,
+            updater_cfg=UpdaterConfig(
+                idle_ticks_required=0,
+                check_interval_ticks=60,
+                min_run_age_seconds=10.0,
+                check_on_start=True,
+            ),
+            upgrade_runner=runner,
+        )
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+        h.state_db.last_run_reported_at.return_value = None
+        h.counters.last_files_uploaded = 0
+
+        monkeypatch.setattr(
+            "data_hub_watcher.updater.detect_install_method",
+            lambda: InstallMethod.UV_TOOL,
+        )
+
+        result = h.updater.on_tick()
+
+        h.request_restart.assert_called_once()
+        assert result is not None
+        assert result.attempted is True
+
+
 class TestUpdaterAsyncDispatch:
     """The upgrade subprocess runs off the heartbeat thread.
 
@@ -867,3 +1156,275 @@ class TestUpdaterAsyncDispatch:
         assert done.wait(timeout=2.0)
         assert seen_threads == ["upgrade-worker"]
         assert seen_threads[0] != threading.current_thread().name
+
+
+# ---------------------------------------------------------------------------
+# Updater worker-dispatch branch (Windows uv-tool)
+# ---------------------------------------------------------------------------
+
+
+class TestUpdaterWorkerDispatch:
+    """On Windows uv-tool installs ``_apply`` routes through the worker.
+
+    Locks in the contract: the in-process subprocess path must NOT
+    fire (it would just re-hit the ``Scripts\\python.exe`` lock issue
+    that motivated this whole change), the request sentinel must
+    land on disk with the right pkg_spec, and ``schtasks /Run``
+    failures must surface as ``UPDATE_FAILED`` rather than a silent
+    no-op.
+    """
+
+    def _force_windows_uv_tool(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("data_hub_watcher.updater.sys.platform", "win32")
+        monkeypatch.setattr(
+            "data_hub_watcher.updater.detect_install_method",
+            lambda: InstallMethod.UV_TOOL,
+        )
+        monkeypatch.setattr(
+            "data_hub_watcher.updater._resolve_uv_executable",
+            lambda override=None, prefix=None: ("/fake/bin/uv.exe", ["/fake/bin/uv.exe"]),
+        )
+        # Pretend pywin32 is installed so the extras detection picks
+        # up the [windows-service] extra, exercising the regression
+        # where pywin32 used to silently disappear after a reinstall.
+        # The function is imported into the ``updater`` namespace, so
+        # we patch it there rather than at the source module.
+        monkeypatch.setattr(
+            "data_hub_watcher.updater.detect_installed_extras",
+            lambda: ["windows-service"],
+        )
+
+    def test_writes_request_sentinel_and_triggers_task(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from data_hub_watcher.upgrade_worker import (
+            read_upgrade_request,
+        )
+
+        runner = MagicMock()  # must not be called on the worker path
+        h = _make_updater(tmp_path, upgrade_runner=runner)
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+
+        self._force_windows_uv_tool(monkeypatch)
+
+        trigger_calls: list[None] = []
+        monkeypatch.setattr(
+            "data_hub_watcher.scheduled_task.trigger_upgrade_task",
+            lambda **_kw: trigger_calls.append(None),
+        )
+
+        h.counters.last_files_uploaded = 0
+        h.updater.on_tick()
+        h.updater.on_tick()
+        result = h.updater.on_tick()
+
+        assert result is not None
+        assert result.attempted is True
+        # Worker dispatch leaves succeeded=None; the real outcome is
+        # surfaced from the post-restart event evaluation, not here.
+        assert result.succeeded is None
+        assert result.extra.get("via_worker") is True
+
+        # Request sentinel must be on disk with the right spec.
+        req = read_upgrade_request(tmp_path / ".data-hub")
+        assert req is not None
+        assert req.target_version == "9.9.9"
+        assert req.pkg_spec == "data-hub-watcher[windows-service]==9.9.9"
+        assert req.uv_executable == "/fake/bin/uv.exe"
+        assert req.install_method == "uv-tool"
+
+        # Marker is also on disk so the post-restart evaluation can
+        # tell whether the new version actually loaded.
+        assert (tmp_path / ".data-hub" / UPGRADE_MARKER_FILENAME).exists()
+        # schtasks /Run was triggered exactly once.
+        assert trigger_calls == [None]
+        # Critical: the in-process subprocess path must NOT fire on
+        # Windows uv-tool — that would re-hit the lock issue the
+        # whole change is designed to avoid.
+        runner.assert_not_called()
+        h.request_restart.assert_not_called()
+
+        # UPDATE_STARTED must have been queued so the dashboard shows
+        # the dispatch even if the worker takes the service down
+        # before the next heartbeat would normally flush.
+        emitted = [c.args[0] for c in h.reporter.queue_event.call_args_list]
+        types = [e.event_type for e in emitted]
+        assert EventType.UPDATE_STARTED in types
+        # The success / final-failure event is deferred to the
+        # post-restart marker evaluation, never emitted from here.
+        assert EventType.UPDATE_SUCCEEDED not in types
+
+    def test_uv_not_found_surfaces_update_failed_without_started(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Same invariant as the in-process path: a missing uv binary
+        # must NOT emit UPDATE_STARTED, must NOT write the marker,
+        # and must surface a single UPDATE_FAILED with the candidates
+        # we probed so the operator can drop a binary in the right
+        # place.
+        h = _make_updater(tmp_path)
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+
+        monkeypatch.setattr("data_hub_watcher.updater.sys.platform", "win32")
+        monkeypatch.setattr(
+            "data_hub_watcher.updater.detect_install_method",
+            lambda: InstallMethod.UV_TOOL,
+        )
+        monkeypatch.setattr(
+            "data_hub_watcher.updater._resolve_uv_executable",
+            lambda override=None, prefix=None: (None, [r"C:\Users\lab\.local\bin\uv.exe"]),
+        )
+
+        trigger_calls: list[None] = []
+        monkeypatch.setattr(
+            "data_hub_watcher.scheduled_task.trigger_upgrade_task",
+            lambda **_kw: trigger_calls.append(None),
+        )
+
+        h.counters.last_files_uploaded = 0
+        h.updater.on_tick()
+        h.updater.on_tick()
+        result = h.updater.on_tick()
+
+        assert result is not None
+        assert result.attempted is True
+        assert result.succeeded is False
+        assert trigger_calls == []
+        assert not (tmp_path / ".data-hub" / UPGRADE_MARKER_FILENAME).exists()
+
+        emitted = [c.args[0] for c in h.reporter.queue_event.call_args_list]
+        types = [e.event_type for e in emitted]
+        assert EventType.UPDATE_STARTED not in types
+        update_failed = [e for e in emitted if e.event_type is EventType.UPDATE_FAILED]
+        assert len(update_failed) == 1
+        details = update_failed[0].details
+        assert details["reason"] == "uv executable not found"
+        assert details["attempted_subprocess"] is False
+        assert details["via_worker"] is True
+        assert details["candidates_tried"] == [r"C:\Users\lab\.local\bin\uv.exe"]
+
+    def test_schtasks_failure_clears_sentinels_and_emits_update_failed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Most likely cause: the scheduled task isn't registered (a
+        # fleet PC that auto-updated into worker-aware code without
+        # re-running ``service install``). The dispatch must:
+        #   1. Clear its own request sentinel + marker so the next
+        #      tick can try again from a clean slate.
+        #   2. Surface UPDATE_FAILED with a reason that points at
+        #      the recovery command.
+        #   3. NOT call request_restart (the worker is what stops
+        #      the service; without it firing we must stay alive).
+        from data_hub_watcher.scheduled_task import ScheduledTaskError
+        from data_hub_watcher.upgrade_worker import (
+            UPGRADE_REQUEST_FILENAME,
+            UPGRADE_RESULT_FILENAME,
+        )
+
+        h = _make_updater(tmp_path)
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+        self._force_windows_uv_tool(monkeypatch)
+
+        def boom(**_kw: Any) -> None:
+            raise ScheduledTaskError(
+                "schtasks /Run failed for 'DataHubWatcherUpgrade'",
+                argv=["schtasks.exe", "/Run", "/TN", "DataHubWatcherUpgrade"],
+                stderr="ERROR: The system cannot find the file specified.",
+                returncode=1,
+            )
+
+        monkeypatch.setattr("data_hub_watcher.scheduled_task.trigger_upgrade_task", boom)
+
+        h.counters.last_files_uploaded = 0
+        h.updater.on_tick()
+        h.updater.on_tick()
+        result = h.updater.on_tick()
+
+        assert result is not None
+        assert result.attempted is True
+        assert result.succeeded is False
+        assert "scheduled task" in result.reason
+        # Sentinels must be cleared so the next tick isn't gated on
+        # a stale request file from a failed dispatch.
+        assert not (tmp_path / ".data-hub" / UPGRADE_REQUEST_FILENAME).exists()
+        assert not (tmp_path / ".data-hub" / UPGRADE_MARKER_FILENAME).exists()
+        # And of course there's no result sentinel — the worker
+        # never ran.
+        assert not (tmp_path / ".data-hub" / UPGRADE_RESULT_FILENAME).exists()
+
+        h.request_restart.assert_not_called()
+
+        emitted = [c.args[0] for c in h.reporter.queue_event.call_args_list]
+        update_failed = [e for e in emitted if e.event_type is EventType.UPDATE_FAILED]
+        assert len(update_failed) == 1
+        details = update_failed[0].details
+        assert details["via_worker"] is True
+        assert details["attempted_subprocess"] is False
+        assert "schtasks_stderr" in details
+        assert details["schtasks_returncode"] == 1
+        assert "service reinstall" in details["reason"]
+
+    def test_posix_uv_tool_still_uses_in_process_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The worker dispatch is gated on Windows specifically. POSIX
+        # uv-tool installs continue to use the inline subprocess
+        # because they don't have the file-lock issue and the inline
+        # path gives the dashboard live UPDATE_STARTED -> succeeded
+        # event pairing without an extra hop.
+        runner = MagicMock(return_value=_success_completed_process())
+        h = _make_updater(tmp_path, upgrade_runner=runner)
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+
+        monkeypatch.setattr("data_hub_watcher.updater.sys.platform", "linux")
+        monkeypatch.setattr(
+            "data_hub_watcher.updater.detect_install_method",
+            lambda: InstallMethod.UV_TOOL,
+        )
+        # If anything tried to dispatch through the worker, this
+        # would explode loudly rather than passing silently.
+        monkeypatch.setattr(
+            "data_hub_watcher.scheduled_task.trigger_upgrade_task",
+            lambda **_kw: pytest.fail("POSIX uv-tool must not route through the worker"),
+        )
+
+        h.counters.last_files_uploaded = 0
+        h.updater.on_tick()
+        h.updater.on_tick()
+        result = h.updater.on_tick()
+
+        assert result is not None
+        assert result.attempted is True
+        assert result.succeeded is True
+        runner.assert_called_once()
+        h.request_restart.assert_called_once_with("9.9.9")
+
+    def test_windows_pip_install_still_uses_in_process_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Windows pip-installed watchers don't have the lock issue
+        # because pip rewrites individual files in site-packages
+        # rather than recreating Scripts\\. They keep using the
+        # inline subprocess path.
+        runner = MagicMock(return_value=_success_completed_process())
+        h = _make_updater(tmp_path, upgrade_runner=runner)
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+
+        monkeypatch.setattr("data_hub_watcher.updater.sys.platform", "win32")
+        monkeypatch.setattr(
+            "data_hub_watcher.updater.detect_install_method",
+            lambda: InstallMethod.PIP,
+        )
+        monkeypatch.setattr(
+            "data_hub_watcher.scheduled_task.trigger_upgrade_task",
+            lambda **_kw: pytest.fail("Windows pip installs must not route through the worker"),
+        )
+
+        h.counters.last_files_uploaded = 0
+        h.updater.on_tick()
+        h.updater.on_tick()
+        result = h.updater.on_tick()
+
+        assert result is not None
+        assert result.succeeded is True
+        runner.assert_called_once()

@@ -23,6 +23,7 @@ is then cleared so a single failure isn't reported indefinitely.
 from __future__ import annotations
 import json
 import logging
+import sys
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -36,14 +37,21 @@ from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import WatcherCounters
 from data_hub_watcher.models import WatcherConfig, WatcherUpdateInfoResponse
 from data_hub_watcher.self_update import (
+    DEFAULT_INDEX_URL,
     InstallMethod,
     UvExecutableNotFoundError,
+    _resolve_uv_executable,
     build_upgrade_command,
     detect_install_method,
     evaluate_update,
     run_upgrade,
 )
 from data_hub_watcher.state import StateDB
+from data_hub_watcher.upgrade_worker import (
+    build_pkg_spec,
+    detect_installed_extras,
+    write_upgrade_request,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +85,20 @@ class UpdaterConfig:
     # reason about heartbeat timing.
     min_run_age_seconds: float | None = None
     run_quiet_multiplier: int = DEFAULT_RUN_QUIET_MULTIPLIER
+    # When True (the production default), the very first heartbeat tick
+    # after process startup fires an ``/update-check`` API call instead
+    # of waiting a full ``check_interval_ticks`` window — so a fresh
+    # service restart picks up a pending release within one heartbeat
+    # interval (~60 s) rather than up to an hour. The activity-window
+    # gates inside ``should_attempt_update`` still apply: if an upload
+    # or run was happening when the previous instance died, the
+    # ``last_run_age_seconds`` / ``idle_ticks_required`` checks defer
+    # the actual upgrade attempt as designed. The on-start fast path
+    # only short-circuits the *cadence* part of the gate, not the
+    # *safety* part. Tests opt out via ``check_on_start=False`` so
+    # their existing cadence assertions (``for _ in range(N): on_tick();
+    # then trigger on the (N+1)th``) keep working unchanged.
+    check_on_start: bool = True
 
 
 @dataclass
@@ -328,7 +350,22 @@ class Updater:
         self._upgrade_executor = upgrade_executor or _default_upgrade_executor
 
         self._idle_ticks = 0
-        self._ticks_since_check = 0
+        # Seed the cadence counter so the very first tick fires an
+        # ``/update-check`` API call when ``check_on_start`` is set
+        # (the production default). With ``check_interval_ticks=60``
+        # and a 60-second heartbeat, the cold-start latency for
+        # picking up a pending release drops from "up to 60 minutes"
+        # to "~60 seconds" — which matters most during testing
+        # iteration (operator runs ``service reinstall``, then sees
+        # the next attempt within one heartbeat instead of an hour)
+        # but is also a small operability win in production: a host
+        # that just rebooted picks up the latest version immediately
+        # rather than running stale code for the first hour after
+        # boot. The activity-window gates in ``should_attempt_update``
+        # still defer the actual upgrade if there's recent run /
+        # upload activity, so this short-circuits cadence only — not
+        # safety.
+        self._ticks_since_check = c.check_interval_ticks if c.check_on_start else 0
         self._upgrade_in_progress = False
         # Per-target memo for the "ineligible install method" refusal
         # path: we want one ``UPDATE_FAILED`` event per *new* server
@@ -458,6 +495,26 @@ class Updater:
                 self._last_refused_target = target
             return UpdateAttemptResult(True, False, reason, target, {"method": method.value})
 
+        # Windows uv-tool installs cannot reinstall in-process: the
+        # service's own ``Scripts\\python.exe`` is the file ``uv``
+        # would need to delete. Route those through the SYSTEM-owned
+        # scheduled-task worker instead, which stops the service
+        # before invoking ``uv``. POSIX uv-tool, Windows pip, and
+        # POSIX pip continue to use the inline subprocess path —
+        # they don't have the lock issue and the inline path gives
+        # the dashboard live UPDATE_STARTED → UPDATE_FAILED pairing
+        # without an extra hop through a sentinel file.
+        if sys.platform == "win32" and method is InstallMethod.UV_TOOL:
+            return self._apply_via_worker(info, method, target)
+
+        return self._apply_in_process(info, method, target)
+
+    def _apply_in_process(
+        self,
+        info: WatcherUpdateInfoResponse,
+        method: InstallMethod,
+        target: str,
+    ) -> UpdateAttemptResult:
         # Resolve the upgrade argv up-front. Doing this before we emit
         # UPDATE_STARTED / write the marker means a missing `uv` binary
         # (the Windows-service / LocalSystem PATH failure mode) becomes
@@ -558,17 +615,36 @@ class Updater:
                     outcome.append(UpdateAttemptResult(True, False, str(exc), target))
                     return
 
+                # Always log the subprocess output to ``watcher.log``
+                # regardless of returncode. Historically the only
+                # signal we had on a partial-install (uv exits 0
+                # despite cleanup failures, or the auto-updater
+                # mis-classifies the exit code) was the marker
+                # comparison on the next startup — by which point
+                # the actual installer error was already lost.
+                # Mirroring the output to the local log keeps it
+                # recoverable on a lab PC even when the dashboard
+                # event ends up incomplete.
+                stdout_tail = (result.stdout or "")[-1000:]
+                stderr_tail = (result.stderr or "")[-1000:]
+                logger.info(
+                    "Upgrade subprocess exited %d (stdout tail): %s",
+                    result.returncode,
+                    stdout_tail or "(empty)",
+                )
+                if stderr_tail:
+                    log_method = logger.warning if result.returncode != 0 else logger.info
+                    log_method("Upgrade subprocess stderr tail: %s", stderr_tail)
+
                 if result.returncode != 0:
-                    stdout = (result.stdout or "")[-1000:]
-                    stderr = (result.stderr or "")[-1000:]
                     self._emit_failure(
                         target,
                         f"subprocess exited {result.returncode}",
                         extra={
                             "install_method": method.value,
                             "command": command,
-                            "stdout_tail": stdout,
-                            "stderr_tail": stderr,
+                            "stdout_tail": stdout_tail,
+                            "stderr_tail": stderr_tail,
                         },
                     )
                     outcome.append(
@@ -612,6 +688,154 @@ class Updater:
             reason="upgrade subprocess dispatched (running off-thread)",
             target_version=target,
             extra={"in_progress": True, "method": method.value},
+        )
+
+    def _apply_via_worker(
+        self,
+        info: WatcherUpdateInfoResponse,
+        method: InstallMethod,
+        target: str,
+    ) -> UpdateAttemptResult:
+        """Dispatch an upgrade through the SYSTEM-owned scheduled task.
+
+        Used on Windows uv-tool installs where the in-process
+        ``uv tool install --reinstall`` cannot complete because it
+        would need to delete ``Scripts\\python.exe`` while it's
+        mapped into the running service. The worker stops the service
+        first, runs ``uv``, then starts the service again — we just
+        write the request sentinel and trigger the task.
+
+        Pre-flight failures (no ``uv`` on disk, ``schtasks`` refuses
+        the trigger) are surfaced as ``UPDATE_FAILED`` events with no
+        preceding ``UPDATE_STARTED`` so the dashboard doesn't show a
+        ghost in-flight upgrade. The success / final-failure events
+        are emitted from the post-restart marker evaluation in
+        :mod:`data_hub_watcher.runtime`, which reads the result
+        sentinel the worker drops on disk.
+        """
+        # Lazy import keeps non-Windows test runs from importing the
+        # scheduled-task wrapper (which itself is import-safe today
+        # but might pull in win32 helpers later).
+        from data_hub_watcher.scheduled_task import (
+            ScheduledTaskError,
+            trigger_upgrade_task,
+        )
+
+        uv_path, candidates = _resolve_uv_executable()
+        if uv_path is None:
+            reason = "uv executable not found"
+            logger.warning("Refusing auto-update via worker: %s", reason)
+            self._emit_failure(
+                target,
+                reason,
+                extra={
+                    "install_method": method.value,
+                    "attempted_subprocess": False,
+                    "via_worker": True,
+                    "candidates_tried": candidates,
+                },
+            )
+            return UpdateAttemptResult(True, False, reason, target, {"method": method.value})
+
+        extras = detect_installed_extras()
+        try:
+            pkg_spec = build_pkg_spec(method, target_version=target, extras=extras)
+        except ValueError as exc:
+            # Defensive — we already filtered EDITABLE / UNKNOWN above.
+            self._emit_failure(
+                target,
+                f"could not build pkg spec: {exc}",
+                extra={"install_method": method.value, "attempted_subprocess": False},
+            )
+            return UpdateAttemptResult(True, False, str(exc), target)
+
+        details_started: dict[str, Any] = {
+            "current_version": WATCHER_VERSION,
+            "target_version": target,
+            "channel": info.channel,
+            "mandatory": info.mandatory,
+            "install_method": method.value,
+            "via_worker": True,
+            "pkg_spec": pkg_spec,
+        }
+        self._reporter.queue_event(
+            WatcherEvent(
+                event_type=EventType.UPDATE_STARTED,
+                message=f"Dispatching upgrade {WATCHER_VERSION} -> {target} via worker",
+                details=details_started,
+            )
+        )
+        # Flush before triggering so the dashboard sees the start
+        # even if the service is stopped almost immediately by the
+        # worker (the heartbeat loop doesn't get another chance to
+        # flush before SCM tears it down).
+        self._reporter.flush()
+
+        write_upgrade_marker(
+            self._config_dir,
+            target_version=target,
+            previous_version=WATCHER_VERSION,
+        )
+        write_upgrade_request(
+            self._config_dir,
+            target_version=target,
+            pkg_spec=pkg_spec,
+            uv_executable=uv_path,
+            index_url=DEFAULT_INDEX_URL,
+            previous_version=WATCHER_VERSION,
+            install_method=method.value,
+        )
+
+        try:
+            trigger_upgrade_task()
+        except ScheduledTaskError as exc:
+            # ``schtasks`` refused — most commonly because the task
+            # isn't registered (fleet PC that auto-updated into the
+            # worker-aware code without re-running ``service install``).
+            # Clear our own sentinels so the next tick can try again
+            # from a clean slate, and surface the failure with a
+            # specific reason that points at the recovery command.
+            logger.warning("schtasks /Run failed: %s", exc)
+            clear_upgrade_marker(self._config_dir)
+            from data_hub_watcher.upgrade_worker import clear_upgrade_request
+
+            clear_upgrade_request(self._config_dir)
+            self._emit_failure(
+                target,
+                "scheduled task could not be triggered; "
+                "run 'data-hub-watcher service reinstall' as Administrator",
+                extra={
+                    "install_method": method.value,
+                    "attempted_subprocess": False,
+                    "via_worker": True,
+                    "schtasks_argv": exc.argv,
+                    "schtasks_stderr": exc.stderr,
+                    "schtasks_returncode": exc.returncode,
+                    "error_class": type(exc).__name__,
+                },
+            )
+            return UpdateAttemptResult(
+                True,
+                False,
+                "scheduled task trigger failed",
+                target,
+                {"method": method.value, "via_worker": True},
+            )
+
+        # The worker stops the service before invoking ``uv``, so we
+        # don't expect to be alive much longer. The success /
+        # final-failure event is emitted from the next process's
+        # post-restart marker evaluation. We do NOT call
+        # ``_request_upgrade_restart`` here — the worker drives the
+        # service lifecycle (Stop-Service then Start-Service)
+        # directly via ``schtasks``, bypassing SCM's failure-actions
+        # restart path entirely.
+        return UpdateAttemptResult(
+            attempted=True,
+            succeeded=None,
+            reason="upgrade dispatched to scheduled task",
+            target_version=target,
+            extra={"method": method.value, "via_worker": True},
         )
 
     def _emit_failure(

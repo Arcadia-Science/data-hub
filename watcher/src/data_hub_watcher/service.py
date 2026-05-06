@@ -18,10 +18,11 @@ from __future__ import annotations
 import logging
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
-from data_hub_watcher.constants import SERVICE_NAME
+from data_hub_watcher.constants import DEFAULT_CONFIG_DIR, SERVICE_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,12 @@ SERVICE_DESCRIPTION = "Monitors instrument directories and uploads data files to
 _REG_KEY = rf"SYSTEM\CurrentControlSet\Services\{SERVICE_NAME}"
 _REG_CONFIG_PATH = "ConfigPath"
 _REG_ENV_PATH = "EnvPath"
+
+# Win32 system error codes returned by ``OpenService`` / ``CreateService``
+# while a service is in the asynchronous DeleteService teardown window.
+# Documented at https://learn.microsoft.com/windows/win32/debug/system-error-codes--1000-1299-.
+_ERROR_SERVICE_DOES_NOT_EXIST = 1060
+_ERROR_SERVICE_MARKED_FOR_DELETE = 1072
 
 # Windows services that must be running before the watcher can usefully
 # contact the Data Hub API. Declaring these as dependencies makes the SCM
@@ -78,7 +85,85 @@ def install_service(config_path: Path, env_path: Path) -> None:
 
     _store_paths_in_registry(config_path, env_path)
     _configure_recovery()
+    # The worker template bakes its sentinel paths in at render time,
+    # so we render against the operator's chosen config directory
+    # (``config_path.parent``) rather than the import-time
+    # ``DEFAULT_CONFIG_DIR``. The two are equivalent for default
+    # installs but diverge when an operator passes a custom
+    # ``--config-path``, and — critically — diverge between the
+    # operator's user account and the LocalSystem account the service
+    # itself runs under. The matching read side in ``_run_service_loop``
+    # consults the registry for the same reason.
+    _install_upgrade_worker(config_path.parent)
     logger.info("Service '%s' installed successfully", SERVICE_NAME)
+
+
+def _install_upgrade_worker(config_dir: Path) -> None:
+    """Drop the upgrade-worker PowerShell script and register the task.
+
+    Splits cleanly from ``install_service`` so unit tests can patch
+    just this function out (the SCM bits don't need to know about the
+    upgrade worker, and the upgrade-worker bits don't need a real
+    ``win32serviceutil`` to test). Failure here is logged but
+    re-raised so the operator running ``service install`` sees a clear
+    error rather than a silently-broken auto-update path.
+
+    *config_dir* must be the directory the running watcher service will
+    later use for its sentinels — the worker template bakes the
+    request/result paths in at render time, so a mismatch here results
+    in the worker reading from one directory while the service writes
+    to another (and the auto-update silently no-ops every tick).
+
+    The operator's uv tool directories are resolved here (rather than
+    inside the worker) because the SYSTEM account that later executes
+    the worker resolves them against the wrong profile —
+    ``C:\\Windows\\System32\\config\\systemprofile\\.local\\...`` rather
+    than ``C:\\Users\\<op>\\.local\\...``. We capture the operator's
+    paths once at install time and bake them into the rendered
+    template via ``UV_TOOL_DIR`` / ``UV_TOOL_BIN_DIR`` overrides; see
+    :func:`data_hub_watcher.upgrade_worker.resolve_uv_tool_dirs` for
+    the long form of the rationale.
+    """
+    from data_hub_watcher.scheduled_task import install_upgrade_task
+    from data_hub_watcher.self_update import (
+        UvExecutableNotFoundError,
+        _resolve_uv_executable,
+    )
+    from data_hub_watcher.upgrade_worker import (
+        UvToolDirResolutionError,
+        resolve_uv_tool_dirs,
+        write_worker_script,
+    )
+
+    uv_path, _tried = _resolve_uv_executable()
+    if uv_path is None:
+        # The same `UvExecutableNotFoundError` the in-process updater
+        # raises — re-uses the operator-facing message format so a
+        # ``service install`` failure here looks identical to a stuck
+        # ``self-update``, which lab-PC docs already cover.
+        raise UvExecutableNotFoundError(_tried)
+    try:
+        tool_dir, tool_bin_dir = resolve_uv_tool_dirs(uv_path)
+    except UvToolDirResolutionError:
+        # Re-raise so ``service install`` aborts loudly. Letting the
+        # install proceed with default tool dirs (i.e. omitting the
+        # env-var overrides) would just reproduce the SYSTEM-installs-
+        # to-wrong-place bug we're trying to fix.
+        raise
+
+    script_path = write_worker_script(
+        config_dir,
+        service_name=SERVICE_NAME,
+        tool_dir=tool_dir,
+        tool_bin_dir=tool_bin_dir,
+    )
+    install_upgrade_task(script_path)
+    logger.info(
+        "Upgrade worker script + scheduled task registered under %s (uv tool dir=%s, bin dir=%s)",
+        config_dir,
+        tool_dir,
+        tool_bin_dir,
+    )
 
 
 def _store_paths_in_registry(config_path: Path, env_path: Path) -> None:
@@ -207,9 +292,103 @@ def uninstall_service() -> None:
     except Exception:
         pass  # already stopped or doesn't exist
 
+    # Try the registry first so we clean up the worker script in the
+    # operator's actual config directory rather than wherever
+    # ``DEFAULT_CONFIG_DIR`` happens to resolve in this process
+    # (it'd be wrong, e.g., if uninstall is invoked from an elevated
+    # ``runas /user:SYSTEM`` shell). If the registry read fails we fall
+    # back to ``DEFAULT_CONFIG_DIR`` so a partially-broken install
+    # doesn't block uninstall — leaving the script behind is harmless
+    # without the matching scheduled task.
+    try:
+        config_path, _env_path = _read_paths_from_registry()
+        worker_config_dir = config_path.parent
+    except OSError:
+        worker_config_dir = DEFAULT_CONFIG_DIR
+    _uninstall_upgrade_worker(worker_config_dir)
     _delete_paths_from_registry()
     win32serviceutil.RemoveService(SERVICE_NAME)
     logger.info("Service '%s' removed", SERVICE_NAME)
+
+
+def _uninstall_upgrade_worker(config_dir: Path) -> None:
+    """Best-effort removal of the upgrade-worker scheduled task + script.
+
+    Idempotent (the underlying ``schtasks /Delete`` swallows
+    "task does not exist") and tolerant of older installs that never
+    registered the task — we don't want to block ``uninstall_service``
+    on a clean slate that's already clean.
+    """
+    from data_hub_watcher.scheduled_task import (
+        ScheduledTaskError,
+        uninstall_upgrade_task,
+    )
+    from data_hub_watcher.upgrade_worker import upgrade_worker_script_path
+
+    try:
+        uninstall_upgrade_task()
+    except ScheduledTaskError as exc:
+        logger.warning("Could not remove upgrade scheduled task: %s", exc)
+
+    script_path = upgrade_worker_script_path(config_dir)
+    try:
+        script_path.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning("Could not remove upgrade worker script %s: %s", script_path, exc)
+
+
+def wait_for_service_removed(
+    *,
+    timeout_seconds: float = 30.0,
+    poll_interval_seconds: float = 0.5,
+) -> bool:
+    """Block until the service is fully removed from the SCM, or *timeout* elapses.
+
+    ``DeleteService`` (called via ``win32serviceutil.RemoveService``) is
+    asynchronous: Windows only *marks* the service for deletion, and the
+    actual record is removed once every open handle to it is closed —
+    including handles held by ``services.msc``, Event Viewer's "Services"
+    pane, Task Manager, and some antivirus / EDR agents that enumerate
+    services.  Until that happens, ``CreateService`` with the same name
+    fails with ``ERROR_SERVICE_MARKED_FOR_DELETE`` (1072), which is the
+    confusing error operators see when ``service reinstall`` runs back-to-
+    back uninstall + install on a host with the Services console open.
+
+    We poll the SCM with ``OpenService``: the service is fully gone the
+    moment that call raises ``ERROR_SERVICE_DOES_NOT_EXIST`` (1060).
+    Returns ``True`` if the service disappeared inside the deadline,
+    ``False`` if it's still hanging around — callers should treat the
+    latter as actionable (close ``services.msc`` and retry) rather than
+    a fatal SCM error.
+    """
+    import pywintypes  # type: ignore[import-untyped]
+    import win32service as ws  # type: ignore[import-untyped]
+
+    deadline = time.monotonic() + timeout_seconds
+    hscm = ws.OpenSCManager(None, None, ws.SC_MANAGER_CONNECT)
+    try:
+        while True:
+            try:
+                hs = ws.OpenService(hscm, SERVICE_NAME, ws.SERVICE_QUERY_STATUS)
+            except pywintypes.error as exc:
+                # winerror lives at index 0 of the (code, func, msg) tuple
+                # but pywintypes.error also exposes it as an attribute on
+                # modern pywin32. Prefer the attribute, fall back to args
+                # so this works against the MagicMock-based test fakes.
+                code = getattr(exc, "winerror", None)
+                if code is None and exc.args:
+                    code = exc.args[0]
+                if code == _ERROR_SERVICE_DOES_NOT_EXIST:
+                    return True
+                raise
+            else:
+                ws.CloseServiceHandle(hs)
+
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(poll_interval_seconds)
+    finally:
+        ws.CloseServiceHandle(hscm)
 
 
 def start_service() -> None:
@@ -264,6 +443,98 @@ def query_service_status() -> dict[str, Any]:
         ws.CloseServiceHandle(hscm)
 
 
+def _repair_upgrade_worker_if_missing(sm: Any, config_dir: Path) -> None:
+    """Re-register the upgrade scheduled task on startup if it has gone missing.
+
+    Lab PCs that auto-update into the version that introduced the
+    out-of-process worker won't have run ``service install`` with the
+    new code, so the scheduled task simply isn't there — and the next
+    auto-update tick would fail loudly. Repairing on each service
+    startup means the host self-heals on the very next service restart
+    (which the auto-updater triggers anyway) for the common case where
+    the rendered worker script is still on disk and only the task
+    record was lost (e.g. an operator manually deleted it in
+    ``taskschd.msc``).
+
+    Critical scope limit: this helper does NOT re-render the worker
+    template. Re-rendering requires the *operator's* uv tool
+    directories from ``uv tool dir`` / ``uv tool dir --bin``, and the
+    service runs as LocalSystem so any uv invocation from here would
+    resolve those paths against the SYSTEM profile rather than the
+    operator's. A SYSTEM-rendered template would bake in the wrong
+    ``UV_TOOL_DIR`` / ``UV_TOOL_BIN_DIR`` and silently install future
+    upgrades into ``C:\\Windows\\System32\\config\\systemprofile\\
+    .local\\...`` instead of the operator's profile — exactly the bug
+    we're trying to prevent. If the rendered script is also missing
+    from *config_dir*, the only safe recovery is for the operator to
+    run ``data-hub-watcher service reinstall`` from their own shell;
+    we log a clear pointer and punt rather than render-against-SYSTEM
+    a worker that would corrupt the next auto-update.
+
+    *config_dir* must be the operator's resolved config directory (the
+    parent of the registry-stored config path) — see the comment on
+    :class:`~data_hub_watcher.runtime.WatcherRuntime.config_dir` for
+    why ``DEFAULT_CONFIG_DIR`` would resolve incorrectly here.
+
+    Failures are logged via the Windows event log but do not raise:
+    a host that can't register the task should still be able to run
+    the watcher in its current version. The next auto-update attempt
+    will surface the missing task as an ``UPDATE_FAILED`` event with
+    a clearer reason.
+    """
+    try:
+        from data_hub_watcher.scheduled_task import (
+            ScheduledTaskError,
+            install_upgrade_task,
+            task_exists,
+        )
+        from data_hub_watcher.upgrade_worker import upgrade_worker_script_path
+    except Exception as exc:
+        sm.LogWarningMsg(f"Cannot import upgrade worker modules during startup: {exc}")
+        return
+
+    try:
+        present = task_exists()
+    except ScheduledTaskError as exc:
+        sm.LogWarningMsg(
+            f"Could not query upgrade scheduled task: {exc}. "
+            "Auto-update may be unavailable until 'data-hub-watcher service "
+            "reinstall' is run."
+        )
+        return
+
+    if present:
+        return
+
+    script_path = upgrade_worker_script_path(config_dir)
+    if not script_path.exists():
+        # We deliberately do NOT re-render here — see the docstring
+        # for why a SYSTEM-rendered template would silently break the
+        # very thing the repair is meant to fix.
+        sm.LogWarningMsg(
+            f"Upgrade scheduled task is missing AND the rendered worker "
+            f"script is absent from {script_path}. Cannot self-repair "
+            "from a LocalSystem context. Run "
+            "'data-hub-watcher service reinstall' as Administrator to "
+            "re-render the worker against the operator's uv tool "
+            "directories and re-register the task."
+        )
+        return
+
+    sm.LogInfoMsg(
+        f"Upgrade scheduled task missing but worker script is present at "
+        f"{script_path}; re-registering the task pointing at the existing "
+        "rendered script."
+    )
+    try:
+        install_upgrade_task(script_path)
+    except (OSError, ScheduledTaskError) as exc:
+        sm.LogWarningMsg(
+            f"Failed to register upgrade scheduled task: {exc}. "
+            "Run 'data-hub-watcher service reinstall' as Administrator to retry."
+        )
+
+
 def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
     """Run the watcher service loop until *stop_event* is set.
 
@@ -305,6 +576,12 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
 
     sm.LogInfoMsg(f"{SERVICE_DISPLAY_NAME} starting")
 
+    # Read registry paths BEFORE the upgrade-worker self-repair so
+    # both have a single source of truth for the operator's config
+    # directory. Doing the repair first would force it to fall back
+    # to ``DEFAULT_CONFIG_DIR`` — which under LocalSystem points at
+    # the SYSTEM profile, not the operator's profile, and would bake
+    # the wrong sentinel paths into the regenerated worker script.
     try:
         path, env_path = _read_paths_from_registry()
     except Exception as exc:
@@ -313,6 +590,8 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
             "Re-run 'data-hub-watcher service install'."
         )
         raise SystemExit(1) from exc
+
+    _repair_upgrade_worker_if_missing(sm, path.parent)
 
     # Mirror the CLI's ``load_env`` semantics: load the base
     # ``~/.data-hub/.env`` first (for any shared, non-secret values
@@ -361,7 +640,12 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
         raise SystemExit(1)
 
     db_path = path.parent / STATE_DB_FILENAME
-    rt = build_runtime(client=client, cfg=cfg, db_path=db_path)
+    # Pass the registry-resolved config directory through to the
+    # runtime so the auto-update sentinels land where the SYSTEM-owned
+    # upgrade worker (whose paths were baked in at install time
+    # against the same directory) actually reads from. See
+    # ``WatcherRuntime.config_dir`` for the gory details.
+    rt = build_runtime(client=client, cfg=cfg, db_path=db_path, config_dir=path.parent)
 
     # Step 2: sync config checksum (now that we have a reporter, any
     # failure surfaces as kind=config_sync_failed in the dashboard

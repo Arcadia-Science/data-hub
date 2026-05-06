@@ -88,13 +88,15 @@ curl https://data-hub.arcadiascience.com/api/v1/instruments \
 
 Go to **Settings > Access Tokens** in the web app. The table shows:
 
-| Column | Description |
-| --- | --- |
-| **Name** | The label you gave the token |
-| **Token** | The prefix only (e.g., `dhub_a1b2...`) — the full token is never stored |
-| **Last used** | When the token was last used to authenticate an API request |
-| **Expires** | Expiration date, or "Never" |
-| **Created** | When the token was created |
+
+| Column        | Description                                                             |
+| ------------- | ----------------------------------------------------------------------- |
+| **Name**      | The label you gave the token                                            |
+| **Token**     | The prefix only (e.g., `dhub_a1b2...`) — the full token is never stored |
+| **Last used** | When the token was last used to authenticate an API request             |
+| **Expires**   | Expiration date, or "Never"                                             |
+| **Created**   | When the token was created                                              |
+
 
 ## Revoking a token
 
@@ -128,14 +130,12 @@ If you revoke a token that a running watcher is using, the watcher will start fa
 
 1. Create a new token.
 2. On the instrument PC, re-run the setup wizard:
-
-   ```sh
+  ```sh
    data-hub-watcher init
-   ```
-
+  ```
 3. Enter the new token when prompted.
 4. Restart the watcher:
-
-   ```sh
+  ```sh
    data-hub-watcher watch
-   ```
+  ```
+
