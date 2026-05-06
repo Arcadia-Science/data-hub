@@ -53,24 +53,17 @@ data-hub-watcher init
 The wizard will walk you through:
 
 1. **Environment** — choose `staging` (for testing), `production`, or `preview` (for testing against a Vercel preview deployment). If you choose `preview`, you'll be prompted for the deployment's API base URL (e.g. `https://data-hub-git-my-branch.vercel.app/api/v1`).
-
 2. **API key** — paste the personal access token. The key is saved to `~/.data-hub/.env.<environment>` (e.g. `~/.data-hub/.env.staging`), so each environment keeps its own key and you can switch between them by re-running `init` without re-entering credentials. You can also set the `DATA_HUB_API_KEY` environment variable before running `init` to skip this prompt.
-
 3. **Instrument** — select an existing instrument from the list, or register a new one by choosing the last option. New instruments start as `pending` and must be activated by an admin in the web app before the watcher can start.
-
 4. **Watch directory** — the absolute path to the folder the instrument writes to.
-
 5. **File patterns** — comma-separated glob patterns (e.g., `*.csv,*.xlsx`). Only files matching these patterns will be uploaded.
-
 6. **Run detection method**:
-   - **`prefix`** — extracts a run ID from each filename using a regex. The default pattern `^([^_]+)` captures everything before the first underscore (e.g., `RUN001_data.csv` → run ID `RUN001`).
-   - **`directory`** — each subdirectory under the watch directory is treated as a separate run.
-
+  - `**prefix`** — extracts a run ID from each filename using a regex. The default pattern `^([^_]+)` captures everything before the first underscore (e.g., `RUN001_data.csv` → run ID `RUN001`).
+  - `**directory**` — each subdirectory under the watch directory is treated as a separate run.
 7. **Stability period** — how many seconds a file must remain unchanged (size + modification time) before it's considered fully written. Increase this for instruments that produce large files slowly. Default is 5 seconds.
-
 8. **Upload mode**:
-   - **`auto`** — files are uploaded to S3 immediately after detection.
-   - **`manual`** — files are reported to the server but not uploaded until an admin approves them via the upload queue.
+  - `**auto`** — files are uploaded to S3 immediately after detection.
+  - `**manual**` — files are reported to the server but not uploaded until an admin approves them via the upload queue.
 
 The wizard saves configuration to `~/.data-hub/config.yaml`, the API key to `~/.data-hub/.env.<environment>`, and syncs the config to the server.
 
@@ -117,28 +110,6 @@ data-hub-watcher service stop      # Stop the service
 data-hub-watcher service uninstall # Remove the service
 data-hub-watcher service reinstall # Stop, uninstall, install, and start (e.g. after a manual wheel upgrade)
 ```
-
-> **Tip:** Close `services.msc` (and any open Event Viewer / Task Manager
-> "Services" tabs) before running `service reinstall`. The Windows SCM
-> defers `DeleteService` until every open handle is closed; if a console
-> is still pointing at `DataHubWatcher`, the reinstall waits up to 30 s
-> for the SCM to finish and then aborts with an actionable error rather
-> than the raw `(1072, 'CreateService', 'marked for deletion')` failure.
-
-> **Note (auto-update):** `service install` also drops a small PowerShell
-> worker under `~/.data-hub/upgrade-worker.ps1` and registers it as the
-> `DataHubWatcherUpgrade` Scheduled Task running as `SYSTEM`. The
-> auto-updater and `data-hub-watcher self-update` both route Windows
-> uv-tool upgrades through that task — the watcher's own
-> `Scripts\python.exe` is mapped into the running service process and
-> Windows refuses to let `uv` replace it in place, so the upgrade is
-> driven from a process tree that doesn't include the service. **Lab PCs
-> already running an older watcher build must be upgraded once with
-> `data-hub-watcher service reinstall` after they auto-update into
-> v0.2.0 or later** — that one-time reinstall is what registers the
-> Scheduled Task. The next service start lazily re-registers a missing
-> task on its own, so most fleet PCs will self-heal without operator
-> intervention.
 
 ## Changing configuration
 
@@ -234,3 +205,4 @@ The watcher writes rotating logs to `~/.data-hub/watcher.log` (10 MB, 5 backups)
 ```sh
 data-hub-watcher --verbose watch
 ```
+

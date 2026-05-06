@@ -16,9 +16,9 @@ On each tick the service:
 
 1. Calls `GET /api/v1/watchers/<watcher-id>/update-check` and compares the server's `latest_version` against its own.
 2. Only attempts an upgrade if **all** of these are true: a newer version is available, no files have been uploaded for several heartbeats in a row, and no run has been reported within roughly 5× the configured `stability_period_seconds`. The activity-window guard exists so the watcher never takes itself down mid-acquisition.
-    - **Exception:** releases flagged as `mandatory` on the server skip the activity-window check entirely and are applied immediately — this is reserved for security fixes or breaking wire-protocol changes where leaving the old version running is worse than a brief interruption.
+  - **Exception:** releases flagged as `mandatory` on the server skip the activity-window check entirely and are applied immediately — this is reserved for security fixes or breaking wire-protocol changes where leaving the old version running is worse than a brief interruption.
 3. Drives the upgrade subprocess via the path appropriate for the install:
-    - **Windows uv-tool installs (the recommended fleet setup)** — writes a request sentinel to `~/.data-hub/.upgrade-request.json` and triggers the `DataHubWatcherUpgrade` Scheduled Task that `service install` registered. The task runs as `SYSTEM`, stops the watcher service, runs `uv tool install --reinstall`, drops a result sentinel for the dashboard, and starts the service again. This out-of-process flow is necessary because `uv` cannot replace `Scripts\python.exe` while it is mapped into the running service process.
+  - **Windows uv-tool installs (the recommended fleet setup)** — writes a request sentinel to `~/.data-hub/.upgrade-request.json` and triggers the `DataHubWatcherUpgrade` Scheduled Task that `service install` registered. The task runs as `SYSTEM`, stops the watcher service, runs `uv tool install --reinstall`, drops a result sentinel for the dashboard, and starts the service again. This out-of-process flow is necessary because `uv` cannot replace `Scripts\python.exe` while it is mapped into the running service process.
     - **POSIX (Linux/macOS) and Windows pip installs** — runs `uv tool install --reinstall` (or the `pip install -U` equivalent) directly on a background thread, then exits non-zero so the SCM (or the foreground CLI) restarts into the new wheel.
 4. Before any subprocess starts, the service emits an `update_started` event you can see in the **Watchers** page. The new process emits `update_succeeded` once it confirms the new version is actually loaded; if the new code crashes at startup or otherwise doesn't take effect, you'll see `update_failed` instead. On Windows uv-tool installs, the success/failure event also carries the worker's captured `worker_returncode`, `worker_stdout_tail`, and `worker_stderr_tail` so you can debug from the dashboard without opening a remote shell.
 
@@ -37,12 +37,14 @@ data-hub-watcher self-update --force    # re-run the upgrade subprocess
 
 The command asks the API for the latest published version, compares it to the locally installed version, and runs the appropriate upgrade flow for your install method:
 
-| Install method | Upgrade flow |
-| --- | --- |
-| Windows + `uv tool install` | Routes through the `DataHubWatcherUpgrade` Scheduled Task — same out-of-process worker the auto-updater uses. The CLI exits as soon as the task accepts the request; watch progress with `data-hub-watcher service status` or by tailing `~/.data-hub/upgrade-worker.log`. |
-| POSIX + `uv tool install` | `uv tool install --reinstall data-hub-watcher==<latest>` inline; output is streamed to your shell. |
-| Plain venv `pip install` | `<python> -m pip install -U data-hub-watcher==<latest>` inline. |
-| Editable / `uv sync` checkout | Refused; upgrade manually with `git pull && uv sync`. |
+
+| Install method                | Upgrade flow                                                                                                                                                                                                                                                               |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Windows + `uv tool install`   | Routes through the `DataHubWatcherUpgrade` Scheduled Task — same out-of-process worker the auto-updater uses. The CLI exits as soon as the task accepts the request; watch progress with `data-hub-watcher service status` or by tailing `~/.data-hub/upgrade-worker.log`. |
+| POSIX + `uv tool install`     | `uv tool install --reinstall data-hub-watcher==<latest>` inline; output is streamed to your shell.                                                                                                                                                                         |
+| Plain venv `pip install`      | `<python> -m pip install -U data-hub-watcher==<latest>` inline.                                                                                                                                                                                                            |
+| Editable / `uv sync` checkout | Refused; upgrade manually with `git pull && uv sync`.                                                                                                                                                                                                                      |
+
 
 The Windows uv-tool path **requires** that `data-hub-watcher service install` (or `service reinstall`) has been run from an Administrator shell at least once on the machine — that is what registers the `DataHubWatcherUpgrade` Scheduled Task. If the task is missing, `self-update` fails fast with an actionable error rather than falling back to the broken in-process reinstall. Fleet PCs that auto-update into a worker-aware build for the first time **must** be reinstalled once with `data-hub-watcher service reinstall` to pick up the new task.
 
@@ -101,12 +103,14 @@ Once the new version is live on PyPI, bump the server-side `WATCHER_LATEST_VERSI
 
 The supported watcher release env vars are:
 
-| Env var | Purpose |
-| --- | --- |
-| `WATCHER_LATEST_VERSION` | Required to advertise a release. `null`/unset means "no update info available" and the watcher skips its update attempt. |
-| `WATCHER_MIN_SUPPORTED_VERSION` | Optional floor; surfaced in the response for future use. Not yet enforced server-side. |
-| `WATCHER_RELEASE_CHANNEL` | Defaults to `stable`. Surfaced in the response and shown in `self-update` output. |
-| `WATCHER_MANDATORY_UPDATE` | Set to `true` / `1` to flag the release as mandatory (see below). |
+
+| Env var                         | Purpose                                                                                                                  |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `WATCHER_LATEST_VERSION`        | Required to advertise a release. `null`/unset means "no update info available" and the watcher skips its update attempt. |
+| `WATCHER_MIN_SUPPORTED_VERSION` | Optional floor; surfaced in the response for future use. Not yet enforced server-side.                                   |
+| `WATCHER_RELEASE_CHANNEL`       | Defaults to `stable`. Surfaced in the response and shown in `self-update` output.                                        |
+| `WATCHER_MANDATORY_UPDATE`      | Set to `true` / `1` to flag the release as mandatory (see below).                                                        |
+
 
 Do **not** bump `WATCHER_LATEST_VERSION` ahead of the PyPI publish — the watcher's upgrade subprocess will fail to resolve a version that doesn't yet exist on the index, and you'll see a wave of `update_failed` events from the fleet. Always: tag → publish → verify → bump env var.
 
@@ -137,15 +141,15 @@ There is no separate "yank" step — a rolled-back release is still on PyPI and 
 
 The upgrade subprocess started but didn't end up running the new version on the next process startup. The `details.reason` field on the `update_failed` event tells you which sub-case fired:
 
-- **`subprocess raised: …`** — `subprocess.run` itself raised before it could exec the upgrade command. Typically `FileNotFoundError` because `uv` isn't on PATH for the service account, or a permission error. Check `~/.data-hub/watcher.log` for the full traceback.
-- **`subprocess exited <N>`** — the upgrade command itself failed. The event details include the last 1000 bytes of stdout/stderr; the most common cause is a transient PyPI / mirror failure or the version not yet existing on the index (see the "don't bump ahead of publish" note above).
-- **`expected '<target>' after upgrade, running '<current>'`** — the subprocess succeeded, the service restarted, but the running interpreter still imports the old version. Almost always means a stale `__pycache__` or a separate copy of the package on `sys.path`. Run `uv tool uninstall data-hub-watcher && uv tool install data-hub-watcher==<target>` as the service account.
+- `**subprocess raised: …`** — `subprocess.run` itself raised before it could exec the upgrade command. Typically `FileNotFoundError` because `uv` isn't on PATH for the service account, or a permission error. Check `~/.data-hub/watcher.log` for the full traceback.
+- `**subprocess exited <N>**` — the upgrade command itself failed. The event details include the last 1000 bytes of stdout/stderr; the most common cause is a transient PyPI / mirror failure or the version not yet existing on the index (see the "don't bump ahead of publish" note above).
+- `**expected '<target>' after upgrade, running '<current>'**` — the subprocess succeeded, the service restarted, but the running interpreter still imports the old version. Almost always means a stale `__pycache__` or a separate copy of the package on `sys.path`. Run `uv tool uninstall data-hub-watcher && uv tool install data-hub-watcher==<target>` as the service account.
 
 ### `update_failed` without a preceding `update_started`
 
 When `details.attempted_subprocess` is `false`, the auto-updater never ran the upgrade command — it refused before starting one. The `details.reason` field tells you why:
 
-- **`install method '<editable|unknown>' not eligible for auto-update`** — the watcher detected a development-style install (editable `uv sync`, or a distribution whose metadata couldn't be located) and refused so it wouldn't silently shadow the source tree with an index build. Resolve by switching the host to a PyPI install (`uv tool install data-hub-watcher`) or, on a developer machine, ignoring the event. To avoid spamming the events stream, the watcher emits this at most once per server target — a rebump of `WATCHER_LATEST_VERSION` will trigger one fresh event per stuck PC.
+- `**install method '<editable|unknown>' not eligible for auto-update**` — the watcher detected a development-style install (editable `uv sync`, or a distribution whose metadata couldn't be located) and refused so it wouldn't silently shadow the source tree with an index build. Resolve by switching the host to a PyPI install (`uv tool install data-hub-watcher`) or, on a developer machine, ignoring the event. To avoid spamming the events stream, the watcher emits this at most once per server target — a rebump of `WATCHER_LATEST_VERSION` will trigger one fresh event per stuck PC.
 
 ### Auto-update never fires
 
