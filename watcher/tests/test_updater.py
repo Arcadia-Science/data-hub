@@ -147,6 +147,15 @@ def _make_updater(
             idle_ticks_required=2,
             check_interval_ticks=3,
             min_run_age_seconds=10.0,
+            # Opt out of the production-default "fire /update-check
+            # on the very first tick" fast path so the existing
+            # ``for _ in range(N): on_tick(); then trigger on the
+            # (N+1)th tick`` cadence assertions throughout this file
+            # keep working unchanged. The on-start fast path has its
+            # own dedicated test class below — pinning the default-on
+            # behaviour separately keeps each test focused on the
+            # specific behaviour it's exercising.
+            check_on_start=False,
         ),
         upgrade_runner=upgrade_runner,
         upgrade_executor=upgrade_executor,
@@ -328,9 +337,16 @@ class TestUpdaterOnTick:
         h.request_restart.assert_not_called()
         h.reporter.queue_event.assert_not_called()
 
-    def test_first_ticks_are_no_op_until_check_interval(self, tmp_path: Path) -> None:
+    def test_first_ticks_are_no_op_until_check_interval_when_check_on_start_disabled(
+        self, tmp_path: Path
+    ) -> None:
+        # The default test helper opts out of the on-start fast path
+        # (see comment in ``_make_updater``) so this still pins the
+        # cadence-only behaviour: with ``check_interval_ticks=3``,
+        # ticks 1 and 2 are no-ops and tick 3 fires the API call.
+        # The on-start fast path's effect on this same shape is
+        # pinned in ``TestUpdaterChecksOnStart`` below.
         h = _make_updater(tmp_path)
-        # Below check_interval_ticks=3 we should not call the API at all.
         h.counters.last_files_uploaded = 0
         assert h.updater.on_tick() is None
         assert h.updater.on_tick() is None
@@ -345,6 +361,10 @@ class TestUpdaterOnTick:
                 idle_ticks_required=2,
                 check_interval_ticks=2,
                 min_run_age_seconds=1.0,
+                # See helper-level comment in ``_make_updater`` for
+                # why cadence-focused tests opt out of the on-start
+                # fast path.
+                check_on_start=False,
             ),
         )
         h.client.get_update_info.return_value = _info(latest="9.9.9")
@@ -386,6 +406,12 @@ class TestUpdaterOnTick:
                 idle_ticks_required=0,
                 check_interval_ticks=1,  # fire on every tick
                 min_run_age_seconds=0.0,
+                # ``check_interval_ticks=1`` already fires on every
+                # tick so the on-start fast path would be a no-op
+                # here anyway, but pin the opt-out so the test's
+                # "exactly 3 invocations → exactly 3 failures"
+                # arithmetic stays explicit.
+                check_on_start=False,
             ),
         )
         h.client.get_update_info.side_effect = ApiError("dead", status_code=502)
@@ -414,6 +440,10 @@ class TestUpdaterOnTick:
                 idle_ticks_required=0,
                 check_interval_ticks=1,
                 min_run_age_seconds=0.0,
+                # See sibling test for why we pin the opt-out even
+                # though check_interval_ticks=1 makes the on-start
+                # fast path effectively a no-op here.
+                check_on_start=False,
             ),
         )
         # 2 failures, then a success, then 2 more failures.
@@ -767,6 +797,219 @@ class TestUpdaterOnTick:
         # Both events must carry the install_method so the dashboard
         # can render the "stuck on dev install" filter.
         assert all(e.details["install_method"] == "unknown" for e in emitted)
+
+
+class TestUpdaterChecksOnStart:
+    """Pin the production-default ``check_on_start=True`` behaviour.
+
+    Why this matters: lab PCs only run ``/update-check`` once an hour
+    by default, so a fresh ``service install`` / ``service reinstall``
+    / boot would otherwise wait up to 60 minutes before noticing a
+    pending release. That latency is fine in steady state but
+    disastrous during fix-forward iteration on the auto-update path
+    itself: the operator pushes a release, manually reinstalls the
+    watcher, then twiddles their thumbs for an hour to see if the
+    next auto-update tick works. Seeding ``_ticks_since_check`` to
+    ``check_interval_ticks`` at construction collapses that wait to
+    one heartbeat (~60 s) without disturbing the steady-state
+    cadence — and without bypassing the activity-window safety
+    gates, which still defer the actual upgrade dispatch as designed.
+    """
+
+    def _make_updater_with_on_start(
+        self,
+        tmp_path: Path,
+        *,
+        idle_ticks_required: int = 0,
+        check_interval_ticks: int = 60,
+        last_run_age_seconds: float | None = None,
+    ) -> _UpdaterHarness:
+        # ``check_on_start=True`` is the production default but the
+        # default helper opts out, so build directly here. Tests in
+        # this class want the production wiring exactly.
+        h = _make_updater(
+            tmp_path,
+            updater_cfg=UpdaterConfig(
+                idle_ticks_required=idle_ticks_required,
+                check_interval_ticks=check_interval_ticks,
+                min_run_age_seconds=10.0,
+                check_on_start=True,
+            ),
+        )
+        if last_run_age_seconds is not None:
+            from datetime import datetime, timedelta, timezone
+
+            # ``state_db.last_run_reported_at`` returns an ISO-8601
+            # string (it's a SQLite TEXT column), not a datetime —
+            # ``_last_run_age_seconds`` parses it via ``fromisoformat``.
+            past = datetime.now(timezone.utc) - timedelta(seconds=last_run_age_seconds)
+            h.state_db.last_run_reported_at.return_value = past.isoformat()
+        return h
+
+    def test_default_config_enables_check_on_start(self) -> None:
+        # Pin the production default explicitly so a future refactor
+        # that flips the default to False (and only updates the
+        # docstring) trips here rather than silently regressing the
+        # cold-start latency back to ~60 minutes.
+        cfg = UpdaterConfig()
+        assert cfg.check_on_start is True
+
+    def test_first_tick_fires_update_check_immediately(self, tmp_path: Path) -> None:
+        # The headline behaviour: with the production-default
+        # ``check_on_start=True`` and the production-default
+        # ``check_interval_ticks=60``, the very first tick after
+        # construction calls ``/update-check`` rather than waiting 59
+        # more ticks. Without this, an operator who just ran
+        # ``service reinstall`` to apply a fix-forward release would
+        # have to wait up to an hour to confirm whether the fix
+        # actually unblocked the auto-update path.
+        h = self._make_updater_with_on_start(tmp_path)
+        h.client.get_update_info.return_value = _info(latest="0.0.0+unknown")
+        h.counters.last_files_uploaded = 0
+
+        result = h.updater.on_tick()
+
+        assert result is not None, (
+            "first tick must call /update-check when check_on_start=True; "
+            "got None which means we waited for the cadence window"
+        )
+        h.client.get_update_info.assert_called_once()
+
+    def test_subsequent_ticks_resume_normal_cadence(self, tmp_path: Path) -> None:
+        # The on-start fast path is one-shot: tick 1 fires, then
+        # ticks 2..(check_interval_ticks) are no-ops, then the
+        # check_interval_ticks+1-th tick fires again. Otherwise we'd
+        # be calling /update-check every single heartbeat which
+        # would 60x the load on the watcher-update endpoint.
+        h = self._make_updater_with_on_start(tmp_path, check_interval_ticks=3)
+        h.client.get_update_info.return_value = _info(latest="0.0.0+unknown")
+        h.counters.last_files_uploaded = 0
+
+        # Tick 1 — on-start fast path fires.
+        assert h.updater.on_tick() is not None
+        assert h.client.get_update_info.call_count == 1
+
+        # Ticks 2 and 3 — within the cadence window after the reset.
+        assert h.updater.on_tick() is None
+        assert h.updater.on_tick() is None
+        assert h.client.get_update_info.call_count == 1
+
+        # Tick 4 — cadence window elapsed, fires again.
+        assert h.updater.on_tick() is not None
+        assert h.client.get_update_info.call_count == 2
+
+    def test_opt_out_preserves_pre_existing_cadence(self, tmp_path: Path) -> None:
+        # The opt-out path must produce exactly the historical
+        # behaviour: ticks 1 and 2 are no-ops with check_interval=3,
+        # tick 3 fires the API call. This is what every other test
+        # class in this file relies on, so a regression here would
+        # cascade into many false failures.
+        h = _make_updater(
+            tmp_path,
+            updater_cfg=UpdaterConfig(
+                idle_ticks_required=0,
+                check_interval_ticks=3,
+                min_run_age_seconds=10.0,
+                check_on_start=False,
+            ),
+        )
+        h.client.get_update_info.return_value = _info(latest="0.0.0+unknown")
+        h.counters.last_files_uploaded = 0
+
+        assert h.updater.on_tick() is None
+        assert h.updater.on_tick() is None
+        assert h.client.get_update_info.call_count == 0
+        assert h.updater.on_tick() is not None
+        assert h.client.get_update_info.call_count == 1
+
+    def test_on_start_check_still_respects_idle_gate(self, tmp_path: Path) -> None:
+        # Critical safety pin: the on-start fast path short-circuits
+        # the *cadence* window, NOT the activity-window safety gate.
+        # If the operator restarts the service while uploads are
+        # actively flowing, the first tick should DO the API call
+        # (we want the operator to see "yes, an upgrade is pending"
+        # in the logs / dashboard immediately) but DEFER the actual
+        # upgrade dispatch until the upload activity quiets down —
+        # exactly as the steady-state cadence would. Without this
+        # pin a future refactor could conflate the two and start
+        # interrupting in-flight uploads on every restart.
+        h = self._make_updater_with_on_start(
+            tmp_path,
+            idle_ticks_required=5,
+            check_interval_ticks=60,
+        )
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+        # Simulate active upload activity: the heartbeat reports
+        # files uploaded on this tick.
+        h.counters.last_files_uploaded = 3
+
+        result = h.updater.on_tick()
+
+        # API was called (the fast path's job)…
+        h.client.get_update_info.assert_called_once()
+        # …but the dispatch was deferred (the safety gate's job).
+        assert result is not None
+        assert result.attempted is False
+        assert "idle ticks" in result.reason
+        h.request_restart.assert_not_called()
+
+    def test_on_start_check_still_respects_recent_run_gate(self, tmp_path: Path) -> None:
+        # Same shape as the idle-gate pin above, but for the
+        # ``last_run_age_seconds`` half of the activity-window
+        # check. A run reported 5 seconds before service restart
+        # (operator restarted mid-experiment to apply a fix) must
+        # NOT trigger an immediate upgrade just because the on-start
+        # fast path enabled the API call.
+        h = self._make_updater_with_on_start(
+            tmp_path,
+            idle_ticks_required=0,  # Idle gate disabled.
+            last_run_age_seconds=5.0,  # Recent run, gate active.
+        )
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+        h.counters.last_files_uploaded = 0
+
+        result = h.updater.on_tick()
+
+        h.client.get_update_info.assert_called_once()
+        assert result is not None
+        assert result.attempted is False
+        assert "recent run" in result.reason
+        h.request_restart.assert_not_called()
+
+    def test_on_start_check_dispatches_when_safety_gates_pass(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The flip side of the safety pins above: when nothing's
+        # happening (clean restart on an idle host with no recent
+        # runs and no pending uploads — the common case), the
+        # on-start fast path SHOULD result in an immediate dispatch.
+        # This is the behaviour the operator-facing testing-iteration
+        # win actually depends on.
+        runner = MagicMock(return_value=_success_completed_process())
+        h = _make_updater(
+            tmp_path,
+            updater_cfg=UpdaterConfig(
+                idle_ticks_required=0,
+                check_interval_ticks=60,
+                min_run_age_seconds=10.0,
+                check_on_start=True,
+            ),
+            upgrade_runner=runner,
+        )
+        h.client.get_update_info.return_value = _info(latest="9.9.9")
+        h.state_db.last_run_reported_at.return_value = None
+        h.counters.last_files_uploaded = 0
+
+        monkeypatch.setattr(
+            "data_hub_watcher.updater.detect_install_method",
+            lambda: InstallMethod.UV_TOOL,
+        )
+
+        result = h.updater.on_tick()
+
+        h.request_restart.assert_called_once()
+        assert result is not None
+        assert result.attempted is True
 
 
 class TestUpdaterAsyncDispatch:
