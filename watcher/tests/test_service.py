@@ -303,6 +303,21 @@ class TestInstallUpgradeWorker:
             "data_hub_watcher.scheduled_task.install_upgrade_task",
             lambda script_path: install_calls.append(script_path),
         )
+        # `_install_upgrade_worker` resolves the operator's uv path
+        # and tool dirs at install time so the SYSTEM-running worker
+        # later forces uv to install in place at the operator's
+        # profile via UV_TOOL_DIR / UV_TOOL_BIN_DIR overrides. Stub
+        # both so the test doesn't depend on a real uv install.
+        operator_tool_dir = tmp_path / "tools"
+        operator_tool_bin_dir = tmp_path / "bin"
+        monkeypatch.setattr(
+            "data_hub_watcher.self_update._resolve_uv_executable",
+            lambda: (str(tmp_path / "uv.exe"), [str(tmp_path / "uv.exe")]),
+        )
+        monkeypatch.setattr(
+            "data_hub_watcher.upgrade_worker.resolve_uv_tool_dirs",
+            lambda _uv: (operator_tool_dir, operator_tool_bin_dir),
+        )
 
         service_module._install_upgrade_worker(tmp_path)
 
@@ -315,18 +330,75 @@ class TestInstallUpgradeWorker:
 
         script_path = upgrade_worker_script_path(tmp_path)
         assert script_path.exists()
-        assert "Stop-Service" in script_path.read_text(encoding="utf-8")
+        rendered = script_path.read_text(encoding="utf-8")
+        assert "Stop-Service" in rendered
         # The rendered template MUST bake in sentinel paths under
         # the supplied config dir — anything else means the running
         # service (which writes sentinels to its own resolved
         # ``config_dir``) would write to a different directory than
         # the worker reads from, and every auto-update silently
         # no-ops with "no request sentinel".
-        rendered = script_path.read_text(encoding="utf-8")
         assert str(tmp_path / ".upgrade-request.json") in rendered
         assert str(tmp_path / ".upgrade-result.json") in rendered
+        # The operator's tool dirs must be baked in too — without the
+        # UV_TOOL_DIR override the SYSTEM-running worker installs to
+        # the wrong profile and the upgrade silently no-ops at the
+        # next service restart even though uv exited 0.
+        assert str(operator_tool_dir) in rendered
+        assert str(operator_tool_bin_dir) in rendered
+        assert "$env:UV_TOOL_DIR" in rendered
+        assert "$env:UV_TOOL_BIN_DIR" in rendered
         # Task installer was handed the same path.
         assert install_calls == [script_path]
+
+    def test_install_raises_when_uv_cannot_be_located(
+        self,
+        service_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        # A `service install` on a host without uv on PATH and without
+        # uv in any of the sys.prefix-derived candidates must fail
+        # loudly here — proceeding would render a template against
+        # default tool dirs, which under SYSTEM would silently install
+        # future upgrades into the wrong profile.
+        from data_hub_watcher.self_update import UvExecutableNotFoundError
+
+        monkeypatch.setattr(
+            "data_hub_watcher.self_update._resolve_uv_executable",
+            lambda: (None, ["/no/such/uv"]),
+        )
+
+        with pytest.raises(UvExecutableNotFoundError):
+            service_module._install_upgrade_worker(tmp_path)
+
+    def test_install_raises_when_uv_tool_dir_lookup_fails(
+        self,
+        service_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        # Same loud-failure rule for the second half of the lookup:
+        # if `uv tool dir` itself can't tell us where the operator's
+        # tool venvs live, we have no business rendering a worker
+        # template that pretends to know.
+        from data_hub_watcher.upgrade_worker import UvToolDirResolutionError
+
+        monkeypatch.setattr(
+            "data_hub_watcher.self_update._resolve_uv_executable",
+            lambda: (str(tmp_path / "uv.exe"), [str(tmp_path / "uv.exe")]),
+        )
+
+        def boom(_uv: str) -> tuple[Path, Path]:
+            raise UvToolDirResolutionError(["uv", "tool", "dir"], stderr="nope")
+
+        monkeypatch.setattr(
+            "data_hub_watcher.upgrade_worker.resolve_uv_tool_dirs",
+            boom,
+        )
+
+        with pytest.raises(UvToolDirResolutionError):
+            service_module._install_upgrade_worker(tmp_path)
 
     def test_uninstall_removes_task_and_script(
         self,
@@ -401,12 +473,22 @@ class TestRepairUpgradeWorkerOnStartup:
 
         assert install_calls == []
 
-    def test_repair_re_registers_when_task_missing(
+    def test_repair_re_registers_when_task_missing_and_script_present(
         self,
         service_module: ModuleType,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
+        # A pre-existing rendered script means a previous valid
+        # `service install` ran in operator context and captured the
+        # right uv tool dirs. Re-registering the task to point at
+        # that script is the safe self-repair — no need to re-render.
+        from data_hub_watcher.upgrade_worker import upgrade_worker_script_path
+
+        script_path = upgrade_worker_script_path(tmp_path)
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        script_path.write_text("# previously rendered worker", encoding="utf-8")
+
         sm = MagicMock(name="servicemanager")
         monkeypatch.setattr("data_hub_watcher.scheduled_task.task_exists", lambda: False)
         install_calls: list[Path] = []
@@ -417,16 +499,46 @@ class TestRepairUpgradeWorkerOnStartup:
 
         service_module._repair_upgrade_worker_if_missing(sm, tmp_path)
 
-        from data_hub_watcher.upgrade_worker import upgrade_worker_script_path
+        # Task is re-registered against the existing script.
+        assert install_calls == [script_path]
+        # CRITICAL: existing script content is NOT overwritten — the
+        # operator's UV_TOOL_DIR / UV_TOOL_BIN_DIR baked at install
+        # time must be preserved. Re-rendering under SYSTEM (which
+        # is what runs the repair) would resolve the wrong tool dirs
+        # and silently break future auto-updates.
+        assert script_path.read_text(encoding="utf-8") == "# previously rendered worker"
 
-        # The repair must render against the supplied *config_dir*,
-        # not ``DEFAULT_CONFIG_DIR`` — this is the regression guard
-        # for the "service runs as LocalSystem so ~ resolves to the
-        # SYSTEM profile" failure mode.
-        assert install_calls == [upgrade_worker_script_path(tmp_path)]
-        assert upgrade_worker_script_path(tmp_path).exists()
-        rendered = upgrade_worker_script_path(tmp_path).read_text(encoding="utf-8")
-        assert str(tmp_path / ".upgrade-request.json") in rendered
+    def test_repair_punts_when_task_and_script_both_missing(
+        self,
+        service_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        # Without a rendered script on disk we have no way to
+        # reconstruct the operator's UV_TOOL_DIR from a SYSTEM
+        # context. Re-rendering with whatever LocalSystem's
+        # `uv tool dir` would return bakes in the wrong profile and
+        # silently corrupts future auto-updates. The only safe move
+        # is to log a clear pointer at `service reinstall` and punt;
+        # the next auto-update tick will fail loudly with a usable
+        # error.
+        sm = MagicMock(name="servicemanager")
+        monkeypatch.setattr("data_hub_watcher.scheduled_task.task_exists", lambda: False)
+        install_calls: list[Path] = []
+        monkeypatch.setattr(
+            "data_hub_watcher.scheduled_task.install_upgrade_task",
+            lambda script_path: install_calls.append(script_path),
+        )
+
+        service_module._repair_upgrade_worker_if_missing(sm, tmp_path)
+
+        # No re-registration happened — punted to operator action.
+        assert install_calls == []
+        # …and the operator-facing message points at the recovery
+        # command, not a bare error code.
+        sm.LogWarningMsg.assert_called_once()
+        msg = sm.LogWarningMsg.call_args.args[0]
+        assert "service reinstall" in msg
 
     def test_repair_swallows_query_errors(
         self,
@@ -457,6 +569,13 @@ class TestRepairUpgradeWorkerOnStartup:
         tmp_path: Path,
     ) -> None:
         from data_hub_watcher.scheduled_task import ScheduledTaskError
+        from data_hub_watcher.upgrade_worker import upgrade_worker_script_path
+
+        # Need an existing script for the repair to attempt task
+        # registration; the failure is on `install_upgrade_task`.
+        script_path = upgrade_worker_script_path(tmp_path)
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        script_path.write_text("# previously rendered worker", encoding="utf-8")
 
         sm = MagicMock(name="servicemanager")
         monkeypatch.setattr("data_hub_watcher.scheduled_task.task_exists", lambda: False)

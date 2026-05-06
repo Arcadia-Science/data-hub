@@ -85,6 +85,20 @@ class UpdaterConfig:
     # reason about heartbeat timing.
     min_run_age_seconds: float | None = None
     run_quiet_multiplier: int = DEFAULT_RUN_QUIET_MULTIPLIER
+    # When True (the production default), the very first heartbeat tick
+    # after process startup fires an ``/update-check`` API call instead
+    # of waiting a full ``check_interval_ticks`` window — so a fresh
+    # service restart picks up a pending release within one heartbeat
+    # interval (~60 s) rather than up to an hour. The activity-window
+    # gates inside ``should_attempt_update`` still apply: if an upload
+    # or run was happening when the previous instance died, the
+    # ``last_run_age_seconds`` / ``idle_ticks_required`` checks defer
+    # the actual upgrade attempt as designed. The on-start fast path
+    # only short-circuits the *cadence* part of the gate, not the
+    # *safety* part. Tests opt out via ``check_on_start=False`` so
+    # their existing cadence assertions (``for _ in range(N): on_tick();
+    # then trigger on the (N+1)th``) keep working unchanged.
+    check_on_start: bool = True
 
 
 @dataclass
@@ -336,7 +350,22 @@ class Updater:
         self._upgrade_executor = upgrade_executor or _default_upgrade_executor
 
         self._idle_ticks = 0
-        self._ticks_since_check = 0
+        # Seed the cadence counter so the very first tick fires an
+        # ``/update-check`` API call when ``check_on_start`` is set
+        # (the production default). With ``check_interval_ticks=60``
+        # and a 60-second heartbeat, the cold-start latency for
+        # picking up a pending release drops from "up to 60 minutes"
+        # to "~60 seconds" — which matters most during testing
+        # iteration (operator runs ``service reinstall``, then sees
+        # the next attempt within one heartbeat instead of an hour)
+        # but is also a small operability win in production: a host
+        # that just rebooted picks up the latest version immediately
+        # rather than running stale code for the first hour after
+        # boot. The activity-window gates in ``should_attempt_update``
+        # still defer the actual upgrade if there's recent run /
+        # upload activity, so this short-circuits cadence only — not
+        # safety.
+        self._ticks_since_check = c.check_interval_ticks if c.check_on_start else 0
         self._upgrade_in_progress = False
         # Per-target memo for the "ineligible install method" refusal
         # path: we want one ``UPDATE_FAILED`` event per *new* server

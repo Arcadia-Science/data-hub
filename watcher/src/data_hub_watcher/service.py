@@ -113,13 +113,57 @@ def _install_upgrade_worker(config_dir: Path) -> None:
     request/result paths in at render time, so a mismatch here results
     in the worker reading from one directory while the service writes
     to another (and the auto-update silently no-ops every tick).
+
+    The operator's uv tool directories are resolved here (rather than
+    inside the worker) because the SYSTEM account that later executes
+    the worker resolves them against the wrong profile —
+    ``C:\\Windows\\System32\\config\\systemprofile\\.local\\...`` rather
+    than ``C:\\Users\\<op>\\.local\\...``. We capture the operator's
+    paths once at install time and bake them into the rendered
+    template via ``UV_TOOL_DIR`` / ``UV_TOOL_BIN_DIR`` overrides; see
+    :func:`data_hub_watcher.upgrade_worker.resolve_uv_tool_dirs` for
+    the long form of the rationale.
     """
     from data_hub_watcher.scheduled_task import install_upgrade_task
-    from data_hub_watcher.upgrade_worker import write_worker_script
+    from data_hub_watcher.self_update import (
+        UvExecutableNotFoundError,
+        _resolve_uv_executable,
+    )
+    from data_hub_watcher.upgrade_worker import (
+        UvToolDirResolutionError,
+        resolve_uv_tool_dirs,
+        write_worker_script,
+    )
 
-    script_path = write_worker_script(config_dir, service_name=SERVICE_NAME)
+    uv_path, _tried = _resolve_uv_executable()
+    if uv_path is None:
+        # The same `UvExecutableNotFoundError` the in-process updater
+        # raises — re-uses the operator-facing message format so a
+        # ``service install`` failure here looks identical to a stuck
+        # ``self-update``, which lab-PC docs already cover.
+        raise UvExecutableNotFoundError(_tried)
+    try:
+        tool_dir, tool_bin_dir = resolve_uv_tool_dirs(uv_path)
+    except UvToolDirResolutionError:
+        # Re-raise so ``service install`` aborts loudly. Letting the
+        # install proceed with default tool dirs (i.e. omitting the
+        # env-var overrides) would just reproduce the SYSTEM-installs-
+        # to-wrong-place bug we're trying to fix.
+        raise
+
+    script_path = write_worker_script(
+        config_dir,
+        service_name=SERVICE_NAME,
+        tool_dir=tool_dir,
+        tool_bin_dir=tool_bin_dir,
+    )
     install_upgrade_task(script_path)
-    logger.info("Upgrade worker script + scheduled task registered under %s", config_dir)
+    logger.info(
+        "Upgrade worker script + scheduled task registered under %s (uv tool dir=%s, bin dir=%s)",
+        config_dir,
+        tool_dir,
+        tool_bin_dir,
+    )
 
 
 def _store_paths_in_registry(config_path: Path, env_path: Path) -> None:
@@ -400,25 +444,37 @@ def query_service_status() -> dict[str, Any]:
 
 
 def _repair_upgrade_worker_if_missing(sm: Any, config_dir: Path) -> None:
-    """Re-install the upgrade scheduled task on startup if it has gone missing.
+    """Re-register the upgrade scheduled task on startup if it has gone missing.
 
     Lab PCs that auto-update into the version that introduced the
     out-of-process worker won't have run ``service install`` with the
     new code, so the scheduled task simply isn't there — and the next
     auto-update tick would fail loudly. Repairing on each service
     startup means the host self-heals on the very next service restart
-    (which the auto-updater triggers anyway), without any operator
-    intervention.
+    (which the auto-updater triggers anyway) for the common case where
+    the rendered worker script is still on disk and only the task
+    record was lost (e.g. an operator manually deleted it in
+    ``taskschd.msc``).
+
+    Critical scope limit: this helper does NOT re-render the worker
+    template. Re-rendering requires the *operator's* uv tool
+    directories from ``uv tool dir`` / ``uv tool dir --bin``, and the
+    service runs as LocalSystem so any uv invocation from here would
+    resolve those paths against the SYSTEM profile rather than the
+    operator's. A SYSTEM-rendered template would bake in the wrong
+    ``UV_TOOL_DIR`` / ``UV_TOOL_BIN_DIR`` and silently install future
+    upgrades into ``C:\\Windows\\System32\\config\\systemprofile\\
+    .local\\...`` instead of the operator's profile — exactly the bug
+    we're trying to prevent. If the rendered script is also missing
+    from *config_dir*, the only safe recovery is for the operator to
+    run ``data-hub-watcher service reinstall`` from their own shell;
+    we log a clear pointer and punt rather than render-against-SYSTEM
+    a worker that would corrupt the next auto-update.
 
     *config_dir* must be the operator's resolved config directory (the
-    parent of the registry-stored config path) — NOT
-    ``DEFAULT_CONFIG_DIR``, because under the LocalSystem account the
-    service runs as the latter resolves to
-    ``C:\\Windows\\System32\\config\\systemprofile\\.data-hub`` rather
-    than the operator's ``~\\.data-hub``. Rendering the worker template
-    against the wrong directory bakes in a sentinel path the running
-    service will never actually write to, which silently breaks every
-    subsequent auto-update.
+    parent of the registry-stored config path) — see the comment on
+    :class:`~data_hub_watcher.runtime.WatcherRuntime.config_dir` for
+    why ``DEFAULT_CONFIG_DIR`` would resolve incorrectly here.
 
     Failures are logged via the Windows event log but do not raise:
     a host that can't register the task should still be able to run
@@ -432,7 +488,7 @@ def _repair_upgrade_worker_if_missing(sm: Any, config_dir: Path) -> None:
             install_upgrade_task,
             task_exists,
         )
-        from data_hub_watcher.upgrade_worker import write_worker_script
+        from data_hub_watcher.upgrade_worker import upgrade_worker_script_path
     except Exception as exc:
         sm.LogWarningMsg(f"Cannot import upgrade worker modules during startup: {exc}")
         return
@@ -450,12 +506,27 @@ def _repair_upgrade_worker_if_missing(sm: Any, config_dir: Path) -> None:
     if present:
         return
 
+    script_path = upgrade_worker_script_path(config_dir)
+    if not script_path.exists():
+        # We deliberately do NOT re-render here — see the docstring
+        # for why a SYSTEM-rendered template would silently break the
+        # very thing the repair is meant to fix.
+        sm.LogWarningMsg(
+            f"Upgrade scheduled task is missing AND the rendered worker "
+            f"script is absent from {script_path}. Cannot self-repair "
+            "from a LocalSystem context. Run "
+            "'data-hub-watcher service reinstall' as Administrator to "
+            "re-render the worker against the operator's uv tool "
+            "directories and re-register the task."
+        )
+        return
+
     sm.LogInfoMsg(
-        "Upgrade scheduled task missing; re-registering it now (one-time "
-        "self-repair after auto-update into worker-aware code)."
+        f"Upgrade scheduled task missing but worker script is present at "
+        f"{script_path}; re-registering the task pointing at the existing "
+        "rendered script."
     )
     try:
-        script_path = write_worker_script(config_dir, service_name=SERVICE_NAME)
         install_upgrade_task(script_path)
     except (OSError, ScheduledTaskError) as exc:
         sm.LogWarningMsg(
