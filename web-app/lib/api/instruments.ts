@@ -286,7 +286,16 @@ export type InstrumentDetail = {
   watchersOffline: number;
   /** Most recent heartbeat from any watcher attached to this instrument. */
   lastWatcherHeartbeatAt: Date | null;
+  /**
+   * The "canonical" watcher for this instrument, used to render watcher
+   * affordances in the instrument header. When multiple watchers are
+   * attached, the most recently heartbeating one wins; ties (or instruments
+   * whose watchers have never heartbeated) fall back to the first watcher
+   * by `createdAt`.
+   */
   activeWatcherId: string | null;
+  /** Desktop hostname of the canonical active watcher, if any. */
+  activeWatcherHostname: string | null;
 };
 
 export const getInstrumentById = cache(async function getInstrumentById(
@@ -313,8 +322,10 @@ export const getInstrumentById = cache(async function getInstrumentById(
     db
       .select({
         id: watchers.id,
+        hostname: watchers.hostname,
         status: watchers.status,
         lastHeartbeatAt: watchers.lastHeartbeatAt,
+        createdAt: watchers.createdAt,
         configYaml: watchers.configYaml,
       })
       .from(watchers)
@@ -329,7 +340,6 @@ export const getInstrumentById = cache(async function getInstrumentById(
 
   let watchersOnline = 0;
   let watchersOffline = 0;
-  let activeWatcherId: string | null = null;
   let lastWatcherHeartbeatAt: Date | null = null;
   for (const w of watcherRows) {
     const isOnline =
@@ -338,7 +348,6 @@ export const getInstrumentById = cache(async function getInstrumentById(
       w.lastHeartbeatAt > staleThreshold;
     if (isOnline) {
       watchersOnline++;
-      activeWatcherId ??= w.id;
     } else {
       watchersOffline++;
     }
@@ -349,7 +358,25 @@ export const getInstrumentById = cache(async function getInstrumentById(
       lastWatcherHeartbeatAt = w.lastHeartbeatAt;
     }
   }
-  activeWatcherId ??= watcherRows[0]?.id ?? null;
+
+  // Canonical "active" watcher: the most recently heartbeating one, falling
+  // back to the earliest registered when no watcher has ever heartbeated.
+  // This keeps `activeWatcherId` aligned with `lastWatcherHeartbeatAt` so
+  // downstream UI (the watcher link in the header, status badge route)
+  // points at the same row the heartbeat timestamp came from.
+  const activeWatcher =
+    watcherRows.length === 0
+      ? null
+      : (watcherRows
+          .filter((w) => w.lastHeartbeatAt !== null)
+          .sort(
+            (a, b) =>
+              (b.lastHeartbeatAt?.getTime() ?? 0) -
+              (a.lastHeartbeatAt?.getTime() ?? 0)
+          )[0] ??
+        [...watcherRows].sort(
+          (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
+        )[0]);
 
   return {
     id: instrument.id,
@@ -364,6 +391,7 @@ export const getInstrumentById = cache(async function getInstrumentById(
     watchersOnline,
     watchersOffline,
     lastWatcherHeartbeatAt,
-    activeWatcherId,
+    activeWatcherId: activeWatcher?.id ?? null,
+    activeWatcherHostname: activeWatcher?.hostname ?? null,
   };
 });
