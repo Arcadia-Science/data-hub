@@ -55,7 +55,7 @@ export function RunCommentForm({
         rows={3}
         aria-label="Comment body"
         aria-invalid={tooLong || undefined}
-        className="resize-none border-0 px-0 shadow-none focus-visible:ring-0"
+        className="resize-none border-0 bg-transparent px-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
       />
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         {tooLong ? (

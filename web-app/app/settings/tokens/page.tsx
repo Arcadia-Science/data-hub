@@ -1,5 +1,6 @@
 import { CreateTokenDialog } from "@/components/tokens/create-token-dialog";
 import { DeleteTokenDialog } from "@/components/tokens/delete-token-dialog";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -9,9 +10,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { auth } from "@/lib/auth";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { db } from "@/lib/db";
-import { personalAccessTokens } from "@/lib/db/schema";
+import { personalAccessTokens, users } from "@/lib/db/schema";
 import { formatRelativeTime } from "@/lib/utils";
 import { desc, eq } from "drizzle-orm";
 import { KeyRound } from "lucide-react";
@@ -21,9 +26,38 @@ export const metadata: Metadata = {
   title: "Access Tokens",
 };
 
-export default async function TokensPage() {
-  const session = await auth();
+// Mirrors the deterministic palette used by RanByCell so the same user gets
+// the same avatar bubble color across the run tables and this page.
+const AVATAR_PALETTE = [
+  "bg-blue-200 text-blue-900 dark:bg-blue-800 dark:text-blue-100",
+  "bg-emerald-200 text-emerald-900 dark:bg-emerald-800 dark:text-emerald-100",
+  "bg-violet-200 text-violet-900 dark:bg-violet-800 dark:text-violet-100",
+  "bg-amber-200 text-amber-900 dark:bg-amber-800 dark:text-amber-100",
+  "bg-rose-200 text-rose-900 dark:bg-rose-800 dark:text-rose-100",
+  "bg-teal-200 text-teal-900 dark:bg-teal-800 dark:text-teal-100",
+  "bg-fuchsia-200 text-fuchsia-900 dark:bg-fuchsia-800 dark:text-fuchsia-100",
+  "bg-orange-200 text-orange-900 dark:bg-orange-800 dark:text-orange-100",
+];
 
+function avatarColor(userId: string): string {
+  let hash = 0;
+  for (let i = 0; i < userId.length; i++) {
+    hash = (hash * 31 + userId.charCodeAt(i)) | 0;
+  }
+  return AVATAR_PALETTE[Math.abs(hash) % AVATAR_PALETTE.length];
+}
+
+function toInitials(displayName: string): string {
+  const parts = displayName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+export default async function TokensPage() {
+  // This is an internal-tool settings page; we intentionally show every PAT
+  // across the workspace so admins can audit them. Auth is enforced by the
+  // settings layout.
   const tokens = await db
     .select({
       id: personalAccessTokens.id,
@@ -32,9 +66,15 @@ export default async function TokensPage() {
       lastUsedAt: personalAccessTokens.lastUsedAt,
       expiresAt: personalAccessTokens.expiresAt,
       createdAt: personalAccessTokens.createdAt,
+      user: {
+        id: users.id,
+        name: users.name,
+        email: users.email,
+        image: users.image,
+      },
     })
     .from(personalAccessTokens)
-    .where(eq(personalAccessTokens.userId, session!.user!.id!))
+    .innerJoin(users, eq(users.id, personalAccessTokens.userId))
     .orderBy(desc(personalAccessTokens.createdAt));
 
   const isExpired = (expiresAt: Date | null) =>
@@ -71,6 +111,7 @@ export default async function TokensPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
+                  <TableHead>User</TableHead>
                   <TableHead>Token</TableHead>
                   <TableHead>Last used</TableHead>
                   <TableHead>Expires</TableHead>
@@ -79,53 +120,82 @@ export default async function TokensPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {tokens.map((token) => (
-                  <TableRow key={token.id}>
-                    <TableCell className="font-medium">{token.name}</TableCell>
-                    <TableCell>
-                      <Badge variant="secondary" className="font-mono text-xs">
-                        {token.tokenPrefix}...
-                      </Badge>
-                    </TableCell>
-                    <TableCell
-                      className="text-muted-foreground"
-                      suppressHydrationWarning
-                    >
-                      {token.lastUsedAt
-                        ? formatRelativeTime(token.lastUsedAt)
-                        : "Never"}
-                    </TableCell>
-                    <TableCell suppressHydrationWarning>
-                      {token.expiresAt ? (
-                        <span
-                          className={
-                            isExpired(token.expiresAt)
-                              ? "text-destructive"
-                              : "text-muted-foreground"
-                          }
+                {tokens.map((token) => {
+                  const displayName =
+                    token.user.name ?? token.user.email ?? "Unknown";
+                  return (
+                    <TableRow key={token.id}>
+                      <TableCell className="font-medium">
+                        {token.name}
+                      </TableCell>
+                      <TableCell>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Avatar size="sm">
+                              {token.user.image ? (
+                                <AvatarImage
+                                  src={token.user.image}
+                                  alt={displayName}
+                                />
+                              ) : null}
+                              <AvatarFallback
+                                className={avatarColor(token.user.id)}
+                              >
+                                {toInitials(displayName)}
+                              </AvatarFallback>
+                            </Avatar>
+                          </TooltipTrigger>
+                          <TooltipContent>{displayName}</TooltipContent>
+                        </Tooltip>
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="secondary"
+                          className="font-mono text-xs"
                         >
-                          {isExpired(token.expiresAt)
-                            ? "Expired"
-                            : formatRelativeTime(token.expiresAt)}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">Never</span>
-                      )}
-                    </TableCell>
-                    <TableCell
-                      className="text-muted-foreground"
-                      suppressHydrationWarning
-                    >
-                      {formatRelativeTime(token.createdAt)}
-                    </TableCell>
-                    <TableCell>
-                      <DeleteTokenDialog
-                        tokenId={token.id}
-                        tokenName={token.name}
-                      />
-                    </TableCell>
-                  </TableRow>
-                ))}
+                          {token.tokenPrefix}...
+                        </Badge>
+                      </TableCell>
+                      <TableCell
+                        className="text-muted-foreground"
+                        suppressHydrationWarning
+                      >
+                        {token.lastUsedAt
+                          ? formatRelativeTime(token.lastUsedAt)
+                          : "Never"}
+                      </TableCell>
+                      <TableCell suppressHydrationWarning>
+                        {token.expiresAt ? (
+                          <span
+                            className={
+                              isExpired(token.expiresAt)
+                                ? "text-destructive"
+                                : "text-muted-foreground"
+                            }
+                          >
+                            {isExpired(token.expiresAt)
+                              ? "Expired"
+                              : formatRelativeTime(token.expiresAt)}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">Never</span>
+                        )}
+                      </TableCell>
+                      <TableCell
+                        className="text-muted-foreground"
+                        suppressHydrationWarning
+                      >
+                        {formatRelativeTime(token.createdAt)}
+                      </TableCell>
+                      <TableCell>
+                        <DeleteTokenDialog
+                          tokenId={token.id}
+                          tokenName={token.name}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>

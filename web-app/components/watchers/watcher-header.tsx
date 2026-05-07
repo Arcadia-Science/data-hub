@@ -81,8 +81,6 @@ export function WatcherHeader({ watcher }: { watcher: WatcherDetail }) {
         </div>
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
-          <span className="font-mono">{watcher.id}</span>
-          <span>·</span>
           <Link
             href={`/instruments/${watcher.instrumentId}`}
             className="hover:text-foreground hover:underline"
