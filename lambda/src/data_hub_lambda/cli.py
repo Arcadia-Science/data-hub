@@ -92,6 +92,43 @@ def hina(file: Path, output_dir: Path | None) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Epson V700 Scanner
+# ---------------------------------------------------------------------------
+
+
+@cli.command("epson-scanner")
+@click.argument("file", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option(
+    "--output-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=None,
+    help="Directory for the exported JPG (default: same directory as FILE).",
+)
+def epson_scanner(file: Path, output_dir: Path | None) -> None:
+    """Process an Epson V700 Scanner TIFF file.
+
+    Resizes the high-resolution scan to a web-friendly JPEG preview and
+    extracts TIFF metadata.
+    """
+    from data_hub_lambda.epson_v700_scanner.image_processing import TIFFToJPEGConverter
+
+    converter = TIFFToJPEGConverter(file)
+    converter.load()
+    jpg_path = converter.export_jpg()
+
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        dest = output_dir / jpg_path.name
+        shutil.move(str(jpg_path), str(dest))
+        jpg_path = dest
+
+    click.echo(f"Exported JPG: {jpg_path}")
+
+    metadata = converter.parse_metadata()
+    click.echo(json.dumps(metadata, indent=2))
+
+
+# ---------------------------------------------------------------------------
 # Azure Cielo qPCR
 # ---------------------------------------------------------------------------
 
