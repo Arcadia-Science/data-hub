@@ -38,30 +38,19 @@ function StatCard({
   );
 }
 
-function FilesProcessedSubline({
-  completed,
-  failed,
+function DataGeneratedSubline({
+  bytes,
   emptyLabel,
 }: {
-  completed: number;
-  failed: number;
+  bytes: number;
   emptyLabel: string;
 }) {
-  if (completed === 0 && failed === 0) {
+  if (bytes === 0) {
     return <span>{emptyLabel}</span>;
   }
   return (
     <>
-      <span className="text-foreground">{formatNumber(completed)}</span>{" "}
-      processed
-      {failed > 0 ? (
-        <>
-          {" · "}
-          <span className="text-destructive">
-            {formatNumber(failed)} failed
-          </span>
-        </>
-      ) : null}
+      <span>{formatBytes(bytes)} generated</span>
     </>
   );
 }
@@ -79,10 +68,9 @@ export function DashboardStatsCards({ stats }: { stats: DashboardStats }) {
         label="Runs in the last 24 hours"
         value={formatNumber(runsLast24Hours.total)}
         subline={
-          <FilesProcessedSubline
-            completed={runsLast24Hours.filesCompleted}
-            failed={runsLast24Hours.filesFailed}
-            emptyLabel="No files processed in the last 24 hours"
+          <DataGeneratedSubline
+            bytes={runsLast24Hours.bytesGenerated}
+            emptyLabel="No data generated in the last 24 hours"
           />
         }
       />
@@ -90,10 +78,9 @@ export function DashboardStatsCards({ stats }: { stats: DashboardStats }) {
         label="Runs in the last 7 days"
         value={formatNumber(runsThisWeek.total)}
         subline={
-          <FilesProcessedSubline
-            completed={runsThisWeek.filesCompleted}
-            failed={runsThisWeek.filesFailed}
-            emptyLabel="No files processed this week"
+          <DataGeneratedSubline
+            bytes={runsThisWeek.bytesGenerated}
+            emptyLabel="No data generated this week"
           />
         }
       />
@@ -103,7 +90,7 @@ export function DashboardStatsCards({ stats }: { stats: DashboardStats }) {
         valueClassName={pendingHasBacklog ? "text-destructive" : undefined}
         subline={
           pendingUploads.count > 0
-            ? `Est. ${formatBytes(pendingUploads.totalBytes)} queued`
+            ? `${formatBytes(pendingUploads.totalBytes)} queued`
             : "Upload queue is clear"
         }
       />

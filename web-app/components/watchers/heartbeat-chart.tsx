@@ -174,9 +174,9 @@ export function HeartbeatChart({
     [heartbeats, startMs, endMs]
   );
 
-  const HALF_DAY_MS = 12 * 60 * 60 * 1000;
+  const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
   const windowMs = endMs - startMs;
-  const widthMultiplier = Math.max(1, windowMs / HALF_DAY_MS);
+  const widthMultiplier = Math.max(1, windowMs / SIX_HOURS_MS);
   const needsScroll = widthMultiplier > 1;
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -283,7 +283,6 @@ export function HeartbeatChart({
               <Area
                 dataKey="errors"
                 type="monotone"
-                stackId="1"
                 stroke="var(--color-errors)"
                 fill="url(#fillErrors)"
                 strokeWidth={1.5}
@@ -291,7 +290,6 @@ export function HeartbeatChart({
               <Area
                 dataKey="files"
                 type="monotone"
-                stackId="1"
                 stroke="var(--color-files)"
                 fill="url(#fillFiles)"
                 strokeWidth={1.5}
@@ -299,7 +297,6 @@ export function HeartbeatChart({
               <Area
                 dataKey="runs"
                 type="monotone"
-                stackId="1"
                 stroke="var(--color-runs)"
                 fill="url(#fillRuns)"
                 strokeWidth={1.5}

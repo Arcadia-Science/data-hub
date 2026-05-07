@@ -110,8 +110,7 @@ export const getInstruments = cache(async function getInstruments() {
 export type DashboardStats = {
   runsLast24Hours: {
     total: number;
-    filesCompleted: number;
-    filesFailed: number;
+    bytesGenerated: number;
   };
   pendingUploads: {
     count: number;
@@ -119,8 +118,7 @@ export type DashboardStats = {
   };
   runsThisWeek: {
     total: number;
-    filesCompleted: number;
-    filesFailed: number;
+    bytesGenerated: number;
     mine: number;
     unattributed: number;
   };
@@ -142,7 +140,7 @@ export const getDashboardStats = cache(async function getDashboardStats(
 ): Promise<DashboardStats> {
   const [
     [runsLast24HoursRow],
-    [filesProcessedRow],
+    [bytesGeneratedRow],
     [pendingRow],
     [runsThisWeekRow],
   ] = await Promise.all([
@@ -158,20 +156,23 @@ export const getDashboardStats = cache(async function getDashboardStats(
         )
       ),
     // Span the last 24 hours + the past 7 days in a single pass; the 24-hour
-    // metrics are a subset of the weekly window, so FILTER clauses give us
-    // both with one index scan instead of two near-identical queries.
+    // window is a subset of the weekly window, so FILTER clauses give us both
+    // with one index scan. Bytes are attributed to the file's owning run so
+    // the time window matches the corresponding "Runs in the last X" card —
+    // this avoids the null-`processedAt` blind spot for not-yet-processed
+    // files (which still represent data the instrument generated).
     db
       .select({
-        completedLast24Hours: sql<number>`cast(count(*) filter (where ${files.status} = 'completed' and ${files.processedAt} > now() - interval '24 hours') as int)`,
-        failedLast24Hours: sql<number>`cast(count(*) filter (where ${files.status} = 'failed' and ${files.processedAt} > now() - interval '24 hours') as int)`,
-        completedWeek: sql<number>`cast(count(*) filter (where ${files.status} = 'completed') as int)`,
-        failedWeek: sql<number>`cast(count(*) filter (where ${files.status} = 'failed') as int)`,
+        bytesLast24Hours: sql<string>`coalesce(sum(${files.sizeBytes}) filter (where ${instrumentRuns.createdAt} > now() - interval '24 hours'), 0)`,
+        bytesWeek: sql<string>`coalesce(sum(${files.sizeBytes}), 0)`,
       })
       .from(files)
+      .innerJoin(instrumentRuns, eq(files.instrumentRunId, instrumentRuns.id))
       .where(
         and(
           isNull(files.deletedAt),
-          sql`${files.processedAt} > now() - interval '7 days'`
+          isNull(instrumentRuns.deletedAt),
+          sql`${instrumentRuns.createdAt} > now() - interval '7 days'`
         )
       ),
     db
@@ -208,18 +209,16 @@ export const getDashboardStats = cache(async function getDashboardStats(
   return {
     runsLast24Hours: {
       total: runsLast24HoursRow?.total ?? 0,
-      filesCompleted: filesProcessedRow?.completedLast24Hours ?? 0,
-      filesFailed: filesProcessedRow?.failedLast24Hours ?? 0,
+      // bigint sums come back as strings from pg; coerce explicitly.
+      bytesGenerated: Number(bytesGeneratedRow?.bytesLast24Hours ?? 0),
     },
     pendingUploads: {
       count: pendingRow?.count ?? 0,
-      // bigint sums come back as strings from pg; coerce explicitly.
       totalBytes: Number(pendingRow?.totalBytes ?? 0),
     },
     runsThisWeek: {
       total: runsThisWeekRow?.total ?? 0,
-      filesCompleted: filesProcessedRow?.completedWeek ?? 0,
-      filesFailed: filesProcessedRow?.failedWeek ?? 0,
+      bytesGenerated: Number(bytesGeneratedRow?.bytesWeek ?? 0),
       mine: runsThisWeekRow?.mine ?? 0,
       unattributed: runsThisWeekRow?.unattributed ?? 0,
     },

@@ -61,7 +61,7 @@ export function WatcherHeader({ watcher }: { watcher: WatcherDetail }) {
               lastOnlineAt={watcher.lastHeartbeatAt}
             />
             {watcher.watcherVersion && (
-              <Badge variant="outline" className="font-mono text-[10px]">
+              <Badge variant="outline" className="font-mono text-xs">
                 v{watcher.watcherVersion}
               </Badge>
             )}

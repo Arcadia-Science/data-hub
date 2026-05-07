@@ -137,8 +137,9 @@ html.dark .shiki span {
   * {
     @apply border-border outline-ring/50;
     }
+  html,
   body {
-    @apply bg-muted-foreground text-foreground dark:bg-background;
+    @apply bg-muted text-foreground dark:bg-background;
     }
   html {
     @apply font-sans;
