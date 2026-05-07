@@ -44,6 +44,7 @@ See [Run archives](run-archives.md) for the full flow, S3 bucket layout, cache s
 | Akta FPLC | `akta_fplc` | `akta-fplc` |
 | Azure 600 Gel Doc | `azure_600_gel_doc` | `azure-600-gel-doc` |
 | Azure Cielo qPCR | `azure_cielo_qpcr` | `azure-cielo-qpcr` |
+| Epson V700 Scanner | `epson_v700_scanner` | `epson-v700-scanner` |
 | Hina Microscope | `hina_microscope` | `hina-microscope` |
 | SpectraMax iD3 Plate Reader | `spectramax_plate_reader` | `spectramax-id3-plate-reader` |
 | SpectraMax iD5 Plate Reader | `spectramax_plate_reader` | `spectramax-id5-plate-reader` |
@@ -78,6 +79,7 @@ Available commands:
 
 | Command | Description |
 | --- | --- |
+| `epson-scanner` | Process an Epson V700 Scanner TIFF (resized JPEG preview + metadata) |
 | `gel-doc` | Process an Azure 600 Gel Doc TIFF (contrast-enhanced PNG + metadata) |
 | `hina` | Convert a Hina microscope ND2 file to a JPG overlay + metadata |
 | `qpcr` | Parse dye channels from an Azure Cielo qPCR Cq Values CSV |

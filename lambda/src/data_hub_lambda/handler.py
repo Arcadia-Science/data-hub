@@ -18,6 +18,7 @@ from data_hub_lambda import (
     archive_builder,
     azure_600_gel_doc,
     azure_cielo_qpcr,
+    epson_v700_scanner,
     hina_microscope,
     spectramax_plate_reader,
 )
@@ -387,6 +388,12 @@ def lambda_handler(event: dict[str, Any], context: Context) -> dict[str, Any] | 
 
         elif instrument_id == Instrument.AZURE_CIELO_QPCR.value:
             result_url = azure_cielo_qpcr.process_file(
+                run_id=event_info.run_id,
+                filename=event_info.filename,
+            )
+
+        elif instrument_id == Instrument.EPSON_V700_SCANNER.value:
+            result_url = epson_v700_scanner.process_file(
                 run_id=event_info.run_id,
                 filename=event_info.filename,
             )
