@@ -16,7 +16,7 @@ export const dashboardSearchParams = {
   date_to: parseAsString.withOptions({ clearOnDefault: true }),
   include_deleted: parseAsBoolean.withDefault(false),
   page: parseAsInteger.withDefault(1),
-  per_page: parseAsInteger.withDefault(25),
+  per_page: parseAsInteger.withDefault(10),
 };
 
 export const dashboardParamsCache = createSearchParamsCache(
@@ -31,7 +31,7 @@ export const instrumentDetailSearchParams = {
   date_to: parseAsString.withOptions({ clearOnDefault: true }),
   include_deleted: parseAsBoolean.withDefault(false),
   page: parseAsInteger.withDefault(1),
-  per_page: parseAsInteger.withDefault(25),
+  per_page: parseAsInteger.withDefault(10),
   // Plate-reader metadata column filters (ignored for generic instruments).
   wavelength: parseAsString,
   measurement_mode: parseAsString,

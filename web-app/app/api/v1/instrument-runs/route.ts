@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
       min: 1,
     }),
     perPage: parseIntParam(searchParams.get("per_page"), {
-      default: 25,
+      default: 10,
       min: 1,
       max: 100,
     }),

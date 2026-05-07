@@ -61,7 +61,7 @@ export function WatcherHeader({ watcher }: { watcher: WatcherDetail }) {
               lastOnlineAt={watcher.lastHeartbeatAt}
             />
             {watcher.watcherVersion && (
-              <Badge variant="outline" className="font-mono text-[10px]">
+              <Badge variant="outline" className="font-mono text-xs">
                 v{watcher.watcherVersion}
               </Badge>
             )}
@@ -81,8 +81,6 @@ export function WatcherHeader({ watcher }: { watcher: WatcherDetail }) {
         </div>
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
-          <span className="font-mono">{watcher.id}</span>
-          <span>·</span>
           <Link
             href={`/instruments/${watcher.instrumentId}`}
             className="hover:text-foreground hover:underline"

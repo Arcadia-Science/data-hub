@@ -108,10 +108,9 @@ export const getInstruments = cache(async function getInstruments() {
 });
 
 export type DashboardStats = {
-  runsToday: {
+  runsLast24Hours: {
     total: number;
-    filesCompleted: number;
-    filesFailed: number;
+    bytesGenerated: number;
   };
   pendingUploads: {
     count: number;
@@ -119,8 +118,7 @@ export type DashboardStats = {
   };
   runsThisWeek: {
     total: number;
-    filesCompleted: number;
-    filesFailed: number;
+    bytesGenerated: number;
     mine: number;
     unattributed: number;
   };
@@ -141,8 +139,8 @@ export const getDashboardStats = cache(async function getDashboardStats(
   currentUserId: string | null
 ): Promise<DashboardStats> {
   const [
-    [runsTodayRow],
-    [filesProcessedTodayRow],
+    [runsLast24HoursRow],
+    [bytesGeneratedRow],
     [pendingRow],
     [runsThisWeekRow],
   ] = await Promise.all([
@@ -154,24 +152,27 @@ export const getDashboardStats = cache(async function getDashboardStats(
       .where(
         and(
           isNull(instrumentRuns.deletedAt),
-          sql`${instrumentRuns.createdAt} >= date_trunc('day', now())`
+          sql`${instrumentRuns.createdAt} > now() - interval '24 hours'`
         )
       ),
-    // Span today + the past 7 days in a single pass; the today metrics are a
-    // subset of the weekly window, so FILTER clauses give us both with one
-    // index scan instead of two near-identical queries.
+    // Span the last 24 hours + the past 7 days in a single pass; the 24-hour
+    // window is a subset of the weekly window, so FILTER clauses give us both
+    // with one index scan. Bytes are attributed to the file's owning run so
+    // the time window matches the corresponding "Runs in the last X" card —
+    // this avoids the null-`processedAt` blind spot for not-yet-processed
+    // files (which still represent data the instrument generated).
     db
       .select({
-        completedToday: sql<number>`cast(count(*) filter (where ${files.status} = 'completed' and ${files.processedAt} >= date_trunc('day', now())) as int)`,
-        failedToday: sql<number>`cast(count(*) filter (where ${files.status} = 'failed' and ${files.processedAt} >= date_trunc('day', now())) as int)`,
-        completedWeek: sql<number>`cast(count(*) filter (where ${files.status} = 'completed') as int)`,
-        failedWeek: sql<number>`cast(count(*) filter (where ${files.status} = 'failed') as int)`,
+        bytesLast24Hours: sql<string>`coalesce(sum(${files.sizeBytes}) filter (where ${instrumentRuns.createdAt} > now() - interval '24 hours'), 0)`,
+        bytesWeek: sql<string>`coalesce(sum(${files.sizeBytes}), 0)`,
       })
       .from(files)
+      .innerJoin(instrumentRuns, eq(files.instrumentRunId, instrumentRuns.id))
       .where(
         and(
           isNull(files.deletedAt),
-          sql`${files.processedAt} > now() - interval '7 days'`
+          isNull(instrumentRuns.deletedAt),
+          sql`${instrumentRuns.createdAt} > now() - interval '7 days'`
         )
       ),
     db
@@ -206,20 +207,18 @@ export const getDashboardStats = cache(async function getDashboardStats(
   ]);
 
   return {
-    runsToday: {
-      total: runsTodayRow?.total ?? 0,
-      filesCompleted: filesProcessedTodayRow?.completedToday ?? 0,
-      filesFailed: filesProcessedTodayRow?.failedToday ?? 0,
+    runsLast24Hours: {
+      total: runsLast24HoursRow?.total ?? 0,
+      // bigint sums come back as strings from pg; coerce explicitly.
+      bytesGenerated: Number(bytesGeneratedRow?.bytesLast24Hours ?? 0),
     },
     pendingUploads: {
       count: pendingRow?.count ?? 0,
-      // bigint sums come back as strings from pg; coerce explicitly.
       totalBytes: Number(pendingRow?.totalBytes ?? 0),
     },
     runsThisWeek: {
       total: runsThisWeekRow?.total ?? 0,
-      filesCompleted: filesProcessedTodayRow?.completedWeek ?? 0,
-      filesFailed: filesProcessedTodayRow?.failedWeek ?? 0,
+      bytesGenerated: Number(bytesGeneratedRow?.bytesWeek ?? 0),
       mine: runsThisWeekRow?.mine ?? 0,
       unattributed: runsThisWeekRow?.unattributed ?? 0,
     },

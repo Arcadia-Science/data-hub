@@ -66,14 +66,16 @@ export function WatcherDetailTabs({
       </TabsContent>
 
       <TabsContent value="status" className="flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-medium">Watcher Status</h3>
-            <p className="text-xs text-muted-foreground">{statusSubtitle}</p>
+        <TablePendingProvider>
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-medium">Watcher Status</h3>
+              <p className="text-xs text-muted-foreground">{statusSubtitle}</p>
+            </div>
+            <StatusToolbar />
           </div>
-          <StatusToolbar />
-        </div>
-        <HeartbeatChart heartbeats={heartbeats} since={effectiveSince} />
+          <HeartbeatChart heartbeats={heartbeats} since={effectiveSince} />
+        </TablePendingProvider>
       </TabsContent>
 
       <TabsContent value="configuration" className="flex flex-col gap-4">

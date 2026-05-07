@@ -1,5 +1,6 @@
 "use client";
 
+import { useTablePending } from "@/components/table-pending";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { todayDateString } from "@/lib/date";
@@ -8,9 +9,15 @@ import { X } from "lucide-react";
 import { useQueryStates } from "nuqs";
 
 export function StatusToolbar() {
+  // Tying URL updates to the surrounding TablePendingProvider's transition lets
+  // <HeartbeatChart> swap to a loading skeleton while the new server data is in
+  // flight, instead of briefly flashing the empty state when the previously
+  // loaded heartbeats no longer fall inside the new date window.
+  const { startTransition } = useTablePending();
   const [filters, setFilters] = useQueryStates(watcherDetailSearchParams, {
     shallow: false,
     throttleMs: 300,
+    startTransition,
   });
 
   const today = todayDateString();

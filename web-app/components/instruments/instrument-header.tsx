@@ -72,10 +72,19 @@ export function InstrumentHeader({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="font-mono text-sm text-muted-foreground">
-          {instrument.id}
-        </span>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+        <span className="font-mono">{instrument.id}</span>
+        {instrument.activeWatcherId && instrument.activeWatcherHostname && (
+          <>
+            <span>·</span>
+            <Link
+              href={`/watchers/${instrument.activeWatcherId}`}
+              className="hover:text-foreground hover:underline"
+            >
+              {instrument.activeWatcherHostname}
+            </Link>
+          </>
+        )}
       </div>
     </div>
   );

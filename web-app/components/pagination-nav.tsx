@@ -64,7 +64,6 @@ export function PaginationNav({
     return (e: MouseEvent) => {
       e.preventDefault();
       setPage(target === 1 ? null : target);
-      window.scrollTo({ top: 0, behavior: "instant" });
     };
   }
 
