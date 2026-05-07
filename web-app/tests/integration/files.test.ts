@@ -392,8 +392,8 @@ describe("Files API", () => {
   });
 
   // Once a file has been uploaded to S3, it can only be removed via the
-  // run-level DELETE (which handles S3 lifecycle). Per-file DELETE is
-  // limited to pre-upload states to prevent orphaned S3 objects.
+  // run-level DELETE. Per-file DELETE is limited to pre-upload states so
+  // soft-deletion stays coherent at the run boundary.
   it("DELETE rejects dismissal of uploaded files", async () => {
     const res = await api(`/api/v1/files/${fileId}`, {
       method: "DELETE",

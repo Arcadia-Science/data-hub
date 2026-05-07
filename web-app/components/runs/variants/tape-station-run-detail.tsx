@@ -15,7 +15,6 @@ export function TapeStationRunDetail({
   attributionsSlot,
 }: RunDetailProps) {
   const isDeleted = run.deletedAt !== null;
-  const canRestore = isDeleted && run.filesPurgedAt === null;
   const activeFileCount = files.filter((f) => f.deletedAt === null).length;
   const hasProcessedFiles =
     files.filter((f) => f.category === "processed" && f.deletedAt === null)
@@ -32,7 +31,7 @@ export function TapeStationRunDetail({
             hasProcessedFiles={hasProcessedFiles}
           />
         )}
-        {canRestore && (
+        {isDeleted && (
           <RestoreRunButton instrumentId={instrumentId} runId={runId} />
         )}
       </RunDetail.Header>

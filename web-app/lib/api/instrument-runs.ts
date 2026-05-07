@@ -102,7 +102,6 @@ export async function lookupRunByNaturalKey(
       createdAt: instrumentRuns.createdAt,
       updatedAt: instrumentRuns.updatedAt,
       deletedAt: instrumentRuns.deletedAt,
-      filesPurgedAt: instrumentRuns.filesPurgedAt,
       instrumentDisplayName: instruments.displayName,
       instrumentType: instruments.instrumentType,
     })

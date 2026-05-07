@@ -53,12 +53,7 @@ export function RunHeader({
       {run.deletedAt && (
         <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">
           <Trash2 className="size-4 shrink-0" />
-          <span>
-            Deleted {formatDateTime(run.deletedAt)}
-            {run.filesPurgedAt && (
-              <> &middot; Files purged {formatDateTime(run.filesPurgedAt)}</>
-            )}
-          </span>
+          <span>Deleted {formatDateTime(run.deletedAt)}</span>
         </div>
       )}
 

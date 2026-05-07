@@ -1,0 +1,1 @@
+ALTER TABLE "instrument_runs" DROP COLUMN "files_purged_at";

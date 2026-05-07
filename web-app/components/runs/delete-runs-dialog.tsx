@@ -119,14 +119,14 @@ export function DeleteRunsDialog({
                   {singleRun!.fileCount > 0 && (
                     <> and its {singleRun!.fileCount} file(s)</>
                   )}
-                  . S3 objects will be permanently purged after 30 days.
+                  . The run can be restored at any time.
                 </p>
               ) : (
                 <p>
                   This will soft-delete <strong>{runCount}</strong> runs and
                   their <strong>{totalFiles}</strong>{" "}
-                  {totalFiles === 1 ? "file" : "files"}. S3 objects will be
-                  permanently purged after 30 days.
+                  {totalFiles === 1 ? "file" : "files"}. The runs can be
+                  restored at any time.
                 </p>
               )}
               {requiresTypeConfirm && (

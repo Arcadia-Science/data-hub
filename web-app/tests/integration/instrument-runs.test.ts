@@ -234,8 +234,8 @@ describe("Instrument Runs API", () => {
   // DELETE /api/v1/instruments/:instrumentId/runs/:runId
   // -------------------------------------------------------------------------
 
-  // Runs are soft-deleted (deleted_at set). S3 objects are NOT removed here —
-  // a separate lifecycle job handles S3 cleanup after a retention period.
+  // Runs are soft-deleted (deleted_at set). Data Hub never hard-deletes runs
+  // or S3 objects, so a soft-deleted run can always be restored.
   it("DELETE soft-deletes a run", async () => {
     const res = await api(`/api/v1/instruments/${instrumentId}/runs/run-001`, {
       method: "DELETE",

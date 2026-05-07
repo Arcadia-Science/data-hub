@@ -13,8 +13,9 @@ type RouteContext = {
 // ---------------------------------------------------------------------------
 // POST /api/v1/instruments/:instrumentId/runs/:runId/restore
 //
-// Restores a soft-deleted run by clearing deleted_at. Rejects if the run was
-// never deleted (409) or if S3 objects have already been purged (409).
+// Restores a soft-deleted run by clearing deleted_at. Rejects with 409 if the
+// run was never deleted. Data Hub never hard-deletes runs or S3 objects, so
+// restore always succeeds for a previously soft-deleted run.
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
@@ -36,16 +37,6 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
   if (!run.deletedAt) {
     return apiError(409, CONFLICT, "Run is not deleted — nothing to restore");
-  }
-
-  // After the 30-day retention window, a background job permanently removes S3
-  // objects and sets filesPurgedAt. At that point the run is unrecoverable.
-  if (run.filesPurgedAt) {
-    return apiError(
-      409,
-      CONFLICT,
-      "Cannot restore a run whose files have been permanently purged"
-    );
   }
 
   await db
