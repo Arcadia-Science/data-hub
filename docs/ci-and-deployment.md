@@ -192,7 +192,7 @@ On pushes to `staging` or `production`, the **Deploy Lambda** workflow:
 
 Secrets (`DATA_HUB_API_KEY`, `SLACK_WEBHOOK_URL`, etc.) are stored in GitHub environment secrets scoped to each environment.
 
-> **Note:** The CI deploy role has intentionally narrow permissions — enough to push a new container image and update the existing CloudFormation stack, but _not_ enough to create the stack from scratch or to add/remove S3 buckets, Lambda functions, or S3 event triggers. Initial stack creation and infrastructure-level changes (e.g., adding a new instrument trigger) must be performed by an admin with broader AWS permissions. Once the stack exists, routine image-update deploys through CI work without issue.
+> **Note:** The CI deploy role has intentionally narrow permissions — enough to push a new container image, update the existing CloudFormation stack, and modify the data buckets' S3 event notifications (so new instrument triggers roll out via CI), but _not_ enough to create the stack from scratch or to add/remove S3 buckets or Lambda functions. Initial stack creation and structural infrastructure changes must be performed by an admin with broader AWS permissions. Once the stack exists, routine image-update deploys and new-trigger rollouts through CI work without issue.
 
 #### Local deployment
 

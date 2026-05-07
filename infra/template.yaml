@@ -289,9 +289,11 @@ Resources:
                   - !Sub "arn:aws:s3:::arcadia-data-hub-archives-${Environment}/*"
 
   # ---- IAM: GitHub Actions deploy role ----
-  # Scoped for routine image-update deploys only.  Initial stack creation and
-  # infrastructure changes (new buckets, Lambda functions, S3 event triggers)
-  # require broader permissions — run those from an admin session.
+  # Scoped for routine image-update deploys plus in-place updates to the
+  # existing data buckets' S3 event notifications (so new instrument triggers
+  # roll out via CI). Initial stack creation and structural changes — adding
+  # new buckets or Lambda functions — still require broader permissions and
+  # must be run from an admin session.
 
   GitHubActionsDeployRole:
     Type: AWS::IAM::Role
@@ -366,6 +368,18 @@ Resources:
                 Resource:
                   - !Sub "arn:aws:s3:::aws-sam-cli-managed-default-samclisourcebucket-*"
                   - !Sub "arn:aws:s3:::aws-sam-cli-managed-default-samclisourcebucket-*/*"
+              # Updating S3 event notifications (e.g., adding a new instrument
+              # trigger to RawDataBucket) requires Get/PutBucketNotification on
+              # the bucket itself. Scoped to the three data buckets this stack
+              # owns so CI can roll out new triggers without an admin deploy.
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketNotification
+                  - s3:PutBucketNotification
+                Resource:
+                  - !Sub "arn:aws:s3:::arcadia-data-hub-raw-${Environment}"
+                  - !Sub "arn:aws:s3:::arcadia-data-hub-processed-${Environment}"
+                  - !Sub "arn:aws:s3:::arcadia-data-hub-archives-${Environment}"
               - Effect: Allow
                 Action:
                   - iam:GetRole
