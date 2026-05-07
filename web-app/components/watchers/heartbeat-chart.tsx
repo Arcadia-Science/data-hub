@@ -1,11 +1,13 @@
 "use client";
 
+import { useTablePending } from "@/components/table-pending";
 import {
   type ChartConfig,
   ChartContainer,
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Tooltip,
   TooltipContent,
@@ -143,6 +145,16 @@ function StatusStrip({
   );
 }
 
+function HeartbeatChartSkeleton() {
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border bg-background p-4 dark:bg-muted">
+      <Skeleton className="h-64 w-full" />
+      <Skeleton className="mx-auto h-3 w-48" />
+      <Skeleton className="mt-2 h-6 w-full" />
+    </div>
+  );
+}
+
 export function HeartbeatChart({
   heartbeats,
   since,
@@ -150,6 +162,13 @@ export function HeartbeatChart({
   heartbeats: WatcherHeartbeatRow[];
   since: string;
 }) {
+  // Reflect the surrounding TablePendingProvider's transition state so that we
+  // can swap to a loading skeleton when the date filter changes — the
+  // server-side fetch hasn't returned yet, but the new `since` window has
+  // already been applied client-side, so the previously loaded heartbeats fall
+  // outside the window and `data` would otherwise be empty.
+  const { isPending } = useTablePending();
+
   const { windowStart, windowEnd } = useMemo(
     () => computeWindow(since),
     [since]
@@ -185,6 +204,10 @@ export function HeartbeatChart({
     const el = scrollRef.current;
     if (el && needsScroll) el.scrollLeft = el.scrollWidth;
   }, [data, needsScroll]);
+
+  if (isPending) {
+    return <HeartbeatChartSkeleton />;
+  }
 
   if (data.length === 0) {
     return (
