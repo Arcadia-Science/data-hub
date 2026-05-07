@@ -198,8 +198,8 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 // DELETE /api/v1/instruments/:instrumentId/runs/:runId
 //
 // Soft-delete only — sets deleted_at. Does NOT cascade to files or remove
-// S3 objects. S3 cleanup is handled by a separate lifecycle job after a
-// configurable retention period.
+// S3 objects. Data Hub has no hard-delete path: a soft-deleted run remains
+// fully restorable indefinitely via POST .../restore.
 // ---------------------------------------------------------------------------
 
 export async function DELETE(request: NextRequest, { params }: RouteContext) {

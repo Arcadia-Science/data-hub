@@ -208,8 +208,9 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
     return apiError(409, CONFLICT, "File is already deleted");
   }
 
-  // Only pre-upload files can be dismissed. Once uploaded to S3, deletion
-  // must go through the run-level DELETE which handles S3 lifecycle.
+  // Only pre-upload files can be dismissed individually. Once uploaded to S3,
+  // soft-deletion must go through the run-level DELETE so deletion state stays
+  // coherent at the run boundary.
   if (file.status !== "detected" && file.status !== "upload_requested") {
     return apiError(
       409,

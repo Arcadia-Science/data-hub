@@ -80,8 +80,8 @@ export function DeleteRunDialog({
               <p>
                 This will soft-delete the run{" "}
                 <strong className="font-mono">{runId}</strong>
-                {fileCount > 0 && <> and its {fileCount} file(s)</>}. S3 objects
-                will be permanently purged after 30 days.
+                {fileCount > 0 && <> and its {fileCount} file(s)</>}. The run
+                can be restored at any time.
               </p>
               {requiresConfirmation && (
                 <div className="space-y-1.5 pt-2">

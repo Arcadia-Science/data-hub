@@ -374,16 +374,10 @@ export const instrumentRuns = pgTable(
       .defaultNow()
       .$onUpdate(() => new Date()),
     // Soft-delete marker. NULL means active; non-NULL means deleted. Queries
-    // should filter on this column to exclude deleted runs.
+    // should filter on this column to exclude deleted runs. Soft-delete is the
+    // only delete mode in Data Hub — S3 objects and file rows are never
+    // hard-deleted, so a soft-deleted run can always be restored.
     deletedAt: timestamp("deleted_at", {
-      withTimezone: true,
-      mode: "date",
-    }),
-    // Set by the S3 lifecycle cleanup job when S3 objects for this run have
-    // been permanently deleted. NULL means S3 objects are still available. A
-    // run with deleted_at set but files_purged_at NULL can still be restored
-    // with full data.
-    filesPurgedAt: timestamp("files_purged_at", {
       withTimezone: true,
       mode: "date",
     }),
