@@ -57,7 +57,7 @@ jobs:
         with:
           node-version: 24
 
-      - uses: astral-sh/setup-uv@v8
+      - uses: astral-sh/setup-uv@v8.1.0
 
       - name: Install Node.js packages
         run: npm ci
