@@ -2,7 +2,7 @@
 
 These fixtures spin up a real Next.js server backed by Postgres so that
 `lambda_handler` -> `process_file` -> `DataHubClient` exercises the
-full HTTP path with only S3 downloads and Slack mocked.
+full HTTP path with only S3 downloads mocked.
 """
 
 from __future__ import annotations
@@ -271,29 +271,13 @@ def mock_s3_upload() -> Generator[MagicMock, None, None]:
 
 
 # ---------------------------------------------------------------------------
-# Step 3c — Slack mock
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(autouse=True)
-def mock_slack() -> Generator[MagicMock, None, None]:
-    """Patch `slack.send_message` as a no-op (captures calls for assertions)."""
-    with patch("data_hub_shared.slack.send_message") as mock:
-        yield mock
-
-
-# ---------------------------------------------------------------------------
 # Step 5 — mock Lambda context
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
 def mock_context() -> MagicMock:
-    """Lightweight mock for `aws_lambda_typing.context.Context`.
-
-    Provides the attributes accessed by `get_cloudwatch_logs_url` so it
-    doesn't crash on the failure path.
-    """
+    """Lightweight mock for `aws_lambda_typing.context.Context`."""
     from aws_lambda_typing.context import Context
 
     ctx = MagicMock(spec=Context)

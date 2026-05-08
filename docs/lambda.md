@@ -1,6 +1,6 @@
 # Lambda
 
-The Data Hub Lambda function preprocesses raw instrument data uploaded to S3 and builds run-archive zips on demand for the web app's "Download all" actions. It can be triggered automatically by S3 events or manually via Function URL invocations from the web app. It runs an instrument-specific preprocessing pipeline (or the archive builder) and reports results back through the API and Slack.
+The Data Hub Lambda function preprocesses raw instrument data uploaded to S3 and builds run-archive zips on demand for the web app's "Download all" actions. It can be triggered automatically by S3 events or manually via Function URL invocations from the web app. It runs an instrument-specific preprocessing pipeline (or the archive builder) and reports results back through the API.
 
 ## How it works
 
@@ -12,8 +12,8 @@ The Lambda has three invocation paths:
 2. The handler parses the S3 key to extract the instrument ID, run ID, and filename. The expected key layout is `{instrument_id}/{run_id}/{filename}`.
 3. It dispatches to the appropriate instrument processor based on the instrument ID.
 4. The processor downloads the raw file from S3, preprocesses it (e.g., extracting metadata), and creates/updates the run and files via the Data Hub API.
-5. On success, a Slack message is sent with a link to view the run in the web dashboard.
-6. On failure, a Slack message is sent with a link to the CloudWatch logs.
+
+Slack notifications are sent by the **web app**, not the Lambda — see [Slack notifications](#slack-notifications) below.
 
 ### Function URL (manual reprocessing)
 
@@ -23,7 +23,7 @@ When a file fails processing (or needs to be re-run), users can trigger reproces
 2. The web app's `POST /api/v1/files/:fileId/reprocess` endpoint transitions the file to `processing` status, clears any previous error, and sends a POST request to the Lambda Function URL.
 3. The request includes an `Authorization: Bearer <LAMBDA_INVOKE_TOKEN>` header and a JSON body containing a synthetic S3 event payload.
 4. The Lambda handler detects the Function URL invocation (via `requestContext` in the event), verifies the Bearer token against the `LAMBDA_INVOKE_TOKEN` environment variable using constant-time comparison, and parses the S3 event from the request body.
-5. From here, processing follows the same dispatch logic as the S3 trigger path (steps 2–6 above).
+5. From here, processing follows the same dispatch logic as the S3 trigger path (steps 2–4 above).
 
 ### Function URL (archive build)
 
@@ -49,7 +49,11 @@ See [Run archives](run-archives.md) for the full flow, S3 bucket layout, cache s
 | SpectraMax iD3 Plate Reader | `spectramax_plate_reader` | `spectramax-id3-plate-reader` |
 | SpectraMax iD5 Plate Reader | `spectramax_plate_reader` | `spectramax-id5-plate-reader` |
 
-Each processor module exposes a `process_file()` function that accepts the run ID and filename (and instrument ID for SpectraMax readers) and returns a URL to the run in the web dashboard.
+Each processor module exposes a `process_file()` function that accepts the run ID and filename (and instrument ID for SpectraMax readers) and reports progress back through the Data Hub API.
+
+## Slack notifications
+
+Slack notifications are sent by the **web app** (`web-app/lib/slack.ts`), not the Lambda. When the Lambda's `process_file` calls `POST /api/v1/instruments/:instrumentId/runs` to register a newly-detected run, that endpoint posts a single message per run to `SLACK_WEBHOOK_URL` (configured per environment in Vercel). Subsequent files for the same run do not re-notify because the upsert is idempotent on `(instrument_id, run_id)`. File-level failures remain visible in the web app via the file row's `status='failed'` and `error_message` fields.
 
 ## Adding a new instrument
 
@@ -58,8 +62,8 @@ Each processor module exposes a `process_file()` function that accepts the run I
 2. **Create a processor module.** Add a new module under `lambda/src/data_hub_lambda/` (e.g., `new_instrument.py`). It must expose:
 
    ```python
-   def process_file(run_id: str, filename: str) -> str:
-       """Process a file and return the URL to the run in the web dashboard."""
+   def process_file(run_id: str, filename: str) -> None:
+       """Process a file, reporting progress via the Data Hub API."""
        ...
    ```
 
@@ -121,4 +125,4 @@ The Lambda function depends on a scientific Python stack:
 - `pydantic` — data validation
 - `requests` — HTTP client for the Data Hub API
 - `aws-lambda-typing` — type stubs for Lambda events/context
-- `data-hub-shared` — shared utilities (S3, Slack, enums)
+- `data-hub-shared` — shared utilities (S3, enums)

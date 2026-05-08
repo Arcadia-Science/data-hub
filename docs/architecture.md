@@ -27,7 +27,7 @@ flowchart LR
 | `web-app/` | `data-hub-web-app` | Next.js web application, REST API, and MCP server. Deployed on Vercel. |
 | `lambda/` | `data-hub-lambda` | AWS Lambda function triggered by S3 uploads. Runs instrument-specific processing pipelines. |
 | `watcher/` | `data-hub-watcher` | CLI agent installed on lab instrument PCs. Detects new files, uploads them to S3, and reports status to the API. |
-| `packages/shared/` | `data-hub-shared` | Shared Python library providing S3 utilities, instrument enums, Slack integration, and test infrastructure. |
+| `packages/shared/` | `data-hub-shared` | Shared Python library providing S3 utilities, instrument enums, and test infrastructure. |
 
 ## Data flow
 
@@ -39,7 +39,7 @@ flowchart LR
 4. It uploads raw files to **S3** at the key `{instrument_id}/{run_id}/{filename}`.
 5. The S3 upload triggers the **Lambda** function.
 6. Lambda downloads the file and dispatches to the appropriate instrument processor for preprocessing (e.g., extracting metadata).
-7. Lambda creates/updates the run and files via the **API** and sends a **Slack** notification.
+7. Lambda creates/updates the run and files via the **API**. The API sends a **Slack** notification once per newly-created run.
 8. Users view the run in the **web dashboard**.
 
 ### Manual upload (manual mode)

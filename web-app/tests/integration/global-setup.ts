@@ -1,5 +1,6 @@
 import type { ChildProcess } from "node:child_process";
 import { execSync, spawn } from "node:child_process";
+import http from "node:http";
 import net from "node:net";
 import postgres from "postgres";
 
@@ -9,6 +10,7 @@ const TEST_DB = "data_hub_test";
 const PG_URL = `postgres://postgres:postgres@127.0.0.1:5432`;
 
 let serverProcess: ChildProcess | null = null;
+let slackCaptureServer: http.Server | null = null;
 
 // Bind to port 0, let the OS assign a free port, then immediately release it.
 // This avoids hardcoding a port that might collide with other services.
@@ -60,6 +62,52 @@ export async function setup() {
 
   const databaseUrl = `${PG_URL}/${TEST_DB}`;
 
+  // Stand up an in-process HTTP capture server so tests can assert on
+  // outgoing Slack webhook calls without depending on the real Slack API.
+  // The Next.js server (spawned below) is configured with a SLACK_WEBHOOK_URL
+  // that points at this capture endpoint; tests inspect captured payloads
+  // via `getCapturedSlackMessages()` in helpers.ts.
+  const captured: { text: string }[] = [];
+  const slackPort = await getFreePort();
+  slackCaptureServer = http.createServer((req, res) => {
+    if (req.method === "POST" && req.url === "/webhook") {
+      let raw = "";
+      req.on("data", (chunk) => {
+        raw += chunk;
+      });
+      req.on("end", () => {
+        try {
+          const parsed = JSON.parse(raw);
+          if (typeof parsed.text === "string") {
+            captured.push({ text: parsed.text });
+          }
+        } catch {
+          // ignore non-JSON bodies; never thrown by sendSlackMessage
+        }
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("ok");
+      });
+      return;
+    }
+    if (req.method === "GET" && req.url === "/captured") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(captured));
+      return;
+    }
+    if (req.method === "POST" && req.url === "/clear") {
+      captured.length = 0;
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end("ok");
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise<void>((resolve) =>
+    slackCaptureServer!.listen(slackPort, "127.0.0.1", resolve)
+  );
+  const slackCaptureBaseUrl = `http://127.0.0.1:${slackPort}`;
+
   // 2. Push schema via drizzle-kit. --force skips the interactive confirmation
   //    prompt that drizzle-kit shows when it detects destructive changes.
   execSync("npx drizzle-kit push --force", {
@@ -109,6 +157,9 @@ export async function setup() {
     // `download-archive/route.ts` still trigger.
     LAMBDA_INVOKE_TOKEN:
       process.env.LAMBDA_INVOKE_TOKEN ?? "test-lambda-invoke-token",
+    // Point Slack webhook calls at the in-process capture server defined
+    // above so tests can assert on the messages without hitting Slack.
+    SLACK_WEBHOOK_URL: `${slackCaptureBaseUrl}/webhook`,
   };
   // Strip the Lambda Function URL so "not configured" test cases work
   // regardless of the developer's local .env. Tests that need a stubbed
@@ -143,11 +194,18 @@ export async function setup() {
   process.env.__TEST_DATABASE_URL = databaseUrl;
   process.env.__TEST_LAMBDA_INVOKE_TOKEN =
     serverEnv.LAMBDA_INVOKE_TOKEN ?? "test-lambda-invoke-token";
+  process.env.__TEST_SLACK_CAPTURE_URL = slackCaptureBaseUrl;
 
   return async () => {
     if (serverProcess) {
       serverProcess.kill("SIGTERM");
       serverProcess = null;
+    }
+    if (slackCaptureServer) {
+      await new Promise<void>((resolve, reject) =>
+        slackCaptureServer!.close((err) => (err ? reject(err) : resolve()))
+      );
+      slackCaptureServer = null;
     }
   };
 }

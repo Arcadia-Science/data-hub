@@ -41,7 +41,6 @@ Shared environment-based configuration. Instantiated as a module-level singleton
 from data_hub_shared.config import config
 
 config.AWS_S3_RAW_DATA_BUCKET
-config.SLACK_WEBHOOK_URL
 ```
 
 | Attribute | Source env var | Default |
@@ -53,7 +52,6 @@ config.SLACK_WEBHOOK_URL
 | `AWS_SESSION_TOKEN` | `AWS_SESSION_TOKEN` | `None` |
 | `AWS_S3_RAW_DATA_BUCKET` | `AWS_S3_RAW_DATA_BUCKET` | `None` |
 | `AWS_S3_PROCESSED_DATA_BUCKET` | `AWS_S3_PROCESSED_DATA_BUCKET` | `None` |
-| `SLACK_WEBHOOK_URL` | `SLACK_WEBHOOK_URL` | `None` |
 
 ### `s3_utils`
 
@@ -68,18 +66,6 @@ Boto3-based S3 utilities. Callers can pass an explicit `s3_client` or let the mo
 | `list_objects(s3_uri_prefix, suffix)` | List object URIs under a prefix |
 | `upload_folder(local_path, s3_uri_prefix)` | Upload all files in a directory |
 | `get_content_type(file_path)` | Guess MIME type for a file |
-
-### `slack`
-
-Posts messages to a Slack channel via a webhook URL:
-
-```python
-from data_hub_shared import slack
-
-slack.send_message("Hello from Data Hub!")
-```
-
-If `SLACK_WEBHOOK_URL` is not set, messages are silently skipped with a warning log.
 
 ### `logger`
 
@@ -98,5 +84,4 @@ Integration test infrastructure used by both Lambda and watcher test suites. Pro
 ## Dependencies
 
 - `boto3` — AWS SDK for S3 operations
-- `requests` — HTTP client for Slack webhooks
 - `psycopg2-binary` — PostgreSQL driver (dev dependency, used by `testing.py`)

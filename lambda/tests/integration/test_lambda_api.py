@@ -1,8 +1,8 @@
 """Integration tests: Lambda -> API -> Postgres.
 
 Each test constructs a realistic S3 event, calls `lambda_handler` with
-only S3 and Slack mocked, then verifies the outcome via API GETs and
-direct DB queries.
+only S3 mocked, then verifies the outcome via API GETs and direct DB
+queries.
 """
 
 from __future__ import annotations
@@ -55,7 +55,6 @@ class TestQPCRHappyPath:
         make_s3_event: Callable[..., dict[str, Any]],
         s3_fixture_files: dict[str, Path],
         mock_context: MagicMock,
-        mock_slack: MagicMock,
     ) -> None:
         # Register the real fixture CSV so the patched S3 download can find it.
         run_id = "Experiment_20260101"
@@ -89,11 +88,6 @@ class TestQPCRHappyPath:
 
         # qPCR files don't produce processed CSV files (unlike plate readers).
         assert all(f["category"] == "raw" for f in run["files"])
-
-        mock_slack.assert_called_once()
-        slack_msg = mock_slack.call_args[0][0]
-        assert "Experiment_20260101" in slack_msg
-        assert "View in Data Hub" in slack_msg
 
 
 # ------------------------------------------------------------------
@@ -143,7 +137,6 @@ class TestSpectraMaxHappyPath:
         make_s3_event: Callable[..., dict[str, Any]],
         s3_fixture_files: dict[str, Path],
         mock_context: MagicMock,
-        mock_slack: MagicMock,
         mock_s3_upload: MagicMock,
         fixture_file: str,
         run_id: str,
@@ -185,11 +178,6 @@ class TestSpectraMaxHappyPath:
             f"s3://test-processed-bucket/spectramax-id3-plate-reader/{run_id}/{run_id}_raw_well_data.csv"
         )
 
-        mock_slack.assert_called_once()
-        slack_msg = mock_slack.call_args[0][0]
-        assert run_id in slack_msg
-        assert "View in Data Hub" in slack_msg
-
 
 # ------------------------------------------------------------------
 # Test 4b': Azure 600 Gel Doc — happy path with processed image
@@ -203,7 +191,6 @@ class TestAzure600GelDocHappyPath:
         make_s3_event: Callable[..., dict[str, Any]],
         s3_fixture_files: dict[str, Path],
         mock_context: MagicMock,
-        mock_slack: MagicMock,
         mock_s3_upload: MagicMock,
     ) -> None:
         # Register the real fixture TIFF so the patched S3 download can find it.
@@ -254,12 +241,6 @@ class TestAzure600GelDocHappyPath:
         upload_dest = mock_s3_upload.call_args[0][1]
         assert upload_dest == f"s3://test-processed-bucket/azure-600-gel-doc/{run_id}/{run_id}.png"
 
-        # Verify the Slack notification.
-        mock_slack.assert_called_once()
-        slack_msg = mock_slack.call_args[0][0]
-        assert run_id in slack_msg
-        assert "View in Data Hub" in slack_msg
-
 
 # ------------------------------------------------------------------
 # Test 4c: Malformed file — failure path
@@ -273,7 +254,6 @@ class TestFailurePath:
         make_s3_event: Callable[..., dict[str, Any]],
         s3_fixture_files: dict[str, Path],
         mock_context: MagicMock,
-        mock_slack: MagicMock,
         tmp_path: Path,
     ) -> None:
         # Create a CSV whose headers don't match the expected qPCR format.
@@ -303,12 +283,6 @@ class TestFailurePath:
         assert file["status"] == "failed"
         assert file["error_message"]
 
-        # Verify the Slack notification.
-        mock_slack.assert_called_once()
-        slack_msg = mock_slack.call_args[0][0]
-        assert run_id in slack_msg
-        assert "View CloudWatch logs" in slack_msg
-
 
 # ------------------------------------------------------------------
 # Test 4d: Idempotent run creation
@@ -322,7 +296,6 @@ class TestIdempotentRunCreation:
         make_s3_event: Callable[..., dict[str, Any]],
         s3_fixture_files: dict[str, Path],
         mock_context: MagicMock,
-        mock_slack: MagicMock,
     ) -> None:
         run_id = "Experiment_20260301"
         filename = f"{run_id}_CqValues.csv"
@@ -362,12 +335,6 @@ class TestIdempotentRunCreation:
         assert run["run_id"] == run_id
         assert run["source"] == "lambda"
 
-        assert mock_slack.call_count == 2
-        for call in mock_slack.call_args_list:
-            slack_msg = call[0][0]
-            assert run_id in slack_msg
-            assert "View in Data Hub" in slack_msg
-
 
 # ------------------------------------------------------------------
 # Test 4e: File reprocessing
@@ -381,7 +348,6 @@ class TestFileReprocessing:
         make_s3_event: Callable[..., dict[str, Any]],
         s3_fixture_files: dict[str, Path],
         mock_context: MagicMock,
-        mock_slack: MagicMock,
     ) -> None:
         """Firing the same S3 event twice must not create a duplicate file row.
 
@@ -427,7 +393,6 @@ class TestFileReprocessing:
         make_s3_event: Callable[..., dict[str, Any]],
         s3_fixture_files: dict[str, Path],
         mock_context: MagicMock,
-        mock_slack: MagicMock,
         tmp_path: Path,
     ) -> None:
         """A failed file can be reprocessed successfully on a retry.
@@ -468,18 +433,12 @@ class TestFileReprocessing:
         assert run["files"][0]["status"] == "completed"
         assert run["files"][0]["error_message"] is None
 
-        # Verify the Slack notifications.
-        assert mock_slack.call_count == 2
-        assert "View CloudWatch logs" in mock_slack.call_args_list[0][0][0]
-        assert "View in Data Hub" in mock_slack.call_args_list[1][0][0]
-
     def test_reprocess_does_not_duplicate_processed_csv(
         self,
         integration_env: IntegrationEnv,
         make_s3_event: Callable[..., dict[str, Any]],
         s3_fixture_files: dict[str, Path],
         mock_context: MagicMock,
-        mock_slack: MagicMock,
         mock_s3_upload: MagicMock,
     ) -> None:
         """Reprocessing a plate reader file must not duplicate the CSV file record.
@@ -508,12 +467,6 @@ class TestFileReprocessing:
         assert len(processed_files) == 1
         assert processed_files[0]["filename"] == f"{run_id}_raw_well_data.csv"
 
-        assert mock_slack.call_count == 2
-        for call in mock_slack.call_args_list:
-            slack_msg = call[0][0]
-            assert run_id in slack_msg
-            assert "View in Data Hub" in slack_msg
-
 
 # ------------------------------------------------------------------
 # Test 4f: Function URL invocation
@@ -527,7 +480,6 @@ class TestFunctionUrlInvocation:
         make_function_url_event: Callable[..., dict[str, Any]],
         s3_fixture_files: dict[str, Path],
         mock_context: MagicMock,
-        mock_slack: MagicMock,
     ) -> None:
         """A Function URL event with a valid token processes the file
         identically to a direct S3 trigger."""
@@ -551,14 +503,10 @@ class TestFunctionUrlInvocation:
         assert len(run["files"]) == 1
         assert run["files"][0]["status"] == "completed"
 
-        mock_slack.assert_called_once()
-        assert "View in Data Hub" in mock_slack.call_args[0][0]
-
     def test_wrong_token_returns_401(
         self,
         make_function_url_event: Callable[..., dict[str, Any]],
         mock_context: MagicMock,
-        mock_slack: MagicMock,
     ) -> None:
         """A Function URL event with an incorrect Bearer token is rejected."""
         event = make_function_url_event(
@@ -570,13 +518,11 @@ class TestFunctionUrlInvocation:
         result = lambda_handler(event, mock_context)
 
         assert result == {"statusCode": 401, "body": "Unauthorized"}
-        mock_slack.assert_not_called()
 
     def test_missing_auth_header_returns_401(
         self,
         make_function_url_event: Callable[..., dict[str, Any]],
         mock_context: MagicMock,
-        mock_slack: MagicMock,
     ) -> None:
         """A Function URL event with no Authorization header is rejected."""
         event = make_function_url_event(
@@ -588,13 +534,11 @@ class TestFunctionUrlInvocation:
         result = lambda_handler(event, mock_context)
 
         assert result == {"statusCode": 401, "body": "Unauthorized"}
-        mock_slack.assert_not_called()
 
     def test_unconfigured_token_returns_401(
         self,
         make_function_url_event: Callable[..., dict[str, Any]],
         mock_context: MagicMock,
-        mock_slack: MagicMock,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """When LAMBDA_INVOKE_TOKEN is not set, all Function URL requests
@@ -610,13 +554,11 @@ class TestFunctionUrlInvocation:
         result = lambda_handler(event, mock_context)
 
         assert result == {"statusCode": 401, "body": "Unauthorized"}
-        mock_slack.assert_not_called()
 
     def test_invalid_json_body_returns_401(
         self,
         make_function_url_event: Callable[..., dict[str, Any]],
         mock_context: MagicMock,
-        mock_slack: MagicMock,
     ) -> None:
         """A Function URL event with a valid token but non-JSON body is
         rejected (the handler cannot parse the S3 event payload)."""
@@ -629,4 +571,3 @@ class TestFunctionUrlInvocation:
         result = lambda_handler(event, mock_context)
 
         assert result == {"statusCode": 401, "body": "Unauthorized"}
-        mock_slack.assert_not_called()

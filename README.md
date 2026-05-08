@@ -19,7 +19,7 @@ flowchart LR
 | `web-app/` | Next.js web application and REST API (Vercel) | [API reference](docs/api.md) |
 | `lambda/` | AWS Lambda function for instrument data processing | [Lambda docs](docs/lambda.md) |
 | `watcher/` | CLI agent for lab instrument PCs | [Watcher docs](docs/watcher.md) |
-| `packages/shared/` | Shared Python library (S3, enums, Slack, test infra) | [Shared library](docs/shared-library.md) |
+| `packages/shared/` | Shared Python library (S3, enums, test infra) | [Shared library](docs/shared-library.md) |
 | `docs/` | Project documentation | — |
 
 ## Quick start

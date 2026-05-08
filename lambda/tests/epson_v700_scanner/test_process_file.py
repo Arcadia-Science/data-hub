@@ -103,14 +103,12 @@ class TestProcessFileHappyPath:
         ):
             from data_hub_lambda.epson_v700_scanner.process_file import process_file
 
-            result_url = process_file(run_id="run-xyz", filename="scan.tif")
+            process_file(run_id="run-xyz", filename="scan.tif")
 
         client.ensure_run.assert_called_once()
         assert client.create_file.call_count == 2
         s3_mock.upload_file.assert_called_once()
         client.update_run.assert_called_once()
-        assert "epson-v700-scanner" in result_url
-        assert "run-xyz" in result_url
 
     def test_uploads_jpg_and_registers_processed_file(
         self,

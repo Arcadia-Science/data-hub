@@ -32,11 +32,6 @@ Parameters:
     NoEcho: true
     Description: API key for Lambda to authenticate with the Data Hub API
 
-  SlackWebhookUrl:
-    Type: String
-    NoEcho: true
-    Description: Slack incoming webhook URL for Lambda notifications
-
   LambdaInvokeToken:
     Type: String
     NoEcho: true
@@ -223,7 +218,6 @@ Resources:
           AWS_S3_ARCHIVES_BUCKET: !Sub "arcadia-data-hub-archives-${Environment}"
           DATA_HUB_API_URL: !Ref DataHubApiUrl
           DATA_HUB_API_KEY: !Ref DataHubApiKey
-          SLACK_WEBHOOK_URL: !Ref SlackWebhookUrl
           LAMBDA_INVOKE_TOKEN: !Ref LambdaInvokeToken
 
   # ---- S3 → Lambda event wiring ----

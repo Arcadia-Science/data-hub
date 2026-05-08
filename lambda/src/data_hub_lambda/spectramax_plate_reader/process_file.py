@@ -3,7 +3,6 @@ import logging
 from typing import Literal
 
 from data_hub_lambda.api_client import get_client
-from data_hub_lambda.constants import DATA_HUB_WEB_URL
 from data_hub_lambda.spectramax_plate_reader.utils import parse_metadata, parse_raw_well_data
 from data_hub_shared import s3_utils
 from data_hub_shared.config import config
@@ -13,16 +12,13 @@ logger = logging.getLogger(__name__)
 InstrumentType = Literal["spectramax-id3-plate-reader", "spectramax-id5-plate-reader"]
 
 
-def process_file(instrument_id: InstrumentType, run_id: str, filename: str) -> str:
+def process_file(instrument_id: InstrumentType, run_id: str, filename: str) -> None:
     """Process a single SpectraMax plate reader file through the Data Hub API.
 
     Args:
         instrument_id: The instrument ID (iD3 or iD5).
         run_id: The run ID (filename stem).
         filename: The original filename (e.g. `033126_CM_Od750.xls`).
-
-    Returns:
-        The web app URL for the instrument run.
     """
     logger.info("Processing SpectraMax file: %s (run: %s)", filename, run_id)
 
@@ -87,5 +83,3 @@ def process_file(instrument_id: InstrumentType, run_id: str, filename: str) -> s
         logger.error("Error processing file: %s", e)
         client.update_file(file_id, status="failed", error_message=str(e))
         raise
-
-    return f"{DATA_HUB_WEB_URL}/instruments/{instrument_id}/runs/{run_id}"

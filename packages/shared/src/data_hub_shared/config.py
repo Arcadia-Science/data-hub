@@ -22,8 +22,6 @@ class Config:
     AWS_S3_RAW_DATA_BUCKET: str | None
     AWS_S3_PROCESSED_DATA_BUCKET: str | None
 
-    SLACK_WEBHOOK_URL: str | None
-
     def __init__(self) -> None:
         self.LOCAL_DATA_DIRPATH = Path(os.getenv("LOCAL_DATA_DIRPATH") or "/tmp/data")
         self.LOCAL_RAW_DATA_DIRPATH = self.LOCAL_DATA_DIRPATH / "raw-data"
@@ -36,8 +34,6 @@ class Config:
 
         self.AWS_S3_RAW_DATA_BUCKET = os.getenv("AWS_S3_RAW_DATA_BUCKET")
         self.AWS_S3_PROCESSED_DATA_BUCKET = os.getenv("AWS_S3_PROCESSED_DATA_BUCKET")
-
-        self.SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
 
 
 config = Config()

@@ -3,7 +3,6 @@ import logging
 
 from data_hub_lambda.agilent_4150_tapestation.utils import parse_tape_type
 from data_hub_lambda.api_client import get_client
-from data_hub_lambda.constants import DATA_HUB_WEB_URL
 from data_hub_shared import s3_utils
 from data_hub_shared.config import config
 from data_hub_shared.enums import Instrument
@@ -13,15 +12,12 @@ logger = logging.getLogger(__name__)
 INSTRUMENT_ID = Instrument.AGILENT_4150_TAPESTATION.value
 
 
-def process_file(run_id: str, filename: str) -> str:
+def process_file(run_id: str, filename: str) -> None:
     """Process a single Agilent 4150 TapeStation file through the Data Hub API.
 
     Args:
         run_id: The run ID (`YYYY-MM-DD - HH-MM-SS` prefix).
         filename: The original filename (e.g. `2026-02-18 - 18-00-04-gDNA_peakTable.csv`).
-
-    Returns:
-        The web app URL for the instrument run.
     """
     logger.info("Processing Agilent 4150 TapeStation file: %s (run: %s)", filename, run_id)
 
@@ -62,5 +58,3 @@ def process_file(run_id: str, filename: str) -> str:
         logger.error("Error processing file: %s", e)
         client.update_file(file_id, status="failed", error_message=str(e))
         raise
-
-    return f"{DATA_HUB_WEB_URL}/instruments/{INSTRUMENT_ID}/runs/{run_id}"

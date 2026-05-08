@@ -2,7 +2,6 @@ from __future__ import annotations
 import logging
 
 from data_hub_lambda.api_client import get_client
-from data_hub_lambda.constants import DATA_HUB_WEB_URL
 from data_hub_shared import s3_utils
 from data_hub_shared.config import config
 from data_hub_shared.enums import Instrument
@@ -12,15 +11,12 @@ logger = logging.getLogger(__name__)
 INSTRUMENT_ID = Instrument.AKTA_FPLC.value
 
 
-def process_file(run_id: str, filename: str) -> str:
+def process_file(run_id: str, filename: str) -> None:
     """Process a single Akta FPLC file through the Data Hub API.
 
     Args:
         run_id: The run ID (filename stem).
         filename: The original filename (e.g. `2025-09-23_test.pdf`).
-
-    Returns:
-        The web app URL for the instrument run.
     """
     logger.info("Processing Akta FPLC file: %s (run: %s)", filename, run_id)
 
@@ -54,5 +50,3 @@ def process_file(run_id: str, filename: str) -> str:
         logger.error("Error processing file: %s", e)
         client.update_file(file_id, status="failed", error_message=str(e))
         raise
-
-    return f"{DATA_HUB_WEB_URL}/instruments/{INSTRUMENT_ID}/runs/{run_id}"
