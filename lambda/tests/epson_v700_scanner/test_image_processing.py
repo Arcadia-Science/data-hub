@@ -3,9 +3,9 @@
 from __future__ import annotations
 from pathlib import Path
 
+import imageio.v3 as iio
 import numpy as np
 import pytest
-import skimage as ski
 import tifffile
 
 from data_hub_lambda.epson_v700_scanner.image_processing import (
@@ -33,7 +33,7 @@ class TestExportJpg:
         assert jpg_path.exists()
         assert jpg_path.suffix == ".jpg"
 
-        loaded = ski.io.imread(str(jpg_path))
+        loaded = iio.imread(jpg_path)
         assert loaded.ndim == 3
         assert loaded.shape[2] == 3
 
@@ -45,7 +45,7 @@ class TestExportJpg:
         converter.load()
         jpg_path = converter.export_jpg()
 
-        loaded = ski.io.imread(str(jpg_path))
+        loaded = iio.imread(jpg_path)
         assert max(loaded.shape[:2]) <= MAX_DIMENSION
 
     def test_does_not_upscale_small_image(self, tmp_path: Path) -> None:
@@ -56,7 +56,7 @@ class TestExportJpg:
         converter.load()
         jpg_path = converter.export_jpg()
 
-        loaded = ski.io.imread(str(jpg_path))
+        loaded = iio.imread(jpg_path)
         assert loaded.shape[0] == 100
         assert loaded.shape[1] == 150
 
@@ -68,7 +68,7 @@ class TestExportJpg:
         converter.load()
         jpg_path = converter.export_jpg()
 
-        loaded = ski.io.imread(str(jpg_path))
+        loaded = iio.imread(jpg_path)
         assert loaded.ndim == 3
         assert loaded.shape[2] == 3
 
@@ -80,7 +80,7 @@ class TestExportJpg:
         converter.load()
         jpg_path = converter.export_jpg()
 
-        loaded = ski.io.imread(str(jpg_path))
+        loaded = iio.imread(jpg_path)
         assert loaded.ndim == 3
         assert loaded.shape[2] == 3
 
@@ -92,7 +92,7 @@ class TestExportJpg:
         converter.load()
         jpg_path = converter.export_jpg()
 
-        loaded = ski.io.imread(str(jpg_path))
+        loaded = iio.imread(jpg_path)
         assert loaded.dtype == np.uint8
 
 

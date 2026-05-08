@@ -3,6 +3,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import imageio.v3 as iio
 import numpy as np
 import skimage as ski
 import tifffile
@@ -90,7 +91,7 @@ class TIFFToJPEGConverter:
         img = self._resize(img)
 
         jpg_path = self.path.parent / f"{self.path.stem}.jpg"
-        ski.io.imsave(str(jpg_path), img, quality=JPEG_QUALITY)
+        iio.imwrite(jpg_path, img, quality=JPEG_QUALITY)
         return jpg_path
 
     def parse_metadata(self) -> dict[str, Any]:
