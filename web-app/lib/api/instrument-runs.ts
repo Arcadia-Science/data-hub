@@ -12,18 +12,7 @@ import {
 } from "@/lib/db/schema";
 import { getS3ObjectStream } from "@/lib/s3";
 import type { AnyColumn, SQL } from "drizzle-orm";
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  gte,
-  ilike,
-  inArray,
-  isNull,
-  lte,
-  sql,
-} from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
 
 // ---------------------------------------------------------------------------
 // Run attributions: users who claimed they ran a given run. Wire shape is
@@ -242,15 +231,24 @@ export async function buildRunListQuery(filters: RunListFilters) {
   // yesterday — even if the watcher only reported them to Data Hub today.
   // Lambda runs and pre-backfill runs (acquired_at IS NULL) fall through to
   // created_at via coalesce.
+  //
+  // NOTE: drizzle's `gte`/`lte` rely on the column's PgColumn mapper to
+  // serialize a JS Date for the postgres-js driver. With a raw SQL
+  // fragment as the LHS that mapper is bypassed, so the driver sees a
+  // Date and throws ERR_INVALID_ARG_TYPE. Bind ISO strings explicitly and
+  // cast on the Postgres side to keep this path on the index.
   if (filters.dateFrom) {
-    conditions.push(gte(acquiredOrCreatedSql, new Date(filters.dateFrom)));
+    const from = new Date(filters.dateFrom).toISOString();
+    conditions.push(sql`${acquiredOrCreatedSql} >= ${from}::timestamptz`);
   }
   // dateTo is a date string (e.g. "2026-03-28") without a time component.
   // Advance by one day so the filter is inclusive of the entire selected day.
   if (filters.dateTo) {
     const end = new Date(filters.dateTo);
     end.setDate(end.getDate() + 1);
-    conditions.push(lte(acquiredOrCreatedSql, end));
+    conditions.push(
+      sql`${acquiredOrCreatedSql} <= ${end.toISOString()}::timestamptz`
+    );
   }
 
   if (filters.search) {

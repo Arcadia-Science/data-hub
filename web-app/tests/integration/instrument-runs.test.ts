@@ -1,3 +1,4 @@
+import { buildRunListQuery } from "@/lib/api/instrument-runs";
 import { instruments } from "@/lib/db/schema";
 import {
   api,
@@ -527,5 +528,23 @@ describe("Run acquired_at", () => {
     // sort-newest should be first overall — its acquired_at (year 2030)
     // is later than every other run's acquired_at OR created_at.
     expect(ids[0]).toBe("sort-newest");
+  });
+
+  // Regression: drizzle's `gte`/`lte` against a raw SQL fragment skips
+  // the column-level Date->string coercion and crashes the postgres-js
+  // driver with ERR_INVALID_ARG_TYPE. The current implementation binds
+  // ISO strings explicitly and casts to timestamptz on the server.
+  it("buildRunListQuery date filters apply against coalesce(acquired_at, created_at)", async () => {
+    const result = await buildRunListQuery({
+      instrumentId,
+      dateFrom: "2009-01-01",
+      dateTo: "2010-12-31",
+      page: 1,
+      perPage: 100,
+      includeDeleted: false,
+    });
+    const ids = result.data.map((r) => r.run_id);
+    expect(ids).toContain("sort-oldest");
+    expect(ids).not.toContain("sort-newest");
   });
 });
