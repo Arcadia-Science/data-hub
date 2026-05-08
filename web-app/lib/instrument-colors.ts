@@ -59,6 +59,15 @@ export const COLOR_MODE_LABELS: Record<string, string> = {
   bw: "B&W",
 };
 
+/**
+ * Map a stored color-mode value (`"rgb"` / `"bw"`) to its display label,
+ * falling back to the raw value for forward-compatibility with any future
+ * values the Lambda might emit before this map is updated.
+ */
+export function formatColorMode(value: string): string {
+  return COLOR_MODE_LABELS[value] ?? value;
+}
+
 // ---------- Plate reader ----------
 
 export const MEASUREMENT_TYPE_COLORS: Record<string, string> = {

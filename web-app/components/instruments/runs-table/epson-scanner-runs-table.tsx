@@ -11,8 +11,8 @@ import {
 import type { EpsonScannerFilterOptions } from "@/lib/api/instrument-runs";
 import {
   COLOR_MODE_COLORS,
-  COLOR_MODE_LABELS,
   DPI_COLORS,
+  formatColorMode,
 } from "@/lib/instrument-colors";
 import { runRowToRef } from "@/lib/runs/row-actions";
 import { cn, formatBytes } from "@/lib/utils";
@@ -35,7 +35,7 @@ function sortDpiOptions(dpis: string[]): string[] {
 }
 
 function colorModeOption(value: string): { value: string; label: string } {
-  return { value, label: COLOR_MODE_LABELS[value] ?? value };
+  return { value, label: formatColorMode(value) };
 }
 
 export function EpsonScannerRunsTable({
@@ -144,11 +144,7 @@ export function EpsonScannerRunsTable({
               </TableCell>
               <TableCell>
                 <MetadataFieldBadge
-                  value={
-                    colorMode
-                      ? (COLOR_MODE_LABELS[colorMode] ?? colorMode)
-                      : null
-                  }
+                  value={colorMode ? formatColorMode(colorMode) : null}
                   colorClass={
                     colorMode ? COLOR_MODE_COLORS[colorMode] : undefined
                   }

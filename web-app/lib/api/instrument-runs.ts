@@ -280,7 +280,12 @@ export async function buildRunListQuery(filters: RunListFilters) {
     );
   }
 
-  // Epson V700 Scanner metadata column filters (leverages the GIN index).
+  // Epson V700 Scanner metadata column filters. Both use the `->>` text
+  // accessor for scalar equality, which is *not* covered by the default
+  // jsonb_ops GIN index — these conditions piggyback on
+  // `idx_instrument_runs_active(instrument_id, …)` and re-evaluate per row,
+  // which is fine on instrument-scoped pages but worth a dedicated
+  // expression index if it ever becomes a hot path.
   if (filters.dpi) {
     conditions.push(sql`${instrumentRuns.metadata}->>'dpi' = ${filters.dpi}`);
   }

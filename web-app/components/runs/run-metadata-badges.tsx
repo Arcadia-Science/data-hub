@@ -8,12 +8,12 @@ import {
   CAPTURE_TYPE_COLORS,
   CHANNEL_COLOR_STYLES,
   COLOR_MODE_COLORS,
-  COLOR_MODE_LABELS,
   DPI_COLORS,
   IMAGING_MODE_COLORS,
   MEASUREMENT_MODE_COLORS,
   MEASUREMENT_TYPE_COLORS,
   buildWavelengthColorMap,
+  formatColorMode,
   getDyeChannelColor,
 } from "@/lib/instrument-colors";
 import { cn } from "@/lib/utils";
@@ -262,7 +262,7 @@ export function EpsonScannerRunBadges({
       {colorMode && (
         <MetadataRow label="Color Mode">
           <ColorBadge
-            value={COLOR_MODE_LABELS[colorMode] ?? colorMode}
+            value={formatColorMode(colorMode)}
             colorClass={COLOR_MODE_COLORS[colorMode]}
           />
         </MetadataRow>
