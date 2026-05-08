@@ -172,7 +172,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     const origin = new URL(request.url).origin;
     await sendSlackMessage(
       `*${instrument.displayName}*\n` +
-        `New run \`${runId}\` created (source: ${source}).\n` +
+        `New instrument run reported: \`${runId}\`.\n` +
         `<${origin}/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}|View in Data Hub>`
     );
   }

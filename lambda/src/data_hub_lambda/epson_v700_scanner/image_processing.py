@@ -16,6 +16,34 @@ MAX_DIMENSION = 1000
 
 _TIFF_SUFFIXES = {".tif", ".tiff"}
 
+# PhotometricInterpretation values: 2 = RGB, others (0, 1, 3) are grayscale or
+# palette and are treated as B&W for our display purposes.
+_PHOTOMETRIC_RGB = 2
+
+
+def _derive_dpi(x_resolution: Any) -> int | None:
+    """Compute integer DPI from a TIFF ``XResolution`` rational tuple."""
+    if not isinstance(x_resolution, (list, tuple)) or len(x_resolution) != 2:
+        return None
+    numerator, denominator = x_resolution
+    if not isinstance(numerator, (int, float)) or not isinstance(denominator, (int, float)):
+        return None
+    if denominator == 0:
+        return None
+    return int(numerator / denominator)
+
+
+def _derive_color_mode(samples_per_pixel: Any, photometric_interpretation: Any) -> str | None:
+    """Infer ``rgb`` vs ``bw`` from TIFF tags, preferring SamplesPerPixel."""
+    if isinstance(samples_per_pixel, (list, tuple)):
+        samples_per_pixel = samples_per_pixel[0] if samples_per_pixel else None
+    if isinstance(samples_per_pixel, int):
+        return "rgb" if samples_per_pixel >= 3 else "bw"
+    if isinstance(photometric_interpretation, int):
+        return "rgb" if photometric_interpretation == _PHOTOMETRIC_RGB else "bw"
+    return None
+
+
 _METADATA_TAG_NAMES = {
     "ImageWidth",
     "ImageLength",
@@ -66,7 +94,16 @@ class TIFFToJPEGConverter:
         return jpg_path
 
     def parse_metadata(self) -> dict[str, Any]:
-        """Extract TIFF tags as a flat string-keyed dict."""
+        """Extract TIFF tags as a flat string-keyed dict.
+
+        In addition to the raw TIFF tags, this also emits two derived
+        scalar fields used by the web UI for filtering and display:
+
+        - ``dpi``: integer DPI computed from ``XResolution`` (a (numerator,
+          denominator) rational). For Epson V700 scans this is 300 or 600.
+        - ``color_mode``: ``"rgb"`` or ``"bw"``, inferred from
+          ``SamplesPerPixel`` (preferred) or ``PhotometricInterpretation``.
+        """
         metadata: dict[str, Any] = {}
         with tifffile.TiffFile(self.path) as tif:
             page = tif.pages.first
@@ -80,6 +117,18 @@ class TIFFToJPEGConverter:
         h, w = self.intensities.shape[:2]
         metadata["OriginalHeight"] = int(h)
         metadata["OriginalWidth"] = int(w)
+
+        dpi = _derive_dpi(metadata.get("XResolution"))
+        if dpi is not None:
+            metadata["dpi"] = dpi
+
+        color_mode = _derive_color_mode(
+            metadata.get("SamplesPerPixel"),
+            metadata.get("PhotometricInterpretation"),
+        )
+        if color_mode is not None:
+            metadata["color_mode"] = color_mode
+
         return metadata
 
     # ------------------------------------------------------------------

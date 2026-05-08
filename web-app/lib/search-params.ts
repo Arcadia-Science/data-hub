@@ -49,6 +49,10 @@ export const instrumentDetailSearchParams = {
   hina_channel: parseAsString,
   hina_dimension: parseAsString,
   hina_size: parseAsString,
+  // Epson V700 Scanner metadata column filters. `dpi` is a numeric string
+  // ("300", "600"); `color_mode` is "rgb" or "bw".
+  dpi: parseAsString,
+  color_mode: parseAsString,
   // Attribution filter: either a userId or the reserved sentinel "unattributed".
   ran_by: parseAsString,
 };

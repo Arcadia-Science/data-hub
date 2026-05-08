@@ -32,6 +32,7 @@ const TYPE_LABELS: Record<string, string> = {
   qpcr: "qPCR",
   tape_station: "TapeStation",
   hina_microscope: "Hina Microscope",
+  epson_v700_scanner: "Epson V700 Scanner",
 };
 
 const INSTRUMENT_TYPE_OPTIONS = VALID_INSTRUMENT_TYPES.map((value) => ({
