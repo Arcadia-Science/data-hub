@@ -14,7 +14,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from data_hub_watcher.run_detector import RunDetector, file_created_at
+from data_hub_watcher.run_detector import (
+    FileInfo,
+    RunDetector,
+    _run_acquired_at,
+    file_created_at,
+)
 from data_hub_watcher.state import StateDB
 
 
@@ -371,3 +376,127 @@ class TestUpdateRunSendsDeltaOnly:
 
         rel_paths = {r.relative_path for r in state_db.get_detected_files_for_run("run-retry")}
         assert rel_paths == {"run-retry/a.nd2", "run-retry/b.nd2", "run-retry/c.nd2"}
+
+
+class TestAcquiredAt:
+    """Run-level `acquired_at` derived from min(file_created_at)."""
+
+    def test_run_acquired_at_skips_zero_and_returns_min(self) -> None:
+        files = [
+            FileInfo(
+                path=Path("/a"),
+                filename="a",
+                size_bytes=1,
+                file_created_at=1_700_000_500.0,
+            ),
+            FileInfo(
+                path=Path("/b"),
+                filename="b",
+                size_bytes=1,
+                file_created_at=0.0,
+            ),
+            FileInfo(
+                path=Path("/c"),
+                filename="c",
+                size_bytes=1,
+                file_created_at=1_699_999_900.0,
+            ),
+        ]
+        assert _run_acquired_at(files) == 1_699_999_900.0
+
+    def test_run_acquired_at_returns_none_when_all_missing(self) -> None:
+        files = [
+            FileInfo(path=Path("/a"), filename="a", size_bytes=1, file_created_at=0.0),
+        ]
+        assert _run_acquired_at(files) is None
+
+    def test_post_payload_includes_acquired_at_iso(
+        self, state_db: StateDB, watch_dir: Path
+    ) -> None:
+        """The POST /runs payload must include `acquired_at` (ISO 8601 UTC) when known."""
+        client = MagicMock()
+        client.report_run.return_value = MagicMock(id="api-run-id")
+        detector = _make_detector(watch_dir, state_db, client=client)
+
+        (watch_dir / "run-acq").mkdir()
+        f = watch_dir / "run-acq" / "data.nd2"
+        f.write_bytes(b"q" * 8)
+        detector.on_stable_file(f)
+
+        client.report_run.assert_called_once()
+        _, payload = client.report_run.call_args.args
+        assert isinstance(payload.get("acquired_at"), str)
+        assert payload["acquired_at"].endswith("+00:00")
+        # The run-level acquired_at equals the per-file file_created_at
+        # (single-file run), which is already exposed in detected_files[0].
+        assert payload["acquired_at"] == payload["detected_files"][0]["file_created_at"]
+
+    def test_patch_includes_earlier_acquired_at_when_later_file_predates(
+        self, state_db: StateDB, watch_dir: Path
+    ) -> None:
+        """If a later-stabilising file has an earlier birthtime, the PATCH must
+        carry an `acquired_at` field so the server can move the row earlier."""
+        client = MagicMock()
+        client.report_run.return_value = MagicMock(id="api-run-id")
+        detector = _make_detector(watch_dir, state_db, client=client)
+
+        run_dir = watch_dir / "run-earlier"
+        run_dir.mkdir()
+        f1 = run_dir / "a.nd2"
+        f1.write_bytes(b"a" * 10)
+        detector.on_stable_file(f1)
+
+        run = detector._runs["run-earlier"]
+        assert run.acquired_at_sent is not None
+        first_acquired = run.acquired_at_sent
+
+        # Inject a second stable file whose on-disk birthtime predates the
+        # first by an hour. Bypass `on_stable_file` so we control the
+        # FileInfo precisely without depending on platform birthtime
+        # behaviour.
+        f2 = run_dir / "b.nd2"
+        f2.write_bytes(b"b" * 20)
+        earlier = first_acquired - 3600.0
+        run.files.append(
+            FileInfo(
+                path=f2,
+                filename=f2.name,
+                size_bytes=20,
+                mtime=first_acquired,
+                file_created_at=earlier,
+            )
+        )
+        detector._update_run(run)
+
+        client.update_run.assert_called_once()
+        _, _, patch_payload = client.update_run.call_args.args
+        assert isinstance(patch_payload.get("acquired_at"), str)
+        # ISO-encoded earlier value matches the new floor.
+        from datetime import datetime, timezone
+
+        assert (
+            patch_payload["acquired_at"]
+            == datetime.fromtimestamp(earlier, tz=timezone.utc).isoformat()
+        )
+        assert run.acquired_at_sent == earlier
+
+    def test_patch_omits_acquired_at_when_floor_unchanged(
+        self, state_db: StateDB, watch_dir: Path
+    ) -> None:
+        """A later file with a *later* birthtime must not bump acquired_at."""
+        client = MagicMock()
+        client.report_run.return_value = MagicMock(id="api-run-id")
+        detector = _make_detector(watch_dir, state_db, client=client)
+
+        run_dir = watch_dir / "run-monotonic"
+        run_dir.mkdir()
+        f1 = run_dir / "a.nd2"
+        f1.write_bytes(b"a" * 10)
+        detector.on_stable_file(f1)
+        f2 = run_dir / "b.nd2"
+        f2.write_bytes(b"b" * 20)
+        detector.on_stable_file(f2)
+
+        client.update_run.assert_called_once()
+        _, _, patch_payload = client.update_run.call_args.args
+        assert "acquired_at" not in patch_payload

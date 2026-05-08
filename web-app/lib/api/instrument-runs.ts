@@ -11,7 +11,7 @@ import {
   users,
 } from "@/lib/db/schema";
 import { getS3ObjectStream } from "@/lib/s3";
-import type { SQL } from "drizzle-orm";
+import type { AnyColumn, SQL } from "drizzle-orm";
 import {
   and,
   asc,
@@ -100,6 +100,7 @@ export async function lookupRunByNaturalKey(
       watcherId: instrumentRuns.watcherId,
       metadata: instrumentRuns.metadata,
       createdAt: instrumentRuns.createdAt,
+      acquiredAt: instrumentRuns.acquiredAt,
       updatedAt: instrumentRuns.updatedAt,
       deletedAt: instrumentRuns.deletedAt,
       instrumentDisplayName: instruments.displayName,
@@ -119,6 +120,42 @@ export async function lookupRunByNaturalKey(
 
   const byRun = await getAttributionsByRunIds([row.id]);
   return { ...row, attributions: byRun.get(row.id) ?? [] };
+}
+
+// ---------------------------------------------------------------------------
+// acquired_at parsing for create/update payloads.
+//
+// Watchers send `acquired_at` as ISO 8601 (UTC) at the run level; older
+// watchers (and the lambda) only send per-file `file_created_at` on
+// `detected_files[]`. Falling back to min(detected_files.file_created_at)
+// gives those callers a usable run-level timestamp without requiring a
+// client-side change.
+// ---------------------------------------------------------------------------
+
+export function parseAcquiredAt(body: Record<string, unknown>): Date | null {
+  if (typeof body.acquired_at === "string") {
+    const explicit = new Date(body.acquired_at);
+    if (!Number.isNaN(explicit.getTime())) return explicit;
+  }
+
+  const detected = Array.isArray(body.detected_files)
+    ? body.detected_files
+    : [];
+  let floor: number | null = null;
+  for (const f of detected) {
+    if (
+      f &&
+      typeof f === "object" &&
+      "file_created_at" in f &&
+      typeof (f as { file_created_at: unknown }).file_created_at === "string"
+    ) {
+      const t = new Date(
+        (f as { file_created_at: string }).file_created_at
+      ).getTime();
+      if (!Number.isNaN(t) && (floor === null || t < floor)) floor = t;
+    }
+  }
+  return floor === null ? null : new Date(floor);
 }
 
 // ---------------------------------------------------------------------------
@@ -165,10 +202,14 @@ const UNATTRIBUTED_SENTINEL = "unattributed";
 
 const MAX_PER_PAGE = 100;
 
-const ALLOWED_SORT_FIELDS: Record<
-  string,
-  (typeof instrumentRuns)["createdAt" | "updatedAt"]
-> = {
+// `acquired_at` sorts on coalesce(acquired_at, created_at) so runs that
+// pre-date the watcher backfill, or that came from the lambda (no
+// acquired_at), still order alongside watcher-reported runs. The matching
+// index is `idx_instrument_runs_active_acquired_at`.
+const acquiredOrCreatedSql = sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt})`;
+
+const ALLOWED_SORT_FIELDS: Record<string, SQL | AnyColumn> = {
+  acquired_at: acquiredOrCreatedSql,
   created_at: instrumentRuns.createdAt,
   updated_at: instrumentRuns.updatedAt,
 };
@@ -196,15 +237,20 @@ export async function buildRunListQuery(filters: RunListFilters) {
     conditions.push(eq(instrumentRuns.source, filters.source));
   }
 
+  // Date filters apply against coalesce(acquired_at, created_at) so a user
+  // filtering "runs from yesterday" sees runs whose data was acquired
+  // yesterday — even if the watcher only reported them to Data Hub today.
+  // Lambda runs and pre-backfill runs (acquired_at IS NULL) fall through to
+  // created_at via coalesce.
   if (filters.dateFrom) {
-    conditions.push(gte(instrumentRuns.createdAt, new Date(filters.dateFrom)));
+    conditions.push(gte(acquiredOrCreatedSql, new Date(filters.dateFrom)));
   }
   // dateTo is a date string (e.g. "2026-03-28") without a time component.
   // Advance by one day so the filter is inclusive of the entire selected day.
   if (filters.dateTo) {
     const end = new Date(filters.dateTo);
     end.setDate(end.getDate() + 1);
-    conditions.push(lte(instrumentRuns.createdAt, end));
+    conditions.push(lte(acquiredOrCreatedSql, end));
   }
 
   if (filters.search) {
@@ -348,9 +394,11 @@ export async function buildRunListQuery(filters: RunListFilters) {
     }
   );
 
+  // Default sort is the run's actual acquisition time (with fallback to
+  // created_at via coalesce inside acquiredOrCreatedSql), so backfilled and
+  // freshly-detected runs interleave correctly chronologically.
   const sortCol =
-    ALLOWED_SORT_FIELDS[filters.sort ?? "created_at"] ??
-    instrumentRuns.createdAt;
+    ALLOWED_SORT_FIELDS[filters.sort ?? "acquired_at"] ?? acquiredOrCreatedSql;
   const orderFn = filters.order === "asc" ? asc : desc;
 
   // Total count for pagination (runs only, no joins needed for the count).
@@ -371,6 +419,7 @@ export async function buildRunListQuery(filters: RunListFilters) {
       source: instrumentRuns.source,
       metadata: instrumentRuns.metadata,
       created_at: instrumentRuns.createdAt,
+      acquired_at: instrumentRuns.acquiredAt,
       updated_at: instrumentRuns.updatedAt,
       deleted_at: instrumentRuns.deletedAt,
       file_count: fileCount,

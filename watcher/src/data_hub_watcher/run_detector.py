@@ -67,6 +67,17 @@ class RunState:
     # every call. On a failed PATCH the cursor is left untouched so the
     # next stable file's PATCH carries the backlog plus the new entry.
     patched_file_count: int = 0
+    # Last `acquired_at` value (seconds since epoch) we successfully sent
+    # to the API for this run. Used so `_update_run` only PATCHes the
+    # field when a later-stabilising file reveals an earlier creation
+    # time than what the server already knows.
+    acquired_at_sent: float | None = None
+
+
+def _run_acquired_at(files: list[FileInfo]) -> float | None:
+    """Earliest known on-disk creation time across *files*, or None."""
+    times = [f.file_created_at for f in files if f.file_created_at]
+    return min(times) if times else None
 
 
 class RunDetector:
@@ -249,17 +260,21 @@ class RunDetector:
         self._state_db.record_detected_files(run.run_id, rows)
 
     def _report_new_run(self, run: RunState) -> None:
-        payload = {
+        acquired = _run_acquired_at(run.files)
+        payload: dict[str, object] = {
             "run_id": run.run_id,
             "source": "watcher",
             "watcher_id": self._watcher_id,
             "detected_files": [self._file_payload(f) for f in run.files],
         }
+        if acquired is not None:
+            payload["acquired_at"] = datetime.fromtimestamp(acquired, tz=timezone.utc).isoformat()
         try:
             resp = self._client.report_run(self._instrument_id, payload)
             run.reported = True
             run.api_run_id = resp.id
             run.patched_file_count = len(run.files)
+            run.acquired_at_sent = acquired
             self._state_db.record_run_reported(run.run_id)
             self._persist_detected_files(run)
             self._counters.runs_reported += 1
@@ -308,15 +323,31 @@ class RunDetector:
         of the PATCH cursor).
         """
         new_files = run.files[run.patched_file_count :]
-        if not new_files:
+        # An out-of-order stable file may carry an older birthtime than
+        # anything we've sent so far; surface that to the server even if
+        # the file delta itself is empty (rare but possible).
+        acquired = _run_acquired_at(run.files)
+        earlier_acquired: float | None = (
+            acquired
+            if acquired is not None
+            and (run.acquired_at_sent is None or acquired < run.acquired_at_sent)
+            else None
+        )
+        if not new_files and earlier_acquired is None:
             return
 
-        payload = {
+        payload: dict[str, object] = {
             "detected_files": [self._file_payload(f) for f in new_files],
         }
+        if earlier_acquired is not None:
+            payload["acquired_at"] = datetime.fromtimestamp(
+                earlier_acquired, tz=timezone.utc
+            ).isoformat()
         try:
             self._client.update_run(self._instrument_id, run.run_id, payload)
             run.patched_file_count = len(run.files)
+            if earlier_acquired is not None:
+                run.acquired_at_sent = earlier_acquired
             self._persist_detected_files(run)
             logger.info(
                 "Updated run %s (sent %d new file(s), %d total)",
@@ -394,6 +425,11 @@ class RunDetector:
                 # is only written after a successful POST/PATCH — so the
                 # PATCH cursor starts at the end of the manifest.
                 patched_file_count=len(files),
+                # Equivalently, the server's `acquired_at` is the floor of
+                # what we've persisted in `detected_files`. Seeding the
+                # cursor here avoids a redundant PATCH on the first stable
+                # file after restart.
+                acquired_at_sent=_run_acquired_at(files),
             )
             count += 1
         if count:

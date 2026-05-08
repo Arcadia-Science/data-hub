@@ -103,7 +103,9 @@ export function DefaultRunsTable({
                 />
               </TableCell>
               <TableCell className="text-right">
-                <RelativeTime date={row.created_at.toISOString()} />
+                <RelativeTime
+                  date={(row.acquired_at ?? row.created_at).toISOString()}
+                />
               </TableCell>
               <TableCell className="py-1">
                 <RunRowActions row={row} />

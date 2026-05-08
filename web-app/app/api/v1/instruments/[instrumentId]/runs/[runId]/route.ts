@@ -6,11 +6,14 @@ import {
   UNAUTHORIZED,
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
-import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
+import {
+  lookupRunByNaturalKey,
+  parseAcquiredAt,
+} from "@/lib/api/instrument-runs";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 import { getPresignedDownloadUrl } from "@/lib/s3";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 
 type RouteContext = {
@@ -82,6 +85,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     source: run.source,
     watcher_id: run.watcherId,
     created_at: run.createdAt,
+    acquired_at: run.acquiredAt,
     updated_at: run.updatedAt,
     deleted_at: run.deletedAt,
     metadata: run.metadata,
@@ -145,6 +149,20 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
       .where(eq(instrumentRuns.id, run.id));
   }
 
+  // Fold an incoming acquired_at into the row using LEAST so the run's
+  // acquisition time can only ever move earlier (e.g. a later-stabilising
+  // file with an older birthtime). Recomputed from detected_files when not
+  // supplied explicitly — see parseAcquiredAt.
+  const incomingAcquiredAt = parseAcquiredAt(body);
+  if (incomingAcquiredAt) {
+    await db
+      .update(instrumentRuns)
+      .set({
+        acquiredAt: sql`least(coalesce(${instrumentRuns.acquiredAt}, ${incomingAcquiredAt}), ${incomingAcquiredAt})`,
+      })
+      .where(eq(instrumentRuns.id, run.id));
+  }
+
   // Handle detected_files upsert (watcher reporting new files for a run).
   const detectedFiles = Array.isArray(body.detected_files)
     ? body.detected_files
@@ -189,6 +207,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     watcher_id: updated!.watcherId,
     metadata: updated!.metadata,
     created_at: updated!.createdAt,
+    acquired_at: updated!.acquiredAt,
     updated_at: updated!.updatedAt,
     deleted_at: updated!.deletedAt,
   });

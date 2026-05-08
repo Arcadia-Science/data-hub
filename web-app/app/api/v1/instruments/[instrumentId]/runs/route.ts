@@ -5,12 +5,12 @@ import {
   UNAUTHORIZED,
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
-import { buildRunListQuery } from "@/lib/api/instrument-runs";
+import { buildRunListQuery, parseAcquiredAt } from "@/lib/api/instrument-runs";
 import { parseIntParam } from "@/lib/api/validators";
 import { db } from "@/lib/db";
 import { files, instrumentRuns, instruments, watchers } from "@/lib/db/schema";
 import { sendSlackMessage } from "@/lib/slack";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 
 type RouteContext = {
@@ -70,6 +70,12 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   const watcherId =
     typeof body.watcher_id === "string" ? body.watcher_id : null;
 
+  // Parse the watcher-supplied acquired_at, falling back to the floor of
+  // any detected_files[].file_created_at when omitted. This is defense-in-
+  // depth: older watchers or future callers that send only file timestamps
+  // still get a meaningful run-level acquisition timestamp on insert.
+  const incomingAcquiredAt = parseAcquiredAt(body);
+
   // Validate watcher_id references an active watcher for this instrument.
   if (watcherId) {
     const [watcher] = await db
@@ -102,6 +108,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       runId,
       source,
       watcherId,
+      acquiredAt: incomingAcquiredAt,
     })
     .onConflictDoNothing({
       target: [instrumentRuns.instrumentId, instrumentRuns.runId],
@@ -111,7 +118,9 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   const isNew = !!inserted;
 
   // If onConflictDoNothing fired, `inserted` is undefined — fetch the
-  // existing row by the natural key.
+  // existing row by the natural key. When the watcher POST races a
+  // lambda-created row, fold the watcher's acquired_at into the existing
+  // row using LEAST so it can only ever move earlier.
   const [run] = isNew
     ? await db
         .select()
@@ -128,6 +137,15 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
           )
         )
         .limit(1);
+
+  if (!isNew && incomingAcquiredAt) {
+    await db
+      .update(instrumentRuns)
+      .set({
+        acquiredAt: sql`least(coalesce(${instrumentRuns.acquiredAt}, ${incomingAcquiredAt}), ${incomingAcquiredAt})`,
+      })
+      .where(eq(instrumentRuns.id, run.id));
+  }
 
   // Watcher payloads may include detected files to bulk-insert alongside
   // the run. Duplicates (same run + relative_path) are silently skipped.

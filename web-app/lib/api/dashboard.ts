@@ -34,7 +34,7 @@ export const getInstrumentSummaries = cache(
         displayName: instruments.displayName,
         status: instruments.status,
         runCount: sql<number>`cast(count(distinct ${instrumentRuns.id}) filter (where ${instrumentRuns.deletedAt} is null) as int)`,
-        lastRunAt: sql<Date | null>`max(${instrumentRuns.createdAt}) filter (where ${instrumentRuns.deletedAt} is null)`,
+        lastRunAt: sql<Date | null>`max(coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt})) filter (where ${instrumentRuns.deletedAt} is null)`,
         filesPendingUpload: sql<number>`cast(count(distinct ${files.id}) filter (where ${files.status} in ('detected', 'upload_requested') and ${files.deletedAt} is null) as int)`,
       })
       .from(instruments)
@@ -152,7 +152,7 @@ export const getDashboardStats = cache(async function getDashboardStats(
       .where(
         and(
           isNull(instrumentRuns.deletedAt),
-          sql`${instrumentRuns.createdAt} > now() - interval '24 hours'`
+          sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '24 hours'`
         )
       ),
     // Span the last 24 hours + the past 7 days in a single pass; the 24-hour
@@ -160,10 +160,13 @@ export const getDashboardStats = cache(async function getDashboardStats(
     // with one index scan. Bytes are attributed to the file's owning run so
     // the time window matches the corresponding "Runs in the last X" card —
     // this avoids the null-`processedAt` blind spot for not-yet-processed
-    // files (which still represent data the instrument generated).
+    // files (which still represent data the instrument generated). Windows
+    // are anchored to the run's actual acquisition time when known so
+    // backfilled historical data doesn't pollute the "last 24h"/"this week"
+    // counts.
     db
       .select({
-        bytesLast24Hours: sql<string>`coalesce(sum(${files.sizeBytes}) filter (where ${instrumentRuns.createdAt} > now() - interval '24 hours'), 0)`,
+        bytesLast24Hours: sql<string>`coalesce(sum(${files.sizeBytes}) filter (where coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '24 hours'), 0)`,
         bytesWeek: sql<string>`coalesce(sum(${files.sizeBytes}), 0)`,
       })
       .from(files)
@@ -172,7 +175,7 @@ export const getDashboardStats = cache(async function getDashboardStats(
         and(
           isNull(files.deletedAt),
           isNull(instrumentRuns.deletedAt),
-          sql`${instrumentRuns.createdAt} > now() - interval '7 days'`
+          sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '7 days'`
         )
       ),
     db
@@ -201,7 +204,7 @@ export const getDashboardStats = cache(async function getDashboardStats(
       .where(
         and(
           isNull(instrumentRuns.deletedAt),
-          sql`${instrumentRuns.createdAt} > now() - interval '7 days'`
+          sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '7 days'`
         )
       ),
   ]);
