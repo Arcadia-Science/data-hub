@@ -62,17 +62,23 @@ function mergeFilePatterns(configs: (string | null)[]): string[] {
 // constants) so each caller gets a fresh drizzle alias and the queries can
 // be composed independently.
 function buildRunCountSubquery() {
+  // `runsThisWeek` and `lastRunAt` are anchored to the run's true
+  // acquisition time when known so backfilled runs (where created_at is
+  // "today" but the data is older) don't pollute the recent-runs window
+  // or get reported as the most recent activity. Falls back to created_at
+  // for Lambda-only and pre-backfill runs where acquired_at is NULL.
   return db
     .select({
       instrumentId: instrumentRuns.instrumentId,
       count: sql<number>`cast(count(*) as int)`.as("run_count"),
       countThisWeek:
-        sql<number>`cast(count(*) filter (where ${instrumentRuns.createdAt} > now() - interval '7 days') as int)`.as(
+        sql<number>`cast(count(*) filter (where coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '7 days') as int)`.as(
           "run_count_this_week"
         ),
-      lastRunAt: sql<Date | null>`max(${instrumentRuns.createdAt})`.as(
-        "last_run_at"
-      ),
+      lastRunAt:
+        sql<Date | null>`max(coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}))`.as(
+          "last_run_at"
+        ),
     })
     .from(instrumentRuns)
     .where(isNull(instrumentRuns.deletedAt))
