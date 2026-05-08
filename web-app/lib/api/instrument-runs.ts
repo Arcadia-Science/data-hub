@@ -151,6 +151,11 @@ type RunListFilters = {
   // so key ordering differences between client serialization and stored value
   // don't matter.
   hinaSize?: string;
+  // Epson V700 Scanner derived metadata. `dpi` is a numeric string (e.g. "300",
+  // "600") and `colorMode` is the canonical "rgb"/"bw" string written by the
+  // Lambda's TIFF metadata parser.
+  dpi?: string;
+  colorMode?: string;
   // Either a userId (match runs attributed to that user) or the reserved
   // sentinel "unattributed" (match runs with no attributions).
   ranBy?: string;
@@ -272,6 +277,16 @@ export async function buildRunListQuery(filters: RunListFilters) {
   if (filters.hinaSize) {
     conditions.push(
       sql`${instrumentRuns.metadata}->'sizes' = ${filters.hinaSize}::jsonb`
+    );
+  }
+
+  // Epson V700 Scanner metadata column filters (leverages the GIN index).
+  if (filters.dpi) {
+    conditions.push(sql`${instrumentRuns.metadata}->>'dpi' = ${filters.dpi}`);
+  }
+  if (filters.colorMode) {
+    conditions.push(
+      sql`${instrumentRuns.metadata}->>'color_mode' = ${filters.colorMode}`
     );
   }
 
@@ -493,6 +508,8 @@ const ALLOWED_METADATA_KEYS = new Set([
   "measurement_type",
   "capture_type",
   "imaging_mode",
+  "dpi",
+  "color_mode",
 ]);
 
 async function distinctMetadataValues(
@@ -668,6 +685,25 @@ export async function getHinaFilterOptions(
 }
 
 // ---------------------------------------------------------------------------
+// Distinct metadata values for Epson V700 Scanner column filters.
+// ---------------------------------------------------------------------------
+
+export type EpsonScannerFilterOptions = {
+  dpis: string[];
+  colorModes: string[];
+};
+
+export async function getEpsonScannerFilterOptions(
+  instrumentId: string
+): Promise<EpsonScannerFilterOptions> {
+  const [dpis, colorModes] = await Promise.all([
+    distinctMetadataValues(instrumentId, "dpi"),
+    distinctMetadataValues(instrumentId, "color_mode"),
+  ]);
+  return { dpis, colorModes };
+}
+
+// ---------------------------------------------------------------------------
 // Dispatcher: fetch whichever per-instrument filter options apply to this
 // instrument type. The discriminated return shape lets the caller narrow to
 // the correct variant component without non-null assertions, and TS
@@ -680,6 +716,7 @@ export type InstrumentFilterOptionsByType =
   | { kind: "gel_doc"; options: GelDocFilterOptions }
   | { kind: "qpcr"; options: QpcrFilterOptions }
   | { kind: "hina_microscope"; options: HinaFilterOptions }
+  | { kind: "epson_v700_scanner"; options: EpsonScannerFilterOptions }
   | { kind: "default" };
 
 export async function getInstrumentFilterOptions(
@@ -706,6 +743,11 @@ export async function getInstrumentFilterOptions(
       return {
         kind: "hina_microscope",
         options: await getHinaFilterOptions(instrumentId),
+      };
+    case "epson_v700_scanner":
+      return {
+        kind: "epson_v700_scanner",
+        options: await getEpsonScannerFilterOptions(instrumentId),
       };
     case "generic":
     case "tape_station":

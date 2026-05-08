@@ -127,6 +127,20 @@
       "when": 1778177006266,
       "tag": "0017_drop_files_purged_at",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1778207440654,
+      "tag": "0018_epson_v700_scanner_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1778207440655,
+      "tag": "0019_set_epson_scanner_type",
+      "breakpoints": true
     }
   ]
 }

@@ -6,6 +6,7 @@ import {
   type RunRow,
 } from "@/components/instruments/runs-table";
 import { DefaultRunsTable } from "@/components/instruments/runs-table/default-runs-table";
+import { EpsonScannerRunsTable } from "@/components/instruments/runs-table/epson-scanner-runs-table";
 import { GelDocRunsTable } from "@/components/instruments/runs-table/gel-doc-runs-table";
 import { HinaRunsTable } from "@/components/instruments/runs-table/hina-runs-table";
 import { PlateReaderRunsTable } from "@/components/instruments/runs-table/plate-reader-runs-table";
@@ -90,6 +91,15 @@ function renderRunsTableVariant(
           ranByOptions={ranByOptions}
         />
       );
+    case "epson_v700_scanner":
+      return (
+        <EpsonScannerRunsTable
+          data={data}
+          instrumentId={instrumentId}
+          filterOptions={filterOptions.options}
+          ranByOptions={ranByOptions}
+        />
+      );
     case "default":
       return (
         <DefaultRunsTable
@@ -134,6 +144,8 @@ export default async function InstrumentDetailPage({
       hinaChannel: filters.hina_channel ?? undefined,
       hinaDimension: filters.hina_dimension ?? undefined,
       hinaSize: filters.hina_size ?? undefined,
+      dpi: filters.dpi ?? undefined,
+      colorMode: filters.color_mode ?? undefined,
       ranBy: filters.ran_by ?? undefined,
     }),
   ]);
@@ -163,6 +175,8 @@ export default async function InstrumentDetailPage({
     filters.hina_channel !== null ||
     filters.hina_dimension !== null ||
     filters.hina_size !== null ||
+    filters.dpi !== null ||
+    filters.color_mode !== null ||
     filters.ran_by !== null;
 
   const currentUserId = session.user?.id ?? null;

@@ -11,6 +11,8 @@ import tifffile
 from data_hub_lambda.epson_v700_scanner.image_processing import (
     MAX_DIMENSION,
     TIFFToJPEGConverter,
+    _derive_color_mode,
+    _derive_dpi,
 )
 
 
@@ -117,6 +119,71 @@ class TestParseMetadata:
         assert "ImageWidth" in metadata
         assert "ImageLength" in metadata
         assert "BitsPerSample" in metadata
+
+
+class TestDeriveDpi:
+    def test_returns_300_dpi(self) -> None:
+        # 300 dpi = 300 * 2^22 / 2^22; the V700 stores it as 1258291200/4194304
+        assert _derive_dpi([1258291200, 4194304]) == 300
+
+    def test_returns_600_dpi(self) -> None:
+        assert _derive_dpi([1258291200, 2097152]) == 600
+
+    def test_handles_tuple(self) -> None:
+        assert _derive_dpi((600, 1)) == 600
+
+    def test_returns_none_for_missing(self) -> None:
+        assert _derive_dpi(None) is None
+
+    def test_returns_none_for_zero_denominator(self) -> None:
+        assert _derive_dpi([300, 0]) is None
+
+    def test_returns_none_for_malformed(self) -> None:
+        assert _derive_dpi([300]) is None
+        assert _derive_dpi("not a list") is None
+
+
+class TestDeriveColorMode:
+    def test_samples_per_pixel_3_is_rgb(self) -> None:
+        assert _derive_color_mode(3, None) == "rgb"
+
+    def test_samples_per_pixel_1_is_bw(self) -> None:
+        assert _derive_color_mode(1, None) == "bw"
+
+    def test_falls_back_to_photometric_rgb(self) -> None:
+        assert _derive_color_mode(None, 2) == "rgb"
+
+    def test_falls_back_to_photometric_bw(self) -> None:
+        assert _derive_color_mode(None, 1) == "bw"
+
+    def test_returns_none_when_both_missing(self) -> None:
+        assert _derive_color_mode(None, None) is None
+
+
+class TestParseMetadataDerivedFields:
+    def test_emits_dpi_and_rgb_color_mode(self, tmp_path: Path) -> None:
+        img = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
+        tif_path = tmp_path / "scan.tif"
+        tifffile.imwrite(str(tif_path), img, resolution=(300, 300))
+
+        converter = TIFFToJPEGConverter(tif_path)
+        converter.load()
+        metadata = converter.parse_metadata()
+
+        assert metadata["dpi"] == 300
+        assert metadata["color_mode"] == "rgb"
+
+    def test_emits_bw_color_mode_for_grayscale(self, tmp_path: Path) -> None:
+        img = np.random.randint(0, 255, (100, 100), dtype=np.uint8)
+        tif_path = tmp_path / "gray.tif"
+        tifffile.imwrite(str(tif_path), img, resolution=(600, 600))
+
+        converter = TIFFToJPEGConverter(tif_path)
+        converter.load()
+        metadata = converter.parse_metadata()
+
+        assert metadata["dpi"] == 600
+        assert metadata["color_mode"] == "bw"
 
 
 class TestValidation:

@@ -7,6 +7,9 @@ import {
 import {
   CAPTURE_TYPE_COLORS,
   CHANNEL_COLOR_STYLES,
+  COLOR_MODE_COLORS,
+  COLOR_MODE_LABELS,
+  DPI_COLORS,
   IMAGING_MODE_COLORS,
   MEASUREMENT_MODE_COLORS,
   MEASUREMENT_TYPE_COLORS,
@@ -225,6 +228,46 @@ export function TapeStationRunBadges({
     <MetadataRow label="Tape Type">
       <ColorBadge value={tapeType} />
     </MetadataRow>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Epson V700 Scanner
+// ---------------------------------------------------------------------------
+
+export function hasEpsonScannerMetadata(metadata: Record<string, unknown>) {
+  return Boolean(
+    getMetadataField(metadata, "dpi") ||
+    getMetadataField(metadata, "color_mode")
+  );
+}
+
+export function EpsonScannerRunBadges({
+  metadata,
+}: {
+  metadata: Record<string, unknown>;
+}) {
+  const dpi = getMetadataField(metadata, "dpi");
+  const colorMode = getMetadataField(metadata, "color_mode");
+
+  if (!dpi && !colorMode) return null;
+
+  return (
+    <>
+      {dpi && (
+        <MetadataRow label="DPI">
+          <ColorBadge value={dpi} colorClass={DPI_COLORS[dpi]} />
+        </MetadataRow>
+      )}
+      {colorMode && (
+        <MetadataRow label="Color Mode">
+          <ColorBadge
+            value={COLOR_MODE_LABELS[colorMode] ?? colorMode}
+            colorClass={COLOR_MODE_COLORS[colorMode]}
+          />
+        </MetadataRow>
+      )}
+    </>
   );
 }
 

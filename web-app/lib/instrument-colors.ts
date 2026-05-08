@@ -38,6 +38,27 @@ export const CHANNEL_COLOR_STYLES: Record<string, string> = {
     "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-300",
 };
 
+// ---------- Epson V700 Scanner ----------
+
+export const DPI_COLORS: Record<string, string> = {
+  "300":
+    "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-800 dark:bg-sky-950 dark:text-sky-300",
+  "600":
+    "border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950 dark:text-indigo-300",
+};
+
+// Stored values are the canonical strings written by the Lambda
+// (`"rgb"` / `"bw"`); the human label is computed at the call site.
+export const COLOR_MODE_COLORS: Record<string, string> = {
+  rgb: "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700 dark:border-fuchsia-800 dark:bg-fuchsia-950 dark:text-fuchsia-300",
+  bw: "border-stone-200 bg-stone-50 text-stone-700 dark:border-stone-800 dark:bg-stone-950 dark:text-stone-300",
+};
+
+export const COLOR_MODE_LABELS: Record<string, string> = {
+  rgb: "RGB",
+  bw: "B&W",
+};
+
 // ---------- Plate reader ----------
 
 export const MEASUREMENT_TYPE_COLORS: Record<string, string> = {
