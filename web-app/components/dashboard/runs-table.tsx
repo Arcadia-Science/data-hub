@@ -1,4 +1,5 @@
 import { RelativeTime } from "@/components/dashboard/relative-time";
+import { AcquiredColumnHeader } from "@/components/instruments/runs-table/acquired-column-header";
 import { RanByCell } from "@/components/instruments/runs-table/ran-by-cell";
 import { RawFileColumnHeader } from "@/components/instruments/runs-table/raw-file-column-header";
 import { RunIdLabel } from "@/components/instruments/runs-table/run-id-label";
@@ -72,7 +73,9 @@ export function RunsTable({
               <RawFileColumnHeader label="Size" />
             </TableHead>
             <TableHead>Ran By</TableHead>
-            <TableHead className="text-right">Created</TableHead>
+            <TableHead className="text-right">
+              <AcquiredColumnHeader />
+            </TableHead>
             <TableHead className="w-[132px]">
               <span className="sr-only">Actions</span>
             </TableHead>
@@ -136,7 +139,11 @@ export function RunsTable({
                   />
                 </TableCell>
                 <TableCell className="text-right">
-                  <RelativeTime date={new Date(row.created_at).toISOString()} />
+                  <RelativeTime
+                    date={new Date(
+                      row.acquired_at ?? row.created_at
+                    ).toISOString()}
+                  />
                 </TableCell>
                 <TableCell className="py-1">
                   <RunRowActions row={row} />
@@ -173,7 +180,9 @@ export function RunsTableSkeleton() {
               <RawFileColumnHeader label="Size" />
             </TableHead>
             <TableHead>Ran By</TableHead>
-            <TableHead className="text-right">Created</TableHead>
+            <TableHead className="text-right">
+              <AcquiredColumnHeader />
+            </TableHead>
             <TableHead className="w-[132px]" />
           </TableRow>
         </TableHeader>

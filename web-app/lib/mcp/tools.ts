@@ -151,9 +151,11 @@ export function registerTools(server: McpServer) {
           .optional()
           .describe("End date (inclusive, YYYY-MM-DD)"),
         sort: z
-          .enum(["created_at", "updated_at"])
+          .enum(["acquired_at", "created_at", "updated_at"])
           .optional()
-          .describe("Sort field (default: created_at)"),
+          .describe(
+            "Sort field (default: acquired_at — when the run actually happened on the instrument PC, falling back to created_at)"
+          ),
         order: z
           .enum(["asc", "desc"])
           .optional()

@@ -29,9 +29,10 @@ export const getSidebarInstruments = cache(
     const lastRunSq = db
       .select({
         instrumentId: instrumentRuns.instrumentId,
-        lastRunAt: sql<Date | null>`max(${instrumentRuns.createdAt})`.as(
-          "last_run_at"
-        ),
+        lastRunAt:
+          sql<Date | null>`max(coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}))`.as(
+            "last_run_at"
+          ),
       })
       .from(instrumentRuns)
       .where(isNull(instrumentRuns.deletedAt))

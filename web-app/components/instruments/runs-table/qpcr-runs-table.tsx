@@ -14,6 +14,7 @@ import { runRowToRef } from "@/lib/runs/row-actions";
 import { cn, formatBytes } from "@/lib/utils";
 
 import type { RunRow } from ".";
+import { AcquiredColumnHeader } from "./acquired-column-header";
 import { FilterableColumnHeader } from "./filterable-column-header";
 import { MetadataArrayBadges, getMetadataArray } from "./metadata-utils";
 import { RanByCell } from "./ran-by-cell";
@@ -65,7 +66,9 @@ export function QpcrRunsTable({
               options={ranByOptions}
             />
           </TableHead>
-          <TableHead className="text-right">Created</TableHead>
+          <TableHead className="text-right">
+            <AcquiredColumnHeader />
+          </TableHead>
           <TableHead className="w-[132px]">
             <span className="sr-only">Actions</span>
           </TableHead>
@@ -129,7 +132,9 @@ export function QpcrRunsTable({
                 />
               </TableCell>
               <TableCell className="text-right">
-                <RelativeTime date={row.created_at.toISOString()} />
+                <RelativeTime
+                  date={(row.acquired_at ?? row.created_at).toISOString()}
+                />
               </TableCell>
               <TableCell className="py-1">
                 <RunRowActions row={row} />

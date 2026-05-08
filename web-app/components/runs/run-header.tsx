@@ -66,7 +66,13 @@ export function RunHeader({
       </div>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
-        <span>Created {formatDateTime(run.createdAt)}</span>
+        {run.acquiredAt && (
+          <>
+            <span>Run started {formatDateTime(run.acquiredAt)}</span>
+            <span className="text-muted-foreground/40">&middot;</span>
+          </>
+        )}
+        <span>Reported {formatDateTime(run.createdAt)}</span>
         <span className="text-muted-foreground/40">&middot;</span>
         <span>Updated {formatDateTime(run.updatedAt)}</span>
         {attributionsSlot && (

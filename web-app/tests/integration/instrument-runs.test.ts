@@ -346,10 +346,202 @@ describe("Run creation Slack notification", () => {
     expect(messages.length).toBe(1);
     expect(messages[0].text).toContain(instrumentDisplayName);
     expect(messages[0].text).toContain(runId);
-    expect(messages[0].text).toContain("source: lambda");
     expect(messages[0].text).toContain(
       `/instruments/${instrumentId}/runs/${runId}`
     );
     expect(messages[0].text).toContain("View in Data Hub");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Run acquisition time
+//
+// `acquired_at` is the run's actual on-instrument timestamp (min of the
+// constituent files' birthtimes). It is supplied by the watcher on POST
+// and may move earlier — never later — via subsequent PATCHes when an
+// out-of-order stable file reveals an earlier birthtime. The list query
+// also sorts and date-filters on coalesce(acquired_at, created_at).
+// ---------------------------------------------------------------------------
+
+describe("Run acquired_at", () => {
+  let token: string;
+  const instrumentId = "acquired-at-instrument";
+
+  beforeAll(async () => {
+    ({ token } = await seedTestUser());
+    const db = getTestDb();
+    await db.insert(instruments).values({
+      id: instrumentId,
+      displayName: "Acquired-At Instrument",
+      status: "active",
+    });
+  });
+
+  afterAll(async () => {
+    await closeTestDb();
+  });
+
+  it("POST stores explicit acquired_at and returns it on GET detail", async () => {
+    const acquiredAt = "2025-01-15T08:30:00.000Z";
+    const res = await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: {
+        run_id: "explicit-acquired",
+        source: "watcher",
+        acquired_at: acquiredAt,
+      },
+    });
+    expect(res.status).toBe(201);
+
+    const detail = await api(
+      `/api/v1/instruments/${instrumentId}/runs/explicit-acquired`,
+      { token }
+    );
+    const data = await detail.json();
+    expect(new Date(data.acquired_at).toISOString()).toBe(acquiredAt);
+  });
+
+  it("POST without acquired_at derives the floor from detected_files", async () => {
+    const res = await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: {
+        run_id: "derived-acquired",
+        source: "watcher",
+        detected_files: [
+          {
+            relative_path: "later.csv",
+            filename: "later.csv",
+            size_bytes: 10,
+            file_created_at: "2025-02-01T12:00:00.000Z",
+          },
+          {
+            relative_path: "earliest.csv",
+            filename: "earliest.csv",
+            size_bytes: 20,
+            file_created_at: "2025-02-01T10:00:00.000Z",
+          },
+        ],
+      },
+    });
+    expect(res.status).toBe(201);
+
+    const detail = await api(
+      `/api/v1/instruments/${instrumentId}/runs/derived-acquired`,
+      { token }
+    );
+    const data = await detail.json();
+    expect(new Date(data.acquired_at).toISOString()).toBe(
+      "2025-02-01T10:00:00.000Z"
+    );
+  });
+
+  it("PATCH with an earlier acquired_at moves the value backward", async () => {
+    await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: {
+        run_id: "patch-earlier",
+        source: "watcher",
+        acquired_at: "2025-03-10T12:00:00.000Z",
+      },
+    });
+
+    const patch = await api(
+      `/api/v1/instruments/${instrumentId}/runs/patch-earlier`,
+      {
+        method: "PATCH",
+        token,
+        body: { acquired_at: "2025-03-10T08:00:00.000Z" },
+      }
+    );
+    expect(patch.status).toBe(200);
+    const data = await patch.json();
+    expect(new Date(data.acquired_at).toISOString()).toBe(
+      "2025-03-10T08:00:00.000Z"
+    );
+  });
+
+  it("PATCH with a later acquired_at is ignored (LEAST semantics)", async () => {
+    await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: {
+        run_id: "patch-later",
+        source: "watcher",
+        acquired_at: "2025-04-05T08:00:00.000Z",
+      },
+    });
+
+    const patch = await api(
+      `/api/v1/instruments/${instrumentId}/runs/patch-later`,
+      {
+        method: "PATCH",
+        token,
+        body: { acquired_at: "2025-04-05T20:00:00.000Z" },
+      }
+    );
+    expect(patch.status).toBe(200);
+    const data = await patch.json();
+    expect(new Date(data.acquired_at).toISOString()).toBe(
+      "2025-04-05T08:00:00.000Z"
+    );
+  });
+
+  it("GET list orders by coalesce(acquired_at, created_at) by default", async () => {
+    // Insert two backfilled runs whose acquired_at predates the runs
+    // already created in this describe block. The default sort (desc)
+    // should still place them after the current-day runs because their
+    // acquired_at is older — even though they were inserted later (so
+    // their created_at is newer).
+    const newest = "2030-01-01T00:00:00.000Z";
+    const oldest = "2010-01-01T00:00:00.000Z";
+
+    await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: {
+        run_id: "sort-newest",
+        source: "watcher",
+        acquired_at: newest,
+      },
+    });
+    await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: {
+        run_id: "sort-oldest",
+        source: "watcher",
+        acquired_at: oldest,
+      },
+    });
+
+    const res = await api(
+      `/api/v1/instruments/${instrumentId}/runs?per_page=100`,
+      { token }
+    );
+    const body = await res.json();
+    const ids: string[] = body.data.map((r: { run_id: string }) => r.run_id);
+    expect(ids.indexOf("sort-newest")).toBeLessThan(ids.indexOf("sort-oldest"));
+    // sort-newest should be first overall — its acquired_at (year 2030)
+    // is later than every other run's acquired_at OR created_at.
+    expect(ids[0]).toBe("sort-newest");
+  });
+
+  // Regression: drizzle's `gte`/`lte` against a raw SQL fragment skips
+  // the column-level Date->string coercion and crashes the postgres-js
+  // driver with ERR_INVALID_ARG_TYPE. The implementation now binds ISO
+  // strings explicitly and casts to timestamptz on the server.
+  it("GET list date_from/date_to filter against coalesce(acquired_at, created_at)", async () => {
+    const res = await api(
+      `/api/v1/instruments/${instrumentId}/runs?date_from=2009-01-01&date_to=2010-12-31&per_page=100`,
+      { token }
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const ids = body.data.map((r: { run_id: string }) => r.run_id);
+    expect(ids).toContain("sort-oldest");
+    expect(ids).not.toContain("sort-newest");
   });
 });

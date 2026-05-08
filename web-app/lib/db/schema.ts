@@ -360,13 +360,21 @@ export const instrumentRuns = pgTable(
     // flat object; multi-valued properties use JSON arrays.
     metadata: jsonb("metadata").notNull().default({}),
     // When the run was first created (reported by watcher or auto-created by
-    // Lambda).
+    // Lambda) — i.e. when Data Hub learned about it.
     createdAt: timestamp("created_at", {
       withTimezone: true,
       mode: "date",
     })
       .notNull()
       .defaultNow(),
+    // When the run actually happened on the instrument PC, derived by the
+    // watcher from the minimum file creation time (st_birthtime where
+    // available, else mtime). NULL for Lambda-created runs and runs reported
+    // by older watchers; the UI and list queries fall back to created_at.
+    acquiredAt: timestamp("acquired_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
     updatedAt: timestamp("updated_at", {
       withTimezone: true,
       mode: "date",
@@ -394,6 +402,14 @@ export const instrumentRuns = pgTable(
     ),
     index("idx_instrument_runs_active")
       .on(run.instrumentId, run.createdAt.desc())
+      .where(sql`${run.deletedAt} is null`),
+    // Supports the default list sort/filter on coalesce(acquired_at,
+    // created_at). Expression must match the buildRunListQuery sort key.
+    index("idx_instrument_runs_active_acquired_at")
+      .on(
+        run.instrumentId,
+        sql`coalesce(${run.acquiredAt}, ${run.createdAt}) desc`
+      )
       .where(sql`${run.deletedAt} is null`),
     index("idx_instrument_runs_metadata_gin").using("gin", run.metadata),
   ]
