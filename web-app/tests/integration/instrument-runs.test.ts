@@ -1,4 +1,3 @@
-import { buildRunListQuery } from "@/lib/api/instrument-runs";
 import { instruments } from "@/lib/db/schema";
 import {
   api,
@@ -532,18 +531,16 @@ describe("Run acquired_at", () => {
 
   // Regression: drizzle's `gte`/`lte` against a raw SQL fragment skips
   // the column-level Date->string coercion and crashes the postgres-js
-  // driver with ERR_INVALID_ARG_TYPE. The current implementation binds
-  // ISO strings explicitly and casts to timestamptz on the server.
-  it("buildRunListQuery date filters apply against coalesce(acquired_at, created_at)", async () => {
-    const result = await buildRunListQuery({
-      instrumentId,
-      dateFrom: "2009-01-01",
-      dateTo: "2010-12-31",
-      page: 1,
-      perPage: 100,
-      includeDeleted: false,
-    });
-    const ids = result.data.map((r) => r.run_id);
+  // driver with ERR_INVALID_ARG_TYPE. The implementation now binds ISO
+  // strings explicitly and casts to timestamptz on the server.
+  it("GET list date_from/date_to filter against coalesce(acquired_at, created_at)", async () => {
+    const res = await api(
+      `/api/v1/instruments/${instrumentId}/runs?date_from=2009-01-01&date_to=2010-12-31&per_page=100`,
+      { token }
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const ids = body.data.map((r: { run_id: string }) => r.run_id);
     expect(ids).toContain("sort-oldest");
     expect(ids).not.toContain("sort-newest");
   });

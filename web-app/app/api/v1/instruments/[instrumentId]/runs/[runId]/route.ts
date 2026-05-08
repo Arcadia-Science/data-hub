@@ -153,12 +153,17 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   // acquisition time can only ever move earlier (e.g. a later-stabilising
   // file with an older birthtime). Recomputed from detected_files when not
   // supplied explicitly — see parseAcquiredAt.
+  //
+  // Bind the ISO string + ::timestamptz cast: drizzle's sql tag has no
+  // PgColumn context here to coerce a JS Date for the postgres-js driver,
+  // which would otherwise throw ERR_INVALID_ARG_TYPE.
   const incomingAcquiredAt = parseAcquiredAt(body);
   if (incomingAcquiredAt) {
+    const iso = incomingAcquiredAt.toISOString();
     await db
       .update(instrumentRuns)
       .set({
-        acquiredAt: sql`least(coalesce(${instrumentRuns.acquiredAt}, ${incomingAcquiredAt}), ${incomingAcquiredAt})`,
+        acquiredAt: sql`least(coalesce(${instrumentRuns.acquiredAt}, ${iso}::timestamptz), ${iso}::timestamptz)`,
       })
       .where(eq(instrumentRuns.id, run.id));
   }

@@ -139,10 +139,15 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
         .limit(1);
 
   if (!isNew && incomingAcquiredAt) {
+    // Bind the ISO string explicitly + cast to timestamptz: drizzle's
+    // sql tag has no PgColumn context here to coerce a JS Date for the
+    // postgres-js driver. See instrument-runs.ts dateFrom/dateTo for
+    // the same pattern.
+    const iso = incomingAcquiredAt.toISOString();
     await db
       .update(instrumentRuns)
       .set({
-        acquiredAt: sql`least(coalesce(${instrumentRuns.acquiredAt}, ${incomingAcquiredAt}), ${incomingAcquiredAt})`,
+        acquiredAt: sql`least(coalesce(${instrumentRuns.acquiredAt}, ${iso}::timestamptz), ${iso}::timestamptz)`,
       })
       .where(eq(instrumentRuns.id, run.id));
   }
@@ -239,6 +244,8 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     search: searchParams.get("search") ?? undefined,
     sort: searchParams.get("sort") ?? undefined,
     order: searchParams.get("order") ?? undefined,
+    dateFrom: searchParams.get("date_from") ?? undefined,
+    dateTo: searchParams.get("date_to") ?? undefined,
     page: parseIntParam(searchParams.get("page"), {
       default: 1,
       min: 1,

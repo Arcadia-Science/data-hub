@@ -26,6 +26,8 @@ export async function GET(request: NextRequest) {
     search: searchParams.get("search") ?? undefined,
     sort: searchParams.get("sort") ?? undefined,
     order: searchParams.get("order") ?? undefined,
+    dateFrom: searchParams.get("date_from") ?? undefined,
+    dateTo: searchParams.get("date_to") ?? undefined,
     page: parseIntParam(searchParams.get("page"), {
       default: 1,
       min: 1,
