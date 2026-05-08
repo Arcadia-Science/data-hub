@@ -133,7 +133,6 @@ cp infra/.env.example infra/.env.staging
 ECR_IMAGE_URI=<image-uri-from-step-2>
 DATA_HUB_API_URL=https://data-hub-env-staging-arcadia-science.vercel.app/api/v1
 DATA_HUB_API_KEY=<your-api-key>
-SLACK_WEBHOOK_URL=<your-slack-webhook>
 GITHUB_OIDC_PROVIDER_ARN=<github-oidc-arn-from-step-1>
 VERCEL_OIDC_PROVIDER_ARN=<vercel-oidc-arn-from-step-1>
 LAMBDA_INVOKE_TOKEN=<shared-secret-for-function-url-auth>
@@ -169,8 +168,9 @@ In your GitHub repo, go to **Settings → Environments**, create a `staging` env
 | `SAM_S3_BUCKET` | SAM CLI managed S3 bucket name (see `sam deploy` output, e.g. `aws-sam-cli-managed-default-samclisourcebucket-*`) |
 | `DATA_HUB_API_URL` | Base API URL for the environment |
 | `DATA_HUB_API_KEY` | API key for Lambda → Data Hub authentication |
-| `SLACK_WEBHOOK_URL` | Slack incoming webhook URL |
 | `LAMBDA_INVOKE_TOKEN` | Shared secret for web app → Lambda Function URL authentication |
+
+Slack notifications are sent by the **web app** (not the Lambda) when a new run is created. Configure `SLACK_WEBHOOK_URL` per environment in the Vercel dashboard alongside the other web-app env vars listed below.
 
 You'll also need the `WebAppRoleArn` and `DataHubFunctionUrl` stack outputs to configure the Vercel web app. In the Vercel dashboard (under the appropriate environment), set:
 
@@ -190,7 +190,7 @@ On pushes to `staging` or `production`, the **Deploy Lambda** workflow:
 2. Builds and pushes the Docker image to ECR.
 3. Runs `sam deploy` to update the CloudFormation stack.
 
-Secrets (`DATA_HUB_API_KEY`, `SLACK_WEBHOOK_URL`, etc.) are stored in GitHub environment secrets scoped to each environment.
+Secrets (`DATA_HUB_API_KEY`, `LAMBDA_INVOKE_TOKEN`, etc.) are stored in GitHub environment secrets scoped to each environment.
 
 > **Note:** The CI deploy role has intentionally narrow permissions — enough to push a new container image, update the existing CloudFormation stack, and modify the data buckets' S3 event notifications (so new instrument triggers roll out via CI), but _not_ enough to create the stack from scratch or to add/remove S3 buckets or Lambda functions. Initial stack creation and structural infrastructure changes must be performed by an admin with broader AWS permissions. Once the stack exists, routine image-update deploys and new-trigger rollouts through CI work without issue.
 

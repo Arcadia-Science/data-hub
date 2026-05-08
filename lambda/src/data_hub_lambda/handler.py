@@ -7,7 +7,7 @@ import warnings
 from dataclasses import dataclass
 from pprint import pformat
 from typing import Any
-from urllib.parse import quote, unquote_plus
+from urllib.parse import unquote_plus
 
 from aws_lambda_typing.context import Context
 from aws_lambda_typing.events.s3 import S3Event
@@ -22,8 +22,6 @@ from data_hub_lambda import (
     hina_microscope,
     spectramax_plate_reader,
 )
-from data_hub_shared import slack
-from data_hub_shared.constants import INSTRUMENT_ID_TO_NAME_MAP
 from data_hub_shared.enums import Instrument
 from data_hub_shared.logger import get_named_logger
 
@@ -84,22 +82,6 @@ def parse_s3_event(event: S3Event) -> S3EventInfo:
         s3_key=s3_key,
         filename=filename,
     )
-
-
-# ------------------------------------------------------------------
-# Helpers
-# ------------------------------------------------------------------
-
-
-def get_cloudwatch_logs_url(context: Context) -> str:
-    """Generates the CloudWatch logs URL for the current Lambda execution."""
-    arn_parts = context.invoked_function_arn.split(":")
-    region = arn_parts[3] if len(arn_parts) > 3 else "us-east-1"
-    log_group_encoded = quote(context.log_group_name, safe="")
-    log_stream_encoded = quote(context.log_stream_name, safe="")
-    base_url = f"https://{region}.console.aws.amazon.com/cloudwatch/home"
-    logs_path = f"log-groups/log-group/{log_group_encoded}/log-events/{log_stream_encoded}"
-    return f"{base_url}?region={region}#logsV2:{logs_path}"
 
 
 # ------------------------------------------------------------------
@@ -358,7 +340,6 @@ def lambda_handler(event: dict[str, Any], context: Context) -> dict[str, Any] | 
     run_id = event_info.run_id
     logger.info("Instrument ID: '%s'", instrument_id)
     logger.info("Run ID: '%s'", run_id)
-    instrument_name = INSTRUMENT_ID_TO_NAME_MAP[instrument_id]
 
     # Pre-cleanup: if the previous invocation on this warm container was
     # SIGKILL'd (e.g. OOM), the `finally` block below didn't run and stale
@@ -369,37 +350,37 @@ def lambda_handler(event: dict[str, Any], context: Context) -> dict[str, Any] | 
         logger.info("Processing file %s...", event_info.filename)
 
         if instrument_id == Instrument.AKTA_FPLC.value:
-            result_url = akta_fplc.process_file(
+            akta_fplc.process_file(
                 run_id=event_info.run_id,
                 filename=event_info.filename,
             )
 
         elif instrument_id == Instrument.AGILENT_4150_TAPESTATION.value:
-            result_url = agilent_4150_tapestation.process_file(
+            agilent_4150_tapestation.process_file(
                 run_id=event_info.run_id,
                 filename=event_info.filename,
             )
 
         elif instrument_id == Instrument.AZURE_600_GEL_DOC.value:
-            result_url = azure_600_gel_doc.process_file(
+            azure_600_gel_doc.process_file(
                 run_id=event_info.run_id,
                 filename=event_info.filename,
             )
 
         elif instrument_id == Instrument.AZURE_CIELO_QPCR.value:
-            result_url = azure_cielo_qpcr.process_file(
+            azure_cielo_qpcr.process_file(
                 run_id=event_info.run_id,
                 filename=event_info.filename,
             )
 
         elif instrument_id == Instrument.EPSON_V700_SCANNER.value:
-            result_url = epson_v700_scanner.process_file(
+            epson_v700_scanner.process_file(
                 run_id=event_info.run_id,
                 filename=event_info.filename,
             )
 
         elif instrument_id == Instrument.HINA_MICROSCOPE.value:
-            result_url = hina_microscope.process_file(
+            hina_microscope.process_file(
                 run_id=event_info.run_id,
                 filename=event_info.filename,
             )
@@ -408,7 +389,7 @@ def lambda_handler(event: dict[str, Any], context: Context) -> dict[str, Any] | 
             Instrument.SPECTRAMAX_ID3_PLATE_READER.value,
             Instrument.SPECTRAMAX_ID5_PLATE_READER.value,
         ):
-            result_url = spectramax_plate_reader.process_file(
+            spectramax_plate_reader.process_file(
                 instrument_id=event_info.instrument_id,  # pyright: ignore[reportArgumentType]
                 run_id=event_info.run_id,
                 filename=event_info.filename,
@@ -418,18 +399,13 @@ def lambda_handler(event: dict[str, Any], context: Context) -> dict[str, Any] | 
             logger.error("Unsupported instrument: %s", instrument_id)
             return None
 
-        slack.send_message(
-            f"*{instrument_name}*\n"
-            f"Finished preprocessing run `{run_id}`!\n"
-            f"<{result_url}|View in Data Hub>"
-        )
     except Exception:
+        # Per-file failure is already PATCHed back to the web app's file row
+        # (status='failed', error_message=...) by each instrument's
+        # `process_file`, so the failure remains visible in the UI without a
+        # Slack notification here.
         logger.exception("Failed to preprocess run %s.", run_id)
-        logs_url = get_cloudwatch_logs_url(context)
-        slack.send_message(
-            f"*{instrument_name}*\n"
-            f"Failed to preprocess run `{run_id}`!\n"
-            f"<{logs_url}|View CloudWatch logs>"
-        )
     finally:
         _cleanup_tmp()
+
+    return None

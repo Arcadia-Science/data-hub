@@ -2,7 +2,6 @@ from __future__ import annotations
 import logging
 
 from data_hub_lambda.api_client import get_client
-from data_hub_lambda.constants import DATA_HUB_WEB_URL
 from data_hub_lambda.epson_v700_scanner.image_processing import TIFFToJPEGConverter
 from data_hub_shared import s3_utils
 from data_hub_shared.config import config
@@ -13,7 +12,7 @@ logger = logging.getLogger(__name__)
 INSTRUMENT_ID = Instrument.EPSON_V700_SCANNER.value
 
 
-def process_file(run_id: str, filename: str) -> str:
+def process_file(run_id: str, filename: str) -> None:
     """Process a single Epson V700 Scanner file through the Data Hub API.
 
     Downloads the raw TIFF, resizes it to a web-friendly JPEG, uploads the
@@ -23,9 +22,6 @@ def process_file(run_id: str, filename: str) -> str:
     Args:
         run_id: The run ID.
         filename: The original filename (e.g. ``scan_001.tif``).
-
-    Returns:
-        The web app URL for the instrument run.
     """
     logger.info("Processing Epson V700 Scanner file: %s (run: %s)", filename, run_id)
 
@@ -86,5 +82,3 @@ def process_file(run_id: str, filename: str) -> str:
         logger.error("Error processing file: %s", e)
         client.update_file(file_id, status="failed", error_message=str(e))
         raise
-
-    return f"{DATA_HUB_WEB_URL}/instruments/{INSTRUMENT_ID}/runs/{run_id}"

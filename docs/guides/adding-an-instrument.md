@@ -76,8 +76,8 @@ lambda/src/data_hub_lambda/bio_rad_cfx96/
 The processor must expose a `process_file` function:
 
 ```python
-def process_file(run_id: str, filename: str) -> str:
-    """Preprocess a file and return the URL to the run in the web dashboard."""
+def process_file(run_id: str, filename: str) -> None:
+    """Preprocess a file, reporting progress through the Data Hub API."""
     ...
 ```
 
@@ -90,7 +90,6 @@ A typical processor:
 5. Performs instrument-specific preprocessing (parsing, metadata extraction, etc.).
 6. Optionally uploads processed artifacts (CSV, images) to the S3 processed bucket and registers them via `client.create_file(..., category="processed")`. This is the pattern used by the SpectraMax plate reader (processed CSV) and Azure 600 Gel Doc (contrast-enhanced PNG).
 7. Updates the raw file status to `completed`.
-8. Returns the web app URL for the run.
 
 See any existing processor (e.g., `lambda/src/data_hub_lambda/azure_cielo_qpcr/process_file.py` for simple metadata extraction, or `lambda/src/data_hub_lambda/spectramax_plate_reader/process_file.py` for the processed-artifact pattern) for complete examples.
 
@@ -100,7 +99,7 @@ Add an `elif` branch in the `lambda_handler` function in `lambda/src/data_hub_la
 
 ```python
 elif instrument_id == Instrument.BIO_RAD_CFX96.value:
-    result_url = bio_rad_cfx96.process_file(
+    bio_rad_cfx96.process_file(
         run_id=event_info.run_id,
         filename=event_info.filename,
     )
@@ -139,4 +138,4 @@ Even without Step 4, you get a fully functional instrument in Data Hub:
 - Files are downloadable via pre-signed S3 URLs.
 - Watcher health monitoring (heartbeats, events) works in the dashboard.
 
-Lambda preprocessing adds automated metadata extraction and Slack notifications on top of that.
+Lambda preprocessing adds automated metadata extraction on top of that. (Slack notifications fire from the web app whenever a new run is created, regardless of whether a Lambda processor exists for the instrument.)

@@ -146,3 +146,31 @@ export async function api(
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Slack webhook capture — the global setup spawns an in-process HTTP server
+// that captures every payload posted to SLACK_WEBHOOK_URL. These helpers let
+// individual tests inspect and reset that capture buffer.
+// ---------------------------------------------------------------------------
+
+function getSlackCaptureUrl(): string {
+  const url = process.env.__TEST_SLACK_CAPTURE_URL;
+  if (!url)
+    throw new Error("__TEST_SLACK_CAPTURE_URL not set — global setup failed?");
+  return url;
+}
+
+export async function getCapturedSlackMessages(): Promise<{ text: string }[]> {
+  const res = await fetch(`${getSlackCaptureUrl()}/captured`);
+  if (!res.ok) {
+    throw new Error(`Slack capture /captured returned ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function clearCapturedSlackMessages(): Promise<void> {
+  const res = await fetch(`${getSlackCaptureUrl()}/clear`, { method: "POST" });
+  if (!res.ok) {
+    throw new Error(`Slack capture /clear returned ${res.status}`);
+  }
+}

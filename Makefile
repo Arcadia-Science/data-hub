@@ -146,7 +146,6 @@ endif
 		"EcrImageUri=$(ECR_IMAGE_URI)" \
 		"DataHubApiUrl=$(DATA_HUB_API_URL)" \
 		"DataHubApiKey=$(DATA_HUB_API_KEY)" \
-		"SlackWebhookUrl=$(SLACK_WEBHOOK_URL)" \
 		"GitHubOidcProviderArn=$(GITHUB_OIDC_PROVIDER_ARN)" \
 		"VercelOidcProviderArn=$(VERCEL_OIDC_PROVIDER_ARN)" \
 		"LambdaInvokeToken=$(LAMBDA_INVOKE_TOKEN)"

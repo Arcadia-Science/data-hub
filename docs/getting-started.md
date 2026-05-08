@@ -48,6 +48,7 @@ vercel env pull
 | `AWS_REGION` | No | AWS region for S3 presigned URLs (defaults to `us-west-1`) |
 | `AWS_ROLE_ARN` | No | IAM role ARN for Vercel OIDC federation to S3 (only needed on Vercel) |
 | `S3_RAW_DATA_BUCKET` | No | S3 bucket for raw data uploads (defaults to `arcadia-data-hub-raw-staging`) |
+| `SLACK_WEBHOOK_URL` | No | Slack incoming webhook URL — when set, the web app posts a notification each time a new run is created |
 
 ### Lambda / shared library
 
@@ -60,7 +61,6 @@ These are set in the Lambda runtime environment:
 | `AWS_SECRET_ACCESS_KEY` | No | AWS credentials |
 | `AWS_S3_RAW_DATA_BUCKET` | No | S3 bucket for raw data |
 | `AWS_S3_PROCESSED_DATA_BUCKET` | No | S3 bucket for processed data |
-| `SLACK_WEBHOOK_URL` | No | Slack webhook for notifications |
 
 ### Watcher
 

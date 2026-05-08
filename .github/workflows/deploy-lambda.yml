@@ -65,7 +65,6 @@ jobs:
               "EcrImageUri=${IMAGE_URI}" \
               "DataHubApiUrl=${{ secrets.DATA_HUB_API_URL }}" \
               "DataHubApiKey=${{ secrets.DATA_HUB_API_KEY }}" \
-              "SlackWebhookUrl=${{ secrets.SLACK_WEBHOOK_URL }}" \
               "Environment=${{ github.ref_name }}" \
               "GitHubOidcProviderArn=${{ secrets.GH_OIDC_PROVIDER_ARN }}" \
               "VercelOidcProviderArn=${{ secrets.VERCEL_OIDC_PROVIDER_ARN }}" \

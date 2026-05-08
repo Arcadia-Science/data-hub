@@ -1,12 +1,14 @@
 import { instruments } from "@/lib/db/schema";
 import {
   api,
+  clearCapturedSlackMessages,
   closeTestDb,
+  getCapturedSlackMessages,
   getTestDb,
   resetDb,
   seedTestUser,
 } from "@/tests/integration/helpers";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 describe("Instrument Runs API", () => {
   let token: string;
@@ -288,5 +290,66 @@ describe("Instrument Runs API", () => {
       body: { metadata: { should: "fail" } },
     });
     expect(res.status).toBe(409);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Slack notification on run creation
+//
+// The web app fires one Slack message per newly-created run. The
+// `onConflictDoNothing` upsert in the route guarantees "first time only", so
+// duplicate POSTs (which return 200) must not re-notify. We use a separate
+// describe block so the capture buffer is isolated from the rest of the suite.
+// ---------------------------------------------------------------------------
+
+describe("Run creation Slack notification", () => {
+  let token: string;
+  const instrumentId = "slack-notif-instrument";
+  const instrumentDisplayName = "Slack Notification Instrument";
+
+  beforeAll(async () => {
+    ({ token } = await seedTestUser());
+    const db = getTestDb();
+    await db.insert(instruments).values({
+      id: instrumentId,
+      displayName: instrumentDisplayName,
+      status: "active",
+    });
+  });
+
+  beforeEach(async () => {
+    await clearCapturedSlackMessages();
+  });
+
+  afterAll(async () => {
+    await closeTestDb();
+  });
+
+  it("POST sends a Slack message on first-time run creation only", async () => {
+    const runId = "slack-run-001";
+
+    const first = await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: { run_id: runId, source: "lambda" },
+    });
+    expect(first.status).toBe(201);
+
+    const duplicate = await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: { run_id: runId, source: "lambda" },
+    });
+    expect(duplicate.status).toBe(200);
+
+    const messages = await getCapturedSlackMessages();
+    expect(messages.length).toBe(1);
+    expect(messages[0].text).toContain(instrumentDisplayName);
+    expect(messages[0].text).toContain(runId);
+    expect(messages[0].text).toContain("source: lambda");
+    expect(messages[0].text).toContain(
+      `/instruments/${instrumentId}/runs/${runId}`
+    );
+    expect(messages[0].text).toContain("View in Data Hub");
   });
 });
