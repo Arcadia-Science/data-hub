@@ -110,9 +110,9 @@ def epson_scanner(file: Path, output_dir: Path | None) -> None:
     Resizes the high-resolution scan to a web-friendly JPEG preview and
     extracts TIFF metadata.
     """
-    from data_hub_lambda.epson_v700_scanner.image_processing import TIFFToJPEGConverter
+    from data_hub_lambda.epson_v700_scanner.image_processing import TiffProcessor
 
-    converter = TIFFToJPEGConverter(file)
+    converter = TiffProcessor(file)
     converter.load()
     jpg_path = converter.export_jpg()
 

@@ -10,10 +10,12 @@ import tifffile
 
 from data_hub_lambda.epson_v700_scanner.image_processing import (
     MAX_DIMENSION,
-    TIFFToJPEGConverter,
+    TiffProcessor,
     _derive_color_mode,
     _derive_dpi,
 )
+
+_GOLD_RGB = np.array([200, 170, 40], dtype=np.uint8)
 
 
 def _write_tiff(path: Path, img: np.ndarray) -> Path:  # type: ignore[type-arg]
@@ -26,7 +28,7 @@ class TestExportJpg:
         img = np.random.randint(0, 255, (200, 300, 3), dtype=np.uint8)
         tif_path = _write_tiff(tmp_path / "scan.tif", img)
 
-        converter = TIFFToJPEGConverter(tif_path)
+        converter = TiffProcessor(tif_path)
         converter.load()
         jpg_path = converter.export_jpg()
 
@@ -41,7 +43,7 @@ class TestExportJpg:
         img = np.random.randint(0, 255, (4000, 6000, 3), dtype=np.uint8)
         tif_path = _write_tiff(tmp_path / "big.tif", img)
 
-        converter = TIFFToJPEGConverter(tif_path)
+        converter = TiffProcessor(tif_path)
         converter.load()
         jpg_path = converter.export_jpg()
 
@@ -52,7 +54,7 @@ class TestExportJpg:
         img = np.random.randint(0, 255, (100, 150, 3), dtype=np.uint8)
         tif_path = _write_tiff(tmp_path / "small.tif", img)
 
-        converter = TIFFToJPEGConverter(tif_path)
+        converter = TiffProcessor(tif_path)
         converter.load()
         jpg_path = converter.export_jpg()
 
@@ -64,7 +66,7 @@ class TestExportJpg:
         img = np.random.randint(0, 255, (200, 300), dtype=np.uint8)
         tif_path = _write_tiff(tmp_path / "gray.tif", img)
 
-        converter = TIFFToJPEGConverter(tif_path)
+        converter = TiffProcessor(tif_path)
         converter.load()
         jpg_path = converter.export_jpg()
 
@@ -76,7 +78,7 @@ class TestExportJpg:
         img = np.random.randint(0, 255, (200, 300, 4), dtype=np.uint8)
         tif_path = _write_tiff(tmp_path / "rgba.tif", img)
 
-        converter = TIFFToJPEGConverter(tif_path)
+        converter = TiffProcessor(tif_path)
         converter.load()
         jpg_path = converter.export_jpg()
 
@@ -88,7 +90,7 @@ class TestExportJpg:
         img = np.random.randint(0, 65535, (200, 300, 3), dtype=np.uint16)
         tif_path = _write_tiff(tmp_path / "16bit.tif", img)
 
-        converter = TIFFToJPEGConverter(tif_path)
+        converter = TiffProcessor(tif_path)
         converter.load()
         jpg_path = converter.export_jpg()
 
@@ -101,7 +103,7 @@ class TestParseMetadata:
         img = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
         tif_path = _write_tiff(tmp_path / "scan.tif", img)
 
-        converter = TIFFToJPEGConverter(tif_path)
+        converter = TiffProcessor(tif_path)
         converter.load()
         metadata = converter.parse_metadata()
 
@@ -112,7 +114,7 @@ class TestParseMetadata:
         img = np.random.randint(0, 255, (100, 200, 3), dtype=np.uint8)
         tif_path = _write_tiff(tmp_path / "scan.tif", img)
 
-        converter = TIFFToJPEGConverter(tif_path)
+        converter = TiffProcessor(tif_path)
         converter.load()
         metadata = converter.parse_metadata()
 
@@ -166,7 +168,7 @@ class TestParseMetadataDerivedFields:
         tif_path = tmp_path / "scan.tif"
         tifffile.imwrite(str(tif_path), img, resolution=(300, 300))
 
-        converter = TIFFToJPEGConverter(tif_path)
+        converter = TiffProcessor(tif_path)
         converter.load()
         metadata = converter.parse_metadata()
 
@@ -178,7 +180,7 @@ class TestParseMetadataDerivedFields:
         tif_path = tmp_path / "gray.tif"
         tifffile.imwrite(str(tif_path), img, resolution=(600, 600))
 
-        converter = TIFFToJPEGConverter(tif_path)
+        converter = TiffProcessor(tif_path)
         converter.load()
         metadata = converter.parse_metadata()
 
@@ -188,13 +190,78 @@ class TestParseMetadataDerivedFields:
 
 class TestValidation:
     def test_rejects_missing_file(self, tmp_path: Path) -> None:
-        converter = TIFFToJPEGConverter(tmp_path / "nonexistent.tif")
+        converter = TiffProcessor(tmp_path / "nonexistent.tif")
         with pytest.raises(FileNotFoundError):
             converter.load()
 
     def test_rejects_non_tiff_extension(self, tmp_path: Path) -> None:
         path = tmp_path / "scan.png"
         path.write_bytes(b"fake")
-        converter = TIFFToJPEGConverter(path)
+        converter = TiffProcessor(path)
         with pytest.raises(ValueError, match="Expected TIFF file"):
             converter.load()
+
+
+# ------------------------------------------------------------------
+# Plate detection
+# ------------------------------------------------------------------
+
+
+def _make_gold_frame(
+    canvas_h: int,
+    canvas_w: int,
+    top: int,
+    left: int,
+    bottom: int,
+    right: int,
+    thickness: int = 20,
+) -> np.ndarray:  # type: ignore[type-arg]
+    """Paint a gold rectangular frame on a black canvas and return it."""
+    img = np.zeros((canvas_h, canvas_w, 3), dtype=np.uint8)
+    img[top : top + thickness, left:right] = _GOLD_RGB
+    img[bottom - thickness : bottom, left:right] = _GOLD_RGB
+    img[top:bottom, left : left + thickness] = _GOLD_RGB
+    img[top:bottom, right - thickness : right] = _GOLD_RGB
+    return img
+
+
+class TestDetectPlates:
+    def test_single_gold_frame(self) -> None:
+        img = _make_gold_frame(500, 400, top=50, left=50, bottom=350, right=350)
+        boxes = TiffProcessor.detect_plates(img)
+
+        assert len(boxes) == 1
+        min_row, min_col, max_row, max_col = boxes[0]
+        assert 60 < min_row < 80
+        assert 60 < min_col < 80
+        assert 320 < max_row < 340
+        assert 320 < max_col < 340
+
+    def test_two_gold_frames_sorted_left_to_right(self) -> None:
+        img = np.zeros((500, 800, 3), dtype=np.uint8)
+        frame1 = _make_gold_frame(500, 800, top=50, left=50, bottom=350, right=300)
+        frame2 = _make_gold_frame(500, 800, top=50, left=400, bottom=350, right=700)
+        img = np.maximum(img, np.maximum(frame1, frame2))
+
+        boxes = TiffProcessor.detect_plates(img)
+
+        assert len(boxes) == 2
+        assert boxes[0][1] < boxes[1][1]
+
+    def test_no_gold_returns_empty(self) -> None:
+        img = np.random.randint(0, 50, (400, 400, 3), dtype=np.uint8)
+        boxes = TiffProcessor.detect_plates(img)
+        assert boxes == []
+
+    def test_metadata_includes_plate_count(self, tmp_path: Path) -> None:
+        img = _make_gold_frame(500, 400, top=50, left=50, bottom=350, right=350)
+        tif_path = tmp_path / "framed.tif"
+        tifffile.imwrite(str(tif_path), img)
+
+        proc = TiffProcessor(tif_path)
+        proc.load()
+        proc.export_jpg()
+        metadata = proc.parse_metadata()
+
+        assert metadata["plate_count"] == 1
+        assert len(metadata["plate_boxes"]) == 1

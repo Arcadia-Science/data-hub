@@ -17,6 +17,22 @@ MAX_DIMENSION = 1000
 
 _TIFF_SUFFIXES = {".tif", ".tiff"}
 
+PlateBox = tuple[int, int, int, int]
+
+_GOLD_HUE_LOW = 0.06
+_GOLD_HUE_HIGH = 0.18
+_GOLD_SAT_MIN = 0.25
+_GOLD_VAL_MIN = 0.35
+
+_MIN_AREA_FRACTION = 0.05
+_MIN_EXTENT = 0.85
+
+_DETECTION_DOWNSAMPLE = 4
+_CLOSING_RADIUS = 5
+
+_OVERLAY_COLOR: tuple[int, int, int] = (0, 255, 0)
+_OVERLAY_THICKNESS = 6
+
 # PhotometricInterpretation values: 2 = RGB, others (0, 1, 3) are grayscale or
 # palette and are treated as B&W for our display purposes.
 _PHOTOMETRIC_RGB = 2
@@ -64,12 +80,13 @@ _METADATA_TAG_NAMES = {
 }
 
 
-class TIFFToJPEGConverter:
-    """Converts high-resolution TIFF scans to resized JPEG images."""
+class TiffProcessor:
+    """Processes high-resolution TIFF scans from the Epson V700 flatbed scanner."""
 
     def __init__(self, path: Path) -> None:
         self.path = path
         self._intensities: NDArray[Any] | None = None
+        self.plate_boxes: list[PlateBox] = []
 
     def load(self) -> None:
         if not self.path.exists():
@@ -86,8 +103,17 @@ class TIFFToJPEGConverter:
         return self._intensities
 
     def export_jpg(self) -> Path:
-        """Resize the loaded TIFF and write a JPEG next to the source file."""
+        """Detect plates, draw overlays, resize, and write a JPEG.
+
+        If no gold frames are detected the full image is exported as-is
+        (the pre-detection fallback behaviour).
+        """
         img = self._to_rgb_uint8(self.intensities)
+        self.plate_boxes = self.detect_plates(img)
+
+        if self.plate_boxes:
+            img = self._draw_plate_overlays(img, self.plate_boxes)
+
         img = self._resize(img)
 
         jpg_path = self.path.parent / f"{self.path.stem}.jpg"
@@ -97,13 +123,13 @@ class TIFFToJPEGConverter:
     def parse_metadata(self) -> dict[str, Any]:
         """Extract TIFF tags as a flat string-keyed dict.
 
-        In addition to the raw TIFF tags, this also emits two derived
-        scalar fields used by the web UI for filtering and display:
+        Derived fields:
 
-        - ``dpi``: integer DPI computed from ``XResolution`` (a (numerator,
-          denominator) rational). For Epson V700 scans this is 300 or 600.
-        - ``color_mode``: ``"rgb"`` or ``"bw"``, inferred from
-          ``SamplesPerPixel`` (preferred) or ``PhotometricInterpretation``.
+        - ``dpi``: integer DPI from ``XResolution``.
+        - ``color_mode``: ``"rgb"`` or ``"bw"``.
+        - ``plate_count``: number of plates detected by :meth:`export_jpg`.
+        - ``plate_boxes``: list of ``[min_row, min_col, max_row, max_col]``
+          bounding boxes in original-image coordinates.
         """
         metadata: dict[str, Any] = {}
         with tifffile.TiffFile(self.path) as tif:
@@ -130,7 +156,91 @@ class TIFFToJPEGConverter:
         if color_mode is not None:
             metadata["color_mode"] = color_mode
 
+        metadata["plate_count"] = len(self.plate_boxes)
+        metadata["plate_boxes"] = [list(b) for b in self.plate_boxes]
+
         return metadata
+
+    # ------------------------------------------------------------------
+    # Plate detection
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def detect_plates(img: NDArray[np.uint8]) -> list[PlateBox]:
+        """Detect agar plates inside gold 3D-printed frames.
+
+        Runs detection on a downsampled copy for speed, then scales
+        bounding boxes back to original coordinates.  Returns
+        ``(min_row, min_col, max_row, max_col)`` sorted left-to-right.
+        """
+        h_orig, w_orig = img.shape[:2]
+        s = _DETECTION_DOWNSAMPLE
+        small: NDArray[np.uint8] = img[::s, ::s]
+
+        hsv = ski.color.rgb2hsv(small)
+
+        gold_mask: NDArray[np.bool_] = (
+            (hsv[:, :, 0] >= _GOLD_HUE_LOW)
+            & (hsv[:, :, 0] <= _GOLD_HUE_HIGH)
+            & (hsv[:, :, 1] >= _GOLD_SAT_MIN)
+            & (hsv[:, :, 2] >= _GOLD_VAL_MIN)
+        )
+
+        selem = ski.morphology.disk(_CLOSING_RADIUS)
+        gold_mask = ski.morphology.closing(gold_mask, selem)
+
+        inverted = ~gold_mask
+        labels = ski.measure.label(inverted)
+        regions = ski.measure.regionprops(labels)
+
+        h_small, w_small = small.shape[:2]
+        min_area = h_small * w_small * _MIN_AREA_FRACTION
+
+        boxes: list[PlateBox] = []
+        for region in regions:
+            if region.area < min_area:
+                continue
+            if region.extent < _MIN_EXTENT:
+                continue
+
+            min_row, min_col, max_row, max_col = region.bbox
+            touches_border = (
+                min_row == 0 or min_col == 0 or max_row == h_small or max_col == w_small
+            )
+            if touches_border:
+                continue
+
+            boxes.append(
+                (
+                    min(min_row * s, h_orig),
+                    min(min_col * s, w_orig),
+                    min(max_row * s, h_orig),
+                    min(max_col * s, w_orig),
+                )
+            )
+
+        boxes.sort(key=lambda b: b[1])
+        return boxes
+
+    @staticmethod
+    def _draw_plate_overlays(
+        img: NDArray[np.uint8],
+        boxes: list[PlateBox],
+    ) -> NDArray[np.uint8]:
+        """Draw coloured rectangle outlines on a copy of the image."""
+        out = img.copy()
+        h, w = out.shape[:2]
+        for min_row, min_col, max_row, max_col in boxes:
+            for offset in range(_OVERLAY_THICKNESS):
+                r0 = max(min_row - offset, 0)
+                c0 = max(min_col - offset, 0)
+                r1 = min(max_row + offset, h - 1)
+                c1 = min(max_col + offset, w - 1)
+                rr, cc = ski.draw.rectangle_perimeter(
+                    start=(r0, c0), end=(r1, c1), shape=out.shape[:2]
+                )
+                out[rr, cc] = _OVERLAY_COLOR
+        return out
 
     # ------------------------------------------------------------------
     # Internal helpers

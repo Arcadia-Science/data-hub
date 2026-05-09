@@ -2,7 +2,7 @@ from __future__ import annotations
 import logging
 
 from data_hub_lambda.api_client import get_client
-from data_hub_lambda.epson_v700_scanner.image_processing import TIFFToJPEGConverter
+from data_hub_lambda.epson_v700_scanner.image_processing import TiffProcessor
 from data_hub_shared import s3_utils
 from data_hub_shared.config import config
 from data_hub_shared.enums import Instrument
@@ -48,7 +48,7 @@ def process_file(run_id: str, filename: str) -> None:
         s3_utils.download_file(f"s3://{s3_bucket}/{s3_key}", local_file_path)
         logger.info("Downloaded %s to %s", filename, local_file_path)
 
-        converter = TIFFToJPEGConverter(local_file_path)
+        converter = TiffProcessor(local_file_path)
         converter.load()
         jpg_file_path = converter.export_jpg()
 
