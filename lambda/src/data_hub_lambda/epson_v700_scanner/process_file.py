@@ -48,9 +48,9 @@ def process_file(run_id: str, filename: str) -> None:
         s3_utils.download_file(f"s3://{s3_bucket}/{s3_key}", local_file_path)
         logger.info("Downloaded %s to %s", filename, local_file_path)
 
-        converter = TiffProcessor(local_file_path)
-        converter.load()
-        jpg_file_path = converter.export_jpg()
+        processor = TiffProcessor(local_file_path)
+        processor.load()
+        jpg_file_path = processor.export_jpg()
 
         processed_bucket = config.AWS_S3_PROCESSED_DATA_BUCKET
         jpg_s3_key = f"{INSTRUMENT_ID}/{run_id}/{jpg_file_path.name}"
@@ -71,7 +71,7 @@ def process_file(run_id: str, filename: str) -> None:
             content_type="image/jpeg",
         )
 
-        metadata = converter.parse_metadata()
+        metadata = processor.parse_metadata()
         logger.info("Parsed metadata: %s", metadata)
 
         client.update_run(INSTRUMENT_ID, run_id, metadata=metadata)

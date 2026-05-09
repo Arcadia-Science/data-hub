@@ -107,14 +107,14 @@ def hina(file: Path, output_dir: Path | None) -> None:
 def epson_scanner(file: Path, output_dir: Path | None) -> None:
     """Process an Epson V700 Scanner TIFF file.
 
-    Resizes the high-resolution scan to a web-friendly JPEG preview and
-    extracts TIFF metadata.
+    Detects agar plates inside gold frames, draws bounding-box overlays,
+    resizes to a web-friendly JPEG preview, and extracts TIFF metadata.
     """
     from data_hub_lambda.epson_v700_scanner.image_processing import TiffProcessor
 
-    converter = TiffProcessor(file)
-    converter.load()
-    jpg_path = converter.export_jpg()
+    processor = TiffProcessor(file)
+    processor.load()
+    jpg_path = processor.export_jpg()
 
     if output_dir is not None:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -124,7 +124,7 @@ def epson_scanner(file: Path, output_dir: Path | None) -> None:
 
     click.echo(f"Exported JPG: {jpg_path}")
 
-    metadata = converter.parse_metadata()
+    metadata = processor.parse_metadata()
     click.echo(json.dumps(metadata, indent=2))
 
 

@@ -17,7 +17,7 @@ MAX_DIMENSION = 1000
 
 _TIFF_SUFFIXES = {".tif", ".tiff"}
 
-PlateBox = tuple[int, int, int, int]
+_PlateBox = tuple[int, int, int, int]
 
 _GOLD_HUE_LOW = 0.06
 _GOLD_HUE_HIGH = 0.18
@@ -86,7 +86,7 @@ class TiffProcessor:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._intensities: NDArray[Any] | None = None
-        self.plate_boxes: list[PlateBox] = []
+        self.plate_boxes: list[_PlateBox] | None = None
 
     def load(self) -> None:
         if not self.path.exists():
@@ -127,9 +127,11 @@ class TiffProcessor:
 
         - ``dpi``: integer DPI from ``XResolution``.
         - ``color_mode``: ``"rgb"`` or ``"bw"``.
-        - ``plate_count``: number of plates detected by :meth:`export_jpg`.
+        - ``plate_count``: number of detected plates (only present after
+          :meth:`export_jpg` has been called).
         - ``plate_boxes``: list of ``[min_row, min_col, max_row, max_col]``
-          bounding boxes in original-image coordinates.
+          bounding boxes in original-image coordinates (only present after
+          :meth:`export_jpg` has been called).
         """
         metadata: dict[str, Any] = {}
         with tifffile.TiffFile(self.path) as tif:
@@ -156,8 +158,9 @@ class TiffProcessor:
         if color_mode is not None:
             metadata["color_mode"] = color_mode
 
-        metadata["plate_count"] = len(self.plate_boxes)
-        metadata["plate_boxes"] = [list(b) for b in self.plate_boxes]
+        if self.plate_boxes is not None:
+            metadata["plate_count"] = len(self.plate_boxes)
+            metadata["plate_boxes"] = [list(b) for b in self.plate_boxes]
 
         return metadata
 
@@ -166,7 +169,7 @@ class TiffProcessor:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def detect_plates(img: NDArray[np.uint8]) -> list[PlateBox]:
+    def detect_plates(img: NDArray[np.uint8]) -> list[_PlateBox]:
         """Detect agar plates inside gold 3D-printed frames.
 
         Runs detection on a downsampled copy for speed, then scales
@@ -196,7 +199,7 @@ class TiffProcessor:
         h_small, w_small = small.shape[:2]
         min_area = h_small * w_small * _MIN_AREA_FRACTION
 
-        boxes: list[PlateBox] = []
+        boxes: list[_PlateBox] = []
         for region in regions:
             if region.area < min_area:
                 continue
@@ -225,21 +228,19 @@ class TiffProcessor:
     @staticmethod
     def _draw_plate_overlays(
         img: NDArray[np.uint8],
-        boxes: list[PlateBox],
+        boxes: list[_PlateBox],
     ) -> NDArray[np.uint8]:
         """Draw coloured rectangle outlines on a copy of the image."""
         out = img.copy()
         h, w = out.shape[:2]
+        t = _OVERLAY_THICKNESS
         for min_row, min_col, max_row, max_col in boxes:
-            for offset in range(_OVERLAY_THICKNESS):
-                r0 = max(min_row - offset, 0)
-                c0 = max(min_col - offset, 0)
-                r1 = min(max_row + offset, h - 1)
-                c1 = min(max_col + offset, w - 1)
-                rr, cc = ski.draw.rectangle_perimeter(
-                    start=(r0, c0), end=(r1, c1), shape=out.shape[:2]
-                )
-                out[rr, cc] = _OVERLAY_COLOR
+            r0 = max(min_row - t, 0)
+            c0 = max(min_col - t, 0)
+            r1 = min(max_row + t, h)
+            c1 = min(max_col + t, w)
+            out[r0:r1, c0:c1] = _OVERLAY_COLOR
+            out[min_row:max_row, min_col:max_col] = img[min_row:max_row, min_col:max_col]
         return out
 
     # ------------------------------------------------------------------
