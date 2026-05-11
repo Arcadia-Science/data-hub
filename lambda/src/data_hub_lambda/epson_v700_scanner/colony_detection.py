@@ -38,7 +38,7 @@ _PERCENTILE_FLOOR = 10.0
 """Percentile used for baseline subtraction after DoG filtering."""
 
 _CONTRAST_PRESENCE_THRESHOLD = 20.0
-"""Minimum 95th-percentile contrast value to declare colonies present."""
+"""Minimum 99.5th-percentile contrast value to declare colonies present."""
 
 
 @dataclass
