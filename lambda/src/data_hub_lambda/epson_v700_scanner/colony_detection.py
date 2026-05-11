@@ -5,7 +5,7 @@ Operates on individual plate crops produced by
 
 Pipeline
 --------
-1. Crop ~10 % margin to remove plate edges / frame artefacts.
+1. Crop a fixed pixel margin to remove plate edges / frame artefacts.
 2. Optimise contrast (Euclidean distance from estimated background colour).
 3. Decide whether colonies are present (contrast above noise floor).
 4. Gaussian smooth.
@@ -25,7 +25,8 @@ from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
 
-MARGIN_FRACTION = 0.10
+MARGIN_PX = 200
+"""Fixed pixel margin cropped from each edge before colony detection."""
 
 _GAUSSIAN_SIGMA = 2.0
 
@@ -117,20 +118,18 @@ class ColonyDetectionResult:
 # ------------------------------------------------------------------
 
 
-def crop_margin(image: NDArray[Any], margin: float = MARGIN_FRACTION) -> NDArray[Any]:
-    """Remove a fractional margin from each edge of *image*.
+def crop_margin(image: NDArray[Any], margin_px: int = MARGIN_PX) -> NDArray[Any]:
+    """Remove a fixed pixel margin from each edge of *image*.
 
     Args:
         image: (H, W) or (H, W, C) array.
-        margin: Fraction of each dimension to remove per side.
+        margin_px: Number of pixels to remove from each side.
 
     Returns:
         Cropped view of the original array.
     """
     h, w = image.shape[:2]
-    row_margin = int(h * margin)
-    col_margin = int(w * margin)
-    return image[row_margin : h - row_margin, col_margin : w - col_margin]
+    return image[margin_px : h - margin_px, margin_px : w - margin_px]
 
 
 def optimize_colony_contrast(image: NDArray[Any]) -> NDArray[np.floating[Any]]:

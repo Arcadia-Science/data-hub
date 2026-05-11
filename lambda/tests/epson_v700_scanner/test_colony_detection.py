@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from data_hub_lambda.epson_v700_scanner.colony_detection import (
-    MARGIN_FRACTION,
+    MARGIN_PX,
     ColonyDetectionResult,
     ColonyProperties,
     crop_margin,
@@ -37,7 +37,7 @@ def _plate_with_colonies(
     """Create a synthetic plate with circular colonies inside the margin."""
     img = np.full((h, w, 3), bg, dtype=np.uint8)
     rng = np.random.RandomState(42)
-    margin = int(max(h, w) * MARGIN_FRACTION) + colony_radius + 5
+    margin = MARGIN_PX + colony_radius + 5
     for _ in range(n_colonies):
         cy = rng.randint(margin, h - margin)
         cx = rng.randint(margin, w - margin)
@@ -60,29 +60,25 @@ def _disk(cy: int, cx: int, radius: int, h: int, w: int) -> tuple[np.ndarray, np
 
 
 class TestCropMargin:
-    def test_default_removes_10pct(self) -> None:
-        img = np.zeros((200, 300, 3), dtype=np.uint8)
+    def test_default_removes_150px(self) -> None:
+        img = np.zeros((500, 600, 3), dtype=np.uint8)
         cropped = crop_margin(img)
-        expected_h = 200 - 2 * int(200 * MARGIN_FRACTION)
-        expected_w = 300 - 2 * int(300 * MARGIN_FRACTION)
-        assert cropped.shape == (expected_h, expected_w, 3)
+        assert cropped.shape == (500 - 2 * MARGIN_PX, 600 - 2 * MARGIN_PX, 3)
 
     def test_grayscale(self) -> None:
-        img = np.zeros((100, 100), dtype=np.uint8)
+        img = np.zeros((500, 500), dtype=np.uint8)
         cropped = crop_margin(img)
-        margin = int(100 * MARGIN_FRACTION)
-        assert cropped.shape == (100 - 2 * margin, 100 - 2 * margin)
+        assert cropped.shape == (500 - 2 * MARGIN_PX, 500 - 2 * MARGIN_PX)
 
     def test_custom_margin(self) -> None:
         img = np.zeros((200, 200, 3), dtype=np.uint8)
-        cropped = crop_margin(img, margin=0.25)
+        cropped = crop_margin(img, margin_px=50)
         assert cropped.shape == (100, 100, 3)
 
     def test_preserves_content(self) -> None:
-        img = np.arange(100 * 100, dtype=np.uint8).reshape(100, 100)
-        cropped = crop_margin(img, margin=0.10)
-        m = int(100 * 0.10)
-        np.testing.assert_array_equal(cropped, img[m : 100 - m, m : 100 - m])
+        img = np.arange(500 * 500, dtype=np.uint8).reshape(500, 500)
+        cropped = crop_margin(img, margin_px=20)
+        np.testing.assert_array_equal(cropped, img[20:480, 20:480])
 
 
 # ------------------------------------------------------------------
@@ -258,7 +254,7 @@ class TestDetectColonies:
         assert result.cropped.shape[1] < 400
 
     def test_grayscale_input(self) -> None:
-        plate = np.full((200, 200), 128, dtype=np.uint8)
+        plate = np.full((400, 400), 128, dtype=np.uint8)
         result = detect_colonies(plate)
         assert isinstance(result, ColonyDetectionResult)
 

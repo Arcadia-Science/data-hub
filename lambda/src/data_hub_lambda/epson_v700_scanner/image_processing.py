@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 JPEG_QUALITY = 85
 
-MAX_DIMENSION = 1000
+MAX_DIMENSION = 2000
 
 _TIFF_SUFFIXES = {".tif", ".tiff"}
 
@@ -278,7 +278,7 @@ class TiffProcessor:
         img: NDArray[np.uint8],
         boxes: list[_PlateBox],
         colony_masks: list[NDArray[np.bool_]],
-        margin: float = 0.10,
+        margin_px: int = 150,
     ) -> NDArray[np.uint8]:
         """Draw colony contour outlines onto *img* for each plate.
 
@@ -290,11 +290,9 @@ class TiffProcessor:
         h, w = out.shape[:2]
         t = _COLONY_CONTOUR_THICKNESS
         for box, mask in zip(boxes, colony_masks, strict=True):
-            min_row, min_col, max_row, max_col = box
-            plate_h = max_row - min_row
-            plate_w = max_col - min_col
-            row_offset = min_row + int(plate_h * margin)
-            col_offset = min_col + int(plate_w * margin)
+            min_row, min_col, _max_row, _max_col = box
+            row_offset = min_row + margin_px
+            col_offset = min_col + margin_px
 
             contours = ski.measure.find_contours(mask.astype(float), level=0.5)
             for contour in contours:
