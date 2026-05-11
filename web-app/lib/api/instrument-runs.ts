@@ -803,6 +803,7 @@ export async function getInstrumentFilterOptions(
       };
     case "generic":
     case "tape_station":
+    case "instant_raman":
       return { kind: "default" };
   }
 }

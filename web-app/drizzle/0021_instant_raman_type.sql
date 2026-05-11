@@ -1,0 +1,1 @@
+ALTER TYPE "public"."instrument_type" ADD VALUE 'instant_raman';
