@@ -178,6 +178,8 @@ def detect_colony_presence(
     Uses the 99.5th percentile of the contrast image; plates without
     colonies have near-uniform background.
     """
+    if contrast.size == 0:
+        return False
     p = float(np.percentile(contrast, 99.5))
     logger.debug("Colony-presence p99.5 contrast = %.2f (threshold %.2f)", p, threshold)
     return p > threshold

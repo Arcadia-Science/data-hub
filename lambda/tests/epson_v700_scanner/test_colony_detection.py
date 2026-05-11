@@ -21,14 +21,14 @@ from data_hub_lambda.epson_v700_scanner.colony_detection import (
 )
 
 
-def _uniform_plate(h: int = 400, w: int = 400, value: int = 120) -> np.ndarray:  # type: ignore[type-arg]
+def _uniform_plate(h: int = 600, w: int = 600, value: int = 120) -> np.ndarray:  # type: ignore[type-arg]
     """Create a uniform-colour plate image (no colonies)."""
     return np.full((h, w, 3), value, dtype=np.uint8)
 
 
 def _plate_with_colonies(
-    h: int = 400,
-    w: int = 400,
+    h: int = 600,
+    w: int = 600,
     bg: int = 120,
     colony_color: tuple[int, int, int] = (255, 255, 255),
     n_colonies: int = 3,
@@ -254,13 +254,13 @@ class TestDetectColonies:
             assert "equivalent_diameter" in c
 
     def test_cropped_smaller_than_input(self) -> None:
-        plate = _uniform_plate(400, 400)
+        plate = _uniform_plate(600, 600)
         result = detect_colonies(plate)
-        assert result.cropped.shape[0] < 400
-        assert result.cropped.shape[1] < 400
+        assert result.cropped.shape[0] < 600
+        assert result.cropped.shape[1] < 600
 
     def test_grayscale_input(self) -> None:
-        plate = np.full((400, 400), 128, dtype=np.uint8)
+        plate = np.full((600, 600), 128, dtype=np.uint8)
         result = detect_colonies(plate)
         assert isinstance(result, ColonyDetectionResult)
 
