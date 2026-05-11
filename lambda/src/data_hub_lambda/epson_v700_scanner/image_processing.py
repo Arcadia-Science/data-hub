@@ -47,7 +47,7 @@ def _derive_dpi(x_resolution: Any) -> int | None:
         return None
     if denominator == 0:
         return None
-    return int(numerator / denominator)
+    return round(numerator / denominator)
 
 
 def _derive_color_mode(samples_per_pixel: Any, photometric_interpretation: Any) -> str | None:
@@ -109,7 +109,8 @@ class TiffProcessor:
         (the pre-detection fallback behaviour).
         """
         img = self._to_rgb_uint8(self.intensities)
-        self.detect_plates(img)
+        if self.plate_boxes is None:
+            self.detect_plates(img)
 
         if self.plate_boxes:
             img = self._draw_plate_overlays(img, self.plate_boxes)
@@ -161,6 +162,11 @@ class TiffProcessor:
         if self.plate_boxes is not None:
             metadata["plate_count"] = len(self.plate_boxes)
             metadata["plate_boxes"] = [list(b) for b in self.plate_boxes]
+        else:
+            logger.warning(
+                "plate_boxes is None; call export_jpg() before"
+                " parse_metadata() to include plate data"
+            )
 
         return metadata
 
@@ -168,12 +174,13 @@ class TiffProcessor:
     # Plate detection
     # ------------------------------------------------------------------
 
-    def detect_plates(self, img: NDArray[np.uint8]) -> list[_PlateBox]:
+    def detect_plates(self, img: NDArray[np.uint8]) -> None:
         """Detect agar plates inside gold 3D-printed frames.
 
         Runs detection on a downsampled copy for speed, then scales
-        bounding boxes back to original coordinates.  Returns
-        ``(min_row, min_col, max_row, max_col)`` sorted left-to-right.
+        bounding boxes back to original coordinates.  Results are stored
+        in ``self.plate_boxes`` as ``(min_row, min_col, max_row, max_col)``
+        tuples sorted left-to-right.
         """
         h_orig, w_orig = img.shape[:2]
         s = _DETECTION_DOWNSAMPLE
@@ -223,14 +230,18 @@ class TiffProcessor:
 
         boxes.sort(key=lambda b: b[1])
         self.plate_boxes = boxes
-        return boxes
+        logger.debug("Detected %d plate(s): %s", len(boxes), boxes)
 
     @staticmethod
     def _draw_plate_overlays(
         img: NDArray[np.uint8],
         boxes: list[_PlateBox],
     ) -> NDArray[np.uint8]:
-        """Draw coloured rectangle outlines on a copy of the image."""
+        """Draw coloured rectangle outlines on a copy of the image.
+
+        Assumes non-overlapping boxes; overlapping boxes would cause
+        later interior restores to overwrite earlier overlay lines.
+        """
         out = img.copy()
         h, w = out.shape[:2]
         t = _OVERLAY_THICKNESS
@@ -250,14 +261,14 @@ class TiffProcessor:
     @staticmethod
     def _to_rgb_uint8(img: NDArray[Any]) -> NDArray[np.uint8]:
         """Normalize to 8-bit RGB regardless of input dtype/channels."""
+        if img.ndim == 3 and img.shape[2] == 4:
+            img = ski.color.rgba2rgb(img)
+
         if img.dtype != np.uint8:
             img = ski.util.img_as_ubyte(ski.exposure.rescale_intensity(img))
 
         if img.ndim == 2:
             img = ski.color.gray2rgb(img)
-        elif img.ndim == 3 and img.shape[2] == 4:
-            img = ski.color.rgba2rgb(img)
-            img = ski.util.img_as_ubyte(img)
 
         return img  # type: ignore[return-value]
 

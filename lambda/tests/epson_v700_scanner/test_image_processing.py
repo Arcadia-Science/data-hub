@@ -229,10 +229,11 @@ class TestDetectPlates:
     def test_single_gold_frame(self) -> None:
         img = _make_gold_frame(500, 400, top=50, left=50, bottom=350, right=350)
         proc = TiffProcessor(Path("dummy.tif"))
-        boxes = proc.detect_plates(img)
+        proc.detect_plates(img)
 
-        assert len(boxes) == 1
-        min_row, min_col, max_row, max_col = boxes[0]
+        assert proc.plate_boxes is not None
+        assert len(proc.plate_boxes) == 1
+        min_row, min_col, max_row, max_col = proc.plate_boxes[0]
         assert 60 < min_row < 80
         assert 60 < min_col < 80
         assert 320 < max_row < 340
@@ -245,16 +246,17 @@ class TestDetectPlates:
         img = np.maximum(img, np.maximum(frame1, frame2))
 
         proc = TiffProcessor(Path("dummy.tif"))
-        boxes = proc.detect_plates(img)
+        proc.detect_plates(img)
 
-        assert len(boxes) == 2
-        assert boxes[0][1] < boxes[1][1]
+        assert proc.plate_boxes is not None
+        assert len(proc.plate_boxes) == 2
+        assert proc.plate_boxes[0][1] < proc.plate_boxes[1][1]
 
     def test_no_gold_returns_empty(self) -> None:
         img = np.random.randint(0, 50, (400, 400, 3), dtype=np.uint8)
         proc = TiffProcessor(Path("dummy.tif"))
-        boxes = proc.detect_plates(img)
-        assert boxes == []
+        proc.detect_plates(img)
+        assert proc.plate_boxes == []
 
     def test_metadata_includes_plate_count(self, tmp_path: Path) -> None:
         img = _make_gold_frame(500, 400, top=50, left=50, bottom=350, right=350)
