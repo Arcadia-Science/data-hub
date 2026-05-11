@@ -13,9 +13,7 @@ from data_hub_lambda.epson_v700_scanner.colony_detection import (
     crop_margin,
     detect_colonies,
     detect_colony_presence,
-    draw_colony_overlay,
     export_colony_csv,
-    export_colony_overlay,
     measure_colonies,
     optimize_colony_contrast,
     smooth,
@@ -263,56 +261,6 @@ class TestDetectColonies:
         plate = np.full((200, 200), 128, dtype=np.uint8)
         result = detect_colonies(plate)
         assert isinstance(result, ColonyDetectionResult)
-
-
-# ------------------------------------------------------------------
-# draw_colony_overlay
-# ------------------------------------------------------------------
-
-
-class TestDrawColonyOverlay:
-    def test_output_shape_matches_input(self) -> None:
-        plate = _plate_with_colonies(h=300, w=300, n_colonies=3, colony_radius=20)
-        result = detect_colonies(plate)
-        overlay = draw_colony_overlay(plate, result.mask)
-        assert overlay.shape == plate.shape
-        assert overlay.dtype == np.uint8
-
-    def test_does_not_mutate_input(self) -> None:
-        plate = _uniform_plate(200, 200)
-        mask = np.zeros((160, 160), dtype=bool)
-        original = plate.copy()
-        draw_colony_overlay(plate, mask)
-        np.testing.assert_array_equal(plate, original)
-
-    def test_empty_mask_returns_copy(self) -> None:
-        plate = _uniform_plate(200, 200)
-        mask = np.zeros((160, 160), dtype=bool)
-        overlay = draw_colony_overlay(plate, mask)
-        np.testing.assert_array_equal(overlay, plate)
-
-    def test_contours_drawn_when_colonies_present(self) -> None:
-        plate = _plate_with_colonies(
-            h=600, w=600, colony_color=(255, 255, 255), n_colonies=8, colony_radius=30
-        )
-        result = detect_colonies(plate)
-        assert result.has_colonies
-        overlay = draw_colony_overlay(plate, result.mask)
-        diff = (overlay != plate).any(axis=-1)
-        assert diff.any(), "Expected overlay to differ from original"
-
-
-# ------------------------------------------------------------------
-# export_colony_overlay
-# ------------------------------------------------------------------
-
-
-class TestExportColonyOverlay:
-    def test_writes_jpeg(self, tmp_path: Path) -> None:
-        img = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
-        out = export_colony_overlay(img, tmp_path / "overlay.jpg")
-        assert out.exists()
-        assert out.suffix == ".jpg"
 
 
 # ------------------------------------------------------------------

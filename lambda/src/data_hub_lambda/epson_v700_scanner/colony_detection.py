@@ -18,7 +18,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import imageio.v3 as iio
 import numpy as np
 import pandas as pd
 import skimage as ski
@@ -32,11 +31,6 @@ _GAUSSIAN_SIGMA = 2.0
 
 _CONTRAST_PRESENCE_THRESHOLD = 5.0
 """Minimum 95th-percentile contrast value to declare colonies present."""
-
-JPEG_QUALITY = 85
-
-_CONTOUR_COLOR: tuple[int, int, int] = (0, 255, 255)
-_CONTOUR_THICKNESS = 3
 
 
 @dataclass
@@ -224,51 +218,6 @@ def measure_colonies(mask: NDArray[np.bool_]) -> list[ColonyProperties]:
 # ------------------------------------------------------------------
 # Visualisation & export
 # ------------------------------------------------------------------
-
-
-def draw_colony_overlay(
-    plate_image: NDArray[np.uint8],
-    mask: NDArray[np.bool_],
-    margin: float = MARGIN_FRACTION,
-) -> NDArray[np.uint8]:
-    """Draw colony contour outlines on the plate image.
-
-    The *mask* lives in the coordinate space of the margin-cropped image,
-    so contours are offset back to the original plate-image coordinates.
-
-    Args:
-        plate_image: Original (H, W, 3) RGB uint8 plate crop.
-        mask: Binary colony mask in cropped coordinates.
-        margin: The same margin fraction used during detection.
-
-    Returns:
-        Copy of *plate_image* with cyan contour outlines.
-    """
-    out = plate_image.copy()
-    h, w = plate_image.shape[:2]
-    row_offset = int(h * margin)
-    col_offset = int(w * margin)
-
-    contours = ski.measure.find_contours(mask.astype(float), level=0.5)
-    t = _CONTOUR_THICKNESS
-    for contour in contours:
-        for r_f, c_f in contour:
-            r = int(round(r_f)) + row_offset
-            c = int(round(c_f)) + col_offset
-            r0, r1 = max(r - t, 0), min(r + t + 1, h)
-            c0, c1 = max(c - t, 0), min(c + t + 1, w)
-            out[r0:r1, c0:c1] = _CONTOUR_COLOR
-    return out
-
-
-def export_colony_overlay(
-    overlay: NDArray[np.uint8],
-    path: Path,
-) -> Path:
-    """Write a colony-overlay image as JPEG."""
-    iio.imwrite(path, overlay, quality=JPEG_QUALITY)
-    logger.debug("Wrote colony overlay: %s", path)
-    return path
 
 
 def export_colony_csv(

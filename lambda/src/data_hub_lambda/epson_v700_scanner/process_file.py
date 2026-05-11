@@ -50,7 +50,27 @@ def process_file(run_id: str, filename: str) -> None:
 
         processor = TiffProcessor(local_file_path)
         processor.load()
-        jpg_file_path = processor.export_jpg()
+        processor.detect_plates()
+
+        colony_masks: list | None = None
+        colony_summaries: list | None = None
+        dataframes: list | None = None
+        plate_crops = processor.crop_plates()
+        if plate_crops:
+            from data_hub_lambda.epson_v700_scanner.colony_detection import (
+                detect_colonies,
+            )
+
+            colony_summaries = []
+            colony_masks = []
+            dataframes = []
+            for i, crop in enumerate(plate_crops):
+                result = detect_colonies(crop)
+                colony_summaries.append(result.summary())
+                colony_masks.append(result.mask)
+                dataframes.append(result.to_dataframe(plate_index=i + 1))
+
+        jpg_file_path = processor.export_jpg(colony_masks=colony_masks)
 
         processed_bucket = config.AWS_S3_PROCESSED_DATA_BUCKET
         jpg_s3_key = f"{INSTRUMENT_ID}/{run_id}/{jpg_file_path.name}"
@@ -73,40 +93,10 @@ def process_file(run_id: str, filename: str) -> None:
 
         metadata = processor.parse_metadata()
 
-        plate_crops = processor.crop_plates()
-        if plate_crops:
+        if plate_crops and dataframes and colony_summaries:
             from data_hub_lambda.epson_v700_scanner.colony_detection import (
-                detect_colonies,
-                draw_colony_overlay,
                 export_colony_csv,
-                export_colony_overlay,
             )
-
-            colony_summaries = []
-            dataframes = []
-            for i, crop in enumerate(plate_crops):
-                result = detect_colonies(crop)
-                colony_summaries.append(result.summary())
-                dataframes.append(result.to_dataframe(plate_index=i + 1))
-
-                overlay = draw_colony_overlay(crop, result.mask)
-                overlay_name = f"{processor.path.stem}_plate{i + 1}_colonies.jpg"
-                overlay_path = export_colony_overlay(overlay, raw_data_dir / overlay_name)
-                overlay_s3_key = f"{INSTRUMENT_ID}/{run_id}/{overlay_name}"
-                s3_utils.upload_file(overlay_path, f"s3://{processed_bucket}/{overlay_s3_key}")
-                overlay_file = client.create_file(
-                    instrument_id=INSTRUMENT_ID,
-                    run_id=run_id,
-                    s3_bucket=processed_bucket or "",
-                    s3_key=overlay_s3_key,
-                    filename=overlay_name,
-                    category="processed",
-                )
-                client.update_file(
-                    overlay_file.id,
-                    size_bytes=overlay_path.stat().st_size,
-                    content_type="image/jpeg",
-                )
 
             csv_name = f"{processor.path.stem}_colonies.csv"
             csv_path = export_colony_csv(dataframes, raw_data_dir / csv_name)

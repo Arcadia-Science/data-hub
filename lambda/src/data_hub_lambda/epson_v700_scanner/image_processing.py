@@ -33,6 +33,9 @@ _CLOSING_RADIUS = 5
 _OVERLAY_COLOR: tuple[int, int, int] = (0, 255, 0)
 _OVERLAY_THICKNESS = 6
 
+_COLONY_CONTOUR_COLOR: tuple[int, int, int] = (0, 255, 255)
+_COLONY_CONTOUR_THICKNESS = 3
+
 # PhotometricInterpretation values: 2 = RGB, others (0, 1, 3) are grayscale or
 # palette and are treated as B&W for our display purposes.
 _PHOTOMETRIC_RGB = 2
@@ -102,11 +105,19 @@ class TiffProcessor:
             raise RuntimeError("Call load() first.")
         return self._intensities
 
-    def export_jpg(self) -> Path:
+    def export_jpg(
+        self,
+        colony_masks: list[NDArray[np.bool_]] | None = None,
+    ) -> Path:
         """Detect plates, draw overlays, resize, and write a JPEG.
 
         If no gold frames are detected the full image is exported as-is
         (the pre-detection fallback behaviour).
+
+        Args:
+            colony_masks: Optional per-plate binary masks (one per entry in
+                ``plate_boxes``).  When provided, colony contour outlines
+                are drawn on the export image.
         """
         img = self._to_rgb_uint8(self.intensities)
         if self.plate_boxes is None:
@@ -114,6 +125,8 @@ class TiffProcessor:
 
         if self.plate_boxes:
             img = self._draw_plate_overlays(img, self.plate_boxes)
+            if colony_masks:
+                img = self._draw_colony_contours(img, self.plate_boxes, colony_masks)
 
         img = self._resize(img)
 
@@ -174,14 +187,20 @@ class TiffProcessor:
     # Plate detection
     # ------------------------------------------------------------------
 
-    def detect_plates(self, img: NDArray[np.uint8]) -> None:
+    def detect_plates(self, img: NDArray[np.uint8] | None = None) -> None:
         """Detect agar plates inside gold 3D-printed frames.
 
         Runs detection on a downsampled copy for speed, then scales
         bounding boxes back to original coordinates.  Results are stored
         in ``self.plate_boxes`` as ``(min_row, min_col, max_row, max_col)``
         tuples sorted left-to-right.
+
+        Args:
+            img: Optional RGB uint8 image.  When *None* the image is
+                derived from ``self.intensities``.
         """
+        if img is None:
+            img = self._to_rgb_uint8(self.intensities)
         h_orig, w_orig = img.shape[:2]
         s = _DETECTION_DOWNSAMPLE
         small: NDArray[np.uint8] = img[::s, ::s]
@@ -252,6 +271,39 @@ class TiffProcessor:
             c1 = min(max_col + t, w)
             out[r0:r1, c0:c1] = _OVERLAY_COLOR
             out[min_row:max_row, min_col:max_col] = img[min_row:max_row, min_col:max_col]
+        return out
+
+    @staticmethod
+    def _draw_colony_contours(
+        img: NDArray[np.uint8],
+        boxes: list[_PlateBox],
+        colony_masks: list[NDArray[np.bool_]],
+        margin: float = 0.10,
+    ) -> NDArray[np.uint8]:
+        """Draw colony contour outlines onto *img* for each plate.
+
+        Each mask lives in the margin-cropped coordinate space of its
+        plate crop, so contours are offset by the plate box origin plus
+        the crop margin.
+        """
+        out = img.copy()
+        h, w = out.shape[:2]
+        t = _COLONY_CONTOUR_THICKNESS
+        for box, mask in zip(boxes, colony_masks, strict=True):
+            min_row, min_col, max_row, max_col = box
+            plate_h = max_row - min_row
+            plate_w = max_col - min_col
+            row_offset = min_row + int(plate_h * margin)
+            col_offset = min_col + int(plate_w * margin)
+
+            contours = ski.measure.find_contours(mask.astype(float), level=0.5)
+            for contour in contours:
+                for r_f, c_f in contour:
+                    r = int(round(r_f)) + row_offset
+                    c = int(round(c_f)) + col_offset
+                    r0, r1 = max(r - t, 0), min(r + t + 1, h)
+                    c0, c1 = max(c - t, 0), min(c + t + 1, w)
+                    out[r0:r1, c0:c1] = _COLONY_CONTOUR_COLOR
         return out
 
     def crop_plates(self) -> list[NDArray[np.uint8]]:

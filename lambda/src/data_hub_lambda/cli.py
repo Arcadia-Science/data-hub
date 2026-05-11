@@ -120,7 +120,37 @@ def epson_scanner(file: Path, output_dir: Path | None, detect_colonies: bool) ->
 
     processor = TiffProcessor(file)
     processor.load()
-    jpg_path = processor.export_jpg()
+
+    colony_masks: list | None = None
+    if detect_colonies:
+        from data_hub_lambda.epson_v700_scanner.colony_detection import (
+            detect_colonies as run_colony_detection,
+        )
+        from data_hub_lambda.epson_v700_scanner.colony_detection import (
+            export_colony_csv,
+        )
+
+        processor.detect_plates()
+        plate_crops = processor.crop_plates()
+        if not plate_crops:
+            click.echo("No plates detected — skipping colony detection.")
+        else:
+            colony_masks = []
+            dataframes = []
+            for i, crop in enumerate(plate_crops):
+                result = run_colony_detection(crop)
+                colony_masks.append(result.mask)
+                click.echo(f"\nPlate {i + 1}:")
+                click.echo(json.dumps(result.summary(), indent=2))
+                dataframes.append(result.to_dataframe(plate_index=i + 1))
+
+            dest_dir = output_dir or file.parent
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            csv_path = dest_dir / f"{file.stem}_colonies.csv"
+            export_colony_csv(dataframes, csv_path)
+            click.echo(f"\nColony CSV: {csv_path}")
+
+    jpg_path = processor.export_jpg(colony_masks=colony_masks)
 
     if output_dir is not None:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -132,41 +162,6 @@ def epson_scanner(file: Path, output_dir: Path | None, detect_colonies: bool) ->
 
     metadata = processor.parse_metadata()
     click.echo(json.dumps(metadata, indent=2))
-
-    if detect_colonies:
-        from data_hub_lambda.epson_v700_scanner.colony_detection import (
-            detect_colonies as run_colony_detection,
-        )
-        from data_hub_lambda.epson_v700_scanner.colony_detection import (
-            draw_colony_overlay,
-            export_colony_csv,
-            export_colony_overlay,
-        )
-
-        plate_crops = processor.crop_plates()
-        if not plate_crops:
-            click.echo("No plates detected — skipping colony detection.")
-            return
-
-        dest_dir = output_dir or file.parent
-        dest_dir.mkdir(parents=True, exist_ok=True)
-
-        dataframes = []
-        for i, crop in enumerate(plate_crops):
-            result = run_colony_detection(crop)
-            click.echo(f"\nPlate {i + 1}:")
-            click.echo(json.dumps(result.summary(), indent=2))
-
-            overlay = draw_colony_overlay(crop, result.mask)
-            overlay_path = dest_dir / f"{file.stem}_plate{i + 1}_colonies.jpg"
-            export_colony_overlay(overlay, overlay_path)
-            click.echo(f"Colony overlay: {overlay_path}")
-
-            dataframes.append(result.to_dataframe(plate_index=i + 1))
-
-        csv_path = dest_dir / f"{file.stem}_colonies.csv"
-        export_colony_csv(dataframes, csv_path)
-        click.echo(f"\nColony CSV: {csv_path}")
 
 
 # ---------------------------------------------------------------------------
