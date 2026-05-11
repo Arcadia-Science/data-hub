@@ -8,7 +8,7 @@ Pipeline
 1. Crop a fixed pixel margin to remove plate edges / frame artefacts.
 2. Optimise contrast (Euclidean distance from estimated background colour).
 3. Decide whether colonies are present (contrast above noise floor).
-4. Gaussian smooth.
+4. Difference-of-Gaussians band-pass filter with 10th-percentile subtraction.
 5. Otsu threshold to produce a binary colony mask.
 """
 
@@ -28,7 +28,14 @@ logger = logging.getLogger(__name__)
 MARGIN_PX = 200
 """Fixed pixel margin cropped from each edge before colony detection."""
 
-_GAUSSIAN_SIGMA = 2.0
+_DOG_LOW_SIGMA = 0.6
+"""Low sigma for the Difference-of-Gaussians band-pass filter."""
+
+_DOG_HIGH_SIGMA = 64.0
+"""High sigma for the Difference-of-Gaussians band-pass filter."""
+
+_PERCENTILE_FLOOR = 10.0
+"""Percentile used for baseline subtraction after DoG filtering."""
 
 _CONTRAST_PRESENCE_THRESHOLD = 20.0
 """Minimum 95th-percentile contrast value to declare colonies present."""
@@ -178,10 +185,26 @@ def detect_colony_presence(
 
 def smooth(
     contrast: NDArray[np.floating[Any]],
-    sigma: float = _GAUSSIAN_SIGMA,
+    low_sigma: float = _DOG_LOW_SIGMA,
+    high_sigma: float = _DOG_HIGH_SIGMA,
+    percentile: float = _PERCENTILE_FLOOR,
 ) -> NDArray[np.floating[Any]]:
-    """Apply Gaussian smoothing."""
-    return ski.filters.gaussian(contrast, sigma=sigma, preserve_range=True)  # type: ignore[no-any-return]
+    """Apply Difference-of-Gaussians band-pass filter with percentile subtraction.
+
+    The DoG filter retains structures between *low_sigma* and *high_sigma*
+    scale, suppressing both high-frequency noise and low-frequency background
+    gradients.  A 10th-percentile baseline is then subtracted and negative
+    values are clipped to zero so the result stays non-negative for Otsu
+    thresholding.
+    """
+    dog: NDArray[np.floating[Any]] = ski.filters.difference_of_gaussians(
+        contrast,
+        low_sigma=low_sigma,
+        high_sigma=high_sigma,
+    )
+    floor = np.percentile(dog, percentile)
+    result: NDArray[np.floating[Any]] = np.clip(dog - floor, 0, None)
+    return result
 
 
 def threshold_colonies(smoothed: NDArray[np.floating[Any]]) -> NDArray[np.bool_]:

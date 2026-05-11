@@ -148,8 +148,14 @@ class TestSmooth:
     def test_smoothing_reduces_noise(self) -> None:
         rng = np.random.RandomState(0)
         img = rng.rand(200, 200) * 100
-        result = smooth(img, sigma=3.0)
+        result = smooth(img, low_sigma=0.6, high_sigma=64.0)
         assert result.std() < img.std()
+
+    def test_result_is_non_negative(self) -> None:
+        rng = np.random.RandomState(42)
+        img = rng.rand(200, 200) * 100
+        result = smooth(img)
+        assert np.all(result >= 0)
 
 
 # ------------------------------------------------------------------
