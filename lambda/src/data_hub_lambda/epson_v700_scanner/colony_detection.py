@@ -30,7 +30,7 @@ MARGIN_PX = 200
 
 _GAUSSIAN_SIGMA = 2.0
 
-_CONTRAST_PRESENCE_THRESHOLD = 5.0
+_CONTRAST_PRESENCE_THRESHOLD = 20.0
 """Minimum 95th-percentile contrast value to declare colonies present."""
 
 
@@ -168,12 +168,12 @@ def detect_colony_presence(
 ) -> bool:
     """Return ``True`` if there is enough contrast to indicate colonies.
 
-    Uses the 95th percentile of the contrast image; plates without
+    Uses the 99.5th percentile of the contrast image; plates without
     colonies have near-uniform background.
     """
-    p95 = float(np.percentile(contrast, 95))
-    logger.debug("Colony-presence p95 contrast = %.2f (threshold %.2f)", p95, threshold)
-    return p95 > threshold
+    p = float(np.percentile(contrast, 99.5))
+    logger.debug("Colony-presence p99.5 contrast = %.2f (threshold %.2f)", p, threshold)
+    return p > threshold
 
 
 def smooth(
