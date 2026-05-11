@@ -109,7 +109,7 @@ class TiffProcessor:
         (the pre-detection fallback behaviour).
         """
         img = self._to_rgb_uint8(self.intensities)
-        self.plate_boxes = self.detect_plates(img)
+        self.detect_plates(img)
 
         if self.plate_boxes:
             img = self._draw_plate_overlays(img, self.plate_boxes)
@@ -168,8 +168,7 @@ class TiffProcessor:
     # Plate detection
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def detect_plates(img: NDArray[np.uint8]) -> list[_PlateBox]:
+    def detect_plates(self, img: NDArray[np.uint8]) -> list[_PlateBox]:
         """Detect agar plates inside gold 3D-printed frames.
 
         Runs detection on a downsampled copy for speed, then scales
@@ -223,6 +222,7 @@ class TiffProcessor:
             )
 
         boxes.sort(key=lambda b: b[1])
+        self.plate_boxes = boxes
         return boxes
 
     @staticmethod
