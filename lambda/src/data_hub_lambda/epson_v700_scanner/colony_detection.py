@@ -15,9 +15,12 @@ Pipeline
 from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
+import imageio.v3 as iio
 import numpy as np
+import pandas as pd
 import skimage as ski
 from numpy.typing import NDArray
 
@@ -29,6 +32,11 @@ _GAUSSIAN_SIGMA = 2.0
 
 _CONTRAST_PRESENCE_THRESHOLD = 5.0
 """Minimum 95th-percentile contrast value to declare colonies present."""
+
+JPEG_QUALITY = 85
+
+_CONTOUR_COLOR: tuple[int, int, int] = (0, 255, 255)
+_CONTOUR_THICKNESS = 3
 
 
 @dataclass
@@ -71,6 +79,43 @@ class ColonyDetectionResult:
                 for c in self.colonies
             ],
         }
+
+    def to_dataframe(self, plate_index: int = 0) -> pd.DataFrame:
+        """Return a :class:`~pandas.DataFrame` with one row per colony."""
+        if not self.colonies:
+            return pd.DataFrame(
+                columns=[
+                    "plate_index",
+                    "label",
+                    "area_px",
+                    "centroid_row",
+                    "centroid_col",
+                    "bbox_min_row",
+                    "bbox_min_col",
+                    "bbox_max_row",
+                    "bbox_max_col",
+                    "eccentricity",
+                    "equivalent_diameter",
+                ]
+            )
+        rows = []
+        for c in self.colonies:
+            rows.append(
+                {
+                    "plate_index": plate_index,
+                    "label": c.label,
+                    "area_px": c.area_px,
+                    "centroid_row": round(c.centroid_row, 1),
+                    "centroid_col": round(c.centroid_col, 1),
+                    "bbox_min_row": c.bbox[0],
+                    "bbox_min_col": c.bbox[1],
+                    "bbox_max_row": c.bbox[2],
+                    "bbox_max_col": c.bbox[3],
+                    "eccentricity": round(c.eccentricity, 4),
+                    "equivalent_diameter": round(c.equivalent_diameter, 2),
+                }
+            )
+        return pd.DataFrame(rows)
 
 
 # ------------------------------------------------------------------
@@ -174,6 +219,84 @@ def measure_colonies(mask: NDArray[np.bool_]) -> list[ColonyProperties]:
 
     colonies.sort(key=lambda c: c.area_px, reverse=True)
     return colonies
+
+
+# ------------------------------------------------------------------
+# Visualisation & export
+# ------------------------------------------------------------------
+
+
+def draw_colony_overlay(
+    plate_image: NDArray[np.uint8],
+    mask: NDArray[np.bool_],
+    margin: float = MARGIN_FRACTION,
+) -> NDArray[np.uint8]:
+    """Draw colony contour outlines on the plate image.
+
+    The *mask* lives in the coordinate space of the margin-cropped image,
+    so contours are offset back to the original plate-image coordinates.
+
+    Args:
+        plate_image: Original (H, W, 3) RGB uint8 plate crop.
+        mask: Binary colony mask in cropped coordinates.
+        margin: The same margin fraction used during detection.
+
+    Returns:
+        Copy of *plate_image* with cyan contour outlines.
+    """
+    out = plate_image.copy()
+    h, w = plate_image.shape[:2]
+    row_offset = int(h * margin)
+    col_offset = int(w * margin)
+
+    contours = ski.measure.find_contours(mask.astype(float), level=0.5)
+    t = _CONTOUR_THICKNESS
+    for contour in contours:
+        for r_f, c_f in contour:
+            r = int(round(r_f)) + row_offset
+            c = int(round(c_f)) + col_offset
+            r0, r1 = max(r - t, 0), min(r + t + 1, h)
+            c0, c1 = max(c - t, 0), min(c + t + 1, w)
+            out[r0:r1, c0:c1] = _CONTOUR_COLOR
+    return out
+
+
+def export_colony_overlay(
+    overlay: NDArray[np.uint8],
+    path: Path,
+) -> Path:
+    """Write a colony-overlay image as JPEG."""
+    iio.imwrite(path, overlay, quality=JPEG_QUALITY)
+    logger.debug("Wrote colony overlay: %s", path)
+    return path
+
+
+def export_colony_csv(
+    frames: list[pd.DataFrame],
+    path: Path,
+) -> Path:
+    """Concatenate per-plate DataFrames and write a CSV."""
+    if frames:
+        combined = pd.concat(frames, ignore_index=True)
+    else:
+        combined = pd.DataFrame(
+            columns=[
+                "plate_index",
+                "label",
+                "area_px",
+                "centroid_row",
+                "centroid_col",
+                "bbox_min_row",
+                "bbox_min_col",
+                "bbox_max_row",
+                "bbox_max_col",
+                "eccentricity",
+                "equivalent_diameter",
+            ]
+        )
+    combined.to_csv(path, index=False)
+    logger.debug("Wrote colony CSV: %s", path)
+    return path
 
 
 # ------------------------------------------------------------------

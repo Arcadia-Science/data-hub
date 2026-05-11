@@ -1,8 +1,10 @@
 """Unit tests for `epson_v700_scanner.colony_detection`."""
 
 from __future__ import annotations
+from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 from data_hub_lambda.epson_v700_scanner.colony_detection import (
     MARGIN_FRACTION,
@@ -11,6 +13,9 @@ from data_hub_lambda.epson_v700_scanner.colony_detection import (
     crop_margin,
     detect_colonies,
     detect_colony_presence,
+    draw_colony_overlay,
+    export_colony_csv,
+    export_colony_overlay,
     measure_colonies,
     optimize_colony_contrast,
     smooth,
@@ -258,3 +263,137 @@ class TestDetectColonies:
         plate = np.full((200, 200), 128, dtype=np.uint8)
         result = detect_colonies(plate)
         assert isinstance(result, ColonyDetectionResult)
+
+
+# ------------------------------------------------------------------
+# draw_colony_overlay
+# ------------------------------------------------------------------
+
+
+class TestDrawColonyOverlay:
+    def test_output_shape_matches_input(self) -> None:
+        plate = _plate_with_colonies(h=300, w=300, n_colonies=3, colony_radius=20)
+        result = detect_colonies(plate)
+        overlay = draw_colony_overlay(plate, result.mask)
+        assert overlay.shape == plate.shape
+        assert overlay.dtype == np.uint8
+
+    def test_does_not_mutate_input(self) -> None:
+        plate = _uniform_plate(200, 200)
+        mask = np.zeros((160, 160), dtype=bool)
+        original = plate.copy()
+        draw_colony_overlay(plate, mask)
+        np.testing.assert_array_equal(plate, original)
+
+    def test_empty_mask_returns_copy(self) -> None:
+        plate = _uniform_plate(200, 200)
+        mask = np.zeros((160, 160), dtype=bool)
+        overlay = draw_colony_overlay(plate, mask)
+        np.testing.assert_array_equal(overlay, plate)
+
+    def test_contours_drawn_when_colonies_present(self) -> None:
+        plate = _plate_with_colonies(
+            h=600, w=600, colony_color=(255, 255, 255), n_colonies=8, colony_radius=30
+        )
+        result = detect_colonies(plate)
+        assert result.has_colonies
+        overlay = draw_colony_overlay(plate, result.mask)
+        diff = (overlay != plate).any(axis=-1)
+        assert diff.any(), "Expected overlay to differ from original"
+
+
+# ------------------------------------------------------------------
+# export_colony_overlay
+# ------------------------------------------------------------------
+
+
+class TestExportColonyOverlay:
+    def test_writes_jpeg(self, tmp_path: Path) -> None:
+        img = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
+        out = export_colony_overlay(img, tmp_path / "overlay.jpg")
+        assert out.exists()
+        assert out.suffix == ".jpg"
+
+
+# ------------------------------------------------------------------
+# to_dataframe
+# ------------------------------------------------------------------
+
+
+class TestToDataframe:
+    def test_columns_present(self) -> None:
+        plate = _plate_with_colonies(
+            h=600, w=600, colony_color=(255, 255, 255), n_colonies=8, colony_radius=30
+        )
+        result = detect_colonies(plate)
+        df = result.to_dataframe(plate_index=1)
+        assert isinstance(df, pd.DataFrame)
+        expected_cols = {
+            "plate_index",
+            "label",
+            "area_px",
+            "centroid_row",
+            "centroid_col",
+            "bbox_min_row",
+            "bbox_min_col",
+            "bbox_max_row",
+            "bbox_max_col",
+            "eccentricity",
+            "equivalent_diameter",
+        }
+        assert expected_cols == set(df.columns)
+
+    def test_row_count_matches_colonies(self) -> None:
+        plate = _plate_with_colonies(
+            h=600, w=600, colony_color=(255, 255, 255), n_colonies=8, colony_radius=30
+        )
+        result = detect_colonies(plate)
+        df = result.to_dataframe()
+        assert len(df) == len(result.colonies)
+
+    def test_empty_result_gives_empty_df(self) -> None:
+        plate = _uniform_plate()
+        result = detect_colonies(plate)
+        df = result.to_dataframe()
+        assert len(df) == 0
+        assert "plate_index" in df.columns
+
+    def test_plate_index_propagated(self) -> None:
+        plate = _plate_with_colonies(
+            h=600, w=600, colony_color=(255, 255, 255), n_colonies=8, colony_radius=30
+        )
+        result = detect_colonies(plate)
+        df = result.to_dataframe(plate_index=3)
+        assert (df["plate_index"] == 3).all()
+
+
+# ------------------------------------------------------------------
+# export_colony_csv
+# ------------------------------------------------------------------
+
+
+class TestExportColonyCsv:
+    def test_writes_csv(self, tmp_path: Path) -> None:
+        plate = _plate_with_colonies(
+            h=600, w=600, colony_color=(255, 255, 255), n_colonies=8, colony_radius=30
+        )
+        result = detect_colonies(plate)
+        frames = [result.to_dataframe(plate_index=1)]
+        csv_path = export_colony_csv(frames, tmp_path / "colonies.csv")
+        assert csv_path.exists()
+        loaded = pd.read_csv(csv_path)
+        assert len(loaded) == len(result.colonies)
+
+    def test_concatenates_multiple_plates(self, tmp_path: Path) -> None:
+        df1 = pd.DataFrame({"plate_index": [1], "label": [1], "area_px": [100]})
+        df2 = pd.DataFrame({"plate_index": [2], "label": [1], "area_px": [200]})
+        csv_path = export_colony_csv([df1, df2], tmp_path / "multi.csv")
+        loaded = pd.read_csv(csv_path)
+        assert len(loaded) == 2
+        assert list(loaded["plate_index"]) == [1, 2]
+
+    def test_empty_frames_writes_empty_csv(self, tmp_path: Path) -> None:
+        csv_path = export_colony_csv([], tmp_path / "empty.csv")
+        assert csv_path.exists()
+        loaded = pd.read_csv(csv_path)
+        assert len(loaded) == 0

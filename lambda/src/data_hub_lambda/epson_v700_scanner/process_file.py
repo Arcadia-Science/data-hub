@@ -75,14 +75,62 @@ def process_file(run_id: str, filename: str) -> None:
 
         plate_crops = processor.crop_plates()
         if plate_crops:
-            from data_hub_lambda.epson_v700_scanner.colony_detection import detect_colonies
+            from data_hub_lambda.epson_v700_scanner.colony_detection import (
+                detect_colonies,
+                draw_colony_overlay,
+                export_colony_csv,
+                export_colony_overlay,
+            )
 
-            colony_results = [detect_colonies(crop).summary() for crop in plate_crops]
-            metadata["colony_detection"] = colony_results
+            colony_summaries = []
+            dataframes = []
+            for i, crop in enumerate(plate_crops):
+                result = detect_colonies(crop)
+                colony_summaries.append(result.summary())
+                dataframes.append(result.to_dataframe(plate_index=i + 1))
+
+                overlay = draw_colony_overlay(crop, result.mask)
+                overlay_name = f"{processor.path.stem}_plate{i + 1}_colonies.jpg"
+                overlay_path = export_colony_overlay(overlay, raw_data_dir / overlay_name)
+                overlay_s3_key = f"{INSTRUMENT_ID}/{run_id}/{overlay_name}"
+                s3_utils.upload_file(overlay_path, f"s3://{processed_bucket}/{overlay_s3_key}")
+                overlay_file = client.create_file(
+                    instrument_id=INSTRUMENT_ID,
+                    run_id=run_id,
+                    s3_bucket=processed_bucket or "",
+                    s3_key=overlay_s3_key,
+                    filename=overlay_name,
+                    category="processed",
+                )
+                client.update_file(
+                    overlay_file.id,
+                    size_bytes=overlay_path.stat().st_size,
+                    content_type="image/jpeg",
+                )
+
+            csv_name = f"{processor.path.stem}_colonies.csv"
+            csv_path = export_colony_csv(dataframes, raw_data_dir / csv_name)
+            csv_s3_key = f"{INSTRUMENT_ID}/{run_id}/{csv_name}"
+            s3_utils.upload_file(csv_path, f"s3://{processed_bucket}/{csv_s3_key}")
+            csv_file = client.create_file(
+                instrument_id=INSTRUMENT_ID,
+                run_id=run_id,
+                s3_bucket=processed_bucket or "",
+                s3_key=csv_s3_key,
+                filename=csv_name,
+                category="processed",
+            )
+            client.update_file(
+                csv_file.id,
+                size_bytes=csv_path.stat().st_size,
+                content_type="text/csv",
+            )
+
+            metadata["colony_detection"] = colony_summaries
             logger.info(
                 "Colony detection complete for %d plate(s): %s",
                 len(plate_crops),
-                [r["colony_count"] for r in colony_results],
+                [r["colony_count"] for r in colony_summaries],
             )
 
         logger.info("Parsed metadata: %s", metadata)

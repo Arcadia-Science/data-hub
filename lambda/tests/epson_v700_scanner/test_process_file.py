@@ -80,6 +80,7 @@ def patched_converter(patched_jpg_path: Path) -> MagicMock:
         "OriginalHeight": 4800,
         "OriginalWidth": 6400,
     }
+    converter.crop_plates.return_value = []
     return converter
 
 
