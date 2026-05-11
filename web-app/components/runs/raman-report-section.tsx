@@ -31,7 +31,7 @@ export function RamanReportSection({
       <h2 className="text-sm font-semibold">
         Report Data{" "}
         <span className="ml-1 font-mono text-xs font-normal text-muted-foreground">
-          {spectra.length} spectrum{spectra.length === 1 ? "" : "s"}
+          {spectra.length} {spectra.length === 1 ? "spectrum" : "spectra"}
         </span>
       </h2>
       <Card size="sm">

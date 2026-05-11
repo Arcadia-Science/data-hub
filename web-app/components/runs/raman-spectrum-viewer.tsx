@@ -22,11 +22,18 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { parse } from "csv-parse/browser/esm/sync";
-import { AlertTriangle, Check, ChevronsUpDown } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsUpDown,
+} from "lucide-react";
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
-import { CartesianGrid, Legend, Line, LineChart, XAxis, YAxis } from "recharts";
+import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 
 type SpectrumPoint = {
   wavenumber: number;
@@ -34,16 +41,23 @@ type SpectrumPoint = {
   intensityDarkSubtracted: number;
 };
 
+type Series = "intensity" | "intensityDarkSubtracted";
+
+// Two distinguishable shades of blue: lighter for the raw signal, deeper for
+// the corrected signal so the dark-subtracted line reads as the primary
+// series when both are visible.
 const chartConfig = {
   intensity: {
     label: "Intensity",
-    color: "var(--color-chart-1)",
+    color: "#93c5fd", // tailwind blue-300
   },
   intensityDarkSubtracted: {
     label: "Intensity (dark-subtracted)",
-    color: "var(--color-chart-2)",
+    color: "#2563eb", // tailwind blue-600
   },
 } satisfies ChartConfig;
+
+const ALL_SERIES: Series[] = ["intensity", "intensityDarkSubtracted"];
 
 const CSV_HEADER_INTENSITY = "Intensity";
 const CSV_HEADER_DARK = "Intensity (dark-subtracted)";
@@ -152,15 +166,63 @@ function SpectrumPicker({
   );
 }
 
-function SpectrumChart({ points }: { points: SpectrumPoint[] }) {
+function SeriesToggle({
+  visible,
+  onChange,
+}: {
+  visible: Series[];
+  onChange: (next: Series[]) => void;
+}) {
+  return (
+    <ToggleGroup
+      type="multiple"
+      size="sm"
+      value={visible}
+      onValueChange={(next) => {
+        // Don't let the user deselect every series — that would leave an
+        // empty chart with no obvious way to recover.
+        if (next.length === 0) return;
+        onChange(next as Series[]);
+      }}
+      aria-label="Series visibility"
+    >
+      {ALL_SERIES.map((key) => (
+        <ToggleGroupItem key={key} value={key} className="gap-1.5 text-xs">
+          <span
+            aria-hidden
+            className="size-2.5 rounded-sm"
+            style={{ backgroundColor: chartConfig[key].color }}
+          />
+          {chartConfig[key].label}
+        </ToggleGroupItem>
+      ))}
+    </ToggleGroup>
+  );
+}
+
+function SpectrumChart({
+  points,
+  visible,
+}: {
+  points: SpectrumPoint[];
+  visible: Series[];
+}) {
   // Recharts performs best with stable, plain-array data; the upstream points
   // are already in render-ready shape, but memoize to keep referential
   // equality across unrelated parent renders (e.g. picker open/close).
   const data = useMemo(() => points, [points]);
+  const showIntensity = visible.includes("intensity");
+  const showDark = visible.includes("intensityDarkSubtracted");
 
   return (
     <ChartContainer config={chartConfig} className="aspect-auto h-80 w-full">
-      <LineChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
+      <LineChart
+        data={data}
+        // Bottom margin makes room for the X-axis title sitting below the
+        // tick labels; the legend lives outside the chart now, so the chart
+        // owns only the axes.
+        margin={{ top: 8, right: 16, bottom: 28, left: 0 }}
+      >
         <CartesianGrid vertical={false} strokeDasharray="3 3" />
         <XAxis
           dataKey="wavenumber"
@@ -173,7 +235,7 @@ function SpectrumChart({ points }: { points: SpectrumPoint[] }) {
           label={{
             value: "Wavenumber (cm\u207B\u00B9)",
             position: "insideBottom",
-            offset: -2,
+            offset: -16,
             style: {
               fontSize: 11,
               fill: "var(--color-muted-foreground)",
@@ -200,26 +262,26 @@ function SpectrumChart({ points }: { points: SpectrumPoint[] }) {
             />
           }
         />
-        <Legend
-          wrapperStyle={{ fontSize: 11, paddingTop: 4 }}
-          iconType="line"
-        />
-        <Line
-          name={chartConfig.intensity.label as string}
-          dataKey="intensity"
-          stroke="var(--color-intensity)"
-          strokeWidth={1.25}
-          dot={false}
-          isAnimationActive={false}
-        />
-        <Line
-          name={chartConfig.intensityDarkSubtracted.label as string}
-          dataKey="intensityDarkSubtracted"
-          stroke="var(--color-intensityDarkSubtracted)"
-          strokeWidth={1.25}
-          dot={false}
-          isAnimationActive={false}
-        />
+        {showIntensity && (
+          <Line
+            name={chartConfig.intensity.label as string}
+            dataKey="intensity"
+            stroke={chartConfig.intensity.color}
+            strokeWidth={1.25}
+            dot={false}
+            isAnimationActive={false}
+          />
+        )}
+        {showDark && (
+          <Line
+            name={chartConfig.intensityDarkSubtracted.label as string}
+            dataKey="intensityDarkSubtracted"
+            stroke={chartConfig.intensityDarkSubtracted.color}
+            strokeWidth={1.25}
+            dot={false}
+            isAnimationActive={false}
+          />
+        )}
       </LineChart>
     </ChartContainer>
   );
@@ -246,6 +308,7 @@ export function RamanSpectrumViewer({
   const [selectedId, setSelectedId] = useState<number | null>(
     () => spectra[0]?.fileId ?? null
   );
+  const [visible, setVisible] = useState<Series[]>(ALL_SERIES);
   // Bumped on retry to invalidate the cache entry and re-run the load effect
   // even when `selectedId` hasn't changed.
   const [retryNonce, setRetryNonce] = useState(0);
@@ -253,6 +316,25 @@ export function RamanSpectrumViewer({
   // synchronous transitions (idle / loading / cache-hit ready) are derived
   // during render. This avoids `react-hooks/set-state-in-effect` warnings.
   const [asyncResult, setAsyncResult] = useState<AsyncResult | null>(null);
+
+  const currentIndex = useMemo(
+    () =>
+      selectedId == null
+        ? -1
+        : spectra.findIndex((s) => s.fileId === selectedId),
+    [spectra, selectedId]
+  );
+  const canGoPrev = currentIndex > 0;
+  const canGoNext = currentIndex >= 0 && currentIndex < spectra.length - 1;
+
+  function goPrev() {
+    if (!canGoPrev) return;
+    setSelectedId(spectra[currentIndex - 1].fileId);
+  }
+  function goNext() {
+    if (!canGoNext) return;
+    setSelectedId(spectra[currentIndex + 1].fileId);
+  }
 
   // Per-mount cache so toggling between already-loaded spectra is instant
   // and never re-hits S3.
@@ -308,12 +390,37 @@ export function RamanSpectrumViewer({
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <SpectrumPicker
-        spectra={spectra}
-        selectedId={selectedId}
-        onSelect={setSelectedId}
-      />
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-2">
+        <SpectrumPicker
+          spectra={spectra}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+        />
+        <div className="flex items-center gap-1">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={goPrev}
+            disabled={!canGoPrev}
+            aria-label="Previous spectrum"
+          >
+            <ChevronLeft className="size-4" />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={goNext}
+            disabled={!canGoNext}
+            aria-label="Next spectrum"
+          >
+            <ChevronRight className="size-4" />
+          </Button>
+        </div>
+      </div>
+      <div className="flex justify-end">
+        <SeriesToggle visible={visible} onChange={setVisible} />
+      </div>
       {state.status === "loading" && (
         <Skeleton className="h-80 w-full" aria-label="Loading spectrum" />
       )}
@@ -326,7 +433,9 @@ export function RamanSpectrumViewer({
           </Button>
         </div>
       )}
-      {state.status === "ready" && <SpectrumChart points={state.points} />}
+      {state.status === "ready" && (
+        <SpectrumChart points={state.points} visible={visible} />
+      )}
     </div>
   );
 }
