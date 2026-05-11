@@ -28,10 +28,10 @@ logger = logging.getLogger(__name__)
 MARGIN_PX = 200
 """Fixed pixel margin cropped from each edge before colony detection."""
 
-_DOG_LOW_SIGMA = 0.6
+_DOG_LOW_SIGMA = 1.0
 """Low sigma for the Difference-of-Gaussians band-pass filter."""
 
-_DOG_HIGH_SIGMA = 64.0
+_DOG_HIGH_SIGMA = 128.0
 """High sigma for the Difference-of-Gaussians band-pass filter."""
 
 _PERCENTILE_FLOOR = 10.0
