@@ -254,6 +254,20 @@ class TiffProcessor:
             out[min_row:max_row, min_col:max_col] = img[min_row:max_row, min_col:max_col]
         return out
 
+    def crop_plates(self) -> list[NDArray[np.uint8]]:
+        """Return RGB uint8 crops for each detected plate.
+
+        Must be called after :meth:`export_jpg` (or :meth:`detect_plates`)
+        so that ``plate_boxes`` is populated.
+        """
+        if self.plate_boxes is None:
+            raise RuntimeError("Call export_jpg() or detect_plates() first.")
+        img = self._to_rgb_uint8(self.intensities)
+        crops: list[NDArray[np.uint8]] = []
+        for min_row, min_col, max_row, max_col in self.plate_boxes:
+            crops.append(img[min_row:max_row, min_col:max_col].copy())
+        return crops
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

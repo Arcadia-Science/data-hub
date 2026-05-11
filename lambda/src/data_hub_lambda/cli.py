@@ -104,7 +104,13 @@ def hina(file: Path, output_dir: Path | None) -> None:
     default=None,
     help="Directory for the exported JPG (default: same directory as FILE).",
 )
-def epson_scanner(file: Path, output_dir: Path | None) -> None:
+@click.option(
+    "--detect-colonies",
+    is_flag=True,
+    default=False,
+    help="Run colony detection and phenotyping on each detected plate.",
+)
+def epson_scanner(file: Path, output_dir: Path | None, detect_colonies: bool) -> None:
     """Process an Epson V700 Scanner TIFF file.
 
     Detects agar plates inside gold frames, draws bounding-box overlays,
@@ -126,6 +132,21 @@ def epson_scanner(file: Path, output_dir: Path | None) -> None:
 
     metadata = processor.parse_metadata()
     click.echo(json.dumps(metadata, indent=2))
+
+    if detect_colonies:
+        from data_hub_lambda.epson_v700_scanner.colony_detection import (
+            detect_colonies as run_colony_detection,
+        )
+
+        plate_crops = processor.crop_plates()
+        if not plate_crops:
+            click.echo("No plates detected — skipping colony detection.")
+            return
+
+        for i, crop in enumerate(plate_crops):
+            result = run_colony_detection(crop)
+            click.echo(f"\nPlate {i + 1}:")
+            click.echo(json.dumps(result.summary(), indent=2))
 
 
 # ---------------------------------------------------------------------------

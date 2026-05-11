@@ -72,6 +72,19 @@ def process_file(run_id: str, filename: str) -> None:
         )
 
         metadata = processor.parse_metadata()
+
+        plate_crops = processor.crop_plates()
+        if plate_crops:
+            from data_hub_lambda.epson_v700_scanner.colony_detection import detect_colonies
+
+            colony_results = [detect_colonies(crop).summary() for crop in plate_crops]
+            metadata["colony_detection"] = colony_results
+            logger.info(
+                "Colony detection complete for %d plate(s): %s",
+                len(plate_crops),
+                [r["colony_count"] for r in colony_results],
+            )
+
         logger.info("Parsed metadata: %s", metadata)
 
         client.update_run(INSTRUMENT_ID, run_id, metadata=metadata)
