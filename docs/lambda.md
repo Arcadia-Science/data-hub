@@ -46,6 +46,7 @@ See [Run archives](run-archives.md) for the full flow, S3 bucket layout, cache s
 | Azure Cielo qPCR | `azure_cielo_qpcr` | `azure-cielo-qpcr` |
 | Epson V700 Scanner | `epson_v700_scanner` | `epson-v700-scanner` |
 | Hina Microscope | `hina_microscope` | `hina-microscope` |
+| InstantRaman | _(no Lambda processor)_ | `instant-raman` |
 | SpectraMax iD3 Plate Reader | `spectramax_plate_reader` | `spectramax-id3-plate-reader` |
 | SpectraMax iD5 Plate Reader | `spectramax_plate_reader` | `spectramax-id5-plate-reader` |
 

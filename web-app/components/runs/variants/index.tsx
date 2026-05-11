@@ -4,6 +4,7 @@ import { DefaultRunDetail } from "./default-run-detail";
 import { EpsonScannerRunDetail } from "./epson-scanner-run-detail";
 import { GelDocRunDetail } from "./gel-doc-run-detail";
 import { HinaMicroscopeRunDetail } from "./hina-microscope-run-detail";
+import { InstantRamanRunDetail } from "./instant-raman-run-detail";
 import { PlateReaderRunDetail } from "./plate-reader-run-detail";
 import { QpcrRunDetail } from "./qpcr-run-detail";
 import { TapeStationRunDetail } from "./tape-station-run-detail";
@@ -24,6 +25,8 @@ export function RunDetailVariant(props: RunDetailVariantProps) {
       return <HinaMicroscopeRunDetail {...props} />;
     case "epson_v700_scanner":
       return <EpsonScannerRunDetail {...props} />;
+    case "instant_raman":
+      return <InstantRamanRunDetail {...props} />;
     default:
       return <DefaultRunDetail {...props} />;
   }

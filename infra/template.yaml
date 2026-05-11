@@ -66,6 +66,26 @@ Resources:
       BucketName: !Sub "arcadia-data-hub-raw-${Environment}"
       VersioningConfiguration:
         Status: Enabled
+      # Allow the web app to fetch raw files from the browser via the
+      # `/api/v1/files/:id/download` 302-redirect to a presigned S3 URL.
+      # Image/PDF previews bypass CORS via `<img>`/`<iframe>`, but client-side
+      # `fetch()` (used e.g. for InstantRaman spectrum CSVs) requires the
+      # origin to be allowlisted so the browser exposes the response body.
+      CorsConfiguration:
+        CorsRules:
+          - AllowedMethods:
+              - GET
+              - HEAD
+            AllowedOrigins:
+              - "https://data-hub.arcadiascience.com"
+              - "https://*.vercel.app"
+              - "http://localhost:3000"
+            AllowedHeaders:
+              - "*"
+            ExposedHeaders:
+              - ETag
+              - Content-Length
+            MaxAge: 3600
       NotificationConfiguration:
         LambdaConfigurations:
           - Event: s3:ObjectCreated:*
@@ -163,6 +183,23 @@ Resources:
       BucketName: !Sub "arcadia-data-hub-processed-${Environment}"
       VersioningConfiguration:
         Status: Enabled
+      # See RawDataBucket for the CORS rationale — both buckets back the same
+      # `/api/v1/files/:id/download` endpoint so they need parity.
+      CorsConfiguration:
+        CorsRules:
+          - AllowedMethods:
+              - GET
+              - HEAD
+            AllowedOrigins:
+              - "https://data-hub.arcadiascience.com"
+              - "https://*.vercel.app"
+              - "http://localhost:3000"
+            AllowedHeaders:
+              - "*"
+            ExposedHeaders:
+              - ETag
+              - Content-Length
+            MaxAge: 3600
       Tags:
         - Key: project
           Value: arcadia-data-hub

@@ -9,6 +9,7 @@ INSTRUMENT_ID_TO_NAME_MAP: dict[str, str] = {
     Instrument.AZURE_CIELO_QPCR.value: "Azure Cielo qPCR",
     Instrument.EPSON_V700_SCANNER.value: "Epson V700 Scanner",
     Instrument.HINA_MICROSCOPE.value: "Hina Microscope",
+    Instrument.INSTANT_RAMAN.value: "InstantRaman",
     Instrument.SPECTRAMAX_ID3_PLATE_READER.value: "SpectraMax iD3 Plate Reader",
     Instrument.SPECTRAMAX_ID5_PLATE_READER.value: "SpectraMax iD5 Plate Reader",
 }
