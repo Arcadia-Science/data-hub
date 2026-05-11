@@ -278,7 +278,7 @@ class TiffProcessor:
         img: NDArray[np.uint8],
         boxes: list[_PlateBox],
         colony_masks: list[NDArray[np.bool_]],
-        margin_px: int = 150,
+        margin_px: int | None = None,
     ) -> NDArray[np.uint8]:
         """Draw colony contour outlines onto *img* for each plate.
 
@@ -286,6 +286,11 @@ class TiffProcessor:
         plate crop, so contours are offset by the plate box origin plus
         the crop margin.
         """
+        if margin_px is None:
+            from data_hub_lambda.epson_v700_scanner.colony_detection import MARGIN_PX
+
+            margin_px = MARGIN_PX
+
         out = img.copy()
         h, w = out.shape[:2]
         t = _COLONY_CONTOUR_THICKNESS
