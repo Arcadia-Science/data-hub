@@ -83,7 +83,7 @@ export default async function RootLayout({
                           await signOut({ redirectTo: "/login" });
                         }}
                       />
-                      <SidebarInset>
+                      <SidebarInset className="pb-12">
                         <header className="flex h-12 shrink-0 items-center gap-2 px-4">
                           <SidebarTrigger />
                         </header>
