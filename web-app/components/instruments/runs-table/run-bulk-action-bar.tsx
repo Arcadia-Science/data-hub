@@ -3,12 +3,14 @@
 import { DeleteRunsDialog } from "@/components/runs/delete-runs-dialog";
 import { ReprocessRunsDialog } from "@/components/runs/reprocess-runs-dialog";
 import { Button } from "@/components/ui/button";
+import { useSidebar } from "@/components/ui/sidebar";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useArchiveDownload } from "@/hooks/use-archive-download";
+import { cn } from "@/lib/utils";
 import { ArrowDownToLine, ArrowUpToLine, RotateCw, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
@@ -17,9 +19,12 @@ import { toast } from "sonner";
 import { useRunSelection, type RunRef } from "./run-selection-provider";
 
 // ---------------------------------------------------------------------------
-// Bulk action bar shown above the runs table when at least one run is
-// selected. The original BulkAttributionBar only surfaced attribution
-// actions; this extends it with upload / download / reprocess / delete.
+// Bulk action bar shown as a floating card pinned to the center bottom of
+// the viewport when at least one run is selected. Floating (rather than
+// inline above the table) so the table doesn't jump down on the user after
+// the first selection. The original BulkAttributionBar only surfaced
+// attribution actions; this extends it with upload / download / reprocess
+// / delete.
 //
 // Per product clarification, an action is shown only when every selected
 // run supports it — a mixed selection collapses back to attribution +
@@ -82,6 +87,7 @@ export function RunBulkActionBar() {
   const { state, actions, meta } = useRunSelection();
   const router = useRouter();
   const { actions: archiveActions } = useArchiveDownload();
+  const { state: sidebarState, isMobile } = useSidebar();
   const [isPending, startTransition] = useTransition();
   const [reprocessOpen, setReprocessOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -174,9 +180,24 @@ export function RunBulkActionBar() {
     filesFailed: r.stats.filesFailed,
   }));
 
+  // On desktop the expanded sidebar reserves space on the left, so anchor the
+  // bar to the center of the main panel (not the viewport) by shifting `left`
+  // by half the sidebar width. On mobile the sidebar is an overlay sheet, so
+  // the main panel already spans the full viewport.
+  const offsetForSidebar = !isMobile && sidebarState === "expanded";
+
   return (
     <>
-      <div className="flex items-center justify-between rounded-lg border bg-muted/40 px-4 py-2">
+      <div
+        role="region"
+        aria-label="Bulk actions for selected runs"
+        className={cn(
+          "fixed bottom-6 z-50 flex -translate-x-1/2 animate-in items-center gap-8 rounded-lg border bg-popover px-8 py-2.5 text-popover-foreground shadow-xl transition-[left] duration-200 ease-linear fade-in slide-in-from-bottom-4",
+          offsetForSidebar
+            ? "left-[calc(50%+var(--sidebar-width)/2)]"
+            : "left-1/2"
+        )}
+      >
         <div className="text-sm">
           <span className="font-medium">{meta.count}</span>{" "}
           <span className="text-muted-foreground">
