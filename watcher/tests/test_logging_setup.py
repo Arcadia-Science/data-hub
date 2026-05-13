@@ -50,8 +50,8 @@ def _isolated_root_logger() -> Any:
 
 
 @pytest.fixture
-def patch_config_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """Redirect ``DEFAULT_CONFIG_DIR`` so file logging lands in tmp_path.
+def patch_log_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Redirect ``WATCHER_LOG_DIR`` so file logging lands in tmp_path.
 
     Patches both the source-module constant and the re-exported binding
     inside ``logging_setup`` so the helper picks the tmp directory up
@@ -59,16 +59,16 @@ def patch_config_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """
     from data_hub_watcher import constants
 
-    monkeypatch.setattr(constants, "DEFAULT_CONFIG_DIR", tmp_path)
-    monkeypatch.setattr(logging_setup, "DEFAULT_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(constants, "WATCHER_LOG_DIR", tmp_path)
+    monkeypatch.setattr(logging_setup, "WATCHER_LOG_DIR", tmp_path)
     return tmp_path
 
 
 class TestSetupFileLogging:
-    def test_creates_log_file_and_attaches_rotating_handler(self, patch_config_dir: Path) -> None:
+    def test_creates_log_file_and_attaches_rotating_handler(self, patch_log_dir: Path) -> None:
         log_path = logging_setup.setup_file_logging()
 
-        assert log_path == patch_config_dir / logging_setup.LOG_FILENAME
+        assert log_path == patch_log_dir / logging_setup.LOG_FILENAME
 
         root = logging.getLogger()
         rotating = [h for h in root.handlers if isinstance(h, RotatingFileHandler)]
@@ -83,7 +83,7 @@ class TestSetupFileLogging:
 
     def test_writes_records_to_disk(
         self,
-        patch_config_dir: Path,
+        patch_log_dir: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         # Pytest's logging plugin defaults the root logger to WARNING,
@@ -108,7 +108,7 @@ class TestSetupFileLogging:
         assert "[INFO]" in contents
         assert "data_hub_watcher.test" in contents
 
-    def test_is_idempotent(self, patch_config_dir: Path) -> None:
+    def test_is_idempotent(self, patch_log_dir: Path) -> None:
         logging_setup.setup_file_logging()
         logging_setup.setup_file_logging()
         logging_setup.setup_file_logging()
@@ -118,7 +118,7 @@ class TestSetupFileLogging:
 
     def test_log_level_env_var_overrides_default(
         self,
-        patch_config_dir: Path,
+        patch_log_dir: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv("DATA_HUB_WATCHER_LOG_LEVEL", "DEBUG")
@@ -127,7 +127,7 @@ class TestSetupFileLogging:
 
     def test_unknown_log_level_falls_back_to_info(
         self,
-        patch_config_dir: Path,
+        patch_log_dir: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         # A typo in a lab-PC env file must NOT silence logging — the

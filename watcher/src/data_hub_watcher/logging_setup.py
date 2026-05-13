@@ -20,7 +20,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
-from data_hub_watcher.constants import DEFAULT_CONFIG_DIR
+from data_hub_watcher.constants import WATCHER_LOG_DIR
 
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 LOG_FILENAME = "watcher.log"
@@ -77,11 +77,11 @@ def _apply_root_level() -> None:
 
 
 def _watcher_log_path() -> Path:
-    return DEFAULT_CONFIG_DIR / LOG_FILENAME
+    return WATCHER_LOG_DIR / LOG_FILENAME
 
 
 def setup_file_logging() -> Path:
-    """Attach a rotating file handler at ``~/.data-hub/watcher.log`` to the root logger.
+    """Attach a rotating file handler at ``watcher.log`` to the root logger.
 
     Idempotent: if a ``RotatingFileHandler`` for the same path is already
     attached to the root logger, returns the existing path without
@@ -90,11 +90,14 @@ def setup_file_logging() -> Path:
     path it's called inside ``_run_service_loop``, which the SCM may
     re-invoke after a restart inside the same Python process.
 
-    Under LocalSystem (the account the Windows service runs as) the
-    path resolves to ``C:\\Windows\\System32\\config\\systemprofile\\
-    .data-hub\\watcher.log``, *not* the operator's profile. This is a
-    documented quirk; see the "Logs" section of
-    ``docs/guides/installing-a-watcher.md``.
+    The path resolves to ``C:\\ProgramData\\DataHubWatcher\\watcher.log``
+    on Windows (a location both the operator user and LocalSystem can
+    write to) and ``~/.data-hub/watcher.log`` on non-Windows hosts; see
+    :data:`data_hub_watcher.constants.WATCHER_LOG_DIR` for the
+    rationale. Running ``data-hub-watcher watch`` while the service is
+    also running is not supported — both processes would race on the
+    same rotating file — but neither is running two watchers against
+    the same instrument, so this is not a new constraint.
     """
     log_path = _watcher_log_path()
     log_path.parent.mkdir(parents=True, exist_ok=True)

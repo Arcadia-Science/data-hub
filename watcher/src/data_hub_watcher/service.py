@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from data_hub_watcher.constants import DEFAULT_CONFIG_DIR, SERVICE_NAME
+from data_hub_watcher.constants import DEFAULT_CONFIG_DIR, SERVICE_NAME, WATCHER_LOG_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +86,17 @@ def install_service(config_path: Path, env_path: Path) -> None:
 
     _store_paths_in_registry(config_path, env_path)
     _configure_recovery()
+    # Create the shared log directory up-front under the operator's
+    # (elevated) shell. On Windows ``C:\ProgramData\DataHubWatcher``
+    # inherits its ACL from ``C:\ProgramData`` — i.e. SYSTEM full
+    # control + Users: Modify on contained files/folders — so the
+    # service running under LocalSystem can write here and the
+    # operator can tail the file from their own shell without
+    # elevation. Doing this here rather than letting the first
+    # writer create it on demand avoids a race where, say, an early
+    # CLI invocation creates the directory with a non-default owner
+    # before the service tries to rotate the file.
+    WATCHER_LOG_DIR.mkdir(parents=True, exist_ok=True)
     # The worker template bakes its sentinel paths in at render time,
     # so we render against the operator's chosen config directory
     # (``config_path.parent``) rather than the import-time
@@ -779,13 +790,18 @@ def _write_bootstrap_failure(exc_info: BaseException) -> None:
     itself. Everything is wrapped in a nested ``try`` so a write
     failure is silent — the original exception is re-raised by the
     caller regardless.
+
+    The log lives alongside ``watcher.log`` (at
+    :data:`data_hub_watcher.constants.WATCHER_LOG_DIR`) so an
+    operator can tail one directory to see both pre- and
+    post-dispatcher failure trails.
     """
     import datetime
     import traceback
 
     try:
-        DEFAULT_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        bootstrap_log = DEFAULT_CONFIG_DIR / "service-bootstrap.log"
+        WATCHER_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        bootstrap_log = WATCHER_LOG_DIR / "service-bootstrap.log"
         with bootstrap_log.open("a", encoding="utf-8") as fh:
             timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
             fh.write(f"\n--- {timestamp} bootstrap failure ---\n")

@@ -1436,8 +1436,8 @@ class TestBootstrapFailureLog:
     ) -> None:
         from data_hub_watcher import constants
 
-        monkeypatch.setattr(constants, "DEFAULT_CONFIG_DIR", tmp_path)
-        monkeypatch.setattr(service_module, "DEFAULT_CONFIG_DIR", tmp_path)
+        monkeypatch.setattr(constants, "WATCHER_LOG_DIR", tmp_path)
+        monkeypatch.setattr(service_module, "WATCHER_LOG_DIR", tmp_path)
 
         try:
             raise RuntimeError("simulated dispatcher failure")
@@ -1463,8 +1463,8 @@ class TestBootstrapFailureLog:
         # restart loop.
         from data_hub_watcher import constants
 
-        monkeypatch.setattr(constants, "DEFAULT_CONFIG_DIR", tmp_path)
-        monkeypatch.setattr(service_module, "DEFAULT_CONFIG_DIR", tmp_path)
+        monkeypatch.setattr(constants, "WATCHER_LOG_DIR", tmp_path)
+        monkeypatch.setattr(service_module, "WATCHER_LOG_DIR", tmp_path)
 
         for i in range(3):
             try:
@@ -1493,8 +1493,8 @@ class TestBootstrapFailureLog:
         # Point at a path that cannot be created (file-as-parent).
         bogus_parent = tmp_path / "blocker"
         bogus_parent.write_text("not a directory")
-        monkeypatch.setattr(constants, "DEFAULT_CONFIG_DIR", bogus_parent / "child")
-        monkeypatch.setattr(service_module, "DEFAULT_CONFIG_DIR", bogus_parent / "child")
+        monkeypatch.setattr(constants, "WATCHER_LOG_DIR", bogus_parent / "child")
+        monkeypatch.setattr(service_module, "WATCHER_LOG_DIR", bogus_parent / "child")
 
         try:
             raise RuntimeError("original failure")
