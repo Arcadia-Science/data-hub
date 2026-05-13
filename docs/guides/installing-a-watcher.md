@@ -206,3 +206,37 @@ The watcher writes rotating logs to `~/.data-hub/watcher.log` (10 MB, 5 backups)
 data-hub-watcher --verbose watch
 ```
 
+#### Where the Windows service writes its log
+
+The Windows service uses the same `watcher.log` filename, but `~` resolves against the account the service runs as — Local System. The file is therefore at:
+
+```
+C:\Windows\System32\config\systemprofile\.data-hub\watcher.log
+```
+
+not under your own user profile. The service also writes a separate `service-bootstrap.log` next to it that captures crashes happening before the service control dispatcher takes over (for example, a missing `pywin32`, a moved virtualenv, or a corrupt install). If `watcher.log` is empty after a crash, check `service-bootstrap.log` for the traceback.
+
+#### Turning on debug logging for the service
+
+Add `DATA_HUB_WATCHER_LOG_LEVEL=DEBUG` to the env file the service is registered against (typically `~/.data-hub/.env.<environment>`) and restart the service. No redeploy or `service reinstall` is needed.
+
+#### Triaging a service that crashes immediately
+
+If the service exits before writing anything to `watcher.log`, two read-only commands will surface the failure:
+
+1. Query the Windows Application event log for entries from the watcher or the underlying Python service host:
+
+   ```powershell
+   Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddHours(-1)} |
+     Where-Object { $_.ProviderName -match 'Python|DataHubWatcher' -or $_.Message -match 'DataHubWatcher' } |
+     Format-List TimeCreated, ProviderName, Id, LevelDisplayName, Message
+   ```
+
+2. Run the service in the foreground from the venv `pywin32` itself ships:
+
+   ```powershell
+   & "C:\path\to\venv\Scripts\python.exe" -m win32serviceutil debug DataHubWatcher
+   ```
+
+   This bypasses the SCM, runs the same startup path the service uses, and prints the full traceback to the console — the fastest way to see why a phase-A/B crash is happening.
+

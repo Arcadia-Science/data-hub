@@ -22,6 +22,7 @@ dependencies, manual-mode wiring) without needing a Windows runner.
 
 from __future__ import annotations
 import importlib
+import logging
 import sys
 import threading
 from collections.abc import Iterator
@@ -513,6 +514,7 @@ class TestRepairUpgradeWorkerOnStartup:
         service_module: ModuleType,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         # Without a rendered script on disk we have no way to
         # reconstruct the operator's UV_TOOL_DIR from a SYSTEM
@@ -530,26 +532,31 @@ class TestRepairUpgradeWorkerOnStartup:
             lambda script_path: install_calls.append(script_path),
         )
 
-        service_module._repair_upgrade_worker_if_missing(sm, tmp_path)
+        with caplog.at_level(logging.WARNING, logger="data_hub_watcher.service"):
+            service_module._repair_upgrade_worker_if_missing(sm, tmp_path)
 
         # No re-registration happened — punted to operator action.
         assert install_calls == []
         # …and the operator-facing message points at the recovery
-        # command, not a bare error code.
-        sm.LogWarningMsg.assert_called_once()
-        msg = sm.LogWarningMsg.call_args.args[0]
-        assert "service reinstall" in msg
+        # command, not a bare error code. The helper now routes
+        # through ``logger.warning`` so the Event-Log handler picks
+        # it up only when one is attached (service path); tests
+        # assert on the stdlib log record directly.
+        warnings_ = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings_) == 1
+        assert "service reinstall" in warnings_[0].getMessage()
 
     def test_repair_swallows_query_errors(
         self,
         service_module: ModuleType,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         # If we can't even query Task Scheduler we should NOT block
         # service startup — the host should keep running its current
-        # version and surface the issue via LogWarningMsg + the next
-        # auto-update event.
+        # version and surface the issue as a logged warning + the
+        # next auto-update event.
         from data_hub_watcher.scheduled_task import ScheduledTaskError
 
         sm = MagicMock(name="servicemanager")
@@ -558,15 +565,18 @@ class TestRepairUpgradeWorkerOnStartup:
             raise ScheduledTaskError("rpc dead")
 
         monkeypatch.setattr("data_hub_watcher.scheduled_task.task_exists", boom)
-        # Must not raise.
-        service_module._repair_upgrade_worker_if_missing(sm, tmp_path)
-        sm.LogWarningMsg.assert_called_once()
+        with caplog.at_level(logging.WARNING, logger="data_hub_watcher.service"):
+            # Must not raise.
+            service_module._repair_upgrade_worker_if_missing(sm, tmp_path)
+        warnings_ = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings_) == 1
 
     def test_repair_swallows_install_failures(
         self,
         service_module: ModuleType,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         from data_hub_watcher.scheduled_task import ScheduledTaskError
         from data_hub_watcher.upgrade_worker import upgrade_worker_script_path
@@ -584,9 +594,11 @@ class TestRepairUpgradeWorkerOnStartup:
             raise ScheduledTaskError("Access is denied")
 
         monkeypatch.setattr("data_hub_watcher.scheduled_task.install_upgrade_task", boom)
-        # Must not raise even when re-registration fails.
-        service_module._repair_upgrade_worker_if_missing(sm, tmp_path)
-        sm.LogWarningMsg.assert_called_once()
+        with caplog.at_level(logging.WARNING, logger="data_hub_watcher.service"):
+            # Must not raise even when re-registration fails.
+            service_module._repair_upgrade_worker_if_missing(sm, tmp_path)
+        warnings_ = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warnings_) == 1
 
 
 # --- _configure_recovery actions + non-crash failure flag --------------------
@@ -1073,14 +1085,59 @@ class _LoopHarness:
             lambda *args, **kwargs: self.dotenv_calls.append((args, kwargs)),
         )
 
+        # Patch the file-logging side of ``logging_setup`` so the
+        # service loop doesn't touch the operator's real
+        # ``~/.data-hub/watcher.log``. The Event-Log handler is
+        # allowed to run for real because every test below asserts
+        # against ``self.sm.LogErrorMsg`` / ``LogInfoMsg`` — i.e. the
+        # SCM-routing handler is the thing under test.
+        from data_hub_watcher import logging_setup
+
+        self.setup_file_logging_calls: list[None] = []
+
+        def _fake_setup_file_logging() -> Path:
+            self.setup_file_logging_calls.append(None)
+            return tmp_path / "watcher.log"
+
+        monkeypatch.setattr(logging_setup, "setup_file_logging", _fake_setup_file_logging)
+        # service.py imports these symbols lazily inside
+        # _run_service_loop, so patching at the source module is
+        # sufficient — there's no re-export to keep in sync.
+
+        # Force the operator-facing env override on so the root
+        # logger drops down to INFO (pytest's logging plugin
+        # defaults it to WARNING, which would silence the very
+        # ``logger.info`` calls these tests assert on).
+        monkeypatch.setenv("DATA_HUB_WATCHER_LOG_LEVEL", "INFO")
+
 
 @pytest.fixture
 def harness(
     service_module: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-) -> _LoopHarness:
-    return _LoopHarness(service_module, monkeypatch, tmp_path)
+) -> Iterator[_LoopHarness]:
+    # Snapshot the root logger's handlers so each test's
+    # ``attach_servicemanager_handler`` call doesn't leak into the
+    # next test. Without this, a previous test's handler would still
+    # be attached and would forward records to a stale MagicMock —
+    # which is harmless for assertions on the current ``sm`` but
+    # would muddy any future assertions about the root logger's
+    # handler list.
+    root = logging.getLogger()
+    original_handlers = list(root.handlers)
+    original_level = root.level
+    try:
+        yield _LoopHarness(service_module, monkeypatch, tmp_path)
+    finally:
+        for handler in root.handlers:
+            if handler not in original_handlers:
+                try:
+                    handler.close()
+                except Exception:
+                    pass
+        root.handlers = original_handlers
+        root.setLevel(original_level)
 
 
 class TestRunServiceLoopHappyPath:
@@ -1266,3 +1323,181 @@ class TestRunServiceLoopChecksumSync:
 
         harness.client.push_config.assert_not_called()
         assert len(harness.start_calls) == 1
+
+
+class TestRunServiceLoopLogging:
+    """The service path must wire up file + Event-Log logging before doing anything else.
+
+    Without this, any failure between ``SvcDoRun`` being invoked and
+    the first explicit ``logger.error`` call would be invisible —
+    which is the original "service crashes immediately, no logs"
+    bug the logging gaps closure is fixing. These tests lock in:
+
+      1. ``setup_file_logging`` is called before any other work, so
+         a registry-read failure on the very next line still produces
+         a record on disk.
+      2. The converted ``logger.error(...)`` calls in
+         ``_run_service_loop`` are routed back to ``sm.LogErrorMsg``
+         via the attached ``_ServiceManagerHandler``, preserving the
+         operator-visible Windows event log behavior.
+    """
+
+    def test_setup_file_logging_runs_before_registry_read(
+        self,
+        harness: _LoopHarness,
+    ) -> None:
+        # Record the call order: file-logging setup must precede the
+        # registry read so a failure inside the read is still
+        # captured on disk.
+        order: list[str] = []
+
+        from data_hub_watcher import logging_setup
+
+        def _record_setup() -> Path:
+            order.append("setup_file_logging")
+            return harness.tmp_path / "watcher.log"
+
+        def _record_registry_read() -> tuple[Path, Path]:
+            order.append("read_paths_from_registry")
+            return harness.config_path, harness.env_path
+
+        harness.monkeypatch.setattr(logging_setup, "setup_file_logging", _record_setup)
+        harness.monkeypatch.setattr(harness.svc, "_read_paths_from_registry", _record_registry_read)
+
+        stop_event = threading.Event()
+        stop_event.set()
+        harness.svc._run_service_loop(stop_event, harness.sm)
+
+        assert order[0] == "setup_file_logging"
+        assert "read_paths_from_registry" in order
+        assert order.index("setup_file_logging") < order.index("read_paths_from_registry")
+
+    def test_logger_error_reaches_log_error_msg_via_handler(
+        self,
+        harness: _LoopHarness,
+    ) -> None:
+        # Smoke-test the wiring: the registry-read failure path uses
+        # ``logger.error(...)`` now, but historically the test
+        # ``test_registry_read_failure_exits_with_error_log`` asserted
+        # against ``sm.LogErrorMsg`` directly. Confirm the handler
+        # has been attached and is forwarding so the same operator
+        # contract holds (registry/install language in the event log
+        # entry) regardless of the stdlib-logging refactor.
+        def boom() -> tuple[Path, Path]:
+            raise OSError("registry key missing")
+
+        harness.monkeypatch.setattr(harness.svc, "_read_paths_from_registry", boom)
+
+        with pytest.raises(SystemExit):
+            harness.svc._run_service_loop(threading.Event(), harness.sm)
+
+        # The Event-Log handler formats records with ``LOG_FORMAT``
+        # (asctime/level/name/message) so the forwarded message is a
+        # superset of the original. Substring checks remain the right
+        # assertion shape because operator-facing wording must not
+        # silently drift on a refactor.
+        harness.sm.LogErrorMsg.assert_called_once()
+        forwarded = harness.sm.LogErrorMsg.call_args.args[0]
+        assert "registry" in forwarded.lower()
+        assert "service install" in forwarded
+
+    def test_startup_emits_pid_and_log_path_info_message(
+        self,
+        harness: _LoopHarness,
+    ) -> None:
+        # On a healthy host the very first thing visible in the event
+        # log should be a service-starting line that includes the
+        # PID and the resolved log path. Lab operators use this to
+        # confirm which python.exe instance is currently running and
+        # to copy-paste the log path into a remote-support session.
+        stop_event = threading.Event()
+        stop_event.set()
+        harness.svc._run_service_loop(stop_event, harness.sm)
+
+        info_messages = [c.args[0] for c in harness.sm.LogInfoMsg.call_args_list]
+        assert any(
+            "starting" in m.lower() and "pid=" in m.lower() and "log=" in m.lower()
+            for m in info_messages
+        )
+
+
+class TestBootstrapFailureLog:
+    """Phase-A/B crashes (before the dispatcher hands off to ``SvcDoRun``)
+    must still leave a trace on disk via ``service-bootstrap.log``. This is
+    the only logging path that bypasses ``logging_setup`` because the
+    failure mode it captures may include ``logging`` itself or
+    ``pathlib`` being broken on the host."""
+
+    def test_writes_traceback_to_bootstrap_log(
+        self,
+        service_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        from data_hub_watcher import constants
+
+        monkeypatch.setattr(constants, "DEFAULT_CONFIG_DIR", tmp_path)
+        monkeypatch.setattr(service_module, "DEFAULT_CONFIG_DIR", tmp_path)
+
+        try:
+            raise RuntimeError("simulated dispatcher failure")
+        except RuntimeError as exc:
+            service_module._write_bootstrap_failure(exc)
+
+        bootstrap_log = tmp_path / "service-bootstrap.log"
+        assert bootstrap_log.exists()
+        contents = bootstrap_log.read_text(encoding="utf-8")
+        assert "bootstrap failure" in contents
+        assert "simulated dispatcher failure" in contents
+        assert "RuntimeError" in contents
+
+    def test_appends_subsequent_failures(
+        self,
+        service_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        # The SCM retries the service on failure, so subsequent
+        # bootstrap crashes must accumulate in the log rather than
+        # truncate it — operators need the full history to triage a
+        # restart loop.
+        from data_hub_watcher import constants
+
+        monkeypatch.setattr(constants, "DEFAULT_CONFIG_DIR", tmp_path)
+        monkeypatch.setattr(service_module, "DEFAULT_CONFIG_DIR", tmp_path)
+
+        for i in range(3):
+            try:
+                raise ValueError(f"attempt {i}")
+            except ValueError as exc:
+                service_module._write_bootstrap_failure(exc)
+
+        contents = (tmp_path / "service-bootstrap.log").read_text(encoding="utf-8")
+        assert "attempt 0" in contents
+        assert "attempt 1" in contents
+        assert "attempt 2" in contents
+
+    def test_silent_when_log_write_fails(
+        self,
+        service_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        # The bootstrap helper must NEVER raise — it runs in an
+        # except block whose only job is to re-raise the original
+        # exception. If we fail to write the log (out-of-disk, locked
+        # file, perms) the operator still needs to see the original
+        # SystemExit propagate to the SCM.
+        from data_hub_watcher import constants
+
+        # Point at a path that cannot be created (file-as-parent).
+        bogus_parent = tmp_path / "blocker"
+        bogus_parent.write_text("not a directory")
+        monkeypatch.setattr(constants, "DEFAULT_CONFIG_DIR", bogus_parent / "child")
+        monkeypatch.setattr(service_module, "DEFAULT_CONFIG_DIR", bogus_parent / "child")
+
+        try:
+            raise RuntimeError("original failure")
+        except RuntimeError as exc:
+            # Must not raise even though directory creation will fail.
+            service_module._write_bootstrap_failure(exc)
