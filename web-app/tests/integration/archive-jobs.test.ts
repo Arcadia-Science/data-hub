@@ -26,7 +26,11 @@ describe("Archive Jobs API", () => {
   const runId = "archive-jobs-test-run";
   let runInternalId: string;
 
-  async function patchAsLambda(
+  // PATCH the archive-job endpoint with bearer auth. In production the
+  // caller is the Lambda using its `DATA_HUB_API_KEY` PAT; here the seeded
+  // test user's token stands in for it (the route doesn't differentiate
+  // between PATs — see the comment on the route handler).
+  async function patchJob(
     jobId: string,
     body: Record<string, unknown>,
     options: { token?: string } = {}
@@ -91,7 +95,7 @@ describe("Archive Jobs API", () => {
       })
       .returning();
 
-    const res = await patchAsLambda(
+    const res = await patchJob(
       job.id,
       { status: "failed", error_message: "tampered" },
       { token: "dhub_not-a-real-token" }
@@ -116,7 +120,7 @@ describe("Archive Jobs API", () => {
       })
       .returning();
 
-    const res = await patchAsLambda(job.id, { status: "weird" });
+    const res = await patchJob(job.id, { status: "weird" });
     expect(res.status).toBe(400);
   });
 
@@ -131,7 +135,7 @@ describe("Archive Jobs API", () => {
       })
       .returning();
 
-    const res = await patchAsLambda(job.id, { status: "ready" });
+    const res = await patchJob(job.id, { status: "ready" });
     expect(res.status).toBe(400);
   });
 
@@ -146,7 +150,7 @@ describe("Archive Jobs API", () => {
       })
       .returning();
 
-    const res = await patchAsLambda(job.id, {
+    const res = await patchJob(job.id, {
       status: "ready",
       archive_bucket: "test-archives-bucket",
       archive_key:
@@ -179,7 +183,7 @@ describe("Archive Jobs API", () => {
       })
       .returning();
 
-    const res = await patchAsLambda(job.id, {
+    const res = await patchJob(job.id, {
       status: "failed",
       error_message: "S3 source missing",
     });

@@ -1,32 +1,71 @@
 import { Hash } from "@smithy/hash-node";
 import { HttpRequest } from "@smithy/protocol-http";
 import { SignatureV4 } from "@smithy/signature-v4";
+import type { AwsCredentialIdentityProvider } from "@smithy/types";
 import { awsCredentialsProvider } from "@vercel/oidc-aws-credentials-provider";
 
 const DEFAULT_REGION = "us-west-1";
 
-// Resolve credentials the same way `web-app/lib/s3.ts` does: use Vercel
-// OIDC federation when AWS_ROLE_ARN is set, otherwise fall back to the
-// AWS SDK's default credential chain (env vars, ~/.aws/credentials, SSO).
-function resolveCredentials() {
-  if (process.env.AWS_ROLE_ARN) {
-    return awsCredentialsProvider({ roleArn: process.env.AWS_ROLE_ARN });
+// Static-credentials fallback used when AWS_ROLE_ARN is unset (local dev,
+// CI). Reads env vars at call time so the value picked up matches whatever
+// the surrounding process exports when `signLambdaInvoke` actually runs.
+const staticCredentialsProvider: AwsCredentialIdentityProvider = async () => {
+  if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+    return {
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      ...(process.env.AWS_SESSION_TOKEN && {
+        sessionToken: process.env.AWS_SESSION_TOKEN,
+      }),
+    };
   }
-  return async () => {
-    if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
-      return {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-        ...(process.env.AWS_SESSION_TOKEN && {
-          sessionToken: process.env.AWS_SESSION_TOKEN,
-        }),
-      };
-    }
-    throw new Error(
-      "No AWS credentials available: set AWS_ROLE_ARN (Vercel OIDC) or " +
-        "AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY (local dev)"
-    );
-  };
+  throw new Error(
+    "No AWS credentials available: set AWS_ROLE_ARN (Vercel OIDC) or " +
+      "AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY (local dev)"
+  );
+};
+
+// Module-level cache for the OIDC provider so its internal credential cache
+// (and the underlying STS AssumeRoleWithWebIdentity round-trip) is reused
+// across requests on the same warm function instance. `awsCredentialsProvider`
+// is itself memoizing, but only once you hold on to the same instance —
+// reconstructing it per call defeats that. Keyed on AWS_ROLE_ARN so a config
+// change between invocations naturally re-provisions.
+let cachedCredentialsProvider: {
+  key: string;
+  provider: AwsCredentialIdentityProvider;
+} | null = null;
+
+function getCredentialsProvider(): AwsCredentialIdentityProvider {
+  const roleArn = process.env.AWS_ROLE_ARN ?? "";
+  if (cachedCredentialsProvider?.key === roleArn) {
+    return cachedCredentialsProvider.provider;
+  }
+  const provider = roleArn
+    ? awsCredentialsProvider({ roleArn })
+    : staticCredentialsProvider;
+  cachedCredentialsProvider = { key: roleArn, provider };
+  return provider;
+}
+
+// SignatureV4 instances hold no per-request state, so memoizing per region
+// avoids reconstructing them on every invocation. The signer takes a
+// credentials provider (not a resolved identity), so it picks up provider
+// rotations through the indirection below.
+const signerByRegion = new Map<string, SignatureV4>();
+
+function getSigner(region: string): SignatureV4 {
+  let signer = signerByRegion.get(region);
+  if (!signer) {
+    signer = new SignatureV4({
+      service: "lambda",
+      region,
+      credentials: () => getCredentialsProvider()(),
+      sha256: Hash.bind(null, "sha256"),
+    });
+    signerByRegion.set(region, signer);
+  }
+  return signer;
 }
 
 // Cheap, side-effect-free check used by callers (and the configured-check
@@ -61,14 +100,7 @@ export async function signLambdaInvoke({
   const region =
     process.env.AWS_REGION ?? regionFromHost(parsed.host) ?? DEFAULT_REGION;
 
-  const credentials = await resolveCredentials()();
-
-  const signer = new SignatureV4({
-    service: "lambda",
-    region,
-    credentials,
-    sha256: Hash.bind(null, "sha256"),
-  });
+  const signer = getSigner(region);
 
   const headers: Record<string, string> = {
     host: parsed.host,

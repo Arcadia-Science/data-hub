@@ -216,11 +216,12 @@ class DataHubClient:
         archive_key: str | None = None,
         size_bytes: int | None = None,
         error_message: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> None:
         """PATCH the archive-job row with the final build outcome.
 
         Authenticates with the standard ``DATA_HUB_API_KEY`` PAT — same
-        credential used for every other Lambda → API call.
+        credential used for every other Lambda → API call. The response
+        body is discarded; callers only care that the PATCH didn't raise.
         """
         payload: dict[str, Any] = {"status": status}
         if archive_bucket is not None:
@@ -232,8 +233,7 @@ class DataHubClient:
         if error_message is not None:
             payload["error_message"] = error_message
 
-        resp = self._request("PATCH", f"/archive-jobs/{job_id}", json=payload)
-        return resp.json()  # type: ignore[no-any-return]
+        self._request("PATCH", f"/archive-jobs/{job_id}", json=payload)
 
 
 # ---------------------------------------------------------------------------
