@@ -203,6 +203,38 @@ class DataHubClient:
         resp = self._request("PATCH", f"/files/{file_id}", json=payload)
         return FileResponse.model_validate(resp.json())
 
+    # ------------------------------------------------------------------
+    # Archive jobs
+    # ------------------------------------------------------------------
+
+    def update_archive_job(
+        self,
+        job_id: str,
+        *,
+        status: str,
+        archive_bucket: str | None = None,
+        archive_key: str | None = None,
+        size_bytes: int | None = None,
+        error_message: str | None = None,
+    ) -> dict[str, Any]:
+        """PATCH the archive-job row with the final build outcome.
+
+        Authenticates with the standard ``DATA_HUB_API_KEY`` PAT — same
+        credential used for every other Lambda → API call.
+        """
+        payload: dict[str, Any] = {"status": status}
+        if archive_bucket is not None:
+            payload["archive_bucket"] = archive_bucket
+        if archive_key is not None:
+            payload["archive_key"] = archive_key
+        if size_bytes is not None:
+            payload["size_bytes"] = size_bytes
+        if error_message is not None:
+            payload["error_message"] = error_message
+
+        resp = self._request("PATCH", f"/archive-jobs/{job_id}", json=payload)
+        return resp.json()  # type: ignore[no-any-return]
+
 
 # ---------------------------------------------------------------------------
 # Module-level singleton

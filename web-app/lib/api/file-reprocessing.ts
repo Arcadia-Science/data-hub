@@ -1,15 +1,15 @@
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
+import { hasInvokeCredentials, signLambdaInvoke } from "@/lib/lambda";
 import { eq } from "drizzle-orm";
 import { after } from "next/server";
 
 const REPROCESSABLE_STATUSES = ["failed", "completed"];
 
-function getLambdaConfig() {
+function getLambdaUrl(): string | null {
   const url = process.env.LAMBDA_FUNCTION_URL;
-  const token = process.env.LAMBDA_INVOKE_TOKEN;
-  if (!url || !token) return null;
-  return { url, token };
+  if (!url || !hasInvokeCredentials()) return null;
+  return url;
 }
 
 export type ReprocessResult =
@@ -86,8 +86,8 @@ export async function reprocessFile(fileId: number): Promise<ReprocessResult> {
     };
   }
 
-  const lambda = getLambdaConfig();
-  if (!lambda) {
+  const lambdaUrl = getLambdaUrl();
+  if (!lambdaUrl) {
     return {
       ok: false,
       status: 503,
@@ -133,14 +133,11 @@ export async function reprocessFile(fileId: number): Promise<ReprocessResult> {
   // back via PATCH /api/v1/files/:fileId with the final status.
   after(async () => {
     try {
-      const res = await fetch(lambda.url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${lambda.token}`,
-        },
+      const signed = await signLambdaInvoke({
+        url: lambdaUrl,
         body: JSON.stringify(s3Event),
       });
+      const res = await fetch(signed);
       if (!res.ok) {
         console.error(
           `Lambda returned ${res.status} for file ${fileId}:`,

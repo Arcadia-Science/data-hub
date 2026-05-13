@@ -18,8 +18,6 @@ import requests
 from data_hub_lambda.handler import lambda_handler
 from data_hub_shared.testing import IntegrationEnv
 
-from .conftest import _reset_singletons
-
 _FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures"
 
 # Apply the `integration` marker to every test in this module so they can
@@ -474,6 +472,14 @@ class TestFileReprocessing:
 
 
 class TestFunctionUrlInvocation:
+    """Tests for the Function URL invocation path.
+
+    Inbound auth is enforced by AWS in front of the handler (the Function
+    URL is configured with ``AuthType: AWS_IAM``), so these tests only
+    exercise body parsing and the dispatch logic — they no longer check
+    for a 401 response on missing/invalid bearer tokens.
+    """
+
     def test_happy_path_processes_file(
         self,
         integration_env: IntegrationEnv,
@@ -481,8 +487,8 @@ class TestFunctionUrlInvocation:
         s3_fixture_files: dict[str, Path],
         mock_context: MagicMock,
     ) -> None:
-        """A Function URL event with a valid token processes the file
-        identically to a direct S3 trigger."""
+        """A Function URL event processes the file identically to a direct
+        S3 trigger."""
         run_id = "Experiment_20260401"
         filename = f"{run_id}_CqValues.csv"
         s3_key = f"azure-cielo-qpcr/{run_id}/{filename}"
@@ -503,65 +509,13 @@ class TestFunctionUrlInvocation:
         assert len(run["files"]) == 1
         assert run["files"][0]["status"] == "completed"
 
-    def test_wrong_token_returns_401(
+    def test_invalid_json_body_returns_400(
         self,
         make_function_url_event: Callable[..., dict[str, Any]],
         mock_context: MagicMock,
     ) -> None:
-        """A Function URL event with an incorrect Bearer token is rejected."""
-        event = make_function_url_event(
-            "azure-cielo-qpcr",
-            "Experiment_20260401",
-            "Experiment_20260401_CqValues.csv",
-            token="wrong-token",
-        )
-        result = lambda_handler(event, mock_context)
-
-        assert result == {"statusCode": 401, "body": "Unauthorized"}
-
-    def test_missing_auth_header_returns_401(
-        self,
-        make_function_url_event: Callable[..., dict[str, Any]],
-        mock_context: MagicMock,
-    ) -> None:
-        """A Function URL event with no Authorization header is rejected."""
-        event = make_function_url_event(
-            "azure-cielo-qpcr",
-            "Experiment_20260401",
-            "Experiment_20260401_CqValues.csv",
-            token=None,
-        )
-        result = lambda_handler(event, mock_context)
-
-        assert result == {"statusCode": 401, "body": "Unauthorized"}
-
-    def test_unconfigured_token_returns_401(
-        self,
-        make_function_url_event: Callable[..., dict[str, Any]],
-        mock_context: MagicMock,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """When LAMBDA_INVOKE_TOKEN is not set, all Function URL requests
-        are rejected even if the caller sends a valid-looking token."""
-        monkeypatch.delenv("LAMBDA_INVOKE_TOKEN", raising=False)
-        _reset_singletons()
-
-        event = make_function_url_event(
-            "azure-cielo-qpcr",
-            "Experiment_20260401",
-            "Experiment_20260401_CqValues.csv",
-        )
-        result = lambda_handler(event, mock_context)
-
-        assert result == {"statusCode": 401, "body": "Unauthorized"}
-
-    def test_invalid_json_body_returns_401(
-        self,
-        make_function_url_event: Callable[..., dict[str, Any]],
-        mock_context: MagicMock,
-    ) -> None:
-        """A Function URL event with a valid token but non-JSON body is
-        rejected (the handler cannot parse the S3 event payload)."""
+        """A Function URL event with a non-JSON body is rejected with 400
+        (the handler cannot parse the inner S3 event payload)."""
         event = make_function_url_event(
             "azure-cielo-qpcr",
             "Experiment_20260401",
@@ -570,4 +524,4 @@ class TestFunctionUrlInvocation:
         )
         result = lambda_handler(event, mock_context)
 
-        assert result == {"statusCode": 401, "body": "Unauthorized"}
+        assert result == {"statusCode": 400, "body": "Invalid JSON body"}

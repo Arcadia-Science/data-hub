@@ -5,7 +5,6 @@ import {
 } from "@/lib/api/archive-jobs";
 import { archiveJobs, instrumentRuns, instruments } from "@/lib/db/schema";
 import {
-  api,
   closeTestDb,
   getBaseUrl,
   getTestDb,
@@ -23,12 +22,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // transitions, the partial-unique-index dedup, and the stuck-row sweep.
 describe("Archive Jobs API", () => {
   let token: string;
-  // PATCH is gated on the shared LAMBDA_INVOKE_TOKEN, not user PATs, so the
-  // route never confuses Lambda callbacks with regular client traffic.
-  // `tests/integration/global-setup.ts` plumbs this through to the test
-  // server's env and exports the value via __TEST_LAMBDA_INVOKE_TOKEN.
-  const lambdaInvokeToken =
-    process.env.__TEST_LAMBDA_INVOKE_TOKEN ?? "test-lambda-invoke-token";
   const instrumentId = "archive-jobs-test-instrument";
   const runId = "archive-jobs-test-run";
   let runInternalId: string;
@@ -42,7 +35,7 @@ describe("Archive Jobs API", () => {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${options.token ?? lambdaInvokeToken}`,
+        Authorization: `Bearer ${options.token ?? token}`,
       },
       body: JSON.stringify(body),
     });
@@ -77,7 +70,7 @@ describe("Archive Jobs API", () => {
   // PATCH (Lambda callback)
   // --------------------------------------------------------------------
 
-  it("PATCH requires the Lambda invoke token (no auth header)", async () => {
+  it("PATCH requires authentication (no auth header)", async () => {
     const fakeId = "00000000-0000-0000-0000-000000000000";
     const res = await fetch(`${getBaseUrl()}/api/v1/archive-jobs/${fakeId}`, {
       method: "PATCH",
@@ -87,47 +80,13 @@ describe("Archive Jobs API", () => {
     expect(res.status).toBe(401);
   });
 
-  it("PATCH rejects user PATs even when the user is otherwise authenticated", async () => {
-    // Critical regression guard: the route used to accept any session/PAT,
-    // letting a logged-in user redirect another user's archive download by
-    // PATCHing their job to a different bucket/key. Lock this down so only
-    // callers presenting LAMBDA_INVOKE_TOKEN can write to archive_jobs.
+  it("PATCH rejects an invalid bearer token", async () => {
     const db = getTestDb();
     const [job] = await db
       .insert(archiveJobs)
       .values({
         instrumentRunId: runInternalId,
-        fingerprint: "fp-pat-rejected",
-        status: "building",
-      })
-      .returning();
-
-    const res = await api(`/api/v1/archive-jobs/${job.id}`, {
-      method: "PATCH",
-      token,
-      body: {
-        status: "ready",
-        archive_bucket: "evil-bucket",
-        archive_key: "runs/x/y/z.zip",
-      },
-    });
-    expect(res.status).toBe(401);
-
-    const [stored] = await db
-      .select()
-      .from(archiveJobs)
-      .where(eq(archiveJobs.id, job.id));
-    expect(stored.status).toBe("building");
-    expect(stored.archiveBucket).toBeNull();
-  });
-
-  it("PATCH rejects a wrong Lambda invoke token", async () => {
-    const db = getTestDb();
-    const [job] = await db
-      .insert(archiveJobs)
-      .values({
-        instrumentRunId: runInternalId,
-        fingerprint: "fp-wrong-lambda-token",
+        fingerprint: "fp-wrong-token",
         status: "building",
       })
       .returning();
@@ -135,7 +94,7 @@ describe("Archive Jobs API", () => {
     const res = await patchAsLambda(
       job.id,
       { status: "failed", error_message: "tampered" },
-      { token: "not-the-real-token" }
+      { token: "dhub_not-a-real-token" }
     );
     expect(res.status).toBe(401);
 

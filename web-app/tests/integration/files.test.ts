@@ -516,7 +516,7 @@ describe("Files API", () => {
 
   // These two tests verify that both reprocessable statuses (failed and
   // completed) pass all validation guards. They return 503 because the
-  // test server has no LAMBDA_FUNCTION_URL / LAMBDA_INVOKE_TOKEN configured.
+  // test server has no LAMBDA_FUNCTION_URL configured.
   it("REPROCESS returns 503 for failed file when Lambda is not configured", async () => {
     const res = await api(`/api/v1/files/${lambdaFileId}/reprocess`, {
       method: "POST",

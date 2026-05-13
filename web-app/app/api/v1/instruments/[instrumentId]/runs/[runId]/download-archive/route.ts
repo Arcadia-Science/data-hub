@@ -181,17 +181,18 @@ async function handleViaArchiveBuilder(args: {
   const wantsJson = clientWantsJson(request);
 
   // Bail early with 503 if the deploy is missing any of the env vars the
-  // archive pipeline depends on (LAMBDA_FUNCTION_URL, LAMBDA_INVOKE_TOKEN,
-  // S3_ARCHIVES_BUCKET). Without this, downstream calls like
-  // `getS3ArchivesBucket()` and `invokeBuildArchive` would throw unhandled
-  // and Vercel would surface an opaque 500 — and the async `after()`
-  // callback would leave the row in `building` until the 20-minute stale
-  // sweep noticed. Mirrors the pattern in `file-reprocessing.ts`.
+  // archive pipeline depends on (LAMBDA_FUNCTION_URL, S3_ARCHIVES_BUCKET,
+  // and AWS credentials for SigV4-signing the Function URL invocation).
+  // Without this, downstream calls like `getS3ArchivesBucket()` and
+  // `invokeBuildArchive` would throw unhandled and Vercel would surface
+  // an opaque 500 — and the async `after()` callback would leave the row
+  // in `building` until the 20-minute stale sweep noticed. Mirrors the
+  // pattern in `file-reprocessing.ts`.
   if (!isArchiveBuilderConfigured()) {
     return apiError(
       503,
       INTERNAL_ERROR,
-      "Archive builder is not configured (LAMBDA_FUNCTION_URL, LAMBDA_INVOKE_TOKEN, and S3_ARCHIVES_BUCKET must all be set)"
+      "Archive builder is not configured (LAMBDA_FUNCTION_URL, S3_ARCHIVES_BUCKET, and AWS credentials must all be set)"
     );
   }
 
@@ -322,7 +323,7 @@ async function handleViaArchiveBuilder(args: {
 // covers us.
 //
 // The outer try/catch is load-bearing: `invokeBuildArchive` throws when
-// `LAMBDA_FUNCTION_URL` / `LAMBDA_INVOKE_TOKEN` are unset (or any other
+// `LAMBDA_FUNCTION_URL` / AWS credentials are unset (or any other
 // synchronous error happens before the fetch is dispatched). Without
 // catching it, an `after()` exception leaves the row in `building` until
 // `expireStaleArchiveJobs` notices 20 minutes later, and the user sees an
