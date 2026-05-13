@@ -10,7 +10,9 @@ watcher does not need AWS credentials.
 from __future__ import annotations
 import logging
 import mimetypes
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, wait
 from pathlib import Path
 
 import requests as http_requests
@@ -66,6 +68,13 @@ class Uploader:
         Watcher identity for queue polling.
     watch_directory:
         Root watch directory for resolving relative paths in queue mode.
+    upload_parallelism:
+        Maximum number of files to upload concurrently within a single
+        :meth:`upload_files` batch. Defaults to 1 (fully serial) so
+        unit tests and call sites that don't pass an explicit value
+        keep their previous behaviour. Production wiring (see
+        ``runtime.build_runtime``) reads this from the per-instrument
+        config.
     """
 
     def __init__(
@@ -78,6 +87,7 @@ class Uploader:
         instrument_id: str,
         watcher_id: str,
         watch_directory: Path,
+        upload_parallelism: int = 1,
     ) -> None:
         self._client = client
         self._state_db = state_db
@@ -86,12 +96,33 @@ class Uploader:
         self._instrument_id = instrument_id
         self._watcher_id = watcher_id
         self._watch_dir = watch_directory
+        if upload_parallelism < 1:
+            raise ValueError(f"upload_parallelism must be >= 1, got {upload_parallelism}")
+        self._parallelism = upload_parallelism
         # Track consecutive upload-queue poll failures so the watcher
         # surfaces a ``kind=upload_queue_poll_failed`` event on the
         # 1st failure and every 10th repeat. The unthrottled case
         # would emit one event per heartbeat tick during an outage,
         # crowding out other signals on the dashboard.
+        # Mutated only from the heartbeat thread (manual mode), so
+        # not under any explicit lock.
         self._consecutive_queue_poll_failures = 0
+        # Single ``requests.Session`` shared across every S3 PUT
+        # (parallel or serial). Keeps TLS connections alive between
+        # presigned URLs that target the same S3 bucket -- avoids
+        # paying the handshake cost on every file in a multi-file
+        # run. ``requests.Session`` is documented as thread-safe for
+        # concurrent ``put`` calls; the urllib3 connection pool
+        # underneath grows on demand up to ``pool_maxsize`` which we
+        # let default (10).
+        self._s3_session = http_requests.Session()
+        # Counter mutations from upload worker threads are protected
+        # by the GIL on the underlying ``int`` increment, but use an
+        # explicit lock anyway so we can later move to ``threading.
+        # Lock``-free atomics or ``itertools.count`` without a behaviour
+        # change. Cheap enough at the per-file cadence that the
+        # serialisation cost is negligible.
+        self._counters_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Auto-mode: upload a batch of files for a reported run
@@ -102,11 +133,47 @@ class Uploader:
 
         Called by `RunDetector` immediately after a successful run report
         (auto mode only).  Returns the number of files successfully uploaded.
+
+        When ``upload_parallelism > 1`` the per-file
+        :meth:`_upload_single` calls run in a short-lived
+        :class:`~concurrent.futures.ThreadPoolExecutor`. The pool is
+        scoped to a single batch (created and torn down per call) so
+        idle worker threads don't outlive the run -- watcher hosts are
+        long-lived and an always-on pool would just be holding socket
+        FDs and Python frames around for nothing between runs.
         """
-        succeeded = 0
-        for info in files:
-            if self._upload_single(info.path, run_id):
-                succeeded += 1
+        if not files:
+            # Avoid spinning up a pool for a (rare) empty manifest;
+            # also preserves the existing "succeeded == len(files)"
+            # check below which would mark the run uploaded with
+            # zero work.
+            self._state_db.record_run_uploaded(run_id)
+            return 0
+
+        # Upper-bound parallelism by the actual file count so a small
+        # batch doesn't allocate more threads than it can use.
+        max_workers = min(self._parallelism, len(files))
+
+        if max_workers <= 1:
+            # Fast path: avoid the pool's overhead (thread spin-up,
+            # ``Future`` wrapping) when there's nothing to parallelise.
+            # Behaviour-identical to the previous serial loop.
+            succeeded = sum(1 for info in files if self._upload_single(info.path, run_id))
+        else:
+            with ThreadPoolExecutor(
+                max_workers=max_workers,
+                thread_name_prefix="uploader",
+            ) as pool:
+                futures = [pool.submit(self._upload_single, info.path, run_id) for info in files]
+                # ``wait`` (rather than ``as_completed``) keeps the
+                # success count deterministic without caring about
+                # completion order. Any exception raised inside
+                # ``_upload_single`` would already have been caught
+                # and translated into a ``False`` return by the
+                # function's own error-handling, so we can safely
+                # treat ``future.result()`` as boolean.
+                wait(futures)
+                succeeded = sum(1 for f in futures if f.result())
 
         if succeeded == len(files):
             self._state_db.record_run_uploaded(run_id)
@@ -176,35 +243,70 @@ class Uploader:
     # Presigned PUT helper
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _put_to_presigned_url(url: str, path: Path, content_type: str | None) -> None:
-        """HTTP PUT a file's bytes to a presigned S3 URL."""
+    def _put_to_presigned_url(self, url: str, path: Path, content_type: str | None) -> None:
+        """HTTP PUT a file's bytes to a presigned S3 URL.
+
+        Reuses ``self._s3_session`` so successive PUTs to the same S3
+        bucket share TLS connections. Method (rather than static) so
+        the parallel-upload path inherits the session without each
+        call having to thread it through.
+        """
         headers: dict[str, str] = {}
         if content_type:
             headers["Content-Type"] = content_type
 
         with open(path, "rb") as fh:
-            resp = http_requests.put(url, data=fh, headers=headers, timeout=300)
+            resp = self._s3_session.put(url, data=fh, headers=headers, timeout=300)
         resp.raise_for_status()
 
     # ------------------------------------------------------------------
     # Single-file upload with retry
     # ------------------------------------------------------------------
 
+    def _bump_errors(self) -> None:
+        """Increment the shared error counter under ``_counters_lock``.
+
+        Centralised so worker threads inside the parallel-upload pool
+        never race the heartbeat thread reading these values for its
+        per-tick payload.
+        """
+        with self._counters_lock:
+            self._counters.errors += 1
+
+    def _bump_files_uploaded(self) -> None:
+        """Increment the shared success counter under ``_counters_lock``."""
+        with self._counters_lock:
+            self._counters.files_uploaded += 1
+
     def _upload_single(self, path: Path, run_id: str) -> bool:
         """Upload one file via a presigned URL, notify the API, and record in StateDB.
 
         Returns `True` on success, `False` after all retries exhausted.
+
+        Concurrency note
+        ----------------
+        ``file_sha256(path)`` and ``client.request_upload_url(...)``
+        run on a tiny 2-thread pool so the (CPU+IO bound) hash and the
+        (network bound) presigned-URL request fully overlap. On a
+        multi-GiB instrument file with a slow API, this halves the
+        critical-path latency before the actual S3 PUT can start. The
+        pool is created per call -- short-lived overhead is dwarfed by
+        the time savings on any non-trivial file.
         """
         content_type = _guess_content_type(path)
-        sha = file_sha256(path)
         stat = path.stat()
         rel_path = _relative_path(path, self._watch_dir)
 
-        # Request a presigned upload URL from the API. This also creates or
-        # locates the server-side file record.
-        try:
-            presigned = self._client.request_upload_url(
+        # Kick off both the SHA-256 and the presigned-URL request in
+        # parallel. ``ThreadPoolExecutor(2)`` is plenty: hashing is
+        # CPU/IO with mostly-released GIL via hashlib's C
+        # implementation, and the request thread blocks on the
+        # network. Resolve both before branching so the rest of the
+        # method behaves exactly as the old serial version.
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="upload-prep") as prep:
+            sha_future = prep.submit(file_sha256, path)
+            presign_future = prep.submit(
+                self._client.request_upload_url,
                 self._instrument_id,
                 run_id,
                 path.name,
@@ -212,17 +314,45 @@ class Uploader:
                 size_bytes=stat.st_size,
                 file_created_at_ts=file_created_at(stat),
             )
-        except ApiError as exc:
-            logger.error("Failed to get presigned URL for %s: %s", path.name, exc.message)
-            self._counters.errors += 1
-            self._reporter.queue_event(
-                WatcherEvent(
-                    event_type=EventType.UPLOAD_FAILED,
-                    message=f"Presigned URL request failed: {path.name}",
-                    details={"error": exc.message},
+
+            try:
+                presigned = presign_future.result()
+            except ApiError as exc:
+                # Wait for the hash to finish (cancellation is best-effort
+                # for already-running futures) before exiting the
+                # ``with`` block, otherwise the pool blocks on shutdown.
+                sha_future.cancel()
+                try:
+                    sha_future.result()
+                except Exception:
+                    pass
+                logger.error("Failed to get presigned URL for %s: %s", path.name, exc.message)
+                self._bump_errors()
+                self._reporter.queue_event(
+                    WatcherEvent(
+                        event_type=EventType.UPLOAD_FAILED,
+                        message=f"Presigned URL request failed: {path.name}",
+                        details={"error": exc.message},
+                    )
                 )
-            )
-            return False
+                return False
+
+            try:
+                sha = sha_future.result()
+            except Exception as exc:
+                # Hashing failed (e.g. the file vanished mid-stream).
+                # Treat as an upload failure so the file is retried
+                # rather than silently dropped.
+                logger.error("Failed to hash %s: %s", path.name, exc)
+                self._bump_errors()
+                self._reporter.queue_event(
+                    WatcherEvent(
+                        event_type=EventType.UPLOAD_FAILED,
+                        message=f"Hashing failed: {path.name}",
+                        details={"error": str(exc)},
+                    )
+                )
+                return False
 
         s3_key = presigned.s3_key
         s3_bucket = presigned.s3_bucket
@@ -274,7 +404,7 @@ class Uploader:
                     details={"s3_key": s3_key, "error": str(last_exc)},
                 )
             )
-            self._counters.errors += 1
+            self._bump_errors()
             return False
 
         # Notify API — treat a failed PATCH as an upload failure so the file
@@ -291,7 +421,7 @@ class Uploader:
             )
         except ApiError as exc:
             logger.error("PATCH /files/%d failed: %s", file_id, exc.message)
-            self._counters.errors += 1
+            self._bump_errors()
             self._reporter.queue_event(
                 WatcherEvent(
                     event_type=EventType.UPLOAD_FAILED,
@@ -309,7 +439,7 @@ class Uploader:
             size_bytes=stat.st_size,
             mtime=stat.st_mtime,
         )
-        self._counters.files_uploaded += 1
+        self._bump_files_uploaded()
         self._reporter.queue_event(
             WatcherEvent(
                 event_type=EventType.FILE_UPLOADED,

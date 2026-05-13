@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from data_hub_watcher.monitor import FileMonitor
+from data_hub_watcher.monitor import FileMonitor, _stat_in_dedup_index
 from data_hub_watcher.state import StateDB
 
 
@@ -393,3 +393,177 @@ class TestDetectedFilesApi:
 
         assert ids == ["run-1", "run-2"]
         assert "run-legacy" not in ids
+
+
+class TestBulkLoadIterators:
+    """The new bulk-load helpers backing the rewritten initial scan.
+
+    These are what let the scan replace the old per-file
+    ``has_stat_match`` / ``has_detected_stat_match`` SELECTs with a
+    single SELECT per table. The scan-level test below proves we
+    actually use them; these tests pin down the iterator semantics
+    in isolation.
+    """
+
+    def test_iter_uploaded_stat_keys_excludes_legacy_rows(self, state_db: StateDB) -> None:
+        # Real row with stat columns populated.
+        state_db.record_upload(
+            "fresh.nd2",
+            "sha-fresh",
+            "s3/fresh.nd2",
+            relative_path="fresh.nd2",
+            size_bytes=1024,
+            mtime=1_700_000_000.0,
+        )
+        # Legacy row predating the stat columns -- relative_path is NULL.
+        # Bulk loaders must skip these so the in-memory dedup index
+        # never contains entries that can't possibly match a scanned file.
+        state_db._conn.execute(
+            "INSERT INTO uploaded_files (filename, sha256, uploaded_at, s3_key) "
+            "VALUES (?, ?, ?, ?)",
+            ("legacy.nd2", "sha-legacy", "2025-01-01T00:00:00+00:00", "s3/legacy.nd2"),
+        )
+        state_db._conn.commit()
+
+        keys = list(state_db.iter_uploaded_stat_keys())
+        assert keys == [("fresh.nd2", 1024, 1_700_000_000.0)]
+
+    def test_iter_detected_stat_keys_returns_all_present_rows(self, state_db: StateDB) -> None:
+        state_db.record_detected_files(
+            "run-1",
+            [
+                ("run-1/a.nd2", "a.nd2", 100, 1.0, None),
+                ("run-1/b.nd2", "b.nd2", 200, 2.0, None),
+            ],
+        )
+
+        keys = sorted(state_db.iter_detected_stat_keys())
+        assert keys == [("run-1/a.nd2", 100, 1.0), ("run-1/b.nd2", 200, 2.0)]
+
+
+class TestStatInDedupIndex:
+    """Pure-Python tolerance check used by the scan to skip dedup'd files."""
+
+    def test_exact_match(self) -> None:
+        index = {"a.nd2": [(1024, 1_700_000_000.0)]}
+        assert _stat_in_dedup_index(index, "a.nd2", 1024, 1_700_000_000.0) is True
+
+    def test_within_mtime_tolerance(self) -> None:
+        index = {"a.nd2": [(1024, 1_700_000_000.0)]}
+        assert _stat_in_dedup_index(index, "a.nd2", 1024, 1_700_000_000.5) is True
+
+    def test_outside_mtime_tolerance(self) -> None:
+        index = {"a.nd2": [(1024, 1_700_000_000.0)]}
+        assert _stat_in_dedup_index(index, "a.nd2", 1024, 1_700_000_100.0) is False
+
+    def test_size_mismatch(self) -> None:
+        index = {"a.nd2": [(1024, 1_700_000_000.0)]}
+        assert _stat_in_dedup_index(index, "a.nd2", 2048, 1_700_000_000.0) is False
+
+    def test_path_not_in_index(self) -> None:
+        index = {"a.nd2": [(1024, 1_700_000_000.0)]}
+        assert _stat_in_dedup_index(index, "b.nd2", 1024, 1_700_000_000.0) is False
+
+    def test_picks_correct_entry_among_multiple(self) -> None:
+        # Same relative path, different (size, mtime) tuples -- the
+        # uploaded_files PK is (filename, sha256, s3_key) so the same
+        # path can legitimately have multiple rows after a re-upload.
+        index = {
+            "a.nd2": [
+                (1024, 1_700_000_000.0),
+                (2048, 1_700_000_500.0),
+            ]
+        }
+        assert _stat_in_dedup_index(index, "a.nd2", 2048, 1_700_000_500.0) is True
+        assert _stat_in_dedup_index(index, "a.nd2", 4096, 1_700_000_500.0) is False
+
+
+class TestInitialScanBulkLoad:
+    """Regression guard: the rewritten scan must NOT issue per-file SELECTs.
+
+    The old loop ran ``has_stat_match`` and ``has_detected_stat_match``
+    once per file -- on a 50k-file lab tree that's 100k SQL round
+    trips through a process-wide lock. The rewrite replaces those with
+    one bulk SELECT per table via ``iter_*_stat_keys``.
+
+    We assert the new behaviour by counting how many times those
+    helpers are invoked across a 50-file scan. The number must be
+    exactly one each, regardless of how many files end up matching or
+    being enqueued.
+    """
+
+    def test_initial_scan_bulk_loads_exactly_once_per_table(
+        self, state_db: StateDB, watch_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for i in range(50):
+            (watch_dir / f"file-{i:03d}.nd2").write_bytes(b"x" * 64)
+
+        # Pre-populate dedup so half the files are skipped -- exercises
+        # both the "in index" and "not in index" branches without
+        # changing the per-table SELECT count.
+        for i in range(0, 50, 2):
+            f = watch_dir / f"file-{i:03d}.nd2"
+            st = f.stat()
+            state_db.record_upload(
+                f.name,
+                f"sha-{i}",
+                f"s3/{f.name}",
+                relative_path=f.name,
+                size_bytes=st.st_size,
+                mtime=st.st_mtime,
+            )
+
+        uploaded_calls = 0
+        detected_calls = 0
+        original_uploaded = state_db.iter_uploaded_stat_keys
+        original_detected = state_db.iter_detected_stat_keys
+
+        def counting_uploaded() -> object:
+            nonlocal uploaded_calls
+            uploaded_calls += 1
+            return original_uploaded()
+
+        def counting_detected() -> object:
+            nonlocal detected_calls
+            detected_calls += 1
+            return original_detected()
+
+        monkeypatch.setattr(state_db, "iter_uploaded_stat_keys", counting_uploaded)
+        monkeypatch.setattr(state_db, "iter_detected_stat_keys", counting_detected)
+
+        # The per-row helpers (``has_stat_match`` /
+        # ``has_detected_stat_match``) must not be touched by the scan
+        # any more -- if they are, our claim of "one SELECT per table"
+        # is a lie.
+        has_stat_calls = 0
+        has_detected_calls = 0
+        original_has_stat = state_db.has_stat_match
+        original_has_detected = state_db.has_detected_stat_match
+
+        def counting_has_stat(*args: object, **kwargs: object) -> bool:
+            nonlocal has_stat_calls
+            has_stat_calls += 1
+            return original_has_stat(*args, **kwargs)  # type: ignore[arg-type]
+
+        def counting_has_detected(*args: object, **kwargs: object) -> bool:
+            nonlocal has_detected_calls
+            has_detected_calls += 1
+            return original_has_detected(*args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(state_db, "has_stat_match", counting_has_stat)
+        monkeypatch.setattr(state_db, "has_detected_stat_match", counting_has_detected)
+
+        monitor = _make_monitor(watch_dir, state_db)
+        monitor._initial_scan()
+
+        assert uploaded_calls == 1, f"expected exactly one bulk SELECT, got {uploaded_calls}"
+        assert detected_calls == 1, f"expected exactly one bulk SELECT, got {detected_calls}"
+        assert has_stat_calls == 0, (
+            f"per-row has_stat_match must not be used in the scan, got {has_stat_calls}"
+        )
+        assert has_detected_calls == 0, (
+            f"per-row has_detected_stat_match must not be used, got {has_detected_calls}"
+        )
+        # And the actual scan output must still be correct: 25 enqueued,
+        # 25 skipped (every other file was pre-recorded above).
+        assert len(monitor._pending) == 25

@@ -41,6 +41,14 @@ class InstrumentConfig(BaseModel):
     enabled: bool = True
     upload_mode: Literal["auto", "manual"] = "auto"
     stability_period_seconds: int = Field(default=5, ge=1, le=300)
+    # Maximum number of files to upload concurrently for a single
+    # detected run (auto mode) or queue poll. The default of 4 balances
+    # S3 throughput against lab-PC network and CPU budgets; instruments
+    # on slow shared uplinks can dial it down to 1 and high-bandwidth
+    # microscopy hosts can push toward the cap. New field, defaulted
+    # for backward compatibility -- existing config YAMLs need no
+    # migration.
+    upload_parallelism: int = Field(default=4, ge=1, le=32)
     run_detection: RunDetectionConfig
 
     @field_validator("id")

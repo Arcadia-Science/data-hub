@@ -253,6 +253,9 @@ def build_runtime(
         instrument_id=inst.id,
         watcher_id=watcher_id,
         watch_directory=inst.watch_directory,
+        # Per-instrument knob, defaulted on the model so older configs
+        # transparently inherit the new parallel-upload behaviour.
+        upload_parallelism=inst.upload_parallelism,
     )
 
     detector = RunDetector(
