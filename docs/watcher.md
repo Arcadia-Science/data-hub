@@ -180,7 +180,7 @@ The watcher maintains a SQLite database at `~/.data-hub/watcher.db` with three t
 - `runs` — tracks which run IDs have been reported and (in auto mode) when their files finished uploading. The most recent `reported_at` timestamp is what the auto-updater consults to gate restarts on a quiet-instrument window.
 - `detected_files` — the file manifest for every reported run, keyed on `(run_id, relative_path)`. Lets the initial scan skip files that are already part of a reported run even in manual mode (where `uploaded_files` stays empty), and lets the run detector hydrate its in-memory state on startup so a restart doesn't re-POST runs the API has already seen.
 
-Logs are written to `~/.data-hub/watcher.log` (10 MB rotating, 5 backups).
+Logs are written to `C:\ProgramData\DataHubWatcher\watcher.log` on Windows and `~/.data-hub/watcher.log` on macOS/Linux (10 MB rotating, 5 backups). Both the CLI `watch` command and the Windows service write to the same file so a single `Get-Content -Wait` (or `tail -F`) covers all entry points.
 
 ### Initial scan identity
 

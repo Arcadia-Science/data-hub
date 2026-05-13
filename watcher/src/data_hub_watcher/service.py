@@ -16,13 +16,14 @@ environment created by ``uv``).
 
 from __future__ import annotations
 import logging
+import os
 import sys
 import threading
 import time
 from pathlib import Path
 from typing import Any
 
-from data_hub_watcher.constants import DEFAULT_CONFIG_DIR, SERVICE_NAME
+from data_hub_watcher.constants import DEFAULT_CONFIG_DIR, SERVICE_NAME, WATCHER_LOG_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,17 @@ def install_service(config_path: Path, env_path: Path) -> None:
 
     _store_paths_in_registry(config_path, env_path)
     _configure_recovery()
+    # Create the shared log directory up-front under the operator's
+    # (elevated) shell. On Windows ``C:\ProgramData\DataHubWatcher``
+    # inherits its ACL from ``C:\ProgramData`` — i.e. SYSTEM full
+    # control + Users: Modify on contained files/folders — so the
+    # service running under LocalSystem can write here and the
+    # operator can tail the file from their own shell without
+    # elevation. Doing this here rather than letting the first
+    # writer create it on demand avoids a race where, say, an early
+    # CLI invocation creates the directory with a non-default owner
+    # before the service tries to rotate the file.
+    WATCHER_LOG_DIR.mkdir(parents=True, exist_ok=True)
     # The worker template bakes its sentinel paths in at render time,
     # so we render against the operator's chosen config directory
     # (``config_path.parent``) rather than the import-time
@@ -443,7 +455,7 @@ def query_service_status() -> dict[str, Any]:
         ws.CloseServiceHandle(hscm)
 
 
-def _repair_upgrade_worker_if_missing(sm: Any, config_dir: Path) -> None:
+def _repair_upgrade_worker_if_missing(config_dir: Path) -> None:
     """Re-register the upgrade scheduled task on startup if it has gone missing.
 
     Lab PCs that auto-update into the version that introduced the
@@ -476,11 +488,13 @@ def _repair_upgrade_worker_if_missing(sm: Any, config_dir: Path) -> None:
     :class:`~data_hub_watcher.runtime.WatcherRuntime.config_dir` for
     why ``DEFAULT_CONFIG_DIR`` would resolve incorrectly here.
 
-    Failures are logged via the Windows event log but do not raise:
-    a host that can't register the task should still be able to run
-    the watcher in its current version. The next auto-update attempt
-    will surface the missing task as an ``UPDATE_FAILED`` event with
-    a clearer reason.
+    Failures are logged via the module logger — which on the service
+    path is attached to a :class:`_ServiceManagerHandler` so warnings
+    reach both ``watcher.log`` and the Windows Event Log — but do not
+    raise: a host that can't register the task should still be able
+    to run the watcher in its current version. The next auto-update
+    attempt will surface the missing task as an ``UPDATE_FAILED``
+    event with a clearer reason.
     """
     try:
         from data_hub_watcher.scheduled_task import (
@@ -490,16 +504,17 @@ def _repair_upgrade_worker_if_missing(sm: Any, config_dir: Path) -> None:
         )
         from data_hub_watcher.upgrade_worker import upgrade_worker_script_path
     except Exception as exc:
-        sm.LogWarningMsg(f"Cannot import upgrade worker modules during startup: {exc}")
+        logger.warning("Cannot import upgrade worker modules during startup: %s", exc)
         return
 
     try:
         present = task_exists()
     except ScheduledTaskError as exc:
-        sm.LogWarningMsg(
-            f"Could not query upgrade scheduled task: {exc}. "
+        logger.warning(
+            "Could not query upgrade scheduled task: %s. "
             "Auto-update may be unavailable until 'data-hub-watcher service "
-            "reinstall' is run."
+            "reinstall' is run.",
+            exc,
         )
         return
 
@@ -511,27 +526,30 @@ def _repair_upgrade_worker_if_missing(sm: Any, config_dir: Path) -> None:
         # We deliberately do NOT re-render here — see the docstring
         # for why a SYSTEM-rendered template would silently break the
         # very thing the repair is meant to fix.
-        sm.LogWarningMsg(
-            f"Upgrade scheduled task is missing AND the rendered worker "
-            f"script is absent from {script_path}. Cannot self-repair "
+        logger.warning(
+            "Upgrade scheduled task is missing AND the rendered worker "
+            "script is absent from %s. Cannot self-repair "
             "from a LocalSystem context. Run "
             "'data-hub-watcher service reinstall' as Administrator to "
             "re-render the worker against the operator's uv tool "
-            "directories and re-register the task."
+            "directories and re-register the task.",
+            script_path,
         )
         return
 
-    sm.LogInfoMsg(
-        f"Upgrade scheduled task missing but worker script is present at "
-        f"{script_path}; re-registering the task pointing at the existing "
-        "rendered script."
+    logger.info(
+        "Upgrade scheduled task missing but worker script is present at "
+        "%s; re-registering the task pointing at the existing "
+        "rendered script.",
+        script_path,
     )
     try:
         install_upgrade_task(script_path)
     except (OSError, ScheduledTaskError) as exc:
-        sm.LogWarningMsg(
-            f"Failed to register upgrade scheduled task: {exc}. "
-            "Run 'data-hub-watcher service reinstall' as Administrator to retry."
+        logger.warning(
+            "Failed to register upgrade scheduled task: %s. "
+            "Run 'data-hub-watcher service reinstall' as Administrator to retry.",
+            exc,
         )
 
 
@@ -566,6 +584,10 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
         STATE_DB_FILENAME,
         env_file_path,
     )
+    from data_hub_watcher.logging_setup import (
+        attach_servicemanager_handler,
+        setup_file_logging,
+    )
     from data_hub_watcher.runtime import (
         build_runtime,
         classify_shutdown,
@@ -574,7 +596,17 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
         sync_config_to_api,
     )
 
-    sm.LogInfoMsg(f"{SERVICE_DISPLAY_NAME} starting")
+    # Wire up file logging + Windows Event Log routing BEFORE any
+    # other work, so a registry-read or env-load failure on the very
+    # next line still produces a record in ``watcher.log`` and the
+    # Event Log. Without this, every ``logger.*`` call made from the
+    # service path — including those from ``runtime``, ``uploader``,
+    # ``monitor``, ``heartbeat``, and ``updater`` — is silently
+    # dropped, which is the bug this whole module-level rework is
+    # closing.
+    log_path = setup_file_logging()
+    attach_servicemanager_handler(sm)
+    logger.info("%s starting (pid=%s, log=%s)", SERVICE_DISPLAY_NAME, os.getpid(), log_path)
 
     # Read registry paths BEFORE the upgrade-worker self-repair so
     # both have a single source of truth for the operator's config
@@ -585,13 +617,14 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
     try:
         path, env_path = _read_paths_from_registry()
     except Exception as exc:
-        sm.LogErrorMsg(
-            f"Cannot read config/env paths from registry: {exc}. "
-            "Re-run 'data-hub-watcher service install'."
+        logger.error(
+            "Cannot read config/env paths from registry: %s. "
+            "Re-run 'data-hub-watcher service install'.",
+            exc,
         )
         raise SystemExit(1) from exc
 
-    _repair_upgrade_worker_if_missing(sm, path.parent)
+    _repair_upgrade_worker_if_missing(path.parent)
 
     # Mirror the CLI's ``load_env`` semantics: load the base
     # ``~/.data-hub/.env`` first (for any shared, non-secret values
@@ -622,13 +655,14 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
     try:
         detail = client.get_instrument(inst.id)
     except ApiError as exc:
-        sm.LogErrorMsg(f"Cannot reach API during startup: {exc.message}")
+        logger.error("Cannot reach API during startup: %s", exc.message)
         raise SystemExit(1) from exc
 
     if detail.status == "pending":
-        sm.LogErrorMsg(
-            f"Instrument {inst.id!r} is still pending activation. "
-            "Service cannot start until the instrument is activated."
+        logger.error(
+            "Instrument %r is still pending activation. "
+            "Service cannot start until the instrument is activated.",
+            inst.id,
         )
         raise SystemExit(1)
 
@@ -636,7 +670,7 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
     # a service-manager error rather than a hard crash so operators
     # see a clear message in the Windows event log.
     if not cfg.watcher_id:
-        sm.LogErrorMsg("No watcher_id in config. Run 'data-hub-watcher init' first.")
+        logger.error("No watcher_id in config. Run 'data-hub-watcher init' first.")
         raise SystemExit(1)
 
     db_path = path.parent / STATE_DB_FILENAME
@@ -652,11 +686,11 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
     # instead of only as a Windows-event-log warning that operators
     # rarely read).
     if sync_config_to_api(client, cfg.watcher_id, path, rt.reporter, trigger="startup"):
-        sm.LogInfoMsg("Config synced to Data Hub")
+        logger.info("Config synced to Data Hub")
 
     start_runtime(rt, started_message=f"Service started on {platform.node()}")
 
-    sm.LogInfoMsg(f"{SERVICE_DISPLAY_NAME} is running")
+    logger.info("%s is running", SERVICE_DISPLAY_NAME)
 
     # Wait for either the SCM's stop_event (operator-initiated stop, or
     # OS shutdown) or the runtime's shutdown_event (in-process updater
@@ -674,7 +708,7 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
     stop_runtime(rt, stopped_message=decision.stopped_message)
 
     if decision.is_upgrade_restart:
-        sm.LogInfoMsg(f"{SERVICE_DISPLAY_NAME} restarting to load upgraded watcher")
+        logger.info("%s restarting to load upgraded watcher", SERVICE_DISPLAY_NAME)
         # Exit non-zero so the SCM's failure-actions config kicks in and
         # restarts the service on the configured 60 s delay. Without
         # SERVICE_CONFIG_FAILURE_ACTIONS_FLAG this would look like a
@@ -682,7 +716,7 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
         # comment on `_configure_recovery` for details.
         raise SystemExit(1)
 
-    sm.LogInfoMsg(f"{SERVICE_DISPLAY_NAME} stopped")
+    logger.info("%s stopped", SERVICE_DISPLAY_NAME)
 
 
 def _create_service_class() -> type | None:
@@ -732,12 +766,82 @@ if _svc_cls is not None:
 # When the SCM starts the process, Python executes this __main__ block which
 # hands control to the service dispatcher.
 
+
+def _write_bootstrap_failure(exc_info: BaseException) -> None:
+    """Append the current exception traceback to the bootstrap log file.
+
+    This runs in the narrow window between Python starting and
+    ``StartServiceCtrlDispatcher`` handing control to our service
+    class. Failures here (broken venv, missing ``pywin32``, corrupt
+    bytecode, etc.) bypass every ``servicemanager.LogErrorMsg`` call
+    in this module because the dispatcher itself hasn't been wired
+    up yet — so without this side-channel the only signal an
+    operator sees is "the service started and exited immediately
+    with no log entries anywhere."
+
+    Only *unexpected* exceptions are captured here. ``SystemExit``
+    and ``KeyboardInterrupt`` are filtered out by the caller so a
+    clean upgrade restart (which raises ``SystemExit(1)`` to trigger
+    the SCM's recovery action) doesn't pollute the bootstrap log
+    with a misleading traceback.
+
+    We deliberately do not route through ``logging_setup`` here:
+    the failure modes we're capturing may include ``logging``,
+    ``pathlib``, or import-time failures in ``data_hub_watcher``
+    itself. Everything is wrapped in a nested ``try`` so a write
+    failure is silent — the original exception is re-raised by the
+    caller regardless.
+
+    The log lives alongside ``watcher.log`` (at
+    :data:`data_hub_watcher.constants.WATCHER_LOG_DIR`) so an
+    operator can tail one directory to see both pre- and
+    post-dispatcher failure trails.
+    """
+    import datetime
+    import traceback
+
+    try:
+        WATCHER_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        bootstrap_log = WATCHER_LOG_DIR / "service-bootstrap.log"
+        with bootstrap_log.open("a", encoding="utf-8") as fh:
+            timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            fh.write(f"\n--- {timestamp} bootstrap failure ---\n")
+            traceback.print_exception(type(exc_info), exc_info, exc_info.__traceback__, file=fh)
+    except Exception:
+        # Last-ditch: if even writing to the bootstrap log fails
+        # there is nothing useful we can do — the original
+        # exception will still propagate to the SCM as a non-zero
+        # exit code.
+        pass
+
+
+def _start_service_dispatcher() -> None:
+    """Hand control to the SCM dispatcher, capturing bootstrap-window failures.
+
+    Extracted from the ``__main__`` block so the bootstrap-capture
+    contract is unit-testable on non-Windows hosts. Only *unexpected*
+    exceptions are diverted into ``service-bootstrap.log`` —
+    ``SystemExit`` (the canonical "exit with non-zero" signal used
+    by ``_run_service_loop`` for upgrade restarts and several
+    early-exit failure modes) and ``KeyboardInterrupt`` (operator
+    Ctrl-C in interactive debug mode) are re-raised untouched so
+    they don't pollute the dedicated pre-dispatcher channel.
+    """
+    import servicemanager  # type: ignore[import-untyped]
+
+    try:
+        servicemanager.Initialize(SERVICE_NAME)  # type: ignore[attr-defined]
+        servicemanager.PrepareToHostSingle(_svc_cls)  # type: ignore[attr-defined]
+        servicemanager.StartServiceCtrlDispatcher()  # type: ignore[attr-defined]
+    except (SystemExit, KeyboardInterrupt):
+        raise
+    except BaseException as exc:
+        _write_bootstrap_failure(exc)
+        raise
+
+
 if __name__ == "__main__":
     if _svc_cls is None:
         raise SystemExit("This module must be run on Windows.")
 
-    import servicemanager  # type: ignore[import-untyped]
-
-    servicemanager.Initialize(SERVICE_NAME)  # type: ignore[attr-defined]
-    servicemanager.PrepareToHostSingle(_svc_cls)  # type: ignore[attr-defined]
-    servicemanager.StartServiceCtrlDispatcher()  # type: ignore[attr-defined]
+    _start_service_dispatcher()
