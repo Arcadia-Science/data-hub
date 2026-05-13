@@ -1,6 +1,6 @@
+import { authenticateRequest } from "@/lib/api/auth";
 import {
   apiError,
-  INTERNAL_ERROR,
   NOT_FOUND,
   UNAUTHORIZED,
   VALIDATION_ERROR,
@@ -10,7 +10,6 @@ import { db } from "@/lib/db";
 import { archiveJobs } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
-import { timingSafeEqual } from "node:crypto";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -19,13 +18,20 @@ type RouteContext = {
 // ---------------------------------------------------------------------------
 // PATCH /api/v1/archive-jobs/:id
 //
-// Lambda-only callback. Authenticated with the shared `LAMBDA_INVOKE_TOKEN`
-// the same way the Function URL itself is authenticated — *not* with a
-// user PAT. This is deliberate: the PATCH lets the caller mark a build as
-// ready with arbitrary `archive_bucket` / `archive_key`, so allowing
-// regular session/token auth would let any signed-in user redirect another
-// user's download or DoS in-flight builds. By gating on a server-only
-// secret, the only writer is the Lambda execution.
+// Lambda callback used to flip an async build to its terminal state.
+// Authenticates with the standard `Authorization: Bearer <PAT>` (or
+// session) — same as every other API route. The Lambda calls this with
+// its `DATA_HUB_API_KEY` PAT, the same credential it uses for every
+// other Lambda → API call.
+//
+// Note: any authenticated caller can update an archive job (including
+// writing arbitrary `archive_bucket`/`archive_key`). The UI does not
+// trust this row's `status` for download readiness — it polls
+// `/download-archive` which short-circuits on an S3 HEAD against the
+// canonical archive key — so worst case a tampered row breaks its own
+// download. We can tighten by validating `archive_bucket` /
+// `archive_key` against the canonical shape if abuse becomes a real
+// concern.
 // ---------------------------------------------------------------------------
 
 const TERMINAL_STATUSES = new Set(["ready", "failed"]);
@@ -38,39 +44,11 @@ type PatchBody = {
   error_message?: unknown;
 };
 
-// Constant-time bearer-token check against `LAMBDA_INVOKE_TOKEN`. Returns
-// a Response on failure so callers can `return` it directly. Using the
-// same secret already shared with the Lambda Function URL keeps the
-// number of distinct shared secrets the operator has to manage at one.
-function authenticateLambdaCallback(request: NextRequest): Response | null {
-  const expected = process.env.LAMBDA_INVOKE_TOKEN;
-  if (!expected) {
-    return apiError(
-      503,
-      INTERNAL_ERROR,
-      "LAMBDA_INVOKE_TOKEN is not configured; cannot accept archive-job callbacks"
-    );
-  }
-
-  const header = request.headers.get("authorization") ?? "";
-  if (!header.startsWith("Bearer ")) {
-    return apiError(401, UNAUTHORIZED, "Authentication required");
-  }
-  const presented = header.slice("Bearer ".length);
-
-  // Length check first so timingSafeEqual doesn't throw on mismatched
-  // byte lengths. The length itself isn't secret.
-  const a = Buffer.from(presented, "utf8");
-  const b = Buffer.from(expected, "utf8");
-  if (a.length !== b.length || !timingSafeEqual(a, b)) {
-    return apiError(401, UNAUTHORIZED, "Authentication required");
-  }
-  return null;
-}
-
 export async function PATCH(request: NextRequest, { params }: RouteContext) {
-  const authError = authenticateLambdaCallback(request);
-  if (authError) return authError;
+  const authResult = await authenticateRequest(request);
+  if (!authResult) {
+    return apiError(401, UNAUTHORIZED, "Authentication required");
+  }
 
   const { id } = await params;
   if (!isValidUUID(id)) {

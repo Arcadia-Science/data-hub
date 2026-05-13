@@ -135,7 +135,6 @@ DATA_HUB_API_URL=https://data-hub-env-staging-arcadia-science.vercel.app/api/v1
 DATA_HUB_API_KEY=<your-api-key>
 GITHUB_OIDC_PROVIDER_ARN=<github-oidc-arn-from-step-1>
 VERCEL_OIDC_PROVIDER_ARN=<vercel-oidc-arn-from-step-1>
-LAMBDA_INVOKE_TOKEN=<shared-secret-for-function-url-auth>
 ```
 
 Then deploy:
@@ -167,8 +166,7 @@ In your GitHub repo, go to **Settings → Environments**, create a `staging` env
 | `VERCEL_OIDC_PROVIDER_ARN` | Vercel OIDC provider ARN from the bootstrap stack |
 | `SAM_S3_BUCKET` | SAM CLI managed S3 bucket name (see `sam deploy` output, e.g. `aws-sam-cli-managed-default-samclisourcebucket-*`) |
 | `DATA_HUB_API_URL` | Base API URL for the environment |
-| `DATA_HUB_API_KEY` | API key for Lambda → Data Hub authentication |
-| `LAMBDA_INVOKE_TOKEN` | Shared secret for web app → Lambda Function URL authentication |
+| `DATA_HUB_API_KEY` | API key for Lambda → Data Hub authentication (also used by the Lambda's archive-job PATCH callback) |
 
 Slack notifications are sent by the **web app** (not the Lambda) when a new run is created. Configure `SLACK_WEBHOOK_URL` per environment in the Vercel dashboard alongside the other web-app env vars listed below.
 
@@ -176,9 +174,8 @@ You'll also need the `WebAppRoleArn` and `DataHubFunctionUrl` stack outputs to c
 
 | Vercel env var | Value |
 | --- | --- |
-| `AWS_ROLE_ARN` | `WebAppRoleArn` stack output — lets the web app generate presigned S3 URLs via OIDC federation |
-| `LAMBDA_FUNCTION_URL` | `DataHubFunctionUrl` stack output — the Lambda Function URL for manual reprocessing |
-| `LAMBDA_INVOKE_TOKEN` | Same shared secret configured in the GitHub environment secret above |
+| `AWS_ROLE_ARN` | `WebAppRoleArn` stack output — lets the web app generate presigned S3 URLs **and** SigV4-sign Lambda Function URL invocations via OIDC federation |
+| `LAMBDA_FUNCTION_URL` | `DataHubFunctionUrl` stack output — the Lambda Function URL for manual reprocessing and archive builds |
 
 Once secrets are set, the CI workflow handles all subsequent deploys automatically.
 
@@ -190,7 +187,7 @@ On pushes to `staging` or `production`, the **Deploy Lambda** workflow:
 2. Builds and pushes the Docker image to ECR.
 3. Runs `sam deploy` to update the CloudFormation stack.
 
-Secrets (`DATA_HUB_API_KEY`, `LAMBDA_INVOKE_TOKEN`, etc.) are stored in GitHub environment secrets scoped to each environment.
+Secrets (`DATA_HUB_API_KEY`, etc.) are stored in GitHub environment secrets scoped to each environment.
 
 > **Note:** The CI deploy role has intentionally narrow permissions — enough to push a new container image, update the existing CloudFormation stack, and modify the data buckets' S3 event notifications (so new instrument triggers roll out via CI), but _not_ enough to create the stack from scratch or to add/remove S3 buckets or Lambda functions. Initial stack creation and structural infrastructure changes must be performed by an admin with broader AWS permissions. Once the stack exists, routine image-update deploys and new-trigger rollouts through CI work without issue.
 

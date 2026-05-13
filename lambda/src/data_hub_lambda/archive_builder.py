@@ -15,14 +15,16 @@ Design notes:
 - ``force_zip64=True`` on every ``ZipFile.open`` call so the writer always
   emits ZIP64 headers; without it, a single ≥4 GB entry would raise.
 - Every input ``key`` is required to live under ``{instrument_id}/{run_id}/``
-  in its source bucket. This keeps a leaked invoke token from being usable
-  to build archives of unrelated S3 prefixes.
+  in its source bucket. This keeps a caller with ``lambda:InvokeFunctionUrl``
+  (e.g. via a compromised Vercel role) from being able to build archives of
+  unrelated S3 prefixes.
 - Each input file carries its own ``source_bucket`` so a single archive can
   zip files that live across the raw and processed buckets (e.g. a run with
   both raw instrument output and Lambda-produced processed artifacts). The
   caller's allow-list is enforced via ``allowed_source_buckets`` in
-  ``parse_build_request`` — a leaked invoke token can't redirect the builder
-  at an arbitrary bucket the Lambda role happens to have GetObject on.
+  ``parse_build_request`` — a caller with ``lambda:InvokeFunctionUrl`` can't
+  redirect the builder at an arbitrary bucket the Lambda role happens to
+  have GetObject on.
 """
 
 from __future__ import annotations
@@ -242,9 +244,9 @@ def parse_build_request(
 
     ``allowed_source_buckets``, when supplied, restricts the set of buckets
     files may reference. The handler passes the Lambda's configured raw +
-    processed bucket names so a leaked invoke token can't be used to read
-    arbitrary buckets the Lambda role might otherwise be able to GetObject
-    on. Tests pass ``None`` to skip the check.
+    processed bucket names so a caller with ``lambda:InvokeFunctionUrl``
+    can't be used to read arbitrary buckets the Lambda role might otherwise
+    be able to GetObject on. Tests pass ``None`` to skip the check.
 
     Each file may specify its own ``source_bucket``. For backward compat
     with the older single-bucket payload, a top-level ``source_bucket`` is

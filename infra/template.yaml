@@ -32,11 +32,6 @@ Parameters:
     NoEcho: true
     Description: API key for Lambda to authenticate with the Data Hub API
 
-  LambdaInvokeToken:
-    Type: String
-    NoEcho: true
-    Description: Shared secret for authenticating manual Function URL invocations from the web app
-
   GitHubOidcProviderArn:
     Type: String
     Description: ARN of the GitHub Actions OIDC provider (from bootstrap stack)
@@ -247,7 +242,10 @@ Resources:
         Size: 10240
       Role: !GetAtt LambdaExecutionRole.Arn
       FunctionUrlConfig:
-        AuthType: NONE
+        # IAM auth: callers (the Vercel web app) must SigV4-sign requests
+        # with credentials that hold lambda:InvokeFunctionUrl on this
+        # function ARN. Replaces the previous shared-bearer-token scheme.
+        AuthType: AWS_IAM
       Environment:
         Variables:
           AWS_S3_RAW_DATA_BUCKET: !Sub "arcadia-data-hub-raw-${Environment}"
@@ -255,7 +253,6 @@ Resources:
           AWS_S3_ARCHIVES_BUCKET: !Sub "arcadia-data-hub-archives-${Environment}"
           DATA_HUB_API_URL: !Ref DataHubApiUrl
           DATA_HUB_API_KEY: !Ref DataHubApiKey
-          LAMBDA_INVOKE_TOKEN: !Ref LambdaInvokeToken
 
   # ---- S3 → Lambda event wiring ----
   # Defined as explicit resources rather than SAM Events to avoid the circular
@@ -480,6 +477,20 @@ Resources:
                 Resource:
                   - !Sub "arn:aws:s3:::arcadia-data-hub-archives-${Environment}"
                   - !Sub "arn:aws:s3:::arcadia-data-hub-archives-${Environment}/*"
+        # Permission for the web app to invoke the Lambda Function URL via
+        # SigV4. Scoped to the single function ARN this stack owns and
+        # gated on AuthType=AWS_IAM so it can't accidentally apply if the
+        # function URL is later flipped back to AuthType=NONE.
+        - PolicyName: LambdaFunctionUrlInvoke
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunctionUrl
+                Resource: !GetAtt DataHubFunction.Arn
+                Condition:
+                  StringEquals:
+                    lambda:FunctionUrlAuthType: AWS_IAM
 
 Outputs:
   DataHubFunctionArn:

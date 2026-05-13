@@ -84,7 +84,6 @@ def integration_env(
         os.environ["AWS_S3_RAW_DATA_BUCKET"] = "test-bucket"
         os.environ["AWS_S3_PROCESSED_DATA_BUCKET"] = "test-processed-bucket"
         os.environ["LOCAL_DATA_DIRPATH"] = str(tmp_data)
-        os.environ["LAMBDA_INVOKE_TOKEN"] = "test-invoke-token"
 
         _reset_singletons()
 
@@ -97,7 +96,6 @@ def integration_env(
             "AWS_S3_RAW_DATA_BUCKET",
             "AWS_S3_PROCESSED_DATA_BUCKET",
             "LOCAL_DATA_DIRPATH",
-            "LAMBDA_INVOKE_TOKEN",
         ):
             os.environ.pop(key, None)
 
@@ -176,12 +174,16 @@ def make_function_url_event(
 ) -> Callable[..., dict[str, Any]]:
     """Factory fixture that wraps an S3 event inside a Function URL envelope.
 
+    The handler no longer authenticates the inbound request — the Function
+    URL is configured with ``AuthType: AWS_IAM`` so AWS itself enforces
+    SigV4 in front of Lambda. Tests therefore don't need to plumb any
+    bearer token through this fixture.
+
     Usage::
 
         def test_example(make_function_url_event):
             event = make_function_url_event(
                 "azure-cielo-qpcr", "Experiment_20260101", "CqValues.csv",
-                token="test-invoke-token",
             )
     """
 
@@ -190,14 +192,9 @@ def make_function_url_event(
         run_id: str,
         filename: str,
         bucket: str = "test-bucket",
-        token: str | None = "test-invoke-token",
         body_override: str | None = None,
     ) -> dict[str, Any]:
         s3_event = make_s3_event(instrument_id, run_id, filename, bucket)
-
-        headers: dict[str, str] = {"content-type": "application/json"}
-        if token is not None:
-            headers["authorization"] = f"Bearer {token}"
 
         return {
             "version": "2.0",
@@ -209,7 +206,7 @@ def make_function_url_event(
                 },
                 "accountId": "123456789012",
             },
-            "headers": headers,
+            "headers": {"content-type": "application/json"},
             "body": body_override if body_override is not None else json.dumps(s3_event),
             "isBase64Encoded": False,
         }

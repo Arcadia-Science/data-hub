@@ -149,14 +149,6 @@ export async function setup() {
       process.env.WATCHER_MIN_SUPPORTED_VERSION ?? "0.1.0",
     WATCHER_RELEASE_CHANNEL: process.env.WATCHER_RELEASE_CHANNEL ?? "stable",
     WATCHER_MANDATORY_UPDATE: process.env.WATCHER_MANDATORY_UPDATE ?? "false",
-    // Stable Lambda invoke token so the archive-jobs PATCH callback
-    // (Lambda → web app) can be exercised in integration tests. Tests use
-    // `process.env.__TEST_LAMBDA_INVOKE_TOKEN` to authenticate. The
-    // LAMBDA_FUNCTION_URL is intentionally left unset so the
-    // "not configured" 503 paths in `file-reprocessing.ts` and
-    // `download-archive/route.ts` still trigger.
-    LAMBDA_INVOKE_TOKEN:
-      process.env.LAMBDA_INVOKE_TOKEN ?? "test-lambda-invoke-token",
     // Point Slack webhook calls at the in-process capture server defined
     // above so tests can assert on the messages without hitting Slack.
     SLACK_WEBHOOK_URL: `${slackCaptureBaseUrl}/webhook`,
@@ -165,6 +157,13 @@ export async function setup() {
   // regardless of the developer's local .env. Tests that need a stubbed
   // Lambda HTTP call should mock fetch rather than set this URL.
   delete serverEnv.LAMBDA_FUNCTION_URL;
+  // Strip AWS_ROLE_ARN as well so the SigV4 path in `lib/lambda.ts`
+  // doesn't try to assume a Vercel OIDC role inside tests. The test
+  // server still gets static AWS_ACCESS_KEY_ID/SECRET via the dummy
+  // values plumbed above, which is enough to satisfy
+  // `hasInvokeCredentials()` for any test that wants to exercise the
+  // archive-builder configured path without standing up a real Lambda.
+  delete serverEnv.AWS_ROLE_ARN;
 
   execSync("npx next build", {
     cwd: import.meta.dirname ? import.meta.dirname + "/../.." : process.cwd(),
@@ -192,8 +191,6 @@ export async function setup() {
   // which Vitest propagates to test workers automatically.
   process.env.__TEST_BASE_URL = baseUrl;
   process.env.__TEST_DATABASE_URL = databaseUrl;
-  process.env.__TEST_LAMBDA_INVOKE_TOKEN =
-    serverEnv.LAMBDA_INVOKE_TOKEN ?? "test-lambda-invoke-token";
   process.env.__TEST_SLACK_CAPTURE_URL = slackCaptureBaseUrl;
 
   return async () => {

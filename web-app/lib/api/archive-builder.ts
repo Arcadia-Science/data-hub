@@ -1,3 +1,4 @@
+import { hasInvokeCredentials, signLambdaInvoke } from "@/lib/lambda";
 import { getS3ArchivesBucket } from "@/lib/s3";
 import crypto from "node:crypto";
 
@@ -47,34 +48,35 @@ export function getArchiveDownloadFilename(runId: string | null): string {
   return runId ? `${runId}.zip` : "archive.zip";
 }
 
-type LambdaConfig = { url: string; token: string };
-
 // Cheap, side-effect-free check used by the route to short-circuit with a
 // 503 *before* it inserts an `archive_jobs` row or fires `after()`. Checks
-// every env var the build pipeline needs — the Lambda Function URL + token
-// for the dispatch, and `S3_ARCHIVES_BUCKET` for the cache-hit HEAD and
-// presign — so a misconfigured deploy fails uniformly with one clear
-// error rather than half-failing inside `getS3ArchivesBucket`.
+// every env var the build pipeline needs — the Lambda Function URL,
+// invoke credentials (Vercel OIDC role or static AWS keys for local dev),
+// and `S3_ARCHIVES_BUCKET` for the cache-hit HEAD and presign — so a
+// misconfigured deploy fails uniformly with one clear error rather than
+// half-failing inside `getS3ArchivesBucket` or `signLambdaInvoke`.
 //
-// The throwing `getLambdaConfig` / `getS3ArchivesBucket` helpers are still
+// The throwing `getLambdaUrl` / `getS3ArchivesBucket` helpers are still
 // used downstream — this check is the entry-point gate.
 export function isArchiveBuilderConfigured(): boolean {
   return Boolean(
     process.env.LAMBDA_FUNCTION_URL &&
-    process.env.LAMBDA_INVOKE_TOKEN &&
+    hasInvokeCredentials() &&
     process.env.S3_ARCHIVES_BUCKET
   );
 }
 
-function getLambdaConfig(): LambdaConfig {
+function getLambdaUrl(): string {
   const url = process.env.LAMBDA_FUNCTION_URL;
-  const token = process.env.LAMBDA_INVOKE_TOKEN;
-  if (!url || !token) {
+  if (!url) {
+    throw new Error("LAMBDA_FUNCTION_URL must be set to build archives");
+  }
+  if (!hasInvokeCredentials()) {
     throw new Error(
-      "LAMBDA_FUNCTION_URL and LAMBDA_INVOKE_TOKEN must be set to build archives"
+      "AWS credentials (AWS_ROLE_ARN on Vercel, or AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY locally) must be set to invoke the Lambda Function URL"
     );
   }
-  return { url, token };
+  return url;
 }
 
 export type InvokeBuildArchiveInput = {
@@ -85,7 +87,7 @@ export type InvokeBuildArchiveInput = {
   // bucket and the processed bucket (e.g. SpectraMax raw .xls + Lambda-
   // produced processed CSV). The Lambda allow-lists each bucket against its
   // own configured raw + processed env vars, so this is not a pivot point
-  // for an invoke-token leak.
+  // for a caller with `lambda:InvokeFunctionUrl` to read arbitrary S3.
   files: { s3Key: string; filename: string; sourceBucket: string }[];
 };
 
@@ -100,14 +102,14 @@ export type InvokeBuildArchiveResult =
 
 // Issues a synchronous archive-build request to the Lambda Function URL and
 // awaits the result. Mirrors the patterns in `file-reprocessing.ts`. Throws
-// if Lambda env vars are missing — the route is fully dependent on the
-// builder, so a misconfigured deploy should fail loudly rather than silently
-// degrade.
+// if Lambda env vars or AWS credentials are missing — the route is fully
+// dependent on the builder, so a misconfigured deploy should fail loudly
+// rather than silently degrade.
 export async function invokeBuildArchive(
   input: InvokeBuildArchiveInput,
   fingerprint: string
 ): Promise<InvokeBuildArchiveResult> {
-  const lambda = getLambdaConfig();
+  const lambdaUrl = getLambdaUrl();
 
   const archiveBucket = getS3ArchivesBucket();
   const archiveKey = getArchiveKey(
@@ -132,14 +134,11 @@ export async function invokeBuildArchive(
 
   let res: Response;
   try {
-    res = await fetch(lambda.url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${lambda.token}`,
-      },
+    const signed = await signLambdaInvoke({
+      url: lambdaUrl,
       body: JSON.stringify(payload),
     });
+    res = await fetch(signed);
   } catch (err) {
     return {
       ok: false,

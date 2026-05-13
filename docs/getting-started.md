@@ -45,10 +45,13 @@ vercel env pull
 | `AUTH_GOOGLE_ID` | Yes | Google OAuth client ID |
 | `AUTH_GOOGLE_SECRET` | Yes | Google OAuth client secret |
 | `AUTH_SECRET` | Yes | NextAuth session encryption key |
-| `AWS_REGION` | No | AWS region for S3 presigned URLs (defaults to `us-west-1`) |
-| `AWS_ROLE_ARN` | No | IAM role ARN for Vercel OIDC federation to S3 (only needed on Vercel) |
+| `AWS_REGION` | No | AWS region for S3 presigned URLs and Lambda Function URL SigV4 signing (defaults to `us-west-1`) |
+| `AWS_ROLE_ARN` | No | IAM role ARN for Vercel OIDC federation. Used to presign S3 URLs and SigV4-sign Lambda Function URL invocations (only needed on Vercel) |
 | `S3_RAW_DATA_BUCKET` | No | S3 bucket for raw data uploads (defaults to `arcadia-data-hub-raw-staging`) |
+| `LAMBDA_FUNCTION_URL` | No | Lambda Function URL. Required for file reprocessing and run-archive downloads. |
 | `SLACK_WEBHOOK_URL` | No | Slack incoming webhook URL — when set, the web app posts a notification each time a new run is created |
+
+> **Local dev note:** the Lambda Function URL is configured with `AuthType: AWS_IAM`, so to invoke it from `make dev` you need AWS credentials with `lambda:InvokeFunctionUrl` on the staging function ARN. The default credential chain (`aws sso login`, `~/.aws/credentials`, or `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`) is used when `AWS_ROLE_ARN` is unset locally.
 
 ### Lambda / shared library
 
