@@ -149,8 +149,14 @@ class TestServiceManagerHandler:
 
         sm.LogErrorMsg.assert_called_once()
         msg = sm.LogErrorMsg.call_args.args[0]
+        # The Event Log records ``LevelDisplayName`` and
+        # ``TimeCreated`` per entry, so the formatter intentionally
+        # drops the bracketed level + asctime — the message body
+        # is just ``<logger>: <message>``. We still include the
+        # logger name so an operator scanning event viewer can tell
+        # ``uploader`` failures from ``api_client`` failures.
         assert "boom" in msg
-        assert "[ERROR]" in msg
+        assert "data_hub_watcher.test" in msg
         sm.LogWarningMsg.assert_not_called()
         sm.LogInfoMsg.assert_not_called()
 

@@ -455,7 +455,7 @@ def query_service_status() -> dict[str, Any]:
         ws.CloseServiceHandle(hscm)
 
 
-def _repair_upgrade_worker_if_missing(sm: Any, config_dir: Path) -> None:
+def _repair_upgrade_worker_if_missing(config_dir: Path) -> None:
     """Re-register the upgrade scheduled task on startup if it has gone missing.
 
     Lab PCs that auto-update into the version that introduced the
@@ -488,19 +488,14 @@ def _repair_upgrade_worker_if_missing(sm: Any, config_dir: Path) -> None:
     :class:`~data_hub_watcher.runtime.WatcherRuntime.config_dir` for
     why ``DEFAULT_CONFIG_DIR`` would resolve incorrectly here.
 
-    Failures are logged via the Windows event log but do not raise:
-    a host that can't register the task should still be able to run
-    the watcher in its current version. The next auto-update attempt
-    will surface the missing task as an ``UPDATE_FAILED`` event with
-    a clearer reason.
+    Failures are logged via the module logger — which on the service
+    path is attached to a :class:`_ServiceManagerHandler` so warnings
+    reach both ``watcher.log`` and the Windows Event Log — but do not
+    raise: a host that can't register the task should still be able
+    to run the watcher in its current version. The next auto-update
+    attempt will surface the missing task as an ``UPDATE_FAILED``
+    event with a clearer reason.
     """
-    # The *sm* parameter is retained for signature compatibility with
-    # existing tests, but routing now goes through the module logger
-    # (which the service path attaches a ``_ServiceManagerHandler`` to
-    # at startup). This means a single ``logger.warning(...)`` call
-    # lands in both ``watcher.log`` and the Windows Event Log.
-    del sm
-
     try:
         from data_hub_watcher.scheduled_task import (
             ScheduledTaskError,
@@ -629,7 +624,7 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
         )
         raise SystemExit(1) from exc
 
-    _repair_upgrade_worker_if_missing(sm, path.parent)
+    _repair_upgrade_worker_if_missing(path.parent)
 
     # Mirror the CLI's ``load_env`` semantics: load the base
     # ``~/.data-hub/.env`` first (for any shared, non-secret values
@@ -784,6 +779,12 @@ def _write_bootstrap_failure(exc_info: BaseException) -> None:
     operator sees is "the service started and exited immediately
     with no log entries anywhere."
 
+    Only *unexpected* exceptions are captured here. ``SystemExit``
+    and ``KeyboardInterrupt`` are filtered out by the caller so a
+    clean upgrade restart (which raises ``SystemExit(1)`` to trigger
+    the SCM's recovery action) doesn't pollute the bootstrap log
+    with a misleading traceback.
+
     We deliberately do not route through ``logging_setup`` here:
     the failure modes we're capturing may include ``logging``,
     ``pathlib``, or import-time failures in ``data_hub_watcher``
@@ -814,16 +815,33 @@ def _write_bootstrap_failure(exc_info: BaseException) -> None:
         pass
 
 
+def _start_service_dispatcher() -> None:
+    """Hand control to the SCM dispatcher, capturing bootstrap-window failures.
+
+    Extracted from the ``__main__`` block so the bootstrap-capture
+    contract is unit-testable on non-Windows hosts. Only *unexpected*
+    exceptions are diverted into ``service-bootstrap.log`` —
+    ``SystemExit`` (the canonical "exit with non-zero" signal used
+    by ``_run_service_loop`` for upgrade restarts and several
+    early-exit failure modes) and ``KeyboardInterrupt`` (operator
+    Ctrl-C in interactive debug mode) are re-raised untouched so
+    they don't pollute the dedicated pre-dispatcher channel.
+    """
+    import servicemanager  # type: ignore[import-untyped]
+
+    try:
+        servicemanager.Initialize(SERVICE_NAME)  # type: ignore[attr-defined]
+        servicemanager.PrepareToHostSingle(_svc_cls)  # type: ignore[attr-defined]
+        servicemanager.StartServiceCtrlDispatcher()  # type: ignore[attr-defined]
+    except (SystemExit, KeyboardInterrupt):
+        raise
+    except BaseException as exc:
+        _write_bootstrap_failure(exc)
+        raise
+
+
 if __name__ == "__main__":
     if _svc_cls is None:
         raise SystemExit("This module must be run on Windows.")
 
-    try:
-        import servicemanager  # type: ignore[import-untyped]
-
-        servicemanager.Initialize(SERVICE_NAME)  # type: ignore[attr-defined]
-        servicemanager.PrepareToHostSingle(_svc_cls)  # type: ignore[attr-defined]
-        servicemanager.StartServiceCtrlDispatcher()  # type: ignore[attr-defined]
-    except BaseException as exc:
-        _write_bootstrap_failure(exc)
-        raise
+    _start_service_dispatcher()

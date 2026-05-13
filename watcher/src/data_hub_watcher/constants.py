@@ -56,7 +56,13 @@ def _resolve_watcher_log_dir() -> Path:
     operator deployments.
     """
     if sys.platform == "win32":
-        program_data = os.environ.get("ProgramData", r"C:\ProgramData")
+        # ``os.environ.get(name, default)`` returns the empty string
+        # when ``name`` is set to ``""`` rather than falling back to
+        # the default. Guard against that by treating an empty value
+        # as missing — otherwise ``Path("") / "DataHubWatcher"`` would
+        # silently produce a relative path that lands in whatever
+        # cwd the service happens to start from.
+        program_data = os.environ.get("ProgramData") or r"C:\ProgramData"
         return Path(program_data) / "DataHubWatcher"
     return DEFAULT_CONFIG_DIR
 

@@ -15,6 +15,7 @@ so that it can be patched out in unit tests on non-Windows hosts.
 from __future__ import annotations
 import logging
 import os
+import sys
 import threading
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -22,7 +23,18 @@ from typing import Any
 
 from data_hub_watcher.constants import WATCHER_LOG_DIR
 
+# Format used by the on-disk rotating handler. Includes asctime so a
+# bare ``tail -F watcher.log`` is operator-readable without a wrapping
+# context (e.g. journalctl) that would supply its own timestamp.
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
+# Format used by the Windows Event Log handler. The Event Log itself
+# records ``TimeCreated`` and ``LevelDisplayName`` per entry, so we
+# drop ``asctime`` and the bracketed level prefix from the message
+# body to avoid every entry showing two timestamps and two level
+# labels when an operator views it in ``eventvwr.msc``.
+EVENT_LOG_FORMAT = "%(name)s: %(message)s"
+
 LOG_FILENAME = "watcher.log"
 
 # 32 KB is the per-string cap on a Windows Event Log entry. Leave a small
@@ -105,21 +117,25 @@ def setup_file_logging() -> Path:
     _apply_root_level()
     root = logging.getLogger()
 
-    target = str(log_path)
+    # ``FileHandler.__init__`` stores ``baseFilename`` as
+    # ``os.path.abspath(filename)`` — not a resolved path — so we
+    # compare against that same shape. On case-insensitive
+    # filesystems (Windows, default APFS) two paths that differ only
+    # in case point at the same file, so we fold case there to avoid
+    # accidentally double-registering.
+    target = os.path.abspath(str(log_path))
+    case_insensitive = sys.platform in ("win32", "darwin")
+    if case_insensitive:
+        target_cmp = target.lower()
+    else:
+        target_cmp = target
+
     for existing in root.handlers:
-        if isinstance(existing, RotatingFileHandler) and getattr(
-            existing, "baseFilename", None
-        ) == str(log_path.resolve(strict=False)):
-            return log_path
-        # ``baseFilename`` is always absolute on RotatingFileHandler,
-        # but the resolved path comparison above may miss handlers
-        # registered with a non-canonicalized path on Windows. Fall
-        # back to a case-insensitive string compare on Windows to
-        # avoid double-registering.
-        if (
-            isinstance(existing, RotatingFileHandler)
-            and getattr(existing, "baseFilename", "").lower() == target.lower()
-        ):
+        if not isinstance(existing, RotatingFileHandler):
+            continue
+        existing_base = getattr(existing, "baseFilename", "")
+        existing_cmp = existing_base.lower() if case_insensitive else existing_base
+        if existing_cmp == target_cmp:
             return log_path
 
     handler = RotatingFileHandler(
@@ -211,6 +227,6 @@ def attach_servicemanager_handler(sm: Any) -> _ServiceManagerHandler:
             return existing
 
     handler = _ServiceManagerHandler(sm)
-    handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    handler.setFormatter(logging.Formatter(EVENT_LOG_FORMAT))
     root.addHandler(handler)
     return handler

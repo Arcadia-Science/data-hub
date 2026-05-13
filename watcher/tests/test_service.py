@@ -462,7 +462,6 @@ class TestRepairUpgradeWorkerOnStartup:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        sm = MagicMock(name="servicemanager")
         monkeypatch.setattr("data_hub_watcher.scheduled_task.task_exists", lambda: True)
         install_calls: list[Path] = []
         monkeypatch.setattr(
@@ -470,7 +469,7 @@ class TestRepairUpgradeWorkerOnStartup:
             lambda script_path: install_calls.append(script_path),
         )
 
-        service_module._repair_upgrade_worker_if_missing(sm, tmp_path)
+        service_module._repair_upgrade_worker_if_missing(tmp_path)
 
         assert install_calls == []
 
@@ -490,7 +489,6 @@ class TestRepairUpgradeWorkerOnStartup:
         script_path.parent.mkdir(parents=True, exist_ok=True)
         script_path.write_text("# previously rendered worker", encoding="utf-8")
 
-        sm = MagicMock(name="servicemanager")
         monkeypatch.setattr("data_hub_watcher.scheduled_task.task_exists", lambda: False)
         install_calls: list[Path] = []
         monkeypatch.setattr(
@@ -498,7 +496,7 @@ class TestRepairUpgradeWorkerOnStartup:
             lambda script_path: install_calls.append(script_path),
         )
 
-        service_module._repair_upgrade_worker_if_missing(sm, tmp_path)
+        service_module._repair_upgrade_worker_if_missing(tmp_path)
 
         # Task is re-registered against the existing script.
         assert install_calls == [script_path]
@@ -524,7 +522,6 @@ class TestRepairUpgradeWorkerOnStartup:
         # is to log a clear pointer at `service reinstall` and punt;
         # the next auto-update tick will fail loudly with a usable
         # error.
-        sm = MagicMock(name="servicemanager")
         monkeypatch.setattr("data_hub_watcher.scheduled_task.task_exists", lambda: False)
         install_calls: list[Path] = []
         monkeypatch.setattr(
@@ -533,7 +530,7 @@ class TestRepairUpgradeWorkerOnStartup:
         )
 
         with caplog.at_level(logging.WARNING, logger="data_hub_watcher.service"):
-            service_module._repair_upgrade_worker_if_missing(sm, tmp_path)
+            service_module._repair_upgrade_worker_if_missing(tmp_path)
 
         # No re-registration happened — punted to operator action.
         assert install_calls == []
@@ -559,15 +556,13 @@ class TestRepairUpgradeWorkerOnStartup:
         # next auto-update event.
         from data_hub_watcher.scheduled_task import ScheduledTaskError
 
-        sm = MagicMock(name="servicemanager")
-
         def boom() -> bool:
             raise ScheduledTaskError("rpc dead")
 
         monkeypatch.setattr("data_hub_watcher.scheduled_task.task_exists", boom)
         with caplog.at_level(logging.WARNING, logger="data_hub_watcher.service"):
             # Must not raise.
-            service_module._repair_upgrade_worker_if_missing(sm, tmp_path)
+            service_module._repair_upgrade_worker_if_missing(tmp_path)
         warnings_ = [r for r in caplog.records if r.levelno == logging.WARNING]
         assert len(warnings_) == 1
 
@@ -587,7 +582,6 @@ class TestRepairUpgradeWorkerOnStartup:
         script_path.parent.mkdir(parents=True, exist_ok=True)
         script_path.write_text("# previously rendered worker", encoding="utf-8")
 
-        sm = MagicMock(name="servicemanager")
         monkeypatch.setattr("data_hub_watcher.scheduled_task.task_exists", lambda: False)
 
         def boom(script_path: Path) -> None:
@@ -596,7 +590,7 @@ class TestRepairUpgradeWorkerOnStartup:
         monkeypatch.setattr("data_hub_watcher.scheduled_task.install_upgrade_task", boom)
         with caplog.at_level(logging.WARNING, logger="data_hub_watcher.service"):
             # Must not raise even when re-registration fails.
-            service_module._repair_upgrade_worker_if_missing(sm, tmp_path)
+            service_module._repair_upgrade_worker_if_missing(tmp_path)
         warnings_ = [r for r in caplog.records if r.levelno == logging.WARNING]
         assert len(warnings_) == 1
 
@@ -1037,11 +1031,11 @@ class _LoopHarness:
         # Stub out the upgrade-worker self-repair so existing
         # ``_run_service_loop`` tests don't try to invoke ``schtasks.exe``
         # — that helper has its own dedicated test class above.
-        self.repair_calls: list[tuple[Any, Path]] = []
+        self.repair_calls: list[Path] = []
         monkeypatch.setattr(
             service_module,
             "_repair_upgrade_worker_if_missing",
-            lambda sm, config_dir: self.repair_calls.append((sm, config_dir)),
+            lambda config_dir: self.repair_calls.append(config_dir),
         )
 
         # Patch source modules of the lazy imports inside _run_service_loop.
@@ -1391,11 +1385,13 @@ class TestRunServiceLoopLogging:
         with pytest.raises(SystemExit):
             harness.svc._run_service_loop(threading.Event(), harness.sm)
 
-        # The Event-Log handler formats records with ``LOG_FORMAT``
-        # (asctime/level/name/message) so the forwarded message is a
-        # superset of the original. Substring checks remain the right
-        # assertion shape because operator-facing wording must not
-        # silently drift on a refactor.
+        # The Event-Log handler formats records with
+        # ``EVENT_LOG_FORMAT`` (``<logger>: <message>``) — asctime and
+        # the bracketed level prefix are intentionally dropped because
+        # the Windows Event Log already records ``TimeCreated`` and
+        # ``LevelDisplayName`` per entry. Substring checks remain the
+        # right assertion shape because operator-facing wording must
+        # not silently drift on a refactor.
         harness.sm.LogErrorMsg.assert_called_once()
         forwarded = harness.sm.LogErrorMsg.call_args.args[0]
         assert "registry" in forwarded.lower()
@@ -1501,3 +1497,88 @@ class TestBootstrapFailureLog:
         except RuntimeError as exc:
             # Must not raise even though directory creation will fail.
             service_module._write_bootstrap_failure(exc)
+
+
+class TestStartServiceDispatcher:
+    """``_start_service_dispatcher`` must distinguish *unexpected* crashes
+    from clean SCM exit signals.
+
+    The bootstrap log exists for crashes that happen before
+    ``SvcDoRun`` is reachable (broken venv, missing ``pywin32``,
+    import-time errors). ``SystemExit`` is the canonical "exit with a
+    non-zero code" mechanism the in-process loop uses to ask the SCM
+    to restart the service after an upgrade — treating those as
+    bootstrap failures would append a fresh traceback on every clean
+    upgrade restart, defeating the purpose of the channel.
+    """
+
+    def test_unexpected_exception_writes_bootstrap_log_and_reraises(
+        self,
+        service_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        from data_hub_watcher import constants
+
+        monkeypatch.setattr(constants, "WATCHER_LOG_DIR", tmp_path)
+        monkeypatch.setattr(service_module, "WATCHER_LOG_DIR", tmp_path)
+
+        sm = sys.modules["servicemanager"]
+        sm.StartServiceCtrlDispatcher.side_effect = RuntimeError("dispatcher exploded")
+
+        with pytest.raises(RuntimeError, match="dispatcher exploded"):
+            service_module._start_service_dispatcher()
+
+        bootstrap_log = tmp_path / "service-bootstrap.log"
+        assert bootstrap_log.exists()
+        contents = bootstrap_log.read_text(encoding="utf-8")
+        assert "dispatcher exploded" in contents
+        assert "RuntimeError" in contents
+
+    def test_systemexit_propagates_without_bootstrap_log(
+        self,
+        service_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        # The upgrade-restart path raises ``SystemExit(1)`` inside
+        # ``_run_service_loop``. If pywin32 propagates that out of
+        # ``StartServiceCtrlDispatcher`` (version-dependent behavior),
+        # we must NOT write a misleading "bootstrap failure" entry —
+        # the watcher exited cleanly to trigger the SCM's recovery
+        # action, not because of a bootstrap-window crash.
+        from data_hub_watcher import constants
+
+        monkeypatch.setattr(constants, "WATCHER_LOG_DIR", tmp_path)
+        monkeypatch.setattr(service_module, "WATCHER_LOG_DIR", tmp_path)
+
+        sm = sys.modules["servicemanager"]
+        sm.StartServiceCtrlDispatcher.side_effect = SystemExit(1)
+
+        with pytest.raises(SystemExit) as excinfo:
+            service_module._start_service_dispatcher()
+
+        assert excinfo.value.code == 1
+        assert not (tmp_path / "service-bootstrap.log").exists()
+
+    def test_keyboard_interrupt_propagates_without_bootstrap_log(
+        self,
+        service_module: ModuleType,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        # Operator Ctrl-C from ``win32serviceutil debug`` (the
+        # debug-in-foreground path referenced in the troubleshooting
+        # guide) must also be treated as a clean exit signal.
+        from data_hub_watcher import constants
+
+        monkeypatch.setattr(constants, "WATCHER_LOG_DIR", tmp_path)
+        monkeypatch.setattr(service_module, "WATCHER_LOG_DIR", tmp_path)
+
+        sm = sys.modules["servicemanager"]
+        sm.StartServiceCtrlDispatcher.side_effect = KeyboardInterrupt()
+
+        with pytest.raises(KeyboardInterrupt):
+            service_module._start_service_dispatcher()
+
+        assert not (tmp_path / "service-bootstrap.log").exists()
