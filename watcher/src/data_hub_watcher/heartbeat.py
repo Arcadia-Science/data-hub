@@ -70,8 +70,34 @@ class HeartbeatLoop:
         self._first_failure_at: float | None = None
 
     def start(self) -> None:
+        """Send an immediate heartbeat, then run periodic heartbeats in a thread.
+
+        The synchronous startup beat is critical because ``start()`` is
+        always called immediately before ``FileMonitor.start()`` runs the
+        initial directory scan, which can block the main thread for
+        several minutes on large or networked watch volumes. Without the
+        immediate beat, the dashboard would see nothing for the full
+        scan window plus up to one ``interval``, and the watcher would
+        be indistinguishable from a hung process — especially painful on
+        Windows where the service runs headless and the only liveness
+        signal an operator has is what shows up in Data Hub.
+
+        We also flush the event reporter on this initial tick so the
+        ``WATCHER_STARTED`` event the runtime queued moments ago becomes
+        visible right away rather than piggy-backing on the first
+        loop-driven flush ~``interval`` seconds later.
+        """
         self._start_time = time.monotonic()
         self._stop_event.clear()
+        # Synchronous startup beat + flush so the dashboard sees the
+        # watcher come up before the (potentially long-running) initial
+        # scan begins. ``_send_heartbeat`` and ``flush`` both swallow
+        # network errors internally, so a startup with the API
+        # unreachable still proceeds — the next loop tick will retry
+        # and emit the standard ``heartbeat_recovered`` event when the
+        # link comes back.
+        self._send_heartbeat(status="watching")
+        self._event_reporter.flush()
         self._thread = threading.Thread(target=self._run, daemon=True, name="heartbeat")
         self._thread.start()
 
