@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor, wait
 from pathlib import Path
 
 import requests as http_requests
+from requests.adapters import HTTPAdapter
 
 from data_hub_watcher.api_client import ApiError, DataHubClient
 from data_hub_watcher.constants import (
@@ -112,10 +113,27 @@ class Uploader:
         # presigned URLs that target the same S3 bucket -- avoids
         # paying the handshake cost on every file in a multi-file
         # run. ``requests.Session`` is documented as thread-safe for
-        # concurrent ``put`` calls; the urllib3 connection pool
-        # underneath grows on demand up to ``pool_maxsize`` which we
-        # let default (10).
+        # concurrent ``put`` calls.
         self._s3_session = http_requests.Session()
+        # Size the urllib3 pool to match ``upload_parallelism`` so we
+        # never trip the "Connection pool is full, discarding
+        # connection" warning that the default ``pool_maxsize=10``
+        # produces once parallelism exceeds 10 -- which the model
+        # explicitly allows (``ge=1, le=32``). Discarded connections
+        # defeat the keep-alive optimisation this session exists for.
+        # ``pool_connections`` controls the number of *host* pools;
+        # presigned S3 PUTs typically hit a single bucket-host so one
+        # is enough, but matching ``pool_maxsize`` is harmless and
+        # leaves room for cross-bucket fan-out if a future config does
+        # that. ``pool_block=False`` (the default) preserves the prior
+        # behaviour of spinning up a transient connection if the pool
+        # is momentarily exhausted instead of blocking the worker.
+        adapter = HTTPAdapter(
+            pool_connections=upload_parallelism,
+            pool_maxsize=upload_parallelism,
+        )
+        self._s3_session.mount("https://", adapter)
+        self._s3_session.mount("http://", adapter)
         # Counter mutations from upload worker threads are protected
         # by the GIL on the underlying ``int`` increment, but use an
         # explicit lock anyway so we can later move to ``threading.
@@ -200,7 +218,13 @@ class Uploader:
             queue = self._client.get_upload_queue(self._watcher_id)
         except ApiError as exc:
             logger.warning("Failed to fetch upload queue: %s", exc.message)
-            self._counters.errors += 1
+            # Route through the shared helper so every error increment
+            # (whether emitted from the heartbeat thread here or from
+            # an upload-pool worker in ``_upload_single``) goes through
+            # the same lock. Inconsistent locking would race the
+            # heartbeat reader against parallel-upload writers and
+            # surface as off-by-one error totals.
+            self._bump_errors()
             self._consecutive_queue_poll_failures += 1
             # Emit on first failure, then every 10th, so a sustained
             # outage stays visible without flooding the queue.
@@ -234,7 +258,7 @@ class Uploader:
                         details={"file_id": qf.id, "expected_path": str(local_path)},
                     )
                 )
-                self._counters.errors += 1
+                self._bump_errors()
                 continue
 
             self._upload_single(local_path, qf.run_id)

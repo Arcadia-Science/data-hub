@@ -18,8 +18,10 @@ These tests pin down the new invariants:
 """
 
 from __future__ import annotations
+import gc
 import sqlite3
 import threading
+import weakref
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -195,3 +197,139 @@ class TestClose:
         for conn in opened:
             with pytest.raises(sqlite3.ProgrammingError):
                 conn.execute("SELECT 1")
+
+
+class TestThreadDeathReclamation:
+    """Connections owned by terminated threads must be reaped.
+
+    The optimisation spawns a fresh ``ThreadPoolExecutor`` per upload
+    batch; each worker opens its own ``sqlite3.Connection`` on first
+    StateDB access. Without lifecycle plumbing those handles would
+    pile up in ``StateDB._connections`` (and in the kernel FD table)
+    for the entire watcher process lifetime -- hours-to-days on a
+    busy lab PC. The per-thread ``weakref.finalize`` callback in
+    ``StateDB._conn`` is what prevents that. These tests pin its
+    behaviour.
+    """
+
+    def test_connections_are_dropped_when_owning_thread_dies(self, state_db: StateDB) -> None:
+        """After short-lived workers exit, only the main thread's handle remains.
+
+        We open one ``StateDB`` connection per worker (the workers
+        write a row so the handle is fully materialised), join the
+        workers, then drive the GC. The watcher's ``_connections``
+        set must drop back down to just the main-thread connection
+        eagerly cached at construction time.
+        """
+        # Materialise the main thread's connection (already opened by
+        # ``_create_tables``, but make the expectation explicit).
+        _ = state_db._conn
+
+        def worker(worker_id: int) -> None:
+            state_db.record_upload(
+                f"tt-{worker_id}.nd2",
+                f"sha-tt-{worker_id}",
+                f"s3/tt/{worker_id}.nd2",
+                relative_path=f"tt/{worker_id}.nd2",
+                size_bytes=1024,
+                mtime=1_700_000_000.0 + worker_id,
+            )
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5.0)
+            assert not t.is_alive()
+
+        # Threading-local data is reclaimed when the thread is joined,
+        # but the actual ``_PerThreadHandle`` may still be sitting on
+        # the GC's young-generation freelist. A single ``gc.collect``
+        # is enough to fire the ``weakref.finalize`` callbacks.
+        gc.collect()
+
+        with state_db._connections_lock:
+            remaining = set(state_db._connections)
+
+        # Exactly one connection should remain: the main thread's.
+        # We don't rely on ``len`` to point at a specific handle --
+        # we assert membership against the live main-thread handle so
+        # the test stays robust to incidental allocations elsewhere.
+        assert state_db._conn in remaining
+        assert len(remaining) == 1, (
+            f"Expected only the main-thread handle to remain, got {len(remaining)} live connections"
+        )
+
+    def test_thread_local_holder_is_garbage_collected_after_thread_dies(
+        self, state_db: StateDB
+    ) -> None:
+        """The per-thread holder is the linchpin of the reaper.
+
+        We weak-ref the holder rather than the connection itself
+        because the connection is briefly kept alive by the
+        ``weakref.finalize`` callback's closed-over reference. A live
+        holder == a still-leaked entry; a dead holder == reaper
+        already ran.
+        """
+        holder_refs: list[weakref.ref[object]] = []
+        holder_refs_lock = threading.Lock()
+
+        def worker() -> None:
+            _ = state_db._conn
+            holder = state_db._local.holder  # type: ignore[attr-defined]
+            with holder_refs_lock:
+                holder_refs.append(weakref.ref(holder))
+
+        threads = [threading.Thread(target=worker) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5.0)
+
+        gc.collect()
+
+        live_holders = [ref() for ref in holder_refs if ref() is not None]
+        assert live_holders == [], (
+            f"Expected all per-thread holders to be GC'd; {len(live_holders)} still alive"
+        )
+
+    def test_pool_workers_do_not_leak_handles_across_batches(self, state_db: StateDB) -> None:
+        """Simulate the per-batch ``ThreadPoolExecutor`` pattern.
+
+        ``Uploader.upload_files`` constructs a new pool per call.
+        With ``upload_parallelism=4`` and 10 batches the unfixed code
+        would accumulate ~40 stale connections; the fix keeps the
+        live count bounded regardless of batch count.
+        """
+        batches = 10
+        per_batch = 4
+
+        def worker(batch: int, worker_id: int) -> None:
+            state_db.record_upload(
+                f"b{batch}-w{worker_id}.nd2",
+                f"sha-b{batch}-w{worker_id}",
+                f"s3/b{batch}/w{worker_id}.nd2",
+                relative_path=f"b{batch}/w{worker_id}.nd2",
+                size_bytes=512,
+                mtime=1_700_000_000.0 + batch,
+            )
+
+        for batch in range(batches):
+            with ThreadPoolExecutor(max_workers=per_batch) as pool:
+                futures = [pool.submit(worker, batch, w) for w in range(per_batch)]
+                for f in futures:
+                    f.result()
+
+        gc.collect()
+
+        with state_db._connections_lock:
+            remaining = len(state_db._connections)
+
+        # Upper bound: the main-thread handle plus a small slack for
+        # any GC scheduling oddities. Concrete number doesn't matter
+        # as long as it isn't O(batches * per_batch) -- the pre-fix
+        # code would land at exactly 41 here.
+        assert remaining <= 2, (
+            f"Per-batch worker connections leaked: {remaining} live "
+            f"after {batches} batches of {per_batch} workers"
+        )

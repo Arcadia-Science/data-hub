@@ -567,3 +567,116 @@ class TestInitialScanBulkLoad:
         # And the actual scan output must still be correct: 25 enqueued,
         # 25 skipped (every other file was pre-recorded above).
         assert len(monitor._pending) == 25
+
+
+class TestIterDirEntriesErrorLogging:
+    """Per-entry ``OSError`` surfaces in the log instead of being dropped.
+
+    The walker previously swallowed ``OSError`` from
+    ``entry.is_dir()`` silently, which meant a permission-denied
+    subdirectory was invisible to operators: the scan never descended
+    into it and there was no log line to explain why. The fix logs a
+    warning per failing entry.
+    """
+
+    def test_scandir_failure_is_logged(
+        self,
+        state_db: StateDB,
+        watch_dir: Path,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Make ``os.scandir`` blow up on the watch directory so we hit
+        # the outer ``OSError`` branch. We restrict the failure to the
+        # exact path we care about so unrelated pytest internals
+        # (which also call scandir) keep working.
+        real_scandir = os.scandir
+
+        def failing_scandir(path: object) -> object:
+            if str(path) == str(watch_dir):
+                raise PermissionError(13, "Permission denied", str(watch_dir))
+            return real_scandir(path)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(os, "scandir", failing_scandir)
+
+        monitor = _make_monitor(watch_dir, state_db)
+        with caplog.at_level("WARNING", logger="data_hub_watcher.monitor"):
+            monitor._initial_scan()
+
+        msgs = [r.getMessage() for r in caplog.records]
+        assert any("scandir failed for" in m for m in msgs), (
+            f"Expected scandir-failure warning, got log records: {msgs}"
+        )
+
+    def test_is_dir_failure_is_logged_and_entry_skipped(
+        self,
+        state_db: StateDB,
+        watch_dir: Path,
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Create a real subdirectory inside ``watch_dir`` and rig the
+        # corresponding ``DirEntry.is_dir`` call to raise. We can't
+        # easily produce a real ``is_dir`` failure on a sane
+        # filesystem, so we wrap ``os.scandir`` to yield ``DirEntry``-
+        # alike objects that raise on ``is_dir()``.
+        bad_dir = watch_dir / "bad"
+        bad_dir.mkdir()
+        (watch_dir / "ok.nd2").write_bytes(b"x" * 8)
+
+        real_scandir = os.scandir
+
+        class _ExplodingEntry:
+            """Forwards everything to a real DirEntry except is_dir(), which raises."""
+
+            def __init__(self, real: os.DirEntry[str]) -> None:
+                self._real = real
+                self.name = real.name
+                self.path = real.path
+
+            def is_dir(self, *, follow_symlinks: bool = True) -> bool:
+                raise PermissionError(13, "is_dir denied", self.path)
+
+            def is_file(self, *, follow_symlinks: bool = True) -> bool:
+                return self._real.is_file(follow_symlinks=follow_symlinks)
+
+            def stat(self, *, follow_symlinks: bool = True) -> os.stat_result:
+                return self._real.stat(follow_symlinks=follow_symlinks)
+
+        class _PatchedScandirContext:
+            def __init__(self, root: str) -> None:
+                self._it = real_scandir(root)
+
+            def __enter__(self) -> object:
+                return self
+
+            def __exit__(self, *exc: object) -> None:
+                self._it.__exit__(*exc)  # type: ignore[arg-type]
+
+            def __iter__(self) -> object:
+                return self
+
+            def __next__(self) -> object:
+                entry = next(self._it)
+                # Wrap only the bad subdirectory; everything else
+                # passes through untouched so ``ok.nd2`` still enqueues.
+                if entry.name == "bad":
+                    return _ExplodingEntry(entry)
+                return entry
+
+        def patched_scandir(path: object) -> object:
+            return _PatchedScandirContext(str(path))
+
+        monkeypatch.setattr(os, "scandir", patched_scandir)
+
+        monitor = _make_monitor(watch_dir, state_db, recursive=True)
+        with caplog.at_level("WARNING", logger="data_hub_watcher.monitor"):
+            monitor._initial_scan()
+
+        msgs = [r.getMessage() for r in caplog.records]
+        assert any("is_dir() failed for" in m for m in msgs), (
+            f"Expected is_dir-failure warning, got log records: {msgs}"
+        )
+        # And the healthy peer file at the same level must still
+        # enqueue -- one bad subdirectory must not abort the scan.
+        assert len(monitor._pending) == 1

@@ -9,6 +9,7 @@ from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
+from requests.adapters import HTTPAdapter
 
 from data_hub_watcher.api_client import ApiError
 from data_hub_watcher.events import EventReporter
@@ -462,3 +463,128 @@ class TestUploadFilesParallelism:
     ) -> None:
         with pytest.raises(ValueError, match="upload_parallelism must be >= 1"):
             self._make_uploader(mock_client, state_db, tmp_path, parallelism=0)
+
+
+class TestS3SessionPoolSizing:
+    """The shared S3 session's urllib3 pool must scale with parallelism.
+
+    Default ``HTTPAdapter`` pool size is 10. With ``upload_parallelism``
+    above that, urllib3 starts discarding connections after each PUT --
+    every excess request opens a fresh TLS connection, defeating the
+    whole point of keeping a long-lived session. The fix mounts an
+    explicit adapter sized to the configured parallelism.
+    """
+
+    def _make_uploader_for_session_check(
+        self,
+        mock_client: MagicMock,
+        state_db: StateDB,
+        watch_dir: Path,
+        *,
+        parallelism: int,
+    ) -> Uploader:
+        return Uploader(
+            client=mock_client,
+            state_db=state_db,
+            event_reporter=MagicMock(spec=EventReporter),
+            counters=WatcherCounters(),
+            instrument_id="test-instrument",
+            watcher_id="watcher-123",
+            watch_directory=watch_dir,
+            upload_parallelism=parallelism,
+        )
+
+    @pytest.mark.parametrize("parallelism", [1, 4, 16, 32])
+    def test_pool_maxsize_matches_parallelism(
+        self,
+        mock_client: MagicMock,
+        state_db: StateDB,
+        tmp_path: Path,
+        parallelism: int,
+    ) -> None:
+        uploader = self._make_uploader_for_session_check(
+            mock_client, state_db, tmp_path, parallelism=parallelism
+        )
+        # ``Session.get_adapter`` returns the abstract ``_BaseAdapter``
+        # supertype; we mounted concrete ``HTTPAdapter`` instances so
+        # casting is safe and unblocks the ``.poolmanager`` access.
+        # Probe both schemes so the test catches a regression that
+        # only mounts one.
+        for scheme in ("https://", "http://"):
+            adapter = cast(HTTPAdapter, uploader._s3_session.get_adapter(f"{scheme}example.com"))
+            # urllib3 stores the per-pool kwargs (including
+            # ``maxsize``) on ``connection_pool_kw``; ``HTTPAdapter``
+            # populates it from its constructor args.
+            pool_kwargs = adapter.poolmanager.connection_pool_kw
+            assert pool_kwargs.get("maxsize") == parallelism, (
+                f"{scheme}: expected pool maxsize={parallelism}, got {pool_kwargs.get('maxsize')}"
+            )
+
+    def test_default_session_adapter_is_replaced(
+        self,
+        mock_client: MagicMock,
+        state_db: StateDB,
+        tmp_path: Path,
+    ) -> None:
+        """A high-parallelism uploader must not be using requests' stock 10-conn adapter."""
+        uploader = self._make_uploader_for_session_check(
+            mock_client, state_db, tmp_path, parallelism=24
+        )
+        adapter = cast(HTTPAdapter, uploader._s3_session.get_adapter("https://s3.example.com"))
+        assert adapter.poolmanager.connection_pool_kw["maxsize"] == 24
+
+
+class TestPollUploadQueueCounterLocking:
+    """Manual-mode poll failures must increment the shared counter under the lock.
+
+    The optimisation introduced a parallel-upload worker pool that
+    races the heartbeat thread to read/write ``_counters``. Routing
+    ``poll_upload_queue``'s error bumps through ``_bump_errors``
+    keeps every mutation point under ``_counters_lock`` and avoids a
+    silent torn-write on the integer field.
+    """
+
+    def test_api_error_bumps_via_helper(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+    ) -> None:
+        mock_client.get_upload_queue.side_effect = ApiError("ACL", status_code=403)
+
+        # Spy on the helper rather than the underlying integer so a
+        # future change that swaps the lock for atomics still passes
+        # without us re-writing the test.
+        with patch.object(uploader, "_bump_errors", wraps=uploader._bump_errors) as spy:
+            uploader.poll_upload_queue()
+
+        spy.assert_called_once()
+        assert uploader._counters.errors == 1
+
+    def test_missing_file_bumps_via_helper(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        from data_hub_watcher.models import UploadQueueFile, UploadQueueResponse
+
+        # Queue references a file that no longer exists on disk -- the
+        # manual-mode "Queued file missing" branch must increment the
+        # counter via the helper, same as the auto-mode upload path.
+        mock_client.get_upload_queue.return_value = UploadQueueResponse(
+            files=[
+                UploadQueueFile(
+                    id=1,
+                    instrument_id="test-instrument",
+                    run_id="RUN-X",
+                    filename="ghost.csv",
+                    relative_path="ghost.csv",
+                )
+            ]
+        )
+
+        with patch.object(uploader, "_bump_errors", wraps=uploader._bump_errors) as spy:
+            uploader.poll_upload_queue()
+
+        spy.assert_called_once()
+        assert uploader._counters.errors == 1

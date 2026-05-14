@@ -26,12 +26,32 @@ from __future__ import annotations
 import logging
 import sqlite3
 import threading
+import weakref
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+class _PerThreadHandle:
+    """Owns a single ``sqlite3.Connection`` for the thread that opened it.
+
+    Stored only in :class:`threading.local` so the holder is reachable
+    exclusively through the owning thread's per-thread storage. When
+    that thread terminates CPython clears its slice of the
+    ``threading.local`` dict, drops the last strong reference to the
+    holder, and the :func:`weakref.finalize` registered against it by
+    :meth:`StateDB._conn` fires -- closing the connection and removing
+    it from :attr:`StateDB._connections` so short-lived upload workers
+    don't accumulate sqlite handles for the lifetime of the watcher.
+    """
+
+    __slots__ = ("conn", "__weakref__")
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
 
 
 @dataclass
@@ -74,9 +94,14 @@ class StateDB:
         # across threads serialises every call on Python's lock and
         # nullifies WAL's concurrent-read benefit.
         self._local = threading.local()
-        # All opened connections, so ``close()`` can reach handles that
-        # belong to threads other than the closer.
-        self._connections: list[sqlite3.Connection] = []
+        # Live per-thread connections, used so ``close()`` can reach
+        # handles that belong to threads other than the closer. Stored
+        # as a ``set`` (not a list) for O(1) removal by the per-thread
+        # weakref finaliser when an upload-worker thread dies; without
+        # that pruning, every short-lived ThreadPoolExecutor worker
+        # would leak an open sqlite handle for the lifetime of the
+        # watcher process.
+        self._connections: set[sqlite3.Connection] = set()
         self._connections_lock = threading.Lock()
         # Serialises concurrent writers from this Python process so we
         # never surface ``database is locked`` to callers. SQLite itself
@@ -103,9 +128,9 @@ class StateDB:
         which is the behavioural difference -- but every call site only
         used it on the main thread, so the change is invisible.
         """
-        conn = getattr(self._local, "conn", None)
-        if conn is not None:
-            return conn
+        holder = getattr(self._local, "holder", None)
+        if holder is not None:
+            return holder.conn
 
         # ``check_same_thread=False`` is no longer strictly needed (each
         # connection is used by exactly one thread) but keeping it set
@@ -133,10 +158,43 @@ class StateDB:
         # bypasses the lock (e.g. via the ``_conn`` property in a test).
         conn.execute("PRAGMA busy_timeout=5000")
 
-        self._local.conn = conn
+        # Hold the handle behind a per-thread wrapper so the finaliser
+        # registered just below has something to watch other than the
+        # connection itself -- registering finalize() on the connection
+        # would race with ``sqlite3.Connection.__del__`` and confuse the
+        # "already-closed" detection.
+        holder = _PerThreadHandle(conn)
+        self._local.holder = holder
         with self._connections_lock:
-            self._connections.append(conn)
+            self._connections.add(conn)
+        # When this thread terminates, CPython clears the per-thread
+        # slice of ``self._local``, the holder loses its last strong
+        # reference, and this finaliser closes the connection and
+        # removes it from ``_connections``. The result: an upload
+        # ThreadPoolExecutor that spawns -> dies -> spawns again on
+        # every batch no longer accumulates a sqlite handle per worker
+        # per batch for the watcher's lifetime.
+        weakref.finalize(holder, self._reap_connection, conn)
         return conn
+
+    def _reap_connection(self, conn: sqlite3.Connection) -> None:
+        """Drop *conn* from the live set and best-effort close it.
+
+        Invoked from a :func:`weakref.finalize` callback when the
+        owning thread's :class:`threading.local` storage is reclaimed.
+        Idempotent against an explicit :meth:`close` -- if the
+        connection has already been closed there, ``conn.close()`` is
+        a no-op and the ``discard`` simply finds nothing to remove.
+        """
+        with self._connections_lock:
+            self._connections.discard(conn)
+        try:
+            conn.close()
+        except sqlite3.Error:
+            # Already closed (e.g. close() ran first) or otherwise in a
+            # bad state. We've removed it from the live set so there is
+            # nothing left to clean up.
+            pass
 
     def _create_tables(self) -> None:
         with self._write_lock:
@@ -451,7 +509,7 @@ class StateDB:
     def close(self) -> None:
         """Close every per-thread sqlite3 handle opened by this StateDB.
 
-        Safe to call from any thread: we snapshot the connection list
+        Safe to call from any thread: we snapshot the connection set
         under ``_connections_lock`` and close each one outside the
         lock. Connections opened after this call (e.g. a stray late
         write attempt) will simply re-open against the file -- there
@@ -470,8 +528,10 @@ class StateDB:
                 # or in a bad state, log and move on so we still close
                 # the rest. Re-raising would leave handles dangling.
                 logger.warning("Error closing StateDB connection: %s", exc)
-        # Drop the thread-local handle so any subsequent _conn access
+        # Drop the thread-local holder so any subsequent _conn access
         # from this thread re-initialises rather than reusing a closed
-        # connection.
-        if hasattr(self._local, "conn"):
-            del self._local.conn
+        # connection. The other threads' holders (and their dead
+        # connections) are reaped lazily by the per-thread finaliser
+        # registered in ``_conn``.
+        if hasattr(self._local, "holder"):
+            del self._local.holder

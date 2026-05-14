@@ -202,7 +202,9 @@ class FileMonitor:
 
         ``OSError`` from a deleted/unreadable directory is logged and
         skipped so a single transient permission glitch doesn't
-        abort the whole scan.
+        abort the whole scan. Per-entry ``is_dir`` failures are also
+        logged: a silently-skipped subdirectory means the scan never
+        descends into it, which can mask whole runs from the watcher.
         """
         stack: list[Path] = [root]
         while stack:
@@ -216,10 +218,21 @@ class FileMonitor:
                 for entry in it:
                     if self._recursive:
                         try:
-                            if entry.is_dir(follow_symlinks=False):
-                                stack.append(Path(entry.path))
-                                continue
-                        except OSError:
+                            is_dir = entry.is_dir(follow_symlinks=False)
+                        except OSError as exc:
+                            # Don't silently drop: an unreadable
+                            # subdirectory here means we'll never
+                            # descend into it and the operator has no
+                            # way to find out without comparing
+                            # uploads against on-disk reality.
+                            logger.warning(
+                                "is_dir() failed for %s: %s; skipping entry",
+                                entry.path,
+                                exc,
+                            )
+                            continue
+                        if is_dir:
+                            stack.append(Path(entry.path))
                             continue
                     yield entry
 
