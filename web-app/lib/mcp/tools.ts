@@ -43,6 +43,20 @@ function errorResult(message: string) {
   };
 }
 
+// Guard for mutating MCP tools. The MCP route's verifyToken translates PAT
+// scopes into the SDK-facing `["read", "write"]` vocabulary; this helper
+// short-circuits with a clear error result when the caller's PAT lacks
+// `mcp:write`. Tools that mutate state (claim_run, unclaim_run,
+// reprocess_file) call this before doing any DB work.
+function requireMcpScope(
+  authInfo: AuthInfo | undefined,
+  required: "read" | "write"
+) {
+  const scopes = authInfo?.scopes ?? [];
+  if (scopes.includes(required)) return null;
+  return errorResult(`Token is missing required MCP scope: ${required}`);
+}
+
 type AttributionResolution =
   | { ok: true; userId: string; runUuid: string }
   | { ok: false; error: ReturnType<typeof errorResult> };
@@ -417,7 +431,9 @@ export function registerTools(server: McpServer) {
       // irreversible from the tool's perspective and clients should confirm.
       annotations: { readOnlyHint: false, destructiveHint: true },
     },
-    async ({ fileId }) => {
+    async ({ fileId }, { authInfo }) => {
+      const scopeError = requireMcpScope(authInfo, "write");
+      if (scopeError) return scopeError;
       const result = await reprocessFile(fileId);
       if (!result.ok) {
         return errorResult(`[${result.code}] ${result.message}`);
@@ -479,6 +495,8 @@ export function registerTools(server: McpServer) {
       },
     },
     async ({ instrumentId, runId }, { authInfo }) => {
+      const scopeError = requireMcpScope(authInfo, "write");
+      if (scopeError) return scopeError;
       const resolved = await resolveAttributionTarget(
         authInfo,
         instrumentId,
@@ -519,6 +537,8 @@ export function registerTools(server: McpServer) {
       },
     },
     async ({ instrumentId, runId }, { authInfo }) => {
+      const scopeError = requireMcpScope(authInfo, "write");
+      if (scopeError) return scopeError;
       const resolved = await resolveAttributionTarget(
         authInfo,
         instrumentId,

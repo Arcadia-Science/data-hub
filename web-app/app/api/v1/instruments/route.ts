@@ -5,6 +5,7 @@ import {
   UNAUTHORIZED,
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
+import { requireScope } from "@/lib/api/scopes";
 import { isValidKebabCase } from "@/lib/api/validators";
 import { db } from "@/lib/db";
 import {
@@ -20,6 +21,8 @@ export async function GET(request: NextRequest) {
   if (!authResult) {
     return apiError(401, UNAUTHORIZED, "Authentication required");
   }
+  const scopeError = requireScope(authResult, "instruments:read");
+  if (scopeError) return scopeError;
 
   const rows = await db
     .select({
@@ -38,6 +41,8 @@ export async function POST(request: NextRequest) {
   if (!authResult) {
     return apiError(401, UNAUTHORIZED, "Authentication required");
   }
+  const scopeError = requireScope(authResult, "instruments:write");
+  if (scopeError) return scopeError;
 
   let body: { id?: string; display_name?: string; instrument_type?: string };
   try {

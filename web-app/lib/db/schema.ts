@@ -158,6 +158,15 @@ export const personalAccessTokens = pgTable(
     // First 8 characters of the token, stored for display purposes
     // (e.g., `dhub_a1b2...`).
     tokenPrefix: text("token_prefix").notNull(),
+    // Permission scopes granted to this token (e.g., `runs:read`,
+    // `files:write`). The wildcard `*` matches everything and is used as
+    // the backfill value for pre-scope tokens. New tokens created via the
+    // API always carry an explicit, non-wildcard scope list. Enforcement
+    // happens in the auth middleware via `requireScope`.
+    scopes: text("scopes")
+      .array()
+      .notNull()
+      .default(sql`ARRAY['*']::text[]`),
     // Updated on each API call authenticated with this token.
     lastUsedAt: timestamp("last_used_at", {
       withTimezone: true,

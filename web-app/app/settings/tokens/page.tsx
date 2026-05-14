@@ -54,6 +54,34 @@ function toInitials(displayName: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
+// Render a token's scopes as a compact column. `["*"]` is the backfill
+// wildcard — render it as a single "Full access" pill so legacy tokens
+// stand out at a glance, since they will eventually be rotated to
+// least-privilege scopes. Anything else is rendered one badge per scope,
+// grouped by resource so reads and writes for the same noun sit next to
+// each other.
+function TokenScopeBadges({ scopes }: { scopes: string[] }) {
+  if (scopes.length === 1 && scopes[0] === "*") {
+    return (
+      <Badge variant="secondary" className="text-xs">
+        Full access
+      </Badge>
+    );
+  }
+  // Stable sort grouped by resource: scopes within the same resource share
+  // a prefix, so a plain lexicographic sort already groups them.
+  const sorted = [...scopes].sort();
+  return (
+    <div className="flex flex-wrap gap-1">
+      {sorted.map((scope) => (
+        <Badge key={scope} variant="secondary" className="font-mono text-xs">
+          {scope}
+        </Badge>
+      ))}
+    </div>
+  );
+}
+
 export default async function TokensPage() {
   // This is an internal-tool settings page; we intentionally show every PAT
   // across the workspace so admins can audit them. Auth is enforced by the
@@ -63,6 +91,7 @@ export default async function TokensPage() {
       id: personalAccessTokens.id,
       name: personalAccessTokens.name,
       tokenPrefix: personalAccessTokens.tokenPrefix,
+      scopes: personalAccessTokens.scopes,
       lastUsedAt: personalAccessTokens.lastUsedAt,
       expiresAt: personalAccessTokens.expiresAt,
       createdAt: personalAccessTokens.createdAt,
@@ -113,6 +142,7 @@ export default async function TokensPage() {
                   <TableHead>Name</TableHead>
                   <TableHead>User</TableHead>
                   <TableHead>Token</TableHead>
+                  <TableHead>Scopes</TableHead>
                   <TableHead>Last used</TableHead>
                   <TableHead>Expires</TableHead>
                   <TableHead>Created</TableHead>
@@ -155,6 +185,9 @@ export default async function TokensPage() {
                         >
                           {token.tokenPrefix}...
                         </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <TokenScopeBadges scopes={token.scopes} />
                       </TableCell>
                       <TableCell
                         className="text-muted-foreground"

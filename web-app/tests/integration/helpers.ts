@@ -86,7 +86,12 @@ function getTokenPrefix(plaintext: string): string {
 // token here and pass it to both the DB (hashed) and the test (plaintext).
 //
 // Pass `expiresAt` to test expired-token rejection. Defaults to no expiry.
-export async function seedTestUser(options?: { expiresAt?: Date | null }) {
+// Pass `scopes` to test scope enforcement; defaults to `["*"]` so every
+// existing test (which expects full access) keeps passing.
+export async function seedTestUser(options?: {
+  expiresAt?: Date | null;
+  scopes?: string[];
+}) {
   const db = getTestDb();
 
   const userId = crypto.randomUUID();
@@ -102,6 +107,7 @@ export async function seedTestUser(options?: { expiresAt?: Date | null }) {
     name: "integration-test-token",
     tokenHash: hashToken(plaintext),
     tokenPrefix: getTokenPrefix(plaintext),
+    scopes: options?.scopes ?? ["*"],
     expiresAt: options?.expiresAt !== undefined ? options.expiresAt : null,
   });
 
