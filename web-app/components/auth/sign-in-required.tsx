@@ -20,7 +20,7 @@ type SignInRequiredProps = {
  * Rendered in place of a signed-in page's body when there's no session.
  *
  * The page's `metadata` / `generateMetadata` is unaffected, so unfurlers
- * (Slackbot, NotionBot, Twitterbot, etc.) still see the real `<title>` /
+ * (Slackbot, NotionBot, Discordbot, etc.) still see the real `<title>` /
  * `og:title` / `og:description` for the route. Real users land on a clean
  * sign-in CTA that returns them to the original URL afterwards.
  *

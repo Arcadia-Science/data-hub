@@ -27,10 +27,35 @@ const fontMono = Geist_Mono({
   variable: "--font-mono",
 });
 
+// `metadataBase` lets Next resolve relative URLs in `openGraph.images` etc.
+// into absolute URLs that unfurlers can fetch. Prefer the current
+// deployment's URL (set on every Vercel build) so preview deployments
+// resolve to themselves; fall back to localhost for `next dev`.
+const metadataBaseUrl = process.env.VERCEL_URL
+  ? new URL(`https://${process.env.VERCEL_URL}`)
+  : new URL("http://localhost:3000");
+
 export const metadata: Metadata = {
+  metadataBase: metadataBaseUrl,
   title: {
     template: "%s | Data Hub",
     default: "Data Hub",
+  },
+  // OG defaults inherited by every page. We intentionally don't set
+  // `openGraph.title` here because per-page `openGraph.title` strings
+  // (set on instrument + run detail pages) should appear verbatim in
+  // unfurl cards — adding a template at root would tack " | Data Hub"
+  // onto every detail title and clutter the preview. `siteName` is
+  // shown separately by Slack/Notion next to the favicon, which is
+  // enough branding for the card header.
+  openGraph: {
+    siteName: "Data Hub",
+    type: "website",
+    locale: "en_US",
+    images: [{ url: "/images/data-hub-logo.svg", alt: "Data Hub" }],
+  },
+  twitter: {
+    card: "summary",
   },
   // Data Hub is an internal tool; we never want it indexed. The same
   // intent is reinforced by `app/robots.ts` (robots.txt) and an

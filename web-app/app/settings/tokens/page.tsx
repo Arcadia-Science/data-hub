@@ -22,8 +22,13 @@ import { desc, eq } from "drizzle-orm";
 import { KeyRound } from "lucide-react";
 import type { Metadata } from "next/types";
 
+const description = "Personal access tokens for the Data Hub API.";
+
 export const metadata: Metadata = {
   title: "Access Tokens",
+  description,
+  openGraph: { title: "Access Tokens", description },
+  twitter: { title: "Access Tokens", description },
 };
 
 // Mirrors the deterministic palette used by RanByCell so the same user gets

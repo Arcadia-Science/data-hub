@@ -39,7 +39,7 @@ export function AppSidebar({
             >
               <Link href="/">
                 <Image
-                  src="/data-hub-logo.svg"
+                  src="/images/data-hub-logo.svg"
                   alt="Data Hub"
                   width={26}
                   height={26}

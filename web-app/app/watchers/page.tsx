@@ -1,16 +1,27 @@
+import { SignInRequired } from "@/components/auth/sign-in-required";
 import { WatchersView } from "@/components/watchers/watchers-view";
 import { getWatcherList } from "@/lib/api/watchers";
 import { auth } from "@/lib/auth";
-import { redirect } from "next/navigation";
 import type { Metadata } from "next/types";
+
+const description = "Watcher agents reporting into Data Hub.";
 
 export const metadata: Metadata = {
   title: "Watchers",
+  description,
+  openGraph: { title: "Watchers", description },
+  twitter: { title: "Watchers", description },
 };
 
 export default async function WatchersPage() {
   const session = await auth();
-  if (!session) redirect("/login");
+  if (!session) {
+    return (
+      <SignInRequired callbackUrl="/watchers">
+        Sign in to view watchers.
+      </SignInRequired>
+    );
+  }
 
   // Fetch all watchers in a single query and partition client-side. The total
   // count is small (typically <50), so this avoids two separate DB round-trips

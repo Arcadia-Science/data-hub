@@ -19,8 +19,16 @@ import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import type { Metadata } from "next/types";
 
+// `default: "Data Hub"` on the root metadata template already renders
+// `<title>Data Hub</title>` here, so we skip an explicit `title` and
+// override only the openGraph / twitter fields that need a strong
+// `og:title` for link previews.
+const description = "Instruments, runs, and watchers at Arcadia Science.";
+
 export const metadata: Metadata = {
-  title: "Data Hub",
+  description,
+  openGraph: { title: "Data Hub", description },
+  twitter: { title: "Data Hub", description },
 };
 
 function last24hISOString(): string {

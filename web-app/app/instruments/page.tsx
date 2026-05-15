@@ -7,8 +7,13 @@ import { getInstrumentListWithCounts } from "@/lib/api/instruments";
 import { auth } from "@/lib/auth";
 import type { Metadata } from "next/types";
 
+const description = "Instruments connected to Data Hub.";
+
 export const metadata: Metadata = {
   title: "Instruments",
+  description,
+  openGraph: { title: "Instruments", description },
+  twitter: { title: "Instruments", description },
 };
 
 export default async function InstrumentsPage() {
