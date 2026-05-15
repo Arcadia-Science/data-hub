@@ -11,6 +11,7 @@ import {
 import { getInstrumentById } from "@/lib/api/instruments";
 import { listCommentsForRun } from "@/lib/api/run-comments";
 import { auth } from "@/lib/auth";
+import { formatDate } from "@/lib/date";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next/types";
 
@@ -22,10 +23,27 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { instrumentId, runId } = await params;
   const run = await lookupRunByNaturalKey(instrumentId, runId);
   if (!run) return { title: "Run Not Found" };
-  const title = `Run: ${run.runId} | ${run.instrumentDisplayName}`;
-  // Both halves of the natural key are already in the URL; description
-  // just restates them in a sentence so unfurls read naturally.
-  const description = `Run ${run.runId} on ${run.instrumentDisplayName}.`;
+
+  const title = `${run.runId} | ${run.instrumentDisplayName}`;
+
+  // Surface the on-instrument acquisition time when known and label it
+  // "Acquired" to match the run header. Older runs and lambda-only paths
+  // don't always have `acquiredAt`, so fall back to `createdAt` and label
+  // it "Reported" — same vocabulary as the visible header.
+  const dateLabel = run.acquiredAt ? "Acquired" : "Reported";
+  const effectiveDate = run.acquiredAt ?? run.createdAt;
+
+  // `getRunFiles` returns every file row (including soft-deleted and
+  // lambda-produced artifacts). The unfurl description only counts the
+  // active raw uploads so deleted files don't inflate the headline.
+  const allFiles = await getRunFiles(run.id);
+  const rawFileCount = allFiles.filter(
+    (f) => f.category === "raw" && f.deletedAt === null
+  ).length;
+  const fileLabel =
+    rawFileCount === 1 ? "1 raw data file" : `${rawFileCount} raw data files`;
+
+  const description = `${dateLabel} ${formatDate(effectiveDate)} \u00b7 ${fileLabel}`;
   return {
     title,
     description,

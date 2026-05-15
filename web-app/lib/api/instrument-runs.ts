@@ -493,13 +493,18 @@ export type RunListRow = Awaited<
 // Per-run file list — all files (including soft-deleted) ordered by creation.
 // ---------------------------------------------------------------------------
 
-export async function getRunFiles(runInternalId: string): Promise<RunFile[]> {
+// Wrapped in `cache()` so the run detail page's `generateMetadata` (which
+// needs the raw-file count) and the page component (which renders the full
+// file list) share a single DB hit per request.
+export const getRunFiles = cache(async function getRunFiles(
+  runInternalId: string
+): Promise<RunFile[]> {
   return db
     .select()
     .from(files)
     .where(eq(files.instrumentRunId, runInternalId))
     .orderBy(files.createdAt);
-}
+});
 
 // ---------------------------------------------------------------------------
 // Per-run processed CSV data — fetches CSV files from S3 and parses them.
