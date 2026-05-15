@@ -1,12 +1,6 @@
-import { authenticateRequest } from "@/lib/api/auth";
-import {
-  apiError,
-  NOT_FOUND,
-  UNAUTHORIZED,
-  VALIDATION_ERROR,
-} from "@/lib/api/errors";
+import { authorize } from "@/lib/api/auth";
+import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { buildRunListQuery, parseAcquiredAt } from "@/lib/api/instrument-runs";
-import { requireScope } from "@/lib/api/scopes";
 import { parseIntParam } from "@/lib/api/validators";
 import { db } from "@/lib/db";
 import { files, instrumentRuns, instruments, watchers } from "@/lib/db/schema";
@@ -30,12 +24,8 @@ type RouteContext = {
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authenticateRequest(request);
-  if (!authResult) {
-    return apiError(401, UNAUTHORIZED, "Authentication required");
-  }
-  const scopeError = requireScope(authResult, "runs:write");
-  if (scopeError) return scopeError;
+  const authResult = await authorize(request, "runs:write");
+  if (authResult instanceof Response) return authResult;
 
   const { instrumentId } = await params;
 
@@ -222,12 +212,8 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 // ---------------------------------------------------------------------------
 
 export async function GET(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authenticateRequest(request);
-  if (!authResult) {
-    return apiError(401, UNAUTHORIZED, "Authentication required");
-  }
-  const scopeError = requireScope(authResult, "runs:read");
-  if (scopeError) return scopeError;
+  const authResult = await authorize(request, "runs:read");
+  if (authResult instanceof Response) return authResult;
 
   const { instrumentId } = await params;
 

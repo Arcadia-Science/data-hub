@@ -1,14 +1,12 @@
-import { authenticateRequest } from "@/lib/api/auth";
+import { authorize } from "@/lib/api/auth";
 import {
   apiError,
   CONFLICT,
   NOT_FOUND,
-  UNAUTHORIZED,
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { createComment, listCommentsForRun } from "@/lib/api/run-comments";
-import { requireScope } from "@/lib/api/scopes";
 import type { NextRequest } from "next/server";
 
 type RouteContext = {
@@ -27,12 +25,8 @@ const MAX_BODY_LENGTH = 10_000;
 // ---------------------------------------------------------------------------
 
 export async function GET(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authenticateRequest(request);
-  if (!authResult) {
-    return apiError(401, UNAUTHORIZED, "Authentication required");
-  }
-  const scopeError = requireScope(authResult, "runs:read");
-  if (scopeError) return scopeError;
+  const authResult = await authorize(request, "runs:read");
+  if (authResult instanceof Response) return authResult;
 
   const { instrumentId, runId } = await params;
   const run = await lookupRunByNaturalKey(instrumentId, runId);
@@ -57,12 +51,8 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authenticateRequest(request);
-  if (!authResult) {
-    return apiError(401, UNAUTHORIZED, "Authentication required");
-  }
-  const scopeError = requireScope(authResult, "runs:write");
-  if (scopeError) return scopeError;
+  const authResult = await authorize(request, "runs:write");
+  if (authResult instanceof Response) return authResult;
 
   const { instrumentId, runId } = await params;
   const run = await lookupRunByNaturalKey(instrumentId, runId);

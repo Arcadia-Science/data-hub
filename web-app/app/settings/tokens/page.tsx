@@ -54,16 +54,32 @@ function toInitials(displayName: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-// Render a token's scopes as a compact column. Three branches:
+// Render a token's scopes as a compact column. Four branches:
 //
-//   1. `["*"]` (backfill wildcard) → single "Full access" pill so legacy
+//   1. `[]` → "No scopes" pill. The DB column is non-null with a default
+//      of `['*']` and the create-token form rejects empty arrays, so this
+//      shouldn't appear in practice — but rendering an explicit empty
+//      state here is much clearer than a silently-empty cell if it ever
+//      does happen (e.g. a manual SQL update).
+//   2. `["*"]` (backfill wildcard) → single "Full access" pill so legacy
 //      tokens stand out at a glance.
-//   2. Single explicit scope → that scope as a badge, no tooltip needed
+//   3. Single explicit scope → that scope as a badge, no tooltip needed
 //      because everything is already visible.
-//   3. Multiple explicit scopes → first scope (sorted) plus a "+N"
+//   4. Multiple explicit scopes → first scope (sorted) plus a "+N"
 //      counter badge. Hovering the cell reveals the full list in a
 //      tooltip so the table stays scannable on tokens with many scopes.
 function TokenScopeBadges({ scopes }: { scopes: string[] }) {
+  if (scopes.length === 0) {
+    return (
+      <Badge
+        variant="secondary"
+        className="text-xs text-muted-foreground italic"
+      >
+        No scopes
+      </Badge>
+    );
+  }
+
   if (scopes.length === 1 && scopes[0] === "*") {
     return (
       <Badge variant="secondary" className="text-xs">
@@ -77,15 +93,11 @@ function TokenScopeBadges({ scopes }: { scopes: string[] }) {
   // entry in the sorted list is the one shown in the collapsed cell.
   const sorted = [...scopes].sort();
 
-  if (sorted.length <= 1) {
+  if (sorted.length === 1) {
     return (
-      <div className="flex flex-wrap gap-1">
-        {sorted.map((scope) => (
-          <Badge key={scope} variant="secondary" className="font-mono text-xs">
-            {scope}
-          </Badge>
-        ))}
-      </div>
+      <Badge variant="secondary" className="font-mono text-xs">
+        {sorted[0]}
+      </Badge>
     );
   }
 

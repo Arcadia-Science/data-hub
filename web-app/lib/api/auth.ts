@@ -1,3 +1,5 @@
+import { apiError, UNAUTHORIZED } from "@/lib/api/errors";
+import { requireScope, type Scope } from "@/lib/api/scopes";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { personalAccessTokens } from "@/lib/db/schema";
@@ -95,4 +97,22 @@ export async function requireSession(): Promise<AuthResult | null> {
     return { userId: session.user.id, authMethod: "session", scopes: ["*"] };
   }
   return null;
+}
+
+// Authenticates a v1 route request and checks for the given scope. Returns
+// the resolved `AuthResult` on success, or a `Response` (401 if missing
+// auth, 403 if the token lacks the scope) the handler should return. Not
+// for session-only routes like `/api/v1/tokens` — those still use
+// `requireSession()` directly.
+export async function authorize(
+  request: NextRequest,
+  scope: Scope
+): Promise<AuthResult | Response> {
+  const auth = await authenticateRequest(request);
+  if (!auth) {
+    return apiError(401, UNAUTHORIZED, "Authentication required");
+  }
+  const scopeError = requireScope(auth, scope);
+  if (scopeError) return scopeError;
+  return auth;
 }

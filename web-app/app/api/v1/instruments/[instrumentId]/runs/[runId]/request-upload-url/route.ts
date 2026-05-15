@@ -1,14 +1,12 @@
-import { authenticateRequest } from "@/lib/api/auth";
+import { authorize } from "@/lib/api/auth";
 import {
   apiError,
   CONFLICT,
   INTERNAL_ERROR,
   NOT_FOUND,
-  UNAUTHORIZED,
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
-import { requireScope } from "@/lib/api/scopes";
 import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
 import { getPresignedUploadUrl, getS3RawDataBucket } from "@/lib/s3";
@@ -38,12 +36,8 @@ const UPLOADED_OR_LATER_STATUSES = new Set([
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authenticateRequest(request);
-  if (!authResult) {
-    return apiError(401, UNAUTHORIZED, "Authentication required");
-  }
-  const scopeError = requireScope(authResult, "runs:write");
-  if (scopeError) return scopeError;
+  const authResult = await authorize(request, "runs:write");
+  if (authResult instanceof Response) return authResult;
 
   const { instrumentId, runId } = await params;
   const run = await lookupRunByNaturalKey(instrumentId, runId);

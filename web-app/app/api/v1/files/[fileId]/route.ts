@@ -1,12 +1,10 @@
-import { authenticateRequest } from "@/lib/api/auth";
+import { authorize } from "@/lib/api/auth";
 import {
   apiError,
   CONFLICT,
   NOT_FOUND,
-  UNAUTHORIZED,
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
-import { requireScope } from "@/lib/api/scopes";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -41,12 +39,8 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
 // ---------------------------------------------------------------------------
 
 export async function PATCH(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authenticateRequest(request);
-  if (!authResult) {
-    return apiError(401, UNAUTHORIZED, "Authentication required");
-  }
-  const scopeError = requireScope(authResult, "files:write");
-  if (scopeError) return scopeError;
+  const authResult = await authorize(request, "files:write");
+  if (authResult instanceof Response) return authResult;
 
   const { fileId } = await params;
   const numericId = parseInt(fileId, 10);
@@ -186,12 +180,8 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 // ---------------------------------------------------------------------------
 
 export async function DELETE(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authenticateRequest(request);
-  if (!authResult) {
-    return apiError(401, UNAUTHORIZED, "Authentication required");
-  }
-  const scopeError = requireScope(authResult, "files:write");
-  if (scopeError) return scopeError;
+  const authResult = await authorize(request, "files:write");
+  if (authResult instanceof Response) return authResult;
 
   const { fileId } = await params;
   const numericId = parseInt(fileId, 10);

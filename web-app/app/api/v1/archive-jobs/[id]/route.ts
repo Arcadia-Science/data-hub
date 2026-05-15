@@ -1,11 +1,5 @@
-import { authenticateRequest } from "@/lib/api/auth";
-import {
-  apiError,
-  NOT_FOUND,
-  UNAUTHORIZED,
-  VALIDATION_ERROR,
-} from "@/lib/api/errors";
-import { requireScope } from "@/lib/api/scopes";
+import { authorize } from "@/lib/api/auth";
+import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { isValidUUID } from "@/lib/api/validators";
 import { db } from "@/lib/db";
 import { archiveJobs } from "@/lib/db/schema";
@@ -46,12 +40,8 @@ type PatchBody = {
 };
 
 export async function PATCH(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authenticateRequest(request);
-  if (!authResult) {
-    return apiError(401, UNAUTHORIZED, "Authentication required");
-  }
-  const scopeError = requireScope(authResult, "archive-jobs:write");
-  if (scopeError) return scopeError;
+  const authResult = await authorize(request, "archive-jobs:write");
+  if (authResult instanceof Response) return authResult;
 
   const { id } = await params;
   if (!isValidUUID(id)) {

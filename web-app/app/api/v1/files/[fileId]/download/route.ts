@@ -1,11 +1,5 @@
-import { authenticateRequest } from "@/lib/api/auth";
-import {
-  apiError,
-  NOT_FOUND,
-  UNAUTHORIZED,
-  VALIDATION_ERROR,
-} from "@/lib/api/errors";
-import { requireScope } from "@/lib/api/scopes";
+import { authorize } from "@/lib/api/auth";
+import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 import { getPresignedDownloadUrl } from "@/lib/s3";
@@ -25,12 +19,8 @@ type RouteContext = {
 // ---------------------------------------------------------------------------
 
 export async function GET(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authenticateRequest(request);
-  if (!authResult) {
-    return apiError(401, UNAUTHORIZED, "Authentication required");
-  }
-  const scopeError = requireScope(authResult, "files:read");
-  if (scopeError) return scopeError;
+  const authResult = await authorize(request, "files:read");
+  if (authResult instanceof Response) return authResult;
 
   const { fileId } = await params;
   const numericId = parseInt(fileId, 10);

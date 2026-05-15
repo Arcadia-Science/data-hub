@@ -1,7 +1,6 @@
-import { authenticateRequest } from "@/lib/api/auth";
-import { apiError, UNAUTHORIZED, VALIDATION_ERROR } from "@/lib/api/errors";
+import { authorize } from "@/lib/api/auth";
+import { apiError, VALIDATION_ERROR } from "@/lib/api/errors";
 import { reprocessFile } from "@/lib/api/file-reprocessing";
-import { requireScope } from "@/lib/api/scopes";
 import type { NextRequest } from "next/server";
 
 type RouteContext = {
@@ -18,12 +17,8 @@ type RouteContext = {
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authenticateRequest(request);
-  if (!authResult) {
-    return apiError(401, UNAUTHORIZED, "Authentication required");
-  }
-  const scopeError = requireScope(authResult, "files:write");
-  if (scopeError) return scopeError;
+  const authResult = await authorize(request, "files:write");
+  if (authResult instanceof Response) return authResult;
 
   const { fileId } = await params;
   const numericId = parseInt(fileId, 10);
