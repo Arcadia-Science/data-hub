@@ -1,3 +1,4 @@
+import { SignInRequired } from "@/components/auth/sign-in-required";
 import { RunAttributionsSection } from "@/components/runs/run-attributions-section";
 import { RunCommentsSection } from "@/components/runs/run-comments-section";
 import { RunDetailVariant } from "@/components/runs/variants";
@@ -10,7 +11,7 @@ import {
 import { getInstrumentById } from "@/lib/api/instruments";
 import { listCommentsForRun } from "@/lib/api/run-comments";
 import { auth } from "@/lib/auth";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import type { Metadata } from "next/types";
 
 type Props = {
@@ -21,16 +22,34 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { instrumentId, runId } = await params;
   const run = await lookupRunByNaturalKey(instrumentId, runId);
   if (!run) return { title: "Run Not Found" };
+  const title = `Run: ${run.runId} | ${run.instrumentDisplayName}`;
+  // Both halves of the natural key are already in the URL; description
+  // just restates them in a sentence so unfurls read naturally.
+  const description = `Run ${run.runId} on ${run.instrumentDisplayName}.`;
   return {
-    title: `Run: ${run.runId} | ${run.instrumentDisplayName}`,
+    title,
+    description,
+    openGraph: { title, description, type: "article" },
+    twitter: { card: "summary", title, description },
   };
 }
 
 export default async function RunDetailPage({ params }: Props) {
   const session = await auth();
-  if (!session) redirect("/login");
-
   const { instrumentId, runId } = await params;
+
+  // The route is publicly reachable so Slack/Notion unfurlers can read the
+  // run + instrument title from `generateMetadata`. Humans without a
+  // session see a sign-in CTA that returns them here afterwards.
+  if (!session) {
+    return (
+      <SignInRequired
+        callbackUrl={`/instruments/${instrumentId}/runs/${runId}`}
+      >
+        Sign in to view this run.
+      </SignInRequired>
+    );
+  }
 
   const run = await lookupRunByNaturalKey(instrumentId, runId);
   if (!run) notFound();

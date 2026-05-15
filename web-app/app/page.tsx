@@ -1,3 +1,4 @@
+import { SignInRequired } from "@/components/auth/sign-in-required";
 import { DashboardStatsCards } from "@/components/dashboard/dashboard-stats";
 import { RunsTable } from "@/components/dashboard/runs-table";
 import { RunsToolbar } from "@/components/dashboard/runs-toolbar";
@@ -16,7 +17,6 @@ import { auth } from "@/lib/auth";
 import { dashboardParamsCache, hasActiveFilters } from "@/lib/search-params";
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import type { Metadata } from "next/types";
 
 export const metadata: Metadata = {
@@ -33,7 +33,17 @@ export default async function DashboardPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const session = await auth();
-  if (!session) redirect("/login");
+  // Render the page metadata (title) for unauthenticated visitors so links
+  // shared into Notion / Slack still unfurl with a useful title; show a
+  // sign-in CTA in the body instead of leaking data. Real users come back
+  // here after the Google flow via `callbackUrl`.
+  if (!session) {
+    return (
+      <SignInRequired callbackUrl="/">
+        Sign in to view your dashboard.
+      </SignInRequired>
+    );
+  }
 
   const params = dashboardParamsCache.parse(await searchParams);
 

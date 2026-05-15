@@ -1,3 +1,4 @@
+import { SignInRequired } from "@/components/auth/sign-in-required";
 import { InstrumentHeader } from "@/components/instruments/instrument-header";
 import { InstrumentRunsToolbar } from "@/components/instruments/instrument-runs-toolbar";
 import {
@@ -27,7 +28,7 @@ import {
 import { getInstrumentById } from "@/lib/api/instruments";
 import { auth } from "@/lib/auth";
 import { instrumentDetailParamsCache } from "@/lib/search-params";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import type { Metadata } from "next/types";
 
 type Props = {
@@ -38,8 +39,18 @@ type Props = {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { instrumentId } = await params;
   const instrument = await getInstrumentById(instrumentId);
+  const title = instrument?.displayName ?? instrumentId;
+  // Description is intentionally minimal — it surfaces in Slack/Notion link
+  // previews. Anything in the URL slug is already visible to the sharer;
+  // we don't include sensitive bits (run counts, watcher status, etc.).
+  const description = instrument
+    ? `${instrument.displayName} runs on Data Hub.`
+    : "Data Hub instrument.";
   return {
-    title: instrument?.displayName ?? instrumentId,
+    title,
+    description,
+    openGraph: { title, description, type: "article" },
+    twitter: { card: "summary", title, description },
   };
 }
 
@@ -116,9 +127,18 @@ export default async function InstrumentDetailPage({
   searchParams,
 }: Props) {
   const session = await auth();
-  if (!session) redirect("/login");
-
   const { instrumentId } = await params;
+  // generateMetadata above still runs without a session, so unfurlers see
+  // the instrument name in the link preview. Real visitors without a
+  // session get a sign-in CTA that returns them here afterwards.
+  if (!session) {
+    return (
+      <SignInRequired callbackUrl={`/instruments/${instrumentId}`}>
+        Sign in to view this instrument&rsquo;s runs.
+      </SignInRequired>
+    );
+  }
+
   const filters = instrumentDetailParamsCache.parse(await searchParams);
 
   // Parallel fetch: instrument metadata (for header) and paginated runs

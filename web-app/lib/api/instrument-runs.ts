@@ -13,6 +13,7 @@ import {
 import { getS3ObjectStream } from "@/lib/s3";
 import type { AnyColumn, SQL } from "drizzle-orm";
 import { and, asc, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
+import { cache } from "react";
 
 // ---------------------------------------------------------------------------
 // Run attributions: users who claimed they ran a given run. Wire shape is
@@ -75,7 +76,12 @@ export async function getAttributionsByRunIds(
 // API URLs use human-readable natural keys (e.g., "spectramax-id3-plate-reader"
 // + "2026-03-26_experiment") rather than the internal UUID surrogate PK. This
 // function resolves that pair to a full run row with the instrument display name.
-export async function lookupRunByNaturalKey(
+//
+// Wrapped in `cache()` so the run detail page's `generateMetadata` and page
+// component share a single DB hit per request (the page calls this once for
+// the head and once for the body). Mirrors the same treatment applied to
+// `getInstrumentById`.
+export const lookupRunByNaturalKey = cache(async function lookupRunByNaturalKey(
   instrumentId: string,
   runId: string
 ) {
@@ -109,7 +115,7 @@ export async function lookupRunByNaturalKey(
 
   const byRun = await getAttributionsByRunIds([row.id]);
   return { ...row, attributions: byRun.get(row.id) ?? [] };
-}
+});
 
 // ---------------------------------------------------------------------------
 // acquired_at parsing for create/update payloads.

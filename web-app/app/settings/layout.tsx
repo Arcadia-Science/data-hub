@@ -1,6 +1,6 @@
+import { SignInRequired } from "@/components/auth/sign-in-required";
 import { auth } from "@/lib/auth";
 import type { Metadata } from "next";
-import { redirect } from "next/navigation";
 
 export const metadata: Metadata = {
   title: {
@@ -15,8 +15,16 @@ export default async function SettingsLayout({
   children: React.ReactNode;
 }) {
   const session = await auth();
+  // Returning SignInRequired in place of `{children}` keeps the page-level
+  // `metadata` exports merging into the head (Next resolves metadata
+  // independently of whether a layout actually renders its children), so
+  // unfurlers still see "Settings | Data Hub" / "Access Tokens" titles.
   if (!session?.user) {
-    redirect("/login");
+    return (
+      <SignInRequired callbackUrl="/settings">
+        Sign in to manage settings.
+      </SignInRequired>
+    );
   }
 
   return (

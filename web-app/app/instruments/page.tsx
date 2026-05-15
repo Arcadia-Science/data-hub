@@ -1,10 +1,10 @@
+import { SignInRequired } from "@/components/auth/sign-in-required";
 import {
   InstrumentRowManagementActions,
   InstrumentsTable,
 } from "@/components/instruments/instruments-table";
 import { getInstrumentListWithCounts } from "@/lib/api/instruments";
 import { auth } from "@/lib/auth";
-import { redirect } from "next/navigation";
 import type { Metadata } from "next/types";
 
 export const metadata: Metadata = {
@@ -13,7 +13,13 @@ export const metadata: Metadata = {
 
 export default async function InstrumentsPage() {
   const session = await auth();
-  if (!session) redirect("/login");
+  if (!session) {
+    return (
+      <SignInRequired callbackUrl="/instruments">
+        Sign in to browse instruments.
+      </SignInRequired>
+    );
+  }
 
   const instruments = await getInstrumentListWithCounts();
 
