@@ -26,9 +26,9 @@ Every personal access token carries an array of permission scopes. A request is 
 | `watchers:read` | Read watcher state (list, heartbeats, events, config, upload queue, update-check) |
 | `watchers:write` | Register/deregister watchers, post heartbeats and events, push config |
 | `archive-jobs:write` | Update archive jobs (Lambda callback). Archive reads happen via `files:read`. |
-| `mcp:read` | Connect to the MCP endpoint and call read-only tools |
-| `mcp:write` | Call mutating MCP tools (`claim_run`, `unclaim_run`, `reprocess_file`) |
 | `*` | Wildcard — matches every scope. Reserved for the migration backfill and the watcher/Lambda PATs until they are rotated to least-privilege scopes; `POST /api/v1/tokens` rejects `*` from API callers. |
+
+MCP tools enforce the same scopes their REST counterparts do: `search_runs` and `get_run` require `runs:read`, `reprocess_file` requires `files:write`, `claim_run`/`unclaim_run` require `runs:write`, and so on. There is no MCP-specific scope vocabulary — a token with `runs:read` over REST also covers the read-side run tools over MCP.
 
 Migration `0022_pat_scopes` backfills every pre-existing token with `["*"]`, so deployed watchers and the Lambda continue to work after deploy until their tokens are rotated to explicit scopes.
 

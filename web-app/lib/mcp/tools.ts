@@ -16,6 +16,7 @@ import {
   getInstrumentById,
   getInstrumentListWithCounts,
 } from "@/lib/api/instruments";
+import { hasScope, type Scope } from "@/lib/api/scopes";
 import { getWatcherHeartbeats, getWatcherList } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { runAttributions } from "@/lib/db/schema";
@@ -43,11 +44,10 @@ function errorResult(message: string) {
   };
 }
 
-// Guard for mutating MCP tools. The MCP route's verifyToken translates PAT
-// scopes into the SDK-facing `["read", "write"]` vocabulary; this helper
-// short-circuits with a clear error result when the caller's PAT lacks
-// `mcp:write`. Tools that mutate state (claim_run, unclaim_run,
-// reprocess_file) call this before doing any DB work.
+// Per-tool scope guard. Every MCP tool checks the same `<resource>:<action>`
+// scope its REST counterpart enforces — there is no MCP-specific scope
+// vocabulary, so a token with `runs:read` over REST also covers `search_runs`
+// over MCP, and so on.
 //
 // When `authInfo` is undefined we skip the check: production traffic always
 // has it (enforced by `withMcpAuth({ required: true })` in the route), and
@@ -57,11 +57,11 @@ function errorResult(message: string) {
 // still reject the call when a user id is required.
 function requireMcpScope(
   authInfo: AuthInfo | undefined,
-  required: "read" | "write"
-) {
+  required: Scope
+): ReturnType<typeof errorResult> | null {
   if (!authInfo) return null;
-  if (authInfo.scopes?.includes(required)) return null;
-  return errorResult(`Token is missing required MCP scope: ${required}`);
+  if (hasScope({ scopes: authInfo.scopes ?? [] }, required)) return null;
+  return errorResult(`Token is missing required scope: ${required}`);
 }
 
 type AttributionResolution =
@@ -111,7 +111,9 @@ export function registerTools(server: McpServer) {
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ status }) => {
+    async ({ status }, { authInfo }) => {
+      const scopeError = requireMcpScope(authInfo, "instruments:read");
+      if (scopeError) return scopeError;
       const instruments = await getInstrumentListWithCounts();
       const filtered = status
         ? instruments.filter((i) => i.status === status)
@@ -135,7 +137,9 @@ export function registerTools(server: McpServer) {
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ instrumentId }) => {
+    async ({ instrumentId }, { authInfo }) => {
+      const scopeError = requireMcpScope(authInfo, "instruments:read");
+      if (scopeError) return scopeError;
       const instrument = await getInstrumentById(instrumentId);
       if (!instrument) {
         return errorResult(`Instrument '${instrumentId}' not found.`);
@@ -219,7 +223,9 @@ export function registerTools(server: McpServer) {
       },
       annotations: { readOnlyHint: true },
     },
-    async (args) => {
+    async (args, { authInfo }) => {
+      const scopeError = requireMcpScope(authInfo, "runs:read");
+      if (scopeError) return scopeError;
       const result = await buildRunListQuery({
         instrumentId: args.instrumentId,
         source: args.source,
@@ -252,7 +258,9 @@ export function registerTools(server: McpServer) {
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ instrumentId, runId }) => {
+    async ({ instrumentId, runId }, { authInfo }) => {
+      const scopeError = requireMcpScope(authInfo, "runs:read");
+      if (scopeError) return scopeError;
       const run = await lookupRunByNaturalKey(instrumentId, runId);
       if (!run) {
         return errorResult(
@@ -275,7 +283,13 @@ export function registerTools(server: McpServer) {
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ instrumentId, runId }) => {
+    async ({ instrumentId, runId }, { authInfo }) => {
+      // The tool is keyed by run and the result is "what files belong to
+      // this run", which lives under the runs domain in the REST API too
+      // (`GET /instruments/:id/runs/:runId` returns files alongside the
+      // run). One scope (`runs:read`) covers both.
+      const scopeError = requireMcpScope(authInfo, "runs:read");
+      if (scopeError) return scopeError;
       const run = await lookupRunByNaturalKey(instrumentId, runId);
       if (!run) {
         return errorResult(
@@ -295,7 +309,14 @@ export function registerTools(server: McpServer) {
         "Get a dashboard-level overview: per-instrument run counts, watcher health (online/offline/no_watcher), and pending upload counts.",
       annotations: { readOnlyHint: true },
     },
-    async () => {
+    // No inputSchema → the SDK passes the request `extra` as a single
+    // argument; pull `authInfo` directly off it.
+    async ({ authInfo }) => {
+      // Dashboard summary keyed per-instrument; gated on `instruments:read`
+      // for parity with the dashboard data source. Watcher health is
+      // included for context but isn't the primary axis.
+      const scopeError = requireMcpScope(authInfo, "instruments:read");
+      if (scopeError) return scopeError;
       const summaries = await getInstrumentSummaries();
       return textResult(summaries);
     }
@@ -315,7 +336,9 @@ export function registerTools(server: McpServer) {
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ instrumentId }) => {
+    async ({ instrumentId }, { authInfo }) => {
+      const scopeError = requireMcpScope(authInfo, "watchers:read");
+      if (scopeError) return scopeError;
       const allWatchers = await getWatcherList({ includeDeleted: false });
       const filtered = instrumentId
         ? allWatchers.filter((w) => w.instrumentId === instrumentId)
@@ -335,7 +358,9 @@ export function registerTools(server: McpServer) {
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ fileId }) => {
+    async ({ fileId }, { authInfo }) => {
+      const scopeError = requireMcpScope(authInfo, "files:read");
+      if (scopeError) return scopeError;
       const file = await getActiveFileById(fileId);
       if (!file) {
         return errorResult(`File '${fileId}' not found.`);
@@ -355,7 +380,9 @@ export function registerTools(server: McpServer) {
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ fileId }) => {
+    async ({ fileId }, { authInfo }) => {
+      const scopeError = requireMcpScope(authInfo, "files:read");
+      if (scopeError) return scopeError;
       const lookup = await lookupFileForDownload(fileId);
       if (!lookup.ok) {
         if (lookup.reason === "not_uploaded") {
@@ -393,7 +420,10 @@ export function registerTools(server: McpServer) {
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ instrumentId, runId }) => {
+    async ({ instrumentId, runId }, { authInfo }) => {
+      // Mirror the REST archive route which is gated on `files:read`.
+      const scopeError = requireMcpScope(authInfo, "files:read");
+      if (scopeError) return scopeError;
       const run = await lookupRunByNaturalKey(instrumentId, runId);
       if (!run) {
         return errorResult(
@@ -439,7 +469,7 @@ export function registerTools(server: McpServer) {
       annotations: { readOnlyHint: false, destructiveHint: true },
     },
     async ({ fileId }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "write");
+      const scopeError = requireMcpScope(authInfo, "files:write");
       if (scopeError) return scopeError;
       const result = await reprocessFile(fileId);
       if (!result.ok) {
@@ -467,7 +497,9 @@ export function registerTools(server: McpServer) {
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ watcherId, hours }) => {
+    async ({ watcherId, hours }, { authInfo }) => {
+      const scopeError = requireMcpScope(authInfo, "watchers:read");
+      if (scopeError) return scopeError;
       const lookbackHours = hours ?? 24;
       const since = new Date(Date.now() - lookbackHours * 60 * 60 * 1000);
       const { rows, total } = await getWatcherHeartbeats(watcherId, {
@@ -502,7 +534,7 @@ export function registerTools(server: McpServer) {
       },
     },
     async ({ instrumentId, runId }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "write");
+      const scopeError = requireMcpScope(authInfo, "runs:write");
       if (scopeError) return scopeError;
       const resolved = await resolveAttributionTarget(
         authInfo,
@@ -544,7 +576,7 @@ export function registerTools(server: McpServer) {
       },
     },
     async ({ instrumentId, runId }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "write");
+      const scopeError = requireMcpScope(authInfo, "runs:write");
       if (scopeError) return scopeError;
       const resolved = await resolveAttributionTarget(
         authInfo,
@@ -582,7 +614,9 @@ export function registerTools(server: McpServer) {
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ instrumentId }) => {
+    async ({ instrumentId }, { authInfo }) => {
+      const scopeError = requireMcpScope(authInfo, "runs:read");
+      if (scopeError) return scopeError;
       const attributors = await getRanByFilterOptions(instrumentId);
       return textResult(attributors);
     }

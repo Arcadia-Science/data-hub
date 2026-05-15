@@ -15,8 +15,6 @@ export const ALL_SCOPES = [
   "watchers:read",
   "watchers:write",
   "archive-jobs:write",
-  "mcp:read",
-  "mcp:write",
 ] as const;
 
 export type Scope = (typeof ALL_SCOPES)[number];

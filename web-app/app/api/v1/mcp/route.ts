@@ -1,5 +1,4 @@
 import { authenticateWithToken } from "@/lib/api/auth";
-import { hasScope } from "@/lib/api/scopes";
 import { registerPrompts } from "@/lib/mcp/prompts";
 import { registerResources } from "@/lib/mcp/resources";
 import { registerTools } from "@/lib/mcp/tools";
@@ -25,11 +24,12 @@ const handler = createMcpHandler(
   }
 );
 
-// Translate the PAT's internal scope vocabulary to the MCP-facing
-// `["read", "write"]` shape the SDK exposes to clients. The MCP surface
-// is gated as a whole on `mcp:read` (any caller without it is rejected
-// here); finer-grained `mcp:write` then controls the mutating tools via
-// `requireMcpScope` inside the tool implementations.
+// Pass the PAT's resource scopes through to the MCP layer unchanged. Each
+// tool checks the same `<resource>:<action>` scope its REST counterpart
+// does (see `requireMcpScope` in `lib/mcp/tools.ts`), so there's no
+// MCP-specific scope vocabulary and no connect-time gate beyond a valid
+// token. The `*` wildcard from legacy/backfilled tokens is honored by
+// `hasScope`, so deployed watchers and the Lambda keep working.
 const verifyToken = async (
   req: Request,
   bearerToken?: string
@@ -37,17 +37,10 @@ const verifyToken = async (
   const result = await authenticateWithToken(req);
   if (!result) return undefined;
 
-  if (!hasScope(result, "mcp:read")) return undefined;
-
-  const mcpScopes: string[] = ["read"];
-  if (hasScope(result, "mcp:write")) {
-    mcpScopes.push("write");
-  }
-
   return {
     token: bearerToken ?? "",
     clientId: result.userId,
-    scopes: mcpScopes,
+    scopes: result.scopes,
     extra: { userId: result.userId, authMethod: result.authMethod },
   };
 };
