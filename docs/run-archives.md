@@ -45,7 +45,7 @@ Archives live in a separate bucket per environment, provisioned by [`infra/templ
 The fingerprint is a sorted SHA-256 of `(file_id, s3_key)` pairs:
 
 ```ts
-// web-app/lib/api/archive-builder.ts
+// web/lib/api/archive-builder.ts
 [...files].map((f) => `${f.id}:${f.s3Key}`).sort().join("|")
 ```
 
@@ -61,7 +61,7 @@ Properties this gives us:
 Two simultaneous "Download all" clicks must not double-invoke the Lambda. The schema enforces this with a *partial* unique index:
 
 ```sql
--- web-app/drizzle/0016_add_archive_jobs.sql
+-- web/drizzle/0016_add_archive_jobs.sql
 CREATE UNIQUE INDEX archive_jobs_inflight_unique_idx
   ON archive_jobs (instrument_run_id, fingerprint)
   WHERE status IN ('pending', 'building');

@@ -151,7 +151,7 @@ def _handle_build_archive(payload: dict[str, Any]) -> dict[str, Any]:
     """Run the archive builder and (optionally) PATCH the originating job.
 
     Sync callers (``payload["job_id"]`` absent) get the build result inline.
-    Async callers send ``"job_id"`` so the web-app job row gets PATCHed when
+    Async callers send ``"job_id"`` so the web app job row gets PATCHed when
     the build finishes — the HTTP response is the ack of acceptance and the
     actual outcome is delivered out-of-band.
     """
@@ -246,7 +246,7 @@ def _post_archive_job_status(
 
     Failures here are logged but never re-raised — the build itself succeeded
     or failed for its own reasons, and we don't want a callback failure to
-    mask that. The web-app's UI does not depend on this PATCH landing
+    mask that. The web app's UI does not depend on this PATCH landing
     either: it polls ``/download-archive`` which short-circuits on an S3
     HEAD, so a finished build is downloadable the moment the multipart
     upload completes.

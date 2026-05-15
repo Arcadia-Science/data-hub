@@ -17,7 +17,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // Tests for the /api/v1/archive-jobs/:id PATCH callback the Lambda fires
 // when a build finishes. The UI doesn't poll this endpoint — it re-issues
 // /download-archive instead — so there is no GET handler on this route;
-// only the Lambda → web-app callback. The actual zip building is exercised
+// only the Lambda → web app callback. The actual zip building is exercised
 // by Lambda unit tests; here we focus on auth, validation, state
 // transitions, the partial-unique-index dedup, and the stuck-row sweep.
 describe("Archive Jobs API", () => {

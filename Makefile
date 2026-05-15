@@ -49,35 +49,35 @@ py-check-watcher-version:
 # Web app.
 .PHONY: fe-format
 fe-format:
-	cd web-app && npm run format
+	cd web && npm run format
 
 .PHONY: fe-lint
 fe-lint:
-	cd web-app && npm run lint
+	cd web && npm run lint
 
 .PHONY: fe-typecheck
 fe-typecheck:
-	cd web-app && npm run typecheck
+	cd web && npm run typecheck
 
 .PHONY: fe-test-mcp
 fe-test-mcp:
-	cd web-app && npm run test:mcp
+	cd web && npm run test:mcp
 
 .PHONY: fe-test-integration
 fe-test-integration:
-	cd web-app && npm run test:integration
+	cd web && npm run test:integration
 
 .PHONY: fe-test
 fe-test:
-	cd web-app && npm run test:mcp && npm run test:integration
+	cd web && npm run test:mcp && npm run test:integration
 
 .PHONY: dev
 dev:
-	cd web-app && npm run dev
+	cd web && npm run dev
 
 .PHONY: fe-build
 fe-build:
-	cd web-app && npm run build
+	cd web && npm run build
 
 # Formatting, linting, and type checking.
 .PHONY: py-check
