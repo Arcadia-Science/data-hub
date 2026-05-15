@@ -31,10 +31,10 @@ _DETECTION_DOWNSAMPLE = 4
 _CLOSING_RADIUS = 5
 
 _OVERLAY_COLOR: tuple[int, int, int] = (0, 255, 0)
-_OVERLAY_THICKNESS = 6
+_OVERLAY_THICKNESS = 8
 
-_COLONY_CONTOUR_COLOR: tuple[int, int, int] = (0, 255, 255)
-_COLONY_CONTOUR_THICKNESS = 3
+_COLONY_CONTOUR_COLOR: tuple[int, int, int] = (255, 0, 255)
+_COLONY_CONTOUR_THICKNESS = 2
 
 # PhotometricInterpretation values: 2 = RGB, others (0, 1, 3) are grayscale or
 # palette and are treated as B&W for our display purposes.
