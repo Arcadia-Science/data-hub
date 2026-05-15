@@ -5,6 +5,7 @@ import {
   UNAUTHORIZED,
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
+import { requireScope } from "@/lib/api/scopes";
 import {
   isValidUUID,
   parseDateParam,
@@ -24,6 +25,8 @@ export async function GET(
   if (!authResult) {
     return apiError(401, UNAUTHORIZED, "Authentication required");
   }
+  const scopeError = requireScope(authResult, "watchers:read");
+  if (scopeError) return scopeError;
 
   const { watcherId } = await params;
   if (!isValidUUID(watcherId)) {

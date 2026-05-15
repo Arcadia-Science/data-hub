@@ -6,6 +6,7 @@ import {
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
 import { buildRunListQuery, parseAcquiredAt } from "@/lib/api/instrument-runs";
+import { requireScope } from "@/lib/api/scopes";
 import { parseIntParam } from "@/lib/api/validators";
 import { db } from "@/lib/db";
 import { files, instrumentRuns, instruments, watchers } from "@/lib/db/schema";
@@ -33,6 +34,8 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   if (!authResult) {
     return apiError(401, UNAUTHORIZED, "Authentication required");
   }
+  const scopeError = requireScope(authResult, "runs:write");
+  if (scopeError) return scopeError;
 
   const { instrumentId } = await params;
 
@@ -223,6 +226,8 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
   if (!authResult) {
     return apiError(401, UNAUTHORIZED, "Authentication required");
   }
+  const scopeError = requireScope(authResult, "runs:read");
+  if (scopeError) return scopeError;
 
   const { instrumentId } = await params;
 

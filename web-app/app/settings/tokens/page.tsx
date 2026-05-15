@@ -54,6 +54,65 @@ function toInitials(displayName: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
+// Render a token's scopes as a compact column. Three branches:
+//
+//   1. `["*"]` (backfill wildcard) → single "Full access" pill so legacy
+//      tokens stand out at a glance.
+//   2. Single explicit scope → that scope as a badge, no tooltip needed
+//      because everything is already visible.
+//   3. Multiple explicit scopes → first scope (sorted) plus a "+N"
+//      counter badge. Hovering the cell reveals the full list in a
+//      tooltip so the table stays scannable on tokens with many scopes.
+function TokenScopeBadges({ scopes }: { scopes: string[] }) {
+  if (scopes.length === 1 && scopes[0] === "*") {
+    return (
+      <Badge variant="secondary" className="text-xs">
+        Full access
+      </Badge>
+    );
+  }
+
+  // Stable sort grouped by resource: scopes within the same resource share
+  // a prefix, so a plain lexicographic sort already groups them. The first
+  // entry in the sorted list is the one shown in the collapsed cell.
+  const sorted = [...scopes].sort();
+
+  if (sorted.length <= 1) {
+    return (
+      <div className="flex flex-wrap gap-1">
+        {sorted.map((scope) => (
+          <Badge key={scope} variant="secondary" className="font-mono text-xs">
+            {scope}
+          </Badge>
+        ))}
+      </div>
+    );
+  }
+
+  const [first, ...rest] = sorted;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="flex w-fit flex-wrap items-center gap-1">
+          <Badge variant="secondary" className="font-mono text-xs">
+            {first}
+          </Badge>
+          <Badge variant="secondary" className="text-xs">
+            +{rest.length}
+          </Badge>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent>
+        <div className="flex flex-col gap-0.5 font-mono text-xs">
+          {sorted.map((scope) => (
+            <span key={scope}>{scope}</span>
+          ))}
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 export default async function TokensPage() {
   // This is an internal-tool settings page; we intentionally show every PAT
   // across the workspace so admins can audit them. Auth is enforced by the
@@ -63,6 +122,7 @@ export default async function TokensPage() {
       id: personalAccessTokens.id,
       name: personalAccessTokens.name,
       tokenPrefix: personalAccessTokens.tokenPrefix,
+      scopes: personalAccessTokens.scopes,
       lastUsedAt: personalAccessTokens.lastUsedAt,
       expiresAt: personalAccessTokens.expiresAt,
       createdAt: personalAccessTokens.createdAt,
@@ -113,6 +173,7 @@ export default async function TokensPage() {
                   <TableHead>Name</TableHead>
                   <TableHead>User</TableHead>
                   <TableHead>Token</TableHead>
+                  <TableHead>Scopes</TableHead>
                   <TableHead>Last used</TableHead>
                   <TableHead>Expires</TableHead>
                   <TableHead>Created</TableHead>
@@ -153,8 +214,11 @@ export default async function TokensPage() {
                           variant="secondary"
                           className="font-mono text-xs"
                         >
-                          {token.tokenPrefix}...
+                          {token.tokenPrefix}…
                         </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <TokenScopeBadges scopes={token.scopes} />
                       </TableCell>
                       <TableCell
                         className="text-muted-foreground"

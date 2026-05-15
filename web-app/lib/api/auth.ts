@@ -6,9 +6,14 @@ import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { after } from "next/server";
 
-type AuthResult = {
+export type AuthResult = {
   userId: string;
   authMethod: "session" | "token";
+  // Permission scopes carried by this request. Token-authenticated requests
+  // carry the scopes column from `personal_access_tokens`. Session
+  // (NextAuth) authentication is treated as fully privileged and always
+  // returns `["*"]`, so `requireScope` is a no-op for browser sessions.
+  scopes: string[];
 };
 
 /**
@@ -36,6 +41,7 @@ async function validatePat(
       id: personalAccessTokens.id,
       userId: personalAccessTokens.userId,
       expiresAt: personalAccessTokens.expiresAt,
+      scopes: personalAccessTokens.scopes,
     })
     .from(personalAccessTokens)
     .where(eq(personalAccessTokens.tokenHash, hash))
@@ -58,7 +64,7 @@ async function validatePat(
       .where(eq(personalAccessTokens.id, pat.id));
   });
 
-  return { userId: pat.userId, authMethod: "token" };
+  return { userId: pat.userId, authMethod: "token", scopes: pat.scopes };
 }
 
 export async function authenticateRequest(
@@ -66,7 +72,7 @@ export async function authenticateRequest(
 ): Promise<AuthResult | null> {
   const session = await auth();
   if (session?.user?.id) {
-    return { userId: session.user.id, authMethod: "session" };
+    return { userId: session.user.id, authMethod: "session", scopes: ["*"] };
   }
 
   return validatePat(_request.headers.get("authorization"));
@@ -86,7 +92,7 @@ export async function authenticateWithToken(
 export async function requireSession(): Promise<AuthResult | null> {
   const session = await auth();
   if (session?.user?.id) {
-    return { userId: session.user.id, authMethod: "session" };
+    return { userId: session.user.id, authMethod: "session", scopes: ["*"] };
   }
   return null;
 }

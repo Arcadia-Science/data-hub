@@ -1,5 +1,6 @@
 import { authenticateRequest } from "@/lib/api/auth";
 import { apiError, UNAUTHORIZED } from "@/lib/api/errors";
+import { requireScope } from "@/lib/api/scopes";
 import { computeEffectiveStatus, STALE_THRESHOLD_MS } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { instruments, watchers } from "@/lib/db/schema";
@@ -11,6 +12,8 @@ export async function GET(request: NextRequest) {
   if (!authResult) {
     return apiError(401, UNAUTHORIZED, "Authentication required");
   }
+  const scopeError = requireScope(authResult, "watchers:read");
+  if (scopeError) return scopeError;
 
   const { searchParams } = request.nextUrl;
   const instrumentIdFilter = searchParams.get("instrument_id");

@@ -6,10 +6,43 @@ The Data Hub API is served by the Next.js web application at `/api/v1/`. It is u
 
 The API supports two authentication methods:
 
-- **Session cookies** — used by the web dashboard (Google OAuth via NextAuth).
+- **Session cookies** — used by the web dashboard (Google OAuth via NextAuth). Session-authenticated callers implicitly hold every scope; scope enforcement only applies to token-authenticated requests.
 - **Bearer tokens** — used by the watcher, Lambda, and MCP clients. Tokens are created in the web dashboard under personal access tokens and sent in the `Authorization: Bearer <token>` header.
 
 Tokens are hashed with SHA-256 before storage. The plaintext token is shown once at creation time.
+
+### Scopes
+
+Every personal access token carries an array of permission scopes. A request is rejected with `403 FORBIDDEN` when the token's scopes do not include the scope required by the route. The vocabulary is:
+
+| Scope | Grants |
+| --- | --- |
+| `instruments:read` | List/read instruments |
+| `instruments:write` | Create/update instruments |
+| `runs:read` | List/read runs (and their comments) |
+| `runs:write` | Create/update/delete runs, comments, attributions, and run-level upload/reprocess endpoints |
+| `files:read` | Read file metadata, download files, download run archives |
+| `files:write` | Create/update/delete file records and reprocess files |
+| `watchers:read` | Read watcher state (list, heartbeats, events, config, upload queue, update-check) |
+| `watchers:write` | Register/deregister watchers, post heartbeats and events, push config |
+| `archive-jobs:read` | Read archive job state. No endpoints currently consume this scope — the existing run-archive download is gated on `files:read` because it returns file bytes — but it is reserved for future archive-job listing/status endpoints. |
+| `archive-jobs:write` | Update archive jobs (Lambda callback). |
+| `*` | Wildcard — matches every scope. Reserved for the migration backfill and the watcher/Lambda PATs until they are rotated to least-privilege scopes; `POST /api/v1/tokens` rejects `*` from API callers. |
+
+MCP tools enforce the same scopes their REST counterparts do: `search_runs` and `get_run` require `runs:read`, `reprocess_file` requires `files:write`, `claim_run`/`unclaim_run` require `runs:write`, and so on. There is no MCP-specific scope vocabulary — a token with `runs:read` over REST also covers the read-side run tools over MCP.
+
+Migration `0022_pat_scopes` backfills every pre-existing token with `["*"]`, so deployed watchers and the Lambda continue to work after deploy until their tokens are rotated to explicit scopes.
+
+`403 FORBIDDEN` responses use the standard error shape:
+
+```json
+{
+  "error": {
+    "code": "FORBIDDEN",
+    "message": "Token is missing required scope: runs:write"
+  }
+}
+```
 
 ## Endpoints
 
@@ -85,8 +118,8 @@ The download-archive endpoint sits in front of a Lambda-driven builder pipeline 
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/api/v1/tokens` | List personal access tokens |
-| `POST` | `/api/v1/tokens` | Create a new token |
+| `GET` | `/api/v1/tokens` | List personal access tokens. Response includes each token's `scopes`. |
+| `POST` | `/api/v1/tokens` | Create a new token. Requires a non-empty `scopes` array (see [Scopes](#scopes)); the wildcard `*` is rejected. |
 | `DELETE` | `/api/v1/tokens/:id` | Revoke a token |
 
 ### MCP (Model Context Protocol)

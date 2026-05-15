@@ -13,6 +13,7 @@ import {
   softDeleteComment,
   updateComment,
 } from "@/lib/api/run-comments";
+import { requireScope } from "@/lib/api/scopes";
 import type { NextRequest } from "next/server";
 
 type RouteContext = {
@@ -42,6 +43,13 @@ async function preflight(
       kind: "error",
       response: apiError(401, UNAUTHORIZED, "Authentication required"),
     };
+  }
+  // Both PATCH and DELETE on this route mutate comment state, so both
+  // require runs:write. Bake the check into the shared preflight so a
+  // future verb added here can't accidentally skip it.
+  const scopeError = requireScope(authResult, "runs:write");
+  if (scopeError) {
+    return { kind: "error", response: scopeError };
   }
 
   const { instrumentId, runId, commentId } = await params;

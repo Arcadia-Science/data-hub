@@ -2,6 +2,7 @@ import { authenticateRequest } from "@/lib/api/auth";
 import { apiError, CONFLICT, NOT_FOUND, UNAUTHORIZED } from "@/lib/api/errors";
 import { reprocessFile } from "@/lib/api/file-reprocessing";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
+import { requireScope } from "@/lib/api/scopes";
 import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
 import { and, eq, inArray, isNull } from "drizzle-orm";
@@ -28,6 +29,8 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   if (!authResult) {
     return apiError(401, UNAUTHORIZED, "Authentication required");
   }
+  const scopeError = requireScope(authResult, "runs:write");
+  if (scopeError) return scopeError;
 
   const { instrumentId, runId } = await params;
   const run = await lookupRunByNaturalKey(instrumentId, runId);

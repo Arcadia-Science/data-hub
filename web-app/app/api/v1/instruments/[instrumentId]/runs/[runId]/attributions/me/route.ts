@@ -4,6 +4,7 @@ import {
   getAttributionsByRunIds,
   lookupRunByNaturalKey,
 } from "@/lib/api/instrument-runs";
+import { requireScope } from "@/lib/api/scopes";
 import { db } from "@/lib/db";
 import { runAttributions } from "@/lib/db/schema";
 import { and, eq } from "drizzle-orm";
@@ -27,6 +28,8 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
   if (!authResult) {
     return apiError(401, UNAUTHORIZED, "Authentication required");
   }
+  const scopeError = requireScope(authResult, "runs:write");
+  if (scopeError) return scopeError;
 
   const { instrumentId, runId } = await params;
   const run = await lookupRunByNaturalKey(instrumentId, runId);
@@ -63,6 +66,8 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
   if (!authResult) {
     return apiError(401, UNAUTHORIZED, "Authentication required");
   }
+  const scopeError = requireScope(authResult, "runs:write");
+  if (scopeError) return scopeError;
 
   const { instrumentId, runId } = await params;
   const run = await lookupRunByNaturalKey(instrumentId, runId);

@@ -8,6 +8,7 @@ import {
 } from "@/lib/api/errors";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { createComment, listCommentsForRun } from "@/lib/api/run-comments";
+import { requireScope } from "@/lib/api/scopes";
 import type { NextRequest } from "next/server";
 
 type RouteContext = {
@@ -30,6 +31,8 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
   if (!authResult) {
     return apiError(401, UNAUTHORIZED, "Authentication required");
   }
+  const scopeError = requireScope(authResult, "runs:read");
+  if (scopeError) return scopeError;
 
   const { instrumentId, runId } = await params;
   const run = await lookupRunByNaturalKey(instrumentId, runId);
@@ -58,6 +61,8 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   if (!authResult) {
     return apiError(401, UNAUTHORIZED, "Authentication required");
   }
+  const scopeError = requireScope(authResult, "runs:write");
+  if (scopeError) return scopeError;
 
   const { instrumentId, runId } = await params;
   const run = await lookupRunByNaturalKey(instrumentId, runId);

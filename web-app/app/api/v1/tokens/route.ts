@@ -1,4 +1,5 @@
 import { requireSession } from "@/lib/api/auth";
+import { validateRequestedScopes } from "@/lib/api/scopes";
 import { db } from "@/lib/db";
 import { personalAccessTokens } from "@/lib/db/schema";
 import { generateToken, getTokenPrefix, hashToken } from "@/lib/tokens";
@@ -16,6 +17,7 @@ export async function GET() {
       id: personalAccessTokens.id,
       name: personalAccessTokens.name,
       token_prefix: personalAccessTokens.tokenPrefix,
+      scopes: personalAccessTokens.scopes,
       last_used_at: personalAccessTokens.lastUsedAt,
       expires_at: personalAccessTokens.expiresAt,
       created_at: personalAccessTokens.createdAt,
@@ -33,7 +35,7 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: { name?: string; expires_at?: string };
+  let body: { name?: string; expires_at?: string; scopes?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -47,6 +49,12 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   }
+
+  const validation = validateRequestedScopes(body.scopes);
+  if (!validation.ok) {
+    return Response.json({ error: validation.error }, { status: 400 });
+  }
+  const scopes = validation.scopes;
 
   let expiresAt: Date | null = null;
   if (body.expires_at) {
@@ -78,12 +86,14 @@ export async function POST(request: NextRequest) {
       name,
       tokenHash,
       tokenPrefix,
+      scopes,
       expiresAt,
     })
     .returning({
       id: personalAccessTokens.id,
       name: personalAccessTokens.name,
       token_prefix: personalAccessTokens.tokenPrefix,
+      scopes: personalAccessTokens.scopes,
       expires_at: personalAccessTokens.expiresAt,
       created_at: personalAccessTokens.createdAt,
     });

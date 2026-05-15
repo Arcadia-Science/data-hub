@@ -155,6 +155,13 @@
       "when": 1778878800000,
       "tag": "0021_instant_raman_type",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1778799469455,
+      "tag": "0022_pat_scopes",
+      "breakpoints": true
     }
   ]
 }

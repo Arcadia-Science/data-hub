@@ -24,16 +24,23 @@ const handler = createMcpHandler(
   }
 );
 
+// Pass the PAT's resource scopes through to the MCP layer unchanged. Each
+// tool checks the same `<resource>:<action>` scope its REST counterpart
+// does (see `requireMcpScope` in `lib/mcp/tools.ts`), so there's no
+// MCP-specific scope vocabulary and no connect-time gate beyond a valid
+// token. The `*` wildcard from legacy/backfilled tokens is honored by
+// `hasScope`, so deployed watchers and the Lambda keep working.
 const verifyToken = async (
   req: Request,
   bearerToken?: string
 ): Promise<AuthInfo | undefined> => {
   const result = await authenticateWithToken(req);
   if (!result) return undefined;
+
   return {
     token: bearerToken ?? "",
     clientId: result.userId,
-    scopes: ["read", "write"],
+    scopes: result.scopes,
     extra: { userId: result.userId, authMethod: result.authMethod },
   };
 };

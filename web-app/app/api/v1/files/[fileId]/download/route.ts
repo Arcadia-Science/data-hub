@@ -5,6 +5,7 @@ import {
   UNAUTHORIZED,
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
+import { requireScope } from "@/lib/api/scopes";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 import { getPresignedDownloadUrl } from "@/lib/s3";
@@ -28,6 +29,8 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
   if (!authResult) {
     return apiError(401, UNAUTHORIZED, "Authentication required");
   }
+  const scopeError = requireScope(authResult, "files:read");
+  if (scopeError) return scopeError;
 
   const { fileId } = await params;
   const numericId = parseInt(fileId, 10);

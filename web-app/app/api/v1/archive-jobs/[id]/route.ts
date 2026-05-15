@@ -5,6 +5,7 @@ import {
   UNAUTHORIZED,
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
+import { requireScope } from "@/lib/api/scopes";
 import { isValidUUID } from "@/lib/api/validators";
 import { db } from "@/lib/db";
 import { archiveJobs } from "@/lib/db/schema";
@@ -49,6 +50,8 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   if (!authResult) {
     return apiError(401, UNAUTHORIZED, "Authentication required");
   }
+  const scopeError = requireScope(authResult, "archive-jobs:write");
+  if (scopeError) return scopeError;
 
   const { id } = await params;
   if (!isValidUUID(id)) {

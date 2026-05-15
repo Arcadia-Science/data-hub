@@ -5,6 +5,7 @@ import {
   UNAUTHORIZED,
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
+import { requireScope } from "@/lib/api/scopes";
 import { db } from "@/lib/db";
 import {
   instrumentRuns,
@@ -23,6 +24,8 @@ export async function GET(
   if (!authResult) {
     return apiError(401, UNAUTHORIZED, "Authentication required");
   }
+  const scopeError = requireScope(authResult, "instruments:read");
+  if (scopeError) return scopeError;
 
   const { instrumentId } = await params;
 
@@ -81,6 +84,8 @@ export async function PATCH(
   if (!authResult) {
     return apiError(401, UNAUTHORIZED, "Authentication required");
   }
+  const scopeError = requireScope(authResult, "instruments:write");
+  if (scopeError) return scopeError;
 
   const { instrumentId } = await params;
 
