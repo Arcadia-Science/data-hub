@@ -1,5 +1,5 @@
-import { apiError, UNAUTHORIZED } from "@/lib/api/errors";
-import { requireScope, type Scope } from "@/lib/api/scopes";
+import { apiError, FORBIDDEN, UNAUTHORIZED } from "@/lib/api/errors";
+import { hasScope, type Scope } from "@/lib/api/scopes";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { personalAccessTokens } from "@/lib/db/schema";
@@ -14,7 +14,7 @@ export type AuthResult = {
   // Permission scopes carried by this request. Token-authenticated requests
   // carry the scopes column from `personal_access_tokens`. Session
   // (NextAuth) authentication is treated as fully privileged and always
-  // returns `["*"]`, so `requireScope` is a no-op for browser sessions.
+  // returns `["*"]`, so `hasScope` is a no-op for browser sessions.
   scopes: string[];
 };
 
@@ -69,15 +69,24 @@ async function validatePat(
   return { userId: pat.userId, authMethod: "token", scopes: pat.scopes };
 }
 
+/**
+ * Resolve a v1 request to either a NextAuth session or a PAT. Sessions are
+ * treated as fully privileged; PATs carry their stored `scopes` array.
+ *
+ * @internal — route handlers should call {@link authorize} instead, which
+ * combines this with the per-route scope check. Exported only because
+ * `authorize` lives in this same module and the test harness exercises
+ * the surface through HTTP rather than direct calls.
+ */
 export async function authenticateRequest(
-  _request: NextRequest
+  request: NextRequest
 ): Promise<AuthResult | null> {
   const session = await auth();
   if (session?.user?.id) {
     return { userId: session.user.id, authMethod: "session", scopes: ["*"] };
   }
 
-  return validatePat(_request.headers.get("authorization"));
+  return validatePat(request.headers.get("authorization"));
 }
 
 /**
@@ -108,11 +117,16 @@ export async function authorize(
   request: NextRequest,
   scope: Scope
 ): Promise<AuthResult | Response> {
-  const auth = await authenticateRequest(request);
-  if (!auth) {
+  const authResult = await authenticateRequest(request);
+  if (!authResult) {
     return apiError(401, UNAUTHORIZED, "Authentication required");
   }
-  const scopeError = requireScope(auth, scope);
-  if (scopeError) return scopeError;
-  return auth;
+  if (!hasScope(authResult, scope)) {
+    return apiError(
+      403,
+      FORBIDDEN,
+      `Token is missing required scope: ${scope}`
+    );
+  }
+  return authResult;
 }

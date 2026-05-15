@@ -1,3 +1,4 @@
+import { SignInRequired } from "@/components/auth/sign-in-required";
 import { CreateTokenDialog } from "@/components/tokens/create-token-dialog";
 import { DeleteTokenDialog } from "@/components/tokens/delete-token-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -15,6 +16,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { personalAccessTokens, users } from "@/lib/db/schema";
 import { formatRelativeTime } from "@/lib/utils";
@@ -131,9 +133,25 @@ function TokenScopeBadges({ scopes }: { scopes: string[] }) {
 }
 
 export default async function TokensPage() {
+  // Page-level auth gate so we never run the workspace-wide PAT query for
+  // an unauthenticated visitor. The settings layout (`../layout.tsx`) also
+  // renders `SignInRequired` when there's no session, but layouts can't
+  // short-circuit page rendering — without this check the `db.select` below
+  // would still execute (its result is then discarded by the layout, but
+  // it's wasted DB work and a 500 from this query would slip past the
+  // layout guard). NextAuth dedupes `auth()` per request, so the duplicate
+  // call is free.
+  const session = await auth();
+  if (!session?.user) {
+    return (
+      <SignInRequired callbackUrl="/settings/tokens">
+        Sign in to manage access tokens.
+      </SignInRequired>
+    );
+  }
+
   // This is an internal-tool settings page; we intentionally show every PAT
-  // across the workspace so admins can audit them. Auth is enforced by the
-  // settings layout.
+  // across the workspace so admins can audit them.
   const tokens = await db
     .select({
       id: personalAccessTokens.id,

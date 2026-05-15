@@ -6,6 +6,10 @@ import { NextResponse } from "next/server";
 // metadata. The page (or layout) renders a `SignInRequired` CTA in place
 // of the real body when there's no session, so no data ever leaks; the
 // metadata exports still resolve and produce a useful unfurl.
+//
+// Each entry matches its exact path or any descendant under it. The trailing
+// `/` boundary in the descendant check is what stops `/api/v1` from also
+// matching `/api/v1foo` (or `/login` from matching `/loginz`, etc.).
 const publicPrefixes = [
   "/login",
   "/api/auth",
@@ -14,11 +18,12 @@ const publicPrefixes = [
   "/settings",
 ];
 
-// `startsWith("/")` would match every path and short-circuit the guard, so
-// the root dashboard needs an exact match. `/watchers` is exact-only so the
-// index page renders metadata for link unfurls while `/watchers/[id]` stays
-// proxy-gated (those URLs aren't shared externally and the detail page
-// surfaces watcher config YAML / hostnames).
+// Paths that are public for the index URL only — descendants stay
+// proxy-gated. The root dashboard is here because adding `/` to
+// `publicPrefixes` would match every path. `/watchers` is exact-only so
+// the index page renders metadata for link unfurls while `/watchers/[id]`
+// stays proxy-gated (those URLs aren't shared externally and the detail
+// page surfaces watcher config YAML / hostnames).
 const publicExactPaths = new Set(["/", "/watchers"]);
 
 export const proxy = auth((req) => {
@@ -26,7 +31,9 @@ export const proxy = auth((req) => {
 
   const isPublic =
     publicExactPaths.has(pathname) ||
-    publicPrefixes.some((route) => pathname.startsWith(route));
+    publicPrefixes.some(
+      (route) => pathname === route || pathname.startsWith(`${route}/`)
+    );
   if (isPublic) {
     return NextResponse.next();
   }

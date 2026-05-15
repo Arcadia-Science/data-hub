@@ -162,7 +162,7 @@ export const personalAccessTokens = pgTable(
     // `files:write`). The wildcard `*` matches everything and is used as
     // the backfill value for pre-scope tokens. New tokens created via the
     // API always carry an explicit, non-wildcard scope list. Enforcement
-    // happens in the auth middleware via `requireScope`.
+    // happens in each v1 route via `authorize(request, "<scope>")`.
     scopes: text("scopes")
       .array()
       .notNull()
