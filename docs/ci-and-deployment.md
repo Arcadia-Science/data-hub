@@ -57,7 +57,7 @@ The Next.js app is deployed on [Vercel](https://vercel.com/arcadia-science/data-
 Environment variables are managed in the Vercel dashboard and can be pulled locally with:
 
 ```sh
-cd web-app
+cd web
 vercel env pull
 ```
 
@@ -68,7 +68,7 @@ Staging and production each have a dedicated PostgreSQL instance hosted on [Rend
 Schema changes are applied with Drizzle:
 
 ```sh
-cd web-app
+cd web
 
 # Generate migration files from schema changes.
 npm run db:generate
@@ -168,7 +168,7 @@ In your GitHub repo, go to **Settings → Environments**, create a `staging` env
 | `DATA_HUB_API_URL` | Base API URL for the environment |
 | `DATA_HUB_API_KEY` | API key for Lambda → Data Hub authentication (also used by the Lambda's archive-job PATCH callback) |
 
-Slack notifications are sent by the **web app** (not the Lambda) when a new run is created. Configure `SLACK_WEBHOOK_URL` per environment in the Vercel dashboard alongside the other web-app env vars listed below.
+Slack notifications are sent by the **web app** (not the Lambda) when a new run is created. Configure `SLACK_WEBHOOK_URL` per environment in the Vercel dashboard alongside the other web app env vars listed below.
 
 You'll also need the `WebAppRoleArn` and `DataHubFunctionUrl` stack outputs to configure the Vercel web app. In the Vercel dashboard (under the appropriate environment), set:
 

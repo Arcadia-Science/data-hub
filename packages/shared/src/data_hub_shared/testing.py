@@ -39,7 +39,7 @@ _DATABASE_URL = f"postgres://{_PG_USER}:{_PG_PASSWORD}@{_PG_HOST}:{_PG_PORT}/{_T
 _TOKEN_PREFIX = "dhub_"
 
 # testing.py lives at packages/shared/src/data_hub_shared/ — walk up 4 levels to the repo root.
-_WEB_APP_DIR = Path(__file__).resolve().parents[4] / "web-app"
+_WEB_DIR = Path(__file__).resolve().parents[4] / "web"
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +115,7 @@ def wait_for_server(
 
 
 # ---------------------------------------------------------------------------
-# Token helpers — must match web-app/lib/tokens.ts
+# Token helpers — must match web/lib/tokens.ts
 # ---------------------------------------------------------------------------
 
 
@@ -230,7 +230,7 @@ def start_test_server() -> Generator[IntegrationEnv, None, None]:
     # 2. Push the Drizzle schema.
     subprocess.run(
         ["npx", "drizzle-kit", "push", "--force"],
-        cwd=str(_WEB_APP_DIR),
+        cwd=str(_WEB_DIR),
         env={**os.environ, "DATABASE_URL": _DATABASE_URL},
         check=True,
         capture_output=True,
@@ -260,7 +260,7 @@ def start_test_server() -> Generator[IntegrationEnv, None, None]:
 
     build_result = subprocess.run(
         ["npx", "next", "build"],
-        cwd=str(_WEB_APP_DIR),
+        cwd=str(_WEB_DIR),
         env=server_env,
         capture_output=True,
     )
@@ -273,7 +273,7 @@ def start_test_server() -> Generator[IntegrationEnv, None, None]:
 
     server_proc = subprocess.Popen(
         ["npx", "next", "start", "-p", str(port)],
-        cwd=str(_WEB_APP_DIR),
+        cwd=str(_WEB_DIR),
         env=server_env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

@@ -1,6 +1,6 @@
 """Integration tests: watcher update-check endpoint via DataHubClient.
 
-The TS-side tests in `web-app/tests/integration/watchers.test.ts` cover
+The TS-side tests in `web/tests/integration/watchers.test.ts` cover
 the HTTP shape; this file ensures the Python `DataHubClient` plumbing
 parses the response into the typed `WatcherUpdateInfoResponse` model
 correctly so the CLI / in-process updater can consume it.

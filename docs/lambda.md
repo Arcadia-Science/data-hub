@@ -54,7 +54,7 @@ Each processor module exposes a `process_file()` function that accepts the run I
 
 ## Slack notifications
 
-Slack notifications are sent by the **web app** (`web-app/lib/slack.ts`), not the Lambda. When the Lambda's `process_file` calls `POST /api/v1/instruments/:instrumentId/runs` to register a newly-detected run, that endpoint posts a single message per run to `SLACK_WEBHOOK_URL` (configured per environment in Vercel). Subsequent files for the same run do not re-notify because the upsert is idempotent on `(instrument_id, run_id)`. File-level failures remain visible in the web app via the file row's `status='failed'` and `error_message` fields.
+Slack notifications are sent by the **web app** (`web/lib/slack.ts`), not the Lambda. When the Lambda's `process_file` calls `POST /api/v1/instruments/:instrumentId/runs` to register a newly-detected run, that endpoint posts a single message per run to `SLACK_WEBHOOK_URL` (configured per environment in Vercel). Subsequent files for the same run do not re-notify because the upsert is idempotent on `(instrument_id, run_id)`. File-level failures remain visible in the web app via the file row's `status='failed'` and `error_message` fields.
 
 ## Adding a new instrument
 

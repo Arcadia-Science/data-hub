@@ -23,7 +23,7 @@ cd data-hub
 uv sync --all-packages
 
 # Install web app dependencies.
-cd web-app && npm install && cd ..
+cd web && npm install && cd ..
 ```
 
 The Python workspace is managed by uv. The root `pyproject.toml` defines three workspace members — `lambda`, `watcher`, and `packages/shared` — and all are installed together by `uv sync --all-packages`.
@@ -35,7 +35,7 @@ The Python workspace is managed by uv. The root `pyproject.toml` defines three w
 The web app requires the following variables. The easiest way to get them is via the Vercel CLI:
 
 ```sh
-cd web-app
+cd web
 vercel env pull
 ```
 
@@ -72,7 +72,7 @@ The watcher reads its configuration from a YAML file at `~/.data-hub/config.yaml
 ## Database setup
 
 ```sh
-cd web-app
+cd web
 
 # Create a local PostgreSQL database.
 createdb data-hub-local
@@ -98,7 +98,7 @@ Other database commands:
 make dev
 
 # Or equivalently:
-cd web-app && npm run dev
+cd web && npm run dev
 ```
 
 The app runs at [http://localhost:3000](http://localhost:3000).

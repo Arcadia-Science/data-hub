@@ -7,7 +7,7 @@ on:
       - production
     paths:
       - .github/workflows/typescript-test.yml
-      - web-app/**
+      - web/**
       - Makefile
   pull_request:
     branches:
@@ -15,7 +15,7 @@ on:
       - production
     paths:
       - .github/workflows/typescript-test.yml
-      - web-app/**
+      - web/**
       - Makefile
 
 jobs:
@@ -51,7 +51,7 @@ jobs:
 
       - name: Install packages
         run: npm ci
-        working-directory: web-app
+        working-directory: web
 
       - name: Run MCP tests
         run: make fe-test-mcp
