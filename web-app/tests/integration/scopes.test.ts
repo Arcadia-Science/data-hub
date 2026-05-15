@@ -131,4 +131,104 @@ describe("PAT scopes", () => {
     });
     expect(runsPost.status).toBe(403);
   });
+
+  // -------------------------------------------------------------------------
+  // Cross-resource coverage. The route handler pattern is mechanical (28
+  // routes all call `requireScope(authResult, "...")`) but a typo in any
+  // single route — say `runs:read` pasted into a watchers handler — would
+  // be invisible if every assertion only hit the runs surface. These cases
+  // touch each remaining resource family with a representative read + write
+  // route so the wrong-scope-string class of bug is detectable.
+  //
+  // Endpoints that need the requested scope return their normal 2xx /
+  // missing-fixture status; ones that don't return 403. We assert the
+  // status code rather than the response body when scope-passes route into
+  // a "not found" branch so the test doesn't depend on fixture details.
+  // -------------------------------------------------------------------------
+
+  it("['instruments:read'] can GET instruments but is 403 on POST", async () => {
+    const { token } = await seedTestUser({ scopes: ["instruments:read"] });
+
+    const getRes = await api("/api/v1/instruments", { token });
+    expect(getRes.status).toBe(200);
+
+    const postRes = await api("/api/v1/instruments", {
+      method: "POST",
+      token,
+      body: { id: "scopes-test-write-only", display_name: "Should be denied" },
+    });
+    expect(postRes.status).toBe(403);
+    const body = await postRes.json();
+    expect(body.error.message).toMatch(
+      /missing required scope: instruments:write/
+    );
+  });
+
+  it("['watchers:read'] can GET watchers but is 403 on POST register", async () => {
+    const { token } = await seedTestUser({ scopes: ["watchers:read"] });
+
+    const getRes = await api("/api/v1/watchers", { token });
+    expect(getRes.status).toBe(200);
+
+    // POST /watchers/register requires `watchers:write`. We send a
+    // well-formed body referencing a non-existent instrument; the scope
+    // guard runs before the lookup, so 403 = scope-fail and any other
+    // 4xx = scope-pass.
+    const postRes = await api("/api/v1/watchers/register", {
+      method: "POST",
+      token,
+      body: { instrument_id: "does-not-exist", hostname: "host.example.com" },
+    });
+    expect(postRes.status).toBe(403);
+    const body = await postRes.json();
+    expect(body.error.message).toMatch(
+      /missing required scope: watchers:write/
+    );
+  });
+
+  // -------------------------------------------------------------------------
+  // Mixed scopes. Confirms that scopes are independent — `:write` does not
+  // imply `:read` and vice versa, and granting one resource doesn't grant
+  // another. Catches the class of bug where someone "helpfully" adds an
+  // implicit hierarchy to `hasScope`.
+  // -------------------------------------------------------------------------
+
+  it("['runs:read', 'files:write'] grants exactly those scopes and nothing else", async () => {
+    const { token } = await seedTestUser({
+      scopes: ["runs:read", "files:write"],
+    });
+
+    // runs:read → GET succeeds
+    const runsGet = await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      token,
+    });
+    expect(runsGet.status).toBe(200);
+
+    // runs:write → POST denied (no implicit `:write` from `:read`)
+    const runsPost = await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: { run_id: "mixed-scope-run", source: "lambda" },
+    });
+    expect(runsPost.status).toBe(403);
+    expect((await runsPost.json()).error.message).toMatch(
+      /missing required scope: runs:write/
+    );
+
+    // files:write → PATCH passes the scope guard. The file doesn't exist
+    // so we get a 404 from the not-found branch, not 403 from the guard.
+    const filesPatch = await api("/api/v1/files/99999", {
+      method: "PATCH",
+      token,
+      body: { status: "completed" },
+    });
+    expect(filesPatch.status).toBe(404);
+
+    // files:read → GET denied (no implicit `:read` from `:write`)
+    const filesGet = await api("/api/v1/files/99999/download", { token });
+    expect(filesGet.status).toBe(403);
+    expect((await filesGet.json()).error.message).toMatch(
+      /missing required scope: files:read/
+    );
+  });
 });

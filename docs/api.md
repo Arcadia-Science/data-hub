@@ -25,7 +25,8 @@ Every personal access token carries an array of permission scopes. A request is 
 | `files:write` | Create/update/delete file records and reprocess files |
 | `watchers:read` | Read watcher state (list, heartbeats, events, config, upload queue, update-check) |
 | `watchers:write` | Register/deregister watchers, post heartbeats and events, push config |
-| `archive-jobs:write` | Update archive jobs (Lambda callback). Archive reads happen via `files:read`. |
+| `archive-jobs:read` | Read archive job state. No endpoints currently consume this scope — the existing run-archive download is gated on `files:read` because it returns file bytes — but it is reserved for future archive-job listing/status endpoints. |
+| `archive-jobs:write` | Update archive jobs (Lambda callback). |
 | `*` | Wildcard — matches every scope. Reserved for the migration backfill and the watcher/Lambda PATs until they are rotated to least-privilege scopes; `POST /api/v1/tokens` rejects `*` from API callers. |
 
 MCP tools enforce the same scopes their REST counterparts do: `search_runs` and `get_run` require `runs:read`, `reprocess_file` requires `files:write`, `claim_run`/`unclaim_run` require `runs:write`, and so on. There is no MCP-specific scope vocabulary — a token with `runs:read` over REST also covers the read-side run tools over MCP.

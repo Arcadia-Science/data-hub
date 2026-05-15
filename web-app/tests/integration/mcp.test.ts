@@ -295,4 +295,96 @@ describe("MCP Server (HTTP)", () => {
     expect(parsed.attributions).toHaveLength(1);
     expect(parsed.attributions[0].userId).toBe(userId);
   });
+
+  // ---- PAT scope enforcement -----------------------------------------------
+  //
+  // Each MCP tool calls `requireMcpScope(authInfo, "<resource>:<action>")`
+  // matching its REST counterpart (see `lib/mcp/tools.ts`). These tests seed
+  // a PAT with a narrow scope set and confirm that:
+  //   - tools whose required scope is granted execute normally;
+  //   - tools whose required scope is missing return `isError: true` with
+  //     a "missing required scope: <scope>" message.
+  //
+  // The scope guard runs before any DB lookup, so we don't need to seed
+  // the file/run referenced by the call — a non-existent id is fine since
+  // the call should be rejected at the guard, not at the lookup.
+
+  it("['runs:read'] can call search_runs but not claim_run", async () => {
+    const { token: scopedToken } = await seedTestUser({
+      scopes: ["runs:read"],
+    });
+
+    const search = await callTool("search_runs", { instrumentId }, scopedToken);
+    expect(search.isError).toBeFalsy();
+
+    const claim = await callTool(
+      "claim_run",
+      { instrumentId, runId },
+      scopedToken
+    );
+    expect(claim.isError).toBe(true);
+    expect(claim.content[0].text).toMatch(/missing required scope: runs:write/);
+  });
+
+  it("['files:read'] can call get_file but not reprocess_file", async () => {
+    const { token: scopedToken } = await seedTestUser({
+      scopes: ["files:read"],
+    });
+
+    // get_file with a nonexistent id still passes the scope guard; it
+    // surfaces a "not found" error instead of a missing-scope error.
+    const getFile = await callTool("get_file", { fileId: 99_999 }, scopedToken);
+    expect(getFile.isError).toBe(true);
+    expect(getFile.content[0].text).toMatch(/not found/);
+    expect(getFile.content[0].text).not.toMatch(/missing required scope/);
+
+    const reprocess = await callTool(
+      "reprocess_file",
+      { fileId: 99_999 },
+      scopedToken
+    );
+    expect(reprocess.isError).toBe(true);
+    expect(reprocess.content[0].text).toMatch(
+      /missing required scope: files:write/
+    );
+  });
+
+  it("['watchers:read'] can call list_watchers but not list_instruments", async () => {
+    const { token: scopedToken } = await seedTestUser({
+      scopes: ["watchers:read"],
+    });
+
+    const watchers = await callTool("list_watchers", {}, scopedToken);
+    expect(watchers.isError).toBeFalsy();
+
+    const instruments = await callTool("list_instruments", {}, scopedToken);
+    expect(instruments.isError).toBe(true);
+    expect(instruments.content[0].text).toMatch(
+      /missing required scope: instruments:read/
+    );
+  });
+
+  it("[] is denied on every protected tool", async () => {
+    const { token: scopedToken } = await seedTestUser({ scopes: [] });
+
+    for (const toolName of [
+      "list_instruments",
+      "search_runs",
+      "list_watchers",
+      "claim_run",
+      "reprocess_file",
+    ]) {
+      const result = await callTool(
+        toolName,
+        toolName === "claim_run"
+          ? { instrumentId, runId }
+          : toolName === "reprocess_file"
+            ? { fileId: 99_999 }
+            : {},
+        scopedToken
+      );
+      expect(result.isError, `expected ${toolName} to be denied`).toBe(true);
+      expect(result.content[0].text).toMatch(/missing required scope/);
+    }
+  });
 });
