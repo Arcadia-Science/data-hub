@@ -88,9 +88,14 @@ function getTokenPrefix(plaintext: string): string {
 // Pass `expiresAt` to test expired-token rejection. Defaults to no expiry.
 // Pass `scopes` to test scope enforcement; defaults to `["*"]` so every
 // existing test (which expects full access) keeps passing.
+// Pass `isAdmin` to seed a workspace admin row. The role only matters for
+// session-authenticated routes (PAT requests never consult `user.is_admin`),
+// but exposing the option here keeps the seeding helper future-proof for
+// any cookie-based session test harness layered on later.
 export async function seedTestUser(options?: {
   expiresAt?: Date | null;
   scopes?: string[];
+  isAdmin?: boolean;
 }) {
   const db = getTestDb();
 
@@ -99,6 +104,7 @@ export async function seedTestUser(options?: {
     id: userId,
     name: "Test User",
     email: `test-${userId.slice(0, 8)}@example.com`,
+    isAdmin: options?.isAdmin ?? false,
   });
 
   const plaintext = generateToken();

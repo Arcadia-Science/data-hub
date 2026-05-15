@@ -1,4 +1,4 @@
-import { authorize } from "@/lib/api/auth";
+import { authorize, requireAdminForSession } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { db } from "@/lib/db";
 import {
@@ -72,6 +72,13 @@ export async function PATCH(
 ) {
   const authResult = await authorize(request, "instruments:write");
   if (authResult instanceof Response) return authResult;
+
+  // Browser callers (the Edit dialog and the "Confirm pending" button on
+  // `/instruments`) must additionally be admins. PAT callers — the watcher
+  // CLI and Lambda — pass through purely on the `instruments:write` scope
+  // so existing automation continues to work without rotation.
+  const adminGate = await requireAdminForSession(authResult);
+  if (adminGate) return adminGate;
 
   const { instrumentId } = await params;
 

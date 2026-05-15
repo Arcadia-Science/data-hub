@@ -2,7 +2,7 @@ import { apiError, FORBIDDEN, UNAUTHORIZED } from "@/lib/api/errors";
 import { hasScope, type Scope } from "@/lib/api/scopes";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { personalAccessTokens } from "@/lib/db/schema";
+import { personalAccessTokens, users } from "@/lib/db/schema";
 import { hashToken } from "@/lib/tokens";
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
@@ -105,6 +105,67 @@ export async function requireSession(): Promise<AuthResult | null> {
   if (session?.user?.id) {
     return { userId: session.user.id, authMethod: "session", scopes: ["*"] };
   }
+  return null;
+}
+
+/**
+ * Session-only admin gate. Use for routes that have no PAT analogue
+ * (PAT create/delete, member toggle). Returns the authenticated user's id
+ * on success, or a `Response` (401 if not signed in, 403 if signed in but
+ * not admin) that the handler should return.
+ *
+ * The admin check always reads `users.is_admin` directly so a demotion via
+ * `/settings/members` takes effect on the next request — the JWT's cached
+ * `session.user.isAdmin` is used only for cheap UI affordance gating.
+ */
+export async function requireAdmin(): Promise<
+  { userId: string; isAdmin: true } | Response
+> {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return apiError(401, UNAUTHORIZED, "Authentication required");
+  }
+
+  const [row] = await db
+    .select({ isAdmin: users.isAdmin })
+    .from(users)
+    .where(eq(users.id, session.user.id))
+    .limit(1);
+
+  if (!row?.isAdmin) {
+    return apiError(403, FORBIDDEN, "Admin role required");
+  }
+
+  return { userId: session.user.id, isAdmin: true };
+}
+
+/**
+ * Layered admin gate for routes that accept either a session or a PAT.
+ * Given an already-resolved `AuthResult` from {@link authorize}, enforce
+ * the admin role on session-authenticated callers but leave PAT callers
+ * alone — the watcher and Lambda PATs continue to authenticate purely via
+ * their stored `scopes` array. Returns `null` to indicate "all good", or a
+ * 403 `Response` the caller should return immediately.
+ *
+ * Splitting this from {@link requireAdmin} keeps the admin DB lookup off
+ * the hot PAT path (every watcher heartbeat / Lambda callback) — only
+ * session-authenticated mutations pay for it.
+ */
+export async function requireAdminForSession(
+  authResult: AuthResult
+): Promise<Response | null> {
+  if (authResult.authMethod !== "session") return null;
+
+  const [row] = await db
+    .select({ isAdmin: users.isAdmin })
+    .from(users)
+    .where(eq(users.id, authResult.userId))
+    .limit(1);
+
+  if (!row?.isAdmin) {
+    return apiError(403, FORBIDDEN, "Admin role required");
+  }
+
   return null;
 }
 

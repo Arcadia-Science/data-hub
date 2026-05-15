@@ -162,6 +162,13 @@
       "when": 1778799469455,
       "tag": "0022_pat_scopes",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1778882678139,
+      "tag": "0023_add_user_is_admin",
+      "breakpoints": true
     }
   ]
 }

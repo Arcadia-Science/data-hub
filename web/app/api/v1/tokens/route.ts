@@ -1,4 +1,4 @@
-import { requireSession } from "@/lib/api/auth";
+import { requireAdmin, requireSession } from "@/lib/api/auth";
 import { validateRequestedScopes } from "@/lib/api/scopes";
 import { db } from "@/lib/db";
 import { personalAccessTokens } from "@/lib/db/schema";
@@ -7,6 +7,11 @@ import { desc, eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 
 export async function GET() {
+  // Listing is open to any signed-in user — regular members see their own
+  // tokens here. The workspace-wide audit list shown on `/settings/tokens`
+  // bypasses this endpoint entirely (it queries the DB directly in the
+  // server component), so this remains a per-user view consistent with
+  // typical PAT-management UIs.
   const authResult = await requireSession();
   if (!authResult) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -30,10 +35,11 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const authResult = await requireSession();
-  if (!authResult) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  // Token creation is admin-only. Non-admins can still view the workspace
+  // PAT list on `/settings/tokens` and call `GET` above, but only admins
+  // can mint new credentials.
+  const authResult = await requireAdmin();
+  if (authResult instanceof Response) return authResult;
 
   let body: { name?: string; expires_at?: string; scopes?: unknown };
   try {

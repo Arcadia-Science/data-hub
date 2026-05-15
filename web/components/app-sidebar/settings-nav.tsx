@@ -14,10 +14,15 @@ import { usePathname } from "next/navigation";
 type SettingsSection = {
   href: string;
   label: string;
+  // Admin-only entries are mounted into the nav only when the viewer is
+  // an admin. Using composition here (filter by predicate, then render)
+  // keeps the SettingsNav body free of per-item `isAdmin && …` branches.
+  adminOnly?: boolean;
 };
 
 const SETTINGS_SECTIONS: SettingsSection[] = [
   { href: "/settings/tokens", label: "Access Tokens" },
+  { href: "/settings/members", label: "Members", adminOnly: true },
 ];
 
 // Single, predictable destination for the "leave settings" affordance. A
@@ -27,8 +32,11 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
 // dashboard so middle-click / cmd-click / "Copy link" all behave too.
 const EXIT_SETTINGS_HREF = "/";
 
-export function SettingsNav() {
+export function SettingsNav({ isAdmin }: { isAdmin: boolean }) {
   const pathname = usePathname();
+  const sections = SETTINGS_SECTIONS.filter(
+    (section) => !section.adminOnly || isAdmin
+  );
 
   return (
     <>
@@ -57,7 +65,7 @@ export function SettingsNav() {
       <SidebarGroup className="pt-1">
         <SidebarGroupContent>
           <SidebarMenu>
-            {SETTINGS_SECTIONS.map((section) => (
+            {sections.map((section) => (
               <SidebarMenuItem key={section.href}>
                 <SidebarMenuButton
                   asChild

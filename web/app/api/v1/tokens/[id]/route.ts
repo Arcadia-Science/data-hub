@@ -1,16 +1,18 @@
-import { requireSession } from "@/lib/api/auth";
+import { requireAdmin } from "@/lib/api/auth";
 import { db } from "@/lib/db";
 import { personalAccessTokens } from "@/lib/db/schema";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authResult = await requireSession();
-  if (!authResult) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  // Token deletion is admin-only. Admins can revoke any user's PAT —
+  // useful for off-boarding, compromised credentials, and pruning unused
+  // tokens during an audit. The previous owner-scoped delete made
+  // multi-user revocation impossible from the UI.
+  const authResult = await requireAdmin();
+  if (authResult instanceof Response) return authResult;
 
   const { id } = await params;
 
@@ -20,16 +22,9 @@ export async function DELETE(
     return Response.json({ error: "Invalid token ID" }, { status: 400 });
   }
 
-  // Scope the delete to the authenticated user so one user can never
-  // delete another user's token — a non-match returns 0 rows → 404.
   const deleted = await db
     .delete(personalAccessTokens)
-    .where(
-      and(
-        eq(personalAccessTokens.id, id),
-        eq(personalAccessTokens.userId, authResult.userId)
-      )
-    )
+    .where(eq(personalAccessTokens.id, id))
     .returning({ id: personalAccessTokens.id });
 
   if (deleted.length === 0) {
