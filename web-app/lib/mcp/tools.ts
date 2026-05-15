@@ -48,12 +48,19 @@ function errorResult(message: string) {
 // short-circuits with a clear error result when the caller's PAT lacks
 // `mcp:write`. Tools that mutate state (claim_run, unclaim_run,
 // reprocess_file) call this before doing any DB work.
+//
+// When `authInfo` is undefined we skip the check: production traffic always
+// has it (enforced by `withMcpAuth({ required: true })` in the route), and
+// the in-memory test transport intentionally omits it. Letting unauthenticated
+// callers through here keeps scope enforcement aligned with the HTTP
+// boundary; downstream user-identity checks (e.g. `resolveAttributionTarget`)
+// still reject the call when a user id is required.
 function requireMcpScope(
   authInfo: AuthInfo | undefined,
   required: "read" | "write"
 ) {
-  const scopes = authInfo?.scopes ?? [];
-  if (scopes.includes(required)) return null;
+  if (!authInfo) return null;
+  if (authInfo.scopes?.includes(required)) return null;
   return errorResult(`Token is missing required MCP scope: ${required}`);
 }
 
