@@ -11,6 +11,8 @@ The API supports two authentication methods:
 
 Tokens are hashed with SHA-256 before storage. The plaintext token is shown once at creation time.
 
+Web page routes use a different gating model from the `/api/v1/*` surface: they're publicly reachable so link previews work, and the page body itself short-circuits to a sign-in CTA when there's no session. The API always requires either a session cookie or a bearer token (see [architecture](architecture.md)).
+
 ### Scopes
 
 Every personal access token carries an array of permission scopes. A request is rejected with `403 FORBIDDEN` when the token's scopes do not include the scope required by the route. The vocabulary is:

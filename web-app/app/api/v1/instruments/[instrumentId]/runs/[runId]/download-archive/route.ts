@@ -7,15 +7,9 @@ import {
   type InvokeBuildArchiveInput,
 } from "@/lib/api/archive-builder";
 import { expireStaleArchiveJobs } from "@/lib/api/archive-jobs";
-import { authenticateRequest } from "@/lib/api/auth";
-import {
-  apiError,
-  INTERNAL_ERROR,
-  NOT_FOUND,
-  UNAUTHORIZED,
-} from "@/lib/api/errors";
+import { authorize } from "@/lib/api/auth";
+import { apiError, INTERNAL_ERROR, NOT_FOUND } from "@/lib/api/errors";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
-import { requireScope } from "@/lib/api/scopes";
 import { db } from "@/lib/db";
 import { archiveJobs, files } from "@/lib/db/schema";
 import {
@@ -92,12 +86,8 @@ type DownloadableFile = {
 // ---------------------------------------------------------------------------
 
 export async function GET(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authenticateRequest(request);
-  if (!authResult) {
-    return apiError(401, UNAUTHORIZED, "Authentication required");
-  }
-  const scopeError = requireScope(authResult, "files:read");
-  if (scopeError) return scopeError;
+  const authResult = await authorize(request, "files:read");
+  if (authResult instanceof Response) return authResult;
 
   const { instrumentId, runId } = await params;
   const run = await lookupRunByNaturalKey(instrumentId, runId);

@@ -1,6 +1,4 @@
-import { authenticateRequest } from "@/lib/api/auth";
-import { apiError, UNAUTHORIZED } from "@/lib/api/errors";
-import { requireScope } from "@/lib/api/scopes";
+import { authorize } from "@/lib/api/auth";
 import { computeEffectiveStatus, STALE_THRESHOLD_MS } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { instruments, watchers } from "@/lib/db/schema";
@@ -8,12 +6,8 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 
 export async function GET(request: NextRequest) {
-  const authResult = await authenticateRequest(request);
-  if (!authResult) {
-    return apiError(401, UNAUTHORIZED, "Authentication required");
-  }
-  const scopeError = requireScope(authResult, "watchers:read");
-  if (scopeError) return scopeError;
+  const authResult = await authorize(request, "watchers:read");
+  if (authResult instanceof Response) return authResult;
 
   const { searchParams } = request.nextUrl;
   const instrumentIdFilter = searchParams.get("instrument_id");

@@ -1,7 +1,5 @@
-import { authenticateRequest } from "@/lib/api/auth";
-import { apiError, UNAUTHORIZED } from "@/lib/api/errors";
+import { authorize } from "@/lib/api/auth";
 import { buildRunListQuery } from "@/lib/api/instrument-runs";
-import { requireScope } from "@/lib/api/scopes";
 import { parseIntParam } from "@/lib/api/validators";
 import type { NextRequest } from "next/server";
 
@@ -14,12 +12,8 @@ import type { NextRequest } from "next/server";
 // ---------------------------------------------------------------------------
 
 export async function GET(request: NextRequest) {
-  const authResult = await authenticateRequest(request);
-  if (!authResult) {
-    return apiError(401, UNAUTHORIZED, "Authentication required");
-  }
-  const scopeError = requireScope(authResult, "runs:read");
-  if (scopeError) return scopeError;
+  const authResult = await authorize(request, "runs:read");
+  if (authResult instanceof Response) return authResult;
 
   const { searchParams } = request.nextUrl;
 

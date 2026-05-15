@@ -1,11 +1,5 @@
-import { authenticateRequest } from "@/lib/api/auth";
-import {
-  apiError,
-  NOT_FOUND,
-  UNAUTHORIZED,
-  VALIDATION_ERROR,
-} from "@/lib/api/errors";
-import { requireScope } from "@/lib/api/scopes";
+import { authorize } from "@/lib/api/auth";
+import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { db } from "@/lib/db";
 import {
   instrumentRuns,
@@ -20,12 +14,8 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ instrumentId: string }> }
 ) {
-  const authResult = await authenticateRequest(request);
-  if (!authResult) {
-    return apiError(401, UNAUTHORIZED, "Authentication required");
-  }
-  const scopeError = requireScope(authResult, "instruments:read");
-  if (scopeError) return scopeError;
+  const authResult = await authorize(request, "instruments:read");
+  if (authResult instanceof Response) return authResult;
 
   const { instrumentId } = await params;
 
@@ -80,12 +70,8 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ instrumentId: string }> }
 ) {
-  const authResult = await authenticateRequest(request);
-  if (!authResult) {
-    return apiError(401, UNAUTHORIZED, "Authentication required");
-  }
-  const scopeError = requireScope(authResult, "instruments:write");
-  if (scopeError) return scopeError;
+  const authResult = await authorize(request, "instruments:write");
+  if (authResult instanceof Response) return authResult;
 
   const { instrumentId } = await params;
 

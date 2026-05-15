@@ -1,3 +1,4 @@
+import { SignInRequired } from "@/components/auth/sign-in-required";
 import { CreateTokenDialog } from "@/components/tokens/create-token-dialog";
 import { DeleteTokenDialog } from "@/components/tokens/delete-token-dialog";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -15,6 +16,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { personalAccessTokens, users } from "@/lib/db/schema";
 import { formatRelativeTime } from "@/lib/utils";
@@ -22,8 +24,13 @@ import { desc, eq } from "drizzle-orm";
 import { KeyRound } from "lucide-react";
 import type { Metadata } from "next/types";
 
+const description = "Personal access tokens for the Data Hub API.";
+
 export const metadata: Metadata = {
   title: "Access Tokens",
+  description,
+  openGraph: { title: "Access Tokens", description },
+  twitter: { title: "Access Tokens", description },
 };
 
 // Mirrors the deterministic palette used by RanByCell so the same user gets
@@ -54,16 +61,32 @@ function toInitials(displayName: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-// Render a token's scopes as a compact column. Three branches:
+// Render a token's scopes as a compact column. Four branches:
 //
-//   1. `["*"]` (backfill wildcard) → single "Full access" pill so legacy
+//   1. `[]` → "No scopes" pill. The DB column is non-null with a default
+//      of `['*']` and the create-token form rejects empty arrays, so this
+//      shouldn't appear in practice — but rendering an explicit empty
+//      state here is much clearer than a silently-empty cell if it ever
+//      does happen (e.g. a manual SQL update).
+//   2. `["*"]` (backfill wildcard) → single "Full access" pill so legacy
 //      tokens stand out at a glance.
-//   2. Single explicit scope → that scope as a badge, no tooltip needed
+//   3. Single explicit scope → that scope as a badge, no tooltip needed
 //      because everything is already visible.
-//   3. Multiple explicit scopes → first scope (sorted) plus a "+N"
+//   4. Multiple explicit scopes → first scope (sorted) plus a "+N"
 //      counter badge. Hovering the cell reveals the full list in a
 //      tooltip so the table stays scannable on tokens with many scopes.
 function TokenScopeBadges({ scopes }: { scopes: string[] }) {
+  if (scopes.length === 0) {
+    return (
+      <Badge
+        variant="secondary"
+        className="text-xs text-muted-foreground italic"
+      >
+        No scopes
+      </Badge>
+    );
+  }
+
   if (scopes.length === 1 && scopes[0] === "*") {
     return (
       <Badge variant="secondary" className="text-xs">
@@ -77,15 +100,11 @@ function TokenScopeBadges({ scopes }: { scopes: string[] }) {
   // entry in the sorted list is the one shown in the collapsed cell.
   const sorted = [...scopes].sort();
 
-  if (sorted.length <= 1) {
+  if (sorted.length === 1) {
     return (
-      <div className="flex flex-wrap gap-1">
-        {sorted.map((scope) => (
-          <Badge key={scope} variant="secondary" className="font-mono text-xs">
-            {scope}
-          </Badge>
-        ))}
-      </div>
+      <Badge variant="secondary" className="font-mono text-xs">
+        {sorted[0]}
+      </Badge>
     );
   }
 
@@ -114,9 +133,25 @@ function TokenScopeBadges({ scopes }: { scopes: string[] }) {
 }
 
 export default async function TokensPage() {
+  // Page-level auth gate so we never run the workspace-wide PAT query for
+  // an unauthenticated visitor. The settings layout (`../layout.tsx`) also
+  // renders `SignInRequired` when there's no session, but layouts can't
+  // short-circuit page rendering — without this check the `db.select` below
+  // would still execute (its result is then discarded by the layout, but
+  // it's wasted DB work and a 500 from this query would slip past the
+  // layout guard). NextAuth dedupes `auth()` per request, so the duplicate
+  // call is free.
+  const session = await auth();
+  if (!session?.user) {
+    return (
+      <SignInRequired callbackUrl="/settings/tokens">
+        Sign in to manage access tokens.
+      </SignInRequired>
+    );
+  }
+
   // This is an internal-tool settings page; we intentionally show every PAT
-  // across the workspace so admins can audit them. Auth is enforced by the
-  // settings layout.
+  // across the workspace so admins can audit them.
   const tokens = await db
     .select({
       id: personalAccessTokens.id,

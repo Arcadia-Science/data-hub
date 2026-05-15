@@ -8,7 +8,7 @@ import {
 } from "@/tests/integration/helpers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-// Exercises the scope guard inserted by requireScope() in the v1 route
+// Exercises the scope guard inserted by `authorize()` in the v1 route
 // handlers. Each test seeds a fresh PAT with a specific scopes array and
 // then hits a read + write endpoint to confirm that:
 //
@@ -98,9 +98,10 @@ describe("PAT scopes", () => {
       token,
       body: { run_id: "wildcard-run", source: "lambda" },
     });
-    // 200 if a previous test (or the dedup race below) already inserted
-    // this run, 201 on a fresh insert. Either status proves the scope
-    // check let the request through.
+    // 200 if the run_id already exists (the runs route dedupes within
+    // its insert window), 201 on a fresh insert. Either status proves
+    // the scope check let the request through, which is all this case
+    // needs to assert.
     expect([200, 201]).toContain(runsPost.status);
   });
 
@@ -133,12 +134,13 @@ describe("PAT scopes", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Cross-resource coverage. The route handler pattern is mechanical (28
-  // routes all call `requireScope(authResult, "...")`) but a typo in any
-  // single route — say `runs:read` pasted into a watchers handler — would
-  // be invisible if every assertion only hit the runs surface. These cases
-  // touch each remaining resource family with a representative read + write
-  // route so the wrong-scope-string class of bug is detectable.
+  // Cross-resource coverage. Every v1 route now opens with a single
+  // `authorize(request, "<scope>")` call, so the call sites are uniform
+  // — but a typo in any one of them (say `runs:read` pasted into a
+  // watchers handler) would be invisible if every assertion only hit
+  // the runs surface. These cases touch each remaining resource family
+  // with a representative read + write route so the wrong-scope-string
+  // class of bug is detectable.
   //
   // Endpoints that need the requested scope return their normal 2xx /
   // missing-fixture status; ones that don't return 403. We assert the

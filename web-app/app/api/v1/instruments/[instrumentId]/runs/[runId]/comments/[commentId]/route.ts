@@ -1,10 +1,9 @@
-import { authenticateRequest } from "@/lib/api/auth";
+import { authorize } from "@/lib/api/auth";
 import {
   apiError,
   CONFLICT,
   FORBIDDEN,
   NOT_FOUND,
-  UNAUTHORIZED,
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
@@ -13,7 +12,6 @@ import {
   softDeleteComment,
   updateComment,
 } from "@/lib/api/run-comments";
-import { requireScope } from "@/lib/api/scopes";
 import type { NextRequest } from "next/server";
 
 type RouteContext = {
@@ -37,19 +35,12 @@ async function preflight(
   request: NextRequest,
   params: RouteContext["params"]
 ): Promise<PreflightResult> {
-  const authResult = await authenticateRequest(request);
-  if (!authResult) {
-    return {
-      kind: "error",
-      response: apiError(401, UNAUTHORIZED, "Authentication required"),
-    };
-  }
   // Both PATCH and DELETE on this route mutate comment state, so both
   // require runs:write. Bake the check into the shared preflight so a
   // future verb added here can't accidentally skip it.
-  const scopeError = requireScope(authResult, "runs:write");
-  if (scopeError) {
-    return { kind: "error", response: scopeError };
+  const authResult = await authorize(request, "runs:write");
+  if (authResult instanceof Response) {
+    return { kind: "error", response: authResult };
   }
 
   const { instrumentId, runId, commentId } = await params;

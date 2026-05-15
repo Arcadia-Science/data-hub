@@ -1,12 +1,10 @@
-import { authenticateRequest } from "@/lib/api/auth";
+import { authorize } from "@/lib/api/auth";
 import {
   apiError,
   CONFLICT,
   NOT_FOUND,
-  UNAUTHORIZED,
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
-import { requireScope } from "@/lib/api/scopes";
 import { isValidUUID } from "@/lib/api/validators";
 import { computeEffectiveStatus, findActiveWatcher } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
@@ -18,12 +16,8 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ watcherId: string }> }
 ) {
-  const authResult = await authenticateRequest(request);
-  if (!authResult) {
-    return apiError(401, UNAUTHORIZED, "Authentication required");
-  }
-  const scopeError = requireScope(authResult, "watchers:read");
-  if (scopeError) return scopeError;
+  const authResult = await authorize(request, "watchers:read");
+  if (authResult instanceof Response) return authResult;
 
   const { watcherId } = await params;
   if (!isValidUUID(watcherId)) {
@@ -60,12 +54,8 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ watcherId: string }> }
 ) {
-  const authResult = await authenticateRequest(request);
-  if (!authResult) {
-    return apiError(401, UNAUTHORIZED, "Authentication required");
-  }
-  const scopeError = requireScope(authResult, "watchers:write");
-  if (scopeError) return scopeError;
+  const authResult = await authorize(request, "watchers:write");
+  if (authResult instanceof Response) return authResult;
 
   const { watcherId } = await params;
   if (!isValidUUID(watcherId)) {
