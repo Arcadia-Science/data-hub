@@ -187,6 +187,35 @@ describe("PAT scopes", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Token management is session-only — pins the security invariant that a
+  // PAT cannot mint, list, or revoke other PATs even when it carries the
+  // wildcard scope. Regression guard for the token routes drifting from
+  // `requireSession()` to `authenticateRequest()`.
+  // -------------------------------------------------------------------------
+
+  it("PATs cannot manage tokens even with ['*']", async () => {
+    const { token } = await seedTestUser({ scopes: ["*"] });
+
+    const listRes = await api("/api/v1/tokens", { token });
+    expect(listRes.status).toBe(401);
+
+    const createRes = await api("/api/v1/tokens", {
+      method: "POST",
+      token,
+      body: { name: "should-fail", scopes: ["runs:read"] },
+    });
+    expect(createRes.status).toBe(401);
+
+    // Random UUID — the auth check runs before the lookup, so 401 means
+    // session was required and the PAT was rejected, not "token not found".
+    const deleteRes = await api(
+      "/api/v1/tokens/00000000-0000-0000-0000-000000000000",
+      { method: "DELETE", token }
+    );
+    expect(deleteRes.status).toBe(401);
+  });
+
+  // -------------------------------------------------------------------------
   // Mixed scopes. Confirms that scopes are independent — `:write` does not
   // imply `:read` and vice versa, and granting one resource doesn't grant
   // another. Catches the class of bug where someone "helpfully" adds an
