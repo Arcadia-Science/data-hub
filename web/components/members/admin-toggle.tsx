@@ -52,11 +52,7 @@ export function AdminToggle({
 
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        toast.error(
-          body?.error?.message ??
-            body?.error ??
-            "Failed to update member's role"
-        );
+        toast.error(body?.error?.message ?? "Failed to update member's role");
         return;
       }
 

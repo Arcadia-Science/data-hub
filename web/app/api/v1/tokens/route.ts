@@ -1,4 +1,5 @@
 import { requireAdmin, requireSession } from "@/lib/api/auth";
+import { apiError, UNAUTHORIZED, VALIDATION_ERROR } from "@/lib/api/errors";
 import { validateRequestedScopes } from "@/lib/api/scopes";
 import { db } from "@/lib/db";
 import { personalAccessTokens } from "@/lib/db/schema";
@@ -14,7 +15,7 @@ export async function GET() {
   // typical PAT-management UIs.
   const authResult = await requireSession();
   if (!authResult) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
+    return apiError(401, UNAUTHORIZED, "Authentication required");
   }
 
   const tokens = await db
@@ -45,20 +46,21 @@ export async function POST(request: NextRequest) {
   try {
     body = await request.json();
   } catch {
-    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+    return apiError(400, VALIDATION_ERROR, "Invalid JSON body");
   }
 
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!name || name.length > 100) {
-    return Response.json(
-      { error: "name is required and must be at most 100 characters" },
-      { status: 400 }
+    return apiError(
+      400,
+      VALIDATION_ERROR,
+      "name is required and must be at most 100 characters"
     );
   }
 
   const validation = validateRequestedScopes(body.scopes);
   if (!validation.ok) {
-    return Response.json({ error: validation.error }, { status: 400 });
+    return apiError(400, VALIDATION_ERROR, validation.error);
   }
   const scopes = validation.scopes;
 
@@ -66,15 +68,17 @@ export async function POST(request: NextRequest) {
   if (body.expires_at) {
     expiresAt = new Date(body.expires_at);
     if (isNaN(expiresAt.getTime())) {
-      return Response.json(
-        { error: "expires_at must be a valid ISO 8601 date" },
-        { status: 400 }
+      return apiError(
+        400,
+        VALIDATION_ERROR,
+        "expires_at must be a valid ISO 8601 date"
       );
     }
     if (expiresAt <= new Date()) {
-      return Response.json(
-        { error: "expires_at must be in the future" },
-        { status: 400 }
+      return apiError(
+        400,
+        VALIDATION_ERROR,
+        "expires_at must be in the future"
       );
     }
   }

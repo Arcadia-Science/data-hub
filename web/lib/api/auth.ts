@@ -118,9 +118,7 @@ export async function requireSession(): Promise<AuthResult | null> {
  * `/settings/members` takes effect on the next request — the JWT's cached
  * `session.user.isAdmin` is used only for cheap UI affordance gating.
  */
-export async function requireAdmin(): Promise<
-  { userId: string; isAdmin: true } | Response
-> {
+export async function requireAdmin(): Promise<{ userId: string } | Response> {
   const session = await auth();
   if (!session?.user?.id) {
     return apiError(401, UNAUTHORIZED, "Authentication required");
@@ -136,7 +134,7 @@ export async function requireAdmin(): Promise<
     return apiError(403, FORBIDDEN, "Admin role required");
   }
 
-  return { userId: session.user.id, isAdmin: true };
+  return { userId: session.user.id };
 }
 
 /**

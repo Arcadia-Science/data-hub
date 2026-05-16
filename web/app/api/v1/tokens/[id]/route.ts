@@ -1,4 +1,5 @@
 import { requireAdmin } from "@/lib/api/auth";
+import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { db } from "@/lib/db";
 import { personalAccessTokens } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -19,7 +20,7 @@ export async function DELETE(
   const UUID_RE =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   if (!UUID_RE.test(id)) {
-    return Response.json({ error: "Invalid token ID" }, { status: 400 });
+    return apiError(400, VALIDATION_ERROR, "Invalid token ID");
   }
 
   const deleted = await db
@@ -28,7 +29,7 @@ export async function DELETE(
     .returning({ id: personalAccessTokens.id });
 
   if (deleted.length === 0) {
-    return Response.json({ error: "Token not found" }, { status: 404 });
+    return apiError(404, NOT_FOUND, "Token not found");
   }
 
   return new Response(null, { status: 204 });
