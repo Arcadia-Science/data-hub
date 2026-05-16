@@ -13,6 +13,16 @@ Tokens are hashed with SHA-256 before storage. The plaintext token is shown once
 
 Web page routes use a different gating model from the `/api/v1/*` surface: they're publicly reachable so link previews work, and the page body itself short-circuits to a sign-in CTA when there's no session. The API always requires either a session cookie or a bearer token (see [architecture](architecture.md)).
 
+### Admin role
+
+A subset of mutations is gated on the workspace admin role in addition to (or instead of) the scope check:
+
+- `PATCH /api/v1/instruments/:instrumentId` — session callers must be admin; bearer-token callers continue to authenticate solely via the `instruments:write` scope, so existing watcher/Lambda automation is unaffected.
+- `POST /api/v1/tokens` and `DELETE /api/v1/tokens/:id` — admin-only, session-only. Bearer tokens cannot manage other tokens.
+- `GET /api/v1/users`, `PATCH /api/v1/users/:userId` — admin-only, session-only. Used by the **Settings > Members** page to toggle other users' admin flag.
+
+The first admin is bootstrapped from the `ADMIN_EMAILS` env var (comma-separated, case-insensitive); listed users are promoted to admin on every sign-in. Subsequent admins can be promoted in the UI by any existing admin. Admins cannot demote themselves — `PATCH /api/v1/users/:userId` with `{ is_admin: false }` on the caller's own user id returns `400 VALIDATION_ERROR`.
+
 ### Scopes
 
 Every personal access token carries an array of permission scopes. A request is rejected with `403 FORBIDDEN` when the token's scopes do not include the scope required by the route. The vocabulary is:
@@ -121,8 +131,15 @@ The download-archive endpoint sits in front of a Lambda-driven builder pipeline 
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/api/v1/tokens` | List personal access tokens. Response includes each token's `scopes`. |
-| `POST` | `/api/v1/tokens` | Create a new token. Requires a non-empty `scopes` array (see [Scopes](#scopes)); the wildcard `*` is rejected. |
-| `DELETE` | `/api/v1/tokens/:id` | Revoke a token |
+| `POST` | `/api/v1/tokens` | Create a new token. Admin-only; requires a non-empty `scopes` array (see [Scopes](#scopes)); the wildcard `*` is rejected. |
+| `DELETE` | `/api/v1/tokens/:id` | Revoke a token. Admin-only; admins can revoke any user's PAT. |
+
+### Users
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/api/v1/users` | List workspace users with their admin flag. Admin-only, session-only. |
+| `PATCH` | `/api/v1/users/:userId` | Toggle the workspace `is_admin` flag for a user. Admin-only, session-only; admins cannot demote themselves. |
 
 ### MCP (Model Context Protocol)
 

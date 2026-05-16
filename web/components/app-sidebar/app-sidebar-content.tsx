@@ -9,6 +9,7 @@ import { usePathname } from "next/navigation";
 type AppSidebarContentProps = {
   instruments: SidebarInstrument[];
   watchers: SidebarWatcher[];
+  isAdmin: boolean;
 };
 
 // Centralizes the "main vs. settings" mode toggle so the rest of the sidebar
@@ -18,6 +19,7 @@ type AppSidebarContentProps = {
 export function AppSidebarContent({
   instruments,
   watchers,
+  isAdmin,
 }: AppSidebarContentProps) {
   const pathname = usePathname();
   const isSettings = pathname.startsWith("/settings");
@@ -25,7 +27,7 @@ export function AppSidebarContent({
   return (
     <SidebarContent>
       {isSettings ? (
-        <SettingsNav />
+        <SettingsNav isAdmin={isAdmin} />
       ) : (
         <MainNav instruments={instruments} watchers={watchers} />
       )}

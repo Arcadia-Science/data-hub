@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import {
   bigint,
   bigserial,
+  boolean,
   index,
   integer,
   jsonb,
@@ -95,6 +96,13 @@ export const users = pgTable("user", {
   emailVerified: timestamp("emailVerified", { mode: "date" }),
   // Profile image URL from Google.
   image: text("image"),
+  // Workspace-wide admin flag. Bootstrapped from the `ADMIN_EMAILS` env var
+  // at sign-in (see `web/lib/auth.ts`); subsequent toggles happen via the
+  // admin-only `/settings/members` page. Used to gate session-authenticated
+  // mutations (PAT create/delete, instrument edits, member toggles). PAT-
+  // authenticated requests are unaffected — they're still authorized by
+  // `personal_access_tokens.scopes`.
+  isAdmin: boolean("is_admin").notNull().default(false),
 });
 
 export const accounts = pgTable(

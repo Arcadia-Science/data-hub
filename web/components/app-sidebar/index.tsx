@@ -52,7 +52,11 @@ export function AppSidebar({
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
-      <AppSidebarContent instruments={instruments} watchers={watchers} />
+      <AppSidebarContent
+        instruments={instruments}
+        watchers={watchers}
+        isAdmin={session.user.isAdmin === true}
+      />
       <SidebarFooter>
         <UserMenuFooter user={session.user} signOutAction={signOutAction} />
       </SidebarFooter>

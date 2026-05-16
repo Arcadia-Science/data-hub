@@ -53,7 +53,7 @@ export function DefaultRunsTable({
           <TableHead className="text-right">
             <AcquiredColumnHeader />
           </TableHead>
-          <TableHead className="w-[132px]">
+          <TableHead className="w-[108px]">
             <span className="sr-only">Actions</span>
           </TableHead>
         </TableRow>

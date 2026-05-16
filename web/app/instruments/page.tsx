@@ -28,6 +28,13 @@ export default async function InstrumentsPage() {
 
   const instruments = await getInstrumentListWithCounts();
 
+  // Composition: the management actions cell (Edit dialog + Confirm
+  // pending button) is rendered only for admins. Regular members see the
+  // same listing without the trailing actions column. InstrumentsTable
+  // already supports `renderRowActions` being omitted entirely, so no
+  // table-level prop changes are needed.
+  const isAdmin = session.user.isAdmin === true;
+
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
       <div className="flex items-center justify-between">
@@ -35,7 +42,7 @@ export default async function InstrumentsPage() {
       </div>
       <InstrumentsTable
         data={instruments}
-        renderRowActions={InstrumentRowManagementActions}
+        renderRowActions={isAdmin ? InstrumentRowManagementActions : undefined}
       />
     </div>
   );

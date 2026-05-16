@@ -167,7 +167,7 @@ function CreateTokenForm({
 
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        toast.error(body?.error ?? "Failed to create token");
+        toast.error(body?.error?.message ?? "Failed to create token");
         return;
       }
 
