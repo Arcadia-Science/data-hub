@@ -58,6 +58,28 @@ export async function resetDb() {
       >[0]
     );
   }
+
+  // Re-seed the `watcher_release_config` singleton with the same
+  // defaults the global setup uses (9.9.9 / 0.1.0 / stable / false).
+  // The TRUNCATE on "user" above cascades through the
+  // `updated_by → user.id` FK and wipes this row even though
+  // `watcher_release_config` is not in TRUNCATE_ORDER — TRUNCATE CASCADE
+  // ignores the ON DELETE SET NULL clause and unconditionally clears
+  // dependent rows. Re-seeding here keeps every test's update-check
+  // baseline identical to a fresh global setup.
+  await db.execute(
+    `INSERT INTO watcher_release_config
+       (id, latest_version, min_supported_version, channel, mandatory)
+     VALUES
+       (true, '9.9.9', '0.1.0', 'stable', false)
+     ON CONFLICT (id) DO UPDATE SET
+       latest_version = EXCLUDED.latest_version,
+       min_supported_version = EXCLUDED.min_supported_version,
+       channel = EXCLUDED.channel,
+       mandatory = EXCLUDED.mandatory,
+       updated_at = now(),
+       updated_by = NULL` as unknown as Parameters<typeof db.execute>[0]
+  );
 }
 
 // ---------------------------------------------------------------------------

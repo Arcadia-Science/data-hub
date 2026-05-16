@@ -2,23 +2,18 @@ import { authorize } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { isValidUUID } from "@/lib/api/validators";
 import { findActiveWatcher } from "@/lib/api/watchers";
+import { db } from "@/lib/db";
+import { watcherReleaseConfig } from "@/lib/db/schema";
 import type { NextRequest } from "next/server";
 
 /**
  * Server-reported watcher release metadata.
  *
- * Source of truth is environment variables today; a dedicated
- * `watcher_releases` table can replace this once we need per-channel
- * rollouts or per-watcher pinned versions:
- *
- *   - `WATCHER_LATEST_VERSION`        — required to advertise a release
- *   - `WATCHER_MIN_SUPPORTED_VERSION` — optional floor for forced upgrades
- *   - `WATCHER_RELEASE_CHANNEL`       — defaults to "stable"
- *   - `WATCHER_MANDATORY_UPDATE`      — "true" / "1" to force rollout
- *
- * When `WATCHER_LATEST_VERSION` is unset the endpoint still returns 200 so
- * watchers don't log spurious 5xxs; `latest_version: null` tells the
- * client to skip the upgrade attempt.
+ * Source of truth is the `watcher_release_config` singleton row, edited
+ * by admins via `/settings/watcher-release`. Until that row exists
+ * (fresh deploy, before any admin save) the endpoint still returns 200
+ * with `latest_version: null` so watchers don't log spurious 5xxs and
+ * the client treats it as "no update available".
  */
 type WatcherReleaseInfo = {
   latest_version: string | null;
@@ -27,20 +22,28 @@ type WatcherReleaseInfo = {
   mandatory: boolean;
 };
 
-function readReleaseInfo(): WatcherReleaseInfo {
-  const latest = process.env.WATCHER_LATEST_VERSION?.trim() || null;
-  const minSupported =
-    process.env.WATCHER_MIN_SUPPORTED_VERSION?.trim() || null;
-  const channel = process.env.WATCHER_RELEASE_CHANNEL?.trim() || "stable";
-  const mandatoryRaw = process.env.WATCHER_MANDATORY_UPDATE?.trim() ?? "";
-  const mandatory =
-    mandatoryRaw === "1" || mandatoryRaw.toLowerCase() === "true";
-
+async function readReleaseInfo(): Promise<WatcherReleaseInfo> {
+  // The singleton check constraint on `id` guarantees at most one row;
+  // no LIMIT 1 or ORDER BY discipline required on read.
+  const [row] = await db.select().from(watcherReleaseConfig);
+  if (!row) {
+    return {
+      latest_version: null,
+      min_supported_version: null,
+      channel: "stable",
+      mandatory: false,
+    };
+  }
   return {
-    latest_version: latest,
-    min_supported_version: minSupported,
-    channel,
-    mandatory: mandatory && latest !== null,
+    latest_version: row.latestVersion,
+    min_supported_version: row.minSupportedVersion,
+    channel: row.channel,
+    // Collapsing mandatory→false when no version is advertised keeps the
+    // wire response self-consistent. The watcher's mandatory branch is
+    // gated on `latest_version` anyway, but mirroring that invariant
+    // here means a misconfigured `mandatory=true` with a blank version
+    // never leaks out of the API.
+    mandatory: row.mandatory && row.latestVersion !== null,
   };
 }
 
@@ -64,5 +67,5 @@ export async function GET(
     return apiError(404, NOT_FOUND, `Watcher '${watcherId}' not found`);
   }
 
-  return Response.json(readReleaseInfo());
+  return Response.json(await readReleaseInfo());
 }

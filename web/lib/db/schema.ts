@@ -4,6 +4,7 @@ import {
   bigint,
   bigserial,
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -148,6 +149,57 @@ export const sessions = pgTable(
     expires: timestamp("expires", { mode: "date" }).notNull(),
   },
   (session) => [index("idx_sessions_user_id").on(session.userId)]
+);
+
+// Singleton row of server-advertised watcher release metadata, served by
+// `GET /api/v1/watchers/:id/update-check` and edited via the admin-only
+// `/settings/watcher-release` page. Previously sourced from the
+// `WATCHER_LATEST_VERSION` / `WATCHER_MIN_SUPPORTED_VERSION` /
+// `WATCHER_RELEASE_CHANNEL` / `WATCHER_MANDATORY_UPDATE` env vars.
+//
+// The `id boolean PRIMARY KEY DEFAULT true` + check constraint is the
+// standard Postgres singleton trick — schema-level guarantee of at most
+// one row, so callers don't need any `LIMIT 1` discipline and concurrent
+// upserts collapse onto the same row via `ON CONFLICT (id) DO UPDATE`.
+//
+// When the table is empty (fresh deploy, before any admin has saved) the
+// update-check endpoint returns `latest_version: null`, the same
+// "no update info available" sentinel watchers already understand.
+export const watcherReleaseConfig = pgTable(
+  "watcher_release_config",
+  {
+    id: boolean("id").primaryKey().default(true),
+    // Required to advertise a release. NULL → watchers skip the upgrade
+    // attempt.
+    latestVersion: text("latest_version"),
+    // Optional floor; surfaced in the response for future use, not yet
+    // enforced server-side.
+    minSupportedVersion: text("min_supported_version"),
+    // Defaults to "stable"; surfaced in the response and shown in
+    // `self-update` output.
+    channel: text("channel").notNull().default("stable"),
+    // When true, the release skips the watcher's activity-window guard so
+    // mid-acquisition PCs upgrade immediately. Has no effect when
+    // `latest_version` is NULL — `update-check` collapses it to false on
+    // read so the wire response stays self-consistent.
+    mandatory: boolean("mandatory").notNull().default(false),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+    // The admin who last saved this row. NULL only after a deleted user
+    // cascade — the route always stamps the authenticated user id on
+    // write.
+    updatedBy: text("updated_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+  },
+  (config) => [
+    check("watcher_release_config_singleton", sql`${config.id} = true`),
+  ]
 );
 
 export const personalAccessTokens = pgTable(

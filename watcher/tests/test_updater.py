@@ -767,8 +767,9 @@ class TestUpdaterOnTick:
     def test_editable_refusal_re_emits_when_target_advances(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # When the server bumps `WATCHER_LATEST_VERSION` to a new
-        # release, we *do* want to re-notify — the dashboard event for
+        # When the server advertises a new release (via the admin-only
+        # /settings/watcher-release page), we *do* want to re-notify —
+        # the dashboard event for
         # the old target doesn't tell the admin this PC is missing the
         # new one. Throttling is per-target, not "fire at most once
         # ever".
