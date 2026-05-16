@@ -181,9 +181,9 @@ export function RunBulkActionBar() {
   }));
 
   // On desktop the expanded sidebar reserves space on the left, so anchor the
-  // bar to the center of the main panel (not the viewport) by shifting `left`
-  // by half the sidebar width. On mobile the sidebar is an overlay sheet, so
-  // the main panel already spans the full viewport.
+  // bar's left edge to the sidebar's right edge so it spans the full main
+  // panel width. On mobile the sidebar is an overlay sheet, so the main panel
+  // already spans the full viewport.
   const offsetForSidebar = !isMobile && sidebarState === "expanded";
 
   return (
@@ -192,10 +192,8 @@ export function RunBulkActionBar() {
         role="region"
         aria-label="Bulk actions for selected runs"
         className={cn(
-          "fixed bottom-6 z-50 flex -translate-x-1/2 animate-in items-center gap-8 rounded-lg border bg-popover px-8 py-2.5 text-popover-foreground shadow-xl transition-[left] duration-200 ease-linear fade-in slide-in-from-bottom-4",
-          offsetForSidebar
-            ? "left-[calc(50%+var(--sidebar-width)/2)]"
-            : "left-1/2"
+          "fixed right-0 bottom-6 z-50 mx-auto flex max-w-6xl animate-in items-center justify-between gap-4 rounded-lg border bg-popover px-8 py-2.5 text-popover-foreground shadow-2xl transition-[left] duration-200 ease-linear fade-in slide-in-from-bottom-4",
+          offsetForSidebar ? "left-[var(--sidebar-width)]" : "left-0"
         )}
       >
         <div className="text-sm">

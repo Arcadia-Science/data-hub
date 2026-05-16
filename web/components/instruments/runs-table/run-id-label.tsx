@@ -8,7 +8,7 @@ import {
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 
-const MAX_RUN_ID_LENGTH = 48;
+const MAX_RUN_ID_LENGTH = 32;
 
 export function RunIdLabel({
   runId,
