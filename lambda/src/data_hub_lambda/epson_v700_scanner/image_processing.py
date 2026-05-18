@@ -38,6 +38,7 @@ _OVERLAY_THICKNESS = 8
 _COLONY_BBOX_COLOR: tuple[int, int, int] = (255, 255, 255)
 _COLONY_BBOX_THICKNESS = 3
 _COLONY_LABEL_FONT_SIZE = 28
+_COLONY_LABEL_MAX_COUNT = 300
 
 # PhotometricInterpretation values: 2 = RGB, others (0, 1, 3) are grayscale or
 # palette and are treated as B&W for our display purposes.
@@ -326,6 +327,7 @@ class TiffProcessor:
 
             labels = ski.measure.label(mask)
             regions = ski.measure.regionprops(labels)
+            show_labels = len(regions) <= _COLONY_LABEL_MAX_COUNT
 
             for region in regions:
                 min_r, min_c, max_r, max_c = region.bbox
@@ -343,17 +345,18 @@ class TiffProcessor:
                     facecolor="none",
                 )
                 ax.add_patch(rect)
-                ax.text(
-                    (c0 + c1) / 2,
-                    r0 - 4,
-                    str(region.label),
-                    color=bbox_color,
-                    fontsize=_COLONY_LABEL_FONT_SIZE,
-                    fontweight="bold",
-                    horizontalalignment="center",
-                    verticalalignment="bottom",
-                    clip_on=True,
-                )
+                if show_labels:
+                    ax.text(
+                        (c0 + c1) / 2,
+                        r0 - 4,
+                        str(region.label),
+                        color=bbox_color,
+                        fontsize=_COLONY_LABEL_FONT_SIZE,
+                        fontweight="bold",
+                        horizontalalignment="center",
+                        verticalalignment="bottom",
+                        clip_on=True,
+                    )
 
         fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
         canvas.draw()
