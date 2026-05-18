@@ -1,7 +1,7 @@
 """Unit tests for `epson_v700_scanner.process_file`.
 
 These verify the orchestration logic by mocking S3 I/O, the API client,
-and the TIFFToJPEGConverter.
+and the TiffProcessor.
 """
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ def patched_jpg_path(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def patched_converter(patched_jpg_path: Path) -> MagicMock:
-    """A stand-in TIFFToJPEGConverter whose export_jpg returns a real tmp file."""
+    """A stand-in TiffProcessor whose export_jpg returns a real tmp file."""
     converter = MagicMock()
     converter.load.return_value = None
     converter.export_jpg.return_value = patched_jpg_path
@@ -80,6 +80,7 @@ def patched_converter(patched_jpg_path: Path) -> MagicMock:
         "OriginalHeight": 4800,
         "OriginalWidth": 6400,
     }
+    converter.crop_plates.return_value = []
     return converter
 
 
@@ -97,7 +98,7 @@ class TestProcessFileHappyPath:
             patch(f"{_PATCH_PREFIX}.get_client", return_value=client),
             patch(f"{_PATCH_PREFIX}.s3_utils") as s3_mock,
             patch(
-                f"{_PATCH_PREFIX}.TIFFToJPEGConverter",
+                f"{_PATCH_PREFIX}.TiffProcessor",
                 return_value=patched_converter,
             ),
         ):
@@ -120,7 +121,7 @@ class TestProcessFileHappyPath:
             patch(f"{_PATCH_PREFIX}.get_client", return_value=client),
             patch(f"{_PATCH_PREFIX}.s3_utils"),
             patch(
-                f"{_PATCH_PREFIX}.TIFFToJPEGConverter",
+                f"{_PATCH_PREFIX}.TiffProcessor",
                 return_value=patched_converter,
             ),
         ):
@@ -144,7 +145,7 @@ class TestProcessFileHappyPath:
             patch(f"{_PATCH_PREFIX}.get_client", return_value=client),
             patch(f"{_PATCH_PREFIX}.s3_utils"),
             patch(
-                f"{_PATCH_PREFIX}.TIFFToJPEGConverter",
+                f"{_PATCH_PREFIX}.TiffProcessor",
                 return_value=patched_converter,
             ),
         ):
@@ -166,7 +167,7 @@ class TestProcessFileHappyPath:
             patch(f"{_PATCH_PREFIX}.get_client", return_value=client),
             patch(f"{_PATCH_PREFIX}.s3_utils"),
             patch(
-                f"{_PATCH_PREFIX}.TIFFToJPEGConverter",
+                f"{_PATCH_PREFIX}.TiffProcessor",
                 return_value=patched_converter,
             ),
         ):
@@ -193,7 +194,7 @@ class TestProcessFileFailure:
             patch(f"{_PATCH_PREFIX}.get_client", return_value=client),
             patch(f"{_PATCH_PREFIX}.s3_utils"),
             patch(
-                f"{_PATCH_PREFIX}.TIFFToJPEGConverter",
+                f"{_PATCH_PREFIX}.TiffProcessor",
                 return_value=failing_converter,
             ),
         ):

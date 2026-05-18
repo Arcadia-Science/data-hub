@@ -2,7 +2,11 @@ from __future__ import annotations
 import logging
 
 from data_hub_lambda.api_client import get_client
-from data_hub_lambda.epson_v700_scanner.image_processing import TIFFToJPEGConverter
+from data_hub_lambda.epson_v700_scanner.colony_detection import (
+    export_colony_csv,
+    run_colony_pipeline,
+)
+from data_hub_lambda.epson_v700_scanner.image_processing import TiffProcessor
 from data_hub_shared import s3_utils
 from data_hub_shared.config import config
 from data_hub_shared.enums import Instrument
@@ -48,9 +52,18 @@ def process_file(run_id: str, filename: str) -> None:
         s3_utils.download_file(f"s3://{s3_bucket}/{s3_key}", local_file_path)
         logger.info("Downloaded %s to %s", filename, local_file_path)
 
-        converter = TIFFToJPEGConverter(local_file_path)
-        converter.load()
-        jpg_file_path = converter.export_jpg()
+        processor = TiffProcessor(local_file_path)
+        processor.load()
+        processor.detect_plates()
+
+        pipeline = None
+        plate_crops = processor.crop_plates()
+        if plate_crops:
+            pipeline = run_colony_pipeline(plate_crops, dpi=processor.dpi)
+
+        jpg_file_path = processor.export_jpg(
+            colony_results=pipeline.results if pipeline else None,
+        )
 
         processed_bucket = config.AWS_S3_PROCESSED_DATA_BUCKET
         jpg_s3_key = f"{INSTRUMENT_ID}/{run_id}/{jpg_file_path.name}"
@@ -71,7 +84,32 @@ def process_file(run_id: str, filename: str) -> None:
             content_type="image/jpeg",
         )
 
-        metadata = converter.parse_metadata()
+        metadata = processor.parse_metadata()
+
+        if pipeline:
+            csv_name = f"{processor.path.stem}_colonies.csv"
+            csv_path = export_colony_csv(
+                pipeline.to_dataframes(),
+                raw_data_dir / csv_name,
+            )
+            csv_s3_key = f"{INSTRUMENT_ID}/{run_id}/{csv_name}"
+            s3_utils.upload_file(csv_path, f"s3://{processed_bucket}/{csv_s3_key}")
+            csv_file = client.create_file(
+                instrument_id=INSTRUMENT_ID,
+                run_id=run_id,
+                s3_bucket=processed_bucket or "",
+                s3_key=csv_s3_key,
+                filename=csv_name,
+                category="processed",
+            )
+            client.update_file(
+                csv_file.id,
+                size_bytes=csv_path.stat().st_size,
+                content_type="text/csv",
+            )
+
+            metadata["colony_detection"] = pipeline.summaries
+
         logger.info("Parsed metadata: %s", metadata)
 
         client.update_run(INSTRUMENT_ID, run_id, metadata=metadata)

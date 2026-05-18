@@ -104,17 +104,49 @@ def hina(file: Path, output_dir: Path | None) -> None:
     default=None,
     help="Directory for the exported JPG (default: same directory as FILE).",
 )
-def epson_scanner(file: Path, output_dir: Path | None) -> None:
+@click.option(
+    "--detect-colonies",
+    is_flag=True,
+    default=False,
+    help="Run colony detection and phenotyping on each detected plate.",
+)
+def epson_scanner(file: Path, output_dir: Path | None, detect_colonies: bool) -> None:
     """Process an Epson V700 Scanner TIFF file.
 
-    Resizes the high-resolution scan to a web-friendly JPEG preview and
-    extracts TIFF metadata.
+    Detects agar plates inside gold frames, draws bounding-box overlays,
+    resizes to a web-friendly JPEG preview, and extracts TIFF metadata.
     """
-    from data_hub_lambda.epson_v700_scanner.image_processing import TIFFToJPEGConverter
+    from data_hub_lambda.epson_v700_scanner.image_processing import TiffProcessor
 
-    converter = TIFFToJPEGConverter(file)
-    converter.load()
-    jpg_path = converter.export_jpg()
+    processor = TiffProcessor(file)
+    processor.load()
+
+    pipeline = None
+    if detect_colonies:
+        from data_hub_lambda.epson_v700_scanner.colony_detection import (
+            export_colony_csv,
+            run_colony_pipeline,
+        )
+
+        processor.detect_plates()
+        plate_crops = processor.crop_plates()
+        if not plate_crops:
+            click.echo("No plates detected — skipping colony detection.")
+        else:
+            pipeline = run_colony_pipeline(plate_crops, dpi=processor.dpi)
+            for i, result in enumerate(pipeline.results):
+                click.echo(f"\nPlate {i + 1}:")
+                click.echo(json.dumps(result.summary(), indent=2))
+
+            dest_dir = output_dir or file.parent
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            csv_path = dest_dir / f"{file.stem}_colonies.csv"
+            export_colony_csv(pipeline.to_dataframes(), csv_path)
+            click.echo(f"\nColony CSV: {csv_path}")
+
+    jpg_path = processor.export_jpg(
+        colony_results=pipeline.results if pipeline else None,
+    )
 
     if output_dir is not None:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -124,7 +156,7 @@ def epson_scanner(file: Path, output_dir: Path | None) -> None:
 
     click.echo(f"Exported JPG: {jpg_path}")
 
-    metadata = converter.parse_metadata()
+    metadata = processor.parse_metadata()
     click.echo(json.dumps(metadata, indent=2))
 
 
