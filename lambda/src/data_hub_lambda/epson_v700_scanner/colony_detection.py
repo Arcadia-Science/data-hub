@@ -251,6 +251,7 @@ def measure_colonies(
     mm_per_px = 25.4 / dpi
 
     labels = ski.measure.label(mask)
+    labels = ski.segmentation.clear_border(labels)
     regions = ski.measure.regionprops(labels, intensity_image=rgb_image)
 
     colonies: list[ColonyProperties] = []
