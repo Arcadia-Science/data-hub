@@ -259,9 +259,9 @@ def measure_colonies(
     min_area_px = int(np.ceil(_MIN_COLONY_AREA_MM2 / mm_per_px**2))
 
     mask = ski.morphology.remove_small_objects(mask, min_size=min_area_px)
-    labels = ski.measure.label(mask)
-    labels = ski.segmentation.clear_border(labels)
+    labels = ski.segmentation.clear_border(mask)
     cleaned_mask: NDArray[np.bool_] = labels > 0
+    labels = ski.measure.label(cleaned_mask)
     regions = ski.measure.regionprops(labels, intensity_image=rgb_image)
 
     colonies: list[ColonyProperties] = []
