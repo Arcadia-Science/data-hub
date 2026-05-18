@@ -190,13 +190,15 @@ class TestMeasureColonies:
     def test_empty_mask_returns_empty(self) -> None:
         mask = np.zeros((100, 100), dtype=bool)
         rgb = np.zeros((100, 100, 3), dtype=np.uint8)
-        assert measure_colonies(mask, rgb, dpi=_TEST_DPI) == []
+        colonies, cleaned = measure_colonies(mask, rgb, dpi=_TEST_DPI)
+        assert colonies == []
+        assert not cleaned.any()
 
     def test_single_blob(self) -> None:
         mask = np.zeros((100, 100), dtype=bool)
         mask[40:60, 40:60] = True
         rgb = np.full((100, 100, 3), 128, dtype=np.uint8)
-        colonies = measure_colonies(mask, rgb, dpi=_TEST_DPI)
+        colonies, _ = measure_colonies(mask, rgb, dpi=_TEST_DPI)
         assert len(colonies) == 1
         mm_per_px = 25.4 / _TEST_DPI
         expected_area_mm2 = 20 * 20 * mm_per_px**2
@@ -207,7 +209,7 @@ class TestMeasureColonies:
         mask[10:20, 10:20] = True  # 100 px
         mask[50:80, 50:80] = True  # 900 px
         rgb = np.full((200, 200, 3), 128, dtype=np.uint8)
-        colonies = measure_colonies(mask, rgb, dpi=_TEST_DPI)
+        colonies, _ = measure_colonies(mask, rgb, dpi=_TEST_DPI)
         assert len(colonies) == 2
         assert colonies[0].area_mm2 > colonies[1].area_mm2
 
@@ -215,7 +217,8 @@ class TestMeasureColonies:
         mask = np.zeros((100, 100), dtype=bool)
         mask[40:60, 40:60] = True
         rgb = np.full((100, 100, 3), 128, dtype=np.uint8)
-        colony = measure_colonies(mask, rgb, dpi=_TEST_DPI)[0]
+        colonies, _ = measure_colonies(mask, rgb, dpi=_TEST_DPI)
+        colony = colonies[0]
         assert isinstance(colony, ColonyProperties)
         assert colony.label >= 1
         assert colony.eccentricity >= 0.0
@@ -227,7 +230,8 @@ class TestMeasureColonies:
         mask[40:60, 40:60] = True
         rgb = np.full((100, 100, 3), 128, dtype=np.uint8)
         mm_per_px = 25.4 / _TEST_DPI
-        colony = measure_colonies(mask, rgb, dpi=_TEST_DPI, margin_px=MARGIN_PX)[0]
+        colonies, _ = measure_colonies(mask, rgb, dpi=_TEST_DPI, margin_px=MARGIN_PX)
+        colony = colonies[0]
         expected_row_mm = (50.0 + MARGIN_PX) * mm_per_px
         expected_col_mm = (50.0 + MARGIN_PX) * mm_per_px
         assert abs(colony.centroid_row_mm - expected_row_mm) < 0.1
@@ -238,10 +242,21 @@ class TestMeasureColonies:
         mask[40:60, 40:60] = True
         rgb = np.zeros((100, 100, 3), dtype=np.uint8)
         rgb[40:60, 40:60] = [200, 100, 50]
-        colony = measure_colonies(mask, rgb, dpi=_TEST_DPI)[0]
+        colonies, _ = measure_colonies(mask, rgb, dpi=_TEST_DPI)
+        colony = colonies[0]
         assert abs(colony.mean_rgb[0] - 200.0) < 1.0
         assert abs(colony.mean_rgb[1] - 100.0) < 1.0
         assert abs(colony.mean_rgb[2] - 50.0) < 1.0
+
+    def test_border_colonies_excluded(self) -> None:
+        mask = np.zeros((100, 100), dtype=bool)
+        mask[0:10, 40:60] = True  # touches top border
+        mask[40:60, 40:60] = True  # interior
+        rgb = np.full((100, 100, 3), 128, dtype=np.uint8)
+        colonies, cleaned = measure_colonies(mask, rgb, dpi=_TEST_DPI)
+        assert len(colonies) == 1
+        assert not cleaned[0:10, 40:60].any()
+        assert cleaned[40:60, 40:60].all()
 
 
 # ------------------------------------------------------------------

@@ -25,7 +25,7 @@ from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
 
-MARGIN_PX = 250
+MARGIN_PX = 200
 """Fixed pixel margin cropped from each edge before colony detection."""
 
 _DOG_LOW_SIGMA = 1.0
@@ -233,7 +233,7 @@ def measure_colonies(
     rgb_image: NDArray[np.uint8],
     dpi: int,
     margin_px: int = MARGIN_PX,
-) -> list[ColonyProperties]:
+) -> tuple[list[ColonyProperties], NDArray[np.bool_]]:
     """Label connected components and extract per-colony measurements.
 
     All spatial measurements are returned in millimetres.  Centroids and
@@ -247,11 +247,16 @@ def measure_colonies(
             ``regionprops`` can compute per-colony mean colour.
         dpi: Image resolution in dots-per-inch.
         margin_px: Pixel margin that was removed from the plate crop.
+
+    Returns:
+        A tuple of (colony list, cleaned mask).  The cleaned mask has
+        border-touching regions removed.
     """
     mm_per_px = 25.4 / dpi
 
     labels = ski.measure.label(mask)
     labels = ski.segmentation.clear_border(labels)
+    cleaned_mask: NDArray[np.bool_] = labels > 0
     regions = ski.measure.regionprops(labels, intensity_image=rgb_image)
 
     colonies: list[ColonyProperties] = []
@@ -284,7 +289,7 @@ def measure_colonies(
         )
 
     colonies.sort(key=lambda c: c.area_mm2, reverse=True)
-    return colonies
+    return colonies, cleaned_mask
 
 
 # ------------------------------------------------------------------
@@ -338,14 +343,14 @@ def detect_colonies(plate_image: NDArray[Any], dpi: int) -> ColonyDetectionResul
         )
 
     smoothed = smooth(contrast)
-    mask = threshold_colonies(smoothed)
-    colonies = measure_colonies(mask, rgb_image=cropped, dpi=dpi)
+    raw_mask = threshold_colonies(smoothed)
+    colonies, cleaned_mask = measure_colonies(raw_mask, rgb_image=cropped, dpi=dpi)
 
     logger.info("Detected %d colony/ies.", len(colonies))
     return ColonyDetectionResult(
         cropped=cropped,
         contrast=contrast,
         has_colonies=True,
-        mask=mask,
+        mask=cleaned_mask,
         colonies=colonies,
     )
