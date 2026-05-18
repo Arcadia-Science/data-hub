@@ -9,7 +9,9 @@ import skimage as ski
 import tifffile
 from numpy.typing import NDArray
 
-from data_hub_lambda.epson_v700_scanner.colony_detection import MARGIN_PX
+from data_hub_lambda.epson_v700_scanner.colony_detection import (
+    ColonyDetectionResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +125,7 @@ class TiffProcessor:
 
     def export_jpg(
         self,
-        colony_masks: list[NDArray[np.bool_]] | None = None,
+        colony_results: list[ColonyDetectionResult] | None = None,
     ) -> Path:
         """Detect plates, draw overlays, resize, and write a JPEG.
 
@@ -131,9 +133,9 @@ class TiffProcessor:
         (the pre-detection fallback behaviour).
 
         Args:
-            colony_masks: Optional per-plate binary masks (one per entry in
-                ``plate_boxes``).  When provided, colony bounding boxes
-                and labels are drawn on the export image.
+            colony_results: Optional per-plate detection results (one per
+                entry in ``plate_boxes``).  When provided, colony bounding
+                boxes and labels are drawn on the export image.
         """
         img = self._to_rgb_uint8(self.intensities)
         if self.plate_boxes is None:
@@ -141,8 +143,13 @@ class TiffProcessor:
 
         if self.plate_boxes:
             img = self._draw_plate_overlays(img, self.plate_boxes)
-            if colony_masks:
-                img = self._draw_colony_bboxes(img, self.plate_boxes, colony_masks)
+            if colony_results:
+                img = self._draw_colony_bboxes(
+                    img,
+                    self.plate_boxes,
+                    colony_results,
+                    dpi=self.dpi,
+                )
 
         img = self._resize(img)
 
@@ -293,14 +300,15 @@ class TiffProcessor:
     def _draw_colony_bboxes(
         img: NDArray[np.uint8],
         boxes: list[_PlateBox],
-        colony_masks: list[NDArray[np.bool_]],
-        margin_px: int = MARGIN_PX,
+        colony_results: list[ColonyDetectionResult],
+        dpi: int,
     ) -> NDArray[np.uint8]:
         """Draw colony bounding boxes and labels onto *img* for each plate.
 
-        Each mask lives in the margin-cropped coordinate space of its
-        plate crop.  Bounding boxes are offset by the plate box origin
-        plus the crop margin to map into full-image coordinates.
+        Uses the pre-computed :class:`ColonyProperties` from each
+        detection result rather than re-labelling the masks.  Bounding
+        boxes (stored in mm, plate-crop-relative) are converted back to
+        full-image pixel coordinates.
 
         Uses matplotlib for anti-aliased rectangle and text rendering.
         """
@@ -308,9 +316,10 @@ class TiffProcessor:
         from matplotlib.figure import Figure
         from matplotlib.patches import Rectangle
 
+        mm_per_px = 25.4 / dpi
         img_h, img_w = img.shape[:2]
-        dpi = 100
-        fig = Figure(figsize=(img_w / dpi, img_h / dpi), dpi=dpi)
+        fig_dpi = 100
+        fig = Figure(figsize=(img_w / fig_dpi, img_h / fig_dpi), dpi=fig_dpi)
         canvas = FigureCanvasAgg(fig)
         ax = fig.add_subplot(1, 1, 1)
         ax.imshow(img)
@@ -320,21 +329,16 @@ class TiffProcessor:
 
         bbox_color = tuple(c / 255.0 for c in _COLONY_BBOX_COLOR)
 
-        for box, mask in zip(boxes, colony_masks, strict=True):
+        for box, result in zip(boxes, colony_results, strict=True):
             plate_min_row, plate_min_col, _max_row, _max_col = box
-            row_offset = plate_min_row + margin_px
-            col_offset = plate_min_col + margin_px
+            show_labels = len(result.colonies) <= _COLONY_LABEL_MAX_COUNT
 
-            labels = ski.measure.label(mask)
-            regions = ski.measure.regionprops(labels)
-            show_labels = len(regions) <= _COLONY_LABEL_MAX_COUNT
-
-            for region in regions:
-                min_r, min_c, max_r, max_c = region.bbox
-                r0 = min_r + row_offset
-                c0 = min_c + col_offset
-                r1 = max_r + row_offset
-                c1 = max_c + col_offset
+            for colony in result.colonies:
+                min_r_mm, min_c_mm, max_r_mm, max_c_mm = colony.bbox_mm
+                r0 = min_r_mm / mm_per_px + plate_min_row
+                c0 = min_c_mm / mm_per_px + plate_min_col
+                r1 = max_r_mm / mm_per_px + plate_min_row
+                c1 = max_c_mm / mm_per_px + plate_min_col
 
                 rect = Rectangle(
                     (c0, r0),
@@ -349,7 +353,7 @@ class TiffProcessor:
                     ax.text(
                         (c0 + c1) / 2,
                         r0 - 4,
-                        str(region.label),
+                        str(colony.label),
                         color=bbox_color,
                         fontsize=_COLONY_LABEL_FONT_SIZE,
                         fontweight="bold",

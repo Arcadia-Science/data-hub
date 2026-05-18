@@ -206,7 +206,7 @@ class TestMeasureColonies:
 
     def test_two_blobs_sorted_by_area(self) -> None:
         mask = np.zeros((200, 200), dtype=bool)
-        mask[10:20, 10:20] = True  # 100 px
+        mask[10:22, 10:22] = True  # 144 px (above min-area threshold at 1200 DPI)
         mask[50:80, 50:80] = True  # 900 px
         rgb = np.full((200, 200, 3), 128, dtype=np.uint8)
         colonies, _ = measure_colonies(mask, rgb, dpi=_TEST_DPI)

@@ -52,26 +52,18 @@ def process_file(run_id: str, filename: str) -> None:
         processor.load()
         processor.detect_plates()
 
-        colony_masks: list | None = None
-        colony_summaries: list | None = None
-        dataframes: list | None = None
+        pipeline = None
         plate_crops = processor.crop_plates()
         if plate_crops:
             from data_hub_lambda.epson_v700_scanner.colony_detection import (
-                detect_colonies,
+                run_colony_pipeline,
             )
 
-            dpi = processor.dpi
-            colony_summaries = []
-            colony_masks = []
-            dataframes = []
-            for i, crop in enumerate(plate_crops):
-                result = detect_colonies(crop, dpi=dpi)
-                colony_summaries.append(result.summary())
-                colony_masks.append(result.mask)
-                dataframes.append(result.to_dataframe(plate_index=i + 1))
+            pipeline = run_colony_pipeline(plate_crops, dpi=processor.dpi)
 
-        jpg_file_path = processor.export_jpg(colony_masks=colony_masks)
+        jpg_file_path = processor.export_jpg(
+            colony_results=pipeline.results if pipeline else None,
+        )
 
         processed_bucket = config.AWS_S3_PROCESSED_DATA_BUCKET
         jpg_s3_key = f"{INSTRUMENT_ID}/{run_id}/{jpg_file_path.name}"
@@ -94,13 +86,16 @@ def process_file(run_id: str, filename: str) -> None:
 
         metadata = processor.parse_metadata()
 
-        if plate_crops and dataframes and colony_summaries:
+        if pipeline:
             from data_hub_lambda.epson_v700_scanner.colony_detection import (
                 export_colony_csv,
             )
 
             csv_name = f"{processor.path.stem}_colonies.csv"
-            csv_path = export_colony_csv(dataframes, raw_data_dir / csv_name)
+            csv_path = export_colony_csv(
+                pipeline.to_dataframes(),
+                raw_data_dir / csv_name,
+            )
             csv_s3_key = f"{INSTRUMENT_ID}/{run_id}/{csv_name}"
             s3_utils.upload_file(csv_path, f"s3://{processed_bucket}/{csv_s3_key}")
             csv_file = client.create_file(
@@ -117,12 +112,7 @@ def process_file(run_id: str, filename: str) -> None:
                 content_type="text/csv",
             )
 
-            metadata["colony_detection"] = colony_summaries
-            logger.info(
-                "Colony detection complete for %d plate(s): %s",
-                len(plate_crops),
-                [r["colony_count"] for r in colony_summaries],
-            )
+            metadata["colony_detection"] = pipeline.summaries
 
         logger.info("Parsed metadata: %s", metadata)
 

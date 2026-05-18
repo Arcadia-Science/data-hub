@@ -121,13 +121,11 @@ def epson_scanner(file: Path, output_dir: Path | None, detect_colonies: bool) ->
     processor = TiffProcessor(file)
     processor.load()
 
-    colony_masks: list | None = None
+    pipeline = None
     if detect_colonies:
         from data_hub_lambda.epson_v700_scanner.colony_detection import (
-            detect_colonies as run_colony_detection,
-        )
-        from data_hub_lambda.epson_v700_scanner.colony_detection import (
             export_colony_csv,
+            run_colony_pipeline,
         )
 
         processor.detect_plates()
@@ -135,23 +133,20 @@ def epson_scanner(file: Path, output_dir: Path | None, detect_colonies: bool) ->
         if not plate_crops:
             click.echo("No plates detected — skipping colony detection.")
         else:
-            dpi = processor.dpi
-            colony_masks = []
-            dataframes = []
-            for i, crop in enumerate(plate_crops):
-                result = run_colony_detection(crop, dpi=dpi)
-                colony_masks.append(result.mask)
+            pipeline = run_colony_pipeline(plate_crops, dpi=processor.dpi)
+            for i, result in enumerate(pipeline.results):
                 click.echo(f"\nPlate {i + 1}:")
                 click.echo(json.dumps(result.summary(), indent=2))
-                dataframes.append(result.to_dataframe(plate_index=i + 1))
 
             dest_dir = output_dir or file.parent
             dest_dir.mkdir(parents=True, exist_ok=True)
             csv_path = dest_dir / f"{file.stem}_colonies.csv"
-            export_colony_csv(dataframes, csv_path)
+            export_colony_csv(pipeline.to_dataframes(), csv_path)
             click.echo(f"\nColony CSV: {csv_path}")
 
-    jpg_path = processor.export_jpg(colony_masks=colony_masks)
+    jpg_path = processor.export_jpg(
+        colony_results=pipeline.results if pipeline else None,
+    )
 
     if output_dir is not None:
         output_dir.mkdir(parents=True, exist_ok=True)

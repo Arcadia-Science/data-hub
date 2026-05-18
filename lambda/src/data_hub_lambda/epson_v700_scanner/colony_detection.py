@@ -78,7 +78,7 @@ _DATAFRAME_COLUMNS = [
 
 @dataclass
 class ColonyDetectionResult:
-    """Full result of the colony-detection pipeline."""
+    """Full result of the colony-detection pipeline for a single plate."""
 
     cropped: NDArray[Any]
     contrast: NDArray[np.floating[Any]]
@@ -133,6 +133,20 @@ class ColonyDetectionResult:
                 }
             )
         return pd.DataFrame(rows)
+
+
+@dataclass
+class ColonyPipelineResult:
+    """Aggregated colony-detection results across all plates in a scan."""
+
+    results: list[ColonyDetectionResult]
+
+    @property
+    def summaries(self) -> list[dict[str, Any]]:
+        return [r.summary() for r in self.results]
+
+    def to_dataframes(self) -> list[pd.DataFrame]:
+        return [r.to_dataframe(plate_index=i + 1) for i, r in enumerate(self.results)]
 
 
 # ------------------------------------------------------------------
@@ -258,7 +272,7 @@ def measure_colonies(
     mm_per_px = 25.4 / dpi
     min_area_px = int(np.ceil(_MIN_COLONY_AREA_MM2 / mm_per_px**2))
 
-    mask = ski.morphology.remove_small_objects(mask, min_size=min_area_px)
+    mask = ski.morphology.remove_small_objects(mask, max_size=min_area_px)
     labels = ski.segmentation.clear_border(mask)
     cleaned_mask: NDArray[np.bool_] = labels > 0
     labels = ski.measure.label(cleaned_mask)
@@ -359,3 +373,26 @@ def detect_colonies(plate_image: NDArray[Any], dpi: int) -> ColonyDetectionResul
         mask=cleaned_mask,
         colonies=colonies,
     )
+
+
+def run_colony_pipeline(
+    plate_crops: list[NDArray[np.uint8]],
+    dpi: int,
+) -> ColonyPipelineResult:
+    """Run colony detection on every plate crop and return aggregated results.
+
+    This is the single entry point for colony detection across all plates in
+    a scan.  Both the Lambda handler and the CLI delegate to this function.
+
+    Args:
+        plate_crops: RGB uint8 plate images from
+            :meth:`~data_hub_lambda.epson_v700_scanner.image_processing.TiffProcessor.crop_plates`.
+        dpi: Image resolution in dots-per-inch.
+    """
+    results = [detect_colonies(crop, dpi=dpi) for crop in plate_crops]
+    logger.info(
+        "Colony pipeline complete for %d plate(s): %s",
+        len(results),
+        [r.summary()["colony_count"] for r in results],
+    )
+    return ColonyPipelineResult(results=results)
