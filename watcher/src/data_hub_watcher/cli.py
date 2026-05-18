@@ -160,16 +160,15 @@ def _load_and_client(ctx: click.Context) -> tuple[WatcherConfig, DataHubClient, 
 
 
 def _setup_file_logging() -> None:
-    """Add a RotatingFileHandler to the root logger (`~/.data-hub/watcher.log`)."""
-    from logging.handlers import RotatingFileHandler
+    """Add a RotatingFileHandler to the root logger (``~/.data-hub/watcher.log``).
 
-    log_path = DEFAULT_CONFIG_DIR / "watcher.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    handler = RotatingFileHandler(
-        str(log_path), maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
-    )
-    handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
-    logging.getLogger().addHandler(handler)
+    Delegates to the shared helper in :mod:`data_hub_watcher.logging_setup`
+    so the CLI ``watch`` path and the Windows-service entry point can't
+    drift on log location, rotation policy, or format.
+    """
+    from data_hub_watcher.logging_setup import setup_file_logging
+
+    setup_file_logging()
 
 
 # ---------------------------------------------------------------------------

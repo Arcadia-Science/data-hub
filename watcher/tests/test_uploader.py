@@ -1,12 +1,15 @@
 """Unit tests for the presigned-URL upload flow in Uploader."""
 
 from __future__ import annotations
+import threading
+import time
 from collections.abc import Generator
 from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
+from requests.adapters import HTTPAdapter
 
 from data_hub_watcher.api_client import ApiError
 from data_hub_watcher.events import EventReporter
@@ -234,14 +237,354 @@ class TestUploadQueuePollFailures:
 
 
 class TestPutToPresignedUrl:
-    def test_successful_put(self, tmp_file: Path) -> None:
-        with patch("data_hub_watcher.uploader.http_requests.put") as mock_put:
-            mock_put.return_value = MagicMock(status_code=200)
-            mock_put.return_value.raise_for_status = MagicMock()
+    def test_successful_put(self, uploader: Uploader, tmp_file: Path) -> None:
+        # ``_put_to_presigned_url`` is now an instance method so the
+        # shared ``self._s3_session`` (kept alive across batched
+        # parallel uploads) is reused on every PUT. We patch the
+        # session's ``put`` rather than ``http_requests.put`` to
+        # observe the real outgoing call.
+        mock_session_put = MagicMock(return_value=MagicMock(status_code=200))
+        mock_session_put.return_value.raise_for_status = MagicMock()
+        with patch.object(uploader._s3_session, "put", mock_session_put):
+            uploader._put_to_presigned_url("https://s3.example.com/presigned", tmp_file, "text/csv")
 
-            Uploader._put_to_presigned_url("https://s3.example.com/presigned", tmp_file, "text/csv")
-
-        mock_put.assert_called_once()
-        call_kwargs = mock_put.call_args
+        mock_session_put.assert_called_once()
+        call_kwargs = mock_session_put.call_args
         assert call_kwargs.kwargs["headers"]["Content-Type"] == "text/csv"
         assert call_kwargs.kwargs["timeout"] == 300
+
+
+class TestUploadFilesParallelism:
+    """Tests that ``upload_files`` actually parallelises per-file uploads.
+
+    The optimisation moves ``Uploader.upload_files`` from a serial
+    ``for info in files`` loop onto a small ``ThreadPoolExecutor``
+    sized by ``InstrumentConfig.upload_parallelism``. These tests
+    verify both correctness (every file still records as uploaded
+    and the run is marked uploaded only when all succeed) and that
+    work actually overlaps in time -- a regression to the serial
+    loop would still pass the correctness assertions but fail the
+    timing one.
+    """
+
+    def _make_uploader(
+        self,
+        mock_client: MagicMock,
+        state_db: StateDB,
+        watch_dir: Path,
+        *,
+        parallelism: int,
+    ) -> Uploader:
+        return Uploader(
+            client=mock_client,
+            state_db=state_db,
+            event_reporter=MagicMock(spec=EventReporter),
+            counters=WatcherCounters(),
+            instrument_id="test-instrument",
+            watcher_id="watcher-123",
+            watch_directory=watch_dir,
+            upload_parallelism=parallelism,
+        )
+
+    def test_serial_path_used_when_parallelism_is_one(
+        self,
+        mock_client: MagicMock,
+        state_db: StateDB,
+        tmp_path: Path,
+    ) -> None:
+        """parallelism=1 must take the no-pool fast path.
+
+        We can't directly observe pool creation, but we can confirm
+        the function still completes and records the run.
+        """
+        from data_hub_watcher.run_detector import FileInfo
+
+        files = []
+        for i in range(3):
+            f = tmp_path / f"file-{i}.csv"
+            f.write_text("a,b\n1,2\n")
+            files.append(FileInfo(path=f, filename=f.name, size_bytes=8))
+
+        mock_client.request_upload_url.side_effect = [
+            PresignedUploadResponse(
+                upload_url=f"https://s3.example.com/presigned/{i}",
+                s3_bucket="b",
+                s3_key=f"k/{i}",
+                file_id=i,
+                already_uploaded=False,
+            )
+            for i in range(3)
+        ]
+        mock_client.mark_file_uploaded.return_value = MagicMock()
+
+        uploader = self._make_uploader(mock_client, state_db, tmp_path, parallelism=1)
+
+        with patch.object(Uploader, "_put_to_presigned_url"):
+            succeeded = uploader.upload_files("RUN-001", files)
+
+        assert succeeded == 3
+
+    def test_parallel_path_runs_concurrently(
+        self,
+        mock_client: MagicMock,
+        state_db: StateDB,
+        tmp_path: Path,
+    ) -> None:
+        """A 6-file batch with parallelism=3 must overlap PUTs in time.
+
+        We use a ``threading.Barrier(3)`` inside the stubbed PUT to
+        prove three workers were inside ``_put_to_presigned_url`` at
+        the same instant. A serial implementation would deadlock the
+        barrier (and the test fails fast on its 5 s timeout), which is
+        the regression guard we want.
+        """
+        from data_hub_watcher.run_detector import FileInfo
+
+        files = []
+        for i in range(6):
+            f = tmp_path / f"file-{i}.csv"
+            f.write_text("a,b\n1,2\n")
+            files.append(FileInfo(path=f, filename=f.name, size_bytes=8))
+
+        mock_client.request_upload_url.side_effect = [
+            PresignedUploadResponse(
+                upload_url=f"https://s3.example.com/presigned/{i}",
+                s3_bucket="b",
+                s3_key=f"k/{i}",
+                file_id=i,
+                already_uploaded=False,
+            )
+            for i in range(6)
+        ]
+        mock_client.mark_file_uploaded.return_value = MagicMock()
+
+        # Three workers must reach the barrier together; if upload_files
+        # serialises them the barrier will time out and BrokenBarrierError
+        # is raised inside the worker, which we re-surface as the future's
+        # exception (and the test fails).
+        barrier = threading.Barrier(parties=3, timeout=5.0)
+        max_in_flight = 0
+        in_flight = 0
+        in_flight_lock = threading.Lock()
+
+        def fake_put(self_: Uploader, url: str, path: Path, content_type: str | None) -> None:
+            nonlocal max_in_flight, in_flight
+            with in_flight_lock:
+                in_flight += 1
+                max_in_flight = max(max_in_flight, in_flight)
+            try:
+                barrier.wait()
+            finally:
+                with in_flight_lock:
+                    in_flight -= 1
+            time.sleep(0.01)  # extend the overlap window for max_in_flight
+
+        uploader = self._make_uploader(mock_client, state_db, tmp_path, parallelism=3)
+
+        with patch.object(Uploader, "_put_to_presigned_url", new=fake_put):
+            succeeded = uploader.upload_files("RUN-001", files)
+
+        assert succeeded == 6
+        # If the pool actually runs three at a time the observed
+        # in-flight peak is exactly the parallelism setting.
+        assert max_in_flight == 3
+
+    def test_run_marked_uploaded_only_when_all_succeed(
+        self,
+        mock_client: MagicMock,
+        state_db: StateDB,
+        tmp_path: Path,
+    ) -> None:
+        from data_hub_watcher.run_detector import FileInfo
+
+        files = []
+        for i in range(3):
+            f = tmp_path / f"file-{i}.csv"
+            f.write_text("a,b\n1,2\n")
+            files.append(FileInfo(path=f, filename=f.name, size_bytes=8))
+
+        # The middle file fails its presign; the others succeed.
+        mock_client.request_upload_url.side_effect = [
+            PresignedUploadResponse(
+                upload_url="https://s3.example.com/presigned/0",
+                s3_bucket="b",
+                s3_key="k/0",
+                file_id=0,
+                already_uploaded=False,
+            ),
+            ApiError("transient", status_code=500),
+            PresignedUploadResponse(
+                upload_url="https://s3.example.com/presigned/2",
+                s3_bucket="b",
+                s3_key="k/2",
+                file_id=2,
+                already_uploaded=False,
+            ),
+        ]
+        mock_client.mark_file_uploaded.return_value = MagicMock()
+
+        uploader = self._make_uploader(mock_client, state_db, tmp_path, parallelism=2)
+
+        with patch.object(Uploader, "_put_to_presigned_url"):
+            succeeded = uploader.upload_files("RUN-002", files)
+
+        assert succeeded == 2
+        # A partial failure must NOT mark the run uploaded -- otherwise
+        # the next restart would skip a file we never finished.
+        run = state_db.get_run("RUN-002")
+        assert run is None or run.uploaded_at is None
+
+    def test_empty_file_list_marks_run_uploaded(
+        self,
+        mock_client: MagicMock,
+        state_db: StateDB,
+        tmp_path: Path,
+    ) -> None:
+        """Preserve the pre-parallelism behaviour for empty manifests."""
+        uploader = self._make_uploader(mock_client, state_db, tmp_path, parallelism=4)
+        # We have to seed the ``runs`` row first so the UPDATE inside
+        # ``record_run_uploaded`` actually flips a column we can read
+        # back. This mirrors how the run-detector orders calls in real
+        # life (POST run → record_run_reported → upload_files → empty).
+        state_db.record_run_reported("RUN-EMPTY")
+
+        succeeded = uploader.upload_files("RUN-EMPTY", [])
+
+        assert succeeded == 0
+        run = state_db.get_run("RUN-EMPTY")
+        assert run is not None
+        assert run.uploaded_at is not None
+
+    def test_invalid_parallelism_rejected(
+        self,
+        mock_client: MagicMock,
+        state_db: StateDB,
+        tmp_path: Path,
+    ) -> None:
+        with pytest.raises(ValueError, match="upload_parallelism must be >= 1"):
+            self._make_uploader(mock_client, state_db, tmp_path, parallelism=0)
+
+
+class TestS3SessionPoolSizing:
+    """The shared S3 session's urllib3 pool must scale with parallelism.
+
+    Default ``HTTPAdapter`` pool size is 10. With ``upload_parallelism``
+    above that, urllib3 starts discarding connections after each PUT --
+    every excess request opens a fresh TLS connection, defeating the
+    whole point of keeping a long-lived session. The fix mounts an
+    explicit adapter sized to the configured parallelism.
+    """
+
+    def _make_uploader_for_session_check(
+        self,
+        mock_client: MagicMock,
+        state_db: StateDB,
+        watch_dir: Path,
+        *,
+        parallelism: int,
+    ) -> Uploader:
+        return Uploader(
+            client=mock_client,
+            state_db=state_db,
+            event_reporter=MagicMock(spec=EventReporter),
+            counters=WatcherCounters(),
+            instrument_id="test-instrument",
+            watcher_id="watcher-123",
+            watch_directory=watch_dir,
+            upload_parallelism=parallelism,
+        )
+
+    @pytest.mark.parametrize("parallelism", [1, 4, 16, 32])
+    def test_pool_maxsize_matches_parallelism(
+        self,
+        mock_client: MagicMock,
+        state_db: StateDB,
+        tmp_path: Path,
+        parallelism: int,
+    ) -> None:
+        uploader = self._make_uploader_for_session_check(
+            mock_client, state_db, tmp_path, parallelism=parallelism
+        )
+        # ``Session.get_adapter`` returns the abstract ``_BaseAdapter``
+        # supertype; we mounted concrete ``HTTPAdapter`` instances so
+        # casting is safe and unblocks the ``.poolmanager`` access.
+        # Probe both schemes so the test catches a regression that
+        # only mounts one.
+        for scheme in ("https://", "http://"):
+            adapter = cast(HTTPAdapter, uploader._s3_session.get_adapter(f"{scheme}example.com"))
+            # urllib3 stores the per-pool kwargs (including
+            # ``maxsize``) on ``connection_pool_kw``; ``HTTPAdapter``
+            # populates it from its constructor args.
+            pool_kwargs = adapter.poolmanager.connection_pool_kw
+            assert pool_kwargs.get("maxsize") == parallelism, (
+                f"{scheme}: expected pool maxsize={parallelism}, got {pool_kwargs.get('maxsize')}"
+            )
+
+    def test_default_session_adapter_is_replaced(
+        self,
+        mock_client: MagicMock,
+        state_db: StateDB,
+        tmp_path: Path,
+    ) -> None:
+        """A high-parallelism uploader must not be using requests' stock 10-conn adapter."""
+        uploader = self._make_uploader_for_session_check(
+            mock_client, state_db, tmp_path, parallelism=24
+        )
+        adapter = cast(HTTPAdapter, uploader._s3_session.get_adapter("https://s3.example.com"))
+        assert adapter.poolmanager.connection_pool_kw["maxsize"] == 24
+
+
+class TestPollUploadQueueCounterLocking:
+    """Manual-mode poll failures must increment the shared counter under the lock.
+
+    The optimisation introduced a parallel-upload worker pool that
+    races the heartbeat thread to read/write ``_counters``. Routing
+    ``poll_upload_queue``'s error bumps through ``_bump_errors``
+    keeps every mutation point under ``_counters_lock`` and avoids a
+    silent torn-write on the integer field.
+    """
+
+    def test_api_error_bumps_via_helper(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+    ) -> None:
+        mock_client.get_upload_queue.side_effect = ApiError("ACL", status_code=403)
+
+        # Spy on the helper rather than the underlying integer so a
+        # future change that swaps the lock for atomics still passes
+        # without us re-writing the test.
+        with patch.object(uploader, "_bump_errors", wraps=uploader._bump_errors) as spy:
+            uploader.poll_upload_queue()
+
+        spy.assert_called_once()
+        assert uploader._counters.errors == 1
+
+    def test_missing_file_bumps_via_helper(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        from data_hub_watcher.models import UploadQueueFile, UploadQueueResponse
+
+        # Queue references a file that no longer exists on disk -- the
+        # manual-mode "Queued file missing" branch must increment the
+        # counter via the helper, same as the auto-mode upload path.
+        mock_client.get_upload_queue.return_value = UploadQueueResponse(
+            files=[
+                UploadQueueFile(
+                    id=1,
+                    instrument_id="test-instrument",
+                    run_id="RUN-X",
+                    filename="ghost.csv",
+                    relative_path="ghost.csv",
+                )
+            ]
+        )
+
+        with patch.object(uploader, "_bump_errors", wraps=uploader._bump_errors) as spy:
+            uploader.poll_upload_queue()
+
+        spy.assert_called_once()
+        assert uploader._counters.errors == 1

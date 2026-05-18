@@ -374,9 +374,9 @@ class TestParseBuildRequest:
             parse_build_request(payload)
 
     def test_rejects_source_bucket_outside_allow_list(self) -> None:
-        # An invoke token holder shouldn't be able to redirect the builder
-        # at an arbitrary bucket the Lambda role might happen to have
-        # GetObject on. The handler always passes its allow-list.
+        # A caller with `lambda:InvokeFunctionUrl` shouldn't be able to
+        # redirect the builder at an arbitrary bucket the Lambda role might
+        # happen to have GetObject on. The handler always passes its allow-list.
         payload = self._base_payload()
         payload["files"] = [
             {
@@ -414,7 +414,8 @@ class TestParseBuildRequest:
     def test_rejects_key_outside_run_prefix(self) -> None:
         payload = self._base_payload()
         # Try to slip a key from a different run into the archive — must fail
-        # so a leaked invoke token can't exfiltrate cross-run data.
+        # so a caller with `lambda:InvokeFunctionUrl` can't exfiltrate
+        # cross-run data.
         payload["files"] = [
             {
                 "key": "other-instrument/RUN999/data.csv",

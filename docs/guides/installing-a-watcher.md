@@ -195,14 +195,57 @@ The watcher can't reach the Data Hub API. Check:
 ### Files are detected but not uploading
 
 - In **manual mode**, files are not uploaded until approved via the upload queue. Check the web dashboard.
-- Check `~/.data-hub/watcher.log` for error details.
+- Check the log file at `C:\ProgramData\DataHubWatcher\watcher.log` (Windows) or `~/.data-hub/watcher.log` (macOS/Linux) for error details.
 - Verify your API token hasn't expired.
 
 ### Logs
 
-The watcher writes rotating logs to `~/.data-hub/watcher.log` (10 MB, 5 backups). Check this file for detailed error information. You can also run with `--verbose` for debug-level console output:
+The watcher writes rotating logs to:
+
+- **Windows**: `C:\ProgramData\DataHubWatcher\watcher.log`
+- **macOS / Linux**: `~/.data-hub/watcher.log`
+
+Files are 10 MB each with 5 backups kept (`watcher.log.1` through `watcher.log.5`). Both the CLI `watch` command and the Windows service write to the same path so a single `Get-Content -Wait` (or `tail -F`) shows everything regardless of which entrypoint is running. You can also pass `--verbose` for debug-level console output on the CLI:
 
 ```sh
 data-hub-watcher --verbose watch
 ```
+
+#### Don't run `watch` alongside the service
+
+Running `data-hub-watcher watch` interactively while the Windows service is also running is not supported — both processes would race on the same rotating log file (and on the same watch directory). Stop the service first if you need to run the CLI for debugging:
+
+```powershell
+data-hub-watcher service stop
+data-hub-watcher --verbose watch
+data-hub-watcher service start   # when you're done
+```
+
+#### Bootstrap log for pre-dispatcher crashes
+
+The service writes a separate `service-bootstrap.log` next to `watcher.log` that captures crashes happening before the service control dispatcher takes over — for example, a missing `pywin32`, a moved virtualenv, or a corrupt install. If `watcher.log` is empty after a crash, check `C:\ProgramData\DataHubWatcher\service-bootstrap.log` for the traceback.
+
+#### Turning on debug logging for the service
+
+Add `DATA_HUB_WATCHER_LOG_LEVEL=DEBUG` to the env file the service is registered against (typically `~/.data-hub/.env.<environment>`) and restart the service. No redeploy or `service reinstall` is needed.
+
+#### Triaging a service that crashes immediately
+
+If the service exits before writing anything to `watcher.log`, two read-only commands will surface the failure:
+
+1. Query the Windows Application event log for entries from the watcher or the underlying Python service host:
+
+   ```powershell
+   Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddHours(-1)} |
+     Where-Object { $_.ProviderName -match 'Python|DataHubWatcher' -or $_.Message -match 'DataHubWatcher' } |
+     Format-List TimeCreated, ProviderName, Id, LevelDisplayName, Message
+   ```
+
+2. Run the service in the foreground from the venv `pywin32` itself ships:
+
+   ```powershell
+   & "C:\path\to\venv\Scripts\python.exe" -m win32serviceutil debug DataHubWatcher
+   ```
+
+   This bypasses the SCM, runs the same startup path the service uses, and prints the full traceback to the console — the fastest way to see why a phase-A/B crash is happening.
 

@@ -16,7 +16,7 @@ flowchart LR
 
 | Directory | Description | Docs |
 | --- | --- | --- |
-| `web-app/` | Next.js web application and REST API (Vercel) | [API reference](docs/api.md) |
+| `web/` | Next.js web application and REST API (Vercel) | [API reference](docs/api.md) |
 | `lambda/` | AWS Lambda function for instrument data processing | [Lambda docs](docs/lambda.md) |
 | `watcher/` | CLI agent for lab instrument PCs | [Watcher docs](docs/watcher.md) |
 | `packages/shared/` | Shared Python library (S3, enums, test infra) | [Shared library](docs/shared-library.md) |
@@ -29,13 +29,13 @@ flowchart LR
 uv sync --all-packages
 
 # Install web app dependencies.
-cd web-app && npm install && cd ..
+cd web && npm install && cd ..
 
 # Set up environment variables for the web app.
-cd web-app && vercel env pull && cd ..
+cd web && vercel env pull && cd ..
 
 # Create and initialize the local database.
-cd web-app && createdb data-hub-local && npm run db:push && cd ..
+cd web && createdb data-hub-local && npm run db:push && cd ..
 
 # Start the dev server.
 make dev

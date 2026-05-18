@@ -141,7 +141,7 @@ There is no separate "yank" step — a rolled-back release is still on PyPI and 
 
 The upgrade subprocess started but didn't end up running the new version on the next process startup. The `details.reason` field on the `update_failed` event tells you which sub-case fired:
 
-- `**subprocess raised: …`** — `subprocess.run` itself raised before it could exec the upgrade command. Typically `FileNotFoundError` because `uv` isn't on PATH for the service account, or a permission error. Check `~/.data-hub/watcher.log` for the full traceback.
+- `**subprocess raised: …`** — `subprocess.run` itself raised before it could exec the upgrade command. Typically `FileNotFoundError` because `uv` isn't on PATH for the service account, or a permission error. Check `C:\ProgramData\DataHubWatcher\watcher.log` (Windows) or `~/.data-hub/watcher.log` (macOS/Linux) for the full traceback.
 - `**subprocess exited <N>**` — the upgrade command itself failed. The event details include the last 1000 bytes of stdout/stderr; the most common cause is a transient PyPI / mirror failure or the version not yet existing on the index (see the "don't bump ahead of publish" note above).
 - `**expected '<target>' after upgrade, running '<current>'**` — the subprocess succeeded, the service restarted, but the running interpreter still imports the old version. Almost always means a stale `__pycache__` or a separate copy of the package on `sys.path`. Run `uv tool uninstall data-hub-watcher && uv tool install data-hub-watcher==<target>` as the service account.
 
@@ -189,7 +189,7 @@ The marker says the upgrade was dispatched via the worker, but the worker never 
 
 Whenever an upgrade fires, the watcher mirrors `uv`'s full stdout/stderr to disk in two places so a misleading dashboard event doesn't leave you guessing:
 
-- **In-process upgrades (POSIX, Windows pip)** — every line of subprocess output is logged at `INFO` to `~/.data-hub/watcher.log` (or the platform equivalent), prefixed with `Upgrade subprocess stdout/stderr tail:`. This happens regardless of the subprocess return code, so a partial install where uv exits 0 but printed errors is still recoverable.
+- **In-process upgrades (POSIX, Windows pip)** — every line of subprocess output is logged at `INFO` to the watcher log (`C:\ProgramData\DataHubWatcher\watcher.log` on Windows, `~/.data-hub/watcher.log` on macOS/Linux), prefixed with `Upgrade subprocess stdout/stderr tail:`. This happens regardless of the subprocess return code, so a partial install where uv exits 0 but printed errors is still recoverable.
 - **Windows uv-tool worker** — every line of uv's output is echoed line-by-line to `~/.data-hub/upgrade-worker.log` with a UTC timestamp (`uv stdout: …` / `uv stderr: …`). Tail this file to watch an upgrade as it happens.
 
 Both files survive a service restart — the watcher only ever appends to them — so an after-the-fact post-mortem of "what did uv actually say five minutes ago?" is always answerable from the lab PC without re-running the upgrade.

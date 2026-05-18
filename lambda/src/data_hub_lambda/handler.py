@@ -1,5 +1,4 @@
 from __future__ import annotations
-import hmac
 import json
 import re
 import shutil
@@ -93,28 +92,14 @@ def _is_function_url_event(event: dict[str, Any]) -> bool:
     return "requestContext" in event and "http" in event.get("requestContext", {})
 
 
-def _authenticate_function_url(event: dict[str, Any]) -> dict[str, Any] | None:
-    """Verify the Bearer token on a Function URL invocation.
+def _parse_function_url_body(event: dict[str, Any]) -> dict[str, Any] | None:
+    """Decode and JSON-parse the body of a Function URL invocation.
 
-    Returns the parsed S3 event payload on success, or ``None`` if
-    authentication fails (the caller should return a 401 response).
+    Authentication is enforced upstream by Lambda itself: the Function URL
+    is configured with ``AuthType: AWS_IAM`` so the runtime only ever
+    delivers SigV4-verified requests to this handler. If the body is not
+    valid JSON we return ``None`` and the caller should respond 400.
     """
-    from data_hub_lambda.config import lambda_config
-
-    expected = lambda_config.LAMBDA_INVOKE_TOKEN
-    if not expected:
-        logger.error("LAMBDA_INVOKE_TOKEN is not configured")
-        return None
-
-    headers: dict[str, str] = event.get("headers", {})
-    auth_header = headers.get("authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return None
-
-    token = auth_header[len("Bearer ") :]
-    if not hmac.compare_digest(token, expected):
-        return None
-
     body = event.get("body", "")
     if event.get("isBase64Encoded"):
         import base64
@@ -166,7 +151,7 @@ def _handle_build_archive(payload: dict[str, Any]) -> dict[str, Any]:
     """Run the archive builder and (optionally) PATCH the originating job.
 
     Sync callers (``payload["job_id"]`` absent) get the build result inline.
-    Async callers send ``"job_id"`` so the web-app job row gets PATCHed when
+    Async callers send ``"job_id"`` so the web app job row gets PATCHed when
     the build finishes — the HTTP response is the ack of acceptance and the
     actual outcome is delivered out-of-band.
     """
@@ -198,9 +183,10 @@ def _handle_build_archive(payload: dict[str, Any]) -> dict[str, Any]:
         return _archive_error_response(400, str(exc))
 
     # Allow-list the destination bucket against the Lambda's own configured
-    # archives bucket. Even though the web app generates the payload, an
-    # attacker with the invoke token shouldn't be able to redirect writes at
-    # an arbitrary bucket the Lambda role happens to have PutObject on.
+    # archives bucket. Even though the web app generates the payload, a
+    # caller with ``lambda:InvokeFunctionUrl`` shouldn't be able to redirect
+    # writes at an arbitrary bucket the Lambda role happens to have
+    # PutObject on.
     expected_bucket = lambda_config.AWS_S3_ARCHIVES_BUCKET
     if expected_bucket and request.destination_bucket != expected_bucket:
         message = (
@@ -255,51 +241,31 @@ def _post_archive_job_status(
 ) -> None:
     """PATCH the archive-job row in the web app with the final build outcome.
 
-    Authenticates with ``LAMBDA_INVOKE_TOKEN`` (the same shared secret the
-    Function URL uses), *not* with the regular ``DATA_HUB_API_KEY`` PAT.
-    The PATCH lets the caller mark a job ``ready`` with arbitrary
-    ``archive_bucket``/``archive_key``, so allowing user PATs would let any
-    signed-in user redirect another user's archive download. Restricting
-    callbacks to a server-only secret keeps Lambda as the sole writer.
+    Authenticates with the standard ``DATA_HUB_API_KEY`` PAT — the same
+    credential used for every other Lambda → API call.
 
     Failures here are logged but never re-raised — the build itself succeeded
     or failed for its own reasons, and we don't want a callback failure to
-    mask that.
+    mask that. The web app's UI does not depend on this PATCH landing
+    either: it polls ``/download-archive`` which short-circuits on an S3
+    HEAD, so a finished build is downloadable the moment the multipart
+    upload completes.
     """
-    from data_hub_lambda.config import lambda_config
-
-    base_url = lambda_config.DATA_HUB_API_URL
-    invoke_token = lambda_config.LAMBDA_INVOKE_TOKEN
-    if not base_url or not invoke_token:
-        logger.error(
-            "DATA_HUB_API_URL/LAMBDA_INVOKE_TOKEN not configured; cannot PATCH archive job %s",
-            job_id,
-        )
-        return
-
-    payload: dict[str, Any] = {"status": status}
-    if archive_bucket is not None:
-        payload["archive_bucket"] = archive_bucket
-    if archive_key is not None:
-        payload["archive_key"] = archive_key
-    if size_bytes is not None:
-        payload["size_bytes"] = size_bytes
-    if error_message is not None:
-        payload["error_message"] = error_message
-
-    import requests
+    from data_hub_lambda.api_client import ApiError, get_client
 
     try:
-        resp = requests.patch(
-            f"{base_url.rstrip('/')}/archive-jobs/{job_id}",
-            json=payload,
-            headers={"Authorization": f"Bearer {invoke_token}"},
-            timeout=(5, 30),
+        get_client().update_archive_job(
+            job_id,
+            status=status,
+            archive_bucket=archive_bucket,
+            archive_key=archive_key,
+            size_bytes=size_bytes,
+            error_message=error_message,
         )
-        if not resp.ok:
-            logger.error(
-                "PATCH /archive-jobs/%s returned %d: %s", job_id, resp.status_code, resp.text
-            )
+    except ApiError as exc:
+        logger.error(
+            "PATCH /archive-jobs/%s failed (status %d): %s", job_id, exc.status_code, exc.message
+        )
     except Exception:
         logger.exception("Failed to PATCH archive-job %s", job_id)
 
@@ -314,12 +280,12 @@ def lambda_handler(event: dict[str, Any], context: Context) -> dict[str, Any] | 
     logger.info("Received event: %s", pformat(event))
 
     # Function URL invocations carry a requestContext with an http key.
-    # Verify the Bearer token and unwrap the inner JSON payload.
+    # AWS_IAM auth is enforced by Lambda before the handler runs, so we
+    # only need to unwrap the inner JSON payload here.
     if _is_function_url_event(event):
-        payload = _authenticate_function_url(event)
+        payload = _parse_function_url_body(event)
         if payload is None:
-            logger.warning("Unauthorized Function URL invocation")
-            return {"statusCode": 401, "body": "Unauthorized"}
+            return {"statusCode": 400, "body": "Invalid JSON body"}
 
         # Discriminator: explicit "type" routes to non-S3-event handlers (today
         # just the archive builder); absent type means a manually-constructed

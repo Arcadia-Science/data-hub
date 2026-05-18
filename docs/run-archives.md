@@ -45,7 +45,7 @@ Archives live in a separate bucket per environment, provisioned by [`infra/templ
 The fingerprint is a sorted SHA-256 of `(file_id, s3_key)` pairs:
 
 ```ts
-// web-app/lib/api/archive-builder.ts
+// web/lib/api/archive-builder.ts
 [...files].map((f) => `${f.id}:${f.s3Key}`).sort().join("|")
 ```
 
@@ -61,7 +61,7 @@ Properties this gives us:
 Two simultaneous "Download all" clicks must not double-invoke the Lambda. The schema enforces this with a *partial* unique index:
 
 ```sql
--- web-app/drizzle/0016_add_archive_jobs.sql
+-- web/drizzle/0016_add_archive_jobs.sql
 CREATE UNIQUE INDEX archive_jobs_inflight_unique_idx
   ON archive_jobs (instrument_run_id, fingerprint)
   WHERE status IN ('pending', 'building');
@@ -74,10 +74,11 @@ The route `INSERT … ON CONFLICT DO NOTHING`s; on conflict it `SELECT`s the exi
 | Variable | Where | Purpose |
 | --- | --- | --- |
 | `S3_ARCHIVES_BUCKET` | Vercel | Bucket the route HEADs and presigns from. Must match the SAM-provisioned bucket for the env. |
-| `LAMBDA_FUNCTION_URL` | Vercel | Function URL of the Data Hub Lambda. Required — the route returns `503` if either Lambda env var is missing. |
-| `LAMBDA_INVOKE_TOKEN` | Vercel + SAM | Shared bearer token. Used both by Vercel → Lambda (`Authorization: Bearer …` on the Function URL POST) **and** by Lambda → Vercel (the same header on the `PATCH /api/v1/archive-jobs/:id` callback). The PATCH endpoint deliberately rejects regular user PATs so a signed-in user can't hijack another user's in-flight build. |
+| `LAMBDA_FUNCTION_URL` | Vercel | Function URL of the Data Hub Lambda. Required — the route returns `503` if it's unset. |
+| `AWS_ROLE_ARN` | Vercel | OIDC role the web app assumes to SigV4-sign Function URL invocations. Must be the `WebAppS3Role` ARN from the per-env stack (it carries the `lambda:InvokeFunctionUrl` policy on the Lambda's ARN). The same role also signs S3 presigns. |
 | `AWS_S3_ARCHIVES_BUCKET` | Lambda | Set automatically by SAM via `!Ref ArchivesBucket`. The Lambda only writes to this bucket. |
 | `DATA_HUB_API_URL` | Lambda | Base URL of the web API (including `/api/v1`). The `_post_archive_job_status` callback PATCHes `/archive-jobs/:id` against this. |
+| `DATA_HUB_API_KEY` | Lambda | PAT used to authenticate every Lambda → API call, including the archive-job callback PATCH. |
 
 ## Runbook
 
@@ -92,7 +93,7 @@ WHERE status = 'building' AND created_at < now() - interval '15 minutes';
 Likely causes, in order of frequency:
 
 1. **Lambda errored before the PATCH fired.** Check CloudWatch logs for `_handle_build_archive` failures around the job's `created_at`. Typical culprits: source object deleted between row insert and Lambda fetch (404 from `GetObject`), or a multipart upload that exceeded the function timeout.
-2. **PATCH callback failed.** The Lambda logs `Failed to PATCH archive-job %s` if the web app rejected the update (auth issue, web app down, `DATA_HUB_API_URL` pointing at a deploy that doesn't have the `archive-jobs/[id]` route yet). The build itself may have succeeded — check the archives bucket for the expected key. **The UI tolerates this case:** the dialog re-issues `/download-archive` (which HEADs S3 first) on every poll rather than reading the row's `status`, so a finished build is downloaded the moment the multipart upload completes regardless of whether the row was ever flipped to `ready`. The stuck row only blocks future *new* builds for the same fingerprint until the 20-minute stale-row sweep kicks in. If you want to clean up immediately, `UPDATE archive_jobs SET status='ready', archive_bucket='…', archive_key='…' WHERE id = '…'` (the `PATCH` endpoint requires the `LAMBDA_INVOKE_TOKEN`, not a user PAT, so going through Postgres is the easiest manual path) or just `DELETE` it.
+2. **PATCH callback failed.** The Lambda logs `Failed to PATCH archive-job %s` if the web app rejected the update (auth issue, web app down, `DATA_HUB_API_URL` pointing at a deploy that doesn't have the `archive-jobs/[id]` route yet). The build itself may have succeeded — check the archives bucket for the expected key. **The UI tolerates this case:** the dialog re-issues `/download-archive` (which HEADs S3 first) on every poll rather than reading the row's `status`, so a finished build is downloaded the moment the multipart upload completes regardless of whether the row was ever flipped to `ready`. The stuck row only blocks future *new* builds for the same fingerprint until the 20-minute stale-row sweep kicks in. If you want to clean up immediately, `UPDATE archive_jobs SET status='ready', archive_bucket='…', archive_key='…' WHERE id = '…'` is the easiest manual path, or just `DELETE` it.
 3. **Async path lost the `after()` callback.** Vercel `next/server` `after()` is best-effort; in rare cases (SIGTERM during scale-down) it can drop. The row will sit in `building` until a new download-archive request for the same fingerprint arrives — see "Self-healing" below.
 
 #### Self-healing
@@ -104,12 +105,12 @@ The download-archive route runs `expireStaleArchiveJobs` on every request: any `
 `Archive builder failed: …` 502s come from the route when `invokeBuildArchive` returned `{ ok: false }`. The most common shapes:
 
 - `Failed to reach archive builder: fetch failed` — Function URL unreachable. Check `LAMBDA_FUNCTION_URL` is set and the Lambda function exists in the right region.
-- `Archive builder returned 401` — `LAMBDA_INVOKE_TOKEN` mismatch between Vercel and Lambda. Often happens after rotating the SAM `LambdaInvokeToken` parameter without updating the Vercel env var.
+- `Archive builder returned 403` — SigV4 signature rejected. Most often means Vercel's assumed role (`AWS_ROLE_ARN`) doesn't carry `lambda:InvokeFunctionUrl` on the Lambda's ARN, or the Function URL was redeployed with `AuthType: NONE` (the policy condition only allows `AWS_IAM`). Confirm the `WebAppS3Role` policy in `infra/template.yaml` still includes `LambdaFunctionUrlInvoke`.
 - `Archive builder returned 500` — Lambda hit an unhandled exception. Check CloudWatch; typical causes are missing IAM perms after a SAM redeploy that drifted, or a source object `KeyError` from a file row whose S3 key no longer exists.
 
 ### Downloads are returning 503
 
-`Archive builder is not configured` means `LAMBDA_FUNCTION_URL` or `LAMBDA_INVOKE_TOKEN` is unset on the deploy. Set both and redeploy.
+`Archive builder is not configured` means `LAMBDA_FUNCTION_URL`, `S3_ARCHIVES_BUCKET`, or AWS credentials (`AWS_ROLE_ARN` on Vercel, or static keys locally) are unset on the deploy. Set all three and redeploy.
 
 ### An archive looks stale (wrong files)
 
@@ -134,5 +135,5 @@ Some choices that aren't obvious from reading the code:
 - **No compression.** `ZIP_STORED` skips deflate. Microscope ND2s, gel TIFFs, and qPCR CSVs barely compress, and Lambda CPU spent on deflate is wall-clock the user is waiting through.
 - **No on-disk staging.** A 300 GB Hina run wouldn't fit in Lambda's 10 GB `/tmp` and we don't want to special-case staging anyway. Streaming S3 → zip writer → S3 multipart keeps memory bounded and works for any size.
 - **`force_zip64=True` everywhere.** A single 4+ GB entry would otherwise raise inside `ZipFile.open`. Cheaper to always emit ZIP64 headers than to gate on entry size.
-- **Key-prefix validation in the Lambda.** Even though the web app generates the key list, the Lambda re-validates that every input lives under `{instrument_id}/{run_id}/`. A leaked invoke token shouldn't be a generic S3-prefix exfiltration tool.
+- **Key-prefix validation in the Lambda.** Even though the web app generates the key list, the Lambda re-validates that every input lives under `{instrument_id}/{run_id}/`. A caller with `lambda:InvokeFunctionUrl` (e.g. via a compromised Vercel role) shouldn't be able to turn the builder into a generic S3-prefix exfiltration tool.
 - **Fingerprint over a hash of file *content*.** Hashing content would mean Lambda has to read every byte before it knows the cache key — defeating the cache. Hashing `(id, s3_key)` is cheap and correct because reprocessing changes the key.

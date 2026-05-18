@@ -67,5 +67,4 @@ jobs:
               "DataHubApiKey=${{ secrets.DATA_HUB_API_KEY }}" \
               "Environment=${{ github.ref_name }}" \
               "GitHubOidcProviderArn=${{ secrets.GH_OIDC_PROVIDER_ARN }}" \
-              "VercelOidcProviderArn=${{ secrets.VERCEL_OIDC_PROVIDER_ARN }}" \
-              "LambdaInvokeToken=${{ secrets.LAMBDA_INVOKE_TOKEN }}"
+              "VercelOidcProviderArn=${{ secrets.VERCEL_OIDC_PROVIDER_ARN }}"

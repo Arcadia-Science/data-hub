@@ -2,11 +2,13 @@
 
 Personal access tokens authenticate the watcher and other API clients with the Data Hub API. This guide covers creating, using, and revoking tokens.
 
+> **Admin-only.** Creating and revoking tokens requires the workspace admin role. Regular members can view the workspace token audit list at **Settings > Access Tokens** but cannot mint or delete tokens. Ask an existing admin (or someone with their email listed in `ADMIN_EMAILS`) if you need a token issued.
+
 ## Creating a token
 
 ### In the web app
 
-1. Sign in to the Data Hub web app.
+1. Sign in to the Data Hub web app as an admin.
 2. Go to **Settings > Access Tokens**.
 3. Click **Create Token**.
 4. Enter a descriptive name (e.g., "FPLC watcher - Lab 201").
@@ -118,8 +120,7 @@ curl -X DELETE https://data-hub.arcadiascience.com/api/v1/tokens/<token-id> \
 ## Security notes
 
 - Tokens are hashed with SHA-256 before storage. The plaintext is never persisted.
-- Each token is scoped to the user who created it.
-- You can only delete your own tokens.
+- Token create and delete are admin-only operations. Admins can revoke any user's token to support off-boarding and incident response.
 - Use descriptive names so you can identify which watcher or client each token belongs to.
 - Set expiration dates for tokens used in temporary setups.
 - Revoke tokens immediately when a watcher is decommissioned or a token may have been exposed.

@@ -6,10 +6,55 @@ The Data Hub API is served by the Next.js web application at `/api/v1/`. It is u
 
 The API supports two authentication methods:
 
-- **Session cookies** — used by the web dashboard (Google OAuth via NextAuth).
+- **Session cookies** — used by the web dashboard (Google OAuth via NextAuth). Session-authenticated callers implicitly hold every scope; scope enforcement only applies to token-authenticated requests.
 - **Bearer tokens** — used by the watcher, Lambda, and MCP clients. Tokens are created in the web dashboard under personal access tokens and sent in the `Authorization: Bearer <token>` header.
 
 Tokens are hashed with SHA-256 before storage. The plaintext token is shown once at creation time.
+
+Web page routes use a different gating model from the `/api/v1/*` surface: they're publicly reachable so link previews work, and the page body itself short-circuits to a sign-in CTA when there's no session. The API always requires either a session cookie or a bearer token (see [architecture](architecture.md)).
+
+### Admin role
+
+A subset of mutations is gated on the workspace admin role in addition to (or instead of) the scope check:
+
+- `PATCH /api/v1/instruments/:instrumentId` — session callers must be admin; bearer-token callers continue to authenticate solely via the `instruments:write` scope, so existing watcher/Lambda automation is unaffected.
+- `POST /api/v1/tokens` and `DELETE /api/v1/tokens/:id` — admin-only, session-only. Bearer tokens cannot manage other tokens.
+- `GET /api/v1/users`, `PATCH /api/v1/users/:userId` — admin-only, session-only. Used by the **Settings > Members** page to toggle other users' admin flag.
+
+The first admin is bootstrapped from the `ADMIN_EMAILS` env var (comma-separated, case-insensitive); listed users are promoted to admin on every sign-in. Subsequent admins can be promoted in the UI by any existing admin. Admins cannot demote themselves — `PATCH /api/v1/users/:userId` with `{ is_admin: false }` on the caller's own user id returns `400 VALIDATION_ERROR`.
+
+### Scopes
+
+Every personal access token carries an array of permission scopes. A request is rejected with `403 FORBIDDEN` when the token's scopes do not include the scope required by the route. The vocabulary is:
+
+| Scope | Grants |
+| --- | --- |
+| `instruments:read` | List/read instruments |
+| `instruments:write` | Create/update instruments |
+| `runs:read` | List/read runs (and their comments) |
+| `runs:write` | Create/update/delete runs, comments, attributions, and run-level upload/reprocess endpoints |
+| `files:read` | Read file metadata, download files, download run archives |
+| `files:write` | Create/update/delete file records and reprocess files |
+| `watchers:read` | Read watcher state (list, heartbeats, events, config, upload queue, update-check) |
+| `watchers:write` | Register/deregister watchers, post heartbeats and events, push config |
+| `archive-jobs:read` | Read archive job state. No endpoints currently consume this scope — the existing run-archive download is gated on `files:read` because it returns file bytes — but it is reserved for future archive-job listing/status endpoints. |
+| `archive-jobs:write` | Update archive jobs (Lambda callback). |
+| `*` | Wildcard — matches every scope. Reserved for the migration backfill and the watcher/Lambda PATs until they are rotated to least-privilege scopes; `POST /api/v1/tokens` rejects `*` from API callers. |
+
+MCP tools enforce the same scopes their REST counterparts do: `search_runs` and `get_run` require `runs:read`, `reprocess_file` requires `files:write`, `claim_run`/`unclaim_run` require `runs:write`, and so on. There is no MCP-specific scope vocabulary — a token with `runs:read` over REST also covers the read-side run tools over MCP.
+
+Migration `0022_pat_scopes` backfills every pre-existing token with `["*"]`, so deployed watchers and the Lambda continue to work after deploy until their tokens are rotated to explicit scopes.
+
+`403 FORBIDDEN` responses use the standard error shape:
+
+```json
+{
+  "error": {
+    "code": "FORBIDDEN",
+    "message": "Token is missing required scope: runs:write"
+  }
+}
+```
 
 ## Endpoints
 
@@ -77,7 +122,7 @@ Comment bodies are markdown source, capped at 10 000 characters. Author-only mut
 | Method | Path | Description |
 | --- | --- | --- |
 | `GET` | `/api/v1/instruments/:instrumentId/runs/:runId/download-archive` | Download the run archive. On cache hits returns `302` with a presigned S3 URL (or `200 { status: "ready", download_url, size_bytes }` if the caller sent `Accept: application/json`). On cache misses always returns `202 { status: "building", job_id }` and dispatches the build asynchronously; the same URL re-issued is the canonical poll target — every poll re-runs the S3 HEAD, so a finished build is visible the moment the multipart upload lands. Optional `?file_ids=1,2,3` narrows the archive to a subset of files (always intersected with the run's own files). |
-| `PATCH` | `/api/v1/archive-jobs/:id` | Lambda callback: marks an async build as `ready` (with `archive_bucket`, `archive_key`, `size_bytes`) or `failed` (with `error_message`). Stamps `completed_at` on terminal transitions. Authenticates with `Authorization: Bearer <LAMBDA_INVOKE_TOKEN>`; user PATs are deliberately rejected so a signed-in user can't redirect another user's archive download. |
+| `PATCH` | `/api/v1/archive-jobs/:id` | Lambda callback: marks an async build as `ready` (with `archive_bucket`, `archive_key`, `size_bytes`) or `failed` (with `error_message`). Stamps `completed_at` on terminal transitions. Uses standard PAT/session auth — the Lambda calls this with its `DATA_HUB_API_KEY` PAT. The UI does not trust this row's `status` for download readiness (it polls `/download-archive`, which short-circuits on an S3 HEAD), so a tampered row at worst breaks its own download. |
 
 The download-archive endpoint sits in front of a Lambda-driven builder pipeline that produces zips in S3 and serves them via presigned URLs, so download bytes never travel through Vercel. See [Run archives](run-archives.md) for the full flow, cache semantics, and operator runbook.
 
@@ -85,9 +130,16 @@ The download-archive endpoint sits in front of a Lambda-driven builder pipeline 
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/api/v1/tokens` | List personal access tokens |
-| `POST` | `/api/v1/tokens` | Create a new token |
-| `DELETE` | `/api/v1/tokens/:id` | Revoke a token |
+| `GET` | `/api/v1/tokens` | List personal access tokens. Response includes each token's `scopes`. |
+| `POST` | `/api/v1/tokens` | Create a new token. Admin-only; requires a non-empty `scopes` array (see [Scopes](#scopes)); the wildcard `*` is rejected. |
+| `DELETE` | `/api/v1/tokens/:id` | Revoke a token. Admin-only; admins can revoke any user's PAT. |
+
+### Users
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/api/v1/users` | List workspace users with their admin flag. Admin-only, session-only. |
+| `PATCH` | `/api/v1/users/:userId` | Toggle the workspace `is_admin` flag for a user. Admin-only, session-only; admins cannot demote themselves. |
 
 ### MCP (Model Context Protocol)
 
