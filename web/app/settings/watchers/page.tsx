@@ -7,22 +7,18 @@ import { eq } from "drizzle-orm";
 import { ShieldOff } from "lucide-react";
 import type { Metadata } from "next/types";
 
-const description =
-  "Configure the watcher release advertised by the auto-update endpoint.";
-
 export const metadata: Metadata = {
-  title: "Watcher Release",
-  description,
-  openGraph: { title: "Watcher Release", description },
-  twitter: { title: "Watcher Release", description },
+  title: "Watchers",
+  description:
+    "Configure the watcher release advertised by the auto-update endpoint.",
 };
 
-export default async function WatcherReleasePage() {
+export default async function WatchersSettingsPage() {
   const session = await auth();
   if (!session?.user) {
     return (
-      <SignInRequired callbackUrl="/settings/watcher-release">
-        Sign in to manage the watcher release.
+      <SignInRequired callbackUrl="/settings/watchers">
+        Sign in to manage watcher settings.
       </SignInRequired>
     );
   }
@@ -39,7 +35,7 @@ export default async function WatcherReleasePage() {
           Admins only
         </p>
         <p className="mt-1 max-w-sm text-center text-sm text-muted-foreground/70">
-          You need workspace admin access to change the watcher release. Ask an
+          You need workspace admin access to change watcher settings. Ask an
           existing admin if you need to be promoted.
         </p>
       </div>
@@ -65,49 +61,29 @@ export default async function WatcherReleasePage() {
     .from(watcherReleaseConfig)
     .leftJoin(users, eq(users.id, watcherReleaseConfig.updatedBy));
 
+  // The form owns its own Card chrome (heading, description, fields,
+  // footer) so it renders as a self-contained settings panel. The page
+  // just wires server-fetched state into it.
   return (
-    <div>
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold tracking-tight">
-            Watcher Release
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Configure the release advertised by{" "}
-            <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs dark:bg-background/40">
-              GET /api/v1/watchers/:id/update-check
-            </code>
-            . Watchers compare their installed version against{" "}
-            <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs dark:bg-background/40">
-              latest_version
-            </code>{" "}
-            and self-upgrade when a newer release is offered.
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-6 max-w-2xl">
-        <WatcherReleaseForm
-          initial={{
-            latestVersion: row?.latestVersion ?? "",
-            minSupportedVersion: row?.minSupportedVersion ?? "",
-            channel: row?.channel ?? "stable",
-            mandatory: row?.mandatory ?? false,
-          }}
-          // Only the primitive form values + the small "last updated"
-          // metadata cross the server/client boundary — keep the
-          // server/client payload minimal per `server-serialization`.
-          lastUpdated={
-            row
-              ? {
-                  at: row.updatedAt.toISOString(),
-                  byName: row.updatedByName,
-                  byEmail: row.updatedByEmail,
-                }
-              : null
-          }
-        />
-      </div>
-    </div>
+    <WatcherReleaseForm
+      initial={{
+        latestVersion: row?.latestVersion ?? "",
+        minSupportedVersion: row?.minSupportedVersion ?? "",
+        channel: row?.channel ?? "stable",
+        mandatory: row?.mandatory ?? false,
+      }}
+      // Only the primitive form values + the small "last updated"
+      // metadata cross the server/client boundary — keep the
+      // server/client payload minimal per `server-serialization`.
+      lastUpdated={
+        row
+          ? {
+              at: row.updatedAt.toISOString(),
+              byName: row.updatedByName,
+              byEmail: row.updatedByEmail,
+            }
+          : null
+      }
+    />
   );
 }

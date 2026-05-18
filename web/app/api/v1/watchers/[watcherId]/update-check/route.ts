@@ -10,10 +10,10 @@ import type { NextRequest } from "next/server";
  * Server-reported watcher release metadata.
  *
  * Source of truth is the `watcher_release_config` singleton row, edited
- * by admins via `/settings/watcher-release`. Until that row exists
- * (fresh deploy, before any admin save) the endpoint still returns 200
- * with `latest_version: null` so watchers don't log spurious 5xxs and
- * the client treats it as "no update available".
+ * by admins via `/settings/watchers`. Until that row exists (fresh
+ * deploy, before any admin save) the endpoint still returns 200 with
+ * `latest_version: null` so watchers don't log spurious 5xxs and the
+ * client treats it as "no update available".
  */
 type WatcherReleaseInfo = {
   latest_version: string | null;

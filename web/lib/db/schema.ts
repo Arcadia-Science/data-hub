@@ -153,7 +153,7 @@ export const sessions = pgTable(
 
 // Singleton row of server-advertised watcher release metadata, served by
 // `GET /api/v1/watchers/:id/update-check` and edited via the admin-only
-// `/settings/watcher-release` page. Previously sourced from the
+// `/settings/watchers` page. Previously sourced from the
 // `WATCHER_LATEST_VERSION` / `WATCHER_MIN_SUPPORTED_VERSION` /
 // `WATCHER_RELEASE_CHANNEL` / `WATCHER_MANDATORY_UPDATE` env vars.
 //

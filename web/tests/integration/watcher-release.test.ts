@@ -9,11 +9,11 @@ import {
 import { eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
-// The `/api/v1/watcher-release` surface is admin-only and session-only —
-// PATs never pass the gate. Mirroring the `users.test.ts` pattern, the
-// negative cases are locked down here; the session-authenticated happy
-// path (admin saving via the UI) is covered by manual QA per the PR
-// description.
+// The `/api/v1/settings/watcher-release` surface is admin-only and
+// session-only — PATs never pass the gate. Mirroring the
+// `users.test.ts` pattern, the negative cases are locked down here; the
+// session-authenticated happy path (admin saving via the UI) is covered
+// by manual QA per the PR description.
 //
 // The end-to-end "settings page → update-check" wiring is verified by
 // upserting the singleton row directly via Drizzle and asserting the
@@ -37,18 +37,18 @@ describe("Watcher Release API admin gate", () => {
     await closeTestDb();
   });
 
-  it("GET /api/v1/watcher-release rejects PAT auth (session required)", async () => {
-    const res = await api("/api/v1/watcher-release", { token });
+  it("GET /api/v1/settings/watcher-release rejects PAT auth (session required)", async () => {
+    const res = await api("/api/v1/settings/watcher-release", { token });
     expect(res.status).toBe(401);
   });
 
-  it("GET /api/v1/watcher-release rejects unauthenticated requests", async () => {
-    const res = await api("/api/v1/watcher-release");
+  it("GET /api/v1/settings/watcher-release rejects unauthenticated requests", async () => {
+    const res = await api("/api/v1/settings/watcher-release");
     expect(res.status).toBe(401);
   });
 
-  it("PUT /api/v1/watcher-release rejects PAT auth", async () => {
-    const res = await api("/api/v1/watcher-release", {
+  it("PUT /api/v1/settings/watcher-release rejects PAT auth", async () => {
+    const res = await api("/api/v1/settings/watcher-release", {
       method: "PUT",
       token,
       body: {
@@ -61,8 +61,8 @@ describe("Watcher Release API admin gate", () => {
     expect(res.status).toBe(401);
   });
 
-  it("PUT /api/v1/watcher-release rejects unauthenticated requests", async () => {
-    const res = await api("/api/v1/watcher-release", {
+  it("PUT /api/v1/settings/watcher-release rejects unauthenticated requests", async () => {
+    const res = await api("/api/v1/settings/watcher-release", {
       method: "PUT",
       body: {
         latest_version: "1.0.0",

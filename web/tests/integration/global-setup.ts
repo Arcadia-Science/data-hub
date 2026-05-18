@@ -121,7 +121,7 @@ export async function setup() {
   //     values during integration tests. Individual tests assert against
   //     these exact strings (see `watchers.test.ts`). Previously this was
   //     done via WATCHER_* env vars; the source of truth is now the DB,
-  //     edited via the admin-only /settings/watcher-release page.
+  //     edited via the admin-only /settings/watchers page.
   const seedSql = postgres(databaseUrl);
   try {
     await seedSql`

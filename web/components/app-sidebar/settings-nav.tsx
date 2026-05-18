@@ -22,12 +22,8 @@ type SettingsSection = {
 
 const SETTINGS_SECTIONS: SettingsSection[] = [
   { href: "/settings/tokens", label: "Access Tokens" },
+  { href: "/settings/watchers", label: "Watchers", adminOnly: true },
   { href: "/settings/members", label: "Members", adminOnly: true },
-  {
-    href: "/settings/watcher-release",
-    label: "Watcher Release",
-    adminOnly: true,
-  },
 ];
 
 // Single, predictable destination for the "leave settings" affordance. A

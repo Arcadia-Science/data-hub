@@ -4,11 +4,12 @@ import { db } from "@/lib/db";
 import { users, watcherReleaseConfig } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
+import { z } from "zod";
 
 // Admin-only read/write of the singleton `watcher_release_config` row,
-// edited via `/settings/watcher-release`. The `update-check` endpoint
-// reads the same row but is open to any watcher-scoped PAT — this route
-// is the privileged write path and is therefore session-only via
+// edited via `/settings/watchers`. The `update-check` endpoint reads
+// the same row but is open to any watcher-scoped PAT — this route is
+// the privileged write path and is therefore session-only via
 // `requireAdmin()`, matching the `/api/v1/users/[userId]` PATCH model.
 
 // Loose PEP-440-style version match — covers the values we already
@@ -18,12 +19,48 @@ import type { NextRequest } from "next/server";
 // is the same failure mode they already debug today.
 const VERSION_REGEX = /^\d+\.\d+\.\d+([.-].+)?$/;
 
-const ALLOWED_PUT_FIELDS = new Set([
-  "latest_version",
-  "min_supported_version",
-  "channel",
-  "mandatory",
-]);
+// Trim and collapse `""` to `null` so the wire contract stays "empty
+// means unset" everywhere — operators don't have to remember to send
+// `null` instead of `""`. Shared by both version fields.
+function normalizeVersionInput(v: string | null | undefined): string | null {
+  if (v == null) return null;
+  const trimmed = v.trim();
+  return trimmed.length === 0 ? null : trimmed;
+}
+
+// PUT semantics: missing fields take their defaults rather than
+// silently preserving the existing row's value. The form always sends
+// all four, so this only affects hand-crafted callers — for whom a
+// uniform "replace with these (or defaults)" rule is far less surprising
+// than the previous mix where `channel`/`mandatory` defaulted but
+// `latest_version`/`min_supported_version` were preserved.
+const PutBodySchema = z.strictObject({
+  latest_version: z
+    .string()
+    .nullish()
+    .transform(normalizeVersionInput)
+    .refine((v) => v === null || VERSION_REGEX.test(v), {
+      message: "latest_version is not a valid PEP 440-style version",
+    }),
+  min_supported_version: z
+    .string()
+    .nullish()
+    .transform(normalizeVersionInput)
+    .refine((v) => v === null || VERSION_REGEX.test(v), {
+      message: "min_supported_version is not a valid PEP 440-style version",
+    }),
+  channel: z
+    .string()
+    .optional()
+    .transform((v) => (v ?? "stable").trim())
+    .refine((v) => v.length > 0, {
+      message: "channel must be a non-empty string",
+    }),
+  mandatory: z
+    .boolean()
+    .optional()
+    .transform((v) => v ?? false),
+});
 
 type WatcherReleaseResponse = {
   latest_version: string | null;
@@ -92,102 +129,34 @@ export async function GET() {
   return Response.json(await readCurrent());
 }
 
-// Normalises a string input from the form: trims whitespace and treats
-// an empty string the same as an omitted/explicit-null value. Keeps the
-// "version unset" semantics from the env-var era — operators don't have
-// to remember to send `null` instead of `""`.
-function normalizeOptionalString(value: unknown): string | null {
-  if (value === null) return null;
-  if (typeof value !== "string") return value as never;
-  const trimmed = value.trim();
-  return trimmed.length === 0 ? null : trimmed;
-}
-
 export async function PUT(request: NextRequest) {
   const authResult = await requireAdmin();
   if (authResult instanceof Response) return authResult;
 
-  let body: Record<string, unknown>;
+  let rawBody: unknown;
   try {
-    body = await request.json();
+    rawBody = await request.json();
   } catch {
     return apiError(400, VALIDATION_ERROR, "Invalid JSON body");
   }
 
-  const unknownKeys = Object.keys(body).filter(
-    (k) => !ALLOWED_PUT_FIELDS.has(k)
-  );
-  if (unknownKeys.length > 0) {
-    return apiError(400, VALIDATION_ERROR, "Unknown fields", {
-      unknown_fields: unknownKeys,
-      allowed_fields: [...ALLOWED_PUT_FIELDS],
+  const parsed = PutBodySchema.safeParse(rawBody);
+  if (!parsed.success) {
+    return apiError(400, VALIDATION_ERROR, "Invalid request body", {
+      issues: parsed.error.issues.map((issue) => ({
+        path: issue.path.join("."),
+        code: issue.code,
+        message: issue.message,
+      })),
     });
   }
 
-  // Type-check each field individually so the error messages name the
-  // offending property (rather than the all-or-nothing failure you'd get
-  // from a single zod parse).
-  if (
-    body.latest_version !== undefined &&
-    body.latest_version !== null &&
-    typeof body.latest_version !== "string"
-  ) {
-    return apiError(
-      400,
-      VALIDATION_ERROR,
-      "latest_version must be a string or null"
-    );
-  }
-  if (
-    body.min_supported_version !== undefined &&
-    body.min_supported_version !== null &&
-    typeof body.min_supported_version !== "string"
-  ) {
-    return apiError(
-      400,
-      VALIDATION_ERROR,
-      "min_supported_version must be a string or null"
-    );
-  }
-  if (body.channel !== undefined && typeof body.channel !== "string") {
-    return apiError(400, VALIDATION_ERROR, "channel must be a string");
-  }
-  if (body.mandatory !== undefined && typeof body.mandatory !== "boolean") {
-    return apiError(400, VALIDATION_ERROR, "mandatory must be a boolean");
-  }
-
-  const latestVersion = normalizeOptionalString(body.latest_version);
-  const minSupportedVersion = normalizeOptionalString(
-    body.min_supported_version
-  );
-  const channel =
-    typeof body.channel === "string" ? body.channel.trim() : "stable";
-  const mandatory = body.mandatory === true;
-
-  if (latestVersion !== null && !VERSION_REGEX.test(latestVersion)) {
-    return apiError(
-      400,
-      VALIDATION_ERROR,
-      `latest_version '${latestVersion}' is not a valid PEP 440-style version`
-    );
-  }
-  if (
-    minSupportedVersion !== null &&
-    !VERSION_REGEX.test(minSupportedVersion)
-  ) {
-    return apiError(
-      400,
-      VALIDATION_ERROR,
-      `min_supported_version '${minSupportedVersion}' is not a valid PEP 440-style version`
-    );
-  }
-  if (channel.length === 0) {
-    return apiError(
-      400,
-      VALIDATION_ERROR,
-      "channel must be a non-empty string"
-    );
-  }
+  const {
+    latest_version: latestVersion,
+    min_supported_version: minSupportedVersion,
+    channel,
+    mandatory,
+  } = parsed.data;
 
   const now = new Date();
   // Singleton upsert: `id = true` is the primary key, so ON CONFLICT

@@ -64,7 +64,7 @@ If you want a specific PC to stay on a particular release rather than tracking t
 uv tool install data-hub-watcher==<pinned>
 ```
 
-Run `data-hub-watcher self-update --check` afterwards to confirm what the server's target is. As long as the pinned version matches `latest_version`, the auto-update tick is a no-op. The moment the server's target moves past your pin, the next tick will try to upgrade past it again — pinning is per-machine state, not server-side state. To park a fleet on a given version intentionally, the right knob is the server-side **Latest version** field on the **Settings → Watcher Release** page in Data Hub (see [Cutting a new release](#cutting-a-new-release)).
+Run `data-hub-watcher self-update --check` afterwards to confirm what the server's target is. As long as the pinned version matches `latest_version`, the auto-update tick is a no-op. The moment the server's target moves past your pin, the next tick will try to upgrade past it again — pinning is per-machine state, not server-side state. To park a fleet on a given version intentionally, the right knob is the server-side **Latest version** field on the **Settings → Watchers** page in Data Hub (see [Cutting a new release](#cutting-a-new-release)).
 
 ## Cutting a new release
 
@@ -99,7 +99,7 @@ Manual dispatch from any branch other than `production` is refused by the workfl
 
 ### 4. Roll the release out
 
-Once the new version is live on PyPI, open **Settings → Watcher Release** in Data Hub (admins only) and set **Latest version** to the new release. Save; the `/update-check` endpoint will start advertising the new target immediately. Lab PCs running an auto-update-capable build will pick it up on their next hourly tick.
+Once the new version is live on PyPI, open **Settings → Watchers** in Data Hub (admins only) and set **Latest version** to the new release. Save; the `/update-check` endpoint will start advertising the new target immediately. Lab PCs running an auto-update-capable build will pick it up on their next hourly tick.
 
 The supported watcher release fields are:
 
@@ -118,7 +118,7 @@ If the rollout needs to be paged through (e.g. you want only `staging` lab PCs t
 
 ## Mandatory updates
 
-By default the activity-window guard means a watcher mid-acquisition won't auto-update — it'll wait for the next idle window. For releases that fix a security issue, a wire-protocol break, or any other case where running the known-bad version is worse than a brief outage, toggle **Mandatory update** on alongside the version bump on the **Watcher Release** settings page. Mandatory rollouts skip the activity-window guard and fire on the very next hourly check on every lab PC.
+By default the activity-window guard means a watcher mid-acquisition won't auto-update — it'll wait for the next idle window. For releases that fix a security issue, a wire-protocol break, or any other case where running the known-bad version is worse than a brief outage, toggle **Mandatory update** on alongside the version bump on the **Settings → Watchers** page. Mandatory rollouts skip the activity-window guard and fire on the very next hourly check on every lab PC.
 
 Use this sparingly. The activity-window guard exists for a reason — a forced upgrade in the middle of a multi-hour microscopy run will lose data. Reserve it for cases where leaving the bad version in place is strictly worse than restarting the watcher in flight.
 
@@ -128,7 +128,7 @@ Note also that mandatory rollouts are versioned, not absolute: the server compar
 
 Rollback is just another release. To revert the fleet from `0.3.0` to `0.2.5`:
 
-1. Open **Settings → Watcher Release** in Data Hub and set **Latest version** to `0.2.5` for the affected environment(s).
+1. Open **Settings → Watchers** in Data Hub and set **Latest version** to `0.2.5` for the affected environment(s).
 2. Toggle **Mandatory update** on if you need the rollback to bypass the activity-window guard (most rollback scenarios qualify — you're rolling back precisely because the running version is misbehaving).
 3. Wait for the next hourly tick on each PC. Lab PCs running an auto-update-capable build will downgrade themselves; PCs being upgraded manually need a `data-hub-watcher self-update` (or an `uv tool install data-hub-watcher==0.2.5` if `self-update` itself is what's broken).
 4. Once the fleet has converged, toggle **Mandatory update** back off.
@@ -149,7 +149,7 @@ The upgrade subprocess started but didn't end up running the new version on the 
 
 When `details.attempted_subprocess` is `false`, the auto-updater never ran the upgrade command — it refused before starting one. The `details.reason` field tells you why:
 
-- `**install method '<editable|unknown>' not eligible for auto-update**` — the watcher detected a development-style install (editable `uv sync`, or a distribution whose metadata couldn't be located) and refused so it wouldn't silently shadow the source tree with an index build. Resolve by switching the host to a PyPI install (`uv tool install data-hub-watcher`) or, on a developer machine, ignoring the event. To avoid spamming the events stream, the watcher emits this at most once per server target — saving a new **Latest version** on the **Watcher Release** settings page will trigger one fresh event per stuck PC.
+- `**install method '<editable|unknown>' not eligible for auto-update**` — the watcher detected a development-style install (editable `uv sync`, or a distribution whose metadata couldn't be located) and refused so it wouldn't silently shadow the source tree with an index build. Resolve by switching the host to a PyPI install (`uv tool install data-hub-watcher`) or, on a developer machine, ignoring the event. To avoid spamming the events stream, the watcher emits this at most once per server target — saving a new **Latest version** on the **Settings → Watchers** page will trigger one fresh event per stuck PC.
 
 ### Auto-update never fires
 
@@ -157,12 +157,12 @@ Check, in order:
 
 - The watcher is running as a service, not in a console window. Foreground `data-hub-watcher watch` does run the in-process updater, but on a developer-style install it'll typically be refused as editable.
 - The environment isn't `preview`. Auto-update is hard-disabled there.
-- The activity-window guard isn't holding things up. The instrument has to have been quiet for several heartbeats; on a busy plate reader you may simply never hit the idle window. Use the CLI path (`data-hub-watcher self-update`) for an immediate upgrade, or toggle **Mandatory update** on the **Watcher Release** settings page if the release warrants it.
+- The activity-window guard isn't holding things up. The instrument has to have been quiet for several heartbeats; on a busy plate reader you may simply never hit the idle window. Use the CLI path (`data-hub-watcher self-update`) for an immediate upgrade, or toggle **Mandatory update** on the **Settings → Watchers** page if the release warrants it.
 - The dashboard's **Last Heartbeat** is recent. If the watcher has gone stale, it's not ticking and won't auto-update.
 
 ### `data-hub-watcher self-update --check` says "(none configured)"
 
-The **Watcher Release** settings page has a blank **Latest version** for that environment. Either you're running against a `preview` build that has never had a release saved, or an admin cleared the field in Data Hub. The CLI returns successfully and treats this as "no update available" — the same response code path used by an up-to-date watcher — so this is benign, just informational.
+The **Settings → Watchers** page has a blank **Latest version** for that environment. Either you're running against a `preview` build that has never had a release saved, or an admin cleared the field in Data Hub. The CLI returns successfully and treats this as "no update available" — the same response code path used by an up-to-date watcher — so this is benign, just informational.
 
 ### "Refusing to self-update an editable / unknown install"
 

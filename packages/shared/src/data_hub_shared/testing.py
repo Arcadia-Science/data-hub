@@ -175,7 +175,7 @@ def seed_watcher_release(
     The ``update-check`` endpoint reads from this table; tests assert on
     the seeded values. Previously these were plumbed via ``WATCHER_*``
     env vars; the source of truth is now the DB, edited via the
-    admin-only ``/settings/watcher-release`` page in the web app.
+    admin-only ``/settings/watchers`` page in the web app.
     """
     conn = psycopg2.connect(dsn)
     conn.autocommit = True

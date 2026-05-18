@@ -768,7 +768,7 @@ class TestUpdaterOnTick:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # When the server advertises a new release (via the admin-only
-        # /settings/watcher-release page), we *do* want to re-notify —
+        # /settings/watchers page), we *do* want to re-notify —
         # the dashboard event for
         # the old target doesn't tell the admin this PC is missing the
         # new one. Throttling is per-target, not "fire at most once
