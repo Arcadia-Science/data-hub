@@ -21,14 +21,14 @@ from data_hub_lambda.epson_v700_scanner.colony_detection import (
 )
 
 
-def _uniform_plate(h: int = 600, w: int = 600, value: int = 120) -> np.ndarray:  # type: ignore[type-arg]
+def _uniform_plate(h: int = 1000, w: int = 1000, value: int = 120) -> np.ndarray:  # type: ignore[type-arg]
     """Create a uniform-colour plate image (no colonies)."""
     return np.full((h, w, 3), value, dtype=np.uint8)
 
 
 def _plate_with_colonies(
-    h: int = 600,
-    w: int = 600,
+    h: int = 1000,
+    w: int = 1000,
     bg: int = 120,
     colony_color: tuple[int, int, int] = (255, 255, 255),
     n_colonies: int = 3,
@@ -60,15 +60,15 @@ def _disk(cy: int, cx: int, radius: int, h: int, w: int) -> tuple[np.ndarray, np
 
 
 class TestCropMargin:
-    def test_default_removes_150px(self) -> None:
-        img = np.zeros((500, 600, 3), dtype=np.uint8)
+    def test_default_removes_margin(self) -> None:
+        img = np.zeros((1000, 1200, 3), dtype=np.uint8)
         cropped = crop_margin(img)
-        assert cropped.shape == (500 - 2 * MARGIN_PX, 600 - 2 * MARGIN_PX, 3)
+        assert cropped.shape == (1000 - 2 * MARGIN_PX, 1200 - 2 * MARGIN_PX, 3)
 
     def test_grayscale(self) -> None:
-        img = np.zeros((500, 500), dtype=np.uint8)
+        img = np.zeros((1000, 1000), dtype=np.uint8)
         cropped = crop_margin(img)
-        assert cropped.shape == (500 - 2 * MARGIN_PX, 500 - 2 * MARGIN_PX)
+        assert cropped.shape == (1000 - 2 * MARGIN_PX, 1000 - 2 * MARGIN_PX)
 
     def test_custom_margin(self) -> None:
         img = np.zeros((200, 200, 3), dtype=np.uint8)
@@ -260,9 +260,7 @@ class TestDetectColonies:
         assert not result.mask.any()
 
     def test_plate_with_colonies_detected(self) -> None:
-        plate = _plate_with_colonies(
-            h=600, w=600, colony_color=(255, 255, 255), n_colonies=8, colony_radius=30
-        )
+        plate = _plate_with_colonies(colony_color=(255, 255, 255), n_colonies=8, colony_radius=30)
         result = detect_colonies(plate, dpi=_TEST_DPI)
         assert result.has_colonies is True
         assert len(result.colonies) > 0
@@ -285,13 +283,13 @@ class TestDetectColonies:
             assert "mean_rgb" in c
 
     def test_cropped_smaller_than_input(self) -> None:
-        plate = _uniform_plate(600, 600)
+        plate = _uniform_plate(1000, 1000)
         result = detect_colonies(plate, dpi=_TEST_DPI)
-        assert result.cropped.shape[0] < 600
-        assert result.cropped.shape[1] < 600
+        assert result.cropped.shape[0] < 1000
+        assert result.cropped.shape[1] < 1000
 
     def test_grayscale_input(self) -> None:
-        plate = np.full((600, 600), 128, dtype=np.uint8)
+        plate = np.full((1000, 1000), 128, dtype=np.uint8)
         result = detect_colonies(plate, dpi=_TEST_DPI)
         assert isinstance(result, ColonyDetectionResult)
 
@@ -303,9 +301,7 @@ class TestDetectColonies:
 
 class TestToDataframe:
     def test_columns_present(self) -> None:
-        plate = _plate_with_colonies(
-            h=600, w=600, colony_color=(255, 255, 255), n_colonies=8, colony_radius=30
-        )
+        plate = _plate_with_colonies(colony_color=(255, 255, 255), n_colonies=8, colony_radius=30)
         result = detect_colonies(plate, dpi=_TEST_DPI)
         df = result.to_dataframe(plate_index=1)
         assert isinstance(df, pd.DataFrame)
@@ -328,9 +324,7 @@ class TestToDataframe:
         assert expected_cols == set(df.columns)
 
     def test_row_count_matches_colonies(self) -> None:
-        plate = _plate_with_colonies(
-            h=600, w=600, colony_color=(255, 255, 255), n_colonies=8, colony_radius=30
-        )
+        plate = _plate_with_colonies(colony_color=(255, 255, 255), n_colonies=8, colony_radius=30)
         result = detect_colonies(plate, dpi=_TEST_DPI)
         df = result.to_dataframe()
         assert len(df) == len(result.colonies)
@@ -343,9 +337,7 @@ class TestToDataframe:
         assert "plate_index" in df.columns
 
     def test_plate_index_propagated(self) -> None:
-        plate = _plate_with_colonies(
-            h=600, w=600, colony_color=(255, 255, 255), n_colonies=8, colony_radius=30
-        )
+        plate = _plate_with_colonies(colony_color=(255, 255, 255), n_colonies=8, colony_radius=30)
         result = detect_colonies(plate, dpi=_TEST_DPI)
         df = result.to_dataframe(plate_index=3)
         assert (df["plate_index"] == 3).all()
@@ -358,9 +350,7 @@ class TestToDataframe:
 
 class TestExportColonyCsv:
     def test_writes_csv(self, tmp_path: Path) -> None:
-        plate = _plate_with_colonies(
-            h=600, w=600, colony_color=(255, 255, 255), n_colonies=8, colony_radius=30
-        )
+        plate = _plate_with_colonies(colony_color=(255, 255, 255), n_colonies=8, colony_radius=30)
         result = detect_colonies(plate, dpi=_TEST_DPI)
         frames = [result.to_dataframe(plate_index=1)]
         csv_path = export_colony_csv(frames, tmp_path / "colonies.csv")

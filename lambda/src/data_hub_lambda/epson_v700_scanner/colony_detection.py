@@ -25,7 +25,7 @@ from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
 
-MARGIN_PX = 200
+MARGIN_PX = 250
 """Fixed pixel margin cropped from each edge before colony detection."""
 
 _DOG_LOW_SIGMA = 1.0
@@ -251,6 +251,7 @@ def measure_colonies(
     mm_per_px = 25.4 / dpi
 
     labels = ski.measure.label(mask)
+    labels = ski.segmentation.clear_border(labels)
     regions = ski.measure.regionprops(labels, intensity_image=rgb_image)
 
     colonies: list[ColonyProperties] = []
