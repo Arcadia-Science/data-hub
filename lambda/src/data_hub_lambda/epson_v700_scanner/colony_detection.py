@@ -40,6 +40,9 @@ _PERCENTILE_FLOOR = 10.0
 _CONTRAST_PRESENCE_THRESHOLD = 20.0
 """Minimum 99.5th-percentile contrast value to declare colonies present."""
 
+_MIN_COLONY_AREA_MM2 = 0.05
+"""Colonies smaller than this (in mm²) are discarded as noise."""
+
 
 @dataclass
 class ColonyProperties:
@@ -253,7 +256,9 @@ def measure_colonies(
         border-touching regions removed.
     """
     mm_per_px = 25.4 / dpi
+    min_area_px = int(np.ceil(_MIN_COLONY_AREA_MM2 / mm_per_px**2))
 
+    mask = ski.morphology.remove_small_objects(mask, min_size=min_area_px)
     labels = ski.measure.label(mask)
     labels = ski.segmentation.clear_border(labels)
     cleaned_mask: NDArray[np.bool_] = labels > 0
