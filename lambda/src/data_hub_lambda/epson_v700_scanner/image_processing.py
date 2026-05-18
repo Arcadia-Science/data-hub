@@ -9,6 +9,8 @@ import skimage as ski
 import tifffile
 from numpy.typing import NDArray
 
+from data_hub_lambda.epson_v700_scanner.colony_detection import MARGIN_PX
+
 logger = logging.getLogger(__name__)
 
 JPEG_QUALITY = 85
@@ -33,8 +35,9 @@ _CLOSING_RADIUS = 5
 _OVERLAY_COLOR: tuple[int, int, int] = (0, 255, 0)
 _OVERLAY_THICKNESS = 8
 
-_COLONY_CONTOUR_COLOR: tuple[int, int, int] = (255, 0, 255)
-_COLONY_CONTOUR_THICKNESS = 2
+_COLONY_BBOX_COLOR: tuple[int, int, int] = (255, 255, 255)
+_COLONY_BBOX_THICKNESS = 3
+_COLONY_LABEL_FONT_SIZE = 28
 
 # PhotometricInterpretation values: 2 = RGB, others (0, 1, 3) are grayscale or
 # palette and are treated as B&W for our display purposes.
@@ -128,8 +131,8 @@ class TiffProcessor:
 
         Args:
             colony_masks: Optional per-plate binary masks (one per entry in
-                ``plate_boxes``).  When provided, colony contour outlines
-                are drawn on the export image.
+                ``plate_boxes``).  When provided, colony bounding boxes
+                and labels are drawn on the export image.
         """
         img = self._to_rgb_uint8(self.intensities)
         if self.plate_boxes is None:
@@ -138,7 +141,7 @@ class TiffProcessor:
         if self.plate_boxes:
             img = self._draw_plate_overlays(img, self.plate_boxes)
             if colony_masks:
-                img = self._draw_colony_contours(img, self.plate_boxes, colony_masks)
+                img = self._draw_colony_bboxes(img, self.plate_boxes, colony_masks)
 
         img = self._resize(img)
 
@@ -286,40 +289,76 @@ class TiffProcessor:
         return out
 
     @staticmethod
-    def _draw_colony_contours(
+    def _draw_colony_bboxes(
         img: NDArray[np.uint8],
         boxes: list[_PlateBox],
         colony_masks: list[NDArray[np.bool_]],
-        margin_px: int | None = None,
+        margin_px: int = MARGIN_PX,
     ) -> NDArray[np.uint8]:
-        """Draw colony contour outlines onto *img* for each plate.
+        """Draw colony bounding boxes and labels onto *img* for each plate.
 
         Each mask lives in the margin-cropped coordinate space of its
-        plate crop, so contours are offset by the plate box origin plus
-        the crop margin.
+        plate crop.  Bounding boxes are offset by the plate box origin
+        plus the crop margin to map into full-image coordinates.
+
+        Uses matplotlib for anti-aliased rectangle and text rendering.
         """
-        if margin_px is None:
-            from data_hub_lambda.epson_v700_scanner.colony_detection import MARGIN_PX
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from matplotlib.figure import Figure
+        from matplotlib.patches import Rectangle
 
-            margin_px = MARGIN_PX
+        img_h, img_w = img.shape[:2]
+        dpi = 100
+        fig = Figure(figsize=(img_w / dpi, img_h / dpi), dpi=dpi)
+        canvas = FigureCanvasAgg(fig)
+        ax = fig.add_subplot(1, 1, 1)
+        ax.imshow(img)
+        ax.set_axis_off()
+        ax.set_xlim(0, img_w)
+        ax.set_ylim(img_h, 0)
 
-        out = img.copy()
-        h, w = out.shape[:2]
-        t = _COLONY_CONTOUR_THICKNESS
+        bbox_color = tuple(c / 255.0 for c in _COLONY_BBOX_COLOR)
+
         for box, mask in zip(boxes, colony_masks, strict=True):
-            min_row, min_col, _max_row, _max_col = box
-            row_offset = min_row + margin_px
-            col_offset = min_col + margin_px
+            plate_min_row, plate_min_col, _max_row, _max_col = box
+            row_offset = plate_min_row + margin_px
+            col_offset = plate_min_col + margin_px
 
-            contours = ski.measure.find_contours(mask.astype(float), level=0.5)
-            for contour in contours:
-                for r_f, c_f in contour:
-                    r = int(round(r_f)) + row_offset
-                    c = int(round(c_f)) + col_offset
-                    r0, r1 = max(r - t, 0), min(r + t + 1, h)
-                    c0, c1 = max(c - t, 0), min(c + t + 1, w)
-                    out[r0:r1, c0:c1] = _COLONY_CONTOUR_COLOR
-        return out
+            labels = ski.measure.label(mask)
+            regions = ski.measure.regionprops(labels)
+
+            for region in regions:
+                min_r, min_c, max_r, max_c = region.bbox
+                r0 = min_r + row_offset
+                c0 = min_c + col_offset
+                r1 = max_r + row_offset
+                c1 = max_c + col_offset
+
+                rect = Rectangle(
+                    (c0, r0),
+                    c1 - c0,
+                    r1 - r0,
+                    linewidth=_COLONY_BBOX_THICKNESS,
+                    edgecolor=bbox_color,
+                    facecolor="none",
+                )
+                ax.add_patch(rect)
+                ax.text(
+                    (c0 + c1) / 2,
+                    r0 - 4,
+                    str(region.label),
+                    color=bbox_color,
+                    fontsize=_COLONY_LABEL_FONT_SIZE,
+                    fontweight="bold",
+                    horizontalalignment="center",
+                    verticalalignment="bottom",
+                    clip_on=True,
+                )
+
+        fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
+        canvas.draw()
+        buf: NDArray[np.uint8] = np.asarray(canvas.buffer_rgba())[:, :, :3].copy()
+        return buf
 
     def crop_plates(self) -> list[NDArray[np.uint8]]:
         """Return RGB uint8 crops for each detected plate.
