@@ -162,6 +162,40 @@ def seed_auth(dsn: str) -> str:
     return token_plaintext
 
 
+def seed_watcher_release(
+    dsn: str,
+    *,
+    latest_version: str = "9.9.9",
+    min_supported_version: str = "0.1.0",
+    channel: str = "stable",
+    mandatory: bool = False,
+) -> None:
+    """Upsert the singleton ``watcher_release_config`` row.
+
+    The ``update-check`` endpoint reads from this table; tests assert on
+    the seeded values. Previously these were plumbed via ``WATCHER_*``
+    env vars; the source of truth is now the DB, edited via the
+    admin-only ``/settings/watchers`` page in the web app.
+    """
+    conn = psycopg2.connect(dsn)
+    conn.autocommit = True
+    with conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO watcher_release_config
+                   (id, latest_version, min_supported_version, channel, mandatory)
+               VALUES
+                   (true, %s, %s, %s, %s)
+               ON CONFLICT (id) DO UPDATE SET
+                   latest_version = EXCLUDED.latest_version,
+                   min_supported_version = EXCLUDED.min_supported_version,
+                   channel = EXCLUDED.channel,
+                   mandatory = EXCLUDED.mandatory,
+                   updated_at = now()""",
+            (latest_version, min_supported_version, channel, mandatory),
+        )
+    conn.close()
+
+
 def seed_instruments(dsn: str, instruments: dict[str, str]) -> None:
     """Insert instrument rows (ON CONFLICT DO NOTHING)."""
     conn = psycopg2.connect(dsn)
@@ -236,6 +270,12 @@ def start_test_server() -> Generator[IntegrationEnv, None, None]:
         capture_output=True,
     )
 
+    # 2a. Seed the singleton watcher_release_config row so the
+    #     update-check endpoint returns deterministic values during
+    #     integration tests. Previously this came from WATCHER_* env
+    #     vars; the source of truth is now the DB.
+    seed_watcher_release(_PG_TEST_DSN)
+
     # 3. Build and start the Next.js production server.
     port = get_free_port()
     base_url = f"http://127.0.0.1:{port}"
@@ -250,12 +290,8 @@ def start_test_server() -> Generator[IntegrationEnv, None, None]:
         "AWS_SECRET_ACCESS_KEY": os.environ.get("AWS_SECRET_ACCESS_KEY", "test-secret"),
         "AWS_REGION": os.environ.get("AWS_REGION", "us-east-1"),
         "S3_RAW_DATA_BUCKET": os.environ.get("S3_RAW_DATA_BUCKET", "data-hub-test-raw"),
-        # Stable defaults for the watcher update-check endpoint so Python
-        # integration tests can assert on a known target version.
-        "WATCHER_LATEST_VERSION": os.environ.get("WATCHER_LATEST_VERSION", "9.9.9"),
-        "WATCHER_MIN_SUPPORTED_VERSION": os.environ.get("WATCHER_MIN_SUPPORTED_VERSION", "0.1.0"),
-        "WATCHER_RELEASE_CHANNEL": os.environ.get("WATCHER_RELEASE_CHANNEL", "stable"),
-        "WATCHER_MANDATORY_UPDATE": os.environ.get("WATCHER_MANDATORY_UPDATE", "false"),
+        # Watcher release defaults are seeded into watcher_release_config
+        # above (see seed_watcher_release); the env-var fallback is gone.
     }
 
     build_result = subprocess.run(

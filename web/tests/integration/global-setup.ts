@@ -116,6 +116,30 @@ export async function setup() {
     stdio: "pipe",
   });
 
+  // 2a. Seed the singleton `watcher_release_config` row with stable
+  //     defaults so the `update-check` endpoint returns deterministic
+  //     values during integration tests. Individual tests assert against
+  //     these exact strings (see `watchers.test.ts`). Previously this was
+  //     done via WATCHER_* env vars; the source of truth is now the DB,
+  //     edited via the admin-only /settings/watchers page.
+  const seedSql = postgres(databaseUrl);
+  try {
+    await seedSql`
+      INSERT INTO watcher_release_config
+        (id, latest_version, min_supported_version, channel, mandatory)
+      VALUES
+        (true, '9.9.9', '0.1.0', 'stable', false)
+      ON CONFLICT (id) DO UPDATE SET
+        latest_version = excluded.latest_version,
+        min_supported_version = excluded.min_supported_version,
+        channel = excluded.channel,
+        mandatory = excluded.mandatory,
+        updated_at = now()
+    `;
+  } finally {
+    await seedSql.end();
+  }
+
   // 3. Build and start the Next.js production server. We use a production
   //    build (`next build` + `next start`) rather than `next dev` because:
   //    - dev mode re-compiles on every request, making tests 5-10x slower
@@ -141,14 +165,8 @@ export async function setup() {
     AWS_REGION: process.env.AWS_REGION ?? "us-east-1",
     S3_RAW_DATA_BUCKET:
       process.env.S3_RAW_DATA_BUCKET ?? "test-raw-data-bucket",
-    // Stable watcher release-info defaults so the `update-check` endpoint
-    // returns deterministic values during integration tests. Individual
-    // tests assert against these exact strings.
-    WATCHER_LATEST_VERSION: process.env.WATCHER_LATEST_VERSION ?? "9.9.9",
-    WATCHER_MIN_SUPPORTED_VERSION:
-      process.env.WATCHER_MIN_SUPPORTED_VERSION ?? "0.1.0",
-    WATCHER_RELEASE_CHANNEL: process.env.WATCHER_RELEASE_CHANNEL ?? "stable",
-    WATCHER_MANDATORY_UPDATE: process.env.WATCHER_MANDATORY_UPDATE ?? "false",
+    // Watcher release-info defaults are seeded into the
+    // `watcher_release_config` table above; the env-var fallback is gone.
     // Point Slack webhook calls at the in-process capture server defined
     // above so tests can assert on the messages without hitting Slack.
     SLACK_WEBHOOK_URL: `${slackCaptureBaseUrl}/webhook`,

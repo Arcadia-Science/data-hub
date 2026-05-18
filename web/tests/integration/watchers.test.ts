@@ -388,9 +388,9 @@ describe("Watchers API", () => {
   // -------------------------------------------------------------------------
 
   // Update-check is the foundation for the auto-update flow. The exact
-  // response values come from `WATCHER_*` env vars seeded in
-  // `tests/integration/global-setup.ts` so the assertions stay stable as
-  // the real release line moves on.
+  // response values come from the `watcher_release_config` singleton row
+  // seeded in `tests/integration/global-setup.ts` so the assertions stay
+  // stable as the real release line moves on.
   it("GET /api/v1/watchers/:id/update-check returns server-reported release info", async () => {
     const res = await api(`/api/v1/watchers/${watcherId}/update-check`, {
       token,

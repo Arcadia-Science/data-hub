@@ -169,6 +169,13 @@
       "when": 1778882678139,
       "tag": "0023_add_user_is_admin",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1778958471151,
+      "tag": "0024_add_watcher_release_config",
+      "breakpoints": true
     }
   ]
 }

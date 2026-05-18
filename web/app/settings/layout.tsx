@@ -34,10 +34,12 @@ export default async function SettingsLayout({
     );
   }
 
+  // No layout-level "Settings" title: the SettingsNav sidebar already
+  // labels this section, so rendering an H1 here was duplicative chrome
+  // on every settings page. Pages render their own H2 instead.
   return (
     <div className="mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 lg:px-8 2xl:w-7xl">
-      <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-      <div className="mt-6">{children}</div>
+      {children}
     </div>
   );
 }

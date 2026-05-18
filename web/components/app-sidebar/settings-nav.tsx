@@ -22,6 +22,7 @@ type SettingsSection = {
 
 const SETTINGS_SECTIONS: SettingsSection[] = [
   { href: "/settings/tokens", label: "Access Tokens" },
+  { href: "/settings/watchers", label: "Watchers", adminOnly: true },
   { href: "/settings/members", label: "Members", adminOnly: true },
 ];
 
