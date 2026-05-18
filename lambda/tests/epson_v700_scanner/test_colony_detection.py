@@ -183,35 +183,65 @@ class TestThresholdColonies:
 # ------------------------------------------------------------------
 
 
+_TEST_DPI = 1200
+
+
 class TestMeasureColonies:
     def test_empty_mask_returns_empty(self) -> None:
         mask = np.zeros((100, 100), dtype=bool)
-        assert measure_colonies(mask) == []
+        rgb = np.zeros((100, 100, 3), dtype=np.uint8)
+        assert measure_colonies(mask, rgb, dpi=_TEST_DPI) == []
 
     def test_single_blob(self) -> None:
         mask = np.zeros((100, 100), dtype=bool)
         mask[40:60, 40:60] = True
-        colonies = measure_colonies(mask)
+        rgb = np.full((100, 100, 3), 128, dtype=np.uint8)
+        colonies = measure_colonies(mask, rgb, dpi=_TEST_DPI)
         assert len(colonies) == 1
-        assert colonies[0].area_px == 20 * 20
+        mm_per_px = 25.4 / _TEST_DPI
+        expected_area_mm2 = 20 * 20 * mm_per_px**2
+        assert abs(colonies[0].area_mm2 - expected_area_mm2) < 1e-6
 
     def test_two_blobs_sorted_by_area(self) -> None:
         mask = np.zeros((200, 200), dtype=bool)
         mask[10:20, 10:20] = True  # 100 px
         mask[50:80, 50:80] = True  # 900 px
-        colonies = measure_colonies(mask)
+        rgb = np.full((200, 200, 3), 128, dtype=np.uint8)
+        colonies = measure_colonies(mask, rgb, dpi=_TEST_DPI)
         assert len(colonies) == 2
-        assert colonies[0].area_px > colonies[1].area_px
+        assert colonies[0].area_mm2 > colonies[1].area_mm2
 
     def test_colony_properties_populated(self) -> None:
         mask = np.zeros((100, 100), dtype=bool)
         mask[40:60, 40:60] = True
-        colony = measure_colonies(mask)[0]
+        rgb = np.full((100, 100, 3), 128, dtype=np.uint8)
+        colony = measure_colonies(mask, rgb, dpi=_TEST_DPI)[0]
         assert isinstance(colony, ColonyProperties)
         assert colony.label >= 1
         assert colony.eccentricity >= 0.0
-        assert colony.equivalent_diameter > 0.0
-        assert len(colony.bbox) == 4
+        assert colony.equivalent_diameter_mm > 0.0
+        assert len(colony.bbox_mm) == 4
+
+    def test_centroid_includes_margin_offset(self) -> None:
+        mask = np.zeros((100, 100), dtype=bool)
+        mask[40:60, 40:60] = True
+        rgb = np.full((100, 100, 3), 128, dtype=np.uint8)
+        mm_per_px = 25.4 / _TEST_DPI
+        colony = measure_colonies(mask, rgb, dpi=_TEST_DPI, margin_px=MARGIN_PX)[0]
+        expected_row_mm = (50.0 + MARGIN_PX) * mm_per_px
+        expected_col_mm = (50.0 + MARGIN_PX) * mm_per_px
+        assert abs(colony.centroid_row_mm - expected_row_mm) < 0.1
+        assert abs(colony.centroid_col_mm - expected_col_mm) < 0.1
+
+    def test_mean_rgb_populated(self) -> None:
+        mask = np.zeros((100, 100), dtype=bool)
+        mask[40:60, 40:60] = True
+        rgb = np.zeros((100, 100, 3), dtype=np.uint8)
+        rgb[40:60, 40:60] = [200, 100, 50]
+        colony = measure_colonies(mask, rgb, dpi=_TEST_DPI)[0]
+        assert abs(colony.mean_rgb[0] - 200.0) < 1.0
+        assert abs(colony.mean_rgb[1] - 100.0) < 1.0
+        assert abs(colony.mean_rgb[2] - 50.0) < 1.0
 
 
 # ------------------------------------------------------------------
@@ -222,7 +252,7 @@ class TestMeasureColonies:
 class TestDetectColonies:
     def test_uniform_plate_no_colonies(self) -> None:
         plate = _uniform_plate()
-        result = detect_colonies(plate)
+        result = detect_colonies(plate, dpi=_TEST_DPI)
         assert isinstance(result, ColonyDetectionResult)
         assert result.has_colonies is False
         assert result.colonies == []
@@ -233,13 +263,13 @@ class TestDetectColonies:
         plate = _plate_with_colonies(
             h=600, w=600, colony_color=(255, 255, 255), n_colonies=8, colony_radius=30
         )
-        result = detect_colonies(plate)
+        result = detect_colonies(plate, dpi=_TEST_DPI)
         assert result.has_colonies is True
         assert len(result.colonies) > 0
 
     def test_summary_schema(self) -> None:
         plate = _plate_with_colonies(n_colonies=2)
-        result = detect_colonies(plate)
+        result = detect_colonies(plate, dpi=_TEST_DPI)
         summary = result.summary()
         assert "has_colonies" in summary
         assert "colony_count" in summary
@@ -247,21 +277,22 @@ class TestDetectColonies:
         if summary["colonies"]:
             c = summary["colonies"][0]
             assert "label" in c
-            assert "area_px" in c
-            assert "centroid" in c
-            assert "bbox" in c
+            assert "area_mm2" in c
+            assert "centroid_mm" in c
+            assert "bbox_mm" in c
             assert "eccentricity" in c
-            assert "equivalent_diameter" in c
+            assert "equivalent_diameter_mm" in c
+            assert "mean_rgb" in c
 
     def test_cropped_smaller_than_input(self) -> None:
         plate = _uniform_plate(600, 600)
-        result = detect_colonies(plate)
+        result = detect_colonies(plate, dpi=_TEST_DPI)
         assert result.cropped.shape[0] < 600
         assert result.cropped.shape[1] < 600
 
     def test_grayscale_input(self) -> None:
         plate = np.full((600, 600), 128, dtype=np.uint8)
-        result = detect_colonies(plate)
+        result = detect_colonies(plate, dpi=_TEST_DPI)
         assert isinstance(result, ColonyDetectionResult)
 
 
@@ -275,21 +306,24 @@ class TestToDataframe:
         plate = _plate_with_colonies(
             h=600, w=600, colony_color=(255, 255, 255), n_colonies=8, colony_radius=30
         )
-        result = detect_colonies(plate)
+        result = detect_colonies(plate, dpi=_TEST_DPI)
         df = result.to_dataframe(plate_index=1)
         assert isinstance(df, pd.DataFrame)
         expected_cols = {
             "plate_index",
             "label",
-            "area_px",
-            "centroid_row",
-            "centroid_col",
-            "bbox_min_row",
-            "bbox_min_col",
-            "bbox_max_row",
-            "bbox_max_col",
+            "area_mm2",
+            "centroid_row_mm",
+            "centroid_col_mm",
+            "bbox_min_row_mm",
+            "bbox_min_col_mm",
+            "bbox_max_row_mm",
+            "bbox_max_col_mm",
             "eccentricity",
-            "equivalent_diameter",
+            "equivalent_diameter_mm",
+            "mean_r",
+            "mean_g",
+            "mean_b",
         }
         assert expected_cols == set(df.columns)
 
@@ -297,13 +331,13 @@ class TestToDataframe:
         plate = _plate_with_colonies(
             h=600, w=600, colony_color=(255, 255, 255), n_colonies=8, colony_radius=30
         )
-        result = detect_colonies(plate)
+        result = detect_colonies(plate, dpi=_TEST_DPI)
         df = result.to_dataframe()
         assert len(df) == len(result.colonies)
 
     def test_empty_result_gives_empty_df(self) -> None:
         plate = _uniform_plate()
-        result = detect_colonies(plate)
+        result = detect_colonies(plate, dpi=_TEST_DPI)
         df = result.to_dataframe()
         assert len(df) == 0
         assert "plate_index" in df.columns
@@ -312,7 +346,7 @@ class TestToDataframe:
         plate = _plate_with_colonies(
             h=600, w=600, colony_color=(255, 255, 255), n_colonies=8, colony_radius=30
         )
-        result = detect_colonies(plate)
+        result = detect_colonies(plate, dpi=_TEST_DPI)
         df = result.to_dataframe(plate_index=3)
         assert (df["plate_index"] == 3).all()
 
@@ -327,7 +361,7 @@ class TestExportColonyCsv:
         plate = _plate_with_colonies(
             h=600, w=600, colony_color=(255, 255, 255), n_colonies=8, colony_radius=30
         )
-        result = detect_colonies(plate)
+        result = detect_colonies(plate, dpi=_TEST_DPI)
         frames = [result.to_dataframe(plate_index=1)]
         csv_path = export_colony_csv(frames, tmp_path / "colonies.csv")
         assert csv_path.exists()
@@ -335,8 +369,8 @@ class TestExportColonyCsv:
         assert len(loaded) == len(result.colonies)
 
     def test_concatenates_multiple_plates(self, tmp_path: Path) -> None:
-        df1 = pd.DataFrame({"plate_index": [1], "label": [1], "area_px": [100]})
-        df2 = pd.DataFrame({"plate_index": [2], "label": [1], "area_px": [200]})
+        df1 = pd.DataFrame({"plate_index": [1], "label": [1], "area_mm2": [0.5]})
+        df2 = pd.DataFrame({"plate_index": [2], "label": [1], "area_mm2": [1.0]})
         csv_path = export_colony_csv([df1, df2], tmp_path / "multi.csv")
         loaded = pd.read_csv(csv_path)
         assert len(loaded) == 2

@@ -43,15 +43,34 @@ _CONTRAST_PRESENCE_THRESHOLD = 20.0
 
 @dataclass
 class ColonyProperties:
-    """Measured properties for a single colony."""
+    """Measured properties for a single colony (physical units, plate-relative)."""
 
     label: int
-    area_px: int
-    centroid_row: float
-    centroid_col: float
-    bbox: tuple[int, int, int, int]
+    area_mm2: float
+    centroid_row_mm: float
+    centroid_col_mm: float
+    bbox_mm: tuple[float, float, float, float]
     eccentricity: float
-    equivalent_diameter: float
+    equivalent_diameter_mm: float
+    mean_rgb: tuple[float, float, float]
+
+
+_DATAFRAME_COLUMNS = [
+    "plate_index",
+    "label",
+    "area_mm2",
+    "centroid_row_mm",
+    "centroid_col_mm",
+    "bbox_min_row_mm",
+    "bbox_min_col_mm",
+    "bbox_max_row_mm",
+    "bbox_max_col_mm",
+    "eccentricity",
+    "equivalent_diameter_mm",
+    "mean_r",
+    "mean_g",
+    "mean_b",
+]
 
 
 @dataclass
@@ -72,11 +91,15 @@ class ColonyDetectionResult:
             "colonies": [
                 {
                     "label": c.label,
-                    "area_px": c.area_px,
-                    "centroid": [round(c.centroid_row, 1), round(c.centroid_col, 1)],
-                    "bbox": list(c.bbox),
+                    "area_mm2": round(c.area_mm2, 4),
+                    "centroid_mm": [
+                        round(c.centroid_row_mm, 3),
+                        round(c.centroid_col_mm, 3),
+                    ],
+                    "bbox_mm": [round(v, 3) for v in c.bbox_mm],
                     "eccentricity": round(c.eccentricity, 4),
-                    "equivalent_diameter": round(c.equivalent_diameter, 2),
+                    "equivalent_diameter_mm": round(c.equivalent_diameter_mm, 4),
+                    "mean_rgb": [round(v, 1) for v in c.mean_rgb],
                 }
                 for c in self.colonies
             ],
@@ -85,36 +108,25 @@ class ColonyDetectionResult:
     def to_dataframe(self, plate_index: int = 0) -> pd.DataFrame:
         """Return a :class:`~pandas.DataFrame` with one row per colony."""
         if not self.colonies:
-            return pd.DataFrame(
-                columns=[
-                    "plate_index",
-                    "label",
-                    "area_px",
-                    "centroid_row",
-                    "centroid_col",
-                    "bbox_min_row",
-                    "bbox_min_col",
-                    "bbox_max_row",
-                    "bbox_max_col",
-                    "eccentricity",
-                    "equivalent_diameter",
-                ]
-            )
+            return pd.DataFrame(columns=_DATAFRAME_COLUMNS)
         rows = []
         for c in self.colonies:
             rows.append(
                 {
                     "plate_index": plate_index,
                     "label": c.label,
-                    "area_px": c.area_px,
-                    "centroid_row": round(c.centroid_row, 1),
-                    "centroid_col": round(c.centroid_col, 1),
-                    "bbox_min_row": c.bbox[0],
-                    "bbox_min_col": c.bbox[1],
-                    "bbox_max_row": c.bbox[2],
-                    "bbox_max_col": c.bbox[3],
+                    "area_mm2": round(c.area_mm2, 4),
+                    "centroid_row_mm": round(c.centroid_row_mm, 3),
+                    "centroid_col_mm": round(c.centroid_col_mm, 3),
+                    "bbox_min_row_mm": round(c.bbox_mm[0], 3),
+                    "bbox_min_col_mm": round(c.bbox_mm[1], 3),
+                    "bbox_max_row_mm": round(c.bbox_mm[2], 3),
+                    "bbox_max_col_mm": round(c.bbox_mm[3], 3),
                     "eccentricity": round(c.eccentricity, 4),
-                    "equivalent_diameter": round(c.equivalent_diameter, 2),
+                    "equivalent_diameter_mm": round(c.equivalent_diameter_mm, 4),
+                    "mean_r": round(c.mean_rgb[0], 1),
+                    "mean_g": round(c.mean_rgb[1], 1),
+                    "mean_b": round(c.mean_rgb[2], 1),
                 }
             )
         return pd.DataFrame(rows)
@@ -216,26 +228,61 @@ def threshold_colonies(smoothed: NDArray[np.floating[Any]]) -> NDArray[np.bool_]
     return mask
 
 
-def measure_colonies(mask: NDArray[np.bool_]) -> list[ColonyProperties]:
-    """Label connected components and extract per-colony measurements."""
+def measure_colonies(
+    mask: NDArray[np.bool_],
+    rgb_image: NDArray[np.uint8],
+    dpi: int,
+    margin_px: int = MARGIN_PX,
+) -> list[ColonyProperties]:
+    """Label connected components and extract per-colony measurements.
+
+    All spatial measurements are returned in millimetres.  Centroids and
+    bounding boxes are expressed relative to the plate crop origin (i.e.
+    the margin offset is added back before conversion).
+
+    Args:
+        mask: Binary colony mask (margin-cropped coordinate space).
+        rgb_image: RGB uint8 image with the same shape as *mask*
+            (margin-cropped).  Used as ``intensity_image`` so that
+            ``regionprops`` can compute per-colony mean colour.
+        dpi: Image resolution in dots-per-inch.
+        margin_px: Pixel margin that was removed from the plate crop.
+    """
+    mm_per_px = 25.4 / dpi
+
     labels = ski.measure.label(mask)
-    regions = ski.measure.regionprops(labels)
+    regions = ski.measure.regionprops(labels, intensity_image=rgb_image)
 
     colonies: list[ColonyProperties] = []
     for region in regions:
+        row_px = float(region.centroid[0]) + margin_px
+        col_px = float(region.centroid[1]) + margin_px
+
+        min_r, min_c, max_r, max_c = region.bbox
+        bbox_mm = (
+            (min_r + margin_px) * mm_per_px,
+            (min_c + margin_px) * mm_per_px,
+            (max_r + margin_px) * mm_per_px,
+            (max_c + margin_px) * mm_per_px,
+        )
+
+        rgb_mean = region.intensity_mean
+        mean_rgb = (float(rgb_mean[0]), float(rgb_mean[1]), float(rgb_mean[2]))
+
         colonies.append(
             ColonyProperties(
                 label=int(region.label),
-                area_px=int(region.area),
-                centroid_row=float(region.centroid[0]),
-                centroid_col=float(region.centroid[1]),
-                bbox=tuple(region.bbox),  # type: ignore[arg-type]
+                area_mm2=float(region.area) * mm_per_px**2,
+                centroid_row_mm=row_px * mm_per_px,
+                centroid_col_mm=col_px * mm_per_px,
+                bbox_mm=bbox_mm,
                 eccentricity=float(region.eccentricity),
-                equivalent_diameter=float(region.equivalent_diameter_area),
+                equivalent_diameter_mm=float(region.equivalent_diameter_area) * mm_per_px,
+                mean_rgb=mean_rgb,
             )
         )
 
-    colonies.sort(key=lambda c: c.area_px, reverse=True)
+    colonies.sort(key=lambda c: c.area_mm2, reverse=True)
     return colonies
 
 
@@ -252,21 +299,7 @@ def export_colony_csv(
     if frames:
         combined = pd.concat(frames, ignore_index=True)
     else:
-        combined = pd.DataFrame(
-            columns=[
-                "plate_index",
-                "label",
-                "area_px",
-                "centroid_row",
-                "centroid_col",
-                "bbox_min_row",
-                "bbox_min_col",
-                "bbox_max_row",
-                "bbox_max_col",
-                "eccentricity",
-                "equivalent_diameter",
-            ]
-        )
+        combined = pd.DataFrame(columns=_DATAFRAME_COLUMNS)
     combined.to_csv(path, index=False)
     logger.debug("Wrote colony CSV: %s", path)
     return path
@@ -277,12 +310,14 @@ def export_colony_csv(
 # ------------------------------------------------------------------
 
 
-def detect_colonies(plate_image: NDArray[Any]) -> ColonyDetectionResult:
+def detect_colonies(plate_image: NDArray[Any], dpi: int) -> ColonyDetectionResult:
     """Run the full colony-detection pipeline on a single plate crop.
 
     Args:
         plate_image: RGB uint8 plate image produced by
             :class:`~data_hub_lambda.epson_v700_scanner.image_processing.TiffProcessor`.
+        dpi: Image resolution in dots-per-inch, used to convert pixel
+            measurements to millimetres.
 
     Returns:
         A :class:`ColonyDetectionResult` with all intermediate arrays
@@ -303,7 +338,7 @@ def detect_colonies(plate_image: NDArray[Any]) -> ColonyDetectionResult:
 
     smoothed = smooth(contrast)
     mask = threshold_colonies(smoothed)
-    colonies = measure_colonies(mask)
+    colonies = measure_colonies(mask, rgb_image=cropped, dpi=dpi)
 
     logger.info("Detected %d colony/ies.", len(colonies))
     return ColonyDetectionResult(

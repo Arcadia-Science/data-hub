@@ -89,7 +89,19 @@ class TiffProcessor:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._intensities: NDArray[Any] | None = None
+        self._dpi: int | None = None
         self.plate_boxes: list[_PlateBox] | None = None
+
+    @property
+    def dpi(self) -> int:
+        """Integer DPI derived from the TIFF ``XResolution`` tag."""
+        if self._dpi is None:
+            with tifffile.TiffFile(self.path) as tif:
+                x_res_tag = tif.pages.first.tags.get("XResolution")
+                self._dpi = _derive_dpi(x_res_tag.value if x_res_tag else None)
+            if self._dpi is None:
+                raise ValueError(f"Cannot determine DPI for {self.path}")
+        return self._dpi
 
     def load(self) -> None:
         if not self.path.exists():

@@ -135,10 +135,11 @@ def epson_scanner(file: Path, output_dir: Path | None, detect_colonies: bool) ->
         if not plate_crops:
             click.echo("No plates detected — skipping colony detection.")
         else:
+            dpi = processor.dpi
             colony_masks = []
             dataframes = []
             for i, crop in enumerate(plate_crops):
-                result = run_colony_detection(crop)
+                result = run_colony_detection(crop, dpi=dpi)
                 colony_masks.append(result.mask)
                 click.echo(f"\nPlate {i + 1}:")
                 click.echo(json.dumps(result.summary(), indent=2))

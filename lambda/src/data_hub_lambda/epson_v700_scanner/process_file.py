@@ -61,11 +61,12 @@ def process_file(run_id: str, filename: str) -> None:
                 detect_colonies,
             )
 
+            dpi = processor.dpi
             colony_summaries = []
             colony_masks = []
             dataframes = []
             for i, crop in enumerate(plate_crops):
-                result = detect_colonies(crop)
+                result = detect_colonies(crop, dpi=dpi)
                 colony_summaries.append(result.summary())
                 colony_masks.append(result.mask)
                 dataframes.append(result.to_dataframe(plate_index=i + 1))
