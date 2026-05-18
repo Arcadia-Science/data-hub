@@ -10,6 +10,8 @@ Pipeline
 3. Decide whether colonies are present (contrast above noise floor).
 4. Difference-of-Gaussians band-pass filter with 10th-percentile subtraction.
 5. Otsu threshold to produce a binary colony mask.
+6. Morphological cleanup: remove sub-threshold objects and border-touching
+   regions, then label and measure surviving colonies.
 """
 
 from __future__ import annotations
@@ -273,9 +275,8 @@ def measure_colonies(
     min_area_px = int(np.ceil(_MIN_COLONY_AREA_MM2 / mm_per_px**2))
 
     mask = ski.morphology.remove_small_objects(mask, max_size=min_area_px)
-    labels = ski.segmentation.clear_border(mask)
-    cleaned_mask: NDArray[np.bool_] = labels > 0
-    labels = ski.measure.label(cleaned_mask)
+    cleared_mask = ski.segmentation.clear_border(mask)
+    labels = ski.measure.label(cleared_mask)
     regions = ski.measure.regionprops(labels, intensity_image=rgb_image)
 
     colonies: list[ColonyProperties] = []
@@ -308,7 +309,7 @@ def measure_colonies(
         )
 
     colonies.sort(key=lambda c: c.area_mm2, reverse=True)
-    return colonies, cleaned_mask
+    return colonies, cleared_mask
 
 
 # ------------------------------------------------------------------

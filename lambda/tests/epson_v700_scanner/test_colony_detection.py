@@ -248,6 +248,19 @@ class TestMeasureColonies:
         assert abs(colony.mean_rgb[1] - 100.0) < 1.0
         assert abs(colony.mean_rgb[2] - 50.0) < 1.0
 
+    def test_subthreshold_colony_removed(self) -> None:
+        """Objects smaller than _MIN_COLONY_AREA_MM2 should be discarded."""
+        mask = np.zeros((200, 200), dtype=bool)
+        # Small blob: 5x5 = 25 px² (well below 112 px threshold at 1200 DPI)
+        mask[90:95, 90:95] = True
+        # Large blob: 20x25 = 500 px² (well above threshold)
+        mask[30:50, 30:55] = True
+        rgb = np.full((200, 200, 3), 128, dtype=np.uint8)
+        colonies, cleaned = measure_colonies(mask, rgb, dpi=_TEST_DPI)
+        assert len(colonies) == 1
+        assert colonies[0].area_mm2 > 0.05
+        assert not cleaned[90:95, 90:95].any()
+
     def test_border_colonies_excluded(self) -> None:
         mask = np.zeros((100, 100), dtype=bool)
         mask[0:10, 40:60] = True  # touches top border

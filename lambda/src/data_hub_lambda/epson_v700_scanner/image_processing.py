@@ -96,6 +96,7 @@ class TiffProcessor:
         self.path = path
         self._intensities: NDArray[Any] | None = None
         self._dpi: int | None = None
+        self._rgb_cache: NDArray[np.uint8] | None = None
         self.plate_boxes: list[_PlateBox] | None = None
 
     @property
@@ -137,7 +138,7 @@ class TiffProcessor:
                 entry in ``plate_boxes``).  When provided, colony bounding
                 boxes and labels are drawn on the export image.
         """
-        img = self._to_rgb_uint8(self.intensities)
+        img = self._get_rgb_uint8().copy()
         if self.plate_boxes is None:
             self.detect_plates(img)
 
@@ -164,11 +165,10 @@ class TiffProcessor:
 
         - ``dpi``: integer DPI from ``XResolution``.
         - ``color_mode``: ``"rgb"`` or ``"bw"``.
-        - ``plate_count``: number of detected plates (only present after
-          :meth:`export_jpg` has been called).
+        - ``plate_count``: number of detected plates (runs detection if
+          not already performed).
         - ``plate_boxes``: list of ``[min_row, min_col, max_row, max_col]``
-          bounding boxes in original-image coordinates (only present after
-          :meth:`export_jpg` has been called).
+          bounding boxes in original-image coordinates.
         """
         metadata: dict[str, Any] = {}
         with tifffile.TiffFile(self.path) as tif:
@@ -195,14 +195,11 @@ class TiffProcessor:
         if color_mode is not None:
             metadata["color_mode"] = color_mode
 
-        if self.plate_boxes is not None:
-            metadata["plate_count"] = len(self.plate_boxes)
-            metadata["plate_boxes"] = [list(b) for b in self.plate_boxes]
-        else:
-            logger.warning(
-                "plate_boxes is None; call export_jpg() before"
-                " parse_metadata() to include plate data"
-            )
+        if self.plate_boxes is None:
+            self.detect_plates()
+        assert self.plate_boxes is not None  # populated by detect_plates
+        metadata["plate_count"] = len(self.plate_boxes)
+        metadata["plate_boxes"] = [list(b) for b in self.plate_boxes]
 
         return metadata
 
@@ -223,7 +220,7 @@ class TiffProcessor:
                 derived from ``self.intensities``.
         """
         if img is None:
-            img = self._to_rgb_uint8(self.intensities)
+            img = self._get_rgb_uint8()
         h_orig, w_orig = img.shape[:2]
         s = _DETECTION_DOWNSAMPLE
         small: NDArray[np.uint8] = img[::s, ::s]
@@ -375,7 +372,7 @@ class TiffProcessor:
         """
         if self.plate_boxes is None:
             raise RuntimeError("Call export_jpg() or detect_plates() first.")
-        img = self._to_rgb_uint8(self.intensities)
+        img = self._get_rgb_uint8()
         crops: list[NDArray[np.uint8]] = []
         for min_row, min_col, max_row, max_col in self.plate_boxes:
             crops.append(img[min_row:max_row, min_col:max_col].copy())
@@ -385,14 +382,25 @@ class TiffProcessor:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _get_rgb_uint8(self) -> NDArray[np.uint8]:
+        """Return the cached RGB uint8 version of the loaded intensities."""
+        if self._rgb_cache is None:
+            self._rgb_cache = self._to_rgb_uint8(self.intensities)
+        return self._rgb_cache
+
     @staticmethod
     def _to_rgb_uint8(img: NDArray[Any]) -> NDArray[np.uint8]:
         """Normalize to 8-bit RGB regardless of input dtype/channels."""
+        orig_dtype = img.dtype
+
         if img.ndim == 3 and img.shape[2] == 4:
             img = ski.color.rgba2rgb(img)
 
-        if img.dtype != np.uint8:
+        if orig_dtype != np.uint8:
             img = ski.util.img_as_ubyte(ski.exposure.rescale_intensity(img))
+        elif img.dtype != np.uint8:
+            # rgba2rgb converted uint8 -> float; scale back without rescaling
+            img = ski.util.img_as_ubyte(img)
 
         if img.ndim == 2:
             img = ski.color.gray2rgb(img)

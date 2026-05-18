@@ -2,6 +2,10 @@ from __future__ import annotations
 import logging
 
 from data_hub_lambda.api_client import get_client
+from data_hub_lambda.epson_v700_scanner.colony_detection import (
+    export_colony_csv,
+    run_colony_pipeline,
+)
 from data_hub_lambda.epson_v700_scanner.image_processing import TiffProcessor
 from data_hub_shared import s3_utils
 from data_hub_shared.config import config
@@ -55,10 +59,6 @@ def process_file(run_id: str, filename: str) -> None:
         pipeline = None
         plate_crops = processor.crop_plates()
         if plate_crops:
-            from data_hub_lambda.epson_v700_scanner.colony_detection import (
-                run_colony_pipeline,
-            )
-
             pipeline = run_colony_pipeline(plate_crops, dpi=processor.dpi)
 
         jpg_file_path = processor.export_jpg(
@@ -87,10 +87,6 @@ def process_file(run_id: str, filename: str) -> None:
         metadata = processor.parse_metadata()
 
         if pipeline:
-            from data_hub_lambda.epson_v700_scanner.colony_detection import (
-                export_colony_csv,
-            )
-
             csv_name = f"{processor.path.stem}_colonies.csv"
             csv_path = export_colony_csv(
                 pipeline.to_dataframes(),

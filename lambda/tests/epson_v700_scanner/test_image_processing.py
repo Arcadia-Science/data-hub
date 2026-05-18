@@ -270,3 +270,55 @@ class TestDetectPlates:
 
         assert metadata["plate_count"] == 1
         assert len(metadata["plate_boxes"]) == 1
+
+
+class TestDrawPlateOverlays:
+    def test_shape_and_dtype_preserved(self) -> None:
+        img = np.random.randint(0, 255, (200, 300, 3), dtype=np.uint8)
+        boxes = [(50, 50, 150, 250)]
+        result = TiffProcessor._draw_plate_overlays(img, boxes)
+        assert result.shape == img.shape
+        assert result.dtype == np.uint8
+
+    def test_interior_pixels_unchanged(self) -> None:
+        img = np.full((200, 300, 3), 128, dtype=np.uint8)
+        boxes = [(50, 50, 150, 250)]
+        result = TiffProcessor._draw_plate_overlays(img, boxes)
+        np.testing.assert_array_equal(result[50:150, 50:250], img[50:150, 50:250])
+
+    def test_border_pixels_modified(self) -> None:
+        img = np.full((200, 300, 3), 128, dtype=np.uint8)
+        boxes = [(50, 50, 150, 250)]
+        result = TiffProcessor._draw_plate_overlays(img, boxes)
+        assert not np.array_equal(result[42:50, 50:250], img[42:50, 50:250])
+
+
+class TestDrawColonyBboxes:
+    def test_shape_and_dtype_preserved(self) -> None:
+        from data_hub_lambda.epson_v700_scanner.colony_detection import (
+            ColonyDetectionResult,
+            ColonyProperties,
+        )
+
+        img = np.random.randint(0, 255, (400, 400, 3), dtype=np.uint8)
+        boxes = [(50, 50, 350, 350)]
+        colony = ColonyProperties(
+            label=1,
+            area_mm2=1.0,
+            centroid_row_mm=5.0,
+            centroid_col_mm=5.0,
+            bbox_mm=(4.0, 4.0, 6.0, 6.0),
+            eccentricity=0.0,
+            equivalent_diameter_mm=1.13,
+            mean_rgb=(128.0, 128.0, 128.0),
+        )
+        result_obj = ColonyDetectionResult(
+            cropped=img[50:350, 50:350],
+            contrast=np.zeros((300, 300)),
+            has_colonies=True,
+            mask=np.zeros((300, 300), dtype=bool),
+            colonies=[colony],
+        )
+        result = TiffProcessor._draw_colony_bboxes(img, boxes, [result_obj], dpi=600)
+        assert result.shape == img.shape
+        assert result.dtype == np.uint8
