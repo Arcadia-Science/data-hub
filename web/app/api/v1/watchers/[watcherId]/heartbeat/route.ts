@@ -1,9 +1,19 @@
 import { authorize } from "@/lib/api/auth";
-import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
+import {
+  apiError,
+  NOT_FOUND,
+  UPGRADE_REQUIRED,
+  VALIDATION_ERROR,
+} from "@/lib/api/errors";
 import { isValidUUID } from "@/lib/api/validators";
+import { isBelowFloor } from "@/lib/api/watcher-versions";
 import { findActiveWatcher } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
-import { watcherHeartbeats, watchers } from "@/lib/db/schema";
+import {
+  watcherHeartbeats,
+  watcherReleaseConfig,
+  watchers,
+} from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 
@@ -53,6 +63,43 @@ export async function POST(
     : new Date();
   if (isNaN(timestamp.getTime())) {
     return apiError(400, VALIDATION_ERROR, "Invalid timestamp");
+  }
+
+  // Enforce the configured min-supported-version floor before recording
+  // anything. Below-floor watchers are sent away with a 426 so they
+  // can't keep heartbeating (and silently look "alive") while skipping
+  // a mandatory upgrade. We compare against `body.watcher_version`
+  // rather than the stored `watchers.watcher_version` so the very first
+  // heartbeat after a manual upgrade is judged on the new version, not
+  // the stale stored one. The singleton constraint on
+  // `watcher_release_config` keeps this a constant-cost select.
+  const reportedVersion =
+    typeof body.watcher_version === "string" && body.watcher_version
+      ? body.watcher_version
+      : null;
+  const [releaseRow] = await db
+    .select({
+      minSupportedVersion: watcherReleaseConfig.minSupportedVersion,
+      latestVersion: watcherReleaseConfig.latestVersion,
+      channel: watcherReleaseConfig.channel,
+    })
+    .from(watcherReleaseConfig);
+
+  if (
+    releaseRow &&
+    isBelowFloor(reportedVersion, releaseRow.minSupportedVersion)
+  ) {
+    return apiError(
+      426,
+      UPGRADE_REQUIRED,
+      `Watcher version ${reportedVersion} is below the minimum supported version ${releaseRow.minSupportedVersion}. Self-update before continuing.`,
+      {
+        current_version: reportedVersion,
+        min_supported_version: releaseRow.minSupportedVersion,
+        latest_version: releaseRow.latestVersion,
+        channel: releaseRow.channel,
+      }
+    );
   }
 
   // Two parallel writes: (1) append to the heartbeat history log, and

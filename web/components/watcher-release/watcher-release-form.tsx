@@ -208,8 +208,11 @@ export function WatcherReleaseForm({
                       className="font-mono"
                     />
                     <FieldDescription>
-                      Optional floor surfaced in the response for future use.
-                      Not yet enforced server-side.
+                      Optional floor. Watchers reporting an installed version
+                      below this have their heartbeats rejected with{" "}
+                      <code className="font-mono">426 Upgrade Required</code>,
+                      forcing them to self-update before they can check in
+                      again. Leave blank to disable the floor.
                     </FieldDescription>
                     {isInvalid && (
                       <FieldError errors={field.state.meta.errors} />
