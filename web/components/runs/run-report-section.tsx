@@ -111,11 +111,11 @@ export function RunReportSection({ files }: { files: RunFile[] }) {
       </h2>
       <Card size="sm">
         <CardContent className="flex flex-col gap-6">
-          {processedCsvs.map((file) => (
-            <ColonyDataTable key={file.id} file={file} />
-          ))}
           {processedImages.map((file) => (
             <ProcessedImagePreview key={file.id} file={file} />
+          ))}
+          {processedCsvs.map((file) => (
+            <ColonyDataTable key={file.id} file={file} />
           ))}
           {pdfFiles.map((file) => (
             <PdfPreview key={file.id} file={file} />
