@@ -130,9 +130,7 @@ export async function POST(
         // Older watchers (pre-version-reporting) won't include this field —
         // fall back to the existing value rather than nulling it out so the
         // dashboard keeps the last-known version visible.
-        ...(typeof body.watcher_version === "string" && body.watcher_version
-          ? { watcherVersion: body.watcher_version }
-          : {}),
+        ...(reportedVersion ? { watcherVersion: reportedVersion } : {}),
       })
       .where(eq(watchers.id, watcherId)),
   ]);
