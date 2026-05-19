@@ -172,8 +172,10 @@ export const watcherReleaseConfig = pgTable(
     // Required to advertise a release. NULL → watchers skip the upgrade
     // attempt.
     latestVersion: text("latest_version"),
-    // Optional floor; surfaced in the response for future use, not yet
-    // enforced server-side.
+    // Optional floor enforced on the heartbeat path: watchers reporting an
+    // installed version below this are rejected with 426 Upgrade Required
+    // (see `app/api/v1/watchers/[watcherId]/heartbeat/route.ts`) so they
+    // can't continue checking in without self-updating first.
     minSupportedVersion: text("min_supported_version"),
     // Defaults to "stable"; surfaced in the response and shown in
     // `self-update` output.

@@ -38,7 +38,7 @@ export default async function SettingsLayout({
   // labels this section, so rendering an H1 here was duplicative chrome
   // on every settings page. Pages render their own H2 instead.
   return (
-    <div className="mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 lg:px-8 2xl:w-7xl">
+    <div className="mx-auto w-full max-w-7xl px-4 pt-4 pb-10 sm:px-6 lg:px-8 2xl:w-7xl">
       {children}
     </div>
   );

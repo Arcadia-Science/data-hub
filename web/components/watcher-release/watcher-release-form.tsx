@@ -1,14 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import {
   Field,
   FieldContent,
@@ -116,12 +109,13 @@ export function WatcherReleaseForm({
   });
 
   return (
-    // The Card wrapper mirrors Vercel's project-settings panel pattern:
-    // heading + description, form fields, then a CardFooter holding the
-    // meta + Save action separated by a single border. The Card spans
-    // the full width of the page area; CardHeader/CardContent and the
-    // inner footer row are capped at `max-w-2xl` so input rows and body
-    // copy stay at a readable measure regardless of viewport.
+    // The form renders as a content-only Card (body + footer separated
+    // by a single border). The page-level heading + description live in
+    // the route's `page.tsx` so they align with the sibling settings
+    // pages and the sidebar "Settings" label. The Card spans the full
+    // width of the page area; CardContent and the inner footer row are
+    // capped at `max-w-2xl` so input rows and body copy stay at a
+    // readable measure regardless of viewport.
     //
     // The fields stay in a single Card (rather than one-card-per-field)
     // because they all configure the same logical resource — the
@@ -134,23 +128,6 @@ export function WatcherReleaseForm({
       }}
     >
       <Card>
-        <CardHeader>
-          <CardTitle className="text-lg font-semibold tracking-tight">
-            Watcher Version
-          </CardTitle>
-          <CardDescription>
-            Configure the release advertised by{" "}
-            <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs dark:bg-background/40">
-              GET /api/v1/watchers/:id/update-check
-            </code>
-            .<br /> Watchers compare their installed version against{" "}
-            <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs dark:bg-background/40">
-              latest_version
-            </code>{" "}
-            and self-upgrade when a newer release is offered.
-          </CardDescription>
-        </CardHeader>
-
         <CardContent className="max-w-2xl">
           <FieldGroup>
             <form.Field name="latestVersion">
@@ -208,8 +185,11 @@ export function WatcherReleaseForm({
                       className="font-mono"
                     />
                     <FieldDescription>
-                      Optional floor surfaced in the response for future use.
-                      Not yet enforced server-side.
+                      Optional floor. Watchers reporting an installed version
+                      below this have their heartbeats rejected with{" "}
+                      <code className="font-mono">426 Upgrade Required</code>,
+                      forcing them to self-update before they can check in
+                      again. Leave blank to disable the floor.
                     </FieldDescription>
                     {isInvalid && (
                       <FieldError errors={field.state.meta.errors} />
