@@ -1,3 +1,4 @@
+import { ColonyDataTable } from "@/components/runs/colony-data-table";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { RunFile } from "@/lib/api/instrument-runs";
@@ -5,6 +6,7 @@ import { ExternalLink } from "lucide-react";
 
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|svg|tiff?)$/i;
 const PDF_EXTENSION = /\.pdf$/i;
+const CSV_EXTENSION = /\.csv$/i;
 
 function isImageFile(file: RunFile): boolean {
   return (
@@ -17,6 +19,10 @@ function isPdfFile(file: RunFile): boolean {
   return (
     file.contentType === "application/pdf" || PDF_EXTENSION.test(file.filename)
   );
+}
+
+function isCsvFile(file: RunFile): boolean {
+  return file.contentType === "text/csv" || CSV_EXTENSION.test(file.filename);
 }
 
 function ProcessedImagePreview({ file }: { file: RunFile }) {
@@ -67,13 +73,18 @@ function PdfPreview({ file }: { file: RunFile }) {
 }
 
 export function RunReportSection({ files }: { files: RunFile[] }) {
+  const processedCsvs = files.filter(
+    (f) => f.category === "processed" && f.deletedAt === null && isCsvFile(f)
+  );
+
   const processedImages = files.filter(
     (f) => f.category === "processed" && f.deletedAt === null && isImageFile(f)
   );
 
   const pdfFiles = files.filter((f) => f.deletedAt === null && isPdfFile(f));
 
-  const totalCount = processedImages.length + pdfFiles.length;
+  const totalCount =
+    processedCsvs.length + processedImages.length + pdfFiles.length;
 
   if (totalCount === 0) {
     return (
@@ -100,6 +111,9 @@ export function RunReportSection({ files }: { files: RunFile[] }) {
       </h2>
       <Card size="sm">
         <CardContent className="flex flex-col gap-6">
+          {processedCsvs.map((file) => (
+            <ColonyDataTable key={file.id} file={file} />
+          ))}
           {processedImages.map((file) => (
             <ProcessedImagePreview key={file.id} file={file} />
           ))}
