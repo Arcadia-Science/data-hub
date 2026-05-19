@@ -61,29 +61,54 @@ export default async function WatchersSettingsPage() {
     .from(watcherReleaseConfig)
     .leftJoin(users, eq(users.id, watcherReleaseConfig.updatedBy));
 
-  // The form owns its own Card chrome (heading, description, fields,
-  // footer) so it renders as a self-contained settings panel. The page
-  // just wires server-fetched state into it.
+  // Page-level heading + description match the layout used by
+  // `/settings/tokens` and `/settings/members` so the h2 aligns
+  // vertically with the "Settings" label in the sidebar. The form below
+  // is content-only (Card body + footer) — same pattern as the table
+  // components those sibling pages render.
   return (
-    <WatcherReleaseForm
-      initial={{
-        latestVersion: row?.latestVersion ?? "",
-        minSupportedVersion: row?.minSupportedVersion ?? "",
-        channel: row?.channel ?? "stable",
-        mandatory: row?.mandatory ?? false,
-      }}
-      // Only the primitive form values + the small "last updated"
-      // metadata cross the server/client boundary — keep the
-      // server/client payload minimal per `server-serialization`.
-      lastUpdated={
-        row
-          ? {
-              at: row.updatedAt.toISOString(),
-              byName: row.updatedByName,
-              byEmail: row.updatedByEmail,
-            }
-          : null
-      }
-    />
+    <div>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight">
+            Watcher Version
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Configure the release advertised by{" "}
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs dark:bg-background/40">
+              GET /api/v1/watchers/:id/update-check
+            </code>
+            . Watchers compare their installed version against{" "}
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs dark:bg-background/40">
+              latest_version
+            </code>{" "}
+            and self-upgrade when a newer release is offered.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-6">
+        <WatcherReleaseForm
+          initial={{
+            latestVersion: row?.latestVersion ?? "",
+            minSupportedVersion: row?.minSupportedVersion ?? "",
+            channel: row?.channel ?? "stable",
+            mandatory: row?.mandatory ?? false,
+          }}
+          // Only the primitive form values + the small "last updated"
+          // metadata cross the server/client boundary — keep the
+          // server/client payload minimal per `server-serialization`.
+          lastUpdated={
+            row
+              ? {
+                  at: row.updatedAt.toISOString(),
+                  byName: row.updatedByName,
+                  byEmail: row.updatedByEmail,
+                }
+              : null
+          }
+        />
+      </div>
+    </div>
   );
 }
