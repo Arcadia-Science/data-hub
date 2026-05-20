@@ -8,7 +8,6 @@ import { files, instrumentRuns, instruments, watchers } from "@/lib/db/schema";
 import { sendSlackMessage } from "@/lib/slack";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import type { NextRequest } from "next/server";
-import { after } from "next/server";
 
 type RouteContext = {
   params: Promise<{ instrumentId: string }>;
@@ -180,12 +179,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     await db.insert(files).values(fileValues).onConflictDoNothing();
   }
 
-  // One Slack notification per newly-created run. The upsert above
-  // (`onConflictDoNothing`) gives us the "first time only" guarantee, so
-  // both the lambda-auto-create and watcher-report paths fire at most once
-  // per (instrument_id, run_id). Awaited so the message is delivered before
-  // the serverless function instance is recycled; `sendSlackMessage`
-  // swallows its own errors so a Slack outage cannot fail the API request.
+  // Send Slack notification and notify app users of new run.
   if (isNew) {
     const origin = new URL(request.url).origin;
     await sendSlackMessage(
@@ -194,15 +188,9 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
         `<${origin}/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}|View in Data Hub>`
     );
 
-    // In-app notification fan-out runs after the response is sent so a
-    // slow recipient query can't add latency to the writing route. The
-    // helper logs and swallows its own errors — a notifications outage
-    // must never fail run creation.
-    after(async () => {
-      await notifyRunCreated({
-        runInternalId: run.id,
-        instrumentId,
-      });
+    await notifyRunCreated({
+      runInternalId: run.id,
+      instrumentId,
     });
   }
 
