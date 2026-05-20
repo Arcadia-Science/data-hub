@@ -210,6 +210,13 @@ export async function setup() {
   process.env.__TEST_BASE_URL = baseUrl;
   process.env.__TEST_DATABASE_URL = databaseUrl;
   process.env.__TEST_SLACK_CAPTURE_URL = slackCaptureBaseUrl;
+  // Point the `@/lib/db` singleton at the test DB so library helpers
+  // imported directly into test files (e.g. `notifyRunCreated` from
+  // `@/lib/api/notifications`) hit the same database as `getTestDb()`.
+  // Without this they'd silently read the developer's local
+  // `DATABASE_URL`, where the relations under test don't exist. The
+  // spawned Next.js server already gets the test DB via `serverEnv`.
+  process.env.DATABASE_URL = databaseUrl;
 
   return async () => {
     if (serverProcess) {

@@ -1,3 +1,4 @@
+import { InstrumentNotificationSwitch } from "@/components/notifications/instrument-notification-switch";
 import { Badge } from "@/components/ui/badge";
 import {
   Breadcrumb,
@@ -14,8 +15,19 @@ import Link from "next/link";
 
 export function InstrumentHeader({
   instrument,
+  notifications,
 }: {
   instrument: InstrumentDetail;
+  /**
+   * Per-viewer notification state for this instrument. When omitted
+   * (e.g. unauthenticated callers, or contexts that don't want to
+   * surface the switch), the action row falls back to the original
+   * watcher-status + run-count layout.
+   */
+  notifications?: {
+    enabled: boolean;
+    masterMuted: boolean;
+  };
 }) {
   const watcherStatus = getWatcherOnlineStatus(instrument);
 
@@ -49,6 +61,13 @@ export function InstrumentHeader({
         </div>
 
         <div className="flex items-center gap-2">
+          {notifications ? (
+            <InstrumentNotificationSwitch
+              instrumentId={instrument.id}
+              initialEnabled={notifications.enabled}
+              masterMuted={notifications.masterMuted}
+            />
+          ) : null}
           {instrument.activeWatcherId ? (
             <Link href={`/watchers/${instrument.activeWatcherId}`}>
               <WatcherStatusBadge

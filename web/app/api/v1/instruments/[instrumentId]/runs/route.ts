@@ -1,12 +1,13 @@
 import { authorize } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { buildRunListQuery, parseAcquiredAt } from "@/lib/api/instrument-runs";
+import { notifyRunCreated } from "@/lib/api/notifications";
 import { parseIntParam } from "@/lib/api/validators";
 import { db } from "@/lib/db";
 import { files, instrumentRuns, instruments, watchers } from "@/lib/db/schema";
 import { sendSlackMessage } from "@/lib/slack";
 import { and, eq, isNull, sql } from "drizzle-orm";
-import type { NextRequest } from "next/server";
+import { after, type NextRequest } from "next/server";
 
 type RouteContext = {
   params: Promise<{ instrumentId: string }>;
@@ -178,19 +179,21 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     await db.insert(files).values(fileValues).onConflictDoNothing();
   }
 
-  // One Slack notification per newly-created run. The upsert above
-  // (`onConflictDoNothing`) gives us the "first time only" guarantee, so
-  // both the lambda-auto-create and watcher-report paths fire at most once
-  // per (instrument_id, run_id). Awaited so the message is delivered before
-  // the serverless function instance is recycled; `sendSlackMessage`
-  // swallows its own errors so a Slack outage cannot fail the API request.
+  // Send Slack notification and notify app users of new run.
   if (isNew) {
-    const origin = new URL(request.url).origin;
-    await sendSlackMessage(
-      `*${instrument.displayName}*\n` +
-        `New instrument run reported: \`${runId}\`.\n` +
-        `<${origin}/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}|View in Data Hub>`
-    );
+    after(async () => {
+      const origin = new URL(request.url).origin;
+      await sendSlackMessage(
+        `*${instrument.displayName}*\n` +
+          `New instrument run reported: \`${runId}\`.\n` +
+          `<${origin}/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}|View in Data Hub>`
+      );
+
+      await notifyRunCreated({
+        runInternalId: run.id,
+        instrumentId,
+      });
+    });
   }
 
   return Response.json(

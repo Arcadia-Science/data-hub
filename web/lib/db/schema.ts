@@ -701,6 +701,145 @@ export const archiveJobs = pgTable(
   ]
 );
 
+// Notification trigger taxonomy. `run_created` fires once per newly-created
+// run for every user who has an enabled per-instrument subscription;
+// `comment_attributed` and `comment_participated` fire on a new comment for
+// run attributees and prior commenters respectively. The `attributed`
+// variant takes precedence when a single recipient qualifies under both
+// rules so the popover doesn't show the same comment twice.
+export const notificationTypeEnum = pgEnum("notification_type", [
+  "run_created",
+  "comment_attributed",
+  "comment_participated",
+]);
+
+// One row per user holding the global notification toggles. Created on
+// first *write* (via the upsert in `notifications.updatePreferences`);
+// readers fall back to `DEFAULT_PREFERENCES` when no row exists so the
+// settings form can always render concrete values without a write-path
+// query.
+export const notificationPreferences = pgTable("notification_preferences", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  // Master mute: when true, suppresses every per-instrument run notification
+  // regardless of the user's `instrument_notification_subscriptions` rows.
+  // Comment notifications are governed independently by the two booleans
+  // below so a muted user can still receive replies on runs they care
+  // about.
+  runsAllMuted: boolean("runs_all_muted").notNull().default(false),
+  // Receive a notification when someone comments on a run the user is
+  // attributed to (via `run_attributions`).
+  commentsAttributedEnabled: boolean("comments_attributed_enabled")
+    .notNull()
+    .default(true),
+  // Receive a notification when someone comments on a run the user has
+  // previously commented on (excluding the user's own follow-ups).
+  commentsParticipatedEnabled: boolean("comments_participated_enabled")
+    .notNull()
+    .default(true),
+  updatedAt: timestamp("updated_at", {
+    withTimezone: true,
+    mode: "date",
+  })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+});
+
+// Per-(user, instrument) opt-in for `run_created` notifications. Absence of
+// a row is treated as "unsubscribed"; the row is kept around even when
+// disabled so toggling off doesn't lose the user's prior interest history.
+export const instrumentNotificationSubscriptions = pgTable(
+  "instrument_notification_subscriptions",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    instrumentId: text("instrument_id")
+      .notNull()
+      .references(() => instruments.id, { onDelete: "cascade" }),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (sub) => [
+    primaryKey({ columns: [sub.userId, sub.instrumentId] }),
+    // Settings page lists every subscription for the current user; this
+    // index keeps that lookup index-only.
+    index("idx_instrument_notification_subscriptions_user_id").on(sub.userId),
+  ]
+);
+
+// Delivered in-app notifications, one row per (recipient, event). Read
+// state lives on the row via `readAt` so unread counts are a single
+// indexed query — the `idx_notifications_user_id_unread` partial index
+// drops the `read_at is null` filter into the index itself for the hot
+// bell-badge path.
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // Recipient. The actor (who caused the notification) is stored
+    // separately as `actorUserId` and may be NULL for system-originated
+    // events like `run_created`.
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    type: notificationTypeEnum("type").notNull(),
+    // The run the notification refers to; cascade on delete so soft- or
+    // hard-deleted runs don't leave orphan rows in the popover. (Runs are
+    // soft-deleted in practice, but the FK protects against accidental
+    // hard delete in tests / future cleanups.)
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => instrumentRuns.id, { onDelete: "cascade" }),
+    // NULL for `run_created`. Set for both comment trigger types.
+    commentId: uuid("comment_id").references(() => runComments.id, {
+      onDelete: "cascade",
+    }),
+    // The user whose action produced the notification. `set null` so a
+    // deleted user doesn't take the recipient's history with them.
+    actorUserId: text("actor_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    readAt: timestamp("read_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow(),
+  },
+  (notification) => [
+    index("idx_notifications_user_id_created_at").on(
+      notification.userId,
+      notification.createdAt.desc()
+    ),
+    // Partial index that backs the unread-count query (`select count(*)
+    // from notifications where user_id = ? and read_at is null`) used on
+    // every bell render. Indexing only unread rows keeps the index small
+    // even after long retention.
+    index("idx_notifications_user_id_unread")
+      .on(notification.userId, notification.createdAt.desc())
+      .where(sql`${notification.readAt} is null`),
+  ]
+);
+
 // Many-to-many link between users and runs: a user "claims" a run they
 // personally performed. Attribution is self-service — users create and remove
 // only their own row. Composite PK enforces one row per (run, user).

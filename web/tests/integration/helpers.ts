@@ -35,6 +35,9 @@ export async function closeTestDb() {
 // CASCADE handles any ordering gaps, but explicit order avoids relying on it.
 // Quoted names match Drizzle-generated tables that use camelCase identifiers.
 const TRUNCATE_ORDER = [
+  "notifications",
+  "instrument_notification_subscriptions",
+  "notification_preferences",
   "files",
   "run_attributions",
   "run_comments",

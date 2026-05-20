@@ -2,6 +2,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 
 import "@/app/globals.css";
 import { AppSidebar } from "@/components/app-sidebar";
+import { NotificationBell } from "@/components/notifications/notification-bell";
+import { NotificationsProvider } from "@/components/notifications/notifications-provider";
 import { ArchiveDownloadProvider } from "@/components/runs/archive-download-provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import {
@@ -12,6 +14,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { countUnread } from "@/lib/api/notifications";
 import { getSidebarInstruments, getSidebarWatchers } from "@/lib/api/sidebar";
 import { auth, signOut } from "@/lib/auth";
 import { cn } from "@/lib/utils";
@@ -88,9 +91,18 @@ export default async function RootLayout({
   // doesn't introduce an additional round-trip. Skipped entirely when the
   // user isn't signed in — the unauthenticated routes don't render the
   // sidebar.
-  const [instruments, watchers] = session
-    ? await Promise.all([getSidebarInstruments(), getSidebarWatchers()])
-    : [[], []];
+  //
+  // The unread-count query rides alongside the sidebar fetches so the
+  // notification bell renders with an accurate badge on first paint —
+  // the partial `idx_notifications_user_id_unread` index keeps the
+  // count cheap regardless of total notification volume.
+  const [instruments, watchers, initialUnreadCount] = session
+    ? await Promise.all([
+        getSidebarInstruments(),
+        getSidebarWatchers(),
+        countUnread(session.user.id!),
+      ])
+    : [[], [], 0];
 
   // Hydrate the sidebar's open/collapsed state from the cookie that
   // `SidebarProvider` writes on toggle. Defaulting to `true` keeps the
@@ -115,25 +127,30 @@ export default async function RootLayout({
             <NuqsAdapter>
               <TooltipProvider>
                 {session ? (
-                  <ArchiveDownloadProvider>
-                    <SidebarProvider defaultOpen={sidebarDefaultOpen}>
-                      <AppSidebar
-                        session={session}
-                        instruments={instruments}
-                        watchers={watchers}
-                        signOutAction={async () => {
-                          "use server";
-                          await signOut({ redirectTo: "/login" });
-                        }}
-                      />
-                      <SidebarInset className="pb-12">
-                        <header className="flex h-12 shrink-0 items-center gap-2 px-4">
-                          <SidebarTrigger />
-                        </header>
-                        {children}
-                      </SidebarInset>
-                    </SidebarProvider>
-                  </ArchiveDownloadProvider>
+                  <NotificationsProvider
+                    initialUnreadCount={initialUnreadCount}
+                  >
+                    <ArchiveDownloadProvider>
+                      <SidebarProvider defaultOpen={sidebarDefaultOpen}>
+                        <AppSidebar
+                          session={session}
+                          instruments={instruments}
+                          watchers={watchers}
+                          signOutAction={async () => {
+                            "use server";
+                            await signOut({ redirectTo: "/login" });
+                          }}
+                        />
+                        <SidebarInset className="pb-12">
+                          <header className="flex h-12 shrink-0 items-center justify-between gap-2 px-4">
+                            <SidebarTrigger />
+                            <NotificationBell />
+                          </header>
+                          {children}
+                        </SidebarInset>
+                      </SidebarProvider>
+                    </ArchiveDownloadProvider>
+                  </NotificationsProvider>
                 ) : (
                   children
                 )}

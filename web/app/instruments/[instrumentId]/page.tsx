@@ -26,6 +26,10 @@ import {
   type InstrumentFilterOptionsByType,
 } from "@/lib/api/instrument-runs";
 import { getInstrumentById } from "@/lib/api/instruments";
+import {
+  getPreferences,
+  listInstrumentSubscriptions,
+} from "@/lib/api/notifications";
 import { auth } from "@/lib/auth";
 import { instrumentDetailParamsCache } from "@/lib/search-params";
 import { notFound } from "next/navigation";
@@ -141,34 +145,38 @@ export default async function InstrumentDetailPage({
 
   const filters = instrumentDetailParamsCache.parse(await searchParams);
 
-  // Parallel fetch: instrument metadata (for header) and paginated runs
-  // (for table) are independent queries — neither depends on the other.
-  const [instrument, runResult] = await Promise.all([
-    getInstrumentById(instrumentId),
-    buildRunListQuery({
-      instrumentId,
-      search: filters.search || undefined,
-      dateFrom: filters.date_from ?? undefined,
-      dateTo: filters.date_to ?? undefined,
-      page: filters.page,
-      perPage: filters.per_page,
-      includeDeleted: filters.include_deleted,
-      wavelength: filters.wavelength ?? undefined,
-      measurementMode: filters.measurement_mode ?? undefined,
-      measurementType: filters.measurement_type ?? undefined,
-      captureType: filters.capture_type ?? undefined,
-      imagingMode: filters.imaging_mode ?? undefined,
-      gelWavelength: filters.gel_wavelength ?? undefined,
-      gelColor: filters.gel_color ?? undefined,
-      dyeChannel: filters.dye_channel ?? undefined,
-      hinaChannel: filters.hina_channel ?? undefined,
-      hinaDimension: filters.hina_dimension ?? undefined,
-      hinaSize: filters.hina_size ?? undefined,
-      dpi: filters.dpi ?? undefined,
-      colorMode: filters.color_mode ?? undefined,
-      ranBy: filters.ran_by ?? undefined,
-    }),
-  ]);
+  // Parallel fetch: instrument metadata (for header), paginated runs
+  // (for table), and the viewer's notification prefs + per-instrument
+  // subscription state are independent queries.
+  const [instrument, runResult, notificationPrefs, notificationSubscriptions] =
+    await Promise.all([
+      getInstrumentById(instrumentId),
+      buildRunListQuery({
+        instrumentId,
+        search: filters.search || undefined,
+        dateFrom: filters.date_from ?? undefined,
+        dateTo: filters.date_to ?? undefined,
+        page: filters.page,
+        perPage: filters.per_page,
+        includeDeleted: filters.include_deleted,
+        wavelength: filters.wavelength ?? undefined,
+        measurementMode: filters.measurement_mode ?? undefined,
+        measurementType: filters.measurement_type ?? undefined,
+        captureType: filters.capture_type ?? undefined,
+        imagingMode: filters.imaging_mode ?? undefined,
+        gelWavelength: filters.gel_wavelength ?? undefined,
+        gelColor: filters.gel_color ?? undefined,
+        dyeChannel: filters.dye_channel ?? undefined,
+        hinaChannel: filters.hina_channel ?? undefined,
+        hinaDimension: filters.hina_dimension ?? undefined,
+        hinaSize: filters.hina_size ?? undefined,
+        dpi: filters.dpi ?? undefined,
+        colorMode: filters.color_mode ?? undefined,
+        ranBy: filters.ran_by ?? undefined,
+      }),
+      getPreferences(session.user.id!),
+      listInstrumentSubscriptions(session.user.id!),
+    ]);
 
   if (!instrument) notFound();
 
@@ -226,9 +234,22 @@ export default async function InstrumentDetailPage({
     { value: "unattributed", label: "Unattributed" },
   ];
 
+  // The subscription list always contains every instrument (left-joined
+  // against `instruments`) so a missing entry would mean a stale read —
+  // fall back to `false` defensively.
+  const subscriptionForThisInstrument = notificationSubscriptions.find(
+    (s) => s.instrumentId === instrumentId
+  );
+
   return (
     <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-6 p-6 2xl:w-7xl">
-      <InstrumentHeader instrument={instrument} />
+      <InstrumentHeader
+        instrument={instrument}
+        notifications={{
+          enabled: subscriptionForThisInstrument?.enabled ?? false,
+          masterMuted: notificationPrefs.runsAllMuted,
+        }}
+      />
       <RunSelectionProvider>
         <TablePendingProvider>
           <InstrumentRunsToolbar />
