@@ -44,12 +44,16 @@ type NotificationsValue = {
   recent: NotificationItem[];
   refresh: () => Promise<void>;
   markAllRead: () => Promise<void>;
+  markOneRead: (id: string) => Promise<void>;
 };
 
 const NotificationsContext = createContext<NotificationsValue | null>(null);
 
-// Re-poll cadence for the bell badge + popover list. Plenty fresh for an
-// internal-tool surface; bumping is a one-line change.
+// Re-poll cadence for the bell badge + popover list while the tab is
+// visible. Hidden tabs don't poll at all — the visibilitychange listener
+// in the effect below kicks an immediate refresh when the tab comes
+// back, so freshness on focus is preserved without burning RTTs on
+// background tabs.
 const POLL_INTERVAL_MS = 60_000;
 
 // ---------------------------------------------------------------------------
@@ -141,16 +145,81 @@ export function NotificationsProvider({
     }
   }, [refresh]);
 
-  // Pull initial data on mount and re-poll every minute. Effect runs once
-  // because `refresh` identity is stable (functional setState above).
+  // Mark a single notification read — used when the popover row is
+  // clicked through to its target. Callers are expected to gate this on
+  // `readAt === null` (the optimistic update + server filter make a
+  // redundant call harmless, but skipping it avoids a pointless RTT).
+  const markOneRead = useCallback(
+    async (id: string) => {
+      const stampedAt = new Date().toISOString();
+      setRecent((prev) =>
+        prev.map((n) =>
+          n.id === id && !n.readAt ? { ...n, readAt: stampedAt } : n
+        )
+      );
+      // Clamp at zero so any drift between the cached `recent` list and
+      // the server-side unread count can't push the badge negative.
+      setUnreadCount((count) => Math.max(0, count - 1));
+      try {
+        const res = await fetch("/api/v1/notifications", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: [id] }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      } catch (err) {
+        toast.error("Couldn't mark notification as read", {
+          description:
+            err instanceof Error
+              ? err.message
+              : "An unexpected error occurred.",
+        });
+        await refresh();
+      }
+    },
+    [refresh]
+  );
+
+  // Initial fetch on mount, then poll every minute *only* while the tab
+  // is visible. `visibilitychange` resumes the loop (and does an
+  // immediate refresh) when the user comes back to the tab so the badge
+  // catches up without waiting for the next tick. `refresh` identity is
+  // stable so the effect runs once.
   useEffect(() => {
-    refresh();
-    const id = setInterval(refresh, POLL_INTERVAL_MS);
-    return () => clearInterval(id);
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    const start = () => {
+      if (intervalId != null) return;
+      intervalId = setInterval(refresh, POLL_INTERVAL_MS);
+    };
+    const stop = () => {
+      if (intervalId == null) return;
+      clearInterval(intervalId);
+      intervalId = null;
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refresh();
+        start();
+      } else {
+        stop();
+      }
+    };
+
+    void refresh();
+    if (document.visibilityState === "visible") start();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      stop();
+    };
   }, [refresh]);
 
   return (
-    <NotificationsContext value={{ unreadCount, recent, refresh, markAllRead }}>
+    <NotificationsContext
+      value={{ unreadCount, recent, refresh, markAllRead, markOneRead }}
+    >
       {children}
     </NotificationsContext>
   );

@@ -54,7 +54,7 @@ export function NotificationBell() {
           ) : null}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" sideOffset={8} className="w-96 p-2">
+      <PopoverContent align="end" sideOffset={8} className="w-96 p-4">
         <NotificationBellContent onNavigate={() => setOpen(false)} />
       </PopoverContent>
     </Popover>

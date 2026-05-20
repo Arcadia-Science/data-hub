@@ -43,16 +43,16 @@ export function NotificationBellContent({
 }: {
   onNavigate?: () => void;
 }) {
-  const { recent, markAllRead, unreadCount } = useNotifications();
+  const { recent, markAllRead, markOneRead, unreadCount } = useNotifications();
 
   return (
     <div className="flex flex-col">
-      <div className="flex items-center justify-between gap-2 border-b pb-3">
+      <div className="flex items-center justify-between gap-2 border-b pb-2">
         <p className="text-sm font-medium">Notifications</p>
         <Button
           type="button"
           variant="ghost"
-          size="xs"
+          size="sm"
           onClick={() => {
             void markAllRead();
           }}
@@ -81,7 +81,14 @@ export function NotificationBellContent({
               <li key={n.id}>
                 <Link
                   href={notificationHref(n)}
-                  onClick={onNavigate}
+                  onClick={() => {
+                    // Mark this row read as the user navigates into it —
+                    // gated on `isUnread` so re-clicking a read row
+                    // doesn't fire a pointless POST. The provider
+                    // handles its own optimistic update + error toast.
+                    if (isUnread) void markOneRead(n.id);
+                    onNavigate?.();
+                  }}
                   className={cn(
                     "flex items-start gap-3 rounded-md px-3 py-2 hover:bg-muted",
                     isUnread && "bg-primary/5"

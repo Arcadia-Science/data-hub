@@ -51,33 +51,15 @@ const DEFAULT_PREFERENCES: NotificationPreferencesDto = {
 };
 
 // ---------------------------------------------------------------------------
-// Preferences: lazy upsert on first read so the settings form always has
-// concrete values, and idempotent partial update on write.
+// Preferences: SELECT-only on the read path with a `DEFAULT_PREFERENCES`
+// fallback for users who haven't materialized a row yet. `updatePreferences`
+// does its own upsert on write, so we never need to insert from the read
+// side just to make the form render — keeping the read at one RTT.
 // ---------------------------------------------------------------------------
 
 export async function getPreferences(
   userId: string
 ): Promise<NotificationPreferencesDto> {
-  // Lazy upsert with `ON CONFLICT DO NOTHING` keeps repeat reads cheap
-  // without a separate select. Returning is best-effort — when the row
-  // already existed, drizzle returns no rows so we fall through to a
-  // follow-up select.
-  const inserted = await db
-    .insert(notificationPreferences)
-    .values({ userId })
-    .onConflictDoNothing({ target: notificationPreferences.userId })
-    .returning({
-      runsAllMuted: notificationPreferences.runsAllMuted,
-      commentsAttributedEnabled:
-        notificationPreferences.commentsAttributedEnabled,
-      commentsParticipatedEnabled:
-        notificationPreferences.commentsParticipatedEnabled,
-    });
-
-  if (inserted.length > 0) {
-    return inserted[0];
-  }
-
   const [row] = await db
     .select({
       runsAllMuted: notificationPreferences.runsAllMuted,

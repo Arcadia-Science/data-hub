@@ -713,9 +713,11 @@ export const notificationTypeEnum = pgEnum("notification_type", [
   "comment_participated",
 ]);
 
-// One row per user holding the global notification toggles. Created lazily
-// on first read in `notifications.getPreferences` so the settings form can
-// always show concrete values; absence here is treated as "all defaults".
+// One row per user holding the global notification toggles. Created on
+// first *write* (via the upsert in `notifications.updatePreferences`);
+// readers fall back to `DEFAULT_PREFERENCES` when no row exists so the
+// settings form can always render concrete values without a write-path
+// query.
 export const notificationPreferences = pgTable("notification_preferences", {
   userId: text("user_id")
     .primaryKey()
