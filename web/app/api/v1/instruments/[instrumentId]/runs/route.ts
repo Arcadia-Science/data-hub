@@ -7,7 +7,7 @@ import { db } from "@/lib/db";
 import { files, instrumentRuns, instruments, watchers } from "@/lib/db/schema";
 import { sendSlackMessage } from "@/lib/slack";
 import { and, eq, isNull, sql } from "drizzle-orm";
-import type { NextRequest } from "next/server";
+import { after, type NextRequest } from "next/server";
 
 type RouteContext = {
   params: Promise<{ instrumentId: string }>;
@@ -181,16 +181,18 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
   // Send Slack notification and notify app users of new run.
   if (isNew) {
-    const origin = new URL(request.url).origin;
-    await sendSlackMessage(
-      `*${instrument.displayName}*\n` +
-        `New instrument run reported: \`${runId}\`.\n` +
-        `<${origin}/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}|View in Data Hub>`
-    );
+    after(async () => {
+      const origin = new URL(request.url).origin;
+      await sendSlackMessage(
+        `*${instrument.displayName}*\n` +
+          `New instrument run reported: \`${runId}\`.\n` +
+          `<${origin}/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}|View in Data Hub>`
+      );
 
-    await notifyRunCreated({
-      runInternalId: run.id,
-      instrumentId,
+      await notifyRunCreated({
+        runInternalId: run.id,
+        instrumentId,
+      });
     });
   }
 

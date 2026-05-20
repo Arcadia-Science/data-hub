@@ -9,6 +9,7 @@ import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { notifyComment } from "@/lib/api/notifications";
 import { createComment, listCommentsForRun } from "@/lib/api/run-comments";
 import type { NextRequest } from "next/server";
+import { after } from "next/server";
 
 type RouteContext = {
   params: Promise<{ instrumentId: string; runId: string }>;
@@ -101,10 +102,12 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   // Fan out to attributees + prior commenters after the response is
   // sent. The helper itself decides who actually qualifies (and skips
   // the comment author) based on each user's notification preferences.
-  await notifyComment({
-    runInternalId: run.id,
-    commentId: comment.id,
-    authorUserId: authResult.userId,
+  after(async () => {
+    await notifyComment({
+      runInternalId: run.id,
+      commentId: comment.id,
+      authorUserId: authResult.userId,
+    });
   });
 
   return Response.json(comment, { status: 201 });
