@@ -4,6 +4,7 @@ import { accounts, sessions, users } from "@/lib/db/schema";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import { eq } from "drizzle-orm";
 import NextAuth from "next-auth";
+import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import { cache } from "react";
 
@@ -55,6 +56,49 @@ async function resolveIsAdmin(userId: string): Promise<boolean> {
   return row.isAdmin;
 }
 
+// Dev-only credentials provider: lets a local developer sign in as any
+// user already present in the `user` table (typically seeded by
+// `npm run db:seed`) by entering only their email — no Google OAuth, no
+// password. Gated to non-production so a production build can never
+// instantiate it; the `/login` page hides the affordance under the same
+// guard. Combined with `session.strategy: "jwt"` below, the credentials
+// provider mints a JWT directly (the DrizzleAdapter is bypassed for this
+// provider — NextAuth's documented behavior for credentials + JWT).
+const isDevAuthEnabled = process.env.NODE_ENV !== "production";
+
+const providers = [
+  Google,
+  ...(isDevAuthEnabled
+    ? [
+        Credentials({
+          id: "dev",
+          name: "Dev account",
+          credentials: {
+            email: { label: "Email", type: "text" },
+          },
+          async authorize(credentials) {
+            const email =
+              typeof credentials?.email === "string"
+                ? credentials.email.trim().toLowerCase()
+                : null;
+            if (!email) return null;
+            const [row] = await db
+              .select({
+                id: users.id,
+                name: users.name,
+                email: users.email,
+                image: users.image,
+              })
+              .from(users)
+              .where(eq(users.email, email))
+              .limit(1);
+            return row ?? null;
+          },
+        }),
+      ]
+    : []),
+];
+
 const {
   handlers,
   signIn,
@@ -66,7 +110,7 @@ const {
     accountsTable: accounts,
     sessionsTable: sessions,
   }),
-  providers: [Google],
+  providers,
   pages: {
     signIn: "/login",
   },
@@ -105,6 +149,6 @@ const {
   },
 });
 
-export { handlers, signIn, signOut };
+export { handlers, isDevAuthEnabled, signIn, signOut };
 
 export const auth = cache(uncachedAuth);

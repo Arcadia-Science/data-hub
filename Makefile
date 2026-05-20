@@ -75,6 +75,14 @@ fe-test:
 dev:
 	cd web && npm run dev
 
+# Reset the local Postgres database, re-push the Drizzle schema, and load
+# a deterministic seed (dev user + PAT, one instrument per type, watchers,
+# runs, files, comments, attributions, archive jobs). See
+# docs/local-development.md for the full local-only dev workflow.
+.PHONY: db-reseed
+db-reseed:
+	cd web && npm run db:reseed
+
 .PHONY: fe-build
 fe-build:
 	cd web && npm run build

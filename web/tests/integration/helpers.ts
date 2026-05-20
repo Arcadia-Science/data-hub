@@ -1,6 +1,11 @@
 import * as schema from "@/lib/db/schema";
+import {
+  clearAll,
+  seedDevUser,
+  seedWatcherReleaseConfig,
+  type SeedUserOptions,
+} from "@/lib/db/seed";
 import { drizzle } from "drizzle-orm/postgres-js";
-import { createHash, randomBytes } from "node:crypto";
 import postgres from "postgres";
 
 // ---------------------------------------------------------------------------
@@ -31,79 +36,30 @@ export async function closeTestDb() {
   }
 }
 
-// Tables listed leaf-first (children before parents) to satisfy FK constraints.
-// CASCADE handles any ordering gaps, but explicit order avoids relying on it.
-// Quoted names match Drizzle-generated tables that use camelCase identifiers.
-const TRUNCATE_ORDER = [
-  "notifications",
-  "instrument_notification_subscriptions",
-  "notification_preferences",
-  "files",
-  "run_attributions",
-  "run_comments",
-  "instrument_runs",
-  "watcher_events",
-  "watcher_heartbeats",
-  "watchers",
-  "personal_access_tokens",
-  "session",
-  "account",
-  "instruments",
-  '"user"',
-] as const;
-
+// TRUNCATE every `pgTable` declared in `lib/db/schema.ts`, then re-seed
+// the `watcher_release_config` singleton with the deterministic baseline
+// `9.9.9 / 0.1.0 / stable / false`. Tests previously hard-coded both the
+// table list and the singleton SQL inline; both now live in
+// `@/lib/db/seed` so adding a new table doesn't require touching this
+// file.
+//
+// `clearAll` uses TRUNCATE CASCADE, which ignores the `ON DELETE SET NULL`
+// on `watcher_release_config.updated_by → user.id` and wipes the singleton
+// regardless of whether it's in the TRUNCATE list. Re-seeding it after
+// the clear keeps every test's update-check baseline identical to a
+// fresh global setup.
 export async function resetDb() {
   const db = getTestDb();
-  for (const table of TRUNCATE_ORDER) {
-    await db.execute(
-      `TRUNCATE TABLE ${table} CASCADE` as unknown as Parameters<
-        typeof db.execute
-      >[0]
-    );
-  }
-
-  // Re-seed the `watcher_release_config` singleton with the same
-  // defaults the global setup uses (9.9.9 / 0.1.0 / stable / false).
-  // The TRUNCATE on "user" above cascades through the
-  // `updated_by → user.id` FK and wipes this row even though
-  // `watcher_release_config` is not in TRUNCATE_ORDER — TRUNCATE CASCADE
-  // ignores the ON DELETE SET NULL clause and unconditionally clears
-  // dependent rows. Re-seeding here keeps every test's update-check
-  // baseline identical to a fresh global setup.
-  await db.execute(
-    `INSERT INTO watcher_release_config
-       (id, latest_version, min_supported_version, channel, mandatory)
-     VALUES
-       (true, '9.9.9', '0.1.0', 'stable', false)
-     ON CONFLICT (id) DO UPDATE SET
-       latest_version = EXCLUDED.latest_version,
-       min_supported_version = EXCLUDED.min_supported_version,
-       channel = EXCLUDED.channel,
-       mandatory = EXCLUDED.mandatory,
-       updated_at = now(),
-       updated_by = NULL` as unknown as Parameters<typeof db.execute>[0]
-  );
+  await clearAll(db);
+  await seedWatcherReleaseConfig(db);
 }
 
 // ---------------------------------------------------------------------------
-// Auth seeding — duplicates the token generation logic from @/lib/tokens
-// rather than importing it. This avoids pulling in the app's module graph
-// (which may trigger Next.js-specific side effects) into test workers.
+// Auth seeding — thin wrapper around the shared `seedDevUser` builder in
+// `@/lib/db/seed`. The shared builder is reused by `scripts/seed-database.ts`
+// for the local-dev workflow, so test seeding and dev seeding share the
+// same token-generation and admin-flag logic.
 // ---------------------------------------------------------------------------
-
-const TOKEN_PREFIX = "dhub_";
-
-function generateToken(): string {
-  return TOKEN_PREFIX + randomBytes(32).toString("hex");
-}
-
-function hashToken(plaintext: string): string {
-  return createHash("sha256").update(plaintext).digest("hex");
-}
-
-function getTokenPrefix(plaintext: string): string {
-  return plaintext.slice(0, TOKEN_PREFIX.length + 4);
-}
 
 // Seeds a user + PAT directly in the database. Returns the plaintext token
 // for use in `Authorization: Bearer dhub_...` headers. The server never
@@ -117,32 +73,14 @@ function getTokenPrefix(plaintext: string): string {
 // session-authenticated routes (PAT requests never consult `user.is_admin`),
 // but exposing the option here keeps the seeding helper future-proof for
 // any cookie-based session test harness layered on later.
-export async function seedTestUser(options?: {
-  expiresAt?: Date | null;
-  scopes?: string[];
-  isAdmin?: boolean;
-}) {
-  const db = getTestDb();
-
-  const userId = crypto.randomUUID();
-  await db.insert(schema.users).values({
-    id: userId,
+export async function seedTestUser(
+  options?: Pick<SeedUserOptions, "expiresAt" | "scopes" | "isAdmin">
+) {
+  const { userId, token } = await seedDevUser(getTestDb(), {
+    ...options,
     name: "Test User",
-    email: `test-${userId.slice(0, 8)}@example.com`,
-    isAdmin: options?.isAdmin ?? false,
   });
-
-  const plaintext = generateToken();
-  await db.insert(schema.personalAccessTokens).values({
-    userId,
-    name: "integration-test-token",
-    tokenHash: hashToken(plaintext),
-    tokenPrefix: getTokenPrefix(plaintext),
-    scopes: options?.scopes ?? ["*"],
-    expiresAt: options?.expiresAt !== undefined ? options.expiresAt : null,
-  });
-
-  return { userId, token: plaintext };
+  return { userId, token };
 }
 
 // ---------------------------------------------------------------------------
