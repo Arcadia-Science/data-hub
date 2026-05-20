@@ -4,6 +4,10 @@ import {
   InstrumentsTable,
 } from "@/components/instruments/instruments-table";
 import { getInstrumentListWithCounts } from "@/lib/api/instruments";
+import {
+  getPreferences,
+  listInstrumentSubscriptions,
+} from "@/lib/api/notifications";
 import { auth } from "@/lib/auth";
 import type { Metadata } from "next/types";
 
@@ -26,7 +30,16 @@ export default async function InstrumentsPage() {
     );
   }
 
-  const instruments = await getInstrumentListWithCounts();
+  // All four queries are independent; running them together avoids the
+  // ladder of waterfalls a serial fetch would incur. The subscription
+  // helper returns the full instrument catalogue with each row's
+  // current `enabled` state, which we collapse into a Map for O(1)
+  // lookup inside the table.
+  const [instruments, subscriptions, prefs] = await Promise.all([
+    getInstrumentListWithCounts(),
+    listInstrumentSubscriptions(session.user.id!),
+    getPreferences(session.user.id!),
+  ]);
 
   // Composition: the management actions cell (Edit dialog + Confirm
   // pending button) is rendered only for admins. Regular members see the
@@ -34,6 +47,10 @@ export default async function InstrumentsPage() {
   // already supports `renderRowActions` being omitted entirely, so no
   // table-level prop changes are needed.
   const isAdmin = session.user.isAdmin === true;
+
+  const subscriptionMap = new Map(
+    subscriptions.map((s) => [s.instrumentId, s.enabled])
+  );
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
@@ -43,6 +60,10 @@ export default async function InstrumentsPage() {
       <InstrumentsTable
         data={instruments}
         renderRowActions={isAdmin ? InstrumentRowManagementActions : undefined}
+        notifications={{
+          subscriptions: subscriptionMap,
+          masterMuted: prefs.runsAllMuted,
+        }}
       />
     </div>
   );

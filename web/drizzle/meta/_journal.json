@@ -176,6 +176,13 @@
       "when": 1778958471151,
       "tag": "0024_add_watcher_release_config",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1779301905199,
+      "tag": "0025_add_notifications",
+      "breakpoints": true
     }
   ]
 }

@@ -1,12 +1,14 @@
 import { authorize } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { buildRunListQuery, parseAcquiredAt } from "@/lib/api/instrument-runs";
+import { notifyRunCreated } from "@/lib/api/notifications";
 import { parseIntParam } from "@/lib/api/validators";
 import { db } from "@/lib/db";
 import { files, instrumentRuns, instruments, watchers } from "@/lib/db/schema";
 import { sendSlackMessage } from "@/lib/slack";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import type { NextRequest } from "next/server";
+import { after } from "next/server";
 
 type RouteContext = {
   params: Promise<{ instrumentId: string }>;
@@ -191,6 +193,17 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
         `New instrument run reported: \`${runId}\`.\n` +
         `<${origin}/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}|View in Data Hub>`
     );
+
+    // In-app notification fan-out runs after the response is sent so a
+    // slow recipient query can't add latency to the writing route. The
+    // helper logs and swallows its own errors — a notifications outage
+    // must never fail run creation.
+    after(async () => {
+      await notifyRunCreated({
+        runInternalId: run.id,
+        instrumentId,
+      });
+    });
   }
 
   return Response.json(

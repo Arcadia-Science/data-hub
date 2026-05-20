@@ -3,6 +3,7 @@ import { EditInstrumentDialog } from "@/components/instruments/edit-instrument-d
 import { RowActionsCell } from "@/components/instruments/row-actions-cell";
 import { ClickableRow } from "@/components/instruments/runs-table/clickable-row";
 import { StatusActions } from "@/components/instruments/status-actions";
+import { InstrumentNotificationsCell } from "@/components/notifications/instrument-notifications-cell";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -42,6 +43,7 @@ export function InstrumentsTable({
   data,
   footer,
   renderRowActions,
+  notifications,
 }: {
   data: InstrumentListItem[];
   /**
@@ -54,6 +56,17 @@ export function InstrumentsTable({
    * is hidden entirely — useful for read-only contexts like the dashboard.
    */
   renderRowActions?: (row: InstrumentListItem) => ReactNode;
+  /**
+   * Per-instrument notification subscription state for the viewer, plus
+   * the viewer's master-mute flag. Threaded in from the page so the
+   * notifications column can render without a per-row client fetch.
+   * Pass `null`/omit to hide the column entirely (used by the
+   * dashboard's truncated table where the column would be noise).
+   */
+  notifications?: {
+    subscriptions: Map<string, boolean>;
+    masterMuted: boolean;
+  };
 }) {
   if (data.length === 0) {
     return (
@@ -76,6 +89,9 @@ export function InstrumentsTable({
             <TableHead>File Patterns</TableHead>
             <TableHead>Runs This Week</TableHead>
             <TableHead>Last Run</TableHead>
+            {notifications ? (
+              <TableHead className="w-[80px]">Notify</TableHead>
+            ) : null}
             {renderRowActions ? <TableHead className="w-[100px]" /> : null}
           </TableRow>
         </TableHeader>
@@ -125,6 +141,15 @@ export function InstrumentsTable({
                     <span className="text-muted-foreground">—</span>
                   )}
                 </TableCell>
+                {notifications ? (
+                  <InstrumentNotificationsCell
+                    instrumentId={row.id}
+                    initialEnabled={
+                      notifications.subscriptions.get(row.id) ?? false
+                    }
+                    masterMuted={notifications.masterMuted}
+                  />
+                ) : null}
                 {renderRowActions ? (
                   <RowActionsCell>{renderRowActions(row)}</RowActionsCell>
                 ) : null}
