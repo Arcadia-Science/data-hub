@@ -45,7 +45,9 @@ export async function GET(request: NextRequest) {
       run_display_id: n.runDisplayId,
       instrument_id: n.instrumentId,
       instrument_display_name: n.instrumentDisplayName,
+      instrument_type: n.instrumentType,
       comment_id: n.commentId,
+      comment_body: n.commentBody,
       actor: n.actor,
     })),
   });

@@ -1,5 +1,6 @@
 "use client";
 
+import type { InstrumentType } from "@/lib/db/schema";
 import {
   createContext,
   use,
@@ -35,7 +36,9 @@ export type NotificationItem = {
   runDisplayId: string;
   instrumentId: string;
   instrumentDisplayName: string;
+  instrumentType: InstrumentType;
   commentId: string | null;
+  commentBody: string | null;
   actor: NotificationActor | null;
 };
 
@@ -71,7 +74,9 @@ type ApiNotification = {
   run_display_id: string;
   instrument_id: string;
   instrument_display_name: string;
+  instrument_type: InstrumentType;
   comment_id: string | null;
+  comment_body: string | null;
   actor: NotificationActor | null;
 };
 
@@ -85,7 +90,9 @@ function fromApi(n: ApiNotification): NotificationItem {
     runDisplayId: n.run_display_id,
     instrumentId: n.instrument_id,
     instrumentDisplayName: n.instrument_display_name,
+    instrumentType: n.instrument_type,
     commentId: n.comment_id,
+    commentBody: n.comment_body,
     actor: n.actor,
   };
 }

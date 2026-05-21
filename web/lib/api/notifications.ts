@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import {
+  type InstrumentType,
   instrumentNotificationSubscriptions,
   instrumentRuns,
   instruments,
@@ -153,6 +154,11 @@ export async function setInstrumentSubscription(
 // need follow-up requests.
 // ---------------------------------------------------------------------------
 
+// Hard cap on the comment-body snippet returned in the popover payload —
+// the full body is never needed for the bell list and we don't want
+// kilobyte-sized markdown blobs piggy-backing on every poll.
+const COMMENT_BODY_PREVIEW_LENGTH = 240;
+
 export type NotificationDto = {
   id: string;
   type: "run_created" | "comment_attributed" | "comment_participated";
@@ -164,7 +170,14 @@ export type NotificationDto = {
   instrumentId: string;
   runDisplayId: string;
   instrumentDisplayName: string;
+  // Surfaced so the bell can render a type-specific icon for grouped
+  // `run_created` rows (microscope / gel doc / plate reader).
+  instrumentType: InstrumentType;
   commentId: string | null;
+  // Truncated markdown body of the originating comment — only populated
+  // when `commentId` is set. NULL for `run_created` rows and for comment
+  // rows whose comment has been soft-deleted.
+  commentBody: string | null;
   actor: {
     id: string;
     displayName: string;
@@ -190,7 +203,12 @@ export async function listNotifications(
       runDisplayId: instrumentRuns.runId,
       instrumentId: instrumentRuns.instrumentId,
       instrumentDisplayName: instruments.displayName,
+      instrumentType: instruments.instrumentType,
       commentId: notifications.commentId,
+      // Soft-deleted comments are surfaced as `null` body via the join
+      // filter below; the row still exists so the user can navigate to
+      // the run, the popover just renders without a preview.
+      commentBody: runComments.body,
       actorId: actor.id,
       actorName: actor.name,
       actorEmail: actor.email,
@@ -200,6 +218,13 @@ export async function listNotifications(
     .innerJoin(instrumentRuns, eq(instrumentRuns.id, notifications.runId))
     .innerJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
     .leftJoin(actor, eq(actor.id, notifications.actorUserId))
+    .leftJoin(
+      runComments,
+      and(
+        eq(runComments.id, notifications.commentId),
+        isNull(runComments.deletedAt)
+      )
+    )
     .where(
       opts.unreadOnly
         ? and(eq(notifications.userId, userId), isNull(notifications.readAt))
@@ -212,6 +237,10 @@ export async function listNotifications(
     const actorDisplayName = row.actorId
       ? (row.actorName ?? row.actorEmail ?? "Unknown")
       : null;
+    const previewBody =
+      row.commentBody && row.commentBody.length > COMMENT_BODY_PREVIEW_LENGTH
+        ? `${row.commentBody.slice(0, COMMENT_BODY_PREVIEW_LENGTH).trimEnd()}…`
+        : row.commentBody;
     return {
       id: row.id,
       type: row.type,
@@ -221,7 +250,9 @@ export async function listNotifications(
       runDisplayId: row.runDisplayId,
       instrumentId: row.instrumentId,
       instrumentDisplayName: row.instrumentDisplayName,
+      instrumentType: row.instrumentType,
       commentId: row.commentId,
+      commentBody: previewBody,
       actor:
         row.actorId && actorDisplayName
           ? {

@@ -17,10 +17,13 @@ import {
   clearAll,
   seedArchiveJobs,
   seedDevUser,
+  seedInstrumentSubscriptions,
   seedInstruments,
+  seedNotifications,
   seedRunAttributions,
   seedRunComments,
   seedRuns,
+  seedTeammates,
   seedWatcherReleaseConfig,
   seedWatchers,
   type SeededRun,
@@ -75,6 +78,26 @@ await seedRunAttributions(db, runs, userId);
 
 console.log("Seeding archive_jobs…");
 await seedArchiveJobs(db, runs, userId);
+
+console.log("Seeding teammate users (notification actors)…");
+const teammates = await seedTeammates(db, 2);
+
+console.log("Seeding instrument subscriptions for the dev user…");
+await seedInstrumentSubscriptions(
+  db,
+  userId,
+  activeInstruments.map((i) => i.id)
+);
+
+console.log("Seeding notifications (run_created + comment rows)…");
+const notifResult = await seedNotifications(db, {
+  recipientUserId: userId,
+  runs,
+  teammates,
+});
+console.log(
+  `  ${notifResult.total} notifications inserted (${notifResult.unread} unread).`
+);
 
 await client.end();
 
