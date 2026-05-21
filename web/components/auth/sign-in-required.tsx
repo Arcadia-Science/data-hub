@@ -1,5 +1,6 @@
+import { DevSignInForm } from "@/components/auth/dev-sign-in-form";
 import { Button } from "@/components/ui/button";
-import { signIn } from "@/lib/auth";
+import { isDevAuthEnabled, signIn } from "@/lib/auth";
 
 type SignInRequiredProps = {
   /**
@@ -24,8 +25,10 @@ type SignInRequiredProps = {
  * `og:title` / `og:description` for the route. Real users land on a clean
  * sign-in CTA that returns them to the original URL afterwards.
  *
- * Mirrors the visual shell of `app/login/page.tsx` so the experience is
- * indistinguishable from hitting `/login` directly.
+ * Mirrors the visual shell of `app/login/page.tsx` (including the
+ * non-production dev sign-in affordance) so the experience is
+ * indistinguishable from hitting `/login` directly. Both gates pull from
+ * the same `isDevAuthEnabled` flag in `lib/auth.ts`.
  */
 export function SignInRequired({ callbackUrl, children }: SignInRequiredProps) {
   return (
@@ -50,6 +53,12 @@ export function SignInRequired({ callbackUrl, children }: SignInRequiredProps) {
             Sign in with Google
           </Button>
         </form>
+        {isDevAuthEnabled && (
+          <DevSignInForm
+            callbackUrl={callbackUrl}
+            inputId="sign-in-required-dev-email"
+          />
+        )}
       </div>
     </div>
   );

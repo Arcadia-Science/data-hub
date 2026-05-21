@@ -90,6 +90,10 @@ Other database commands:
 | `npm run db:push` | Push schema directly (no migration files) |
 | `npm run db:studio` | Open Drizzle Studio GUI |
 | `npm run db:reset` | Drop and re-create the public schema |
+| `npm run db:seed` | Load a deterministic seed (see [Local development](local-development.md)) |
+| `npm run db:reseed` | `db:reset` + `db:push` + `db:seed` in one shot |
+
+> **Web + API + database only?** If you don't need the watcher or Lambda, see [Local development](local-development.md) for a zero-credential setup using `make db-reseed` and a dev-only sign-in.
 
 ## Running locally
 

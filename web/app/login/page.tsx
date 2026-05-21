@@ -1,5 +1,6 @@
+import { DevSignInForm } from "@/components/auth/dev-sign-in-form";
 import { Button } from "@/components/ui/button";
-import { signIn } from "@/lib/auth";
+import { isDevAuthEnabled, signIn } from "@/lib/auth";
 import { Metadata } from "next/types";
 
 export const metadata: Metadata = {
@@ -29,6 +30,9 @@ export default function LoginPage() {
             Sign in with Google
           </Button>
         </form>
+        {isDevAuthEnabled && (
+          <DevSignInForm callbackUrl="/" inputId="login-dev-email" />
+        )}
       </div>
     </div>
   );

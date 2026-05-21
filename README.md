@@ -47,6 +47,7 @@ See the full [Getting Started guide](docs/getting-started.md) for prerequisites 
 
 ### Guides
 
+- [Local development](docs/local-development.md) — zero-credential dev workflow for the web app + API + database (no watcher / Lambda needed)
 - [Adding an instrument](docs/guides/adding-an-instrument.md) — end-to-end: watcher setup, activation, optional Lambda preprocessing
 - [Installing a watcher](docs/guides/installing-a-watcher.md) — lab operator focused: init, watch, troubleshooting
 - [Managing tokens](docs/guides/managing-tokens.md) — creating, using, and revoking API tokens
