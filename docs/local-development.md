@@ -125,8 +125,49 @@ Some features depend on services that aren't running in this workflow. Each one 
 | Run archive ("Download all") | 503 "Archive builder is not configured" | Set `LAMBDA_FUNCTION_URL` + `S3_ARCHIVES_BUCKET` and grant `lambda:InvokeFunctionUrl` |
 | File reprocessing | The reprocess endpoint returns null and no Lambda is invoked | Same |
 | Slack notifications on new runs | `console.warn` only, no HTTP call | Set `SLACK_WEBHOOK_URL` |
-| Watcher uploads → Lambda → API loop | Not exercised; the seed inserts the resulting rows directly | Run the watcher (`docs/watcher.md`) and the Lambda (`docs/lambda.md`) end-to-end |
+| Watcher uploads → Lambda → API loop | Not exercised; the seed inserts the resulting rows directly. For Lambda-only smoke testing, see [Testing the Lambda end-to-end](#testing-the-lambda-end-to-end) below | Run the watcher (`docs/watcher.md`) and the Lambda (`docs/lambda.md`) end-to-end |
 | Sign in with Google | The button still renders but OAuth callback will 4xx without `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | `vercel env pull` per `docs/getting-started.md` |
+
+## Testing the Lambda end-to-end
+
+Working on a `process_file()` module (or wiring up a brand new one — see [Adding an instrument](guides/adding-an-instrument.md)) and want to run it against the local web app without standing up real S3? The lambda CLI ships a `handler` subcommand that drives `lambda_handler` end-to-end against a gitignored directory mirroring the S3 layout.
+
+```sh
+cd lambda
+
+# Point the inner DataHubClient at the local dev API. The PAT is printed
+# by `npm run db:seed` / `make db-reseed`.
+export DATA_HUB_API_URL=http://localhost:3000/api/v1
+export DATA_HUB_API_KEY=dhub_<paste-from-seed-output>
+
+# instrument_id / run_id / filename match the kebab-case S3 key layout the
+# real Lambda expects; --source is the local file you want "uploaded".
+uv run data-hub-process handler \
+  agilent-4150-tapestation \
+  run-1 \
+  sample.csv \
+  --source ~/Downloads/sample.csv
+```
+
+What happens under the hood:
+
+1. The CLI copies `--source` into `lambda/.local-s3/test-raw-data-bucket/<instrument-id>/<run-id>/<filename>`. That mirror directory is gitignored.
+2. `AWS_S3_RAW_DATA_BUCKET` / `AWS_S3_PROCESSED_DATA_BUCKET` are set so `process_file()` modules see consistent bucket names.
+3. `data_hub_shared.s3_utils.download_file` and `upload_file` are monkey-patched for the duration of the call to `shutil.copy2` from/to the mirror — no boto3, no AWS credentials, no LocalStack.
+4. A synthetic S3 event is built and `lambda_handler(event, ctx)` runs the same dispatch path production uses, calling the dev API at `localhost:3000` for the run/file upserts.
+
+After it returns, navigate to `http://localhost:3000/instruments/<instrument-id>/runs/<run-id>` to inspect what landed; processed artifacts show up under `lambda/.local-s3/test-processed-data-bucket/...`.
+
+Useful flags (`uv run data-hub-process handler --help` for the full list):
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--source FILE` | required | Local file to stage as the "uploaded" raw object. |
+| `--mirror-root DIR` | `<repo>/lambda/.local-s3` (or `$LOCAL_S3_MIRROR`) | Where the mirror lives on disk. |
+| `--raw-bucket NAME` | `test-raw-data-bucket` | First path segment under the mirror for the raw file. |
+| `--processed-bucket NAME` | `test-processed-data-bucket` | First path segment for `upload_file` calls from the processor. |
+
+The wiring lives in [lambda/src/data_hub_lambda/cli.py](../lambda/src/data_hub_lambda/cli.py) (`handler` subcommand) and [lambda/src/data_hub_lambda/local_s3_mirror.py](../lambda/src/data_hub_lambda/local_s3_mirror.py) (`patched_s3` context manager). The same patch surface backs the integration suite at [lambda/tests/integration/conftest.py](../lambda/tests/integration/conftest.py), so anything that works under the CLI is exercised in CI too.
 
 ## Where the seed lives
 
