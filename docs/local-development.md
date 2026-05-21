@@ -103,14 +103,16 @@ You can also run `npm run db:seed` on its own — it calls the schema-driven `cl
 | `watchers` | 7 (for active instruments) | Rotates through `watching` / `registered` / `stopped` |
 | `watcher_heartbeats` | ~10 per watching watcher | Spread over the last hour |
 | `watcher_events` | 3 per watching watcher | `watcher_started`, `config_synced`, `file_uploaded` |
-| `instrument_runs` | 5 per active instrument | Last 14 days, alternating `lambda` / `watcher` source |
+| `instrument_runs` | 5 per active instrument | Spread across the last ~2 weeks (3, 6, 9, 12, 15 days back), alternating `lambda` / `watcher` source |
 | `files` | 3 per run | Mix of `uploaded` / `completed` / `failed`, `raw` / `processed` |
 | `run_comments` | 1 per run | Authored by the dev user |
 | `run_attributions` | 1 per run | Dev user attributed |
 | `archive_jobs` | 3 | One each of `ready` / `building` / `failed` |
 | `watcher_release_config` | 1 (singleton) | `9.9.9 / 0.1.0 / stable / false` |
 
-Identifiers are deterministic (`seed-<type>`, `seed-run-1`, …) so screenshots, bug reports, and `curl` examples stay stable across reseeds. The seed does not use Faker or randomness beyond UUIDs and PAT bytes.
+Externally-visible identifiers used in URLs and API paths — instrument IDs (`seed-<type>`) and run IDs (`seed-run-1`, …) — are deterministic across reseeds, so screenshots, bug reports, and `curl` examples against `/api/v1/instruments/seed-plate-reader/runs/seed-run-1` stay stable.
+
+Surrogate UUIDs (watcher IDs, archive job IDs, the per-row primary keys on `instrument_runs` and `files`) and the PAT plaintext are regenerated on every reseed — the seed does not use Faker but it does call `crypto.randomUUID()` and `crypto.randomBytes()` where the schema needs server-side IDs.
 
 ## What's deliberately missing
 

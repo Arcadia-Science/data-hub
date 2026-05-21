@@ -271,9 +271,13 @@ export async function seedRuns(
 ): Promise<SeededRun[]> {
   if (count <= 0) return [];
 
+  // Spread runs across the last ~2 weeks (3, 6, 9, 12, 15 days back for
+  // count = 5) so UI date filters like "last 7 days" / "last 14 days"
+  // return non-empty, differing result sets.
   const now = new Date();
+  const dayMs = 24 * 60 * 60_000;
   const runValues = Array.from({ length: count }, (_, i) => {
-    const acquiredAt = new Date(now.getTime() - (i + 1) * 24 * 60 * 60_000);
+    const acquiredAt = new Date(now.getTime() - (i + 1) * 3 * dayMs);
     return {
       instrumentId,
       runId: `seed-run-${i + 1}`,

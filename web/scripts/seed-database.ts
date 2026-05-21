@@ -23,6 +23,7 @@ import {
   seedRuns,
   seedWatcherReleaseConfig,
   seedWatchers,
+  type SeededRun,
 } from "@/lib/db/seed";
 import "dotenv/config";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -62,13 +63,11 @@ await seedWatchers(
 );
 
 console.log("Seeding runs + files…");
-const runs = (
-  await Promise.all(
-    instruments
-      .filter((i) => i.status === "active")
-      .map((i) => seedRuns(db, i.id, 5))
-  )
-).flat();
+const activeInstruments = instruments.filter((i) => i.status === "active");
+const runs: SeededRun[] = [];
+for (const instrument of activeInstruments) {
+  runs.push(...(await seedRuns(db, instrument.id, 5)));
+}
 
 console.log("Seeding run comments + attributions…");
 await seedRunComments(db, runs, userId);
