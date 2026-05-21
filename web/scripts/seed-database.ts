@@ -64,7 +64,9 @@ console.log("Seeding runs + files…");
 const activeInstruments = instruments.filter((i) => i.status === "active");
 const runs: SeededRun[] = [];
 for (const instrument of activeInstruments) {
-  runs.push(...(await seedRuns(db, instrument.id, 5)));
+  runs.push(
+    ...(await seedRuns(db, instrument.id, 5, instrument.instrumentType))
+  );
 }
 
 console.log("Seeding run comments + attributions…");

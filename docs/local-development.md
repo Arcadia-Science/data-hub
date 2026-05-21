@@ -39,15 +39,22 @@ DATABASE_URL=postgres://localhost:5432/data-hub-local
 # Any 32+ character string. NextAuth uses it to sign session JWTs.
 AUTH_SECRET=local-dev-secret-at-least-32-characters!!
 
-# Dummy AWS credentials. The AWS SDK signs presigned URLs locally
-# (HMAC-only — no network call), so any non-empty values work. Actual
-# uploads/downloads against `test-raw-data-bucket` will fail at the
-# browser, which is fine for local dev (see "What's deliberately
-# missing" below).
+# Dummy AWS credentials. The local-mirror branch in `web/lib/s3.ts`
+# bypasses the AWS SDK entirely when LOCAL_S3_MIRROR is set, but a
+# few server-side modules instantiate the SDK at import time so any
+# non-empty values keep them happy.
 AWS_ACCESS_KEY_ID=test-key
 AWS_SECRET_ACCESS_KEY=test-secret
 AWS_REGION=us-east-1
 S3_RAW_DATA_BUCKET=test-raw-data-bucket
+
+# Filesystem-backed S3 mirror. When set (and NODE_ENV != production),
+# `web/lib/s3.ts` swaps presigned-URL generation, HEAD checks, and
+# server-side stream reads for `<root>/<bucket>/<key>` lookups, and
+# the seed copies fixture bytes into the mirror so seeded runs
+# render real bytes. Path is resolved relative to web/. See
+# "Working with file bytes locally" below.
+LOCAL_S3_MIRROR=../lambda/.local-s3
 ```
 
 Explicitly **do not** set the following — leaving them unset is what makes the relevant features short-circuit cleanly:
@@ -104,7 +111,7 @@ You can also run `npm run db:seed` on its own — it calls the schema-driven `cl
 | `watcher_heartbeats` | ~10 per watching watcher | Spread over the last hour |
 | `watcher_events` | 3 per watching watcher | `watcher_started`, `config_synced`, `file_uploaded` |
 | `instrument_runs` | 5 per active instrument | Spread across the last ~2 weeks (3, 6, 9, 12, 15 days back), alternating `lambda` / `watcher` source |
-| `files` | 3 per run | Mix of `uploaded` / `completed` / `failed`, `raw` / `processed` |
+| `files` | 3 per run | Mix of `uploaded` / `completed` / `failed`, `raw` / `processed`. For qPCR / gel doc / plate reader the first slot uses a real fixture filename and bytes are copied into `LOCAL_S3_MIRROR` (see [Working with file bytes locally](#working-with-file-bytes-locally)) |
 | `run_comments` | 1 per run | Authored by the dev user |
 | `run_attributions` | 1 per run | Dev user attributed |
 | `archive_jobs` | 3 | One each of `ready` / `building` / `failed` |
@@ -120,12 +127,12 @@ Some features depend on services that aren't running in this workflow. Each one 
 
 | Feature | Behavior locally | How to enable |
 | --- | --- | --- |
-| File download | Presigned URL renders but GET fails — no real S3 object | Point S3 env vars at a real bucket or LocalStack/MinIO |
-| File upload (from watcher) | `request-upload-url` returns a usable signed URL, but actually PUTting fails | Same |
+| File download | Served from `LOCAL_S3_MIRROR` if set (real bytes for seeded qPCR / gel doc / plate reader runs out of the box; other instruments staged via `data-hub-process handler`). 404s when unset. See [Working with file bytes locally](#working-with-file-bytes-locally) | Point S3 env vars at a real bucket or LocalStack/MinIO |
+| File upload (from watcher) | `request-upload-url` returns a same-origin URL routed to `/api/_local-s3/...`; `PUT` writes bytes into the mirror | Same |
 | Run archive ("Download all") | 503 "Archive builder is not configured" | Set `LAMBDA_FUNCTION_URL` + `S3_ARCHIVES_BUCKET` and grant `lambda:InvokeFunctionUrl` |
 | File reprocessing | The reprocess endpoint returns null and no Lambda is invoked | Same |
 | Slack notifications on new runs | `console.warn` only, no HTTP call | Set `SLACK_WEBHOOK_URL` |
-| Watcher uploads → Lambda → API loop | Not exercised; the seed inserts the resulting rows directly. For Lambda-only smoke testing, see [Testing the Lambda end-to-end](#testing-the-lambda-end-to-end) below | Run the watcher (`docs/watcher.md`) and the Lambda (`docs/lambda.md`) end-to-end |
+| Watcher uploads → Lambda → API loop | Not exercised end-to-end; the seed inserts the resulting rows directly. For Lambda-only smoke testing, see [Testing the Lambda end-to-end](#testing-the-lambda-end-to-end) below | Run the watcher (`docs/watcher.md`) and the Lambda (`docs/lambda.md`) end-to-end |
 | Sign in with Google | The button still renders but OAuth callback will 4xx without `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | `vercel env pull` per `docs/getting-started.md` |
 
 ## Testing the Lambda end-to-end
@@ -168,6 +175,31 @@ Useful flags (`uv run data-hub-process handler --help` for the full list):
 | `--processed-bucket NAME` | `test-processed-data-bucket` | First path segment for `upload_file` calls from the processor. |
 
 The wiring lives in [lambda/src/data_hub_lambda/cli.py](../lambda/src/data_hub_lambda/cli.py) (`handler` subcommand) and [lambda/src/data_hub_lambda/local_s3_mirror.py](../lambda/src/data_hub_lambda/local_s3_mirror.py) (`patched_s3` context manager). The same patch surface backs the integration suite at [lambda/tests/integration/conftest.py](../lambda/tests/integration/conftest.py), so anything that works under the CLI is exercised in CI too.
+
+## Working with file bytes locally
+
+`LOCAL_S3_MIRROR` makes the Next.js app share the same on-disk layout the lambda CLI writes to. When it's set (and `NODE_ENV != production`), the four helpers in [web/lib/s3.ts](../web/lib/s3.ts) — `getPresignedDownloadUrl`, `getPresignedUploadUrl`, `headS3Object`, `getS3ObjectStream` — short-circuit AWS and serve from disk. The HTTP face of the mirror is a single dev-only catch-all at [web/app/api/_local-s3/[bucket]/[...key]/route.ts](../web/app/api/_local-s3/%5Bbucket%5D/%5B...key%5D/route.ts) that handles GET (download with optional `Content-Disposition`) and PUT (writes bytes from the request body).
+
+What this gets you out of the box after `make db-reseed`:
+
+| Instrument type | Seeded fixture | Where it comes from |
+| --- | --- | --- |
+| qPCR | `azure_cielo_qpcr_example.csv` | `lambda/tests/fixtures/` |
+| Gel doc | `azure_600_gel_doc_example.tif` | `lambda/tests/fixtures/` |
+| Plate reader | `spectramax_plate_reader_endpoint.xls` | `lambda/tests/fixtures/` |
+| Other instruments | none — files 404 in the mirror | Stage real bytes via `data-hub-process handler` |
+
+The seed copies the fixture into `<LOCAL_S3_MIRROR>/test-raw-data-bucket/<instrument-id>/<run-id>/<filename>` for every seeded run on those instruments, so navigating to `/instruments/seed-qpcr/runs/seed-run-1` shows a real CSV in the file browser, the colony / plate-reader viewers fetch real bytes via `/api/v1/files/<id>/download`, and PNG / TIFF / PDF previews on `RunReportSection` render without 404s.
+
+For instrument types without a fixture (or new file types you're adding components for), the existing CLI flow stays the same: run `data-hub-process handler <instrument-id> <run-id> <filename> --source <FILE>` and the dashboard picks up the file the moment the API row lands.
+
+Components don't need to change — every existing run viewer already fetches `/api/v1/files/<id>/download`, which 302s to whatever `getPresignedDownloadUrl` returns. New custom components for a specific instrument should follow the same pattern (`fetch("/api/v1/files/<id>/download")` for raw bytes, `<img src="/api/v1/files/<id>/download">` for images) and inherit local-mirror support automatically.
+
+A few details worth knowing:
+
+- Adding fixtures for more instruments is one entry in `INSTRUMENT_FIXTURES` in [web/lib/db/seed.ts](../web/lib/db/seed.ts), pointing at any file under `lambda/tests/fixtures/`.
+- The route is gated on `NODE_ENV !== "production"` AND `LOCAL_S3_MIRROR` set; either condition unmet returns 404 unconditionally, so a production build can never expose the filesystem.
+- The MCP tool at `/api/v1/mcp` returns a relative `/api/_local-s3/...` URL when the mirror is active — browsers resolve it against the current origin, but non-browser MCP clients on localhost may need to prefix with `http://localhost:3000`.
 
 ## Where the seed lives
 
