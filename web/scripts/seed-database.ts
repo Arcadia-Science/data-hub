@@ -17,10 +17,13 @@ import {
   clearAll,
   seedArchiveJobs,
   seedDevUser,
+  seedInstrumentSubscriptions,
   seedInstruments,
+  seedNotifications,
   seedRunAttributions,
   seedRunComments,
   seedRuns,
+  seedTeammates,
   seedWatcherReleaseConfig,
   seedWatchers,
   type SeededRun,
@@ -28,14 +31,9 @@ import {
 import "dotenv/config";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+import { assertLocalDatabaseUrl } from "./assert-local-db";
 
-const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) {
-  console.error(
-    "DATABASE_URL is not set. Add it to web/.env or export it before running this script."
-  );
-  process.exit(1);
-}
+const databaseUrl = assertLocalDatabaseUrl("db:seed");
 
 const client = postgres(databaseUrl);
 const db = drizzle(client, { schema });
@@ -75,6 +73,26 @@ await seedRunAttributions(db, runs, userId);
 
 console.log("Seeding archive_jobs…");
 await seedArchiveJobs(db, runs, userId);
+
+console.log("Seeding teammate users (notification actors)…");
+const teammates = await seedTeammates(db, 2);
+
+console.log("Seeding instrument subscriptions for the dev user…");
+await seedInstrumentSubscriptions(
+  db,
+  userId,
+  activeInstruments.map((i) => i.id)
+);
+
+console.log("Seeding notifications (run_created + comment rows)…");
+const notifResult = await seedNotifications(db, {
+  recipientUserId: userId,
+  runs,
+  teammates,
+});
+console.log(
+  `  ${notifResult.total} notifications inserted (${notifResult.unread} unread).`
+);
 
 await client.end();
 

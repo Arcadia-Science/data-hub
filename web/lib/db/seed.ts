@@ -353,6 +353,238 @@ export async function seedRunAttributions(
 }
 
 // ---------------------------------------------------------------------------
+// Teammates — additional users (no PATs) that act as comment authors so the
+// dev user receives `comment_attributed` / `comment_participated`
+// notifications with realistic actor avatars + names. PATs are skipped on
+// purpose: these accounts are populated for UI exercise, not for API
+// scripting.
+// ---------------------------------------------------------------------------
+
+export type SeededTeammate = { id: string; name: string; email: string };
+
+// Fixed preset list (rather than randomized) so reseeds produce stable
+// identities — screenshots / bug reports referencing "Lucy" keep matching
+// after a `db:reseed`.
+const TEAMMATE_PRESETS: Array<Omit<SeededTeammate, "id">> = [
+  { name: "Lucy Hurlbut", email: "lucy@local" },
+  { name: "Marcus Chen", email: "marcus@local" },
+  { name: "Priya Patel", email: "priya@local" },
+];
+
+export async function seedTeammates(
+  db: Db,
+  count: number = 2
+): Promise<SeededTeammate[]> {
+  const chosen = TEAMMATE_PRESETS.slice(0, Math.max(0, count));
+  if (chosen.length === 0) return [];
+  const rows = chosen.map((preset) => ({
+    id: crypto.randomUUID(),
+    name: preset.name,
+    email: preset.email,
+    isAdmin: false,
+  }));
+  await db.insert(schema.users).values(rows);
+  return rows.map((r) => ({ id: r.id, name: r.name, email: r.email }));
+}
+
+// ---------------------------------------------------------------------------
+// Per-(user, instrument) `run_created` subscriptions. Seeded so the
+// /settings/notifications form renders with a believable mix of enabled +
+// disabled toggles instead of every row defaulting to off.
+// ---------------------------------------------------------------------------
+
+export async function seedInstrumentSubscriptions(
+  db: Db,
+  userId: string,
+  instrumentIds: string[],
+  enabledCount?: number
+): Promise<void> {
+  if (instrumentIds.length === 0) return;
+  // Default: roughly the first half of the list enabled, the rest left as
+  // explicit `enabled = false` rows so the toggle is materialised in the
+  // settings page (rather than relying on the missing-row fallback).
+  const cutoff = enabledCount ?? Math.ceil(instrumentIds.length / 2);
+  const rows = instrumentIds.map((instrumentId, idx) => ({
+    userId,
+    instrumentId,
+    enabled: idx < cutoff,
+  }));
+  await db.insert(schema.instrumentNotificationSubscriptions).values(rows);
+}
+
+// ---------------------------------------------------------------------------
+// Notifications — a believable steady state for the bell popover:
+//   - Today bucket: two comment notifications from the same teammate so the
+//     "mentioned you" + follow-up pattern (mirroring the design mock) lands
+//     under the TODAY header.
+//   - Yesterday bucket: three groups of `run_created` notifications (3 + 3
+//     + 2 rows across three different instruments) so the grouped-row
+//     variant of the popover renders with a comma-separated run-id list
+//     under each instrument heading.
+//   - Earlier bucket: one already-read `comment_participated` row so the
+//     read-vs-unread visual contrast and the "Earlier" section both show
+//     up after the first popover open.
+//
+// All notifications target a single recipient (the dev user). Comments
+// authored by the teammates are inserted here as well so the popover can
+// surface their body preview without depending on `seedRunComments`
+// having already inserted teammate comments — that builder only seeds
+// dev-user comments to satisfy the comment_participated precondition.
+// ---------------------------------------------------------------------------
+
+export type SeededNotifications = {
+  total: number;
+  unread: number;
+};
+
+export async function seedNotifications(
+  db: Db,
+  input: {
+    recipientUserId: string;
+    runs: SeededRun[];
+    teammates: SeededTeammate[];
+  }
+): Promise<SeededNotifications> {
+  const { recipientUserId, runs, teammates } = input;
+  if (runs.length === 0 || teammates.length === 0) {
+    return { total: 0, unread: 0 };
+  }
+
+  const now = new Date();
+  const HOUR = 60 * 60_000;
+  const DAY = 24 * HOUR;
+  // Anchor against the calendar boundary so the seeded `createdAt`s always
+  // land in the intended popover bucket regardless of the wall-clock time
+  // a developer runs `db:seed`.
+  const startOfToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate()
+  );
+
+  // Group seeded runs by instrument so we can carve out per-instrument
+  // batches for the grouped `run_created` rows.
+  const runsByInstrument = new Map<string, SeededRun[]>();
+  for (const run of runs) {
+    const list = runsByInstrument.get(run.instrumentId) ?? [];
+    list.push(run);
+    runsByInstrument.set(run.instrumentId, list);
+  }
+  const instrumentIds = [...runsByInstrument.keys()];
+
+  type NotifInsert = typeof schema.notifications.$inferInsert;
+  const notifRows: NotifInsert[] = [];
+
+  // -------------------------------------------------------------------------
+  // Teammate-authored comments + matching `comment_attributed` rows.
+  // Pre-allocating the comment UUIDs lets us batch the notification insert
+  // below without a round-trip to fetch the comment ids back.
+  // -------------------------------------------------------------------------
+
+  const primaryTeammate = teammates[0];
+  const todayCommentTargets = runs.slice(0, 2);
+  const todayCommentBodies = [
+    `@dev can you take a look at the OD readings on plate 3? Something looks off…`,
+    `Nevermind — I see what happened. The well was contaminated.`,
+  ];
+
+  type CommentInsert = typeof schema.runComments.$inferInsert;
+  const todayComments: CommentInsert[] = todayCommentTargets.map((run, i) => ({
+    id: crypto.randomUUID(),
+    runId: run.id,
+    userId: primaryTeammate.id,
+    body: todayCommentBodies[i],
+    // Both ~20h ago — same actor + same day mirrors the design mock.
+    createdAt: new Date(now.getTime() - (20 - i * 0.25) * HOUR),
+  }));
+  await db.insert(schema.runComments).values(todayComments);
+
+  for (const comment of todayComments) {
+    notifRows.push({
+      userId: recipientUserId,
+      type: "comment_attributed",
+      runId: comment.runId,
+      commentId: comment.id ?? null,
+      actorUserId: comment.userId,
+      createdAt: comment.createdAt,
+      readAt: null,
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Yesterday: grouped `run_created` rows across three instruments. The
+  // popover collapses notifications sharing (bucket, instrumentId) into a
+  // single row, so emitting 3 / 3 / 2 here yields three grouped rows.
+  // -------------------------------------------------------------------------
+
+  // Within "yesterday" the bell sorts the group by latest createdAt; we
+  // stamp these between 6PM and 6AM yesterday so the bucket assignment is
+  // unambiguous regardless of `now`.
+  const yesterdayBaseline = new Date(startOfToday.getTime() - 6 * HOUR);
+
+  const groupBatches: Array<{ instrumentIdx: number; count: number }> = [
+    { instrumentIdx: 0, count: 3 },
+    { instrumentIdx: 1, count: 3 },
+    { instrumentIdx: 2, count: 2 },
+  ];
+
+  groupBatches.forEach((batch, batchIdx) => {
+    const instrumentId = instrumentIds[batch.instrumentIdx];
+    if (!instrumentId) return;
+    const pool = runsByInstrument.get(instrumentId) ?? [];
+    const picks = pool.slice(0, batch.count);
+    picks.forEach((run, i) => {
+      notifRows.push({
+        userId: recipientUserId,
+        type: "run_created",
+        runId: run.id,
+        // Stagger each group's stamps within a separate ~1h window so the
+        // grouped row's "latest" anchor differs between batches and the
+        // ordering inside the popover stays deterministic.
+        createdAt: new Date(
+          yesterdayBaseline.getTime() - (batchIdx * HOUR + i * 5 * 60_000)
+        ),
+        readAt: null,
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Earlier: one already-read `comment_participated` row to exercise both
+  // the "Earlier" bucket and the read-row treatment (dimmed background, no
+  // left rail). The dev user has a seeded comment on every run via
+  // `seedRunComments`, so any run qualifies for the participated trigger.
+  // -------------------------------------------------------------------------
+
+  const earlierTarget = runs[Math.min(4, runs.length - 1)];
+  const earlierReply: CommentInsert = {
+    id: crypto.randomUUID(),
+    runId: earlierTarget.id,
+    userId: primaryTeammate.id,
+    body: "Following up — do you want to re-run with fresh standards before we sign this off?",
+    createdAt: new Date(startOfToday.getTime() - 3 * DAY),
+  };
+  await db.insert(schema.runComments).values([earlierReply]);
+
+  notifRows.push({
+    userId: recipientUserId,
+    type: "comment_participated",
+    runId: earlierTarget.id,
+    commentId: earlierReply.id ?? null,
+    actorUserId: primaryTeammate.id,
+    createdAt: earlierReply.createdAt,
+    // Marked read so the popover renders both a read and the unread rows
+    // above for visual contrast.
+    readAt: new Date(startOfToday.getTime() - 2 * DAY),
+  });
+
+  await db.insert(schema.notifications).values(notifRows);
+
+  const unread = notifRows.filter((r) => r.readAt == null).length;
+  return { total: notifRows.length, unread };
+}
+
+// ---------------------------------------------------------------------------
 // Archive jobs — one row in each lifecycle state so the download-archive UI
 // renders every variant.
 // ---------------------------------------------------------------------------
