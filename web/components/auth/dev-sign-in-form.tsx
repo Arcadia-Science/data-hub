@@ -28,6 +28,9 @@ export function DevSignInForm({
       <form
         action={async (formData: FormData) => {
           "use server";
+          if (process.env.NODE_ENV === "production") {
+            throw new Error("Dev sign-in is disabled in production");
+          }
           const email = formData.get("email");
           await signIn("dev", {
             email: typeof email === "string" ? email : "",
