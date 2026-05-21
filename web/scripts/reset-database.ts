@@ -2,8 +2,11 @@ import "dotenv/config";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+import { assertLocalDatabaseUrl } from "./assert-local-db";
 
-const client = postgres(process.env.DATABASE_URL!);
+const databaseUrl = assertLocalDatabaseUrl("db:reset");
+
+const client = postgres(databaseUrl);
 const db = drizzle(client);
 
 console.log("Dropping public schema…");

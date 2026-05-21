@@ -31,14 +31,9 @@ import {
 import "dotenv/config";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+import { assertLocalDatabaseUrl } from "./assert-local-db";
 
-const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) {
-  console.error(
-    "DATABASE_URL is not set. Add it to web/.env or export it before running this script."
-  );
-  process.exit(1);
-}
+const databaseUrl = assertLocalDatabaseUrl("db:seed");
 
 const client = postgres(databaseUrl);
 const db = drizzle(client, { schema });
