@@ -83,6 +83,13 @@ dev:
 db-reseed:
 	cd web && npm run db:reseed
 
+# Re-run the post-seed handler step that drives `data-hub-process handler`
+# over each fixture-bearing run. Use this when `make db-reseed` ran before
+# `make dev` was up — the seed itself prints this hint when it skips.
+.PHONY: db-process-fixtures
+db-process-fixtures:
+	cd web && npm run db:process-fixtures
+
 .PHONY: fe-build
 fe-build:
 	cd web && npm run build

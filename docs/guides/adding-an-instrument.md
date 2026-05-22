@@ -113,6 +113,8 @@ Add unit tests in `lambda/tests/` for the new processor. Integration tests will 
 
 For a quick end-to-end smoke against your local web app — without S3, AWS credentials, or LocalStack — use `data-hub-process handler` to drive `lambda_handler` against a gitignored local mirror. See [Testing the Lambda end-to-end](../local-development.md#testing-the-lambda-end-to-end).
 
+If your instrument has a representative fixture (small, redistributable) you can also wire it into the dev seed: drop the file under `lambda/tests/fixtures/`, then add paired entries to `INSTRUMENT_FIXTURES` and `CANONICAL_INSTRUMENT_ID` in [web/lib/db/seed.ts](../../web/lib/db/seed.ts). Every `make db-reseed` will then drive your `process_file` end-to-end so the new instrument's runs render real bytes (and processed artifacts) in the dashboard immediately.
+
 ### 4.5 Configure the S3 trigger
 
 Add a `LambdaConfiguration` entry to the `RawDataBucket` resource's `NotificationConfiguration` in `infra/template.yaml`. Each entry specifies a prefix (the instrument ID) and a suffix (the file extension):
