@@ -42,6 +42,31 @@ _OFF_NUM_WELLS = 12
 
 _ROW_LABELS = "ABCDEFGHIJKLMNOP"
 
+# SoftMax Pro substitutes a short non-numeric token for the well value when
+# the instrument couldn't produce a usable reading:
+#
+#   - ``Path?``  PathCheck pathlength correction failed (typically an empty
+#                or low-volume well that breaks the NIR-ratio measurement).
+#   - ``Range?`` Reading was outside the detector's dynamic range.
+#
+# These wells are preserved in the parsed DataFrame with ``value=NaN`` so
+# that downstream code can distinguish a "well was attempted but failed"
+# from a "well was never read" (which remains absent from the output).
+_WELL_VALUE_SENTINELS = frozenset({"Path?", "Range?"})
+
+
+def _parse_well_value(val_str: str) -> float:
+    """Convert a SpectraMax well-cell string to a float.
+
+    Returns ``NaN`` for documented non-numeric sentinels emitted by
+    SoftMax Pro (see :data:`_WELL_VALUE_SENTINELS`). Any other
+    non-numeric token is treated as a parser bug and re-raises
+    :class:`ValueError`.
+    """
+    if val_str in _WELL_VALUE_SENTINELS:
+        return float("nan")
+    return float(val_str)
+
 
 def _parse_wavelengths(raw: str) -> tuple[int, ...]:
     """Parse a space-separated wavelength string like ``'750'`` or ``'750 600'``."""
@@ -236,7 +261,11 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
     """Parse raw well readings from a SpectraMax `.xls` file into long form.
 
     Each row in the returned DataFrame represents a single well reading.
-    Wells with no data (empty cells) are omitted.
+    Wells with no data (empty cells) are omitted. Wells where SoftMax Pro
+    emitted a non-numeric sentinel (e.g. ``Path?`` for a PathCheck
+    pathlength failure, ``Range?`` for out-of-range) are kept with
+    ``value=NaN`` so the failed well is still visible to downstream
+    consumers.
 
     Returns:
         A :class:`~pandas.DataFrame` with columns:
@@ -249,7 +278,9 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
         well_position  str     e.g. "A1", "H12"
         temperature_c  float?  Celsius; shared across all wells in a
                                reading group
-        value          float   Raw instrument reading
+        value          float   Raw instrument reading; ``NaN`` for wells
+                               whose value was a SoftMax Pro sentinel
+                               such as ``Path?`` or ``Range?``.
         row_label      str     e.g. "A"
         column_label   int     e.g. 1
         wavelength     int?    Nanometres; `None` when not reported
@@ -303,7 +334,7 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
                             "plate_name": header.plate_name,
                             "well_position": f"{row_label}{column_label}",
                             "temperature_c": temp_val,
-                            "value": float(val_str),
+                            "value": _parse_well_value(val_str),
                             "row_label": row_label,
                             "column_label": column_label,
                             "wavelength": wl,
@@ -353,7 +384,7 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
                                     "plate_name": header.plate_name,
                                     "well_position": f"{row_label}{column_label}",
                                     "temperature_c": temp_val,
-                                    "value": float(val_str),
+                                    "value": _parse_well_value(val_str),
                                     "row_label": row_label,
                                     "column_label": column_label,
                                     "wavelength": wl,
