@@ -132,7 +132,7 @@ Some features depend on services that aren't running in this workflow. Each one 
 | Run archive ("Download all") | 503 "Archive builder is not configured" | Set `LAMBDA_FUNCTION_URL` + `S3_ARCHIVES_BUCKET` and grant `lambda:InvokeFunctionUrl` |
 | File reprocessing | The reprocess endpoint returns null and no Lambda is invoked | Same |
 | Slack notifications on new runs | `console.warn` only, no HTTP call | Set `SLACK_WEBHOOK_URL` |
-| Watcher uploads → Lambda → API loop | Not exercised end-to-end; the seed inserts the resulting rows directly. For Lambda-only smoke testing, see [Testing the Lambda end-to-end](#testing-the-lambda-end-to-end) below | Run the watcher (`docs/watcher.md`) and the Lambda (`docs/lambda.md`) end-to-end |
+| Watcher uploads → Lambda → API loop | Not exercised end-to-end; the seed inserts the resulting rows directly. For Lambda-only smoke testing, see [Testing the Lambda end-to-end](#testing-the-lambda-end-to-end) below | Run the watcher (`docs/reference/watcher.md`) and the Lambda (`docs/reference/lambda.md`) end-to-end |
 | Sign in with Google | The button still renders but OAuth callback will 4xx without `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | `vercel env pull` per `docs/getting-started.md` |
 
 ## Testing the Lambda end-to-end
@@ -225,5 +225,5 @@ The same builders back the integration test harness in [web/tests/integration/he
 
 - [Getting started](getting-started.md) — full setup with real Google OAuth and AWS credentials.
 - [Architecture](architecture.md) — system overview and data flow.
-- [REST API](api.md) — endpoint reference for the seeded PAT.
-- [MCP server](mcp.md) — Model Context Protocol tools at `/api/v1/mcp`.
+- [REST API](reference/api.md) — endpoint reference for the seeded PAT.
+- [MCP server](reference/mcp.md) — Model Context Protocol tools at `/api/v1/mcp`.

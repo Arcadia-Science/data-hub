@@ -30,7 +30,7 @@ uv run data-hub-watcher init
 uv run data-hub-watcher watch
 ```
 
-For lab-PC installs (PyPI), see [Installing a watcher](guides/installing-a-watcher.md). For releasing new versions and how the in-place upgrade flow works (CLI `self-update` and the Windows-service auto-updater), see [Upgrading the watcher](guides/upgrading-the-watcher.md).
+For lab-PC installs (PyPI), see [Installing a watcher](../guides/installing-a-watcher.md). For releasing new versions and how the in-place upgrade flow works (CLI `self-update` and the Windows-service auto-updater), see [Upgrading the watcher](../guides/upgrading-the-watcher.md).
 
 ## Commands
 
@@ -68,7 +68,7 @@ While running:
 - **Uploader** requests a presigned S3 URL from the API and uploads each file via HTTP PUT (auto mode), or polls the server's upload queue (manual mode). The watcher does not need AWS credentials. Each upload retries up to 3 times with exponential backoff (1, 2, 4 s) and is recorded locally with its SHA-256 so retries and restarts don't re-upload the same bytes. In manual mode, queue-poll failures are throttled (1st failure, then every 10th) to keep a sustained outage visible without flooding the events stream.
 - **Heartbeat loop** sends periodic heartbeats (every 60 seconds) to the API. The payload includes the watcher version, instrument ID, watch directory, upload mode, per-interval activity counters, and process uptime; a final `status="stopped"` heartbeat is sent on graceful shutdown. In manual mode, the tick also polls the upload queue.
 - **Event reporter** batches and flushes lifecycle events (started, stopped, file uploaded, errors) to the API. See [Observability](#observability) for the full taxonomy.
-- **Auto-updater** runs from the same heartbeat tick on every platform — not only Windows services. It polls `GET /watchers/:id/update-check` roughly hourly and applies new releases when the watcher has been idle long enough not to clobber an in-flight run. The full activity-window guard, mandatory-update behavior, and rollback flow are documented in [Upgrading the watcher](guides/upgrading-the-watcher.md); auto-update is hard-disabled in the `preview` environment.
+- **Auto-updater** runs from the same heartbeat tick on every platform — not only Windows services. It polls `GET /watchers/:id/update-check` roughly hourly and applies new releases when the watcher has been idle long enough not to clobber an in-flight run. The full activity-window guard, mandatory-update behavior, and rollback flow are documented in [Upgrading the watcher](../guides/upgrading-the-watcher.md); auto-update is hard-disabled in the `preview` environment.
 
 Use `--dry-run` to validate config and preview what would happen without starting the monitor.
 
@@ -122,7 +122,7 @@ Manage the watcher as a Windows service:
 
 ### `self-update`
 
-Checks the API for a newer published version and runs the appropriate `uv tool install --reinstall` (or `pip install -U`) subprocess in place. See [Upgrading the watcher](guides/upgrading-the-watcher.md) for the supported install methods, the activity-window guard, mandatory updates, and rollback flow.
+Checks the API for a newer published version and runs the appropriate `uv tool install --reinstall` (or `pip install -U`) subprocess in place. See [Upgrading the watcher](../guides/upgrading-the-watcher.md) for the supported install methods, the activity-window guard, mandatory updates, and rollback flow.
 
 ## Configuration
 

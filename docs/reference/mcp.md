@@ -8,7 +8,7 @@ The server lives at `/api/v1/mcp` on the same Next.js deployment that serves the
 
 The MCP server accepts **Bearer tokens only** — session cookies are not supported. Create a personal access token in the web app at **Settings > Access Tokens**, then pass it in the `Authorization: Bearer <token>` header when configuring your client.
 
-See [Managing tokens](guides/managing-tokens.md) for details on creating, using, and revoking tokens.
+See [Managing tokens](../guides/managing-tokens.md) for details on creating, using, and revoking tokens.
 
 ## Installation
 

@@ -4,7 +4,7 @@ The "Download all" actions on the run detail page and the runs table deliver eve
 
 Each archive can mix files from the raw bucket and the processed bucket in a single zip. This matters for instruments that produce processed artifacts via Lambda preprocessing (SpectraMax raw `.xls` → processed CSV; Hina `.nd2` → processed JPG; Azure 600 Gel Doc `.tif` → processed PNG): the run's file rows reference both buckets, and "Download all" zips them together.
 
-This page covers the end-to-end flow, the cache + dedup model, and the on-call runbook. For the Lambda invocation contract, see [Lambda → Function URL (archive build)](lambda.md#function-url-archive-build). For the HTTP endpoints, see [REST API → Archive jobs](api.md#archive-jobs).
+This page covers the end-to-end flow, the cache + dedup model, and the on-call runbook. For the Lambda invocation contract, see [Lambda → Function URL (archive build)](../reference/lambda.md#function-url-archive-build). For the HTTP endpoints, see [REST API → Archive jobs](../reference/api.md#archive-jobs).
 
 ## Flow
 
@@ -29,7 +29,7 @@ Every cache miss goes async, regardless of archive size. The route does the chea
 
 ## S3 layout
 
-Archives live in a separate bucket per environment, provisioned by [`infra/template.yaml`](../infra/template.yaml):
+Archives live in a separate bucket per environment, provisioned by [`infra/template.yaml`](../../infra/template.yaml):
 
 - **Bucket:** `arcadia-data-hub-archives-{staging,production}`.
 - **Public access:** fully blocked. Reads happen exclusively via short-lived presigned GET URLs; writes happen exclusively from the Lambda execution role.
