@@ -1,4 +1,5 @@
 from __future__ import annotations
+import math
 from pathlib import Path
 
 import pytest
@@ -332,6 +333,52 @@ class TestDualWavelength:
         assert (self.df["temperature_c"] == 25.0).all()
 
 
+class TestNonNumericSentinels:
+    """SoftMax Pro emits ``Path?`` (PathCheck pathlength correction failed)
+    and ``Range?`` (out of dynamic range) in place of a numeric value when
+    the instrument couldn't produce a usable reading. Those wells should
+    be preserved with ``value=NaN``, while truly empty cells continue to
+    be omitted entirely.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _load(self, tmp_path: Path) -> None:
+        prefix = "Plate:\tPlate1\t1.3\tPlateFormat"
+        # Use 'Reduced' so the synthetic file matches real pathlength-corrected
+        # exports (where 'Path?' originates) — the parser treats Raw/Reduced
+        # interchangeably, but this keeps the fixture faithful.
+        middle = "\tReduced\tFALSE\t1\t\t\t\t\t\t1"
+        header = f"{prefix}\tEndpoint\tAbsorbance{middle}\t750\t1\t3\t6\t1\t2\n"
+        col_header = "\t\t1\t2\t3\t\n"
+        # A1=numeric, A2=Path?, A3=empty (omitted)
+        # B1=Range?, B2=numeric, B3=Path?
+        row_a = "\t25.0\t0.10\tPath?\t\t\n"
+        row_b = "\t\tRange?\t0.40\tPath?\t\n"
+        content = f"##BLOCKS= 1\n{header}{col_header}{row_a}{row_b}\n~End\n"
+        path = tmp_path / "sentinels.xls"
+        path.write_text(content, encoding="utf-16")
+        self.df = parse_raw_well_data(path)
+
+    def test_empty_cells_omitted_but_sentinels_kept(self) -> None:
+        # 5 wells: A1, A2 (Path?), B1 (Range?), B2, B3 (Path?). A3 is empty.
+        assert self.df["well_position"].tolist() == ["A1", "A2", "B1", "B2", "B3"]
+
+    def test_numeric_values_unaffected(self) -> None:
+        a1 = self.df[self.df["well_position"] == "A1"].iloc[0]
+        b2 = self.df[self.df["well_position"] == "B2"].iloc[0]
+        assert a1["value"] == pytest.approx(0.10)
+        assert b2["value"] == pytest.approx(0.40)
+
+    def test_path_sentinel_becomes_nan(self) -> None:
+        for well in ("A2", "B3"):
+            value = self.df[self.df["well_position"] == well].iloc[0]["value"]
+            assert math.isnan(value), f"expected NaN for {well}, got {value!r}"
+
+    def test_range_sentinel_becomes_nan(self) -> None:
+        value = self.df[self.df["well_position"] == "B1"].iloc[0]["value"]
+        assert math.isnan(value)
+
+
 # ---------------------------------------------------------------------------
 # Error handling
 # ---------------------------------------------------------------------------
@@ -342,4 +389,19 @@ class TestParseRawWellDataValidation:
         path = tmp_path / "empty.xls"
         path.write_text("##BLOCKS= 1\n~End\n", encoding="utf-16")
         with pytest.raises(ValueError, match="No 'Plate:' header line found"):
+            parse_raw_well_data(path)
+
+    def test_unknown_non_numeric_token_still_raises(self, tmp_path: Path) -> None:
+        # Anything that isn't a documented SoftMax Pro sentinel (Path?,
+        # Range?) should still surface as a ValueError — silently swallowing
+        # arbitrary garbage would hide real parser bugs.
+        prefix = "Plate:\tPlate1\t1.3\tPlateFormat"
+        middle = "\tRaw\tFALSE\t1\t\t\t\t\t\t1"
+        header = f"{prefix}\tEndpoint\tAbsorbance{middle}\t750\t1\t1\t1\t1\t1\n"
+        col_header = "\t\t1\t\n"
+        row_a = "\t25.0\tnotanumber\t\n"
+        content = f"##BLOCKS= 1\n{header}{col_header}{row_a}\n~End\n"
+        path = tmp_path / "garbage.xls"
+        path.write_text(content, encoding="utf-16")
+        with pytest.raises(ValueError, match="could not convert string to float"):
             parse_raw_well_data(path)
