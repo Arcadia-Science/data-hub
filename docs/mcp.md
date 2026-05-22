@@ -78,7 +78,7 @@ All tools return JSON encoded as a single text content block. Error cases set `i
 | `search_runs` | Paginated search across runs with filtering, sorting, and date range. Supports plate-reader metadata filters (`wavelength`, `measurementMode`, `measurementType`) and attribution filtering via `ranBy` (a user id or the literal `"unattributed"`). |
 | `get_run` | Get a single run by its natural key (`instrumentId` + `runId`). |
 | `list_run_files` | List all files attached to a run, including processing status and metadata. Use `get_file_download_url` on processed CSV files to access experimental results. |
-| `get_run_archive_path` | Get the API path that streams a ZIP archive of all uploaded files for a run. Prepend the Data Hub origin and authenticate with the same Bearer token to download. |
+| `get_run_archive` | Get a downloadable ZIP archive of all uploaded files for a run. Returns a 15-minute pre-signed S3 URL on a cache hit (clickable in a browser, no auth required), or a `building` job + `retryAfterSeconds` hint on a miss — call again after the suggested wait to poll. |
 
 Both `get_run` and `search_runs` responses embed an `attributions` array on each run, listing the users who have claimed it (user id, display name, initials, avatar URL). No separate read tool is needed to inspect who ran a run.
 
@@ -148,7 +148,7 @@ The Bearer token is missing, mistyped, revoked, or expired. Verify the token at 
 - Restart the client after editing — most clients don't hot-reload MCP server definitions.
 - Hit `https://data-hub.arcadiascience.com/api/v1/mcp` with `curl -H "Authorization: Bearer <token>"` to confirm the endpoint responds.
 
-### `get_file_download_url` vs. `get_run_archive_path`
+### `get_file_download_url` vs. `get_run_archive`
 
-- `get_file_download_url` returns a pre-signed S3 URL that anyone with the link can use for 15 minutes — no Data Hub credentials required on the follow-up request. Use this when handing a file to a user or an untrusted downstream tool.
-- `get_run_archive_path` returns a Data Hub API path. The archive endpoint streams the ZIP on demand and requires the same Bearer token the MCP session used. Use this when the downloader has the token (e.g., a script running in the same environment).
+- `get_file_download_url` returns a pre-signed S3 URL for a single file. Anyone with the link can fetch it for 15 minutes — no Data Hub credentials required on the follow-up request.
+- `get_run_archive` returns the same kind of pre-signed S3 URL, but for a multi-file ZIP archive of an entire run. On a cache miss the Lambda builds the archive asynchronously and the tool returns `{ status: "building", jobId, retryAfterSeconds }`; call the tool again after the suggested wait until you get back `{ status: "ready", downloadUrl }`. Like `get_file_download_url`, the URL itself carries the auth, so the resulting link is browser-clickable without the original Bearer token.

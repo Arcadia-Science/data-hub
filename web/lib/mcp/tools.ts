@@ -1,10 +1,6 @@
 import { getInstrumentSummaries } from "@/lib/api/dashboard";
 import { reprocessFile } from "@/lib/api/file-reprocessing";
-import {
-  countDownloadableRunFiles,
-  getActiveFileById,
-  lookupFileForDownload,
-} from "@/lib/api/files";
+import { getActiveFileById, lookupFileForDownload } from "@/lib/api/files";
 import {
   buildRunListQuery,
   getAttributionsByRunIds,
@@ -16,6 +12,7 @@ import {
   getInstrumentById,
   getInstrumentListWithCounts,
 } from "@/lib/api/instruments";
+import { prepareRunArchive } from "@/lib/api/run-archive";
 import { hasScope, type Scope } from "@/lib/api/scopes";
 import { getWatcherHeartbeats, getWatcherList } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
@@ -409,11 +406,14 @@ export function registerTools(server: McpServer) {
   );
 
   server.registerTool(
-    "get_run_archive_path",
+    "get_run_archive",
     {
-      title: "Get Run Archive Path",
+      title: "Get Run Archive",
       description:
-        "Get an API path that streams a ZIP archive of all active, uploaded files for a run. The returned path is relative to the Data Hub API host — prepend the Data Hub origin to produce a full URL. Unlike get_file_download_url, the archive endpoint requires the same Bearer token the client used for this MCP session; the path cannot be fetched anonymously.",
+        "Get a downloadable ZIP archive of every active, uploaded file in a run. " +
+        "If the archive is already cached, returns a short-lived (15 min) pre-signed S3 URL the caller can fetch directly without auth — paste it into a browser or share it as a download link. " +
+        "If the archive isn't cached, kicks off an async build and returns `{ status: 'building', jobId, retryAfterSeconds }`; call this tool again after the suggested wait to poll for completion. " +
+        "Most archives finish in a few seconds; large runs may take a minute or two. Mirrors the REST `download-archive` route, including its dedup-by-fingerprint cache, so concurrent callers share a single Lambda invocation.",
       inputSchema: {
         instrumentId: z.string().describe("Instrument identifier"),
         runId: z.string().describe("Run identifier within the instrument"),
@@ -424,32 +424,43 @@ export function registerTools(server: McpServer) {
       // Mirror the REST archive route which is gated on `files:read`.
       const scopeError = requireMcpScope(authInfo, "files:read");
       if (scopeError) return scopeError;
-      const run = await lookupRunByNaturalKey(instrumentId, runId);
-      if (!run) {
-        return errorResult(
-          `Run '${runId}' not found for instrument '${instrumentId}'.`
-        );
-      }
 
-      // Mirror the preflight check in the download-archive route so callers
-      // get a clear error instead of a 404 from the ZIP stream. The archive
-      // route only includes files that have actually been uploaded to S3.
-      const count = await countDownloadableRunFiles(run.id);
-      if (count === 0) {
-        return errorResult(
-          `Run '${runId}' has no downloadable files to archive.`
-        );
-      }
-
-      const archivePath = `/api/v1/instruments/${encodeURIComponent(
-        instrumentId
-      )}/runs/${encodeURIComponent(runId)}/download-archive`;
-
-      return textResult({
+      // Token-authenticated callers (every MCP request) don't have a
+      // session user to record against `archive_jobs.created_by`, even
+      // though the underlying user id is on `authInfo.extra`. Keep the
+      // audit column NULL for parity with the watcher/Lambda paths and
+      // to avoid a foreign-key surprise if the linked user is later
+      // deleted.
+      const result = await prepareRunArchive({
         instrumentId,
         runId,
-        archivePath,
-        contentType: "application/zip",
+        createdBy: null,
+      });
+
+      if (!result.ok) {
+        return errorResult(result.message);
+      }
+
+      if (result.status === "ready") {
+        return textResult({
+          status: "ready",
+          instrumentId,
+          runId,
+          downloadUrl: result.downloadUrl,
+          filename: result.filename,
+          sizeBytes: result.sizeBytes,
+          expiresInSeconds: result.expiresInSeconds,
+          contentType: "application/zip",
+        });
+      }
+
+      return textResult({
+        status: "building",
+        instrumentId,
+        runId,
+        jobId: result.jobId,
+        retryAfterSeconds: result.retryAfterSeconds,
+        hint: "Call get_run_archive again after the suggested wait to retrieve the download URL.",
       });
     }
   );

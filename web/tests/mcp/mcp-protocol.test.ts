@@ -176,7 +176,23 @@ vi.mock("@/lib/api/files", () => ({
     }
     return { ok: false, reason: "not_found" };
   }),
-  countDownloadableRunFiles: vi.fn().mockResolvedValue(3),
+}));
+
+// `prepareRunArchive` owns the cache-hit / build-kickoff branch on the
+// MCP `get_run_archive` tool. The default mock returns a `ready`
+// response so the happy-path test asserts on a presigned URL; the
+// "building" branch has its own override later in the suite.
+vi.mock("@/lib/api/run-archive", () => ({
+  prepareRunArchive: vi.fn().mockResolvedValue({
+    ok: true,
+    status: "ready",
+    downloadUrl: "https://s3.example.com/archive-signed-url",
+    sizeBytes: 4096,
+    filename: "run-1.zip",
+    expiresInSeconds: 900,
+    archiveBucket: "test-archives",
+    archiveKey: "runs/test-plate-reader/run-1/abc.zip",
+  }),
 }));
 
 vi.mock("@/lib/api/file-reprocessing", () => ({
@@ -248,7 +264,7 @@ describe("MCP Protocol (in-memory)", () => {
     "list_watchers",
     "get_file",
     "get_file_download_url",
-    "get_run_archive_path",
+    "get_run_archive",
     "reprocess_file",
     "get_watcher_heartbeats",
     "claim_run",
@@ -432,20 +448,70 @@ describe("MCP Protocol (in-memory)", () => {
     expect(parsed.expiresInSeconds).toBeGreaterThan(0);
   });
 
-  it("get_run_archive_path returns an archive path", async () => {
+  it("get_run_archive returns a presigned URL on cache hit", async () => {
     const result = await client.callTool({
-      name: "get_run_archive_path",
+      name: "get_run_archive",
       arguments: { instrumentId: "test-plate-reader", runId: "run-1" },
     });
     expect(result.isError).toBeFalsy();
     const parsed = parseText(result.content) as {
-      archivePath: string;
-      contentType: string;
+      status: string;
+      downloadUrl?: string;
+      filename?: string;
+      sizeBytes?: number;
+      expiresInSeconds?: number;
+      contentType?: string;
     };
-    expect(parsed.archivePath).toContain("/download-archive");
-    expect(parsed.archivePath).toContain("test-plate-reader");
-    expect(parsed.archivePath).toContain("run-1");
+    expect(parsed.status).toBe("ready");
+    expect(parsed.downloadUrl).toContain("s3.example.com");
+    expect(parsed.filename).toBe("run-1.zip");
+    expect(parsed.expiresInSeconds).toBe(900);
     expect(parsed.contentType).toBe("application/zip");
+  });
+
+  it("get_run_archive returns a job and retry hint while building", async () => {
+    const { prepareRunArchive } = await import("@/lib/api/run-archive");
+    vi.mocked(prepareRunArchive).mockResolvedValueOnce({
+      ok: true,
+      status: "building",
+      jobId: "job-abc",
+      ownsBuild: true,
+      retryAfterSeconds: 5,
+    });
+
+    const result = await client.callTool({
+      name: "get_run_archive",
+      arguments: { instrumentId: "test-plate-reader", runId: "run-1" },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as {
+      status: string;
+      jobId?: string;
+      retryAfterSeconds?: number;
+      hint?: string;
+    };
+    expect(parsed.status).toBe("building");
+    expect(parsed.jobId).toBe("job-abc");
+    expect(parsed.retryAfterSeconds).toBe(5);
+    expect(parsed.hint).toMatch(/get_run_archive/);
+  });
+
+  it("get_run_archive surfaces a clear error when no files are downloadable", async () => {
+    const { prepareRunArchive } = await import("@/lib/api/run-archive");
+    vi.mocked(prepareRunArchive).mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      message: "No downloadable files for this run",
+    });
+
+    const result = await client.callTool({
+      name: "get_run_archive",
+      arguments: { instrumentId: "test-plate-reader", runId: "run-empty" },
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content).toEqual([
+      { type: "text", text: "No downloadable files for this run" },
+    ]);
   });
 
   it("reprocess_file succeeds for a reprocessable file", async () => {
