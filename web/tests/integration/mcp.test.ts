@@ -151,7 +151,7 @@ describe("MCP Server (HTTP)", () => {
     expect(toolNames).toContain("list_run_files");
     expect(toolNames).toContain("get_file");
     expect(toolNames).toContain("get_file_download_url");
-    expect(toolNames).toContain("get_run_archive_path");
+    expect(toolNames).toContain("get_run_archive");
     expect(toolNames).toContain("get_system_status");
     expect(toolNames).toContain("list_watchers");
     expect(toolNames).toContain("get_watcher_heartbeats");

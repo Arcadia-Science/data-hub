@@ -208,7 +208,7 @@ Components don't need to change — every existing run viewer already fetches `/
 
 A few details worth knowing:
 
-- Adding fixtures for more instruments is one entry in `INSTRUMENT_FIXTURES` in [web/lib/db/seed.ts](../web/lib/db/seed.ts), pointing at any file under `lambda/tests/fixtures/`.
+- Adding fixtures for more instruments is two paired entries in [web/lib/db/seed.ts](../web/lib/db/seed.ts): an `INSTRUMENT_FIXTURES` row (`{ filename, contentType, runIds }`) pointing at any file under `lambda/tests/fixtures/`, and a `CANONICAL_INSTRUMENT_ID` mapping to the kebab-case id from `data_hub_shared.enums.Instrument`. Without the canonical id, the seed-time handler step rejects the instrument because `parse_s3_event` only accepts values from that enum.
 - The route is gated on `NODE_ENV !== "production"` AND `LOCAL_S3_MIRROR` set; either condition unmet returns 404 unconditionally, so a production build can never expose the filesystem.
 - The MCP tool at `/api/v1/mcp` returns a relative `/api/local-s3/...` URL when the mirror is active — browsers resolve it against the current origin, but non-browser MCP clients on localhost may need to prefix with `http://localhost:3000`.
 

@@ -74,10 +74,10 @@ Slack notifications are sent by the **web app** (`web/lib/slack.ts`), not the La
 
 ## Local processing CLI
 
-The `data-hub-process` CLI lets you run instrument-specific parsing and processing locally, without S3 or API access. This is useful for debugging processors against real files.
+The `data-hub-process` CLI lets you exercise instrument-specific parsing and processing locally. Most subcommands run a single processor in isolation against a file on disk and print the result; the `handler` subcommand drives `lambda_handler` end-to-end against a local S3 mirror and the dev API.
 
 ```sh
-uv run data-hub-process <command> <file>
+uv run data-hub-process <command> [args]
 ```
 
 Available commands:
@@ -90,12 +90,16 @@ Available commands:
 | `qpcr` | Parse dye channels from an Azure Cielo qPCR Cq Values CSV |
 | `spectramax` | Parse metadata and raw well data from a SpectraMax `.xls` export |
 | `tapestation` | Extract the tape type from a TapeStation CSV filename |
+| `handler` | Stage a file into a local S3 mirror and invoke `lambda_handler` against the local dev API. See [Testing the Lambda end-to-end](local-development.md#testing-the-lambda-end-to-end) for the workflow. |
 
-Example:
+The first six subcommands need no S3 or API access — they call into the same parsing/processing utilities the lambda uses, but stop short of the network. `handler` is different: it expects a running dev API and a `LOCAL_S3_MIRROR` directory, and uses the same dispatch path production uses.
+
+Examples:
 
 ```sh
 uv run data-hub-process gel-doc path/to/image.tif --output-dir out/
 uv run data-hub-process spectramax path/to/plate.xls
+uv run data-hub-process handler azure-cielo-qpcr Experiment_20260101 cq.csv --source ~/Downloads/cq.csv
 ```
 
 ## Docker build

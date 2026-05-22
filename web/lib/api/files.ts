@@ -64,16 +64,6 @@ export async function lookupFileForDownload(
   };
 }
 
-// Counts files in a run that are eligible for archive download (uploaded to
-// S3 and not soft-deleted). Matches the filter applied by the
-// download-archive route so callers can issue a meaningful preflight check.
-export async function countDownloadableRunFiles(
-  runInternalId: string
-): Promise<number> {
-  const summary = await summarizeDownloadableRunFiles(runInternalId);
-  return summary.count;
-}
-
 export type DownloadableRunFilesSummary = {
   count: number;
   // Sum of `size_bytes` across all matching files, or null when at least one
