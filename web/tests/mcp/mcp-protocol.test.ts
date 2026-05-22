@@ -211,6 +211,11 @@ vi.mock("@/lib/s3", () => ({
   getPresignedDownloadUrl: vi
     .fn()
     .mockResolvedValue("https://s3.example.com/signed-url"),
+  // Mirror the real export so consumers (e.g. `tools.ts`) that import
+  // it for the response payload see a numeric value instead of
+  // `undefined`. Tests that read `expiresInSeconds` off a tool result
+  // assert `> 0`, so any positive number works here.
+  PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS: 15 * 60,
 }));
 
 // ---------------------------------------------------------------------------

@@ -17,16 +17,14 @@ import { hasScope, type Scope } from "@/lib/api/scopes";
 import { getWatcherHeartbeats, getWatcherList } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { runAttributions } from "@/lib/db/schema";
-import { getPresignedDownloadUrl } from "@/lib/s3";
+import {
+  getPresignedDownloadUrl,
+  PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS,
+} from "@/lib/s3";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-
-// Pre-signed URLs issued via the MCP server use the same default window as
-// the REST download route (15 minutes). Exposed in the tool response so
-// clients know how long the link remains valid.
-const DOWNLOAD_URL_EXPIRES_IN_SECONDS = 15 * 60;
 
 function textResult(data: unknown) {
   return {
@@ -393,14 +391,14 @@ export function registerTools(server: McpServer) {
       const downloadUrl = await getPresignedDownloadUrl(
         lookup.s3Bucket,
         lookup.s3Key,
-        DOWNLOAD_URL_EXPIRES_IN_SECONDS
+        PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS
       );
 
       return textResult({
         fileId,
         filename: lookup.filename,
         downloadUrl,
-        expiresInSeconds: DOWNLOAD_URL_EXPIRES_IN_SECONDS,
+        expiresInSeconds: PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS,
       });
     }
   );

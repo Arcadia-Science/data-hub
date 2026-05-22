@@ -18,7 +18,13 @@ import { awsCredentialsProvider } from "@vercel/oidc-aws-credentials-provider";
 import { createReadStream } from "node:fs";
 import type { Readable } from "node:stream";
 
-const DEFAULT_DOWNLOAD_EXPIRY_SECONDS = 15 * 60; // 15 minutes
+// Canonical presigned-download window. Every download URL we hand out
+// (single-file via `get_file_download_url`, run archive via
+// `get_run_archive` / `download-archive`) shares this lifetime so callers
+// — UI, MCP clients, the docs — can describe a single "URLs are good for
+// 15 minutes" contract. Tests and the docs both pin against this constant
+// to avoid drift.
+export const PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS = 15 * 60;
 const DEFAULT_UPLOAD_EXPIRY_SECONDS = 60 * 60; // 1 hour — generous for large lab files over slow networks
 
 // Singleton client — reused across requests within the same function instance.
@@ -140,7 +146,7 @@ export async function getPresignedDownloadUrl(
   // Backwards-compat: callers that passed a bare `expiresIn` number still work.
   const opts: PresignedDownloadOptions =
     typeof options === "number" ? { expiresIn: options } : options;
-  const expiresIn = opts.expiresIn ?? DEFAULT_DOWNLOAD_EXPIRY_SECONDS;
+  const expiresIn = opts.expiresIn ?? PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS;
 
   // Local-mirror branch: return a same-origin URL that points at
   // `/api/local-s3/...`. The 302 in `/api/v1/files/[fileId]/download`

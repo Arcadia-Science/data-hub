@@ -14,14 +14,10 @@ import {
   getPresignedDownloadUrl,
   getS3ArchivesBucket,
   headS3Object,
+  PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS,
 } from "@/lib/s3";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { after } from "next/server";
-
-// Pre-signed URL window for cache-hit archives. Matches the per-file
-// download window so MCP clients see a uniform "URL good for ~15 min"
-// contract regardless of whether they fetched a single file or an archive.
-export const ARCHIVE_DOWNLOAD_URL_EXPIRES_IN_SECONDS = 15 * 60;
 
 // Hint to caller (LLM, polling UI) for how long to wait before checking
 // again. Sized to be longer than a small archive's typical build (which
@@ -155,7 +151,7 @@ export async function prepareRunArchive(
       archiveKey,
       {
         filename,
-        expiresIn: ARCHIVE_DOWNLOAD_URL_EXPIRES_IN_SECONDS,
+        expiresIn: PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS,
       }
     );
     return {
@@ -164,7 +160,7 @@ export async function prepareRunArchive(
       downloadUrl,
       sizeBytes: head.sizeBytes,
       filename,
-      expiresInSeconds: ARCHIVE_DOWNLOAD_URL_EXPIRES_IN_SECONDS,
+      expiresInSeconds: PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS,
       archiveBucket,
       archiveKey,
     };
