@@ -7,7 +7,7 @@
 // Kept in its own module so the AWS code path in `s3.ts` stays
 // untouched and so callers never need to know which implementation
 // they're hitting. The companion route at
-// `app/api/_local-s3/[bucket]/[...key]/route.ts` is the HTTP face of
+// `app/api/local-s3/[bucket]/[...key]/route.ts` is the HTTP face of
 // the same mirror; the lambda CLI's `data-hub-process handler`
 // command is the python-side writer.
 //
@@ -82,6 +82,11 @@ function sanitizeContentDispositionFilename(name: string): string {
 // `+` round-trips correctly through the `[...key]` catch-all in the
 // route handler. The bucket is encoded as a single segment.
 //
+// Note: the route lives at `/api/local-s3/...` (not `_local-s3`) —
+// the App Router treats folders prefixed with `_` as private and
+// excludes them from routing entirely, so a leading underscore
+// makes every request 404 before the handler runs.
+//
 // Returning a same-origin (relative) URL is intentional: every
 // browser-driven consumer (302 redirects, `<img src>`, `<a href>`,
 // `<iframe src>`) resolves it against the current origin, and
@@ -99,7 +104,7 @@ export function localMirrorDownloadUrl(
         `attachment; filename="${sanitizeContentDispositionFilename(filename)}"`
       )}`
     : "";
-  return `/api/_local-s3/${encodeURIComponent(bucket)}/${segments}${search}`;
+  return `/api/local-s3/${encodeURIComponent(bucket)}/${segments}${search}`;
 }
 
 export function localMirrorUploadUrl(bucket: string, key: string): string {

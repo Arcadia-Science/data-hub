@@ -128,7 +128,7 @@ Some features depend on services that aren't running in this workflow. Each one 
 | Feature | Behavior locally | How to enable |
 | --- | --- | --- |
 | File download | Served from `LOCAL_S3_MIRROR` if set (real bytes for seeded qPCR / gel doc / plate reader runs out of the box; other instruments staged via `data-hub-process handler`). 404s when unset. See [Working with file bytes locally](#working-with-file-bytes-locally) | Point S3 env vars at a real bucket or LocalStack/MinIO |
-| File upload (from watcher) | `request-upload-url` returns a same-origin URL routed to `/api/_local-s3/...`; `PUT` writes bytes into the mirror | Same |
+| File upload (from watcher) | `request-upload-url` returns a same-origin URL routed to `/api/local-s3/...`; `PUT` writes bytes into the mirror | Same |
 | Run archive ("Download all") | 503 "Archive builder is not configured" | Set `LAMBDA_FUNCTION_URL` + `S3_ARCHIVES_BUCKET` and grant `lambda:InvokeFunctionUrl` |
 | File reprocessing | The reprocess endpoint returns null and no Lambda is invoked | Same |
 | Slack notifications on new runs | `console.warn` only, no HTTP call | Set `SLACK_WEBHOOK_URL` |
@@ -178,7 +178,7 @@ The wiring lives in [lambda/src/data_hub_lambda/cli.py](../lambda/src/data_hub_l
 
 ## Working with file bytes locally
 
-`LOCAL_S3_MIRROR` makes the Next.js app share the same on-disk layout the lambda CLI writes to. When it's set (and `NODE_ENV != production`), the four helpers in [web/lib/s3.ts](../web/lib/s3.ts) — `getPresignedDownloadUrl`, `getPresignedUploadUrl`, `headS3Object`, `getS3ObjectStream` — short-circuit AWS and serve from disk. The HTTP face of the mirror is a single dev-only catch-all at [web/app/api/_local-s3/[bucket]/[...key]/route.ts](../web/app/api/_local-s3/%5Bbucket%5D/%5B...key%5D/route.ts) that handles GET (download with optional `Content-Disposition`) and PUT (writes bytes from the request body).
+`LOCAL_S3_MIRROR` makes the Next.js app share the same on-disk layout the lambda CLI writes to. When it's set (and `NODE_ENV != production`), the four helpers in [web/lib/s3.ts](../web/lib/s3.ts) — `getPresignedDownloadUrl`, `getPresignedUploadUrl`, `headS3Object`, `getS3ObjectStream` — short-circuit AWS and serve from disk. The HTTP face of the mirror is a single dev-only catch-all at [web/app/api/local-s3/[bucket]/[...key]/route.ts](../web/app/api/local-s3/%5Bbucket%5D/%5B...key%5D/route.ts) that handles GET (download with optional `Content-Disposition`) and PUT (writes bytes from the request body). Note the folder is `local-s3` (no leading underscore) — the App Router treats `_`-prefixed folders as private and excludes them from routing.
 
 What this gets you out of the box after `make db-reseed`:
 
@@ -199,7 +199,7 @@ A few details worth knowing:
 
 - Adding fixtures for more instruments is one entry in `INSTRUMENT_FIXTURES` in [web/lib/db/seed.ts](../web/lib/db/seed.ts), pointing at any file under `lambda/tests/fixtures/`.
 - The route is gated on `NODE_ENV !== "production"` AND `LOCAL_S3_MIRROR` set; either condition unmet returns 404 unconditionally, so a production build can never expose the filesystem.
-- The MCP tool at `/api/v1/mcp` returns a relative `/api/_local-s3/...` URL when the mirror is active — browsers resolve it against the current origin, but non-browser MCP clients on localhost may need to prefix with `http://localhost:3000`.
+- The MCP tool at `/api/v1/mcp` returns a relative `/api/local-s3/...` URL when the mirror is active — browsers resolve it against the current origin, but non-browser MCP clients on localhost may need to prefix with `http://localhost:3000`.
 
 ## Where the seed lives
 

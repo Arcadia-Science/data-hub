@@ -143,7 +143,7 @@ export async function getPresignedDownloadUrl(
   const expiresIn = opts.expiresIn ?? DEFAULT_DOWNLOAD_EXPIRY_SECONDS;
 
   // Local-mirror branch: return a same-origin URL that points at
-  // `/api/_local-s3/...`. The 302 in `/api/v1/files/[fileId]/download`
+  // `/api/local-s3/...`. The 302 in `/api/v1/files/[fileId]/download`
   // and any `<img>` / `<iframe>` consumer of the embedded
   // `download_url` field both resolve relative URLs against the
   // current origin, so no consumer needs to know we swapped backends.
@@ -191,7 +191,7 @@ export async function getPresignedUploadUrl(
   expiresIn: number = DEFAULT_UPLOAD_EXPIRY_SECONDS
 ): Promise<string> {
   // Local-mirror branch: return a same-origin URL routed to the
-  // `PUT` handler in `app/api/_local-s3/[bucket]/[...key]/route.ts`,
+  // `PUT` handler in `app/api/local-s3/[bucket]/[...key]/route.ts`,
   // which writes the request body to disk under the mirror root.
   // `contentType` is intentionally unused locally — the local route
   // doesn't enforce it the way a presigned PUT does.
