@@ -159,12 +159,16 @@ const INSTRUMENT_LABELS: Record<schema.InstrumentType, string> = {
 // `data-hub-process handler` against a seeded run with no path
 // rewriting. Other instrument types fall back to the cosmetic
 // `seed-<type>` id since they don't have a canonical pipeline yet.
-const CANONICAL_INSTRUMENT_ID: Partial<Record<schema.InstrumentType, string>> =
-  {
-    qpcr: "azure-cielo-qpcr",
-    gel_doc: "azure-600-gel-doc",
-    plate_reader: "spectramax-id3-plate-reader",
-  };
+//
+// Exported so `web/scripts/process-fixtures.ts` can map seeded rows
+// back to the same canonical ids when invoking the handler.
+export const CANONICAL_INSTRUMENT_ID: Partial<
+  Record<schema.InstrumentType, string>
+> = {
+  qpcr: "azure-cielo-qpcr",
+  gel_doc: "azure-600-gel-doc",
+  plate_reader: "spectramax-id3-plate-reader",
+};
 
 export async function seedInstruments(db: Db): Promise<SeededInstrument[]> {
   const rows: SeededInstrument[] = schema.VALID_INSTRUMENT_TYPES.map(
@@ -292,6 +296,12 @@ export type SeededRun = {
 
 const FILE_STATUSES = ["uploaded", "completed", "failed"] as const;
 
+export type InstrumentFixture = {
+  filename: string;
+  contentType: string;
+  runIds: readonly string[];
+};
+
 // Maps each instrument-type that has a fixture file checked into the
 // repo to its fixture filename, content-type, and a stable list of
 // run ids that look like real ones from that instrument (the qPCR
@@ -303,11 +313,12 @@ const FILE_STATUSES = ["uploaded", "completed", "failed"] as const;
 // `seed-run-N` ids. Adding a new entry here is enough to make every
 // seeded run for that instrument type render real bytes (provided
 // `LOCAL_S3_MIRROR` is set).
-const INSTRUMENT_FIXTURES: Partial<
-  Record<
-    schema.InstrumentType,
-    { filename: string; contentType: string; runIds: readonly string[] }
-  >
+//
+// Exported so `web/scripts/process-fixtures.ts` can re-derive the
+// triples `(canonical_instrument_id, run_id, filename)` that need
+// to be processed without re-running the seed.
+export const INSTRUMENT_FIXTURES: Partial<
+  Record<schema.InstrumentType, InstrumentFixture>
 > = {
   qpcr: {
     filename: "azure_cielo_qpcr_example.csv",
@@ -349,7 +360,7 @@ const INSTRUMENT_FIXTURES: Partial<
 // integration test harness run from different working directories
 // but both end up importing this module from the same on-disk path.
 const SEED_DIR = path.dirname(fileURLToPath(import.meta.url));
-const FIXTURES_DIR = path.resolve(
+export const FIXTURES_DIR = path.resolve(
   SEED_DIR,
   "..",
   "..",

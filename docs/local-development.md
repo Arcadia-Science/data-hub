@@ -191,6 +191,17 @@ What this gets you out of the box after `make db-reseed`:
 
 The seed copies the fixture into `<LOCAL_S3_MIRROR>/test-raw-data-bucket/<instrument-id>/<run-id>/<filename>` for every seeded run on those instruments, so navigating to `/instruments/azure-cielo-qpcr/runs/Experiment_20260129` shows a real CSV in the file browser, the colony / plate-reader viewers fetch real bytes via `/api/v1/files/<id>/download`, and PNG / TIFF / PDF previews on `RunReportSection` render without 404s. Fixture-bearing runs only have the real fixture file — the synthetic CSV siblings other instruments still get are dropped so the UI only shows files that actually exist on disk.
 
+When the dev API is reachable during seeding, the seed also drives `data-hub-process handler` over each fixture-bearing run so the dashboard renders processed artifacts (gel-doc PNGs, plate-reader CSVs, qPCR metadata) immediately after a reseed. If the API isn't up yet (`npm run db:reseed` ran before `npm run dev`), the seed prints a hint and skips the step — you can re-run it on its own once the dev server is reachable:
+
+```sh
+# in the terminal where the dev server is running
+npm run dev
+# in another terminal, after the dev server is reachable
+npm run db:process-fixtures
+```
+
+`npm run db:process-fixtures` mints a fresh PAT for `dev@local`, re-derives the fixture-bearing `(instrument_id, run_id, filename)` triples from the database, and spawns `data-hub-process handler` for each. The wiring lives in [web/scripts/process-fixtures.ts](../web/scripts/process-fixtures.ts) — it's the same module the seed calls — so anything that works during a reseed also works post-hoc.
+
 For instrument types without a fixture (or new file types you're adding components for), the existing CLI flow stays the same: run `data-hub-process handler <instrument-id> <run-id> <filename> --source <FILE>` and the dashboard picks up the file the moment the API row lands.
 
 Components don't need to change — every existing run viewer already fetches `/api/v1/files/<id>/download`, which 302s to whatever `getPresignedDownloadUrl` returns. New custom components for a specific instrument should follow the same pattern (`fetch("/api/v1/files/<id>/download")` for raw bytes, `<img src="/api/v1/files/<id>/download">` for images) and inherit local-mirror support automatically.
@@ -205,6 +216,8 @@ A few details worth knowing:
 
 - [web/lib/db/seed.ts](../web/lib/db/seed.ts) — shared builder functions (`seedDevUser`, `seedInstruments`, `seedRuns`, etc.) plus a schema-driven `clearAll()`.
 - [web/scripts/seed-database.ts](../web/scripts/seed-database.ts) — the entry point that `npm run db:seed` runs.
+- [web/scripts/process-fixtures.ts](../web/scripts/process-fixtures.ts) — shared probe/spawn logic for the post-seed handler step.
+- [web/scripts/process-seeded-fixtures.ts](../web/scripts/process-seeded-fixtures.ts) — `npm run db:process-fixtures` entry point for re-running the handler step on demand.
 
 The same builders back the integration test harness in [web/tests/integration/helpers.ts](../web/tests/integration/helpers.ts), so any new table added to `web/lib/db/schema.ts` is automatically included in `clearAll()` and only needs a new builder function if you want it populated by the dev seed.
 
