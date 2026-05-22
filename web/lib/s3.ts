@@ -1,4 +1,11 @@
 import {
+  getLocalMirrorRoot,
+  localMirrorDownloadUrl,
+  localMirrorHead,
+  localMirrorUploadUrl,
+  resolveMirrorPath,
+} from "@/lib/s3-local-mirror";
+import {
   GetObjectCommand,
   HeadObjectCommand,
   NotFound,
@@ -8,6 +15,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { awsCredentialsProvider } from "@vercel/oidc-aws-credentials-provider";
+import { createReadStream } from "node:fs";
 import type { Readable } from "node:stream";
 
 const DEFAULT_DOWNLOAD_EXPIRY_SECONDS = 15 * 60; // 15 minutes
@@ -67,6 +75,15 @@ export async function headS3Object(
   bucket: string,
   key: string
 ): Promise<S3HeadResult> {
+  // Local-mirror branch: `fs.stat` against `<root>/<bucket>/<key>`.
+  // Any error (ENOENT, traversal-rejected) collapses to a clean
+  // `{ exists: false }` so the route's archive-cache HEAD logic
+  // behaves the same as a real S3 cache miss.
+  const localRoot = getLocalMirrorRoot();
+  if (localRoot) {
+    return localMirrorHead(localRoot, bucket, key);
+  }
+
   try {
     const response = await s3.send(
       new HeadObjectCommand({ Bucket: bucket, Key: key })
@@ -125,6 +142,15 @@ export async function getPresignedDownloadUrl(
     typeof options === "number" ? { expiresIn: options } : options;
   const expiresIn = opts.expiresIn ?? DEFAULT_DOWNLOAD_EXPIRY_SECONDS;
 
+  // Local-mirror branch: return a same-origin URL that points at
+  // `/api/local-s3/...`. The 302 in `/api/v1/files/[fileId]/download`
+  // and any `<img>` / `<iframe>` consumer of the embedded
+  // `download_url` field both resolve relative URLs against the
+  // current origin, so no consumer needs to know we swapped backends.
+  if (getLocalMirrorRoot()) {
+    return localMirrorDownloadUrl(bucket, key, opts.filename);
+  }
+
   const command = new GetObjectCommand({
     Bucket: bucket,
     Key: key,
@@ -139,6 +165,17 @@ export async function getS3ObjectStream(
   bucket: string,
   key: string
 ): Promise<Readable> {
+  // Local-mirror branch: open the file directly. `createReadStream`
+  // emits the same `Readable` shape that the AWS SDK's `Body` does,
+  // so the caller's `streamToBuffer` (in `lib/api/instrument-runs.ts`)
+  // works without changes. ENOENT propagates as a thrown error,
+  // matching the production behaviour where a missing object would
+  // raise a `NoSuchKey` exception during `s3.send`.
+  const localRoot = getLocalMirrorRoot();
+  if (localRoot) {
+    return createReadStream(resolveMirrorPath(localRoot, bucket, key));
+  }
+
   const command = new GetObjectCommand({ Bucket: bucket, Key: key });
   const response = await s3.send(command);
   if (!response.Body) {
@@ -153,6 +190,15 @@ export async function getPresignedUploadUrl(
   contentType?: string,
   expiresIn: number = DEFAULT_UPLOAD_EXPIRY_SECONDS
 ): Promise<string> {
+  // Local-mirror branch: return a same-origin URL routed to the
+  // `PUT` handler in `app/api/local-s3/[bucket]/[...key]/route.ts`,
+  // which writes the request body to disk under the mirror root.
+  // `contentType` is intentionally unused locally — the local route
+  // doesn't enforce it the way a presigned PUT does.
+  if (getLocalMirrorRoot()) {
+    return localMirrorUploadUrl(bucket, key);
+  }
+
   const command = new PutObjectCommand({
     Bucket: bucket,
     Key: key,

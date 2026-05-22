@@ -32,6 +32,7 @@ import "dotenv/config";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { assertLocalDatabaseUrl } from "./assert-local-db";
+import { processSeededFixtures } from "./process-fixtures";
 
 const databaseUrl = assertLocalDatabaseUrl("db:seed");
 
@@ -64,7 +65,9 @@ console.log("Seeding runs + files…");
 const activeInstruments = instruments.filter((i) => i.status === "active");
 const runs: SeededRun[] = [];
 for (const instrument of activeInstruments) {
-  runs.push(...(await seedRuns(db, instrument.id, 5)));
+  runs.push(
+    ...(await seedRuns(db, instrument.id, 5, instrument.instrumentType))
+  );
 }
 
 console.log("Seeding run comments + attributions…");
@@ -93,6 +96,13 @@ const notifResult = await seedNotifications(db, {
 console.log(
   `  ${notifResult.total} notifications inserted (${notifResult.unread} unread).`
 );
+
+// Drive the lambda handler over each fixture-bearing run so the
+// dashboard shows real processed artifacts (gel-doc PNGs, plate-
+// reader CSVs, qPCR metadata) immediately after a reseed. Skips
+// quietly with an actionable hint when the dev API isn't running
+// yet — see web/scripts/process-fixtures.ts for the gating logic.
+await processSeededFixtures(db, { apiKey: token });
 
 await client.end();
 

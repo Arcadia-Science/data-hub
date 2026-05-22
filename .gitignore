@@ -219,3 +219,6 @@ __marimo__/
 
 # macOS
 .DS_Store
+
+# Local S3 mirror used by `data-hub-process handler` (see docs/local-development.md).
+lambda/.local-s3/

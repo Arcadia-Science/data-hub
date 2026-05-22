@@ -19,6 +19,7 @@
     "db:reset": "tsx scripts/reset-database.ts",
     "db:seed": "tsx scripts/seed-database.ts",
     "db:reseed": "npm run db:reset && npm run db:push && npm run db:seed",
+    "db:process-fixtures": "tsx scripts/process-seeded-fixtures.ts",
     "test:mcp": "vitest run --config vitest.config.ts",
     "test:mcp:watch": "vitest --config vitest.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",

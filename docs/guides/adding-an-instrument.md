@@ -111,6 +111,8 @@ Don't forget to add the import at the top of `handler.py`.
 
 Add unit tests in `lambda/tests/` for the new processor. Integration tests will automatically cover the new instrument if it's registered in the shared library.
 
+For a quick end-to-end smoke against your local web app — without S3, AWS credentials, or LocalStack — use `data-hub-process handler` to drive `lambda_handler` against a gitignored local mirror. See [Testing the Lambda end-to-end](../local-development.md#testing-the-lambda-end-to-end).
+
 ### 4.5 Configure the S3 trigger
 
 Add a `LambdaConfiguration` entry to the `RawDataBucket` resource's `NotificationConfiguration` in `infra/template.yaml`. Each entry specifies a prefix (the instrument ID) and a suffix (the file extension):
