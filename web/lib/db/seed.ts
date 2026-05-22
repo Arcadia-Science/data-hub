@@ -151,10 +151,25 @@ const INSTRUMENT_LABELS: Record<schema.InstrumentType, string> = {
   instant_raman: "Instant Raman Spectrometer",
 };
 
+// Instrument types that map to a canonical kebab-case id baked into the
+// lambda's `Instrument` enum and hardcoded inside each `process_file`.
+// Using the canonical id here means seeded files live at the same
+// `<bucket>/<instrument-id>/<run-id>/<filename>` path the lambda
+// `process_file` modules read from, so a dev can run
+// `data-hub-process handler` against a seeded run with no path
+// rewriting. Other instrument types fall back to the cosmetic
+// `seed-<type>` id since they don't have a canonical pipeline yet.
+const CANONICAL_INSTRUMENT_ID: Partial<Record<schema.InstrumentType, string>> =
+  {
+    qpcr: "azure-cielo-qpcr",
+    gel_doc: "azure-600-gel-doc",
+    plate_reader: "spectramax-id3-plate-reader",
+  };
+
 export async function seedInstruments(db: Db): Promise<SeededInstrument[]> {
   const rows: SeededInstrument[] = schema.VALID_INSTRUMENT_TYPES.map(
     (type, idx) => ({
-      id: `seed-${type.replace(/_/g, "-")}`,
+      id: CANONICAL_INSTRUMENT_ID[type] ?? `seed-${type.replace(/_/g, "-")}`,
       displayName: INSTRUMENT_LABELS[type],
       instrumentType: type,
       // First row pending so the "activate instrument" admin flow is
@@ -278,25 +293,54 @@ export type SeededRun = {
 const FILE_STATUSES = ["uploaded", "completed", "failed"] as const;
 
 // Maps each instrument-type that has a fixture file checked into the
-// repo to its fixture filename and content-type. Adding a new entry
-// here is enough to make every seeded run for that instrument type
-// render real bytes (provided `LOCAL_S3_MIRROR` is set). Instruments
-// without an entry keep their synthetic `raw_1.csv` filenames and
-// 404 against the local mirror.
+// repo to its fixture filename, content-type, and a stable list of
+// run ids that look like real ones from that instrument (the qPCR
+// `process_file` documents `Experiment_YYYYMMDD`; the gel-doc and
+// plate-reader modules treat the filename stem as the run id, so
+// these mirror those formats). The run-id list length sets how many
+// runs `seedRuns` produces for fixture-bearing instruments; other
+// instruments keep the count argument and use synthetic
+// `seed-run-N` ids. Adding a new entry here is enough to make every
+// seeded run for that instrument type render real bytes (provided
+// `LOCAL_S3_MIRROR` is set).
 const INSTRUMENT_FIXTURES: Partial<
-  Record<schema.InstrumentType, { filename: string; contentType: string }>
+  Record<
+    schema.InstrumentType,
+    { filename: string; contentType: string; runIds: readonly string[] }
+  >
 > = {
   qpcr: {
     filename: "azure_cielo_qpcr_example.csv",
     contentType: "text/csv",
+    runIds: [
+      "Experiment_20260129",
+      "Experiment_20260122",
+      "Experiment_20260115",
+      "Experiment_20260108",
+      "Experiment_20260101",
+    ],
   },
   gel_doc: {
     filename: "azure_600_gel_doc_example.tif",
     contentType: "image/tiff",
+    runIds: [
+      "26.02.02_10.45.05",
+      "26.01.26_15.10.30",
+      "26.01.19_11.05.42",
+      "26.01.12_14.22.18",
+      "26.01.05_09.30.00",
+    ],
   },
   plate_reader: {
     filename: "spectramax_plate_reader_endpoint.xls",
     contentType: "application/vnd.ms-excel",
+    runIds: [
+      "012926_AR_OD600",
+      "012226_DK_OD750",
+      "011526_AR_GFP_endpoint",
+      "010826_DK_OD600",
+      "010126_AR_OD750",
+    ],
   },
 };
 
@@ -323,6 +367,18 @@ export async function seedRuns(
 ): Promise<SeededRun[]> {
   if (count <= 0) return [];
 
+  const fixture = instrumentType
+    ? INSTRUMENT_FIXTURES[instrumentType]
+    : undefined;
+
+  // Fixture-bearing instruments take their run-id strings from the
+  // canonical-looking list (capped at `count` so the caller still
+  // controls the run total). Other instruments keep the synthetic
+  // `seed-run-N` ids — those rows aren't expected to round-trip
+  // through any real `process_file`, so a generic identifier is
+  // fine.
+  const fixtureRunIds = fixture?.runIds.slice(0, count);
+
   // Spread runs across the last ~2 weeks (3, 6, 9, 12, 15 days back for
   // count = 5) so UI date filters like "last 7 days" / "last 14 days"
   // return non-empty, differing result sets.
@@ -332,7 +388,7 @@ export async function seedRuns(
     const acquiredAt = new Date(now.getTime() - (i + 1) * 3 * dayMs);
     return {
       instrumentId,
-      runId: `seed-run-${i + 1}`,
+      runId: fixtureRunIds?.[i] ?? `seed-run-${i + 1}`,
       source: (i % 2 === 0 ? "lambda" : "watcher") as "lambda" | "watcher",
       metadata: { seeded: true, sample_count: 96 - i },
       acquiredAt,
@@ -348,42 +404,55 @@ export async function seedRuns(
       runId: schema.instrumentRuns.runId,
     });
 
-  const fixture = instrumentType
-    ? INSTRUMENT_FIXTURES[instrumentType]
-    : undefined;
-
-  const fileRows = runs.flatMap((run, runIdx) =>
-    Array.from({ length: 3 }, (_, fi) => {
-      const status = FILE_STATUSES[(runIdx + fi) % FILE_STATUSES.length];
-      const category = fi === 2 ? ("processed" as const) : ("raw" as const);
-      // Slot 0 is the "real" raw file when a fixture exists. Slots 1
-      // and 2 keep their synthetic CSV names for status/category mix
-      // and 404 in the local mirror — the dev still has at least one
-      // viewable file per run, which is what custom-component
-      // development needs.
-      const useFixture = fi === 0 && fixture !== undefined;
-      const filename = useFixture
-        ? fixture.filename
-        : `${category}_${fi + 1}.csv`;
-      const contentType = useFixture ? fixture.contentType : "text/csv";
-      return {
-        instrumentRunId: run.id,
-        relativePath: filename,
-        s3Bucket: RAW_BUCKET,
-        s3Key: `${run.instrumentId}/${run.runId}/${filename}`,
-        filename,
-        contentType,
-        sizeBytes: 1024 * (fi + 1),
-        category,
-        status,
-        metadata: { seeded: true },
-        errorMessage:
-          status === "failed" ? "Seeded failure for UI exercise" : null,
-        uploadedAt: status !== "failed" ? new Date() : null,
-        processedAt: status === "completed" ? new Date() : null,
-      };
-    })
-  );
+  // Fixture-bearing runs render exactly one file row — the real
+  // fixture — so the UI doesn't show synthetic CSV siblings next to
+  // a real `.tif` / `.xls`. Status still cycles across the 5 runs
+  // (uploaded → completed → failed → uploaded → completed) for UI
+  // mix. Other instruments keep the historical 3-files-per-run
+  // shape (raw, raw, processed) with synthetic CSV names.
+  const fileRows = fixture
+    ? runs.map((run, runIdx) => {
+        const status = FILE_STATUSES[runIdx % FILE_STATUSES.length];
+        return {
+          instrumentRunId: run.id,
+          relativePath: fixture.filename,
+          s3Bucket: RAW_BUCKET,
+          s3Key: `${run.instrumentId}/${run.runId}/${fixture.filename}`,
+          filename: fixture.filename,
+          contentType: fixture.contentType,
+          sizeBytes: 1024,
+          category: "raw" as const,
+          status,
+          metadata: { seeded: true },
+          errorMessage:
+            status === "failed" ? "Seeded failure for UI exercise" : null,
+          uploadedAt: status !== "failed" ? new Date() : null,
+          processedAt: status === "completed" ? new Date() : null,
+        };
+      })
+    : runs.flatMap((run, runIdx) =>
+        Array.from({ length: 3 }, (_, fi) => {
+          const status = FILE_STATUSES[(runIdx + fi) % FILE_STATUSES.length];
+          const category = fi === 2 ? ("processed" as const) : ("raw" as const);
+          const filename = `${category}_${fi + 1}.csv`;
+          return {
+            instrumentRunId: run.id,
+            relativePath: filename,
+            s3Bucket: RAW_BUCKET,
+            s3Key: `${run.instrumentId}/${run.runId}/${filename}`,
+            filename,
+            contentType: "text/csv",
+            sizeBytes: 1024 * (fi + 1),
+            category,
+            status,
+            metadata: { seeded: true },
+            errorMessage:
+              status === "failed" ? "Seeded failure for UI exercise" : null,
+            uploadedAt: status !== "failed" ? new Date() : null,
+            processedAt: status === "completed" ? new Date() : null,
+          };
+        })
+      );
   await db.insert(schema.files).values(fileRows);
 
   // If the local-mirror env var is set and this instrument type has

@@ -111,13 +111,13 @@ You can also run `npm run db:seed` on its own — it calls the schema-driven `cl
 | `watcher_heartbeats` | ~10 per watching watcher | Spread over the last hour |
 | `watcher_events` | 3 per watching watcher | `watcher_started`, `config_synced`, `file_uploaded` |
 | `instrument_runs` | 5 per active instrument | Spread across the last ~2 weeks (3, 6, 9, 12, 15 days back), alternating `lambda` / `watcher` source |
-| `files` | 3 per run | Mix of `uploaded` / `completed` / `failed`, `raw` / `processed`. For qPCR / gel doc / plate reader the first slot uses a real fixture filename and bytes are copied into `LOCAL_S3_MIRROR` (see [Working with file bytes locally](#working-with-file-bytes-locally)) |
+| `files` | 3 per run, or 1 for fixture-bearing runs | Mix of `uploaded` / `completed` / `failed` (and `raw` / `processed` for the 3-file shape). qPCR / gel doc / plate reader runs render exactly one row — the real fixture, bytes copied into `LOCAL_S3_MIRROR` (see [Working with file bytes locally](#working-with-file-bytes-locally)) |
 | `run_comments` | 1 per run | Authored by the dev user |
 | `run_attributions` | 1 per run | Dev user attributed |
 | `archive_jobs` | 3 | One each of `ready` / `building` / `failed` |
 | `watcher_release_config` | 1 (singleton) | `9.9.9 / 0.1.0 / stable / false` |
 
-Externally-visible identifiers used in URLs and API paths — instrument IDs (`seed-<type>`) and run IDs (`seed-run-1`, …) — are deterministic across reseeds, so screenshots, bug reports, and `curl` examples against `/api/v1/instruments/seed-plate-reader/runs/seed-run-1` stay stable.
+Externally-visible identifiers used in URLs and API paths are deterministic across reseeds, so screenshots, bug reports, and `curl` examples stay stable. Instrument types backed by a real lambda `process_file` (qPCR, gel doc, plate reader) use the canonical kebab-case ids the lambda expects (`azure-cielo-qpcr`, `azure-600-gel-doc`, `spectramax-id3-plate-reader`) with realistic-looking run ids (`Experiment_20260129`, `26.02.02_10.45.05`, `012926_AR_OD600`, …). Other instrument types use cosmetic `seed-<type>` ids and `seed-run-1`…`seed-run-5` since they don't round-trip through any pipeline.
 
 Surrogate UUIDs (watcher IDs, archive job IDs, the per-row primary keys on `instrument_runs` and `files`) and the PAT plaintext are regenerated on every reseed — the seed does not use Faker but it does call `crypto.randomUUID()` and `crypto.randomBytes()` where the schema needs server-side IDs.
 
@@ -189,7 +189,7 @@ What this gets you out of the box after `make db-reseed`:
 | Plate reader | `spectramax_plate_reader_endpoint.xls` | `lambda/tests/fixtures/` |
 | Other instruments | none — files 404 in the mirror | Stage real bytes via `data-hub-process handler` |
 
-The seed copies the fixture into `<LOCAL_S3_MIRROR>/test-raw-data-bucket/<instrument-id>/<run-id>/<filename>` for every seeded run on those instruments, so navigating to `/instruments/seed-qpcr/runs/seed-run-1` shows a real CSV in the file browser, the colony / plate-reader viewers fetch real bytes via `/api/v1/files/<id>/download`, and PNG / TIFF / PDF previews on `RunReportSection` render without 404s.
+The seed copies the fixture into `<LOCAL_S3_MIRROR>/test-raw-data-bucket/<instrument-id>/<run-id>/<filename>` for every seeded run on those instruments, so navigating to `/instruments/azure-cielo-qpcr/runs/Experiment_20260129` shows a real CSV in the file browser, the colony / plate-reader viewers fetch real bytes via `/api/v1/files/<id>/download`, and PNG / TIFF / PDF previews on `RunReportSection` render without 404s. Fixture-bearing runs only have the real fixture file — the synthetic CSV siblings other instruments still get are dropped so the UI only shows files that actually exist on disk.
 
 For instrument types without a fixture (or new file types you're adding components for), the existing CLI flow stays the same: run `data-hub-process handler <instrument-id> <run-id> <filename> --source <FILE>` and the dashboard picks up the file the moment the API row lands.
 
