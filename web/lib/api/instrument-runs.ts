@@ -507,6 +507,54 @@ export const getRunFiles = cache(async function getRunFiles(
 });
 
 // ---------------------------------------------------------------------------
+// Per-run file list, paginated. Used by the MCP `list_run_files` tool so that
+// runs with thousands of files don't dump every row into a single response.
+// Mirrors the page/per_page/total/total_pages shape returned by
+// `buildRunListQuery`. Not wrapped in `cache()` — callers pass distinct
+// (page, perPage) keys, and the UI uses the unbounded `getRunFiles` above.
+// ---------------------------------------------------------------------------
+
+export async function getRunFilesPage(
+  runInternalId: string,
+  { page, perPage }: { page: number; perPage: number }
+): Promise<{
+  data: RunFile[];
+  pagination: {
+    page: number;
+    per_page: number;
+    total: number;
+    total_pages: number;
+  };
+}> {
+  const safePerPage = Math.min(Math.max(perPage, 1), MAX_PER_PAGE);
+  const safePage = Math.max(page, 1);
+  const offset = (safePage - 1) * safePerPage;
+
+  const [{ total }] = await db
+    .select({ total: sql<number>`count(*)::int` })
+    .from(files)
+    .where(eq(files.instrumentRunId, runInternalId));
+
+  const data = await db
+    .select()
+    .from(files)
+    .where(eq(files.instrumentRunId, runInternalId))
+    .orderBy(files.createdAt)
+    .limit(safePerPage)
+    .offset(offset);
+
+  return {
+    data,
+    pagination: {
+      page: safePage,
+      per_page: safePerPage,
+      total,
+      total_pages: Math.ceil(total / safePerPage),
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Per-run processed CSV data — fetches CSV files from S3 and parses them.
 // ---------------------------------------------------------------------------
 
