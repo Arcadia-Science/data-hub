@@ -93,7 +93,10 @@ vi.mock("@/lib/api/instrument-runs", () => ({
         ? { id: "internal-1", instrumentId: _instId, runId }
         : null
     ),
-  getRunFiles: vi.fn().mockResolvedValue([]),
+  getRunFilesPage: vi.fn().mockResolvedValue({
+    data: [],
+    pagination: { page: 1, per_page: 50, total: 0, total_pages: 0 },
+  }),
   getPlateReaderFilterOptions: vi.fn().mockResolvedValue({
     wavelengths: ["450"],
     measurementModes: ["Absorbance"],
@@ -583,6 +586,62 @@ describe("MCP Protocol (in-memory)", () => {
       arguments: { instrumentId: "test-plate-reader", runId: "nonexistent" },
     });
     expect(result.isError).toBe(true);
+  });
+
+  it("list_run_files returns a paginated payload and forwards page args", async () => {
+    const { getRunFilesPage } = await import("@/lib/api/instrument-runs");
+    vi.mocked(getRunFilesPage).mockResolvedValueOnce({
+      data: [
+        {
+          id: 1,
+          filename: "data.csv",
+          relativePath: "data.csv",
+          category: "raw",
+          status: "uploaded",
+          sizeBytes: 42,
+          contentType: "text/csv",
+          errorMessage: null,
+          createdAt: new Date("2026-01-01T00:00:00Z"),
+          uploadedAt: new Date("2026-01-01T00:00:00Z"),
+          processedAt: null,
+          // Fields below should be stripped from the MCP payload.
+          s3Bucket: "secret-bucket",
+          s3Key: "secret/key",
+          metadata: { huge: "blob" },
+        } as never,
+      ],
+      pagination: { page: 2, per_page: 10, total: 25, total_pages: 3 },
+    });
+
+    const result = await client.callTool({
+      name: "list_run_files",
+      arguments: {
+        instrumentId: "test-plate-reader",
+        runId: "run-1",
+        page: 2,
+        perPage: 10,
+      },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(getRunFilesPage).toHaveBeenCalledWith("internal-1", {
+      page: 2,
+      perPage: 10,
+    });
+    const payload = parseText(result.content) as {
+      data: Array<Record<string, unknown>>;
+      pagination: Record<string, unknown>;
+    };
+    expect(payload.pagination).toEqual({
+      page: 2,
+      per_page: 10,
+      total: 25,
+      total_pages: 3,
+    });
+    expect(payload.data[0]).not.toHaveProperty("s3Bucket");
+    expect(payload.data[0]).not.toHaveProperty("s3Key");
+    expect(payload.data[0]).not.toHaveProperty("metadata");
+    expect(payload.data[0].filename).toBe("data.csv");
   });
 
   it("get_file returns error for nonexistent file", async () => {

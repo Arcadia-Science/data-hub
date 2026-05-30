@@ -5,8 +5,9 @@ import {
   buildRunListQuery,
   getAttributionsByRunIds,
   getRanByFilterOptions,
-  getRunFiles,
+  getRunFilesPage,
   lookupRunByNaturalKey,
+  type RunFile,
 } from "@/lib/api/instrument-runs";
 import {
   getInstrumentById,
@@ -36,6 +37,26 @@ function errorResult(message: string) {
   return {
     content: [{ type: "text" as const, text: message }],
     isError: true,
+  };
+}
+
+// Trim a file row to the fields useful to an LLM listing a run's files.
+// Internal S3 location (`s3Bucket`/`s3Key`) and the potentially large
+// `metadata` jsonb are intentionally dropped — callers that need full detail
+// for a specific file use the `get_file` tool.
+function toMcpFile(f: RunFile) {
+  return {
+    id: f.id,
+    filename: f.filename,
+    relativePath: f.relativePath,
+    category: f.category,
+    status: f.status,
+    sizeBytes: f.sizeBytes,
+    contentType: f.contentType,
+    errorMessage: f.errorMessage,
+    createdAt: f.createdAt,
+    uploadedAt: f.uploadedAt,
+    processedAt: f.processedAt,
   };
 }
 
@@ -271,14 +292,27 @@ export function registerTools(server: McpServer) {
     {
       title: "List Run Files",
       description:
-        "List all files associated with a run, including raw uploads and processed artifacts with their status and metadata.",
+        "List files associated with a run (raw uploads and processed artifacts) with their status, category, and size. Paginated — runs can have thousands of files. Use the page/perPage arguments to walk the full list, and use get_file for full per-file detail including metadata and S3 location.",
       inputSchema: {
         instrumentId: z.string().describe("Instrument identifier"),
         runId: z.string().describe("Run identifier within the instrument"),
+        page: z
+          .number()
+          .int()
+          .min(1)
+          .optional()
+          .describe("Page number (default: 1)"),
+        perPage: z
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .optional()
+          .describe("Results per page (default: 50, max: 100)"),
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ instrumentId, runId }, { authInfo }) => {
+    async ({ instrumentId, runId, page, perPage }, { authInfo }) => {
       // The tool is keyed by run and the result is "what files belong to
       // this run", which lives under the runs domain in the REST API too
       // (`GET /instruments/:id/runs/:runId` returns files alongside the
@@ -291,8 +325,11 @@ export function registerTools(server: McpServer) {
           `Run '${runId}' not found for instrument '${instrumentId}'.`
         );
       }
-      const files = await getRunFiles(run.id);
-      return textResult(files);
+      const { data, pagination } = await getRunFilesPage(run.id, {
+        page: page ?? 1,
+        perPage: perPage ?? 50,
+      });
+      return textResult({ data: data.map(toMcpFile), pagination });
     }
   );
 
