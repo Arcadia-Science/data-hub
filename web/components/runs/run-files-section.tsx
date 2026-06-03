@@ -35,7 +35,10 @@ import {
   FileSelectionProvider,
   useFileSelection,
 } from "./file-selection-provider";
-import { EditableRunFilesTable, ReadOnlyRunFilesTable } from "./run-files-table";
+import {
+  EditableRunFilesTable,
+  ReadOnlyRunFilesTable,
+} from "./run-files-table";
 
 type RunFilesSectionProps = {
   // Current page of the server-paginated, filtered, sorted file list.
