@@ -4,19 +4,25 @@ import { RunCommentsSection } from "@/components/runs/run-comments-section";
 import { RunDetailVariant } from "@/components/runs/variants";
 import { WatcherStatusProvider } from "@/components/runs/watcher-status-provider";
 import {
+  buildRunFilesQuery,
   getProcessedCsvData,
-  getRunFiles,
+  getRunFileStats,
+  getRunReportFiles,
   lookupRunByNaturalKey,
 } from "@/lib/api/instrument-runs";
 import { getInstrumentById } from "@/lib/api/instruments";
 import { listCommentsForRun } from "@/lib/api/run-comments";
 import { auth } from "@/lib/auth";
 import { formatDate } from "@/lib/date";
+import { runDetailParamsCache } from "@/lib/search-params";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next/types";
 
+const FILES_PER_PAGE = 10;
+
 type Props = {
   params: Promise<{ instrumentId: string; runId: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -33,13 +39,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const dateLabel = run.acquiredAt ? "Acquired" : "Reported";
   const effectiveDate = run.acquiredAt ?? run.createdAt;
 
-  // `getRunFiles` returns every file row (including soft-deleted and
-  // lambda-produced artifacts). The unfurl description only counts the
-  // active raw uploads so deleted files don't inflate the headline.
-  const allFiles = await getRunFiles(run.id);
-  const rawFileCount = allFiles.filter(
-    (f) => f.category === "raw" && f.deletedAt === null
-  ).length;
+  // The unfurl description only counts active raw uploads so deleted files
+  // don't inflate the headline. A single aggregate query avoids loading the
+  // full file list just to count.
+  const { rawActive: rawFileCount } = await getRunFileStats(run.id);
   const fileLabel =
     rawFileCount === 1 ? "1 raw data file" : `${rawFileCount} raw data files`;
 
@@ -52,9 +55,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   };
 }
 
-export default async function RunDetailPage({ params }: Props) {
+export default async function RunDetailPage({ params, searchParams }: Props) {
   const session = await auth();
   const { instrumentId, runId } = await params;
+  const filters = runDetailParamsCache.parse(await searchParams);
 
   // The route is publicly reachable so Slack/Notion unfurlers can read the
   // run + instrument title from `generateMetadata`. Humans without a
@@ -72,12 +76,22 @@ export default async function RunDetailPage({ params }: Props) {
   const run = await lookupRunByNaturalKey(instrumentId, runId);
   if (!run) notFound();
 
-  const [runFiles, instrument, comments] = await Promise.all([
-    getRunFiles(run.id),
-    getInstrumentById(instrumentId),
-    listCommentsForRun(run.id),
-  ]);
-  const wellData = await getProcessedCsvData(runFiles);
+  const [filesPage, fileStats, reportFiles, instrument, comments] =
+    await Promise.all([
+      buildRunFilesQuery(run.id, {
+        page: filters.files_page,
+        perPage: FILES_PER_PAGE,
+        search: filters.files_search || undefined,
+        status: filters.files_status,
+        sort: filters.files_sort,
+        includeDismissed: filters.files_dismissed,
+      }),
+      getRunFileStats(run.id),
+      getRunReportFiles(run.id),
+      getInstrumentById(instrumentId),
+      listCommentsForRun(run.id),
+    ]);
+  const wellData = await getProcessedCsvData(reportFiles);
   // Gate client-side upload actions on watcher availability — a queued
   // upload request is a no-op if no agent is around to action it.
   const isWatcherOnline = (instrument?.watchersOnline ?? 0) > 0;
@@ -87,7 +101,10 @@ export default async function RunDetailPage({ params }: Props) {
       <WatcherStatusProvider isWatcherOnline={isWatcherOnline}>
         <RunDetailVariant
           run={run}
-          files={runFiles}
+          files={filesPage.data}
+          filesPagination={filesPage.pagination}
+          fileStats={fileStats}
+          reportFiles={reportFiles}
           wellData={wellData}
           instrumentId={instrumentId}
           runId={runId}

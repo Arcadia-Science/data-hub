@@ -11,15 +11,16 @@ import {
 export function HinaMicroscopeRunDetail({
   run,
   files,
+  filesPagination,
+  fileStats,
+  reportFiles,
   instrumentId,
   runId,
   attributionsSlot,
 }: RunDetailProps) {
   const isDeleted = run.deletedAt !== null;
-  const activeFileCount = files.filter((f) => f.deletedAt === null).length;
-  const hasProcessedFiles =
-    files.filter((f) => f.category === "processed" && f.deletedAt === null)
-      .length > 0;
+  const activeFileCount = fileStats.active;
+  const hasProcessedFiles = fileStats.processedActive > 0;
 
   return (
     <>
@@ -45,13 +46,15 @@ export function HinaMicroscopeRunDetail({
         )}
         <RunDetail.Files
           files={files}
+          pagination={filesPagination}
+          stats={fileStats}
           instrumentId={instrumentId}
           runId={runId}
           isDeleted={isDeleted}
         />
       </RunDetail.FilesMetadataLayout>
 
-      <HinaReportSection files={files} />
+      <HinaReportSection files={reportFiles} />
     </>
   );
 }

@@ -490,28 +490,251 @@ export type RunListRow = Awaited<
 >["data"][number];
 
 // ---------------------------------------------------------------------------
-// Per-run file list — all files (including soft-deleted) ordered by creation.
+// Per-run file list — server-side filtering, sorting, and pagination for the
+// run detail files table. The web UI is URL-driven (nuqs) and only ever
+// fetches a single page, so runs with thousands of files never load the whole
+// list into memory.
 // ---------------------------------------------------------------------------
 
-// Wrapped in `cache()` so the run detail page's `generateMetadata` (which
-// needs the raw-file count) and the page component (which renders the full
-// file list) share a single DB hit per request.
-export const getRunFiles = cache(async function getRunFiles(
+// Mirrors the client-side filter/sort unions the files table exposes.
+export type FilesStatusFilter =
+  | "all"
+  | "raw"
+  | "processed"
+  | "pending"
+  | "uploaded"
+  | "processing"
+  | "completed"
+  | "failed";
+
+export type FilesSortField = "name" | "size" | "date" | "status";
+
+// Filter inputs shared by the paginated query and the archive-download
+// "download what you filtered" resolution.
+export type RunFilesFilter = {
+  search?: string;
+  status?: FilesStatusFilter;
+  includeDismissed?: boolean;
+};
+
+export type RunFilesListFilters = RunFilesFilter & {
+  page: number;
+  perPage: number;
+  sort?: FilesSortField;
+};
+
+// "Pending" in the UI collapses the two pre-upload statuses.
+const PENDING_FILE_STATUSES = ["detected", "upload_requested"] as const;
+
+// Status-label sort order. Mirrors the alphabetical ordering produced by the
+// client's `statusLabel` localeCompare (Completed, Dismissed, Failed, Pending,
+// Processing, Uploaded, Uploading) so server-side sort matches what the table
+// rendered before. Dismissed (soft-deleted) rows rank by their label too.
+const statusSortRank = sql`case
+  when ${files.deletedAt} is not null then 2
+  when ${files.status} = 'completed' then 1
+  when ${files.status} = 'failed' then 3
+  when ${files.status} = 'detected' then 4
+  when ${files.status} = 'processing' then 5
+  when ${files.status} = 'uploaded' then 6
+  when ${files.status} = 'upload_requested' then 7
+  else 8
+end`;
+
+// Build the WHERE conditions for a run's file list. Exported so the archive
+// route can resolve the same filtered set the table is showing.
+export function runFilesWhere(
+  runInternalId: string,
+  filters: RunFilesFilter
+): SQL[] {
+  const conditions: SQL[] = [eq(files.instrumentRunId, runInternalId)];
+
+  if (!filters.includeDismissed) {
+    conditions.push(isNull(files.deletedAt));
+  }
+
+  if (filters.search) {
+    // Escape LIKE wildcards so user input is treated as literal text.
+    const escaped = filters.search
+      .replace(/\\/g, "\\\\")
+      .replace(/%/g, "\\%")
+      .replace(/_/g, "\\_");
+    conditions.push(ilike(files.filename, `%${escaped}%`));
+  }
+
+  switch (filters.status) {
+    case "raw":
+    case "processed":
+      conditions.push(eq(files.category, filters.status));
+      break;
+    case "pending":
+      conditions.push(inArray(files.status, [...PENDING_FILE_STATUSES]));
+      break;
+    case "uploaded":
+    case "processing":
+    case "completed":
+    case "failed":
+      conditions.push(eq(files.status, filters.status));
+      break;
+    default:
+      // "all" / undefined — no status condition.
+      break;
+  }
+
+  return conditions;
+}
+
+// Category-first ordering (raw before processed, matching the old
+// `compareByCategory`) then the chosen field. Date sorts on
+// coalesce(file_created_at, created_at) to match the displayed "Created"
+// column; size coalesces NULL to 0 like the old numeric comparator.
+function runFilesOrderBy(sort: FilesSortField): SQL[] {
+  const categoryFirst = sql`(${files.category} = 'raw') desc`;
+  switch (sort) {
+    case "size":
+      return [categoryFirst, sql`coalesce(${files.sizeBytes}, 0) asc`];
+    case "date":
+      return [
+        categoryFirst,
+        sql`coalesce(${files.fileCreatedAt}, ${files.createdAt}) asc`,
+      ];
+    case "status":
+      return [categoryFirst, sql`${statusSortRank} asc`];
+    default:
+      return [categoryFirst, sql`${files.filename} asc`];
+  }
+}
+
+export type RunFilesPage = {
+  data: RunFile[];
+  pagination: {
+    page: number;
+    per_page: number;
+    total: number;
+    total_pages: number;
+  };
+};
+
+export async function buildRunFilesQuery(
+  runInternalId: string,
+  filters: RunFilesListFilters
+): Promise<RunFilesPage> {
+  const safePerPage = Math.min(Math.max(filters.perPage, 1), MAX_PER_PAGE);
+  const safePage = Math.max(filters.page, 1);
+  const offset = (safePage - 1) * safePerPage;
+
+  const where = and(...runFilesWhere(runInternalId, filters));
+
+  const [{ total }] = await db
+    .select({ total: sql<number>`cast(count(*) as int)` })
+    .from(files)
+    .where(where);
+
+  const data = await db
+    .select()
+    .from(files)
+    .where(where)
+    .orderBy(...runFilesOrderBy(filters.sort ?? "name"))
+    .limit(safePerPage)
+    .offset(offset);
+
+  return {
+    data,
+    pagination: {
+      page: safePage,
+      per_page: safePerPage,
+      total,
+      total_pages: Math.ceil(total / safePerPage),
+    },
+  };
+}
+
+// Aggregate per-run file counts in a single query. Replaces the client-side
+// summary counting that used to scan the full file list, and feeds the table
+// footer, the in-flight auto-refresh signal, the per-variant counts, and the
+// run detail page's `generateMetadata`.
+export type RunFileStats = {
+  active: number;
+  dismissed: number;
+  rawActive: number;
+  processedActive: number;
+  pending: number;
+  uploaded: number;
+  processing: number;
+  // Files actively uploading to S3 (status = upload_requested). Tracked
+  // separately from `pending` so the table only auto-refreshes while work is
+  // genuinely in flight (not while files merely await a manual upload).
+  uploadRequested: number;
+};
+
+export async function getRunFileStats(
+  runInternalId: string
+): Promise<RunFileStats> {
+  const activeNotDeleted = sql`${files.deletedAt} is null`;
+  const [row] = await db
+    .select({
+      active: sql<number>`cast(count(*) filter (where ${activeNotDeleted}) as int)`,
+      dismissed: sql<number>`cast(count(*) filter (where ${files.deletedAt} is not null) as int)`,
+      rawActive: sql<number>`cast(count(*) filter (where ${files.category} = 'raw' and ${activeNotDeleted}) as int)`,
+      processedActive: sql<number>`cast(count(*) filter (where ${files.category} = 'processed' and ${activeNotDeleted}) as int)`,
+      pending: sql<number>`cast(count(*) filter (where ${files.status} in ('detected', 'upload_requested') and ${activeNotDeleted}) as int)`,
+      uploaded: sql<number>`cast(count(*) filter (where ${files.status} not in ('detected', 'upload_requested', 'processing') and ${activeNotDeleted}) as int)`,
+      processing: sql<number>`cast(count(*) filter (where ${files.status} = 'processing' and ${activeNotDeleted}) as int)`,
+      uploadRequested: sql<number>`cast(count(*) filter (where ${files.status} = 'upload_requested' and ${activeNotDeleted}) as int)`,
+    })
+    .from(files)
+    .where(eq(files.instrumentRunId, runInternalId));
+
+  return row;
+}
+
+// Report-relevant files for a run: processed artifacts, any PDFs, and any
+// CSVs. The report sections render these inline (processed images, CSV
+// tables, PDF previews); `getProcessedCsvData` parses the processed CSVs; and
+// the InstantRaman variant treats every active CSV (raw or processed) as a
+// spectrum. CSVs/PDFs are matched by content type or extension so raw uploads
+// are included. Scoped to report-relevant outputs (typically few) rather than
+// the thousands of raw files that motivated server-side pagination.
+export async function getRunReportFiles(
   runInternalId: string
 ): Promise<RunFile[]> {
   return db
     .select()
     .from(files)
-    .where(eq(files.instrumentRunId, runInternalId))
+    .where(
+      and(
+        eq(files.instrumentRunId, runInternalId),
+        isNull(files.deletedAt),
+        sql`(
+          ${files.category} = 'processed'
+          or ${files.contentType} in ('application/pdf', 'text/csv')
+          or lower(${files.filename}) like '%.pdf'
+          or lower(${files.filename}) like '%.csv'
+        )`
+      )
+    )
     .orderBy(files.createdAt);
-});
+}
+
+// Resolve the file IDs matching the current table filters, used by the
+// archive route so "Download all" honors active filters across every page.
+export async function getFilteredFileIds(
+  runInternalId: string,
+  filters: RunFilesFilter
+): Promise<number[]> {
+  const rows = await db
+    .select({ id: files.id })
+    .from(files)
+    .where(and(...runFilesWhere(runInternalId, filters)));
+  return rows.map((r) => r.id);
+}
 
 // ---------------------------------------------------------------------------
 // Per-run file list, paginated. Used by the MCP `list_run_files` tool so that
 // runs with thousands of files don't dump every row into a single response.
 // Mirrors the page/per_page/total/total_pages shape returned by
 // `buildRunListQuery`. Not wrapped in `cache()` — callers pass distinct
-// (page, perPage) keys, and the UI uses the unbounded `getRunFiles` above.
+// (page, perPage) keys.
 // ---------------------------------------------------------------------------
 
 export async function getRunFilesPage(
