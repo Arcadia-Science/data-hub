@@ -26,7 +26,7 @@ import type {
 import { runDetailSearchParams } from "@/lib/search-params";
 import { Download, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useQueryStates } from "nuqs";
+import { debounce, useQueryStates } from "nuqs";
 import { useEffect, useTransition } from "react";
 import { toast } from "sonner";
 import { FileBulkActionBar } from "./file-bulk-action-bar";
@@ -39,6 +39,10 @@ import {
   EditableRunFilesTable,
   ReadOnlyRunFilesTable,
 } from "./run-files-table";
+
+// Wait this long after the last search keystroke before writing the query to
+// the URL and refetching the page.
+const SEARCH_DEBOUNCE_MS = 300;
 
 type RunFilesSectionProps = {
   // Current page of the server-paginated, filtered, sorted file list.
@@ -102,15 +106,15 @@ function RunFilesSectionContent({
   const [isPending, startTransition] = useTransition();
 
   // All search / filter / sort / page state lives in the URL. `shallow:false`
-  // triggers the RSC refetch, `startTransition` ties it to the table's stale
-  // treatment, and `throttleMs` debounces search keystrokes. Every
-  // filter/sort change also resets `files_page` to 1 so the user never lands
-  // on an out-of-range page (default values drop out of the URL via nuqs
-  // clearOnDefault).
+  // triggers the RSC refetch and `startTransition` ties it to the table's
+  // stale treatment. Discrete controls (status/sort/dismissed/page) update
+  // immediately; the free-text search debounces its URL writes per-keystroke
+  // (see the input's onChange below). Every filter/sort change also resets
+  // `files_page` to 1 so the user never lands on an out-of-range page
+  // (default values drop out of the URL via nuqs clearOnDefault).
   const { startTransition: tableStartTransition } = useTablePending();
   const [filters, setFilters] = useQueryStates(runDetailSearchParams, {
     shallow: false,
-    throttleMs: 300,
     startTransition: tableStartTransition,
   });
 
@@ -169,7 +173,13 @@ function RunFilesSectionContent({
               placeholder="Search files..."
               value={filters.files_search}
               onChange={(e) =>
-                setFilters({ files_search: e.target.value, files_page: 1 })
+                setFilters(
+                  { files_search: e.target.value, files_page: 1 },
+                  // Debounce the URL write (and resulting RSC refetch) so we
+                  // only query once the user pauses typing. The input stays
+                  // responsive because nuqs updates `filters` optimistically.
+                  { limitUrlUpdates: debounce(SEARCH_DEBOUNCE_MS) }
+                )
               }
               className="h-8 pl-8 text-xs"
             />
