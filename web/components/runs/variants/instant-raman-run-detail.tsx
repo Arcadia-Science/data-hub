@@ -7,20 +7,23 @@ import { RunDetail } from "@/components/runs/run-detail";
 export function InstantRamanRunDetail({
   run,
   files,
+  filesPagination,
+  fileStats,
+  reportFiles,
   instrumentId,
   runId,
   attributionsSlot,
 }: RunDetailProps) {
   const isDeleted = run.deletedAt !== null;
-  const activeFileCount = files.filter((f) => f.deletedAt === null).length;
-  const hasProcessedFiles =
-    files.filter((f) => f.category === "processed" && f.deletedAt === null)
-      .length > 0;
+  const activeFileCount = fileStats.active;
+  const hasProcessedFiles = fileStats.processedActive > 0;
 
   // Within an InstantRaman run we treat every active CSV as a Raman spectrum.
   // Non-conforming files surface an inline error in the chart area rather than
-  // being silently filtered out, so users always see what's available.
-  const spectra = files
+  // being silently filtered out, so users always see what's available. Sourced
+  // from the report-files set (which includes every active CSV) so the full
+  // spectrum list survives server-side pagination of the files table.
+  const spectra = reportFiles
     .filter((f) => f.deletedAt === null && /\.csv$/i.test(f.filename))
     .map((f) => ({ fileId: f.id, filename: f.filename }))
     .sort((a, b) => a.filename.localeCompare(b.filename));
@@ -44,6 +47,8 @@ export function InstantRamanRunDetail({
       <RunDetail.FilesMetadataLayout>
         <RunDetail.Files
           files={files}
+          pagination={filesPagination}
+          stats={fileStats}
           instrumentId={instrumentId}
           runId={runId}
           isDeleted={isDeleted}

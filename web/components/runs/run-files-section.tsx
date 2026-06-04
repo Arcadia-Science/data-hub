@@ -1,16 +1,13 @@
 "use client";
 
+import { PaginationNav } from "@/components/pagination-nav";
+import {
+  TablePendingBoundary,
+  TablePendingProvider,
+  useTablePending,
+} from "@/components/table-pending";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Pagination,
-  PaginationContent,
-  PaginationEllipsis,
-  PaginationItem,
-  PaginationLink,
-  PaginationNext,
-  PaginationPrevious,
-} from "@/components/ui/pagination";
 import {
   Select,
   SelectContent,
@@ -19,16 +16,18 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useArchiveDownload } from "@/hooks/use-archive-download";
-import type { RunFile } from "@/lib/api/instrument-runs";
+import type {
+  FilesSortField,
+  FilesStatusFilter,
+  RunFile,
+  RunFilesPage,
+  RunFileStats,
+} from "@/lib/api/instrument-runs";
+import { runDetailSearchParams } from "@/lib/search-params";
 import { Download, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
-import {
-  type MouseEvent,
-  useEffect,
-  useMemo,
-  useState,
-  useTransition,
-} from "react";
+import { debounce, useQueryStates } from "nuqs";
+import { useEffect, useTransition } from "react";
 import { toast } from "sonner";
 import { FileBulkActionBar } from "./file-bulk-action-bar";
 import {
@@ -39,75 +38,23 @@ import {
 import {
   EditableRunFilesTable,
   ReadOnlyRunFilesTable,
-  statusLabel,
 } from "./run-files-table";
 
-const PAGE_SIZE = 10;
+// Wait this long after the last search keystroke before writing the query to
+// the URL and refetching the page.
+const SEARCH_DEBOUNCE_MS = 300;
 
-function getVisiblePages(
-  page: number,
-  totalPages: number
-): (number | "ellipsis")[] {
-  if (totalPages <= 7)
-    return Array.from({ length: totalPages }, (_, i) => i + 1);
-
-  const pages: (number | "ellipsis")[] = [1];
-  if (page > 3) pages.push("ellipsis");
-  const start = Math.max(2, page - 1);
-  const end = Math.min(totalPages - 1, page + 1);
-  for (let i = start; i <= end; i++) pages.push(i);
-  if (page < totalPages - 2) pages.push("ellipsis");
-  if (totalPages > 1) pages.push(totalPages);
-  return pages;
-}
-
-type StatusFilter =
-  | "all"
-  | "raw"
-  | "processed"
-  | "pending"
-  | "uploaded"
-  | "processing"
-  | "completed"
-  | "failed";
-type SortField = "name" | "size" | "date" | "status";
-
-const PENDING_STATUSES = new Set(["detected", "upload_requested"]);
-
-function matchesFilter(file: RunFile, filter: StatusFilter): boolean {
-  if (filter === "all") return true;
-  if (filter === "raw") return file.category === "raw";
-  if (filter === "processed") return file.category === "processed";
-  if (filter === "pending") return PENDING_STATUSES.has(file.status);
-  return file.status === filter;
-}
-
-function compareByCategory(a: RunFile, b: RunFile): number {
-  if (a.category === b.category) return 0;
-  return a.category === "raw" ? -1 : 1;
-}
-
-function compareByField(a: RunFile, b: RunFile, field: SortField): number {
-  switch (field) {
-    case "name":
-      return a.filename.localeCompare(b.filename);
-    case "size":
-      return (a.sizeBytes ?? 0) - (b.sizeBytes ?? 0);
-    case "date":
-      return (
-        new Date(a.createdAt ?? 0).getTime() -
-        new Date(b.createdAt ?? 0).getTime()
-      );
-    case "status":
-      return statusLabel(a).localeCompare(statusLabel(b));
-    default:
-      return 0;
-  }
-}
-
-function compareFiles(a: RunFile, b: RunFile, field: SortField): number {
-  return compareByCategory(a, b) || compareByField(a, b, field);
-}
+type RunFilesSectionProps = {
+  // Current page of the server-paginated, filtered, sorted file list.
+  files: RunFile[];
+  pagination: RunFilesPage["pagination"];
+  // Aggregate per-run counts used for the footer summary, filter labels, and
+  // the in-flight auto-refresh signal — independent of the current filter.
+  stats: RunFileStats;
+  instrumentId: string;
+  runId: string;
+  isDeleted: boolean;
+};
 
 // Synchronously trigger one anchor-click per file so the browser treats
 // them all as the same user gesture (Chrome silently drops downloads
@@ -126,124 +73,93 @@ function fanOutFileDownload(refs: FileRef[]) {
   }
 }
 
-export function RunFilesSection(props: {
-  files: RunFile[];
-  instrumentId: string;
-  runId: string;
-  isDeleted: boolean;
-}) {
-  // The read-only path doesn't need selection at all. Skip the provider so
-  // we don't pay for the context for runs that can't be modified anyway.
-  if (props.isDeleted) {
-    return <RunFilesSectionContent {...props} />;
-  }
+export function RunFilesSection(props: RunFilesSectionProps) {
+  // TablePendingProvider wraps the whole section so the toolbar's URL updates
+  // and PaginationNav share the same React transition, dimming the table
+  // while the next server page streams in. The read-only path additionally
+  // skips the selection provider since those runs can't be modified.
   return (
-    <FileSelectionProvider>
-      <RunFilesSectionContent {...props} />
-    </FileSelectionProvider>
+    <TablePendingProvider>
+      {props.isDeleted ? (
+        <RunFilesSectionContent {...props} />
+      ) : (
+        <FileSelectionProvider>
+          <RunFilesSectionContent {...props} />
+        </FileSelectionProvider>
+      )}
+    </TablePendingProvider>
   );
 }
 
 function RunFilesSectionContent({
   files,
+  pagination,
+  stats,
   instrumentId,
   runId,
   isDeleted,
-}: {
-  files: RunFile[];
-  instrumentId: string;
-  runId: string;
-  isDeleted: boolean;
-}) {
+}: RunFilesSectionProps) {
   const router = useRouter();
   const { actions: archiveActions } = useArchiveDownload();
+  // Mutation transition (upload/dismiss/reprocess) — distinct from the table's
+  // navigation transition below.
   const [isPending, startTransition] = useTransition();
-  const [showDismissed, setShowDismissed] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [sortField, setSortField] = useState<SortField>("name");
-  const [page, setPage] = useState(1);
 
-  const activeFiles = useMemo(
-    () => files.filter((f) => f.deletedAt === null),
-    [files]
-  );
+  // All search / filter / sort / page state lives in the URL. `shallow:false`
+  // triggers the RSC refetch and `startTransition` ties it to the table's
+  // stale treatment. Discrete controls (status/sort/dismissed/page) update
+  // immediately; the free-text search debounces its URL writes per-keystroke
+  // (see the input's onChange below). Every filter/sort change also resets
+  // `files_page` to 1 so the user never lands on an out-of-range page
+  // (default values drop out of the URL via nuqs clearOnDefault).
+  const { startTransition: tableStartTransition } = useTablePending();
+  const [filters, setFilters] = useQueryStates(runDetailSearchParams, {
+    shallow: false,
+    startTransition: tableStartTransition,
+  });
 
-  const dismissedFiles = useMemo(
-    () => files.filter((f) => f.deletedAt !== null),
-    [files]
-  );
-
-  // Auto-refresh while any file is in a transient state so the UI picks up
-  // status transitions (e.g. upload_requested → uploaded, processing →
-  // completed) without a manual reload.
-  const hasInFlight = activeFiles.some(
-    (f) => f.status === "processing" || f.status === "upload_requested"
-  );
+  // Auto-refresh while work is genuinely in flight (uploading or processing)
+  // so the UI picks up status transitions without a manual reload. Files that
+  // are merely "detected" (awaiting a manual upload) don't trigger polling.
+  const hasInFlight = stats.processing > 0 || stats.uploadRequested > 0;
   useEffect(() => {
     if (!hasInFlight) return;
     const id = setInterval(() => router.refresh(), 3000);
     return () => clearInterval(id);
   }, [hasInFlight, router]);
 
-  const baseFiles = showDismissed ? files : activeFiles;
-
-  const filteredFiles = useMemo(() => {
-    let result = baseFiles;
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter((f) => f.filename.toLowerCase().includes(q));
-    }
-    if (statusFilter !== "all") {
-      result = result.filter((f) => matchesFilter(f, statusFilter));
-    }
-    return [...result].sort((a, b) => compareFiles(a, b, sortField));
-  }, [baseFiles, searchQuery, statusFilter, sortField]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredFiles.length / PAGE_SIZE));
-  const currentPage = Math.min(Math.max(1, page), totalPages);
-
-  const paginatedFiles = useMemo(
-    () =>
-      filteredFiles.slice(
-        (currentPage - 1) * PAGE_SIZE,
-        currentPage * PAGE_SIZE
-      ),
-    [filteredFiles, currentPage]
-  );
-
-  const isDownloadable = (f: RunFile) =>
-    ["uploaded", "processing", "completed", "failed"].includes(f.status);
-
-  // Files in the *currently filtered* view that are eligible for the
-  // archive download. The "Download all" button reflects this set so
-  // status/search filters narrow the zip to match what's on screen.
-  const filteredDownloadableFiles = useMemo(
-    () => filteredFiles.filter(isDownloadable),
-    [filteredFiles]
-  );
-
-  // When no filters are active, omit `file_ids` so the URL stays short and
-  // the archive route falls back to its "all downloadable files in run"
-  // path. Otherwise serialize the filtered set so the server zips exactly
-  // what the user sees.
+  // The archive route resolves the active filters to a downloadable file set
+  // server-side, so "Download all" honors search/status/dismissed across every
+  // page (not just the rows currently on screen). With no filters active we
+  // omit the params so the route's default "all downloadable files" path runs.
   const isFilterActive =
-    searchQuery.trim() !== "" || statusFilter !== "all" || showDismissed;
+    filters.files_search.trim() !== "" ||
+    filters.files_status !== "all" ||
+    filters.files_dismissed;
   const archiveBaseHref = `/api/v1/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}/download-archive`;
-  const downloadHref = isFilterActive
-    ? `${archiveBaseHref}?file_ids=${filteredDownloadableFiles.map((f) => f.id).join(",")}`
-    : archiveBaseHref;
+  let downloadHref = archiveBaseHref;
+  if (isFilterActive) {
+    const params = new URLSearchParams();
+    if (filters.files_search.trim()) {
+      params.set("search", filters.files_search.trim());
+    }
+    if (filters.files_status !== "all") {
+      params.set("status", filters.files_status);
+    }
+    if (filters.files_dismissed) params.set("dismissed", "true");
+    downloadHref = `${archiveBaseHref}?${params.toString()}`;
+  }
 
-  // Summary counts
-  const pendingCount = activeFiles.filter((f) =>
-    PENDING_STATUSES.has(f.status)
-  ).length;
-  const uploadedCount = activeFiles.filter(
-    (f) => !PENDING_STATUSES.has(f.status) && f.status !== "processing"
-  ).length;
+  // Count of downloadable active files in the whole run (uploaded/processing/
+  // completed/failed). `stats.uploaded` already folds completed+failed in, so
+  // adding processing covers the full downloadable set.
+  const downloadableCount = stats.uploaded + stats.processing;
 
-  const filterLabel =
-    statusFilter === "all" ? `All (${activeFiles.length})` : undefined;
+  const from =
+    pagination.total === 0
+      ? 0
+      : (pagination.page - 1) * pagination.per_page + 1;
+  const to = Math.min(pagination.page * pagination.per_page, pagination.total);
 
   return (
     <div className="flex flex-col gap-2">
@@ -255,27 +171,38 @@ function RunFilesSectionContent({
             <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="Search files..."
-              value={searchQuery}
-              onChange={(e) => {
-                setSearchQuery(e.target.value);
-                setPage(1);
-              }}
+              value={filters.files_search}
+              onChange={(e) =>
+                setFilters(
+                  { files_search: e.target.value, files_page: 1 },
+                  // Debounce the URL write (and resulting RSC refetch) so we
+                  // only query once the user pauses typing. The input stays
+                  // responsive because nuqs updates `filters` optimistically.
+                  { limitUrlUpdates: debounce(SEARCH_DEBOUNCE_MS) }
+                )
+              }
               className="h-8 pl-8 text-xs"
             />
           </div>
           <Select
-            value={statusFilter}
-            onValueChange={(v) => {
-              setStatusFilter(v as StatusFilter);
-              setPage(1);
-            }}
+            value={filters.files_status}
+            onValueChange={(v) =>
+              setFilters({
+                files_status: v as FilesStatusFilter,
+                files_page: 1,
+              })
+            }
           >
             <SelectTrigger size="sm" className="h-8 text-sm">
-              <SelectValue>{filterLabel}</SelectValue>
+              <SelectValue>
+                {filters.files_status === "all"
+                  ? `All (${stats.active})`
+                  : undefined}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all" className="text-sm">
-                All ({activeFiles.length})
+                All ({stats.active})
               </SelectItem>
               <SelectItem value="raw" className="text-sm">
                 Raw
@@ -301,20 +228,19 @@ function RunFilesSectionContent({
             </SelectContent>
           </Select>
           <Select
-            value={sortField}
-            onValueChange={(v) => {
-              setSortField(v as SortField);
-              setPage(1);
-            }}
+            value={filters.files_sort}
+            onValueChange={(v) =>
+              setFilters({ files_sort: v as FilesSortField, files_page: 1 })
+            }
           >
             <SelectTrigger size="sm" className="h-8 text-sm">
               <SelectValue>
                 Sort:{" "}
-                {sortField === "name"
+                {filters.files_sort === "name"
                   ? "Name"
-                  : sortField === "size"
+                  : filters.files_sort === "size"
                     ? "Size"
-                    : sortField === "date"
+                    : filters.files_sort === "date"
                       ? "Date"
                       : "Status"}
               </SelectValue>
@@ -334,20 +260,22 @@ function RunFilesSectionContent({
               </SelectItem>
             </SelectContent>
           </Select>
-          {dismissedFiles.length > 0 && (
+          {stats.dismissed > 0 && (
             <Button
-              variant={showDismissed ? "secondary" : "ghost"}
+              variant={filters.files_dismissed ? "secondary" : "ghost"}
               size="sm"
               className="h-8 text-sm"
-              onClick={() => {
-                setShowDismissed((p) => !p);
-                setPage(1);
-              }}
+              onClick={() =>
+                setFilters({
+                  files_dismissed: !filters.files_dismissed,
+                  files_page: 1,
+                })
+              }
             >
-              {showDismissed ? "Hide dismissed" : "Show dismissed"}
+              {filters.files_dismissed ? "Hide dismissed" : "Show dismissed"}
             </Button>
           )}
-          {filteredDownloadableFiles.length > 0 && (
+          {downloadableCount > 0 && (
             <Button
               variant="outline"
               size="sm"
@@ -361,7 +289,9 @@ function RunFilesSectionContent({
               }
             >
               <Download className="size-3" />
-              Download all ({filteredDownloadableFiles.length})
+              {isFilterActive
+                ? "Download filtered"
+                : `Download all (${downloadableCount})`}
             </Button>
           )}
         </div>
@@ -377,116 +307,65 @@ function RunFilesSectionContent({
           />
         )}
 
-        {/* Dense file table */}
-        {filteredFiles.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">
-            No files match your filters.
-          </p>
-        ) : isDeleted ? (
-          <ReadOnlyRunFilesTable
-            files={paginatedFiles}
-            isPending={isPending}
-            onReprocess={(id) =>
-              handleSingleReprocess(id, startTransition, router)
-            }
-          />
-        ) : (
-          <EditableRunFilesTable
-            files={paginatedFiles}
-            isPending={isPending}
-            onUpload={(id) =>
-              handleSingleUpload(
-                id,
-                instrumentId,
-                runId,
-                startTransition,
-                router
-              )
-            }
-            onDismiss={(id) => handleSingleDismiss(id, startTransition, router)}
-            onReprocess={(id) =>
-              handleSingleReprocess(id, startTransition, router)
-            }
-          />
-        )}
+        {/* Dense file table — server-paginated, dimmed while a navigation is
+            in flight. */}
+        <TablePendingBoundary>
+          {files.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              No files match your filters.
+            </p>
+          ) : isDeleted ? (
+            <ReadOnlyRunFilesTable
+              files={files}
+              isPending={isPending}
+              onReprocess={(id) =>
+                handleSingleReprocess(id, startTransition, router)
+              }
+            />
+          ) : (
+            <EditableRunFilesTable
+              files={files}
+              isPending={isPending}
+              onUpload={(id) =>
+                handleSingleUpload(
+                  id,
+                  instrumentId,
+                  runId,
+                  startTransition,
+                  router
+                )
+              }
+              onDismiss={(id) =>
+                handleSingleDismiss(id, startTransition, router)
+              }
+              onReprocess={(id) =>
+                handleSingleReprocess(id, startTransition, router)
+              }
+            />
+          )}
+        </TablePendingBoundary>
 
         {/* Summary footer */}
         <div className="flex items-center justify-between gap-2 border-t px-3 py-2 text-sm text-muted-foreground">
           <span>
-            {filteredFiles.length === 0
-              ? `Showing 0 of ${activeFiles.length}`
-              : `Showing ${(currentPage - 1) * PAGE_SIZE + 1}–${Math.min(
-                  currentPage * PAGE_SIZE,
-                  filteredFiles.length
-                )} of ${filteredFiles.length}`}
-            {dismissedFiles.length > 0 && showDismissed
-              ? ` (+${dismissedFiles.length} dismissed)`
+            {pagination.total === 0
+              ? `Showing 0 of ${stats.active}`
+              : `Showing ${from}–${to} of ${pagination.total}`}
+            {stats.dismissed > 0 && filters.files_dismissed
+              ? ` (+${stats.dismissed} dismissed)`
               : ""}
           </span>
-          {totalPages > 1 && (
-            <Pagination className="mx-0 w-auto justify-end">
-              <PaginationContent>
-                {(() => {
-                  const atPrev = currentPage <= 1;
-                  const atNext = currentPage >= totalPages;
-                  const go = (target: number) => (e: MouseEvent) => {
-                    e.preventDefault();
-                    setPage(Math.min(Math.max(1, target), totalPages));
-                  };
-                  return (
-                    <>
-                      <PaginationItem>
-                        <PaginationPrevious
-                          href="#"
-                          onClick={go(currentPage - 1)}
-                          aria-disabled={atPrev}
-                          className={
-                            atPrev
-                              ? "pointer-events-none opacity-50"
-                              : undefined
-                          }
-                        />
-                      </PaginationItem>
-                      {getVisiblePages(currentPage, totalPages).map((p, i) =>
-                        p === "ellipsis" ? (
-                          <PaginationItem key={`ellipsis-${i}`}>
-                            <PaginationEllipsis />
-                          </PaginationItem>
-                        ) : (
-                          <PaginationItem key={p}>
-                            <PaginationLink
-                              href="#"
-                              isActive={p === currentPage}
-                              onClick={go(p)}
-                            >
-                              {p}
-                            </PaginationLink>
-                          </PaginationItem>
-                        )
-                      )}
-                      <PaginationItem>
-                        <PaginationNext
-                          href="#"
-                          onClick={go(currentPage + 1)}
-                          aria-disabled={atNext}
-                          className={
-                            atNext
-                              ? "pointer-events-none opacity-50"
-                              : undefined
-                          }
-                        />
-                      </PaginationItem>
-                    </>
-                  );
-                })()}
-              </PaginationContent>
-            </Pagination>
-          )}
           <span>
-            {pendingCount} pending &middot; {uploadedCount} uploaded
+            {stats.pending} pending &middot; {stats.uploaded} uploaded
           </span>
         </div>
       </div>
+
+      <PaginationNav
+        page={pagination.page}
+        totalPages={pagination.total_pages}
+        pageParam="files_page"
+      />
     </div>
   );
 }

@@ -7,6 +7,8 @@ import type {
   RawWellRow,
   RunDetail as RunDetailType,
   RunFile,
+  RunFilesPage,
+  RunFileStats,
 } from "@/lib/api/instrument-runs";
 
 export const RunDetail = {
@@ -19,7 +21,13 @@ export const RunDetail = {
 
 export type RunDetailProps = {
   run: RunDetailType;
+  // Current page of the server-paginated files table.
   files: RunFile[];
+  filesPagination: RunFilesPage["pagination"];
+  // Aggregate per-run file counts (footer summary, variant counts).
+  fileStats: RunFileStats;
+  // Processed + PDF files for the report sections and well-data parsing.
+  reportFiles: RunFile[];
   wellData: RawWellRow[];
   instrumentId: string;
   runId: string;
