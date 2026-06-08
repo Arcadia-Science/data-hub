@@ -5,7 +5,7 @@ import {
   type InstrumentType,
   watchers,
 } from "@/lib/db/schema";
-import { and, count, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, count, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { cache } from "react";
 import YAML from "yaml";
 
@@ -28,6 +28,36 @@ export type InstrumentListItem = {
 // A watcher is stale when its last heartbeat is older than this threshold,
 // even if its DB status is "watching". Must match the window in dashboard.ts.
 const HEARTBEAT_STALE_MINUTES = 5;
+
+/**
+ * Returns true when the instrument has at least one watcher that is actively
+ * heartbeating (status "watching" with a heartbeat inside the staleness
+ * window). Uploads transfer through the watcher agent, so the upload-request
+ * routes use this to reject queueing when no watcher could pick the files up —
+ * otherwise files sit in `upload_requested` forever and the UI shows a
+ * perpetual "Uploading" spinner with no error.
+ */
+export async function instrumentHasOnlineWatcher(
+  instrumentId: string
+): Promise<boolean> {
+  const staleThreshold = new Date(
+    Date.now() - HEARTBEAT_STALE_MINUTES * 60 * 1000
+  );
+
+  const [row] = await db
+    .select({ value: count() })
+    .from(watchers)
+    .where(
+      and(
+        eq(watchers.instrumentId, instrumentId),
+        isNull(watchers.deletedAt),
+        eq(watchers.status, "watching"),
+        gt(watchers.lastHeartbeatAt, staleThreshold)
+      )
+    );
+
+  return (row?.value ?? 0) > 0;
+}
 
 /**
  * Extracts `instrument.file_patterns` from a watcher's stored config YAML.
