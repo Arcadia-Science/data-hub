@@ -8,6 +8,10 @@ export const INTERNAL_ERROR = "INTERNAL_ERROR";
 // watcher's reported version is below the configured
 // `watcher_release_config.min_supported_version` floor.
 export const UPGRADE_REQUIRED = "UPGRADE_REQUIRED";
+// Paired with HTTP 409. Returned by the upload-request routes when the
+// instrument has no online watcher to pick up the queue — without one,
+// queued files would sit in `upload_requested` forever (never reaching S3).
+export const WATCHER_OFFLINE = "WATCHER_OFFLINE";
 
 export function apiError(
   status: number,
