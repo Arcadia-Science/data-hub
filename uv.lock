@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
@@ -40,21 +40,22 @@ wheels = [
 
 [[package]]
 name = "arcadia-microscopy-tools"
-version = "0.3.2"
+version = "0.4.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "arcadia-pycolor" },
     { name = "colour-science" },
     { name = "liffile" },
+    { name = "matplotlib" },
     { name = "nd2" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "pydantic" },
     { name = "scikit-image" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8e/59/0be702d252c7bf935a9f4eca83db1435ab85b5da99575943810bdf35ea0f/arcadia_microscopy_tools-0.3.2.tar.gz", hash = "sha256:bf45a847b243aa1c364bc07a0e901dd8006e013dc5bbc2792f3408e9304ed8c9", size = 3326355, upload-time = "2026-03-23T22:50:35.672Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6e/ce/41bdcc5b43e5dbe6cd9ab83e1ae43fc471e70b1e0291b863bd988f1cc32d/arcadia_microscopy_tools-0.4.1.tar.gz", hash = "sha256:dc5d3fb9150492b6b11a069dbe04a438f41a3e3865f4c9c5b2a33db31fdbad6b", size = 3166930, upload-time = "2026-06-09T17:44:17.935Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8e/1a/d3297a140a1694b9a00707575ec7a8aac6d353fa43a57ca316124efd9839/arcadia_microscopy_tools-0.3.2-py3-none-any.whl", hash = "sha256:324a711d420921bbea9ceffc08f435ff0b91bf9471043c93ed661b0f32eb526b", size = 1863223, upload-time = "2026-03-23T22:50:37.26Z" },
+    { url = "https://files.pythonhosted.org/packages/71/e5/befbd426988321fb8f340f08dfd4fe52f2e5e74df966a918e8206830ab52/arcadia_microscopy_tools-0.4.1-py3-none-any.whl", hash = "sha256:3d55ce71c3a0e34f8c3f201974d47d1fbab3ee3db2f081b7f28b6a373496a146", size = 1866723, upload-time = "2026-06-09T17:44:19.454Z" },
 ]
 
 [[package]]
@@ -386,7 +387,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arcadia-microscopy-tools", specifier = ">=0.3.2" },
+    { name = "arcadia-microscopy-tools", specifier = ">=0.4.1" },
     { name = "aws-lambda-typing", specifier = ">=2.20.0" },
     { name = "click", specifier = ">=8.1" },
     { name = "data-hub-shared", editable = "packages/shared" },

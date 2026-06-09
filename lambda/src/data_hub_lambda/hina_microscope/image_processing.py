@@ -64,7 +64,7 @@ class ND2Processor:
         """Produce the RGB overlay for the loaded image."""
         per_channel_2d: dict[Channel, NDArray[np.float64]] = {}
         for channel in self.image.channels:
-            intensities = self.image.get_intensities_from_channel(channel)
+            intensities = self.image.get_channel_intensities(channel)
             reduced = self._reduce_to_2d(intensities, self._non_channel_axes())
             per_channel_2d[channel] = _rescale_percentile(reduced, CONTRAST_PERCENTILES)
 
