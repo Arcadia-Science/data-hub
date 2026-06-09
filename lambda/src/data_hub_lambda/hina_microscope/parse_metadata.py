@@ -26,7 +26,7 @@ def parse_metadata(image: MicroscopyImage) -> dict[str, Any]:
 
 
 def _channel_to_dict(channel: Channel) -> dict[str, Any]:
-    color = channel.color.hex_code if channel.color is not None else None
+    color = channel.color.lower()
     return {
         "name": channel.name,
         "excitation_nm": channel.excitation_nm,
