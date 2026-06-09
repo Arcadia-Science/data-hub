@@ -1,5 +1,6 @@
 ---
 description: Ensure that all code changes are checked for formatting, lint, and type errors by running `make check-all` after every update.
+globs: **/*.{ts,tsx,mjs,js,py}
 alwaysApply: true
 ---
 
