@@ -88,7 +88,16 @@ export type InvokeBuildArchiveInput = {
   // produced processed CSV). The Lambda allow-lists each bucket against its
   // own configured raw + processed env vars, so this is not a pivot point
   // for a caller with `lambda:InvokeFunctionUrl` to read arbitrary S3.
-  files: { s3Key: string; filename: string; sourceBucket: string }[];
+  //
+  // `sizeBytes` is an optional hint the builder uses to decide whether a file
+  // is small enough to prefetch concurrently; it never affects correctness, so
+  // it's fine to omit (the builder streams unknown-size files inline).
+  files: {
+    s3Key: string;
+    filename: string;
+    sourceBucket: string;
+    sizeBytes?: number | null;
+  }[];
 };
 
 export type InvokeBuildArchiveResult =
@@ -128,6 +137,9 @@ export async function invokeBuildArchive(
       key: f.s3Key,
       name: f.filename,
       source_bucket: f.sourceBucket,
+      // Snake-cased to match the Lambda payload contract. Omitted when null so
+      // the builder treats it as "unknown" and streams the file inline.
+      ...(f.sizeBytes == null ? {} : { size_bytes: f.sizeBytes }),
     })),
   };
   if (input.jobId) payload.job_id = input.jobId;

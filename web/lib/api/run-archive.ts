@@ -19,17 +19,56 @@ import {
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { after } from "next/server";
 
-// Hint to caller (LLM, polling UI) for how long to wait before checking
-// again. Sized to be longer than a small archive's typical build (which
-// the Lambda finishes in 1-3s for a few-MB run) but short enough that the
-// chat experience doesn't stall.
+// Floor for the build-time retry hint handed to the caller (LLM, polling UI).
+// Even a trivial archive pays Lambda cold-start + invoke + presign overhead,
+// so polling sooner than this just wastes round-trips.
 export const ARCHIVE_BUILD_RETRY_AFTER_SECONDS = 5;
+
+// Ceiling for the hint. Keeps the interactive chat experience responsive: we'd
+// rather a caller poll a couple extra times on a genuinely huge run than stall
+// for half a minute when the build may well finish early.
+export const ARCHIVE_BUILD_RETRY_AFTER_MAX_SECONDS = 30;
+
+// Coefficients for the retry-hint estimate. Build time is dominated by either
+// per-object GetObject latency (runs with thousands of tiny files) or raw
+// throughput (a few very large files), so we model both terms and take their
+// sum. PER_FILE is small because the builder now prefetches small files
+// concurrently; THROUGHPUT reflects the Lambda's streaming zip rate. These are
+// deliberately rough first guesses — the floor/cap bound the blast radius if
+// they're off, and they can be retuned against real telemetry.
+const ARCHIVE_BUILD_BASE_SECONDS = 3;
+const ARCHIVE_BUILD_SECONDS_PER_FILE = 0.005;
+const ARCHIVE_BUILD_BYTES_PER_SECOND = 200 * 1024 * 1024;
+
+// Estimates how long the caller should wait before polling again, based on the
+// shape of the run. `totalBytes` should sum only known file sizes (NULL sizes
+// contribute nothing to the throughput term, but every file still counts
+// toward the per-file term). Always clamped to
+// [ARCHIVE_BUILD_RETRY_AFTER_SECONDS, ARCHIVE_BUILD_RETRY_AFTER_MAX_SECONDS].
+export function estimateRetryAfterSeconds(input: {
+  fileCount: number;
+  totalBytes: number;
+}): number {
+  const estimate =
+    ARCHIVE_BUILD_BASE_SECONDS +
+    input.fileCount * ARCHIVE_BUILD_SECONDS_PER_FILE +
+    input.totalBytes / ARCHIVE_BUILD_BYTES_PER_SECOND;
+  const rounded = Math.ceil(estimate);
+  return Math.min(
+    ARCHIVE_BUILD_RETRY_AFTER_MAX_SECONDS,
+    Math.max(ARCHIVE_BUILD_RETRY_AFTER_SECONDS, rounded)
+  );
+}
 
 export type DownloadableFile = {
   id: number;
   filename: string;
   s3Bucket: string;
   s3Key: string;
+  // Nullable: older rows and not-yet-sized uploads can lack a size. Used only
+  // to estimate the build-time retry hint and to let the builder decide
+  // prefetch eligibility — never required for correctness.
+  sizeBytes: number | null;
 };
 
 export type PrepareRunArchiveInput = {
@@ -197,17 +236,25 @@ export async function prepareRunArchive(
         s3Key: f.s3Key,
         filename: f.filename,
         sourceBucket: f.s3Bucket,
+        sizeBytes: f.sizeBytes,
       })),
     };
     after(() => runArchiveBuildInBackground(job.id, buildInput, fingerprint));
   }
 
+  const totalBytes = downloadable.reduce(
+    (sum, f) => sum + (f.sizeBytes ?? 0),
+    0
+  );
   return {
     ok: true,
     status: "building",
     jobId: job.id,
     ownsBuild,
-    retryAfterSeconds: ARCHIVE_BUILD_RETRY_AFTER_SECONDS,
+    retryAfterSeconds: estimateRetryAfterSeconds({
+      fileCount: downloadable.length,
+      totalBytes,
+    }),
   };
 }
 
@@ -233,6 +280,7 @@ async function loadDownloadableFiles(
       filename: files.filename,
       s3Bucket: files.s3Bucket,
       s3Key: files.s3Key,
+      sizeBytes: files.sizeBytes,
     })
     .from(files)
     .where(and(...conditions));
@@ -246,6 +294,7 @@ async function loadDownloadableFiles(
       filename: f.filename,
       s3Bucket: f.s3Bucket,
       s3Key: f.s3Key,
+      sizeBytes: f.sizeBytes,
     }));
 }
 
