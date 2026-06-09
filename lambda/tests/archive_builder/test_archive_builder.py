@@ -9,6 +9,7 @@ which keeps these tests self-contained and fast.
 
 from __future__ import annotations
 import io
+import threading
 import zipfile
 from typing import Any
 
@@ -50,14 +51,36 @@ class StubS3Client:
         self.fail_part_at: int | None = None
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
+        # Concurrency instrumentation for the prefetch tests. `get_object` can
+        # now run on worker threads, so guard shared state with a lock and
+        # track peak in-flight GETs + the thread each key was fetched on.
+        self._lock = threading.Lock()
+        self._concurrent_get = 0
+        self.max_concurrent_get = 0
+        self.get_threads: dict[str, int] = {}
+        # When set, every get_object rendezvouses here before returning, so a
+        # test can assert N fetches genuinely overlap (a serial implementation
+        # would deadlock and time out).
+        self.get_barrier: threading.Barrier | None = None
+
     # -- source side --
     def get_object(self, *, Bucket: str, Key: str) -> dict[str, Any]:
-        self.calls.append(("get_object", {"Bucket": Bucket, "Key": Key}))
+        with self._lock:
+            self.calls.append(("get_object", {"Bucket": Bucket, "Key": Key}))
+            self.get_threads[Key] = threading.get_ident()
+            self._concurrent_get += 1
+            self.max_concurrent_get = max(self.max_concurrent_get, self._concurrent_get)
         try:
-            data = self.source_objects[(Bucket, Key)]
-        except KeyError as exc:
-            raise FileNotFoundError(f"missing fixture s3://{Bucket}/{Key}") from exc
-        return {"Body": _StubS3Body(data)}
+            if self.get_barrier is not None:
+                self.get_barrier.wait(timeout=5)
+            try:
+                data = self.source_objects[(Bucket, Key)]
+            except KeyError as exc:
+                raise FileNotFoundError(f"missing fixture s3://{Bucket}/{Key}") from exc
+            return {"Body": _StubS3Body(data)}
+        finally:
+            with self._lock:
+                self._concurrent_get -= 1
 
     # -- destination side --
     def create_multipart_upload(self, *, Bucket: str, Key: str) -> dict[str, Any]:
@@ -133,8 +156,13 @@ def _make_request(
     )
 
 
-def _file(key: str, name: str, source_bucket: str = "raw-bucket") -> ArchiveFile:
-    return ArchiveFile(key=key, name=name, source_bucket=source_bucket)
+def _file(
+    key: str,
+    name: str,
+    source_bucket: str = "raw-bucket",
+    size_bytes: int | None = None,
+) -> ArchiveFile:
+    return ArchiveFile(key=key, name=name, source_bucket=source_bucket, size_bytes=size_bytes)
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +280,128 @@ class TestBuildRunArchive:
 
 
 # ---------------------------------------------------------------------------
+# Prefetch / concurrency behavior
+# ---------------------------------------------------------------------------
+
+
+class TestBuildRunArchivePrefetch:
+    def test_many_small_files_preserve_order_and_contents(self) -> None:
+        # The motivating case: thousands of tiny files. Sizes are supplied so
+        # every file is prefetch-eligible. Order and contents must survive the
+        # out-of-order concurrent fetches.
+        count = 50
+        objects: dict[tuple[str, str], bytes] = {}
+        files: list[ArchiveFile] = []
+        for i in range(count):
+            key = f"akta-fplc/RUN001/f{i:04d}.csv"
+            body = f"row-{i}\n".encode() * (i + 1)
+            objects[("raw-bucket", key)] = body
+            files.append(_file(key, f"f{i:04d}.csv", size_bytes=len(body)))
+        s3 = StubS3Client(objects)
+        request = _make_request(files)
+
+        build_run_archive(request, s3_client=s3)
+
+        zipped = s3.uploaded_objects[("archives-bucket", "runs/akta-fplc/RUN001/abc.zip")]
+        with zipfile.ZipFile(io.BytesIO(zipped)) as zf:
+            assert zf.namelist() == [f"f{i:04d}.csv" for i in range(count)]
+            for i in range(count):
+                assert zf.read(f"f{i:04d}.csv") == f"row-{i}\n".encode() * (i + 1)
+
+    def test_small_files_are_fetched_concurrently(self) -> None:
+        # A barrier sized to the file count forces every get_object to overlap;
+        # a serial fetch loop would never release the barrier and the wait()
+        # would raise BrokenBarrierError / time out.
+        count = 4
+        objects: dict[tuple[str, str], bytes] = {}
+        files: list[ArchiveFile] = []
+        for i in range(count):
+            key = f"akta-fplc/RUN001/f{i}.csv"
+            body = f"data-{i}".encode()
+            objects[("raw-bucket", key)] = body
+            files.append(_file(key, f"f{i}.csv", size_bytes=len(body)))
+        s3 = StubS3Client(objects)
+        s3.get_barrier = threading.Barrier(count)
+        request = _make_request(files)
+
+        build_run_archive(request, s3_client=s3)
+
+        assert s3.max_concurrent_get == count
+
+    def test_large_file_streams_inline_on_main_thread(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Drop the prefetch threshold so the "big" file is ineligible. Inline
+        # files are fetched lazily on the calling thread (never buffered whole
+        # on a worker); eligible files are fetched on a pool thread.
+        import data_hub_lambda.archive_builder as ab
+
+        monkeypatch.setattr(ab, "_PREFETCH_MAX_FILE_BYTES", 16)
+        s3 = StubS3Client(
+            {
+                ("raw-bucket", "akta-fplc/RUN001/big.bin"): b"x" * 4096,
+                ("raw-bucket", "akta-fplc/RUN001/small.csv"): b"tiny",
+            }
+        )
+        request = _make_request(
+            [
+                _file("akta-fplc/RUN001/big.bin", "big.bin", size_bytes=4096),
+                _file("akta-fplc/RUN001/small.csv", "small.csv", size_bytes=4),
+            ]
+        )
+        main_ident = threading.get_ident()
+
+        build_run_archive(request, s3_client=s3)
+
+        # Big file streamed inline on the main thread; small file prefetched on
+        # a worker thread.
+        assert s3.get_threads["akta-fplc/RUN001/big.bin"] == main_ident
+        assert s3.get_threads["akta-fplc/RUN001/small.csv"] != main_ident
+        zipped = s3.uploaded_objects[("archives-bucket", "runs/akta-fplc/RUN001/abc.zip")]
+        with zipfile.ZipFile(io.BytesIO(zipped)) as zf:
+            assert zf.read("big.bin") == b"x" * 4096
+            assert zf.read("small.csv") == b"tiny"
+
+    def test_unknown_size_streams_inline(self) -> None:
+        # No size hint → treated as "might be huge" → inline on the main thread.
+        s3 = StubS3Client({("raw-bucket", "akta-fplc/RUN001/unknown.bin"): b"payload"})
+        request = _make_request([_file("akta-fplc/RUN001/unknown.bin", "unknown.bin")])
+        main_ident = threading.get_ident()
+
+        build_run_archive(request, s3_client=s3)
+
+        assert s3.get_threads["akta-fplc/RUN001/unknown.bin"] == main_ident
+
+    def test_mixed_small_and_large_preserve_order(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import data_hub_lambda.archive_builder as ab
+
+        monkeypatch.setattr(ab, "_PREFETCH_MAX_FILE_BYTES", 16)
+        s3 = StubS3Client(
+            {
+                ("raw-bucket", "akta-fplc/RUN001/a.csv"): b"alpha",
+                ("raw-bucket", "akta-fplc/RUN001/big.bin"): b"B" * 100,
+                ("raw-bucket", "akta-fplc/RUN001/c.csv"): b"charlie",
+            }
+        )
+        request = _make_request(
+            [
+                _file("akta-fplc/RUN001/a.csv", "a.csv", size_bytes=5),
+                _file("akta-fplc/RUN001/big.bin", "big.bin", size_bytes=100),
+                _file("akta-fplc/RUN001/c.csv", "c.csv", size_bytes=7),
+            ]
+        )
+
+        build_run_archive(request, s3_client=s3)
+
+        zipped = s3.uploaded_objects[("archives-bucket", "runs/akta-fplc/RUN001/abc.zip")]
+        with zipfile.ZipFile(io.BytesIO(zipped)) as zf:
+            assert zf.namelist() == ["a.csv", "big.bin", "c.csv"]
+            assert zf.read("a.csv") == b"alpha"
+            assert zf.read("big.bin") == b"B" * 100
+            assert zf.read("c.csv") == b"charlie"
+
+
+# ---------------------------------------------------------------------------
 # Failure-path tests
 # ---------------------------------------------------------------------------
 
@@ -269,6 +419,27 @@ class TestBuildRunArchiveFailures:
             build_run_archive(request, s3_client=s3)
 
         # Multipart upload was aborted, no completed object exists.
+        assert s3.aborted, "expected abort_multipart_upload to be called"
+        assert ("archives-bucket", "runs/akta-fplc/RUN001/abc.zip") not in s3.uploaded_objects
+
+    def test_aborts_when_prefetch_get_object_fails(self) -> None:
+        # An eligible (sized) file whose source object is missing fails inside
+        # the worker; the future result re-raises in the main thread, which
+        # must abort the multipart upload rather than leak a partial object.
+        s3 = StubS3Client(
+            {("raw-bucket", "akta-fplc/RUN001/present.csv"): b"here"}
+            # "missing.csv" intentionally absent.
+        )
+        request = _make_request(
+            [
+                _file("akta-fplc/RUN001/present.csv", "present.csv", size_bytes=4),
+                _file("akta-fplc/RUN001/missing.csv", "missing.csv", size_bytes=4),
+            ]
+        )
+
+        with pytest.raises(FileNotFoundError):
+            build_run_archive(request, s3_client=s3)
+
         assert s3.aborted, "expected abort_multipart_upload to be called"
         assert ("archives-bucket", "runs/akta-fplc/RUN001/abc.zip") not in s3.uploaded_objects
 
@@ -437,3 +608,24 @@ class TestParseBuildRequest:
         ]
         with pytest.raises(ValueError, match="Invalid archive entry name"):
             parse_build_request(payload)
+
+    def test_parses_valid_size_bytes(self) -> None:
+        payload = self._base_payload()
+        payload["files"][0]["size_bytes"] = 2048
+        request = parse_build_request(payload)
+        assert request.files[0].size_bytes == 2048
+
+    def test_size_bytes_defaults_to_none_when_absent(self) -> None:
+        # The base payload omits size_bytes (legacy callers); it must parse as
+        # None so the file streams inline rather than crashing.
+        request = parse_build_request(self._base_payload())
+        assert request.files[0].size_bytes is None
+
+    @pytest.mark.parametrize("bad_size", [-1, "1024", 1.5, None])
+    def test_invalid_size_bytes_coerced_to_none(self, bad_size: Any) -> None:
+        # Lenient coercion: a malformed hint never rejects the build, it just
+        # falls back to inline streaming.
+        payload = self._base_payload()
+        payload["files"][0]["size_bytes"] = bad_size
+        request = parse_build_request(payload)
+        assert request.files[0].size_bytes is None
