@@ -64,22 +64,18 @@ _MAX_PARTS = 10_000
 # case before it reaches S3.
 _MAX_TOTAL_BYTES = _PART_SIZE_BYTES * _MAX_PARTS
 
-# Concurrency for prefetching small source objects. The bottleneck for runs
-# with thousands of tiny files is per-object GetObject latency, not bandwidth,
-# so fetching several at once collapses what was a serial chain of round-trips.
-# boto3's default connection pool is 10; 16 keeps us from starving it while
-# still parallelizing meaningfully.
+# The bottleneck for runs with thousands of tiny files is per-object
+# ``GetObject`` latency, not bandwidth, so overlapping fetches collapses what
+# was a serial chain of round-trips.
 _PREFETCH_CONCURRENCY = 16
 
-# Only files at or below this size are prefetched into memory. Larger files
-# (and any file with an unknown size) are streamed inline so the resident set
-# stays bounded regardless of total archive size — a 200 GB single-file run
-# must still zip inside the Lambda memory budget.
+# Files at or below this size are prefetched into memory; larger and
+# unknown-size files stream inline so peak memory stays bounded regardless of
+# total archive size (a 200 GB single-file run must still fit the Lambda).
 _PREFETCH_MAX_FILE_BYTES = 16 * 1024 * 1024
 
-# Ceiling on the bytes held across all in-flight prefetches at once. Caps peak
-# memory from the look-ahead window (e.g. many ~16 MB files queued ahead of a
-# slow writer) independent of _PREFETCH_CONCURRENCY.
+# Bounds peak memory from the look-ahead window (many ``_PREFETCH_MAX_FILE_BYTES``
+# files queued ahead of a slow writer) independently of ``_PREFETCH_CONCURRENCY``.
 _PREFETCH_MAX_INFLIGHT_BYTES = 256 * 1024 * 1024
 
 
@@ -327,10 +323,9 @@ def parse_build_request(
         if "/" in name or name in ("", ".", ".."):
             raise ValueError(f"Invalid archive entry name: {name!r}")
 
-        # Optional prefetch hint. Anything not a non-negative int (missing,
-        # null, float, negative, wrong type) is treated as "unknown" → the
-        # file streams inline rather than being buffered. Correctness never
-        # depends on this value, so we coerce leniently instead of rejecting.
+        # Optional prefetch hint, coerced leniently: anything but a
+        # non-negative int becomes ``None`` ("unknown" size), so a malformed
+        # value streams the file inline rather than failing the build.
         raw_size = entry.get("size_bytes")
         size_bytes = raw_size if isinstance(raw_size, int) and raw_size >= 0 else None
         parsed_files.append(
@@ -377,9 +372,9 @@ def build_run_archive(
         part_size=_PART_SIZE_BYTES,
     )
 
-    # Managed by hand rather than via `with` so the error path can cancel
-    # queued-but-unstarted prefetches (cancel_futures=True) instead of letting
-    # the executor drain doomed GetObject work before the exception surfaces.
+    # Managed by hand rather than ``with`` so the error path can cancel
+    # queued-but-unstarted prefetches via ``cancel_futures=True``, instead of
+    # draining doomed ``GetObject`` work before the exception surfaces.
     executor = ThreadPoolExecutor(max_workers=_PREFETCH_CONCURRENCY)
     try:
         # ZipFile.write() requires a real file path on disk; .open() with

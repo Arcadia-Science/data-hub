@@ -24,27 +24,23 @@ import { after } from "next/server";
 // so polling sooner than this just wastes round-trips.
 export const ARCHIVE_BUILD_RETRY_AFTER_SECONDS = 5;
 
-// Ceiling for the hint. Keeps the interactive chat experience responsive: we'd
-// rather a caller poll a couple extra times on a genuinely huge run than stall
-// for half a minute when the build may well finish early.
+// Ceiling for the hint, keeping the chat interactive: better to have a caller
+// poll a couple extra times on a genuinely huge run than stall on one long
+// wait when the build may well finish early.
 export const ARCHIVE_BUILD_RETRY_AFTER_MAX_SECONDS = 30;
 
 // Coefficients for the retry-hint estimate. Build time is dominated by either
-// per-object GetObject latency (runs with thousands of tiny files) or raw
-// throughput (a few very large files), so we model both terms and take their
-// sum. PER_FILE is small because the builder now prefetches small files
-// concurrently; THROUGHPUT reflects the Lambda's streaming zip rate. These are
-// deliberately rough first guesses — the floor/cap bound the blast radius if
-// they're off, and they can be retuned against real telemetry.
+// per-object `GetObject` latency (many tiny files) or throughput (a few large
+// files), so the estimate sums both terms. They are rough first guesses; the
+// floor/cap bound the error, and they can be retuned against real telemetry.
 const ARCHIVE_BUILD_BASE_SECONDS = 3;
 const ARCHIVE_BUILD_SECONDS_PER_FILE = 0.005;
 const ARCHIVE_BUILD_BYTES_PER_SECOND = 200 * 1024 * 1024;
 
-// Estimates how long the caller should wait before polling again, based on the
-// shape of the run. `totalBytes` should sum only known file sizes (NULL sizes
-// contribute nothing to the throughput term, but every file still counts
-// toward the per-file term). Always clamped to
-// [ARCHIVE_BUILD_RETRY_AFTER_SECONDS, ARCHIVE_BUILD_RETRY_AFTER_MAX_SECONDS].
+// Estimates how long the caller should wait before polling again, from the
+// shape of the run. `totalBytes` sums only known file sizes (NULL sizes add
+// nothing to the throughput term but still count toward the per-file term).
+// Clamped to [`ARCHIVE_BUILD_RETRY_AFTER_SECONDS`, `ARCHIVE_BUILD_RETRY_AFTER_MAX_SECONDS`].
 export function estimateRetryAfterSeconds(input: {
   fileCount: number;
   totalBytes: number;
