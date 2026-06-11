@@ -1,4 +1,4 @@
-import { instruments } from "@/lib/db/schema";
+import { instruments, files as schemaFiles } from "@/lib/db/schema";
 import {
   api,
   closeTestDb,
@@ -6,6 +6,7 @@ import {
   resetDb,
   seedTestUser,
 } from "@/tests/integration/helpers";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // Files have two distinct lifecycle paths through the status state machine:
@@ -375,6 +376,27 @@ describe("Files API", () => {
       body: { status: "uploaded" },
     });
     expect(res.status).toBe(404);
+  });
+
+  // Watcher cancel path (ENG-1397): after giving up on a queued file the
+  // watcher reverts it upload_requested → detected, which must clear
+  // upload_requested_at so the row leaves the upload queue.
+  it("PATCH transitions upload_requested → detected and clears upload_requested_at", async () => {
+    const db = getTestDb();
+    await db
+      .update(schemaFiles)
+      .set({ status: "upload_requested", uploadRequestedAt: new Date() })
+      .where(eq(schemaFiles.id, thirdFileId));
+
+    const res = await api(`/api/v1/files/${thirdFileId}`, {
+      method: "PATCH",
+      token,
+      body: { status: "detected" },
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe("detected");
+    expect(data.upload_requested_at).toBeNull();
   });
 
   // -------------------------------------------------------------------------

@@ -1,5 +1,7 @@
 import { db } from "@/lib/db";
 import {
+  files,
+  instrumentRuns,
   instruments,
   watcherEventTypeEnum,
   watcherEvents,
@@ -8,6 +10,7 @@ import {
 } from "@/lib/db/schema";
 import { and, asc, count, desc, eq, gte, inArray, isNull } from "drizzle-orm";
 import { cache } from "react";
+import YAML from "yaml";
 
 export const STALE_THRESHOLD_MS = 5 * 60 * 1000;
 
@@ -19,6 +22,57 @@ export async function findActiveWatcher(watcherId: string) {
     .limit(1);
 
   return watcher ?? null;
+}
+
+/**
+ * Extracts `instrument.watch_directory` from a watcher's stored config YAML.
+ * Returns null when the YAML is missing or unparseable. Mirrors the
+ * `extractFilePatterns` helper in `lib/api/instruments.ts`.
+ */
+export function extractWatchDirectory(
+  configYaml: string | null
+): string | null {
+  if (!configYaml) return null;
+  try {
+    const doc = YAML.parse(configYaml);
+    const dir = doc?.instrument?.watch_directory;
+    return typeof dir === "string" ? dir : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reverts an instrument's pending upload requests back to `detected`,
+ * clearing `upload_requested_at` so they drop out of the upload queue.
+ *
+ * Called when a watcher's `watch_directory` changes: every queued file's
+ * `relative_path` was anchored to the old root, so none resolve under the
+ * new one and the watcher would otherwise re-error on each heartbeat poll
+ * (ENG-1397). Returns the reverted file ids (for event reporting).
+ */
+export async function revertPendingUploadRequests(
+  instrumentId: string
+): Promise<number[]> {
+  const reverted = await db
+    .update(files)
+    .set({ status: "detected", uploadRequestedAt: null })
+    .where(
+      and(
+        inArray(
+          files.instrumentRunId,
+          db
+            .select({ id: instrumentRuns.id })
+            .from(instrumentRuns)
+            .where(eq(instrumentRuns.instrumentId, instrumentId))
+        ),
+        eq(files.status, "upload_requested"),
+        isNull(files.uploadedAt),
+        isNull(files.deletedAt)
+      )
+    )
+    .returning({ id: files.id });
+  return reverted.map((row) => row.id);
 }
 
 type WatcherLike = {

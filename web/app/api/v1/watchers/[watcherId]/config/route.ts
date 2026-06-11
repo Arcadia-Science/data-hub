@@ -1,9 +1,13 @@
 import { authorize } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { isValidUUID } from "@/lib/api/validators";
-import { findActiveWatcher } from "@/lib/api/watchers";
+import {
+  extractWatchDirectory,
+  findActiveWatcher,
+  revertPendingUploadRequests,
+} from "@/lib/api/watchers";
 import { db } from "@/lib/db";
-import { watchers } from "@/lib/db/schema";
+import { watcherEvents, watchers } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 
@@ -42,6 +46,9 @@ export async function PUT(
     );
   }
 
+  const previousWatchDir = extractWatchDirectory(watcher.configYaml);
+  const nextWatchDir = extractWatchDirectory(body.config_yaml);
+
   await db
     .update(watchers)
     .set({
@@ -49,6 +56,29 @@ export async function PUT(
       configYaml: body.config_yaml,
     })
     .where(eq(watchers.id, watcherId));
+
+  // A watch_directory change orphans every pending request: each carries a
+  // relative_path under the old root that no longer resolves. Revert them to
+  // `detected` to drain the queue instead of erroring each poll (ENG-1397).
+  // Gated on a known previous dir so first-push / unrelated edits don't
+  // revert spuriously.
+  if (previousWatchDir && nextWatchDir && previousWatchDir !== nextWatchDir) {
+    const revertedIds = await revertPendingUploadRequests(watcher.instrumentId);
+    if (revertedIds.length > 0) {
+      await db.insert(watcherEvents).values({
+        watcherId,
+        eventType: "config_synced",
+        message: `Cancelled ${revertedIds.length} pending upload request(s) after watch directory changed`,
+        details: {
+          kind: "upload_requests_cancelled",
+          cancelled_count: revertedIds.length,
+          previous_watch_directory: previousWatchDir,
+          watch_directory: nextWatchDir,
+        },
+        timestamp: new Date(),
+      });
+    }
+  }
 
   return Response.json({ config_checksum: body.config_checksum });
 }
