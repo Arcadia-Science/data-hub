@@ -235,3 +235,15 @@ class DataHubClient:
     def mark_file_uploaded(self, file_id: int, s3_info: dict[str, Any]) -> FileResponse:
         resp = self._request("PATCH", f"/files/{file_id}", json=s3_info)
         return FileResponse.model_validate(resp.json())
+
+    def cancel_upload_request(self, file_id: int) -> FileResponse:
+        """Revert a queued file to ``detected`` so it leaves the upload queue.
+
+        Called after the watcher gives up on a queued file (missing on disk
+        or persistently failing to upload) so the server stops serving it in
+        the upload queue and the watcher stops re-erroring on it every
+        heartbeat poll (ENG-1397). The file stays a re-requestable detection
+        rather than being deleted, so an operator can queue it again later.
+        """
+        resp = self._request("PATCH", f"/files/{file_id}", json={"status": "detected"})
+        return FileResponse.model_validate(resp.json())

@@ -18,9 +18,12 @@ type RouteContext = {
 //   Watcher flow:   detected → [upload_requested →] uploaded → processing → completed|failed
 //   Lambda flow:    (created as "uploaded" via POST .../files) → processing → completed|failed
 //   Reprocessing:   completed|failed → processing → completed|failed
+//   Cancel request: upload_requested → detected (watcher gave up locating
+//                   the local file after repeated polls; clears the queue
+//                   entry — see ENG-1397)
 const VALID_TRANSITIONS: Record<string, string[]> = {
   detected: ["uploaded"],
-  upload_requested: ["uploaded"],
+  upload_requested: ["uploaded", "detected"],
   uploaded: ["processing"],
   processing: ["processing", "completed", "failed"],
   completed: ["processing"],
@@ -103,6 +106,12 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 
     if (body.status === "uploaded") {
       updates.uploadedAt = now;
+    }
+    // Reverting a pending request back to detected (watcher cancel): clear
+    // upload_requested_at so the row leaves the upload queue, whose filter
+    // requires upload_requested_at to be non-null.
+    if (body.status === "detected") {
+      updates.uploadRequestedAt = null;
     }
     if (body.status === "completed" || body.status === "failed") {
       updates.processedAt = now;

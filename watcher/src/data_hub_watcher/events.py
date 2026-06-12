@@ -41,6 +41,13 @@ a database migration. Known ``kind`` values, with their per-kind
 * ``update_check_failed`` -- ``GET /watchers/:id/update-check`` failed.
   Emitted only after 3 consecutive failures so we don't alert on a
   single hourly blip. ``details = {"kind", "error", "consecutive_failures"}``.
+* ``queued_file_missing`` -- a manual-mode upload-queue file was not found
+  on disk at its resolved path. Emitted once per file id (throttled across
+  heartbeat polls). ``details = {"kind", "file_id", "expected_path"}``.
+* ``upload_request_cancelled`` -- the watcher gave up on a queued file
+  after ``MAX_QUEUE_FILE_ATTEMPTS`` failed polls (missing or upload error)
+  and reverted it to ``detected`` server-side so it leaves the queue.
+  ``details = {"kind", "file_id", "attempts", "reason"}``.
 """
 
 from __future__ import annotations

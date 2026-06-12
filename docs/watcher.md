@@ -172,6 +172,11 @@ In YAML, prefer single-quoted strings for patterns so that backslash sequences l
 - **`auto`**: Files are uploaded to S3 immediately after run detection.
 - **`manual`**: Runs are reported to the API without uploading. The server decides which files to upload via a queue, polled on each heartbeat tick. Useful when uploads need human approval.
 
+Queued files are resolved against the current `watch_directory` (each queue entry carries a `relative_path` anchored to the root that was active when the file was detected). Two safeguards keep a stale queue entry from erroring forever (ENG-1397):
+
+- **On `watch_directory` change**: the server reverts every pending upload request for that instrument back to `detected` (clearing `upload_requested_at`) as soon as the new config is pushed, so the queue drains immediately. The reverted files remain re-requestable detections; an operator can queue them again from their new location.
+- **Per-file 3-try cap (`MAX_QUEUE_FILE_ATTEMPTS`)**: a queued file that keeps failing — missing on disk or failing to upload — is retried on at most three heartbeat polls. After that the watcher cancels the request server-side (revert to `detected`) so the file leaves the queue instead of re-erroring each tick. The attempt count resets on watcher restart, so a transient outage longer than three ticks is recovered on the next start.
+
 ## Local state
 
 The watcher maintains a SQLite database at `~/.data-hub/watcher.db` with three tables:
@@ -204,7 +209,7 @@ The watcher's primary observability surface is the per-watcher event log served 
 | Event type | When |
 | --- | --- |
 | `watcher_started` / `watcher_stopped` | Process lifecycle. The stopped message distinguishes a normal stop from an upgrade-driven restart. |
-| `config_synced` | Local config differed from the remote checksum and was pushed. Triggered by `init`, `config edit`, `config open`, and on watcher startup. |
+| `config_synced` | Local config differed from the remote checksum and was pushed. Triggered by `init`, `config edit`, `config open`, and on watcher startup. The server also emits one with `details.kind="upload_requests_cancelled"` (and `cancelled_count`) when a `watch_directory` change drained pending upload requests. |
 | `run_reported` | A run was POSTed to the API for the first time. |
 | `file_uploaded` / `upload_failed` | Per-file upload outcome. `upload_failed` carries the S3 key and last error. |
 | `update_started` / `update_succeeded` / `update_failed` | Auto-update lifecycle. `update_succeeded` is emitted from the *next* process startup once the new version is confirmed to be loaded. |
@@ -224,6 +229,8 @@ The watcher's primary observability surface is the per-watcher event log served 
 | `events_dropped` | Synthetic event prepended after one or more prior batches were dropped. `details.dropped_count` reports the gap size. |
 | `heartbeat_recovered` | First successful heartbeat after one or more consecutive failures. `details.gap_seconds` reports the outage length. |
 | `upload_queue_poll_failed` | `GET /watchers/:id/upload-queue` failed in manual mode. Emitted on the 1st failure and every 10th repeat. |
+| `queued_file_missing` | A manual-mode queued file was not found on disk at its resolved path. Emitted once per file (throttled across polls). `details` includes `file_id`, `expected_path`. |
+| `upload_request_cancelled` | The watcher gave up on a queued file after `MAX_QUEUE_FILE_ATTEMPTS` failed polls (missing or upload error) and reverted it to `detected` server-side. `details` includes `file_id`, `attempts`, `reason`. |
 | `update_check_failed` | `GET /watchers/:id/update-check` failed for 3 consecutive attempts (~3 hours of going dark on the update channel). |
 
 ### File timestamps
