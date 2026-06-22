@@ -1,3 +1,5 @@
+import { and, eq } from "drizzle-orm";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   countUnread,
   getPreferences,
@@ -24,8 +26,6 @@ import {
   resetDb,
   seedTestUser,
 } from "@/tests/integration/helpers";
-import { and, eq } from "drizzle-orm";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 // End-to-end + library-level coverage for the in-app notifications system.
 // The library matrix exercises the recipient-selection logic directly
@@ -80,7 +80,9 @@ describe("Notifications", () => {
   ): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      if (await predicate()) return;
+      if (await predicate()) {
+        return;
+      }
       await new Promise((r) => setTimeout(r, intervalMs));
     }
     throw new Error("Timed out waiting for after()-deferred notification");

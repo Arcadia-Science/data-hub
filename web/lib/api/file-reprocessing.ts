@@ -1,14 +1,16 @@
+import { eq } from "drizzle-orm";
+import { after } from "next/server";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 import { hasInvokeCredentials, signLambdaInvoke } from "@/lib/lambda";
-import { eq } from "drizzle-orm";
-import { after } from "next/server";
 
 const REPROCESSABLE_STATUSES = ["failed", "completed"];
 
 function getLambdaUrl(): string | null {
   const url = process.env.LAMBDA_FUNCTION_URL;
-  if (!url || !hasInvokeCredentials()) return null;
+  if (!(url && hasInvokeCredentials())) {
+    return null;
+  }
   return url;
 }
 
@@ -62,7 +64,7 @@ export async function reprocessFile(fileId: number): Promise<ReprocessResult> {
     };
   }
 
-  if (!file.s3Bucket || !file.s3Key) {
+  if (!(file.s3Bucket && file.s3Key)) {
     return {
       ok: false,
       status: 409,

@@ -1,5 +1,6 @@
 "use client";
 
+import { parseAsString, useQueryState, useQueryStates } from "nuqs";
 import { TablePendingProvider } from "@/components/table-pending";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EventLog } from "@/components/watchers/event-log";
@@ -9,7 +10,6 @@ import { StatusToolbar } from "@/components/watchers/status-toolbar";
 import type { WatcherEventRow, WatcherHeartbeatRow } from "@/lib/api/watchers";
 import { todayDateString } from "@/lib/date";
 import { watcherDetailSearchParams } from "@/lib/search-params";
-import { parseAsString, useQueryState, useQueryStates } from "nuqs";
 
 export function WatcherDetailTabs({
   configTab,
@@ -37,20 +37,20 @@ export function WatcherDetailTabs({
   const statusSubtitle = `Activity and connectivity for ${new Date(effectiveSince + "T00:00:00").toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}`;
 
   return (
-    <Tabs value={tab} onValueChange={setTab}>
+    <Tabs onValueChange={setTab} value={tab}>
       <TabsList className="mb-4" variant="line">
         <TabsTrigger value="logs">Logs</TabsTrigger>
         <TabsTrigger value="status">Status</TabsTrigger>
         <TabsTrigger value="configuration">Configuration</TabsTrigger>
       </TabsList>
 
-      <TabsContent value="logs" className="flex flex-col gap-4">
+      <TabsContent className="flex flex-col gap-4" value="logs">
         <TablePendingProvider>
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-sm font-medium">Event Log</h3>
+              <h3 className="font-medium text-sm">Event Log</h3>
               {eventsTotal > 0 && (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-muted-foreground text-xs">
                   {eventsTotal} event{eventsTotal !== 1 && "s"}
                 </p>
               )}
@@ -65,12 +65,12 @@ export function WatcherDetailTabs({
         </TablePendingProvider>
       </TabsContent>
 
-      <TabsContent value="status" className="flex flex-col gap-4">
+      <TabsContent className="flex flex-col gap-4" value="status">
         <TablePendingProvider>
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-sm font-medium">Watcher Status</h3>
-              <p className="text-xs text-muted-foreground">{statusSubtitle}</p>
+              <h3 className="font-medium text-sm">Watcher Status</h3>
+              <p className="text-muted-foreground text-xs">{statusSubtitle}</p>
             </div>
             <StatusToolbar />
           </div>
@@ -78,9 +78,9 @@ export function WatcherDetailTabs({
         </TablePendingProvider>
       </TabsContent>
 
-      <TabsContent value="configuration" className="flex flex-col gap-4">
+      <TabsContent className="flex flex-col gap-4" value="configuration">
         <div>
-          <h3 className="text-sm font-medium">Configuration</h3>
+          <h3 className="font-medium text-sm">Configuration</h3>
         </div>
         {configTab}
       </TabsContent>

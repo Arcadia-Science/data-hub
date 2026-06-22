@@ -1,3 +1,4 @@
+import { SearchX } from "lucide-react";
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import { AcquiredColumnHeader } from "@/components/instruments/runs-table/acquired-column-header";
 import { RanByCell } from "@/components/instruments/runs-table/ran-by-cell";
@@ -24,7 +25,6 @@ import {
 import type { RunListRow } from "@/lib/api/instrument-runs";
 import { runRowToRef } from "@/lib/runs/row-actions";
 import { cn, formatBytes } from "@/lib/utils";
-import { SearchX } from "lucide-react";
 
 export function RunsTable({
   data,
@@ -45,7 +45,7 @@ export function RunsTable({
     return (
       <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-background py-16 dark:bg-muted">
         <SearchX className="size-8 text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">
+        <p className="text-muted-foreground text-sm">
           {hasFilters
             ? "No runs match your filters."
             : "No instrument runs yet."}
@@ -87,38 +87,38 @@ export function RunsTable({
             const href = `/instruments/${row.instrument_id}/runs/${encodeURIComponent(row.run_id)}`;
             return (
               <TableRow
-                key={row.id}
                 className={cn("group", isDeleted && "opacity-50")}
+                key={row.id}
               >
                 <TableCell>
                   <RunSelectCheckbox runRef={runRowToRef(row)} />
                 </TableCell>
                 <TableCell>
-                  <div className="flex items-center gap-1.5 text-sm font-medium">
+                  <div className="flex items-center gap-1.5 font-medium text-sm">
                     {row.instrument_display_name}
                   </div>
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-2.5">
                     <RunStatusIcon
+                      errorMessages={row.error_messages}
                       fileCount={row.file_count}
                       filesCompleted={row.files_completed}
                       filesFailed={row.files_failed}
                       filesPendingUpload={row.files_pending_upload}
-                      filesUploaded={row.files_uploaded}
                       filesProcessing={row.files_processing}
-                      errorMessages={row.error_messages}
+                      filesUploaded={row.files_uploaded}
                     />
                     <RunIdLabel
-                      runId={row.run_id}
+                      className="text-sm"
                       href={href}
                       isDeleted={isDeleted}
-                      className="text-sm"
+                      runId={row.run_id}
                     />
                     {isDeleted ? (
                       <Badge
+                        className="ml-1.5 font-normal text-[10px]"
                         variant="outline"
-                        className="ml-1.5 text-[10px] font-normal"
                       >
                         deleted
                       </Badge>
@@ -133,9 +133,9 @@ export function RunsTable({
                 </TableCell>
                 <TableCell>
                   <RanByCell
+                    attributions={row.attributions}
                     instrumentId={row.instrument_id}
                     runId={row.run_id}
-                    attributions={row.attributions}
                   />
                 </TableCell>
                 <TableCell className="text-right">
@@ -154,11 +154,11 @@ export function RunsTable({
         </TableBody>
       </Table>
       <RunsTableFooter
+        pendingUploadCount={pendingUploadCount}
+        ranByYouCount={ranByYouCount}
         shownCount={data.length}
         totalCount={totalCount}
-        pendingUploadCount={pendingUploadCount}
         unattributedCount={unattributedCount}
-        ranByYouCount={ranByYouCount}
       />
     </div>
   );

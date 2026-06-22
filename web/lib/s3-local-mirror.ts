@@ -37,7 +37,9 @@ const MIME_MAP: Record<string, string> = {
 };
 
 export function getLocalMirrorRoot(): string | null {
-  if (process.env.NODE_ENV === "production") return null;
+  if (process.env.NODE_ENV === "production") {
+    return null;
+  }
   const v = process.env.LOCAL_S3_MIRROR;
   return v ? path.resolve(v) : null;
 }

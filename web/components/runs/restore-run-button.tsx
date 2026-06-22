@@ -1,10 +1,10 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
 import { Loader2, RotateCcw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 
 export function RestoreRunButton({
   instrumentId,
@@ -36,11 +36,11 @@ export function RestoreRunButton({
 
   return (
     <Button
-      variant="outline"
-      size="sm"
       className="h-7 gap-1 text-xs"
-      onClick={handleRestore}
       disabled={isPending}
+      onClick={handleRestore}
+      size="sm"
+      variant="outline"
     >
       {isPending ? (
         <Loader2 className="size-3 animate-spin" />

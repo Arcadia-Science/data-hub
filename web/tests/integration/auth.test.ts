@@ -1,10 +1,10 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   api,
   closeTestDb,
   resetDb,
   seedTestUser,
 } from "@/tests/integration/helpers";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // Tests the authenticateRequest middleware's rejection paths. The middleware
 // checks in order: (1) NextAuth session cookie, (2) Bearer scheme,

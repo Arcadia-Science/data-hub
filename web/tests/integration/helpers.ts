@@ -1,12 +1,12 @@
+import { drizzle } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 import * as schema from "@/lib/db/schema";
 import {
   clearAll,
+  type SeedUserOptions,
   seedDevUser,
   seedWatcherReleaseConfig,
-  type SeedUserOptions,
 } from "@/lib/db/seed";
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
 
 // ---------------------------------------------------------------------------
 // Database — lazily initialized Drizzle client connected directly to the test
@@ -20,8 +20,9 @@ let _client: ReturnType<typeof postgres> | null = null;
 export function getTestDb() {
   if (!_db) {
     const url = process.env.__TEST_DATABASE_URL;
-    if (!url)
+    if (!url) {
       throw new Error("__TEST_DATABASE_URL not set — global setup failed?");
+    }
     _client = postgres(url);
     _db = drizzle(_client, { schema });
   }
@@ -96,7 +97,9 @@ type ApiOptions = Omit<RequestInit, "body"> & {
 
 export function getBaseUrl(): string {
   const url = process.env.__TEST_BASE_URL;
-  if (!url) throw new Error("__TEST_BASE_URL not set — global setup failed?");
+  if (!url) {
+    throw new Error("__TEST_BASE_URL not set — global setup failed?");
+  }
   return url;
 }
 
@@ -118,7 +121,7 @@ export async function api(
   return fetch(`${getBaseUrl()}${path}`, {
     ...rest,
     headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: body === undefined ? undefined : JSON.stringify(body),
   });
 }
 
@@ -130,8 +133,9 @@ export async function api(
 
 function getSlackCaptureUrl(): string {
   const url = process.env.__TEST_SLACK_CAPTURE_URL;
-  if (!url)
+  if (!url) {
     throw new Error("__TEST_SLACK_CAPTURE_URL not set — global setup failed?");
+  }
   return url;
 }
 

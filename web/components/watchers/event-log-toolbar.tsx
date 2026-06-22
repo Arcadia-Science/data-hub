@@ -1,5 +1,7 @@
 "use client";
 
+import { CalendarDays, Filter, X } from "lucide-react";
+import { useQueryStates } from "nuqs";
 import { useTablePending } from "@/components/table-pending";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -11,8 +13,6 @@ import {
 } from "@/components/ui/popover";
 import { todayDateString } from "@/lib/date";
 import { watcherDetailSearchParams } from "@/lib/search-params";
-import { CalendarDays, Filter, X } from "lucide-react";
-import { useQueryStates } from "nuqs";
 
 const EVENT_TYPES = [
   { value: "watcher_started", label: "Started" },
@@ -60,10 +60,10 @@ export function EventLogToolbar() {
     <div className="flex flex-wrap items-center gap-2">
       {hasFilters && (
         <Button
-          variant="ghost"
-          size="sm"
-          onClick={clearFilters}
           className="h-8 gap-1 text-xs"
+          onClick={clearFilters}
+          size="sm"
+          variant="ghost"
         >
           <X className="size-3" />
           Clear
@@ -72,7 +72,7 @@ export function EventLogToolbar() {
 
       <Popover>
         <PopoverTrigger asChild>
-          <Button variant="outline" size="sm" className="h-8 gap-1 text-sm">
+          <Button className="h-8 gap-1 text-sm" size="sm" variant="outline">
             <Filter className="size-3" />
             Event Type
             {filters.event_type.length > 0 && (
@@ -82,12 +82,12 @@ export function EventLogToolbar() {
             )}
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-48 p-2" align="start">
+        <PopoverContent align="start" className="w-48 p-2">
           <div className="flex flex-col gap-1">
             {EVENT_TYPES.map((et) => (
               <label
-                key={et.value}
                 className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted"
+                key={et.value}
               >
                 <Checkbox
                   checked={filters.event_type.includes(et.value)}
@@ -103,16 +103,16 @@ export function EventLogToolbar() {
       <div className="flex items-center gap-2">
         <CalendarDays className="size-3.5 text-muted-foreground" />
         <Input
-          type="date"
-          value={filters.events_since ?? today}
+          aria-label="Events since"
+          className="h-8 w-36 text-xs"
           onChange={(e) =>
             setFilters({
               events_since: e.target.value || null,
               logs_page: null,
             })
           }
-          className="h-8 w-36 text-xs"
-          aria-label="Events since"
+          type="date"
+          value={filters.events_since ?? today}
         />
       </div>
     </div>

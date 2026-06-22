@@ -1,7 +1,7 @@
+import { asc } from "drizzle-orm";
 import { requireAdmin } from "@/lib/api/auth";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
-import { asc } from "drizzle-orm";
 
 // Admin-only roster used by `/settings/members`. Returns every signed-in
 // user along with their workspace admin flag so the members page can
@@ -11,7 +11,9 @@ import { asc } from "drizzle-orm";
 // state.
 export async function GET() {
   const authResult = await requireAdmin();
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const rows = await db
     .select({

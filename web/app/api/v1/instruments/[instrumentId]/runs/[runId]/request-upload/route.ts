@@ -1,3 +1,5 @@
+import { eq, inArray } from "drizzle-orm";
+import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import {
   apiError,
@@ -10,8 +12,6 @@ import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { instrumentHasOnlineWatcher } from "@/lib/api/instruments";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
-import { eq, inArray } from "drizzle-orm";
-import type { NextRequest } from "next/server";
 
 type RouteContext = {
   params: Promise<{ instrumentId: string; runId: string }>;
@@ -29,7 +29,9 @@ type RouteContext = {
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
   const authResult = await authorize(request, "runs:write");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { instrumentId, runId } = await params;
   const run = await lookupRunByNaturalKey(instrumentId, runId);

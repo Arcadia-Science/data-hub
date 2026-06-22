@@ -1,3 +1,5 @@
+import { and, eq, isNull } from "drizzle-orm";
+import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import {
   apiError,
@@ -8,8 +10,6 @@ import {
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
-import { and, eq, isNull } from "drizzle-orm";
-import type { NextRequest } from "next/server";
 
 // Statuses where a row is "pre-S3" — safe for the Lambda path to overwrite
 // when adopting a watcher-created row. Anything beyond uploaded is left
@@ -33,7 +33,9 @@ type RouteContext = {
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
   const authResult = await authorize(request, "files:write");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { instrumentId, runId } = await params;
   const run = await lookupRunByNaturalKey(instrumentId, runId);
@@ -63,7 +65,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   const filename =
     typeof body.filename === "string" ? body.filename.trim() : "";
 
-  if (!s3Bucket || !s3Key || !filename) {
+  if (!(s3Bucket && s3Key && filename)) {
     return apiError(
       400,
       VALIDATION_ERROR,

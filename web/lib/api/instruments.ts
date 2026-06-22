@@ -1,13 +1,13 @@
-import { db } from "@/lib/db";
-import {
-  instrumentRuns,
-  instruments,
-  type InstrumentType,
-  watchers,
-} from "@/lib/db/schema";
 import { and, count, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { cache } from "react";
 import YAML from "yaml";
+import { db } from "@/lib/db";
+import {
+  type InstrumentType,
+  instrumentRuns,
+  instruments,
+  watchers,
+} from "@/lib/db/schema";
 
 export type InstrumentListItem = {
   id: string;
@@ -64,11 +64,15 @@ export async function instrumentHasOnlineWatcher(
  * Returns an empty array when the YAML is missing or unparseable.
  */
 function extractFilePatterns(configYaml: string | null): string[] {
-  if (!configYaml) return [];
+  if (!configYaml) {
+    return [];
+  }
   try {
     const doc = YAML.parse(configYaml);
     const patterns = doc?.instrument?.file_patterns;
-    if (Array.isArray(patterns)) return patterns.map(String);
+    if (Array.isArray(patterns)) {
+      return patterns.map(String);
+    }
   } catch {
     // Malformed YAML — silently ignore.
   }
@@ -82,7 +86,9 @@ function extractFilePatterns(configYaml: string | null): string[] {
 function mergeFilePatterns(configs: (string | null)[]): string[] {
   const set = new Set<string>();
   for (const yaml of configs) {
-    for (const p of extractFilePatterns(yaml)) set.add(p);
+    for (const p of extractFilePatterns(yaml)) {
+      set.add(p);
+    }
   }
   return [...set].sort();
 }
@@ -343,7 +349,9 @@ export const getInstrumentById = cache(async function getInstrumentById(
     .where(eq(instruments.id, instrumentId))
     .limit(1);
 
-  if (!instrument) return null;
+  if (!instrument) {
+    return null;
+  }
 
   const [runCountResult, watcherRows] = await Promise.all([
     db

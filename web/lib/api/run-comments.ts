@@ -1,7 +1,7 @@
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { runComments, users } from "@/lib/db/schema";
 import { toInitials } from "@/lib/utils";
-import { and, asc, eq, isNull } from "drizzle-orm";
 
 // ---------------------------------------------------------------------------
 // Run comments — markdown notes left by users on an instrument run.
@@ -177,7 +177,9 @@ export async function updateComment(input: {
       userId: runComments.userId,
     });
 
-  if (updated.length === 0) return null;
+  if (updated.length === 0) {
+    return null;
+  }
   const row = updated[0];
 
   const [user] = await db

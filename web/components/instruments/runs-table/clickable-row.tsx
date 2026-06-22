@@ -1,7 +1,7 @@
 "use client";
 
-import { TableRow } from "@/components/ui/table";
 import { useRouter } from "next/navigation";
+import { TableRow } from "@/components/ui/table";
 
 export function ClickableRow({
   href,

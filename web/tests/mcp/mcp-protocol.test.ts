@@ -75,9 +75,15 @@ vi.mock("@/lib/api/instruments", () => ({
     .fn()
     .mockResolvedValue([MOCK_INSTRUMENT, MOCK_GEL_DOC_INSTRUMENT]),
   getInstrumentById: vi.fn().mockImplementation(async (id: string) => {
-    if (id === "test-plate-reader") return MOCK_INSTRUMENT;
-    if (id === "test-gel-doc") return MOCK_GEL_DOC_INSTRUMENT;
-    if (id === "test-generic") return MOCK_GENERIC_INSTRUMENT;
+    if (id === "test-plate-reader") {
+      return MOCK_INSTRUMENT;
+    }
+    if (id === "test-gel-doc") {
+      return MOCK_GEL_DOC_INSTRUMENT;
+    }
+    if (id === "test-generic") {
+      return MOCK_GENERIC_INSTRUMENT;
+    }
     return null;
   }),
 }));
@@ -200,7 +206,9 @@ vi.mock("@/lib/api/run-archive", () => ({
 
 vi.mock("@/lib/api/file-reprocessing", () => ({
   reprocessFile: vi.fn().mockImplementation(async (id: number) => {
-    if (id === 42) return { ok: true, fileId: id };
+    if (id === 42) {
+      return { ok: true, fileId: id };
+    }
     return {
       ok: false,
       status: 404,

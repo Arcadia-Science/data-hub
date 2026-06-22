@@ -2,12 +2,12 @@
 
 import {
   createContext,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type ReactNode,
 } from "react";
 import { toast } from "sonner";
 
@@ -60,7 +60,7 @@ type ArchiveDownloadContextValue = {
 export const ArchiveDownloadContext =
   createContext<ArchiveDownloadContextValue | null>(null);
 
-const POLL_INTERVAL_MS = 2_000;
+const POLL_INTERVAL_MS = 2000;
 // Stop polling after a generous amount of time so a stuck Lambda doesn't
 // leave the dialog spinning forever. Lambda Function URLs cap at 15 minutes;
 // we double that as a hard ceiling.
@@ -203,7 +203,7 @@ export function ArchiveDownloadProvider({ children }: { children: ReactNode }) {
       triggerDownload(downloadUrl, filename);
       // Auto-dismiss the row a moment later so the dialog doesn't linger
       // when the build was actually a cache hit.
-      window.setTimeout(() => dismiss(id), 1_500);
+      window.setTimeout(() => dismiss(id), 1500);
     },
     [dismiss, updateJob]
   );
@@ -259,11 +259,15 @@ export function ArchiveDownloadProvider({ children }: { children: ReactNode }) {
   // don't spin up N timers.
   useEffect(() => {
     const building = jobs.filter((j) => j.status === "building");
-    if (building.length === 0) return;
+    if (building.length === 0) {
+      return;
+    }
 
     const interval = window.setInterval(async () => {
       for (const job of jobsRef.current) {
-        if (job.status !== "building") continue;
+        if (job.status !== "building") {
+          continue;
+        }
         if (Date.now() - job.startedAt > POLL_TIMEOUT_MS) {
           updateJob(job.id, {
             status: "failed",

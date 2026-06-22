@@ -1,6 +1,6 @@
+import crypto from "node:crypto";
 import { hasInvokeCredentials, signLambdaInvoke } from "@/lib/lambda";
 import { getS3ArchivesBucket } from "@/lib/s3";
-import crypto from "node:crypto";
 
 // Inputs to `fingerprintFiles`. Only the fields that participate in the
 // hash are accepted — adding extra fields here would suggest they affect
@@ -61,8 +61,8 @@ export function getArchiveDownloadFilename(runId: string | null): string {
 export function isArchiveBuilderConfigured(): boolean {
   return Boolean(
     process.env.LAMBDA_FUNCTION_URL &&
-    hasInvokeCredentials() &&
-    process.env.S3_ARCHIVES_BUCKET
+      hasInvokeCredentials() &&
+      process.env.S3_ARCHIVES_BUCKET
   );
 }
 
@@ -142,7 +142,9 @@ export async function invokeBuildArchive(
       ...(f.sizeBytes == null ? {} : { size_bytes: f.sizeBytes }),
     })),
   };
-  if (input.jobId) payload.job_id = input.jobId;
+  if (input.jobId) {
+    payload.job_id = input.jobId;
+  }
 
   let res: Response;
   try {
@@ -203,7 +205,9 @@ export async function invokeBuildArchive(
 async function readLambdaErrorMessage(res: Response): Promise<string> {
   const fallback = `Archive builder returned ${res.status}`;
   const text = await res.text().catch(() => "");
-  if (!text) return fallback;
+  if (!text) {
+    return fallback;
+  }
   try {
     const parsed = JSON.parse(text) as { error?: unknown };
     if (typeof parsed?.error === "string" && parsed.error.trim()) {

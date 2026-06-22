@@ -17,17 +17,17 @@
 // detection, and orphan-process risk for what is already a two-
 // terminal workflow in practice.
 
+import { spawn } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { and, eq } from "drizzle-orm";
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import * as schema from "@/lib/db/schema";
 import {
   CANONICAL_INSTRUMENT_ID,
   FIXTURES_DIR,
   INSTRUMENT_FIXTURES,
 } from "@/lib/db/seed";
-import { and, eq } from "drizzle-orm";
-import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { spawn } from "node:child_process";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 type Db = PostgresJsDatabase<typeof schema>;
 
@@ -90,10 +90,14 @@ async function probeApi(apiUrl: string, apiKey: string): Promise<boolean> {
 async function getFixtureTriples(db: Db): Promise<FixtureTriple[]> {
   const triples: FixtureTriple[] = [];
   for (const [instrumentType, fixture] of Object.entries(INSTRUMENT_FIXTURES)) {
-    if (!fixture) continue;
+    if (!fixture) {
+      continue;
+    }
     const canonicalId =
       CANONICAL_INSTRUMENT_ID[instrumentType as schema.InstrumentType];
-    if (!canonicalId) continue;
+    if (!canonicalId) {
+      continue;
+    }
 
     // Join `files` → `instrument_runs` to find every fixture-named
     // raw file under the canonical instrument. The seed only writes
@@ -206,7 +210,9 @@ export async function processSeededFixtures(
   // fixtures into a place the lambda can read, so processing has
   // nothing to act on.
   if (!mirrorRoot) {
-    if (log) printSkipHint("no-mirror");
+    if (log) {
+      printSkipHint("no-mirror");
+    }
     return { skipped: true, skipReason: "no-mirror", ran: 0, failed: 0 };
   }
 
@@ -216,7 +222,9 @@ export async function processSeededFixtures(
   // dev server first-byte is sub-100ms once it's up.
   const apiUp = await probeApi(apiUrl, opts.apiKey);
   if (!apiUp) {
-    if (log) printSkipHint("api-down");
+    if (log) {
+      printSkipHint("api-down");
+    }
     return { skipped: true, skipReason: "api-down", ran: 0, failed: 0 };
   }
 
@@ -224,7 +232,9 @@ export async function processSeededFixtures(
   // yet, or the canonical instrument ids drifted from this script.
   const triples = await getFixtureTriples(db);
   if (triples.length === 0) {
-    if (log) printSkipHint("no-fixtures");
+    if (log) {
+      printSkipHint("no-fixtures");
+    }
     return { skipped: true, skipReason: "no-fixtures", ran: 0, failed: 0 };
   }
 

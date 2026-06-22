@@ -1,3 +1,5 @@
+import type { NextRequest } from "next/server";
+import { z } from "zod";
 import { requireSession } from "@/lib/api/auth";
 import { apiError, UNAUTHORIZED, VALIDATION_ERROR } from "@/lib/api/errors";
 import {
@@ -5,8 +7,6 @@ import {
   listInstrumentSubscriptions,
   updatePreferences,
 } from "@/lib/api/notifications";
-import type { NextRequest } from "next/server";
-import { z } from "zod";
 
 // PUT body is a partial: every key is optional and only present fields
 // are written. Defaults live on the column, so a missing key on a fresh
@@ -30,7 +30,9 @@ const PutBodySchema = z
 
 export async function GET() {
   const auth = await requireSession();
-  if (!auth) return apiError(401, UNAUTHORIZED, "Authentication required");
+  if (!auth) {
+    return apiError(401, UNAUTHORIZED, "Authentication required");
+  }
 
   const [prefs, subscriptions] = await Promise.all([
     getPreferences(auth.userId),
@@ -59,7 +61,9 @@ export async function GET() {
 
 export async function PUT(request: NextRequest) {
   const auth = await requireSession();
-  if (!auth) return apiError(401, UNAUTHORIZED, "Authentication required");
+  if (!auth) {
+    return apiError(401, UNAUTHORIZED, "Authentication required");
+  }
 
   let raw: unknown;
   try {

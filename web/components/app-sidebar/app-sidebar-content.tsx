@@ -1,10 +1,10 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { MainNav } from "@/components/app-sidebar/main-nav";
 import { SettingsNav } from "@/components/app-sidebar/settings-nav";
 import { SidebarContent } from "@/components/ui/sidebar";
 import type { SidebarInstrument, SidebarWatcher } from "@/lib/api/sidebar";
-import { usePathname } from "next/navigation";
 
 type AppSidebarContentProps = {
   instruments: SidebarInstrument[];

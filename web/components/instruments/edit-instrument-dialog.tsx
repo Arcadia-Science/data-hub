@@ -1,5 +1,9 @@
 "use client";
 
+import { Loader2, Pencil } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -20,10 +24,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { VALID_INSTRUMENT_TYPES } from "@/lib/db/schema";
-import { Loader2, Pencil } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
-import { toast } from "sonner";
 
 const TYPE_LABELS: Record<string, string> = {
   generic: "Generic",
@@ -81,7 +81,6 @@ export function EditInstrumentDialog({
 
   return (
     <Dialog
-      open={open}
       onOpenChange={(value) => {
         setOpen(value);
         // Re-sync form state from props on open so the dialog reflects any
@@ -91,9 +90,10 @@ export function EditInstrumentDialog({
           setType(instrumentType);
         }
       }}
+      open={open}
     >
       <DialogTrigger asChild>
-        <Button variant="ghost" size="sm" className="flex gap-2 text-xs">
+        <Button className="flex gap-2 text-xs" size="sm" variant="ghost">
           <Pencil className="size-3.5" />
           <span>Edit</span>
         </Button>
@@ -110,17 +110,17 @@ export function EditInstrumentDialog({
           <div className="grid gap-2">
             <Label htmlFor="edit-name">Display name</Label>
             <Input
-              id="edit-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              maxLength={100}
               autoFocus
+              id="edit-name"
+              maxLength={100}
+              onChange={(e) => setName(e.target.value)}
+              value={name}
             />
           </div>
           <div className="grid gap-2">
             <Label htmlFor="edit-type">Instrument type</Label>
-            <Select value={type} onValueChange={setType}>
-              <SelectTrigger id="edit-type" className="w-full">
+            <Select onValueChange={setType} value={type}>
+              <SelectTrigger className="w-full" id="edit-type">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -131,13 +131,13 @@ export function EditInstrumentDialog({
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-muted-foreground text-xs">
               Controls the run detail page layout.
             </p>
           </div>
         </div>
         <DialogFooter>
-          <Button onClick={handleSave} disabled={!name.trim() || isPending}>
+          <Button disabled={!name.trim() || isPending} onClick={handleSave}>
             {isPending && (
               <Loader2 className="animate-spin" data-icon="inline-start" />
             )}

@@ -1,15 +1,15 @@
 "use client";
 
+import { Loader2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useTransition } from "react";
+import { toast } from "sonner";
 import { Switch } from "@/components/ui/switch";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Loader2 } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useTransition } from "react";
-import { toast } from "sonner";
 
 type AdminToggleProps = {
   userId: string;
@@ -71,15 +71,17 @@ export function AdminToggle({
         <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
       ) : null}
       <Switch
+        aria-label={isAdmin ? "Revoke admin" : "Grant admin"}
         checked={isAdmin}
         disabled={isSelf || isPending}
         onCheckedChange={handleChange}
-        aria-label={isAdmin ? "Revoke admin" : "Grant admin"}
       />
     </div>
   );
 
-  if (!isSelf) return control;
+  if (!isSelf) {
+    return control;
+  }
 
   return (
     <Tooltip>

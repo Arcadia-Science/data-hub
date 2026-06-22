@@ -75,7 +75,7 @@ function getSigner(region: string): SignatureV4 {
 export function hasInvokeCredentials(): boolean {
   return Boolean(
     process.env.AWS_ROLE_ARN ||
-    (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY)
+      (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY)
   );
 }
 

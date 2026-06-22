@@ -1,5 +1,8 @@
 "use client";
 
+import { Check, ChevronsUpDown, Search, X } from "lucide-react";
+import { useQueryStates } from "nuqs";
+import { useState } from "react";
 import { RunFiltersCombobox } from "@/components/runs/run-filters-combobox";
 import { RunsDateFilter } from "@/components/runs/runs-date-filter";
 import { useTablePending } from "@/components/table-pending";
@@ -21,9 +24,6 @@ import {
 } from "@/components/ui/popover";
 import { dashboardSearchParams, hasActiveFilters } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
-import { Check, ChevronsUpDown, Search, X } from "lucide-react";
-import { useQueryStates } from "nuqs";
-import { useState } from "react";
 
 type Instrument = {
   id: string;
@@ -69,36 +69,36 @@ export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
           <div className="relative w-64">
             <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
+              className="pl-9"
+              onChange={(e) => setFilters({ search: e.target.value, page: 1 })}
               placeholder="Search runs..."
               value={filters.search}
-              onChange={(e) => setFilters({ search: e.target.value, page: 1 })}
-              className="pl-9"
             />
           </div>
 
           {/* Instrument multi-select */}
-          <Popover open={instrumentOpen} onOpenChange={setInstrumentOpen}>
+          <Popover onOpenChange={setInstrumentOpen} open={instrumentOpen}>
             <PopoverTrigger asChild>
               <Button
-                variant="outline"
-                size="sm"
+                aria-expanded={instrumentOpen}
                 className="h-9 gap-1.5"
                 role="combobox"
-                aria-expanded={instrumentOpen}
+                size="sm"
+                variant="outline"
               >
                 <ChevronsUpDown className="size-3.5 opacity-50" />
                 Instruments
                 {filters.instrument_id.length > 0 && (
                   <Badge
-                    variant="secondary"
                     className="ml-1 px-1.5 text-[10px]"
+                    variant="secondary"
                   >
                     {filters.instrument_id.length}
                   </Badge>
                 )}
               </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-72 p-0" align="start">
+            <PopoverContent align="start" className="w-72 p-0">
               <Command>
                 <CommandInput placeholder="Filter instruments..." />
                 <CommandList>
@@ -109,8 +109,8 @@ export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
                       return (
                         <CommandItem
                           key={inst.id}
-                          value={inst.displayName}
                           onSelect={() => toggleInstrument(inst.id)}
+                          value={inst.displayName}
                         >
                           <Check
                             className={cn(
@@ -133,10 +133,10 @@ export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
           {/* Clear filters */}
           {hasFilters && (
             <Button
-              variant="ghost"
-              size="sm"
+              className="h-9 gap-1.5 font-normal text-sm"
               onClick={clearFilters}
-              className="h-9 gap-1.5 text-sm font-normal"
+              size="sm"
+              variant="ghost"
             >
               <X className="size-3.5" />
               Clear
@@ -144,7 +144,8 @@ export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
           )}
 
           <RunsDateFilter
-            value={{ from: filters.date_from, to: filters.date_to }}
+            align="end"
+            defaultPreset="24h"
             onChange={(range) =>
               setFilters({
                 date_from: range.from,
@@ -152,15 +153,14 @@ export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
                 page: 1,
               })
             }
-            align="end"
-            defaultPreset="24h"
+            value={{ from: filters.date_from, to: filters.date_to }}
           />
 
           <RunFiltersCombobox
-            values={{ includeDeleted: filters.include_deleted }}
             onChange={({ includeDeleted }) =>
               setFilters({ include_deleted: includeDeleted, page: 1 })
             }
+            values={{ includeDeleted: filters.include_deleted }}
           />
         </div>
       </div>

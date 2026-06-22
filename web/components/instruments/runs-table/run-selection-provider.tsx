@@ -80,9 +80,13 @@ export function RunSelectionProvider({
       const next = new Map(prev);
       const alreadyAll = refs.every((r) => next.has(r.id));
       if (alreadyAll) {
-        for (const r of refs) next.delete(r.id);
+        for (const r of refs) {
+          next.delete(r.id);
+        }
       } else {
-        for (const r of refs) next.set(r.id, r);
+        for (const r of refs) {
+          next.set(r.id, r);
+        }
       }
       return next;
     });

@@ -9,12 +9,12 @@
 // randomness beyond UUIDs / token bytes. Bug reports against a seeded
 // database should be reproducible from the same seed call sequence.
 
-import { generateToken, getTokenPrefix, hashToken } from "@/lib/tokens";
-import { getTableName, isTable, sql } from "drizzle-orm";
-import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { copyFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { getTableName, isTable, sql } from "drizzle-orm";
+import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import { generateToken, getTokenPrefix, hashToken } from "@/lib/tokens";
 import * as schema from "./schema";
 
 export type Db = PostgresJsDatabase<typeof schema>;
@@ -43,7 +43,9 @@ export async function clearAll(db: Db): Promise<void> {
     .filter(isTable)
     .map((t) => getTableName(t));
 
-  if (tableNames.length === 0) return;
+  if (tableNames.length === 0) {
+    return;
+  }
 
   // Quote each identifier so camelCase Drizzle-generated names (e.g.
   // `"user"` — a reserved word in some SQL dialects) round-trip safely.
@@ -99,7 +101,7 @@ export async function seedDevUser(
     tokenHash: hashToken(plaintext),
     tokenPrefix: getTokenPrefix(plaintext),
     scopes: options.scopes ?? ["*"],
-    expiresAt: options.expiresAt !== undefined ? options.expiresAt : null,
+    expiresAt: options.expiresAt === undefined ? null : options.expiresAt,
   });
 
   return { userId, email, token: plaintext };
@@ -202,7 +204,9 @@ export async function seedWatchers(
   db: Db,
   instrumentIds: string[]
 ): Promise<SeededWatcher[]> {
-  if (instrumentIds.length === 0) return [];
+  if (instrumentIds.length === 0) {
+    return [];
+  }
 
   const now = new Date();
   const watcherValues = instrumentIds.map((instrumentId, idx) => {
@@ -373,10 +377,12 @@ export const FIXTURES_DIR = path.resolve(
 export async function seedRuns(
   db: Db,
   instrumentId: string,
-  count: number = 5,
+  count = 5,
   instrumentType?: schema.InstrumentType
 ): Promise<SeededRun[]> {
-  if (count <= 0) return [];
+  if (count <= 0) {
+    return [];
+  }
 
   const fixture = instrumentType
     ? INSTRUMENT_FIXTURES[instrumentType]
@@ -437,7 +443,7 @@ export async function seedRuns(
           metadata: { seeded: true },
           errorMessage:
             status === "failed" ? "Seeded failure for UI exercise" : null,
-          uploadedAt: status !== "failed" ? new Date() : null,
+          uploadedAt: status === "failed" ? null : new Date(),
           processedAt: status === "completed" ? new Date() : null,
         };
       })
@@ -459,7 +465,7 @@ export async function seedRuns(
             metadata: { seeded: true },
             errorMessage:
               status === "failed" ? "Seeded failure for UI exercise" : null,
-            uploadedAt: status !== "failed" ? new Date() : null,
+            uploadedAt: status === "failed" ? null : new Date(),
             processedAt: status === "completed" ? new Date() : null,
           };
         })
@@ -504,7 +510,9 @@ export async function seedRunComments(
   runs: SeededRun[],
   userId: string
 ): Promise<void> {
-  if (runs.length === 0) return;
+  if (runs.length === 0) {
+    return;
+  }
   const rows = runs.map((run, i) => ({
     runId: run.id,
     userId,
@@ -518,7 +526,9 @@ export async function seedRunAttributions(
   runs: SeededRun[],
   userId: string
 ): Promise<void> {
-  if (runs.length === 0) return;
+  if (runs.length === 0) {
+    return;
+  }
   const rows = runs.map((run) => ({ runId: run.id, userId }));
   await db.insert(schema.runAttributions).values(rows);
 }
@@ -544,10 +554,12 @@ const TEAMMATE_PRESETS: Array<Omit<SeededTeammate, "id">> = [
 
 export async function seedTeammates(
   db: Db,
-  count: number = 2
+  count = 2
 ): Promise<SeededTeammate[]> {
   const chosen = TEAMMATE_PRESETS.slice(0, Math.max(0, count));
-  if (chosen.length === 0) return [];
+  if (chosen.length === 0) {
+    return [];
+  }
   const rows = chosen.map((preset) => ({
     id: crypto.randomUUID(),
     name: preset.name,
@@ -570,7 +582,9 @@ export async function seedInstrumentSubscriptions(
   instrumentIds: string[],
   enabledCount?: number
 ): Promise<void> {
-  if (instrumentIds.length === 0) return;
+  if (instrumentIds.length === 0) {
+    return;
+  }
   // Default: roughly the first half of the list enabled, the rest left as
   // explicit `enabled = false` rows so the toggle is materialised in the
   // settings page (rather than relying on the missing-row fallback).
@@ -655,8 +669,8 @@ export async function seedNotifications(
   const primaryTeammate = teammates[0];
   const todayCommentTargets = runs.slice(0, 2);
   const todayCommentBodies = [
-    `@dev can you take a look at the OD readings on plate 3? Something looks off…`,
-    `Nevermind — I see what happened. The well was contaminated.`,
+    "@dev can you take a look at the OD readings on plate 3? Something looks off…",
+    "Nevermind — I see what happened. The well was contaminated.",
   ];
 
   type CommentInsert = typeof schema.runComments.$inferInsert;
@@ -701,7 +715,9 @@ export async function seedNotifications(
 
   groupBatches.forEach((batch, batchIdx) => {
     const instrumentId = instrumentIds[batch.instrumentIdx];
-    if (!instrumentId) return;
+    if (!instrumentId) {
+      return;
+    }
     const pool = runsByInstrument.get(instrumentId) ?? [];
     const picks = pool.slice(0, batch.count);
     picks.forEach((run, i) => {
@@ -765,7 +781,9 @@ export async function seedArchiveJobs(
   runs: SeededRun[],
   createdBy?: string
 ): Promise<void> {
-  if (runs.length === 0) return;
+  if (runs.length === 0) {
+    return;
+  }
 
   const statuses = ["ready", "building", "failed"] as const;
   const rows = statuses.slice(0, runs.length).map((status, i) => {

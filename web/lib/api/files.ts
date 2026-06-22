@@ -1,6 +1,6 @@
+import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
-import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
 
 export type FileRow = typeof files.$inferSelect;
 
@@ -52,7 +52,7 @@ export async function lookupFileForDownload(
     return { ok: false, reason: "not_found" };
   }
 
-  if (!file.s3Bucket || !file.s3Key) {
+  if (!(file.s3Bucket && file.s3Key)) {
     return { ok: false, reason: "not_uploaded" };
   }
 
@@ -91,7 +91,9 @@ export async function summarizeDownloadableRunFiles(
       )
     );
   const count = row?.count ?? 0;
-  if (count === 0) return { count: 0, totalSizeBytes: 0 };
+  if (count === 0) {
+    return { count: 0, totalSizeBytes: 0 };
+  }
   const totalSizeBytes =
     row?.anyNull || row?.totalSize === null
       ? null

@@ -1,3 +1,4 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { instrumentRuns, instruments } from "@/lib/db/schema";
 import {
   api,
@@ -7,7 +8,6 @@ import {
   resetDb,
   seedTestUser,
 } from "@/tests/integration/helpers";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // Tests for GET /api/v1/instruments/:instrumentId/runs/:runId/download-archive.
 //

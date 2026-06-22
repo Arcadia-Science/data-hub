@@ -1,3 +1,5 @@
+import { eq } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { instruments, files as schemaFiles } from "@/lib/db/schema";
 import {
   api,
@@ -6,8 +8,6 @@ import {
   resetDb,
   seedTestUser,
 } from "@/tests/integration/helpers";
-import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // Files have two distinct lifecycle paths through the status state machine:
 //

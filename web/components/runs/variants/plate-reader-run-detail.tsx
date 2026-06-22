@@ -24,8 +24,12 @@ const HEATMAP_MEASUREMENT_TYPES = new Set(["Endpoint", "Well Scan", "Kinetic"]);
  * PlateWellData boundary.
  */
 function coerceNumeric(value: unknown): unknown {
-  if (typeof value === "number") return value;
-  if (typeof value !== "string" || value === "") return value;
+  if (typeof value === "number") {
+    return value;
+  }
+  if (typeof value !== "string" || value === "") {
+    return value;
+  }
   const n = Number(value);
   return Number.isFinite(n) ? n : value;
 }
@@ -53,7 +57,9 @@ type PlateMapGroup =
 function sortTimeKeys(keys: string[]): string[] {
   const unique = [...new Set(keys)];
   const allNumeric = unique.every((k) => {
-    if (k === "") return false;
+    if (k === "") {
+      return false;
+    }
     return Number.isFinite(Number(k));
   });
   if (allNumeric) {
@@ -144,12 +150,16 @@ function extractPlateMaps(
   rows: RawWellRow[],
   options: { kinetic: boolean }
 ): PlateMapGroup[] {
-  if (rows.length === 0) return [];
+  if (rows.length === 0) {
+    return [];
+  }
 
   // Auto-detect the well-address column name across CSV export formats.
   const wellKey =
-    rows[0].well_position !== undefined ? "well_position" : "well";
-  if (rows[0][wellKey] === undefined) return [];
+    rows[0].well_position === undefined ? "well" : "well_position";
+  if (rows[0][wellKey] === undefined) {
+    return [];
+  }
 
   const uniqueTimes = new Set(rows.map((r) => String(r.time ?? "")));
   const hasTimeVariation = uniqueTimes.size > 1;
@@ -192,8 +202,12 @@ function extractPlateMaps(
   return Array.from(grouped.entries()).map(([key, group]) => {
     const [plate = "", wavelength = "", time = ""] = key.split("|");
     const titleParts: string[] = [];
-    if (plate) titleParts.push(plate);
-    if (time) titleParts.push(`t=${time}`);
+    if (plate) {
+      titleParts.push(plate);
+    }
+    if (time) {
+      titleParts.push(`t=${time}`);
+    }
     return {
       mode: "static" as const,
       plateName: titleParts.join(" · "),
@@ -217,13 +231,15 @@ function PlateMapSection({
 }) {
   const groups = extractPlateMaps(rows, { kinetic: kineticLayout });
 
-  if (groups.length === 0) return null;
+  if (groups.length === 0) {
+    return null;
+  }
 
   return (
     <div className="flex flex-col gap-2">
-      <h2 className="text-sm font-semibold">
+      <h2 className="font-semibold text-sm">
         Plate Maps{" "}
-        <span className="ml-1 font-mono text-xs font-normal text-muted-foreground">
+        <span className="ml-1 font-mono font-normal text-muted-foreground text-xs">
           {groups.length} map(s)
         </span>
       </h2>
@@ -233,18 +249,18 @@ function PlateMapSection({
             {groups.map((g, i) =>
               g.mode === "kinetic" ? (
                 <KineticPlateMapWithTimeSlider
-                  key={i}
-                  timeLabels={g.timeLabels}
                   frames={g.frames}
                   heatmap={heatmap}
+                  key={i}
                   plateName={g.plateName}
+                  timeLabels={g.timeLabels}
                   wavelength={g.wavelength}
                 />
               ) : (
                 <PlateMapGrid
-                  key={i}
                   data={g.wells}
                   heatmap={heatmap}
+                  key={i}
                   plateName={g.plateName}
                   wavelength={g.wavelength}
                 />
@@ -285,13 +301,13 @@ export function PlateReaderRunDetail({
 
   return (
     <>
-      <RunDetail.Header run={run} attributionsSlot={attributionsSlot}>
+      <RunDetail.Header attributionsSlot={attributionsSlot} run={run}>
         {!isDeleted && (
           <DeleteRunDialog
-            instrumentId={instrumentId}
-            runId={runId}
             fileCount={activeFileCount}
             hasProcessedFiles={hasProcessedFiles}
+            instrumentId={instrumentId}
+            runId={runId}
           />
         )}
         {isDeleted && (
@@ -309,18 +325,18 @@ export function PlateReaderRunDetail({
         )}
         <RunDetail.Files
           files={files}
-          pagination={filesPagination}
-          stats={fileStats}
           instrumentId={instrumentId}
-          runId={runId}
           isDeleted={isDeleted}
+          pagination={filesPagination}
+          runId={runId}
+          stats={fileStats}
         />
       </RunDetail.FilesMetadataLayout>
 
       <PlateMapSection
-        rows={wellData}
         heatmap={heatmap}
         kineticLayout={measurementType === "Kinetic"}
+        rows={wellData}
       />
     </>
   );

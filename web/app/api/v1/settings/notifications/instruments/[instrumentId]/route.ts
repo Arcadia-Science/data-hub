@@ -1,3 +1,6 @@
+import { eq } from "drizzle-orm";
+import type { NextRequest } from "next/server";
+import { z } from "zod";
 import { requireSession } from "@/lib/api/auth";
 import {
   apiError,
@@ -8,9 +11,6 @@ import {
 import { setInstrumentSubscription } from "@/lib/api/notifications";
 import { db } from "@/lib/db";
 import { instruments } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
-import type { NextRequest } from "next/server";
-import { z } from "zod";
 
 const PutBodySchema = z.object({ enabled: z.boolean() }).strict();
 
@@ -29,7 +29,9 @@ type RouteContext = {
 
 export async function PUT(request: NextRequest, { params }: RouteContext) {
   const auth = await requireSession();
-  if (!auth) return apiError(401, UNAUTHORIZED, "Authentication required");
+  if (!auth) {
+    return apiError(401, UNAUTHORIZED, "Authentication required");
+  }
 
   const { instrumentId } = await params;
 

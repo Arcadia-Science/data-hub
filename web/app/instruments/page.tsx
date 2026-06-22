@@ -1,3 +1,4 @@
+import type { Metadata } from "next/types";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import {
   InstrumentRowManagementActions,
@@ -9,7 +10,6 @@ import {
   listInstrumentSubscriptions,
 } from "@/lib/api/notifications";
 import { auth } from "@/lib/auth";
-import type { Metadata } from "next/types";
 
 const description = "Instruments connected to Data Hub.";
 
@@ -55,15 +55,15 @@ export default async function InstrumentsPage() {
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">Instruments</h1>
+        <h1 className="font-semibold text-2xl tracking-tight">Instruments</h1>
       </div>
       <InstrumentsTable
         data={instruments}
-        renderRowActions={isAdmin ? InstrumentRowManagementActions : undefined}
         notifications={{
           subscriptions: subscriptionMap,
           masterMuted: prefs.runsAllMuted,
         }}
+        renderRowActions={isAdmin ? InstrumentRowManagementActions : undefined}
       />
     </div>
   );

@@ -1,5 +1,9 @@
 "use client";
 
+import { Loader2, Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useTransition } from "react";
+import { toast } from "sonner";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -12,10 +16,6 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Loader2, Trash2 } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useTransition } from "react";
-import { toast } from "sonner";
 
 export function DeregisterDialog({
   watcherId,
@@ -53,9 +53,9 @@ export function DeregisterDialog({
     <AlertDialog>
       <AlertDialogTrigger asChild>
         <Button
-          variant="ghost"
+          className="h-7 gap-1 text-destructive text-xs hover:text-destructive"
           size="sm"
-          className="h-7 gap-1 text-xs text-destructive hover:text-destructive"
+          variant="ghost"
         >
           <Trash2 className="size-3" />
           Deregister
@@ -80,9 +80,9 @@ export function DeregisterDialog({
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
-            variant="destructive"
-            onClick={handleDeregister}
             disabled={isPending}
+            onClick={handleDeregister}
+            variant="destructive"
           >
             {isPending && <Loader2 className="size-4 animate-spin" />}
             Deregister

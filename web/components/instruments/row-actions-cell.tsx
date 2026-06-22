@@ -1,7 +1,7 @@
 "use client";
 
-import { TableCell } from "@/components/ui/table";
 import type { ReactNode } from "react";
+import { TableCell } from "@/components/ui/table";
 
 /**
  * Wraps an `<InstrumentsTable>` actions cell so clicks inside it (edit

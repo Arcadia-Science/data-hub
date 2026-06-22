@@ -1,3 +1,4 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { instruments } from "@/lib/db/schema";
 import {
   api,
@@ -6,7 +7,6 @@ import {
   resetDb,
   seedTestUser,
 } from "@/tests/integration/helpers";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // End-to-end tests for the self-service run attribution surface:
 //

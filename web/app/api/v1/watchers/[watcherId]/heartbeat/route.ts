@@ -1,3 +1,5 @@
+import { eq } from "drizzle-orm";
+import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import {
   apiError,
@@ -14,15 +16,15 @@ import {
   watcherReleaseConfig,
   watchers,
 } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
-import type { NextRequest } from "next/server";
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ watcherId: string }> }
 ) {
   const authResult = await authorize(request, "watchers:write");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { watcherId } = await params;
   if (!isValidUUID(watcherId)) {

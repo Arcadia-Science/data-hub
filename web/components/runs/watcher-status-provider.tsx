@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, use, type ReactNode } from "react";
+import { createContext, type ReactNode, use } from "react";
 
 /**
  * Describes whether the instrument's watcher is actively heartbeating.

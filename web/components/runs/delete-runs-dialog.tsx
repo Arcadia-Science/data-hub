@@ -1,5 +1,9 @@
 "use client";
 
+import { Loader2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
+import { toast } from "sonner";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -12,10 +16,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2 } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
-import { toast } from "sonner";
 
 export type DeleteRunTarget = {
   instrumentId: string;
@@ -78,7 +78,9 @@ export function DeleteRunsDialog({
   const isConfirmed = !requiresTypeConfirm || confirmValue === singleRun!.runId;
 
   function handleOpenChange(next: boolean) {
-    if (!next) setConfirmValue("");
+    if (!next) {
+      setConfirmValue("");
+    }
     onOpenChange(next);
   }
 
@@ -106,7 +108,7 @@ export function DeleteRunsDialog({
   const title = isSingle ? "Delete run?" : `Delete ${runCount} runs?`;
 
   return (
-    <AlertDialog open={open} onOpenChange={handleOpenChange}>
+    <AlertDialog onOpenChange={handleOpenChange} open={open}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
@@ -131,18 +133,18 @@ export function DeleteRunsDialog({
               )}
               {requiresTypeConfirm && (
                 <div className="space-y-1.5 pt-2">
-                  <Label htmlFor="confirm-run-id" className="text-xs">
+                  <Label className="text-xs" htmlFor="confirm-run-id">
                     Type{" "}
                     <strong className="font-mono">{singleRun!.runId}</strong> to
                     confirm
                   </Label>
                   <Input
+                    autoComplete="off"
+                    className="font-mono text-sm"
                     id="confirm-run-id"
-                    value={confirmValue}
                     onChange={(e) => setConfirmValue(e.target.value)}
                     placeholder={singleRun!.runId}
-                    className="font-mono text-sm"
-                    autoComplete="off"
+                    value={confirmValue}
                   />
                 </div>
               )}
@@ -152,9 +154,9 @@ export function DeleteRunsDialog({
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
-            variant="destructive"
-            onClick={handleDelete}
             disabled={isPending || !isConfirmed}
+            onClick={handleDelete}
+            variant="destructive"
           >
             {isPending && <Loader2 className="size-4 animate-spin" />}
             Delete

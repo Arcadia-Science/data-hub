@@ -1,8 +1,8 @@
+import type { Metadata } from "next/types";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import { WatchersView } from "@/components/watchers/watchers-view";
 import { getWatcherList } from "@/lib/api/watchers";
 import { auth } from "@/lib/auth";
-import type { Metadata } from "next/types";
 
 const description = "Watcher agents reporting into Data Hub.";
 
@@ -34,7 +34,7 @@ export default async function WatchersPage() {
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">Watchers</h1>
+        <h1 className="font-semibold text-2xl tracking-tight">Watchers</h1>
       </div>
       <WatchersView activeData={active} deregisteredData={deregistered} />
     </div>

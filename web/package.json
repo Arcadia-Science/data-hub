@@ -7,9 +7,8 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
-    "format": "prettier --write \"**/*.{ts,tsx}\" --log-level warn",
-    "format:check": "prettier --check \"**/*.{ts,tsx}\" --log-level warn",
+    "lint": "ultracite check",
+    "format": "ultracite fix",
     "typecheck": "tsc --noEmit",
     "precommit": "npm run format && npm run lint && npm run typecheck",
     "db:generate": "drizzle-kit generate",
@@ -66,21 +65,17 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@eslint/eslintrc": "^3",
+    "@biomejs/biome": "^2.4.16",
     "@tailwindcss/postcss": "^4.2.1",
     "@types/node": "^25.5.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "drizzle-kit": "^0.31.10",
-    "eslint": "^9.39.4",
-    "eslint-config-next": "16.1.7",
     "postcss": "^8",
-    "prettier": "^3.8.1",
-    "prettier-plugin-organize-imports": "^4.3.0",
-    "prettier-plugin-tailwindcss": "^0.7.2",
     "tailwindcss": "^4.2.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
+    "ultracite": "^7.8.3",
     "vitest": "^4.1.2"
   }
 }

@@ -1,3 +1,4 @@
+import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import { apiError, INTERNAL_ERROR, NOT_FOUND } from "@/lib/api/errors";
 import {
@@ -6,7 +7,6 @@ import {
   lookupRunByNaturalKey,
 } from "@/lib/api/instrument-runs";
 import { prepareRunArchive } from "@/lib/api/run-archive";
-import type { NextRequest } from "next/server";
 
 const FILES_STATUS_VALUES: ReadonlySet<FilesStatusFilter> = new Set([
   "all",
@@ -23,7 +23,7 @@ function parseStatusParam(value: string | null): FilesStatusFilter | undefined {
   if (value && FILES_STATUS_VALUES.has(value as FilesStatusFilter)) {
     return value as FilesStatusFilter;
   }
-  return undefined;
+  return;
 }
 
 type RouteContext = {
@@ -48,12 +48,16 @@ export const maxDuration = 300;
 // translates that into the same 404 a non-matching id list would.
 function parseFileIdsParam(searchParams: URLSearchParams): number[] | null {
   const raw = searchParams.getAll("file_ids");
-  if (raw.length === 0) return null;
+  if (raw.length === 0) {
+    return null;
+  }
   const ids = new Set<number>();
   for (const entry of raw) {
     for (const part of entry.split(",")) {
       const n = Number.parseInt(part.trim(), 10);
-      if (Number.isInteger(n) && n > 0) ids.add(n);
+      if (Number.isInteger(n) && n > 0) {
+        ids.add(n);
+      }
     }
   }
   return Array.from(ids);
@@ -71,7 +75,9 @@ async function resolveFileIdsFilter(
   runId: string
 ): Promise<number[] | null> {
   const explicit = parseFileIdsParam(request.nextUrl.searchParams);
-  if (explicit !== null) return explicit;
+  if (explicit !== null) {
+    return explicit;
+  }
 
   const sp = request.nextUrl.searchParams;
   const search = sp.get("search")?.trim() || undefined;
@@ -82,13 +88,17 @@ async function resolveFileIdsFilter(
     search !== undefined ||
     (status !== undefined && status !== "all") ||
     includeDismissed;
-  if (!hasFilter) return null;
+  if (!hasFilter) {
+    return null;
+  }
 
   // `lookupRunByNaturalKey` is request-cached, so this doesn't double the
   // lookup `prepareRunArchive` performs. A missing run falls through to the
   // 404 that helper raises.
   const run = await lookupRunByNaturalKey(instrumentId, runId);
-  if (!run) return null;
+  if (!run) {
+    return null;
+  }
 
   return getFilteredFileIds(run.id, { search, status, includeDismissed });
 }
@@ -122,7 +132,9 @@ async function resolveFileIdsFilter(
 // ---------------------------------------------------------------------------
 export async function GET(request: NextRequest, { params }: RouteContext) {
   const authResult = await authorize(request, "files:read");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { instrumentId, runId } = await params;
 

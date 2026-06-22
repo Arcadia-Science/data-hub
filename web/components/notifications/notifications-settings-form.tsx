@@ -1,5 +1,10 @@
 "use client";
 
+import { useForm } from "@tanstack/react-form";
+import { Loader2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import {
@@ -16,11 +21,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useForm } from "@tanstack/react-form";
-import { Loader2 } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { toast } from "sonner";
-import { z } from "zod";
 
 // Mirror of the server's PUT body shape, in form-friendly camelCase. The
 // schema is reused for `onSubmit` validation so the client surfaces the
@@ -155,11 +155,11 @@ export function NotificationsSettingsForm({
                     </FieldDescription>
                   </FieldContent>
                   <Switch
+                    aria-label="Mute all instrument notifications"
+                    checked={field.state.value}
                     id={field.name}
                     name={field.name}
-                    checked={field.state.value}
                     onCheckedChange={field.handleChange}
-                    aria-label="Mute all instrument notifications"
                   />
                 </Field>
               )}
@@ -180,11 +180,11 @@ export function NotificationsSettingsForm({
                     </FieldDescription>
                   </FieldContent>
                   <Switch
+                    aria-label="Notify me when someone comments on a run I'm attributed to"
+                    checked={field.state.value}
                     id={field.name}
                     name={field.name}
-                    checked={field.state.value}
                     onCheckedChange={field.handleChange}
-                    aria-label="Notify me when someone comments on a run I'm attributed to"
                   />
                 </Field>
               )}
@@ -203,11 +203,11 @@ export function NotificationsSettingsForm({
                     </FieldDescription>
                   </FieldContent>
                   <Switch
+                    aria-label="Notify me when someone replies on a run I've commented on"
+                    checked={field.state.value}
                     id={field.name}
                     name={field.name}
-                    checked={field.state.value}
                     onCheckedChange={field.handleChange}
-                    aria-label="Notify me when someone replies on a run I've commented on"
                   />
                 </Field>
               )}
@@ -220,8 +220,8 @@ export function NotificationsSettingsForm({
             <FieldSeparator />
             <CardContent className="max-w-2xl">
               <div className="mb-4">
-                <h3 className="text-sm font-medium">Per-instrument</h3>
-                <p className="text-sm text-muted-foreground">
+                <h3 className="font-medium text-sm">Per-instrument</h3>
+                <p className="text-muted-foreground text-sm">
                   Pick the instruments you want to be notified about whenever a
                   new run is reported.
                 </p>
@@ -255,14 +255,14 @@ export function NotificationsSettingsForm({
                                 <TooltipTrigger asChild>
                                   <span className="inline-flex">
                                     <Switch
+                                      aria-label={`Notify me about new runs on ${row.displayName}`}
+                                      checked={enabled && !masterMuted}
+                                      disabled={masterMuted}
                                       id={field.name}
                                       name={field.name}
-                                      checked={enabled && !masterMuted}
                                       onCheckedChange={(v) =>
                                         field.handleChange(v)
                                       }
-                                      disabled={masterMuted}
-                                      aria-label={`Notify me about new runs on ${row.displayName}`}
                                     />
                                   </span>
                                 </TooltipTrigger>
@@ -295,11 +295,11 @@ export function NotificationsSettingsForm({
               })}
             >
               {({ canSubmit, isSubmitting }) => (
-                <Button type="submit" disabled={!canSubmit || isSubmitting}>
+                <Button disabled={!canSubmit || isSubmitting} type="submit">
                   {isSubmitting ? (
                     <Loader2
-                      data-icon="inline-start"
                       className="animate-spin"
+                      data-icon="inline-start"
                     />
                   ) : null}
                   Save

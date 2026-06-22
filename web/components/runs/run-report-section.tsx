@@ -1,8 +1,8 @@
+import { ExternalLink } from "lucide-react";
 import { ColonyDataTable } from "@/components/runs/colony-data-table";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { RunFile } from "@/lib/api/instrument-runs";
-import { ExternalLink } from "lucide-react";
 
 const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|svg|tiff?)$/i;
 const PDF_EXTENSION = /\.pdf$/i;
@@ -31,9 +31,9 @@ function ProcessedImagePreview({ file }: { file: RunFile }) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium">{file.filename}</h3>
-        <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" asChild>
-          <a href={downloadUrl} target="_blank" rel="noopener noreferrer">
+        <h3 className="font-medium text-sm">{file.filename}</h3>
+        <Button asChild className="h-7 gap-1 text-xs" size="sm" variant="ghost">
+          <a href={downloadUrl} rel="noopener noreferrer" target="_blank">
             <ExternalLink className="size-3" />
             Full size
           </a>
@@ -41,7 +41,7 @@ function ProcessedImagePreview({ file }: { file: RunFile }) {
       </div>
       <div className="overflow-hidden rounded-md border bg-muted/30">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={downloadUrl} alt={file.filename} className="h-auto w-full" />
+        <img alt={file.filename} className="h-auto w-full" src={downloadUrl} />
       </div>
     </div>
   );
@@ -53,9 +53,9 @@ function PdfPreview({ file }: { file: RunFile }) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium">{file.filename}</h3>
-        <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" asChild>
-          <a href={downloadUrl} target="_blank" rel="noopener noreferrer">
+        <h3 className="font-medium text-sm">{file.filename}</h3>
+        <Button asChild className="h-7 gap-1 text-xs" size="sm" variant="ghost">
+          <a href={downloadUrl} rel="noopener noreferrer" target="_blank">
             <ExternalLink className="size-3" />
             Open in new tab
           </a>
@@ -63,9 +63,9 @@ function PdfPreview({ file }: { file: RunFile }) {
       </div>
       <div className="overflow-hidden rounded-md border">
         <iframe
+          className="h-[80vh] w-full"
           src={downloadUrl}
           title={file.filename}
-          className="h-[80vh] w-full"
         />
       </div>
     </div>
@@ -89,10 +89,10 @@ export function RunReportSection({ files }: { files: RunFile[] }) {
   if (totalCount === 0) {
     return (
       <div className="flex flex-col gap-2">
-        <h2 className="text-sm font-semibold">Report Data</h2>
+        <h2 className="font-semibold text-sm">Report Data</h2>
         <Card size="sm">
           <CardContent>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-muted-foreground text-sm">
               No report data has been generated for this run.
             </p>
           </CardContent>
@@ -103,22 +103,22 @@ export function RunReportSection({ files }: { files: RunFile[] }) {
 
   return (
     <div className="flex flex-col gap-2">
-      <h2 className="text-sm font-semibold">
+      <h2 className="font-semibold text-sm">
         Report Data{" "}
-        <span className="ml-1 font-mono text-xs font-normal text-muted-foreground">
+        <span className="ml-1 font-mono font-normal text-muted-foreground text-xs">
           {totalCount} file(s)
         </span>
       </h2>
       <Card size="sm">
         <CardContent className="flex flex-col gap-6">
           {processedImages.map((file) => (
-            <ProcessedImagePreview key={file.id} file={file} />
+            <ProcessedImagePreview file={file} key={file.id} />
           ))}
           {processedCsvs.map((file) => (
-            <ColonyDataTable key={file.id} file={file} />
+            <ColonyDataTable file={file} key={file.id} />
           ))}
           {pdfFiles.map((file) => (
-            <PdfPreview key={file.id} file={file} />
+            <PdfPreview file={file} key={file.id} />
           ))}
         </CardContent>
       </Card>

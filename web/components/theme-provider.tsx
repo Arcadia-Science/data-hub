@@ -1,7 +1,7 @@
 "use client";
 
 import { ThemeProvider as NextThemesProvider } from "next-themes";
-import * as React from "react";
+import type * as React from "react";
 
 function ThemeProvider({
   children,
@@ -11,8 +11,8 @@ function ThemeProvider({
     <NextThemesProvider
       attribute="class"
       defaultTheme="system"
-      enableSystem
       disableTransitionOnChange
+      enableSystem
       {...props}
     >
       {children}

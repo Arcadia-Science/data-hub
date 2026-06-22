@@ -1,7 +1,7 @@
 "use client";
 
-import type { RunFile } from "@/lib/api/instrument-runs";
 import { createContext, use, useCallback, useMemo, useState } from "react";
+import type { RunFile } from "@/lib/api/instrument-runs";
 
 // ---------------------------------------------------------------------------
 // File selection provider for the run files table. Mirrors RunSelectionProvider
@@ -37,12 +37,16 @@ export type FileRef = {
 // (dismissed files, transient `upload_requested` rows). Caller treats null
 // the same as "no checkbox in this row".
 export function buildFileRef(file: RunFile): FileRef | null {
-  if (file.deletedAt !== null) return null;
+  if (file.deletedAt !== null) {
+    return null;
+  }
   const isDetected = file.status === "detected";
   const canDownload = DOWNLOADABLE_STATUSES.has(file.status);
   const canReprocess =
     REPROCESSABLE_STATUSES.has(file.status) && file.s3Key !== null;
-  if (!isDetected && !canDownload) return null;
+  if (!(isDetected || canDownload)) {
+    return null;
+  }
   return {
     id: file.id,
     filename: file.filename,
@@ -107,9 +111,13 @@ export function FileSelectionProvider({
       const next = new Map(prev);
       const alreadyAll = refs.length > 0 && refs.every((r) => next.has(r.id));
       if (alreadyAll) {
-        for (const r of refs) next.delete(r.id);
+        for (const r of refs) {
+          next.delete(r.id);
+        }
       } else {
-        for (const r of refs) next.set(r.id, r);
+        for (const r of refs) {
+          next.set(r.id, r);
+        }
       }
       return next;
     });

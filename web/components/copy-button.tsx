@@ -1,15 +1,15 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { Check, Copy } from "lucide-react";
 import { useCallback, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 interface CopyButtonProps {
-  value: string;
   className?: string;
-  variant?: React.ComponentProps<typeof Button>["variant"];
   size?: React.ComponentProps<typeof Button>["size"];
+  value: string;
+  variant?: React.ComponentProps<typeof Button>["variant"];
 }
 
 export function CopyButton({
@@ -28,11 +28,11 @@ export function CopyButton({
 
   return (
     <Button
-      variant={variant}
-      size={size}
-      onClick={handleCopy}
       aria-label="Copy to clipboard"
       className={cn(className)}
+      onClick={handleCopy}
+      size={size}
+      variant={variant}
     >
       {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
     </Button>

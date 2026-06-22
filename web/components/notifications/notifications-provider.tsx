@@ -1,15 +1,15 @@
 "use client";
 
-import type { InstrumentType } from "@/lib/db/schema";
 import {
   createContext,
+  type ReactNode,
   use,
   useCallback,
   useEffect,
   useState,
-  type ReactNode,
 } from "react";
 import { toast } from "sonner";
+import type { InstrumentType } from "@/lib/db/schema";
 
 // ---------------------------------------------------------------------------
 // Notifications provider — single source of truth for the bell badge and
@@ -114,7 +114,9 @@ export function NotificationsProvider({
   const refresh = useCallback(async () => {
     try {
       const res = await fetch("/api/v1/notifications", { cache: "no-store" });
-      if (!res.ok) return;
+      if (!res.ok) {
+        return;
+      }
       const body = (await res.json()) as {
         unreadCount: number;
         notifications: ApiNotification[];
@@ -142,7 +144,9 @@ export function NotificationsProvider({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
     } catch (err) {
       toast.error("Couldn't mark notifications as read", {
         description:
@@ -173,7 +177,9 @@ export function NotificationsProvider({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ids: [id] }),
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
       } catch (err) {
         toast.error("Couldn't mark notification as read", {
           description:
@@ -196,11 +202,15 @@ export function NotificationsProvider({
     let intervalId: ReturnType<typeof setInterval> | null = null;
 
     const start = () => {
-      if (intervalId != null) return;
+      if (intervalId != null) {
+        return;
+      }
       intervalId = setInterval(refresh, POLL_INTERVAL_MS);
     };
     const stop = () => {
-      if (intervalId == null) return;
+      if (intervalId == null) {
+        return;
+      }
       clearInterval(intervalId);
       intervalId = null;
     };
@@ -215,7 +225,9 @@ export function NotificationsProvider({
     };
 
     void refresh();
-    if (document.visibilityState === "visible") start();
+    if (document.visibilityState === "visible") {
+      start();
+    }
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);

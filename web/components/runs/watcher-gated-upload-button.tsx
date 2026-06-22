@@ -1,5 +1,6 @@
 "use client";
 
+import type * as React from "react";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -7,7 +8,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import type * as React from "react";
 
 import { useWatcherStatus } from "./watcher-status-provider";
 
@@ -57,7 +57,7 @@ export function WatcherGatedUploadButton({
           </Button>
         </span>
       </TooltipTrigger>
-      <TooltipContent side="top" className="max-w-xs">
+      <TooltipContent className="max-w-xs" side="top">
         {offlineTooltip}
       </TooltipContent>
     </Tooltip>

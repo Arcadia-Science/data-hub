@@ -1,3 +1,5 @@
+import { and, eq, isNull, sql } from "drizzle-orm";
+import { after, type NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { buildRunListQuery, parseAcquiredAt } from "@/lib/api/instrument-runs";
@@ -6,8 +8,6 @@ import { parseIntParam } from "@/lib/api/validators";
 import { db } from "@/lib/db";
 import { files, instrumentRuns, instruments, watchers } from "@/lib/db/schema";
 import { sendSlackMessage } from "@/lib/slack";
-import { and, eq, isNull, sql } from "drizzle-orm";
-import { after, type NextRequest } from "next/server";
 
 type RouteContext = {
   params: Promise<{ instrumentId: string }>;
@@ -26,7 +26,9 @@ type RouteContext = {
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
   const authResult = await authorize(request, "runs:write");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { instrumentId } = await params;
 
@@ -216,7 +218,9 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
 export async function GET(request: NextRequest, { params }: RouteContext) {
   const authResult = await authorize(request, "runs:read");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { instrumentId } = await params;
 

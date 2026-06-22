@@ -7,7 +7,7 @@ import postgres from "postgres";
 const TEST_DB = "data_hub_test";
 // Matches the credentials expected by the CI Postgres service container
 // and local dev defaults. Override via env vars if using a non-standard setup.
-const PG_URL = `postgres://postgres:postgres@127.0.0.1:5432`;
+const PG_URL = "postgres://postgres:postgres@127.0.0.1:5432";
 
 let serverProcess: ChildProcess | null = null;
 let slackCaptureServer: http.Server | null = null;
@@ -37,7 +37,9 @@ async function waitForServer(url: string, timeoutMs = 120_000) {
   while (Date.now() - start < timeoutMs) {
     try {
       const res = await fetch(url);
-      if (res.ok || res.status < 500) return;
+      if (res.ok || res.status < 500) {
+        return;
+      }
     } catch {
       // server not ready yet
     }

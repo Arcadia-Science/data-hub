@@ -1,3 +1,6 @@
+import { desc, eq } from "drizzle-orm";
+import { KeyRound } from "lucide-react";
+import type { Metadata } from "next/types";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import { CreateTokenDialog } from "@/components/tokens/create-token-dialog";
 import { DeleteTokenDialog } from "@/components/tokens/delete-token-dialog";
@@ -21,9 +24,6 @@ import { avatarColor, toInitials } from "@/lib/avatar-color";
 import { db } from "@/lib/db";
 import { personalAccessTokens, users } from "@/lib/db/schema";
 import { formatRelativeTime } from "@/lib/utils";
-import { desc, eq } from "drizzle-orm";
-import { KeyRound } from "lucide-react";
-import type { Metadata } from "next/types";
 
 const description = "Personal access tokens for the Data Hub API.";
 
@@ -52,8 +52,8 @@ function TokenScopeBadges({ scopes }: { scopes: string[] }) {
   if (scopes.length === 0) {
     return (
       <Badge
+        className="text-muted-foreground text-xs italic"
         variant="secondary"
-        className="text-xs text-muted-foreground italic"
       >
         No scopes
       </Badge>
@@ -62,7 +62,7 @@ function TokenScopeBadges({ scopes }: { scopes: string[] }) {
 
   if (scopes.length === 1 && scopes[0] === "*") {
     return (
-      <Badge variant="secondary" className="text-xs">
+      <Badge className="text-xs" variant="secondary">
         Full access
       </Badge>
     );
@@ -75,7 +75,7 @@ function TokenScopeBadges({ scopes }: { scopes: string[] }) {
 
   if (sorted.length === 1) {
     return (
-      <Badge variant="secondary" className="font-mono text-xs">
+      <Badge className="font-mono text-xs" variant="secondary">
         {sorted[0]}
       </Badge>
     );
@@ -86,10 +86,10 @@ function TokenScopeBadges({ scopes }: { scopes: string[] }) {
     <Tooltip>
       <TooltipTrigger asChild>
         <div className="flex w-fit flex-wrap items-center gap-1">
-          <Badge variant="secondary" className="font-mono text-xs">
+          <Badge className="font-mono text-xs" variant="secondary">
             {first}
           </Badge>
-          <Badge variant="secondary" className="text-xs">
+          <Badge className="text-xs" variant="secondary">
             +{rest.length}
           </Badge>
         </div>
@@ -157,10 +157,10 @@ export default async function TokensPage() {
     <div>
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold tracking-tight">
+          <h2 className="font-semibold text-lg tracking-tight">
             Access Tokens
           </h2>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-muted-foreground text-sm">
             {isAdmin
               ? "Manage personal access tokens for API authentication."
               : "View personal access tokens for API authentication."}
@@ -173,10 +173,10 @@ export default async function TokensPage() {
         {tokens.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-lg border border-dashed bg-background py-12 dark:bg-muted">
             <KeyRound className="size-10 text-muted-foreground/50" />
-            <p className="mt-3 text-sm font-medium text-muted-foreground">
+            <p className="mt-3 font-medium text-muted-foreground text-sm">
               No access tokens yet
             </p>
-            <p className="mt-1 text-sm text-muted-foreground/70">
+            <p className="mt-1 text-muted-foreground/70 text-sm">
               {isAdmin
                 ? "Create a token to authenticate with the API."
                 : "Ask an admin to create a token for you."}
@@ -212,8 +212,8 @@ export default async function TokensPage() {
                             <Avatar size="sm">
                               {token.user.image ? (
                                 <AvatarImage
-                                  src={token.user.image}
                                   alt={displayName}
+                                  src={token.user.image}
                                 />
                               ) : null}
                               <AvatarFallback
@@ -228,8 +228,8 @@ export default async function TokensPage() {
                       </TableCell>
                       <TableCell>
                         <Badge
-                          variant="secondary"
                           className="font-mono text-xs"
+                          variant="secondary"
                         >
                           {token.tokenPrefix}…
                         </Badge>

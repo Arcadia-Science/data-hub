@@ -1,5 +1,18 @@
 "use client";
 
+import {
+  ArrowDownToLine,
+  ArrowUpToLine,
+  Loader2,
+  MoreHorizontal,
+  RotateCw,
+  Trash2,
+} from "lucide-react";
+import { useRouter } from "next/navigation";
+import { type MouseEvent, useState, useTransition } from "react";
+import { toast } from "sonner";
+import { DeleteRunsDialog } from "@/components/runs/delete-runs-dialog";
+import { ReprocessRunsDialog } from "@/components/runs/reprocess-runs-dialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -16,20 +29,6 @@ import {
 import { useArchiveDownload } from "@/hooks/use-archive-download";
 import { computeRunCaps } from "@/lib/runs/row-actions";
 import { cn } from "@/lib/utils";
-import {
-  ArrowDownToLine,
-  ArrowUpToLine,
-  Loader2,
-  MoreHorizontal,
-  RotateCw,
-  Trash2,
-} from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useState, useTransition, type MouseEvent } from "react";
-import { toast } from "sonner";
-
-import { DeleteRunsDialog } from "@/components/runs/delete-runs-dialog";
-import { ReprocessRunsDialog } from "@/components/runs/reprocess-runs-dialog";
 import type { RunRow } from ".";
 
 // Actions cell shown inline at the end of every runs-table row. The strip is
@@ -54,7 +53,9 @@ export function RunRowActions({ row }: { row: RunRow }) {
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   // Deleted rows get no actions — the row is read-only.
-  if (row.deleted_at !== null) return null;
+  if (row.deleted_at !== null) {
+    return null;
+  }
 
   const baseUrl = `/api/v1/instruments/${row.instrument_id}/runs/${encodeURIComponent(
     row.run_id
@@ -109,13 +110,13 @@ export function RunRowActions({ row }: { row: RunRow }) {
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              type="button"
-              variant="outline"
-              size="icon"
+              aria-label="Upload files from this run"
               className="size-7"
               disabled={isPending}
               onClick={handleUpload}
-              aria-label="Upload files from this run"
+              size="icon"
+              type="button"
+              variant="outline"
             >
               {isPending ? (
                 <Loader2 className="size-3.5 animate-spin" />
@@ -132,12 +133,12 @@ export function RunRowActions({ row }: { row: RunRow }) {
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              type="button"
-              variant="outline"
-              size="icon"
+              aria-label="Download run archive"
               className="size-7"
               onClick={handleDownload}
-              aria-label="Download run archive"
+              size="icon"
+              type="button"
+              variant="outline"
             >
               <ArrowDownToLine className="size-3.5" />
             </Button>
@@ -146,15 +147,15 @@ export function RunRowActions({ row }: { row: RunRow }) {
         </Tooltip>
       )}
 
-      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+      <DropdownMenu onOpenChange={setMenuOpen} open={menuOpen}>
         <DropdownMenuTrigger asChild>
           <Button
+            aria-label="More actions"
+            className="size-7"
+            onClick={swallow}
+            size="icon"
             type="button"
             variant="outline"
-            size="icon"
-            className="size-7"
-            aria-label="More actions"
-            onClick={swallow}
           >
             <MoreHorizontal className="size-3.5" />
           </Button>
@@ -175,12 +176,12 @@ export function RunRowActions({ row }: { row: RunRow }) {
           {caps.reprocess && caps.delete && <DropdownMenuSeparator />}
           {caps.delete && (
             <DropdownMenuItem
-              variant="destructive"
               onSelect={(e) => {
                 e.preventDefault();
                 setMenuOpen(false);
                 setDeleteOpen(true);
               }}
+              variant="destructive"
             >
               <Trash2 className="size-3.5" />
               Delete run
@@ -190,8 +191,8 @@ export function RunRowActions({ row }: { row: RunRow }) {
       </DropdownMenu>
 
       <ReprocessRunsDialog
-        open={reprocessOpen}
         onOpenChange={setReprocessOpen}
+        open={reprocessOpen}
         runs={[
           {
             instrumentId: row.instrument_id,
@@ -202,8 +203,8 @@ export function RunRowActions({ row }: { row: RunRow }) {
         ]}
       />
       <DeleteRunsDialog
-        open={deleteOpen}
         onOpenChange={setDeleteOpen}
+        open={deleteOpen}
         runs={[
           {
             instrumentId: row.instrument_id,

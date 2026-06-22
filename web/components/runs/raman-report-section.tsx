@@ -14,10 +14,10 @@ export function RamanReportSection({
   if (spectra.length === 0) {
     return (
       <div className="flex flex-col gap-2">
-        <h2 className="text-sm font-semibold">Report Data</h2>
+        <h2 className="font-semibold text-sm">Report Data</h2>
         <Card size="sm">
           <CardContent>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-muted-foreground text-sm">
               No report data has been generated for this run.
             </p>
           </CardContent>
@@ -28,9 +28,9 @@ export function RamanReportSection({
 
   return (
     <div className="flex flex-col gap-2">
-      <h2 className="text-sm font-semibold">
+      <h2 className="font-semibold text-sm">
         Report Data{" "}
-        <span className="ml-1 font-mono text-xs font-normal text-muted-foreground">
+        <span className="ml-1 font-mono font-normal text-muted-foreground text-xs">
           {spectra.length} {spectra.length === 1 ? "spectrum" : "spectra"}
         </span>
       </h2>

@@ -7,8 +7,8 @@ import type {
   RawWellRow,
   RunDetail as RunDetailType,
   RunFile,
-  RunFilesPage,
   RunFileStats,
+  RunFilesPage,
 } from "@/lib/api/instrument-runs";
 
 export const RunDetail = {

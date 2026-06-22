@@ -1,11 +1,11 @@
+import { eq } from "drizzle-orm";
+import { ShieldOff } from "lucide-react";
+import type { Metadata } from "next/types";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import { WatcherReleaseForm } from "@/components/watcher-release/watcher-release-form";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users, watcherReleaseConfig } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
-import { ShieldOff } from "lucide-react";
-import type { Metadata } from "next/types";
 
 export const metadata: Metadata = {
   title: "Watchers",
@@ -31,10 +31,10 @@ export default async function WatchersSettingsPage() {
     return (
       <div className="flex flex-col items-center justify-center rounded-lg border border-dashed bg-background py-16 dark:bg-muted">
         <ShieldOff className="size-10 text-muted-foreground/50" />
-        <p className="mt-3 text-sm font-medium text-muted-foreground">
+        <p className="mt-3 font-medium text-muted-foreground text-sm">
           Admins only
         </p>
-        <p className="mt-1 max-w-sm text-center text-sm text-muted-foreground/70">
+        <p className="mt-1 max-w-sm text-center text-muted-foreground/70 text-sm">
           You need workspace admin access to change watcher settings. Ask an
           existing admin if you need to be promoted.
         </p>
@@ -70,10 +70,10 @@ export default async function WatchersSettingsPage() {
     <div>
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold tracking-tight">
+          <h2 className="font-semibold text-lg tracking-tight">
             Watcher Version
           </h2>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-muted-foreground text-sm">
             Configure the release advertised by{" "}
             <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs dark:bg-background/40">
               GET /api/v1/watchers/:id/update-check

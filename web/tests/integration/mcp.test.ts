@@ -1,3 +1,4 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import * as schema from "@/lib/db/schema";
 import {
   api,
@@ -6,9 +7,8 @@ import {
   resetDb,
   seedTestUser,
 } from "@/tests/integration/helpers";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-function jsonRpc(method: string, params: unknown = {}, id: number = 1) {
+function jsonRpc(method: string, params: unknown = {}, id = 1) {
   return {
     jsonrpc: "2.0" as const,
     id,
@@ -28,7 +28,9 @@ async function parseSseResponse(res: Response) {
     .filter(Boolean)
     .map((block) => {
       const dataLine = block.split("\n").find((l) => l.startsWith("data: "));
-      if (!dataLine) return null;
+      if (!dataLine) {
+        return null;
+      }
       return JSON.parse(dataLine.slice("data: ".length));
     })
     .filter(Boolean);

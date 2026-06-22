@@ -1,3 +1,6 @@
+import Image from "next/image";
+import Link from "next/link";
+import type { Session } from "next-auth";
 import { AppSidebarContent } from "@/components/app-sidebar/app-sidebar-content";
 import { UserMenuFooter } from "@/components/app-sidebar/user-menu-footer";
 import {
@@ -10,9 +13,6 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar";
 import type { SidebarInstrument, SidebarWatcher } from "@/lib/api/sidebar";
-import type { Session } from "next-auth";
-import Image from "next/image";
-import Link from "next/link";
 
 type AppSidebarProps = {
   session: Session;
@@ -34,19 +34,19 @@ export function AppSidebar({
           <SidebarMenuItem>
             <SidebarMenuButton
               asChild
-              tooltip="Data Hub"
               className="py-1 group-data-[collapsible=icon]:justify-center"
+              tooltip="Data Hub"
             >
               <Link href="/">
                 <Image
-                  src="/images/data-hub-logo.svg"
                   alt="Data Hub"
-                  width={26}
+                  className="size-5.5 shrink-0"
                   height={26}
                   priority
-                  className="size-5.5 shrink-0"
+                  src="/images/data-hub-logo.svg"
+                  width={26}
                 />
-                <span className="text-base font-medium">Data Hub</span>
+                <span className="font-medium text-base">Data Hub</span>
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
@@ -54,11 +54,11 @@ export function AppSidebar({
       </SidebarHeader>
       <AppSidebarContent
         instruments={instruments}
-        watchers={watchers}
         isAdmin={session.user.isAdmin === true}
+        watchers={watchers}
       />
       <SidebarFooter>
-        <UserMenuFooter user={session.user} signOutAction={signOutAction} />
+        <UserMenuFooter signOutAction={signOutAction} user={session.user} />
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>

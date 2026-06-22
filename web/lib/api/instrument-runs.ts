@@ -1,5 +1,7 @@
 import { parse } from "csv-parse/sync";
-
+import type { AnyColumn, SQL } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
+import { cache } from "react";
 import { formatHinaSizes } from "@/components/runs/run-metadata-badges";
 import { db } from "@/lib/db";
 import type { InstrumentType } from "@/lib/db/schema";
@@ -11,9 +13,6 @@ import {
   users,
 } from "@/lib/db/schema";
 import { getS3ObjectStream } from "@/lib/s3";
-import type { AnyColumn, SQL } from "drizzle-orm";
-import { and, asc, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
-import { cache } from "react";
 
 // ---------------------------------------------------------------------------
 // Run attributions: users who claimed they ran a given run. Wire shape is
@@ -30,8 +29,12 @@ export type RunAttribution = {
 
 function toInitials(displayName: string): string {
   const parts = displayName.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  if (parts.length === 0) {
+    return "?";
+  }
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
@@ -39,7 +42,9 @@ export async function getAttributionsByRunIds(
   runIds: string[]
 ): Promise<Map<string, RunAttribution[]>> {
   const byRun = new Map<string, RunAttribution[]>();
-  if (runIds.length === 0) return byRun;
+  if (runIds.length === 0) {
+    return byRun;
+  }
 
   const rows = await db
     .select({
@@ -111,7 +116,9 @@ export const lookupRunByNaturalKey = cache(async function lookupRunByNaturalKey(
     )
     .limit(1);
 
-  if (!row) return null;
+  if (!row) {
+    return null;
+  }
 
   const byRun = await getAttributionsByRunIds([row.id]);
   return { ...row, attributions: byRun.get(row.id) ?? [] };
@@ -130,7 +137,9 @@ export const lookupRunByNaturalKey = cache(async function lookupRunByNaturalKey(
 export function parseAcquiredAt(body: Record<string, unknown>): Date | null {
   if (typeof body.acquired_at === "string") {
     const explicit = new Date(body.acquired_at);
-    if (!Number.isNaN(explicit.getTime())) return explicit;
+    if (!Number.isNaN(explicit.getTime())) {
+      return explicit;
+    }
   }
 
   const detected = Array.isArray(body.detected_files)
@@ -147,7 +156,9 @@ export function parseAcquiredAt(body: Record<string, unknown>): Date | null {
       const t = new Date(
         (f as { file_created_at: string }).file_created_at
       ).getTime();
-      if (!Number.isNaN(t) && (floor === null || t < floor)) floor = t;
+      if (!Number.isNaN(t) && (floor === null || t < floor)) {
+        floor = t;
+      }
     }
   }
   return floor === null ? null : new Date(floor);
@@ -385,9 +396,13 @@ export async function buildRunListQuery(filters: RunListFilters) {
   >`coalesce(array_agg(${files.errorMessage}) filter (where ${files.status} = 'failed' and ${files.errorMessage} is not null and ${files.deletedAt} is null), '{}')`.mapWith(
     {
       mapFromDriverValue: (value: unknown) => {
-        if (Array.isArray(value)) return value as string[];
+        if (Array.isArray(value)) {
+          return value as string[];
+        }
         if (typeof value === "string") {
-          if (value === "{}") return [];
+          if (value === "{}") {
+            return [];
+          }
           return value
             .replace(/^\{|}$/g, "")
             .split(",")
@@ -805,7 +820,9 @@ export async function getProcessedCsvData(
       f.s3Key
   );
 
-  if (csvFiles.length === 0) return [];
+  if (csvFiles.length === 0) {
+    return [];
+  }
 
   const results = await Promise.all(
     csvFiles.map(async (file) => {

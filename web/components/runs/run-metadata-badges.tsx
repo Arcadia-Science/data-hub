@@ -1,23 +1,3 @@
-import { Badge } from "@/components/ui/badge";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import {
-  CAPTURE_TYPE_COLORS,
-  CHANNEL_COLOR_STYLES,
-  COLOR_MODE_COLORS,
-  DPI_COLORS,
-  IMAGING_MODE_COLORS,
-  MEASUREMENT_MODE_COLORS,
-  MEASUREMENT_TYPE_COLORS,
-  buildWavelengthColorMap,
-  formatColorMode,
-  getDyeChannelColor,
-} from "@/lib/instrument-colors";
-import { cn } from "@/lib/utils";
-
 import {
   getMetadataArray,
   getMetadataField,
@@ -25,6 +5,25 @@ import {
   getMetadataRecord,
   sortWavelengths,
 } from "@/components/runs/metadata-badges";
+import { Badge } from "@/components/ui/badge";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  buildWavelengthColorMap,
+  CAPTURE_TYPE_COLORS,
+  CHANNEL_COLOR_STYLES,
+  COLOR_MODE_COLORS,
+  DPI_COLORS,
+  formatColorMode,
+  getDyeChannelColor,
+  IMAGING_MODE_COLORS,
+  MEASUREMENT_MODE_COLORS,
+  MEASUREMENT_TYPE_COLORS,
+} from "@/lib/instrument-colors";
+import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
 // Shared row component: label on the left, badge(s) on the right
@@ -39,7 +38,7 @@ function MetadataRow({
 }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="shrink-0 text-xs text-muted-foreground">{label}</span>
+      <span className="shrink-0 text-muted-foreground text-xs">{label}</span>
       {children}
     </div>
   );
@@ -53,7 +52,7 @@ function ColorBadge({
   colorClass?: string;
 }) {
   return (
-    <Badge variant="outline" className={cn("font-mono", colorClass)}>
+    <Badge className={cn("font-mono", colorClass)} variant="outline">
       {value}
     </Badge>
   );
@@ -66,8 +65,8 @@ function ColorBadge({
 export function hasPlateReaderMetadata(metadata: Record<string, unknown>) {
   return Boolean(
     getMetadataArray(metadata, "wavelengths").length ||
-    getMetadataField(metadata, "measurement_mode") ||
-    getMetadataField(metadata, "measurement_type")
+      getMetadataField(metadata, "measurement_mode") ||
+      getMetadataField(metadata, "measurement_type")
   );
 }
 
@@ -82,7 +81,9 @@ export function PlateReaderRunBadges({
   const mode = getMetadataField(metadata, "measurement_mode");
   const type = getMetadataField(metadata, "measurement_type");
 
-  if (!wavelengths.length && !mode && !type) return null;
+  if (!(wavelengths.length || mode || type)) {
+    return null;
+  }
 
   const wavelengthColors = buildWavelengthColorMap(wavelengths);
 
@@ -90,12 +91,12 @@ export function PlateReaderRunBadges({
     <>
       {type && (
         <MetadataRow label="Measurement Type">
-          <ColorBadge value={type} colorClass={MEASUREMENT_TYPE_COLORS[type]} />
+          <ColorBadge colorClass={MEASUREMENT_TYPE_COLORS[type]} value={type} />
         </MetadataRow>
       )}
       {mode && (
         <MetadataRow label="Measurement Mode">
-          <ColorBadge value={mode} colorClass={MEASUREMENT_MODE_COLORS[mode]} />
+          <ColorBadge colorClass={MEASUREMENT_MODE_COLORS[mode]} value={mode} />
         </MetadataRow>
       )}
       {wavelengths.length > 0 && (
@@ -103,7 +104,7 @@ export function PlateReaderRunBadges({
           label={wavelengths.length === 1 ? "Wavelength" : "Wavelengths"}
         >
           {wavelengths.map((w) => (
-            <ColorBadge key={w} value={w} colorClass={wavelengthColors[w]} />
+            <ColorBadge colorClass={wavelengthColors[w]} key={w} value={w} />
           ))}
         </MetadataRow>
       )}
@@ -118,9 +119,9 @@ export function PlateReaderRunBadges({
 export function hasGelDocMetadata(metadata: Record<string, unknown>) {
   return Boolean(
     getMetadataField(metadata, "capture_type") ||
-    getMetadataField(metadata, "imaging_mode") ||
-    getMetadataArray(metadata, "wavelengths").length ||
-    getMetadataArray(metadata, "colors").length
+      getMetadataField(metadata, "imaging_mode") ||
+      getMetadataArray(metadata, "wavelengths").length ||
+      getMetadataArray(metadata, "colors").length
   );
 }
 
@@ -136,8 +137,9 @@ export function GelDocRunBadges({
   );
   const colors = getMetadataArray(metadata, "colors");
 
-  if (!captureType && !imagingMode && !wavelengths.length && !colors.length)
+  if (!(captureType || imagingMode || wavelengths.length || colors.length)) {
     return null;
+  }
 
   const wavelengthColors = buildWavelengthColorMap(wavelengths);
 
@@ -146,23 +148,23 @@ export function GelDocRunBadges({
       {captureType && (
         <MetadataRow label="Capture Type">
           <ColorBadge
-            value={captureType}
             colorClass={CAPTURE_TYPE_COLORS[captureType]}
+            value={captureType}
           />
         </MetadataRow>
       )}
       {imagingMode && (
         <MetadataRow label="Imaging Mode">
           <ColorBadge
-            value={imagingMode}
             colorClass={IMAGING_MODE_COLORS[imagingMode]}
+            value={imagingMode}
           />
         </MetadataRow>
       )}
       {wavelengths.length > 0 && (
         <MetadataRow label="Wavelengths">
           {wavelengths.map((w) => (
-            <ColorBadge key={w} value={w} colorClass={wavelengthColors[w]} />
+            <ColorBadge colorClass={wavelengthColors[w]} key={w} value={w} />
           ))}
         </MetadataRow>
       )}
@@ -170,9 +172,9 @@ export function GelDocRunBadges({
         <MetadataRow label="Colors">
           {colors.map((c) => (
             <ColorBadge
+              colorClass={CHANNEL_COLOR_STYLES[c]}
               key={c}
               value={c}
-              colorClass={CHANNEL_COLOR_STYLES[c]}
             />
           ))}
         </MetadataRow>
@@ -196,12 +198,14 @@ export function QpcrRunBadges({
 }) {
   const dyeChannels = getMetadataArray(metadata, "dye_channels");
 
-  if (dyeChannels.length === 0) return null;
+  if (dyeChannels.length === 0) {
+    return null;
+  }
 
   return (
     <MetadataRow label="Dye Channels">
       {dyeChannels.map((ch) => (
-        <ColorBadge key={ch} value={ch} colorClass={getDyeChannelColor(ch)} />
+        <ColorBadge colorClass={getDyeChannelColor(ch)} key={ch} value={ch} />
       ))}
     </MetadataRow>
   );
@@ -222,7 +226,9 @@ export function TapeStationRunBadges({
 }) {
   const tapeType = getMetadataField(metadata, "Tape Type");
 
-  if (!tapeType) return null;
+  if (!tapeType) {
+    return null;
+  }
 
   return (
     <MetadataRow label="Tape Type">
@@ -238,7 +244,7 @@ export function TapeStationRunBadges({
 export function hasEpsonScannerMetadata(metadata: Record<string, unknown>) {
   return Boolean(
     getMetadataField(metadata, "dpi") ||
-    getMetadataField(metadata, "color_mode")
+      getMetadataField(metadata, "color_mode")
   );
 }
 
@@ -250,20 +256,22 @@ export function EpsonScannerRunBadges({
   const dpi = getMetadataField(metadata, "dpi");
   const colorMode = getMetadataField(metadata, "color_mode");
 
-  if (!dpi && !colorMode) return null;
+  if (!(dpi || colorMode)) {
+    return null;
+  }
 
   return (
     <>
       {dpi && (
         <MetadataRow label="DPI">
-          <ColorBadge value={dpi} colorClass={DPI_COLORS[dpi]} />
+          <ColorBadge colorClass={DPI_COLORS[dpi]} value={dpi} />
         </MetadataRow>
       )}
       {colorMode && (
         <MetadataRow label="Color Mode">
           <ColorBadge
-            value={formatColorMode(colorMode)}
             colorClass={COLOR_MODE_COLORS[colorMode]}
+            value={formatColorMode(colorMode)}
           />
         </MetadataRow>
       )}
@@ -307,7 +315,9 @@ function parseColorToRgb(
       b: Number.parseInt(rgbMatch[3], 10),
     };
   }
-  if (trimmed.toLowerCase() === "white") return { r: 255, g: 255, b: 255 };
+  if (trimmed.toLowerCase() === "white") {
+    return { r: 255, g: 255, b: 255 };
+  }
   return null;
 }
 
@@ -322,7 +332,7 @@ function relativeLuminance({
 }): number {
   const linear = (v: number) => {
     const s = v / 255;
-    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+    return s <= 0.039_28 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
   };
   return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
 }
@@ -343,7 +353,9 @@ export type ChannelBadgeStyle = {
 export function getHinaChannelBadgeStyle(
   color: string | null
 ): ChannelBadgeStyle {
-  if (!color) return { badge: undefined, dot: {} };
+  if (!color) {
+    return { badge: undefined, dot: {} };
+  }
   const rgb = parseColorToRgb(color);
   const isNearWhite =
     rgb !== null && relativeLuminance(rgb) > NEAR_WHITE_LUMINANCE;
@@ -369,7 +381,7 @@ export function extractHinaChannels(metadata: unknown): HinaChannel[] {
   const raw = getMetadataObjectArray(metadata, "channels");
   return raw
     .map((c) => {
-      const name = c.name != null ? String(c.name) : "";
+      const name = c.name == null ? "" : String(c.name);
       const color = typeof c.color === "string" ? c.color : null;
       return { name, color };
     })
@@ -380,7 +392,9 @@ export function formatHinaSizes(sizes: Record<string, unknown>): string {
   const entries = Object.entries(sizes).filter(
     ([, v]) => typeof v === "number" || typeof v === "string"
   );
-  if (entries.length === 0) return "";
+  if (entries.length === 0) {
+    return "";
+  }
 
   const known = SIZE_DIMENSION_ORDER.filter((k) =>
     entries.some(([ek]) => ek === k)
@@ -399,24 +413,30 @@ export function formatHinaSizes(sizes: Record<string, unknown>): string {
   // Separate spatial dimensions (Y x X) into a compact "HxW" group so the
   // badge reads like "C=4 · 256x256" rather than "C=4 · Y=256 · X=256".
   const spatial: string[] = [];
-  if (sizeMap.Y != null) spatial.push(String(sizeMap.Y));
-  if (sizeMap.X != null) spatial.push(String(sizeMap.X));
+  if (sizeMap.Y != null) {
+    spatial.push(String(sizeMap.Y));
+  }
+  if (sizeMap.X != null) {
+    spatial.push(String(sizeMap.X));
+  }
 
   const scalar = orderedKeys
     .filter((k) => k !== "X" && k !== "Y")
     .map((k) => `${k}=${sizeMap[k]}`);
 
   const parts = [...scalar];
-  if (spatial.length > 0) parts.push(spatial.join("\u00d7"));
+  if (spatial.length > 0) {
+    parts.push(spatial.join("\u00d7"));
+  }
   return parts.join(" \u00b7 ");
 }
 
 export function hasHinaMetadata(metadata: Record<string, unknown>) {
   return Boolean(
     extractHinaChannels(metadata).length ||
-    getMetadataArray(metadata, "dimensions").length ||
-    (getMetadataRecord(metadata, "sizes") &&
-      Object.keys(getMetadataRecord(metadata, "sizes") ?? {}).length > 0)
+      getMetadataArray(metadata, "dimensions").length ||
+      (getMetadataRecord(metadata, "sizes") &&
+        Object.keys(getMetadataRecord(metadata, "sizes") ?? {}).length > 0)
   );
 }
 
@@ -426,7 +446,7 @@ export function hasHinaMetadata(metadata: Record<string, unknown>) {
 function ChannelBadge({ name, color }: HinaChannel) {
   const { badge, dot } = getHinaChannelBadgeStyle(color);
   return (
-    <Badge variant="outline" className="font-mono" style={badge}>
+    <Badge className="font-mono" style={badge} variant="outline">
       {color && (
         <span
           aria-hidden="true"
@@ -446,7 +466,7 @@ function ChannelBadge({ name, color }: HinaChannel) {
 // the channel hex so the color cue is preserved.
 function TooltipChannelBadge({ name, color }: HinaChannel) {
   return (
-    <Badge variant="outline" className="border-current font-mono text-current">
+    <Badge className="border-current font-mono text-current" variant="outline">
       {color && (
         <span
           aria-hidden="true"
@@ -466,14 +486,15 @@ export function HinaChannelBadges({
   channels: HinaChannel[];
   maxVisible?: number;
 }) {
-  if (channels.length === 0)
+  if (channels.length === 0) {
     return <span className="text-foreground">&mdash;</span>;
+  }
 
   if (maxVisible === undefined || channels.length <= maxVisible) {
     return (
       <div className="flex flex-wrap gap-1">
         {channels.map((c) => (
-          <ChannelBadge key={c.name} name={c.name} color={c.color} />
+          <ChannelBadge color={c.color} key={c.name} name={c.name} />
         ))}
       </div>
     );
@@ -487,12 +508,12 @@ export function HinaChannelBadges({
       <TooltipTrigger asChild>
         <div className="flex flex-wrap gap-1">
           {visible.map((c) => (
-            <ChannelBadge key={c.name} name={c.name} color={c.color} />
+            <ChannelBadge color={c.color} key={c.name} name={c.name} />
           ))}
           <Badge
-            variant="outline"
-            className="font-mono text-muted-foreground"
             aria-label={`${hiddenCount} more`}
+            className="font-mono text-muted-foreground"
+            variant="outline"
           >
             +{hiddenCount}
           </Badge>
@@ -501,7 +522,7 @@ export function HinaChannelBadges({
       <TooltipContent className="max-w-none">
         <div className="flex flex-nowrap gap-1">
           {channels.map((c) => (
-            <TooltipChannelBadge key={c.name} name={c.name} color={c.color} />
+            <TooltipChannelBadge color={c.color} key={c.name} name={c.name} />
           ))}
         </div>
       </TooltipContent>
@@ -519,15 +540,16 @@ export function HinaRunBadges({
   const sizes = getMetadataRecord(metadata, "sizes");
   const sizesLabel = sizes ? formatHinaSizes(sizes) : "";
 
-  if (channels.length === 0 && dimensions.length === 0 && !sizesLabel)
+  if (channels.length === 0 && dimensions.length === 0 && !sizesLabel) {
     return null;
+  }
 
   return (
     <>
       {channels.length > 0 && (
         <MetadataRow label={channels.length === 1 ? "Channel" : "Channels"}>
           {channels.map((c) => (
-            <ChannelBadge key={c.name} name={c.name} color={c.color} />
+            <ChannelBadge color={c.color} key={c.name} name={c.name} />
           ))}
         </MetadataRow>
       )}
@@ -552,12 +574,16 @@ export function HinaRunBadges({
 // ---------------------------------------------------------------------------
 
 function formatBadgeValue(value: unknown): string[] | null {
-  if (value === null || value === undefined) return null;
+  if (value === null || value === undefined) {
+    return null;
+  }
   if (Array.isArray(value)) {
     const strings = value.map(String).filter(Boolean);
     return strings.length > 0 ? strings : null;
   }
-  if (typeof value === "object") return [JSON.stringify(value)];
+  if (typeof value === "object") {
+    return [JSON.stringify(value)];
+  }
   const s = String(value);
   return s ? [s] : null;
 }
@@ -583,7 +609,9 @@ export function DefaultRunBadges({
     }))
     .filter((r): r is typeof r & { values: string[] } => r.values !== null);
 
-  if (rows.length === 0) return null;
+  if (rows.length === 0) {
+    return null;
+  }
 
   return (
     <>

@@ -1,10 +1,12 @@
+import { and, eq, inArray, isNull } from "drizzle-orm";
+import { after } from "next/server";
 import {
   fingerprintFiles,
   getArchiveDownloadFilename,
   getArchiveKey,
+  type InvokeBuildArchiveInput,
   invokeBuildArchive,
   isArchiveBuilderConfigured,
-  type InvokeBuildArchiveInput,
 } from "@/lib/api/archive-builder";
 import { expireStaleArchiveJobs } from "@/lib/api/archive-jobs";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
@@ -16,8 +18,6 @@ import {
   headS3Object,
   PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS,
 } from "@/lib/s3";
-import { and, eq, inArray, isNull } from "drizzle-orm";
-import { after } from "next/server";
 
 // Floor for the build-time retry hint handed to the caller (LLM, polling UI).
 // Even a trivial archive pays Lambda cold-start + invoke + presign overhead,

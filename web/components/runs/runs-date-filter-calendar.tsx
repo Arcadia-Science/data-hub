@@ -1,10 +1,10 @@
 "use client";
 
+import { useState } from "react";
+import type { DateRange as DayPickerRange } from "react-day-picker";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Separator } from "@/components/ui/separator";
-import { useState } from "react";
-import type { DateRange as DayPickerRange } from "react-day-picker";
 import type { DateRange } from "./runs-date-filter";
 
 function toDraft(value: DateRange): DayPickerRange {
@@ -32,36 +32,38 @@ export function CalendarRangeView({
   }
 
   function handleApply() {
-    if (!draft.from || !draft.to) return;
+    if (!(draft.from && draft.to)) {
+      return;
+    }
     onApply({ from: draft.from, to: draft.to });
   }
 
   return (
     <div className="flex flex-col">
       <Calendar
+        defaultMonth={draft.from ?? new Date()}
         mode="range"
         numberOfMonths={1}
-        defaultMonth={draft.from ?? new Date()}
-        selected={draft}
         onSelect={handleSelect}
+        selected={draft}
       />
       <Separator />
       <div className="flex items-center justify-between gap-2 p-2">
         <Button
-          type="button"
-          variant="ghost"
-          size="sm"
           className="h-8 text-xs"
           onClick={onCancel}
+          size="sm"
+          type="button"
+          variant="ghost"
         >
           Back
         </Button>
         <Button
-          type="button"
-          size="sm"
           className="h-8 text-xs"
           disabled={!canApply}
           onClick={handleApply}
+          size="sm"
+          type="button"
         >
           Apply
         </Button>

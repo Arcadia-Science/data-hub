@@ -1,5 +1,8 @@
 "use client";
 
+import { ChevronRight, Cpu, Home, type LucideIcon, Radio } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import {
   Collapsible,
   CollapsibleContent,
@@ -17,9 +20,6 @@ import {
   SidebarMenuSubItem,
 } from "@/components/ui/sidebar";
 import type { SidebarInstrument, SidebarWatcher } from "@/lib/api/sidebar";
-import { ChevronRight, Cpu, Home, Radio, type LucideIcon } from "lucide-react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
 
 type MainNavProps = {
   instruments: SidebarInstrument[];
@@ -49,23 +49,22 @@ export function MainNav({ instruments, watchers }: MainNavProps) {
             </SidebarMenuItem>
 
             <CollapsibleNavSection
-              icon={Cpu}
-              label="Instruments"
               basePath="/instruments"
-              viewAllHref="/instruments"
+              currentPath={pathname}
+              icon={Cpu}
               items={instruments.map((instrument) => ({
                 key: instrument.id,
                 href: `/instruments/${instrument.id}`,
                 label: instrument.displayName,
               }))}
-              currentPath={pathname}
+              label="Instruments"
+              viewAllHref="/instruments"
             />
 
             <CollapsibleNavSection
-              icon={Radio}
-              label="Watchers"
               basePath="/watchers"
-              viewAllHref="/watchers"
+              currentPath={pathname}
+              icon={Radio}
               items={watchers.map((watcher) => ({
                 key: watcher.id,
                 href: `/watchers/${watcher.id}`,
@@ -74,7 +73,8 @@ export function MainNav({ instruments, watchers }: MainNavProps) {
                 // row never collapses to an empty label.
                 label: watcher.hostname ?? `${watcher.id.slice(0, 8)}…`,
               }))}
-              currentPath={pathname}
+              label="Watchers"
+              viewAllHref="/watchers"
             />
           </SidebarMenu>
         </SidebarGroupContent>
@@ -110,8 +110,8 @@ function CollapsibleNavSection({
   return (
     <Collapsible
       asChild
-      defaultOpen={isWithinSection}
       className="group/collapsible"
+      defaultOpen={isWithinSection}
     >
       <SidebarMenuItem>
         <CollapsibleTrigger asChild>
@@ -138,8 +138,8 @@ function CollapsibleNavSection({
             <SidebarMenuSubItem>
               <SidebarMenuSubButton
                 asChild
-                isActive={currentPath === viewAllHref}
                 className="text-muted-foreground"
+                isActive={currentPath === viewAllHref}
               >
                 <Link href={viewAllHref}>
                   <span>View all</span>

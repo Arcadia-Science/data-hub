@@ -21,8 +21,8 @@ export function DevSignInForm({
   inputId?: string;
 }) {
   return (
-    <div className="w-full border-t border-border pt-6">
-      <p className="mb-3 text-center text-xs tracking-wider text-muted-foreground uppercase">
+    <div className="w-full border-border border-t pt-6">
+      <p className="mb-3 text-center text-muted-foreground text-xs uppercase tracking-wider">
         Local development
       </p>
       <form
@@ -42,18 +42,18 @@ export function DevSignInForm({
         <div className="flex flex-col gap-1.5">
           <Label htmlFor={inputId}>Email</Label>
           <Input
+            defaultValue="dev@local"
             id={inputId}
             name="email"
-            type="email"
             placeholder="dev@local"
-            defaultValue="dev@local"
             required
+            type="email"
           />
         </div>
         <Button
+          className="w-full cursor-pointer"
           type="submit"
           variant="outline"
-          className="w-full cursor-pointer"
         >
           Sign in (dev)
         </Button>

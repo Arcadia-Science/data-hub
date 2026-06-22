@@ -1,5 +1,8 @@
 "use client";
 
+import { ChevronLeft } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -7,9 +10,6 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { ChevronLeft } from "lucide-react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
 
 type SettingsSection = {
   href: string;
@@ -51,8 +51,8 @@ export function SettingsNav({ isAdmin }: { isAdmin: boolean }) {
             <SidebarMenuItem>
               <SidebarMenuButton
                 asChild
-                tooltip="Exit settings"
                 className="relative justify-center font-medium"
+                tooltip="Exit settings"
               >
                 <Link href={EXIT_SETTINGS_HREF}>
                   <ChevronLeft className="absolute left-2" />

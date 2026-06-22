@@ -1,9 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WatchersTable } from "@/components/watchers/watchers-table";
 import type { WatcherListItem } from "@/lib/api/watchers";
-import { useState } from "react";
 
 type Tab = "active" | "deregistered";
 
@@ -20,17 +20,17 @@ export function WatchersView({
   const [tab, setTab] = useState<Tab>("active");
 
   return (
-    <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
+    <Tabs onValueChange={(v) => setTab(v as Tab)} value={tab}>
       <TabsList variant="line">
         <TabsTrigger value="active">Active ({activeData.length})</TabsTrigger>
         <TabsTrigger value="deregistered">
           Deregistered ({deregisteredData.length})
         </TabsTrigger>
       </TabsList>
-      <TabsContent value="active" className="mt-2">
+      <TabsContent className="mt-2" value="active">
         <WatchersTable data={activeData} />
       </TabsContent>
-      <TabsContent value="deregistered" className="mt-2">
+      <TabsContent className="mt-2" value="deregistered">
         <WatchersTable data={deregisteredData} isDeregisteredView />
       </TabsContent>
     </Tabs>

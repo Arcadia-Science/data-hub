@@ -12,17 +12,16 @@ import remarkGfm from "remark-gfm";
 // react-markdown bundle (~30 KB) only ships when there's a comment to render.
 export function CommentMarkdown({ body }: { body: string }) {
   return (
-    <div className="text-sm leading-relaxed break-words text-foreground">
+    <div className="break-words text-foreground text-sm leading-relaxed">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
         components={{
           p: (props) => <p className="mb-2 last:mb-0" {...props} />,
           a: (props) => (
             <a
               {...props}
-              target="_blank"
-              rel="noopener noreferrer"
               className="text-primary underline underline-offset-2 hover:no-underline"
+              rel="noopener noreferrer"
+              target="_blank"
             />
           ),
           ul: (props) => (
@@ -61,18 +60,18 @@ export function CommentMarkdown({ body }: { body: string }) {
           ),
           blockquote: (props) => (
             <blockquote
-              className="mb-2 border-l-2 border-border pl-3 text-muted-foreground italic last:mb-0"
+              className="mb-2 border-border border-l-2 pl-3 text-muted-foreground italic last:mb-0"
               {...props}
             />
           ),
           h1: (props) => (
-            <h1 className="mb-2 text-lg font-semibold" {...props} />
+            <h1 className="mb-2 font-semibold text-lg" {...props} />
           ),
           h2: (props) => (
-            <h2 className="mb-2 text-base font-semibold" {...props} />
+            <h2 className="mb-2 font-semibold text-base" {...props} />
           ),
           h3: (props) => (
-            <h3 className="mb-1 text-sm font-semibold" {...props} />
+            <h3 className="mb-1 font-semibold text-sm" {...props} />
           ),
           hr: () => <hr className="my-3 border-border" />,
           table: (props) => (
@@ -82,14 +81,15 @@ export function CommentMarkdown({ body }: { body: string }) {
           ),
           th: (props) => (
             <th
-              className="border-b border-border px-2 py-1 text-left font-medium"
+              className="border-border border-b px-2 py-1 text-left font-medium"
               {...props}
             />
           ),
           td: (props) => (
-            <td className="border-b border-border/50 px-2 py-1" {...props} />
+            <td className="border-border/50 border-b px-2 py-1" {...props} />
           ),
         }}
+        remarkPlugins={[remarkGfm]}
       >
         {body}
       </ReactMarkdown>

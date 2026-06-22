@@ -1,3 +1,5 @@
+import { notFound } from "next/navigation";
+import type { Metadata } from "next/types";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import { RunAttributionsSection } from "@/components/runs/run-attributions-section";
 import { RunCommentsSection } from "@/components/runs/run-comments-section";
@@ -15,8 +17,6 @@ import { listCommentsForRun } from "@/lib/api/run-comments";
 import { auth } from "@/lib/auth";
 import { formatDate } from "@/lib/date";
 import { runDetailParamsCache } from "@/lib/search-params";
-import { notFound } from "next/navigation";
-import type { Metadata } from "next/types";
 
 const FILES_PER_PAGE = 10;
 
@@ -28,7 +28,9 @@ type Props = {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { instrumentId, runId } = await params;
   const run = await lookupRunByNaturalKey(instrumentId, runId);
-  if (!run) return { title: "Run Not Found" };
+  if (!run) {
+    return { title: "Run Not Found" };
+  }
 
   const title = `${run.runId} | ${run.instrumentDisplayName}`;
 
@@ -74,7 +76,9 @@ export default async function RunDetailPage({ params, searchParams }: Props) {
   }
 
   const run = await lookupRunByNaturalKey(instrumentId, runId);
-  if (!run) notFound();
+  if (!run) {
+    notFound();
+  }
 
   const [filesPage, fileStats, reportFiles, instrument, comments] =
     await Promise.all([
@@ -100,26 +104,26 @@ export default async function RunDetailPage({ params, searchParams }: Props) {
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
       <WatcherStatusProvider isWatcherOnline={isWatcherOnline}>
         <RunDetailVariant
-          run={run}
-          files={filesPage.data}
-          filesPagination={filesPage.pagination}
-          fileStats={fileStats}
-          reportFiles={reportFiles}
-          wellData={wellData}
-          instrumentId={instrumentId}
-          runId={runId}
           attributionsSlot={
             <RunAttributionsSection
+              attributions={run.attributions}
               instrumentId={run.instrumentId}
               runId={run.runId}
-              attributions={run.attributions}
             />
           }
+          fileStats={fileStats}
+          files={filesPage.data}
+          filesPagination={filesPage.pagination}
+          instrumentId={instrumentId}
+          reportFiles={reportFiles}
+          run={run}
+          runId={runId}
+          wellData={wellData}
         />
         <RunCommentsSection
+          comments={comments}
           instrumentId={run.instrumentId}
           runId={run.runId}
-          comments={comments}
         />
       </WatcherStatusProvider>
     </div>

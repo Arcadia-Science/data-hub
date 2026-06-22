@@ -1,5 +1,6 @@
 "use client";
 
+import { Clock, Power, Radio, WifiOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
   Tooltip,
@@ -9,7 +10,6 @@ import {
 import type { WatcherOnlineStatus } from "@/components/watchers/watcher-online-status";
 import type { EffectiveStatus } from "@/lib/api/watchers";
 import { cn, formatRelativeTime } from "@/lib/utils";
-import { Clock, Power, Radio, WifiOff } from "lucide-react";
 
 /**
  * Union of every status this badge can render:
@@ -112,7 +112,7 @@ export function WatcherStatusBadge({
     </Badge>
   );
 
-  if (!TOOLTIP_STATUSES.has(status) || !lastOnlineAt) {
+  if (!(TOOLTIP_STATUSES.has(status) && lastOnlineAt)) {
     return badge;
   }
 

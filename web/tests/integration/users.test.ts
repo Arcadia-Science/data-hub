@@ -1,10 +1,10 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   api,
   closeTestDb,
   resetDb,
   seedTestUser,
 } from "@/tests/integration/helpers";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // The `/api/v1/users` surface is admin-only and session-only — PATs never
 // pass the gate. The full happy-path (admin promoting a teammate) needs a

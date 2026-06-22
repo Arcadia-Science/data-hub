@@ -1,3 +1,5 @@
+import { and, eq, isNull } from "drizzle-orm";
+import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import {
   apiError,
@@ -7,12 +9,12 @@ import {
 } from "@/lib/api/errors";
 import { db } from "@/lib/db";
 import { instruments, watchers } from "@/lib/db/schema";
-import { and, eq, isNull } from "drizzle-orm";
-import type { NextRequest } from "next/server";
 
 export async function POST(request: NextRequest) {
   const authResult = await authorize(request, "watchers:write");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   let body: {
     instrument_id?: string;

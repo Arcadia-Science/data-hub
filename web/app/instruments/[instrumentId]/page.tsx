@@ -1,3 +1,5 @@
+import { notFound } from "next/navigation";
+import type { Metadata } from "next/types";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import { InstrumentHeader } from "@/components/instruments/instrument-header";
 import { InstrumentRunsToolbar } from "@/components/instruments/instrument-runs-toolbar";
@@ -32,8 +34,6 @@ import {
 } from "@/lib/api/notifications";
 import { auth } from "@/lib/auth";
 import { instrumentDetailParamsCache } from "@/lib/search-params";
-import { notFound } from "next/navigation";
-import type { Metadata } from "next/types";
 
 type Props = {
   params: Promise<{ instrumentId: string }>;
@@ -74,8 +74,8 @@ function renderRunsTableVariant(
       return (
         <PlateReaderRunsTable
           data={data}
-          instrumentId={instrumentId}
           filterOptions={filterOptions.options}
+          instrumentId={instrumentId}
           ranByOptions={ranByOptions}
         />
       );
@@ -83,8 +83,8 @@ function renderRunsTableVariant(
       return (
         <GelDocRunsTable
           data={data}
-          instrumentId={instrumentId}
           filterOptions={filterOptions.options}
+          instrumentId={instrumentId}
           ranByOptions={ranByOptions}
         />
       );
@@ -92,8 +92,8 @@ function renderRunsTableVariant(
       return (
         <QpcrRunsTable
           data={data}
-          instrumentId={instrumentId}
           filterOptions={filterOptions.options}
+          instrumentId={instrumentId}
           ranByOptions={ranByOptions}
         />
       );
@@ -101,8 +101,8 @@ function renderRunsTableVariant(
       return (
         <HinaRunsTable
           data={data}
-          instrumentId={instrumentId}
           filterOptions={filterOptions.options}
+          instrumentId={instrumentId}
           ranByOptions={ranByOptions}
         />
       );
@@ -110,8 +110,8 @@ function renderRunsTableVariant(
       return (
         <EpsonScannerRunsTable
           data={data}
-          instrumentId={instrumentId}
           filterOptions={filterOptions.options}
+          instrumentId={instrumentId}
           ranByOptions={ranByOptions}
         />
       );
@@ -178,7 +178,9 @@ export default async function InstrumentDetailPage({
       listInstrumentSubscriptions(session.user.id!),
     ]);
 
-  if (!instrument) notFound();
+  if (!instrument) {
+    notFound();
+  }
 
   // Fetch whichever per-instrument filter options apply, in parallel with
   // the attribution dropdown options.
@@ -242,7 +244,7 @@ export default async function InstrumentDetailPage({
   );
 
   return (
-    <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col gap-6 p-6 2xl:w-7xl">
+    <div className="mx-auto flex w-full min-w-0 max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
       <InstrumentHeader
         instrument={instrument}
         notifications={{
@@ -256,13 +258,13 @@ export default async function InstrumentDetailPage({
           <RunBulkActionBar />
           <TablePendingBoundary>
             <InstrumentRunsTableShell
-              isEmpty={runResult.data.length === 0}
               hasFilters={hasFilters}
+              isEmpty={runResult.data.length === 0}
+              pendingUploadCount={pendingUploadCount}
+              ranByYouCount={ranByYouCount}
               shownCount={runResult.data.length}
               totalCount={runResult.pagination.total}
-              pendingUploadCount={pendingUploadCount}
               unattributedCount={unattributedCount}
-              ranByYouCount={ranByYouCount}
             >
               {renderRunsTableVariant(
                 filterOptions,
@@ -274,8 +276,8 @@ export default async function InstrumentDetailPage({
           </TablePendingBoundary>
           <PaginationNav
             page={runResult.pagination.page}
-            totalPages={runResult.pagination.total_pages}
             pageParam="page"
+            totalPages={runResult.pagination.total_pages}
           />
         </TablePendingProvider>
       </RunSelectionProvider>

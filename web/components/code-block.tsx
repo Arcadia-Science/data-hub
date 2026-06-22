@@ -1,9 +1,9 @@
 import { codeToHtml } from "shiki";
 
 interface CodeBlockProps {
+  className?: string;
   code: string;
   lang: string;
-  className?: string;
 }
 
 export async function CodeBlock({ code, lang, className }: CodeBlockProps) {

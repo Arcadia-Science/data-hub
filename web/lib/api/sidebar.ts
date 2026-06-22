@@ -1,7 +1,7 @@
-import { db } from "@/lib/db";
-import { instrumentRuns, instruments, watchers } from "@/lib/db/schema";
 import { eq, isNull, sql } from "drizzle-orm";
 import { cache } from "react";
+import { db } from "@/lib/db";
+import { instrumentRuns, instruments, watchers } from "@/lib/db/schema";
 
 export type SidebarInstrument = {
   id: string;

@@ -1,5 +1,6 @@
 "use client";
 
+import { Download, Loader2, RotateCw, Upload, X } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,7 +30,6 @@ import {
 import type { RunFile } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
 import { formatBytes } from "@/lib/utils";
-import { Download, Loader2, RotateCw, Upload, X } from "lucide-react";
 import {
   FileSelectAllCheckbox,
   FileSelectCheckbox,
@@ -47,7 +47,9 @@ const DOWNLOADABLE_STATUSES = new Set([
 const REPROCESSABLE_STATUSES = new Set(["completed", "failed"]);
 
 export function statusLabel(file: RunFile): string {
-  if (file.deletedAt !== null) return "Dismissed";
+  if (file.deletedAt !== null) {
+    return "Dismissed";
+  }
   switch (file.status) {
     case "detected":
       return "Pending";
@@ -73,8 +75,8 @@ function StatusBadge({ file }: { file: RunFile }) {
     case "Pending":
       return (
         <Badge
-          variant="outline"
           className="border-amber-500/40 bg-amber-500/10 text-amber-400"
+          variant="outline"
         >
           {label}
         </Badge>
@@ -82,8 +84,8 @@ function StatusBadge({ file }: { file: RunFile }) {
     case "Uploading":
       return (
         <Badge
-          variant="outline"
           className="gap-1 border-sky-500/40 bg-sky-500/10 text-sky-400"
+          variant="outline"
         >
           <Loader2 className="size-3 animate-spin" />
           {label}
@@ -94,8 +96,8 @@ function StatusBadge({ file }: { file: RunFile }) {
     case "Processing":
       return (
         <Badge
-          variant="outline"
           className="gap-1 border-blue-500/40 bg-blue-500/10 text-blue-400"
+          variant="outline"
         >
           <Loader2 className="size-3 animate-spin" />
           {label}
@@ -104,21 +106,23 @@ function StatusBadge({ file }: { file: RunFile }) {
     case "Completed":
       return (
         <Badge
-          variant="outline"
           className="border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
+          variant="outline"
         >
           {label}
         </Badge>
       );
     case "Failed": {
       const badge = <Badge variant="destructive">{label}</Badge>;
-      if (!file.errorMessage) return badge;
+      if (!file.errorMessage) {
+        return badge;
+      }
       return (
         <Tooltip>
           <TooltipTrigger asChild>
             <span tabIndex={0}>{badge}</span>
           </TooltipTrigger>
-          <TooltipContent side="top" className="max-w-sm">
+          <TooltipContent className="max-w-sm" side="top">
             {file.errorMessage}
           </TooltipContent>
         </Tooltip>
@@ -126,7 +130,7 @@ function StatusBadge({ file }: { file: RunFile }) {
     }
     case "Dismissed":
       return (
-        <Badge variant="secondary" className="opacity-60">
+        <Badge className="opacity-60" variant="secondary">
           {label}
         </Badge>
       );
@@ -142,19 +146,19 @@ function StatusBadge({ file }: { file: RunFile }) {
 function FileColumnHeaders() {
   return (
     <>
-      <TableHead className="text-sm font-medium text-muted-foreground">
+      <TableHead className="font-medium text-muted-foreground text-sm">
         File name
       </TableHead>
-      <TableHead className="text-sm font-medium text-muted-foreground">
+      <TableHead className="font-medium text-muted-foreground text-sm">
         Type
       </TableHead>
-      <TableHead className="text-sm font-medium text-muted-foreground">
+      <TableHead className="font-medium text-muted-foreground text-sm">
         Size
       </TableHead>
-      <TableHead className="text-sm font-medium text-muted-foreground">
+      <TableHead className="font-medium text-muted-foreground text-sm">
         Created
       </TableHead>
-      <TableHead className="text-sm font-medium text-muted-foreground">
+      <TableHead className="font-medium text-muted-foreground text-sm">
         Status
       </TableHead>
     </>
@@ -169,8 +173,8 @@ function FileInfoCells({ file }: { file: RunFile }) {
           {file.filename}
           {DOWNLOADABLE_STATUSES.has(file.status) && (
             <a
-              href={`/api/v1/files/${file.id}/download`}
               className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+              href={`/api/v1/files/${file.id}/download`}
             >
               <Download className="size-4" />
             </a>
@@ -178,14 +182,14 @@ function FileInfoCells({ file }: { file: RunFile }) {
         </span>
       </TableCell>
       <TableCell className="py-2">
-        <Badge variant="outline" className="capitalize">
+        <Badge className="capitalize" variant="outline">
           {file.category}
         </Badge>
       </TableCell>
-      <TableCell className="py-2 text-sm text-muted-foreground">
+      <TableCell className="py-2 text-muted-foreground text-sm">
         {formatBytes(file.sizeBytes)}
       </TableCell>
-      <TableCell className="py-2 text-sm text-muted-foreground">
+      <TableCell className="py-2 text-muted-foreground text-sm">
         {file.fileCreatedAt
           ? formatDateTime(file.fileCreatedAt)
           : file.createdAt
@@ -212,10 +216,10 @@ function ReprocessAction({
     <AlertDialog>
       <AlertDialogTrigger asChild>
         <Button
-          variant="outline"
-          size="sm"
           className="h-6 gap-1 px-2 text-xs"
           disabled={isPending}
+          size="sm"
+          variant="outline"
         >
           {isPending ? (
             <Loader2 className="size-3 animate-spin" />
@@ -259,11 +263,11 @@ function UploadDismissActions({
   return (
     <>
       <WatcherGatedUploadButton
-        variant="outline"
-        size="sm"
         className="h-6 gap-1 px-2 text-xs"
-        onClick={() => onUpload(file.id)}
         disabled={isPending}
+        onClick={() => onUpload(file.id)}
+        size="sm"
+        variant="outline"
       >
         <Upload className="size-3" />
         Upload
@@ -271,10 +275,10 @@ function UploadDismissActions({
       <AlertDialog>
         <AlertDialogTrigger asChild>
           <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 gap-1 px-2 text-xs text-muted-foreground"
+            className="h-6 gap-1 px-2 text-muted-foreground text-xs"
             disabled={isPending}
+            size="sm"
+            variant="ghost"
           >
             <X className="size-3" />
             Dismiss
@@ -338,13 +342,13 @@ export function ReadOnlyRunFilesTable({
           const isDismissed = file.deletedAt !== null;
           return (
             <TableRow
-              key={file.id}
               className={`group ${isDismissed ? "opacity-50" : ""}`}
+              key={file.id}
             >
               <FileInfoCells file={file} />
               <TableCell className="py-2 pr-3">
                 {canReprocess(file) && (
-                  <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+                  <div className="flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
                     <ReprocessAction
                       file={file}
                       isPending={isPending}
@@ -395,7 +399,9 @@ export function EditableRunFilesTable({
   for (const file of files) {
     const ref = buildFileRef(file);
     refsByFileId.set(file.id, ref);
-    if (ref) visibleSelectableRefs.push(ref);
+    if (ref) {
+      visibleSelectableRefs.push(ref);
+    }
   }
 
   const showSelectionColumn = visibleSelectableRefs.length > 0;
@@ -437,9 +443,9 @@ export function EditableRunFilesTable({
 
           return (
             <TableRow
-              key={file.id}
-              data-state={isSelected ? "selected" : undefined}
               className={`group ${isDismissed ? "opacity-50" : ""}`}
+              data-state={isSelected ? "selected" : undefined}
+              key={file.id}
             >
               {showSelectionColumn && (
                 <TableCell className="py-2 pr-0 pl-3">
@@ -457,8 +463,8 @@ export function EditableRunFilesTable({
                     <UploadDismissActions
                       file={file}
                       isPending={isPending}
-                      onUpload={onUpload}
                       onDismiss={onDismiss}
+                      onUpload={onUpload}
                     />
                   </div>
                 ) : canDoReprocess ? (

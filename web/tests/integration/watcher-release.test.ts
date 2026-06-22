@@ -1,3 +1,5 @@
+import { eq, sql } from "drizzle-orm";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { instruments, watcherReleaseConfig, watchers } from "@/lib/db/schema";
 import {
   api,
@@ -6,8 +8,6 @@ import {
   resetDb,
   seedTestUser,
 } from "@/tests/integration/helpers";
-import { eq, sql } from "drizzle-orm";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 // The `/api/v1/settings/watcher-release` surface is admin-only and
 // session-only — PATs never pass the gate. Mirroring the

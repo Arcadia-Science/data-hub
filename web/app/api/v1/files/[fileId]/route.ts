@@ -1,3 +1,5 @@
+import { eq } from "drizzle-orm";
+import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import {
   apiError,
@@ -7,8 +9,6 @@ import {
 } from "@/lib/api/errors";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
-import type { NextRequest } from "next/server";
 
 type RouteContext = {
   params: Promise<{ fileId: string }>;
@@ -43,10 +43,12 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
 
 export async function PATCH(request: NextRequest, { params }: RouteContext) {
   const authResult = await authorize(request, "files:write");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { fileId } = await params;
-  const numericId = parseInt(fileId, 10);
+  const numericId = Number.parseInt(fileId, 10);
   if (isNaN(numericId)) {
     return apiError(400, VALIDATION_ERROR, "Invalid file ID");
   }
@@ -93,7 +95,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   // Status transition validation.
   if ("status" in body && typeof body.status === "string") {
     const allowed = VALID_TRANSITIONS[file.status];
-    if (!allowed || !allowed.includes(body.status)) {
+    if (!(allowed && allowed.includes(body.status))) {
       return apiError(
         409,
         CONFLICT,
@@ -126,11 +128,18 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   }
 
   // S3 info — set when transitioning to "uploaded" (watcher path).
-  if (typeof body.s3_bucket === "string") updates.s3Bucket = body.s3_bucket;
-  if (typeof body.s3_key === "string") updates.s3Key = body.s3_key;
-  if (typeof body.content_type === "string")
+  if (typeof body.s3_bucket === "string") {
+    updates.s3Bucket = body.s3_bucket;
+  }
+  if (typeof body.s3_key === "string") {
+    updates.s3Key = body.s3_key;
+  }
+  if (typeof body.content_type === "string") {
     updates.contentType = body.content_type;
-  if (typeof body.size_bytes === "number") updates.sizeBytes = body.size_bytes;
+  }
+  if (typeof body.size_bytes === "number") {
+    updates.sizeBytes = body.size_bytes;
+  }
 
   // Metadata — flat JSON object set by the Lambda after processing.
   if (
@@ -190,10 +199,12 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 
 export async function DELETE(request: NextRequest, { params }: RouteContext) {
   const authResult = await authorize(request, "files:write");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { fileId } = await params;
-  const numericId = parseInt(fileId, 10);
+  const numericId = Number.parseInt(fileId, 10);
   if (isNaN(numericId)) {
     return apiError(400, VALIDATION_ERROR, "Invalid file ID");
   }

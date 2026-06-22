@@ -1,10 +1,5 @@
-import {
-  getLocalMirrorRoot,
-  localMirrorDownloadUrl,
-  localMirrorHead,
-  localMirrorUploadUrl,
-  resolveMirrorPath,
-} from "@/lib/s3-local-mirror";
+import { createReadStream } from "node:fs";
+import type { Readable } from "node:stream";
 import {
   GetObjectCommand,
   HeadObjectCommand,
@@ -15,8 +10,13 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { awsCredentialsProvider } from "@vercel/oidc-aws-credentials-provider";
-import { createReadStream } from "node:fs";
-import type { Readable } from "node:stream";
+import {
+  getLocalMirrorRoot,
+  localMirrorDownloadUrl,
+  localMirrorHead,
+  localMirrorUploadUrl,
+  resolveMirrorPath,
+} from "@/lib/s3-local-mirror";
 
 // Canonical presigned-download window. Every download URL we hand out
 // (single-file via `get_file_download_url`, run archive via
@@ -99,15 +99,19 @@ export async function headS3Object(
       sizeBytes: response.ContentLength ?? null,
     };
   } catch (err) {
-    if (err instanceof NotFound) return { exists: false };
+    if (err instanceof NotFound) {
+      return { exists: false };
+    }
     if (err instanceof S3ServiceException) {
       const status = err.$metadata?.httpStatusCode;
-      if (status === 404) return { exists: false };
+      if (status === 404) {
+        return { exists: false };
+      }
       if (status === 403) {
         console.warn(
           `headS3Object: 403 from S3 on s3://${bucket}/${key} — treating as cache miss. ` +
             `If this is steady-state, check that the caller's IAM grants s3:ListBucket ` +
-            `on the bucket ARN (without it, S3 returns 403 for missing keys instead of 404).`
+            "on the bucket ARN (without it, S3 returns 403 for missing keys instead of 404)."
         );
         return { exists: false };
       }

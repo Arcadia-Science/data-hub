@@ -14,17 +14,27 @@ export function parseIntParam(
   value: string | null,
   opts: { default: number; min?: number; max?: number }
 ): number {
-  if (value === null) return opts.default;
-  const n = parseInt(value, 10);
-  if (isNaN(n)) return opts.default;
+  if (value === null) {
+    return opts.default;
+  }
+  const n = Number.parseInt(value, 10);
+  if (isNaN(n)) {
+    return opts.default;
+  }
   let clamped = n;
-  if (opts.min != null) clamped = Math.max(opts.min, clamped);
-  if (opts.max != null) clamped = Math.min(opts.max, clamped);
+  if (opts.min != null) {
+    clamped = Math.max(opts.min, clamped);
+  }
+  if (opts.max != null) {
+    clamped = Math.min(opts.max, clamped);
+  }
   return clamped;
 }
 
 export function parseDateParam(value: string | null): Date | null {
-  if (!value) return null;
+  if (!value) {
+    return null;
+  }
   const d = new Date(value);
   return isNaN(d.getTime()) ? null : d;
 }

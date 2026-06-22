@@ -15,6 +15,7 @@
 import * as schema from "@/lib/db/schema";
 import {
   clearAll,
+  type SeededRun,
   seedArchiveJobs,
   seedDevUser,
   seedInstrumentSubscriptions,
@@ -26,7 +27,6 @@ import {
   seedTeammates,
   seedWatcherReleaseConfig,
   seedWatchers,
-  type SeededRun,
 } from "@/lib/db/seed";
 import "dotenv/config";
 import { drizzle } from "drizzle-orm/postgres-js";
@@ -112,4 +112,4 @@ console.log(`  email: ${email}`);
 console.log("");
 console.log("Or call the API with the seeded PAT:");
 console.log(`  curl -H 'Authorization: Bearer ${token}' \\`);
-console.log(`    http://localhost:3000/api/v1/instruments`);
+console.log("    http://localhost:3000/api/v1/instruments");

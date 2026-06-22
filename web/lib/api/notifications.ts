@@ -1,3 +1,13 @@
+import {
+  aliasedTable,
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNull,
+  sql,
+} from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   type InstrumentType,
@@ -11,16 +21,6 @@ import {
   users,
 } from "@/lib/db/schema";
 import { toInitials } from "@/lib/utils";
-import {
-  aliasedTable,
-  and,
-  asc,
-  desc,
-  eq,
-  inArray,
-  isNull,
-  sql,
-} from "drizzle-orm";
 
 // ---------------------------------------------------------------------------
 // Notifications — in-app event delivery for instrument runs and run comments.
@@ -277,7 +277,9 @@ export async function countUnread(userId: string): Promise<number> {
 }
 
 export async function markRead(userId: string, ids?: string[]): Promise<void> {
-  if (ids && ids.length === 0) return;
+  if (ids && ids.length === 0) {
+    return;
+  }
   const now = new Date();
   await db
     .update(notifications)
@@ -334,7 +336,9 @@ export async function notifyRunCreated(input: {
         )
       );
 
-    if (recipients.length === 0) return;
+    if (recipients.length === 0) {
+      return;
+    }
 
     await db.insert(notifications).values(
       recipients.map((r) => ({
@@ -415,7 +419,9 @@ export async function notifyComment(input: {
       })),
     ];
 
-    if (rows.length === 0) return;
+    if (rows.length === 0) {
+      return;
+    }
 
     await db.insert(notifications).values(rows);
   } catch (err) {

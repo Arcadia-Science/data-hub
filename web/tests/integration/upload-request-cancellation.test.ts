@@ -1,3 +1,5 @@
+import { inArray } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { files, instruments } from "@/lib/db/schema";
 import {
   api,
@@ -6,8 +8,6 @@ import {
   resetDb,
   seedTestUser,
 } from "@/tests/integration/helpers";
-import { inArray } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // When a watcher's watch_directory changes, every still-pending upload
 // request points at a relative path anchored to the old root and can no

@@ -1,5 +1,8 @@
 "use client";
 
+import { ChevronsUpDown, LogOut, Settings } from "lucide-react";
+import Link from "next/link";
+import { useTransition } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -14,9 +17,6 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { ChevronsUpDown, LogOut, Settings } from "lucide-react";
-import Link from "next/link";
-import { useTransition } from "react";
 
 type UserMenuFooterProps = {
   user: {
@@ -54,12 +54,12 @@ export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton
-              size="lg"
               className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+              size="lg"
             >
               <Avatar className="size-8 rounded-lg">
                 {user.image && (
-                  <AvatarImage src={user.image} alt={user.name ?? ""} />
+                  <AvatarImage alt={user.name ?? ""} src={user.image} />
                 )}
                 <AvatarFallback className="rounded-lg text-xs">
                   {initials}
@@ -70,7 +70,7 @@ export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
                   {user.name ?? "User"}
                 </span>
                 {user.email && (
-                  <span className="truncate text-xs text-muted-foreground">
+                  <span className="truncate text-muted-foreground text-xs">
                     {user.email}
                   </span>
                 )}
@@ -79,9 +79,9 @@ export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
             </SidebarMenuButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
+            align="end"
             className="w-(--radix-dropdown-menu-trigger-width) min-w-56 rounded-lg"
             side={isMobile ? "bottom" : "top"}
-            align="end"
             sideOffset={4}
           >
             <DropdownMenuItem asChild>

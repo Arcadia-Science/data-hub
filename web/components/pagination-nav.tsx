@@ -1,5 +1,7 @@
 "use client";
 
+import { parseAsInteger, useQueryState } from "nuqs";
+import type { MouseEvent } from "react";
 import { useTablePending } from "@/components/table-pending";
 import {
   Pagination,
@@ -11,27 +13,34 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 import { cn } from "@/lib/utils";
-import { parseAsInteger, useQueryState } from "nuqs";
-import type { MouseEvent } from "react";
 
 function getVisiblePages(
   page: number,
   totalPages: number
 ): (number | "ellipsis")[] {
-  if (totalPages <= 7)
+  if (totalPages <= 7) {
     return Array.from({ length: totalPages }, (_, i) => i + 1);
+  }
 
   const pages: (number | "ellipsis")[] = [1];
 
-  if (page > 3) pages.push("ellipsis");
+  if (page > 3) {
+    pages.push("ellipsis");
+  }
 
   const start = Math.max(2, page - 1);
   const end = Math.min(totalPages - 1, page + 1);
-  for (let i = start; i <= end; i++) pages.push(i);
+  for (let i = start; i <= end; i++) {
+    pages.push(i);
+  }
 
-  if (page < totalPages - 2) pages.push("ellipsis");
+  if (page < totalPages - 2) {
+    pages.push("ellipsis");
+  }
 
-  if (totalPages > 1) pages.push(totalPages);
+  if (totalPages > 1) {
+    pages.push(totalPages);
+  }
 
   return pages;
 }
@@ -56,7 +65,9 @@ export function PaginationNav({
       .withOptions({ shallow: false, startTransition })
   );
 
-  if (totalPages <= 1) return null;
+  if (totalPages <= 1) {
+    return null;
+  }
 
   const visible = getVisiblePages(page, totalPages);
 
@@ -82,10 +93,10 @@ export function PaginationNav({
       <PaginationContent>
         <PaginationItem>
           <PaginationPrevious
-            href="#"
-            onClick={go(page - 1)}
             aria-disabled={atPrev}
             className={atPrev ? "pointer-events-none opacity-50" : undefined}
+            href="#"
+            onClick={go(page - 1)}
           />
         </PaginationItem>
 
@@ -105,10 +116,10 @@ export function PaginationNav({
 
         <PaginationItem>
           <PaginationNext
-            href="#"
-            onClick={go(page + 1)}
             aria-disabled={atNext}
             className={atNext ? "pointer-events-none opacity-50" : undefined}
+            href="#"
+            onClick={go(page + 1)}
           />
         </PaginationItem>
       </PaginationContent>

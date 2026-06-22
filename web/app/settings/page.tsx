@@ -1,6 +1,6 @@
+import { redirect } from "next/navigation";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import { auth } from "@/lib/auth";
-import { redirect } from "next/navigation";
 
 export default async function SettingsPage() {
   // Self-defending auth gate; mirrors `tokens/page.tsx`. Without this an

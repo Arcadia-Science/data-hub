@@ -1,12 +1,12 @@
+import { eq } from "drizzle-orm";
+import type { NextRequest } from "next/server";
+import { after } from "next/server";
 import { apiError, FORBIDDEN, UNAUTHORIZED } from "@/lib/api/errors";
 import { hasScope, type Scope } from "@/lib/api/scopes";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { personalAccessTokens, users } from "@/lib/db/schema";
 import { hashToken } from "@/lib/tokens";
-import { eq } from "drizzle-orm";
-import type { NextRequest } from "next/server";
-import { after } from "next/server";
 
 export type AuthResult = {
   userId: string;
@@ -152,7 +152,9 @@ export async function requireAdmin(): Promise<{ userId: string } | Response> {
 export async function requireAdminForSession(
   authResult: AuthResult
 ): Promise<Response | null> {
-  if (authResult.authMethod !== "session") return null;
+  if (authResult.authMethod !== "session") {
+    return null;
+  }
 
   const [row] = await db
     .select({ isAdmin: users.isAdmin })

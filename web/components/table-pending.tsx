@@ -1,15 +1,15 @@
 "use client";
 
-import { cn } from "@/lib/utils";
 import {
+  createContext,
   type ReactNode,
   type TransitionStartFunction,
-  createContext,
   useContext,
   useEffect,
   useState,
   useTransition,
 } from "react";
+import { cn } from "@/lib/utils";
 
 type TablePendingContextValue = {
   // Instantaneous transition state from React. Use this for logic that should
@@ -46,7 +46,9 @@ export function TablePendingProvider({
   // on entry, cleanup on exit). This keeps the setState out of the effect body
   // itself, avoiding cascading render warnings.
   useEffect(() => {
-    if (!isPending) return;
+    if (!isPending) {
+      return;
+    }
     const id = setTimeout(() => setIsPendingVisible(true), delayMs);
     return () => {
       clearTimeout(id);

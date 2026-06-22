@@ -1,16 +1,16 @@
+import { and, asc, count, desc, eq, gte, inArray, isNull } from "drizzle-orm";
+import { cache } from "react";
+import YAML from "yaml";
 import { db } from "@/lib/db";
 import {
   files,
   instrumentRuns,
   instruments,
-  watcherEventTypeEnum,
   watcherEvents,
+  watcherEventTypeEnum,
   watcherHeartbeats,
   watchers,
 } from "@/lib/db/schema";
-import { and, asc, count, desc, eq, gte, inArray, isNull } from "drizzle-orm";
-import { cache } from "react";
-import YAML from "yaml";
 
 export const STALE_THRESHOLD_MS = 5 * 60 * 1000;
 
@@ -32,7 +32,9 @@ export async function findActiveWatcher(watcherId: string) {
 export function extractWatchDirectory(
   configYaml: string | null
 ): string | null {
-  if (!configYaml) return null;
+  if (!configYaml) {
+    return null;
+  }
   try {
     const doc = YAML.parse(configYaml);
     const dir = doc?.instrument?.watch_directory;
@@ -89,9 +91,13 @@ export type EffectiveStatus = "registered" | "watching" | "stopped" | "stale";
  * so they're exempt from staleness checks.
  */
 export function computeEffectiveStatus(watcher: WatcherLike): EffectiveStatus {
-  if (watcher.status === "registered") return "registered";
+  if (watcher.status === "registered") {
+    return "registered";
+  }
 
-  if (!watcher.lastHeartbeatAt) return "stale";
+  if (!watcher.lastHeartbeatAt) {
+    return "stale";
+  }
 
   const age = Date.now() - watcher.lastHeartbeatAt.getTime();
   return age > STALE_THRESHOLD_MS
@@ -194,7 +200,9 @@ export const getWatcherById = cache(async function getWatcherById(
     .where(eq(watchers.id, watcherId))
     .limit(1);
 
-  if (!row) return null;
+  if (!row) {
+    return null;
+  }
 
   return {
     id: row.id,

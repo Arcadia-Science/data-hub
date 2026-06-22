@@ -225,10 +225,7 @@ export const personalAccessTokens = pgTable(
     // the backfill value for pre-scope tokens. New tokens created via the
     // API always carry an explicit, non-wildcard scope list. Enforcement
     // happens in each v1 route via `authorize(request, "<scope>")`.
-    scopes: text("scopes")
-      .array()
-      .notNull()
-      .default(sql`ARRAY['*']::text[]`),
+    scopes: text("scopes").array().notNull().default(sql`ARRAY['*']::text[]`),
     // Updated on each API call authenticated with this token.
     lastUsedAt: timestamp("last_used_at", {
       withTimezone: true,

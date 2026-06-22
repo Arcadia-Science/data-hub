@@ -10,16 +10,24 @@ export function getMetadataField(
   metadata: unknown,
   key: string
 ): string | null {
-  if (!metadata || typeof metadata !== "object") return null;
+  if (!metadata || typeof metadata !== "object") {
+    return null;
+  }
   const value = (metadata as Record<string, unknown>)[key];
-  return value != null ? String(value) : null;
+  return value == null ? null : String(value);
 }
 
 export function getMetadataArray(metadata: unknown, key: string): string[] {
-  if (!metadata || typeof metadata !== "object") return [];
+  if (!metadata || typeof metadata !== "object") {
+    return [];
+  }
   const value = (metadata as Record<string, unknown>)[key];
-  if (Array.isArray(value)) return value.map(String);
-  if (value != null) return [String(value)];
+  if (Array.isArray(value)) {
+    return value.map(String);
+  }
+  if (value != null) {
+    return [String(value)];
+  }
   return [];
 }
 
@@ -27,7 +35,9 @@ export function getMetadataRecord(
   metadata: unknown,
   key: string
 ): Record<string, unknown> | null {
-  if (!metadata || typeof metadata !== "object") return null;
+  if (!metadata || typeof metadata !== "object") {
+    return null;
+  }
   const value = (metadata as Record<string, unknown>)[key];
   if (value && typeof value === "object" && !Array.isArray(value)) {
     return value as Record<string, unknown>;
@@ -39,9 +49,13 @@ export function getMetadataObjectArray(
   metadata: unknown,
   key: string
 ): Record<string, unknown>[] {
-  if (!metadata || typeof metadata !== "object") return [];
+  if (!metadata || typeof metadata !== "object") {
+    return [];
+  }
   const value = (metadata as Record<string, unknown>)[key];
-  if (!Array.isArray(value)) return [];
+  if (!Array.isArray(value)) {
+    return [];
+  }
   return value.filter(
     (v): v is Record<string, unknown> =>
       v !== null && typeof v === "object" && !Array.isArray(v)
@@ -59,9 +73,15 @@ export function sortWavelengths(wavelengths: string[]): string[] {
     const nb = Number(b);
     const aNum = Number.isFinite(na);
     const bNum = Number.isFinite(nb);
-    if (aNum && bNum) return na - nb;
-    if (aNum) return -1;
-    if (bNum) return 1;
+    if (aNum && bNum) {
+      return na - nb;
+    }
+    if (aNum) {
+      return -1;
+    }
+    if (bNum) {
+      return 1;
+    }
     return a.localeCompare(b);
   });
 }
@@ -73,9 +93,11 @@ export function MetadataFieldBadge({
   value: string | null;
   colorClass?: string;
 }) {
-  if (!value) return <span className="text-muted-foreground">&mdash;</span>;
+  if (!value) {
+    return <span className="text-muted-foreground">&mdash;</span>;
+  }
   return (
-    <Badge variant="outline" className={cn("font-mono", colorClass)}>
+    <Badge className={cn("font-mono", colorClass)} variant="outline">
       {value}
     </Badge>
   );
@@ -94,9 +116,9 @@ function BadgeRow({
     <div className={cn("flex flex-wrap gap-1", className)}>
       {values.map((v) => (
         <Badge
+          className={cn("font-mono", colorMap?.[v])}
           key={v}
           variant="outline"
-          className={cn("font-mono", colorMap?.[v])}
         >
           {v}
         </Badge>
@@ -112,9 +134,10 @@ export function MetadataArrayBadges({
   values: string[];
   colorMap?: Record<string, string>;
 }) {
-  if (values.length === 0)
+  if (values.length === 0) {
     return <span className="text-muted-foreground">&mdash;</span>;
-  return <BadgeRow values={values} colorMap={colorMap} />;
+  }
+  return <BadgeRow colorMap={colorMap} values={values} />;
 }
 
 /**
@@ -132,11 +155,12 @@ export function TruncatedBadges({
   colorMap?: Record<string, string>;
   maxVisible?: number;
 }) {
-  if (values.length === 0)
+  if (values.length === 0) {
     return <span className="text-muted-foreground">&mdash;</span>;
+  }
 
   if (values.length <= maxVisible) {
-    return <BadgeRow values={values} colorMap={colorMap} />;
+    return <BadgeRow colorMap={colorMap} values={values} />;
   }
 
   const visible = values.slice(0, maxVisible);
@@ -148,24 +172,24 @@ export function TruncatedBadges({
         <div className="flex flex-wrap gap-1">
           {visible.map((v) => (
             <Badge
+              className={cn("font-mono", colorMap?.[v])}
               key={v}
               variant="outline"
-              className={cn("font-mono", colorMap?.[v])}
             >
               {v}
             </Badge>
           ))}
           <Badge
-            variant="outline"
-            className="font-mono text-muted-foreground"
             aria-label={`${hiddenCount} more`}
+            className="font-mono text-muted-foreground"
+            variant="outline"
           >
             +{hiddenCount}
           </Badge>
         </div>
       </TooltipTrigger>
       <TooltipContent className="max-w-none">
-        <BadgeRow values={values} colorMap={colorMap} className="flex-nowrap" />
+        <BadgeRow className="flex-nowrap" colorMap={colorMap} values={values} />
       </TooltipContent>
     </Tooltip>
   );

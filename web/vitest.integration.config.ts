@@ -10,6 +10,6 @@ export default defineConfig({
     globalSetup: "tests/integration/global-setup.ts",
   },
   resolve: {
-    alias: { "@": path.resolve(__dirname, ".") },
+    alias: { "@": path.resolve(import.meta.dirname, ".") },
   },
 });

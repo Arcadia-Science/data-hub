@@ -1,3 +1,4 @@
+import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import {
   apiError,
@@ -12,7 +13,6 @@ import {
   softDeleteComment,
   updateComment,
 } from "@/lib/api/run-comments";
-import type { NextRequest } from "next/server";
 
 type RouteContext = {
   params: Promise<{
@@ -100,7 +100,9 @@ async function preflight(
 
 export async function PATCH(request: NextRequest, { params }: RouteContext) {
   const pre = await preflight(request, params);
-  if (pre.kind === "error") return pre.response;
+  if (pre.kind === "error") {
+    return pre.response;
+  }
 
   let payload: Record<string, unknown>;
   try {
@@ -150,7 +152,9 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 
 export async function DELETE(request: NextRequest, { params }: RouteContext) {
   const pre = await preflight(request, params);
-  if (pre.kind === "error") return pre.response;
+  if (pre.kind === "error") {
+    return pre.response;
+  }
 
   await softDeleteComment({
     commentId: pre.commentId,

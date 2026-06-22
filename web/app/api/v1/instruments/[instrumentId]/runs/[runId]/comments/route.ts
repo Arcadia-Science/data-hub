@@ -1,3 +1,5 @@
+import type { NextRequest } from "next/server";
+import { after } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import {
   apiError,
@@ -8,8 +10,6 @@ import {
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { notifyComment } from "@/lib/api/notifications";
 import { createComment, listCommentsForRun } from "@/lib/api/run-comments";
-import type { NextRequest } from "next/server";
-import { after } from "next/server";
 
 type RouteContext = {
   params: Promise<{ instrumentId: string; runId: string }>;
@@ -28,7 +28,9 @@ const MAX_BODY_LENGTH = 10_000;
 
 export async function GET(request: NextRequest, { params }: RouteContext) {
   const authResult = await authorize(request, "runs:read");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { instrumentId, runId } = await params;
   const run = await lookupRunByNaturalKey(instrumentId, runId);
@@ -54,7 +56,9 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
   const authResult = await authorize(request, "runs:write");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { instrumentId, runId } = await params;
   const run = await lookupRunByNaturalKey(instrumentId, runId);
