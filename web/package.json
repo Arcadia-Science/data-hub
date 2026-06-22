@@ -7,10 +7,10 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "ultracite check",
-    "format": "ultracite fix",
+    "lint:check": "ultracite check",
+    "lint:fix": "ultracite fix",
     "typecheck": "tsc --noEmit",
-    "precommit": "npm run format && npm run lint && npm run typecheck",
+    "precommit": "npm run lint:fix && npm run typecheck",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
@@ -22,7 +22,9 @@
     "test:mcp": "vitest run --config vitest.config.ts",
     "test:mcp:watch": "vitest --config vitest.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
-    "test:integration:watch": "vitest --config vitest.integration.config.ts"
+    "test:integration:watch": "vitest --config vitest.integration.config.ts",
+    "check": "npm run lint:check && npm run typecheck",
+    "check-all": "npm run check && npm run test-all && npm run build"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.1",
