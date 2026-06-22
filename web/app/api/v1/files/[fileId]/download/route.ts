@@ -6,9 +6,9 @@ import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 import { getPresignedDownloadUrl } from "@/lib/s3";
 
-type RouteContext = {
+interface RouteContext {
   params: Promise<{ fileId: string }>;
-};
+}
 
 // ---------------------------------------------------------------------------
 // GET /api/v1/files/:fileId/download
@@ -26,7 +26,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
 
   const { fileId } = await params;
   const numericId = Number.parseInt(fileId, 10);
-  if (isNaN(numericId)) {
+  if (Number.isNaN(numericId)) {
     return apiError(400, VALIDATION_ERROR, "Invalid file ID");
   }
 

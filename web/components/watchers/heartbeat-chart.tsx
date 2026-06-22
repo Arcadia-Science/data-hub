@@ -47,14 +47,14 @@ function computeWindow(since: string): {
   return { windowStart, windowEnd };
 }
 
-type Bucket = {
-  key: number;
+interface Bucket {
   className: string;
-  label: string;
-  startTime: Date;
   endTime: Date;
   heartbeatCount: number;
-};
+  key: number;
+  label: string;
+  startTime: Date;
+}
 
 function buildBuckets(
   heartbeats: WatcherHeartbeatRow[],

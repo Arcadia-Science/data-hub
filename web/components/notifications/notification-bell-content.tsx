@@ -61,21 +61,21 @@ const BUCKET_LABEL: Record<Bucket, string> = {
   earlier: "Earlier",
 };
 
-type CommentEntry = {
+interface CommentEntry {
+  id: string;
   kind: "comment";
-  id: string;
   notification: NotificationItem;
-};
+}
 
-type RunGroupEntry = {
-  kind: "run_group";
+interface RunGroupEntry {
   id: string;
+  instrumentDisplayName: string;
   instrumentId: string;
   instrumentType: InstrumentType;
-  instrumentDisplayName: string;
-  runs: NotificationItem[];
+  kind: "run_group";
   latestCreatedAt: string;
-};
+  runs: NotificationItem[];
+}
 
 type Entry = CommentEntry | RunGroupEntry;
 type BucketedEntries = Record<Bucket, Entry[]>;

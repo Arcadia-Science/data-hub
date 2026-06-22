@@ -3,15 +3,15 @@ import { cache } from "react";
 import { db } from "@/lib/db";
 import { instrumentRuns, instruments, watchers } from "@/lib/db/schema";
 
-export type SidebarInstrument = {
-  id: string;
+export interface SidebarInstrument {
   displayName: string;
-};
-
-export type SidebarWatcher = {
   id: string;
+}
+
+export interface SidebarWatcher {
   hostname: string | null;
-};
+  id: string;
+}
 
 // Cap the sidebar lists so the nav stays scannable even on workspaces with
 // many instruments/watchers. The "View all" sub-item links to the full page.

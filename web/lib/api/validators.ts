@@ -18,7 +18,7 @@ export function parseIntParam(
     return opts.default;
   }
   const n = Number.parseInt(value, 10);
-  if (isNaN(n)) {
+  if (Number.isNaN(n)) {
     return opts.default;
   }
   let clamped = n;
@@ -36,5 +36,5 @@ export function parseDateParam(value: string | null): Date | null {
     return null;
   }
   const d = new Date(value);
-  return isNaN(d.getTime()) ? null : d;
+  return Number.isNaN(d.getTime()) ? null : d;
 }

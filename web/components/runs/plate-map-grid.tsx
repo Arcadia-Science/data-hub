@@ -8,7 +8,10 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-export type PlateWellData = { well: string; value: unknown };
+export interface PlateWellData {
+  value: unknown;
+  well: string;
+}
 
 function parseWell(well: string): { row: number; col: number } | null {
   const match = well.match(/^([A-P])(\d{1,2})$/i);
@@ -80,14 +83,14 @@ function heatmapColor(
   return [`rgb(${r},${g},${b})`, fg];
 }
 
-type PlateMapGridProps = {
+interface PlateMapGridProps {
   data: unknown;
   heatmap?: boolean;
   /** When heatmap is on, use this scale instead of inferring min/max from `data`. */
   heatmapRange?: { min: number; max: number };
   plateName?: string;
   wavelength?: string;
-};
+}
 
 export function PlateMapGrid({
   data,
@@ -290,13 +293,13 @@ function computeGlobalHeatmapRange(
   return { min, max };
 }
 
-type KineticPlateMapWithTimeSliderProps = {
-  timeLabels: string[];
+interface KineticPlateMapWithTimeSliderProps {
   frames: PlateWellData[][];
   heatmap: boolean;
   plateName?: string;
+  timeLabels: string[];
   wavelength?: string;
-};
+}
 
 /**
  * Plate map with a time index slider (for kinetic absorbance series).

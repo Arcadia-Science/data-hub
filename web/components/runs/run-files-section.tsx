@@ -44,17 +44,17 @@ import {
 // the URL and refetching the page.
 const SEARCH_DEBOUNCE_MS = 300;
 
-type RunFilesSectionProps = {
+interface RunFilesSectionProps {
   // Current page of the server-paginated, filtered, sorted file list.
   files: RunFile[];
+  instrumentId: string;
+  isDeleted: boolean;
   pagination: RunFilesPage["pagination"];
+  runId: string;
   // Aggregate per-run counts used for the footer summary, filter labels, and
   // the in-flight auto-refresh signal — independent of the current filter.
   stats: RunFileStats;
-  instrumentId: string;
-  runId: string;
-  isDeleted: boolean;
-};
+}
 
 // Synchronously trigger one anchor-click per file so the browser treats
 // them all as the same user gesture (Chrome silently drops downloads

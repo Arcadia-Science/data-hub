@@ -11,14 +11,14 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 
-type SettingsSection = {
-  href: string;
-  label: string;
+interface SettingsSection {
   // Admin-only entries are mounted into the nav only when the viewer is
   // an admin. Using composition here (filter by predicate, then render)
   // keeps the SettingsNav body free of per-item `isAdmin && …` branches.
   adminOnly?: boolean;
-};
+  href: string;
+  label: string;
+}
 
 const SETTINGS_SECTIONS: SettingsSection[] = [
   { href: "/settings/notifications", label: "Notifications" },

@@ -31,13 +31,13 @@ import { WatcherGatedUploadButton } from "./watcher-gated-upload-button";
 // narrow the selection before acting.
 // ---------------------------------------------------------------------------
 
-export type FileBulkActionBarProps = {
+export interface FileBulkActionBarProps {
   isPending: boolean;
-  onUpload: (ids: number[]) => void;
   onDismiss: (ids: number[]) => void;
-  onReprocess: (ids: number[]) => void;
   onDownload: (refs: FileRef[]) => void;
-};
+  onReprocess: (ids: number[]) => void;
+  onUpload: (ids: number[]) => void;
+}
 
 export function FileBulkActionBar({
   isPending,

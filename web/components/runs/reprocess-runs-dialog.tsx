@@ -15,12 +15,12 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-export type ReprocessRunTarget = {
-  instrumentId: string;
-  runId: string;
+export interface ReprocessRunTarget {
   filesCompleted: number;
   filesFailed: number;
-};
+  instrumentId: string;
+  runId: string;
+}
 
 // ---------------------------------------------------------------------------
 // Controlled reprocess dialog used by both the per-row "..." menu (single

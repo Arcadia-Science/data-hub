@@ -283,10 +283,10 @@ export function EpsonScannerRunBadges({
 // Hina microscope
 // ---------------------------------------------------------------------------
 
-export type HinaChannel = {
-  name: string;
+export interface HinaChannel {
   color: string | null;
-};
+  name: string;
+}
 
 // Parse `#rgb`, `#rrggbb`, `rgb(...)`, or the `white` literal into RGB. Anything
 // else (named colors beyond `white`, hsl(), etc.) returns null and the caller
@@ -345,10 +345,10 @@ function relativeLuminance({
 // and the dot is ringed with `--border` so a white swatch is still visible.
 const NEAR_WHITE_LUMINANCE = 0.85;
 
-export type ChannelBadgeStyle = {
+export interface ChannelBadgeStyle {
   badge: React.CSSProperties | undefined;
   dot: React.CSSProperties;
-};
+}
 
 export function getHinaChannelBadgeStyle(
   color: string | null

@@ -49,7 +49,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 
   const { fileId } = await params;
   const numericId = Number.parseInt(fileId, 10);
-  if (isNaN(numericId)) {
+  if (Number.isNaN(numericId)) {
     return apiError(400, VALIDATION_ERROR, "Invalid file ID");
   }
 
@@ -95,7 +95,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   // Status transition validation.
   if ("status" in body && typeof body.status === "string") {
     const allowed = VALID_TRANSITIONS[file.status];
-    if (!(allowed && allowed.includes(body.status))) {
+    if (!allowed?.includes(body.status)) {
       return apiError(
         409,
         CONFLICT,
@@ -205,7 +205,7 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
 
   const { fileId } = await params;
   const numericId = Number.parseInt(fileId, 10);
-  if (isNaN(numericId)) {
+  if (Number.isNaN(numericId)) {
     return apiError(400, VALIDATION_ERROR, "Invalid file ID");
   }
 

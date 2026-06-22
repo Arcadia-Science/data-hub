@@ -14,13 +14,13 @@ import {
   updateComment,
 } from "@/lib/api/run-comments";
 
-type RouteContext = {
+interface RouteContext {
   params: Promise<{
     instrumentId: string;
     runId: string;
     commentId: string;
   }>;
-};
+}
 
 const MAX_BODY_LENGTH = 10_000;
 

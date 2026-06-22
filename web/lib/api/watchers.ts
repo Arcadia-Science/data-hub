@@ -77,10 +77,10 @@ export async function revertPendingUploadRequests(
   return reverted.map((row) => row.id);
 }
 
-type WatcherLike = {
-  status: string;
+interface WatcherLike {
   lastHeartbeatAt: Date | null;
-};
+  status: string;
+}
 
 export type EffectiveStatus = "registered" | "watching" | "stopped" | "stale";
 
@@ -109,17 +109,17 @@ export function computeEffectiveStatus(watcher: WatcherLike): EffectiveStatus {
 // List page
 // ---------------------------------------------------------------------------
 
-export type WatcherListItem = {
-  id: string;
-  instrumentId: string;
-  instrumentDisplayName: string | null;
-  hostname: string | null;
-  watcherVersion: string | null;
-  effectiveStatus: EffectiveStatus;
-  lastHeartbeatAt: Date | null;
+export interface WatcherListItem {
   createdAt: Date;
   deletedAt: Date | null;
-};
+  effectiveStatus: EffectiveStatus;
+  hostname: string | null;
+  id: string;
+  instrumentDisplayName: string | null;
+  instrumentId: string;
+  lastHeartbeatAt: Date | null;
+  watcherVersion: string | null;
+}
 
 // Fetches all watchers (optionally including soft-deleted ones) with their
 // parent instrument's display name. The total count is small enough that we
@@ -225,16 +225,16 @@ export const getWatcherById = cache(async function getWatcherById(
 // Heartbeats
 // ---------------------------------------------------------------------------
 
-export type WatcherHeartbeatRow = {
-  id: number;
-  timestamp: Date;
-  status: string;
-  uploadMode: string | null;
-  filesUploadedSinceLast: number | null;
-  runsReportedSinceLast: number | null;
+export interface WatcherHeartbeatRow {
   errorsSinceLast: number | null;
+  filesUploadedSinceLast: number | null;
+  id: number;
+  runsReportedSinceLast: number | null;
+  status: string;
+  timestamp: Date;
+  uploadMode: string | null;
   uptimeSeconds: number | null;
-};
+}
 
 // Default time window for heartbeat/event queries when no explicit range is
 // given. Kept in the data layer (not the page component) to avoid calling
@@ -244,7 +244,10 @@ const DEFAULT_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 
 export const WATCHER_PAGE_SIZE = 20;
 
-export type PaginatedResult<T> = { rows: T[]; total: number };
+export interface PaginatedResult<T> {
+  rows: T[];
+  total: number;
+}
 
 export async function getWatcherHeartbeats(
   watcherId: string,
@@ -317,13 +320,13 @@ export async function getAllWatcherHeartbeats(
 // Events
 // ---------------------------------------------------------------------------
 
-export type WatcherEventRow = {
-  id: number;
-  eventType: string;
-  message: string;
+export interface WatcherEventRow {
   details: unknown;
+  eventType: string;
+  id: number;
+  message: string;
   timestamp: Date;
-};
+}
 
 export async function getWatcherEvents(
   watcherId: string,

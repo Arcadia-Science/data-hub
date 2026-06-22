@@ -62,23 +62,23 @@ export async function clearAll(db: Db): Promise<void> {
 // User + PAT
 // ---------------------------------------------------------------------------
 
-export type SeedUserOptions = {
+export interface SeedUserOptions {
   email?: string;
-  name?: string;
+  // Optional PAT expiry. NULL (the default) means no expiry.
+  expiresAt?: Date | null;
   isAdmin?: boolean;
+  name?: string;
   // Permission scopes for the minted PAT. Defaults to `["*"]` so the
   // returned token can hit every v1 route — matches the historical test
   // behavior. Pass an explicit list to exercise scope enforcement.
   scopes?: string[];
-  // Optional PAT expiry. NULL (the default) means no expiry.
-  expiresAt?: Date | null;
-};
+}
 
-export type SeedUserResult = {
-  userId: string;
+export interface SeedUserResult {
   email: string;
   token: string;
-};
+  userId: string;
+}
 
 export async function seedDevUser(
   db: Db,
@@ -135,12 +135,12 @@ export async function seedWatcherReleaseConfig(db: Db): Promise<void> {
 // instrument is seeded as `pending` so the activation flow shows up.
 // ---------------------------------------------------------------------------
 
-export type SeededInstrument = {
-  id: string;
+export interface SeededInstrument {
   displayName: string;
+  id: string;
   instrumentType: schema.InstrumentType;
   status: "pending" | "active" | "inactive";
-};
+}
 
 const INSTRUMENT_LABELS: Record<schema.InstrumentType, string> = {
   generic: "Generic Lab Instrument",
@@ -192,11 +192,11 @@ export async function seedInstruments(db: Db): Promise<SeededInstrument[]> {
 // Watchers + heartbeats + events
 // ---------------------------------------------------------------------------
 
-export type SeededWatcher = {
+export interface SeededWatcher {
   id: string;
   instrumentId: string;
   status: "registered" | "watching" | "stopped";
-};
+}
 
 const WATCHER_STATUSES = ["watching", "registered", "stopped"] as const;
 
@@ -292,19 +292,19 @@ export async function seedWatchers(
 // `data-hub-process handler` to stage real files for those.
 // ---------------------------------------------------------------------------
 
-export type SeededRun = {
+export interface SeededRun {
   id: string;
   instrumentId: string;
   runId: string;
-};
+}
 
 const FILE_STATUSES = ["uploaded", "completed", "failed"] as const;
 
-export type InstrumentFixture = {
-  filename: string;
+export interface InstrumentFixture {
   contentType: string;
+  filename: string;
   runIds: readonly string[];
-};
+}
 
 // Maps each instrument-type that has a fixture file checked into the
 // repo to its fixture filename, content-type, and a stable list of
@@ -541,7 +541,11 @@ export async function seedRunAttributions(
 // scripting.
 // ---------------------------------------------------------------------------
 
-export type SeededTeammate = { id: string; name: string; email: string };
+export interface SeededTeammate {
+  email: string;
+  id: string;
+  name: string;
+}
 
 // Fixed preset list (rather than randomized) so reseeds produce stable
 // identities — screenshots / bug reports referencing "Lucy" keep matching
@@ -617,10 +621,10 @@ export async function seedInstrumentSubscriptions(
 // dev-user comments to satisfy the comment_participated precondition.
 // ---------------------------------------------------------------------------
 
-export type SeededNotifications = {
+export interface SeededNotifications {
   total: number;
   unread: number;
-};
+}
 
 export async function seedNotifications(
   db: Db,

@@ -25,10 +25,10 @@ import {
 import { dashboardSearchParams, hasActiveFilters } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 
-type Instrument = {
-  id: string;
+interface Instrument {
   displayName: string;
-};
+  id: string;
+}
 
 export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
   const { startTransition } = useTablePending();

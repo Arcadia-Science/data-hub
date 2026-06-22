@@ -20,35 +20,35 @@ import type { InstrumentType } from "@/lib/db/schema";
 // content is mounted lazily.
 // ---------------------------------------------------------------------------
 
-export type NotificationActor = {
-  id: string;
-  displayName: string;
-  initials: string;
+export interface NotificationActor {
   avatarUrl: string | null;
-};
-
-export type NotificationItem = {
+  displayName: string;
   id: string;
-  type: "run_created" | "comment_attributed" | "comment_participated";
-  createdAt: string;
-  readAt: string | null;
-  runId: string;
-  runDisplayId: string;
-  instrumentId: string;
-  instrumentDisplayName: string;
-  instrumentType: InstrumentType;
-  commentId: string | null;
-  commentBody: string | null;
-  actor: NotificationActor | null;
-};
+  initials: string;
+}
 
-type NotificationsValue = {
-  unreadCount: number;
-  recent: NotificationItem[];
-  refresh: () => Promise<void>;
+export interface NotificationItem {
+  actor: NotificationActor | null;
+  commentBody: string | null;
+  commentId: string | null;
+  createdAt: string;
+  id: string;
+  instrumentDisplayName: string;
+  instrumentId: string;
+  instrumentType: InstrumentType;
+  readAt: string | null;
+  runDisplayId: string;
+  runId: string;
+  type: "run_created" | "comment_attributed" | "comment_participated";
+}
+
+interface NotificationsValue {
   markAllRead: () => Promise<void>;
   markOneRead: (id: string) => Promise<void>;
-};
+  recent: NotificationItem[];
+  refresh: () => Promise<void>;
+  unreadCount: number;
+}
 
 const NotificationsContext = createContext<NotificationsValue | null>(null);
 
@@ -65,20 +65,20 @@ const POLL_INTERVAL_MS = 60_000;
 // sees the API's casing.
 // ---------------------------------------------------------------------------
 
-type ApiNotification = {
-  id: string;
-  type: NotificationItem["type"];
-  created_at: string;
-  read_at: string | null;
-  run_id: string;
-  run_display_id: string;
-  instrument_id: string;
-  instrument_display_name: string;
-  instrument_type: InstrumentType;
-  comment_id: string | null;
-  comment_body: string | null;
+interface ApiNotification {
   actor: NotificationActor | null;
-};
+  comment_body: string | null;
+  comment_id: string | null;
+  created_at: string;
+  id: string;
+  instrument_display_name: string;
+  instrument_id: string;
+  instrument_type: InstrumentType;
+  read_at: string | null;
+  run_display_id: string;
+  run_id: string;
+  type: NotificationItem["type"];
+}
 
 function fromApi(n: ApiNotification): NotificationItem {
   return {

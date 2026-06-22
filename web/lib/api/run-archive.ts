@@ -56,30 +56,30 @@ export function estimateRetryAfterSeconds(input: {
   );
 }
 
-export type DownloadableFile = {
-  id: number;
+export interface DownloadableFile {
   filename: string;
+  id: number;
   s3Bucket: string;
   s3Key: string;
   // Nullable: older rows and not-yet-sized uploads can lack a size. Used only
   // to estimate the build-time retry hint and to let the builder decide
   // prefetch eligibility — never required for correctness.
   sizeBytes: number | null;
-};
+}
 
-export type PrepareRunArchiveInput = {
-  instrumentId: string;
-  runId: string;
+export interface PrepareRunArchiveInput {
+  // User who triggered this build, for the `archive_jobs.created_by`
+  // audit column. Should be `null` for token-authenticated callers
+  // (Lambda, MCP, watcher) since the column references `users.id`.
+  createdBy: string | null;
   // Subset of file IDs to include. `null` means "every uploaded file in
   // the run", which matches the default "Download all" behavior. An empty
   // array means the caller asked for a specific subset and supplied none
   // of the run's files; we surface that as a clear error.
   fileIdsFilter?: number[] | null;
-  // User who triggered this build, for the `archive_jobs.created_by`
-  // audit column. Should be `null` for token-authenticated callers
-  // (Lambda, MCP, watcher) since the column references `users.id`.
-  createdBy: string | null;
-};
+  instrumentId: string;
+  runId: string;
+}
 
 export type PrepareRunArchiveResult =
   | {
@@ -294,17 +294,17 @@ async function loadDownloadableFiles(
     }));
 }
 
-type EnsureArchiveJobInput = {
-  runInternalId: string;
-  fingerprint: string;
+interface EnsureArchiveJobInput {
   archiveBucket: string;
   createdBy: string | null;
-};
+  fingerprint: string;
+  runInternalId: string;
+}
 
-type EnsureArchiveJobResult = {
+interface EnsureArchiveJobResult {
   job: typeof archiveJobs.$inferSelect;
   ownsBuild: boolean;
-};
+}
 
 // Inserts a fresh in-flight job for (run, fingerprint), or — if another
 // request beat us to it — selects the existing one. The partial unique

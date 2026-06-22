@@ -39,11 +39,11 @@ import { toInitials } from "@/lib/utils";
 // personal-UX, never invoked by PATs, so we don't add a scope.
 // ---------------------------------------------------------------------------
 
-export type NotificationPreferencesDto = {
-  runsAllMuted: boolean;
+export interface NotificationPreferencesDto {
   commentsAttributedEnabled: boolean;
   commentsParticipatedEnabled: boolean;
-};
+  runsAllMuted: boolean;
+}
 
 const DEFAULT_PREFERENCES: NotificationPreferencesDto = {
   runsAllMuted: false,
@@ -99,11 +99,11 @@ export async function updatePreferences(
 // `enabled` state (missing row → disabled).
 // ---------------------------------------------------------------------------
 
-export type InstrumentSubscriptionRow = {
-  instrumentId: string;
+export interface InstrumentSubscriptionRow {
   displayName: string;
   enabled: boolean;
-};
+  instrumentId: string;
+}
 
 export async function listInstrumentSubscriptions(
   userId: string
@@ -159,32 +159,32 @@ export async function setInstrumentSubscription(
 // kilobyte-sized markdown blobs piggy-backing on every poll.
 const COMMENT_BODY_PREVIEW_LENGTH = 240;
 
-export type NotificationDto = {
-  id: string;
-  type: "run_created" | "comment_attributed" | "comment_participated";
-  createdAt: Date;
-  readAt: Date | null;
-  runId: string;
-  // Natural keys for linking — `/instruments/:instrumentId/runs/:runId` is
-  // what the row navigates to.
-  instrumentId: string;
-  runDisplayId: string;
-  instrumentDisplayName: string;
-  // Surfaced so the bell can render a type-specific icon for grouped
-  // `run_created` rows (microscope / gel doc / plate reader).
-  instrumentType: InstrumentType;
-  commentId: string | null;
-  // Truncated markdown body of the originating comment — only populated
-  // when `commentId` is set. NULL for `run_created` rows and for comment
-  // rows whose comment has been soft-deleted.
-  commentBody: string | null;
+export interface NotificationDto {
   actor: {
     id: string;
     displayName: string;
     initials: string;
     avatarUrl: string | null;
   } | null;
-};
+  // Truncated markdown body of the originating comment — only populated
+  // when `commentId` is set. NULL for `run_created` rows and for comment
+  // rows whose comment has been soft-deleted.
+  commentBody: string | null;
+  commentId: string | null;
+  createdAt: Date;
+  id: string;
+  instrumentDisplayName: string;
+  // Natural keys for linking — `/instruments/:instrumentId/runs/:runId` is
+  // what the row navigates to.
+  instrumentId: string;
+  // Surfaced so the bell can render a type-specific icon for grouped
+  // `run_created` rows (microscope / gel doc / plate reader).
+  instrumentType: InstrumentType;
+  readAt: Date | null;
+  runDisplayId: string;
+  runId: string;
+  type: "run_created" | "comment_attributed" | "comment_participated";
+}
 
 export async function listNotifications(
   userId: string,

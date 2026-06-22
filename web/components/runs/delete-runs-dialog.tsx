@@ -17,12 +17,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-export type DeleteRunTarget = {
-  instrumentId: string;
-  runId: string;
+export interface DeleteRunTarget {
   fileCount: number;
   hasProcessedFiles: boolean;
-};
+  instrumentId: string;
+  runId: string;
+}
 
 // ---------------------------------------------------------------------------
 // Controlled delete dialog shared by the row "..." menu and the bulk action

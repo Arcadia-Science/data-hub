@@ -8,13 +8,16 @@ import { RunsTableFooter } from "./runs-table-footer";
 // keep working. The type itself is derived server-side.
 export type RunRow = RunListRow;
 
-export type RanByOption = { value: string; label: string };
+export interface RanByOption {
+  label: string;
+  value: string;
+}
 
-export type RunsTableProps = {
+export interface RunsTableProps {
   data: RunRow[];
   instrumentId: string;
   ranByOptions: RanByOption[];
-};
+}
 
 /**
  * Thin wrapper around the per-instrument table variants.

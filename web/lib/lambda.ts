@@ -79,11 +79,11 @@ export function hasInvokeCredentials(): boolean {
   );
 }
 
-export type SignedLambdaInvokeInit = {
-  url: string;
+export interface SignedLambdaInvokeInit {
   body: string;
   contentType?: string;
-};
+  url: string;
+}
 
 // Build a SigV4-signed POST against a Lambda Function URL configured with
 // AuthType=AWS_IAM. Returns a `Request` ready to hand to `fetch()`.

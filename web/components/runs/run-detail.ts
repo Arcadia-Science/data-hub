@@ -19,19 +19,19 @@ export const RunDetail = {
   Report: RunReportSection,
 };
 
-export type RunDetailProps = {
-  run: RunDetailType;
-  // Current page of the server-paginated files table.
-  files: RunFile[];
-  filesPagination: RunFilesPage["pagination"];
-  // Aggregate per-run file counts (footer summary, variant counts).
-  fileStats: RunFileStats;
-  // Processed + PDF files for the report sections and well-data parsing.
-  reportFiles: RunFile[];
-  wellData: RawWellRow[];
-  instrumentId: string;
-  runId: string;
+export interface RunDetailProps {
   // Rendered below the header on every variant. Parent composes the
   // attribution UI so server-only user/session wiring stays at the page.
   attributionsSlot: React.ReactNode;
-};
+  // Aggregate per-run file counts (footer summary, variant counts).
+  fileStats: RunFileStats;
+  // Current page of the server-paginated files table.
+  files: RunFile[];
+  filesPagination: RunFilesPage["pagination"];
+  instrumentId: string;
+  // Processed + PDF files for the report sections and well-data parsing.
+  reportFiles: RunFile[];
+  run: RunDetailType;
+  runId: string;
+  wellData: RawWellRow[];
+}

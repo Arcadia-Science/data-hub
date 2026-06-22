@@ -14,9 +14,9 @@ import { instruments } from "@/lib/db/schema";
 
 const PutBodySchema = z.object({ enabled: z.boolean() }).strict();
 
-type RouteContext = {
+interface RouteContext {
   params: Promise<{ instrumentId: string }>;
-};
+}
 
 // ---------------------------------------------------------------------------
 // PUT /api/v1/settings/notifications/instruments/:instrumentId  { enabled }

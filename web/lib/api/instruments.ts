@@ -9,21 +9,21 @@ import {
   watchers,
 } from "@/lib/db/schema";
 
-export type InstrumentListItem = {
-  id: string;
+export interface InstrumentListItem {
+  createdAt: Date;
   displayName: string;
-  status: "pending" | "active" | "inactive";
-  instrumentType: InstrumentType;
   filePatterns: string[];
-  runCount: number;
-  runsThisWeek: number;
+  id: string;
+  instrumentType: InstrumentType;
   lastRunAt: Date | null;
-  watcherCount: number;
-  watchersOnline: number;
   /** Most recent heartbeat from any watcher attached to this instrument. */
   lastWatcherHeartbeatAt: Date | null;
-  createdAt: Date;
-};
+  runCount: number;
+  runsThisWeek: number;
+  status: "pending" | "active" | "inactive";
+  watcherCount: number;
+  watchersOnline: number;
+}
 
 // A watcher is stale when its last heartbeat is older than this threshold,
 // even if its DB status is "watching". Must match the window in dashboard.ts.
@@ -144,19 +144,19 @@ function buildWatcherCountSubquery() {
 // Coerces drizzle's raw-sql aggregate output into the InstrumentListItem
 // shape callers expect. Aggregates flow through the `sql` template without
 // the timestamp parser the column would apply, so we re-wrap dates here.
-type InstrumentListRow = {
-  id: string;
-  displayName: string;
-  status: "pending" | "active" | "inactive";
-  instrumentType: InstrumentType;
+interface InstrumentListRow {
   createdAt: Date;
+  displayName: string;
+  id: string;
+  instrumentType: InstrumentType;
+  lastRunAt: Date | null;
+  lastWatcherHeartbeatAt: Date | null;
   runCount: number;
   runsThisWeek: number;
-  lastRunAt: Date | null;
+  status: "pending" | "active" | "inactive";
   watcherCount: number;
   watchersOnline: number;
-  lastWatcherHeartbeatAt: Date | null;
-};
+}
 
 function hydrateInstrumentRow(
   row: InstrumentListRow,
@@ -230,10 +230,10 @@ export const getInstrumentListWithCounts = cache(
   }
 );
 
-export type DashboardInstrumentSummary = {
+export interface DashboardInstrumentSummary {
   rows: InstrumentListItem[];
   totalActive: number;
-};
+}
 
 /**
  * Focused query for the dashboard's truncated instruments table: pulls only
@@ -314,20 +314,9 @@ export const getRecentActiveInstrumentsForDashboard = cache(
   }
 );
 
-export type InstrumentDetail = {
-  id: string;
-  displayName: string;
-  status: "pending" | "active" | "inactive";
-  instrumentType: InstrumentType;
-  filePatterns: string[];
-  createdAt: Date;
-  updatedAt: Date;
-  runCount: number;
-  watcherCount: number;
-  watchersOnline: number;
-  watchersOffline: number;
-  /** Most recent heartbeat from any watcher attached to this instrument. */
-  lastWatcherHeartbeatAt: Date | null;
+export interface InstrumentDetail {
+  /** Desktop hostname of the canonical active watcher, if any. */
+  activeWatcherHostname: string | null;
   /**
    * The "canonical" watcher for this instrument, used to render watcher
    * affordances in the instrument header. When multiple watchers are
@@ -336,9 +325,20 @@ export type InstrumentDetail = {
    * by `createdAt`.
    */
   activeWatcherId: string | null;
-  /** Desktop hostname of the canonical active watcher, if any. */
-  activeWatcherHostname: string | null;
-};
+  createdAt: Date;
+  displayName: string;
+  filePatterns: string[];
+  id: string;
+  instrumentType: InstrumentType;
+  /** Most recent heartbeat from any watcher attached to this instrument. */
+  lastWatcherHeartbeatAt: Date | null;
+  runCount: number;
+  status: "pending" | "active" | "inactive";
+  updatedAt: Date;
+  watcherCount: number;
+  watchersOffline: number;
+  watchersOnline: number;
+}
 
 export const getInstrumentById = cache(async function getInstrumentById(
   instrumentId: string

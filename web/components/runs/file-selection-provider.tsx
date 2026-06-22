@@ -20,18 +20,18 @@ const DOWNLOADABLE_STATUSES = new Set([
 
 const REPROCESSABLE_STATUSES = new Set(["completed", "failed"]);
 
-export type FileCaps = {
-  upload: boolean;
+export interface FileCaps {
   dismiss: boolean;
-  reprocess: boolean;
   download: boolean;
-};
+  reprocess: boolean;
+  upload: boolean;
+}
 
-export type FileRef = {
-  id: number;
-  filename: string;
+export interface FileRef {
   caps: FileCaps;
-};
+  filename: string;
+  id: number;
+}
 
 // Returns null for rows that should not participate in selection at all
 // (dismissed files, transient `upload_requested` rows). Caller treats null
@@ -59,8 +59,7 @@ export function buildFileRef(file: RunFile): FileRef | null {
   };
 }
 
-type FileSelectionContextValue = {
-  state: { selected: ReadonlyMap<number, FileRef> };
+interface FileSelectionContextValue {
   actions: {
     toggle: (ref: FileRef) => void;
     selectMany: (refs: FileRef[]) => void;
@@ -76,7 +75,8 @@ type FileSelectionContextValue = {
     allCanReprocess: boolean;
     allCanDownload: boolean;
   };
-};
+  state: { selected: ReadonlyMap<number, FileRef> };
+}
 
 const FileSelectionContext = createContext<FileSelectionContextValue | null>(
   null

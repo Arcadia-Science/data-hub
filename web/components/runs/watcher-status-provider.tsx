@@ -10,9 +10,9 @@ import { createContext, type ReactNode, use } from "react";
  * `watcher-gated-upload-button.tsx`). Centralizing the flag here keeps
  * the run-detail variants free of `isWatcherOnline` prop drilling.
  */
-export type WatcherStatus = {
+export interface WatcherStatus {
   isWatcherOnline: boolean;
-};
+}
 
 const WatcherStatusContext = createContext<WatcherStatus | null>(null);
 

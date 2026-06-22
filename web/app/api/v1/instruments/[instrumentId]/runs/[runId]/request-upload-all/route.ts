@@ -12,9 +12,9 @@ import { instrumentHasOnlineWatcher } from "@/lib/api/instruments";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 
-type RouteContext = {
+interface RouteContext {
   params: Promise<{ instrumentId: string; runId: string }>;
-};
+}
 
 // ---------------------------------------------------------------------------
 // POST /api/v1/instruments/:instrumentId/runs/:runId/request-upload-all

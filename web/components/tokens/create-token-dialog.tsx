@@ -54,11 +54,11 @@ function computeExpiresAt(days: string): string | undefined {
 // Resource → [read, write] grid order. Derived from ALL_SCOPES so adding a
 // new scope automatically surfaces in the picker. Tokens API rejects "*"
 // from callers, so it's intentionally absent here.
-type ResourceRow = {
-  resource: string;
+interface ResourceRow {
   read?: Scope;
+  resource: string;
   write?: Scope;
-};
+}
 
 function buildResourceRows(): ResourceRow[] {
   const byResource = new Map<string, ResourceRow>();

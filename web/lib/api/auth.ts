@@ -8,15 +8,15 @@ import { db } from "@/lib/db";
 import { personalAccessTokens, users } from "@/lib/db/schema";
 import { hashToken } from "@/lib/tokens";
 
-export type AuthResult = {
-  userId: string;
+export interface AuthResult {
   authMethod: "session" | "token";
   // Permission scopes carried by this request. Token-authenticated requests
   // carry the scopes column from `personal_access_tokens`. Session
   // (NextAuth) authentication is treated as fully privileged and always
   // returns `["*"]`, so `hasScope` is a no-op for browser sessions.
   scopes: string[];
-};
+  userId: string;
+}
 
 /**
  * Validate a PAT from the Authorization header. Shared by both

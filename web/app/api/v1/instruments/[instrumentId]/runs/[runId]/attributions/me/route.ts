@@ -9,9 +9,9 @@ import {
 import { db } from "@/lib/db";
 import { runAttributions } from "@/lib/db/schema";
 
-type RouteContext = {
+interface RouteContext {
   params: Promise<{ instrumentId: string; runId: string }>;
-};
+}
 
 // ---------------------------------------------------------------------------
 // PUT /api/v1/instruments/:instrumentId/runs/:runId/attributions/me

@@ -26,9 +26,9 @@ function parseStatusParam(value: string | null): FilesStatusFilter | undefined {
   return;
 }
 
-type RouteContext = {
+interface RouteContext {
   params: Promise<{ instrumentId: string; runId: string }>;
-};
+}
 
 // The route itself returns its 202 response in a couple of round-trips
 // (cache HEAD, dedup INSERT), but the `after()` callback that POSTs the

@@ -33,11 +33,11 @@ const preferencesSchema = z.object({
 
 type FormPreferences = z.infer<typeof preferencesSchema>;
 
-type InstrumentRow = {
-  instrumentId: string;
+interface InstrumentRow {
   displayName: string;
   enabled: boolean;
-};
+  instrumentId: string;
+}
 
 // The form's `perInstrument` field is a Record<string, boolean> keyed by
 // instrument id. Storing it as a plain map (rather than parallel arrays)
@@ -46,10 +46,10 @@ type FormValues = FormPreferences & {
   perInstrument: Record<string, boolean>;
 };
 
-type Props = {
-  initialPreferences: FormPreferences;
+interface Props {
   initialInstruments: InstrumentRow[];
-};
+  initialPreferences: FormPreferences;
+}
 
 export function NotificationsSettingsForm({
   initialPreferences,

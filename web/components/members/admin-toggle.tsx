@@ -11,8 +11,13 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-type AdminToggleProps = {
-  userId: string;
+interface AdminToggleProps {
+  /**
+   * Pre-resolved display label used in the success / error toasts so the
+   * caller doesn't have to thread the user-row data into the toast
+   * messages from the parent table cell.
+   */
+  displayName: string;
   /**
    * Current admin state, taken from the latest server render. The switch
    * is uncontrolled with respect to local UI state — the optimistic flip
@@ -25,13 +30,8 @@ type AdminToggleProps = {
    * switch here so the user never sees that failure path.
    */
   isSelf: boolean;
-  /**
-   * Pre-resolved display label used in the success / error toasts so the
-   * caller doesn't have to thread the user-row data into the toast
-   * messages from the parent table cell.
-   */
-  displayName: string;
-};
+  userId: string;
+}
 
 export function AdminToggle({
   userId,

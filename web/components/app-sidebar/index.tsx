@@ -14,12 +14,12 @@ import {
 } from "@/components/ui/sidebar";
 import type { SidebarInstrument, SidebarWatcher } from "@/lib/api/sidebar";
 
-type AppSidebarProps = {
-  session: Session;
+interface AppSidebarProps {
   instruments: SidebarInstrument[];
-  watchers: SidebarWatcher[];
+  session: Session;
   signOutAction: () => Promise<void>;
-};
+  watchers: SidebarWatcher[];
+}
 
 export function AppSidebar({
   session,

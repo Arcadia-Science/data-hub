@@ -55,12 +55,12 @@ export async function POST(
     return apiError(400, VALIDATION_ERROR, "Maximum 100 events per request");
   }
 
-  type EventInput = {
-    event_type: string;
-    timestamp: string;
-    message: string;
+  interface EventInput {
     details?: Record<string, unknown>;
-  };
+    event_type: string;
+    message: string;
+    timestamp: string;
+  }
 
   const values = [];
   for (let i = 0; i < body.events.length; i++) {
@@ -80,7 +80,7 @@ export async function POST(
       );
     }
     const ts = new Date(evt.timestamp);
-    if (isNaN(ts.getTime())) {
+    if (Number.isNaN(ts.getTime())) {
       return apiError(400, VALIDATION_ERROR, `Invalid timestamp at index ${i}`);
     }
     values.push({

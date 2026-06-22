@@ -35,10 +35,10 @@ import {
 import { auth } from "@/lib/auth";
 import { instrumentDetailParamsCache } from "@/lib/search-params";
 
-type Props = {
+interface Props {
   params: Promise<{ instrumentId: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
-};
+}
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { instrumentId } = await params;

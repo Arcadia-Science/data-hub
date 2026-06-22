@@ -6,11 +6,11 @@ import { SettingsNav } from "@/components/app-sidebar/settings-nav";
 import { SidebarContent } from "@/components/ui/sidebar";
 import type { SidebarInstrument, SidebarWatcher } from "@/lib/api/sidebar";
 
-type AppSidebarContentProps = {
+interface AppSidebarContentProps {
   instruments: SidebarInstrument[];
-  watchers: SidebarWatcher[];
   isAdmin: boolean;
-};
+  watchers: SidebarWatcher[];
+}
 
 // Centralizes the "main vs. settings" mode toggle so the rest of the sidebar
 // doesn't need to know about pathname-based switching. When the user

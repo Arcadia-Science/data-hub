@@ -13,15 +13,18 @@ import { Separator } from "@/components/ui/separator";
 import { formatDateRange } from "@/lib/date";
 import { cn } from "@/lib/utils";
 
-export type DateRange = { from: string | null; to: string | null };
+export interface DateRange {
+  from: string | null;
+  to: string | null;
+}
 
 export type PresetId = "24h" | "3d" | "1w" | "2w" | "1m";
 
-type Preset = {
+interface Preset {
+  days: number;
   id: PresetId;
   label: string;
-  days: number;
-};
+}
 
 // Module-scoped so we don't reallocate on every render.
 const PRESETS: readonly Preset[] = [

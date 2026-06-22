@@ -7,12 +7,12 @@
 // (X.Y.Z, X.Y.Z.postN, X.Y.ZrcN, X.Y.Z-dev0) all fit cleanly under this
 // simpler model so we keep the implementation small.
 
-type ParsedVersion = {
+interface ParsedVersion {
   core: [number, number, number];
   // Anything after the X.Y.Z prefix, including the leading "." / "-".
   // Empty string ⇒ release; non-empty ⇒ pre-release / post-release suffix.
   suffix: string;
-};
+}
 
 function parseLoose(v: string): ParsedVersion | null {
   const m = /^(\d+)\.(\d+)\.(\d+)([.-].+)?$/.exec(v.trim());

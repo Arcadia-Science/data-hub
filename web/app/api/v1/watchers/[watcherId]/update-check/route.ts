@@ -15,12 +15,12 @@ import { watcherReleaseConfig } from "@/lib/db/schema";
  * `latest_version: null` so watchers don't log spurious 5xxs and the
  * client treats it as "no update available".
  */
-type WatcherReleaseInfo = {
-  latest_version: string | null;
-  min_supported_version: string | null;
+interface WatcherReleaseInfo {
   channel: string;
+  latest_version: string | null;
   mandatory: boolean;
-};
+  min_supported_version: string | null;
+}
 
 async function readReleaseInfo(): Promise<WatcherReleaseInfo> {
   // The singleton check constraint on `id` guarantees at most one row;

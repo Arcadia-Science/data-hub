@@ -13,9 +13,9 @@ import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
 import { getPresignedUploadUrl, getS3RawDataBucket } from "@/lib/s3";
 
-type RouteContext = {
+interface RouteContext {
   params: Promise<{ instrumentId: string; runId: string }>;
-};
+}
 
 const UPLOAD_URL_EXPIRY_SECONDS = 60 * 60; // 1 hour
 

@@ -11,18 +11,18 @@ import { toInitials } from "@/lib/utils";
 // 403 vs 404 distinction). Reads are open to any authenticated user.
 // ---------------------------------------------------------------------------
 
-export type RunCommentDto = {
-  id: string;
+export interface RunCommentDto {
   body: string;
+  created_at: Date;
+  edited_at: Date | null;
+  id: string;
   user: {
     id: string;
     displayName: string;
     initials: string;
     avatarUrl: string | null;
   };
-  created_at: Date;
-  edited_at: Date | null;
-};
+}
 
 function toDto(row: {
   id: string;

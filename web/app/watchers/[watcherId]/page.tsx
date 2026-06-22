@@ -13,10 +13,10 @@ import { auth } from "@/lib/auth";
 import { todayDateString } from "@/lib/date";
 import { watcherDetailParamsCache } from "@/lib/search-params";
 
-type Props = {
+interface Props {
   params: Promise<{ watcherId: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
-};
+}
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { watcherId } = await params;

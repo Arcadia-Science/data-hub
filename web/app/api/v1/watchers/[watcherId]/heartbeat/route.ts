@@ -63,7 +63,7 @@ export async function POST(
   const timestamp = body.timestamp
     ? new Date(body.timestamp as string)
     : new Date();
-  if (isNaN(timestamp.getTime())) {
+  if (Number.isNaN(timestamp.getTime())) {
     return apiError(400, VALIDATION_ERROR, "Invalid timestamp");
   }
 

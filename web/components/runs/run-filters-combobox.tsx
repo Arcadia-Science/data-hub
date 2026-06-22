@@ -16,15 +16,15 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 
-type FilterValues = {
+interface FilterValues {
   includeDeleted: boolean;
-};
+}
 
-type FilterDef = {
+interface FilterDef {
+  icon: ComponentType<{ className?: string }>;
   key: keyof FilterValues;
   label: string;
-  icon: ComponentType<{ className?: string }>;
-};
+}
 
 const FILTERS: readonly FilterDef[] = [
   { key: "includeDeleted", label: "Show deleted runs", icon: Trash2 },

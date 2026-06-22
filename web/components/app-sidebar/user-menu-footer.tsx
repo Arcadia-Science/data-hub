@@ -18,14 +18,14 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 
-type UserMenuFooterProps = {
+interface UserMenuFooterProps {
+  signOutAction: () => Promise<void>;
   user: {
     name?: string | null;
     email?: string | null;
     image?: string | null;
   };
-  signOutAction: () => Promise<void>;
-};
+}
 
 function getInitials(name?: string | null, email?: string | null): string {
   if (name) {

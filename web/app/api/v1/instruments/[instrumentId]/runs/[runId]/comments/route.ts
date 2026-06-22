@@ -11,9 +11,9 @@ import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { notifyComment } from "@/lib/api/notifications";
 import { createComment, listCommentsForRun } from "@/lib/api/run-comments";
 
-type RouteContext = {
+interface RouteContext {
   params: Promise<{ instrumentId: string; runId: string }>;
-};
+}
 
 // Cap on the markdown source we accept. Generous for prose, well below any
 // jsonb / text limit. Bumping is a route-only change — no migration needed.

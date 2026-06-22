@@ -16,9 +16,9 @@ import { files } from "@/lib/db/schema";
 // untouched so Lambda retries don't regress in-progress / completed work.
 const PRE_UPLOAD_STATUSES = new Set(["detected", "upload_requested"]);
 
-type RouteContext = {
+interface RouteContext {
   params: Promise<{ instrumentId: string; runId: string }>;
-};
+}
 
 // ---------------------------------------------------------------------------
 // POST /api/v1/instruments/:instrumentId/runs/:runId/files

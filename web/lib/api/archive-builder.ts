@@ -5,10 +5,10 @@ import { getS3ArchivesBucket } from "@/lib/s3";
 // Inputs to `fingerprintFiles`. Only the fields that participate in the
 // hash are accepted — adding extra fields here would suggest they affect
 // cache identity when they don't.
-export type ArchiveFileInput = {
+export interface ArchiveFileInput {
   id: number;
   s3Key: string;
-};
+}
 
 // Stable hash of the (file_id, s3_key) pairs that compose an archive. Adding
 // or removing a file changes the fingerprint, so the route never serves a
@@ -79,10 +79,7 @@ function getLambdaUrl(): string {
   return url;
 }
 
-export type InvokeBuildArchiveInput = {
-  jobId?: string;
-  instrumentId: string;
-  runId: string;
+export interface InvokeBuildArchiveInput {
   // Per-file source bucket so a single archive can mix files from the raw
   // bucket and the processed bucket (e.g. SpectraMax raw .xls + Lambda-
   // produced processed CSV). The Lambda allow-lists each bucket against its
@@ -98,7 +95,10 @@ export type InvokeBuildArchiveInput = {
     sourceBucket: string;
     sizeBytes?: number | null;
   }[];
-};
+  instrumentId: string;
+  jobId?: string;
+  runId: string;
+}
 
 export type InvokeBuildArchiveResult =
   | {

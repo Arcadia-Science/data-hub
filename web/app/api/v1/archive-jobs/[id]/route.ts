@@ -6,9 +6,9 @@ import { isValidUUID } from "@/lib/api/validators";
 import { db } from "@/lib/db";
 import { archiveJobs } from "@/lib/db/schema";
 
-type RouteContext = {
+interface RouteContext {
   params: Promise<{ id: string }>;
-};
+}
 
 // ---------------------------------------------------------------------------
 // PATCH /api/v1/archive-jobs/:id
@@ -31,13 +31,13 @@ type RouteContext = {
 
 const TERMINAL_STATUSES = new Set(["ready", "failed"]);
 
-type PatchBody = {
-  status?: unknown;
+interface PatchBody {
   archive_bucket?: unknown;
   archive_key?: unknown;
-  size_bytes?: unknown;
   error_message?: unknown;
-};
+  size_bytes?: unknown;
+  status?: unknown;
+}
 
 export async function PATCH(request: NextRequest, { params }: RouteContext) {
   const authResult = await authorize(request, "archive-jobs:write");

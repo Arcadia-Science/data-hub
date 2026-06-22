@@ -120,7 +120,7 @@ export async function headS3Object(
   }
 }
 
-export type PresignedDownloadOptions = {
+export interface PresignedDownloadOptions {
   expiresIn?: number;
   // Override the filename the browser saves the response under. Browsers
   // ignore the `<a download="…">` attribute on cross-origin URLs unless the
@@ -129,7 +129,7 @@ export type PresignedDownloadOptions = {
   // `response-content-disposition` query param. S3 echoes that header back
   // on the GET response, and the browser uses it as the saved filename.
   filename?: string;
-};
+}
 
 // Sanitize a filename for use inside a `Content-Disposition` header. Strips
 // CR/LF (header injection) and quotes (which would terminate the filename

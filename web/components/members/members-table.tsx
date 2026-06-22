@@ -11,22 +11,22 @@ import {
 } from "@/components/ui/table";
 import { avatarColor, toInitials } from "@/lib/avatar-color";
 
-export type MemberRow = {
-  id: string;
-  name: string | null;
+export interface MemberRow {
   email: string | null;
+  id: string;
   image: string | null;
   isAdmin: boolean;
-};
+  name: string | null;
+}
 
-type MembersTableProps = {
-  data: MemberRow[];
+interface MembersTableProps {
   /**
    * The signed-in admin viewing the table. Used to flag the self row so
    * the toggle is disabled (server also rejects self-demotion).
    */
   currentUserId: string;
-};
+  data: MemberRow[];
+}
 
 export function MembersTable({ data, currentUserId }: MembersTableProps) {
   return (

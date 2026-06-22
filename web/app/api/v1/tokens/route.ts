@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
   let expiresAt: Date | null = null;
   if (body.expires_at) {
     expiresAt = new Date(body.expires_at);
-    if (isNaN(expiresAt.getTime())) {
+    if (Number.isNaN(expiresAt.getTime())) {
       return apiError(
         400,
         VALIDATION_ERROR,

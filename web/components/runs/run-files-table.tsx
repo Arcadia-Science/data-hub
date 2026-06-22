@@ -318,11 +318,11 @@ function canReprocess(file: RunFile): boolean {
 // data without restoring the run.
 // ---------------------------------------------------------------------------
 
-export type ReadOnlyRunFilesTableProps = {
+export interface ReadOnlyRunFilesTableProps {
   files: RunFile[];
   isPending: boolean;
   onReprocess: (id: number) => void;
-};
+}
 
 export function ReadOnlyRunFilesTable({
   files,
@@ -373,13 +373,13 @@ export function ReadOnlyRunFilesTable({
 // action bar reads from the same context.
 // ---------------------------------------------------------------------------
 
-export type EditableRunFilesTableProps = {
+export interface EditableRunFilesTableProps {
   files: RunFile[];
   isPending: boolean;
-  onUpload: (id: number) => void;
   onDismiss: (id: number) => void;
   onReprocess: (id: number) => void;
-};
+  onUpload: (id: number) => void;
+}
 
 export function EditableRunFilesTable({
   files,

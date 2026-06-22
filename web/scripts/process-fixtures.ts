@@ -39,33 +39,33 @@ const LAMBDA_DIR = path.resolve(SCRIPT_DIR, "..", "..", "lambda");
 
 const DEFAULT_API_URL = "http://localhost:3000/api/v1";
 
-export type FixtureTriple = {
+export interface FixtureTriple {
+  filename: string;
   instrumentId: string;
   runId: string;
-  filename: string;
-};
+}
 
-export type ProcessFixturesOptions = {
+export interface ProcessFixturesOptions {
   apiKey: string;
   apiUrl?: string;
   // When false, suppress the progress/skip logs (used by callers
   // that want to format their own output). Defaults to true.
   log?: boolean;
-};
+}
 
-export type ProcessFixturesResult = {
+export interface ProcessFixturesResult {
+  failed: number;
+  // Counts of attempted handler invocations. `failed` rows are
+  // logged but don't throw — the seed/processing step is best-
+  // effort and never blocks the dev from getting back to work.
+  ran: number;
   // Whether the entire step was skipped (mirror not configured, API
   // not reachable, or no fixture rows found). When skipped, no
   // handler invocation was attempted.
   skipped: boolean;
   // Reason for the skip — only set when `skipped` is true.
   skipReason?: "no-mirror" | "api-down" | "no-fixtures";
-  // Counts of attempted handler invocations. `failed` rows are
-  // logged but don't throw — the seed/processing step is best-
-  // effort and never blocks the dev from getting back to work.
-  ran: number;
-  failed: number;
-};
+}
 
 // Probe the dev API with the supplied PAT. Hits the auth-gated
 // `/instruments` endpoint instead of an unauth health route so a

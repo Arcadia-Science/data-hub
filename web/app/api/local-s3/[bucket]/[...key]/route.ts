@@ -26,9 +26,9 @@ import {
   resolveMirrorPath,
 } from "@/lib/s3-local-mirror";
 
-type RouteContext = {
+interface RouteContext {
   params: Promise<{ bucket: string; key: string[] }>;
-};
+}
 
 const NOT_FOUND_RESPONSE = () => new Response("Not Found", { status: 404 });
 

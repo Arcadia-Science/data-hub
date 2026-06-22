@@ -64,18 +64,18 @@ const PutBodySchema = z.strictObject({
     .transform((v) => v ?? false),
 });
 
-type WatcherReleaseResponse = {
-  latest_version: string | null;
-  min_supported_version: string | null;
+interface WatcherReleaseResponse {
   channel: string;
+  latest_version: string | null;
   mandatory: boolean;
+  min_supported_version: string | null;
   updated_at: string | null;
   updated_by: {
     id: string;
     name: string | null;
     email: string | null;
   } | null;
-};
+}
 
 const EMPTY_RESPONSE: WatcherReleaseResponse = {
   latest_version: null,

@@ -20,10 +20,10 @@ import { runDetailParamsCache } from "@/lib/search-params";
 
 const FILES_PER_PAGE = 10;
 
-type Props = {
+interface Props {
   params: Promise<{ instrumentId: string; runId: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
-};
+}
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { instrumentId, runId } = await params;

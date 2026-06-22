@@ -64,13 +64,13 @@ export async function lookupFileForDownload(
   };
 }
 
-export type DownloadableRunFilesSummary = {
+export interface DownloadableRunFilesSummary {
   count: number;
   // Sum of `size_bytes` across all matching files, or null when at least one
   // file is missing its size. The UI uses this to decide whether to expect
   // a sync 302 or an async 202 from the archive route.
   totalSizeBytes: number | null;
-};
+}
 
 export async function summarizeDownloadableRunFiles(
   runInternalId: string

@@ -3,9 +3,9 @@ import { authorize } from "@/lib/api/auth";
 import { apiError, VALIDATION_ERROR } from "@/lib/api/errors";
 import { reprocessFile } from "@/lib/api/file-reprocessing";
 
-type RouteContext = {
+interface RouteContext {
   params: Promise<{ fileId: string }>;
-};
+}
 
 // ---------------------------------------------------------------------------
 // POST /api/v1/files/:fileId/reprocess
@@ -24,7 +24,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
   const { fileId } = await params;
   const numericId = Number.parseInt(fileId, 10);
-  if (isNaN(numericId)) {
+  if (Number.isNaN(numericId)) {
     return apiError(400, VALIDATION_ERROR, "Invalid file ID");
   }
 

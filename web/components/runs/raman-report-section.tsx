@@ -1,10 +1,10 @@
 import { RamanSpectrumViewer } from "@/components/runs/raman-spectrum-viewer";
 import { Card, CardContent } from "@/components/ui/card";
 
-export type RamanSpectrumFileRef = {
+export interface RamanSpectrumFileRef {
   fileId: number;
   filename: string;
-};
+}
 
 export function RamanReportSection({
   spectra,

@@ -48,16 +48,16 @@ const formSchema = z.object({
 
 type WatcherReleaseFormValues = z.input<typeof formSchema>;
 
-type LastUpdated = {
+interface LastUpdated {
   at: string;
-  byName: string | null;
   byEmail: string | null;
-};
+  byName: string | null;
+}
 
-type WatcherReleaseFormProps = {
+interface WatcherReleaseFormProps {
   initial: WatcherReleaseFormValues;
   lastUpdated: LastUpdated | null;
-};
+}
 
 export function WatcherReleaseForm({
   initial,

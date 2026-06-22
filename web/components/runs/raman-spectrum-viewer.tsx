@@ -35,11 +35,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 
-type SpectrumPoint = {
-  wavenumber: number;
+interface SpectrumPoint {
   intensity: number;
   intensityDarkSubtracted: number;
-};
+  wavenumber: number;
+}
 
 type Series = "intensity" | "intensityDarkSubtracted";
 

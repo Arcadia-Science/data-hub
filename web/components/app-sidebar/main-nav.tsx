@@ -21,10 +21,10 @@ import {
 } from "@/components/ui/sidebar";
 import type { SidebarInstrument, SidebarWatcher } from "@/lib/api/sidebar";
 
-type MainNavProps = {
+interface MainNavProps {
   instruments: SidebarInstrument[];
   watchers: SidebarWatcher[];
-};
+}
 
 export function MainNav({ instruments, watchers }: MainNavProps) {
   const pathname = usePathname();
@@ -83,16 +83,16 @@ export function MainNav({ instruments, watchers }: MainNavProps) {
   );
 }
 
-type CollapsibleNavSectionProps = {
-  icon: LucideIcon;
-  label: string;
+interface CollapsibleNavSectionProps {
   /** Pathname prefix used to determine the active/expanded state. */
   basePath: string;
+  currentPath: string;
+  icon: LucideIcon;
+  items: Array<{ key: string; href: string; label: string }>;
+  label: string;
   /** Href for the trailing "View all" sub-item that opens the full list. */
   viewAllHref: string;
-  items: Array<{ key: string; href: string; label: string }>;
-  currentPath: string;
-};
+}
 
 function CollapsibleNavSection({
   icon: Icon,

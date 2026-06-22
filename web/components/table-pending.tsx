@@ -11,7 +11,7 @@ import {
 } from "react";
 import { cn } from "@/lib/utils";
 
-type TablePendingContextValue = {
+interface TablePendingContextValue {
   // Instantaneous transition state from React. Use this for logic that should
   // react immediately (e.g. blocking double-clicks on pagination).
   isPending: boolean;
@@ -22,7 +22,7 @@ type TablePendingContextValue = {
   // Pass this into nuqs `withOptions({ startTransition })` so URL updates are
   // tracked as React transitions.
   startTransition: TransitionStartFunction;
-};
+}
 
 const noopStartTransition: TransitionStartFunction = (cb) => cb();
 

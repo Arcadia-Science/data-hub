@@ -2,7 +2,7 @@ import { DevSignInForm } from "@/components/auth/dev-sign-in-form";
 import { Button } from "@/components/ui/button";
 import { isDevAuthEnabled, signIn } from "@/lib/auth";
 
-type SignInRequiredProps = {
+interface SignInRequiredProps {
   /**
    * URL the user should land on after a successful sign-in. The unfurler
    * arrives here without a session, so `callbackUrl` lets us return them to
@@ -15,7 +15,7 @@ type SignInRequiredProps = {
    * inline formatting without us inventing per-case prop variants.
    */
   children?: React.ReactNode;
-};
+}
 
 /**
  * Rendered in place of a signed-in page's body when there's no session.
