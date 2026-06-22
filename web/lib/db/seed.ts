@@ -550,7 +550,7 @@ export interface SeededTeammate {
 // Fixed preset list (rather than randomized) so reseeds produce stable
 // identities — screenshots / bug reports referencing "Lucy" keep matching
 // after a `db:reseed`.
-const TEAMMATE_PRESETS: Array<Omit<SeededTeammate, "id">> = [
+const TEAMMATE_PRESETS: Omit<SeededTeammate, "id">[] = [
   { name: "Lucy Hurlbut", email: "lucy@local" },
   { name: "Marcus Chen", email: "marcus@local" },
   { name: "Priya Patel", email: "priya@local" },

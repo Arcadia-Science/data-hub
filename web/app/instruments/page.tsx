@@ -37,8 +37,8 @@ export default async function InstrumentsPage() {
   // lookup inside the table.
   const [instruments, subscriptions, prefs] = await Promise.all([
     getInstrumentListWithCounts(),
-    listInstrumentSubscriptions(session.user.id!),
-    getPreferences(session.user.id!),
+    listInstrumentSubscriptions(session.user.id),
+    getPreferences(session.user.id),
   ]);
 
   // Composition: the management actions cell (Edit dialog + Confirm

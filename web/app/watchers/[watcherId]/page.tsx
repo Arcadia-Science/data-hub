@@ -45,7 +45,7 @@ export default async function WatcherDetailPage({
   // <HeartbeatChart> clips the chart precisely on the client, and the event log
   // already orders by timestamp so a slightly wider window is harmless.
   function toTzSafeSince(dateString: string): Date {
-    const d = new Date(dateString + "T00:00:00Z");
+    const d = new Date(`${dateString}T00:00:00Z`);
     d.setUTCDate(d.getUTCDate() - 1);
     return d;
   }

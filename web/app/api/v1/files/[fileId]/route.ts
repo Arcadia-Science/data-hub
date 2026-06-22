@@ -10,9 +10,9 @@ import {
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 
-type RouteContext = {
+interface RouteContext {
   params: Promise<{ fileId: string }>;
-};
+}
 
 // Enforced state machine for file status transitions:
 //   Watcher flow:   detected → [upload_requested →] uploaded → processing → completed|failed

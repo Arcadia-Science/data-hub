@@ -100,7 +100,7 @@ export default async function RootLayout({
     ? await Promise.all([
         getSidebarInstruments(),
         getSidebarWatchers(),
-        countUnread(session.user.id!),
+        countUnread(session.user.id),
       ])
     : [[], [], 0];
 

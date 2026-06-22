@@ -106,14 +106,14 @@ export async function setup() {
     res.end();
   });
   await new Promise<void>((resolve) =>
-    slackCaptureServer!.listen(slackPort, "127.0.0.1", resolve)
+    slackCaptureServer?.listen(slackPort, "127.0.0.1", resolve)
   );
   const slackCaptureBaseUrl = `http://127.0.0.1:${slackPort}`;
 
   // 2. Push schema via drizzle-kit. --force skips the interactive confirmation
   //    prompt that drizzle-kit shows when it detects destructive changes.
   execSync("npx drizzle-kit push --force", {
-    cwd: import.meta.dirname ? import.meta.dirname + "/../.." : process.cwd(),
+    cwd: import.meta.dirname ? `${import.meta.dirname}/../..` : process.cwd(),
     env: { ...process.env, DATABASE_URL: databaseUrl },
     stdio: "pipe",
   });
@@ -186,13 +186,13 @@ export async function setup() {
   delete serverEnv.AWS_ROLE_ARN;
 
   execSync("npx next build", {
-    cwd: import.meta.dirname ? import.meta.dirname + "/../.." : process.cwd(),
+    cwd: import.meta.dirname ? `${import.meta.dirname}/../..` : process.cwd(),
     env: serverEnv,
     stdio: "pipe",
   });
 
   serverProcess = spawn("npx", ["next", "start", "-p", String(port)], {
-    cwd: import.meta.dirname ? import.meta.dirname + "/../.." : process.cwd(),
+    cwd: import.meta.dirname ? `${import.meta.dirname}/../..` : process.cwd(),
     env: serverEnv,
     stdio: "pipe",
   });
@@ -227,7 +227,7 @@ export async function setup() {
     }
     if (slackCaptureServer) {
       await new Promise<void>((resolve, reject) =>
-        slackCaptureServer!.close((err) => (err ? reject(err) : resolve()))
+        slackCaptureServer?.close((err) => (err ? reject(err) : resolve()))
       );
       slackCaptureServer = null;
     }

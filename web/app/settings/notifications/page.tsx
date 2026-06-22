@@ -31,8 +31,8 @@ export default async function NotificationsSettingsPage() {
   // schema-side defaults when no row exists yet, so the form always
   // renders with concrete values — no need for nullable form state.
   const [prefs, subscriptions] = await Promise.all([
-    getPreferences(session.user.id!),
-    listInstrumentSubscriptions(session.user.id!),
+    getPreferences(session.user.id),
+    listInstrumentSubscriptions(session.user.id),
   ]);
 
   return (

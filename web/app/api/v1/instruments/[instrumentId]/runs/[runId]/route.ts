@@ -203,17 +203,17 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   const updated = await lookupRunByNaturalKey(instrumentId, runId);
 
   return Response.json({
-    id: updated!.id,
-    instrument_id: updated!.instrumentId,
-    instrument_display_name: updated!.instrumentDisplayName,
-    run_id: updated!.runId,
-    source: updated!.source,
-    watcher_id: updated!.watcherId,
-    metadata: updated!.metadata,
-    created_at: updated!.createdAt,
-    acquired_at: updated!.acquiredAt,
-    updated_at: updated!.updatedAt,
-    deleted_at: updated!.deletedAt,
+    id: updated?.id,
+    instrument_id: updated?.instrumentId,
+    instrument_display_name: updated?.instrumentDisplayName,
+    run_id: updated?.runId,
+    source: updated?.source,
+    watcher_id: updated?.watcherId,
+    metadata: updated?.metadata,
+    created_at: updated?.createdAt,
+    acquired_at: updated?.acquiredAt,
+    updated_at: updated?.updatedAt,
+    deleted_at: updated?.deletedAt,
   });
 }
 

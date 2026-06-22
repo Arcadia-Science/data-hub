@@ -34,7 +34,7 @@ async function parseSseResponse(res: Response) {
       return JSON.parse(dataLine.slice("data: ".length));
     })
     .filter(Boolean);
-  return events[events.length - 1];
+  return events.at(-1);
 }
 
 describe("MCP Server (HTTP)", () => {

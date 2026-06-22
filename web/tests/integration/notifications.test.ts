@@ -784,8 +784,8 @@ describe("Notifications", () => {
 
       const commentRow = rows.find((r) => r.type === "comment_attributed")!;
       expect(commentRow.actor).not.toBeNull();
-      expect(commentRow.actor!.id).toBe(actor);
-      expect(commentRow.actor!.initials).toBeTruthy();
+      expect(commentRow.actor?.id).toBe(actor);
+      expect(commentRow.actor?.initials).toBeTruthy();
       expect(commentRow.commentId).toBeTruthy();
     });
 
@@ -863,21 +863,24 @@ describe("Notifications", () => {
       const bRows = await listNotifications(userB);
       const targetForB = bRows.find((r) => r.readAt === null);
       expect(targetForB).toBeDefined();
+      if (!targetForB) {
+        throw new Error("expected unread notification for user B");
+      }
 
       const bUnreadBefore = await countUnread(userB);
 
       // Caller is userA, but the id belongs to userB — the user-scoped
       // `where` in markRead must reject the cross-user attempt.
-      await markRead(userA, [targetForB!.id]);
+      await markRead(userA, [targetForB.id]);
 
       const bUnreadAfter = await countUnread(userB);
       expect(bUnreadAfter).toBe(bUnreadBefore);
 
       const stillUnread = (await listNotifications(userB)).find(
-        (r) => r.id === targetForB!.id
+        (r) => r.id === targetForB.id
       );
       expect(stillUnread).toBeDefined();
-      expect(stillUnread!.readAt).toBeNull();
+      expect(stillUnread?.readAt).toBeNull();
     });
   });
 

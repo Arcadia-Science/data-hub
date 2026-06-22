@@ -62,19 +62,19 @@ const BUCKET_LABEL: Record<Bucket, string> = {
 };
 
 interface CommentEntry {
-  id: string;
   kind: "comment";
+  id: string;
   notification: NotificationItem;
 }
 
 interface RunGroupEntry {
+  kind: "run_group";
   id: string;
-  instrumentDisplayName: string;
   instrumentId: string;
   instrumentType: InstrumentType;
-  kind: "run_group";
-  latestCreatedAt: string;
+  instrumentDisplayName: string;
   runs: NotificationItem[];
+  latestCreatedAt: string;
 }
 
 type Entry = CommentEntry | RunGroupEntry;
@@ -550,10 +550,7 @@ function RunGroupNotificationRow({
                   >
                     <span className="truncate">{run.runDisplayId}</span>
                     {run.readAt === null ? (
-                      <span
-                        aria-label="Unread"
-                        className="ml-auto inline-block size-1.5 shrink-0 rounded-full bg-primary"
-                      />
+                      <span className="ml-auto inline-block size-1.5 shrink-0 rounded-full bg-primary" />
                     ) : null}
                   </Link>
                 </li>

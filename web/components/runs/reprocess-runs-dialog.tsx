@@ -103,7 +103,7 @@ export function ReprocessRunsDialog({
 
   const title =
     runCount === 1
-      ? `Reprocess run ${runs[0]!.runId}?`
+      ? `Reprocess run ${runs[0]?.runId}?`
       : `Reprocess ${runCount} runs?`;
 
   return (

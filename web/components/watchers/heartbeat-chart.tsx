@@ -40,8 +40,8 @@ function computeWindow(since: string): {
   windowEnd: Date;
 } {
   const now = Math.floor(Date.now() / FIVE_MIN) * FIVE_MIN;
-  const windowStart = new Date(since + "T00:00:00");
-  const endOfDay = new Date(since + "T00:00:00");
+  const windowStart = new Date(`${since}T00:00:00`);
+  const endOfDay = new Date(`${since}T00:00:00`);
   endOfDay.setDate(endOfDay.getDate() + 1);
   const windowEnd = endOfDay.getTime() > now ? new Date(now) : endOfDay;
   return { windowStart, windowEnd };

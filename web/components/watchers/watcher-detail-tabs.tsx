@@ -34,7 +34,7 @@ export function WatcherDetailTabs({
   const [{ since }] = useQueryStates(watcherDetailSearchParams);
 
   const effectiveSince = since ?? todayDateString();
-  const statusSubtitle = `Activity and connectivity for ${new Date(effectiveSince + "T00:00:00").toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}`;
+  const statusSubtitle = `Activity and connectivity for ${new Date(`${effectiveSince}T00:00:00`).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}`;
 
   return (
     <Tabs onValueChange={setTab} value={tab}>

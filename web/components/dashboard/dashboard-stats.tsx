@@ -48,11 +48,7 @@ function DataGeneratedSubline({
   if (bytes === 0) {
     return <span>{emptyLabel}</span>;
   }
-  return (
-    <>
-      <span>{formatBytes(bytes)} generated</span>
-    </>
-  );
+  return <span>{formatBytes(bytes)} generated</span>;
 }
 
 export function DashboardStatsCards({ stats }: { stats: DashboardStats }) {

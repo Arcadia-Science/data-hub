@@ -30,56 +30,54 @@ export function MainNav({ instruments, watchers }: MainNavProps) {
   const pathname = usePathname();
 
   return (
-    <>
-      <SidebarGroup>
-        <SidebarGroupLabel>Navigation</SidebarGroupLabel>
-        <SidebarGroupContent>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                asChild
-                isActive={pathname === "/"}
-                tooltip="Home"
-              >
-                <Link href="/">
-                  <Home />
-                  <span>Home</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
+    <SidebarGroup>
+      <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+      <SidebarGroupContent>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              asChild
+              isActive={pathname === "/"}
+              tooltip="Home"
+            >
+              <Link href="/">
+                <Home />
+                <span>Home</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
 
-            <CollapsibleNavSection
-              basePath="/instruments"
-              currentPath={pathname}
-              icon={Cpu}
-              items={instruments.map((instrument) => ({
-                key: instrument.id,
-                href: `/instruments/${instrument.id}`,
-                label: instrument.displayName,
-              }))}
-              label="Instruments"
-              viewAllHref="/instruments"
-            />
+          <CollapsibleNavSection
+            basePath="/instruments"
+            currentPath={pathname}
+            icon={Cpu}
+            items={instruments.map((instrument) => ({
+              key: instrument.id,
+              href: `/instruments/${instrument.id}`,
+              label: instrument.displayName,
+            }))}
+            label="Instruments"
+            viewAllHref="/instruments"
+          />
 
-            <CollapsibleNavSection
-              basePath="/watchers"
-              currentPath={pathname}
-              icon={Radio}
-              items={watchers.map((watcher) => ({
-                key: watcher.id,
-                href: `/watchers/${watcher.id}`,
-                // Hostname is the canonical identifier for a watcher in the
-                // table view; fall back to the short id when missing so the
-                // row never collapses to an empty label.
-                label: watcher.hostname ?? `${watcher.id.slice(0, 8)}…`,
-              }))}
-              label="Watchers"
-              viewAllHref="/watchers"
-            />
-          </SidebarMenu>
-        </SidebarGroupContent>
-      </SidebarGroup>
-    </>
+          <CollapsibleNavSection
+            basePath="/watchers"
+            currentPath={pathname}
+            icon={Radio}
+            items={watchers.map((watcher) => ({
+              key: watcher.id,
+              href: `/watchers/${watcher.id}`,
+              // Hostname is the canonical identifier for a watcher in the
+              // table view; fall back to the short id when missing so the
+              // row never collapses to an empty label.
+              label: watcher.hostname ?? `${watcher.id.slice(0, 8)}…`,
+            }))}
+            label="Watchers"
+            viewAllHref="/watchers"
+          />
+        </SidebarMenu>
+      </SidebarGroupContent>
+    </SidebarGroup>
   );
 }
 

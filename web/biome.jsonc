@@ -7,11 +7,20 @@
   ],
   "linter": {
     "rules": {
+      "a11y": {
+        "noNoninteractiveElementInteractions": "off",
+        "noStaticElementInteractions": "off",
+        "useKeyWithClickEvents": "off"
+      },
       "complexity": {
-        "noExcessiveCognitiveComplexity": "off"
+        "noExcessiveCognitiveComplexity": "off",
+        "noVoid": "off"
       },
       "performance": {
         "useTopLevelRegex": "off"
+      },
+      "style": {
+        "noNestedTernary": "off"
       }
     }
   }

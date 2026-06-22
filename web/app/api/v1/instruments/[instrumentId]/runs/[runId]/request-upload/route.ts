@@ -163,7 +163,10 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   // Build the response with the upload_requested_at for all files (both
   // newly transitioned and already-queued).
   const responseFiles = fileIds.map((fid: number) => {
-    const f = requestedById.get(fid)!;
+    const f = requestedById.get(fid);
+    if (!f) {
+      return apiError(400, VALIDATION_ERROR, `File ${fid} not found`);
+    }
     return {
       id: f.id,
       filename: f.filename,

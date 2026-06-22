@@ -174,8 +174,8 @@ export default async function InstrumentDetailPage({
         colorMode: filters.color_mode ?? undefined,
         ranBy: filters.ran_by ?? undefined,
       }),
-      getPreferences(session.user.id!),
-      listInstrumentSubscriptions(session.user.id!),
+      getPreferences(session.user.id),
+      listInstrumentSubscriptions(session.user.id),
     ]);
 
   if (!instrument) {

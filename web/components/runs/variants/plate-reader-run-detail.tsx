@@ -119,7 +119,7 @@ function extractKineticPlateMapGroups(
 
     const timeKeysSorted = sortTimeKeys([...byTime.keys()]);
     const frames = timeKeysSorted.map((tk) =>
-      byTime.get(tk)!.map((r) => ({
+      (byTime.get(tk) ?? []).map((r) => ({
         well: String(r[wellKey]),
         value: coerceNumeric(r.value),
       }))

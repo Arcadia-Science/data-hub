@@ -74,8 +74,8 @@ describe("Files API", () => {
     );
     const detailData = await detail.json();
     const byName = (name: string) =>
-      detailData.files.find((f: { filename: string }) => f.filename === name)!
-        .id;
+      detailData.files.find((f: { filename: string }) => f.filename === name)
+        ?.id;
     fileId = byName("sample.csv");
     secondFileId = byName("sample2.csv");
     thirdFileId = byName("sample3.csv");
