@@ -102,7 +102,9 @@ export function PaginationNav({
 
         {visible.map((p, i) =>
           p === "ellipsis" ? (
-            <PaginationItem key={`ellipsis-${i}`}>
+            <PaginationItem
+              key={`ellipsis-${String(visible[i - 1])}-${String(visible[i + 1])}`}
+            >
               <PaginationEllipsis />
             </PaginationItem>
           ) : (

@@ -62,19 +62,19 @@ const BUCKET_LABEL: Record<Bucket, string> = {
 };
 
 interface CommentEntry {
-  kind: "comment";
   id: string;
+  kind: "comment";
   notification: NotificationItem;
 }
 
 interface RunGroupEntry {
-  kind: "run_group";
   id: string;
+  instrumentDisplayName: string;
   instrumentId: string;
   instrumentType: InstrumentType;
-  instrumentDisplayName: string;
-  runs: NotificationItem[];
+  kind: "run_group";
   latestCreatedAt: string;
+  runs: NotificationItem[];
 }
 
 type Entry = CommentEntry | RunGroupEntry;

@@ -35,7 +35,7 @@ function toInitials(displayName: string): string {
   if (parts.length === 1) {
     return parts[0].slice(0, 2).toUpperCase();
   }
-  return (parts[0][0] + parts.at(-1)[0]).toUpperCase();
+  return (parts[0][0] + parts.at(-1)?.[0]).toUpperCase();
 }
 
 export async function getAttributionsByRunIds(
@@ -826,8 +826,12 @@ export async function getProcessedCsvData(
 
   const results = await Promise.all(
     csvFiles.map(async (file) => {
+      const { s3Bucket, s3Key } = file;
+      if (!(s3Bucket && s3Key)) {
+        return [];
+      }
       try {
-        const stream = await getS3ObjectStream(file.s3Bucket!, file.s3Key!);
+        const stream = await getS3ObjectStream(s3Bucket, s3Key);
         const buf = await streamToBuffer(stream);
         return parse(buf, {
           columns: true,

@@ -144,7 +144,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   // Only transition files that are still in "detected" — skip those already
   // in "upload_requested" to make the endpoint idempotent.
   const toTransition = fileIds.filter(
-    (fid: number) => requestedById.get(fid)!.status === "detected"
+    (fid: number) => requestedById.get(fid)?.status === "detected"
   );
 
   if (toTransition.length > 0) {

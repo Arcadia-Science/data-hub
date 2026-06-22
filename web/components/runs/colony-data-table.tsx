@@ -74,12 +74,10 @@ export function ColonyDataTable({ file }: { file: RunFile }) {
         : { status: "error", message: asyncResult.message };
     }
     return { status: "loading" };
-    // retryNonce participates so a retry that clears the cache entry forces
-    // a fresh derivation back to "loading" before the next fetch resolves.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fileId, asyncResult, retryNonce]);
+  }, [fileId, asyncResult]);
 
   useEffect(() => {
+    void retryNonce;
     if (cacheRef.current.has(fileId)) {
       return;
     }
@@ -221,8 +219,10 @@ function ColonyDataTableView({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {pageRows.map((row, idx) => (
-              <TableRow key={start + idx}>
+            {pageRows.map((row) => (
+              <TableRow
+                key={columns.map((col) => `${col}:${row[col] ?? ""}`).join("|")}
+              >
                 {columns.map((col) => (
                   <TableCell
                     className={cn(

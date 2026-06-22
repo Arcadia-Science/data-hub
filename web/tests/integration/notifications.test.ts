@@ -776,17 +776,19 @@ describe("Notifications", () => {
         types.indexOf("run_created")
       );
 
-      const runRow = rows.find((r) => r.type === "run_created")!;
-      expect(runRow.instrumentDisplayName).toBe(instrumentDisplayName);
-      expect(runRow.runDisplayId).toBe("run-list-shape");
-      expect(runRow.actor).toBeNull();
-      expect(runRow.commentId).toBeNull();
+      const runRow = rows.find((r) => r.type === "run_created");
+      expect(runRow).toBeDefined();
+      expect(runRow?.instrumentDisplayName).toBe(instrumentDisplayName);
+      expect(runRow?.runDisplayId).toBe("run-list-shape");
+      expect(runRow?.actor).toBeNull();
+      expect(runRow?.commentId).toBeNull();
 
-      const commentRow = rows.find((r) => r.type === "comment_attributed")!;
-      expect(commentRow.actor).not.toBeNull();
-      expect(commentRow.actor?.id).toBe(actor);
-      expect(commentRow.actor?.initials).toBeTruthy();
-      expect(commentRow.commentId).toBeTruthy();
+      const commentRow = rows.find((r) => r.type === "comment_attributed");
+      expect(commentRow).toBeDefined();
+      expect(commentRow?.actor).not.toBeNull();
+      expect(commentRow?.actor?.id).toBe(actor);
+      expect(commentRow?.actor?.initials).toBeTruthy();
+      expect(commentRow?.commentId).toBeTruthy();
     });
 
     it("listNotifications respects the limit option", async () => {
@@ -841,8 +843,9 @@ describe("Notifications", () => {
       await markRead(userA, [target.id]);
 
       const fresh = await listNotifications(userA);
-      const updated = fresh.find((r) => r.id === target.id)!;
-      expect(updated.readAt).not.toBeNull();
+      const updated = fresh.find((r) => r.id === target.id);
+      expect(updated).toBeDefined();
+      expect(updated?.readAt).not.toBeNull();
 
       // Other rows remain unread.
       const others = fresh.filter((r) => r.id !== target.id);

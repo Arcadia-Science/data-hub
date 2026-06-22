@@ -120,12 +120,14 @@ export function HinaReportSection({ files }: { files: RunFile[] }) {
                 return (
                   <CarouselItem key={file.id}>
                     <div className="overflow-hidden rounded-md border bg-muted/30">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      {/* biome-ignore lint/performance/noImgElement: auth-gated download URLs are not next/image candidates */}
                       <img
                         alt={file.filename}
                         className="mx-auto block max-h-[70vh] w-auto object-contain"
+                        height={600}
                         loading={i === 0 ? "eager" : "lazy"}
                         src={url}
+                        width={800}
                       />
                     </div>
                   </CarouselItem>
