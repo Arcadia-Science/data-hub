@@ -610,8 +610,8 @@ export async function notifyComment(input: {
           payload: {
             text:
               job.type === "comment_attributed"
-                ? `${dmAuthorDisplayName} mentioned you in a run you ran on *${dmInstrumentDisplayName}*`
-                : `${dmAuthorDisplayName} commented on a run you participated in on *${dmInstrumentDisplayName}*`,
+                ? `${dmAuthorDisplayName} commented on a run you ran on *${dmInstrumentDisplayName}*`
+                : `${dmAuthorDisplayName} commented on *${dmInstrumentDisplayName}*, a run you've commented on`,
             blocks: buildCommentBlocks({
               actorDisplayName: dmAuthorDisplayName,
               instrumentDisplayName: dmInstrumentDisplayName,

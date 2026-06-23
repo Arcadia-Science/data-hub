@@ -188,17 +188,17 @@ export function buildCommentBlocks(opts: {
   runUrl: string;
   type: "comment_attributed" | "comment_participated";
 }): (Block | KnownBlock)[] {
-  const action =
+  const summary =
     opts.type === "comment_attributed"
-      ? `*${opts.actorDisplayName}* mentioned you in a run you ran`
-      : `*${opts.actorDisplayName}* commented on a run you participated in`;
+      ? `*${opts.actorDisplayName}* commented on a run you ran on *${opts.instrumentDisplayName}* (\`${opts.runDisplayId}\`)`
+      : `*${opts.actorDisplayName}* commented on *${opts.instrumentDisplayName}* (\`${opts.runDisplayId}\`), a run you've commented on`;
 
   return [
     {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `${action} on *${opts.instrumentDisplayName}* (\`${opts.runDisplayId}\`)\n> ${opts.commentPreview.replace(/\n/g, "\n> ")}`,
+        text: `${summary}\n> ${opts.commentPreview.replace(/\n/g, "\n> ")}`,
       },
     },
     {

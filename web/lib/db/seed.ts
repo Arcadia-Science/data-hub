@@ -605,8 +605,7 @@ export async function seedInstrumentSubscriptions(
 // ---------------------------------------------------------------------------
 // Notifications — a believable steady state for the bell popover:
 //   - Today bucket: two comment notifications from the same teammate so the
-//     "mentioned you" + follow-up pattern (mirroring the design mock) lands
-//     under the TODAY header.
+//     comment-on-your-run + follow-up pattern lands under the TODAY header.
 //   - Yesterday bucket: three groups of `run_created` notifications (3 + 3
 //     + 2 rows across three different instruments) so the grouped-row
 //     variant of the popover renders with a comma-separated run-id list

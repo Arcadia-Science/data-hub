@@ -91,13 +91,14 @@ function notificationHref(n: NotificationItem): string {
 
 function commentActionLabel(n: NotificationItem): string {
   // The actor is nullable at the type level (deleted user, etc.); fall
-  // back to a generic phrasing so the row still reads cleanly.
+  // back to a generic phrasing so the row still reads cleanly. Wording
+  // mirrors the notification preference labels in settings.
   const actor = n.actor?.displayName ?? "Someone";
   switch (n.type) {
     case "comment_attributed":
-      return `${actor} mentioned you in`;
+      return `${actor} commented on a run you ran on`;
     case "comment_participated":
-      return `${actor} commented on`;
+      return `${actor} commented on a run you've commented on`;
     case "run_created":
       // Unreachable — `run_created` never flows into the comment row
       // renderer — but exhaustive switches keep TS honest.
@@ -394,9 +395,7 @@ function CommentNotificationRow({
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <p className="text-sm leading-snug">
             <span className="font-medium">{commentActionLabel(n)}</span>{" "}
-            <span className="font-medium text-primary">
-              run {n.runDisplayId}
-            </span>
+            <span className="font-medium text-primary">{n.runDisplayId}</span>
           </p>
           {n.commentBody ? (
             <p className="line-clamp-2 text-muted-foreground text-sm italic">
