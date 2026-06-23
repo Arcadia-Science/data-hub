@@ -44,8 +44,8 @@ export default async function NotificationsSettingsPage() {
         <p className="text-muted-foreground text-sm">
           Choose which Data Hub events to be notified about, and whether to
           receive them in-app, via Slack DM, or both. In-app and Slack are
-          independent — you can enable Slack only for a type by turning off its
-          in-app switch.
+          independent — for each type you can turn either channel on or off
+          without affecting the other.
         </p>
       </div>
 

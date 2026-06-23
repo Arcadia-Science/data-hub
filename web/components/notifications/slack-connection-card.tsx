@@ -67,14 +67,14 @@ function SectionHeader({
       ) : connected ? (
         <p className="text-muted-foreground text-sm">
           Choose which notification types to also deliver as Slack DMs. In-app
-          and Slack are independent — you can enable Slack only for a type by
-          turning off its in-app switch above.
+          and Slack are independent — each type can be delivered in-app, via
+          Slack, both, or neither.
         </p>
       ) : (
         <p className="text-muted-foreground text-sm">
           Connect your Slack account to receive notifications as personal DMs
-          from the Data Hub bot. In-app and Slack are independent — you can turn
-          off in-app for a type and receive it only via Slack.
+          from the Data Hub bot. In-app and Slack are independent — each type
+          can be delivered in-app, via Slack, both, or neither.
         </p>
       )}
     </div>
