@@ -22,6 +22,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { and, eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+// biome-ignore lint/performance/noNamespaceImport: drizzle scripts need the full schema module for Db typing
 import * as schema from "@/lib/db/schema";
 import {
   CANONICAL_INSTRUMENT_ID,

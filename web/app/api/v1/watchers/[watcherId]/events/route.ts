@@ -62,7 +62,7 @@ export async function POST(
     timestamp: string;
   }
 
-  const values = [];
+  const values: (typeof watcherEvents.$inferInsert)[] = [];
   for (let i = 0; i < body.events.length; i++) {
     const evt = body.events[i] as EventInput;
     if (!(evt.event_type && evt.timestamp && evt.message)) {

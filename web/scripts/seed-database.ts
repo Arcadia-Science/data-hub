@@ -12,6 +12,7 @@
 // singleton in `lib/db/index.ts` is wired for long-lived Next.js
 // processes and never calls `.end()`.
 
+// biome-ignore lint/performance/noNamespaceImport: drizzle scripts need the full schema module for Db typing
 import * as schema from "@/lib/db/schema";
 import {
   clearAll,

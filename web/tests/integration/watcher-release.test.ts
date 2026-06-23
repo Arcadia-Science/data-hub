@@ -283,7 +283,7 @@ describe("Heartbeat enforces watcher_release_config.min_supported_version", () =
       });
   }
 
-  async function heartbeat(body: Record<string, unknown>): Promise<Response> {
+  function heartbeat(body: Record<string, unknown>) {
     return api(`/api/v1/watchers/${watcherId}/heartbeat`, {
       method: "POST",
       token,

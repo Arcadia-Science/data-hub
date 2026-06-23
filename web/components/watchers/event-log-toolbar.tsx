@@ -6,6 +6,7 @@ import { useTablePending } from "@/components/table-pending";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Popover,
   PopoverContent,
@@ -85,16 +86,22 @@ export function EventLogToolbar() {
         <PopoverContent align="start" className="w-48 p-2">
           <div className="flex flex-col gap-1">
             {EVENT_TYPES.map((et) => (
-              <label
-                className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted"
+              <div
+                className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted"
                 key={et.value}
               >
                 <Checkbox
                   checked={filters.event_type.includes(et.value)}
+                  id={`event-type-${et.value}`}
                   onCheckedChange={() => toggleEventType(et.value)}
                 />
-                {et.label}
-              </label>
+                <Label
+                  className="flex-1 cursor-pointer font-normal"
+                  htmlFor={`event-type-${et.value}`}
+                >
+                  {et.label}
+                </Label>
+              </div>
             ))}
           </div>
         </PopoverContent>

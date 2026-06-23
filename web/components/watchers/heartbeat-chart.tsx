@@ -202,6 +202,7 @@ export function HeartbeatChart({
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-scroll to the latest buckets when heartbeat data changes
   useEffect(() => {
     const el = scrollRef.current;
     if (el && needsScroll) {

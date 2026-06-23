@@ -32,15 +32,15 @@ const SIDEBAR_WIDTH_MOBILE = "18rem";
 const SIDEBAR_WIDTH_ICON = "3rem";
 const SIDEBAR_KEYBOARD_SHORTCUT = "b";
 
-interface SidebarContextProps {
-  isMobile: boolean;
-  open: boolean;
-  openMobile: boolean;
-  setOpen: (open: boolean) => void;
-  setOpenMobile: (open: boolean) => void;
+type SidebarContextProps = {
   state: "expanded" | "collapsed";
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  openMobile: boolean;
+  setOpenMobile: (open: boolean) => void;
+  isMobile: boolean;
   toggleSidebar: () => void;
-}
+};
 
 const SidebarContext = React.createContext<SidebarContextProps | null>(null);
 
@@ -88,7 +88,7 @@ function SidebarProvider({
     [setOpenProp, open]
   );
 
-  // Helper to toggle the sidebar.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keep setOpenMobile in deps to match shadcn sidebar context shape
   const toggleSidebar = React.useCallback(
     () =>
       isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open),
@@ -115,6 +115,7 @@ function SidebarProvider({
   // This makes it easier to style the sidebar with Tailwind classes.
   const state = open ? "expanded" : "collapsed";
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keep setOpenMobile in deps to match shadcn sidebar context shape
   const contextValue = React.useMemo<SidebarContextProps>(
     () => ({
       state,

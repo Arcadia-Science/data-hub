@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, type SQL, sql } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import { computeEffectiveStatus, STALE_THRESHOLD_MS } from "@/lib/api/watchers";
@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
   const statusFilter = searchParams.get("status");
   const includeDeleted = searchParams.get("include_deleted") === "true";
 
-  const conditions = [];
+  const conditions: SQL[] = [];
 
   if (!includeDeleted) {
     conditions.push(isNull(watchers.deletedAt));

@@ -9,8 +9,10 @@
     "rules": {
       "a11y": {
         "noNoninteractiveElementInteractions": "off",
+        "noNoninteractiveTabindex": "off",
         "noStaticElementInteractions": "off",
-        "useKeyWithClickEvents": "off"
+        "useKeyWithClickEvents": "off",
+        "useSemanticElements": "off"
       },
       "complexity": {
         "noExcessiveCognitiveComplexity": "off",
@@ -21,7 +23,21 @@
       },
       "style": {
         "noNestedTernary": "off"
+      },
+      // TODO: replace index-based React keys in skeleton rows, pagination, and
+      // static lists with stable identifiers, then re-enable this rule.
+      "suspicious": {
+        "noArrayIndexKey": "off",
+        "noControlCharactersInRegex": "off"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["components/ui/**"],
+      "linter": {
+        "enabled": false
+      }
+    }
+  ]
 }

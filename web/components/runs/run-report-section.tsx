@@ -40,8 +40,14 @@ function ProcessedImagePreview({ file }: { file: RunFile }) {
         </Button>
       </div>
       <div className="overflow-hidden rounded-md border bg-muted/30">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img alt={file.filename} className="h-auto w-full" src={downloadUrl} />
+        {/* biome-ignore lint/performance/noImgElement: auth-gated download URLs are not next/image candidates */}
+        <img
+          alt={file.filename}
+          className="h-auto w-full"
+          height={600}
+          src={downloadUrl}
+          width={800}
+        />
       </div>
     </div>
   );

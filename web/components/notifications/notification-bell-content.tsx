@@ -102,6 +102,8 @@ function commentActionLabel(n: NotificationItem): string {
       // Unreachable — `run_created` never flows into the comment row
       // renderer — but exhaustive switches keep TS honest.
       return `${actor} created`;
+    default:
+      return `${actor} commented on`;
   }
 }
 

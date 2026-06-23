@@ -17,6 +17,7 @@ export const AVATAR_PALETTE = [
 export function avatarColor(userId: string): string {
   let hash = 0;
   for (let i = 0; i < userId.length; i++) {
+    // biome-ignore lint/suspicious/noBitwiseOperators: | 0 coerces the hash to a 32-bit integer
     hash = (hash * 31 + userId.charCodeAt(i)) | 0;
   }
   return AVATAR_PALETTE[Math.abs(hash) % AVATAR_PALETTE.length];

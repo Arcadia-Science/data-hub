@@ -31,6 +31,8 @@ function applyOptimistic(
       );
     case "delete":
       return current.filter((c) => c.id !== action.commentId);
+    default:
+      return current;
   }
 }
 

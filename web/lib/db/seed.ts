@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { getTableName, isTable, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { generateToken, getTokenPrefix, hashToken } from "@/lib/tokens";
+// biome-ignore lint/performance/noNamespaceImport: seed needs the full schema module for Db typing and table iteration
 import * as schema from "./schema";
 
 export type Db = PostgresJsDatabase<typeof schema>;

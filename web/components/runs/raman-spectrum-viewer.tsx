@@ -348,6 +348,7 @@ export function RamanSpectrumViewer({
   // and never re-hits S3.
   const cacheRef = useRef<Map<number, SpectrumPoint[]>>(new Map());
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: retryNonce retriggers loading state after cache clear on retry
   const state: LoadState = useMemo(() => {
     if (selectedId == null) {
       return { status: "idle" };
@@ -362,11 +363,9 @@ export function RamanSpectrumViewer({
         : { status: "error", message: asyncResult.message };
     }
     return { status: "loading" };
-    // `retryNonce` participates so a retry that clears the cache entry forces
-    // a fresh derivation back to "loading" before the next fetch resolves.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, asyncResult, retryNonce]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: retryNonce retriggers fetch when the user retries after an error
   useEffect(() => {
     if (selectedId == null) {
       return;

@@ -176,14 +176,14 @@ export async function setup() {
   // Strip the Lambda Function URL so "not configured" test cases work
   // regardless of the developer's local .env. Tests that need a stubbed
   // Lambda HTTP call should mock fetch rather than set this URL.
-  delete serverEnv.LAMBDA_FUNCTION_URL;
+  serverEnv.LAMBDA_FUNCTION_URL = undefined;
   // Strip AWS_ROLE_ARN as well so the SigV4 path in `lib/lambda.ts`
   // doesn't try to assume a Vercel OIDC role inside tests. The test
   // server still gets static AWS_ACCESS_KEY_ID/SECRET via the dummy
   // values plumbed above, which is enough to satisfy
   // `hasInvokeCredentials()` for any test that wants to exercise the
   // archive-builder configured path without standing up a real Lambda.
-  delete serverEnv.AWS_ROLE_ARN;
+  serverEnv.AWS_ROLE_ARN = undefined;
 
   execSync("npx next build", {
     cwd: import.meta.dirname ? `${import.meta.dirname}/../..` : process.cwd(),

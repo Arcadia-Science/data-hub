@@ -23,39 +23,39 @@ import { ArchiveDownloadDialog } from "./archive-download-dialog";
 // 200s on a hit. That makes the artifact in S3 — not the row's status —
 // the source of truth for "ready", so we recover automatically even if
 // the Lambda's PATCH callback to flip the row to `ready` never lands.
-export type ArchiveDownloadJob = {
-  id: string;
-  runId: string;
+export interface ArchiveDownloadJob {
   archiveUrl: string;
   defaultFilename: string;
+  downloadUrl?: string;
+  errorMessage?: string;
+  id: string;
   // `job_id` returned by the very first 202. Subsequent polls compare
   // their own `job_id` against this; if it changes, the route's dedup
   // INSERT created a new row, which only happens after the previous
   // attempt was marked failed (or expired by the stuck-row sweep). We
   // surface that as a failure rather than silently chase a fresh build.
   initialJobId?: string;
-  status: "pending" | "building" | "ready" | "failed";
-  errorMessage?: string;
-  downloadUrl?: string;
+  runId: string;
   sizeBytes?: number | null;
   startedAt: number;
-};
+  status: "pending" | "building" | "ready" | "failed";
+}
 
-type StartArchiveDownloadInput = {
+interface StartArchiveDownloadInput {
   archiveUrl: string;
-  runId: string;
   defaultFilename?: string;
-};
+  runId: string;
+}
 
-export type ArchiveDownloadActions = {
-  start: (input: StartArchiveDownloadInput) => Promise<void>;
+export interface ArchiveDownloadActions {
   dismiss: (id: string) => void;
-};
+  start: (input: StartArchiveDownloadInput) => Promise<void>;
+}
 
-type ArchiveDownloadContextValue = {
-  jobs: ArchiveDownloadJob[];
+interface ArchiveDownloadContextValue {
   actions: ArchiveDownloadActions;
-};
+  jobs: ArchiveDownloadJob[];
+}
 
 export const ArchiveDownloadContext =
   createContext<ArchiveDownloadContextValue | null>(null);

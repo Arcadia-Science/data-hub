@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+// biome-ignore lint/performance/noNamespaceImport: integration tests need the full schema module for Db typing
 import * as schema from "@/lib/db/schema";
 import {
   api,

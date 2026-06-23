@@ -148,7 +148,7 @@ export function PlateMapGrid({
       }
     }
   }
-  const hasRange = isFinite(vMin) && isFinite(vMax);
+  const hasRange = Number.isFinite(vMin) && Number.isFinite(vMax);
 
   const rowLabels = Array.from({ length: rows }, (_, i) =>
     String.fromCharCode(65 + i)
@@ -287,7 +287,7 @@ function computeGlobalHeatmapRange(
       }
     }
   }
-  if (!(isFinite(min) && isFinite(max))) {
+  if (!(Number.isFinite(min) && Number.isFinite(max))) {
     return;
   }
   return { min, max };

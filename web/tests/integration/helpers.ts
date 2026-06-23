@@ -1,5 +1,6 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+// biome-ignore lint/performance/noNamespaceImport: tests need the full schema module for Db typing
 import * as schema from "@/lib/db/schema";
 import {
   clearAll,
@@ -115,7 +116,7 @@ export async function api(
   };
 
   if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
+    headers.Authorization = `Bearer ${token}`;
   }
 
   return fetch(`${getBaseUrl()}${path}`, {

@@ -1111,6 +1111,8 @@ export async function getInstrumentFilterOptions(
     case "tape_station":
     case "instant_raman":
       return { kind: "default" };
+    default:
+      return { kind: "default" };
   }
 }
 

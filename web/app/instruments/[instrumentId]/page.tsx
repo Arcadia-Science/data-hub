@@ -115,7 +115,7 @@ function renderRunsTableVariant(
           ranByOptions={ranByOptions}
         />
       );
-    case "default":
+    default:
       return (
         <DefaultRunsTable
           data={data}

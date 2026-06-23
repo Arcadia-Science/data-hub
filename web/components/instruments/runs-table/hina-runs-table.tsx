@@ -1,5 +1,10 @@
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import {
+  getMetadataArray,
+  getMetadataRecord,
+  MetadataArrayBadges,
+} from "@/components/runs/metadata-badges";
+import {
   extractHinaChannels,
   formatHinaSizes,
   HinaChannelBadges,
@@ -16,15 +21,9 @@ import {
 import type { HinaFilterOptions } from "@/lib/api/instrument-runs";
 import { runRowToRef } from "@/lib/runs/row-actions";
 import { cn, formatBytes } from "@/lib/utils";
-
 import type { RunRow } from ".";
 import { AcquiredColumnHeader } from "./acquired-column-header";
 import { FilterableColumnHeader } from "./filterable-column-header";
-import {
-  getMetadataArray,
-  getMetadataRecord,
-  MetadataArrayBadges,
-} from "./metadata-utils";
 import { RanByCell } from "./ran-by-cell";
 import { RawFileColumnHeader } from "./raw-file-column-header";
 import { RunIdLabel } from "./run-id-label";
