@@ -5,19 +5,57 @@ import { apiError, UNAUTHORIZED, VALIDATION_ERROR } from "@/lib/api/errors";
 import {
   getPreferences,
   listInstrumentSubscriptions,
+  type NotificationPreferencesDto,
   updatePreferences,
 } from "@/lib/api/notifications";
+
+// Single source of truth mapping snake_case API keys to their camelCase DTO
+// counterparts. The schema, request parsing, and response serialization are
+// all derived from this so a new toggle only has to be added here.
+const PREFERENCE_FIELDS = {
+  runs_all_muted: "runsAllMuted",
+  comments_attributed_enabled: "commentsAttributedEnabled",
+  comments_participated_enabled: "commentsParticipatedEnabled",
+  slack_runs_enabled: "slackRunsEnabled",
+  slack_comments_attributed_enabled: "slackCommentsAttributedEnabled",
+  slack_comments_participated_enabled: "slackCommentsParticipatedEnabled",
+} as const satisfies Record<string, keyof NotificationPreferencesDto>;
+
+type ApiPreferenceKey = keyof typeof PREFERENCE_FIELDS;
 
 // PUT body is a partial: every key is optional and only present fields
 // are written. Defaults live on the column, so a missing key on a fresh
 // preferences row picks up the schema-side default rather than `false`.
 const PutBodySchema = z
-  .object({
-    runs_all_muted: z.boolean().optional(),
-    comments_attributed_enabled: z.boolean().optional(),
-    comments_participated_enabled: z.boolean().optional(),
-  })
+  .object(
+    Object.fromEntries(
+      Object.keys(PREFERENCE_FIELDS).map((key) => [key, z.boolean().optional()])
+    ) as Record<ApiPreferenceKey, z.ZodOptional<z.ZodBoolean>>
+  )
   .strict();
+
+function serializePreferences(
+  prefs: NotificationPreferencesDto
+): Record<ApiPreferenceKey, boolean> {
+  const out = {} as Record<ApiPreferenceKey, boolean>;
+  for (const apiKey of Object.keys(PREFERENCE_FIELDS) as ApiPreferenceKey[]) {
+    out[apiKey] = prefs[PREFERENCE_FIELDS[apiKey]];
+  }
+  return out;
+}
+
+function toPreferencesPatch(
+  data: Partial<Record<ApiPreferenceKey, boolean>>
+): Partial<NotificationPreferencesDto> {
+  const patch: Partial<NotificationPreferencesDto> = {};
+  for (const apiKey of Object.keys(PREFERENCE_FIELDS) as ApiPreferenceKey[]) {
+    const value = data[apiKey];
+    if (value !== undefined) {
+      patch[PREFERENCE_FIELDS[apiKey]] = value;
+    }
+  }
+  return patch;
+}
 
 // ---------------------------------------------------------------------------
 // GET /api/v1/settings/notifications
@@ -40,9 +78,7 @@ export async function GET() {
   ]);
 
   return Response.json({
-    runs_all_muted: prefs.runsAllMuted,
-    comments_attributed_enabled: prefs.commentsAttributedEnabled,
-    comments_participated_enabled: prefs.commentsParticipatedEnabled,
+    ...serializePreferences(prefs),
     instruments: subscriptions.map((s) => ({
       instrument_id: s.instrumentId,
       display_name: s.displayName,
@@ -83,23 +119,10 @@ export async function PUT(request: NextRequest) {
     });
   }
 
-  const patch: Parameters<typeof updatePreferences>[1] = {};
-  if (parsed.data.runs_all_muted !== undefined) {
-    patch.runsAllMuted = parsed.data.runs_all_muted;
-  }
-  if (parsed.data.comments_attributed_enabled !== undefined) {
-    patch.commentsAttributedEnabled = parsed.data.comments_attributed_enabled;
-  }
-  if (parsed.data.comments_participated_enabled !== undefined) {
-    patch.commentsParticipatedEnabled =
-      parsed.data.comments_participated_enabled;
-  }
+  const updated = await updatePreferences(
+    auth.userId,
+    toPreferencesPatch(parsed.data)
+  );
 
-  const updated = await updatePreferences(auth.userId, patch);
-
-  return Response.json({
-    runs_all_muted: updated.runsAllMuted,
-    comments_attributed_enabled: updated.commentsAttributedEnabled,
-    comments_participated_enabled: updated.commentsParticipatedEnabled,
-  });
+  return Response.json(serializePreferences(updated));
 }

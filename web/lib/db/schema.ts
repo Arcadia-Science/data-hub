@@ -719,22 +719,34 @@ export const notificationPreferences = pgTable("notification_preferences", {
   userId: text("user_id")
     .primaryKey()
     .references(() => users.id, { onDelete: "cascade" }),
-  // Master mute: when true, suppresses every per-instrument run notification
-  // regardless of the user's `instrument_notification_subscriptions` rows.
-  // Comment notifications are governed independently by the two booleans
-  // below so a muted user can still receive replies on runs they care
-  // about.
+  // In-app delivery: master mute for run notifications. When true, suppresses
+  // every per-instrument run notification in the bell regardless of the user's
+  // `instrument_notification_subscriptions` rows. Comment notifications are
+  // governed independently by the two booleans below.
   runsAllMuted: boolean("runs_all_muted").notNull().default(false),
-  // Receive a notification when someone comments on a run the user is
+  // Receive an in-app notification when someone comments on a run the user is
   // attributed to (via `run_attributions`).
   commentsAttributedEnabled: boolean("comments_attributed_enabled")
     .notNull()
     .default(true),
-  // Receive a notification when someone comments on a run the user has
+  // Receive an in-app notification when someone comments on a run the user has
   // previously commented on (excluding the user's own follow-ups).
   commentsParticipatedEnabled: boolean("comments_participated_enabled")
     .notNull()
     .default(true),
+  // Slack delivery toggles — independent of the in-app toggles above so a
+  // user can receive a notification type via Slack only, in-app only, both,
+  // or neither. All default false; connecting Slack (via OAuth) flips them to
+  // true as the opt-in signal.
+  slackRunsEnabled: boolean("slack_runs_enabled").notNull().default(false),
+  slackCommentsAttributedEnabled: boolean("slack_comments_attributed_enabled")
+    .notNull()
+    .default(false),
+  slackCommentsParticipatedEnabled: boolean(
+    "slack_comments_participated_enabled"
+  )
+    .notNull()
+    .default(false),
   updatedAt: timestamp("updated_at", {
     withTimezone: true,
     mode: "date",
@@ -836,6 +848,32 @@ export const notifications = pgTable(
       .where(sql`${notification.readAt} is null`),
   ]
 );
+
+// One row per user that has completed the "Connect to Slack" OAuth flow.
+// Stores the Slack member ID so the bot can DM the user — no per-user access
+// token is held (the bot acts under a shared `SLACK_BOT_TOKEN`). `revokedAt`
+// is set when Slack reports a terminal error (token_revoked / user_not_found)
+// so the UI can prompt reconnect without a polling call to Slack.
+export const slackConnections = pgTable("slack_connections", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  slackUserId: text("slack_user_id").notNull(),
+  slackTeamId: text("slack_team_id").notNull(),
+  slackTeamName: text("slack_team_name"),
+  connectedAt: timestamp("connected_at", {
+    withTimezone: true,
+    mode: "date",
+  })
+    .notNull()
+    .defaultNow(),
+  // Set to the timestamp when a `chat.postMessage` call returned a terminal
+  // error indicating the connection is dead. Cleared on reconnect.
+  revokedAt: timestamp("revoked_at", {
+    withTimezone: true,
+    mode: "date",
+  }),
+});
 
 // Many-to-many link between users and runs: a user "claims" a run they
 // personally performed. Attribution is self-service — users create and remove

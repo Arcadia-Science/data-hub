@@ -1,0 +1,48 @@
+// GET /api/v1/settings/slack/connect
+//
+// Redirects the current user to the Slack OIDC authorization URL.
+// Using GET + redirect lets the UI render a plain <a> with no client JS.
+// The signed `state` binds the flow to the current user so the callback
+// can verify we're completing the flow we started.
+
+import { type NextRequest, NextResponse } from "next/server";
+import { requireSession } from "@/lib/api/auth";
+import { apiError, UNAUTHORIZED } from "@/lib/api/errors";
+import { getSlackRedirectUri } from "@/lib/slack/oauth";
+import { generateState } from "@/lib/slack/state";
+
+function getSlackClientId(): string | null {
+  return process.env.SLACK_CLIENT_ID ?? null;
+}
+
+export async function GET(request: NextRequest) {
+  const auth = await requireSession();
+  if (!auth) {
+    return apiError(401, UNAUTHORIZED, "Authentication required");
+  }
+
+  const clientId = getSlackClientId();
+  if (!clientId) {
+    return apiError(500, "CONFIGURATION_ERROR", "Slack is not configured");
+  }
+
+  const origin = new URL(request.url).origin;
+  const redirectUri = getSlackRedirectUri(origin);
+  const state = generateState(auth.userId);
+
+  // OpenID Connect "Sign in with Slack": the openid scopes go in `scope` (the
+  // `/openid/connect/authorize` endpoint ignores the classic `user_scope`
+  // param), and `response_type=code` is required. `profile` carries the user
+  // ID, team ID, and team name we read from the id_token — no workspace write
+  // scopes are requested.
+  const params = new URLSearchParams({
+    response_type: "code",
+    client_id: clientId,
+    scope: "openid profile",
+    redirect_uri: redirectUri,
+    state,
+  });
+
+  const authorizeUrl = `https://slack.com/openid/connect/authorize?${params}`;
+  return NextResponse.redirect(authorizeUrl);
+}

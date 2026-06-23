@@ -112,10 +112,8 @@ export function WatcherReleaseForm({
     // The form renders as a content-only Card (body + footer separated
     // by a single border). The page-level heading + description live in
     // the route's `page.tsx` so they align with the sibling settings
-    // pages and the sidebar "Settings" label. The Card spans the full
-    // width of the page area; CardContent and the inner footer row are
-    // capped at `max-w-2xl` so input rows and body copy stay at a
-    // readable measure regardless of viewport.
+    // pages and the sidebar "Settings" label. Width is constrained by
+    // `SettingsPageContent` on the route; CardContent fills the card.
     //
     // The fields stay in a single Card (rather than one-card-per-field)
     // because they all configure the same logical resource — the
@@ -128,7 +126,7 @@ export function WatcherReleaseForm({
       }}
     >
       <Card>
-        <CardContent className="max-w-2xl">
+        <CardContent>
           <FieldGroup>
             <form.Field name="latestVersion">
               {(field) => {
@@ -290,10 +288,7 @@ export function WatcherReleaseForm({
           </FieldGroup>
         </CardContent>
 
-        {/* Footer keeps full card width so its top border runs
-            edge-to-edge; the inner row is capped at the same max-w-2xl
-            as the body so the action row visually aligns with the
-            field column above. */}
+        {/* Footer keeps full card width so its top border runs edge-to-edge. */}
         <CardFooter className="border-t">
           <div className="flex w-full items-center justify-between gap-4">
             {lastUpdated ? (

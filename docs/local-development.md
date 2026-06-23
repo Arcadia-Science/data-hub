@@ -61,6 +61,7 @@ Explicitly **do not** set the following — leaving them unset is what makes the
 
 - `LAMBDA_FUNCTION_URL` — file reprocessing and "Download all" buttons surface a 503 / "Lambda not configured" message instead of trying to invoke a Function URL.
 - `SLACK_WEBHOOK_URL` — `sendSlackMessage()` in `web/lib/slack.ts` becomes a no-op with a single warn line.
+- `SLACK_BOT_TOKEN`, `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET` — Slack DM/OAuth features are disabled when unset; the Settings > Notifications page renders a "Connect to Slack" button that is inert without these.
 - `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` — Google sign-in is unused locally; the dev Credentials provider handles auth.
 - `AWS_ROLE_ARN` — Vercel OIDC federation is for production. The local AWS SDK falls back to the static credentials above.
 
@@ -131,8 +132,9 @@ Some features depend on services that aren't running in this workflow. Each one 
 | File upload (from watcher) | `request-upload-url` returns a same-origin URL routed to `/api/local-s3/...`; `PUT` writes bytes into the mirror | Same |
 | Run archive ("Download all") | 503 "Archive builder is not configured" | Set `LAMBDA_FUNCTION_URL` + `S3_ARCHIVES_BUCKET` and grant `lambda:InvokeFunctionUrl` |
 | File reprocessing | The reprocess endpoint returns null and no Lambda is invoked | Same |
-| Slack notifications on new runs | `console.warn` only, no HTTP call | Set `SLACK_WEBHOOK_URL` |
-| Watcher uploads → Lambda → API loop | Not exercised end-to-end; the seed inserts the resulting rows directly. For Lambda-only smoke testing, see [Testing the Lambda end-to-end](#testing-the-lambda-end-to-end) below | Run the watcher (`docs/reference/watcher.md`) and the Lambda (`docs/reference/lambda.md`) end-to-end |
+| Slack channel notifications on new runs | `console.warn` only, no HTTP call | Set `SLACK_WEBHOOK_URL` |
+| Slack DM notifications / Connect to Slack | `console.warn` only; the "Connect to Slack" button redirects to Slack but the callback will error without credentials | Set `SLACK_BOT_TOKEN`, `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET` |
+| Watcher uploads → Lambda → API loop | Not exercised end-to-end; the seed inserts the resulting rows directly. For Lambda-only smoke testing, see [Testing the Lambda end-to-end](#testing-the-lambda-end-to-end) below | Run the watcher (`docs/watcher.md`) and the Lambda (`docs/lambda.md`) end-to-end |
 | Sign in with Google | The button still renders but OAuth callback will 4xx without `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | `vercel env pull` per `docs/getting-started.md` |
 
 ## Testing the Lambda end-to-end

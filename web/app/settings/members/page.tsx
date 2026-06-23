@@ -3,6 +3,7 @@ import { ShieldOff } from "lucide-react";
 import type { Metadata } from "next/types";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import { MembersTable } from "@/components/members/members-table";
+import { SettingsPageContent } from "@/components/settings/settings-page-content";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
@@ -32,16 +33,18 @@ export default async function MembersPage() {
   // visible. The settings sidebar already hides this entry for non-admins.
   if (!session.user.isAdmin) {
     return (
-      <div className="flex flex-col items-center justify-center rounded-lg border border-dashed bg-background py-16 dark:bg-muted">
-        <ShieldOff className="size-10 text-muted-foreground/50" />
-        <p className="mt-3 font-medium text-muted-foreground text-sm">
-          Admins only
-        </p>
-        <p className="mt-1 max-w-sm text-center text-muted-foreground/70 text-sm">
-          You need workspace admin access to view or change member roles. Ask an
-          existing admin if you need to be promoted.
-        </p>
-      </div>
+      <SettingsPageContent>
+        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed bg-background py-16 dark:bg-muted">
+          <ShieldOff className="size-10 text-muted-foreground/50" />
+          <p className="mt-3 font-medium text-muted-foreground text-sm">
+            Admins only
+          </p>
+          <p className="mt-1 max-w-sm text-center text-muted-foreground/70 text-sm">
+            You need workspace admin access to view or change member roles. Ask
+            an existing admin if you need to be promoted.
+          </p>
+        </div>
+      </SettingsPageContent>
     );
   }
 
@@ -57,7 +60,7 @@ export default async function MembersPage() {
     .orderBy(asc(users.email));
 
   return (
-    <div>
+    <SettingsPageContent>
       <div className="flex items-center justify-between">
         <div>
           <h2 className="font-semibold text-lg tracking-tight">Members</h2>
@@ -70,6 +73,6 @@ export default async function MembersPage() {
       <div className="mt-6">
         <MembersTable currentUserId={session.user.id} data={members} />
       </div>
-    </div>
+    </SettingsPageContent>
   );
 }

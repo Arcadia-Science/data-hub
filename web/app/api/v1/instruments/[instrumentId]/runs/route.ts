@@ -181,7 +181,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     await db.insert(files).values(fileValues).onConflictDoNothing();
   }
 
-  // Send Slack notification and notify app users of new run.
+  // Send Slack channel notification and fan out per-user notifications.
   if (isNew) {
     after(async () => {
       const origin = new URL(request.url).origin;
@@ -194,6 +194,9 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       await notifyRunCreated({
         runInternalId: run.id,
         instrumentId,
+        instrumentDisplayName: instrument.displayName,
+        runDisplayId: runId,
+        origin,
       });
     });
   }

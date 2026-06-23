@@ -154,3 +154,41 @@ export async function clearCapturedSlackMessages(): Promise<void> {
     throw new Error(`Slack capture /clear returned ${res.status}`);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Slack DM capture — mirrors the webhook helpers above but for
+// chat.postMessage calls routed through the mock Slack Web API server.
+// ---------------------------------------------------------------------------
+
+function getSlackDmCaptureUrl(): string {
+  const url = process.env.__TEST_SLACK_DM_CAPTURE_URL;
+  if (!url) {
+    throw new Error(
+      "__TEST_SLACK_DM_CAPTURE_URL not set — global setup failed?"
+    );
+  }
+  return url;
+}
+
+export interface CapturedSlackDm {
+  blocks?: unknown[];
+  channel: string;
+  text: string;
+}
+
+export async function getCapturedSlackDms(): Promise<CapturedSlackDm[]> {
+  const res = await fetch(`${getSlackDmCaptureUrl()}/dms/captured`);
+  if (!res.ok) {
+    throw new Error(`Slack DM capture /dms/captured returned ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function clearCapturedSlackDms(): Promise<void> {
+  const res = await fetch(`${getSlackDmCaptureUrl()}/dms/clear`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    throw new Error(`Slack DM capture /dms/clear returned ${res.status}`);
+  }
+}

@@ -49,7 +49,13 @@ vercel env pull
 | `AWS_ROLE_ARN` | No | IAM role ARN for Vercel OIDC federation. Used to presign S3 URLs and SigV4-sign Lambda Function URL invocations (only needed on Vercel) |
 | `S3_RAW_DATA_BUCKET` | No | S3 bucket for raw data uploads (defaults to `arcadia-data-hub-raw-staging`) |
 | `LAMBDA_FUNCTION_URL` | No | Lambda Function URL. Required for file reprocessing and run-archive downloads. |
-| `SLACK_WEBHOOK_URL` | No | Slack incoming webhook URL — when set, the web app posts a notification each time a new run is created |
+| `SLACK_WEBHOOK_URL` | No | Slack incoming webhook URL — when set, the web app posts a channel notification each time a new run is created |
+| `SLACK_BOT_TOKEN` | No | Slack bot token (`xoxb-…`) — required for personal Slack DM notifications |
+| `SLACK_CLIENT_ID` | No | Slack app client ID — required for the "Connect to Slack" OAuth flow on Settings > Notifications |
+| `SLACK_CLIENT_SECRET` | No | Slack app client secret — required for the OAuth flow |
+| `SLACK_STATE_SECRET` | No | Signing secret for OAuth state tokens; falls back to `AUTH_SECRET` |
+| `SLACK_REDIRECT_URI` | No | Override the OAuth redirect URI (defaults to `<origin>/api/v1/settings/slack/callback`) |
+| `SLACK_TEAM_ID` | No | Restrict Slack connections to a specific workspace ID (recommended for single-tenant deployments) |
 
 > **Local dev note:** the Lambda Function URL is configured with `AuthType: AWS_IAM`, so to invoke it from `make dev` you need AWS credentials with `lambda:InvokeFunctionUrl` on the staging function ARN. The default credential chain (`aws sso login`, `~/.aws/credentials`, or `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`) is used when `AWS_ROLE_ARN` is unset locally.
 

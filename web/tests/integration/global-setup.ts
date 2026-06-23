@@ -12,6 +12,15 @@ const PG_URL = "postgres://postgres:postgres@127.0.0.1:5432";
 let serverProcess: ChildProcess | null = null;
 let slackCaptureServer: http.Server | null = null;
 
+// Captured Slack DM calls (chat.postMessage). Separate from the webhook buffer
+// so tests can assert each channel independently.
+interface CapturedDm {
+  blocks?: unknown[];
+  channel: string;
+  text: string;
+}
+const capturedDms: CapturedDm[] = [];
+
 // Bind to port 0, let the OS assign a free port, then immediately release it.
 // This avoids hardcoding a port that might collide with other services.
 function getFreePort(): Promise<number> {
@@ -65,13 +74,22 @@ export async function setup() {
   const databaseUrl = `${PG_URL}/${TEST_DB}`;
 
   // Stand up an in-process HTTP capture server so tests can assert on
-  // outgoing Slack webhook calls without depending on the real Slack API.
-  // The Next.js server (spawned below) is configured with a SLACK_WEBHOOK_URL
-  // that points at this capture endpoint; tests inspect captured payloads
-  // via `getCapturedSlackMessages()` in helpers.ts.
+  // outgoing Slack webhook calls and Slack Web API DMs without depending on
+  // the real Slack API.
+  //
+  // The capture server handles:
+  //   POST /webhook            — incoming webhook (SLACK_WEBHOOK_URL)
+  //   GET  /captured           — read webhook capture buffer
+  //   POST /clear              — reset webhook buffer
+  //   POST /api/chat.postMessage — Web API DM capture (__TEST_SLACK_API_URL)
+  //   GET  /dms/captured       — read DM capture buffer
+  //   POST /dms/clear          — reset DM buffer
+  //
+  // Tests inspect captured payloads via helpers in helpers.ts.
   const captured: { text: string }[] = [];
   const slackPort = await getFreePort();
   slackCaptureServer = http.createServer((req, res) => {
+    // --- Incoming webhook (existing) ---
     if (req.method === "POST" && req.url === "/webhook") {
       let raw = "";
       req.on("data", (chunk) => {
@@ -102,6 +120,67 @@ export async function setup() {
       res.end("ok");
       return;
     }
+
+    // --- Slack Web API mock (chat.postMessage for DMs) ---
+    // The @slack/web-api SDK sends chat.postMessage as
+    // application/x-www-form-urlencoded with complex fields (e.g. `blocks`)
+    // JSON-encoded as strings inside the form body.
+    if (req.method === "POST" && req.url === "/api/chat.postMessage") {
+      let raw = "";
+      req.on("data", (chunk) => {
+        raw += chunk;
+      });
+      req.on("end", () => {
+        const params = new URLSearchParams(raw);
+        const channel = params.get("channel") ?? "";
+
+        // Tests inject Slack platform errors via a sentinel channel id of the
+        // form `U_FAIL_<error_code>`. The WebClient surfaces `<error_code>` as
+        // `err.data.error`, exercising the real failure-handling branches.
+        if (channel.startsWith("U_FAIL_")) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(
+            JSON.stringify({
+              ok: false,
+              error: channel.slice("U_FAIL_".length),
+            })
+          );
+          return;
+        }
+
+        try {
+          const text = params.get("text") ?? "";
+          const blocksRaw = params.get("blocks");
+          let blocks: unknown[] | undefined;
+          if (blocksRaw) {
+            try {
+              blocks = JSON.parse(blocksRaw) as unknown[];
+            } catch {
+              // blocks not parseable — skip
+            }
+          }
+          capturedDms.push({ channel, text, blocks });
+        } catch {
+          // ignore unparseable bodies
+        }
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true, ts: "1234567890.000001" }));
+      });
+      return;
+    }
+
+    if (req.method === "GET" && req.url === "/dms/captured") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(capturedDms));
+      return;
+    }
+    if (req.method === "POST" && req.url === "/dms/clear") {
+      capturedDms.length = 0;
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end("ok");
+      return;
+    }
+
     res.writeHead(404);
     res.end();
   });
@@ -172,6 +251,10 @@ export async function setup() {
     // Point Slack webhook calls at the in-process capture server defined
     // above so tests can assert on the messages without hitting Slack.
     SLACK_WEBHOOK_URL: `${slackCaptureBaseUrl}/webhook`,
+    // Stub bot token so sendSlackDm's guard passes; the WebClient is
+    // redirected to the capture server via __TEST_SLACK_API_URL.
+    SLACK_BOT_TOKEN: "xoxb-test-bot-token",
+    __TEST_SLACK_API_URL: `${slackCaptureBaseUrl}/api/`,
   };
   // Strip the Lambda Function URL so "not configured" test cases work
   // regardless of the developer's local .env. Tests that need a stubbed
@@ -212,6 +295,13 @@ export async function setup() {
   process.env.__TEST_BASE_URL = baseUrl;
   process.env.__TEST_DATABASE_URL = databaseUrl;
   process.env.__TEST_SLACK_CAPTURE_URL = slackCaptureBaseUrl;
+  process.env.__TEST_SLACK_DM_CAPTURE_URL = slackCaptureBaseUrl;
+  // Propagate the Slack stubs to the Vitest test-worker process so that
+  // library-level calls to `notifyRunCreated`/`notifyComment` (which invoke
+  // `sendSlackDm` directly in-process) also route through the capture server
+  // rather than the real Slack API or no-op on a missing token.
+  process.env.SLACK_BOT_TOKEN = "xoxb-test-bot-token";
+  process.env.__TEST_SLACK_API_URL = `${slackCaptureBaseUrl}/api/`;
   // Point the `@/lib/db` singleton at the test DB so library helpers
   // imported directly into test files (e.g. `notifyRunCreated` from
   // `@/lib/api/notifications`) hit the same database as `getTestDb()`.

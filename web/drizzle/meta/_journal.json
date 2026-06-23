@@ -183,6 +183,13 @@
       "when": 1779301905199,
       "tag": "0025_add_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1782244950707,
+      "tag": "0026_known_blazing_skull",
+      "breakpoints": true
     }
   ]
 }
