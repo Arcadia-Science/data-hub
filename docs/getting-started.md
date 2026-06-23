@@ -73,7 +73,7 @@ These are set in the Lambda runtime environment:
 
 ### Watcher
 
-The watcher reads its configuration from a YAML file at `~/.data-hub/config.yaml`. See the [watcher docs](watcher.md) for details. The only environment variable it uses is `DATA_HUB_API_KEY` (optional, can also be provided interactively during `init`).
+The watcher reads its configuration from a YAML file at `~/.data-hub/config.yaml`. See the [watcher docs](reference/watcher.md) for details. The only environment variable it uses is `DATA_HUB_API_KEY` (optional, can also be provided interactively during `init`).
 
 ## Database setup
 
@@ -148,4 +148,4 @@ make py-test
 make fe-test-integration
 ```
 
-Integration tests use a `data_hub_test` Postgres database and spin up a real Next.js production server. See [CI and deployment](ci-and-deployment.md) for how these run in GitHub Actions.
+Integration tests use a `data_hub_test` Postgres database and spin up a real Next.js production server. See [CI and deployment](ops/ci-and-deployment.md) for how these run in GitHub Actions.

@@ -227,5 +227,5 @@ The same builders back the integration test harness in [web/tests/integration/he
 
 - [Getting started](getting-started.md) — full setup with real Google OAuth and AWS credentials.
 - [Architecture](architecture.md) — system overview and data flow.
-- [REST API](api.md) — endpoint reference for the seeded PAT.
-- [MCP server](mcp.md) — Model Context Protocol tools at `/api/v1/mcp`.
+- [REST API](reference/api.md) — endpoint reference for the seeded PAT.
+- [MCP server](reference/mcp.md) — Model Context Protocol tools at `/api/v1/mcp`.

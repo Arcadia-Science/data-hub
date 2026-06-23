@@ -11,7 +11,7 @@ The API supports two authentication methods:
 
 Tokens are hashed with SHA-256 before storage. The plaintext token is shown once at creation time.
 
-Web page routes use a different gating model from the `/api/v1/*` surface: they're publicly reachable so link previews work, and the page body itself short-circuits to a sign-in CTA when there's no session. The API always requires either a session cookie or a bearer token (see [architecture](architecture.md)).
+Web page routes use a different gating model from the `/api/v1/*` surface: they're publicly reachable so link previews work, and the page body itself short-circuits to a sign-in CTA when there's no session. The API always requires either a session cookie or a bearer token (see [architecture](../architecture.md)).
 
 ### Admin role
 
@@ -115,7 +115,7 @@ Comment bodies are markdown source, capped at 10 000 characters. Author-only mut
 | `PUT` | `/api/v1/watchers/:watcherId/config` | Push config YAML and checksum |
 | `GET` | `/api/v1/watchers/:watcherId/config-checksum` | Get the config checksum |
 | `GET` | `/api/v1/watchers/:watcherId/upload-queue` | Get pending upload queue |
-| `GET` | `/api/v1/watchers/:watcherId/update-check` | Get server-advertised release info (latest version, channel, mandatory flag); used by the watcher's self-update CLI and background auto-updater. See [Upgrading the watcher](guides/upgrading-the-watcher.md). |
+| `GET` | `/api/v1/watchers/:watcherId/update-check` | Get server-advertised release info (latest version, channel, mandatory flag); used by the watcher's self-update CLI and background auto-updater. See [Upgrading the watcher](../guides/upgrading-the-watcher.md). |
 
 ### Archive jobs
 
@@ -124,7 +124,7 @@ Comment bodies are markdown source, capped at 10 000 characters. Author-only mut
 | `GET` | `/api/v1/instruments/:instrumentId/runs/:runId/download-archive` | Download the run archive. On cache hits returns `302` with a presigned S3 URL (or `200 { status: "ready", download_url, size_bytes }` if the caller sent `Accept: application/json`). On cache misses always returns `202 { status: "building", job_id }` and dispatches the build asynchronously; the same URL re-issued is the canonical poll target — every poll re-runs the S3 HEAD, so a finished build is visible the moment the multipart upload lands. Optional `?file_ids=1,2,3` narrows the archive to a subset of files (always intersected with the run's own files). |
 | `PATCH` | `/api/v1/archive-jobs/:id` | Lambda callback: marks an async build as `ready` (with `archive_bucket`, `archive_key`, `size_bytes`) or `failed` (with `error_message`). Stamps `completed_at` on terminal transitions. Uses standard PAT/session auth — the Lambda calls this with its `DATA_HUB_API_KEY` PAT. The UI does not trust this row's `status` for download readiness (it polls `/download-archive`, which short-circuits on an S3 HEAD), so a tampered row at worst breaks its own download. |
 
-The download-archive endpoint sits in front of a Lambda-driven builder pipeline that produces zips in S3 and serves them via presigned URLs, so download bytes never travel through Vercel. See [Run archives](run-archives.md) for the full flow, cache semantics, and operator runbook.
+The download-archive endpoint sits in front of a Lambda-driven builder pipeline that produces zips in S3 and serves them via presigned URLs, so download bytes never travel through Vercel. See [Run archives](../ops/run-archives.md) for the full flow, cache semantics, and operator runbook.
 
 ### Tokens
 

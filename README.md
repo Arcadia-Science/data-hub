@@ -16,10 +16,10 @@ flowchart LR
 
 | Directory | Description | Docs |
 | --- | --- | --- |
-| `web/` | Next.js web application and REST API (Vercel) | [API reference](docs/api.md) |
-| `lambda/` | AWS Lambda function for instrument data processing | [Lambda docs](docs/lambda.md) |
-| `watcher/` | CLI agent for lab instrument PCs | [Watcher docs](docs/watcher.md) |
-| `packages/shared/` | Shared Python library (S3, enums, test infra) | [Shared library](docs/shared-library.md) |
+| `web/` | Next.js web application and REST API (Vercel) | [API reference](docs/reference/api.md) |
+| `lambda/` | AWS Lambda function for instrument data processing | [Lambda docs](docs/reference/lambda.md) |
+| `watcher/` | CLI agent for lab instrument PCs | [Watcher docs](docs/reference/watcher.md) |
+| `packages/shared/` | Shared Python library (S3, enums, test infra) | [Shared library](docs/reference/shared-library.md) |
 | `docs/` | Project documentation | — |
 
 ## Quick start
@@ -56,12 +56,12 @@ See the full [Getting Started guide](docs/getting-started.md) for prerequisites 
 
 - [Architecture](docs/architecture.md) — system overview, data flow, and design decisions
 - [Getting started](docs/getting-started.md) — development setup, environment variables, running locally
-- [Watcher](docs/watcher.md) — CLI commands, configuration, run detection, upload modes
-- [Lambda](docs/lambda.md) — processing pipeline, supported instruments, adding new instruments
-- [REST API](docs/api.md) — endpoint reference and authentication
-- [MCP server](docs/mcp.md) — tools, resources, prompts, and installation for Claude Desktop / Cursor
-- [Shared library](docs/shared-library.md) — module reference for `data-hub-shared`
-- [CI and deployment](docs/ci-and-deployment.md) — GitHub Actions, Vercel, Render, Lambda deployment
+- [Watcher](docs/reference/watcher.md) — CLI commands, configuration, run detection, upload modes
+- [Lambda](docs/reference/lambda.md) — processing pipeline, supported instruments, adding new instruments
+- [REST API](docs/reference/api.md) — endpoint reference and authentication
+- [MCP server](docs/reference/mcp.md) — tools, resources, prompts, and installation for Claude Desktop / Cursor
+- [Shared library](docs/reference/shared-library.md) — module reference for `data-hub-shared`
+- [CI and deployment](docs/ops/ci-and-deployment.md) — GitHub Actions, Vercel, Render, Lambda deployment
 - [Conventions](docs/conventions.md) — S3 key layout, instrument IDs, code style, environments
 
 ## Development

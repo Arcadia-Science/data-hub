@@ -38,7 +38,7 @@ data-hub-watcher watch
 
 The watcher will detect new files, group them into runs, upload them to S3, and report everything to the API. Files become viewable in the web dashboard immediately after upload.
 
-See the [watcher reference](../watcher.md) for details on upload modes, run detection, and configuration options.
+See the [watcher reference](../reference/watcher.md) for details on upload modes, run detection, and configuration options.
 
 ## Step 4 (optional): Add Lambda preprocessing
 
