@@ -8,19 +8,11 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { requireSession } from "@/lib/api/auth";
 import { apiError, UNAUTHORIZED } from "@/lib/api/errors";
+import { getSlackRedirectUri } from "@/lib/slack/oauth";
 import { generateState } from "@/lib/slack/state";
 
 function getSlackClientId(): string | null {
   return process.env.SLACK_CLIENT_ID ?? null;
-}
-
-function getRedirectUri(origin: string): string {
-  // Allow an explicit override for environments where the redirect URI
-  // registered in the Slack app config differs from the request origin
-  // (e.g. staging behind a proxy).
-  return (
-    process.env.SLACK_REDIRECT_URI ?? `${origin}/api/v1/settings/slack/callback`
-  );
 }
 
 export async function GET(request: NextRequest) {
@@ -35,7 +27,7 @@ export async function GET(request: NextRequest) {
   }
 
   const origin = new URL(request.url).origin;
-  const redirectUri = getRedirectUri(origin);
+  const redirectUri = getSlackRedirectUri(origin);
   const state = generateState(auth.userId);
 
   const params = new URLSearchParams({

@@ -60,26 +60,7 @@ export async function upsertSlackConnection(
     });
 
   // On (re)connect, opt the user in to all three Slack notification types.
-  // Uses `onConflictDoUpdate` so it works regardless of whether a prefs row
-  // exists yet, and does not overwrite any other pref columns the user may
-  // have customised.
-  await db
-    .insert(notificationPreferences)
-    .values({
-      userId,
-      slackRunsEnabled: true,
-      slackCommentsAttributedEnabled: true,
-      slackCommentsParticipatedEnabled: true,
-    })
-    .onConflictDoUpdate({
-      target: notificationPreferences.userId,
-      set: {
-        slackRunsEnabled: true,
-        slackCommentsAttributedEnabled: true,
-        slackCommentsParticipatedEnabled: true,
-        updatedAt: new Date(),
-      },
-    });
+  await setAllSlackPrefs(userId, true);
 }
 
 export async function deleteSlackConnection(userId: string): Promise<void> {
@@ -88,20 +69,27 @@ export async function deleteSlackConnection(userId: string): Promise<void> {
   // Disable Slack toggles so stale prefs don't accidentally fire if the user
   // reconnects a different account later and the previous toggles would
   // otherwise be inherited.
+  await setAllSlackPrefs(userId, false);
+}
+
+async function setAllSlackPrefs(
+  userId: string,
+  enabled: boolean
+): Promise<void> {
   await db
     .insert(notificationPreferences)
     .values({
       userId,
-      slackRunsEnabled: false,
-      slackCommentsAttributedEnabled: false,
-      slackCommentsParticipatedEnabled: false,
+      slackRunsEnabled: enabled,
+      slackCommentsAttributedEnabled: enabled,
+      slackCommentsParticipatedEnabled: enabled,
     })
     .onConflictDoUpdate({
       target: notificationPreferences.userId,
       set: {
-        slackRunsEnabled: false,
-        slackCommentsAttributedEnabled: false,
-        slackCommentsParticipatedEnabled: false,
+        slackRunsEnabled: enabled,
+        slackCommentsAttributedEnabled: enabled,
+        slackCommentsParticipatedEnabled: enabled,
         updatedAt: new Date(),
       },
     });

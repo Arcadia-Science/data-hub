@@ -16,13 +16,8 @@ import { type NextRequest, NextResponse } from "next/server";
 import { requireSession } from "@/lib/api/auth";
 import { apiError, UNAUTHORIZED } from "@/lib/api/errors";
 import { upsertSlackConnection } from "@/lib/slack/connections";
+import { getSlackRedirectUri } from "@/lib/slack/oauth";
 import { verifyState } from "@/lib/slack/state";
-
-function getRedirectUri(origin: string): string {
-  return (
-    process.env.SLACK_REDIRECT_URI ?? `${origin}/api/v1/settings/slack/callback`
-  );
-}
 
 /**
  * Decode a JWT's payload without verifying the signature. Safe here because
@@ -88,7 +83,7 @@ export async function GET(request: NextRequest) {
   }
 
   const origin = new URL(request.url).origin;
-  const redirectUri = getRedirectUri(origin);
+  const redirectUri = getSlackRedirectUri(origin);
 
   // Exchange the code for the OIDC token response.
   const anonClient = new WebClient();

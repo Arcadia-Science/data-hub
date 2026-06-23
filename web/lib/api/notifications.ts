@@ -101,38 +101,16 @@ export async function updatePreferences(
   userId: string,
   patch: Partial<NotificationPreferencesDto>
 ): Promise<NotificationPreferencesDto> {
-  // Map DTO field names to the DB column names used by Drizzle. The
-  // `values()` call on a fresh insert also uses these column references so
-  // the column name mapping only needs to live in one place.
-  const dbPatch: Partial<{
-    runsAllMuted: boolean;
-    commentsAttributedEnabled: boolean;
-    commentsParticipatedEnabled: boolean;
-    slackRunsEnabled: boolean;
-    slackCommentsAttributedEnabled: boolean;
-    slackCommentsParticipatedEnabled: boolean;
-    updatedAt: Date;
-  }> = {};
-
-  if (patch.runsAllMuted !== undefined) {
-    dbPatch.runsAllMuted = patch.runsAllMuted;
-  }
-  if (patch.commentsAttributedEnabled !== undefined) {
-    dbPatch.commentsAttributedEnabled = patch.commentsAttributedEnabled;
-  }
-  if (patch.commentsParticipatedEnabled !== undefined) {
-    dbPatch.commentsParticipatedEnabled = patch.commentsParticipatedEnabled;
-  }
-  if (patch.slackRunsEnabled !== undefined) {
-    dbPatch.slackRunsEnabled = patch.slackRunsEnabled;
-  }
-  if (patch.slackCommentsAttributedEnabled !== undefined) {
-    dbPatch.slackCommentsAttributedEnabled =
-      patch.slackCommentsAttributedEnabled;
-  }
-  if (patch.slackCommentsParticipatedEnabled !== undefined) {
-    dbPatch.slackCommentsParticipatedEnabled =
-      patch.slackCommentsParticipatedEnabled;
+  // DTO keys are identical to the Drizzle column property names, so writing
+  // the defined subset only requires dropping `undefined` values.
+  const dbPatch: Partial<NotificationPreferencesDto> = {};
+  for (const key of Object.keys(
+    DEFAULT_PREFERENCES
+  ) as (keyof NotificationPreferencesDto)[]) {
+    const value = patch[key];
+    if (value !== undefined) {
+      dbPatch[key] = value;
+    }
   }
 
   await db
