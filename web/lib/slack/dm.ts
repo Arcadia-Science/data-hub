@@ -164,18 +164,11 @@ export function buildRunCreatedBlocks(opts: {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*New run on ${opts.instrumentDisplayName}*\nRun \`${opts.runDisplayId}\` has been reported.`,
+        // A mrkdwn link rather than an `actions` button: link buttons are
+        // still interactive components, so they make Slack demand a configured
+        // Interactivity Request URL the bot doesn't have.
+        text: `*New run on ${opts.instrumentDisplayName}*\nRun \`${opts.runDisplayId}\` has been reported.\n<${opts.runUrl}|View in Data Hub>`,
       },
-    },
-    {
-      type: "actions",
-      elements: [
-        {
-          type: "button",
-          text: { type: "plain_text", text: "View in Data Hub" },
-          url: opts.runUrl,
-        },
-      ],
     },
   ];
 }
@@ -198,18 +191,8 @@ export function buildCommentBlocks(opts: {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `${summary}\n> ${opts.commentPreview.replace(/\n/g, "\n> ")}`,
+        text: `${summary}\n> ${opts.commentPreview.replace(/\n/g, "\n> ")}\n<${opts.runUrl}|View comment>`,
       },
-    },
-    {
-      type: "actions",
-      elements: [
-        {
-          type: "button",
-          text: { type: "plain_text", text: "View comment" },
-          url: opts.runUrl,
-        },
-      ],
     },
   ];
 }
