@@ -1,5 +1,10 @@
 "use client";
 
+import { useForm } from "@tanstack/react-form";
+import { Loader2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import {
@@ -13,11 +18,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { formatRelativeTime } from "@/lib/utils";
-import { useForm } from "@tanstack/react-form";
-import { Loader2 } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { toast } from "sonner";
-import { z } from "zod";
 
 // Loose PEP 440-ish version match. Mirrors VERSION_REGEX in
 // app/api/v1/settings/watcher-release/route.ts so the client surfaces the
@@ -48,16 +48,16 @@ const formSchema = z.object({
 
 type WatcherReleaseFormValues = z.input<typeof formSchema>;
 
-type LastUpdated = {
+interface LastUpdated {
   at: string;
-  byName: string | null;
   byEmail: string | null;
-};
+  byName: string | null;
+}
 
-type WatcherReleaseFormProps = {
+interface WatcherReleaseFormProps {
   initial: WatcherReleaseFormValues;
   lastUpdated: LastUpdated | null;
-};
+}
 
 export function WatcherReleaseForm({
   initial,
@@ -138,16 +138,16 @@ export function WatcherReleaseForm({
                   <Field data-invalid={isInvalid}>
                     <FieldLabel htmlFor={field.name}>Latest version</FieldLabel>
                     <Input
+                      aria-invalid={isInvalid}
+                      autoComplete="off"
+                      className="font-mono"
                       id={field.name}
                       name={field.name}
-                      value={field.state.value}
                       onBlur={field.handleBlur}
                       onChange={(e) => field.handleChange(e.target.value)}
                       placeholder="e.g. 0.4.2"
-                      autoComplete="off"
                       spellCheck={false}
-                      aria-invalid={isInvalid}
-                      className="font-mono"
+                      value={field.state.value}
                     />
                     <FieldDescription>
                       The release watchers will self-upgrade to. Leave blank to
@@ -173,16 +173,16 @@ export function WatcherReleaseForm({
                       Minimum supported version
                     </FieldLabel>
                     <Input
+                      aria-invalid={isInvalid}
+                      autoComplete="off"
+                      className="font-mono"
                       id={field.name}
                       name={field.name}
-                      value={field.state.value}
                       onBlur={field.handleBlur}
                       onChange={(e) => field.handleChange(e.target.value)}
                       placeholder="e.g. 0.1.0"
-                      autoComplete="off"
                       spellCheck={false}
-                      aria-invalid={isInvalid}
-                      className="font-mono"
+                      value={field.state.value}
                     />
                     <FieldDescription>
                       Optional floor. Watchers reporting an installed version
@@ -209,16 +209,16 @@ export function WatcherReleaseForm({
                       Release channel
                     </FieldLabel>
                     <Input
+                      aria-invalid={isInvalid}
+                      autoComplete="off"
+                      className="font-mono"
                       id={field.name}
                       name={field.name}
-                      value={field.state.value}
                       onBlur={field.handleBlur}
                       onChange={(e) => field.handleChange(e.target.value)}
                       placeholder="stable"
-                      autoComplete="off"
                       spellCheck={false}
-                      aria-invalid={isInvalid}
-                      className="font-mono"
+                      value={field.state.value}
                     />
                     <FieldDescription>
                       Defaults to <code className="font-mono">stable</code>.
@@ -251,12 +251,12 @@ export function WatcherReleaseForm({
                     <Field orientation="horizontal">
                       <FieldContent>
                         <FieldLabel
-                          htmlFor={field.name}
                           className={
                             latestVersionEmpty
                               ? "text-muted-foreground"
                               : undefined
                           }
+                          htmlFor={field.name}
                         >
                           Mandatory update
                         </FieldLabel>
@@ -275,12 +275,12 @@ export function WatcherReleaseForm({
                           choice survives clearing/restoring the version
                           field. */}
                       <Switch
+                        aria-label="Toggle mandatory update"
+                        checked={field.state.value && !latestVersionEmpty}
+                        disabled={latestVersionEmpty || isSubmitting}
                         id={field.name}
                         name={field.name}
-                        checked={field.state.value && !latestVersionEmpty}
                         onCheckedChange={field.handleChange}
-                        disabled={latestVersionEmpty || isSubmitting}
-                        aria-label="Toggle mandatory update"
                       />
                     </Field>
                   )}
@@ -298,7 +298,7 @@ export function WatcherReleaseForm({
           <div className="flex w-full items-center justify-between gap-4">
             {lastUpdated ? (
               <p
-                className="text-xs text-muted-foreground"
+                className="text-muted-foreground text-xs"
                 suppressHydrationWarning
               >
                 Last updated{" "}
@@ -316,7 +316,7 @@ export function WatcherReleaseForm({
                 .
               </p>
             ) : (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-muted-foreground text-xs">
                 No release configured yet. Watchers will skip self-updates until
                 you save a version.
               </p>
@@ -331,11 +331,11 @@ export function WatcherReleaseForm({
               })}
             >
               {({ canSubmit, isSubmitting, channelEmpty }) => (
-                <Button type="submit" disabled={!canSubmit || channelEmpty}>
+                <Button disabled={!canSubmit || channelEmpty} type="submit">
                   {isSubmitting ? (
                     <Loader2
-                      data-icon="inline-start"
                       className="animate-spin"
+                      data-icon="inline-start"
                     />
                   ) : null}
                   Save

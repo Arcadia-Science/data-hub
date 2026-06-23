@@ -1,12 +1,12 @@
 "use client";
 
+import { useSession } from "next-auth/react";
+import { useOptimistic, useState } from "react";
 import { RunCommentForm } from "@/components/runs/run-comment-form";
 import { RunCommentItem } from "@/components/runs/run-comment-item";
 import { Card } from "@/components/ui/card";
 import type { RunCommentDto } from "@/lib/api/run-comments";
 import { toInitials } from "@/lib/utils";
-import { useSession } from "next-auth/react";
-import { useOptimistic, useState } from "react";
 
 type Action =
   | { kind: "create"; comment: RunCommentDto }
@@ -19,7 +19,9 @@ function applyOptimistic(
 ): RunCommentDto[] {
   switch (action.kind) {
     case "create":
-      if (current.some((c) => c.id === action.comment.id)) return current;
+      if (current.some((c) => c.id === action.comment.id)) {
+        return current;
+      }
       return [...current, action.comment];
     case "update":
       return current.map((c) =>
@@ -29,6 +31,8 @@ function applyOptimistic(
       );
     case "delete":
       return current.filter((c) => c.id !== action.commentId);
+    default:
+      return current;
   }
 }
 
@@ -91,7 +95,9 @@ export function RunCommentsList({
         body: JSON.stringify({ body }),
       }
     );
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) {
+      throw new Error(await res.text());
+    }
     const created = (await res.json()) as RunCommentDto;
     setCommitted((prev) =>
       prev.some((c) => c.id === created.id) ? prev : [...prev, created]
@@ -112,7 +118,9 @@ export function RunCommentsList({
         body: JSON.stringify({ body }),
       }
     );
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) {
+      throw new Error(await res.text());
+    }
     const updated = (await res.json()) as RunCommentDto;
     setCommitted((prev) =>
       prev.map((c) => (c.id === updated.id ? updated : c))
@@ -126,33 +134,35 @@ export function RunCommentsList({
       `/api/v1/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}/comments/${commentId}`,
       { method: "DELETE" }
     );
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) {
+      throw new Error(await res.text());
+    }
     setCommitted((prev) => prev.filter((c) => c.id !== commentId));
   }
 
   // Empty + form-only: when there are no comments and no logged-in user,
   // the empty-state message stands alone outside the card stack.
   if (optimistic.length === 0 && !currentUserId) {
-    return <p className="text-sm text-muted-foreground">No comments yet.</p>;
+    return <p className="text-muted-foreground text-sm">No comments yet.</p>;
   }
 
   const rowClass = "px-4 py-4 first:pt-1 last:pb-1";
 
   return (
-    <Card size="sm" className="gap-0 py-0">
+    <Card className="gap-0 py-0" size="sm">
       <div className="flex flex-col divide-y divide-border">
         {optimistic.length === 0 ? (
-          <p className={`${rowClass} text-sm text-muted-foreground`}>
+          <p className={`${rowClass} text-muted-foreground text-sm`}>
             No comments yet.
           </p>
         ) : (
           optimistic.map((comment) => (
-            <div key={comment.id} className={rowClass}>
+            <div className={rowClass} key={comment.id}>
               <RunCommentItem
                 comment={comment}
                 currentUserId={currentUserId}
-                onUpdate={updateCommentAction}
                 onDelete={deleteCommentAction}
+                onUpdate={updateCommentAction}
               />
             </div>
           ))

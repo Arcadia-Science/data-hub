@@ -13,6 +13,7 @@ import mimetypes
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, wait
+from dataclasses import dataclass
 from pathlib import Path
 
 import requests as http_requests
@@ -20,16 +21,31 @@ from requests.adapters import HTTPAdapter
 
 from data_hub_watcher.api_client import ApiError, DataHubClient
 from data_hub_watcher.constants import (
+    MAX_QUEUE_FILE_ATTEMPTS,
     UPLOAD_RETRY_BASE_DELAY,
     UPLOAD_RETRY_MAX,
 )
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import WatcherCounters
+from data_hub_watcher.models import UploadQueueFile
 from data_hub_watcher.run_detector import FileInfo, file_created_at
 from data_hub_watcher.state import StateDB
 from data_hub_watcher.util import file_sha256
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _QueueAttempt:
+    """Per-file bookkeeping for manual-mode upload-queue retries.
+
+    ``count`` is the number of consecutive heartbeat polls that have failed
+    to upload the file (missing on disk or upload error); ``reason`` is the
+    most recent failure cause, surfaced in the give-up event.
+    """
+
+    count: int
+    reason: str
 
 
 def _guess_content_type(path: Path) -> str | None:
@@ -108,6 +124,11 @@ class Uploader:
         # Mutated only from the heartbeat thread (manual mode), so
         # not under any explicit lock.
         self._consecutive_queue_poll_failures = 0
+        # Per-file upload-queue attempt bookkeeping, keyed by server file id.
+        # Bounds retries before giving up (see ``_process_queued_file``) and
+        # doubles as the emit-once throttle for the missing-file error. Pruned
+        # each poll, so a re-requested id starts fresh. Heartbeat thread only.
+        self._queue_attempts: dict[int, _QueueAttempt] = {}
         # Single ``requests.Session`` shared across every S3 PUT
         # (parallel or serial). Keeps TLS connections alive between
         # presigned URLs that target the same S3 bucket -- avoids
@@ -243,25 +264,114 @@ class Uploader:
         # Reset on any success -- the next failure starts a fresh
         # outage window so the throttled emissions are accurate.
         self._consecutive_queue_poll_failures = 0
+
+        # Prune attempt records for files no longer pending (uploaded,
+        # cancelled, or dismissed) so the dict tracks only the live queue
+        # and a re-requested id starts a fresh attempt window.
+        current_ids = {qf.id for qf in queue.files}
+        self._queue_attempts = {
+            fid: rec for fid, rec in self._queue_attempts.items() if fid in current_ids
+        }
+
         if not queue.files:
             return
 
         logger.info("Upload queue has %d file(s)", len(queue.files))
         for qf in queue.files:
-            local_path = self._watch_dir / (qf.relative_path or qf.filename)
-            if not local_path.exists():
+            self._process_queued_file(qf)
+
+    def _process_queued_file(self, qf: UploadQueueFile) -> None:
+        """Attempt one queued file, bounding retries across heartbeat polls.
+
+        Manual-mode polling runs every heartbeat, so a file that can't be
+        uploaded -- missing on disk after a watch-directory change, or a
+        persistent upload error -- would otherwise re-error forever. We cap
+        attempts at ``MAX_QUEUE_FILE_ATTEMPTS`` and then cancel the request
+        server-side (revert to ``detected``) so it leaves the queue. The
+        "Queued file missing" error is emitted only on the first miss; the
+        upload path emits its own per-attempt events via ``_upload_single``.
+        """
+        attempt = self._queue_attempts.get(qf.id)
+        attempt_count = attempt.count if attempt else 0
+
+        # Already exhausted: a prior poll's cancel may have failed, so keep
+        # retrying the cancel until the file drops out of the queue.
+        if attempt_count >= MAX_QUEUE_FILE_ATTEMPTS:
+            self._cancel_queued_file(qf, attempt.reason if attempt else "unknown")
+            return
+
+        local_path = self._watch_dir / (qf.relative_path or qf.filename)
+        if local_path.exists():
+            ok = self._upload_single(local_path, qf.run_id)
+            reason = "upload_failed"
+        else:
+            ok = False
+            reason = "missing"
+            # Throttle: surface the visible "missing" error only on the
+            # first miss for this file; later misses are debug-only until
+            # the give-up threshold cancels the request.
+            if attempt_count == 0:
                 logger.error("Queued file not found locally: %s", local_path)
                 self._reporter.queue_event(
                     WatcherEvent(
                         event_type=EventType.ERROR,
                         message=f"Queued file missing: {qf.filename}",
-                        details={"file_id": qf.id, "expected_path": str(local_path)},
+                        details={
+                            "kind": "queued_file_missing",
+                            "file_id": qf.id,
+                            "expected_path": str(local_path),
+                        },
                     )
                 )
                 self._bump_errors()
-                continue
+            else:
+                logger.debug("Queued file still missing (already reported): %s", local_path)
 
-            self._upload_single(local_path, qf.run_id)
+        if ok:
+            self._queue_attempts.pop(qf.id, None)
+            return
+
+        attempt_count += 1
+        self._queue_attempts[qf.id] = _QueueAttempt(count=attempt_count, reason=reason)
+        if attempt_count >= MAX_QUEUE_FILE_ATTEMPTS:
+            self._cancel_queued_file(qf, reason)
+
+    def _cancel_queued_file(self, qf: UploadQueueFile, reason: str) -> None:
+        """Cancel a persistently-failing queued file's upload request.
+
+        Reverts the file to ``detected`` server-side so it leaves the upload
+        queue. On API failure the attempt record is left in place so the next
+        poll retries the cancel; the give-up event fires only on a successful
+        cancel, so a retried cancel doesn't re-flood the log.
+        """
+        try:
+            self._client.cancel_upload_request(qf.id)
+        except ApiError as exc:
+            logger.warning(
+                "Failed to cancel upload request for %s (file_id=%s): %s",
+                qf.filename,
+                qf.id,
+                exc.message,
+            )
+            self._bump_errors()
+            return
+
+        logger.warning(
+            "Gave up on queued file after %d attempts: %s (reason=%s)",
+            MAX_QUEUE_FILE_ATTEMPTS,
+            qf.filename,
+            reason,
+        )
+        self._reporter.report_error(
+            "upload_request_cancelled",
+            (
+                f"Gave up uploading {qf.filename} after {MAX_QUEUE_FILE_ATTEMPTS} "
+                "attempts; cancelled upload request"
+            ),
+            file_id=qf.id,
+            attempts=MAX_QUEUE_FILE_ATTEMPTS,
+            reason=reason,
+        )
 
     # ------------------------------------------------------------------
     # Presigned PUT helper

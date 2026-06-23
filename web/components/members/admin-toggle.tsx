@@ -1,18 +1,23 @@
 "use client";
 
+import { Loader2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useTransition } from "react";
+import { toast } from "sonner";
 import { Switch } from "@/components/ui/switch";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Loader2 } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useTransition } from "react";
-import { toast } from "sonner";
 
-type AdminToggleProps = {
-  userId: string;
+interface AdminToggleProps {
+  /**
+   * Pre-resolved display label used in the success / error toasts so the
+   * caller doesn't have to thread the user-row data into the toast
+   * messages from the parent table cell.
+   */
+  displayName: string;
   /**
    * Current admin state, taken from the latest server render. The switch
    * is uncontrolled with respect to local UI state — the optimistic flip
@@ -25,13 +30,8 @@ type AdminToggleProps = {
    * switch here so the user never sees that failure path.
    */
   isSelf: boolean;
-  /**
-   * Pre-resolved display label used in the success / error toasts so the
-   * caller doesn't have to thread the user-row data into the toast
-   * messages from the parent table cell.
-   */
-  displayName: string;
-};
+  userId: string;
+}
 
 export function AdminToggle({
   userId,
@@ -71,15 +71,17 @@ export function AdminToggle({
         <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
       ) : null}
       <Switch
+        aria-label={isAdmin ? "Revoke admin" : "Grant admin"}
         checked={isAdmin}
         disabled={isSelf || isPending}
         onCheckedChange={handleChange}
-        aria-label={isAdmin ? "Revoke admin" : "Grant admin"}
       />
     </div>
   );
 
-  if (!isSelf) return control;
+  if (!isSelf) {
+    return control;
+  }
 
   return (
     <Tooltip>

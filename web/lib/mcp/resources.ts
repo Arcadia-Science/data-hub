@@ -1,3 +1,5 @@
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { getInstruments } from "@/lib/api/dashboard";
 import {
   getGelDocFilterOptions,
@@ -7,8 +9,6 @@ import {
   getInstrumentById,
   getInstrumentListWithCounts,
 } from "@/lib/api/instruments";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 // Instrument types that expose a structured filter-options resource. Generic
 // instruments have no predefined metadata schema so they're excluded.

@@ -1,5 +1,10 @@
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import {
+  getMetadataArray,
+  getMetadataRecord,
+  MetadataArrayBadges,
+} from "@/components/runs/metadata-badges";
+import {
   extractHinaChannels,
   formatHinaSizes,
   HinaChannelBadges,
@@ -16,15 +21,9 @@ import {
 import type { HinaFilterOptions } from "@/lib/api/instrument-runs";
 import { runRowToRef } from "@/lib/runs/row-actions";
 import { cn, formatBytes } from "@/lib/utils";
-
 import type { RunRow } from ".";
 import { AcquiredColumnHeader } from "./acquired-column-header";
 import { FilterableColumnHeader } from "./filterable-column-header";
-import {
-  getMetadataArray,
-  getMetadataRecord,
-  MetadataArrayBadges,
-} from "./metadata-utils";
 import { RanByCell } from "./ran-by-cell";
 import { RawFileColumnHeader } from "./raw-file-column-header";
 import { RunIdLabel } from "./run-id-label";
@@ -63,29 +62,29 @@ export function HinaRunsTable({
           <TableHead>
             <FilterableColumnHeader
               label="Channels"
-              paramKey="hina_channel"
               options={filterOptions.channels}
+              paramKey="hina_channel"
             />
           </TableHead>
           <TableHead>
             <FilterableColumnHeader
               label="Dimensions"
-              paramKey="hina_dimension"
               options={filterOptions.dimensions}
+              paramKey="hina_dimension"
             />
           </TableHead>
           <TableHead>
             <FilterableColumnHeader
               label="Sizes"
-              paramKey="hina_size"
               options={filterOptions.sizes}
+              paramKey="hina_size"
             />
           </TableHead>
           <TableHead>
             <FilterableColumnHeader
               label="Ran By"
-              paramKey="ran_by"
               options={ranByOptions}
+              paramKey="ran_by"
             />
           </TableHead>
           <TableHead className="text-right">
@@ -105,8 +104,8 @@ export function HinaRunsTable({
           const sizesLabel = sizes ? formatHinaSizes(sizes) : "";
           return (
             <TableRow
-              key={row.id}
               className={cn("group", isDeleted && "opacity-50")}
+              key={row.id}
             >
               <TableCell>
                 <RunSelectCheckbox runRef={runRowToRef(row)} />
@@ -114,21 +113,21 @@ export function HinaRunsTable({
               <TableCell>
                 <div className="flex items-center gap-2.5">
                   <RunStatusIcon
+                    errorMessages={row.error_messages}
                     fileCount={row.file_count}
                     filesCompleted={row.files_completed}
                     filesFailed={row.files_failed}
                     filesPendingUpload={row.files_pending_upload}
-                    filesUploaded={row.files_uploaded}
                     filesProcessing={row.files_processing}
-                    errorMessages={row.error_messages}
+                    filesUploaded={row.files_uploaded}
                   />
                   <RunIdLabel
-                    runId={row.run_id}
                     href={`/instruments/${instrumentId}/runs/${encodeURIComponent(row.run_id)}`}
                     isDeleted={isDeleted}
+                    runId={row.run_id}
                   />
                   {isDeleted && (
-                    <Badge variant="outline" className="ml-1.5 font-normal">
+                    <Badge className="ml-1.5 font-normal" variant="outline">
                       deleted
                     </Badge>
                   )}
@@ -148,7 +147,7 @@ export function HinaRunsTable({
               </TableCell>
               <TableCell>
                 {sizesLabel ? (
-                  <Badge variant="outline" className="font-mono">
+                  <Badge className="font-mono" variant="outline">
                     {sizesLabel}
                   </Badge>
                 ) : (
@@ -157,9 +156,9 @@ export function HinaRunsTable({
               </TableCell>
               <TableCell>
                 <RanByCell
+                  attributions={row.attributions}
                   instrumentId={row.instrument_id}
                   runId={row.run_id}
-                  attributions={row.attributions}
                 />
               </TableCell>
               <TableCell className="text-right">

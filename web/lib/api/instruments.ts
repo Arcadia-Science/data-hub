@@ -1,44 +1,78 @@
-import { db } from "@/lib/db";
-import {
-  instrumentRuns,
-  instruments,
-  type InstrumentType,
-  watchers,
-} from "@/lib/db/schema";
-import { and, count, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, count, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { cache } from "react";
 import YAML from "yaml";
+import { db } from "@/lib/db";
+import {
+  type InstrumentType,
+  instrumentRuns,
+  instruments,
+  watchers,
+} from "@/lib/db/schema";
 
-export type InstrumentListItem = {
-  id: string;
+export interface InstrumentListItem {
+  createdAt: Date;
   displayName: string;
-  status: "pending" | "active" | "inactive";
-  instrumentType: InstrumentType;
   filePatterns: string[];
-  runCount: number;
-  runsThisWeek: number;
+  id: string;
+  instrumentType: InstrumentType;
   lastRunAt: Date | null;
-  watcherCount: number;
-  watchersOnline: number;
   /** Most recent heartbeat from any watcher attached to this instrument. */
   lastWatcherHeartbeatAt: Date | null;
-  createdAt: Date;
-};
+  runCount: number;
+  runsThisWeek: number;
+  status: "pending" | "active" | "inactive";
+  watcherCount: number;
+  watchersOnline: number;
+}
 
 // A watcher is stale when its last heartbeat is older than this threshold,
 // even if its DB status is "watching". Must match the window in dashboard.ts.
 const HEARTBEAT_STALE_MINUTES = 5;
 
 /**
+ * Returns true when the instrument has at least one watcher that is actively
+ * heartbeating (status "watching" with a heartbeat inside the staleness
+ * window). Uploads transfer through the watcher agent, so the upload-request
+ * routes use this to reject queueing when no watcher could pick the files up —
+ * otherwise files sit in `upload_requested` forever and the UI shows a
+ * perpetual "Uploading" spinner with no error.
+ */
+export async function instrumentHasOnlineWatcher(
+  instrumentId: string
+): Promise<boolean> {
+  const staleThreshold = new Date(
+    Date.now() - HEARTBEAT_STALE_MINUTES * 60 * 1000
+  );
+
+  const [row] = await db
+    .select({ value: count() })
+    .from(watchers)
+    .where(
+      and(
+        eq(watchers.instrumentId, instrumentId),
+        isNull(watchers.deletedAt),
+        eq(watchers.status, "watching"),
+        gt(watchers.lastHeartbeatAt, staleThreshold)
+      )
+    );
+
+  return (row?.value ?? 0) > 0;
+}
+
+/**
  * Extracts `instrument.file_patterns` from a watcher's stored config YAML.
  * Returns an empty array when the YAML is missing or unparseable.
  */
 function extractFilePatterns(configYaml: string | null): string[] {
-  if (!configYaml) return [];
+  if (!configYaml) {
+    return [];
+  }
   try {
     const doc = YAML.parse(configYaml);
     const patterns = doc?.instrument?.file_patterns;
-    if (Array.isArray(patterns)) return patterns.map(String);
+    if (Array.isArray(patterns)) {
+      return patterns.map(String);
+    }
   } catch {
     // Malformed YAML — silently ignore.
   }
@@ -52,7 +86,9 @@ function extractFilePatterns(configYaml: string | null): string[] {
 function mergeFilePatterns(configs: (string | null)[]): string[] {
   const set = new Set<string>();
   for (const yaml of configs) {
-    for (const p of extractFilePatterns(yaml)) set.add(p);
+    for (const p of extractFilePatterns(yaml)) {
+      set.add(p);
+    }
   }
   return [...set].sort();
 }
@@ -108,19 +144,19 @@ function buildWatcherCountSubquery() {
 // Coerces drizzle's raw-sql aggregate output into the InstrumentListItem
 // shape callers expect. Aggregates flow through the `sql` template without
 // the timestamp parser the column would apply, so we re-wrap dates here.
-type InstrumentListRow = {
-  id: string;
-  displayName: string;
-  status: "pending" | "active" | "inactive";
-  instrumentType: InstrumentType;
+interface InstrumentListRow {
   createdAt: Date;
+  displayName: string;
+  id: string;
+  instrumentType: InstrumentType;
+  lastRunAt: Date | null;
+  lastWatcherHeartbeatAt: Date | null;
   runCount: number;
   runsThisWeek: number;
-  lastRunAt: Date | null;
+  status: "pending" | "active" | "inactive";
   watcherCount: number;
   watchersOnline: number;
-  lastWatcherHeartbeatAt: Date | null;
-};
+}
 
 function hydrateInstrumentRow(
   row: InstrumentListRow,
@@ -194,10 +230,10 @@ export const getInstrumentListWithCounts = cache(
   }
 );
 
-export type DashboardInstrumentSummary = {
+export interface DashboardInstrumentSummary {
   rows: InstrumentListItem[];
   totalActive: number;
-};
+}
 
 /**
  * Focused query for the dashboard's truncated instruments table: pulls only
@@ -278,20 +314,9 @@ export const getRecentActiveInstrumentsForDashboard = cache(
   }
 );
 
-export type InstrumentDetail = {
-  id: string;
-  displayName: string;
-  status: "pending" | "active" | "inactive";
-  instrumentType: InstrumentType;
-  filePatterns: string[];
-  createdAt: Date;
-  updatedAt: Date;
-  runCount: number;
-  watcherCount: number;
-  watchersOnline: number;
-  watchersOffline: number;
-  /** Most recent heartbeat from any watcher attached to this instrument. */
-  lastWatcherHeartbeatAt: Date | null;
+export interface InstrumentDetail {
+  /** Desktop hostname of the canonical active watcher, if any. */
+  activeWatcherHostname: string | null;
   /**
    * The "canonical" watcher for this instrument, used to render watcher
    * affordances in the instrument header. When multiple watchers are
@@ -300,9 +325,20 @@ export type InstrumentDetail = {
    * by `createdAt`.
    */
   activeWatcherId: string | null;
-  /** Desktop hostname of the canonical active watcher, if any. */
-  activeWatcherHostname: string | null;
-};
+  createdAt: Date;
+  displayName: string;
+  filePatterns: string[];
+  id: string;
+  instrumentType: InstrumentType;
+  /** Most recent heartbeat from any watcher attached to this instrument. */
+  lastWatcherHeartbeatAt: Date | null;
+  runCount: number;
+  status: "pending" | "active" | "inactive";
+  updatedAt: Date;
+  watcherCount: number;
+  watchersOffline: number;
+  watchersOnline: number;
+}
 
 export const getInstrumentById = cache(async function getInstrumentById(
   instrumentId: string
@@ -313,7 +349,9 @@ export const getInstrumentById = cache(async function getInstrumentById(
     .where(eq(instruments.id, instrumentId))
     .limit(1);
 
-  if (!instrument) return null;
+  if (!instrument) {
+    return null;
+  }
 
   const [runCountResult, watcherRows] = await Promise.all([
     db

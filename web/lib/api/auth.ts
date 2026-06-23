@@ -1,22 +1,22 @@
+import { eq } from "drizzle-orm";
+import type { NextRequest } from "next/server";
+import { after } from "next/server";
 import { apiError, FORBIDDEN, UNAUTHORIZED } from "@/lib/api/errors";
 import { hasScope, type Scope } from "@/lib/api/scopes";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { personalAccessTokens, users } from "@/lib/db/schema";
 import { hashToken } from "@/lib/tokens";
-import { eq } from "drizzle-orm";
-import type { NextRequest } from "next/server";
-import { after } from "next/server";
 
-export type AuthResult = {
-  userId: string;
+export interface AuthResult {
   authMethod: "session" | "token";
   // Permission scopes carried by this request. Token-authenticated requests
   // carry the scopes column from `personal_access_tokens`. Session
   // (NextAuth) authentication is treated as fully privileged and always
   // returns `["*"]`, so `hasScope` is a no-op for browser sessions.
   scopes: string[];
-};
+  userId: string;
+}
 
 /**
  * Validate a PAT from the Authorization header. Shared by both
@@ -97,7 +97,7 @@ export async function authenticateRequest(
 export async function authenticateWithToken(
   request: Pick<Request, "headers">
 ): Promise<AuthResult | null> {
-  return validatePat(request.headers.get("authorization"));
+  return await validatePat(request.headers.get("authorization"));
 }
 
 export async function requireSession(): Promise<AuthResult | null> {
@@ -152,7 +152,9 @@ export async function requireAdmin(): Promise<{ userId: string } | Response> {
 export async function requireAdminForSession(
   authResult: AuthResult
 ): Promise<Response | null> {
-  if (authResult.authMethod !== "session") return null;
+  if (authResult.authMethod !== "session") {
+    return null;
+  }
 
   const [row] = await db
     .select({ isAdmin: users.isAdmin })

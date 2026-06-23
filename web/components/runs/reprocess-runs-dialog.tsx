@@ -1,5 +1,9 @@
 "use client";
 
+import { Loader2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useTransition } from "react";
+import { toast } from "sonner";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -10,17 +14,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Loader2 } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useTransition } from "react";
-import { toast } from "sonner";
 
-export type ReprocessRunTarget = {
-  instrumentId: string;
-  runId: string;
+export interface ReprocessRunTarget {
   filesCompleted: number;
   filesFailed: number;
-};
+  instrumentId: string;
+  runId: string;
+}
 
 // ---------------------------------------------------------------------------
 // Controlled reprocess dialog used by both the per-row "..." menu (single
@@ -39,7 +39,9 @@ async function fanOut(
         r.runId
       )}/reprocess`;
       const res = await fetch(url, { method: "POST" });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
       const body = (await res.json()) as { files_queued?: number };
       return body.files_queued ?? 0;
     })
@@ -101,11 +103,11 @@ export function ReprocessRunsDialog({
 
   const title =
     runCount === 1
-      ? `Reprocess run ${runs[0]!.runId}?`
+      ? `Reprocess run ${runs[0]?.runId}?`
       : `Reprocess ${runCount} runs?`;
 
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
+    <AlertDialog onOpenChange={onOpenChange} open={open}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
@@ -119,7 +121,7 @@ export function ReprocessRunsDialog({
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={handleConfirm} disabled={isPending}>
+          <AlertDialogAction disabled={isPending} onClick={handleConfirm}>
             {isPending && <Loader2 className="size-4 animate-spin" />}
             Reprocess
           </AlertDialogAction>

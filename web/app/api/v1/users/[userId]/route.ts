@@ -1,9 +1,9 @@
+import { eq } from "drizzle-orm";
+import type { NextRequest } from "next/server";
 import { requireAdmin } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
-import type { NextRequest } from "next/server";
 
 const ALLOWED_PATCH_FIELDS = new Set(["is_admin"]);
 
@@ -20,7 +20,9 @@ export async function PATCH(
   { params }: { params: Promise<{ userId: string }> }
 ) {
   const authResult = await requireAdmin();
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { userId } = await params;
 

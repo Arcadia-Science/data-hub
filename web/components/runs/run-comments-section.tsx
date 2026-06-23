@@ -22,19 +22,19 @@ export function RunCommentsSection({
 }) {
   return (
     <div className="flex flex-col gap-2">
-      <h2 className="text-sm font-semibold">
+      <h2 className="font-semibold text-sm">
         Comments
         {comments.length > 0 && (
-          <span className="ml-1 font-mono text-xs font-normal text-muted-foreground">
+          <span className="ml-1 font-mono font-normal text-muted-foreground text-xs">
             {comments.length}
           </span>
         )}
       </h2>
       <div>
         <RunCommentsList
+          initialComments={comments}
           instrumentId={instrumentId}
           runId={runId}
-          initialComments={comments}
         />
       </div>
     </div>

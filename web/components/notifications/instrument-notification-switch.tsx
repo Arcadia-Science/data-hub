@@ -1,13 +1,13 @@
 "use client";
 
+import { useState, useTransition } from "react";
+import { toast } from "sonner";
 import { Switch } from "@/components/ui/switch";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useState, useTransition } from "react";
-import { toast } from "sonner";
 
 // Composition over a `tooltip` boolean prop: the Tooltip is wrapped here
 // so callers don't have to know about the active vs muted copy. Three
@@ -55,7 +55,9 @@ export function InstrumentNotificationSwitch({
             body: JSON.stringify({ enabled: next }),
           }
         );
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
       } catch (err) {
         setEnabled(previous);
         toast.error("Couldn't update instrument notifications", {
@@ -81,11 +83,11 @@ export function InstrumentNotificationSwitch({
             pointer events otherwise. */}
         <span className="inline-flex">
           <Switch
-            size={size}
-            checked={enabled && !masterMuted}
-            onCheckedChange={handleChange}
-            disabled={masterMuted || isPending}
             aria-label={ariaLabel}
+            checked={enabled && !masterMuted}
+            disabled={masterMuted || isPending}
+            onCheckedChange={handleChange}
+            size={size}
           />
         </span>
       </TooltipTrigger>

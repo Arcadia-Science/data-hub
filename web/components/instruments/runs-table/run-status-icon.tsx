@@ -1,18 +1,18 @@
 "use client";
 
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
-import {
   CircleCheck,
   CircleDashed,
   CircleX,
   Clock,
   LoaderCircle,
 } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 
 export function RunStatusIcon({
   fileCount,
@@ -91,11 +91,11 @@ export function RunStatusIcon({
         <span className="relative z-10 flex shrink-0">{icon}</span>
       </TooltipTrigger>
       <TooltipContent
-        side="top"
         className={cn(
           (hasFailed || hasPending || hasUploaded || hasProcessing) &&
             "max-w-sm"
         )}
+        side="top"
       >
         {lines.length === 1 ? (
           lines[0]

@@ -1,5 +1,9 @@
 "use client";
 
+import { ArrowDownToLine, ArrowUpToLine, RotateCw, Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
+import { toast } from "sonner";
 import { DeleteRunsDialog } from "@/components/runs/delete-runs-dialog";
 import { ReprocessRunsDialog } from "@/components/runs/reprocess-runs-dialog";
 import { Button } from "@/components/ui/button";
@@ -11,12 +15,8 @@ import {
 } from "@/components/ui/tooltip";
 import { useArchiveDownload } from "@/hooks/use-archive-download";
 import { cn } from "@/lib/utils";
-import { ArrowDownToLine, ArrowUpToLine, RotateCw, Trash2 } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
-import { toast } from "sonner";
 
-import { useRunSelection, type RunRef } from "./run-selection-provider";
+import { type RunRef, useRunSelection } from "./run-selection-provider";
 
 // ---------------------------------------------------------------------------
 // Bulk action bar shown as a floating card pinned to the center bottom of
@@ -64,7 +64,9 @@ async function fanOutUpload(
         ref.runId
       )}/request-upload-all`;
       const res = await fetch(url, { method: "POST" });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
       const body = (await res.json()) as { files_queued?: number };
       return body.files_queued ?? 0;
     })
@@ -92,7 +94,9 @@ export function RunBulkActionBar() {
   const [reprocessOpen, setReprocessOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  if (meta.count === 0) return null;
+  if (meta.count === 0) {
+    return null;
+  }
 
   const refs = Array.from(state.selected.values());
 
@@ -189,12 +193,12 @@ export function RunBulkActionBar() {
   return (
     <>
       <div
-        role="region"
         aria-label="Bulk actions for selected runs"
         className={cn(
-          "fixed right-0 bottom-6 z-50 mx-auto flex max-w-6xl animate-in items-center justify-between gap-4 rounded-lg border bg-popover px-8 py-2.5 text-popover-foreground shadow-2xl transition-[left] duration-200 ease-linear fade-in slide-in-from-bottom-4",
+          "fade-in slide-in-from-bottom-4 fixed right-0 bottom-6 z-50 mx-auto flex max-w-6xl animate-in items-center justify-between gap-4 rounded-lg border bg-popover px-8 py-2.5 text-popover-foreground shadow-2xl transition-[left] duration-200 ease-linear",
           offsetForSidebar ? "left-[var(--sidebar-width)]" : "left-0"
         )}
+        role="region"
       >
         <div className="text-sm">
           <span className="font-medium">{meta.count}</span>{" "}
@@ -204,20 +208,20 @@ export function RunBulkActionBar() {
         </div>
         <div className="flex items-center gap-2">
           <Button
-            type="button"
-            variant="default"
-            size="sm"
             disabled={isPending}
             onClick={() => runAttribution("PUT", "Claimed")}
+            size="sm"
+            type="button"
+            variant="default"
           >
             I ran these
           </Button>
           <Button
-            type="button"
-            variant="outline"
-            size="sm"
             disabled={isPending}
             onClick={() => runAttribution("DELETE", "Removed attribution from")}
+            size="sm"
+            type="button"
+            variant="outline"
           >
             Remove my attribution
           </Button>
@@ -226,12 +230,12 @@ export function RunBulkActionBar() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
+                  className="gap-1.5"
                   disabled={isPending}
                   onClick={runUpload}
-                  className="gap-1.5"
+                  size="sm"
+                  type="button"
+                  variant="outline"
                 >
                   <ArrowUpToLine className="size-3.5" />
                   Upload
@@ -245,11 +249,11 @@ export function RunBulkActionBar() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
+                  className="gap-1.5"
+                  onClick={handleDownload}
+                  size="sm"
                   type="button"
                   variant="outline"
-                  size="sm"
-                  onClick={handleDownload}
-                  className="gap-1.5"
                 >
                   <ArrowDownToLine className="size-3.5" />
                   Download
@@ -261,12 +265,12 @@ export function RunBulkActionBar() {
 
           {meta.allCanReprocess && (
             <Button
-              type="button"
-              variant="outline"
-              size="sm"
+              className="gap-1.5"
               disabled={isPending}
               onClick={() => setReprocessOpen(true)}
-              className="gap-1.5"
+              size="sm"
+              type="button"
+              variant="outline"
             >
               <RotateCw className="size-3.5" />
               Reprocess
@@ -275,12 +279,12 @@ export function RunBulkActionBar() {
 
           {meta.allCanDelete && (
             <Button
-              type="button"
-              variant="outline"
-              size="sm"
+              className="gap-1.5 text-destructive hover:text-destructive"
               disabled={isPending}
               onClick={() => setDeleteOpen(true)}
-              className="gap-1.5 text-destructive hover:text-destructive"
+              size="sm"
+              type="button"
+              variant="outline"
             >
               <Trash2 className="size-3.5" />
               Delete
@@ -288,11 +292,11 @@ export function RunBulkActionBar() {
           )}
 
           <Button
-            type="button"
-            variant="ghost"
-            size="sm"
             disabled={isPending}
             onClick={() => actions.clear()}
+            size="sm"
+            type="button"
+            variant="ghost"
           >
             Clear
           </Button>
@@ -300,16 +304,16 @@ export function RunBulkActionBar() {
       </div>
 
       <ReprocessRunsDialog
-        open={reprocessOpen}
-        onOpenChange={setReprocessOpen}
-        runs={reprocessTargets}
         onComplete={() => actions.clear()}
+        onOpenChange={setReprocessOpen}
+        open={reprocessOpen}
+        runs={reprocessTargets}
       />
       <DeleteRunsDialog
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        runs={deleteTargets}
         onComplete={() => actions.clear()}
+        onOpenChange={setDeleteOpen}
+        open={deleteOpen}
+        runs={deleteTargets}
       />
     </>
   );

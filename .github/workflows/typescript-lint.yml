@@ -34,11 +34,10 @@ jobs:
       - name: Install packages
         run: npm ci
 
-      - name: Check formatting
-        run: npm run format:check
-
-      - name: Lint
-        run: npm run lint
+      # `ultracite check` runs Biome's combined formatter + linter check
+      # (read-only), replacing the separate Prettier `--check` + ESLint steps.
+      - name: Lint and format check
+        run: npm run lint:check
 
       - name: Type check
         run: npm run typecheck

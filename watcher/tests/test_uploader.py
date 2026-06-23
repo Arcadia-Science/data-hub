@@ -12,9 +12,14 @@ import pytest
 from requests.adapters import HTTPAdapter
 
 from data_hub_watcher.api_client import ApiError
+from data_hub_watcher.constants import MAX_QUEUE_FILE_ATTEMPTS
 from data_hub_watcher.events import EventReporter
 from data_hub_watcher.heartbeat import WatcherCounters
-from data_hub_watcher.models import PresignedUploadResponse
+from data_hub_watcher.models import (
+    PresignedUploadResponse,
+    UploadQueueFile,
+    UploadQueueResponse,
+)
 from data_hub_watcher.state import StateDB
 from data_hub_watcher.uploader import Uploader
 
@@ -588,3 +593,152 @@ class TestPollUploadQueueCounterLocking:
 
         spy.assert_called_once()
         assert uploader._counters.errors == 1
+
+
+class TestPollUploadQueueAttemptCap:
+    """A persistently-failing queued file is bounded, then cancelled.
+
+    Manual-mode polling runs every heartbeat, so a stale queue entry (e.g.
+    one left pointing at the old root after the watch directory changed, or
+    a file that keeps failing to upload) would otherwise re-error forever.
+    The watcher surfaces the visible error once, retries up to
+    ``MAX_QUEUE_FILE_ATTEMPTS`` polls, then cancels the request server-side
+    so it leaves the queue (ENG-1397).
+    """
+
+    @staticmethod
+    def _ghost_queue() -> UploadQueueResponse:
+        """A one-file queue pointing at a path that doesn't exist on disk."""
+        return UploadQueueResponse(
+            files=[
+                UploadQueueFile(
+                    id=1,
+                    instrument_id="test-instrument",
+                    run_id="RUN-X",
+                    filename="ghost.csv",
+                    relative_path="ghost.csv",
+                )
+            ]
+        )
+
+    def test_missing_file_errors_once_then_cancels(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+    ) -> None:
+        mock_client.get_upload_queue.return_value = self._ghost_queue()
+
+        for _ in range(MAX_QUEUE_FILE_ATTEMPTS):
+            uploader.poll_upload_queue()
+
+        reporter_mock = cast(MagicMock, uploader._reporter)
+
+        # Visible "missing" error and the error counter fire exactly once
+        # across all polls (throttled), not once per heartbeat.
+        assert reporter_mock.queue_event.call_count == 1
+        assert uploader._counters.errors == 1
+
+        # On the final poll the watcher gives up and cancels server-side.
+        mock_client.cancel_upload_request.assert_called_once_with(1)
+        reporter_mock.report_error.assert_called_once()
+        assert reporter_mock.report_error.call_args.args[0] == "upload_request_cancelled"
+        assert reporter_mock.report_error.call_args.kwargs["reason"] == "missing"
+
+    def test_upload_failure_cancels_after_threshold(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        (tmp_path / "data.csv").write_text("x")
+        mock_client.get_upload_queue.return_value = UploadQueueResponse(
+            files=[
+                UploadQueueFile(
+                    id=2,
+                    instrument_id="test-instrument",
+                    run_id="RUN-Y",
+                    filename="data.csv",
+                    relative_path="data.csv",
+                )
+            ]
+        )
+
+        # The file exists but every upload attempt fails -> cap applies to
+        # upload failures too, not just missing files.
+        with patch.object(uploader, "_upload_single", return_value=False):
+            for _ in range(MAX_QUEUE_FILE_ATTEMPTS):
+                uploader.poll_upload_queue()
+
+        reporter_mock = cast(MagicMock, uploader._reporter)
+        mock_client.cancel_upload_request.assert_called_once_with(2)
+        assert reporter_mock.report_error.call_args.kwargs["reason"] == "upload_failed"
+
+    def test_successful_upload_prunes_without_cancel(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        (tmp_path / "data.csv").write_text("x")
+        mock_client.get_upload_queue.return_value = UploadQueueResponse(
+            files=[
+                UploadQueueFile(
+                    id=3,
+                    instrument_id="test-instrument",
+                    run_id="RUN-Z",
+                    filename="data.csv",
+                    relative_path="data.csv",
+                )
+            ]
+        )
+
+        with patch.object(uploader, "_upload_single", return_value=True):
+            uploader.poll_upload_queue()
+
+        assert 3 not in uploader._queue_attempts
+        mock_client.cancel_upload_request.assert_not_called()
+
+    def test_requeued_id_rearms_after_leaving_queue(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+    ) -> None:
+        mock_client.get_upload_queue.return_value = self._ghost_queue()
+        reporter_mock = cast(MagicMock, uploader._reporter)
+
+        # Two misses (stay under the threshold): error fires once, count grows.
+        uploader.poll_upload_queue()
+        uploader.poll_upload_queue()
+        assert uploader._queue_attempts[1].count == 2
+        assert reporter_mock.queue_event.call_count == 1
+
+        # File leaves the queue -> its attempt record is pruned.
+        mock_client.get_upload_queue.return_value = UploadQueueResponse(files=[])
+        uploader.poll_upload_queue()
+        assert 1 not in uploader._queue_attempts
+
+        # It comes back (re-requested): the throttle re-arms and fires again.
+        mock_client.get_upload_queue.return_value = self._ghost_queue()
+        uploader.poll_upload_queue()
+        assert reporter_mock.queue_event.call_count == 2
+
+    def test_cancel_failure_is_retried_next_poll(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+    ) -> None:
+        mock_client.get_upload_queue.return_value = self._ghost_queue()
+        mock_client.cancel_upload_request.side_effect = ApiError("boom", status_code=500)
+
+        for _ in range(MAX_QUEUE_FILE_ATTEMPTS):
+            uploader.poll_upload_queue()
+
+        # Cancel attempted once on the threshold poll and it failed, so the
+        # attempt record stays put and no give-up event is emitted yet.
+        assert mock_client.cancel_upload_request.call_count == 1
+        assert uploader._queue_attempts[1].count == MAX_QUEUE_FILE_ATTEMPTS
+        cast(MagicMock, uploader._reporter).report_error.assert_not_called()
+
+        # The next poll retries the cancel rather than re-erroring on upload.
+        uploader.poll_upload_queue()
+        assert mock_client.cancel_upload_request.call_count == 2

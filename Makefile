@@ -49,11 +49,11 @@ py-check-watcher-version:
 # Web app.
 .PHONY: fe-format
 fe-format:
-	cd web && npm run format
+	cd web && npm run lint:fix
 
 .PHONY: fe-lint
 fe-lint:
-	cd web && npm run lint
+	cd web && npm run lint:check
 
 .PHONY: fe-typecheck
 fe-typecheck:

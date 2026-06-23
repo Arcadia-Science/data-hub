@@ -1,12 +1,15 @@
+import { and, eq, inArray, isNull } from "drizzle-orm";
+import { after } from "next/server";
 import {
   fingerprintFiles,
   getArchiveDownloadFilename,
   getArchiveKey,
+  type InvokeBuildArchiveInput,
   invokeBuildArchive,
   isArchiveBuilderConfigured,
-  type InvokeBuildArchiveInput,
 } from "@/lib/api/archive-builder";
 import { expireStaleArchiveJobs } from "@/lib/api/archive-jobs";
+import { estimateRetryAfterSeconds } from "@/lib/api/archive-retry";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { db } from "@/lib/db";
 import { archiveJobs, files } from "@/lib/db/schema";
@@ -16,35 +19,31 @@ import {
   headS3Object,
   PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS,
 } from "@/lib/s3";
-import { and, eq, inArray, isNull } from "drizzle-orm";
-import { after } from "next/server";
 
-// Hint to caller (LLM, polling UI) for how long to wait before checking
-// again. Sized to be longer than a small archive's typical build (which
-// the Lambda finishes in 1-3s for a few-MB run) but short enough that the
-// chat experience doesn't stall.
-export const ARCHIVE_BUILD_RETRY_AFTER_SECONDS = 5;
-
-export type DownloadableFile = {
-  id: number;
+export interface DownloadableFile {
   filename: string;
+  id: number;
   s3Bucket: string;
   s3Key: string;
-};
+  // Nullable: older rows and not-yet-sized uploads can lack a size. Used only
+  // to estimate the build-time retry hint and to let the builder decide
+  // prefetch eligibility — never required for correctness.
+  sizeBytes: number | null;
+}
 
-export type PrepareRunArchiveInput = {
-  instrumentId: string;
-  runId: string;
+export interface PrepareRunArchiveInput {
+  // User who triggered this build, for the `archive_jobs.created_by`
+  // audit column. Should be `null` for token-authenticated callers
+  // (Lambda, MCP, watcher) since the column references `users.id`.
+  createdBy: string | null;
   // Subset of file IDs to include. `null` means "every uploaded file in
   // the run", which matches the default "Download all" behavior. An empty
   // array means the caller asked for a specific subset and supplied none
   // of the run's files; we surface that as a clear error.
   fileIdsFilter?: number[] | null;
-  // User who triggered this build, for the `archive_jobs.created_by`
-  // audit column. Should be `null` for token-authenticated callers
-  // (Lambda, MCP, watcher) since the column references `users.id`.
-  createdBy: string | null;
-};
+  instrumentId: string;
+  runId: string;
+}
 
 export type PrepareRunArchiveResult =
   | {
@@ -197,17 +196,25 @@ export async function prepareRunArchive(
         s3Key: f.s3Key,
         filename: f.filename,
         sourceBucket: f.s3Bucket,
+        sizeBytes: f.sizeBytes,
       })),
     };
     after(() => runArchiveBuildInBackground(job.id, buildInput, fingerprint));
   }
 
+  const totalBytes = downloadable.reduce(
+    (sum, f) => sum + (f.sizeBytes ?? 0),
+    0
+  );
   return {
     ok: true,
     status: "building",
     jobId: job.id,
     ownsBuild,
-    retryAfterSeconds: ARCHIVE_BUILD_RETRY_AFTER_SECONDS,
+    retryAfterSeconds: estimateRetryAfterSeconds({
+      fileCount: downloadable.length,
+      totalBytes,
+    }),
   };
 }
 
@@ -233,6 +240,7 @@ async function loadDownloadableFiles(
       filename: files.filename,
       s3Bucket: files.s3Bucket,
       s3Key: files.s3Key,
+      sizeBytes: files.sizeBytes,
     })
     .from(files)
     .where(and(...conditions));
@@ -246,20 +254,21 @@ async function loadDownloadableFiles(
       filename: f.filename,
       s3Bucket: f.s3Bucket,
       s3Key: f.s3Key,
+      sizeBytes: f.sizeBytes,
     }));
 }
 
-type EnsureArchiveJobInput = {
-  runInternalId: string;
-  fingerprint: string;
+interface EnsureArchiveJobInput {
   archiveBucket: string;
   createdBy: string | null;
-};
+  fingerprint: string;
+  runInternalId: string;
+}
 
-type EnsureArchiveJobResult = {
+interface EnsureArchiveJobResult {
   job: typeof archiveJobs.$inferSelect;
   ownsBuild: boolean;
-};
+}
 
 // Inserts a fresh in-flight job for (run, fingerprint), or — if another
 // request beat us to it — selects the existing one. The partial unique

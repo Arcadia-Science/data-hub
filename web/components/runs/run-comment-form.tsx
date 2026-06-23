@@ -1,9 +1,9 @@
 "use client";
 
+import { type FormEvent, useState, useTransition } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { useState, useTransition, type FormEvent } from "react";
-import { toast } from "sonner";
 
 const MAX_BODY_LENGTH = 10_000;
 
@@ -30,7 +30,9 @@ export function RunCommentForm({
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault();
-    if (!canSubmit) return;
+    if (!canSubmit) {
+      return;
+    }
     const submitted = body;
     // Clear immediately for a snappy feel; the optimistic comment carries
     // the text. Restore on failure so the user can retry.
@@ -46,18 +48,18 @@ export function RunCommentForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-2">
+    <form className="flex flex-col gap-2" onSubmit={handleSubmit}>
       <Textarea
-        placeholder="Add a comment"
-        value={body}
-        onChange={(e) => setBody(e.target.value)}
-        disabled={isPending}
-        rows={3}
-        aria-label="Comment body"
         aria-invalid={tooLong || undefined}
+        aria-label="Comment body"
         className="resize-none border-0 bg-transparent px-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
+        disabled={isPending}
+        onChange={(e) => setBody(e.target.value)}
+        placeholder="Add a comment"
+        rows={3}
+        value={body}
       />
-      <div className="flex items-center justify-between text-xs text-muted-foreground">
+      <div className="flex items-center justify-between text-muted-foreground text-xs">
         {tooLong ? (
           <span className="text-destructive">
             {body.length}/{MAX_BODY_LENGTH.toLocaleString()} characters
@@ -65,7 +67,7 @@ export function RunCommentForm({
         ) : (
           <span aria-hidden="true" />
         )}
-        <Button type="submit" size="sm" disabled={!canSubmit}>
+        <Button disabled={!canSubmit} size="sm" type="submit">
           {isPending ? "Posting…" : "Post comment"}
         </Button>
       </div>

@@ -1,3 +1,6 @@
+import { ArrowRight } from "lucide-react";
+import Link from "next/link";
+import type { Metadata } from "next/types";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import { DashboardStatsCards } from "@/components/dashboard/dashboard-stats";
 import { RunsTable } from "@/components/dashboard/runs-table";
@@ -15,9 +18,6 @@ import { buildRunListQuery } from "@/lib/api/instrument-runs";
 import { getRecentActiveInstrumentsForDashboard } from "@/lib/api/instruments";
 import { auth } from "@/lib/auth";
 import { dashboardParamsCache, hasActiveFilters } from "@/lib/search-params";
-import { ArrowRight } from "lucide-react";
-import Link from "next/link";
-import type { Metadata } from "next/types";
 
 // `default: "Data Hub"` on the root metadata template already renders
 // `<title>Data Hub</title>` here, so we skip an explicit `title` and
@@ -112,13 +112,13 @@ export default async function DashboardPage({
       <DashboardStatsCards stats={stats} />
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-medium tracking-tight">Instruments</h2>
+        <h2 className="font-medium text-lg tracking-tight">Instruments</h2>
         <InstrumentsTable
           data={recentActiveInstruments}
           footer={
             <Link
+              className="flex items-center justify-center gap-1.5 px-4 py-2.5 text-muted-foreground text-sm transition-colors hover:bg-muted/50 hover:text-foreground"
               href="/instruments"
-              className="flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
             >
               View all {totalActiveInstruments} instruments
               <ArrowRight className="size-3.5" />
@@ -128,7 +128,7 @@ export default async function DashboardPage({
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-medium tracking-tight">Recent runs</h2>
+        <h2 className="font-medium text-lg tracking-tight">Recent runs</h2>
         <RunSelectionProvider>
           <TablePendingProvider>
             <RunsToolbar instruments={instruments} />
@@ -137,16 +137,16 @@ export default async function DashboardPage({
               <RunsTable
                 data={runResult.data}
                 hasFilters={hasFilters}
-                totalCount={runResult.pagination.total}
                 pendingUploadCount={pendingUploadCount}
-                unattributedCount={unattributedCount}
                 ranByYouCount={ranByYouCount}
+                totalCount={runResult.pagination.total}
+                unattributedCount={unattributedCount}
               />
             </TablePendingBoundary>
             <PaginationNav
               page={runResult.pagination.page}
-              totalPages={runResult.pagination.total_pages}
               pageParam="page"
+              totalPages={runResult.pagination.total_pages}
             />
           </TablePendingProvider>
         </RunSelectionProvider>

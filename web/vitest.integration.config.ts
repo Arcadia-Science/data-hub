@@ -1,4 +1,4 @@
-import path from "path";
+import path from "node:path";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
@@ -10,6 +10,6 @@ export default defineConfig({
     globalSetup: "tests/integration/global-setup.ts",
   },
   resolve: {
-    alias: { "@": path.resolve(__dirname, ".") },
+    alias: { "@": path.resolve(import.meta.dirname, ".") },
   },
 });

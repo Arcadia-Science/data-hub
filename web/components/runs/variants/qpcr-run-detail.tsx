@@ -10,25 +10,26 @@ import {
 export function QpcrRunDetail({
   run,
   files,
+  filesPagination,
+  fileStats,
+  reportFiles,
   instrumentId,
   runId,
   attributionsSlot,
 }: RunDetailProps) {
   const isDeleted = run.deletedAt !== null;
-  const activeFileCount = files.filter((f) => f.deletedAt === null).length;
-  const hasProcessedFiles =
-    files.filter((f) => f.category === "processed" && f.deletedAt === null)
-      .length > 0;
+  const activeFileCount = fileStats.active;
+  const hasProcessedFiles = fileStats.processedActive > 0;
 
   return (
     <>
-      <RunDetail.Header run={run} attributionsSlot={attributionsSlot}>
+      <RunDetail.Header attributionsSlot={attributionsSlot} run={run}>
         {!isDeleted && (
           <DeleteRunDialog
-            instrumentId={instrumentId}
-            runId={runId}
             fileCount={activeFileCount}
             hasProcessedFiles={hasProcessedFiles}
+            instrumentId={instrumentId}
+            runId={runId}
           />
         )}
         {isDeleted && (
@@ -45,12 +46,14 @@ export function QpcrRunDetail({
         <RunDetail.Files
           files={files}
           instrumentId={instrumentId}
-          runId={runId}
           isDeleted={isDeleted}
+          pagination={filesPagination}
+          runId={runId}
+          stats={fileStats}
         />
       </RunDetail.FilesMetadataLayout>
 
-      <RunDetail.Report files={files} />
+      <RunDetail.Report files={reportFiles} />
     </>
   );
 }

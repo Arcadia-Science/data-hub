@@ -17,6 +17,7 @@ export const AVATAR_PALETTE = [
 export function avatarColor(userId: string): string {
   let hash = 0;
   for (let i = 0; i < userId.length; i++) {
+    // biome-ignore lint/suspicious/noBitwiseOperators: | 0 coerces the hash to a 32-bit integer
     hash = (hash * 31 + userId.charCodeAt(i)) | 0;
   }
   return AVATAR_PALETTE[Math.abs(hash) % AVATAR_PALETTE.length];
@@ -24,7 +25,11 @@ export function avatarColor(userId: string): string {
 
 export function toInitials(displayName: string): string {
   const parts = displayName.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  if (parts.length === 0) {
+    return "?";
+  }
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+  return (parts[0][0] + parts.at(-1)?.[0]).toUpperCase();
 }

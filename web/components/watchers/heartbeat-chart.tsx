@@ -1,5 +1,8 @@
 "use client";
 
+import { HeartPulse } from "lucide-react";
+import { useEffect, useMemo, useRef } from "react";
+import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { useTablePending } from "@/components/table-pending";
 import {
   type ChartConfig,
@@ -16,9 +19,6 @@ import {
 import type { WatcherHeartbeatRow } from "@/lib/api/watchers";
 import { formatDateTime, formatTime } from "@/lib/date";
 import { cn } from "@/lib/utils";
-import { HeartPulse } from "lucide-react";
-import { useEffect, useMemo, useRef } from "react";
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 
 const chartConfig = {
   files: { label: "Files", color: "var(--color-primary)" },
@@ -40,21 +40,21 @@ function computeWindow(since: string): {
   windowEnd: Date;
 } {
   const now = Math.floor(Date.now() / FIVE_MIN) * FIVE_MIN;
-  const windowStart = new Date(since + "T00:00:00");
-  const endOfDay = new Date(since + "T00:00:00");
+  const windowStart = new Date(`${since}T00:00:00`);
+  const endOfDay = new Date(`${since}T00:00:00`);
   endOfDay.setDate(endOfDay.getDate() + 1);
   const windowEnd = endOfDay.getTime() > now ? new Date(now) : endOfDay;
   return { windowStart, windowEnd };
 }
 
-type Bucket = {
-  key: number;
+interface Bucket {
   className: string;
-  label: string;
-  startTime: Date;
   endTime: Date;
   heartbeatCount: number;
-};
+  key: number;
+  label: string;
+  startTime: Date;
+}
 
 function buildBuckets(
   heartbeats: WatcherHeartbeatRow[],
@@ -71,7 +71,9 @@ function buildBuckets(
 
   for (const hb of heartbeats) {
     const ts = hb.timestamp.getTime();
-    if (ts < startMs || ts >= endMs) continue;
+    if (ts < startMs || ts >= endMs) {
+      continue;
+    }
 
     const idx = Math.min(
       Math.floor((ts - startMs) / bucketMs),
@@ -117,14 +119,14 @@ function StatusStrip({
 
   return (
     <div className="mt-3 flex flex-col gap-1.5">
-      <span className="text-xs text-muted-foreground">Connectivity</span>
+      <span className="text-muted-foreground text-xs">Connectivity</span>
       <div className="flex h-6 w-full items-stretch gap-0.5">
         {buckets.map((bucket) => (
-          <Tooltip key={bucket.key} delayDuration={0}>
+          <Tooltip delayDuration={0} key={bucket.key}>
             <TooltipTrigger asChild>
               <div className={cn("flex-1 rounded-sm", bucket.className)} />
             </TooltipTrigger>
-            <TooltipContent side="top" className="text-xs">
+            <TooltipContent className="text-xs" side="top">
               <p className="font-medium">{bucket.label}</p>
               <p className="text-muted-foreground">
                 {formatTime(bucket.startTime)} – {formatTime(bucket.endTime)}
@@ -200,9 +202,12 @@ export function HeartbeatChart({
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-scroll to the latest buckets when heartbeat data changes
   useEffect(() => {
     const el = scrollRef.current;
-    if (el && needsScroll) el.scrollLeft = el.scrollWidth;
+    if (el && needsScroll) {
+      el.scrollLeft = el.scrollWidth;
+    }
   }, [data, needsScroll]);
 
   if (isPending) {
@@ -213,7 +218,7 @@ export function HeartbeatChart({
     return (
       <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-background py-8 dark:bg-muted">
         <HeartPulse className="size-6 text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">
+        <p className="text-muted-foreground text-sm">
           No heartbeats in this time range.
         </p>
       </div>
@@ -222,22 +227,22 @@ export function HeartbeatChart({
 
   return (
     <div className="rounded-lg border bg-background p-4 dark:bg-muted">
-      <div ref={scrollRef} className={cn(needsScroll && "overflow-x-auto")}>
+      <div className={cn(needsScroll && "overflow-x-auto")} ref={scrollRef}>
         <div
           style={
             needsScroll ? { minWidth: `${widthMultiplier * 100}%` } : undefined
           }
         >
           <ChartContainer
-            config={chartConfig}
             className="aspect-auto h-64 w-full"
+            config={chartConfig}
           >
             <AreaChart
               data={data}
               margin={{ top: 4, right: 4, bottom: 0, left: 0 }}
             >
               <defs>
-                <linearGradient id="fillFiles" x1="0" y1="0" x2="0" y2="1">
+                <linearGradient id="fillFiles" x1="0" x2="0" y1="0" y2="1">
                   <stop
                     offset="0%"
                     stopColor="var(--color-files)"
@@ -249,7 +254,7 @@ export function HeartbeatChart({
                     stopOpacity={0.05}
                   />
                 </linearGradient>
-                <linearGradient id="fillRuns" x1="0" y1="0" x2="0" y2="1">
+                <linearGradient id="fillRuns" x1="0" x2="0" y1="0" y2="1">
                   <stop
                     offset="0%"
                     stopColor="var(--color-runs)"
@@ -261,7 +266,7 @@ export function HeartbeatChart({
                     stopOpacity={0.05}
                   />
                 </linearGradient>
-                <linearGradient id="fillErrors" x1="0" y1="0" x2="0" y2="1">
+                <linearGradient id="fillErrors" x1="0" x2="0" y1="0" y2="1">
                   <stop
                     offset="0%"
                     stopColor="var(--color-errors)"
@@ -276,20 +281,20 @@ export function HeartbeatChart({
               </defs>
               <CartesianGrid vertical={false} />
               <XAxis
+                axisLine={false}
                 dataKey="timestamp"
-                type="number"
-                scale="time"
                 domain={[startMs, endMs]}
+                minTickGap={40}
+                scale="time"
                 tickFormatter={(v: number) => formatTime(new Date(v))}
                 tickLine={false}
-                axisLine={false}
                 tickMargin={8}
-                minTickGap={40}
+                type="number"
               />
               <YAxis
                 allowDecimals={false}
-                tickLine={false}
                 axisLine={false}
+                tickLine={false}
                 tickMargin={8}
                 width={32}
               />
@@ -305,24 +310,24 @@ export function HeartbeatChart({
               />
               <Area
                 dataKey="errors"
-                type="monotone"
-                stroke="var(--color-errors)"
                 fill="url(#fillErrors)"
+                stroke="var(--color-errors)"
                 strokeWidth={1.5}
+                type="monotone"
               />
               <Area
                 dataKey="files"
-                type="monotone"
-                stroke="var(--color-files)"
                 fill="url(#fillFiles)"
+                stroke="var(--color-files)"
                 strokeWidth={1.5}
+                type="monotone"
               />
               <Area
                 dataKey="runs"
-                type="monotone"
-                stroke="var(--color-runs)"
                 fill="url(#fillRuns)"
+                stroke="var(--color-runs)"
                 strokeWidth={1.5}
+                type="monotone"
               />
             </AreaChart>
           </ChartContainer>
@@ -330,7 +335,7 @@ export function HeartbeatChart({
       </div>
       <div className="flex items-center justify-center gap-4 py-2 text-xs">
         {Object.entries(chartConfig).map(([key, { label, color }]) => (
-          <div key={key} className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5" key={key}>
             <div
               className="size-2.5 rounded-sm"
               style={{ backgroundColor: color }}
@@ -341,8 +346,8 @@ export function HeartbeatChart({
       </div>
       <StatusStrip
         heartbeats={heartbeats}
-        windowStart={windowStart}
         windowEnd={windowEnd}
+        windowStart={windowStart}
       />
     </div>
   );

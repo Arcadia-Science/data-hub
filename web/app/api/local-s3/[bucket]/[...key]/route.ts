@@ -13,28 +13,30 @@
 // on the Edge runtime and there's no production deployment story for
 // this route anyway.
 
-import {
-  getLocalMirrorRoot,
-  mimeFor,
-  resolveMirrorPath,
-} from "@/lib/s3-local-mirror";
-import type { NextRequest } from "next/server";
 import { createReadStream, createWriteStream } from "node:fs";
 import { mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ReadableStream as NodeWebReadableStream } from "node:stream/web";
+import type { NextRequest } from "next/server";
+import {
+  getLocalMirrorRoot,
+  mimeFor,
+  resolveMirrorPath,
+} from "@/lib/s3-local-mirror";
 
-type RouteContext = {
+interface RouteContext {
   params: Promise<{ bucket: string; key: string[] }>;
-};
+}
 
 const NOT_FOUND_RESPONSE = () => new Response("Not Found", { status: 404 });
 
 export async function GET(request: NextRequest, { params }: RouteContext) {
   const root = getLocalMirrorRoot();
-  if (!root) return NOT_FOUND_RESPONSE();
+  if (!root) {
+    return NOT_FOUND_RESPONSE();
+  }
 
   const { bucket, key } = await params;
   const joinedKey = key.join("/");
@@ -50,7 +52,9 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
   let fileSize: number;
   try {
     const s = await stat(filePath);
-    if (!s.isFile()) return NOT_FOUND_RESPONSE();
+    if (!s.isFile()) {
+      return NOT_FOUND_RESPONSE();
+    }
     fileSize = s.size;
   } catch {
     return NOT_FOUND_RESPONSE();
@@ -79,7 +83,9 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
 
 export async function PUT(request: NextRequest, { params }: RouteContext) {
   const root = getLocalMirrorRoot();
-  if (!root) return NOT_FOUND_RESPONSE();
+  if (!root) {
+    return NOT_FOUND_RESPONSE();
+  }
 
   const { bucket, key } = await params;
   const joinedKey = key.join("/");

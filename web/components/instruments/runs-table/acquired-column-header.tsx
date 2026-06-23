@@ -16,14 +16,14 @@ export function AcquiredColumnHeader() {
   return (
     <Tooltip>
       <TooltipTrigger
-        type="button"
         aria-label="About the Acquired column"
         className="inline-flex h-8 cursor-help items-center gap-1.5 font-medium text-foreground"
+        type="button"
       >
         Acquired
         <CircleHelp
-          className="size-3 text-muted-foreground"
           aria-hidden="true"
+          className="size-3 text-muted-foreground"
         />
       </TooltipTrigger>
       <TooltipContent side="top">

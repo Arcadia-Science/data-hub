@@ -1,5 +1,8 @@
 "use client";
 
+import { Calendar as CalendarIcon, Check, ChevronDown } from "lucide-react";
+import dynamic from "next/dynamic";
+import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -9,19 +12,19 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { formatDateRange } from "@/lib/date";
 import { cn } from "@/lib/utils";
-import { Calendar as CalendarIcon, Check, ChevronDown } from "lucide-react";
-import dynamic from "next/dynamic";
-import { useMemo, useState } from "react";
 
-export type DateRange = { from: string | null; to: string | null };
+export interface DateRange {
+  from: string | null;
+  to: string | null;
+}
 
 export type PresetId = "24h" | "3d" | "1w" | "2w" | "1m";
 
-type Preset = {
+interface Preset {
+  days: number;
   id: PresetId;
   label: string;
-  days: number;
-};
+}
 
 // Module-scoped so we don't reallocate on every render.
 const PRESETS: readonly Preset[] = [
@@ -39,14 +42,18 @@ function isoDaysAgo(days: number): string {
 }
 
 function resolveActivePreset(value: DateRange): PresetId | null {
-  if (!value.from || value.to) return null;
+  if (!value.from || value.to) {
+    return null;
+  }
   const fromMs = Date.parse(value.from);
-  if (Number.isNaN(fromMs)) return null;
+  if (Number.isNaN(fromMs)) {
+    return null;
+  }
   const now = Date.now();
   // Pick the closest preset within a half-day tolerance so a value written a
   // few minutes ago still lights up its preset on subsequent renders.
   let best: PresetId | null = null;
-  let bestDiff = Infinity;
+  let bestDiff = Number.POSITIVE_INFINITY;
   for (const preset of PRESETS) {
     const target = now - preset.days * MS_PER_DAY;
     const diff = Math.abs(target - fromMs);
@@ -64,7 +71,9 @@ function presetLabel(id: PresetId): string {
 
 function resolveLabel(value: DateRange, defaultPreset?: PresetId): string {
   const preset = resolveActivePreset(value);
-  if (preset) return presetLabel(preset);
+  if (preset) {
+    return presetLabel(preset);
+  }
   if (value.from && value.to) {
     return formatDateRange(new Date(value.from), new Date(value.to));
   }
@@ -113,8 +122,12 @@ export function RunsDateFilter({
   const isEmpty = value.from === null && value.to === null;
   const activePreset = useMemo(() => {
     const resolved = resolveActivePreset(value);
-    if (resolved) return resolved;
-    if (isEmpty && defaultPreset) return defaultPreset;
+    if (resolved) {
+      return resolved;
+    }
+    if (isEmpty && defaultPreset) {
+      return defaultPreset;
+    }
     return null;
   }, [value, isEmpty, defaultPreset]);
   const label = useMemo(
@@ -127,7 +140,9 @@ export function RunsDateFilter({
   function openChange(next: boolean) {
     setOpen(next);
     // Always reset to the preset view when the popover reopens.
-    if (!next) setView("presets");
+    if (!next) {
+      setView("presets");
+    }
   }
 
   function applyPreset(preset: Preset) {
@@ -151,13 +166,13 @@ export function RunsDateFilter({
   }
 
   return (
-    <Popover open={open} onOpenChange={openChange}>
+    <Popover onOpenChange={openChange} open={open}>
       <PopoverTrigger asChild>
         <Button
-          variant="outline"
-          size="sm"
-          className="h-9 gap-2 font-normal"
           aria-label="Date range"
+          className="h-9 gap-2 font-normal"
+          size="sm"
+          variant="outline"
         >
           <CalendarIcon className="size-3.5 text-muted-foreground" />
           <span className="text-sm">{label}</span>
@@ -174,16 +189,16 @@ export function RunsDateFilter({
           <PresetList
             activePreset={activePreset}
             isCustom={isCustom}
-            showAllTime={!defaultPreset}
-            onSelectPreset={applyPreset}
             onClear={clearRange}
             onOpenCustom={() => setView("custom")}
+            onSelectPreset={applyPreset}
+            showAllTime={!defaultPreset}
           />
         ) : (
           <CalendarRangeView
             initial={value}
-            onCancel={() => setView("presets")}
             onApply={applyCustom}
+            onCancel={() => setView("presets")}
           />
         )}
       </PopoverContent>
@@ -211,22 +226,22 @@ function PresetList({
     <div className="flex w-56 flex-col py-1">
       {showAllTime ? (
         <>
-          <PresetItem label="All time" active={isAllTime} onSelect={onClear} />
+          <PresetItem active={isAllTime} label="All time" onSelect={onClear} />
           <Separator className="my-1" />
         </>
       ) : null}
       {PRESETS.map((preset) => (
         <PresetItem
+          active={preset.id === activePreset}
           key={preset.id}
           label={preset.label}
-          active={preset.id === activePreset}
           onSelect={() => onSelectPreset(preset)}
         />
       ))}
       <Separator className="my-1" />
       <PresetItem
-        label="Custom range…"
         active={isCustom}
+        label="Custom range…"
         onSelect={onOpenCustom}
       />
     </div>
@@ -244,12 +259,12 @@ function PresetItem({
 }) {
   return (
     <button
-      type="button"
-      onClick={onSelect}
       className={cn(
         "flex items-center justify-between px-3 py-1.5 text-left text-sm outline-none hover:bg-accent focus-visible:bg-accent",
         active && "font-medium"
       )}
+      onClick={onSelect}
+      type="button"
     >
       <span>{label}</span>
       {active ? <Check className="size-3.5 text-muted-foreground" /> : null}

@@ -1,14 +1,14 @@
+import { eq } from "drizzle-orm";
+import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { isValidUUID } from "@/lib/api/validators";
 import { db } from "@/lib/db";
 import { archiveJobs } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
-import type { NextRequest } from "next/server";
 
-type RouteContext = {
+interface RouteContext {
   params: Promise<{ id: string }>;
-};
+}
 
 // ---------------------------------------------------------------------------
 // PATCH /api/v1/archive-jobs/:id
@@ -31,17 +31,19 @@ type RouteContext = {
 
 const TERMINAL_STATUSES = new Set(["ready", "failed"]);
 
-type PatchBody = {
-  status?: unknown;
+interface PatchBody {
   archive_bucket?: unknown;
   archive_key?: unknown;
-  size_bytes?: unknown;
   error_message?: unknown;
-};
+  size_bytes?: unknown;
+  status?: unknown;
+}
 
 export async function PATCH(request: NextRequest, { params }: RouteContext) {
   const authResult = await authorize(request, "archive-jobs:write");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { id } = await params;
   if (!isValidUUID(id)) {
@@ -68,17 +70,16 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 
   const status = body.status as "pending" | "building" | "ready" | "failed";
 
-  if (status === "ready") {
-    if (
-      typeof body.archive_bucket !== "string" ||
-      typeof body.archive_key !== "string"
-    ) {
-      return apiError(
-        400,
-        VALIDATION_ERROR,
-        "archive_bucket and archive_key are required when status is 'ready'"
-      );
-    }
+  if (
+    status === "ready" &&
+    (typeof body.archive_bucket !== "string" ||
+      typeof body.archive_key !== "string")
+  ) {
+    return apiError(
+      400,
+      VALIDATION_ERROR,
+      "archive_bucket and archive_key are required when status is 'ready'"
+    );
   }
 
   const update: Partial<typeof archiveJobs.$inferInsert> = { status };

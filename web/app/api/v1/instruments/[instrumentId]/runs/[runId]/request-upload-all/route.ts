@@ -1,14 +1,20 @@
-import { authorize } from "@/lib/api/auth";
-import { apiError, CONFLICT, NOT_FOUND } from "@/lib/api/errors";
-import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
-import { db } from "@/lib/db";
-import { files, instrumentRuns } from "@/lib/db/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import type { NextRequest } from "next/server";
+import { authorize } from "@/lib/api/auth";
+import {
+  apiError,
+  CONFLICT,
+  NOT_FOUND,
+  WATCHER_OFFLINE,
+} from "@/lib/api/errors";
+import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
+import { instrumentHasOnlineWatcher } from "@/lib/api/instruments";
+import { db } from "@/lib/db";
+import { files, instrumentRuns } from "@/lib/db/schema";
 
-type RouteContext = {
+interface RouteContext {
   params: Promise<{ instrumentId: string; runId: string }>;
-};
+}
 
 // ---------------------------------------------------------------------------
 // POST /api/v1/instruments/:instrumentId/runs/:runId/request-upload-all
@@ -21,7 +27,9 @@ type RouteContext = {
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
   const authResult = await authorize(request, "runs:write");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { instrumentId, runId } = await params;
   const run = await lookupRunByNaturalKey(instrumentId, runId);
@@ -39,6 +47,18 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       409,
       CONFLICT,
       "Cannot request uploads for a soft-deleted run"
+    );
+  }
+
+  // Uploads are performed by the watcher agent (it polls this queue and pushes
+  // bytes to S3). With no online watcher the files would be marked
+  // `upload_requested` and never progress, leaving the UI stuck on
+  // "Uploading". Reject up front so the caller gets a clear, actionable error.
+  if (!(await instrumentHasOnlineWatcher(run.instrumentId))) {
+    return apiError(
+      409,
+      WATCHER_OFFLINE,
+      "No online watcher for this instrument. Bring the watcher online before requesting uploads — otherwise nothing will transfer to S3."
     );
   }
 

@@ -1,4 +1,8 @@
 import { RelativeTime } from "@/components/dashboard/relative-time";
+import {
+  getMetadataArray,
+  MetadataArrayBadges,
+} from "@/components/runs/metadata-badges";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -12,11 +16,9 @@ import type { QpcrFilterOptions } from "@/lib/api/instrument-runs";
 import { getDyeChannelColor } from "@/lib/instrument-colors";
 import { runRowToRef } from "@/lib/runs/row-actions";
 import { cn, formatBytes } from "@/lib/utils";
-
 import type { RunRow } from ".";
 import { AcquiredColumnHeader } from "./acquired-column-header";
 import { FilterableColumnHeader } from "./filterable-column-header";
-import { MetadataArrayBadges, getMetadataArray } from "./metadata-utils";
 import { RanByCell } from "./ran-by-cell";
 import { RawFileColumnHeader } from "./raw-file-column-header";
 import { RunIdLabel } from "./run-id-label";
@@ -55,15 +57,15 @@ export function QpcrRunsTable({
           <TableHead>
             <FilterableColumnHeader
               label="Dye Channels"
-              paramKey="dye_channel"
               options={filterOptions.dyeChannels}
+              paramKey="dye_channel"
             />
           </TableHead>
           <TableHead>
             <FilterableColumnHeader
               label="Ran By"
-              paramKey="ran_by"
               options={ranByOptions}
+              paramKey="ran_by"
             />
           </TableHead>
           <TableHead className="text-right">
@@ -83,8 +85,8 @@ export function QpcrRunsTable({
           );
           return (
             <TableRow
-              key={row.id}
               className={cn("group", isDeleted && "opacity-50")}
+              key={row.id}
             >
               <TableCell>
                 <RunSelectCheckbox runRef={runRowToRef(row)} />
@@ -92,21 +94,21 @@ export function QpcrRunsTable({
               <TableCell>
                 <div className="flex items-center gap-2.5">
                   <RunStatusIcon
+                    errorMessages={row.error_messages}
                     fileCount={row.file_count}
                     filesCompleted={row.files_completed}
                     filesFailed={row.files_failed}
                     filesPendingUpload={row.files_pending_upload}
-                    filesUploaded={row.files_uploaded}
                     filesProcessing={row.files_processing}
-                    errorMessages={row.error_messages}
+                    filesUploaded={row.files_uploaded}
                   />
                   <RunIdLabel
-                    runId={row.run_id}
                     href={`/instruments/${instrumentId}/runs/${encodeURIComponent(row.run_id)}`}
                     isDeleted={isDeleted}
+                    runId={row.run_id}
                   />
                   {isDeleted && (
-                    <Badge variant="outline" className="ml-1.5 font-normal">
+                    <Badge className="ml-1.5 font-normal" variant="outline">
                       deleted
                     </Badge>
                   )}
@@ -120,15 +122,15 @@ export function QpcrRunsTable({
               </TableCell>
               <TableCell>
                 <MetadataArrayBadges
-                  values={dyeChannels}
                   colorMap={dyeChannelColors}
+                  values={dyeChannels}
                 />
               </TableCell>
               <TableCell>
                 <RanByCell
+                  attributions={row.attributions}
                   instrumentId={row.instrument_id}
                   runId={row.run_id}
-                  attributions={row.attributions}
                 />
               </TableCell>
               <TableCell className="text-right">

@@ -1,9 +1,9 @@
+import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import { authenticateWithToken } from "@/lib/api/auth";
 import { registerPrompts } from "@/lib/mcp/prompts";
 import { registerResources } from "@/lib/mcp/resources";
 import { registerTools } from "@/lib/mcp/tools";
-import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
-import { createMcpHandler, withMcpAuth } from "mcp-handler";
 
 const handler = createMcpHandler(
   (server) => {
@@ -35,7 +35,9 @@ const verifyToken = async (
   bearerToken?: string
 ): Promise<AuthInfo | undefined> => {
   const result = await authenticateWithToken(req);
-  if (!result) return undefined;
+  if (!result) {
+    return;
+  }
 
   return {
     token: bearerToken ?? "",

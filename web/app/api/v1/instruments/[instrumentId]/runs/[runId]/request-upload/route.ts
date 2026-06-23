@@ -1,19 +1,21 @@
+import { eq, inArray } from "drizzle-orm";
+import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import {
   apiError,
   CONFLICT,
   NOT_FOUND,
   VALIDATION_ERROR,
+  WATCHER_OFFLINE,
 } from "@/lib/api/errors";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
+import { instrumentHasOnlineWatcher } from "@/lib/api/instruments";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
-import { eq, inArray } from "drizzle-orm";
-import type { NextRequest } from "next/server";
 
-type RouteContext = {
+interface RouteContext {
   params: Promise<{ instrumentId: string; runId: string }>;
-};
+}
 
 // ---------------------------------------------------------------------------
 // POST /api/v1/instruments/:instrumentId/runs/:runId/request-upload
@@ -27,7 +29,9 @@ type RouteContext = {
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
   const authResult = await authorize(request, "runs:write");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { instrumentId, runId } = await params;
   const run = await lookupRunByNaturalKey(instrumentId, runId);
@@ -45,6 +49,18 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       409,
       CONFLICT,
       "Cannot request uploads for a soft-deleted run"
+    );
+  }
+
+  // Uploads are performed by the watcher agent (it polls this queue and pushes
+  // bytes to S3). With no online watcher the files would be marked
+  // `upload_requested` and never progress, leaving the UI stuck on
+  // "Uploading". Reject up front so the caller gets a clear, actionable error.
+  if (!(await instrumentHasOnlineWatcher(run.instrumentId))) {
+    return apiError(
+      409,
+      WATCHER_OFFLINE,
+      "No online watcher for this instrument. Bring the watcher online before requesting uploads — otherwise nothing will transfer to S3."
     );
   }
 
@@ -128,7 +144,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   // Only transition files that are still in "detected" — skip those already
   // in "upload_requested" to make the endpoint idempotent.
   const toTransition = fileIds.filter(
-    (fid: number) => requestedById.get(fid)!.status === "detected"
+    (fid: number) => requestedById.get(fid)?.status === "detected"
   );
 
   if (toTransition.length > 0) {
@@ -147,7 +163,10 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   // Build the response with the upload_requested_at for all files (both
   // newly transitioned and already-queued).
   const responseFiles = fileIds.map((fid: number) => {
-    const f = requestedById.get(fid)!;
+    const f = requestedById.get(fid);
+    if (!f) {
+      return apiError(400, VALIDATION_ERROR, `File ${fid} not found`);
+    }
     return {
       id: f.id,
       filename: f.filename,

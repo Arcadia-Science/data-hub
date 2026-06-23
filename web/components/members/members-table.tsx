@@ -11,22 +11,22 @@ import {
 } from "@/components/ui/table";
 import { avatarColor, toInitials } from "@/lib/avatar-color";
 
-export type MemberRow = {
-  id: string;
-  name: string | null;
+export interface MemberRow {
   email: string | null;
+  id: string;
   image: string | null;
   isAdmin: boolean;
-};
+  name: string | null;
+}
 
-type MembersTableProps = {
-  data: MemberRow[];
+interface MembersTableProps {
   /**
    * The signed-in admin viewing the table. Used to flag the self row so
    * the toggle is disabled (server also rejects self-demotion).
    */
   currentUserId: string;
-};
+  data: MemberRow[];
+}
 
 export function MembersTable({ data, currentUserId }: MembersTableProps) {
   return (
@@ -50,7 +50,7 @@ export function MembersTable({ data, currentUserId }: MembersTableProps) {
                   <div className="flex items-center gap-3">
                     <Avatar size="sm">
                       {member.image ? (
-                        <AvatarImage src={member.image} alt={displayName} />
+                        <AvatarImage alt={displayName} src={member.image} />
                       ) : null}
                       <AvatarFallback className={avatarColor(member.id)}>
                         {toInitials(displayName)}
@@ -60,7 +60,7 @@ export function MembersTable({ data, currentUserId }: MembersTableProps) {
                       <span className="font-medium">
                         {displayName}
                         {isSelf ? (
-                          <span className="ml-1.5 text-xs text-muted-foreground">
+                          <span className="ml-1.5 text-muted-foreground text-xs">
                             (you)
                           </span>
                         ) : null}
@@ -75,7 +75,7 @@ export function MembersTable({ data, currentUserId }: MembersTableProps) {
                   {member.isAdmin ? (
                     <Badge variant="secondary">Admin</Badge>
                   ) : (
-                    <Badge variant="outline" className="text-muted-foreground">
+                    <Badge className="text-muted-foreground" variant="outline">
                       Member
                     </Badge>
                   )}
@@ -83,10 +83,10 @@ export function MembersTable({ data, currentUserId }: MembersTableProps) {
                 <TableCell className="text-right">
                   <div className="flex justify-end">
                     <AdminToggle
-                      userId={member.id}
+                      displayName={displayName}
                       isAdmin={member.isAdmin}
                       isSelf={isSelf}
-                      displayName={displayName}
+                      userId={member.id}
                     />
                   </div>
                 </TableCell>

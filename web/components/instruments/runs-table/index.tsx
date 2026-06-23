@@ -1,5 +1,5 @@
-import type { RunListRow } from "@/lib/api/instrument-runs";
 import { SearchX } from "lucide-react";
+import type { RunListRow } from "@/lib/api/instrument-runs";
 
 import { RunsTableFooter } from "./runs-table-footer";
 
@@ -8,13 +8,16 @@ import { RunsTableFooter } from "./runs-table-footer";
 // keep working. The type itself is derived server-side.
 export type RunRow = RunListRow;
 
-export type RanByOption = { value: string; label: string };
+export interface RanByOption {
+  label: string;
+  value: string;
+}
 
-export type RunsTableProps = {
+export interface RunsTableProps {
   data: RunRow[];
   instrumentId: string;
   ranByOptions: RanByOption[];
-};
+}
 
 /**
  * Thin wrapper around the per-instrument table variants.
@@ -53,7 +56,7 @@ export function InstrumentRunsTableShell({
     return (
       <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-background py-16 dark:bg-muted">
         <SearchX className="size-8 text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">
+        <p className="text-muted-foreground text-sm">
           {hasFilters
             ? "No runs match your filters."
             : "No instrument runs yet."}
@@ -66,11 +69,11 @@ export function InstrumentRunsTableShell({
     <div className="rounded-lg border bg-background dark:bg-muted">
       {children}
       <RunsTableFooter
+        pendingUploadCount={pendingUploadCount}
+        ranByYouCount={ranByYouCount}
         shownCount={shownCount}
         totalCount={totalCount}
-        pendingUploadCount={pendingUploadCount}
         unattributedCount={unattributedCount}
-        ranByYouCount={ranByYouCount}
       />
     </div>
   );

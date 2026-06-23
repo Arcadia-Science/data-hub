@@ -1,5 +1,10 @@
 "use client";
 
+import { UserPlus, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
+import { type MouseEvent, useOptimistic, useTransition } from "react";
+import { toast } from "sonner";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,11 +14,6 @@ import {
 } from "@/components/ui/tooltip";
 import type { RunAttribution } from "@/lib/api/instrument-runs";
 import { cn } from "@/lib/utils";
-import { UserPlus, X } from "lucide-react";
-import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
-import { useOptimistic, useTransition, type MouseEvent } from "react";
-import { toast } from "sonner";
 
 // A small, deterministic palette keyed by userId hash so the same user always
 // gets the same color across rows. Tailwind tokens are baked in (we can't
@@ -32,6 +32,7 @@ const AVATAR_PALETTE = [
 function avatarColor(userId: string): string {
   let hash = 0;
   for (let i = 0; i < userId.length; i++) {
+    // biome-ignore lint/suspicious/noBitwiseOperators: | 0 coerces the hash to a 32-bit integer
     hash = (hash * 31 + userId.charCodeAt(i)) | 0;
   }
   return AVATAR_PALETTE[Math.abs(hash) % AVATAR_PALETTE.length];
@@ -42,9 +43,13 @@ function avatarColor(userId: string): string {
 // avoiding a fallback flip on reconcile.
 function toInitials(displayName: string): string {
   const parts = displayName.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  if (parts.length === 0) {
+    return "?";
+  }
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+  return (parts[0][0] + parts.at(-1)?.[0]).toUpperCase();
 }
 
 type Action =
@@ -56,7 +61,9 @@ function applyOptimistic(
   action: Action
 ): RunAttribution[] {
   if (action.kind === "claim") {
-    if (current.some((a) => a.userId === action.user.userId)) return current;
+    if (current.some((a) => a.userId === action.user.userId)) {
+      return current;
+    }
     return [...current, action.user];
   }
   return current.filter((a) => a.userId !== action.userId);
@@ -88,7 +95,9 @@ export function RanByCell({
 
   function handleClaim(event: MouseEvent) {
     event.stopPropagation();
-    if (!currentUserId) return;
+    if (!currentUserId) {
+      return;
+    }
     // Optimistic shape mirrors what the server will send back so the avatar
     // bubble doesn't flip from a colored "YO" fallback to the real photo on
     // reconcile. Pulls displayName / image straight from the session.
@@ -103,7 +112,9 @@ export function RanByCell({
       dispatch({ kind: "claim", user: me });
       try {
         const res = await fetch(baseUrl, { method: "PUT" });
-        if (!res.ok) throw new Error(await res.text());
+        if (!res.ok) {
+          throw new Error(await res.text());
+        }
       } catch {
         toast.error("Couldn't claim this run. Try again?");
       } finally {
@@ -114,12 +125,16 @@ export function RanByCell({
 
   function handleRemove(event: MouseEvent) {
     event.stopPropagation();
-    if (!currentUserId) return;
+    if (!currentUserId) {
+      return;
+    }
     startMutation(async () => {
       dispatch({ kind: "remove", userId: currentUserId });
       try {
         const res = await fetch(baseUrl, { method: "DELETE" });
-        if (!res.ok) throw new Error(await res.text());
+        if (!res.ok) {
+          throw new Error(await res.text());
+        }
       } catch {
         toast.error("Couldn't remove attribution. Try again?");
       } finally {
@@ -137,13 +152,13 @@ export function RanByCell({
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              disabled={isPending}
-              onClick={handleClaim}
               aria-label="I ran this"
               className="size-7 text-muted-foreground/70 hover:text-foreground"
+              disabled={isPending}
+              onClick={handleClaim}
+              size="icon"
+              type="button"
+              variant="ghost"
             >
               <UserPlus className="size-4" />
             </Button>
@@ -154,7 +169,7 @@ export function RanByCell({
         <Tooltip>
           <TooltipTrigger asChild>
             <span className="inline-flex size-7 items-center justify-center text-muted-foreground/60">
-              <UserPlus className="size-4" aria-hidden="true" />
+              <UserPlus aria-hidden="true" className="size-4" />
               <span className="sr-only">Unattributed</span>
             </span>
           </TooltipTrigger>
@@ -171,17 +186,17 @@ export function RanByCell({
             <Tooltip key={attribution.userId}>
               <TooltipTrigger asChild>
                 <Avatar
-                  size="sm"
-                  data-self-attribution={isSelf || undefined}
                   className={cn(
                     "ring-2 ring-background",
                     isSelf && "ring-primary/30"
                   )}
+                  data-self-attribution={isSelf || undefined}
+                  size="sm"
                 >
                   {attribution.avatarUrl ? (
                     <AvatarImage
-                      src={attribution.avatarUrl}
                       alt={attribution.displayName}
+                      src={attribution.avatarUrl}
                     />
                   ) : null}
                   <AvatarFallback className={avatarColor(attribution.userId)}>
@@ -198,11 +213,6 @@ export function RanByCell({
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              disabled={isPending}
-              onClick={handleRemove}
               aria-label="Remove my attribution"
               className={cn(
                 "size-6 text-muted-foreground/70 hover:text-foreground",
@@ -210,6 +220,11 @@ export function RanByCell({
                 "group-has-[[data-self-attribution]:hover]/ranby:opacity-100",
                 "hover:opacity-100 focus-visible:opacity-100"
               )}
+              disabled={isPending}
+              onClick={handleRemove}
+              size="icon"
+              type="button"
+              variant="ghost"
             >
               <X className="size-3.5" />
             </Button>
@@ -220,13 +235,13 @@ export function RanByCell({
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              disabled={isPending}
-              onClick={handleClaim}
               aria-label="I ran this too"
               className="size-6 text-muted-foreground/70 hover:text-foreground"
+              disabled={isPending}
+              onClick={handleClaim}
+              size="icon"
+              type="button"
+              variant="ghost"
             >
               <UserPlus className="size-3.5" />
             </Button>

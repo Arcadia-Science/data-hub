@@ -1,11 +1,34 @@
+import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import { apiError, INTERNAL_ERROR, NOT_FOUND } from "@/lib/api/errors";
+import {
+  type FilesStatusFilter,
+  getFilteredFileIds,
+  lookupRunByNaturalKey,
+} from "@/lib/api/instrument-runs";
 import { prepareRunArchive } from "@/lib/api/run-archive";
-import type { NextRequest } from "next/server";
 
-type RouteContext = {
+const FILES_STATUS_VALUES: ReadonlySet<FilesStatusFilter> = new Set([
+  "all",
+  "raw",
+  "processed",
+  "pending",
+  "uploaded",
+  "processing",
+  "completed",
+  "failed",
+]);
+
+function parseStatusParam(value: string | null): FilesStatusFilter | undefined {
+  if (value && FILES_STATUS_VALUES.has(value as FilesStatusFilter)) {
+    return value as FilesStatusFilter;
+  }
+  return;
+}
+
+interface RouteContext {
   params: Promise<{ instrumentId: string; runId: string }>;
-};
+}
 
 // The route itself returns its 202 response in a couple of round-trips
 // (cache HEAD, dedup INSERT), but the `after()` callback that POSTs the
@@ -25,15 +48,59 @@ export const maxDuration = 300;
 // translates that into the same 404 a non-matching id list would.
 function parseFileIdsParam(searchParams: URLSearchParams): number[] | null {
   const raw = searchParams.getAll("file_ids");
-  if (raw.length === 0) return null;
+  if (raw.length === 0) {
+    return null;
+  }
   const ids = new Set<number>();
   for (const entry of raw) {
     for (const part of entry.split(",")) {
       const n = Number.parseInt(part.trim(), 10);
-      if (Number.isInteger(n) && n > 0) ids.add(n);
+      if (Number.isInteger(n) && n > 0) {
+        ids.add(n);
+      }
     }
   }
   return Array.from(ids);
+}
+
+// Resolve the archive's file-id filter. An explicit `?file_ids=` always wins.
+// Otherwise, the files table's active filters (`search`/`status`/`dismissed`)
+// are resolved to the matching ids server-side so "Download all" honors the
+// filter across every page — non-downloadable ids are dropped downstream by
+// `loadDownloadableFiles`. With neither present we return `null` (the route's
+// default "all downloadable files in the run" path).
+async function resolveFileIdsFilter(
+  request: NextRequest,
+  instrumentId: string,
+  runId: string
+): Promise<number[] | null> {
+  const explicit = parseFileIdsParam(request.nextUrl.searchParams);
+  if (explicit !== null) {
+    return explicit;
+  }
+
+  const sp = request.nextUrl.searchParams;
+  const search = sp.get("search")?.trim() || undefined;
+  const status = parseStatusParam(sp.get("status"));
+  const includeDismissed = sp.get("dismissed") === "true";
+
+  const hasFilter =
+    search !== undefined ||
+    (status !== undefined && status !== "all") ||
+    includeDismissed;
+  if (!hasFilter) {
+    return null;
+  }
+
+  // `lookupRunByNaturalKey` is request-cached, so this doesn't double the
+  // lookup `prepareRunArchive` performs. A missing run falls through to the
+  // 404 that helper raises.
+  const run = await lookupRunByNaturalKey(instrumentId, runId);
+  if (!run) {
+    return null;
+  }
+
+  return getFilteredFileIds(run.id, { search, status, includeDismissed });
 }
 
 // ---------------------------------------------------------------------------
@@ -53,23 +120,28 @@ function parseFileIdsParam(searchParams: URLSearchParams): number[] | null {
 // the canonical "is it ready?" signal regardless of whether the Lambda's
 // PATCH callback to flip the row to `ready` ever lands.
 //
-// Optional `?file_ids=1,2,3` narrows the archive to a specific subset
-// (used by the UI's "Download all" button to honor active table
-// filters). IDs are intersected with the run's own files inside the
-// helper, so callers can't reach files belonging to other runs. The
-// fingerprint includes those IDs, so a filtered archive caches
-// independently of a full-run archive.
+// Optional `?file_ids=1,2,3` narrows the archive to a specific subset. IDs
+// are intersected with the run's own files inside the helper, so callers
+// can't reach files belonging to other runs. The fingerprint includes those
+// IDs, so a filtered archive caches independently of a full-run archive.
+//
+// Alternatively the UI's "Download all" button forwards the files table's
+// active filters (`?search=`, `?status=`, `?dismissed=true`), which are
+// resolved to the matching file ids server-side so the zip honors the filter
+// across every page (not just the rows currently on screen).
 // ---------------------------------------------------------------------------
 export async function GET(request: NextRequest, { params }: RouteContext) {
   const authResult = await authorize(request, "files:read");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { instrumentId, runId } = await params;
 
   const result = await prepareRunArchive({
     instrumentId,
     runId,
-    fileIdsFilter: parseFileIdsParam(request.nextUrl.searchParams),
+    fileIdsFilter: await resolveFileIdsFilter(request, instrumentId, runId),
     createdBy: authResult.authMethod === "session" ? authResult.userId : null,
   });
 

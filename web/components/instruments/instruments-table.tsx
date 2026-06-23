@@ -1,3 +1,5 @@
+import { SearchX } from "lucide-react";
+import type { ReactNode } from "react";
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import { EditInstrumentDialog } from "@/components/instruments/edit-instrument-dialog";
 import { RowActionsCell } from "@/components/instruments/row-actions-cell";
@@ -16,8 +18,6 @@ import {
 import { getWatcherOnlineStatus } from "@/components/watchers/watcher-online-status";
 import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type { InstrumentListItem } from "@/lib/api/instruments";
-import { SearchX } from "lucide-react";
-import type { ReactNode } from "react";
 
 /**
  * Default row actions used by the management page: an approval action for
@@ -31,8 +31,8 @@ export function InstrumentRowManagementActions(row: InstrumentListItem) {
     <div className="flex items-center justify-end gap-1">
       {row.status === "pending" && <StatusActions instrumentId={row.id} />}
       <EditInstrumentDialog
-        instrumentId={row.id}
         displayName={row.displayName}
+        instrumentId={row.id}
         instrumentType={row.instrumentType}
       />
     </div>
@@ -72,7 +72,7 @@ export function InstrumentsTable({
     return (
       <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-background py-16 dark:bg-muted">
         <SearchX className="size-8 text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">
+        <p className="text-muted-foreground text-sm">
           No instruments configured yet.
         </p>
       </div>
@@ -100,20 +100,20 @@ export function InstrumentsTable({
             const watcherStatus = getWatcherOnlineStatus(row);
             return (
               <ClickableRow
-                key={row.id}
-                href={`/instruments/${row.id}`}
                 className="text-sm"
+                href={`/instruments/${row.id}`}
+                key={row.id}
               >
                 <TableCell>
                   <span className="font-medium">{row.displayName}</span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                  <span className="mt-0.5 block text-muted-foreground text-xs">
                     {row.runCount} total {row.runCount === 1 ? "run" : "runs"}
                   </span>
                 </TableCell>
                 <TableCell>
                   <WatcherStatusBadge
-                    status={watcherStatus}
                     lastOnlineAt={row.lastWatcherHeartbeatAt}
+                    status={watcherStatus}
                   />
                 </TableCell>
                 <TableCell>
@@ -121,9 +121,9 @@ export function InstrumentsTable({
                     <div className="flex flex-wrap gap-1">
                       {row.filePatterns.map((p) => (
                         <Badge
+                          className="font-mono font-normal text-xs"
                           key={p}
                           variant="outline"
-                          className="font-mono text-xs font-normal"
                         >
                           {p}
                         </Badge>
@@ -143,10 +143,10 @@ export function InstrumentsTable({
                 </TableCell>
                 {notifications ? (
                   <InstrumentNotificationsCell
-                    instrumentId={row.id}
                     initialEnabled={
                       notifications.subscriptions.get(row.id) ?? false
                     }
+                    instrumentId={row.id}
                     masterMuted={notifications.masterMuted}
                   />
                 ) : null}

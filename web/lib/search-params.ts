@@ -4,6 +4,7 @@ import {
   parseAsBoolean,
   parseAsInteger,
   parseAsString,
+  parseAsStringLiteral,
 } from "nuqs/server";
 
 // All dashboard filter/pagination state lives in the URL via nuqs. This makes
@@ -74,6 +75,36 @@ export const watcherDetailSearchParams = {
 
 export const watcherDetailParamsCache = createSearchParamsCache(
   watcherDetailSearchParams
+);
+
+// Run detail page: the files table is server-paginated, so its search /
+// filter / sort / page state lives in the URL. Keys are prefixed `files_` so
+// they don't collide with the comments section or future run-detail params.
+// This single object is the source of truth for both the server cache below
+// and the client `useQueryStates` in the files toolbar.
+const FILES_STATUS_VALUES = [
+  "all",
+  "raw",
+  "processed",
+  "pending",
+  "uploaded",
+  "processing",
+  "completed",
+  "failed",
+] as const;
+
+const FILES_SORT_VALUES = ["name", "size", "date", "status"] as const;
+
+export const runDetailSearchParams = {
+  files_page: parseAsInteger.withDefault(1),
+  files_search: parseAsString.withDefault(""),
+  files_status: parseAsStringLiteral(FILES_STATUS_VALUES).withDefault("all"),
+  files_sort: parseAsStringLiteral(FILES_SORT_VALUES).withDefault("name"),
+  files_dismissed: parseAsBoolean.withDefault(false),
+};
+
+export const runDetailParamsCache = createSearchParamsCache(
+  runDetailSearchParams
 );
 
 export function hasActiveFilters(params: {

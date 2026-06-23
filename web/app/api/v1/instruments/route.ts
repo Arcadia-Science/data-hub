@@ -1,3 +1,5 @@
+import { eq } from "drizzle-orm";
+import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import { apiError, CONFLICT, VALIDATION_ERROR } from "@/lib/api/errors";
 import { isValidKebabCase } from "@/lib/api/validators";
@@ -7,12 +9,12 @@ import {
   instruments,
   VALID_INSTRUMENT_TYPES,
 } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
-import type { NextRequest } from "next/server";
 
 export async function GET(request: NextRequest) {
   const authResult = await authorize(request, "instruments:read");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const rows = await db
     .select({
@@ -28,7 +30,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const authResult = await authorize(request, "instruments:write");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   let body: { id?: string; display_name?: string; instrument_type?: string };
   try {

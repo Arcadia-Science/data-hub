@@ -122,8 +122,8 @@ This runs both Python and web app checks:
 | `make py-format` | Auto-fix with Ruff |
 | `make py-lint` | Ruff linter |
 | `make py-typecheck` | Pyright |
-| `make fe-format` | Prettier |
-| `make fe-lint` | ESLint |
+| `make fe-format` | Biome format + safe lint fixes (`ultracite fix`) |
+| `make fe-lint` | Biome format + lint check (`ultracite check`) |
 | `make fe-typecheck` | TypeScript compiler |
 
 ## Running tests

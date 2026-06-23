@@ -9,9 +9,7 @@ const nextConfig = {
     return [
       {
         source: "/:path*",
-        headers: [
-          { key: "X-Robots-Tag", value: "noindex, nofollow" },
-        ],
+        headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
       },
     ];
   },

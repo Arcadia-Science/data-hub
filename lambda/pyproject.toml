@@ -4,7 +4,7 @@ version = "0.2.0"
 requires-python = ">=3.12"
 dependencies = [
     "data-hub-shared",
-    "arcadia-microscopy-tools>=0.3.2",
+    "arcadia-microscopy-tools>=0.4.1",
     "aws-lambda-typing>=2.20.0",
     "click>=8.1",
     "matplotlib>=3.8",

@@ -1,5 +1,8 @@
 "use client";
 
+import { ChevronLeft } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -7,18 +10,15 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { ChevronLeft } from "lucide-react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
 
-type SettingsSection = {
-  href: string;
-  label: string;
+interface SettingsSection {
   // Admin-only entries are mounted into the nav only when the viewer is
   // an admin. Using composition here (filter by predicate, then render)
   // keeps the SettingsNav body free of per-item `isAdmin && …` branches.
   adminOnly?: boolean;
-};
+  href: string;
+  label: string;
+}
 
 const SETTINGS_SECTIONS: SettingsSection[] = [
   { href: "/settings/notifications", label: "Notifications" },
@@ -51,8 +51,8 @@ export function SettingsNav({ isAdmin }: { isAdmin: boolean }) {
             <SidebarMenuItem>
               <SidebarMenuButton
                 asChild
-                tooltip="Exit settings"
                 className="relative justify-center font-medium"
+                tooltip="Exit settings"
               >
                 <Link href={EXIT_SETTINGS_HREF}>
                   <ChevronLeft className="absolute left-2" />

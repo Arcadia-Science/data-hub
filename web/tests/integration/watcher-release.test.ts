@@ -1,3 +1,5 @@
+import { eq, sql } from "drizzle-orm";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { instruments, watcherReleaseConfig, watchers } from "@/lib/db/schema";
 import {
   api,
@@ -6,8 +8,6 @@ import {
   resetDb,
   seedTestUser,
 } from "@/tests/integration/helpers";
-import { eq, sql } from "drizzle-orm";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 // The `/api/v1/settings/watcher-release` surface is admin-only and
 // session-only — PATs never pass the gate. Mirroring the
@@ -283,7 +283,7 @@ describe("Heartbeat enforces watcher_release_config.min_supported_version", () =
       });
   }
 
-  async function heartbeat(body: Record<string, unknown>): Promise<Response> {
+  function heartbeat(body: Record<string, unknown>) {
     return api(`/api/v1/watchers/${watcherId}/heartbeat`, {
       method: "POST",
       token,

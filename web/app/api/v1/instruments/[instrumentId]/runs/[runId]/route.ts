@@ -1,3 +1,5 @@
+import { eq, sql } from "drizzle-orm";
+import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import {
   apiError,
@@ -12,12 +14,10 @@ import {
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 import { getPresignedDownloadUrl } from "@/lib/s3";
-import { eq, sql } from "drizzle-orm";
-import type { NextRequest } from "next/server";
 
-type RouteContext = {
+interface RouteContext {
   params: Promise<{ instrumentId: string; runId: string }>;
-};
+}
 
 // ---------------------------------------------------------------------------
 // GET /api/v1/instruments/:instrumentId/runs/:runId
@@ -28,7 +28,9 @@ type RouteContext = {
 
 export async function GET(request: NextRequest, { params }: RouteContext) {
   const authResult = await authorize(request, "runs:read");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { instrumentId, runId } = await params;
   const run = await lookupRunByNaturalKey(instrumentId, runId);
@@ -102,7 +104,9 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
 
 export async function PATCH(request: NextRequest, { params }: RouteContext) {
   const authResult = await authorize(request, "runs:write");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { instrumentId, runId } = await params;
   const run = await lookupRunByNaturalKey(instrumentId, runId);
@@ -199,17 +203,17 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   const updated = await lookupRunByNaturalKey(instrumentId, runId);
 
   return Response.json({
-    id: updated!.id,
-    instrument_id: updated!.instrumentId,
-    instrument_display_name: updated!.instrumentDisplayName,
-    run_id: updated!.runId,
-    source: updated!.source,
-    watcher_id: updated!.watcherId,
-    metadata: updated!.metadata,
-    created_at: updated!.createdAt,
-    acquired_at: updated!.acquiredAt,
-    updated_at: updated!.updatedAt,
-    deleted_at: updated!.deletedAt,
+    id: updated?.id,
+    instrument_id: updated?.instrumentId,
+    instrument_display_name: updated?.instrumentDisplayName,
+    run_id: updated?.runId,
+    source: updated?.source,
+    watcher_id: updated?.watcherId,
+    metadata: updated?.metadata,
+    created_at: updated?.createdAt,
+    acquired_at: updated?.acquiredAt,
+    updated_at: updated?.updatedAt,
+    deleted_at: updated?.deletedAt,
   });
 }
 
@@ -223,7 +227,9 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 
 export async function DELETE(request: NextRequest, { params }: RouteContext) {
   const authResult = await authorize(request, "runs:write");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { instrumentId, runId } = await params;
   const run = await lookupRunByNaturalKey(instrumentId, runId);

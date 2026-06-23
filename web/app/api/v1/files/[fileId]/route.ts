@@ -1,3 +1,5 @@
+import { eq } from "drizzle-orm";
+import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import {
   apiError,
@@ -7,20 +9,21 @@ import {
 } from "@/lib/api/errors";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
-import type { NextRequest } from "next/server";
 
-type RouteContext = {
+interface RouteContext {
   params: Promise<{ fileId: string }>;
-};
+}
 
 // Enforced state machine for file status transitions:
 //   Watcher flow:   detected → [upload_requested →] uploaded → processing → completed|failed
 //   Lambda flow:    (created as "uploaded" via POST .../files) → processing → completed|failed
 //   Reprocessing:   completed|failed → processing → completed|failed
+//   Cancel request: upload_requested → detected (watcher gave up locating
+//                   the local file after repeated polls; clears the queue
+//                   entry — see ENG-1397)
 const VALID_TRANSITIONS: Record<string, string[]> = {
   detected: ["uploaded"],
-  upload_requested: ["uploaded"],
+  upload_requested: ["uploaded", "detected"],
   uploaded: ["processing"],
   processing: ["processing", "completed", "failed"],
   completed: ["processing"],
@@ -40,11 +43,13 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
 
 export async function PATCH(request: NextRequest, { params }: RouteContext) {
   const authResult = await authorize(request, "files:write");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { fileId } = await params;
-  const numericId = parseInt(fileId, 10);
-  if (isNaN(numericId)) {
+  const numericId = Number.parseInt(fileId, 10);
+  if (Number.isNaN(numericId)) {
     return apiError(400, VALIDATION_ERROR, "Invalid file ID");
   }
 
@@ -90,7 +95,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   // Status transition validation.
   if ("status" in body && typeof body.status === "string") {
     const allowed = VALID_TRANSITIONS[file.status];
-    if (!allowed || !allowed.includes(body.status)) {
+    if (!allowed?.includes(body.status)) {
       return apiError(
         409,
         CONFLICT,
@@ -103,6 +108,12 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 
     if (body.status === "uploaded") {
       updates.uploadedAt = now;
+    }
+    // Reverting a pending request back to detected (watcher cancel): clear
+    // upload_requested_at so the row leaves the upload queue, whose filter
+    // requires upload_requested_at to be non-null.
+    if (body.status === "detected") {
+      updates.uploadRequestedAt = null;
     }
     if (body.status === "completed" || body.status === "failed") {
       updates.processedAt = now;
@@ -117,11 +128,18 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   }
 
   // S3 info — set when transitioning to "uploaded" (watcher path).
-  if (typeof body.s3_bucket === "string") updates.s3Bucket = body.s3_bucket;
-  if (typeof body.s3_key === "string") updates.s3Key = body.s3_key;
-  if (typeof body.content_type === "string")
+  if (typeof body.s3_bucket === "string") {
+    updates.s3Bucket = body.s3_bucket;
+  }
+  if (typeof body.s3_key === "string") {
+    updates.s3Key = body.s3_key;
+  }
+  if (typeof body.content_type === "string") {
     updates.contentType = body.content_type;
-  if (typeof body.size_bytes === "number") updates.sizeBytes = body.size_bytes;
+  }
+  if (typeof body.size_bytes === "number") {
+    updates.sizeBytes = body.size_bytes;
+  }
 
   // Metadata — flat JSON object set by the Lambda after processing.
   if (
@@ -181,11 +199,13 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 
 export async function DELETE(request: NextRequest, { params }: RouteContext) {
   const authResult = await authorize(request, "files:write");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { fileId } = await params;
-  const numericId = parseInt(fileId, 10);
-  if (isNaN(numericId)) {
+  const numericId = Number.parseInt(fileId, 10);
+  if (Number.isNaN(numericId)) {
     return apiError(400, VALIDATION_ERROR, "Invalid file ID");
   }
 

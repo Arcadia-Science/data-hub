@@ -1,3 +1,5 @@
+import { and, eq } from "drizzle-orm";
+import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import { apiError, NOT_FOUND } from "@/lib/api/errors";
 import {
@@ -6,12 +8,10 @@ import {
 } from "@/lib/api/instrument-runs";
 import { db } from "@/lib/db";
 import { runAttributions } from "@/lib/db/schema";
-import { and, eq } from "drizzle-orm";
-import type { NextRequest } from "next/server";
 
-type RouteContext = {
+interface RouteContext {
   params: Promise<{ instrumentId: string; runId: string }>;
-};
+}
 
 // ---------------------------------------------------------------------------
 // PUT /api/v1/instruments/:instrumentId/runs/:runId/attributions/me
@@ -24,7 +24,9 @@ type RouteContext = {
 
 export async function PUT(request: NextRequest, { params }: RouteContext) {
   const authResult = await authorize(request, "runs:write");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { instrumentId, runId } = await params;
   const run = await lookupRunByNaturalKey(instrumentId, runId);
@@ -58,7 +60,9 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
 
 export async function DELETE(request: NextRequest, { params }: RouteContext) {
   const authResult = await authorize(request, "runs:write");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { instrumentId, runId } = await params;
   const run = await lookupRunByNaturalKey(instrumentId, runId);

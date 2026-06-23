@@ -1,26 +1,33 @@
 "use client";
 
+import { Fragment, useMemo, useState } from "react";
 import { Slider } from "@/components/ui/slider";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Fragment, useMemo, useState } from "react";
 
-export type PlateWellData = { well: string; value: unknown };
+export interface PlateWellData {
+  value: unknown;
+  well: string;
+}
 
 function parseWell(well: string): { row: number; col: number } | null {
   const match = well.match(/^([A-P])(\d{1,2})$/i);
-  if (!match) return null;
+  if (!match) {
+    return null;
+  }
   return {
     row: match[1].toUpperCase().charCodeAt(0) - 65,
-    col: parseInt(match[2], 10) - 1,
+    col: Number.parseInt(match[2], 10) - 1,
   };
 }
 
 function formatCellValue(value: unknown): string {
-  if (value === null || value === undefined) return "";
+  if (value === null || value === undefined) {
+    return "";
+  }
   if (typeof value === "number") {
     return Number.isInteger(value)
       ? String(value)
@@ -76,14 +83,14 @@ function heatmapColor(
   return [`rgb(${r},${g},${b})`, fg];
 }
 
-type PlateMapGridProps = {
+interface PlateMapGridProps {
   data: unknown;
   heatmap?: boolean;
   /** When heatmap is on, use this scale instead of inferring min/max from `data`. */
   heatmapRange?: { min: number; max: number };
   plateName?: string;
   wavelength?: string;
-};
+}
 
 export function PlateMapGrid({
   data,
@@ -92,10 +99,14 @@ export function PlateMapGrid({
   plateName,
   wavelength,
 }: PlateMapGridProps) {
-  if (!Array.isArray(data)) return null;
+  if (!Array.isArray(data)) {
+    return null;
+  }
 
   const wells = data as PlateWellData[];
-  if (wells.length === 0) return null;
+  if (wells.length === 0) {
+    return null;
+  }
 
   let maxRow = 0;
   let maxCol = 0;
@@ -103,17 +114,23 @@ export function PlateMapGrid({
 
   for (const w of wells) {
     const pos = parseWell(w.well);
-    if (!pos) continue;
-    if (pos.row > maxRow) maxRow = pos.row;
-    if (pos.col > maxCol) maxCol = pos.col;
+    if (!pos) {
+      continue;
+    }
+    if (pos.row > maxRow) {
+      maxRow = pos.row;
+    }
+    if (pos.col > maxCol) {
+      maxCol = pos.col;
+    }
     cellMap.set(`${pos.row}-${pos.col}`, w.value);
   }
 
   const rows = maxRow + 1;
   const cols = maxCol + 1;
 
-  let vMin = Infinity;
-  let vMax = -Infinity;
+  let vMin = Number.POSITIVE_INFINITY;
+  let vMax = Number.NEGATIVE_INFINITY;
   if (heatmap) {
     if (heatmapRange) {
       vMin = heatmapRange.min;
@@ -121,13 +138,17 @@ export function PlateMapGrid({
     } else {
       for (const v of cellMap.values()) {
         if (typeof v === "number") {
-          if (v < vMin) vMin = v;
-          if (v > vMax) vMax = v;
+          if (v < vMin) {
+            vMin = v;
+          }
+          if (v > vMax) {
+            vMax = v;
+          }
         }
       }
     }
   }
-  const hasRange = isFinite(vMin) && isFinite(vMax);
+  const hasRange = Number.isFinite(vMin) && Number.isFinite(vMax);
 
   const rowLabels = Array.from({ length: rows }, (_, i) =>
     String.fromCharCode(65 + i)
@@ -138,11 +159,11 @@ export function PlateMapGrid({
     <div className="flex w-fit flex-col gap-3">
       {(plateName || wavelength) && (
         <div className="flex items-baseline justify-between gap-4">
-          <h4 className="font-mono text-sm leading-snug font-medium text-foreground">
+          <h4 className="font-medium font-mono text-foreground text-sm leading-snug">
             {plateName}
           </h4>
           {wavelength && (
-            <span className="font-mono text-sm text-muted-foreground">
+            <span className="font-mono text-muted-foreground text-sm">
               {wavelength} nm
             </span>
           )}
@@ -158,8 +179,8 @@ export function PlateMapGrid({
           {/* Column headers */}
           {colLabels.map((c, ci) => (
             <div
+              className="py-1 font-medium text-muted-foreground text-xs"
               key={c}
-              className="py-1 text-xs font-medium text-muted-foreground"
               style={{ gridRow: 1, gridColumn: ci + 2 }}
             >
               {c}
@@ -170,7 +191,7 @@ export function PlateMapGrid({
           {rowLabels.map((rowLabel, ri) => (
             <Fragment key={rowLabel}>
               <div
-                className="flex items-center justify-center text-xs font-medium text-muted-foreground"
+                className="flex items-center justify-center font-medium text-muted-foreground text-xs"
                 style={{ gridRow: ri + 2, gridColumn: 1 }}
               >
                 {rowLabel}
@@ -228,7 +249,7 @@ export function PlateMapGrid({
         </div>
       </div>
 
-      {heatmap && hasRange && <PlasmaColorBar min={vMin} max={vMax} />}
+      {heatmap && hasRange && <PlasmaColorBar max={vMax} min={vMin} />}
     </div>
   );
 }
@@ -252,27 +273,33 @@ function PlasmaColorBar({ min, max }: { min: number; max: number }) {
 function computeGlobalHeatmapRange(
   frames: PlateWellData[][]
 ): { min: number; max: number } | undefined {
-  let min = Infinity;
-  let max = -Infinity;
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
   for (const frame of frames) {
     for (const w of frame) {
       if (typeof w.value === "number") {
-        if (w.value < min) min = w.value;
-        if (w.value > max) max = w.value;
+        if (w.value < min) {
+          min = w.value;
+        }
+        if (w.value > max) {
+          max = w.value;
+        }
       }
     }
   }
-  if (!isFinite(min) || !isFinite(max)) return undefined;
+  if (!(Number.isFinite(min) && Number.isFinite(max))) {
+    return;
+  }
   return { min, max };
 }
 
-type KineticPlateMapWithTimeSliderProps = {
-  timeLabels: string[];
+interface KineticPlateMapWithTimeSliderProps {
   frames: PlateWellData[][];
   heatmap: boolean;
   plateName?: string;
+  timeLabels: string[];
   wavelength?: string;
-};
+}
 
 /**
  * Plate map with a time index slider (for kinetic absorbance series).
@@ -294,7 +321,9 @@ export function KineticPlateMapWithTimeSlider({
     [heatmap, frames]
   );
 
-  if (frames.length === 0) return null;
+  if (frames.length === 0) {
+    return null;
+  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -307,7 +336,7 @@ export function KineticPlateMapWithTimeSlider({
       />
       {frames.length > 1 && (
         <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+          <div className="flex items-center justify-between gap-2 text-muted-foreground text-xs">
             <span>Time</span>
             <span
               className="min-w-0 truncate font-mono text-foreground tabular-nums"
@@ -324,13 +353,13 @@ export function KineticPlateMapWithTimeSlider({
               {timeLabels[0]}
             </span>
             <Slider
+              aria-label="Select measurement time"
               className="flex-1 py-1"
-              min={0}
               max={maxIdx}
+              min={0}
+              onValueChange={(v) => setIndex(v[0] ?? 0)}
               step={1}
               value={[selectedIndex]}
-              onValueChange={(v) => setIndex(v[0] ?? 0)}
-              aria-label="Select measurement time"
             />
             <span
               className="w-10 shrink-0 truncate text-center font-mono text-[10px] text-muted-foreground"

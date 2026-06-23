@@ -1,15 +1,15 @@
 "use client";
 
-import type { InstrumentType } from "@/lib/db/schema";
 import {
   createContext,
+  type ReactNode,
   use,
   useCallback,
   useEffect,
   useState,
-  type ReactNode,
 } from "react";
 import { toast } from "sonner";
+import type { InstrumentType } from "@/lib/db/schema";
 
 // ---------------------------------------------------------------------------
 // Notifications provider — single source of truth for the bell badge and
@@ -20,35 +20,35 @@ import { toast } from "sonner";
 // content is mounted lazily.
 // ---------------------------------------------------------------------------
 
-export type NotificationActor = {
-  id: string;
-  displayName: string;
-  initials: string;
+export interface NotificationActor {
   avatarUrl: string | null;
-};
-
-export type NotificationItem = {
+  displayName: string;
   id: string;
-  type: "run_created" | "comment_attributed" | "comment_participated";
-  createdAt: string;
-  readAt: string | null;
-  runId: string;
-  runDisplayId: string;
-  instrumentId: string;
-  instrumentDisplayName: string;
-  instrumentType: InstrumentType;
-  commentId: string | null;
-  commentBody: string | null;
-  actor: NotificationActor | null;
-};
+  initials: string;
+}
 
-type NotificationsValue = {
-  unreadCount: number;
-  recent: NotificationItem[];
-  refresh: () => Promise<void>;
+export interface NotificationItem {
+  actor: NotificationActor | null;
+  commentBody: string | null;
+  commentId: string | null;
+  createdAt: string;
+  id: string;
+  instrumentDisplayName: string;
+  instrumentId: string;
+  instrumentType: InstrumentType;
+  readAt: string | null;
+  runDisplayId: string;
+  runId: string;
+  type: "run_created" | "comment_attributed" | "comment_participated";
+}
+
+interface NotificationsValue {
   markAllRead: () => Promise<void>;
   markOneRead: (id: string) => Promise<void>;
-};
+  recent: NotificationItem[];
+  refresh: () => Promise<void>;
+  unreadCount: number;
+}
 
 const NotificationsContext = createContext<NotificationsValue | null>(null);
 
@@ -65,20 +65,20 @@ const POLL_INTERVAL_MS = 60_000;
 // sees the API's casing.
 // ---------------------------------------------------------------------------
 
-type ApiNotification = {
-  id: string;
-  type: NotificationItem["type"];
-  created_at: string;
-  read_at: string | null;
-  run_id: string;
-  run_display_id: string;
-  instrument_id: string;
-  instrument_display_name: string;
-  instrument_type: InstrumentType;
-  comment_id: string | null;
-  comment_body: string | null;
+interface ApiNotification {
   actor: NotificationActor | null;
-};
+  comment_body: string | null;
+  comment_id: string | null;
+  created_at: string;
+  id: string;
+  instrument_display_name: string;
+  instrument_id: string;
+  instrument_type: InstrumentType;
+  read_at: string | null;
+  run_display_id: string;
+  run_id: string;
+  type: NotificationItem["type"];
+}
 
 function fromApi(n: ApiNotification): NotificationItem {
   return {
@@ -114,7 +114,9 @@ export function NotificationsProvider({
   const refresh = useCallback(async () => {
     try {
       const res = await fetch("/api/v1/notifications", { cache: "no-store" });
-      if (!res.ok) return;
+      if (!res.ok) {
+        return;
+      }
       const body = (await res.json()) as {
         unreadCount: number;
         notifications: ApiNotification[];
@@ -142,7 +144,9 @@ export function NotificationsProvider({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
     } catch (err) {
       toast.error("Couldn't mark notifications as read", {
         description:
@@ -173,7 +177,9 @@ export function NotificationsProvider({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ids: [id] }),
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
       } catch (err) {
         toast.error("Couldn't mark notification as read", {
           description:
@@ -196,11 +202,15 @@ export function NotificationsProvider({
     let intervalId: ReturnType<typeof setInterval> | null = null;
 
     const start = () => {
-      if (intervalId != null) return;
+      if (intervalId != null) {
+        return;
+      }
       intervalId = setInterval(refresh, POLL_INTERVAL_MS);
     };
     const stop = () => {
-      if (intervalId == null) return;
+      if (intervalId == null) {
+        return;
+      }
       clearInterval(intervalId);
       intervalId = null;
     };
@@ -215,7 +225,9 @@ export function NotificationsProvider({
     };
 
     void refresh();
-    if (document.visibilityState === "visible") start();
+    if (document.visibilityState === "visible") {
+      start();
+    }
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);

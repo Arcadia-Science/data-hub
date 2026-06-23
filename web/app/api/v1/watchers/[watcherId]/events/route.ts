@@ -1,3 +1,5 @@
+import { and, desc, eq, gte, inArray } from "drizzle-orm";
+import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import {
@@ -8,8 +10,6 @@ import {
 import { findActiveWatcher } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { watcherEvents, watcherEventTypeEnum } from "@/lib/db/schema";
-import { and, desc, eq, gte, inArray } from "drizzle-orm";
-import type { NextRequest } from "next/server";
 
 // Derived from the Drizzle enum so adding a new event type is a one-line
 // schema change — historically this was a hand-maintained Set and drifted
@@ -22,7 +22,9 @@ export async function POST(
   { params }: { params: Promise<{ watcherId: string }> }
 ) {
   const authResult = await authorize(request, "watchers:write");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { watcherId } = await params;
   if (!isValidUUID(watcherId)) {
@@ -53,17 +55,17 @@ export async function POST(
     return apiError(400, VALIDATION_ERROR, "Maximum 100 events per request");
   }
 
-  type EventInput = {
-    event_type: string;
-    timestamp: string;
-    message: string;
+  interface EventInput {
     details?: Record<string, unknown>;
-  };
+    event_type: string;
+    message: string;
+    timestamp: string;
+  }
 
-  const values = [];
+  const values: (typeof watcherEvents.$inferInsert)[] = [];
   for (let i = 0; i < body.events.length; i++) {
     const evt = body.events[i] as EventInput;
-    if (!evt.event_type || !evt.timestamp || !evt.message) {
+    if (!(evt.event_type && evt.timestamp && evt.message)) {
       return apiError(
         400,
         VALIDATION_ERROR,
@@ -78,7 +80,7 @@ export async function POST(
       );
     }
     const ts = new Date(evt.timestamp);
-    if (isNaN(ts.getTime())) {
+    if (Number.isNaN(ts.getTime())) {
       return apiError(400, VALIDATION_ERROR, `Invalid timestamp at index ${i}`);
     }
     values.push({
@@ -100,7 +102,9 @@ export async function GET(
   { params }: { params: Promise<{ watcherId: string }> }
 ) {
   const authResult = await authorize(request, "watchers:read");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { watcherId } = await params;
   if (!isValidUUID(watcherId)) {

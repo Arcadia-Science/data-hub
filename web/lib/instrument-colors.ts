@@ -135,6 +135,7 @@ export function buildWavelengthColorMap(
 function hashLabel(s: string): number {
   let h = 5381;
   for (let i = 0; i < s.length; i++) {
+    // biome-ignore lint/suspicious/noBitwiseOperators: djb2 hash uses shifts to stay in unsigned 32-bit range
     h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
   }
   return h;

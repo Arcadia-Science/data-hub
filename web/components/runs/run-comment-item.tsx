@@ -1,5 +1,9 @@
 "use client";
 
+import { Loader2, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import dynamic from "next/dynamic";
+import { useState, useTransition } from "react";
+import { toast } from "sonner";
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import {
   AlertDialog,
@@ -22,10 +26,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
 import type { RunCommentDto } from "@/lib/api/run-comments";
-import { Loader2, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
-import dynamic from "next/dynamic";
-import { useState, useTransition } from "react";
-import { toast } from "sonner";
 
 // Comment timestamps may arrive as Date objects (server-rendered initial
 // payload) or ISO strings (JSON responses to mutations). Normalize to a
@@ -42,7 +42,7 @@ const CommentMarkdown = dynamic(
   () => import("./comment-markdown").then((m) => m.CommentMarkdown),
   {
     loading: () => (
-      <div className="py-1 text-sm text-muted-foreground">Loading…</div>
+      <div className="py-1 text-muted-foreground text-sm">Loading…</div>
     ),
   }
 );
@@ -73,7 +73,9 @@ export function RunCommentItem({
   const canSave = trimmed.length > 0 && !tooLong && !isSaving;
 
   function handleSave() {
-    if (!canSave) return;
+    if (!canSave) {
+      return;
+    }
     const submitted = draft;
     // Close the editor immediately — the optimistic state shows the new
     // body. If the action throws, re-open with the draft preserved.
@@ -105,18 +107,18 @@ export function RunCommentItem({
   return (
     <>
       <article className="flex gap-3">
-        <Avatar size="sm" className="mt-0.5 shrink-0">
+        <Avatar className="mt-0.5 shrink-0" size="sm">
           {comment.user.avatarUrl ? (
             <AvatarImage
-              src={comment.user.avatarUrl}
               alt={comment.user.displayName}
+              src={comment.user.avatarUrl}
             />
           ) : null}
           <AvatarFallback>{comment.user.initials}</AvatarFallback>
         </Avatar>
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <div className="flex items-start justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground text-sm">
               <span className="font-medium text-foreground">
                 {comment.user.displayName}
               </span>
@@ -132,12 +134,12 @@ export function RunCommentItem({
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
+                    aria-label="Comment actions"
+                    className="-mt-1 -mr-1 size-7 shrink-0 text-muted-foreground/70 hover:text-foreground"
+                    disabled={isDeleting}
+                    size="icon"
                     type="button"
                     variant="ghost"
-                    size="icon"
-                    className="-mt-1 -mr-1 size-7 shrink-0 text-muted-foreground/70 hover:text-foreground"
-                    aria-label="Comment actions"
-                    disabled={isDeleting}
                   >
                     <MoreHorizontal className="size-4" />
                   </Button>
@@ -149,11 +151,11 @@ export function RunCommentItem({
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
-                    variant="destructive"
                     onSelect={(e) => {
                       e.preventDefault();
                       setDeleteOpen(true);
                     }}
+                    variant="destructive"
                   >
                     <Trash2 className="size-3.5" />
                     Delete
@@ -166,14 +168,14 @@ export function RunCommentItem({
           {isEditing ? (
             <div className="flex flex-col gap-2">
               <Textarea
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                disabled={isSaving}
-                rows={3}
-                aria-label="Edit comment"
                 aria-invalid={tooLong || undefined}
+                aria-label="Edit comment"
+                disabled={isSaving}
+                onChange={(e) => setDraft(e.target.value)}
+                rows={3}
+                value={draft}
               />
-              <div className="flex items-center justify-between text-sm text-muted-foreground">
+              <div className="flex items-center justify-between text-muted-foreground text-sm">
                 {tooLong ? (
                   <span className="text-destructive">
                     {draft.length}/{MAX_BODY_LENGTH.toLocaleString()} characters
@@ -183,22 +185,22 @@ export function RunCommentItem({
                 )}
                 <div className="flex items-center gap-2">
                   <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
+                    disabled={isSaving}
                     onClick={() => {
                       setDraft(comment.body);
                       setIsEditing(false);
                     }}
-                    disabled={isSaving}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
                   >
                     Cancel
                   </Button>
                   <Button
-                    type="button"
-                    size="sm"
-                    onClick={handleSave}
                     disabled={!canSave}
+                    onClick={handleSave}
+                    size="sm"
+                    type="button"
                   >
                     {isSaving ? "Saving…" : "Save"}
                   </Button>
@@ -211,7 +213,7 @@ export function RunCommentItem({
         </div>
       </article>
 
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+      <AlertDialog onOpenChange={setDeleteOpen} open={deleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete comment?</AlertDialogTitle>
@@ -223,9 +225,9 @@ export function RunCommentItem({
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              variant="destructive"
-              onClick={handleDelete}
               disabled={isDeleting}
+              onClick={handleDelete}
+              variant="destructive"
             >
               {isDeleting && <Loader2 className="size-4 animate-spin" />}
               Delete

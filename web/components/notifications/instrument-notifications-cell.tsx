@@ -22,8 +22,8 @@ export function InstrumentNotificationsCell({
   return (
     <TableCell onClick={(e) => e.stopPropagation()}>
       <InstrumentNotificationSwitch
-        instrumentId={instrumentId}
         initialEnabled={initialEnabled}
+        instrumentId={instrumentId}
         masterMuted={masterMuted}
         size="sm"
       />

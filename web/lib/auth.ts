@@ -1,12 +1,12 @@
-import { isAdminEmail } from "@/lib/admin-emails";
-import { db } from "@/lib/db";
-import { accounts, sessions, users } from "@/lib/db/schema";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import { eq } from "drizzle-orm";
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import { cache } from "react";
+import { isAdminEmail } from "@/lib/admin-emails";
+import { db } from "@/lib/db";
+import { accounts, sessions, users } from "@/lib/db/schema";
 
 declare module "next-auth" {
   interface Session {
@@ -46,7 +46,9 @@ async function resolveIsAdmin(userId: string): Promise<boolean> {
     .where(eq(users.id, userId))
     .limit(1);
 
-  if (!row) return false;
+  if (!row) {
+    return false;
+  }
 
   if (!row.isAdmin && isAdminEmail(row.email)) {
     await db.update(users).set({ isAdmin: true }).where(eq(users.id, userId));
@@ -81,7 +83,9 @@ const providers = [
               typeof credentials?.email === "string"
                 ? credentials.email.trim().toLowerCase()
                 : null;
-            if (!email) return null;
+            if (!email) {
+              return null;
+            }
             const [row] = await db
               .select({
                 id: users.id,

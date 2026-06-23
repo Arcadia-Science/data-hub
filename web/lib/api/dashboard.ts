@@ -1,3 +1,5 @@
+import { and, eq, isNull, sql } from "drizzle-orm";
+import { cache } from "react";
 import { db } from "@/lib/db";
 import {
   files,
@@ -6,18 +8,16 @@ import {
   runAttributions,
   watchers,
 } from "@/lib/db/schema";
-import { and, eq, isNull, sql } from "drizzle-orm";
-import { cache } from "react";
 
-export type InstrumentSummary = {
-  id: string;
+export interface InstrumentSummary {
   displayName: string;
-  status: "pending" | "active" | "inactive";
-  runCount: number;
-  lastRunAt: Date | null;
-  watcherStatus: "online" | "offline" | "no_watcher";
   filesPendingUpload: number;
-};
+  id: string;
+  lastRunAt: Date | null;
+  runCount: number;
+  status: "pending" | "active" | "inactive";
+  watcherStatus: "online" | "offline" | "no_watcher";
+}
 
 // A watcher is considered stale (offline) if it hasn't sent a heartbeat
 // within this window, even if its DB status is still "watching".
@@ -97,7 +97,7 @@ export const getInstrumentSummaries = cache(
 );
 
 export const getInstruments = cache(async function getInstruments() {
-  return db
+  return await db
     .select({
       id: instruments.id,
       displayName: instruments.displayName,
@@ -107,14 +107,14 @@ export const getInstruments = cache(async function getInstruments() {
     .orderBy(instruments.displayName);
 });
 
-export type DashboardStats = {
-  runsLast24Hours: {
-    total: number;
-    bytesGenerated: number;
-  };
+export interface DashboardStats {
   pendingUploads: {
     count: number;
     totalBytes: number;
+  };
+  runsLast24Hours: {
+    total: number;
+    bytesGenerated: number;
   };
   runsThisWeek: {
     total: number;
@@ -122,7 +122,7 @@ export type DashboardStats = {
     mine: number;
     unattributed: number;
   };
-};
+}
 
 /**
  * Aggregates the four dashboard summary metrics surfaced above the instruments

@@ -1,10 +1,10 @@
+import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { isValidUUID } from "@/lib/api/validators";
 import { findActiveWatcher } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { watcherReleaseConfig } from "@/lib/db/schema";
-import type { NextRequest } from "next/server";
 
 /**
  * Server-reported watcher release metadata.
@@ -15,12 +15,12 @@ import type { NextRequest } from "next/server";
  * `latest_version: null` so watchers don't log spurious 5xxs and the
  * client treats it as "no update available".
  */
-type WatcherReleaseInfo = {
-  latest_version: string | null;
-  min_supported_version: string | null;
+interface WatcherReleaseInfo {
   channel: string;
+  latest_version: string | null;
   mandatory: boolean;
-};
+  min_supported_version: string | null;
+}
 
 async function readReleaseInfo(): Promise<WatcherReleaseInfo> {
   // The singleton check constraint on `id` guarantees at most one row;
@@ -52,7 +52,9 @@ export async function GET(
   { params }: { params: Promise<{ watcherId: string }> }
 ) {
   const authResult = await authorize(request, "watchers:read");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { watcherId } = await params;
   if (!isValidUUID(watcherId)) {

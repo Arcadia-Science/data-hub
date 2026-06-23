@@ -1,7 +1,7 @@
+import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import { buildRunListQuery } from "@/lib/api/instrument-runs";
 import { parseIntParam } from "@/lib/api/validators";
-import type { NextRequest } from "next/server";
 
 // ---------------------------------------------------------------------------
 // GET /api/v1/instrument-runs
@@ -13,7 +13,9 @@ import type { NextRequest } from "next/server";
 
 export async function GET(request: NextRequest) {
   const authResult = await authorize(request, "runs:read");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { searchParams } = request.nextUrl;
 

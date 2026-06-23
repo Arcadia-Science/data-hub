@@ -121,18 +121,18 @@ class TestChannelToDict:
         assert result["emission_nm"] is None
         assert result["color"] == "#ffffff"
 
-    def test_channel_with_none_color(self) -> None:
+    def test_channel_color_normalized_to_lowercase(self) -> None:
         from arcadia_microscopy_tools.channels import Channel
 
-        bare = Channel(name="CUSTOM", excitation_nm=500, emission_nm=520, color=None)
+        custom = Channel(name="CUSTOM", excitation_nm=500, emission_nm=520, color="#AABBCC")
 
-        result = _channel_to_dict(bare)
+        result = _channel_to_dict(custom)
 
         assert result == {
             "name": "CUSTOM",
             "excitation_nm": 500,
             "emission_nm": 520,
-            "color": None,
+            "color": "#aabbcc",
         }
 
 

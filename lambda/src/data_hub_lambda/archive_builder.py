@@ -28,7 +28,10 @@ Design notes:
 """
 
 from __future__ import annotations
+import io
 import logging
+from collections.abc import Iterator
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
@@ -60,6 +63,20 @@ _MAX_PARTS = 10_000
 # ``_MultipartUploadStream._upload_part`` catches the within-a-single-file
 # case before it reaches S3.
 _MAX_TOTAL_BYTES = _PART_SIZE_BYTES * _MAX_PARTS
+
+# The bottleneck for runs with thousands of tiny files is per-object
+# ``GetObject`` latency, not bandwidth, so overlapping fetches collapses what
+# was a serial chain of round-trips.
+_PREFETCH_CONCURRENCY = 16
+
+# Files at or below this size are prefetched into memory; larger and
+# unknown-size files stream inline so peak memory stays bounded regardless of
+# total archive size (a 200 GB single-file run must still fit the Lambda).
+_PREFETCH_MAX_FILE_BYTES = 16 * 1024 * 1024
+
+# Bounds peak memory from the look-ahead window (many ``_PREFETCH_MAX_FILE_BYTES``
+# files queued ahead of a slow writer) independently of ``_PREFETCH_CONCURRENCY``.
+_PREFETCH_MAX_INFLIGHT_BYTES = 256 * 1024 * 1024
 
 
 # ---------------------------------------------------------------------------
@@ -212,11 +229,17 @@ class ArchiveFile:
     ``source_bucket`` is per-file so the builder can zip across the raw and
     processed buckets in a single archive — the web app sends each file's
     bucket alongside its key.
+
+    ``size_bytes`` is an optional hint used solely to decide whether a file is
+    small enough to prefetch into memory concurrently (see ``build_run_archive``).
+    It does not affect correctness: an unknown size is treated as "too large to
+    buffer" and the file is streamed inline. Never trusted for allocation.
     """
 
     key: str
     name: str
     source_bucket: str
+    size_bytes: int | None = None
 
 
 @dataclass
@@ -299,7 +322,15 @@ def parse_build_request(
             raise ValueError(f"File key '{key}' does not belong to run '{expected_prefix}'")
         if "/" in name or name in ("", ".", ".."):
             raise ValueError(f"Invalid archive entry name: {name!r}")
-        parsed_files.append(ArchiveFile(key=key, name=name, source_bucket=bucket))
+
+        # Optional prefetch hint, coerced leniently: anything but a
+        # non-negative int becomes ``None`` ("unknown" size), so a malformed
+        # value streams the file inline rather than failing the build.
+        raw_size = entry.get("size_bytes")
+        size_bytes = raw_size if isinstance(raw_size, int) and raw_size >= 0 else None
+        parsed_files.append(
+            ArchiveFile(key=key, name=name, source_bucket=bucket, size_bytes=size_bytes)
+        )
 
     return BuildArchiveRequest(
         instrument_id=instrument_id,
@@ -321,6 +352,14 @@ def build_run_archive(
     in-memory buffer. Returns the destination location and total bytes
     uploaded on success. Aborts the multipart upload on any failure so partial
     objects don't leak.
+
+    Source objects that fit under ``_PREFETCH_MAX_FILE_BYTES`` are fetched
+    concurrently a window ahead of the writer (see ``_iter_archive_readers``),
+    which collapses the per-object GetObject latency that otherwise dominates
+    runs with thousands of tiny files. The zip is still written single-threaded
+    and in request order, so entry ordering and the multipart stream are
+    untouched. Larger (or unknown-size) files stream inline to keep memory
+    bounded.
     """
     import zipfile
 
@@ -333,6 +372,10 @@ def build_run_archive(
         part_size=_PART_SIZE_BYTES,
     )
 
+    # Managed by hand rather than ``with`` so the error path can cancel
+    # queued-but-unstarted prefetches via ``cancel_futures=True``, instead of
+    # draining doomed ``GetObject`` work before the exception surfaces.
+    executor = ThreadPoolExecutor(max_workers=_PREFETCH_CONCURRENCY)
     try:
         # ZipFile.write() requires a real file path on disk; .open() with
         # mode="w" returns a writable handle we can stream into. Both rely
@@ -343,8 +386,8 @@ def build_run_archive(
             compression=zipfile.ZIP_STORED,
             allowZip64=True,
         ) as zf:
-            for file in request.files:
-                _append_file_to_zip(s3, file, zf)
+            for file, reader in _iter_archive_readers(s3, request.files, executor):
+                _write_reader_to_zip(reader, file.name, zf)
                 if stream.tell() > _MAX_TOTAL_BYTES:
                     raise ValueError(
                         f"Archive exceeded the {_MAX_TOTAL_BYTES}-byte cap "
@@ -354,6 +397,8 @@ def build_run_archive(
     except Exception:
         stream.abort()
         raise
+    finally:
+        executor.shutdown(cancel_futures=True)
 
     stream.close()
 
@@ -364,17 +409,96 @@ def build_run_archive(
     )
 
 
-def _append_file_to_zip(s3_client: Any, file: ArchiveFile, zf: Any) -> None:
+def _is_prefetch_eligible(file: ArchiveFile) -> bool:
+    # Unknown size → not eligible: we can't admit it to the byte budget, and
+    # the safe assumption is that it might be huge, so it streams inline.
+    return file.size_bytes is not None and file.size_bytes <= _PREFETCH_MAX_FILE_BYTES
+
+
+def _fetch_to_buffer(s3_client: Any, file: ArchiveFile) -> io.BytesIO:
+    """Read a small source object fully into memory, on a worker thread.
+
+    Only ever called for ``_is_prefetch_eligible`` files, so the buffer is
+    bounded by ``_PREFETCH_MAX_FILE_BYTES``.
+    """
     obj = s3_client.get_object(Bucket=file.source_bucket, Key=file.key)
     body = obj["Body"]
     try:
+        return io.BytesIO(body.read())
+    finally:
+        body.close()
+
+
+def _iter_archive_readers(
+    s3_client: Any,
+    files: list[ArchiveFile],
+    executor: ThreadPoolExecutor,
+) -> Iterator[tuple[ArchiveFile, Any]]:
+    """Yield ``(file, reader)`` pairs in request order, prefetching small files.
+
+    A sliding window of up to ``_PREFETCH_CONCURRENCY`` eligible files (and at
+    most ``_PREFETCH_MAX_INFLIGHT_BYTES`` of buffered data) is fetched ahead of
+    the consumer on worker threads. ``reader`` is an in-memory ``BytesIO`` for
+    prefetched files, or the live ``StreamingBody`` for inline (large/unknown)
+    files fetched lazily when the consumer reaches them. Either way the reader
+    exposes ``read(n)``/``close()`` so the writer treats them identically.
+
+    The submission cursor advances past inline files without buffering them, so
+    a single large file in the middle of a run doesn't stall prefetching of the
+    small files after it.
+    """
+    n = len(files)
+    submit_idx = 0
+    inflight_bytes = 0
+    futures: dict[int, Future[io.BytesIO]] = {}
+
+    def _pump() -> None:
+        nonlocal submit_idx, inflight_bytes
+        while submit_idx < n and len(futures) < _PREFETCH_CONCURRENCY:
+            file = files[submit_idx]
+            if not _is_prefetch_eligible(file):
+                # Streamed inline at consume time; advance so the window can
+                # keep reaching the small files beyond it.
+                submit_idx += 1
+                continue
+            size = file.size_bytes or 0
+            # Always allow at least one in-flight fetch; otherwise honor the
+            # byte budget so the look-ahead window can't balloon memory.
+            if futures and inflight_bytes + size > _PREFETCH_MAX_INFLIGHT_BYTES:
+                break
+            futures[submit_idx] = executor.submit(_fetch_to_buffer, s3_client, file)
+            inflight_bytes += size
+            submit_idx += 1
+
+    try:
+        for idx in range(n):
+            file = files[idx]
+            _pump()
+            future = futures.pop(idx, None)
+            if future is not None:
+                buffer = future.result()
+                inflight_bytes -= file.size_bytes or 0
+                yield file, buffer
+            else:
+                # Large/unknown-size file: stream it inline, lazily, now.
+                obj = s3_client.get_object(Bucket=file.source_bucket, Key=file.key)
+                yield file, obj["Body"]
+    finally:
+        # On early exit (writer error mid-stream) cancel prefetches we never
+        # consumed so the executor's shutdown doesn't block on doomed work.
+        for future in futures.values():
+            future.cancel()
+
+
+def _write_reader_to_zip(reader: Any, name: str, zf: Any) -> None:
+    try:
         # force_zip64=True makes the per-entry header ZIP64-capable so files
         # ≥4 GB don't blow up the writer mid-stream.
-        with zf.open(file.name, mode="w", force_zip64=True) as entry:
+        with zf.open(name, mode="w", force_zip64=True) as entry:
             while True:
-                chunk = body.read(_COPY_BLOCK_SIZE_BYTES)
+                chunk = reader.read(_COPY_BLOCK_SIZE_BYTES)
                 if not chunk:
                     break
                 entry.write(chunk)
     finally:
-        body.close()
+        reader.close()
