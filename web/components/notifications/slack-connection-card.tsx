@@ -53,7 +53,7 @@ function SectionHeader({
           revoked ? (
             <Badge variant="destructive">Reconnect required</Badge>
           ) : (
-            <Badge variant="secondary">
+            <Badge variant="outline">
               Connected{slackTeamName ? ` · ${slackTeamName}` : ""}
             </Badge>
           )
