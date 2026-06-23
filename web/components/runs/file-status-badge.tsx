@@ -30,7 +30,7 @@ export function FileStatusBadge({ status }: { status: string }) {
   };
 
   return (
-    <Badge variant={config.variant} className="text-[10px]">
+    <Badge className="text-[10px]" variant={config.variant}>
       {config.label}
     </Badge>
   );

@@ -1,3 +1,7 @@
+import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { and, eq } from "drizzle-orm";
+import { z } from "zod";
 import { getInstrumentSummaries } from "@/lib/api/dashboard";
 import { reprocessFile } from "@/lib/api/file-reprocessing";
 import { getActiveFileById, lookupFileForDownload } from "@/lib/api/files";
@@ -22,10 +26,6 @@ import {
   getPresignedDownloadUrl,
   PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS,
 } from "@/lib/s3";
-import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { and, eq } from "drizzle-orm";
-import { z } from "zod";
 
 function textResult(data: unknown) {
   return {
@@ -75,8 +75,12 @@ function requireMcpScope(
   authInfo: AuthInfo | undefined,
   required: Scope
 ): ReturnType<typeof errorResult> | null {
-  if (!authInfo) return null;
-  if (hasScope({ scopes: authInfo.scopes ?? [] }, required)) return null;
+  if (!authInfo) {
+    return null;
+  }
+  if (hasScope({ scopes: authInfo.scopes ?? [] }, required)) {
+    return null;
+  }
   return errorResult(`Token is missing required scope: ${required}`);
 }
 
@@ -129,7 +133,9 @@ export function registerTools(server: McpServer) {
     },
     async ({ status }, { authInfo }) => {
       const scopeError = requireMcpScope(authInfo, "instruments:read");
-      if (scopeError) return scopeError;
+      if (scopeError) {
+        return scopeError;
+      }
       const instruments = await getInstrumentListWithCounts();
       const filtered = status
         ? instruments.filter((i) => i.status === status)
@@ -155,7 +161,9 @@ export function registerTools(server: McpServer) {
     },
     async ({ instrumentId }, { authInfo }) => {
       const scopeError = requireMcpScope(authInfo, "instruments:read");
-      if (scopeError) return scopeError;
+      if (scopeError) {
+        return scopeError;
+      }
       const instrument = await getInstrumentById(instrumentId);
       if (!instrument) {
         return errorResult(`Instrument '${instrumentId}' not found.`);
@@ -241,7 +249,9 @@ export function registerTools(server: McpServer) {
     },
     async (args, { authInfo }) => {
       const scopeError = requireMcpScope(authInfo, "runs:read");
-      if (scopeError) return scopeError;
+      if (scopeError) {
+        return scopeError;
+      }
       const result = await buildRunListQuery({
         instrumentId: args.instrumentId,
         source: args.source,
@@ -276,7 +286,9 @@ export function registerTools(server: McpServer) {
     },
     async ({ instrumentId, runId }, { authInfo }) => {
       const scopeError = requireMcpScope(authInfo, "runs:read");
-      if (scopeError) return scopeError;
+      if (scopeError) {
+        return scopeError;
+      }
       const run = await lookupRunByNaturalKey(instrumentId, runId);
       if (!run) {
         return errorResult(
@@ -318,7 +330,9 @@ export function registerTools(server: McpServer) {
       // (`GET /instruments/:id/runs/:runId` returns files alongside the
       // run). One scope (`runs:read`) covers both.
       const scopeError = requireMcpScope(authInfo, "runs:read");
-      if (scopeError) return scopeError;
+      if (scopeError) {
+        return scopeError;
+      }
       const run = await lookupRunByNaturalKey(instrumentId, runId);
       if (!run) {
         return errorResult(
@@ -348,7 +362,9 @@ export function registerTools(server: McpServer) {
       // for parity with the dashboard data source. Watcher health is
       // included for context but isn't the primary axis.
       const scopeError = requireMcpScope(authInfo, "instruments:read");
-      if (scopeError) return scopeError;
+      if (scopeError) {
+        return scopeError;
+      }
       const summaries = await getInstrumentSummaries();
       return textResult(summaries);
     }
@@ -370,7 +386,9 @@ export function registerTools(server: McpServer) {
     },
     async ({ instrumentId }, { authInfo }) => {
       const scopeError = requireMcpScope(authInfo, "watchers:read");
-      if (scopeError) return scopeError;
+      if (scopeError) {
+        return scopeError;
+      }
       const allWatchers = await getWatcherList({ includeDeleted: false });
       const filtered = instrumentId
         ? allWatchers.filter((w) => w.instrumentId === instrumentId)
@@ -392,7 +410,9 @@ export function registerTools(server: McpServer) {
     },
     async ({ fileId }, { authInfo }) => {
       const scopeError = requireMcpScope(authInfo, "files:read");
-      if (scopeError) return scopeError;
+      if (scopeError) {
+        return scopeError;
+      }
       const file = await getActiveFileById(fileId);
       if (!file) {
         return errorResult(`File '${fileId}' not found.`);
@@ -414,7 +434,9 @@ export function registerTools(server: McpServer) {
     },
     async ({ fileId }, { authInfo }) => {
       const scopeError = requireMcpScope(authInfo, "files:read");
-      if (scopeError) return scopeError;
+      if (scopeError) {
+        return scopeError;
+      }
       const lookup = await lookupFileForDownload(fileId);
       if (!lookup.ok) {
         if (lookup.reason === "not_uploaded") {
@@ -458,7 +480,9 @@ export function registerTools(server: McpServer) {
     async ({ instrumentId, runId }, { authInfo }) => {
       // Mirror the REST archive route which is gated on `files:read`.
       const scopeError = requireMcpScope(authInfo, "files:read");
-      if (scopeError) return scopeError;
+      if (scopeError) {
+        return scopeError;
+      }
 
       // Token-authenticated callers (every MCP request) don't have a
       // session user to record against `archive_jobs.created_by`, even
@@ -516,7 +540,9 @@ export function registerTools(server: McpServer) {
     },
     async ({ fileId }, { authInfo }) => {
       const scopeError = requireMcpScope(authInfo, "files:write");
-      if (scopeError) return scopeError;
+      if (scopeError) {
+        return scopeError;
+      }
       const result = await reprocessFile(fileId);
       if (!result.ok) {
         return errorResult(`[${result.code}] ${result.message}`);
@@ -545,7 +571,9 @@ export function registerTools(server: McpServer) {
     },
     async ({ watcherId, hours }, { authInfo }) => {
       const scopeError = requireMcpScope(authInfo, "watchers:read");
-      if (scopeError) return scopeError;
+      if (scopeError) {
+        return scopeError;
+      }
       const lookbackHours = hours ?? 24;
       const since = new Date(Date.now() - lookbackHours * 60 * 60 * 1000);
       const { rows, total } = await getWatcherHeartbeats(watcherId, {
@@ -581,13 +609,17 @@ export function registerTools(server: McpServer) {
     },
     async ({ instrumentId, runId }, { authInfo }) => {
       const scopeError = requireMcpScope(authInfo, "runs:write");
-      if (scopeError) return scopeError;
+      if (scopeError) {
+        return scopeError;
+      }
       const resolved = await resolveAttributionTarget(
         authInfo,
         instrumentId,
         runId
       );
-      if (!resolved.ok) return resolved.error;
+      if (!resolved.ok) {
+        return resolved.error;
+      }
 
       await db
         .insert(runAttributions)
@@ -623,13 +655,17 @@ export function registerTools(server: McpServer) {
     },
     async ({ instrumentId, runId }, { authInfo }) => {
       const scopeError = requireMcpScope(authInfo, "runs:write");
-      if (scopeError) return scopeError;
+      if (scopeError) {
+        return scopeError;
+      }
       const resolved = await resolveAttributionTarget(
         authInfo,
         instrumentId,
         runId
       );
-      if (!resolved.ok) return resolved.error;
+      if (!resolved.ok) {
+        return resolved.error;
+      }
 
       await db
         .delete(runAttributions)
@@ -662,7 +698,9 @@ export function registerTools(server: McpServer) {
     },
     async ({ instrumentId }, { authInfo }) => {
       const scopeError = requireMcpScope(authInfo, "runs:read");
-      if (scopeError) return scopeError;
+      if (scopeError) {
+        return scopeError;
+      }
       const attributors = await getRanByFilterOptions(instrumentId);
       return textResult(attributors);
     }

@@ -1,3 +1,5 @@
+import { and, eq } from "drizzle-orm";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   countUnread,
   getPreferences,
@@ -24,8 +26,6 @@ import {
   resetDb,
   seedTestUser,
 } from "@/tests/integration/helpers";
-import { and, eq } from "drizzle-orm";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 // End-to-end + library-level coverage for the in-app notifications system.
 // The library matrix exercises the recipient-selection logic directly
@@ -80,7 +80,9 @@ describe("Notifications", () => {
   ): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      if (await predicate()) return;
+      if (await predicate()) {
+        return;
+      }
       await new Promise((r) => setTimeout(r, intervalMs));
     }
     throw new Error("Timed out waiting for after()-deferred notification");
@@ -774,17 +776,19 @@ describe("Notifications", () => {
         types.indexOf("run_created")
       );
 
-      const runRow = rows.find((r) => r.type === "run_created")!;
-      expect(runRow.instrumentDisplayName).toBe(instrumentDisplayName);
-      expect(runRow.runDisplayId).toBe("run-list-shape");
-      expect(runRow.actor).toBeNull();
-      expect(runRow.commentId).toBeNull();
+      const runRow = rows.find((r) => r.type === "run_created");
+      expect(runRow).toBeDefined();
+      expect(runRow?.instrumentDisplayName).toBe(instrumentDisplayName);
+      expect(runRow?.runDisplayId).toBe("run-list-shape");
+      expect(runRow?.actor).toBeNull();
+      expect(runRow?.commentId).toBeNull();
 
-      const commentRow = rows.find((r) => r.type === "comment_attributed")!;
-      expect(commentRow.actor).not.toBeNull();
-      expect(commentRow.actor!.id).toBe(actor);
-      expect(commentRow.actor!.initials).toBeTruthy();
-      expect(commentRow.commentId).toBeTruthy();
+      const commentRow = rows.find((r) => r.type === "comment_attributed");
+      expect(commentRow).toBeDefined();
+      expect(commentRow?.actor).not.toBeNull();
+      expect(commentRow?.actor?.id).toBe(actor);
+      expect(commentRow?.actor?.initials).toBeTruthy();
+      expect(commentRow?.commentId).toBeTruthy();
     });
 
     it("listNotifications respects the limit option", async () => {
@@ -839,8 +843,9 @@ describe("Notifications", () => {
       await markRead(userA, [target.id]);
 
       const fresh = await listNotifications(userA);
-      const updated = fresh.find((r) => r.id === target.id)!;
-      expect(updated.readAt).not.toBeNull();
+      const updated = fresh.find((r) => r.id === target.id);
+      expect(updated).toBeDefined();
+      expect(updated?.readAt).not.toBeNull();
 
       // Other rows remain unread.
       const others = fresh.filter((r) => r.id !== target.id);
@@ -861,21 +866,24 @@ describe("Notifications", () => {
       const bRows = await listNotifications(userB);
       const targetForB = bRows.find((r) => r.readAt === null);
       expect(targetForB).toBeDefined();
+      if (!targetForB) {
+        throw new Error("expected unread notification for user B");
+      }
 
       const bUnreadBefore = await countUnread(userB);
 
       // Caller is userA, but the id belongs to userB — the user-scoped
       // `where` in markRead must reject the cross-user attempt.
-      await markRead(userA, [targetForB!.id]);
+      await markRead(userA, [targetForB.id]);
 
       const bUnreadAfter = await countUnread(userB);
       expect(bUnreadAfter).toBe(bUnreadBefore);
 
       const stillUnread = (await listNotifications(userB)).find(
-        (r) => r.id === targetForB!.id
+        (r) => r.id === targetForB.id
       );
       expect(stillUnread).toBeDefined();
-      expect(stillUnread!.readAt).toBeNull();
+      expect(stillUnread?.readAt).toBeNull();
     });
   });
 

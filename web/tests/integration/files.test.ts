@@ -1,3 +1,5 @@
+import { eq } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { instruments, files as schemaFiles } from "@/lib/db/schema";
 import {
   api,
@@ -6,8 +8,6 @@ import {
   resetDb,
   seedTestUser,
 } from "@/tests/integration/helpers";
-import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // Files have two distinct lifecycle paths through the status state machine:
 //
@@ -74,8 +74,8 @@ describe("Files API", () => {
     );
     const detailData = await detail.json();
     const byName = (name: string) =>
-      detailData.files.find((f: { filename: string }) => f.filename === name)!
-        .id;
+      detailData.files.find((f: { filename: string }) => f.filename === name)
+        ?.id;
     fileId = byName("sample.csv");
     secondFileId = byName("sample2.csv");
     thirdFileId = byName("sample3.csv");

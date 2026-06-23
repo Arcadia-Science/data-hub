@@ -17,9 +17,9 @@ export function RunAttributionsSection({
     <div className="flex items-center gap-2">
       <span>Ran By</span>
       <RanByCell
+        attributions={attributions}
         instrumentId={instrumentId}
         runId={runId}
-        attributions={attributions}
       />
     </div>
   );

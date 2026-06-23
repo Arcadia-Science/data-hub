@@ -1,7 +1,7 @@
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { runComments, users } from "@/lib/db/schema";
 import { toInitials } from "@/lib/utils";
-import { and, asc, eq, isNull } from "drizzle-orm";
 
 // ---------------------------------------------------------------------------
 // Run comments — markdown notes left by users on an instrument run.
@@ -11,18 +11,18 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 // 403 vs 404 distinction). Reads are open to any authenticated user.
 // ---------------------------------------------------------------------------
 
-export type RunCommentDto = {
-  id: string;
+export interface RunCommentDto {
   body: string;
+  created_at: Date;
+  edited_at: Date | null;
+  id: string;
   user: {
     id: string;
     displayName: string;
     initials: string;
     avatarUrl: string | null;
   };
-  created_at: Date;
-  edited_at: Date | null;
-};
+}
 
 function toDto(row: {
   id: string;
@@ -177,7 +177,9 @@ export async function updateComment(input: {
       userId: runComments.userId,
     });
 
-  if (updated.length === 0) return null;
+  if (updated.length === 0) {
+    return null;
+  }
   const row = updated[0];
 
   const [user] = await db

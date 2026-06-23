@@ -1,5 +1,8 @@
 "use client";
 
+import { ChevronsUpDown, ListFilter } from "lucide-react";
+import { useQueryStates } from "nuqs";
+import type { inferParserType } from "nuqs/server";
 import { useTablePending } from "@/components/table-pending";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,9 +15,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { instrumentDetailSearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
-import { ChevronsUpDown, ListFilter } from "lucide-react";
-import { useQueryStates } from "nuqs";
-import type { inferParserType } from "nuqs/server";
 
 type InstrumentDetailFilters = inferParserType<
   typeof instrumentDetailSearchParams
@@ -68,12 +68,12 @@ export function FilterableColumnHeader({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
-          variant="ghost"
-          size="sm"
           className={cn(
             "-ml-2 h-8 gap-1 font-medium",
             currentValue && "text-foreground"
           )}
+          size="sm"
+          variant="ghost"
         >
           {currentValue ? (
             <ListFilter className="size-3" />
@@ -85,10 +85,10 @@ export function FilterableColumnHeader({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-48">
         <DropdownMenuRadioGroup
-          value={currentValue ?? ""}
           onValueChange={(value) =>
             setFilters({ [paramKey]: value || null, page: 1 })
           }
+          value={currentValue ?? ""}
         >
           <DropdownMenuRadioItem value="">All</DropdownMenuRadioItem>
           <DropdownMenuSeparator />

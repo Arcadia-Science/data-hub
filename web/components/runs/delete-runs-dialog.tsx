@@ -1,5 +1,9 @@
 "use client";
 
+import { Loader2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
+import { toast } from "sonner";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -12,17 +16,13 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2 } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
-import { toast } from "sonner";
 
-export type DeleteRunTarget = {
-  instrumentId: string;
-  runId: string;
+export interface DeleteRunTarget {
   fileCount: number;
   hasProcessedFiles: boolean;
-};
+  instrumentId: string;
+  runId: string;
+}
 
 // ---------------------------------------------------------------------------
 // Controlled delete dialog shared by the row "..." menu and the bulk action
@@ -67,18 +67,20 @@ export function DeleteRunsDialog({
   const [confirmValue, setConfirmValue] = useState("");
 
   const runCount = runs.length;
-  const isSingle = runCount === 1;
-  const singleRun = isSingle ? runs[0]! : null;
+  const singleRun = runCount === 1 ? runs[0] : undefined;
+  const isSingle = singleRun !== undefined;
   const totalFiles = runs.reduce((sum, r) => sum + r.fileCount, 0);
 
   // Single-run with processed files keeps the strict gate so an accidental
   // delete can't wipe expensive processed artifacts. Bulk deletes don't
   // require typing (per product clarification).
-  const requiresTypeConfirm = isSingle && singleRun!.hasProcessedFiles;
-  const isConfirmed = !requiresTypeConfirm || confirmValue === singleRun!.runId;
+  const requiresTypeConfirm = isSingle && singleRun.hasProcessedFiles;
+  const isConfirmed = !requiresTypeConfirm || confirmValue === singleRun?.runId;
 
   function handleOpenChange(next: boolean) {
-    if (!next) setConfirmValue("");
+    if (!next) {
+      setConfirmValue("");
+    }
     onOpenChange(next);
   }
 
@@ -106,18 +108,18 @@ export function DeleteRunsDialog({
   const title = isSingle ? "Delete run?" : `Delete ${runCount} runs?`;
 
   return (
-    <AlertDialog open={open} onOpenChange={handleOpenChange}>
+    <AlertDialog onOpenChange={handleOpenChange} open={open}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div className="space-y-2">
-              {isSingle ? (
+              {singleRun ? (
                 <p>
                   This will soft-delete the run{" "}
-                  <strong className="font-mono">{singleRun!.runId}</strong>
-                  {singleRun!.fileCount > 0 && (
-                    <> and its {singleRun!.fileCount} file(s)</>
+                  <strong className="font-mono">{singleRun.runId}</strong>
+                  {singleRun.fileCount > 0 && (
+                    <> and its {singleRun.fileCount} file(s)</>
                   )}
                   . The run can be restored at any time.
                 </p>
@@ -129,20 +131,20 @@ export function DeleteRunsDialog({
                   restored at any time.
                 </p>
               )}
-              {requiresTypeConfirm && (
+              {requiresTypeConfirm && singleRun && (
                 <div className="space-y-1.5 pt-2">
-                  <Label htmlFor="confirm-run-id" className="text-xs">
+                  <Label className="text-xs" htmlFor="confirm-run-id">
                     Type{" "}
-                    <strong className="font-mono">{singleRun!.runId}</strong> to
+                    <strong className="font-mono">{singleRun.runId}</strong> to
                     confirm
                   </Label>
                   <Input
-                    id="confirm-run-id"
-                    value={confirmValue}
-                    onChange={(e) => setConfirmValue(e.target.value)}
-                    placeholder={singleRun!.runId}
-                    className="font-mono text-sm"
                     autoComplete="off"
+                    className="font-mono text-sm"
+                    id="confirm-run-id"
+                    onChange={(e) => setConfirmValue(e.target.value)}
+                    placeholder={singleRun.runId}
+                    value={confirmValue}
                   />
                 </div>
               )}
@@ -152,9 +154,9 @@ export function DeleteRunsDialog({
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
-            variant="destructive"
-            onClick={handleDelete}
             disabled={isPending || !isConfirmed}
+            onClick={handleDelete}
+            variant="destructive"
           >
             {isPending && <Loader2 className="size-4 animate-spin" />}
             Delete

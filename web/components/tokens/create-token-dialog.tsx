@@ -1,5 +1,9 @@
 "use client";
 
+import { Loader2, Plus } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useCallback, useMemo, useState, useTransition } from "react";
+import { toast } from "sonner";
 import { CopyButton } from "@/components/copy-button";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -22,10 +26,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ALL_SCOPES, type Scope } from "@/lib/api/scopes";
-import { Loader2, Plus } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useCallback, useMemo, useState, useTransition } from "react";
-import { toast } from "sonner";
 
 // Lifted dialog state: the form and success bodies are sibling components
 // that never share state across the boundary, so the parent only tracks the
@@ -43,20 +43,22 @@ const EXPIRY_PRESETS = [
 ] as const;
 
 function computeExpiresAt(days: string): string | undefined {
-  if (days === "none") return undefined;
+  if (days === "none") {
+    return;
+  }
   const d = new Date();
-  d.setDate(d.getDate() + parseInt(days, 10));
+  d.setDate(d.getDate() + Number.parseInt(days, 10));
   return d.toISOString();
 }
 
 // Resource → [read, write] grid order. Derived from ALL_SCOPES so adding a
 // new scope automatically surfaces in the picker. Tokens API rejects "*"
 // from callers, so it's intentionally absent here.
-type ResourceRow = {
-  resource: string;
+interface ResourceRow {
   read?: Scope;
+  resource: string;
   write?: Scope;
-};
+}
 
 function buildResourceRows(): ResourceRow[] {
   const byResource = new Map<string, ResourceRow>();
@@ -79,14 +81,18 @@ export function CreateTokenDialog() {
   // in the success branch.
   return (
     <Dialog
-      open={open}
       onOpenChange={(value) => {
         // Block dismissal while the plaintext is shown — the token can never
         // be retrieved again, so the user must explicitly click "Done".
-        if (!value && view.kind === "success") return;
+        if (!value && view.kind === "success") {
+          return;
+        }
         setOpen(value);
-        if (!value) setView({ kind: "form" });
+        if (!value) {
+          setView({ kind: "form" });
+        }
       }}
+      open={open}
     >
       <DialogTrigger asChild>
         <Button size="sm">
@@ -95,11 +101,15 @@ export function CreateTokenDialog() {
         </Button>
       </DialogTrigger>
       <DialogContent
-        onPointerDownOutside={(e) => {
-          if (view.kind === "success") e.preventDefault();
-        }}
         onEscapeKeyDown={(e) => {
-          if (view.kind === "success") e.preventDefault();
+          if (view.kind === "success") {
+            e.preventDefault();
+          }
+        }}
+        onPointerDownOutside={(e) => {
+          if (view.kind === "success") {
+            e.preventDefault();
+          }
         }}
       >
         {view.kind === "form" ? (
@@ -108,11 +118,11 @@ export function CreateTokenDialog() {
           />
         ) : (
           <CreateTokenSuccess
-            plaintext={view.plaintext}
             onDone={() => {
               setOpen(false);
               setView({ kind: "form" });
             }}
+            plaintext={view.plaintext}
           />
         )}
       </DialogContent>
@@ -188,17 +198,17 @@ function CreateTokenForm({
         <div className="grid gap-2">
           <Label htmlFor="token-name">Name</Label>
           <Input
+            autoFocus
             id="token-name"
+            maxLength={100}
+            onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Plate Reader PC"
             value={name}
-            onChange={(e) => setName(e.target.value)}
-            maxLength={100}
-            autoFocus
           />
         </div>
         <div className="grid gap-2">
           <Label htmlFor="token-expiry">Expiration</Label>
-          <Select value={expiry} onValueChange={setExpiry}>
+          <Select onValueChange={setExpiry} value={expiry}>
             <SelectTrigger id="token-expiry">
               <SelectValue />
             </SelectTrigger>
@@ -214,32 +224,32 @@ function CreateTokenForm({
         <div className="grid gap-2">
           <Label>Scopes</Label>
           <div className="grid grid-cols-[1fr_auto_auto] items-center gap-x-4 gap-y-2 rounded-md border bg-background px-3 py-2 dark:bg-muted">
-            <div className="text-xs font-medium text-muted-foreground">
+            <div className="font-medium text-muted-foreground text-xs">
               Resource
             </div>
-            <div className="w-14 text-center text-xs font-medium text-muted-foreground">
+            <div className="w-14 text-center font-medium text-muted-foreground text-xs">
               Read
             </div>
-            <div className="w-14 text-center text-xs font-medium text-muted-foreground">
+            <div className="w-14 text-center font-medium text-muted-foreground text-xs">
               Write
             </div>
             {resourceRows.map((row) => (
               <ScopeRow
                 key={row.resource}
+                onToggle={toggle}
                 row={row}
                 selected={selected}
-                onToggle={toggle}
               />
             ))}
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-muted-foreground text-xs">
             Pick the minimum scopes this token needs. You can&apos;t change them
             after creation — revoke and re-issue instead.
           </p>
         </div>
       </div>
       <DialogFooter>
-        <Button onClick={handleCreate} disabled={!canSubmit}>
+        <Button disabled={!canSubmit} onClick={handleCreate}>
           {isPending ? (
             <Loader2 className="animate-spin" data-icon="inline-start" />
           ) : null}
@@ -265,25 +275,25 @@ function ScopeRow({
       <div className="flex w-14 justify-center">
         {row.read ? (
           <Checkbox
-            id={`scope-${row.read}`}
-            checked={selected.has(row.read)}
-            onCheckedChange={() => onToggle(row.read as Scope)}
             aria-label={row.read}
+            checked={selected.has(row.read)}
+            id={`scope-${row.read}`}
+            onCheckedChange={() => onToggle(row.read as Scope)}
           />
         ) : (
-          <span className="text-xs text-muted-foreground/40">—</span>
+          <span className="text-muted-foreground/40 text-xs">—</span>
         )}
       </div>
       <div className="flex w-14 justify-center">
         {row.write ? (
           <Checkbox
-            id={`scope-${row.write}`}
-            checked={selected.has(row.write)}
-            onCheckedChange={() => onToggle(row.write as Scope)}
             aria-label={row.write}
+            checked={selected.has(row.write)}
+            id={`scope-${row.write}`}
+            onCheckedChange={() => onToggle(row.write as Scope)}
           />
         ) : (
-          <span className="text-xs text-muted-foreground/40">—</span>
+          <span className="text-muted-foreground/40 text-xs">—</span>
         )}
       </div>
     </>

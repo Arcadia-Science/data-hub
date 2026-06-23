@@ -1,8 +1,8 @@
+import { eq } from "drizzle-orm";
 import { requireAdmin } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { db } from "@/lib/db";
 import { personalAccessTokens } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
 
 export async function DELETE(
   _request: Request,
@@ -13,7 +13,9 @@ export async function DELETE(
   // tokens during an audit. The previous owner-scoped delete made
   // multi-user revocation impossible from the UI.
   const authResult = await requireAdmin();
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { id } = await params;
 

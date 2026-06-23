@@ -1,3 +1,5 @@
+import { and, eq } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { files, instrumentRuns, instruments, watchers } from "@/lib/db/schema";
 import {
   api,
@@ -6,8 +8,6 @@ import {
   resetDb,
   seedTestUser,
 } from "@/tests/integration/helpers";
-import { and, eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // Regression coverage for the "stuck on Uploading" bug: queueing an upload
 // while the instrument has no online watcher used to succeed, leaving files in

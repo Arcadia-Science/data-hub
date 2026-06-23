@@ -1,5 +1,15 @@
 "use client";
 
+import { parse } from "csv-parse/browser/esm/sync";
+import {
+  AlertTriangle,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsUpDown,
+} from "lucide-react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 import type { RamanSpectrumFileRef } from "@/components/runs/raman-report-section";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,22 +34,12 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
-import { parse } from "csv-parse/browser/esm/sync";
-import {
-  AlertTriangle,
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  ChevronsUpDown,
-} from "lucide-react";
-import { startTransition, useEffect, useMemo, useRef, useState } from "react";
-import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 
-type SpectrumPoint = {
-  wavenumber: number;
+interface SpectrumPoint {
   intensity: number;
   intensityDarkSubtracted: number;
-};
+  wavenumber: number;
+}
 
 type Series = "intensity" | "intensityDarkSubtracted";
 
@@ -84,8 +84,10 @@ async function fetchSpectrum(fileId: number): Promise<SpectrumPoint[]> {
   }
   const first = rows[0];
   if (
-    !(CSV_HEADER_WAVENUMBER in first) ||
-    !(CSV_HEADER_INTENSITY in first || CSV_HEADER_DARK in first)
+    !(
+      CSV_HEADER_WAVENUMBER in first &&
+      (CSV_HEADER_INTENSITY in first || CSV_HEADER_DARK in first)
+    )
   ) {
     throw new Error(
       `CSV is missing expected columns (${CSV_HEADER_WAVENUMBER} + ${CSV_HEADER_INTENSITY}/${CSV_HEADER_DARK})`
@@ -114,13 +116,13 @@ function SpectrumPicker({
   const selected = spectra.find((s) => s.fileId === selectedId);
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover onOpenChange={setOpen} open={open}>
       <PopoverTrigger asChild>
         <Button
-          variant="outline"
-          role="combobox"
           aria-expanded={open}
           className="w-full max-w-md justify-between font-normal"
+          role="combobox"
+          variant="outline"
         >
           <span className="truncate">
             {selected ? selected.filename : "Select a spectrum…"}
@@ -129,8 +131,8 @@ function SpectrumPicker({
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        className="w-[var(--radix-popover-trigger-width)] p-0"
         align="start"
+        className="w-[var(--radix-popover-trigger-width)] p-0"
       >
         <Command>
           <CommandInput placeholder="Search spectra..." />
@@ -142,11 +144,11 @@ function SpectrumPicker({
                 return (
                   <CommandItem
                     key={s.fileId}
-                    value={s.filename}
                     onSelect={() => {
                       onSelect(s.fileId);
                       setOpen(false);
                     }}
+                    value={s.filename}
                   >
                     <Check
                       className={cn(
@@ -175,19 +177,21 @@ function SeriesToggle({
 }) {
   return (
     <ToggleGroup
-      type="multiple"
-      size="sm"
-      value={visible}
+      aria-label="Series visibility"
       onValueChange={(next) => {
         // Don't let the user deselect every series — that would leave an
         // empty chart with no obvious way to recover.
-        if (next.length === 0) return;
+        if (next.length === 0) {
+          return;
+        }
         onChange(next as Series[]);
       }}
-      aria-label="Series visibility"
+      size="sm"
+      type="multiple"
+      value={visible}
     >
       {ALL_SERIES.map((key) => (
-        <ToggleGroupItem key={key} value={key} className="gap-1.5 text-xs">
+        <ToggleGroupItem className="gap-1.5 text-xs" key={key} value={key}>
           <span
             aria-hidden
             className="size-2.5 rounded-sm"
@@ -215,7 +219,7 @@ function SpectrumChart({
   const showDark = visible.includes("intensityDarkSubtracted");
 
   return (
-    <ChartContainer config={chartConfig} className="aspect-auto h-80 w-full">
+    <ChartContainer className="aspect-auto h-80 w-full" config={chartConfig}>
       <LineChart
         data={data}
         // Bottom margin makes room for the X-axis title sitting below the
@@ -223,15 +227,11 @@ function SpectrumChart({
         // owns only the axes.
         margin={{ top: 8, right: 16, bottom: 28, left: 0 }}
       >
-        <CartesianGrid vertical={false} strokeDasharray="3 3" />
+        <CartesianGrid strokeDasharray="3 3" vertical={false} />
         <XAxis
-          dataKey="wavenumber"
-          type="number"
-          domain={["dataMin", "dataMax"]}
-          tickLine={false}
           axisLine={false}
-          tickMargin={8}
-          tickFormatter={(v: number) => v.toFixed(0)}
+          dataKey="wavenumber"
+          domain={["dataMin", "dataMax"]}
           label={{
             value: "Wavenumber (cm\u207B\u00B9)",
             position: "insideBottom",
@@ -241,15 +241,19 @@ function SpectrumChart({
               fill: "var(--color-muted-foreground)",
             },
           }}
+          tickFormatter={(v: number) => v.toFixed(0)}
+          tickLine={false}
+          tickMargin={8}
+          type="number"
         />
         <YAxis
-          tickLine={false}
           axisLine={false}
-          tickMargin={8}
-          width={64}
           tickFormatter={(v: number) =>
             Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0)
           }
+          tickLine={false}
+          tickMargin={8}
+          width={64}
         />
         <ChartTooltip
           content={
@@ -264,22 +268,22 @@ function SpectrumChart({
         />
         {showIntensity && (
           <Line
-            name={chartConfig.intensity.label as string}
             dataKey="intensity"
-            stroke={chartConfig.intensity.color}
-            strokeWidth={1.25}
             dot={false}
             isAnimationActive={false}
+            name={chartConfig.intensity.label as string}
+            stroke={chartConfig.intensity.color}
+            strokeWidth={1.25}
           />
         )}
         {showDark && (
           <Line
-            name={chartConfig.intensityDarkSubtracted.label as string}
             dataKey="intensityDarkSubtracted"
-            stroke={chartConfig.intensityDarkSubtracted.color}
-            strokeWidth={1.25}
             dot={false}
             isAnimationActive={false}
+            name={chartConfig.intensityDarkSubtracted.label as string}
+            stroke={chartConfig.intensityDarkSubtracted.color}
+            strokeWidth={1.25}
           />
         )}
       </LineChart>
@@ -328,11 +332,15 @@ export function RamanSpectrumViewer({
   const canGoNext = currentIndex >= 0 && currentIndex < spectra.length - 1;
 
   function goPrev() {
-    if (!canGoPrev) return;
+    if (!canGoPrev) {
+      return;
+    }
     setSelectedId(spectra[currentIndex - 1].fileId);
   }
   function goNext() {
-    if (!canGoNext) return;
+    if (!canGoNext) {
+      return;
+    }
     setSelectedId(spectra[currentIndex + 1].fileId);
   }
 
@@ -340,30 +348,39 @@ export function RamanSpectrumViewer({
   // and never re-hits S3.
   const cacheRef = useRef<Map<number, SpectrumPoint[]>>(new Map());
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: retryNonce retriggers loading state after cache clear on retry
   const state: LoadState = useMemo(() => {
-    if (selectedId == null) return { status: "idle" };
+    if (selectedId == null) {
+      return { status: "idle" };
+    }
     const cached = cacheRef.current.get(selectedId);
-    if (cached) return { status: "ready", points: cached };
+    if (cached) {
+      return { status: "ready", points: cached };
+    }
     if (asyncResult && asyncResult.fileId === selectedId) {
       return asyncResult.status === "ready"
         ? { status: "ready", points: asyncResult.points }
         : { status: "error", message: asyncResult.message };
     }
     return { status: "loading" };
-    // `retryNonce` participates so a retry that clears the cache entry forces
-    // a fresh derivation back to "loading" before the next fetch resolves.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, asyncResult, retryNonce]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: retryNonce retriggers fetch when the user retries after an error
   useEffect(() => {
-    if (selectedId == null) return;
-    if (cacheRef.current.has(selectedId)) return;
+    if (selectedId == null) {
+      return;
+    }
+    if (cacheRef.current.has(selectedId)) {
+      return;
+    }
 
     let cancelled = false;
     fetchSpectrum(selectedId)
       .then((points) => {
         cacheRef.current.set(selectedId, points);
-        if (cancelled) return;
+        if (cancelled) {
+          return;
+        }
         // Rendering ~2k points to recharts is the heavy part of this update;
         // a transition lets the picker close stay snappy.
         startTransition(() => {
@@ -371,7 +388,9 @@ export function RamanSpectrumViewer({
         });
       })
       .catch((err: unknown) => {
-        if (cancelled) return;
+        if (cancelled) {
+          return;
+        }
         const message =
           err instanceof Error ? err.message : "Failed to load spectrum";
         setAsyncResult({ fileId: selectedId, status: "error", message });
@@ -383,7 +402,9 @@ export function RamanSpectrumViewer({
   }, [selectedId, retryNonce]);
 
   function handleRetry() {
-    if (selectedId == null) return;
+    if (selectedId == null) {
+      return;
+    }
     cacheRef.current.delete(selectedId);
     setAsyncResult(null);
     setRetryNonce((n) => n + 1);
@@ -393,42 +414,42 @@ export function RamanSpectrumViewer({
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-2">
         <SpectrumPicker
-          spectra={spectra}
-          selectedId={selectedId}
           onSelect={setSelectedId}
+          selectedId={selectedId}
+          spectra={spectra}
         />
         <div className="flex items-center gap-1">
           <Button
-            variant="outline"
-            size="icon"
-            onClick={goPrev}
-            disabled={!canGoPrev}
             aria-label="Previous spectrum"
+            disabled={!canGoPrev}
+            onClick={goPrev}
+            size="icon"
+            variant="outline"
           >
             <ChevronLeft className="size-4" />
           </Button>
           <Button
-            variant="outline"
-            size="icon"
-            onClick={goNext}
-            disabled={!canGoNext}
             aria-label="Next spectrum"
+            disabled={!canGoNext}
+            onClick={goNext}
+            size="icon"
+            variant="outline"
           >
             <ChevronRight className="size-4" />
           </Button>
         </div>
       </div>
       <div className="flex justify-end">
-        <SeriesToggle visible={visible} onChange={setVisible} />
+        <SeriesToggle onChange={setVisible} visible={visible} />
       </div>
       {state.status === "loading" && (
-        <Skeleton className="h-80 w-full" aria-label="Loading spectrum" />
+        <Skeleton aria-label="Loading spectrum" className="h-80 w-full" />
       )}
       {state.status === "error" && (
         <div className="flex h-80 flex-col items-center justify-center gap-3 rounded-md border border-dashed bg-muted/20 p-6 text-center">
-          <AlertTriangle className="size-6 text-muted-foreground" aria-hidden />
-          <p className="text-sm text-muted-foreground">{state.message}</p>
-          <Button variant="outline" size="sm" onClick={handleRetry}>
+          <AlertTriangle aria-hidden className="size-6 text-muted-foreground" />
+          <p className="text-muted-foreground text-sm">{state.message}</p>
+          <Button onClick={handleRetry} size="sm" variant="outline">
             Retry
           </Button>
         </div>

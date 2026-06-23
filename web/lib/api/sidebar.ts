@@ -1,17 +1,17 @@
-import { db } from "@/lib/db";
-import { instrumentRuns, instruments, watchers } from "@/lib/db/schema";
 import { eq, isNull, sql } from "drizzle-orm";
 import { cache } from "react";
+import { db } from "@/lib/db";
+import { instrumentRuns, instruments, watchers } from "@/lib/db/schema";
 
-export type SidebarInstrument = {
-  id: string;
+export interface SidebarInstrument {
   displayName: string;
-};
-
-export type SidebarWatcher = {
   id: string;
+}
+
+export interface SidebarWatcher {
   hostname: string | null;
-};
+  id: string;
+}
 
 // Cap the sidebar lists so the nav stays scannable even on workspaces with
 // many instruments/watchers. The "View all" sub-item links to the full page.
@@ -39,7 +39,7 @@ export const getSidebarInstruments = cache(
       .groupBy(instrumentRuns.instrumentId)
       .as("last_run");
 
-    return db
+    return await db
       .select({
         id: instruments.id,
         displayName: instruments.displayName,
@@ -57,7 +57,7 @@ export const getSidebarInstruments = cache(
 // dominate the top of the list.
 export const getSidebarWatchers = cache(
   async function getSidebarWatchers(): Promise<SidebarWatcher[]> {
-    return db
+    return await db
       .select({
         id: watchers.id,
         hostname: watchers.hostname,

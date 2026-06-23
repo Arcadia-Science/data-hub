@@ -9,15 +9,15 @@ const DEFAULT_REGION = "us-west-1";
 // Static-credentials fallback used when AWS_ROLE_ARN is unset (local dev,
 // CI). Reads env vars at call time so the value picked up matches whatever
 // the surrounding process exports when `signLambdaInvoke` actually runs.
-const staticCredentialsProvider: AwsCredentialIdentityProvider = async () => {
+const staticCredentialsProvider: AwsCredentialIdentityProvider = () => {
   if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
-    return {
+    return Promise.resolve({
       accessKeyId: process.env.AWS_ACCESS_KEY_ID,
       secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
       ...(process.env.AWS_SESSION_TOKEN && {
         sessionToken: process.env.AWS_SESSION_TOKEN,
       }),
-    };
+    });
   }
   throw new Error(
     "No AWS credentials available: set AWS_ROLE_ARN (Vercel OIDC) or " +
@@ -75,15 +75,15 @@ function getSigner(region: string): SignatureV4 {
 export function hasInvokeCredentials(): boolean {
   return Boolean(
     process.env.AWS_ROLE_ARN ||
-    (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY)
+      (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY)
   );
 }
 
-export type SignedLambdaInvokeInit = {
-  url: string;
+export interface SignedLambdaInvokeInit {
   body: string;
   contentType?: string;
-};
+  url: string;
+}
 
 // Build a SigV4-signed POST against a Lambda Function URL configured with
 // AuthType=AWS_IAM. Returns a `Request` ready to hand to `fetch()`.

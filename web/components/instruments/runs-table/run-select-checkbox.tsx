@@ -1,9 +1,9 @@
 "use client";
 
-import { Checkbox } from "@/components/ui/checkbox";
 import type { MouseEvent } from "react";
+import { Checkbox } from "@/components/ui/checkbox";
 
-import { useRunSelection, type RunRef } from "./run-selection-provider";
+import { type RunRef, useRunSelection } from "./run-selection-provider";
 
 // Stops row-click navigation when interacting with the checkbox.
 function swallow(event: MouseEvent) {
@@ -13,7 +13,7 @@ function swallow(event: MouseEvent) {
 export function RunSelectCheckbox({ runRef }: { runRef: RunRef }) {
   const { actions, meta } = useRunSelection();
   return (
-    <div onClick={swallow} className="flex items-center">
+    <div className="flex items-center" onClick={swallow}>
       <Checkbox
         aria-label={`Select run ${runRef.runId}`}
         checked={meta.isSelected(runRef.id)}
@@ -26,7 +26,7 @@ export function RunSelectCheckbox({ runRef }: { runRef: RunRef }) {
 export function RunSelectAllCheckbox({ refs }: { refs: RunRef[] }) {
   const { actions, meta } = useRunSelection();
   return (
-    <div onClick={swallow} className="flex items-center">
+    <div className="flex items-center" onClick={swallow}>
       <Checkbox
         aria-label="Select all runs on this page"
         checked={refs.length > 0 && meta.allSelected(refs)}

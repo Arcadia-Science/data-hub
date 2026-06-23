@@ -1,9 +1,9 @@
 import { codeToHtml } from "shiki";
 
 interface CodeBlockProps {
+  className?: string;
   code: string;
   lang: string;
-  className?: string;
 }
 
 export async function CodeBlock({ code, lang, className }: CodeBlockProps) {
@@ -17,6 +17,7 @@ export async function CodeBlock({ code, lang, className }: CodeBlockProps) {
   });
 
   return (
+    // biome-ignore lint/security/noDangerouslySetInnerHtml: shiki emits syntax-highlighting markup, not raw user HTML
     <div className={className} dangerouslySetInnerHTML={{ __html: html }} />
   );
 }

@@ -1,3 +1,4 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { instruments } from "@/lib/db/schema";
 import {
   api,
@@ -8,7 +9,6 @@ import {
   resetDb,
   seedTestUser,
 } from "@/tests/integration/helpers";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 describe("Instrument Runs API", () => {
   let token: string;

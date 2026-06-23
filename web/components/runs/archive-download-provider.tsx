@@ -2,12 +2,12 @@
 
 import {
   createContext,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type ReactNode,
 } from "react";
 import { toast } from "sonner";
 
@@ -23,44 +23,44 @@ import { ArchiveDownloadDialog } from "./archive-download-dialog";
 // 200s on a hit. That makes the artifact in S3 — not the row's status —
 // the source of truth for "ready", so we recover automatically even if
 // the Lambda's PATCH callback to flip the row to `ready` never lands.
-export type ArchiveDownloadJob = {
-  id: string;
-  runId: string;
+export interface ArchiveDownloadJob {
   archiveUrl: string;
   defaultFilename: string;
+  downloadUrl?: string;
+  errorMessage?: string;
+  id: string;
   // `job_id` returned by the very first 202. Subsequent polls compare
   // their own `job_id` against this; if it changes, the route's dedup
   // INSERT created a new row, which only happens after the previous
   // attempt was marked failed (or expired by the stuck-row sweep). We
   // surface that as a failure rather than silently chase a fresh build.
   initialJobId?: string;
-  status: "pending" | "building" | "ready" | "failed";
-  errorMessage?: string;
-  downloadUrl?: string;
+  runId: string;
   sizeBytes?: number | null;
   startedAt: number;
-};
+  status: "pending" | "building" | "ready" | "failed";
+}
 
-type StartArchiveDownloadInput = {
+interface StartArchiveDownloadInput {
   archiveUrl: string;
-  runId: string;
   defaultFilename?: string;
-};
+  runId: string;
+}
 
-export type ArchiveDownloadActions = {
-  start: (input: StartArchiveDownloadInput) => Promise<void>;
+export interface ArchiveDownloadActions {
   dismiss: (id: string) => void;
-};
+  start: (input: StartArchiveDownloadInput) => Promise<void>;
+}
 
-type ArchiveDownloadContextValue = {
-  jobs: ArchiveDownloadJob[];
+interface ArchiveDownloadContextValue {
   actions: ArchiveDownloadActions;
-};
+  jobs: ArchiveDownloadJob[];
+}
 
 export const ArchiveDownloadContext =
   createContext<ArchiveDownloadContextValue | null>(null);
 
-const POLL_INTERVAL_MS = 2_000;
+const POLL_INTERVAL_MS = 2000;
 // Stop polling after a generous amount of time so a stuck Lambda doesn't
 // leave the dialog spinning forever. Lambda Function URLs cap at 15 minutes;
 // we double that as a hard ceiling.
@@ -203,7 +203,7 @@ export function ArchiveDownloadProvider({ children }: { children: ReactNode }) {
       triggerDownload(downloadUrl, filename);
       // Auto-dismiss the row a moment later so the dialog doesn't linger
       // when the build was actually a cache hit.
-      window.setTimeout(() => dismiss(id), 1_500);
+      window.setTimeout(() => dismiss(id), 1500);
     },
     [dismiss, updateJob]
   );
@@ -246,6 +246,8 @@ export function ArchiveDownloadProvider({ children }: { children: ReactNode }) {
             initialJobId: result.jobId,
           });
           return;
+        default:
+          return;
       }
     },
     [completeReady, dismiss, updateJob]
@@ -259,11 +261,15 @@ export function ArchiveDownloadProvider({ children }: { children: ReactNode }) {
   // don't spin up N timers.
   useEffect(() => {
     const building = jobs.filter((j) => j.status === "building");
-    if (building.length === 0) return;
+    if (building.length === 0) {
+      return;
+    }
 
     const interval = window.setInterval(async () => {
       for (const job of jobsRef.current) {
-        if (job.status !== "building") continue;
+        if (job.status !== "building") {
+          continue;
+        }
         if (Date.now() - job.startedAt > POLL_TIMEOUT_MS) {
           updateJob(job.id, {
             status: "failed",
@@ -310,6 +316,8 @@ export function ArchiveDownloadProvider({ children }: { children: ReactNode }) {
             // Polling is a background activity; don't navigate the user.
             // Try again on the next interval — by then the route will
             // hopefully be honoring the JSON Accept header again.
+            break;
+          default:
             break;
         }
       }

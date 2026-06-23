@@ -1,5 +1,6 @@
 "use client";
 
+import { ArrowDownToLine, RotateCw, Upload, X } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,7 +18,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { ArrowDownToLine, RotateCw, Upload, X } from "lucide-react";
 
 import { type FileRef, useFileSelection } from "./file-selection-provider";
 import { WatcherGatedUploadButton } from "./watcher-gated-upload-button";
@@ -31,13 +31,13 @@ import { WatcherGatedUploadButton } from "./watcher-gated-upload-button";
 // narrow the selection before acting.
 // ---------------------------------------------------------------------------
 
-export type FileBulkActionBarProps = {
+export interface FileBulkActionBarProps {
   isPending: boolean;
-  onUpload: (ids: number[]) => void;
   onDismiss: (ids: number[]) => void;
-  onReprocess: (ids: number[]) => void;
   onDownload: (refs: FileRef[]) => void;
-};
+  onReprocess: (ids: number[]) => void;
+  onUpload: (ids: number[]) => void;
+}
 
 export function FileBulkActionBar({
   isPending,
@@ -48,7 +48,9 @@ export function FileBulkActionBar({
 }: FileBulkActionBarProps) {
   const { state, actions, meta } = useFileSelection();
 
-  if (meta.count === 0) return null;
+  if (meta.count === 0) {
+    return null;
+  }
 
   const refs = Array.from(state.selected.values());
   const ids = refs.map((r) => r.id);
@@ -66,12 +68,12 @@ export function FileBulkActionBar({
           <Tooltip>
             <TooltipTrigger asChild>
               <WatcherGatedUploadButton
-                type="button"
-                variant="default"
-                size="sm"
+                className="h-7 gap-1.5 text-xs"
                 disabled={isPending}
                 onClick={() => onUpload(ids)}
-                className="h-7 gap-1.5 text-xs"
+                size="sm"
+                type="button"
+                variant="default"
               >
                 <Upload className="size-3.5" />
                 Upload
@@ -87,11 +89,11 @@ export function FileBulkActionBar({
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button
+                className="h-7 gap-1.5 text-xs"
+                disabled={isPending}
+                size="sm"
                 type="button"
                 variant="outline"
-                size="sm"
-                disabled={isPending}
-                className="h-7 gap-1.5 text-xs"
               >
                 <X className="size-3.5" />
                 Dismiss
@@ -121,11 +123,11 @@ export function FileBulkActionBar({
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button
+                className="h-7 gap-1.5 text-xs"
+                disabled={isPending}
+                size="sm"
                 type="button"
                 variant="outline"
-                size="sm"
-                disabled={isPending}
-                className="h-7 gap-1.5 text-xs"
               >
                 <RotateCw className="size-3.5" />
                 Reprocess
@@ -156,11 +158,11 @@ export function FileBulkActionBar({
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
+                className="h-7 gap-1.5 text-xs"
+                onClick={() => onDownload(refs)}
+                size="sm"
                 type="button"
                 variant="outline"
-                size="sm"
-                onClick={() => onDownload(refs)}
-                className="h-7 gap-1.5 text-xs"
               >
                 <ArrowDownToLine className="size-3.5" />
                 Download
@@ -173,12 +175,12 @@ export function FileBulkActionBar({
         )}
 
         <Button
-          type="button"
-          variant="ghost"
-          size="sm"
+          className="h-7 text-xs"
           disabled={isPending}
           onClick={() => actions.clear()}
-          className="h-7 text-xs"
+          size="sm"
+          type="button"
+          variant="ghost"
         >
           Clear
         </Button>

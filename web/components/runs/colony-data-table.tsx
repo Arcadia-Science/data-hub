@@ -1,5 +1,13 @@
 "use client";
 
+import { parse } from "csv-parse/browser/esm/sync";
+import {
+  AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
+  ExternalLink,
+} from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -12,14 +20,6 @@ import {
 } from "@/components/ui/table";
 import type { RunFile } from "@/lib/api/instrument-runs";
 import { cn } from "@/lib/utils";
-import { parse } from "csv-parse/browser/esm/sync";
-import {
-  AlertTriangle,
-  ChevronLeft,
-  ChevronRight,
-  ExternalLink,
-} from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
 
 const PAGE_SIZE = 10;
 
@@ -65,29 +65,35 @@ export function ColonyDataTable({ file }: { file: RunFile }) {
 
   const state: LoadState = useMemo(() => {
     const cached = cacheRef.current.get(fileId);
-    if (cached) return { status: "ready", rows: cached };
+    if (cached) {
+      return { status: "ready", rows: cached };
+    }
     if (asyncResult && asyncResult.fileId === fileId) {
       return asyncResult.status === "ready"
         ? { status: "ready", rows: asyncResult.rows }
         : { status: "error", message: asyncResult.message };
     }
     return { status: "loading" };
-    // retryNonce participates so a retry that clears the cache entry forces
-    // a fresh derivation back to "loading" before the next fetch resolves.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fileId, asyncResult, retryNonce]);
+  }, [fileId, asyncResult]);
 
   useEffect(() => {
-    if (cacheRef.current.has(fileId)) return;
+    void retryNonce;
+    if (cacheRef.current.has(fileId)) {
+      return;
+    }
     let cancelled = false;
     fetchCsvRows(fileId)
       .then((rows) => {
         cacheRef.current.set(fileId, rows);
-        if (cancelled) return;
+        if (cancelled) {
+          return;
+        }
         setAsyncResult({ fileId, status: "ready", rows });
       })
       .catch((err: unknown) => {
-        if (cancelled) return;
+        if (cancelled) {
+          return;
+        }
         const message =
           err instanceof Error ? err.message : "Failed to load CSV";
         setAsyncResult({ fileId, status: "error", message });
@@ -106,31 +112,31 @@ export function ColonyDataTable({ file }: { file: RunFile }) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium">{file.filename}</h3>
-        <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" asChild>
-          <a href={downloadUrl} target="_blank" rel="noopener noreferrer">
+        <h3 className="font-medium text-sm">{file.filename}</h3>
+        <Button asChild className="h-7 gap-1 text-xs" size="sm" variant="ghost">
+          <a href={downloadUrl} rel="noopener noreferrer" target="_blank">
             <ExternalLink className="size-3" />
             Open as CSV
           </a>
         </Button>
       </div>
       {state.status === "loading" && (
-        <Skeleton className="h-72 w-full" aria-label="Loading CSV" />
+        <Skeleton aria-label="Loading CSV" className="h-72 w-full" />
       )}
       {state.status === "error" && (
         <div className="flex h-72 flex-col items-center justify-center gap-3 rounded-md border border-dashed bg-muted/20 p-6 text-center">
-          <AlertTriangle className="size-6 text-muted-foreground" aria-hidden />
-          <p className="text-sm text-muted-foreground">{state.message}</p>
-          <Button variant="outline" size="sm" onClick={handleRetry}>
+          <AlertTriangle aria-hidden className="size-6 text-muted-foreground" />
+          <p className="text-muted-foreground text-sm">{state.message}</p>
+          <Button onClick={handleRetry} size="sm" variant="outline">
             Retry
           </Button>
         </div>
       )}
       {state.status === "ready" && (
         <ColonyDataTableView
-          rows={state.rows}
-          page={page}
           onPageChange={setPage}
+          page={page}
+          rows={state.rows}
         />
       )}
     </div>
@@ -155,11 +161,15 @@ function ColonyDataTableView({
   // Computed once per row set so per-cell rendering stays cheap.
   const numericColumns = useMemo<Set<string>>(() => {
     const out = new Set<string>();
-    if (rows.length === 0) return out;
+    if (rows.length === 0) {
+      return out;
+    }
     for (const col of columns) {
       for (const row of rows) {
         const v = row[col];
-        if (v === undefined || v === "") continue;
+        if (v === undefined || v === "") {
+          continue;
+        }
         if (!Number.isNaN(Number(v)) && Number.isFinite(Number(v))) {
           out.add(col);
         }
@@ -180,7 +190,7 @@ function ColonyDataTableView({
 
   if (total === 0) {
     return (
-      <div className="flex h-24 items-center justify-center rounded-md border border-dashed bg-muted/20 text-sm text-muted-foreground">
+      <div className="flex h-24 items-center justify-center rounded-md border border-dashed bg-muted/20 text-muted-foreground text-sm">
         CSV is empty.
       </div>
     );
@@ -197,11 +207,11 @@ function ColonyDataTableView({
             <TableRow>
               {columns.map((col) => (
                 <TableHead
-                  key={col}
                   className={cn(
                     "font-mono text-xs",
                     numericColumns.has(col) && "text-right"
                   )}
+                  key={col}
                 >
                   {col}
                 </TableHead>
@@ -209,15 +219,17 @@ function ColonyDataTableView({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {pageRows.map((row, idx) => (
-              <TableRow key={start + idx}>
+            {pageRows.map((row) => (
+              <TableRow
+                key={columns.map((col) => `${col}:${row[col] ?? ""}`).join("|")}
+              >
                 {columns.map((col) => (
                   <TableCell
-                    key={col}
                     className={cn(
                       "font-mono text-xs",
                       numericColumns.has(col) && "text-right tabular-nums"
                     )}
+                    key={col}
                   >
                     {row[col] ?? ""}
                   </TableCell>
@@ -227,7 +239,7 @@ function ColonyDataTableView({
           </TableBody>
         </Table>
       </div>
-      <div className="flex items-center justify-between text-xs text-muted-foreground">
+      <div className="flex items-center justify-between text-muted-foreground text-xs">
         <span>
           Showing <span className="tabular-nums">{start + 1}</span>–
           <span className="tabular-nums">{end}</span> of{" "}
@@ -239,20 +251,20 @@ function ColonyDataTableView({
           </span>
           <div className="flex items-center gap-1">
             <Button
-              variant="outline"
-              size="icon"
-              onClick={() => onPageChange(safePage - 1)}
-              disabled={!canGoPrev}
               aria-label="Previous page"
+              disabled={!canGoPrev}
+              onClick={() => onPageChange(safePage - 1)}
+              size="icon"
+              variant="outline"
             >
               <ChevronLeft className="size-4" />
             </Button>
             <Button
-              variant="outline"
-              size="icon"
-              onClick={() => onPageChange(safePage + 1)}
-              disabled={!canGoNext}
               aria-label="Next page"
+              disabled={!canGoNext}
+              onClick={() => onPageChange(safePage + 1)}
+              size="icon"
+              variant="outline"
             >
               <ChevronRight className="size-4" />
             </Button>

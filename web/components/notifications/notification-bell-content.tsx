@@ -1,8 +1,23 @@
 "use client";
 
 import {
-  useNotifications,
+  Activity,
+  BellOff,
+  ChevronDown,
+  FlaskConical,
+  Image as ImageIcon,
+  type LucideIcon,
+  Microscope,
+  Radar,
+  ScanLine,
+  Settings,
+  TestTube,
+} from "lucide-react";
+import Link from "next/link";
+import { useMemo, useState } from "react";
+import {
   type NotificationItem,
+  useNotifications,
 } from "@/components/notifications/notifications-provider";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -10,21 +25,6 @@ import { Button } from "@/components/ui/button";
 import { avatarColor } from "@/lib/avatar-color";
 import type { InstrumentType } from "@/lib/db/schema";
 import { cn, formatRelativeTime } from "@/lib/utils";
-import {
-  Activity,
-  BellOff,
-  ChevronDown,
-  FlaskConical,
-  Image as ImageIcon,
-  Microscope,
-  Radar,
-  ScanLine,
-  Settings,
-  TestTube,
-  type LucideIcon,
-} from "lucide-react";
-import Link from "next/link";
-import { useMemo, useState } from "react";
 
 // ---------------------------------------------------------------------------
 // Bell popover content. The provider is the single source of truth for
@@ -61,21 +61,21 @@ const BUCKET_LABEL: Record<Bucket, string> = {
   earlier: "Earlier",
 };
 
-type CommentEntry = {
+interface CommentEntry {
+  id: string;
   kind: "comment";
-  id: string;
   notification: NotificationItem;
-};
+}
 
-type RunGroupEntry = {
-  kind: "run_group";
+interface RunGroupEntry {
   id: string;
+  instrumentDisplayName: string;
   instrumentId: string;
   instrumentType: InstrumentType;
-  instrumentDisplayName: string;
-  runs: NotificationItem[];
+  kind: "run_group";
   latestCreatedAt: string;
-};
+  runs: NotificationItem[];
+}
 
 type Entry = CommentEntry | RunGroupEntry;
 type BucketedEntries = Record<Bucket, Entry[]>;
@@ -102,6 +102,8 @@ function commentActionLabel(n: NotificationItem): string {
       // Unreachable — `run_created` never flows into the comment row
       // renderer — but exhaustive switches keep TS honest.
       return `${actor} created`;
+    default:
+      return `${actor} commented on`;
   }
 }
 
@@ -112,10 +114,14 @@ function bucketOf(createdAt: string, now: Date): Bucket {
     now.getMonth(),
     now.getDate()
   );
-  if (created >= startOfToday) return "today";
+  if (created >= startOfToday) {
+    return "today";
+  }
   const startOfYesterday = new Date(startOfToday);
   startOfYesterday.setDate(startOfYesterday.getDate() - 1);
-  if (created >= startOfYesterday) return "yesterday";
+  if (created >= startOfYesterday) {
+    return "yesterday";
+  }
   return "earlier";
 }
 
@@ -165,8 +171,8 @@ function buildEntries(items: NotificationItem[], now: Date): BucketedEntries {
 const EMPTY_STATE = (
   <div className="flex flex-col items-center justify-center gap-2 px-3 py-12 text-center">
     <BellOff className="size-6 text-muted-foreground/60" />
-    <p className="text-sm text-muted-foreground">You&apos;re all caught up.</p>
-    <p className="text-xs text-muted-foreground/70">
+    <p className="text-muted-foreground text-sm">You&apos;re all caught up.</p>
+    <p className="text-muted-foreground/70 text-xs">
       New runs and replies will show up here when you have something subscribed.
     </p>
   </div>
@@ -192,12 +198,12 @@ export function NotificationBellContent({
   return (
     <div className="flex flex-col">
       <NotificationsHeader
-        unreadCount={unreadCount}
         hasUnread={hasUnread}
         onMarkAllRead={() => {
           void markAllRead();
         }}
         onNavigate={onNavigate}
+        unreadCount={unreadCount}
       />
       {isEmpty ? (
         EMPTY_STATE
@@ -205,7 +211,9 @@ export function NotificationBellContent({
         <div className="max-h-[60vh] overflow-y-auto">
           {BUCKET_ORDER.map((bucket) => {
             const entries = buckets[bucket];
-            if (entries.length === 0) return null;
+            if (entries.length === 0) {
+              return null;
+            }
             return (
               <NotificationSection key={bucket} label={BUCKET_LABEL[bucket]}>
                 {entries.map((entry) =>
@@ -222,8 +230,8 @@ export function NotificationBellContent({
                     />
                   ) : (
                     <RunGroupNotificationRow
-                      key={entry.id}
                       group={entry}
+                      key={entry.id}
                       onActivate={(notificationId) => {
                         void markOneRead(notificationId);
                       }}
@@ -260,12 +268,12 @@ function NotificationsHeader({
   return (
     <div className="flex items-center justify-between gap-2 border-b px-4 py-3">
       <div className="flex items-center gap-2">
-        <h2 className="text-sm font-semibold tracking-tight">Notifications</h2>
+        <h2 className="font-semibold text-sm tracking-tight">Notifications</h2>
         {hasUnread ? (
           <Badge
-            variant="secondary"
-            className="bg-primary/10 text-primary"
             aria-label={`${unreadCount} unread`}
+            className="bg-primary/10 text-primary"
+            variant="secondary"
           >
             {unreadCount > 99 ? "99+" : unreadCount} new
           </Badge>
@@ -273,21 +281,21 @@ function NotificationsHeader({
       </div>
       <div className="flex items-center gap-1">
         <Button
-          asChild
-          variant="ghost"
-          size="icon-sm"
           aria-label="Notification settings"
+          asChild
+          size="icon-sm"
+          variant="ghost"
         >
           <Link href="/settings/notifications" onClick={() => onNavigate?.()}>
             <Settings />
           </Link>
         </Button>
         <Button
+          disabled={!hasUnread}
+          onClick={onMarkAllRead}
+          size="sm"
           type="button"
           variant="outline"
-          size="sm"
-          onClick={onMarkAllRead}
-          disabled={!hasUnread}
         >
           Mark all read
         </Button>
@@ -311,7 +319,7 @@ function NotificationSection({
 }) {
   return (
     <section>
-      <div className="border-b bg-muted px-4 py-1.5 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">
+      <div className="border-b bg-muted px-4 py-1.5 font-semibold text-[10px] text-muted-foreground uppercase tracking-wider">
         {label}
       </div>
       <ul className="divide-y divide-border">{children}</ul>
@@ -365,14 +373,14 @@ function CommentNotificationRow({
   return (
     <NotificationRowShell isUnread={isUnread}>
       <Link
+        className="flex items-start gap-3 px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         href={href}
         onClick={onActivate}
-        className="flex items-start gap-3 px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       >
         {n.actor ? (
           <Avatar size="sm">
             {n.actor.avatarUrl ? (
-              <AvatarImage src={n.actor.avatarUrl} alt={n.actor.displayName} />
+              <AvatarImage alt={n.actor.displayName} src={n.actor.avatarUrl} />
             ) : null}
             <AvatarFallback className={avatarColor(n.actor.id)}>
               {n.actor.initials}
@@ -391,12 +399,12 @@ function CommentNotificationRow({
             </span>
           </p>
           {n.commentBody ? (
-            <p className="line-clamp-2 text-sm text-muted-foreground italic">
+            <p className="line-clamp-2 text-muted-foreground text-sm italic">
               &ldquo;{n.commentBody}&rdquo;
             </p>
           ) : null}
           <p
-            className="text-xs text-muted-foreground/80"
+            className="text-muted-foreground/80 text-xs"
             suppressHydrationWarning
           >
             {formatRelativeTime(n.createdAt)}
@@ -458,12 +466,14 @@ function RunGroupNotificationRow({
     return (
       <NotificationRowShell isUnread={isUnread}>
         <Link
+          className="flex cursor-pointer items-start gap-3 px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
           href={notificationHref(onlyRun)}
           onClick={() => {
-            if (onlyRun.readAt === null) onActivate(onlyRun.id);
+            if (onlyRun.readAt === null) {
+              onActivate(onlyRun.id);
+            }
             onNavigate?.();
           }}
-          className="flex cursor-pointer items-start gap-3 px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         >
           {iconBlock}
           <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -471,11 +481,11 @@ function RunGroupNotificationRow({
               <span className="font-medium">1 new run</span> on{" "}
               {group.instrumentDisplayName}
             </p>
-            <p className="line-clamp-2 font-mono text-xs text-muted-foreground">
+            <p className="line-clamp-2 font-mono text-muted-foreground text-xs">
               {onlyRun.runDisplayId}
             </p>
             <p
-              className="text-xs text-muted-foreground/80"
+              className="text-muted-foreground/80 text-xs"
               suppressHydrationWarning
             >
               {formatRelativeTime(group.latestCreatedAt)}
@@ -489,15 +499,15 @@ function RunGroupNotificationRow({
   return (
     <NotificationRowShell isUnread={isUnread}>
       <button
-        type="button"
         aria-expanded={expanded}
         aria-label={
           expanded
             ? `Collapse ${count} runs on ${group.instrumentDisplayName}`
             : `Expand ${count} runs on ${group.instrumentDisplayName}`
         }
-        onClick={() => setExpanded((prev) => !prev)}
         className="flex w-full cursor-pointer items-start gap-3 px-4 pt-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        onClick={() => setExpanded((prev) => !prev)}
+        type="button"
       >
         {iconBlock}
         <span className="flex min-w-0 flex-1 items-start justify-between gap-2">
@@ -526,36 +536,35 @@ function RunGroupNotificationRow({
               {orderedRuns.map((run) => (
                 <li key={run.id}>
                   <Link
-                    href={notificationHref(run)}
-                    onClick={() => {
-                      if (run.readAt === null) onActivate(run.id);
-                      onNavigate?.();
-                    }}
                     className={cn(
                       "flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 font-mono text-xs hover:bg-muted/80 focus-visible:bg-muted/80 focus-visible:outline-none",
                       run.readAt === null
                         ? "text-foreground"
                         : "text-muted-foreground"
                     )}
+                    href={notificationHref(run)}
+                    onClick={() => {
+                      if (run.readAt === null) {
+                        onActivate(run.id);
+                      }
+                      onNavigate?.();
+                    }}
                   >
                     <span className="truncate">{run.runDisplayId}</span>
                     {run.readAt === null ? (
-                      <span
-                        aria-label="Unread"
-                        className="ml-auto inline-block size-1.5 shrink-0 rounded-full bg-primary"
-                      />
+                      <span className="ml-auto inline-block size-1.5 shrink-0 rounded-full bg-primary" />
                     ) : null}
                   </Link>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="line-clamp-2 font-mono text-xs text-muted-foreground">
+            <p className="line-clamp-2 font-mono text-muted-foreground text-xs">
               {orderedRuns.map((r) => r.runDisplayId).join(", ")}
             </p>
           )}
           <p
-            className="text-xs text-muted-foreground/80"
+            className="text-muted-foreground/80 text-xs"
             suppressHydrationWarning
           >
             {formatRelativeTime(group.latestCreatedAt)}

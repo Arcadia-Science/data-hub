@@ -53,11 +53,11 @@ This directory contains the source code for the Data Hub web application and API
 | `npm run dev`             | Start dev server (Turbopack)                                                     |
 | `npm run build`           | Production build                                                                 |
 | `npm run start`           | Start production server                                                          |
-| `npm run lint`            | Run ESLint                                                                       |
-| `npm run format`          | Format code with Prettier                                                        |
-| `npm run format:check`    | Check formatting without writing                                                 |
+| `npm run lint:check`      | Check formatting + lint with Biome (read-only)                                   |
+| `npm run lint:fix`        | Format and apply safe lint fixes with Biome                                      |
 | `npm run typecheck`       | Run the TypeScript compiler (no emit)                                            |
-| `npm run precommit`       | Format + lint + typecheck (run before committing)                                |
+| `npm run check`           | Lint check + typecheck                                                            |
+| `npm run precommit`       | Lint fix + typecheck (run before committing)                                     |
 | `npm run db:generate`     | Generate Drizzle migration files                                                 |
 | `npm run db:migrate`      | Apply pending migrations                                                         |
 | `npm run db:push`         | Push schema to database (no migration files)                                     |
@@ -86,11 +86,10 @@ See the table below for a summary of environment variables configured for this a
 
 ## CI
 
-A GitHub Actions workflow (`.github/workflows/typescript-lint.yml`) runs on every push to `staging` and `production`, as well as pull requests targeting both branches. It executes three checks:
+A GitHub Actions workflow (`.github/workflows/typescript-lint.yml`) runs on every push to `staging` and `production`, as well as pull requests targeting both branches. It executes two checks:
 
-1. **Format check** — `npm run format:check` (Prettier)
-2. **Lint** — `npm run lint` (ESLint)
-3. **Type check** — `npm run typecheck` (TypeScript compiler)
+1. **Lint and format check** — `npm run lint:check` (Biome, via Ultracite — combined formatter + linter, read-only)
+2. **Type check** — `npm run typecheck` (TypeScript compiler)
 
 Run `npm run precommit` locally before pushing to catch the same issues earlier.
 

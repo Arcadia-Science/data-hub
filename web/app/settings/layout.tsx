@@ -1,6 +1,6 @@
+import type { Metadata } from "next";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import { auth } from "@/lib/auth";
-import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: {

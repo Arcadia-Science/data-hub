@@ -18,18 +18,24 @@
 let cached: Set<string> | null = null;
 
 export function getAdminEmails(): Set<string> {
-  if (cached) return cached;
+  if (cached) {
+    return cached;
+  }
   const raw = process.env.ADMIN_EMAILS ?? "";
   const set = new Set<string>();
   for (const entry of raw.split(",")) {
     const normalized = entry.trim().toLowerCase();
-    if (normalized) set.add(normalized);
+    if (normalized) {
+      set.add(normalized);
+    }
   }
   cached = set;
   return set;
 }
 
 export function isAdminEmail(email: string | null | undefined): boolean {
-  if (!email) return false;
+  if (!email) {
+    return false;
+  }
   return getAdminEmails().has(email.trim().toLowerCase());
 }

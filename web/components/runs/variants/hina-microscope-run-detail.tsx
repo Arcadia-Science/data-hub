@@ -24,13 +24,13 @@ export function HinaMicroscopeRunDetail({
 
   return (
     <>
-      <RunDetail.Header run={run} attributionsSlot={attributionsSlot}>
+      <RunDetail.Header attributionsSlot={attributionsSlot} run={run}>
         {!isDeleted && (
           <DeleteRunDialog
-            instrumentId={instrumentId}
-            runId={runId}
             fileCount={activeFileCount}
             hasProcessedFiles={hasProcessedFiles}
+            instrumentId={instrumentId}
+            runId={runId}
           />
         )}
         {isDeleted && (
@@ -46,11 +46,11 @@ export function HinaMicroscopeRunDetail({
         )}
         <RunDetail.Files
           files={files}
-          pagination={filesPagination}
-          stats={fileStats}
           instrumentId={instrumentId}
-          runId={runId}
           isDeleted={isDeleted}
+          pagination={filesPagination}
+          runId={runId}
+          stats={fileStats}
         />
       </RunDetail.FilesMetadataLayout>
 

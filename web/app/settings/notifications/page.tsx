@@ -1,3 +1,4 @@
+import type { Metadata } from "next/types";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import { NotificationsSettingsForm } from "@/components/notifications/notifications-settings-form";
 import {
@@ -5,7 +6,6 @@ import {
   listInstrumentSubscriptions,
 } from "@/lib/api/notifications";
 import { auth } from "@/lib/auth";
-import type { Metadata } from "next/types";
 
 const description = "Choose which Data Hub events to be notified about.";
 
@@ -31,15 +31,15 @@ export default async function NotificationsSettingsPage() {
   // schema-side defaults when no row exists yet, so the form always
   // renders with concrete values — no need for nullable form state.
   const [prefs, subscriptions] = await Promise.all([
-    getPreferences(session.user.id!),
-    listInstrumentSubscriptions(session.user.id!),
+    getPreferences(session.user.id),
+    listInstrumentSubscriptions(session.user.id),
   ]);
 
   return (
     <div>
       <div>
-        <h2 className="text-lg font-semibold tracking-tight">Notifications</h2>
-        <p className="text-sm text-muted-foreground">
+        <h2 className="font-semibold text-lg tracking-tight">Notifications</h2>
+        <p className="text-muted-foreground text-sm">
           Choose which Data Hub events should produce an in-app notification.
           Per-instrument subscriptions opt you in to <em>new run</em>{" "}
           notifications; comment notifications fire when someone replies on a
@@ -49,16 +49,16 @@ export default async function NotificationsSettingsPage() {
 
       <div className="mt-6">
         <NotificationsSettingsForm
-          initialPreferences={{
-            runsAllMuted: prefs.runsAllMuted,
-            commentsAttributedEnabled: prefs.commentsAttributedEnabled,
-            commentsParticipatedEnabled: prefs.commentsParticipatedEnabled,
-          }}
           initialInstruments={subscriptions.map((s) => ({
             instrumentId: s.instrumentId,
             displayName: s.displayName,
             enabled: s.enabled,
           }))}
+          initialPreferences={{
+            runsAllMuted: prefs.runsAllMuted,
+            commentsAttributedEnabled: prefs.commentsAttributedEnabled,
+            commentsParticipatedEnabled: prefs.commentsParticipatedEnabled,
+          }}
         />
       </div>
     </div>

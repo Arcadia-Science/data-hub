@@ -97,12 +97,8 @@
           "name": "account_userId_user_id_fk",
           "tableFrom": "account",
           "tableTo": "user",
-          "columnsFrom": [
-            "userId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["userId"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -110,10 +106,7 @@
       "compositePrimaryKeys": {
         "account_provider_providerAccountId_pk": {
           "name": "account_provider_providerAccountId_pk",
-          "columns": [
-            "provider",
-            "providerAccountId"
-          ]
+          "columns": ["provider", "providerAccountId"]
         }
       },
       "uniqueConstraints": {},
@@ -252,12 +245,8 @@
           "name": "archive_jobs_instrument_run_id_instrument_runs_id_fk",
           "tableFrom": "archive_jobs",
           "tableTo": "instrument_runs",
-          "columnsFrom": [
-            "instrument_run_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["instrument_run_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -265,12 +254,8 @@
           "name": "archive_jobs_created_by_user_id_fk",
           "tableFrom": "archive_jobs",
           "tableTo": "user",
-          "columnsFrom": [
-            "created_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["created_by"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -540,12 +525,8 @@
           "name": "files_instrument_run_id_instrument_runs_id_fk",
           "tableFrom": "files",
           "tableTo": "instrument_runs",
-          "columnsFrom": [
-            "instrument_run_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["instrument_run_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -616,12 +597,8 @@
           "name": "instrument_notification_subscriptions_user_id_user_id_fk",
           "tableFrom": "instrument_notification_subscriptions",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -629,12 +606,8 @@
           "name": "instrument_notification_subscriptions_instrument_id_instruments_id_fk",
           "tableFrom": "instrument_notification_subscriptions",
           "tableTo": "instruments",
-          "columnsFrom": [
-            "instrument_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["instrument_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -642,10 +615,7 @@
       "compositePrimaryKeys": {
         "instrument_notification_subscriptions_user_id_instrument_id_pk": {
           "name": "instrument_notification_subscriptions_user_id_instrument_id_pk",
-          "columns": [
-            "user_id",
-            "instrument_id"
-          ]
+          "columns": ["user_id", "instrument_id"]
         }
       },
       "uniqueConstraints": {},
@@ -811,12 +781,8 @@
           "name": "instrument_runs_instrument_id_instruments_id_fk",
           "tableFrom": "instrument_runs",
           "tableTo": "instruments",
-          "columnsFrom": [
-            "instrument_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["instrument_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -824,12 +790,8 @@
           "name": "instrument_runs_watcher_id_watchers_id_fk",
           "tableFrom": "instrument_runs",
           "tableTo": "watchers",
-          "columnsFrom": [
-            "watcher_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["watcher_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -839,10 +801,7 @@
         "uq_instrument_runs_instrument_id_run_id": {
           "name": "uq_instrument_runs_instrument_id_run_id",
           "nullsNotDistinct": false,
-          "columns": [
-            "instrument_id",
-            "run_id"
-          ]
+          "columns": ["instrument_id", "run_id"]
         }
       },
       "policies": {},
@@ -949,12 +908,8 @@
           "name": "notification_preferences_user_id_user_id_fk",
           "tableFrom": "notification_preferences",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1071,12 +1026,8 @@
           "name": "notifications_user_id_user_id_fk",
           "tableFrom": "notifications",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1084,12 +1035,8 @@
           "name": "notifications_run_id_instrument_runs_id_fk",
           "tableFrom": "notifications",
           "tableTo": "instrument_runs",
-          "columnsFrom": [
-            "run_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["run_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1097,12 +1044,8 @@
           "name": "notifications_comment_id_run_comments_id_fk",
           "tableFrom": "notifications",
           "tableTo": "run_comments",
-          "columnsFrom": [
-            "comment_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["comment_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1110,12 +1053,8 @@
           "name": "notifications_actor_user_id_user_id_fk",
           "tableFrom": "notifications",
           "tableTo": "user",
-          "columnsFrom": [
-            "actor_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["actor_user_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -1210,12 +1149,8 @@
           "name": "personal_access_tokens_user_id_user_id_fk",
           "tableFrom": "personal_access_tokens",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1225,9 +1160,7 @@
         "personal_access_tokens_token_hash_unique": {
           "name": "personal_access_tokens_token_hash_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "token_hash"
-          ]
+          "columns": ["token_hash"]
         }
       },
       "policies": {},
@@ -1295,12 +1228,8 @@
           "name": "run_attributions_run_id_instrument_runs_id_fk",
           "tableFrom": "run_attributions",
           "tableTo": "instrument_runs",
-          "columnsFrom": [
-            "run_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["run_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1308,12 +1237,8 @@
           "name": "run_attributions_user_id_user_id_fk",
           "tableFrom": "run_attributions",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1321,10 +1246,7 @@
       "compositePrimaryKeys": {
         "run_attributions_run_id_user_id_pk": {
           "name": "run_attributions_run_id_user_id_pk",
-          "columns": [
-            "run_id",
-            "user_id"
-          ]
+          "columns": ["run_id", "user_id"]
         }
       },
       "uniqueConstraints": {},
@@ -1431,12 +1353,8 @@
           "name": "run_comments_run_id_instrument_runs_id_fk",
           "tableFrom": "run_comments",
           "tableTo": "instrument_runs",
-          "columnsFrom": [
-            "run_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["run_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1444,12 +1362,8 @@
           "name": "run_comments_user_id_user_id_fk",
           "tableFrom": "run_comments",
           "tableTo": "user",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1505,12 +1419,8 @@
           "name": "session_userId_user_id_fk",
           "tableFrom": "session",
           "tableTo": "user",
-          "columnsFrom": [
-            "userId"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["userId"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1570,9 +1480,7 @@
         "user_email_unique": {
           "name": "user_email_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "email"
-          ]
+          "columns": ["email"]
         }
       },
       "policies": {},
@@ -1677,12 +1585,8 @@
           "name": "watcher_events_watcher_id_watchers_id_fk",
           "tableFrom": "watcher_events",
           "tableTo": "watchers",
-          "columnsFrom": [
-            "watcher_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["watcher_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1791,12 +1695,8 @@
           "name": "watcher_heartbeats_watcher_id_watchers_id_fk",
           "tableFrom": "watcher_heartbeats",
           "tableTo": "watchers",
-          "columnsFrom": [
-            "watcher_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["watcher_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1864,12 +1764,8 @@
           "name": "watcher_release_config_updated_by_user_id_fk",
           "tableFrom": "watcher_release_config",
           "tableTo": "user",
-          "columnsFrom": [
-            "updated_by"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["updated_by"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -1990,12 +1886,8 @@
           "name": "watchers_instrument_id_instruments_id_fk",
           "tableFrom": "watchers",
           "tableTo": "instruments",
-          "columnsFrom": [
-            "instrument_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["instrument_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2011,20 +1903,12 @@
     "public.archive_job_status": {
       "name": "archive_job_status",
       "schema": "public",
-      "values": [
-        "pending",
-        "building",
-        "ready",
-        "failed"
-      ]
+      "values": ["pending", "building", "ready", "failed"]
     },
     "public.file_category": {
       "name": "file_category",
       "schema": "public",
-      "values": [
-        "raw",
-        "processed"
-      ]
+      "values": ["raw", "processed"]
     },
     "public.file_status": {
       "name": "file_status",
@@ -2041,19 +1925,12 @@
     "public.instrument_run_source": {
       "name": "instrument_run_source",
       "schema": "public",
-      "values": [
-        "lambda",
-        "watcher"
-      ]
+      "values": ["lambda", "watcher"]
     },
     "public.instrument_status": {
       "name": "instrument_status",
       "schema": "public",
-      "values": [
-        "pending",
-        "active",
-        "inactive"
-      ]
+      "values": ["pending", "active", "inactive"]
     },
     "public.instrument_type": {
       "name": "instrument_type",
@@ -2072,19 +1949,12 @@
     "public.notification_type": {
       "name": "notification_type",
       "schema": "public",
-      "values": [
-        "run_created",
-        "comment_attributed",
-        "comment_participated"
-      ]
+      "values": ["run_created", "comment_attributed", "comment_participated"]
     },
     "public.upload_mode": {
       "name": "upload_mode",
       "schema": "public",
-      "values": [
-        "auto",
-        "manual"
-      ]
+      "values": ["auto", "manual"]
     },
     "public.watcher_event_type": {
       "name": "watcher_event_type",
@@ -2105,11 +1975,7 @@
     "public.watcher_status": {
       "name": "watcher_status",
       "schema": "public",
-      "values": [
-        "registered",
-        "watching",
-        "stopped"
-      ]
+      "values": ["registered", "watching", "stopped"]
     }
   },
   "schemas": {},

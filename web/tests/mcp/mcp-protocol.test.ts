@@ -74,10 +74,16 @@ vi.mock("@/lib/api/instruments", () => ({
   getInstrumentListWithCounts: vi
     .fn()
     .mockResolvedValue([MOCK_INSTRUMENT, MOCK_GEL_DOC_INSTRUMENT]),
-  getInstrumentById: vi.fn().mockImplementation(async (id: string) => {
-    if (id === "test-plate-reader") return MOCK_INSTRUMENT;
-    if (id === "test-gel-doc") return MOCK_GEL_DOC_INSTRUMENT;
-    if (id === "test-generic") return MOCK_GENERIC_INSTRUMENT;
+  getInstrumentById: vi.fn().mockImplementation((id: string) => {
+    if (id === "test-plate-reader") {
+      return MOCK_INSTRUMENT;
+    }
+    if (id === "test-gel-doc") {
+      return MOCK_GEL_DOC_INSTRUMENT;
+    }
+    if (id === "test-generic") {
+      return MOCK_GENERIC_INSTRUMENT;
+    }
     return null;
   }),
 }));
@@ -165,7 +171,7 @@ vi.mock("@/lib/api/files", () => ({
   getActiveFileById: vi
     .fn()
     .mockImplementation(async (id: number) => (id === 42 ? MOCK_FILE : null)),
-  lookupFileForDownload: vi.fn().mockImplementation(async (id: number) => {
+  lookupFileForDownload: vi.fn().mockImplementation((id: number) => {
     if (id === 42) {
       return {
         ok: true,
@@ -199,8 +205,10 @@ vi.mock("@/lib/api/run-archive", () => ({
 }));
 
 vi.mock("@/lib/api/file-reprocessing", () => ({
-  reprocessFile: vi.fn().mockImplementation(async (id: number) => {
-    if (id === 42) return { ok: true, fileId: id };
+  reprocessFile: vi.fn().mockImplementation((id: number) => {
+    if (id === 42) {
+      return { ok: true, fileId: id };
+    }
     return {
       ok: false,
       status: 404,
@@ -315,68 +323,70 @@ describe("MCP Protocol (in-memory)", () => {
 
   it("tools that require params declare them in inputSchema", async () => {
     const { tools } = await client.listTools();
-    const getInstrument = tools.find((t) => t.name === "get_instrument")!;
-    expect(getInstrument.inputSchema.properties).toHaveProperty("instrumentId");
+    const getInstrument = tools.find((t) => t.name === "get_instrument");
+    expect(getInstrument?.inputSchema.properties).toHaveProperty(
+      "instrumentId"
+    );
 
-    const getRun = tools.find((t) => t.name === "get_run")!;
-    expect(getRun.inputSchema.properties).toHaveProperty("instrumentId");
-    expect(getRun.inputSchema.properties).toHaveProperty("runId");
+    const getRun = tools.find((t) => t.name === "get_run");
+    expect(getRun?.inputSchema.properties).toHaveProperty("instrumentId");
+    expect(getRun?.inputSchema.properties).toHaveProperty("runId");
 
-    const getFile = tools.find((t) => t.name === "get_file")!;
-    expect(getFile.inputSchema.properties).toHaveProperty("fileId");
+    const getFile = tools.find((t) => t.name === "get_file");
+    expect(getFile?.inputSchema.properties).toHaveProperty("fileId");
 
-    const reprocess = tools.find((t) => t.name === "reprocess_file")!;
-    expect(reprocess.inputSchema.properties).toHaveProperty("fileId");
+    const reprocess = tools.find((t) => t.name === "reprocess_file");
+    expect(reprocess?.inputSchema.properties).toHaveProperty("fileId");
 
-    const heartbeats = tools.find((t) => t.name === "get_watcher_heartbeats")!;
-    expect(heartbeats.inputSchema.properties).toHaveProperty("watcherId");
+    const heartbeats = tools.find((t) => t.name === "get_watcher_heartbeats");
+    expect(heartbeats?.inputSchema.properties).toHaveProperty("watcherId");
 
     // Attribution tools intentionally do NOT expose a `userId` argument — the
     // authenticated user is pulled from `authInfo.extra.userId` on the server
     // so the wire API has no spoofable slot.
-    const claimRun = tools.find((t) => t.name === "claim_run")!;
-    expect(claimRun.inputSchema.properties).toHaveProperty("instrumentId");
-    expect(claimRun.inputSchema.properties).toHaveProperty("runId");
-    expect(claimRun.inputSchema.properties).not.toHaveProperty("userId");
+    const claimRun = tools.find((t) => t.name === "claim_run");
+    expect(claimRun?.inputSchema.properties).toHaveProperty("instrumentId");
+    expect(claimRun?.inputSchema.properties).toHaveProperty("runId");
+    expect(claimRun?.inputSchema.properties).not.toHaveProperty("userId");
 
-    const unclaimRun = tools.find((t) => t.name === "unclaim_run")!;
-    expect(unclaimRun.inputSchema.properties).toHaveProperty("instrumentId");
-    expect(unclaimRun.inputSchema.properties).toHaveProperty("runId");
-    expect(unclaimRun.inputSchema.properties).not.toHaveProperty("userId");
+    const unclaimRun = tools.find((t) => t.name === "unclaim_run");
+    expect(unclaimRun?.inputSchema.properties).toHaveProperty("instrumentId");
+    expect(unclaimRun?.inputSchema.properties).toHaveProperty("runId");
+    expect(unclaimRun?.inputSchema.properties).not.toHaveProperty("userId");
 
     const listAttributors = tools.find(
       (t) => t.name === "list_run_attributors"
-    )!;
-    expect(listAttributors.inputSchema.properties).toHaveProperty(
+    );
+    expect(listAttributors?.inputSchema.properties).toHaveProperty(
       "instrumentId"
     );
 
     // search_runs gained a `ranBy` filter alongside the new attribution tools.
-    const searchRuns = tools.find((t) => t.name === "search_runs")!;
-    expect(searchRuns.inputSchema.properties).toHaveProperty("ranBy");
+    const searchRuns = tools.find((t) => t.name === "search_runs");
+    expect(searchRuns?.inputSchema.properties).toHaveProperty("ranBy");
   });
 
   it("claim_run is annotated as write / non-destructive / idempotent", async () => {
     const { tools } = await client.listTools();
-    const tool = tools.find((t) => t.name === "claim_run")!;
-    expect(tool.annotations?.readOnlyHint).toBe(false);
-    expect(tool.annotations?.destructiveHint).toBe(false);
-    expect(tool.annotations?.idempotentHint).toBe(true);
+    const tool = tools.find((t) => t.name === "claim_run");
+    expect(tool?.annotations?.readOnlyHint).toBe(false);
+    expect(tool?.annotations?.destructiveHint).toBe(false);
+    expect(tool?.annotations?.idempotentHint).toBe(true);
   });
 
   it("unclaim_run is annotated as write / destructive / idempotent", async () => {
     const { tools } = await client.listTools();
-    const tool = tools.find((t) => t.name === "unclaim_run")!;
-    expect(tool.annotations?.readOnlyHint).toBe(false);
-    expect(tool.annotations?.destructiveHint).toBe(true);
-    expect(tool.annotations?.idempotentHint).toBe(true);
+    const tool = tools.find((t) => t.name === "unclaim_run");
+    expect(tool?.annotations?.readOnlyHint).toBe(false);
+    expect(tool?.annotations?.destructiveHint).toBe(true);
+    expect(tool?.annotations?.idempotentHint).toBe(true);
   });
 
   // ---- Tool execution (happy path) ----------------------------------------
 
   function parseText(content: unknown): unknown {
-    const text = (content as Array<{ type: string; text: string }>)[0].text;
-    return JSON.parse(text);
+    const text = (content as Array<{ type: string; text: string }>)[0]?.text;
+    return JSON.parse(text ?? "");
   }
 
   it("list_instruments returns JSON text content", async () => {
@@ -629,7 +639,7 @@ describe("MCP Protocol (in-memory)", () => {
       perPage: 10,
     });
     const payload = parseText(result.content) as {
-      data: Array<Record<string, unknown>>;
+      data: Record<string, unknown>[];
       pagination: Record<string, unknown>;
     };
     expect(payload.pagination).toEqual({
@@ -679,9 +689,9 @@ describe("MCP Protocol (in-memory)", () => {
 
   it("reprocess_file is annotated as destructive", async () => {
     const { tools } = await client.listTools();
-    const tool = tools.find((t) => t.name === "reprocess_file")!;
-    expect(tool.annotations?.readOnlyHint).toBe(false);
-    expect(tool.annotations?.destructiveHint).toBe(true);
+    const tool = tools.find((t) => t.name === "reprocess_file");
+    expect(tool?.annotations?.readOnlyHint).toBe(false);
+    expect(tool?.annotations?.destructiveHint).toBe(true);
   });
 
   it("list_run_attributors returns the mocked list", async () => {

@@ -1,16 +1,16 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { MainNav } from "@/components/app-sidebar/main-nav";
 import { SettingsNav } from "@/components/app-sidebar/settings-nav";
 import { SidebarContent } from "@/components/ui/sidebar";
 import type { SidebarInstrument, SidebarWatcher } from "@/lib/api/sidebar";
-import { usePathname } from "next/navigation";
 
-type AppSidebarContentProps = {
+interface AppSidebarContentProps {
   instruments: SidebarInstrument[];
-  watchers: SidebarWatcher[];
   isAdmin: boolean;
-};
+  watchers: SidebarWatcher[];
+}
 
 // Centralizes the "main vs. settings" mode toggle so the rest of the sidebar
 // doesn't need to know about pathname-based switching. When the user

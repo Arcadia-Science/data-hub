@@ -25,7 +25,9 @@ export const SCOPE_SET: Set<Scope> = new Set<Scope>(ALL_SCOPES);
 // Shape required by `hasScope`. We intentionally avoid importing the full
 // `AuthResult` from `@/lib/api/auth` to break a circular dependency —
 // scopes.ts is imported by auth.ts callers.
-type AuthLike = { scopes: string[] };
+interface AuthLike {
+  scopes: string[];
+}
 
 export function hasScope(auth: AuthLike, required: Scope): boolean {
   return auth.scopes.includes("*") || auth.scopes.includes(required);

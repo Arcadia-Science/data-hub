@@ -2,35 +2,34 @@
 
 import { createContext, use, useCallback, useMemo, useState } from "react";
 
-export type RunCaps = {
-  upload: boolean;
+export interface RunCaps {
+  delete: boolean;
   download: boolean;
   reprocess: boolean;
-  delete: boolean;
-};
+  upload: boolean;
+}
 
 // Minimal per-row counts the bulk bar needs to populate confirmation
 // dialogs without refetching — covers the "soft-delete 4 runs and their
 // 44 files" and "reprocess 12 eligible files" messaging.
-export type RunStats = {
+export interface RunStats {
   fileCount: number;
   filesCompleted: number;
   filesFailed: number;
-};
+}
 
-export type RunRef = {
+export interface RunRef {
+  caps: RunCaps;
   id: string;
   instrumentId: string;
   runId: string;
-  caps: RunCaps;
   stats: RunStats;
-};
+}
 
 // Explicit context interface: state / actions / meta. Consumers never touch
 // the underlying useState — we can swap implementations (e.g. move to URL
 // state, redux, etc.) without changing any consumer.
-type RunSelectionContextValue = {
-  state: { selected: ReadonlyMap<string, RunRef> };
+interface RunSelectionContextValue {
   actions: {
     toggle: (ref: RunRef) => void;
     selectMany: (refs: RunRef[]) => void;
@@ -48,7 +47,8 @@ type RunSelectionContextValue = {
     allCanReprocess: boolean;
     allCanDelete: boolean;
   };
-};
+  state: { selected: ReadonlyMap<string, RunRef> };
+}
 
 const RunSelectionContext = createContext<RunSelectionContextValue | null>(
   null
@@ -80,9 +80,13 @@ export function RunSelectionProvider({
       const next = new Map(prev);
       const alreadyAll = refs.every((r) => next.has(r.id));
       if (alreadyAll) {
-        for (const r of refs) next.delete(r.id);
+        for (const r of refs) {
+          next.delete(r.id);
+        }
       } else {
-        for (const r of refs) next.set(r.id, r);
+        for (const r of refs) {
+          next.set(r.id, r);
+        }
       }
       return next;
     });

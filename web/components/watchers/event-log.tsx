@@ -1,5 +1,6 @@
 "use client";
 
+import { Inbox } from "lucide-react";
 import { CopyButton } from "@/components/copy-button";
 import { PaginationNav } from "@/components/pagination-nav";
 import { TablePendingBoundary } from "@/components/table-pending";
@@ -12,7 +13,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import type { WatcherEventRow } from "@/lib/api/watchers";
 import { formatRelativeTime } from "@/lib/utils";
-import { Inbox } from "lucide-react";
 
 const eventTypeMeta: Record<
   string,
@@ -40,12 +40,12 @@ function EventEntry({ event }: { event: WatcherEventRow }) {
   const trigger = (
     <div className="flex w-full items-start justify-between gap-3">
       <div className="flex items-center gap-4">
-        <Badge variant={meta.variant} className="text-[10px]">
+        <Badge className="text-[10px]" variant={meta.variant}>
           {meta.label}
         </Badge>
         <span className="text-sm">{event.message}</span>
       </div>
-      <span className="me-2 shrink-0 text-xs text-muted-foreground">
+      <span className="me-2 shrink-0 text-muted-foreground text-xs">
         {formatRelativeTime(event.timestamp)}
       </span>
     </div>
@@ -56,17 +56,17 @@ function EventEntry({ event }: { event: WatcherEventRow }) {
   }
 
   return (
-    <AccordionItem value={String(event.id)} className="border-b last:border-0">
+    <AccordionItem className="border-b last:border-0" value={String(event.id)}>
       <AccordionTrigger className="cursor-pointer px-4 py-3 hover:no-underline">
         {trigger}
       </AccordionTrigger>
       <AccordionContent className="px-4 pb-3">
         <div className="relative">
           <CopyButton
-            value={JSON.stringify(event.details, null, 2)}
-            size="icon-xs"
-            variant="ghost"
             className="absolute top-1.5 right-1.5 text-muted-foreground"
+            size="icon-xs"
+            value={JSON.stringify(event.details, null, 2)}
+            variant="ghost"
           />
           <pre className="overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs leading-relaxed">
             {JSON.stringify(event.details, null, 2)}
@@ -91,7 +91,7 @@ export function EventLog({
       <TablePendingBoundary>
         <div className="flex flex-col items-center justify-center gap-2 rounded-md border border-dashed bg-background py-8 dark:bg-muted">
           <Inbox className="size-6 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">
+          <p className="text-muted-foreground text-sm">
             No events in this time range.
           </p>
         </div>
@@ -102,16 +102,16 @@ export function EventLog({
   return (
     <div className="rounded-md border bg-background dark:bg-muted">
       <TablePendingBoundary>
-        <Accordion type="multiple" className="divide-y">
+        <Accordion className="divide-y" type="multiple">
           {events.map((event) => (
-            <EventEntry key={event.id} event={event} />
+            <EventEntry event={event} key={event.id} />
           ))}
         </Accordion>
       </TablePendingBoundary>
       <PaginationNav
         page={page}
-        totalPages={totalPages}
         pageParam="logs_page"
+        totalPages={totalPages}
       />
     </div>
   );

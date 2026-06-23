@@ -7,14 +7,14 @@ import postgres from "postgres";
 const TEST_DB = "data_hub_test";
 // Matches the credentials expected by the CI Postgres service container
 // and local dev defaults. Override via env vars if using a non-standard setup.
-const PG_URL = `postgres://postgres:postgres@127.0.0.1:5432`;
+const PG_URL = "postgres://postgres:postgres@127.0.0.1:5432";
 
 let serverProcess: ChildProcess | null = null;
 let slackCaptureServer: http.Server | null = null;
 
 // Bind to port 0, let the OS assign a free port, then immediately release it.
 // This avoids hardcoding a port that might collide with other services.
-async function getFreePort(): Promise<number> {
+function getFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
     srv.listen(0, () => {
@@ -37,7 +37,9 @@ async function waitForServer(url: string, timeoutMs = 120_000) {
   while (Date.now() - start < timeoutMs) {
     try {
       const res = await fetch(url);
-      if (res.ok || res.status < 500) return;
+      if (res.ok || res.status < 500) {
+        return;
+      }
     } catch {
       // server not ready yet
     }
@@ -104,14 +106,14 @@ export async function setup() {
     res.end();
   });
   await new Promise<void>((resolve) =>
-    slackCaptureServer!.listen(slackPort, "127.0.0.1", resolve)
+    slackCaptureServer?.listen(slackPort, "127.0.0.1", resolve)
   );
   const slackCaptureBaseUrl = `http://127.0.0.1:${slackPort}`;
 
   // 2. Push schema via drizzle-kit. --force skips the interactive confirmation
   //    prompt that drizzle-kit shows when it detects destructive changes.
   execSync("npx drizzle-kit push --force", {
-    cwd: import.meta.dirname ? import.meta.dirname + "/../.." : process.cwd(),
+    cwd: import.meta.dirname ? `${import.meta.dirname}/../..` : process.cwd(),
     env: { ...process.env, DATABASE_URL: databaseUrl },
     stdio: "pipe",
   });
@@ -174,23 +176,23 @@ export async function setup() {
   // Strip the Lambda Function URL so "not configured" test cases work
   // regardless of the developer's local .env. Tests that need a stubbed
   // Lambda HTTP call should mock fetch rather than set this URL.
-  delete serverEnv.LAMBDA_FUNCTION_URL;
+  serverEnv.LAMBDA_FUNCTION_URL = undefined;
   // Strip AWS_ROLE_ARN as well so the SigV4 path in `lib/lambda.ts`
   // doesn't try to assume a Vercel OIDC role inside tests. The test
   // server still gets static AWS_ACCESS_KEY_ID/SECRET via the dummy
   // values plumbed above, which is enough to satisfy
   // `hasInvokeCredentials()` for any test that wants to exercise the
   // archive-builder configured path without standing up a real Lambda.
-  delete serverEnv.AWS_ROLE_ARN;
+  serverEnv.AWS_ROLE_ARN = undefined;
 
   execSync("npx next build", {
-    cwd: import.meta.dirname ? import.meta.dirname + "/../.." : process.cwd(),
+    cwd: import.meta.dirname ? `${import.meta.dirname}/../..` : process.cwd(),
     env: serverEnv,
     stdio: "pipe",
   });
 
   serverProcess = spawn("npx", ["next", "start", "-p", String(port)], {
-    cwd: import.meta.dirname ? import.meta.dirname + "/../.." : process.cwd(),
+    cwd: import.meta.dirname ? `${import.meta.dirname}/../..` : process.cwd(),
     env: serverEnv,
     stdio: "pipe",
   });
@@ -225,7 +227,7 @@ export async function setup() {
     }
     if (slackCaptureServer) {
       await new Promise<void>((resolve, reject) =>
-        slackCaptureServer!.close((err) => (err ? reject(err) : resolve()))
+        slackCaptureServer?.close((err) => (err ? reject(err) : resolve()))
       );
       slackCaptureServer = null;
     }

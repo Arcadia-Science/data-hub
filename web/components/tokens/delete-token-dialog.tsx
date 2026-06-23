@@ -1,5 +1,9 @@
 "use client";
 
+import { Loader2, Trash2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useTransition } from "react";
+import { toast } from "sonner";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -12,10 +16,6 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Loader2, Trash2 } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useTransition } from "react";
-import { toast } from "sonner";
 
 export function DeleteTokenDialog({
   tokenId,
@@ -45,7 +45,7 @@ export function DeleteTokenDialog({
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button variant="ghost" size="icon-sm" aria-label="Delete token">
+        <Button aria-label="Delete token" size="icon-sm" variant="ghost">
           <Trash2 className="size-4 text-muted-foreground" />
         </Button>
       </AlertDialogTrigger>
@@ -61,9 +61,9 @@ export function DeleteTokenDialog({
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
-            onClick={handleDelete}
-            disabled={isPending}
             className="bg-destructive/10 text-destructive hover:bg-destructive/20"
+            disabled={isPending}
+            onClick={handleDelete}
           >
             {isPending ? (
               <Loader2 className="animate-spin" data-icon="inline-start" />

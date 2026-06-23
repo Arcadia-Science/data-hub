@@ -1,3 +1,4 @@
+// biome-ignore lint/performance/noNamespaceImport: shadcn hook template uses the React namespace for hooks
 import * as React from "react";
 
 const MOBILE_BREAKPOINT = 768;

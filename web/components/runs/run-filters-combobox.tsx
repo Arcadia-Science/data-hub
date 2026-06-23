@@ -1,5 +1,7 @@
 "use client";
 
+import { ListFilter, Trash2 } from "lucide-react";
+import { type ComponentType, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,18 +15,16 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { ListFilter, Trash2 } from "lucide-react";
-import { useState, type ComponentType } from "react";
 
-type FilterValues = {
+interface FilterValues {
   includeDeleted: boolean;
-};
+}
 
-type FilterDef = {
+interface FilterDef {
+  icon: ComponentType<{ className?: string }>;
   key: keyof FilterValues;
   label: string;
-  icon: ComponentType<{ className?: string }>;
-};
+}
 
 const FILTERS: readonly FilterDef[] = [
   { key: "includeDeleted", label: "Show deleted runs", icon: Trash2 },
@@ -44,25 +44,25 @@ export function RunFiltersCombobox({
   );
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover onOpenChange={setOpen} open={open}>
       <PopoverTrigger asChild>
         <Button
-          variant="outline"
-          size="sm"
+          aria-expanded={open}
           className="h-9 gap-2 font-normal"
           role="combobox"
-          aria-expanded={open}
+          size="sm"
+          variant="outline"
         >
           <ListFilter className="size-3.5 text-muted-foreground" />
           <span className="text-sm">Add filter</span>
           {activeCount > 0 && (
-            <Badge variant="secondary" className="ml-0.5 px-1.5 text-[10px]">
+            <Badge className="ml-0.5 px-1.5 text-[10px]" variant="secondary">
               {activeCount}
             </Badge>
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-64 p-0" align="end">
+      <PopoverContent align="end" className="w-64 p-0">
         <Command>
           <CommandList>
             <CommandGroup>
@@ -71,12 +71,12 @@ export function RunFiltersCombobox({
                 const active = values[filter.key];
                 return (
                   <CommandItem
-                    key={filter.key}
-                    value={filter.label}
                     data-checked={active}
+                    key={filter.key}
                     onSelect={() =>
                       onChange({ ...values, [filter.key]: !active })
                     }
+                    value={filter.label}
                   >
                     <Icon className="size-3.5 text-muted-foreground" />
                     {filter.label}

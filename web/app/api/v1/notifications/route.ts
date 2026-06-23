@@ -1,3 +1,5 @@
+import type { NextRequest } from "next/server";
+import { z } from "zod";
 import { requireSession } from "@/lib/api/auth";
 import { apiError, UNAUTHORIZED, VALIDATION_ERROR } from "@/lib/api/errors";
 import {
@@ -5,8 +7,6 @@ import {
   listNotifications,
   markRead,
 } from "@/lib/api/notifications";
-import type { NextRequest } from "next/server";
-import { z } from "zod";
 
 // Notification reads/writes are session-only — these are personal-UX
 // surfaces, never invoked by the watcher / Lambda PATs, so they don't
@@ -26,7 +26,9 @@ const PostBodySchema = z.object({
 
 export async function GET(request: NextRequest) {
   const auth = await requireSession();
-  if (!auth) return apiError(401, UNAUTHORIZED, "Authentication required");
+  if (!auth) {
+    return apiError(401, UNAUTHORIZED, "Authentication required");
+  }
 
   const unreadOnly = request.nextUrl.searchParams.get("unread_only") === "true";
   const [items, unreadCount] = await Promise.all([
@@ -64,7 +66,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const auth = await requireSession();
-  if (!auth) return apiError(401, UNAUTHORIZED, "Authentication required");
+  if (!auth) {
+    return apiError(401, UNAUTHORIZED, "Authentication required");
+  }
 
   let raw: unknown = {};
   // Empty body is fine — it means "mark all". Only error on outright

@@ -51,8 +51,7 @@ Environment-specific configuration is managed through environment variables, nev
 
 ### TypeScript / JavaScript
 
-- Formatter: [Prettier](https://prettier.io/)
-- Linter: [ESLint](https://eslint.org/)
+- Formatter + linter: [Biome](https://biomejs.dev/) via [Ultracite](https://www.ultracite.ai/) (`npm run lint:check` / `lint:fix`)
 - Type checker: TypeScript compiler (`tsc`)
 
 ### Pre-commit

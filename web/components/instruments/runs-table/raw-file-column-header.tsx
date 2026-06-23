@@ -14,14 +14,14 @@ export function RawFileColumnHeader({ label }: { label: string }) {
   return (
     <Tooltip>
       <TooltipTrigger
-        type="button"
         aria-label={`About the ${label} column`}
         className="inline-flex h-8 cursor-help items-center gap-1.5 font-medium text-foreground"
+        type="button"
       >
         {label}
         <CircleHelp
-          className="size-3 text-muted-foreground"
           aria-hidden="true"
+          className="size-3 text-muted-foreground"
         />
       </TooltipTrigger>
       <TooltipContent side="top">

@@ -1,6 +1,6 @@
+import { and, eq, inArray, lt } from "drizzle-orm";
 import { db as defaultDb } from "@/lib/db";
 import { archiveJobs } from "@/lib/db/schema";
-import { and, eq, inArray, lt } from "drizzle-orm";
 
 // How long an in-flight `archive_jobs` row is allowed to sit in
 // `pending`/`building` before the next request treats it as dead and flips

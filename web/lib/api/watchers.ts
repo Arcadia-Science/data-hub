@@ -1,16 +1,16 @@
+import { and, asc, count, desc, eq, gte, inArray, isNull } from "drizzle-orm";
+import { cache } from "react";
+import YAML from "yaml";
 import { db } from "@/lib/db";
 import {
   files,
   instrumentRuns,
   instruments,
-  watcherEventTypeEnum,
   watcherEvents,
+  watcherEventTypeEnum,
   watcherHeartbeats,
   watchers,
 } from "@/lib/db/schema";
-import { and, asc, count, desc, eq, gte, inArray, isNull } from "drizzle-orm";
-import { cache } from "react";
-import YAML from "yaml";
 
 export const STALE_THRESHOLD_MS = 5 * 60 * 1000;
 
@@ -32,7 +32,9 @@ export async function findActiveWatcher(watcherId: string) {
 export function extractWatchDirectory(
   configYaml: string | null
 ): string | null {
-  if (!configYaml) return null;
+  if (!configYaml) {
+    return null;
+  }
   try {
     const doc = YAML.parse(configYaml);
     const dir = doc?.instrument?.watch_directory;
@@ -75,10 +77,10 @@ export async function revertPendingUploadRequests(
   return reverted.map((row) => row.id);
 }
 
-type WatcherLike = {
-  status: string;
+interface WatcherLike {
   lastHeartbeatAt: Date | null;
-};
+  status: string;
+}
 
 export type EffectiveStatus = "registered" | "watching" | "stopped" | "stale";
 
@@ -89,9 +91,13 @@ export type EffectiveStatus = "registered" | "watching" | "stopped" | "stale";
  * so they're exempt from staleness checks.
  */
 export function computeEffectiveStatus(watcher: WatcherLike): EffectiveStatus {
-  if (watcher.status === "registered") return "registered";
+  if (watcher.status === "registered") {
+    return "registered";
+  }
 
-  if (!watcher.lastHeartbeatAt) return "stale";
+  if (!watcher.lastHeartbeatAt) {
+    return "stale";
+  }
 
   const age = Date.now() - watcher.lastHeartbeatAt.getTime();
   return age > STALE_THRESHOLD_MS
@@ -103,17 +109,17 @@ export function computeEffectiveStatus(watcher: WatcherLike): EffectiveStatus {
 // List page
 // ---------------------------------------------------------------------------
 
-export type WatcherListItem = {
-  id: string;
-  instrumentId: string;
-  instrumentDisplayName: string | null;
-  hostname: string | null;
-  watcherVersion: string | null;
-  effectiveStatus: EffectiveStatus;
-  lastHeartbeatAt: Date | null;
+export interface WatcherListItem {
   createdAt: Date;
   deletedAt: Date | null;
-};
+  effectiveStatus: EffectiveStatus;
+  hostname: string | null;
+  id: string;
+  instrumentDisplayName: string | null;
+  instrumentId: string;
+  lastHeartbeatAt: Date | null;
+  watcherVersion: string | null;
+}
 
 // Fetches all watchers (optionally including soft-deleted ones) with their
 // parent instrument's display name. The total count is small enough that we
@@ -194,7 +200,9 @@ export const getWatcherById = cache(async function getWatcherById(
     .where(eq(watchers.id, watcherId))
     .limit(1);
 
-  if (!row) return null;
+  if (!row) {
+    return null;
+  }
 
   return {
     id: row.id,
@@ -217,16 +225,16 @@ export const getWatcherById = cache(async function getWatcherById(
 // Heartbeats
 // ---------------------------------------------------------------------------
 
-export type WatcherHeartbeatRow = {
-  id: number;
-  timestamp: Date;
-  status: string;
-  uploadMode: string | null;
-  filesUploadedSinceLast: number | null;
-  runsReportedSinceLast: number | null;
+export interface WatcherHeartbeatRow {
   errorsSinceLast: number | null;
+  filesUploadedSinceLast: number | null;
+  id: number;
+  runsReportedSinceLast: number | null;
+  status: string;
+  timestamp: Date;
+  uploadMode: string | null;
   uptimeSeconds: number | null;
-};
+}
 
 // Default time window for heartbeat/event queries when no explicit range is
 // given. Kept in the data layer (not the page component) to avoid calling
@@ -236,7 +244,10 @@ const DEFAULT_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 
 export const WATCHER_PAGE_SIZE = 20;
 
-export type PaginatedResult<T> = { rows: T[]; total: number };
+export interface PaginatedResult<T> {
+  rows: T[];
+  total: number;
+}
 
 export async function getWatcherHeartbeats(
   watcherId: string,
@@ -283,7 +294,7 @@ export async function getAllWatcherHeartbeats(
 ): Promise<WatcherHeartbeatRow[]> {
   const since = opts.since ?? new Date(Date.now() - DEFAULT_LOOKBACK_MS);
 
-  return db
+  return await db
     .select({
       id: watcherHeartbeats.id,
       timestamp: watcherHeartbeats.timestamp,
@@ -309,13 +320,13 @@ export async function getAllWatcherHeartbeats(
 // Events
 // ---------------------------------------------------------------------------
 
-export type WatcherEventRow = {
-  id: number;
-  eventType: string;
-  message: string;
+export interface WatcherEventRow {
   details: unknown;
+  eventType: string;
+  id: number;
+  message: string;
   timestamp: Date;
-};
+}
 
 export async function getWatcherEvents(
   watcherId: string,

@@ -1,10 +1,10 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   api,
   closeTestDb,
   resetDb,
   seedTestUser,
 } from "@/tests/integration/helpers";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 describe("Instruments API", () => {
   let token: string;

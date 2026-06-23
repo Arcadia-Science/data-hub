@@ -1,10 +1,10 @@
+import { eq } from "drizzle-orm";
+import type { NextRequest } from "next/server";
+import { z } from "zod";
 import { requireAdmin } from "@/lib/api/auth";
 import { apiError, VALIDATION_ERROR } from "@/lib/api/errors";
 import { db } from "@/lib/db";
 import { users, watcherReleaseConfig } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
-import type { NextRequest } from "next/server";
-import { z } from "zod";
 
 // Admin-only read/write of the singleton `watcher_release_config` row,
 // edited via `/settings/watchers`. The `update-check` endpoint reads
@@ -23,7 +23,9 @@ const VERSION_REGEX = /^\d+\.\d+\.\d+([.-].+)?$/;
 // means unset" everywhere — operators don't have to remember to send
 // `null` instead of `""`. Shared by both version fields.
 function normalizeVersionInput(v: string | null | undefined): string | null {
-  if (v == null) return null;
+  if (v == null) {
+    return null;
+  }
   const trimmed = v.trim();
   return trimmed.length === 0 ? null : trimmed;
 }
@@ -62,18 +64,18 @@ const PutBodySchema = z.strictObject({
     .transform((v) => v ?? false),
 });
 
-type WatcherReleaseResponse = {
-  latest_version: string | null;
-  min_supported_version: string | null;
+interface WatcherReleaseResponse {
   channel: string;
+  latest_version: string | null;
   mandatory: boolean;
+  min_supported_version: string | null;
   updated_at: string | null;
   updated_by: {
     id: string;
     name: string | null;
     email: string | null;
   } | null;
-};
+}
 
 const EMPTY_RESPONSE: WatcherReleaseResponse = {
   latest_version: null,
@@ -124,14 +126,18 @@ async function readCurrent(): Promise<WatcherReleaseResponse> {
 
 export async function GET() {
   const authResult = await requireAdmin();
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   return Response.json(await readCurrent());
 }
 
 export async function PUT(request: NextRequest) {
   const authResult = await requireAdmin();
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   let rawBody: unknown;
   try {

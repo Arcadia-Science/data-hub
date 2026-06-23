@@ -1,3 +1,5 @@
+import { and, count, eq, isNull } from "drizzle-orm";
+import type { NextRequest } from "next/server";
 import { authorize, requireAdminForSession } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { db } from "@/lib/db";
@@ -7,15 +9,15 @@ import {
   VALID_INSTRUMENT_TYPES,
   watchers,
 } from "@/lib/db/schema";
-import { and, count, eq, isNull } from "drizzle-orm";
-import type { NextRequest } from "next/server";
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ instrumentId: string }> }
 ) {
   const authResult = await authorize(request, "instruments:read");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { instrumentId } = await params;
 
@@ -71,14 +73,18 @@ export async function PATCH(
   { params }: { params: Promise<{ instrumentId: string }> }
 ) {
   const authResult = await authorize(request, "instruments:write");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   // Browser callers (the Edit dialog and the "Confirm pending" button on
   // `/instruments`) must additionally be admins. PAT callers — the watcher
   // CLI and Lambda — pass through purely on the `instruments:write` scope
   // so existing automation continues to work without rotation.
   const adminGate = await requireAdminForSession(authResult);
-  if (adminGate) return adminGate;
+  if (adminGate) {
+    return adminGate;
+  }
 
   const { instrumentId } = await params;
 
@@ -135,9 +141,15 @@ export async function PATCH(
   }
 
   const updates: Record<string, unknown> = {};
-  if ("status" in body) updates.status = body.status;
-  if ("display_name" in body) updates.displayName = body.display_name;
-  if ("instrument_type" in body) updates.instrumentType = body.instrument_type;
+  if ("status" in body) {
+    updates.status = body.status;
+  }
+  if ("display_name" in body) {
+    updates.displayName = body.display_name;
+  }
+  if ("instrument_type" in body) {
+    updates.instrumentType = body.instrument_type;
+  }
 
   if (Object.keys(updates).length === 0) {
     return apiError(400, VALIDATION_ERROR, "No valid fields to update");

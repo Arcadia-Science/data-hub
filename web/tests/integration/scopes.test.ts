@@ -1,3 +1,4 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { instruments } from "@/lib/db/schema";
 import {
   api,
@@ -6,7 +7,6 @@ import {
   resetDb,
   seedTestUser,
 } from "@/tests/integration/helpers";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // Exercises the scope guard inserted by `authorize()` in the v1 route
 // handlers. Each test seeds a fresh PAT with a specific scopes array and

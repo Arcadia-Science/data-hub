@@ -1,11 +1,11 @@
+import { desc, eq } from "drizzle-orm";
+import type { NextRequest } from "next/server";
 import { requireAdmin, requireSession } from "@/lib/api/auth";
 import { apiError, UNAUTHORIZED, VALIDATION_ERROR } from "@/lib/api/errors";
 import { validateRequestedScopes } from "@/lib/api/scopes";
 import { db } from "@/lib/db";
 import { personalAccessTokens } from "@/lib/db/schema";
 import { generateToken, getTokenPrefix, hashToken } from "@/lib/tokens";
-import { desc, eq } from "drizzle-orm";
-import type { NextRequest } from "next/server";
 
 export async function GET() {
   // Listing is open to any signed-in user — regular members see their own
@@ -40,7 +40,9 @@ export async function POST(request: NextRequest) {
   // PAT list on `/settings/tokens` and call `GET` above, but only admins
   // can mint new credentials.
   const authResult = await requireAdmin();
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   let body: { name?: string; expires_at?: string; scopes?: unknown };
   try {
@@ -67,7 +69,7 @@ export async function POST(request: NextRequest) {
   let expiresAt: Date | null = null;
   if (body.expires_at) {
     expiresAt = new Date(body.expires_at);
-    if (isNaN(expiresAt.getTime())) {
+    if (Number.isNaN(expiresAt.getTime())) {
       return apiError(
         400,
         VALIDATION_ERROR,

@@ -1,5 +1,7 @@
 "use client";
 
+import { Bell } from "lucide-react";
+import { useState } from "react";
 import { NotificationBellContent } from "@/components/notifications/notification-bell-content";
 import { useNotifications } from "@/components/notifications/notifications-provider";
 import { Button } from "@/components/ui/button";
@@ -8,8 +10,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { Bell } from "lucide-react";
-import { useState } from "react";
 
 // Bell + Popover wrapper. Kept separate from the popover content so the
 // content component can subscribe to `recent` without re-rendering the
@@ -20,25 +20,27 @@ export function NotificationBell() {
 
   return (
     <Popover
-      open={open}
       onOpenChange={(next) => {
         setOpen(next);
         // Pull fresh data when the popover opens so the user sees the
         // latest list even between polling ticks. Failures are silent —
         // the polling loop will retry.
-        if (next) void refresh();
+        if (next) {
+          void refresh();
+        }
       }}
+      open={open}
     >
       <PopoverTrigger asChild>
         <Button
-          variant="ghost"
-          size="icon-sm"
           aria-label={
             unreadCount > 0
               ? `Notifications, ${unreadCount} unread`
               : "Notifications"
           }
           className="relative"
+          size="icon-sm"
+          variant="ghost"
         >
           <Bell />
           {/* Badge renders only when count > 0 (per
@@ -47,7 +49,7 @@ export function NotificationBell() {
           {unreadCount > 0 ? (
             <span
               aria-hidden
-              className="absolute -top-1 -right-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] leading-none font-semibold text-primary-foreground tabular-nums"
+              className="absolute -top-1 -right-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 font-semibold text-[10px] text-primary-foreground tabular-nums leading-none"
             >
               {unreadCount > 99 ? "99+" : unreadCount}
             </span>
@@ -56,8 +58,8 @@ export function NotificationBell() {
       </PopoverTrigger>
       <PopoverContent
         align="end"
-        sideOffset={8}
         className="w-104 gap-0 overflow-hidden p-0"
+        sideOffset={8}
       >
         <NotificationBellContent onNavigate={() => setOpen(false)} />
       </PopoverContent>

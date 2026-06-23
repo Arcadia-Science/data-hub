@@ -1,4 +1,8 @@
 import { RelativeTime } from "@/components/dashboard/relative-time";
+import {
+  getMetadataField,
+  MetadataFieldBadge,
+} from "@/components/runs/metadata-badges";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -16,11 +20,9 @@ import {
 } from "@/lib/instrument-colors";
 import { runRowToRef } from "@/lib/runs/row-actions";
 import { cn, formatBytes } from "@/lib/utils";
-
 import type { RunRow } from ".";
 import { AcquiredColumnHeader } from "./acquired-column-header";
 import { FilterableColumnHeader } from "./filterable-column-header";
-import { MetadataFieldBadge, getMetadataField } from "./metadata-utils";
 import { RanByCell } from "./ran-by-cell";
 import { RawFileColumnHeader } from "./raw-file-column-header";
 import { RunIdLabel } from "./run-id-label";
@@ -71,22 +73,22 @@ export function EpsonScannerRunsTable({
           <TableHead>
             <FilterableColumnHeader
               label="DPI"
-              paramKey="dpi"
               options={dpiOptions}
+              paramKey="dpi"
             />
           </TableHead>
           <TableHead>
             <FilterableColumnHeader
               label="Color Mode"
-              paramKey="color_mode"
               options={colorModeOptions}
+              paramKey="color_mode"
             />
           </TableHead>
           <TableHead>
             <FilterableColumnHeader
               label="Ran By"
-              paramKey="ran_by"
               options={ranByOptions}
+              paramKey="ran_by"
             />
           </TableHead>
           <TableHead className="text-right">
@@ -104,8 +106,8 @@ export function EpsonScannerRunsTable({
           const colorMode = getMetadataField(row.metadata, "color_mode");
           return (
             <TableRow
-              key={row.id}
               className={cn("group", isDeleted && "opacity-50")}
+              key={row.id}
             >
               <TableCell>
                 <RunSelectCheckbox runRef={runRowToRef(row)} />
@@ -113,21 +115,21 @@ export function EpsonScannerRunsTable({
               <TableCell>
                 <div className="flex items-center gap-2.5">
                   <RunStatusIcon
+                    errorMessages={row.error_messages}
                     fileCount={row.file_count}
                     filesCompleted={row.files_completed}
                     filesFailed={row.files_failed}
                     filesPendingUpload={row.files_pending_upload}
-                    filesUploaded={row.files_uploaded}
                     filesProcessing={row.files_processing}
-                    errorMessages={row.error_messages}
+                    filesUploaded={row.files_uploaded}
                   />
                   <RunIdLabel
-                    runId={row.run_id}
                     href={`/instruments/${instrumentId}/runs/${encodeURIComponent(row.run_id)}`}
                     isDeleted={isDeleted}
+                    runId={row.run_id}
                   />
                   {isDeleted && (
-                    <Badge variant="outline" className="ml-1.5 font-normal">
+                    <Badge className="ml-1.5 font-normal" variant="outline">
                       deleted
                     </Badge>
                   )}
@@ -141,23 +143,23 @@ export function EpsonScannerRunsTable({
               </TableCell>
               <TableCell>
                 <MetadataFieldBadge
-                  value={dpi}
                   colorClass={dpi ? DPI_COLORS[dpi] : undefined}
+                  value={dpi}
                 />
               </TableCell>
               <TableCell>
                 <MetadataFieldBadge
-                  value={colorMode ? formatColorMode(colorMode) : null}
                   colorClass={
                     colorMode ? COLOR_MODE_COLORS[colorMode] : undefined
                   }
+                  value={colorMode ? formatColorMode(colorMode) : null}
                 />
               </TableCell>
               <TableCell>
                 <RanByCell
+                  attributions={row.attributions}
                   instrumentId={row.instrument_id}
                   runId={row.run_id}
-                  attributions={row.attributions}
                 />
               </TableCell>
               <TableCell className="text-right">

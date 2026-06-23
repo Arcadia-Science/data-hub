@@ -1,5 +1,7 @@
 import { parse } from "csv-parse/sync";
-
+import type { AnyColumn, SQL } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
+import { cache } from "react";
 import { formatHinaSizes } from "@/components/runs/run-metadata-badges";
 import { db } from "@/lib/db";
 import type { InstrumentType } from "@/lib/db/schema";
@@ -11,9 +13,6 @@ import {
   users,
 } from "@/lib/db/schema";
 import { getS3ObjectStream } from "@/lib/s3";
-import type { AnyColumn, SQL } from "drizzle-orm";
-import { and, asc, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
-import { cache } from "react";
 
 // ---------------------------------------------------------------------------
 // Run attributions: users who claimed they ran a given run. Wire shape is
@@ -21,25 +20,31 @@ import { cache } from "react";
 // computed server-side so the client doesn't recompute per render.
 // ---------------------------------------------------------------------------
 
-export type RunAttribution = {
-  userId: string;
+export interface RunAttribution {
+  avatarUrl: string | null;
   displayName: string;
   initials: string;
-  avatarUrl: string | null;
-};
+  userId: string;
+}
 
 function toInitials(displayName: string): string {
   const parts = displayName.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  if (parts.length === 0) {
+    return "?";
+  }
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+  return (parts[0][0] + parts.at(-1)?.[0]).toUpperCase();
 }
 
 export async function getAttributionsByRunIds(
   runIds: string[]
 ): Promise<Map<string, RunAttribution[]>> {
   const byRun = new Map<string, RunAttribution[]>();
-  if (runIds.length === 0) return byRun;
+  if (runIds.length === 0) {
+    return byRun;
+  }
 
   const rows = await db
     .select({
@@ -111,7 +116,9 @@ export const lookupRunByNaturalKey = cache(async function lookupRunByNaturalKey(
     )
     .limit(1);
 
-  if (!row) return null;
+  if (!row) {
+    return null;
+  }
 
   const byRun = await getAttributionsByRunIds([row.id]);
   return { ...row, attributions: byRun.get(row.id) ?? [] };
@@ -130,7 +137,9 @@ export const lookupRunByNaturalKey = cache(async function lookupRunByNaturalKey(
 export function parseAcquiredAt(body: Record<string, unknown>): Date | null {
   if (typeof body.acquired_at === "string") {
     const explicit = new Date(body.acquired_at);
-    if (!Number.isNaN(explicit.getTime())) return explicit;
+    if (!Number.isNaN(explicit.getTime())) {
+      return explicit;
+    }
   }
 
   const detected = Array.isArray(body.detected_files)
@@ -147,7 +156,9 @@ export function parseAcquiredAt(body: Record<string, unknown>): Date | null {
       const t = new Date(
         (f as { file_created_at: string }).file_created_at
       ).getTime();
-      if (!Number.isNaN(t) && (floor === null || t < floor)) floor = t;
+      if (!Number.isNaN(t) && (floor === null || t < floor)) {
+        floor = t;
+      }
     }
   }
   return floor === null ? null : new Date(floor);
@@ -158,40 +169,40 @@ export function parseAcquiredAt(body: Record<string, unknown>): Date | null {
 // Used by both per-instrument and cross-instrument list endpoints.
 // ---------------------------------------------------------------------------
 
-type RunListFilters = {
-  instrumentId?: string | string[];
-  source?: string;
-  search?: string;
+interface RunListFilters {
+  captureType?: string;
+  colorMode?: string;
   dateFrom?: string;
   dateTo?: string;
-  sort?: string;
-  order?: string;
-  page: number;
-  perPage: number;
-  includeDeleted: boolean;
-  wavelength?: string;
-  measurementMode?: string;
-  measurementType?: string;
-  captureType?: string;
-  imagingMode?: string;
-  gelWavelength?: string;
-  gelColor?: string;
+  // Epson V700 Scanner derived metadata. `dpi` is a numeric string (e.g. "300",
+  // "600") and `colorMode` is the canonical "rgb"/"bw" string written by the
+  // Lambda's TIFF metadata parser.
+  dpi?: string;
   dyeChannel?: string;
+  gelColor?: string;
+  gelWavelength?: string;
   hinaChannel?: string;
   hinaDimension?: string;
   // Raw sizes JSONB object serialized as a string; compared via jsonb equality
   // so key ordering differences between client serialization and stored value
   // don't matter.
   hinaSize?: string;
-  // Epson V700 Scanner derived metadata. `dpi` is a numeric string (e.g. "300",
-  // "600") and `colorMode` is the canonical "rgb"/"bw" string written by the
-  // Lambda's TIFF metadata parser.
-  dpi?: string;
-  colorMode?: string;
+  imagingMode?: string;
+  includeDeleted: boolean;
+  instrumentId?: string | string[];
+  measurementMode?: string;
+  measurementType?: string;
+  order?: string;
+  page: number;
+  perPage: number;
   // Either a userId (match runs attributed to that user) or the reserved
   // sentinel "unattributed" (match runs with no attributions).
   ranBy?: string;
-};
+  search?: string;
+  sort?: string;
+  source?: string;
+  wavelength?: string;
+}
 
 const UNATTRIBUTED_SENTINEL = "unattributed";
 
@@ -385,9 +396,13 @@ export async function buildRunListQuery(filters: RunListFilters) {
   >`coalesce(array_agg(${files.errorMessage}) filter (where ${files.status} = 'failed' and ${files.errorMessage} is not null and ${files.deletedAt} is null), '{}')`.mapWith(
     {
       mapFromDriverValue: (value: unknown) => {
-        if (Array.isArray(value)) return value as string[];
+        if (Array.isArray(value)) {
+          return value as string[];
+        }
         if (typeof value === "string") {
-          if (value === "{}") return [];
+          if (value === "{}") {
+            return [];
+          }
           return value
             .replace(/^\{|}$/g, "")
             .split(",")
@@ -511,11 +526,11 @@ export type FilesSortField = "name" | "size" | "date" | "status";
 
 // Filter inputs shared by the paginated query and the archive-download
 // "download what you filtered" resolution.
-export type RunFilesFilter = {
+export interface RunFilesFilter {
+  includeDismissed?: boolean;
   search?: string;
   status?: FilesStatusFilter;
-  includeDismissed?: boolean;
-};
+}
 
 export type RunFilesListFilters = RunFilesFilter & {
   page: number;
@@ -605,7 +620,7 @@ function runFilesOrderBy(sort: FilesSortField): SQL[] {
   }
 }
 
-export type RunFilesPage = {
+export interface RunFilesPage {
   data: RunFile[];
   pagination: {
     page: number;
@@ -613,7 +628,7 @@ export type RunFilesPage = {
     total: number;
     total_pages: number;
   };
-};
+}
 
 export async function buildRunFilesQuery(
   runInternalId: string,
@@ -653,19 +668,19 @@ export async function buildRunFilesQuery(
 // summary counting that used to scan the full file list, and feeds the table
 // footer, the in-flight auto-refresh signal, the per-variant counts, and the
 // run detail page's `generateMetadata`.
-export type RunFileStats = {
+export interface RunFileStats {
   active: number;
   dismissed: number;
-  rawActive: number;
-  processedActive: number;
   pending: number;
-  uploaded: number;
+  processedActive: number;
   processing: number;
+  rawActive: number;
+  uploaded: number;
   // Files actively uploading to S3 (status = upload_requested). Tracked
   // separately from `pending` so the table only auto-refreshes while work is
   // genuinely in flight (not while files merely await a manual upload).
   uploadRequested: number;
-};
+}
 
 export async function getRunFileStats(
   runInternalId: string
@@ -698,7 +713,7 @@ export async function getRunFileStats(
 export async function getRunReportFiles(
   runInternalId: string
 ): Promise<RunFile[]> {
-  return db
+  return await db
     .select()
     .from(files)
     .where(
@@ -805,12 +820,18 @@ export async function getProcessedCsvData(
       f.s3Key
   );
 
-  if (csvFiles.length === 0) return [];
+  if (csvFiles.length === 0) {
+    return [];
+  }
 
   const results = await Promise.all(
     csvFiles.map(async (file) => {
+      const { s3Bucket, s3Key } = file;
+      if (!(s3Bucket && s3Key)) {
+        return [];
+      }
       try {
-        const stream = await getS3ObjectStream(file.s3Bucket!, file.s3Key!);
+        const stream = await getS3ObjectStream(s3Bucket, s3Key);
         const buf = await streamToBuffer(stream);
         return parse(buf, {
           columns: true,
@@ -831,11 +852,11 @@ export async function getProcessedCsvData(
 // Distinct metadata values for plate-reader column filters.
 // ---------------------------------------------------------------------------
 
-export type PlateReaderFilterOptions = {
-  wavelengths: string[];
+export interface PlateReaderFilterOptions {
   measurementModes: string[];
   measurementTypes: string[];
-};
+  wavelengths: string[];
+}
 
 const ALLOWED_METADATA_KEYS = new Set([
   "measurement_mode",
@@ -887,12 +908,12 @@ export async function getPlateReaderFilterOptions(
 // Distinct metadata values for gel-doc column filters.
 // ---------------------------------------------------------------------------
 
-export type GelDocFilterOptions = {
+export interface GelDocFilterOptions {
   captureTypes: string[];
+  colors: string[];
   imagingModes: string[];
   wavelengths: string[];
-  colors: string[];
-};
+}
 
 const ALLOWED_METADATA_ARRAY_KEYS = new Set([
   "wavelengths",
@@ -937,9 +958,9 @@ export async function getGelDocFilterOptions(
 // Distinct metadata values for qPCR column filters.
 // ---------------------------------------------------------------------------
 
-export type QpcrFilterOptions = {
+export interface QpcrFilterOptions {
   dyeChannels: string[];
-};
+}
 
 export async function getQpcrFilterOptions(
   instrumentId: string
@@ -959,13 +980,16 @@ export async function getQpcrFilterOptions(
 // `{"C":4,"X":256,"Y":256}`). We return the raw jsonb object for equality
 // filtering together with a pre-formatted label so the client doesn't need to
 // reimplement the formatting rules.
-export type HinaSizeOption = { value: string; label: string };
+export interface HinaSizeOption {
+  label: string;
+  value: string;
+}
 
-export type HinaFilterOptions = {
+export interface HinaFilterOptions {
   channels: string[];
   dimensions: string[];
   sizes: HinaSizeOption[];
-};
+}
 
 async function distinctHinaChannelNames(
   instrumentId: string
@@ -1022,10 +1046,10 @@ export async function getHinaFilterOptions(
 // Distinct metadata values for Epson V700 Scanner column filters.
 // ---------------------------------------------------------------------------
 
-export type EpsonScannerFilterOptions = {
-  dpis: string[];
+export interface EpsonScannerFilterOptions {
   colorModes: string[];
-};
+  dpis: string[];
+}
 
 export async function getEpsonScannerFilterOptions(
   instrumentId: string
@@ -1087,6 +1111,8 @@ export async function getInstrumentFilterOptions(
     case "tape_station":
     case "instant_raman":
       return { kind: "default" };
+    default:
+      return { kind: "default" };
   }
 }
 
@@ -1095,10 +1121,10 @@ export async function getInstrumentFilterOptions(
 // instrument — used to populate the "Ran By" column filter dropdown.
 // ---------------------------------------------------------------------------
 
-export type RanByFilterOption = {
-  userId: string;
+export interface RanByFilterOption {
   displayName: string;
-};
+  userId: string;
+}
 
 export async function getRanByFilterOptions(
   instrumentId: string

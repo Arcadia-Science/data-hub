@@ -1,22 +1,22 @@
+import { notFound, redirect } from "next/navigation";
+import type { Metadata } from "next/types";
 import { WatcherConfig } from "@/components/watchers/watcher-config";
 import { WatcherDetailTabs } from "@/components/watchers/watcher-detail-tabs";
 import { WatcherHeader } from "@/components/watchers/watcher-header";
 import {
-  WATCHER_PAGE_SIZE,
   getAllWatcherHeartbeats,
   getWatcherById,
   getWatcherEvents,
+  WATCHER_PAGE_SIZE,
 } from "@/lib/api/watchers";
 import { auth } from "@/lib/auth";
 import { todayDateString } from "@/lib/date";
 import { watcherDetailParamsCache } from "@/lib/search-params";
-import { notFound, redirect } from "next/navigation";
-import type { Metadata } from "next/types";
 
-type Props = {
+interface Props {
   params: Promise<{ watcherId: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
-};
+}
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { watcherId } = await params;
@@ -31,7 +31,9 @@ export default async function WatcherDetailPage({
   searchParams,
 }: Props) {
   const session = await auth();
-  if (!session) redirect("/login");
+  if (!session) {
+    redirect("/login");
+  }
 
   const { watcherId } = await params;
   const filters = watcherDetailParamsCache.parse(await searchParams);
@@ -43,7 +45,7 @@ export default async function WatcherDetailPage({
   // <HeartbeatChart> clips the chart precisely on the client, and the event log
   // already orders by timestamp so a slightly wider window is harmless.
   function toTzSafeSince(dateString: string): Date {
-    const d = new Date(dateString + "T00:00:00Z");
+    const d = new Date(`${dateString}T00:00:00Z`);
     d.setUTCDate(d.getUTCDate() - 1);
     return d;
   }
@@ -65,7 +67,9 @@ export default async function WatcherDetailPage({
     }),
   ]);
 
-  if (!watcher) notFound();
+  if (!watcher) {
+    notFound();
+  }
 
   const logsTotalPages = Math.ceil(eventResult.total / WATCHER_PAGE_SIZE);
 
@@ -74,11 +78,11 @@ export default async function WatcherDetailPage({
       <WatcherHeader watcher={watcher} />
       <WatcherDetailTabs
         configTab={<WatcherConfig configYaml={watcher.configYaml} />}
-        heartbeats={heartbeats}
         events={eventResult.rows}
-        eventsTotal={eventResult.total}
         eventsPage={filters.logs_page}
+        eventsTotal={eventResult.total}
         eventsTotalPages={logsTotalPages}
+        heartbeats={heartbeats}
       />
     </div>
   );

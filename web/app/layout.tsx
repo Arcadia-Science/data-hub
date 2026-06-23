@@ -1,6 +1,10 @@
 import { Geist, Geist_Mono } from "next/font/google";
 
 import "@/app/globals.css";
+import type { Metadata } from "next";
+import { cookies } from "next/headers";
+import { SessionProvider } from "next-auth/react";
+import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { AppSidebar } from "@/components/app-sidebar";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { NotificationsProvider } from "@/components/notifications/notifications-provider";
@@ -18,10 +22,6 @@ import { countUnread } from "@/lib/api/notifications";
 import { getSidebarInstruments, getSidebarWatchers } from "@/lib/api/sidebar";
 import { auth, signOut } from "@/lib/auth";
 import { cn } from "@/lib/utils";
-import type { Metadata } from "next";
-import { SessionProvider } from "next-auth/react";
-import { cookies } from "next/headers";
-import { NuqsAdapter } from "nuqs/adapters/next/app";
 
 const fontSans = Geist({ subsets: ["latin"], variable: "--font-sans" });
 
@@ -100,7 +100,7 @@ export default async function RootLayout({
     ? await Promise.all([
         getSidebarInstruments(),
         getSidebarWatchers(),
-        countUnread(session.user.id!),
+        countUnread(session.user.id),
       ])
     : [[], [], 0];
 
@@ -112,14 +112,14 @@ export default async function RootLayout({
 
   return (
     <html
-      lang="en"
-      suppressHydrationWarning
       className={cn(
         "antialiased",
         fontMono.variable,
         "font-sans",
         fontSans.variable
       )}
+      lang="en"
+      suppressHydrationWarning
     >
       <body>
         <SessionProvider session={session}>
@@ -133,13 +133,13 @@ export default async function RootLayout({
                     <ArchiveDownloadProvider>
                       <SidebarProvider defaultOpen={sidebarDefaultOpen}>
                         <AppSidebar
-                          session={session}
                           instruments={instruments}
-                          watchers={watchers}
+                          session={session}
                           signOutAction={async () => {
                             "use server";
                             await signOut({ redirectTo: "/login" });
                           }}
+                          watchers={watchers}
                         />
                         <SidebarInset className="pb-12">
                           <header className="flex h-12 shrink-0 items-center justify-between gap-2 px-4">

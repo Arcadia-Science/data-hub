@@ -1,5 +1,10 @@
 "use client";
 
+import { Download, Search } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { debounce, useQueryStates } from "nuqs";
+import { useEffect, useTransition } from "react";
+import { toast } from "sonner";
 import { PaginationNav } from "@/components/pagination-nav";
 import {
   TablePendingBoundary,
@@ -20,15 +25,10 @@ import type {
   FilesSortField,
   FilesStatusFilter,
   RunFile,
-  RunFilesPage,
   RunFileStats,
+  RunFilesPage,
 } from "@/lib/api/instrument-runs";
 import { runDetailSearchParams } from "@/lib/search-params";
-import { Download, Search } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { debounce, useQueryStates } from "nuqs";
-import { useEffect, useTransition } from "react";
-import { toast } from "sonner";
 import { FileBulkActionBar } from "./file-bulk-action-bar";
 import {
   type FileRef,
@@ -44,17 +44,17 @@ import {
 // the URL and refetching the page.
 const SEARCH_DEBOUNCE_MS = 300;
 
-type RunFilesSectionProps = {
+interface RunFilesSectionProps {
   // Current page of the server-paginated, filtered, sorted file list.
   files: RunFile[];
+  instrumentId: string;
+  isDeleted: boolean;
   pagination: RunFilesPage["pagination"];
+  runId: string;
   // Aggregate per-run counts used for the footer summary, filter labels, and
   // the in-flight auto-refresh signal — independent of the current filter.
   stats: RunFileStats;
-  instrumentId: string;
-  runId: string;
-  isDeleted: boolean;
-};
+}
 
 // Synchronously trigger one anchor-click per file so the browser treats
 // them all as the same user gesture (Chrome silently drops downloads
@@ -123,7 +123,9 @@ function RunFilesSectionContent({
   // are merely "detected" (awaiting a manual upload) don't trigger polling.
   const hasInFlight = stats.processing > 0 || stats.uploadRequested > 0;
   useEffect(() => {
-    if (!hasInFlight) return;
+    if (!hasInFlight) {
+      return;
+    }
     const id = setInterval(() => router.refresh(), 3000);
     return () => clearInterval(id);
   }, [hasInFlight, router]);
@@ -146,7 +148,9 @@ function RunFilesSectionContent({
     if (filters.files_status !== "all") {
       params.set("status", filters.files_status);
     }
-    if (filters.files_dismissed) params.set("dismissed", "true");
+    if (filters.files_dismissed) {
+      params.set("dismissed", "true");
+    }
     downloadHref = `${archiveBaseHref}?${params.toString()}`;
   }
 
@@ -163,15 +167,14 @@ function RunFilesSectionContent({
 
   return (
     <div className="flex flex-col gap-2">
-      <h2 className="text-sm font-semibold">Files</h2>
+      <h2 className="font-semibold text-sm">Files</h2>
       <div className="rounded-lg border bg-background dark:bg-muted">
         {/* Toolbar: search, filter, sort */}
         <div className="flex items-center gap-2 border-b px-3 py-2">
           <div className="relative flex-1">
             <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search files..."
-              value={filters.files_search}
+              className="h-8 pl-8 text-xs"
               onChange={(e) =>
                 setFilters(
                   { files_search: e.target.value, files_page: 1 },
@@ -181,19 +184,20 @@ function RunFilesSectionContent({
                   { limitUrlUpdates: debounce(SEARCH_DEBOUNCE_MS) }
                 )
               }
-              className="h-8 pl-8 text-xs"
+              placeholder="Search files..."
+              value={filters.files_search}
             />
           </div>
           <Select
-            value={filters.files_status}
             onValueChange={(v) =>
               setFilters({
                 files_status: v as FilesStatusFilter,
                 files_page: 1,
               })
             }
+            value={filters.files_status}
           >
-            <SelectTrigger size="sm" className="h-8 text-sm">
+            <SelectTrigger className="h-8 text-sm" size="sm">
               <SelectValue>
                 {filters.files_status === "all"
                   ? `All (${stats.active})`
@@ -201,39 +205,39 @@ function RunFilesSectionContent({
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all" className="text-sm">
+              <SelectItem className="text-sm" value="all">
                 All ({stats.active})
               </SelectItem>
-              <SelectItem value="raw" className="text-sm">
+              <SelectItem className="text-sm" value="raw">
                 Raw
               </SelectItem>
-              <SelectItem value="processed" className="text-sm">
+              <SelectItem className="text-sm" value="processed">
                 Processed
               </SelectItem>
-              <SelectItem value="pending" className="text-sm">
+              <SelectItem className="text-sm" value="pending">
                 Pending
               </SelectItem>
-              <SelectItem value="uploaded" className="text-sm">
+              <SelectItem className="text-sm" value="uploaded">
                 Uploaded
               </SelectItem>
-              <SelectItem value="processing" className="text-sm">
+              <SelectItem className="text-sm" value="processing">
                 Processing
               </SelectItem>
-              <SelectItem value="completed" className="text-sm">
+              <SelectItem className="text-sm" value="completed">
                 Completed
               </SelectItem>
-              <SelectItem value="failed" className="text-sm">
+              <SelectItem className="text-sm" value="failed">
                 Failed
               </SelectItem>
             </SelectContent>
           </Select>
           <Select
-            value={filters.files_sort}
             onValueChange={(v) =>
               setFilters({ files_sort: v as FilesSortField, files_page: 1 })
             }
+            value={filters.files_sort}
           >
-            <SelectTrigger size="sm" className="h-8 text-sm">
+            <SelectTrigger className="h-8 text-sm" size="sm">
               <SelectValue>
                 Sort:{" "}
                 {filters.files_sort === "name"
@@ -246,24 +250,22 @@ function RunFilesSectionContent({
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="name" className="text-sm">
+              <SelectItem className="text-sm" value="name">
                 Sort: Name
               </SelectItem>
-              <SelectItem value="size" className="text-sm">
+              <SelectItem className="text-sm" value="size">
                 Sort: Size
               </SelectItem>
-              <SelectItem value="date" className="text-sm">
+              <SelectItem className="text-sm" value="date">
                 Sort: Date
               </SelectItem>
-              <SelectItem value="status" className="text-sm">
+              <SelectItem className="text-sm" value="status">
                 Sort: Status
               </SelectItem>
             </SelectContent>
           </Select>
           {stats.dismissed > 0 && (
             <Button
-              variant={filters.files_dismissed ? "secondary" : "ghost"}
-              size="sm"
               className="h-8 text-sm"
               onClick={() =>
                 setFilters({
@@ -271,14 +273,14 @@ function RunFilesSectionContent({
                   files_page: 1,
                 })
               }
+              size="sm"
+              variant={filters.files_dismissed ? "secondary" : "ghost"}
             >
               {filters.files_dismissed ? "Hide dismissed" : "Show dismissed"}
             </Button>
           )}
           {downloadableCount > 0 && (
             <Button
-              variant="outline"
-              size="sm"
               className="h-8 gap-1 text-sm"
               onClick={() =>
                 archiveActions.start({
@@ -287,6 +289,8 @@ function RunFilesSectionContent({
                   defaultFilename: `${runId}.zip`,
                 })
               }
+              size="sm"
+              variant="outline"
             >
               <Download className="size-3" />
               {isFilterActive
@@ -301,8 +305,8 @@ function RunFilesSectionContent({
         {!isDeleted && (
           <BulkActionBarHost
             instrumentId={instrumentId}
-            runId={runId}
             isPending={isPending}
+            runId={runId}
             startTransition={startTransition}
           />
         )}
@@ -311,7 +315,7 @@ function RunFilesSectionContent({
             in flight. */}
         <TablePendingBoundary>
           {files.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">
+            <p className="py-8 text-center text-muted-foreground text-sm">
               No files match your filters.
             </p>
           ) : isDeleted ? (
@@ -326,6 +330,12 @@ function RunFilesSectionContent({
             <EditableRunFilesTable
               files={files}
               isPending={isPending}
+              onDismiss={(id) =>
+                handleSingleDismiss(id, startTransition, router)
+              }
+              onReprocess={(id) =>
+                handleSingleReprocess(id, startTransition, router)
+              }
               onUpload={(id) =>
                 handleSingleUpload(
                   id,
@@ -335,18 +345,12 @@ function RunFilesSectionContent({
                   router
                 )
               }
-              onDismiss={(id) =>
-                handleSingleDismiss(id, startTransition, router)
-              }
-              onReprocess={(id) =>
-                handleSingleReprocess(id, startTransition, router)
-              }
             />
           )}
         </TablePendingBoundary>
 
         {/* Summary footer */}
-        <div className="flex items-center justify-between gap-2 border-t px-3 py-2 text-sm text-muted-foreground">
+        <div className="flex items-center justify-between gap-2 border-t px-3 py-2 text-muted-foreground text-sm">
           <span>
             {pagination.total === 0
               ? `Showing 0 of ${stats.active}`
@@ -363,8 +367,8 @@ function RunFilesSectionContent({
 
       <PaginationNav
         page={pagination.page}
-        totalPages={pagination.total_pages}
         pageParam="files_page"
+        totalPages={pagination.total_pages}
       />
     </div>
   );
@@ -391,7 +395,9 @@ function BulkActionBarHost({
   const { actions } = useFileSelection();
 
   function handleBulkUpload(ids: number[]) {
-    if (ids.length === 0) return;
+    if (ids.length === 0) {
+      return;
+    }
     startTransition(async () => {
       const res = await fetch(
         `/api/v1/instruments/${instrumentId}/runs/${runId}/request-upload`,
@@ -413,7 +419,9 @@ function BulkActionBarHost({
   }
 
   function handleBulkDismiss(ids: number[]) {
-    if (ids.length === 0) return;
+    if (ids.length === 0) {
+      return;
+    }
     startTransition(async () => {
       const results = await Promise.allSettled(
         ids.map((fid) => fetch(`/api/v1/files/${fid}`, { method: "DELETE" }))
@@ -433,7 +441,9 @@ function BulkActionBarHost({
   }
 
   function handleBulkReprocess(ids: number[]) {
-    if (ids.length === 0) return;
+    if (ids.length === 0) {
+      return;
+    }
     startTransition(async () => {
       const results = await Promise.allSettled(
         ids.map((fid) =>
@@ -460,7 +470,9 @@ function BulkActionBarHost({
   }
 
   function handleBulkDownload(refs: FileRef[]) {
-    if (refs.length === 0) return;
+    if (refs.length === 0) {
+      return;
+    }
     fanOutFileDownload(refs);
     toast.success(
       `Downloading ${refs.length} file${refs.length === 1 ? "" : "s"}`
@@ -470,10 +482,10 @@ function BulkActionBarHost({
   return (
     <FileBulkActionBar
       isPending={isPending}
-      onUpload={handleBulkUpload}
       onDismiss={handleBulkDismiss}
-      onReprocess={handleBulkReprocess}
       onDownload={handleBulkDownload}
+      onReprocess={handleBulkReprocess}
+      onUpload={handleBulkUpload}
     />
   );
 }

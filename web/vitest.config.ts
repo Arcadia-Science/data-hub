@@ -1,4 +1,4 @@
-import path from "path";
+import path from "node:path";
 import { defineConfig } from "vitest/config";
 
 // Fast unit-style suite — pure functions and in-memory MCP transport tests.
@@ -10,6 +10,6 @@ export default defineConfig({
     testTimeout: 10_000,
   },
   resolve: {
-    alias: { "@": path.resolve(__dirname, ".") },
+    alias: { "@": path.resolve(import.meta.dirname, ".") },
   },
 });

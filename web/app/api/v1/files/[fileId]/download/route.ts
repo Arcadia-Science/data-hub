@@ -1,14 +1,14 @@
+import { eq } from "drizzle-orm";
+import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 import { getPresignedDownloadUrl } from "@/lib/s3";
-import { eq } from "drizzle-orm";
-import type { NextRequest } from "next/server";
 
-type RouteContext = {
+interface RouteContext {
   params: Promise<{ fileId: string }>;
-};
+}
 
 // ---------------------------------------------------------------------------
 // GET /api/v1/files/:fileId/download
@@ -20,11 +20,13 @@ type RouteContext = {
 
 export async function GET(request: NextRequest, { params }: RouteContext) {
   const authResult = await authorize(request, "files:read");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { fileId } = await params;
-  const numericId = parseInt(fileId, 10);
-  if (isNaN(numericId)) {
+  const numericId = Number.parseInt(fileId, 10);
+  if (Number.isNaN(numericId)) {
     return apiError(400, VALIDATION_ERROR, "Invalid file ID");
   }
 
@@ -57,7 +59,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     return apiError(404, NOT_FOUND, `File '${fileId}' not found`);
   }
 
-  if (!file.s3Bucket || !file.s3Key) {
+  if (!(file.s3Bucket && file.s3Key)) {
     return apiError(404, NOT_FOUND, "File has not been uploaded to S3 yet");
   }
 

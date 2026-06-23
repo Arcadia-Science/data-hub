@@ -1,3 +1,5 @@
+import { and, eq, isNull } from "drizzle-orm";
+import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import {
   apiError,
@@ -10,12 +12,10 @@ import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
 import { getPresignedUploadUrl, getS3RawDataBucket } from "@/lib/s3";
-import { and, eq, isNull } from "drizzle-orm";
-import type { NextRequest } from "next/server";
 
-type RouteContext = {
+interface RouteContext {
   params: Promise<{ instrumentId: string; runId: string }>;
-};
+}
 
 const UPLOAD_URL_EXPIRY_SECONDS = 60 * 60; // 1 hour
 
@@ -37,7 +37,9 @@ const UPLOADED_OR_LATER_STATUSES = new Set([
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
   const authResult = await authorize(request, "runs:write");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { instrumentId, runId } = await params;
   const run = await lookupRunByNaturalKey(instrumentId, runId);

@@ -16,6 +16,7 @@
 // truncates the table; the row is otherwise harmless because every
 // PAT is hashed at rest.
 
+// biome-ignore lint/performance/noNamespaceImport: drizzle scripts need the full schema module for Db typing
 import * as schema from "@/lib/db/schema";
 import { generateToken, getTokenPrefix, hashToken } from "@/lib/tokens";
 import "dotenv/config";

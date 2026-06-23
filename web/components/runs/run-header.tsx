@@ -1,3 +1,5 @@
+import { Trash2 } from "lucide-react";
+import Link from "next/link";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -8,8 +10,6 @@ import {
 } from "@/components/ui/breadcrumb";
 import type { RunDetail } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
-import { Trash2 } from "lucide-react";
-import Link from "next/link";
 
 export function RunHeader({
   run,
@@ -51,21 +51,21 @@ export function RunHeader({
       </Breadcrumb>
 
       {run.deletedAt && (
-        <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">
+        <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-2.5 text-destructive text-sm">
           <Trash2 className="size-4 shrink-0" />
           <span>Deleted {formatDateTime(run.deletedAt)}</span>
         </div>
       )}
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="font-mono text-2xl font-semibold tracking-tight">
+        <h1 className="font-mono font-semibold text-2xl tracking-tight">
           {run.runId}
         </h1>
 
         <div className="flex items-center gap-2">{children}</div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground text-sm">
         {run.acquiredAt && (
           <>
             <span>Run started {formatDateTime(run.acquiredAt)}</span>

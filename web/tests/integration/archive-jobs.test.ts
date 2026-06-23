@@ -1,3 +1,5 @@
+import { and, eq, inArray } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   expireStaleArchiveJobs,
   STUCK_BUILD_ERROR_MESSAGE,
@@ -11,8 +13,6 @@ import {
   resetDb,
   seedTestUser,
 } from "@/tests/integration/helpers";
-import { and, eq, inArray } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 // Tests for the /api/v1/archive-jobs/:id PATCH callback the Lambda fires
 // when a build finishes. The UI doesn't poll this endpoint — it re-issues
@@ -35,7 +35,7 @@ describe("Archive Jobs API", () => {
     body: Record<string, unknown>,
     options: { token?: string } = {}
   ) {
-    return fetch(`${getBaseUrl()}/api/v1/archive-jobs/${jobId}`, {
+    return await fetch(`${getBaseUrl()}/api/v1/archive-jobs/${jobId}`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",

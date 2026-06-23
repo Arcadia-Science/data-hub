@@ -1,5 +1,7 @@
 "use client";
 
+import { Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -9,8 +11,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
 
 import type { ArchiveDownloadJob } from "./archive-download-provider";
 
@@ -21,7 +21,9 @@ import type { ArchiveDownloadJob } from "./archive-download-provider";
 
 function formatElapsed(startedAt: number, now: number): string {
   const seconds = Math.max(0, Math.floor((now - startedAt) / 1000));
-  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
   const mins = Math.floor(seconds / 60);
   const rem = seconds - mins * 60;
   return rem === 0 ? `${mins}m` : `${mins}m ${rem}s`;
@@ -42,8 +44,10 @@ function formatElapsed(startedAt: number, now: number): string {
 function useNowTick(active: boolean): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!active) return;
-    const id = window.setInterval(() => setNow(Date.now()), 1_000);
+    if (!active) {
+      return;
+    }
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, [active]);
   return now;
@@ -67,13 +71,17 @@ export function ArchiveDownloadDialog({
 
   return (
     <Dialog
-      open={open}
       onOpenChange={(next) => {
         // Closing the dialog dismisses every visible row. Building rows are
         // forfeit on close — the build itself continues server-side and the
         // archive will be available via the cache key on the next click.
-        if (!next) for (const j of visible) onDismiss(j.id);
+        if (!next) {
+          for (const j of visible) {
+            onDismiss(j.id);
+          }
+        }
       }}
+      open={open}
     >
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
@@ -88,24 +96,24 @@ export function ArchiveDownloadDialog({
         <ul className="-mx-1 max-h-[50vh] min-w-0 space-y-3 overflow-y-auto px-1 py-2">
           {visible.map((job) => (
             <li
-              key={job.id}
               className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2 text-sm"
+              key={job.id}
             >
               <div className="flex min-w-0 flex-1 items-center gap-2">
                 {job.status === "building" ? (
                   <Loader2
-                    className="size-4 shrink-0 animate-spin text-muted-foreground"
                     aria-hidden
+                    className="size-4 shrink-0 animate-spin text-muted-foreground"
                   />
                 ) : (
                   <span
-                    className="inline-block size-2 shrink-0 rounded-full bg-destructive"
                     aria-hidden
+                    className="inline-block size-2 shrink-0 rounded-full bg-destructive"
                   />
                 )}
                 <div className="min-w-0 flex-1">
                   <div className="truncate font-medium">{job.runId}</div>
-                  <div className="text-xs text-muted-foreground">
+                  <div className="text-muted-foreground text-xs">
                     {job.status === "building"
                       ? `Building zip archive... ${formatElapsed(job.startedAt, now)}`
                       : (job.errorMessage ?? "Failed")}
@@ -113,11 +121,11 @@ export function ArchiveDownloadDialog({
                 </div>
               </div>
               <Button
-                type="button"
-                variant="ghost"
-                size="sm"
                 className="shrink-0"
                 onClick={() => onDismiss(job.id)}
+                size="sm"
+                type="button"
+                variant="ghost"
               >
                 {job.status === "building" ? "Hide" : "Dismiss"}
               </Button>
@@ -127,12 +135,14 @@ export function ArchiveDownloadDialog({
 
         <DialogFooter>
           <Button
+            onClick={() => {
+              for (const j of visible) {
+                onDismiss(j.id);
+              }
+            }}
+            size="sm"
             type="button"
             variant="outline"
-            size="sm"
-            onClick={() => {
-              for (const j of visible) onDismiss(j.id);
-            }}
           >
             Close
           </Button>

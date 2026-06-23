@@ -22,6 +22,8 @@ export function getWatcherOnlineStatus({
   watcherCount: number;
   watchersOnline: number;
 }): WatcherOnlineStatus {
-  if (watcherCount === 0) return "no_watcher";
+  if (watcherCount === 0) {
+    return "no_watcher";
+  }
   return watchersOnline > 0 ? "online" : "offline";
 }

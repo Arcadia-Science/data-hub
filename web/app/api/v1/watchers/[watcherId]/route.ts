@@ -1,3 +1,5 @@
+import { eq } from "drizzle-orm";
+import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import {
   apiError,
@@ -9,15 +11,15 @@ import { isValidUUID } from "@/lib/api/validators";
 import { computeEffectiveStatus, findActiveWatcher } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { instruments, watchers } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
-import type { NextRequest } from "next/server";
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ watcherId: string }> }
 ) {
   const authResult = await authorize(request, "watchers:read");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { watcherId } = await params;
   if (!isValidUUID(watcherId)) {
@@ -55,7 +57,9 @@ export async function DELETE(
   { params }: { params: Promise<{ watcherId: string }> }
 ) {
   const authResult = await authorize(request, "watchers:write");
-  if (authResult instanceof Response) return authResult;
+  if (authResult instanceof Response) {
+    return authResult;
+  }
 
   const { watcherId } = await params;
   if (!isValidUUID(watcherId)) {
