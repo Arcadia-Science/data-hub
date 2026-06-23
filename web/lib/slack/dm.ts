@@ -7,11 +7,13 @@
 // the token is absent the function is a no-op so local dev and tests can opt
 // out cleanly.
 //
-// Fatal Slack errors (token_revoked, account_inactive, user_not_found) are
-// returned as a `{ revoked: true }` signal so callers can mark the
-// `slack_connections.revoked_at` column. All failures are logged but never
-// thrown — DMs are a side-channel and must not break the mutation that
-// triggered the notification.
+// Failures are classified, never thrown — DMs are a side-channel and must not
+// break the mutation that triggered the notification. The classification
+// matters because every DM uses the *shared* bot token: a token-level failure
+// is global and says nothing about any one recipient, so it must not revoke a
+// user's connection (which would falsely tell them to reconnect when only an
+// admin can fix the token). Error strings are from Slack's `chat.postMessage`
+// reference: https://api.slack.com/methods/chat.postMessage.
 
 import type { Block, KnownBlock } from "@slack/web-api";
 import { WebClient } from "@slack/web-api";
@@ -19,15 +21,27 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { slackConnections } from "@/lib/db/schema";
 
-// Errors returned by Slack that mean the user's connection is permanently
-// broken and needs to be reconnected.
-const REVOKED_ERRORS = new Set([
-  "token_revoked",
+// The recipient can't be DM'd: their stored member ID no longer resolves to a
+// DM channel (left the workspace, deactivated). Revoke just this connection.
+const USER_UNREACHABLE_ERRORS = new Set(["channel_not_found"]);
+
+// The shared bot token / app install is broken. Affects every recipient, so
+// these must never revoke an individual connection.
+const BOT_TOKEN_ERRORS = new Set([
   "account_inactive",
-  "user_not_found",
-  "not_authed",
   "invalid_auth",
+  "not_authed",
+  "token_expired",
+  "token_revoked",
+  "missing_scope",
+  "not_allowed_token_type",
 ]);
+
+function extractSlackErrorCode(err: unknown): string | undefined {
+  return err && typeof err === "object" && "data" in err
+    ? (err as { data?: { error?: string } }).data?.error
+    : undefined;
+}
 
 let _client: WebClient | null = null;
 
@@ -50,21 +64,22 @@ export interface SlackDmPayload {
   text: string;
 }
 
-/**
- * Post a DM to a Slack user.
- *
- * Returns `{ revoked: true }` when Slack reports a terminal auth error so
- * the caller can mark the user's connection as revoked. Returns
- * `{ revoked: false }` on success or transient failure.
- */
-export async function sendSlackDm(
+export type SlackDmResult =
+  | { status: "sent" }
+  // The bot token is dead; the whole batch will fail the same way.
+  | { status: "bot_token_invalid" }
+  // This recipient is gone; their connection should be revoked.
+  | { status: "user_unreachable" }
+  // Missing token, rate limit, server error — retry-able, no action.
+  | { status: "transient" };
+
+async function sendSlackDm(
   slackUserId: string,
   payload: SlackDmPayload
-): Promise<{ revoked: boolean }> {
+): Promise<SlackDmResult> {
   const client = getClient();
   if (!client) {
-    console.warn("SLACK_BOT_TOKEN is not set, skipping Slack DM.");
-    return { revoked: false };
+    return { status: "transient" };
   }
 
   try {
@@ -73,27 +88,56 @@ export async function sendSlackDm(
       text: payload.text,
       blocks: payload.blocks,
     });
-    return { revoked: false };
+    return { status: "sent" };
   } catch (err: unknown) {
-    const code =
-      err && typeof err === "object" && "data" in err
-        ? (err as { data?: { error?: string } }).data?.error
-        : undefined;
-    if (code && REVOKED_ERRORS.has(code)) {
-      return { revoked: true };
+    const code = extractSlackErrorCode(err);
+    if (code && USER_UNREACHABLE_ERRORS.has(code)) {
+      return { status: "user_unreachable" };
+    }
+    if (code && BOT_TOKEN_ERRORS.has(code)) {
+      return { status: "bot_token_invalid" };
     }
     console.error(`Failed to send Slack DM to ${slackUserId}: ${String(err)}`);
-    return { revoked: false };
+    return { status: "transient" };
   }
 }
 
+export interface SlackDmJob {
+  payload: SlackDmPayload;
+  slackUserId: string;
+  userId: string;
+}
+
 /**
- * Mark a user's Slack connection as revoked so the settings UI can prompt
- * them to reconnect. Called when `sendSlackDm` returns `{ revoked: true }`.
+ * Deliver a batch of DMs concurrently and react to per-recipient vs global
+ * failures. Only `user_unreachable` revokes a connection; a dead bot token is
+ * logged once for ops and leaves every connection intact.
  */
-export async function markSlackConnectionRevoked(
-  userId: string
-): Promise<void> {
+export async function deliverSlackDms(jobs: SlackDmJob[]): Promise<void> {
+  if (jobs.length === 0) {
+    return;
+  }
+
+  let botTokenInvalid = false;
+  await Promise.all(
+    jobs.map(async (job) => {
+      const result = await sendSlackDm(job.slackUserId, job.payload);
+      if (result.status === "user_unreachable") {
+        await markSlackConnectionRevoked(job.userId);
+      } else if (result.status === "bot_token_invalid") {
+        botTokenInvalid = true;
+      }
+    })
+  );
+
+  if (botTokenInvalid) {
+    console.error(
+      "Slack bot token rejected; DMs skipped until the app is reinstalled or the token is rotated."
+    );
+  }
+}
+
+async function markSlackConnectionRevoked(userId: string): Promise<void> {
   try {
     await db
       .update(slackConnections)

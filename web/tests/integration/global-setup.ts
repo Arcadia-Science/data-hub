@@ -131,9 +131,24 @@ export async function setup() {
         raw += chunk;
       });
       req.on("end", () => {
+        const params = new URLSearchParams(raw);
+        const channel = params.get("channel") ?? "";
+
+        // Tests inject Slack platform errors via a sentinel channel id of the
+        // form `U_FAIL_<error_code>`. The WebClient surfaces `<error_code>` as
+        // `err.data.error`, exercising the real failure-handling branches.
+        if (channel.startsWith("U_FAIL_")) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(
+            JSON.stringify({
+              ok: false,
+              error: channel.slice("U_FAIL_".length),
+            })
+          );
+          return;
+        }
+
         try {
-          const params = new URLSearchParams(raw);
-          const channel = params.get("channel") ?? "";
           const text = params.get("text") ?? "";
           const blocksRaw = params.get("blocks");
           let blocks: unknown[] | undefined;

@@ -24,8 +24,7 @@ import {
 import {
   buildCommentBlocks,
   buildRunCreatedBlocks,
-  markSlackConnectionRevoked,
-  sendSlackDm,
+  deliverSlackDms,
 } from "@/lib/slack/dm";
 import { toInitials } from "@/lib/utils";
 
@@ -422,21 +421,19 @@ export async function notifyRunCreated(input: {
       instrumentDisplayName
     ) {
       const runUrl = `${origin}/instruments/${input.instrumentId}/runs/${encodeURIComponent(runDisplayId)}`;
-      await Promise.all(
-        slackCandidates.map(async (c) => {
-          const slackUserId = c.slackUserId ?? "";
-          const result = await sendSlackDm(slackUserId, {
+      await deliverSlackDms(
+        slackCandidates.map((c) => ({
+          userId: c.userId,
+          slackUserId: c.slackUserId ?? "",
+          payload: {
             text: `New run on *${instrumentDisplayName}*: \`${runDisplayId}\``,
             blocks: buildRunCreatedBlocks({
               instrumentDisplayName,
               runDisplayId,
               runUrl,
             }),
-          });
-          if (result.revoked) {
-            await markSlackConnectionRevoked(c.userId);
-          }
-        })
+          },
+        }))
       );
     }
   } catch (err) {
@@ -606,29 +603,26 @@ export async function notifyComment(input: {
           })),
       ];
 
-      if (slackJobs.length > 0) {
-        await Promise.all(
-          slackJobs.map(async (job) => {
-            const result = await sendSlackDm(job.slackUserId, {
-              text:
-                job.type === "comment_attributed"
-                  ? `${dmAuthorDisplayName} mentioned you in a run you ran on *${dmInstrumentDisplayName}*`
-                  : `${dmAuthorDisplayName} commented on a run you participated in on *${dmInstrumentDisplayName}*`,
-              blocks: buildCommentBlocks({
-                actorDisplayName: dmAuthorDisplayName,
-                instrumentDisplayName: dmInstrumentDisplayName,
-                runDisplayId: dmRunDisplayId,
-                commentPreview,
-                runUrl,
-                type: job.type,
-              }),
-            });
-            if (result.revoked) {
-              await markSlackConnectionRevoked(job.userId);
-            }
-          })
-        );
-      }
+      await deliverSlackDms(
+        slackJobs.map((job) => ({
+          userId: job.userId,
+          slackUserId: job.slackUserId,
+          payload: {
+            text:
+              job.type === "comment_attributed"
+                ? `${dmAuthorDisplayName} mentioned you in a run you ran on *${dmInstrumentDisplayName}*`
+                : `${dmAuthorDisplayName} commented on a run you participated in on *${dmInstrumentDisplayName}*`,
+            blocks: buildCommentBlocks({
+              actorDisplayName: dmAuthorDisplayName,
+              instrumentDisplayName: dmInstrumentDisplayName,
+              runDisplayId: dmRunDisplayId,
+              commentPreview,
+              runUrl,
+              type: job.type,
+            }),
+          },
+        }))
+      );
     }
   } catch (err) {
     console.error("notifyComment failed", err);

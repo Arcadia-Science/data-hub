@@ -1299,5 +1299,57 @@ describe("Notifications", () => {
       const dms = await getCapturedSlackDms();
       expect(dms).toHaveLength(1);
     });
+
+    // -----------------------------------------------------------------------
+    // Failure classification — per-recipient vs shared-token errors
+    // -----------------------------------------------------------------------
+
+    it("revokes the connection when Slack reports the recipient is unreachable", async () => {
+      const { userId } = await seedTestUser();
+      await setInstrumentSubscription(userId, instrumentId, true);
+      // The mock returns `{ ok: false, error: "channel_not_found" }` for this
+      // sentinel member id.
+      await connectSlack(userId, "U_FAIL_channel_not_found");
+
+      const runInternalId = await seedRun(instrumentId, "run-unreachable");
+      await notifyRunCreated({
+        runInternalId,
+        instrumentId,
+        instrumentDisplayName,
+        runDisplayId: "run-unreachable",
+        origin,
+      });
+
+      const db = getTestDb();
+      const [conn] = await db
+        .select()
+        .from(slackConnections)
+        .where(eq(slackConnections.userId, userId));
+      expect(conn.revokedAt).not.toBeNull();
+    });
+
+    it("leaves the connection intact when the shared bot token is rejected", async () => {
+      const { userId } = await seedTestUser();
+      await setInstrumentSubscription(userId, instrumentId, true);
+      // `invalid_auth` is a token-level failure that says nothing about this
+      // recipient, so their connection must not be revoked.
+      await connectSlack(userId, "U_FAIL_invalid_auth");
+
+      const runInternalId = await seedRun(instrumentId, "run-bot-token-dead");
+      await notifyRunCreated({
+        runInternalId,
+        instrumentId,
+        instrumentDisplayName,
+        runDisplayId: "run-bot-token-dead",
+        origin,
+      });
+
+      const db = getTestDb();
+      const [conn] = await db
+        .select()
+        .from(slackConnections)
+        .where(eq(slackConnections.userId, userId));
+      expect(conn.revokedAt).toBeNull();
+    });
   });
 });
