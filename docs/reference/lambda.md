@@ -34,7 +34,7 @@ The web app's `GET /api/v1/instruments/:instrumentId/runs/:runId/download-archiv
 3. The builder streams each S3 object through `zipfile.ZipFile` into an `_MultipartUploadStream` that buffers writes into ~16 MB parts and flushes each via `UploadPart`. Memory stays bounded regardless of total archive size, so a 200+ GB run zips inside the Lambda's standard memory budget. Entries are written `ZIP_STORED` (no compression — instrument output rarely compresses) with `force_zip64=True` (so individual entries ≥ 4 GB don't blow up the writer).
 4. On success, the Lambda returns `{ archive_bucket, archive_key, size_bytes }`. If `job_id` was supplied, it also PATCHes `/api/v1/archive-jobs/:job_id` with the same fields and `status: "ready"`; on failure it PATCHes `status: "failed"` with `error_message`. The PATCH callback authenticates with `Authorization: Bearer <DATA_HUB_API_KEY>` — the same PAT the Lambda uses for every other Lambda → API call. The PATCH primarily serves to record terminal state for diagnostics and to surface `failed` quickly — the UI's polling target is the `/download-archive` route itself (whose first action is an S3 HEAD against the canonical archive key), so a finished build is downloadable the moment the multipart upload completes regardless of whether this PATCH lands.
 
-See [Run archives](run-archives.md) for the full flow, S3 bucket layout, cache semantics, and operator runbook.
+See [Run archives](../ops/run-archives.md) for the full flow, S3 bucket layout, cache semantics, and operator runbook.
 
 ## Supported instruments
 
@@ -90,7 +90,7 @@ Available commands:
 | `qpcr` | Parse dye channels from an Azure Cielo qPCR Cq Values CSV |
 | `spectramax` | Parse metadata and raw well data from a SpectraMax `.xls` export |
 | `tapestation` | Extract the tape type from a TapeStation CSV filename |
-| `handler` | Stage a file into a local S3 mirror and invoke `lambda_handler` against the local dev API. See [Testing the Lambda end-to-end](local-development.md#testing-the-lambda-end-to-end) for the workflow. |
+| `handler` | Stage a file into a local S3 mirror and invoke `lambda_handler` against the local dev API. See [Testing the Lambda end-to-end](../local-development.md#testing-the-lambda-end-to-end) for the workflow. |
 
 The first six subcommands need no S3 or API access — they call into the same parsing/processing utilities the lambda uses, but stop short of the network. `handler` is different: it expects a running dev API and a `LOCAL_S3_MIRROR` directory, and uses the same dispatch path production uses.
 

@@ -75,7 +75,7 @@ Or in Cursor (`.cursor/mcp.json`):
 }
 ```
 
-See the [MCP server docs](../mcp.md) for the full list of tools, resources, prompts, and client-specific setup details.
+See the [MCP server docs](../reference/mcp.md) for the full list of tools, resources, prompts, and client-specific setup details.
 
 ### With the API directly
 
