@@ -119,7 +119,7 @@ export async function api(
     headers.Authorization = `Bearer ${token}`;
   }
 
-  return fetch(`${getBaseUrl()}${path}`, {
+  return await fetch(`${getBaseUrl()}${path}`, {
     ...rest,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),

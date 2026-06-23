@@ -15,7 +15,7 @@ export function registerPrompts(server: McpServer) {
           .describe("Date to summarize (YYYY-MM-DD). Defaults to today."),
       },
     },
-    async ({ date }) => {
+    ({ date }) => {
       const targetDate = date || new Date().toISOString().slice(0, 10);
       return {
         messages: [

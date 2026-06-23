@@ -14,7 +14,7 @@ let slackCaptureServer: http.Server | null = null;
 
 // Bind to port 0, let the OS assign a free port, then immediately release it.
 // This avoids hardcoding a port that might collide with other services.
-async function getFreePort(): Promise<number> {
+function getFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
     srv.listen(0, () => {

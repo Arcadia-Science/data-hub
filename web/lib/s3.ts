@@ -168,7 +168,7 @@ export async function getPresignedDownloadUrl(
       ResponseContentDisposition: `attachment; filename="${sanitizeContentDispositionFilename(opts.filename)}"`,
     }),
   });
-  return getSignedUrl(s3, command, { expiresIn });
+  return await getSignedUrl(s3, command, { expiresIn });
 }
 
 export async function getS3ObjectStream(
@@ -214,5 +214,5 @@ export async function getPresignedUploadUrl(
     Key: key,
     ...(contentType && { ContentType: contentType }),
   });
-  return getSignedUrl(s3, command, { expiresIn });
+  return await getSignedUrl(s3, command, { expiresIn });
 }

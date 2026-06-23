@@ -39,7 +39,7 @@ export const getSidebarInstruments = cache(
       .groupBy(instrumentRuns.instrumentId)
       .as("last_run");
 
-    return db
+    return await db
       .select({
         id: instruments.id,
         displayName: instruments.displayName,
@@ -57,7 +57,7 @@ export const getSidebarInstruments = cache(
 // dominate the top of the list.
 export const getSidebarWatchers = cache(
   async function getSidebarWatchers(): Promise<SidebarWatcher[]> {
-    return db
+    return await db
       .select({
         id: watchers.id,
         hostname: watchers.hostname,

@@ -9,6 +9,7 @@ import {
   isArchiveBuilderConfigured,
 } from "@/lib/api/archive-builder";
 import { expireStaleArchiveJobs } from "@/lib/api/archive-jobs";
+import { estimateRetryAfterSeconds } from "@/lib/api/archive-retry";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { db } from "@/lib/db";
 import { archiveJobs, files } from "@/lib/db/schema";
@@ -18,43 +19,6 @@ import {
   headS3Object,
   PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS,
 } from "@/lib/s3";
-
-// Floor for the build-time retry hint handed to the caller (LLM, polling UI).
-// Even a trivial archive pays Lambda cold-start + invoke + presign overhead,
-// so polling sooner than this just wastes round-trips.
-export const ARCHIVE_BUILD_RETRY_AFTER_SECONDS = 5;
-
-// Ceiling for the hint, keeping the chat interactive: better to have a caller
-// poll a couple extra times on a genuinely huge run than stall on one long
-// wait when the build may well finish early.
-export const ARCHIVE_BUILD_RETRY_AFTER_MAX_SECONDS = 30;
-
-// Coefficients for the retry-hint estimate. Build time is dominated by either
-// per-object `GetObject` latency (many tiny files) or throughput (a few large
-// files), so the estimate sums both terms. They are rough first guesses; the
-// floor/cap bound the error, and they can be retuned against real telemetry.
-const ARCHIVE_BUILD_BASE_SECONDS = 3;
-const ARCHIVE_BUILD_SECONDS_PER_FILE = 0.005;
-const ARCHIVE_BUILD_BYTES_PER_SECOND = 200 * 1024 * 1024;
-
-// Estimates how long the caller should wait before polling again, from the
-// shape of the run. `totalBytes` sums only known file sizes (NULL sizes add
-// nothing to the throughput term but still count toward the per-file term).
-// Clamped to [`ARCHIVE_BUILD_RETRY_AFTER_SECONDS`, `ARCHIVE_BUILD_RETRY_AFTER_MAX_SECONDS`].
-export function estimateRetryAfterSeconds(input: {
-  fileCount: number;
-  totalBytes: number;
-}): number {
-  const estimate =
-    ARCHIVE_BUILD_BASE_SECONDS +
-    input.fileCount * ARCHIVE_BUILD_SECONDS_PER_FILE +
-    input.totalBytes / ARCHIVE_BUILD_BYTES_PER_SECOND;
-  const rounded = Math.ceil(estimate);
-  return Math.min(
-    ARCHIVE_BUILD_RETRY_AFTER_MAX_SECONDS,
-    Math.max(ARCHIVE_BUILD_RETRY_AFTER_SECONDS, rounded)
-  );
-}
 
 export interface DownloadableFile {
   filename: string;

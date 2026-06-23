@@ -294,7 +294,7 @@ export async function getAllWatcherHeartbeats(
 ): Promise<WatcherHeartbeatRow[]> {
   const since = opts.since ?? new Date(Date.now() - DEFAULT_LOOKBACK_MS);
 
-  return db
+  return await db
     .select({
       id: watcherHeartbeats.id,
       timestamp: watcherHeartbeats.timestamp,

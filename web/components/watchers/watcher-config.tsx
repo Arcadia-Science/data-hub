@@ -2,11 +2,7 @@ import { FileText } from "lucide-react";
 import { CodeBlock } from "@/components/code-block";
 import { CopyButton } from "@/components/copy-button";
 
-export async function WatcherConfig({
-  configYaml,
-}: {
-  configYaml: string | null;
-}) {
+export function WatcherConfig({ configYaml }: { configYaml: string | null }) {
   if (!configYaml) {
     return (
       <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-background py-8 dark:bg-muted">

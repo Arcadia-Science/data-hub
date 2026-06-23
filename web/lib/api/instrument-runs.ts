@@ -713,7 +713,7 @@ export async function getRunFileStats(
 export async function getRunReportFiles(
   runInternalId: string
 ): Promise<RunFile[]> {
-  return db
+  return await db
     .select()
     .from(files)
     .where(

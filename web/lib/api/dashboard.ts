@@ -97,7 +97,7 @@ export const getInstrumentSummaries = cache(
 );
 
 export const getInstruments = cache(async function getInstruments() {
-  return db
+  return await db
     .select({
       id: instruments.id,
       displayName: instruments.displayName,

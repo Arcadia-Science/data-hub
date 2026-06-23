@@ -35,7 +35,7 @@ describe("Archive Jobs API", () => {
     body: Record<string, unknown>,
     options: { token?: string } = {}
   ) {
-    return fetch(`${getBaseUrl()}/api/v1/archive-jobs/${jobId}`, {
+    return await fetch(`${getBaseUrl()}/api/v1/archive-jobs/${jobId}`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",

@@ -3,7 +3,7 @@ import {
   ARCHIVE_BUILD_RETRY_AFTER_MAX_SECONDS,
   ARCHIVE_BUILD_RETRY_AFTER_SECONDS,
   estimateRetryAfterSeconds,
-} from "@/lib/api/run-archive";
+} from "@/lib/api/archive-retry";
 
 describe("estimateRetryAfterSeconds", () => {
   it("returns the floor for a tiny single-file run", () => {

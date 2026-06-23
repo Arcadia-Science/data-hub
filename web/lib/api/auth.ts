@@ -97,7 +97,7 @@ export async function authenticateRequest(
 export async function authenticateWithToken(
   request: Pick<Request, "headers">
 ): Promise<AuthResult | null> {
-  return validatePat(request.headers.get("authorization"));
+  return await validatePat(request.headers.get("authorization"));
 }
 
 export async function requireSession(): Promise<AuthResult | null> {
