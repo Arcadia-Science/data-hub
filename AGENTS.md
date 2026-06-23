@@ -52,4 +52,5 @@ recreate it from the "Minimal `.env`" block in `docs/local-development.md` (the 
   writes to `web/.next` and **contends with a running `make dev`** (also using `.next`). Stop the
   dev server before running integration tests, then restart it afterward.
 - Lint/format/typecheck: `make check-all` (note: `py-format`/`fe-format` auto-rewrite files; use
-  `uv run ruff check .`, `npm run lint`, `npm run typecheck`, `npm run format:check` for read-only checks).
+  `uv run ruff check .`, `npm run lint:check` (Biome formatter + linter, read-only), and
+  `npm run typecheck` for read-only checks).

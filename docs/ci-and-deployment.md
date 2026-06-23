@@ -19,9 +19,8 @@ Four workflows run on pushes to `staging`/`production` and on pull requests targ
 ### TypeScript lint and typecheck (`typescript-lint.yml`)
 
 1. Install dependencies with `npm ci`.
-2. `npm run format:check` — Prettier.
-3. `npm run lint` — ESLint.
-4. `npm run typecheck` — TypeScript compiler.
+2. `npm run lint:check` — Biome (via Ultracite), combined formatter + linter check.
+3. `npm run typecheck` — TypeScript compiler.
 
 ### TypeScript tests (`typescript-test.yml`)
 
