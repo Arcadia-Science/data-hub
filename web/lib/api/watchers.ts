@@ -1,6 +1,7 @@
 import { and, asc, count, desc, eq, gte, inArray, isNull } from "drizzle-orm";
 import { cache } from "react";
 import YAML from "yaml";
+import { instrumentHasOnlineWatcher } from "@/lib/api/instruments";
 import { db } from "@/lib/db";
 import {
   files,
@@ -75,6 +76,55 @@ export async function revertPendingUploadRequests(
     )
     .returning({ id: files.id });
   return reverted.map((row) => row.id);
+}
+
+// Sweep-only grace window, wider than the 5-minute online threshold so a brief
+// heartbeat blip doesn't churn the queue. The graceful-stop path skips it: an
+// explicit stop is intentional and reverts immediately.
+export const UPLOAD_REQUEST_REVERT_GRACE_MS = 15 * 60 * 1000;
+
+type UploadRevertReason = "watcher_stopped" | "watcher_offline_sweep";
+
+/**
+ * Reverts an instrument's pending upload requests to `detected` when no watcher
+ * is online to drain them, recording a `watcherEvents` row. Returns the count
+ * reverted. The online check is defensive given the one-active-watcher index,
+ * but lets the sweep attribute an event to a soft-deleted watcher without
+ * touching a live one.
+ */
+export async function revertUploadQueueIfWatcherOffline(opts: {
+  instrumentId: string;
+  watcherId: string;
+  reason: UploadRevertReason;
+}): Promise<number> {
+  if (await instrumentHasOnlineWatcher(opts.instrumentId)) {
+    return 0;
+  }
+
+  const revertedIds = await revertPendingUploadRequests(opts.instrumentId);
+  if (revertedIds.length === 0) {
+    return 0;
+  }
+
+  // Reuse existing enum values to avoid a migration: graceful stops map to
+  // `watcher_stopped`, the sweep to `error`. `kind`/`reason` in details let
+  // callers treat both uniformly (mirrors the config-route revert).
+  const eventType: "watcher_stopped" | "error" =
+    opts.reason === "watcher_stopped" ? "watcher_stopped" : "error";
+
+  await db.insert(watcherEvents).values({
+    watcherId: opts.watcherId,
+    eventType,
+    message: `Reverted ${revertedIds.length} pending upload request(s) — no online watcher to upload them`,
+    details: {
+      kind: "upload_requests_cancelled",
+      reason: opts.reason,
+      cancelled_count: revertedIds.length,
+    },
+    timestamp: new Date(),
+  });
+
+  return revertedIds.length;
 }
 
 interface WatcherLike {

@@ -9,7 +9,10 @@ import {
 } from "@/lib/api/errors";
 import { isValidUUID } from "@/lib/api/validators";
 import { isBelowFloor } from "@/lib/api/watcher-versions";
-import { findActiveWatcher } from "@/lib/api/watchers";
+import {
+  findActiveWatcher,
+  revertUploadQueueIfWatcherOffline,
+} from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import {
   watcherHeartbeats,
@@ -136,6 +139,17 @@ export async function POST(
       })
       .where(eq(watchers.id, watcherId)),
   ]);
+
+  // A non-`watching` heartbeat (typically a graceful `stopped` on shutdown)
+  // means this watcher can't drain its queue, so revert anything left in
+  // `upload_requested`. The helper re-checks online status before acting.
+  if (status !== "watching") {
+    await revertUploadQueueIfWatcherOffline({
+      instrumentId: watcher.instrumentId,
+      watcherId,
+      reason: "watcher_stopped",
+    });
+  }
 
   return Response.json({ ok: true });
 }
