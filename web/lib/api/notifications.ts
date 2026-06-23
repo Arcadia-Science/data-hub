@@ -18,8 +18,15 @@ import {
   notifications,
   runAttributions,
   runComments,
+  slackConnections,
   users,
 } from "@/lib/db/schema";
+import {
+  buildCommentBlocks,
+  buildRunCreatedBlocks,
+  markSlackConnectionRevoked,
+  sendSlackDm,
+} from "@/lib/slack/dm";
 import { toInitials } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -42,13 +49,22 @@ import { toInitials } from "@/lib/utils";
 export interface NotificationPreferencesDto {
   commentsAttributedEnabled: boolean;
   commentsParticipatedEnabled: boolean;
+  // In-app delivery
   runsAllMuted: boolean;
+  slackCommentsAttributedEnabled: boolean;
+  slackCommentsParticipatedEnabled: boolean;
+  // Slack delivery — independent of in-app; all default false until the user
+  // connects Slack (at which point the OAuth callback flips these to true).
+  slackRunsEnabled: boolean;
 }
 
 const DEFAULT_PREFERENCES: NotificationPreferencesDto = {
   runsAllMuted: false,
   commentsAttributedEnabled: true,
   commentsParticipatedEnabled: true,
+  slackRunsEnabled: false,
+  slackCommentsAttributedEnabled: false,
+  slackCommentsParticipatedEnabled: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -68,6 +84,11 @@ export async function getPreferences(
         notificationPreferences.commentsAttributedEnabled,
       commentsParticipatedEnabled:
         notificationPreferences.commentsParticipatedEnabled,
+      slackRunsEnabled: notificationPreferences.slackRunsEnabled,
+      slackCommentsAttributedEnabled:
+        notificationPreferences.slackCommentsAttributedEnabled,
+      slackCommentsParticipatedEnabled:
+        notificationPreferences.slackCommentsParticipatedEnabled,
     })
     .from(notificationPreferences)
     .where(eq(notificationPreferences.userId, userId))
@@ -80,14 +101,46 @@ export async function updatePreferences(
   userId: string,
   patch: Partial<NotificationPreferencesDto>
 ): Promise<NotificationPreferencesDto> {
-  // Make sure the row exists so the subsequent UPDATE has something to
-  // touch — keeps the function valid as a first-write entry point.
+  // Map DTO field names to the DB column names used by Drizzle. The
+  // `values()` call on a fresh insert also uses these column references so
+  // the column name mapping only needs to live in one place.
+  const dbPatch: Partial<{
+    runsAllMuted: boolean;
+    commentsAttributedEnabled: boolean;
+    commentsParticipatedEnabled: boolean;
+    slackRunsEnabled: boolean;
+    slackCommentsAttributedEnabled: boolean;
+    slackCommentsParticipatedEnabled: boolean;
+    updatedAt: Date;
+  }> = {};
+
+  if (patch.runsAllMuted !== undefined) {
+    dbPatch.runsAllMuted = patch.runsAllMuted;
+  }
+  if (patch.commentsAttributedEnabled !== undefined) {
+    dbPatch.commentsAttributedEnabled = patch.commentsAttributedEnabled;
+  }
+  if (patch.commentsParticipatedEnabled !== undefined) {
+    dbPatch.commentsParticipatedEnabled = patch.commentsParticipatedEnabled;
+  }
+  if (patch.slackRunsEnabled !== undefined) {
+    dbPatch.slackRunsEnabled = patch.slackRunsEnabled;
+  }
+  if (patch.slackCommentsAttributedEnabled !== undefined) {
+    dbPatch.slackCommentsAttributedEnabled =
+      patch.slackCommentsAttributedEnabled;
+  }
+  if (patch.slackCommentsParticipatedEnabled !== undefined) {
+    dbPatch.slackCommentsParticipatedEnabled =
+      patch.slackCommentsParticipatedEnabled;
+  }
+
   await db
     .insert(notificationPreferences)
-    .values({ userId, ...patch })
+    .values({ userId, ...dbPatch })
     .onConflictDoUpdate({
       target: notificationPreferences.userId,
-      set: { ...patch, updatedAt: new Date() },
+      set: { ...dbPatch, updatedAt: new Date() },
     });
 
   return getPreferences(userId);
@@ -298,22 +351,43 @@ export async function markRead(userId: string, ids?: string[]): Promise<void> {
 // ---------------------------------------------------------------------------
 // Fan-out helpers — invoked from inside `after(...)` hooks on the run-create
 // and comment-create routes so the writing route can return immediately.
-// Each helper performs a single targeted SELECT to compute recipients, then
-// a single bulk INSERT. Failures are swallowed and logged: a notification
-// outage must never fail the underlying mutation.
+//
+// In-app and Slack are **independent delivery channels** that share the same
+// candidacy logic (who cares about this event). For each candidate we decide
+// separately:
+//   (a) Insert a `notifications` row  — if the user's in-app toggle is on.
+//   (b) Send a Slack DM               — if the user has a live Slack
+//                                       connection AND the Slack toggle is on.
+//
+// A user can therefore receive a type via Slack only (no bell row), in-app
+// only, both, or neither. Failures in either channel are swallowed and logged
+// — a notification outage must never fail the triggering mutation, and a
+// Slack failure must never suppress the in-app insert (and vice-versa).
 // ---------------------------------------------------------------------------
 
 export async function notifyRunCreated(input: {
   runInternalId: string;
   instrumentId: string;
+  // The following are needed to build Slack DM messages. When omitted
+  // (e.g. in library-level tests that don't test Slack delivery), Slack
+  // DMs are silently skipped even if a user has a live connection.
+  instrumentDisplayName?: string;
+  runDisplayId?: string;
+  origin?: string;
 }): Promise<void> {
   try {
-    // Recipients: every user whose subscription for this instrument is
-    // enabled AND whose master `runs_all_muted` is false (or absent —
-    // missing row implies defaults i.e. master not muted).
-    const recipients = await db
+    // Candidates: every user with an enabled subscription for this instrument.
+    // We pull all channel-routing columns in one join so a single query covers
+    // both in-app and Slack delivery decisions.
+    const candidates = await db
       .select({
         userId: instrumentNotificationSubscriptions.userId,
+        // In-app: muted when `runs_all_muted` is true.
+        runsAllMuted: notificationPreferences.runsAllMuted,
+        // Slack: enabled when connected (non-revoked) AND toggle is on.
+        slackUserId: slackConnections.slackUserId,
+        slackRunsEnabled: notificationPreferences.slackRunsEnabled,
+        slackRevokedAt: slackConnections.revokedAt,
       })
       .from(instrumentNotificationSubscriptions)
       .leftJoin(
@@ -323,30 +397,70 @@ export async function notifyRunCreated(input: {
           instrumentNotificationSubscriptions.userId
         )
       )
+      .leftJoin(
+        slackConnections,
+        eq(slackConnections.userId, instrumentNotificationSubscriptions.userId)
+      )
       .where(
         and(
           eq(
             instrumentNotificationSubscriptions.instrumentId,
             input.instrumentId
           ),
-          eq(instrumentNotificationSubscriptions.enabled, true),
-          // `coalesce(..., false)` so the master flag missing entirely
-          // (no preferences row yet) is treated as not-muted.
-          sql`coalesce(${notificationPreferences.runsAllMuted}, false) = false`
+          eq(instrumentNotificationSubscriptions.enabled, true)
         )
       );
 
-    if (recipients.length === 0) {
+    if (candidates.length === 0) {
       return;
     }
 
-    await db.insert(notifications).values(
-      recipients.map((r) => ({
-        userId: r.userId,
+    const inAppRows = candidates
+      .filter(
+        // `coalesce(runsAllMuted, false)` so missing pref row → not muted.
+        (c) => !c.runsAllMuted
+      )
+      .map((c) => ({
+        userId: c.userId,
         type: "run_created" as const,
         runId: input.runInternalId,
-      }))
+      }));
+
+    const slackCandidates = candidates.filter(
+      (c) => c.slackUserId && !c.slackRevokedAt && (c.slackRunsEnabled ?? false)
     );
+
+    // Insert in-app rows first; Slack DMs fire after so a Slack outage
+    // never delays or blocks the bell badge update.
+    if (inAppRows.length > 0) {
+      await db.insert(notifications).values(inAppRows);
+    }
+
+    const { origin, runDisplayId, instrumentDisplayName } = input;
+    if (
+      slackCandidates.length > 0 &&
+      origin &&
+      runDisplayId &&
+      instrumentDisplayName
+    ) {
+      const runUrl = `${origin}/instruments/${input.instrumentId}/runs/${encodeURIComponent(runDisplayId)}`;
+      await Promise.all(
+        slackCandidates.map(async (c) => {
+          const slackUserId = c.slackUserId ?? "";
+          const result = await sendSlackDm(slackUserId, {
+            text: `New run on *${instrumentDisplayName}*: \`${runDisplayId}\``,
+            blocks: buildRunCreatedBlocks({
+              instrumentDisplayName,
+              runDisplayId,
+              runUrl,
+            }),
+          });
+          if (result.revoked) {
+            await markSlackConnectionRevoked(c.userId);
+          }
+        })
+      );
+    }
   } catch (err) {
     console.error("notifyRunCreated failed", err);
   }
@@ -356,74 +470,188 @@ export async function notifyComment(input: {
   runInternalId: string;
   commentId: string;
   authorUserId: string;
+  // The following are needed to build Slack DM messages. When omitted
+  // (e.g. in library-level tests), Slack DMs are silently skipped.
+  authorDisplayName?: string;
+  instrumentId?: string;
+  instrumentDisplayName?: string;
+  runDisplayId?: string;
+  commentBody?: string;
+  origin?: string;
 }): Promise<void> {
   try {
-    // Build the recipient set in two SELECTs that we union in JS so the
-    // attributed→participated precedence is enforced cleanly without a
-    // PostgreSQL-only DISTINCT ON. Each branch is independently gated on
-    // the user's own `comments_*_enabled` toggle and skips the comment
-    // author themselves.
+    // Resolve the two candidate sets independently (attributed wins over
+    // participated on overlap). Each branch pulls all channel-routing columns
+    // in one join — candidacy is independent of channel toggles so we can
+    // apply per-channel gates in JS after the query.
     const [attributedRows, participatedRows] = await Promise.all([
       db
-        .select({ userId: runAttributions.userId })
+        .select({
+          userId: runAttributions.userId,
+          commentsAttributedEnabled:
+            notificationPreferences.commentsAttributedEnabled,
+          slackUserId: slackConnections.slackUserId,
+          slackCommentsAttributedEnabled:
+            notificationPreferences.slackCommentsAttributedEnabled,
+          slackRevokedAt: slackConnections.revokedAt,
+        })
         .from(runAttributions)
         .leftJoin(
           notificationPreferences,
           eq(notificationPreferences.userId, runAttributions.userId)
         )
+        .leftJoin(
+          slackConnections,
+          eq(slackConnections.userId, runAttributions.userId)
+        )
         .where(
           and(
             eq(runAttributions.runId, input.runInternalId),
-            sql`${runAttributions.userId} <> ${input.authorUserId}`,
-            sql`coalesce(${notificationPreferences.commentsAttributedEnabled}, true) = true`
+            sql`${runAttributions.userId} <> ${input.authorUserId}`
           )
         ),
       db
-        .selectDistinct({ userId: runComments.userId })
+        .selectDistinct({
+          userId: runComments.userId,
+          commentsParticipatedEnabled:
+            notificationPreferences.commentsParticipatedEnabled,
+          slackUserId: slackConnections.slackUserId,
+          slackCommentsParticipatedEnabled:
+            notificationPreferences.slackCommentsParticipatedEnabled,
+          slackRevokedAt: slackConnections.revokedAt,
+        })
         .from(runComments)
         .leftJoin(
           notificationPreferences,
           eq(notificationPreferences.userId, runComments.userId)
         )
+        .leftJoin(
+          slackConnections,
+          eq(slackConnections.userId, runComments.userId)
+        )
         .where(
           and(
             eq(runComments.runId, input.runInternalId),
             sql`${runComments.userId} <> ${input.authorUserId}`,
-            isNull(runComments.deletedAt),
-            sql`coalesce(${notificationPreferences.commentsParticipatedEnabled}, true) = true`
+            isNull(runComments.deletedAt)
           )
         ),
     ]);
 
-    // Attributed wins on overlap so the user only sees one row per
-    // (recipient, comment) and the type carries the strongest signal.
+    // Attributed wins on overlap: a user already in `attributedRows` is
+    // skipped from `participatedRows` to avoid double-delivery.
     const attributedSet = new Set(attributedRows.map((r) => r.userId));
-    const participatedOnly = participatedRows
-      .map((r) => r.userId)
-      .filter((id) => !attributedSet.has(id));
+    const participatedOnly = participatedRows.filter(
+      (r) => !attributedSet.has(r.userId)
+    );
 
-    const rows = [
-      ...attributedRows.map((r) => ({
-        userId: r.userId,
-        type: "comment_attributed" as const,
-        runId: input.runInternalId,
-        commentId: input.commentId,
-        actorUserId: input.authorUserId,
-      })),
-      ...participatedOnly.map((userId) => ({
-        userId,
-        type: "comment_participated" as const,
-        runId: input.runInternalId,
-        commentId: input.commentId,
-        actorUserId: input.authorUserId,
-      })),
+    // --- In-app delivery (independent of Slack) ---
+    const inAppRows = [
+      ...attributedRows
+        .filter((r) => r.commentsAttributedEnabled !== false)
+        .map((r) => ({
+          userId: r.userId,
+          type: "comment_attributed" as const,
+          runId: input.runInternalId,
+          commentId: input.commentId,
+          actorUserId: input.authorUserId,
+        })),
+      ...participatedOnly
+        .filter((r) => r.commentsParticipatedEnabled !== false)
+        .map((r) => ({
+          userId: r.userId,
+          type: "comment_participated" as const,
+          runId: input.runInternalId,
+          commentId: input.commentId,
+          actorUserId: input.authorUserId,
+        })),
     ];
 
-    if (rows.length === 0) {
-      return;
+    if (inAppRows.length > 0) {
+      await db.insert(notifications).values(inAppRows);
     }
 
-    await db.insert(notifications).values(rows);
+    // --- Slack delivery (independent of in-app) ---
+    // Skip entirely when the route didn't supply the fields needed to build
+    // the DM (e.g. library-level test invocations).
+    const {
+      origin: dmOrigin,
+      instrumentId: dmInstrumentId,
+      runDisplayId: dmRunDisplayId,
+      instrumentDisplayName: dmInstrumentDisplayName,
+      authorDisplayName: dmAuthorDisplayName,
+      commentBody: dmCommentBody,
+    } = input;
+
+    if (
+      dmOrigin &&
+      dmInstrumentId &&
+      dmRunDisplayId &&
+      dmInstrumentDisplayName &&
+      dmAuthorDisplayName &&
+      dmCommentBody !== undefined
+    ) {
+      const runUrl = `${dmOrigin}/instruments/${dmInstrumentId}/runs/${encodeURIComponent(dmRunDisplayId)}#comment-${input.commentId}`;
+      const commentPreview =
+        dmCommentBody.length > 240
+          ? `${dmCommentBody.slice(0, 240).trimEnd()}…`
+          : dmCommentBody;
+
+      const slackJobs: Array<{
+        userId: string;
+        slackUserId: string;
+        type: "comment_attributed" | "comment_participated";
+      }> = [
+        ...attributedRows
+          .filter(
+            (r) =>
+              r.slackUserId &&
+              !r.slackRevokedAt &&
+              (r.slackCommentsAttributedEnabled ?? false)
+          )
+          .map((r) => ({
+            userId: r.userId,
+            slackUserId: r.slackUserId ?? "",
+            type: "comment_attributed" as const,
+          })),
+        ...participatedOnly
+          .filter(
+            (r) =>
+              r.slackUserId &&
+              !r.slackRevokedAt &&
+              (r.slackCommentsParticipatedEnabled ?? false)
+          )
+          .map((r) => ({
+            userId: r.userId,
+            slackUserId: r.slackUserId ?? "",
+            type: "comment_participated" as const,
+          })),
+      ];
+
+      if (slackJobs.length > 0) {
+        await Promise.all(
+          slackJobs.map(async (job) => {
+            const result = await sendSlackDm(job.slackUserId, {
+              text:
+                job.type === "comment_attributed"
+                  ? `${dmAuthorDisplayName} mentioned you in a run you ran on *${dmInstrumentDisplayName}*`
+                  : `${dmAuthorDisplayName} commented on a run you participated in on *${dmInstrumentDisplayName}*`,
+              blocks: buildCommentBlocks({
+                actorDisplayName: dmAuthorDisplayName,
+                instrumentDisplayName: dmInstrumentDisplayName,
+                runDisplayId: dmRunDisplayId,
+                commentPreview,
+                runUrl,
+                type: job.type,
+              }),
+            });
+            if (result.revoked) {
+              await markSlackConnectionRevoked(job.userId);
+            }
+          })
+        );
+      }
+    }
   } catch (err) {
     console.error("notifyComment failed", err);
   }

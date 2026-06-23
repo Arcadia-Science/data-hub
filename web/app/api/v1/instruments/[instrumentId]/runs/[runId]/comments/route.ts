@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { after } from "next/server";
 import { authorize } from "@/lib/api/auth";
@@ -10,6 +11,8 @@ import {
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { notifyComment } from "@/lib/api/notifications";
 import { createComment, listCommentsForRun } from "@/lib/api/run-comments";
+import { db } from "@/lib/db";
+import { users } from "@/lib/db/schema";
 
 interface RouteContext {
   params: Promise<{ instrumentId: string; runId: string }>;
@@ -103,14 +106,28 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     body: payload.body,
   });
 
-  // Fan out to attributees + prior commenters after the response is
-  // sent. The helper itself decides who actually qualifies (and skips
-  // the comment author) based on each user's notification preferences.
+  // Fan out to attributees + prior commenters after the response is sent.
+  // Fetch the author's display name here (before the response) so the
+  // closure captures a concrete string rather than making a DB call inside
+  // the deferred `after()` block where request context may be gone.
+  const [author] = await db
+    .select({ name: users.name, email: users.email })
+    .from(users)
+    .where(eq(users.id, authResult.userId))
+    .limit(1);
+  const authorDisplayName = author?.name ?? author?.email ?? "Someone";
+
   after(async () => {
     await notifyComment({
       runInternalId: run.id,
       commentId: comment.id,
       authorUserId: authResult.userId,
+      authorDisplayName,
+      instrumentId,
+      instrumentDisplayName: run.instrumentDisplayName,
+      runDisplayId: runId,
+      commentBody: payload.body as string,
+      origin: new URL(request.url).origin,
     });
   });
 
