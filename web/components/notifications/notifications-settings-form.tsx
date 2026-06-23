@@ -183,7 +183,7 @@ export function NotificationsSettingsForm({
         }}
       >
         <Card>
-          <CardContent className="max-w-2xl">
+          <CardContent>
             <FieldGroup>
               <form.Field name="runsAllMuted">
                 {(field) => (
@@ -263,7 +263,7 @@ export function NotificationsSettingsForm({
           {initialInstruments.length > 0 ? (
             <>
               <FieldSeparator />
-              <CardContent className="max-w-2xl">
+              <CardContent>
                 <div className="mb-4">
                   <h3 className="font-medium text-sm">Per-instrument</h3>
                   <p className="text-muted-foreground text-sm">
@@ -360,6 +360,11 @@ export function NotificationsSettingsForm({
         disconnect (an immediate action) doesn't require a Save click.
         The Slack per-type toggles are wired back into the form state
         above so they are persisted on the same Save. */}
+      <SlackConnectionCard.SectionHeader
+        connected={slackConnection.connected}
+        revoked={slackConnection.revoked}
+        slackTeamName={slackConnection.slackTeamName}
+      />
       {slackConnection.connected ? (
         <form.Subscribe
           selector={(state) => ({
@@ -389,7 +394,6 @@ export function NotificationsSettingsForm({
                 slackValues.slackCommentsParticipatedEnabled
               }
               slackRunsEnabled={slackValues.slackRunsEnabled}
-              slackTeamName={slackConnection.slackTeamName}
             />
           )}
         </form.Subscribe>

@@ -2,6 +2,7 @@ import type { Metadata } from "next/types";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import { NotificationsSettingsForm } from "@/components/notifications/notifications-settings-form";
+import { SettingsPageContent } from "@/components/settings/settings-page-content";
 import {
   getPreferences,
   listInstrumentSubscriptions,
@@ -37,7 +38,7 @@ export default async function NotificationsSettingsPage() {
   ]);
 
   return (
-    <div>
+    <SettingsPageContent>
       <div>
         <h2 className="font-semibold text-lg tracking-tight">Notifications</h2>
         <p className="text-muted-foreground text-sm">
@@ -79,6 +80,6 @@ export default async function NotificationsSettingsPage() {
           />
         </Suspense>
       </div>
-    </div>
+    </SettingsPageContent>
   );
 }

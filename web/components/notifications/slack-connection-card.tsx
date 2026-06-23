@@ -4,22 +4,17 @@
 // settings form. Two states are rendered as separate sub-components so the
 // parent never needs boolean props to distinguish them:
 //
+//   <SlackConnectionCard.SectionHeader .../> — title + description above card
 //   <SlackConnectionCard.Connected .../>   — shows status + Slack switches
 //   <SlackConnectionCard.Disconnected />   — shows "Connect to Slack" CTA
 
-import { BotMessageSquare, Loader2, TriangleAlert } from "lucide-react";
+import { Loader2, TriangleAlert } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Field,
   FieldContent,
@@ -35,23 +30,64 @@ import {
 } from "@/components/ui/tooltip";
 
 // ---------------------------------------------------------------------------
+// Section header — lives above the card, matching the page-level
+// Notifications heading pattern in `app/settings/notifications/page.tsx`.
+// ---------------------------------------------------------------------------
+
+function SectionHeader({
+  connected,
+  revoked,
+  slackTeamName,
+}: {
+  connected: boolean;
+  revoked: boolean;
+  slackTeamName: string | null;
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="font-semibold text-lg tracking-tight">
+          Slack notifications
+        </h2>
+        {connected ? (
+          revoked ? (
+            <Badge variant="destructive">Reconnect required</Badge>
+          ) : (
+            <Badge variant="secondary">
+              Connected{slackTeamName ? ` · ${slackTeamName}` : ""}
+            </Badge>
+          )
+        ) : null}
+      </div>
+      {connected && revoked ? (
+        <p className="flex items-start gap-1.5 text-destructive text-sm">
+          <TriangleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+          The Slack connection is no longer valid. Reconnect to resume DMs.
+        </p>
+      ) : connected ? (
+        <p className="text-muted-foreground text-sm">
+          Choose which notification types to also deliver as Slack DMs. In-app
+          and Slack are independent — you can enable Slack only for a type by
+          turning off its in-app switch above.
+        </p>
+      ) : (
+        <p className="text-muted-foreground text-sm">
+          Connect your Slack account to receive notifications as personal DMs
+          from the Data Hub bot. In-app and Slack are independent — you can turn
+          off in-app for a type and receive it only via Slack.
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Disconnected state
 // ---------------------------------------------------------------------------
 
 function Disconnected() {
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <BotMessageSquare aria-hidden className="size-4 shrink-0" />
-          Slack notifications
-        </CardTitle>
-        <CardDescription>
-          Connect your Slack account to receive notifications as personal DMs
-          from the Data Hub bot. In-app and Slack are independent — you can turn
-          off in-app for a type and receive it only via Slack.
-        </CardDescription>
-      </CardHeader>
       <CardContent>
         <Button asChild variant="outline">
           <a href="/api/v1/settings/slack/connect">Connect to Slack</a>
@@ -74,11 +110,9 @@ interface ConnectedProps {
   slackCommentsParticipatedEnabled: boolean;
   // Controlled switch values from the parent TanStack Form state.
   slackRunsEnabled: boolean;
-  slackTeamName: string | null;
 }
 
 function Connected({
-  slackTeamName,
   revoked,
   slackRunsEnabled,
   slackCommentsAttributedEnabled,
@@ -111,34 +145,6 @@ function Connected({
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <BotMessageSquare aria-hidden className="size-4 shrink-0" />
-          Slack notifications
-          {revoked ? (
-            <Badge className="ml-auto" variant="destructive">
-              Reconnect required
-            </Badge>
-          ) : (
-            <Badge className="ml-auto" variant="secondary">
-              Connected{slackTeamName ? ` · ${slackTeamName}` : ""}
-            </Badge>
-          )}
-        </CardTitle>
-        {revoked ? (
-          <CardDescription className="flex items-start gap-1.5 text-destructive">
-            <TriangleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0" />
-            The Slack connection is no longer valid. Reconnect to resume DMs.
-          </CardDescription>
-        ) : (
-          <CardDescription>
-            Choose which notification types to also deliver as Slack DMs. In-app
-            and Slack are independent — you can enable Slack only for a type by
-            turning off its in-app switch above.
-          </CardDescription>
-        )}
-      </CardHeader>
-
       <CardContent className="flex flex-col gap-6">
         {revoked ? (
           <Button asChild variant="outline">
@@ -230,6 +236,7 @@ function Connected({
 // ---------------------------------------------------------------------------
 
 export const SlackConnectionCard = {
+  SectionHeader,
   Connected,
   Disconnected,
 };
