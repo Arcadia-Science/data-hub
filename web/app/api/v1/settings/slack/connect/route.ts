@@ -30,12 +30,15 @@ export async function GET(request: NextRequest) {
   const redirectUri = getSlackRedirectUri(origin);
   const state = generateState(auth.userId);
 
+  // OpenID Connect "Sign in with Slack": the openid scopes go in `scope` (the
+  // `/openid/connect/authorize` endpoint ignores the classic `user_scope`
+  // param), and `response_type=code` is required. `profile` carries the user
+  // ID, team ID, and team name we read from the id_token — no workspace write
+  // scopes are requested.
   const params = new URLSearchParams({
+    response_type: "code",
     client_id: clientId,
-    scope: "",
-    // Request the user's own identity via OIDC so we get their Slack user ID
-    // without any write permissions to the workspace.
-    user_scope: "openid,profile",
+    scope: "openid profile",
     redirect_uri: redirectUri,
     state,
   });
