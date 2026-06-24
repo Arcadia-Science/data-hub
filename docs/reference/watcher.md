@@ -52,6 +52,8 @@ Interactive setup wizard that:
 
 The wizard normalizes the pasted API key (stripping zero-width and non-breaking-space characters that Windows clipboards routinely inject) and rejects values that don't start with `dhub_`, so a paste mistake surfaces as a clear error rather than a confusing 401 later. Pass `--show-key` if your terminal mangles hidden input on paste.
 
+The initial scan mode defaults by environment: a fresh `init` on `production` uploads whatever is already in the watch directory, while `staging` and `preview` skip the pre-existing backlog and upload only files created afterwards. This guards a test environment from ingesting a PC's entire history. Set `initial_scan` in the config to override — see [Initial scan and the backlog](#initial-scan-and-the-backlog).
+
 ### `watch`
 
 Starts the file monitoring loop. Before entering the loop it:
@@ -193,12 +195,14 @@ A switch validates the target API with the resolved key, reuses the stored `watc
 
 #### Initial scan and the backlog
 
-Each environment keeps its own local state database (see [Local state](#local-state)), so switching never re-uploads files across environments. To avoid flooding a non-production environment with a PC's historical data, the initial scan mode defaults by environment:
+Each environment keeps its own local state database (see [Local state](#local-state)), so switching never re-uploads files across environments. The first time an environment is entered — whether by `init` or by `config set-environment` — the initial scan mode decides what happens to files already sitting in the watch directory. It defaults by environment:
 
 - `production` → `full`: the existing backlog is uploaded (production is the source of truth).
-- `staging` / `preview` → `new-only`: the files already on disk when the environment is first entered are recorded as a baseline and skipped; only files created after the switch flow to the target.
+- `staging` / `preview` → `new-only`: the files already on disk when the environment is first entered are recorded as a baseline and skipped; only files created afterwards are uploaded.
 
-Set `initial_scan` explicitly in the config to override (e.g. `full` to deliberately populate a staging environment). Switching a preview to a different deployment URL resets that environment's local state so the new target gets a clean baseline.
+This means a **fresh `init` on `staging` or `preview` does not upload the pre-existing backlog** — a deliberate guard so a test environment isn't flooded with a PC's entire history. Set `initial_scan: full` in the config to opt back in (e.g. to deliberately populate a staging environment), or `initial_scan: new-only` on production to suppress its backlog.
+
+Upgrading an existing watcher is unaffected: the environment's database already carries upload/run history, so the one-shot baseline seeding is skipped and detection continues exactly as before. Switching a preview to a different deployment URL resets that environment's local state so the new target gets a clean baseline.
 
 ### Upload modes
 

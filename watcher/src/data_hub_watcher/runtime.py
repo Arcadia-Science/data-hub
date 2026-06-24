@@ -26,7 +26,7 @@ from data_hub_watcher.constants import (
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import HeartbeatLoop, WatcherCounters
 from data_hub_watcher.models import WatcherConfig
-from data_hub_watcher.monitor import FileMonitor, seed_baseline_files
+from data_hub_watcher.monitor import FileMonitor
 from data_hub_watcher.run_detector import RunDetector
 from data_hub_watcher.state import StateDB
 from data_hub_watcher.updater import Updater, evaluate_upgrade_marker
@@ -219,19 +219,11 @@ def build_runtime(
     state_db = StateDB(db_path)
     state_db.prune_uploaded_files(PRUNE_DAYS)
 
-    # Record the pre-existing backlog as skip on a `new-only` environment's
-    # first start so the initial scan doesn't flood the target. Gated on an
-    # empty DB so a real upload/run history is never re-baselined.
-    if cfg.resolve_initial_scan() == "new-only" and not state_db.baseline_established():
-        seed_baseline_files(
-            state_db,
-            inst.watch_directory,
-            inst.file_patterns,
-            inst.run_detection.recursive,
-        )
-        # Mark even when zero files matched so an empty watch dir isn't
-        # re-walked on every start.
-        state_db.mark_baseline_seeded()
+    # On a `new-only` environment's first start, the monitor folds backlog
+    # baselining into its initial scan (one walk) instead of uploading the
+    # pre-existing files. Gated on an empty DB so a real upload/run history is
+    # never re-baselined; the gate is read once here, before the scan runs.
+    seed_baseline = cfg.resolve_initial_scan() == "new-only" and not state_db.baseline_established()
 
     counters = WatcherCounters()
     reporter = EventReporter(client, watcher_id)
@@ -292,6 +284,7 @@ def build_runtime(
         state_db=state_db,
         recursive=inst.run_detection.recursive,
         event_reporter=reporter,
+        seed_baseline=seed_baseline,
     )
 
     # The heartbeat's `on_tick` hook is now multi-purpose:

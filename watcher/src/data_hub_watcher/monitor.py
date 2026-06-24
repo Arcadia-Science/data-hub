@@ -115,6 +115,12 @@ class FileMonitor:
     recursive:
         Whether to monitor subdirectories (`True` for directory-mode run
         detection, `False` otherwise).
+    seed_baseline:
+        When `True`, the initial scan records every matching file already on
+        disk as `baseline_files` (skip, never uploaded) instead of enqueuing
+        it. Set by `runtime.build_runtime` on the first start of a `new-only`
+        environment so the pre-existing backlog is suppressed in a single
+        directory walk rather than a separate seeding pass plus a scan.
     """
 
     def __init__(
@@ -126,9 +132,11 @@ class FileMonitor:
         state_db: StateDB,
         recursive: bool = False,
         event_reporter: EventReporter | None = None,
+        seed_baseline: bool = False,
     ) -> None:
         self._watch_dir = watch_directory
         self._patterns = file_patterns
+        self._seed_baseline = seed_baseline
         # Compile the patterns once and reuse for both the initial scan
         # and the watchdog event handler. Hot-path scans of large
         # directories used to do ``len(file_patterns)`` fnmatch calls
@@ -288,7 +296,15 @@ class FileMonitor:
         one ``entry.stat()`` + two SQL ``SELECT`` s per file" pattern
         with "one cached ``DirEntry.stat()`` + one Python dict lookup"
         -- typically a 5-10x speedup on lab-PC sized trees.
+
+        On the first start of a `new-only` environment (`seed_baseline`)
+        the same walk records the backlog as `baseline_files` instead of
+        enqueuing it -- see :meth:`_seed_baseline_scan` -- so startup costs
+        one directory walk, not one to seed and one to scan it back.
         """
+        if self._seed_baseline:
+            self._seed_baseline_scan()
+            return
         logger.info(
             "Initial scan starting (dir=%s, patterns=%s, recursive=%s)…",
             self._watch_dir,
@@ -347,6 +363,50 @@ class FileMonitor:
             queued,
             skipped,
         )
+
+    def _seed_baseline_scan(self) -> int:
+        """Record every matching file on disk as baseline, enqueue nothing.
+
+        Runs in place of the normal initial scan on the first start of a
+        `new-only` environment (see :class:`FileMonitor`'s ``seed_baseline``).
+        A baseline row means "skip, never uploaded"; the rows also feed
+        :meth:`_load_dedup_index` so future restarts skip the same backlog.
+
+        Reuses :meth:`_iter_dir_entries` -- the very walker the normal scan
+        uses -- so the traversal and stat semantics match exactly and the
+        first start pays for a single directory walk. Returns the count of
+        baselined files.
+        """
+        rows: list[tuple[str, int, float]] = []
+        for entry in self._iter_dir_entries(self._watch_dir):
+            try:
+                if not entry.is_file(follow_symlinks=False):
+                    continue
+            except OSError:
+                continue
+            if not self._matches_name(entry.name):
+                continue
+            try:
+                st = entry.stat(follow_symlinks=False)
+            except OSError:
+                continue
+            entry_path = Path(entry.path)
+            try:
+                rel_path = entry_path.relative_to(self._watch_dir).as_posix()
+            except ValueError:
+                rel_path = entry.name
+            rows.append((rel_path, st.st_size, st.st_mtime))
+
+        self._state_db.record_baseline_files(rows)
+        # Mark even when zero files matched so an empty watch dir isn't
+        # re-walked on every start (the gate in `build_runtime` reads this).
+        self._state_db.mark_baseline_seeded()
+        logger.info(
+            "Baseline seeded: %d existing file(s) under %s marked as skip (new-only env)",
+            len(rows),
+            self._watch_dir,
+        )
+        return len(rows)
 
     # ------------------------------------------------------------------
     # stability tracking
@@ -442,65 +502,6 @@ class FileMonitor:
                         path=str(path),
                         error=str(exc),
                     )
-
-
-def seed_baseline_files(
-    state_db: StateDB,
-    watch_directory: Path,
-    file_patterns: list[str],
-    recursive: bool,
-) -> int:
-    """Record every matching file currently on disk as baseline, no upload.
-
-    Called once when a `new-only` environment is first started so the initial
-    scan and ongoing detection skip the pre-existing backlog. Returns the
-    number of files recorded.
-
-    Walks via `os.scandir` with an explicit stack (same approach as
-    `FileMonitor._iter_dir_entries`) to avoid the recursion-depth cap on deep
-    run trees and to reuse `DirEntry`'s cached stat.
-    """
-    matches = _compile_pattern_matcher(file_patterns)
-    rows: list[tuple[str, int, float]] = []
-    stack: list[Path] = [watch_directory]
-    while stack:
-        current = stack.pop()
-        try:
-            it = os.scandir(current)
-        except OSError as exc:
-            logger.warning("baseline scandir failed for %s: %s", current, exc)
-            continue
-        with it:
-            for entry in it:
-                try:
-                    if entry.is_dir(follow_symlinks=False):
-                        if recursive:
-                            stack.append(Path(entry.path))
-                        continue
-                    # Mirror `FileMonitor._initial_scan`: it only enqueues real
-                    # files (`is_file(follow_symlinks=False)`), so only those
-                    # belong in the baseline or membership would diverge.
-                    if not entry.is_file(follow_symlinks=False):
-                        continue
-                    if not matches(entry.name):
-                        continue
-                    st = entry.stat(follow_symlinks=False)
-                except OSError:
-                    continue
-                entry_path = Path(entry.path)
-                try:
-                    rel_path = entry_path.relative_to(watch_directory).as_posix()
-                except ValueError:
-                    rel_path = entry.name
-                rows.append((rel_path, st.st_size, st.st_mtime))
-
-    state_db.record_baseline_files(rows)
-    logger.info(
-        "Baseline seeded: %d existing file(s) under %s marked as skip (new-only env)",
-        len(rows),
-        watch_directory,
-    )
-    return len(rows)
 
 
 def _stat_in_dedup_index(

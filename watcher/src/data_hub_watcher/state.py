@@ -34,9 +34,9 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# `meta` key set once `seed_baseline_files` has run for a `new-only`
-# environment, so the one-shot seed gate survives an empty-at-first-start
-# watch directory. See `StateDB.baseline_established`.
+# `meta` key set once `FileMonitor._seed_baseline_scan` has run for a
+# `new-only` environment, so the one-shot seed gate survives an
+# empty-at-first-start watch directory. See `StateDB.baseline_established`.
 BASELINE_SEEDED_META_KEY = "baseline_seeded"
 
 
@@ -480,9 +480,9 @@ class StateDB:
     def record_baseline_files(self, files: Iterable[tuple[str, int, float]]) -> None:
         """Record `(relative_path, size_bytes, mtime)` rows as baseline.
 
-        Used by `seed_baseline_files` when entering a `new-only` environment:
-        the rows feed the initial-scan dedup index so the pre-existing backlog
-        is skipped without ever being uploaded.
+        Used by `FileMonitor._seed_baseline_scan` when entering a `new-only`
+        environment: the rows feed the initial-scan dedup index so the
+        pre-existing backlog is skipped without ever being uploaded.
         """
         rows = list(files)
         if not rows:
@@ -522,7 +522,7 @@ class StateDB:
         return bool(cur.fetchone()[0])
 
     def mark_baseline_seeded(self) -> None:
-        """Record that `seed_baseline_files` has run for this environment.
+        """Record that baseline seeding has run for this environment.
 
         Makes the one-shot seed gate hold even when the initial scan matched
         zero files (see `baseline_established`).
