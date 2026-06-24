@@ -12,7 +12,7 @@ export function HinaMicroscopeRunDetail({
   files,
   filesPagination,
   fileStats,
-  reportFiles,
+  reportImages,
   instrumentId,
   runId,
   attributionsSlot,
@@ -53,7 +53,7 @@ export function HinaMicroscopeRunDetail({
         />
       </RunDetail.FilesMetadataLayout>
 
-      <RunDetail.ImageCarousel files={reportFiles} />
+      <RunDetail.ImageCarousel files={reportImages} />
     </>
   );
 }

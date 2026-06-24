@@ -9,6 +9,7 @@ import {
   buildRunFilesQuery,
   getProcessedCsvData,
   getRunFileStats,
+  getRunImageFiles,
   getRunReportFiles,
   lookupRunByNaturalKey,
 } from "@/lib/api/instrument-runs";
@@ -80,21 +81,33 @@ export default async function RunDetailPage({ params, searchParams }: Props) {
     notFound();
   }
 
-  const [filesPage, fileStats, reportFiles, instrument, comments] =
-    await Promise.all([
-      buildRunFilesQuery(run.id, {
-        page: filters.files_page,
-        perPage: FILES_PER_PAGE,
-        search: filters.files_search || undefined,
-        status: filters.files_status,
-        sort: filters.files_sort,
-        includeDismissed: filters.files_dismissed,
-      }),
-      getRunFileStats(run.id),
-      getRunReportFiles(run.id),
-      getInstrumentById(instrumentId),
-      listCommentsForRun(run.id),
-    ]);
+  // Only imaging instruments use the carousel, so only they pay for the query.
+  const isImagingInstrument =
+    run.instrumentType === "gel_doc" ||
+    run.instrumentType === "hina_microscope";
+
+  const [
+    filesPage,
+    fileStats,
+    reportFiles,
+    reportImages,
+    instrument,
+    comments,
+  ] = await Promise.all([
+    buildRunFilesQuery(run.id, {
+      page: filters.files_page,
+      perPage: FILES_PER_PAGE,
+      search: filters.files_search || undefined,
+      status: filters.files_status,
+      sort: filters.files_sort,
+      includeDismissed: filters.files_dismissed,
+    }),
+    getRunFileStats(run.id),
+    getRunReportFiles(run.id),
+    isImagingInstrument ? getRunImageFiles(run.id) : Promise.resolve([]),
+    getInstrumentById(instrumentId),
+    listCommentsForRun(run.id),
+  ]);
   const wellData = await getProcessedCsvData(reportFiles);
   // Gate client-side upload actions on watcher availability — a queued
   // upload request is a no-op if no agent is around to action it.
@@ -116,6 +129,7 @@ export default async function RunDetailPage({ params, searchParams }: Props) {
           filesPagination={filesPage.pagination}
           instrumentId={instrumentId}
           reportFiles={reportFiles}
+          reportImages={reportImages}
           run={run}
           runId={runId}
           wellData={wellData}

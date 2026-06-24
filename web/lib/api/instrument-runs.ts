@@ -764,6 +764,39 @@ export async function getRunReportFiles(
     .orderBy(files.createdAt);
 }
 
+// The carousel is a previewer, not the Files table — cap the payload.
+const CAROUSEL_IMAGE_LIMIT = 100;
+
+// Images for the imaging-instrument carousel. Unlike `getRunReportFiles`, this
+// includes raw captures — for gel doc / microscopy the raw images are the
+// report. Processed images sort first so they survive the cap.
+export async function getRunImageFiles(
+  runInternalId: string
+): Promise<RunFile[]> {
+  return await db
+    .select()
+    .from(files)
+    .where(
+      and(
+        eq(files.instrumentRunId, runInternalId),
+        isNull(files.deletedAt),
+        // Only images already in S3 have bytes to render; skip ones still
+        // pending upload so the carousel never shows a broken image.
+        sql`${files.s3Bucket} is not null and ${files.s3Key} is not null`,
+        sql`(
+          ${files.contentType} in ('image/png', 'image/jpeg', 'image/gif', 'image/webp')
+          or lower(${files.filename}) like '%.png'
+          or lower(${files.filename}) like '%.jpg'
+          or lower(${files.filename}) like '%.jpeg'
+          or lower(${files.filename}) like '%.gif'
+          or lower(${files.filename}) like '%.webp'
+        )`
+      )
+    )
+    .orderBy(sql`(${files.category} = 'processed') desc`, files.filename)
+    .limit(CAROUSEL_IMAGE_LIMIT);
+}
+
 // Resolve the file IDs matching the current table filters, used by the
 // archive route so "Download all" honors active filters across every page.
 export async function getFilteredFileIds(

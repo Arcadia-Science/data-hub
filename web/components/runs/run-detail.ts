@@ -33,6 +33,8 @@ export interface RunDetailProps {
   instrumentId: string;
   // Processed + PDF files for the report sections and well-data parsing.
   reportFiles: RunFile[];
+  // Images for the imaging-instrument carousel; empty for other instruments.
+  reportImages: RunFile[];
   run: RunDetailType;
   runId: string;
   wellData: RawWellRow[];

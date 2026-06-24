@@ -12,7 +12,7 @@ export function GelDocRunDetail({
   files,
   filesPagination,
   fileStats,
-  reportFiles,
+  reportImages,
   instrumentId,
   runId,
   attributionsSlot,
@@ -55,7 +55,7 @@ export function GelDocRunDetail({
         />
       </RunDetail.FilesMetadataLayout>
 
-      <RunDetail.ImageCarousel files={reportFiles} />
+      <RunDetail.ImageCarousel files={reportImages} />
     </>
   );
 }

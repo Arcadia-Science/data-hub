@@ -14,11 +14,19 @@ import {
 } from "@/components/ui/carousel";
 import type { RunFile } from "@/lib/api/instrument-runs";
 
-const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|tiff?)$/i;
+// Browser-displayable formats only; `.tif`/`.nd2` raw captures can't render.
+const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp)$/i;
+const RENDERABLE_CONTENT_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+]);
 
 function isImageFile(file: RunFile): boolean {
   return (
-    file.contentType?.startsWith("image/") === true ||
+    (file.contentType !== null &&
+      RENDERABLE_CONTENT_TYPES.has(file.contentType)) ||
     IMAGE_EXTENSIONS.test(file.filename)
   );
 }
@@ -31,13 +39,10 @@ function sortByFilename(a: RunFile, b: RunFile): number {
 // doc): a carousel instead of the default `RunReportSection`, which stacks
 // every image down the page.
 export function ImageCarouselReport({ files }: { files: RunFile[] }) {
-  const processedImages = useMemo(
+  const images = useMemo(
     () =>
       files
-        .filter(
-          (f) =>
-            f.category === "processed" && f.deletedAt === null && isImageFile(f)
-        )
+        .filter((f) => f.deletedAt === null && isImageFile(f))
         .sort(sortByFilename),
     [files]
   );
@@ -62,7 +67,7 @@ export function ImageCarouselReport({ files }: { files: RunFile[] }) {
     };
   }, [api]);
 
-  if (processedImages.length === 0) {
+  if (images.length === 0) {
     return (
       <div className="flex flex-col gap-2">
         <h2 className="font-semibold text-sm">Report Data</h2>
@@ -77,8 +82,7 @@ export function ImageCarouselReport({ files }: { files: RunFile[] }) {
     );
   }
 
-  const currentFile =
-    processedImages[Math.min(currentIndex, processedImages.length - 1)];
+  const currentFile = images[Math.min(currentIndex, images.length - 1)];
   const currentDownloadUrl = `/api/v1/files/${currentFile.id}/download`;
 
   return (
@@ -86,7 +90,7 @@ export function ImageCarouselReport({ files }: { files: RunFile[] }) {
       <h2 className="font-semibold text-sm">
         Report Data{" "}
         <span className="ml-1 font-mono font-normal text-muted-foreground text-xs">
-          {processedImages.length} image(s)
+          {images.length} image(s)
         </span>
       </h2>
       <Card size="sm">
@@ -97,7 +101,7 @@ export function ImageCarouselReport({ files }: { files: RunFile[] }) {
                 {currentFile.filename}
               </h3>
               <span className="font-mono text-muted-foreground text-xs">
-                {currentIndex + 1} / {processedImages.length}
+                {currentIndex + 1} / {images.length}
               </span>
             </div>
             <Button
@@ -118,7 +122,7 @@ export function ImageCarouselReport({ files }: { files: RunFile[] }) {
           </div>
           <Carousel className="w-full" opts={{ loop: false }} setApi={setApi}>
             <CarouselContent>
-              {processedImages.map((file, i) => {
+              {images.map((file, i) => {
                 const url = `/api/v1/files/${file.id}/download`;
                 return (
                   <CarouselItem key={file.id}>
@@ -137,7 +141,7 @@ export function ImageCarouselReport({ files }: { files: RunFile[] }) {
                 );
               })}
             </CarouselContent>
-            {processedImages.length > 1 && (
+            {images.length > 1 && (
               <>
                 <CarouselPrevious className="left-2" />
                 <CarouselNext className="right-2" />
