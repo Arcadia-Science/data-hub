@@ -8,7 +8,11 @@ import {
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
 import { isValidUUID } from "@/lib/api/validators";
-import { computeEffectiveStatus, findActiveWatcher } from "@/lib/api/watchers";
+import {
+  computeEffectiveStatus,
+  findActiveWatcher,
+  revertUploadQueueIfWatcherOffline,
+} from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { instruments, watchers } from "@/lib/db/schema";
 
@@ -71,6 +75,7 @@ export async function DELETE(
   const [watcher] = await db
     .select({
       id: watchers.id,
+      instrumentId: watchers.instrumentId,
       deletedAt: watchers.deletedAt,
     })
     .from(watchers)
@@ -90,6 +95,14 @@ export async function DELETE(
     .update(watchers)
     .set({ deletedAt: now })
     .where(eq(watchers.id, watcherId));
+
+  // Must run after the soft-delete so the helper's online check excludes this
+  // watcher; otherwise a deregistered instrument's queue would sit undrained.
+  await revertUploadQueueIfWatcherOffline({
+    instrumentId: watcher.instrumentId,
+    watcherId,
+    reason: "watcher_deregistered",
+  });
 
   return Response.json({ id: watcherId, deleted_at: now });
 }

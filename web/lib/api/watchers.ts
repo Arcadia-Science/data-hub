@@ -83,7 +83,10 @@ export async function revertPendingUploadRequests(
 // explicit stop is intentional and reverts immediately.
 export const UPLOAD_REQUEST_REVERT_GRACE_MS = 15 * 60 * 1000;
 
-type UploadRevertReason = "watcher_stopped" | "watcher_offline_sweep";
+type UploadRevertReason =
+  | "watcher_stopped"
+  | "watcher_deregistered"
+  | "watcher_offline_sweep";
 
 /**
  * Reverts an instrument's pending upload requests to `detected` when no watcher
@@ -106,11 +109,11 @@ export async function revertUploadQueueIfWatcherOffline(opts: {
     return 0;
   }
 
-  // Reuse existing enum values to avoid a migration: graceful stops map to
-  // `watcher_stopped`, the sweep to `error`. `kind`/`reason` in details let
-  // callers treat both uniformly (mirrors the config-route revert).
+  // Reuse existing enum values to avoid a migration: intentional teardowns map
+  // to `watcher_stopped`, the unattended sweep to `error`. `kind`/`reason` in
+  // details let callers treat them uniformly (mirrors the config-route revert).
   const eventType: "watcher_stopped" | "error" =
-    opts.reason === "watcher_stopped" ? "watcher_stopped" : "error";
+    opts.reason === "watcher_offline_sweep" ? "error" : "watcher_stopped";
 
   await db.insert(watcherEvents).values({
     watcherId: opts.watcherId,

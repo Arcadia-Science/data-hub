@@ -182,4 +182,43 @@ describe("Heartbeat — revert upload queue on watcher stop", () => {
       expect(r.status).toBe("upload_requested");
     }
   });
+
+  it("reverts queued files when the watcher is deregistered (DELETE)", async () => {
+    const instrumentId = "deregister-revert-inst";
+    const ids = await seedQueuedRun(instrumentId, "run-1", token);
+    const watcherId = await insertWatcher(instrumentId, "lab-pc");
+
+    const res = await api(`/api/v1/watchers/${watcherId}`, {
+      method: "DELETE",
+      token,
+    });
+    expect(res.status).toBe(200);
+
+    const db = getTestDb();
+    const rows = await db
+      .select({
+        status: files.status,
+        uploadRequestedAt: files.uploadRequestedAt,
+      })
+      .from(files)
+      .where(inArray(files.id, ids));
+    for (const r of rows) {
+      expect(r.status).toBe("detected");
+      expect(r.uploadRequestedAt).toBeNull();
+    }
+
+    const events = await db
+      .select()
+      .from(watcherEvents)
+      .where(eq(watcherEvents.watcherId, watcherId));
+    const revert = events.find(
+      (e) =>
+        (e.details as { kind?: string } | null)?.kind ===
+        "upload_requests_cancelled"
+    );
+    expect(revert?.eventType).toBe("watcher_stopped");
+    expect((revert?.details as { reason?: string }).reason).toBe(
+      "watcher_deregistered"
+    );
+  });
 });
