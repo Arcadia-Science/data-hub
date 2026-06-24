@@ -9,7 +9,10 @@ import {
 } from "@/lib/api/errors";
 import { isValidUUID } from "@/lib/api/validators";
 import { isBelowFloor } from "@/lib/api/watcher-versions";
-import { findActiveWatcher } from "@/lib/api/watchers";
+import {
+  findActiveWatcher,
+  revertUploadQueueIfWatcherOffline,
+} from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import {
   watcherHeartbeats,
@@ -136,6 +139,30 @@ export async function POST(
       })
       .where(eq(watchers.id, watcherId)),
   ]);
+
+  // A graceful `stopped` heartbeat (shutdown) means this watcher can't drain
+  // its queue, so revert anything left in `upload_requested`. We deliberately
+  // ignore `registered`: it's a transient startup state, and reverting there
+  // would churn the queue on every restart (`registered` → `watching`) when the
+  // watcher is about to come back and drain it. The cron sweep backstops a
+  // watcher that registers and then dies. The helper re-checks online status.
+  //
+  // Best-effort: the heartbeat itself is already committed above, so a failure
+  // here must not fail the response (the watcher would treat a 500 as a missed
+  // heartbeat).
+  if (status === "stopped") {
+    try {
+      await revertUploadQueueIfWatcherOffline({
+        instrumentId: watcher.instrumentId,
+        watcherId,
+        reason: "watcher_stopped",
+      });
+    } catch (err) {
+      console.error(
+        `[watcher-heartbeat] upload-queue revert failed for watcher ${watcherId}: ${err}`
+      );
+    }
+  }
 
   return Response.json({ ok: true });
 }
