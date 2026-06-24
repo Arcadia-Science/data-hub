@@ -206,6 +206,43 @@ class TestRegistryRoundTrip:
         ]
 
 
+class TestRewriteServiceEnvPath:
+    """`_rewrite_service_env_path` updates only `EnvPath`, keeping `ConfigPath`."""
+
+    def test_rewrites_env_path_preserving_config_path(self, service_module: ModuleType) -> None:
+        winreg = sys.modules["winreg"]
+        stored: dict[str, str] = {}
+        winreg.OpenKey.return_value = MagicMock(name="reg_key")
+
+        def _set(key: Any, name: str, _reserved: int, _type: int, value: str) -> None:
+            stored[name] = value
+
+        def _query(key: Any, name: str) -> tuple[str, int]:
+            return stored[name], _REG_SZ
+
+        winreg.SetValueEx.side_effect = _set
+        winreg.QueryValueEx.side_effect = _query
+
+        service_module._store_paths_in_registry(
+            Path("C:/data-hub/config.yaml"), Path("C:/data-hub/.env.staging")
+        )
+
+        service_module._rewrite_service_env_path(Path("C:/data-hub/.env.production"))
+
+        config_path, env_path = service_module._read_paths_from_registry()
+        assert config_path == Path("C:/data-hub/config.yaml")
+        assert env_path == Path("C:/data-hub/.env.production")
+
+    def test_no_installed_service_is_a_noop(self, service_module: ModuleType) -> None:
+        # A CLI-only host has no registry key; the switch must not fail there.
+        winreg = sys.modules["winreg"]
+        winreg.OpenKey.side_effect = OSError("key not found")
+
+        service_module._rewrite_service_env_path(Path("C:/data-hub/.env.production"))
+
+        winreg.SetValueEx.assert_not_called()
+
+
 # --- install_service argument shape -----------------------------------------
 
 
@@ -969,7 +1006,7 @@ def _make_config(
     return WatcherConfig(
         version=1,
         environment=environment,  # type: ignore[arg-type]
-        watcher_id=watcher_id,
+        watcher_ids={environment: watcher_id} if watcher_id else {},
         instrument=instrument,
     )
 

@@ -26,7 +26,7 @@ from data_hub_watcher.constants import (
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import HeartbeatLoop, WatcherCounters
 from data_hub_watcher.models import WatcherConfig
-from data_hub_watcher.monitor import FileMonitor
+from data_hub_watcher.monitor import FileMonitor, seed_baseline_files
 from data_hub_watcher.run_detector import RunDetector
 from data_hub_watcher.state import StateDB
 from data_hub_watcher.updater import Updater, evaluate_upgrade_marker
@@ -218,6 +218,18 @@ def build_runtime(
 
     state_db = StateDB(db_path)
     state_db.prune_uploaded_files(PRUNE_DAYS)
+
+    # In a `new-only` environment (staging/preview by default), record the
+    # pre-existing backlog as skip on first start so the initial scan doesn't
+    # flood the target with historical data. Gated on an empty DB so we never
+    # re-baseline once real uploads/runs exist for this environment.
+    if cfg.resolve_initial_scan() == "new-only" and not state_db.baseline_established():
+        seed_baseline_files(
+            state_db,
+            inst.watch_directory,
+            inst.file_patterns,
+            inst.run_detection.recursive,
+        )
 
     counters = WatcherCounters()
     reporter = EventReporter(client, watcher_id)

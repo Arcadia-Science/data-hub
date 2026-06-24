@@ -75,7 +75,7 @@ class DetectedFileRecord:
 
 
 class StateDB:
-    """Thin wrapper around a SQLite database with three tables.
+    """Thin wrapper around a SQLite database, one file per environment.
 
     - `uploaded_files` — tracks files already sent to S3.
     - `runs` — tracks runs reported to and uploaded via the API.
@@ -83,6 +83,12 @@ class StateDB:
       reported to the API, so subsequent restarts can hydrate
       `RunDetector._runs` and skip files in the initial scan even in
       manual mode (where `uploaded_files` stays empty).
+    - `baseline_files` — files that existed on disk when a `new-only`
+      environment was first entered and were deliberately skipped (never
+      uploaded). Distinct from `uploaded_files`: a baseline row means
+      "ignore", not "sent". Never pruned, unlike `uploaded_files`.
+    - `meta` — small key/value store (e.g. the preview deployment URL this
+      DB was seeded against) used to decide when to reset on a redeploy.
     """
 
     def __init__(self, db_path: Path) -> None:
@@ -225,6 +231,17 @@ class StateDB:
 
                 CREATE INDEX IF NOT EXISTS idx_detected_files_stat
                     ON detected_files (relative_path, size_bytes, mtime);
+
+                CREATE TABLE IF NOT EXISTS baseline_files (
+                    relative_path TEXT PRIMARY KEY,
+                    size_bytes    INTEGER NOT NULL,
+                    mtime         REAL NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS meta (
+                    key   TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
                 """
             )
             # Additive migration: older state DBs predate the stat-based
@@ -450,6 +467,66 @@ class StateDB:
         """
         cur = self._conn.execute("SELECT DISTINCT run_id FROM detected_files ORDER BY run_id")
         return [row[0] for row in cur.fetchall()]
+
+    # ------------------------------------------------------------------
+    # baseline_files
+    # ------------------------------------------------------------------
+
+    def record_baseline_files(self, files: Iterable[tuple[str, int, float]]) -> None:
+        """Record `(relative_path, size_bytes, mtime)` rows as baseline.
+
+        Used by `seed_baseline_files` when entering a `new-only` environment:
+        the rows feed the initial-scan dedup index so the pre-existing backlog
+        is skipped without ever being uploaded.
+        """
+        rows = list(files)
+        if not rows:
+            return
+        with self._write_lock:
+            self._conn.executemany(
+                "INSERT OR REPLACE INTO baseline_files "
+                "(relative_path, size_bytes, mtime) VALUES (?, ?, ?)",
+                rows,
+            )
+            self._conn.commit()
+
+    def iter_baseline_stat_keys(self) -> Iterator[tuple[str, int, float]]:
+        """Yield `(relative_path, size_bytes, mtime)` for every baseline row."""
+        cur = self._conn.execute("SELECT relative_path, size_bytes, mtime FROM baseline_files")
+        for row in cur:
+            yield row[0], row[1], row[2]
+
+    def baseline_established(self) -> bool:
+        """Whether this DB already has baseline or real upload/run history.
+
+        Gate for one-shot baseline seeding: if any of `baseline_files`,
+        `uploaded_files`, or `detected_files` is non-empty we must not reseed,
+        or we would mark genuinely-new files as skippable backlog.
+        """
+        cur = self._conn.execute(
+            "SELECT "
+            "EXISTS(SELECT 1 FROM baseline_files) OR "
+            "EXISTS(SELECT 1 FROM uploaded_files) OR "
+            "EXISTS(SELECT 1 FROM detected_files)"
+        )
+        return bool(cur.fetchone()[0])
+
+    # ------------------------------------------------------------------
+    # meta
+    # ------------------------------------------------------------------
+
+    def get_meta(self, key: str) -> str | None:
+        cur = self._conn.execute("SELECT value FROM meta WHERE key = ?", (key,))
+        row = cur.fetchone()
+        return None if row is None else str(row[0])
+
+    def set_meta(self, key: str, value: str) -> None:
+        with self._write_lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+                (key, value),
+            )
+            self._conn.commit()
 
     # ------------------------------------------------------------------
     # runs

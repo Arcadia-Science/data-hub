@@ -252,6 +252,10 @@ class FileMonitor:
             index.setdefault(rel_path, []).append((size_bytes, mtime))
         for rel_path, size_bytes, mtime in self._state_db.iter_detected_stat_keys():
             index.setdefault(rel_path, []).append((size_bytes, mtime))
+        # Baseline rows mark the pre-existing backlog of a `new-only`
+        # environment as already-handled so the scan skips it without upload.
+        for rel_path, size_bytes, mtime in self._state_db.iter_baseline_stat_keys():
+            index.setdefault(rel_path, []).append((size_bytes, mtime))
         return index
 
     def _initial_scan(self) -> None:
@@ -438,6 +442,60 @@ class FileMonitor:
                         path=str(path),
                         error=str(exc),
                     )
+
+
+def seed_baseline_files(
+    state_db: StateDB,
+    watch_directory: Path,
+    file_patterns: list[str],
+    recursive: bool,
+) -> int:
+    """Record every matching file currently on disk as baseline, no upload.
+
+    Called once when a `new-only` environment is first started so the initial
+    scan and ongoing detection skip the pre-existing backlog. Returns the
+    number of files recorded.
+
+    Walks via `os.scandir` with an explicit stack (same approach as
+    `FileMonitor._iter_dir_entries`) to avoid the recursion-depth cap on deep
+    run trees and to reuse `DirEntry`'s cached stat.
+    """
+    matches = _compile_pattern_matcher(file_patterns)
+    rows: list[tuple[str, int, float]] = []
+    stack: list[Path] = [watch_directory]
+    while stack:
+        current = stack.pop()
+        try:
+            it = os.scandir(current)
+        except OSError as exc:
+            logger.warning("baseline scandir failed for %s: %s", current, exc)
+            continue
+        with it:
+            for entry in it:
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        if recursive:
+                            stack.append(Path(entry.path))
+                        continue
+                    if not matches(entry.name):
+                        continue
+                    st = entry.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                entry_path = Path(entry.path)
+                try:
+                    rel_path = entry_path.relative_to(watch_directory).as_posix()
+                except ValueError:
+                    rel_path = entry.name
+                rows.append((rel_path, st.st_size, st.st_mtime))
+
+    state_db.record_baseline_files(rows)
+    logger.info(
+        "Baseline seeded: %d existing file(s) under %s marked as skip (new-only env)",
+        len(rows),
+        watch_directory,
+    )
+    return len(rows)
 
 
 def _stat_in_dedup_index(

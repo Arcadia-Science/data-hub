@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from data_hub_watcher.monitor import FileMonitor, _stat_in_dedup_index
+from data_hub_watcher.monitor import FileMonitor, _stat_in_dedup_index, seed_baseline_files
 from data_hub_watcher.state import StateDB
 
 
@@ -316,6 +316,55 @@ class TestInitialScan:
 
         assert a not in monitor._pending
         assert b in monitor._pending
+
+
+class TestSeedBaselineFiles:
+    """`seed_baseline_files` records the backlog so the scan skips it."""
+
+    def test_records_matching_files_without_marking_upload(
+        self, state_db: StateDB, watch_dir: Path
+    ) -> None:
+        (watch_dir / "a.nd2").write_bytes(b"x" * 100)
+        (watch_dir / "b.nd2").write_bytes(b"x" * 200)
+        (watch_dir / "skip.txt").write_text("nope")
+
+        count = seed_baseline_files(state_db, watch_dir, ["*.nd2"], recursive=False)
+
+        assert count == 2
+        assert {k[0] for k in state_db.iter_baseline_stat_keys()} == {"a.nd2", "b.nd2"}
+        # A baseline row is an "ignore" marker, not an upload record.
+        assert list(state_db.iter_uploaded_stat_keys()) == []
+
+    def test_recursive_records_nested_relative_path(
+        self, state_db: StateDB, watch_dir: Path
+    ) -> None:
+        (watch_dir / "run-a").mkdir()
+        (watch_dir / "run-a" / "out.nd2").write_bytes(b"x" * 10)
+
+        count = seed_baseline_files(state_db, watch_dir, ["*.nd2"], recursive=True)
+
+        assert count == 1
+        assert [k[0] for k in state_db.iter_baseline_stat_keys()] == ["run-a/out.nd2"]
+
+    def test_non_recursive_ignores_subdirectories(self, state_db: StateDB, watch_dir: Path) -> None:
+        (watch_dir / "top.nd2").write_bytes(b"x" * 10)
+        (watch_dir / "sub").mkdir()
+        (watch_dir / "sub" / "nested.nd2").write_bytes(b"x" * 10)
+
+        count = seed_baseline_files(state_db, watch_dir, ["*.nd2"], recursive=False)
+
+        assert count == 1
+        assert [k[0] for k in state_db.iter_baseline_stat_keys()] == ["top.nd2"]
+
+    def test_initial_scan_skips_baseline_files(self, state_db: StateDB, watch_dir: Path) -> None:
+        f = watch_dir / "backlog.nd2"
+        f.write_bytes(b"x" * 512)
+        seed_baseline_files(state_db, watch_dir, ["*.nd2"], recursive=False)
+
+        monitor = _make_monitor(watch_dir, state_db)
+        monitor._initial_scan()
+
+        assert f not in monitor._pending
 
 
 class TestDetectedFilesApi:

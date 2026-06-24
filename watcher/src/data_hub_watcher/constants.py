@@ -197,6 +197,50 @@ def save_api_key(api_key: str, environment: str | None = None) -> Path:
     return env_path
 
 
+# Sidecars SQLite creates alongside the main DB file in WAL mode; they must
+# travel with it on rename and be removed on reset or the DB is left corrupt.
+_SQLITE_SIDECAR_SUFFIXES: tuple[str, ...] = ("", "-wal", "-shm")
+
+
+def state_db_path(config_dir: Path, environment: str) -> Path:
+    """Per-environment state DB path.
+
+    Keyed by `environment` (not `watcher_id`) so a deregister/re-register on
+    the same host reuses the existing dedup history instead of re-uploading
+    the whole backlog. See `docs/watcher.md` for the rationale.
+    """
+    return config_dir / f"watcher-{environment}.db"
+
+
+def resolve_state_db_path(config_dir: Path, environment: str) -> Path:
+    """Return the per-environment state DB path, migrating the legacy file once.
+
+    The pre-multi-env single `watcher.db` belongs to whatever environment was
+    active before the upgrade, i.e. the one being resolved now. Renaming it
+    (rather than starting fresh) preserves that environment's dedup state so
+    the first post-upgrade scan does not re-upload everything.
+    """
+    target = state_db_path(config_dir, environment)
+    legacy = config_dir / STATE_DB_FILENAME
+    if not target.exists() and legacy.exists():
+        for suffix in _SQLITE_SIDECAR_SUFFIXES:
+            src = legacy.with_name(legacy.name + suffix)
+            if src.exists():
+                src.rename(target.with_name(target.name + suffix))
+    return target
+
+
+def reset_state_db(config_dir: Path, environment: str) -> None:
+    """Delete an environment's state DB (and WAL sidecars).
+
+    Used when a preview deployment changes so the next start reseeds a clean
+    baseline against the new target instead of inheriting the old one's state.
+    """
+    target = state_db_path(config_dir, environment)
+    for suffix in _SQLITE_SIDECAR_SUFFIXES:
+        target.with_name(target.name + suffix).unlink(missing_ok=True)
+
+
 def resolve_config_path(cli_override: str | None = None) -> Path:
     """Return the config file path, checking CLI flag, env var, then default."""
     if cli_override:
