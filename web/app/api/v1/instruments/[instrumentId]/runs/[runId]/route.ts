@@ -87,6 +87,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     acquired_at: run.acquiredAt,
     updated_at: run.updatedAt,
     deleted_at: run.deletedAt,
+    deleted_by: run.deletedBy,
     metadata: run.metadata,
     attributions: run.attributions,
     files: filesWithUrls,
@@ -249,12 +250,13 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
   const now = new Date();
   await db
     .update(instrumentRuns)
-    .set({ deletedAt: now })
+    .set({ deletedAt: now, deletedBy: authResult.userId })
     .where(eq(instrumentRuns.id, run.id));
 
   return Response.json({
     instrument_id: run.instrumentId,
     run_id: run.runId,
     deleted_at: now,
+    deleted_by: authResult.userId,
   });
 }

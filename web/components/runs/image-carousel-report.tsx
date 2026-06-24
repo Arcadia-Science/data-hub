@@ -27,7 +27,10 @@ function sortByFilename(a: RunFile, b: RunFile): number {
   return a.filename.localeCompare(b.filename, undefined, { numeric: true });
 }
 
-export function HinaReportSection({ files }: { files: RunFile[] }) {
+// For instruments whose report data is purely imagery (Hina microscope, gel
+// doc): a carousel instead of the default `RunReportSection`, which stacks
+// every image down the page.
+export function ImageCarouselReport({ files }: { files: RunFile[] }) {
   const processedImages = useMemo(
     () =>
       files

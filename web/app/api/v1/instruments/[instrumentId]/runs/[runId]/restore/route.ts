@@ -41,7 +41,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
   await db
     .update(instrumentRuns)
-    .set({ deletedAt: null })
+    .set({ deletedAt: null, deletedBy: null })
     .where(eq(instrumentRuns.id, run.id));
 
   const restored = await lookupRunByNaturalKey(instrumentId, runId);

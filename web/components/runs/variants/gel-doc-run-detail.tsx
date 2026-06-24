@@ -55,7 +55,7 @@ export function GelDocRunDetail({
         />
       </RunDetail.FilesMetadataLayout>
 
-      <RunDetail.Report files={reportFiles} />
+      <RunDetail.ImageCarousel files={reportFiles} />
     </>
   );
 }

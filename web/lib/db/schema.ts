@@ -459,6 +459,13 @@ export const instrumentRuns = pgTable(
       withTimezone: true,
       mode: "date",
     }),
+    // Who soft-deleted this run, captured from the acting session/PAT user.
+    // NULL while active, and stays NULL for runs deleted before this column
+    // existed. `set null` on user deletion so removing a user never blocks on
+    // historical deletions. Cleared again on restore.
+    deletedBy: text("deleted_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
   },
   (run) => [
     unique("uq_instrument_runs_instrument_id_run_id").on(

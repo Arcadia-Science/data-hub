@@ -27,6 +27,16 @@ export interface RunAttribution {
   userId: string;
 }
 
+// The user who soft-deleted a run, resolved for display in the run header's
+// deleted banner. Shares the shape of `RunAttribution` so the header can
+// render it with the same avatar/initials treatment.
+export interface RunDeleter {
+  avatarUrl: string | null;
+  displayName: string;
+  initials: string;
+  userId: string;
+}
+
 function toInitials(displayName: string): string {
   const parts = displayName.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) {
@@ -103,11 +113,18 @@ export const lookupRunByNaturalKey = cache(async function lookupRunByNaturalKey(
       acquiredAt: instrumentRuns.acquiredAt,
       updatedAt: instrumentRuns.updatedAt,
       deletedAt: instrumentRuns.deletedAt,
+      deletedBy: instrumentRuns.deletedBy,
       instrumentDisplayName: instruments.displayName,
       instrumentType: instruments.instrumentType,
+      // Deleter identity, resolved via the left join below. All NULL when the
+      // run is active or was deleted before `deleted_by` was captured.
+      deletedByName: users.name,
+      deletedByEmail: users.email,
+      deletedByImage: users.image,
     })
     .from(instrumentRuns)
     .innerJoin(instruments, eq(instrumentRuns.instrumentId, instruments.id))
+    .leftJoin(users, eq(users.id, instrumentRuns.deletedBy))
     .where(
       and(
         eq(instrumentRuns.instrumentId, instrumentId),
@@ -120,8 +137,25 @@ export const lookupRunByNaturalKey = cache(async function lookupRunByNaturalKey(
     return null;
   }
 
-  const byRun = await getAttributionsByRunIds([row.id]);
-  return { ...row, attributions: byRun.get(row.id) ?? [] };
+  const { deletedByName, deletedByEmail, deletedByImage, ...runRow } = row;
+
+  // Collapse the three nullable user columns into one object the header can
+  // render directly. Email is the fallback label for users without a name.
+  const deletedByUser: RunDeleter | null = runRow.deletedBy
+    ? {
+        userId: runRow.deletedBy,
+        displayName: deletedByName ?? deletedByEmail ?? "Unknown user",
+        initials: toInitials(deletedByName ?? deletedByEmail ?? "Unknown user"),
+        avatarUrl: deletedByImage,
+      }
+    : null;
+
+  const byRun = await getAttributionsByRunIds([runRow.id]);
+  return {
+    ...runRow,
+    deletedByUser,
+    attributions: byRun.get(runRow.id) ?? [],
+  };
 });
 
 // ---------------------------------------------------------------------------

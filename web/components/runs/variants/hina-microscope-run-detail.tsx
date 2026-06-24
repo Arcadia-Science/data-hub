@@ -1,5 +1,4 @@
 import { DeleteRunDialog } from "@/components/runs/delete-run-dialog";
-import { HinaReportSection } from "@/components/runs/hina-report-section";
 import { RestoreRunButton } from "@/components/runs/restore-run-button";
 import type { RunDetailProps } from "@/components/runs/run-detail";
 import { RunDetail } from "@/components/runs/run-detail";
@@ -54,7 +53,7 @@ export function HinaMicroscopeRunDetail({
         />
       </RunDetail.FilesMetadataLayout>
 
-      <HinaReportSection files={reportFiles} />
+      <RunDetail.ImageCarousel files={reportFiles} />
     </>
   );
 }
