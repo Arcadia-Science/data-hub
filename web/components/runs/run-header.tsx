@@ -1,5 +1,8 @@
+"use client";
+
 import { Trash2 } from "lucide-react";
 import Link from "next/link";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -9,8 +12,12 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import type { RunDetail } from "@/lib/api/instrument-runs";
+import { avatarColor } from "@/lib/avatar-color";
 import { formatDateTime } from "@/lib/date";
 
+// Must stay a client component: `formatDateTime` resolves the timezone at
+// runtime, so rendering on the server uses UTC and shifts every timestamp by
+// the viewer's offset (disagreeing with the client-rendered files table).
 export function RunHeader({
   run,
   children,
@@ -53,7 +60,30 @@ export function RunHeader({
       {run.deletedAt && (
         <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-2.5 text-destructive text-sm">
           <Trash2 className="size-4 shrink-0" />
-          <span>Deleted {formatDateTime(run.deletedAt)}</span>
+          <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+            <span>Deleted {formatDateTime(run.deletedAt)}</span>
+            {run.deletedByUser && (
+              <span className="flex items-center gap-1.5">
+                <span>by</span>
+                <Avatar size="sm">
+                  {run.deletedByUser.avatarUrl ? (
+                    <AvatarImage
+                      alt={run.deletedByUser.displayName}
+                      src={run.deletedByUser.avatarUrl}
+                    />
+                  ) : null}
+                  <AvatarFallback
+                    className={avatarColor(run.deletedByUser.userId)}
+                  >
+                    {run.deletedByUser.initials}
+                  </AvatarFallback>
+                </Avatar>
+                <span className="font-medium">
+                  {run.deletedByUser.displayName}
+                </span>
+              </span>
+            )}
+          </span>
         </div>
       )}
 

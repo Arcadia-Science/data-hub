@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -14,6 +16,9 @@ import type { WatcherDetail } from "@/lib/api/watchers";
 import { formatDate } from "@/lib/date";
 import { formatRelativeTime } from "@/lib/utils";
 
+// Must stay a client component: `formatDate` resolves the timezone at runtime,
+// so server rendering uses UTC and can land a date on the wrong calendar day
+// near midnight.
 export function WatcherHeader({ watcher }: { watcher: WatcherDetail }) {
   const isDeregistered = !!watcher.deletedAt;
 

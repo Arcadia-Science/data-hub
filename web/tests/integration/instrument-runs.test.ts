@@ -12,11 +12,12 @@ import {
 
 describe("Instrument Runs API", () => {
   let token: string;
+  let userId: string;
   const instrumentId = "runs-test-instrument";
 
   beforeAll(async () => {
     await resetDb();
-    ({ token } = await seedTestUser());
+    ({ token, userId } = await seedTestUser());
 
     const db = getTestDb();
     await db.insert(instruments).values({
@@ -247,6 +248,8 @@ describe("Instrument Runs API", () => {
     const data = await res.json();
     expect(data.deleted_at).toBeTruthy();
     expect(data.run_id).toBe("run-001");
+    // The acting user (the PAT's owner) is recorded as the deleter.
+    expect(data.deleted_by).toBe(userId);
   });
 
   it("DELETE returns 409 for already-deleted run", async () => {

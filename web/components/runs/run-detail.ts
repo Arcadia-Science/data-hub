@@ -1,3 +1,4 @@
+import { ImageCarouselReport } from "@/components/runs/image-carousel-report";
 import { RunFilesMetadataLayout } from "@/components/runs/run-files-metadata-layout";
 import { RunFilesSection } from "@/components/runs/run-files-section";
 import { RunHeader } from "@/components/runs/run-header";
@@ -17,6 +18,7 @@ export const RunDetail = {
   Files: RunFilesSection,
   FilesMetadataLayout: RunFilesMetadataLayout,
   Report: RunReportSection,
+  ImageCarousel: ImageCarouselReport,
 };
 
 export interface RunDetailProps {
@@ -31,6 +33,8 @@ export interface RunDetailProps {
   instrumentId: string;
   // Processed + PDF files for the report sections and well-data parsing.
   reportFiles: RunFile[];
+  // Images for the imaging-instrument carousel; empty for other instruments.
+  reportImages: RunFile[];
   run: RunDetailType;
   runId: string;
   wellData: RawWellRow[];
