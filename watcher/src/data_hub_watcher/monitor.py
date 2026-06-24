@@ -477,6 +477,11 @@ def seed_baseline_files(
                         if recursive:
                             stack.append(Path(entry.path))
                         continue
+                    # Mirror `FileMonitor._initial_scan`: it only enqueues real
+                    # files (`is_file(follow_symlinks=False)`), so only those
+                    # belong in the baseline or membership would diverge.
+                    if not entry.is_file(follow_symlinks=False):
+                        continue
                     if not matches(entry.name):
                         continue
                     st = entry.stat(follow_symlinks=False)

@@ -54,6 +54,14 @@ class TestBaselineFiles:
         state_db.prune_uploaded_files(days=0)
         assert list(state_db.iter_baseline_stat_keys()) == [("a.csv", 1, 1.0)]
 
+    def test_mark_baseline_seeded_establishes_without_rows(self, state_db: StateDB) -> None:
+        # The sentinel makes the one-shot seed gate hold for an empty watch dir
+        # (zero matched files) so the tree isn't re-walked on every start.
+        assert state_db.baseline_established() is False
+        state_db.mark_baseline_seeded()
+        assert state_db.baseline_established() is True
+        assert list(state_db.iter_baseline_stat_keys()) == []
+
 
 class TestMeta:
     def test_get_missing_returns_none(self, state_db: StateDB) -> None:

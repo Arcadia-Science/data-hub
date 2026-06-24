@@ -7,6 +7,7 @@ config's parent directory is the config dir.
 """
 
 from __future__ import annotations
+import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -225,3 +226,98 @@ class TestPreviewRedeploy:
             assert [k[0] for k in db.iter_baseline_stat_keys()] == ["old-backlog.csv"]
         finally:
             db.close()
+
+
+def _env_key_client_factory(captured: list[tuple[str, str]]) -> object:
+    """A `_make_client` replacement that records `(environment, key)` per call.
+
+    The key is whatever `DataHubClient` would resolve at call time: the
+    explicit `api_key` if given, else the live `DATA_HUB_API_KEY`. Recording it
+    is how the tests below catch a process env left pointing at the wrong
+    environment after a switch.
+    """
+
+    def make_client(
+        environment: str, api_key: str | None = None, api_base_url: str | None = None
+    ) -> MagicMock:
+        client = MagicMock()
+        client.list_instruments.return_value = [MagicMock(id="test-instrument")]
+        client.get_instrument.return_value = MagicMock(status="active")
+        client.register_watcher.return_value = MagicMock(watcher_id="w-prod")
+        client.get_config_checksum.return_value = None
+        captured.append((environment, api_key or os.environ.get("DATA_HUB_API_KEY", "")))
+        return client
+
+    return make_client
+
+
+def _fake_load_env(environment: str | None = None) -> None:
+    """Mirror `load_env`'s override semantics: set the env's key into os.environ."""
+    if environment:
+        os.environ["DATA_HUB_API_KEY"] = f"key-{environment}"
+
+
+class TestSwitchLeavesProcessEnvConsistent:
+    """The switch must leave `DATA_HUB_API_KEY` pointing at the target env.
+
+    `_emit_switch_breadcrumb` reloads the *old* env's `.env` last, so without a
+    restore the process env is left on the old key and any same-process
+    follow-up (e.g. `config edit`'s post-edit push) hits the new env's API with
+    the wrong key. Called directly because `CliRunner` restores `os.environ`.
+    """
+
+    def test_switch_restores_target_key(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(cli_module, "load_env", _fake_load_env)
+        monkeypatch.setattr(cli_module, "save_api_key", lambda *a, **k: tmp_path / ".env")
+        monkeypatch.setattr(cli_module, "_make_client", _env_key_client_factory([]))
+        monkeypatch.setenv("DATA_HUB_API_KEY", "key-staging")
+
+        path = _write_config(
+            tmp_path,
+            environment="staging",
+            watcher_ids={"staging": "w-staging", "production": "w-prod-existing"},
+        )
+        cfg = load_config(path)
+
+        new_cfg = cli_module._switch_environment(path, cfg, "production")
+
+        assert new_cfg.environment == "production"
+        assert os.environ["DATA_HUB_API_KEY"] == "key-production"
+
+
+class TestConfigEditWithSwitch:
+    """`config edit` re-prompting the environment delegates to the switch flow."""
+
+    def test_edit_with_switch_pushes_to_new_env_key(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        captured: list[tuple[str, str]] = []
+        monkeypatch.setattr(cli_module, "load_env", _fake_load_env)
+        monkeypatch.setattr(cli_module, "save_api_key", lambda *a, **k: tmp_path / ".env")
+        monkeypatch.setattr(cli_module, "_make_client", _env_key_client_factory(captured))
+        # Pin run-detection so the edit only needs the simple prompts below.
+        monkeypatch.setattr(
+            cli_module, "_prompt_run_detection", lambda *a, **k: (r"^([^_]+)", False)
+        )
+        path = _write_config(
+            tmp_path,
+            environment="staging",
+            watcher_ids={"staging": "w-staging", "production": "w-prod-existing"},
+        )
+        monkeypatch.setattr(cli_module, "resolve_config_path", lambda _override: path)
+        monkeypatch.setenv("DATA_HUB_API_KEY", "key-staging")
+
+        # Prompts in order: environment, watch dir, file patterns, stability,
+        # upload mode, enabled. Empty lines accept the current defaults.
+        user_input = "\n".join(["production", "", "", "", "", ""]) + "\n"
+        runner = CliRunner()
+        result = runner.invoke(cli_module.cli, ["config", "edit"], input=user_input)
+
+        assert result.exit_code == 0, result.output
+        assert load_config(path).environment == "production"
+        # The last client built is the post-edit push; it must target the new
+        # environment with the new environment's key (the fix for the
+        # breadcrumb leaving the old key in os.environ).
+        assert captured[-1] == ("production", "key-production")

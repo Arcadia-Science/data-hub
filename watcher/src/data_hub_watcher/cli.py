@@ -97,6 +97,10 @@ def _resolve_path(ctx: click.Context) -> Path:
 
 API_KEY_PREFIX = "dhub_"
 
+# `meta` key holding the preview deployment URL the local preview DB was
+# seeded against. Read on the next switch to detect a redeploy to a new URL.
+PREVIEW_SEED_URL_META_KEY = "preview_api_base_url"
+
 # Invisible characters that some Windows clipboards (Outlook, Teams, Word, etc.)
 # silently inject when an operator copies an API key. Stripping them here
 # avoids 401s caused by a hash mismatch on the server.
@@ -529,6 +533,27 @@ def _emit_switch_breadcrumb(old_cfg: WatcherConfig, target: str) -> None:
         logger.debug("Could not emit environment-switch breadcrumb", exc_info=True)
 
 
+def _preview_seed_url(config_dir: Path) -> str | None:
+    """The preview deployment URL the local preview state DB was seeded against.
+
+    Returns None when no preview DB exists yet or the meta is absent (a DB
+    predating the key). Opens the DB only when present so the lookup never
+    creates an empty database as a side effect.
+    """
+    db_file = state_db_path(config_dir, "preview")
+    if not db_file.exists():
+        return None
+    try:
+        db = StateDB(db_file)
+        try:
+            return db.get_meta(PREVIEW_SEED_URL_META_KEY)
+        finally:
+            db.close()
+    except Exception:
+        logger.debug("Could not read preview seed URL", exc_info=True)
+        return None
+
+
 def _switch_environment(
     path: Path,
     cfg: WatcherConfig,
@@ -543,7 +568,10 @@ def _switch_environment(
 
     Returns the persisted config for *target* (so `config edit` can continue
     editing from it). Raises `ClickException` and leaves the on-disk config
-    untouched on any validation or registration failure.
+    untouched on any validation or registration failure. The config is saved
+    before the (non-fatal) push to the target API, so a push failure leaves
+    the on-disk config updated while the API copy lags behind — by design,
+    since a push failure is a warning, not a hard error.
     """
     inst = cfg.instrument
     config_dir = path.parent
@@ -553,14 +581,13 @@ def _switch_environment(
             raise click.ClickException("--api-base-url is required when switching to 'preview'.")
         api_base_url = api_base_url.rstrip("/")
 
-    # A preview redeploy points at a brand-new database server-side, so the
-    # stored registration won't exist there and local state must be reset.
-    preview_redeploy = (
-        target == "preview"
-        and cfg.environment == "preview"
-        and api_base_url is not None
-        and api_base_url != cfg.api_base_url
-    )
+    # A preview redeploy points at a new database server-side, so the stored
+    # registration won't exist and local state must be reset. Compare against
+    # the URL the DB was seeded against (`meta`), falling back to the config.
+    preview_redeploy = False
+    if target == "preview" and cfg.environment == "preview" and api_base_url is not None:
+        seeded_url = _preview_seed_url(config_dir) or cfg.api_base_url
+        preview_redeploy = seeded_url is not None and api_base_url != seeded_url
 
     if cfg.environment == target and not preview_redeploy:
         click.echo(f"Already on environment '{target}'.")
@@ -594,6 +621,9 @@ def _switch_environment(
 
     existing_id = watcher_ids.get(target)
     if existing_id:
+        # No per-watcher GET exists, so validate indirectly: a reachable
+        # instrument confirms credentials and target. A watcher deregistered
+        # server-side isn't caught here; re-registering is the recovery.
         try:
             client.get_instrument(inst.id)
         except ApiError as exc:
@@ -621,18 +651,23 @@ def _switch_environment(
     save_config(new_cfg, path)
     click.echo(f"Config saved to {path}")
 
-    # Remember which preview deployment the state DB was seeded against so a
-    # later URL change triggers a reset (see `preview_redeploy`).
+    # Record which preview deployment this state DB was seeded against; the
+    # next switch reads it back via `_preview_seed_url` to decide whether the
+    # URL changed and the DB must be reset (see `preview_redeploy`).
     if target == "preview" and api_base_url is not None:
         try:
             db = StateDB(state_db_path(config_dir, target))
-            db.set_meta("preview_api_base_url", api_base_url)
+            db.set_meta(PREVIEW_SEED_URL_META_KEY, api_base_url)
             db.close()
         except Exception:
             logger.debug("Could not record preview deployment URL", exc_info=True)
 
     _push_config_to_api(client, watcher_id, path, trigger="env-switch")
     _emit_switch_breadcrumb(cfg, target)
+    # The breadcrumb reloads the old env's `.env` with override, so restore the
+    # target key; otherwise a same-process follow-up like `config edit`'s
+    # post-edit push would hit the new env with the old key and fail silently.
+    os.environ["DATA_HUB_API_KEY"] = api_key
 
     if sys.platform == "win32":
         from data_hub_watcher.service import _rewrite_service_env_path

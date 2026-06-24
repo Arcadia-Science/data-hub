@@ -34,6 +34,11 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# `meta` key set once `seed_baseline_files` has run for a `new-only`
+# environment, so the one-shot seed gate survives an empty-at-first-start
+# watch directory. See `StateDB.baseline_established`.
+BASELINE_SEEDED_META_KEY = "baseline_seeded"
+
 
 class _PerThreadHandle:
     """Owns a single ``sqlite3.Connection`` for the thread that opened it.
@@ -501,8 +506,13 @@ class StateDB:
 
         Gate for one-shot baseline seeding: if any of `baseline_files`,
         `uploaded_files`, or `detected_files` is non-empty we must not reseed,
-        or we would mark genuinely-new files as skippable backlog.
+        or we would mark genuinely-new files as skippable backlog. Also true
+        once seeding has run via the `baseline_seeded` meta sentinel — without
+        it a `new-only` watch dir that was empty at first start would re-walk
+        the whole tree on every restart until the first file appears.
         """
+        if self.get_meta(BASELINE_SEEDED_META_KEY) is not None:
+            return True
         cur = self._conn.execute(
             "SELECT "
             "EXISTS(SELECT 1 FROM baseline_files) OR "
@@ -510,6 +520,14 @@ class StateDB:
             "EXISTS(SELECT 1 FROM detected_files)"
         )
         return bool(cur.fetchone()[0])
+
+    def mark_baseline_seeded(self) -> None:
+        """Record that `seed_baseline_files` has run for this environment.
+
+        Makes the one-shot seed gate hold even when the initial scan matched
+        zero files (see `baseline_established`).
+        """
+        self.set_meta(BASELINE_SEEDED_META_KEY, "1")
 
     # ------------------------------------------------------------------
     # meta

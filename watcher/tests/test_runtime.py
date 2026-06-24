@@ -316,6 +316,21 @@ class TestBuildRuntimeBaselineSeeding:
         finally:
             rt.state_db.close()
 
+    def test_empty_new_only_dir_marks_seeded_so_it_isnt_rewalked(
+        self, tmp_path: Path, db_path: Path
+    ) -> None:
+        cfg = self._cfg(tmp_path, environment="staging")
+        # Remove the sample so nothing matches; the one-shot gate must still
+        # flip via the sentinel rather than re-walking on every start.
+        (tmp_path / "data" / "RUN001_sample.csv").unlink()
+
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+        try:
+            assert list(rt.state_db.iter_baseline_stat_keys()) == []
+            assert rt.state_db.baseline_established() is True
+        finally:
+            rt.state_db.close()
+
 
 class TestBuildRuntimeConfigDir:
     """Plumbing of the explicit ``config_dir`` parameter through the runtime.

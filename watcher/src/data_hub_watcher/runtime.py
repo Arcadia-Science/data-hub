@@ -219,10 +219,9 @@ def build_runtime(
     state_db = StateDB(db_path)
     state_db.prune_uploaded_files(PRUNE_DAYS)
 
-    # In a `new-only` environment (staging/preview by default), record the
-    # pre-existing backlog as skip on first start so the initial scan doesn't
-    # flood the target with historical data. Gated on an empty DB so we never
-    # re-baseline once real uploads/runs exist for this environment.
+    # Record the pre-existing backlog as skip on a `new-only` environment's
+    # first start so the initial scan doesn't flood the target. Gated on an
+    # empty DB so a real upload/run history is never re-baselined.
     if cfg.resolve_initial_scan() == "new-only" and not state_db.baseline_established():
         seed_baseline_files(
             state_db,
@@ -230,6 +229,9 @@ def build_runtime(
             inst.file_patterns,
             inst.run_detection.recursive,
         )
+        # Mark even when zero files matched so an empty watch dir isn't
+        # re-walked on every start.
+        state_db.mark_baseline_seeded()
 
     counters = WatcherCounters()
     reporter = EventReporter(client, watcher_id)
