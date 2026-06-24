@@ -136,8 +136,8 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
   if (!isNew && incomingAcquiredAt) {
     // Bind the ISO string explicitly + cast to timestamptz: drizzle's
-    // sql tag has no PgColumn context here to coerce a JS Date for the
-    // postgres-js driver. See instrument-runs.ts dateFrom/dateTo for
+    // sql tag has no PgColumn context here to type a JS Date interpolated
+    // into a raw fragment. See instrument-runs.ts dateFrom/dateTo for
     // the same pattern.
     const iso = incomingAcquiredAt.toISOString();
     await db

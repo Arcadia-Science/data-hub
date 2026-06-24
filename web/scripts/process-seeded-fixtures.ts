@@ -21,15 +21,15 @@ import * as schema from "@/lib/db/schema";
 import { generateToken, getTokenPrefix, hashToken } from "@/lib/tokens";
 import "dotenv/config";
 import { eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
 import { assertLocalDatabaseUrl } from "./assert-local-db";
 import { processSeededFixtures } from "./process-fixtures";
 
 const databaseUrl = assertLocalDatabaseUrl("db:process-fixtures");
 
-const client = postgres(databaseUrl);
-const db = drizzle(client, { schema });
+const pool = new Pool({ connectionString: databaseUrl });
+const db = drizzle(pool, { schema });
 
 try {
   // Find the seeded dev user. We look up by email rather than by
@@ -73,5 +73,5 @@ try {
     process.exit(1);
   }
 } finally {
-  await client.end();
+  await pool.end();
 }

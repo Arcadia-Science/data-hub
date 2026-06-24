@@ -21,7 +21,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { and, eq } from "drizzle-orm";
-import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 // biome-ignore lint/performance/noNamespaceImport: drizzle scripts need the full schema module for Db typing
 import * as schema from "@/lib/db/schema";
 import {
@@ -30,7 +30,7 @@ import {
   INSTRUMENT_FIXTURES,
 } from "@/lib/db/seed";
 
-type Db = PostgresJsDatabase<typeof schema>;
+type Db = NodePgDatabase<typeof schema>;
 
 // Resolve the lambda directory relative to *this* file (not
 // `process.cwd()`) so `npm run db:seed` from `web/` and a manual

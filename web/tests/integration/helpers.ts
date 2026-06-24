@@ -1,5 +1,5 @@
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
 // biome-ignore lint/performance/noNamespaceImport: tests need the full schema module for Db typing
 import * as schema from "@/lib/db/schema";
 import {
@@ -16,7 +16,7 @@ import {
 // ---------------------------------------------------------------------------
 
 let _db: ReturnType<typeof drizzle<typeof schema>> | null = null;
-let _client: ReturnType<typeof postgres> | null = null;
+let _pool: Pool | null = null;
 
 export function getTestDb() {
   if (!_db) {
@@ -24,16 +24,16 @@ export function getTestDb() {
     if (!url) {
       throw new Error("__TEST_DATABASE_URL not set — global setup failed?");
     }
-    _client = postgres(url);
-    _db = drizzle(_client, { schema });
+    _pool = new Pool({ connectionString: url });
+    _db = drizzle(_pool, { schema });
   }
   return _db;
 }
 
 export async function closeTestDb() {
-  if (_client) {
-    await _client.end();
-    _client = null;
+  if (_pool) {
+    await _pool.end();
+    _pool = null;
     _db = null;
   }
 }

@@ -13,12 +13,12 @@ import { copyFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getTableName, isTable, sql } from "drizzle-orm";
-import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import { generateToken, getTokenPrefix, hashToken } from "@/lib/tokens";
 // biome-ignore lint/performance/noNamespaceImport: seed needs the full schema module for Db typing and table iteration
 import * as schema from "./schema";
 
-export type Db = PostgresJsDatabase<typeof schema>;
+export type Db = NodePgDatabase<typeof schema>;
 
 // Bucket name shared with the lambda CLI's `data-hub-process handler`
 // (`--raw-bucket` default). Exporting the constant means the seed and

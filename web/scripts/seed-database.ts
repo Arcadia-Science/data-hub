@@ -7,10 +7,10 @@
 //   npm run db:seed           # seed on top of whatever's there
 //   npm run db:reseed         # reset → push → seed (the usual loop)
 //
-// Opens its own `postgres` client (instead of importing `@/lib/db`) so
-// the pool closes cleanly at the end of the script — the app-side
-// singleton in `lib/db/index.ts` is wired for long-lived Next.js
-// processes and never calls `.end()`.
+// Opens its own `pg` pool (instead of importing `@/lib/db`) so the pool
+// closes cleanly at the end of the script — the app-side singleton in
+// `lib/db/index.ts` is wired for long-lived Next.js processes and never
+// calls `.end()`.
 
 // biome-ignore lint/performance/noNamespaceImport: drizzle scripts need the full schema module for Db typing
 import * as schema from "@/lib/db/schema";
@@ -30,15 +30,15 @@ import {
   seedWatchers,
 } from "@/lib/db/seed";
 import "dotenv/config";
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
 import { assertLocalDatabaseUrl } from "./assert-local-db";
 import { processSeededFixtures } from "./process-fixtures";
 
 const databaseUrl = assertLocalDatabaseUrl("db:seed");
 
-const client = postgres(databaseUrl);
-const db = drizzle(client, { schema });
+const pool = new Pool({ connectionString: databaseUrl });
+const db = drizzle(pool, { schema });
 
 console.log("Clearing existing rows…");
 await clearAll(db);
@@ -105,7 +105,7 @@ console.log(
 // yet — see web/scripts/process-fixtures.ts for the gating logic.
 await processSeededFixtures(db, { apiKey: token });
 
-await client.end();
+await pool.end();
 
 console.log("");
 console.log("Done. Sign in at http://localhost:3000/login with:");

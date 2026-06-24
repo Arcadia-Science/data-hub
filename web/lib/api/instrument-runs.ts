@@ -249,11 +249,10 @@ export async function buildRunListQuery(filters: RunListFilters) {
   // Lambda runs and pre-backfill runs (acquired_at IS NULL) fall through to
   // created_at via coalesce.
   //
-  // NOTE: drizzle's `gte`/`lte` rely on the column's PgColumn mapper to
-  // serialize a JS Date for the postgres-js driver. With a raw SQL
-  // fragment as the LHS that mapper is bypassed, so the driver sees a
-  // Date and throws ERR_INVALID_ARG_TYPE. Bind ISO strings explicitly and
-  // cast on the Postgres side to keep this path on the index.
+  // NOTE: a raw SQL fragment as the LHS bypasses the column's PgColumn
+  // mapper, so an interpolated JS Date reaches the driver with no Postgres
+  // type to bind against. Bind ISO strings explicitly and cast to
+  // timestamptz so the comparison stays correctly typed and on the index.
   if (filters.dateFrom) {
     const from = new Date(filters.dateFrom).toISOString();
     conditions.push(sql`${acquiredOrCreatedSql} >= ${from}::timestamptz`);
@@ -930,7 +929,7 @@ async function distinctMetadataArrayValues(
     throw new Error(`Invalid metadata array key: ${key}`);
   }
   const jsonKey = sql.raw(`'${key}'`);
-  const rows = await db.execute<{ value: string }>(
+  const result = await db.execute<{ value: string }>(
     sql`select distinct val as value
         from ${instrumentRuns},
              lateral jsonb_array_elements_text(${instrumentRuns.metadata}->${jsonKey}) as val
@@ -939,7 +938,7 @@ async function distinctMetadataArrayValues(
           and jsonb_typeof(${instrumentRuns.metadata}->${jsonKey}) = 'array'
         order by val`
   );
-  return Array.from(rows, (r) => r.value).filter(Boolean);
+  return Array.from(result.rows, (r) => r.value).filter(Boolean);
 }
 
 export async function getGelDocFilterOptions(
@@ -994,7 +993,7 @@ export interface HinaFilterOptions {
 async function distinctHinaChannelNames(
   instrumentId: string
 ): Promise<string[]> {
-  const rows = await db.execute<{ value: string }>(
+  const result = await db.execute<{ value: string }>(
     sql`select distinct elem->>'name' as value
         from ${instrumentRuns},
              lateral jsonb_array_elements(${instrumentRuns.metadata}->'channels') as elem
@@ -1004,20 +1003,20 @@ async function distinctHinaChannelNames(
           and elem->>'name' is not null
         order by value`
   );
-  return Array.from(rows, (r) => r.value).filter(Boolean);
+  return Array.from(result.rows, (r) => r.value).filter(Boolean);
 }
 
 async function distinctHinaSizeObjects(
   instrumentId: string
 ): Promise<Record<string, unknown>[]> {
-  const rows = await db.execute<{ value: Record<string, unknown> }>(
+  const result = await db.execute<{ value: Record<string, unknown> }>(
     sql`select distinct ${instrumentRuns.metadata}->'sizes' as value
         from ${instrumentRuns}
         where ${instrumentRuns.instrumentId} = ${instrumentId}
           and ${instrumentRuns.deletedAt} is null
           and jsonb_typeof(${instrumentRuns.metadata}->'sizes') = 'object'`
   );
-  return Array.from(rows, (r) => r.value).filter(
+  return Array.from(result.rows, (r) => r.value).filter(
     (v): v is Record<string, unknown> => v !== null && typeof v === "object"
   );
 }

@@ -154,8 +154,8 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   // supplied explicitly — see parseAcquiredAt.
   //
   // Bind the ISO string + ::timestamptz cast: drizzle's sql tag has no
-  // PgColumn context here to coerce a JS Date for the postgres-js driver,
-  // which would otherwise throw ERR_INVALID_ARG_TYPE.
+  // PgColumn context here to type a JS Date interpolated into a raw
+  // fragment, so we cast explicitly. See instrument-runs.ts dateFrom/dateTo.
   const incomingAcquiredAt = parseAcquiredAt(body);
   if (incomingAcquiredAt) {
     const iso = incomingAcquiredAt.toISOString();
