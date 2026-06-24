@@ -2,7 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import { execSync, spawn } from "node:child_process";
 import http from "node:http";
 import net from "node:net";
-import postgres from "postgres";
+import { Client, Pool } from "pg";
 
 const TEST_DB = "data_hub_test";
 // Matches the credentials expected by the CI Postgres service container
@@ -62,14 +62,20 @@ async function waitForServer(url: string, timeoutMs = 120_000) {
 export async function setup() {
   // 1. Connect to the default `postgres` DB to create the test database.
   //    We can't use the test DB URL directly because it might not exist yet.
-  const adminSql = postgres(`${PG_URL}/postgres`);
-  const existing = await adminSql`
-    SELECT 1 FROM pg_database WHERE datname = ${TEST_DB}
-  `;
-  if (existing.length === 0) {
-    await adminSql.unsafe(`CREATE DATABASE ${TEST_DB}`);
+  const adminClient = new Client({ connectionString: `${PG_URL}/postgres` });
+  await adminClient.connect();
+  try {
+    const existing = await adminClient.query(
+      "SELECT 1 FROM pg_database WHERE datname = $1",
+      [TEST_DB]
+    );
+    if (existing.rows.length === 0) {
+      // CREATE DATABASE can't be parameterized; TEST_DB is a trusted constant.
+      await adminClient.query(`CREATE DATABASE ${TEST_DB}`);
+    }
+  } finally {
+    await adminClient.end();
   }
-  await adminSql.end();
 
   const databaseUrl = `${PG_URL}/${TEST_DB}`;
 
@@ -203,9 +209,9 @@ export async function setup() {
   //     these exact strings (see `watchers.test.ts`). Previously this was
   //     done via WATCHER_* env vars; the source of truth is now the DB,
   //     edited via the admin-only /settings/watchers page.
-  const seedSql = postgres(databaseUrl);
+  const seedPool = new Pool({ connectionString: databaseUrl });
   try {
-    await seedSql`
+    await seedPool.query(`
       INSERT INTO watcher_release_config
         (id, latest_version, min_supported_version, channel, mandatory)
       VALUES
@@ -216,9 +222,9 @@ export async function setup() {
         channel = excluded.channel,
         mandatory = excluded.mandatory,
         updated_at = now()
-    `;
+    `);
   } finally {
-    await seedSql.end();
+    await seedPool.end();
   }
 
   // 3. Build and start the Next.js production server. We use a production

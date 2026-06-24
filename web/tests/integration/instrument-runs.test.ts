@@ -529,10 +529,10 @@ describe("Run acquired_at", () => {
     expect(ids[0]).toBe("sort-newest");
   });
 
-  // Regression: drizzle's `gte`/`lte` against a raw SQL fragment skips
-  // the column-level Date->string coercion and crashes the postgres-js
-  // driver with ERR_INVALID_ARG_TYPE. The implementation now binds ISO
-  // strings explicitly and casts to timestamptz on the server.
+  // Regression: drizzle's `gte`/`lte` against a raw SQL fragment skips the
+  // column-level type coercion, so a JS Date would reach the driver untyped.
+  // The implementation binds ISO strings explicitly and casts to timestamptz
+  // on the server.
   it("GET list date_from/date_to filter against coalesce(acquired_at, created_at)", async () => {
     const res = await api(
       `/api/v1/instruments/${instrumentId}/runs?date_from=2009-01-01&date_to=2010-12-31&per_page=100`,
