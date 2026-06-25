@@ -8,10 +8,12 @@
 //   <SlackConnectionCard.Connected .../>   — shows status + Slack switches
 //   <SlackConnectionCard.Disconnected />   — shows "Connect to Slack" CTA
 
+import { useForm } from "@tanstack/react-form";
 import { Loader2, TriangleAlert } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
+import { z } from "zod";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -101,28 +103,64 @@ function Disconnected() {
 // Connected state
 // ---------------------------------------------------------------------------
 
-interface ConnectedProps {
-  onSlackCommentsAttributedChange: (value: boolean) => void;
-  onSlackCommentsParticipatedChange: (value: boolean) => void;
-  onSlackRunsChange: (value: boolean) => void;
-  revoked: boolean;
-  slackCommentsAttributedEnabled: boolean;
-  slackCommentsParticipatedEnabled: boolean;
-  // Controlled switch values from the parent TanStack Form state.
-  slackRunsEnabled: boolean;
-}
+// Slack delivery toggles. The card owns this form outright so its dirty
+// state is independent of the in-app notification form — saving one never
+// enables the other's Save button.
+const slackPreferencesSchema = z.object({
+  slackRunsEnabled: z.boolean(),
+  slackCommentsAttributedEnabled: z.boolean(),
+  slackCommentsParticipatedEnabled: z.boolean(),
+});
+
+export type SlackPreferences = z.infer<typeof slackPreferencesSchema>;
 
 function Connected({
   revoked,
-  slackRunsEnabled,
-  slackCommentsAttributedEnabled,
-  slackCommentsParticipatedEnabled,
-  onSlackRunsChange,
-  onSlackCommentsAttributedChange,
-  onSlackCommentsParticipatedChange,
-}: ConnectedProps) {
+  initialPreferences,
+}: {
+  initialPreferences: SlackPreferences;
+  revoked: boolean;
+}) {
   const router = useRouter();
   const [disconnecting, setDisconnecting] = useState(false);
+
+  const form = useForm({
+    defaultValues: initialPreferences,
+    validators: {
+      onSubmit: ({ value }) => {
+        const result = slackPreferencesSchema.safeParse(value);
+        return result.success ? undefined : result.error;
+      },
+    },
+    onSubmit: async ({ value }) => {
+      // Partial PUT against the shared notifications endpoint — only the
+      // `slack_*` keys, so this save never touches the in-app prefs.
+      const res = await fetch("/api/v1/settings/notifications", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          slack_runs_enabled: value.slackRunsEnabled,
+          slack_comments_attributed_enabled:
+            value.slackCommentsAttributedEnabled,
+          slack_comments_participated_enabled:
+            value.slackCommentsParticipatedEnabled,
+        }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        toast.error(
+          body?.error?.message ?? "Couldn't save Slack notification settings"
+        );
+        return;
+      }
+
+      toast.success("Slack notification settings saved");
+      // Re-baseline so `isDirty` resets and Save disables until the next edit.
+      form.reset(value);
+      router.refresh();
+    },
+  });
 
   async function handleDisconnect() {
     setDisconnecting(true);
@@ -151,68 +189,94 @@ function Connected({
             <a href="/api/v1/settings/slack/connect">Reconnect to Slack</a>
           </Button>
         ) : (
-          <FieldGroup>
-            <Field orientation="horizontal">
-              <FieldContent>
-                <FieldLabel htmlFor="slack-runs">
-                  New instrument runs
-                </FieldLabel>
-                <FieldDescription>
-                  DM me when a new run is reported on a subscribed instrument.
-                </FieldDescription>
-              </FieldContent>
-              <Switch
-                aria-label="Send new run notifications via Slack DM"
-                checked={slackRunsEnabled}
-                id="slack-runs"
-                onCheckedChange={onSlackRunsChange}
-              />
-            </Field>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              form.handleSubmit();
+            }}
+          >
+            <FieldGroup>
+              <form.Field name="slackRunsEnabled">
+                {(field) => (
+                  <Field orientation="horizontal">
+                    <FieldContent>
+                      <FieldLabel htmlFor={field.name}>
+                        New instrument runs
+                      </FieldLabel>
+                      <FieldDescription>
+                        DM me when a new run is reported on a subscribed
+                        instrument.
+                      </FieldDescription>
+                    </FieldContent>
+                    <Switch
+                      aria-label="Send new run notifications via Slack DM"
+                      checked={field.state.value}
+                      id={field.name}
+                      name={field.name}
+                      onCheckedChange={field.handleChange}
+                    />
+                  </Field>
+                )}
+              </form.Field>
 
-            <Field orientation="horizontal">
-              <FieldContent>
-                <FieldLabel htmlFor="slack-comments-attributed">
-                  Comments on runs you ran
-                </FieldLabel>
-                <FieldDescription>
-                  DM me when someone comments on a run I&apos;m attributed to.
-                </FieldDescription>
-              </FieldContent>
-              <Switch
-                aria-label="Send attributed comment notifications via Slack DM"
-                checked={slackCommentsAttributedEnabled}
-                id="slack-comments-attributed"
-                onCheckedChange={onSlackCommentsAttributedChange}
-              />
-            </Field>
+              <form.Field name="slackCommentsAttributedEnabled">
+                {(field) => (
+                  <Field orientation="horizontal">
+                    <FieldContent>
+                      <FieldLabel htmlFor={field.name}>
+                        Comments on runs you ran
+                      </FieldLabel>
+                      <FieldDescription>
+                        DM me when someone comments on a run I&apos;m attributed
+                        to.
+                      </FieldDescription>
+                    </FieldContent>
+                    <Switch
+                      aria-label="Send attributed comment notifications via Slack DM"
+                      checked={field.state.value}
+                      id={field.name}
+                      name={field.name}
+                      onCheckedChange={field.handleChange}
+                    />
+                  </Field>
+                )}
+              </form.Field>
 
-            <Field orientation="horizontal">
-              <FieldContent>
-                <FieldLabel htmlFor="slack-comments-participated">
-                  Replies to your comments
-                </FieldLabel>
-                <FieldDescription>
-                  DM me when someone comments on a run I&apos;ve previously
-                  commented on.
-                </FieldDescription>
-              </FieldContent>
-              <Switch
-                aria-label="Send participated comment notifications via Slack DM"
-                checked={slackCommentsParticipatedEnabled}
-                id="slack-comments-participated"
-                onCheckedChange={onSlackCommentsParticipatedChange}
-              />
-            </Field>
-          </FieldGroup>
+              <form.Field name="slackCommentsParticipatedEnabled">
+                {(field) => (
+                  <Field orientation="horizontal">
+                    <FieldContent>
+                      <FieldLabel htmlFor={field.name}>
+                        Replies to your comments
+                      </FieldLabel>
+                      <FieldDescription>
+                        DM me when someone comments on a run I&apos;ve
+                        previously commented on.
+                      </FieldDescription>
+                    </FieldContent>
+                    <Switch
+                      aria-label="Send participated comment notifications via Slack DM"
+                      checked={field.state.value}
+                      id={field.name}
+                      name={field.name}
+                      onCheckedChange={field.handleChange}
+                    />
+                  </Field>
+                )}
+              </form.Field>
+            </FieldGroup>
+          </form>
         )}
 
-        <div className="border-t pt-4">
+        <div className="flex items-center justify-between gap-4 border-t pt-4">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
                 disabled={disconnecting}
                 onClick={handleDisconnect}
                 size="sm"
+                type="button"
                 variant="outline"
               >
                 {disconnecting ? (
@@ -225,6 +289,33 @@ function Connected({
               Remove the Slack connection and disable all Slack DMs.
             </TooltipContent>
           </Tooltip>
+          {/* Hidden while revoked: the toggles are replaced by the Reconnect
+            CTA above, so there's nothing here to save. */}
+          {revoked ? null : (
+            <form.Subscribe
+              selector={(state) => ({
+                canSubmit: state.canSubmit,
+                isSubmitting: state.isSubmitting,
+                isDirty: state.isDirty,
+              })}
+            >
+              {({ canSubmit, isSubmitting, isDirty }) => (
+                <Button
+                  disabled={!(canSubmit && isDirty)}
+                  onClick={() => form.handleSubmit()}
+                  type="button"
+                >
+                  {isSubmitting ? (
+                    <Loader2
+                      className="animate-spin"
+                      data-icon="inline-start"
+                    />
+                  ) : null}
+                  Save
+                </Button>
+              )}
+            </form.Subscribe>
+          )}
         </div>
       </CardContent>
     </Card>

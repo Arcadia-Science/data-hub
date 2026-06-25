@@ -6,7 +6,10 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
-import { SlackConnectionCard } from "@/components/notifications/slack-connection-card";
+import {
+  SlackConnectionCard,
+  type SlackPreferences,
+} from "@/components/notifications/slack-connection-card";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import {
@@ -24,20 +27,16 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-// Mirror of the server's PUT body shape, in form-friendly camelCase. The
-// schema is reused for `onSubmit` validation so the client surfaces the
-// same validity rule the server enforces.
-const preferencesSchema = z.object({
+// In-app delivery toggles only. Slack delivery is a separate form owned by
+// `SlackConnectionCard` so the two have independent dirty state; this schema
+// is reused for `onSubmit` validation to mirror the server's rule.
+const inAppPreferencesSchema = z.object({
   runsAllMuted: z.boolean(),
   commentsAttributedEnabled: z.boolean(),
   commentsParticipatedEnabled: z.boolean(),
-  // Slack delivery toggles — independent of in-app.
-  slackRunsEnabled: z.boolean(),
-  slackCommentsAttributedEnabled: z.boolean(),
-  slackCommentsParticipatedEnabled: z.boolean(),
 });
 
-type FormPreferences = z.infer<typeof preferencesSchema>;
+type InAppPreferences = z.infer<typeof inAppPreferencesSchema>;
 
 interface InstrumentRow {
   displayName: string;
@@ -54,13 +53,15 @@ interface SlackConnectionState {
 // The form's `perInstrument` field is a Record<string, boolean> keyed by
 // instrument id. Storing it as a plain map (rather than parallel arrays)
 // keeps the per-row Field paths predictable: `perInstrument.${id}`.
-type FormValues = FormPreferences & {
+type FormValues = InAppPreferences & {
   perInstrument: Record<string, boolean>;
 };
 
 interface Props {
   initialInstruments: InstrumentRow[];
-  initialPreferences: FormPreferences;
+  // The page supplies both channels' prefs; the in-app subset seeds this
+  // form, the Slack subset is handed to `SlackConnectionCard.Connected`.
+  initialPreferences: InAppPreferences & SlackPreferences;
   slackConnection: SlackConnectionState;
 }
 
@@ -101,9 +102,12 @@ export function NotificationsSettingsForm({
     initialInstruments.map((row) => [row.instrumentId, row.enabled])
   );
 
-  const form = useForm({
+  const prefsForm = useForm({
     defaultValues: {
-      ...initialPreferences,
+      runsAllMuted: initialPreferences.runsAllMuted,
+      commentsAttributedEnabled: initialPreferences.commentsAttributedEnabled,
+      commentsParticipatedEnabled:
+        initialPreferences.commentsParticipatedEnabled,
       perInstrument: initialPerInstrument,
     } satisfies FormValues,
     validators: {
@@ -111,7 +115,7 @@ export function NotificationsSettingsForm({
       // the per-instrument map is structural). The schema's onSubmit
       // pass acts as a final guard against malformed values.
       onSubmit: ({ value }) => {
-        const result = preferencesSchema.safeParse(value);
+        const result = inAppPreferencesSchema.safeParse(value);
         return result.success ? undefined : result.error;
       },
     },
@@ -124,10 +128,6 @@ export function NotificationsSettingsForm({
         runs_all_muted: value.runsAllMuted,
         comments_attributed_enabled: value.commentsAttributedEnabled,
         comments_participated_enabled: value.commentsParticipatedEnabled,
-        slack_runs_enabled: value.slackRunsEnabled,
-        slack_comments_attributed_enabled: value.slackCommentsAttributedEnabled,
-        slack_comments_participated_enabled:
-          value.slackCommentsParticipatedEnabled,
       };
 
       const changedInstruments = initialInstruments.filter(
@@ -167,8 +167,10 @@ export function NotificationsSettingsForm({
       }
 
       toast.success("Notification settings saved");
-      // router.refresh() re-runs the page server component so the
-      // form's defaults get re-seeded from the just-saved state.
+      // Re-baseline to the just-saved values so `isDirty` returns to false
+      // and Save disables until the next edit. `router.refresh()` still
+      // re-runs the server component to pick up out-of-band changes.
+      prefsForm.reset(value);
       router.refresh();
     },
   });
@@ -179,13 +181,13 @@ export function NotificationsSettingsForm({
         onSubmit={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          form.handleSubmit();
+          prefsForm.handleSubmit();
         }}
       >
         <Card>
           <CardContent>
             <FieldGroup>
-              <form.Field name="runsAllMuted">
+              <prefsForm.Field name="runsAllMuted">
                 {(field) => (
                   <Field orientation="horizontal">
                     <FieldContent>
@@ -208,11 +210,11 @@ export function NotificationsSettingsForm({
                     />
                   </Field>
                 )}
-              </form.Field>
+              </prefsForm.Field>
 
               <FieldSeparator />
 
-              <form.Field name="commentsAttributedEnabled">
+              <prefsForm.Field name="commentsAttributedEnabled">
                 {(field) => (
                   <Field orientation="horizontal">
                     <FieldContent>
@@ -233,9 +235,9 @@ export function NotificationsSettingsForm({
                     />
                   </Field>
                 )}
-              </form.Field>
+              </prefsForm.Field>
 
-              <form.Field name="commentsParticipatedEnabled">
+              <prefsForm.Field name="commentsParticipatedEnabled">
                 {(field) => (
                   <Field orientation="horizontal">
                     <FieldContent>
@@ -256,7 +258,7 @@ export function NotificationsSettingsForm({
                     />
                   </Field>
                 )}
-              </form.Field>
+              </prefsForm.Field>
             </FieldGroup>
           </CardContent>
 
@@ -275,12 +277,14 @@ export function NotificationsSettingsForm({
                   boolean (a single primitive), so toggling the master doesn't
                   re-render every row's local Field — instead, each row's
                   Switch is `disabled` when muted. This keeps the per-row
-                  subscriptions on their own form.Field renderers. */}
-                <form.Subscribe selector={(state) => state.values.runsAllMuted}>
+                  subscriptions on their own prefsForm.Field renderers. */}
+                <prefsForm.Subscribe
+                  selector={(state) => state.values.runsAllMuted}
+                >
                   {(masterMuted) => (
                     <FieldGroup>
                       {initialInstruments.map((row) => (
-                        <form.Field
+                        <prefsForm.Field
                           key={row.instrumentId}
                           name={`perInstrument.${row.instrumentId}`}
                         >
@@ -292,9 +296,6 @@ export function NotificationsSettingsForm({
                                   <FieldLabel htmlFor={field.name}>
                                     {row.displayName}
                                   </FieldLabel>
-                                  <FieldDescription className="font-mono text-xs">
-                                    {row.instrumentId}
-                                  </FieldDescription>
                                 </FieldContent>
                                 <Tooltip>
                                   <TooltipTrigger asChild>
@@ -322,25 +323,26 @@ export function NotificationsSettingsForm({
                               </Field>
                             );
                           }}
-                        </form.Field>
+                        </prefsForm.Field>
                       ))}
                     </FieldGroup>
                   )}
-                </form.Subscribe>
+                </prefsForm.Subscribe>
               </CardContent>
             </>
           ) : null}
 
           <CardFooter className="border-t">
             <div className="flex w-full items-center justify-end gap-4">
-              <form.Subscribe
+              <prefsForm.Subscribe
                 selector={(state) => ({
                   canSubmit: state.canSubmit,
                   isSubmitting: state.isSubmitting,
+                  isDirty: state.isDirty,
                 })}
               >
-                {({ canSubmit, isSubmitting }) => (
-                  <Button disabled={!canSubmit || isSubmitting} type="submit">
+                {({ canSubmit, isSubmitting, isDirty }) => (
+                  <Button disabled={!(canSubmit && isDirty)} type="submit">
                     {isSubmitting ? (
                       <Loader2
                         className="animate-spin"
@@ -350,53 +352,30 @@ export function NotificationsSettingsForm({
                     Save
                   </Button>
                 )}
-              </form.Subscribe>
+              </prefsForm.Subscribe>
             </div>
           </CardFooter>
         </Card>
       </form>
 
-      {/* Slack connection card lives outside the main form so that
-        disconnect (an immediate action) doesn't require a Save click.
-        The Slack per-type toggles are wired back into the form state
-        above so they are persisted on the same Save. */}
+      {/* Slack lives outside the in-app form and owns its own form + Save,
+        so its toggles and dirty state are fully independent. */}
       <SlackConnectionCard.SectionHeader
         connected={slackConnection.connected}
         revoked={slackConnection.revoked}
         slackTeamName={slackConnection.slackTeamName}
       />
       {slackConnection.connected ? (
-        <form.Subscribe
-          selector={(state) => ({
-            slackRunsEnabled: state.values.slackRunsEnabled,
+        <SlackConnectionCard.Connected
+          initialPreferences={{
+            slackRunsEnabled: initialPreferences.slackRunsEnabled,
             slackCommentsAttributedEnabled:
-              state.values.slackCommentsAttributedEnabled,
+              initialPreferences.slackCommentsAttributedEnabled,
             slackCommentsParticipatedEnabled:
-              state.values.slackCommentsParticipatedEnabled,
-          })}
-        >
-          {(slackValues) => (
-            <SlackConnectionCard.Connected
-              onSlackCommentsAttributedChange={(v) =>
-                form.setFieldValue("slackCommentsAttributedEnabled", v)
-              }
-              onSlackCommentsParticipatedChange={(v) =>
-                form.setFieldValue("slackCommentsParticipatedEnabled", v)
-              }
-              onSlackRunsChange={(v) =>
-                form.setFieldValue("slackRunsEnabled", v)
-              }
-              revoked={slackConnection.revoked}
-              slackCommentsAttributedEnabled={
-                slackValues.slackCommentsAttributedEnabled
-              }
-              slackCommentsParticipatedEnabled={
-                slackValues.slackCommentsParticipatedEnabled
-              }
-              slackRunsEnabled={slackValues.slackRunsEnabled}
-            />
-          )}
-        </form.Subscribe>
+              initialPreferences.slackCommentsParticipatedEnabled,
+          }}
+          revoked={slackConnection.revoked}
+        />
       ) : (
         <SlackConnectionCard.Disconnected />
       )}

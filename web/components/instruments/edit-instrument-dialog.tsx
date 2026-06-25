@@ -56,6 +56,11 @@ export function EditInstrumentDialog({
   const [type, setType] = useState(instrumentType);
   const [isPending, startTransition] = useTransition();
 
+  // Disable Save until the user actually changes something — comparing the
+  // trimmed name avoids treating whitespace-only edits as a real change.
+  const isUnchanged =
+    name.trim() === displayName.trim() && type === instrumentType;
+
   function handleSave() {
     startTransition(async () => {
       const res = await fetch(`/api/v1/instruments/${instrumentId}`, {
@@ -137,7 +142,10 @@ export function EditInstrumentDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button disabled={!name.trim() || isPending} onClick={handleSave}>
+          <Button
+            disabled={!name.trim() || isUnchanged || isPending}
+            onClick={handleSave}
+          >
             {isPending && (
               <Loader2 className="animate-spin" data-icon="inline-start" />
             )}

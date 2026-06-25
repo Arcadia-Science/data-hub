@@ -85,7 +85,7 @@ export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
             sideOffset={4}
           >
             <DropdownMenuItem asChild>
-              <Link href="/settings/tokens">
+              <Link href="/settings/notifications">
                 <Settings data-icon="inline-start" />
                 Settings
               </Link>
