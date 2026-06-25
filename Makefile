@@ -94,21 +94,6 @@ db-process-fixtures:
 fe-build:
 	cd web && npm run build
 
-# Public documentation site (Fumadocs). Standalone app under docs/ with its own
-# dependencies; intentionally not wired into check-all since it may be split
-# into its own repository.
-.PHONY: docs-dev
-docs-dev:
-	cd docs && npm run dev
-
-.PHONY: docs-build
-docs-build:
-	cd docs && npm run build
-
-.PHONY: docs-lint
-docs-lint:
-	cd docs && npm run lint
-
 # Formatting, linting, and type checking.
 .PHONY: py-check
 py-check:

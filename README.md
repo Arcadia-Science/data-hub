@@ -20,7 +20,7 @@ flowchart LR
 | `lambda/` | AWS Lambda function for instrument data processing | [Lambda docs](developer-docs/reference/lambda.md) |
 | `watcher/` | CLI agent for lab instrument PCs | [Watcher docs](developer-docs/reference/watcher.md) |
 | `packages/shared/` | Shared Python library (S3, enums, test infra) | [Shared library](developer-docs/reference/shared-library.md) |
-| `docs/` | Project documentation | — |
+| `developer-docs/` | Project documentation | — |
 
 ## Quick start
 
