@@ -167,8 +167,11 @@ export function NotificationsSettingsForm({
       }
 
       toast.success("Notification settings saved");
-      // router.refresh() re-runs the page server component so the
-      // form's defaults get re-seeded from the just-saved state.
+      // Re-baseline to the just-saved values so `isDirty` returns to false
+      // and every Save button disables until the next edit. `router.refresh()`
+      // still re-runs the server component to pick up out-of-band changes
+      // (e.g. the Slack connection row).
+      form.reset(value);
       router.refresh();
     },
   });
@@ -337,10 +340,11 @@ export function NotificationsSettingsForm({
                 selector={(state) => ({
                   canSubmit: state.canSubmit,
                   isSubmitting: state.isSubmitting,
+                  isDirty: state.isDirty,
                 })}
               >
-                {({ canSubmit, isSubmitting }) => (
-                  <Button disabled={!canSubmit || isSubmitting} type="submit">
+                {({ canSubmit, isSubmitting, isDirty }) => (
+                  <Button disabled={!(canSubmit && isDirty)} type="submit">
                     {isSubmitting ? (
                       <Loader2
                         className="animate-spin"
@@ -373,10 +377,16 @@ export function NotificationsSettingsForm({
               state.values.slackCommentsAttributedEnabled,
             slackCommentsParticipatedEnabled:
               state.values.slackCommentsParticipatedEnabled,
+            canSubmit: state.canSubmit,
+            isSubmitting: state.isSubmitting,
+            isDirty: state.isDirty,
           })}
         >
           {(slackValues) => (
             <SlackConnectionCard.Connected
+              canSave={slackValues.canSubmit && slackValues.isDirty}
+              isSaving={slackValues.isSubmitting}
+              onSave={() => form.handleSubmit()}
               onSlackCommentsAttributedChange={(v) =>
                 form.setFieldValue("slackCommentsAttributedEnabled", v)
               }

@@ -102,6 +102,12 @@ function Disconnected() {
 // ---------------------------------------------------------------------------
 
 interface ConnectedProps {
+  // Save is owned by the parent form (the Slack toggles write into the same
+  // TanStack Form state), so the card just receives the gate + handler and
+  // stays unaware of the form itself.
+  canSave: boolean;
+  isSaving: boolean;
+  onSave: () => void;
   onSlackCommentsAttributedChange: (value: boolean) => void;
   onSlackCommentsParticipatedChange: (value: boolean) => void;
   onSlackRunsChange: (value: boolean) => void;
@@ -120,6 +126,9 @@ function Connected({
   onSlackRunsChange,
   onSlackCommentsAttributedChange,
   onSlackCommentsParticipatedChange,
+  canSave,
+  isSaving,
+  onSave,
 }: ConnectedProps) {
   const router = useRouter();
   const [disconnecting, setDisconnecting] = useState(false);
@@ -206,7 +215,7 @@ function Connected({
           </FieldGroup>
         )}
 
-        <div className="border-t pt-4">
+        <div className="flex items-center justify-between gap-4 border-t pt-4">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -225,6 +234,16 @@ function Connected({
               Remove the Slack connection and disable all Slack DMs.
             </TooltipContent>
           </Tooltip>
+          {/* Hidden while revoked: the toggles are replaced by the Reconnect
+            CTA above, so there's nothing here to save. */}
+          {revoked ? null : (
+            <Button disabled={!canSave} onClick={onSave} type="button">
+              {isSaving ? (
+                <Loader2 className="animate-spin" data-icon="inline-start" />
+              ) : null}
+              Save
+            </Button>
+          )}
         </div>
       </CardContent>
     </Card>

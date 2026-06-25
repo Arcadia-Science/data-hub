@@ -70,7 +70,10 @@ export function RunCommentItem({
 
   const trimmed = draft.trim();
   const tooLong = draft.length > MAX_BODY_LENGTH;
-  const canSave = trimmed.length > 0 && !tooLong && !isSaving;
+  // Nothing to save when the draft matches the stored body — gate on the
+  // trimmed comparison so re-spacing alone doesn't enable Save.
+  const isUnchanged = trimmed === comment.body.trim();
+  const canSave = trimmed.length > 0 && !tooLong && !isUnchanged && !isSaving;
 
   function handleSave() {
     if (!canSave) {

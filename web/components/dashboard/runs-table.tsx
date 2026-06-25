@@ -1,4 +1,5 @@
 import { SearchX } from "lucide-react";
+import Link from "next/link";
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import { AcquiredColumnHeader } from "@/components/instruments/runs-table/acquired-column-header";
 import { RanByCell } from "@/components/instruments/runs-table/ran-by-cell";
@@ -94,9 +95,12 @@ export function RunsTable({
                   <RunSelectCheckbox runRef={runRowToRef(row)} />
                 </TableCell>
                 <TableCell>
-                  <div className="flex items-center gap-1.5 font-medium text-sm">
+                  <Link
+                    className="inline-flex items-center gap-1.5 rounded-sm font-medium text-sm hover:underline focus-visible:underline focus-visible:outline-none"
+                    href={`/instruments/${row.instrument_id}`}
+                  >
                     {row.instrument_display_name}
-                  </div>
+                  </Link>
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-2.5">

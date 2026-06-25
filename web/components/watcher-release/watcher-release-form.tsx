@@ -101,9 +101,10 @@ export function WatcherReleaseForm({
       }
 
       toast.success("Watcher release saved");
-      // router.refresh() re-runs the page's server component so the "last
-      // updated by" line re-renders with the just-saved values — no need
-      // to thread the response back into client state.
+      // Re-baseline to the saved values so `isDirty` resets and the Save
+      // button disables until the next edit. router.refresh() still re-runs
+      // the server component so the "last updated by" line re-renders.
+      form.reset(value);
       router.refresh();
     },
   });
@@ -322,11 +323,15 @@ export function WatcherReleaseForm({
               selector={(state) => ({
                 canSubmit: state.canSubmit,
                 isSubmitting: state.isSubmitting,
+                isDirty: state.isDirty,
                 channelEmpty: state.values.channel.trim().length === 0,
               })}
             >
-              {({ canSubmit, isSubmitting, channelEmpty }) => (
-                <Button disabled={!canSubmit || channelEmpty} type="submit">
+              {({ canSubmit, isSubmitting, isDirty, channelEmpty }) => (
+                <Button
+                  disabled={!canSubmit || channelEmpty || !isDirty}
+                  type="submit"
+                >
                   {isSubmitting ? (
                     <Loader2
                       className="animate-spin"
