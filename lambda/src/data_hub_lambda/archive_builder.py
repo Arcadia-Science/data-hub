@@ -3,7 +3,7 @@ destination S3 multipart upload, with no on-disk staging.
 
 This exists so the web app's ``download-archive`` route can offload zip
 building to Lambda and serve the result via a presigned GET URL — bypassing
-Vercel's Fast Origin Transfer entirely. See ``docs/architecture.md``.
+Vercel's Fast Origin Transfer entirely. See ``developer-docs/architecture.md``.
 
 Design notes:
 - ``zipfile.ZipFile`` is given a file-like object (``_MultipartUploadStream``)

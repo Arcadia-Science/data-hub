@@ -94,7 +94,7 @@ function sanitizeContentDispositionFilename(name: string): string {
 // `<iframe src>`) resolves it against the current origin, and
 // embedding `http://localhost:3000` would break any non-3000 dev
 // setup. Non-browser MCP consumers may need to prefix the host
-// themselves — see docs/local-development.md.
+// themselves — see developer-docs/local-development.md.
 export function localMirrorDownloadUrl(
   bucket: string,
   key: string,

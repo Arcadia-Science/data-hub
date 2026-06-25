@@ -184,7 +184,7 @@ function printSkipHint(
   if (reason === "no-mirror") {
     lines.push(
       "[fixtures] Set LOCAL_S3_MIRROR in web/.env (e.g. ../lambda/.local-s3) and reseed.",
-      "[fixtures] See docs/local-development.md for the full workflow."
+      "[fixtures] See developer-docs/local-development.md for the full workflow."
     );
   } else if (reason === "api-down") {
     lines.push(

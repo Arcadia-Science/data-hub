@@ -5,7 +5,7 @@ A "mirror" is a directory whose layout matches an S3 bucket layout —
 ``data_hub_shared.s3_utils.download_file`` / ``upload_file`` lets a
 developer drive ``lambda_handler`` end-to-end against the local web app
 without LocalStack, MinIO, or real AWS credentials. See
-``docs/local-development.md`` for the full workflow.
+``developer-docs/local-development.md`` for the full workflow.
 
 Kept intentionally small: a path mapper, a context manager that swaps
 the two ``s3_utils`` entry points for ``shutil.copy2`` calls against the
