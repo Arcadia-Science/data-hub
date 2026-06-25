@@ -7,8 +7,8 @@ locally with zero external credentials is the **Next.js web app + REST API + Pos
 (`web/`). The `lambda/`, `watcher/`, and `packages/shared/` Python packages are exercised
 via tests and a local S3 mirror — no real AWS is needed for local work.
 
-Standard commands live in the `Makefile`, `web/package.json`, `docs/getting-started.md`, and
-`docs/local-development.md`. The notes below are the non-obvious caveats that those docs don't
+Standard commands live in the `Makefile`, `web/package.json`, `developer-docs/getting-started.md`, and
+`developer-docs/local-development.md`. The notes below are the non-obvious caveats that those docs don't
 make obvious for a fresh cloud VM (where the update script has already installed deps).
 
 ### Starting services (not handled by the update script)
@@ -26,7 +26,7 @@ make obvious for a fresh cloud VM (where the update script has already installed
 ### Environment file
 
 `web/.env` is gitignored and required for `make dev` / seeding. If it is missing on a fresh VM,
-recreate it from the "Minimal `.env`" block in `docs/local-development.md` (the key lines are
+recreate it from the "Minimal `.env`" block in `developer-docs/local-development.md` (the key lines are
 `DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/data-hub-local`, a 32+ char
 `AUTH_SECRET`, dummy `AWS_*` values, and `LOCAL_S3_MIRROR=../lambda/.local-s3`).
 

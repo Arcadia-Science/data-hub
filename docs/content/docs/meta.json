@@ -1,0 +1,11 @@
+{
+  "title": "Documentation",
+  "root": true,
+  "pages": [
+    "index",
+    "installing-a-watcher",
+    "adding-an-instrument",
+    "upgrading-the-watcher",
+    "managing-tokens"
+  ]
+}

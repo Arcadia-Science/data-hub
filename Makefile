@@ -78,7 +78,7 @@ dev:
 # Reset the local Postgres database, re-push the Drizzle schema, and load
 # a deterministic seed (dev user + PAT, one instrument per type, watchers,
 # runs, files, comments, attributions, archive jobs). See
-# docs/local-development.md for the full local-only dev workflow.
+# developer-docs/local-development.md for the full local-only dev workflow.
 .PHONY: db-reseed
 db-reseed:
 	cd web && npm run db:reseed
@@ -93,6 +93,21 @@ db-process-fixtures:
 .PHONY: fe-build
 fe-build:
 	cd web && npm run build
+
+# Public documentation site (Fumadocs). Standalone app under docs/ with its own
+# dependencies; intentionally not wired into check-all since it may be split
+# into its own repository.
+.PHONY: docs-dev
+docs-dev:
+	cd docs && npm run dev
+
+.PHONY: docs-build
+docs-build:
+	cd docs && npm run build
+
+.PHONY: docs-lint
+docs-lint:
+	cd docs && npm run lint
 
 # Formatting, linting, and type checking.
 .PHONY: py-check

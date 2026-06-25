@@ -207,7 +207,7 @@ def state_db_path(config_dir: Path, environment: str) -> Path:
 
     Keyed by `environment` (not `watcher_id`) so a deregister/re-register on
     the same host reuses the existing dedup history instead of re-uploading
-    the whole backlog. See `docs/watcher.md` for the rationale.
+    the whole backlog. See `developer-docs/reference/watcher.md` for the rationale.
     """
     return config_dir / f"watcher-{environment}.db"
 
