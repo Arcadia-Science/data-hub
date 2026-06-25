@@ -195,6 +195,20 @@ def _store_paths_in_registry(config_path: Path, env_path: Path) -> None:
         winreg.CloseKey(key)  # type: ignore[attr-defined]
 
 
+def _rewrite_service_env_path(env_path: Path) -> None:
+    """Point the installed service at a new env file, keeping `ConfigPath`.
+
+    Called after an environment switch so a service restart loads the target
+    environment's `.env.<env>`. A host without an installed service (no
+    registry key) is a no-op so the switch still succeeds on CLI-only PCs.
+    """
+    try:
+        config_path, _ = _read_paths_from_registry()
+    except OSError:
+        return
+    _store_paths_in_registry(config_path, env_path)
+
+
 def _read_paths_from_registry() -> tuple[Path, Path]:
     """Read config & env paths previously stored by ``install_service``."""
     import winreg  # type: ignore[import-untyped]
@@ -581,8 +595,8 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
     from data_hub_watcher.config_io import load_config
     from data_hub_watcher.constants import (
         API_URLS,
-        STATE_DB_FILENAME,
         env_file_path,
+        resolve_state_db_path,
     )
     from data_hub_watcher.logging_setup import (
         attach_servicemanager_handler,
@@ -673,7 +687,7 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
         logger.error("No watcher_id in config. Run 'data-hub-watcher init' first.")
         raise SystemExit(1)
 
-    db_path = path.parent / STATE_DB_FILENAME
+    db_path = resolve_state_db_path(path.parent, cfg.environment)
     # Pass the registry-resolved config directory through to the
     # runtime so the auto-update sentinels land where the SYSTEM-owned
     # upgrade worker (whose paths were baked in at install time

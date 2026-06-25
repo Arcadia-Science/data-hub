@@ -219,6 +219,12 @@ def build_runtime(
     state_db = StateDB(db_path)
     state_db.prune_uploaded_files(PRUNE_DAYS)
 
+    # On a `new-only` environment's first start, the monitor folds backlog
+    # baselining into its initial scan (one walk) instead of uploading the
+    # pre-existing files. Gated on an empty DB so a real upload/run history is
+    # never re-baselined; the gate is read once here, before the scan runs.
+    seed_baseline = cfg.resolve_initial_scan() == "new-only" and not state_db.baseline_established()
+
     counters = WatcherCounters()
     reporter = EventReporter(client, watcher_id)
 
@@ -278,6 +284,7 @@ def build_runtime(
         state_db=state_db,
         recursive=inst.run_detection.recursive,
         event_reporter=reporter,
+        seed_baseline=seed_baseline,
     )
 
     # The heartbeat's `on_tick` hook is now multi-purpose:

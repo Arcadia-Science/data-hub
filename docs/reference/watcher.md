@@ -52,13 +52,15 @@ Interactive setup wizard that:
 
 The wizard normalizes the pasted API key (stripping zero-width and non-breaking-space characters that Windows clipboards routinely inject) and rejects values that don't start with `dhub_`, so a paste mistake surfaces as a clear error rather than a confusing 401 later. Pass `--show-key` if your terminal mangles hidden input on paste.
 
+The initial scan mode defaults by environment: a fresh `init` on `production` uploads whatever is already in the watch directory, while `staging` and `preview` skip the pre-existing backlog and upload only files created afterwards. This guards a test environment from ingesting a PC's entire history. Set `initial_scan` in the config to override — see [Initial scan and the backlog](#initial-scan-and-the-backlog).
+
 ### `watch`
 
 Starts the file monitoring loop. Before entering the loop it:
 
 - Validates the config and checks that the instrument is active (not pending).
 - Syncs the config checksum with the API.
-- Initializes the local state database (`~/.data-hub/watcher.db`).
+- Initializes the local state database for the active environment (`~/.data-hub/watcher-<environment>.db`).
 - Hydrates in-memory run state from the local DB so the initial scan skips files that were already reported in a previous session.
 
 While running:
@@ -95,6 +97,7 @@ Subcommands for managing the YAML config file:
 | --- | --- |
 | `config show` | Pretty-print the current config |
 | `config validate` | Validate the config file (offline) |
+| `config set-environment ENV` | Switch the active API environment (see [Switching environments](#switching-environments)) |
 | `config edit` | Re-prompt each field with current values as defaults |
 | `config open` | Open the config in your editor, then re-validate |
 | `config path` | Print the resolved config file path |
@@ -134,7 +137,9 @@ The config file lives at `~/.data-hub/config.yaml` by default. Override with `--
 version: 1
 environment: production          # "staging", "production", or "preview"
 api_base_url: null               # required when environment is "preview"
-watcher_id: <assigned-by-api>
+watcher_ids:                     # one registration id per environment
+  production: <assigned-by-api>
+initial_scan: null               # null (default), "full", or "new-only"
 instrument:
   id: akta-fplc                  # kebab-case instrument ID
   watch_directory: /path/to/data
@@ -167,6 +172,38 @@ The `init` wizard offers the following presets (you can also supply a custom reg
 
 In YAML, prefer single-quoted strings for patterns so that backslash sequences like `\d` don't need escaping.
 
+A config written by an older watcher used a single top-level `watcher_id`. It is migrated transparently on load: the value is lifted into `watcher_ids` under the active `environment`, and the legacy key is dropped on the next save.
+
+### Switching environments
+
+A single PC can move between `staging`, `production`, and `preview` and back. Because staging and production are separate Data Hub deployments with separate databases, each holds its own watcher registration — `watcher_ids` stores one id per environment, and the credentials live in per-environment `~/.data-hub/.env.<environment>` files.
+
+Switch with:
+
+```sh
+# Switch to staging (reuses a stored registration, or registers one).
+uv run data-hub-watcher config set-environment staging
+
+# Point at a preview deployment (the base URL is required).
+uv run data-hub-watcher config set-environment preview \
+  --api-base-url https://data-hub-git-my-branch.vercel.app/api/v1
+```
+
+`config edit` also re-prompts for the environment and runs the same switch flow when it changes. Useful flags: `--api-key` (otherwise the key is read from the env file or prompted), `--show-key`, and `--no-register` (fail instead of registering a new watcher if none is stored for the target).
+
+A switch validates the target API with the resolved key, reuses the stored `watcher_id` for that environment (or registers a new one), pushes the config to the target, and leaves a `watcher_stopped` breadcrumb in the old environment. The running `watch` process or Windows service keeps using the old environment until restarted — on Windows the service registry env path is rewritten and you must `service stop && service start`; elsewhere restart the `watch` process.
+
+#### Initial scan and the backlog
+
+Each environment keeps its own local state database (see [Local state](#local-state)), so switching never re-uploads files across environments. The first time an environment is entered — whether by `init` or by `config set-environment` — the initial scan mode decides what happens to files already sitting in the watch directory. It defaults by environment:
+
+- `production` → `full`: the existing backlog is uploaded (production is the source of truth).
+- `staging` / `preview` → `new-only`: the files already on disk when the environment is first entered are recorded as a baseline and skipped; only files created afterwards are uploaded.
+
+This means a **fresh `init` on `staging` or `preview` does not upload the pre-existing backlog** — a deliberate guard so a test environment isn't flooded with a PC's entire history. Set `initial_scan: full` in the config to opt back in (e.g. to deliberately populate a staging environment), or `initial_scan: new-only` on production to suppress its backlog.
+
+Upgrading an existing watcher is unaffected: the environment's database already carries upload/run history, so the one-shot baseline seeding is skipped and detection continues exactly as before. Switching a preview to a different deployment URL resets that environment's local state so the new target gets a clean baseline.
+
 ### Upload modes
 
 - **`auto`**: Files are uploaded to S3 immediately after run detection.
@@ -179,11 +216,13 @@ Queued files are resolved against the current `watch_directory` (each queue entr
 
 ## Local state
 
-The watcher maintains a SQLite database at `~/.data-hub/watcher.db` with three tables:
+The watcher maintains one SQLite database per environment at `~/.data-hub/watcher-<environment>.db` (e.g. `watcher-production.db`). Isolating state per environment is what lets a PC switch back and forth without one environment's uploads being recorded against another. A pre-multi-environment `~/.data-hub/watcher.db` is renamed to the active environment's file on first start. Each database has the following tables:
 
 - `uploaded_files` — one row per successful S3 upload, keyed on `(filename, sha256, s3_key)`. Used by the uploader to skip re-uploads on retry and by the initial scan to skip files that have already been sent. Records older than 90 days are pruned automatically.
 - `runs` — tracks which run IDs have been reported and (in auto mode) when their files finished uploading. The most recent `reported_at` timestamp is what the auto-updater consults to gate restarts on a quiet-instrument window.
 - `detected_files` — the file manifest for every reported run, keyed on `(run_id, relative_path)`. Lets the initial scan skip files that are already part of a reported run even in manual mode (where `uploaded_files` stays empty), and lets the run detector hydrate its in-memory state on startup so a restart doesn't re-POST runs the API has already seen.
+- `baseline_files` — files that already existed on disk when a `new-only` environment was first entered, keyed on `relative_path`. A baseline row means "skip" (never uploaded), as opposed to `uploaded_files` which means "sent". Unlike `uploaded_files`, baseline rows are never pruned. Empty in `full`-scan (production) environments.
+- `meta` — a small key/value store. Currently holds the preview deployment URL the database was seeded against, so the watcher can reset local state when a preview is redeployed to a new URL.
 
 Logs are written to `C:\ProgramData\DataHubWatcher\watcher.log` on Windows and `~/.data-hub/watcher.log` on macOS/Linux (10 MB rotating, 5 backups). Both the CLI `watch` command and the Windows service write to the same file so a single `Get-Content -Wait` (or `tail -F`) covers all entry points.
 
@@ -200,6 +239,8 @@ Practical consequences:
 - If a run's parent folder is renamed or moved, its files look "new" to the next scan and will be re-enqueued. The uploader's own SHA-based dedup prevents a redundant S3 PUT, but it will pay the cost of hashing each affected file once.
 - Upgrading from a pre-`relative_path`/`size_bytes`/`mtime` state DB is a silent, self-healing migration: legacy rows miss the stat lookup, so files are re-enqueued once and then recorded with full stat data on their next upload.
 
+In a `new-only` environment (staging/preview by default — see [Switching environments](#switching-environments)), the first start also seeds `baseline_files` with everything currently on disk so the historical backlog is skipped rather than uploaded. The seeding is one-shot: it only runs when the environment's database has no upload, run, or baseline history yet.
+
 ## Observability
 
 The watcher's primary observability surface is the per-watcher event log served by `POST /watchers/:id/events`. Events are queued in memory by the long-running components (uploader, run detector, monitor, heartbeat, updater) and flushed in batches on every heartbeat tick. The queue is bounded to 500 events; on overflow the oldest are dropped (FIFO) and surfaced via a synthetic `events_dropped` event prepended to the next successful flush, so an outage that loses observability data is itself observable when the link recovers.
@@ -208,7 +249,7 @@ The watcher's primary observability surface is the per-watcher event log served 
 
 | Event type | When |
 | --- | --- |
-| `watcher_started` / `watcher_stopped` | Process lifecycle. The stopped message distinguishes a normal stop from an upgrade-driven restart. |
+| `watcher_started` / `watcher_stopped` | Process lifecycle. The stopped message distinguishes a normal stop from an upgrade-driven restart. `watcher_stopped` is also emitted in the *old* environment as a breadcrumb when the watcher switches environments. |
 | `config_synced` | Local config differed from the remote checksum and was pushed. Triggered by `init`, `config edit`, `config open`, and on watcher startup. The server also emits one with `details.kind="upload_requests_cancelled"` (and `cancelled_count`) when a `watch_directory` change drained pending upload requests. |
 | `run_reported` | A run was POSTed to the API for the first time. |
 | `file_uploaded` / `upload_failed` | Per-file upload outcome. `upload_failed` carries the S3 key and last error. |

@@ -67,6 +67,8 @@ The wizard will walk you through:
 
 The wizard saves configuration to `~/.data-hub/config.yaml`, the API key to `~/.data-hub/.env.<environment>`, and syncs the config to the server.
 
+> **Heads-up on the existing backlog.** On `staging` and `preview`, the watcher does *not* upload files that are already in the watch directory when you first run `init` — it records them as a baseline and uploads only files created afterwards. This keeps test environments from ingesting a PC's entire history. `production` uploads the existing backlog as normal. To force a full upload on staging/preview, set `initial_scan: full` in `~/.data-hub/config.yaml` before starting the watcher (see the [watcher reference](../reference/watcher.md#initial-scan-and-the-backlog)).
+
 ## Starting the watcher
 
 First, verify your setup with a dry run:

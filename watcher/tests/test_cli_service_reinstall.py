@@ -31,7 +31,7 @@ def _make_config(tmp_path: Path) -> WatcherConfig:
     return WatcherConfig(
         version=1,
         environment="staging",
-        watcher_id="w-test",
+        watcher_ids={"staging": "w-test"},
         instrument=InstrumentConfig(
             id="test-instrument",
             watch_directory=watch_dir,

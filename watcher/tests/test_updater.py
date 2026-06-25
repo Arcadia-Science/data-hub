@@ -80,7 +80,7 @@ def _make_config(
         version=1,
         environment=environment,  # type: ignore[arg-type]
         api_base_url="https://example.test/api/v1" if environment == "preview" else None,
-        watcher_id="w-test",
+        watcher_ids={environment: "w-test"},
         instrument=instrument,
     )
 

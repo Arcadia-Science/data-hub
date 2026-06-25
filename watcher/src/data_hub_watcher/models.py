@@ -4,7 +4,7 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -73,8 +73,44 @@ class WatcherConfig(BaseModel):
     version: Literal[1]
     environment: Literal["staging", "production", "preview"]
     api_base_url: str | None = None
-    watcher_id: str | None = None
+    # One watcher_id per environment so a single PC can switch between
+    # staging/production/preview without losing the registration it already
+    # holds in each. Keyed by the `environment` literal.
+    watcher_ids: dict[str, str] = Field(default_factory=dict)
+    # When None, the effective mode is derived from `environment` (see
+    # `resolve_initial_scan`): production uploads its existing backlog, other
+    # environments skip it. Set explicitly to override per host.
+    initial_scan: Literal["full", "new-only"] | None = None
     instrument: InstrumentConfig
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_watcher_id(cls, data: Any) -> Any:
+        # Pre-multi-env configs (and pre-multi-env constructor calls) carry a
+        # single top-level `watcher_id`. Lift it into `watcher_ids` under the
+        # active environment so on-disk configs migrate transparently on load.
+        if isinstance(data, dict) and "watcher_id" in data and "watcher_ids" not in data:
+            legacy = data.pop("watcher_id")
+            env = data.get("environment")
+            if legacy and env:
+                data["watcher_ids"] = {env: legacy}
+        return data
+
+    @property
+    def watcher_id(self) -> str | None:
+        """The watcher_id registered for the active environment, if any."""
+        return self.watcher_ids.get(self.environment)
+
+    def resolve_initial_scan(self) -> Literal["full", "new-only"]:
+        """Effective initial-scan mode, defaulting by environment when unset.
+
+        Production is the source of truth and must upload everything on disk;
+        staging/preview only want activity that happens after the switch, so
+        they default to skipping the pre-existing backlog.
+        """
+        if self.initial_scan is not None:
+            return self.initial_scan
+        return "full" if self.environment == "production" else "new-only"
 
     @model_validator(mode="after")
     def _validate_preview_url(self) -> WatcherConfig:

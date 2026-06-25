@@ -65,7 +65,7 @@ def _make_config(
     return WatcherConfig(
         version=1,
         environment="staging",
-        watcher_id=watcher_id,
+        watcher_ids={"staging": watcher_id} if watcher_id else {},
         instrument=instrument,
     )
 
@@ -247,6 +247,100 @@ class TestBuildRuntimeErrors:
         cfg = _make_config(tmp_path, upload_mode="auto", watcher_id=None)
         with pytest.raises(ValueError, match="watcher_id"):
             build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+
+
+class TestBuildRuntimeBaselineSeeding:
+    """Baseline seeding gating: only `new-only` envs with no history seed."""
+
+    def _cfg(
+        self,
+        tmp_path: Path,
+        *,
+        environment: str,
+        initial_scan: Literal["full", "new-only"] | None = None,
+    ) -> WatcherConfig:
+        watch_dir = tmp_path / "data"
+        watch_dir.mkdir(exist_ok=True)
+        (watch_dir / "RUN001_sample.csv").write_text("a,b\n1,2\n")
+        return WatcherConfig(
+            version=1,
+            environment=environment,  # type: ignore[arg-type]
+            api_base_url="https://x.example/api/v1" if environment == "preview" else None,
+            watcher_ids={environment: "w-test"},
+            initial_scan=initial_scan,
+            instrument=InstrumentConfig(
+                id="test-instrument",
+                watch_directory=watch_dir,
+                file_patterns=["*.csv"],
+                run_detection=RunDetectionConfig(pattern=r"^([^_]+)", recursive=False),
+            ),
+        )
+
+    def test_new_only_env_enables_baseline_seeding(self, tmp_path: Path, db_path: Path) -> None:
+        # Seeding itself happens in the monitor's initial scan; `build_runtime`
+        # only decides whether to arm it. The scan effect is covered by
+        # `test_monitor_initial_scan.TestSeedBaselineScan`.
+        cfg = self._cfg(tmp_path, environment="staging")
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+        try:
+            assert rt.monitor._seed_baseline is True
+        finally:
+            rt.state_db.close()
+
+    def test_production_does_not_seed_baseline(self, tmp_path: Path, db_path: Path) -> None:
+        cfg = self._cfg(tmp_path, environment="production")
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+        try:
+            assert rt.monitor._seed_baseline is False
+        finally:
+            rt.state_db.close()
+
+    def test_does_not_reseed_when_history_exists(self, tmp_path: Path, db_path: Path) -> None:
+        # An existing upload row means this environment already has real
+        # state; reseeding would wrongly mark genuinely-new files as backlog.
+        pre = StateDB(db_path)
+        pre.record_upload(
+            "old.csv", "sha", "s3/old.csv", relative_path="old.csv", size_bytes=1, mtime=1.0
+        )
+        pre.close()
+
+        cfg = self._cfg(tmp_path, environment="staging")
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+        try:
+            assert rt.monitor._seed_baseline is False
+        finally:
+            rt.state_db.close()
+
+    def test_explicit_full_override_skips_seeding(self, tmp_path: Path, db_path: Path) -> None:
+        cfg = self._cfg(tmp_path, environment="staging", initial_scan="full")
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+        try:
+            assert rt.monitor._seed_baseline is False
+        finally:
+            rt.state_db.close()
+
+    def test_seeded_history_disarms_seeding_on_next_build(
+        self, tmp_path: Path, db_path: Path
+    ) -> None:
+        # First start seeds (and marks the sentinel) via the monitor scan; a
+        # later `build_runtime` against the same DB must not re-arm seeding,
+        # even for an empty dir where the sentinel is the only signal.
+        cfg = self._cfg(tmp_path, environment="staging")
+        (tmp_path / "data" / "RUN001_sample.csv").unlink()
+
+        first = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+        try:
+            assert first.monitor._seed_baseline is True
+            first.monitor._initial_scan()
+            assert first.state_db.baseline_established() is True
+        finally:
+            first.state_db.close()
+
+        second = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+        try:
+            assert second.monitor._seed_baseline is False
+        finally:
+            second.state_db.close()
 
 
 class TestBuildRuntimeConfigDir:

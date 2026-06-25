@@ -19,13 +19,15 @@ from data_hub_watcher.constants import (
     DEFAULT_CONFIG_DIR,
     DEFAULT_STABILITY_PERIOD_SECONDS,
     RUN_DETECTION_PRESETS,
-    STATE_DB_FILENAME,
     SUPPORTED_ENVIRONMENTS,
     WATCHER_VERSION,
     env_file_path,
     load_env,
+    reset_state_db,
     resolve_config_path,
+    resolve_state_db_path,
     save_api_key,
+    state_db_path,
 )
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import WatcherCounters
@@ -94,6 +96,10 @@ def _resolve_path(ctx: click.Context) -> Path:
 
 
 API_KEY_PREFIX = "dhub_"
+
+# `meta` key holding the preview deployment URL the local preview DB was
+# seeded against. Read on the next switch to detect a redeploy to a new URL.
+PREVIEW_SEED_URL_META_KEY = "preview_api_base_url"
 
 # Invisible characters that some Windows clipboards (Outlook, Teams, Word, etc.)
 # silently inject when an operator copies an API key. Stripping them here
@@ -327,7 +333,7 @@ def init(ctx: click.Context, show_key: bool) -> None:
         version=1,
         environment=environment,
         api_base_url=api_base_url,
-        watcher_id=watcher_id,
+        watcher_ids={environment: watcher_id},
         instrument=InstrumentConfig(
             id=selected.id,
             watch_directory=watch_dir,
@@ -478,6 +484,206 @@ def _push_config_to_api(
         )
 
 
+def _register_watcher_for_switch(client: DataHubClient, instrument_id: str) -> str:
+    """Register a watcher for *instrument_id*, mirroring `init`'s 409 handling."""
+    try:
+        reg = client.register_watcher(
+            instrument_id=instrument_id,
+            hostname=platform.node(),
+            os_info=f"{platform.system()} {platform.release()}",
+        )
+    except ApiError as exc:
+        if exc.status_code == 409:
+            existing_id = ""
+            if exc.detail and exc.detail.details:
+                existing_id = str(exc.detail.details.get("existing_watcher_id") or "")
+            id_suffix = f" (id: {existing_id})" if existing_id else ""
+            raise click.ClickException(
+                f"Instrument '{instrument_id}' already has an active watcher{id_suffix} "
+                "in the target environment. Deregister it there first, then retry."
+            ) from exc
+        raise click.ClickException(f"Failed to register watcher: {exc.message}") from exc
+    return reg.watcher_id
+
+
+def _emit_switch_breadcrumb(old_cfg: WatcherConfig, target: str) -> None:
+    """Best-effort breadcrumb in the old environment that the watcher left.
+
+    Reuses `WATCHER_STOPPED` because the event enum has no generic INFO type;
+    the matching `WATCHER_STARTED` lands in the new environment on the next
+    `watch` start. Never raised — a switch must not fail on a missing key or
+    an unreachable old API.
+    """
+    old_id = old_cfg.watcher_id
+    if not old_id:
+        return
+    try:
+        load_env(old_cfg.environment)
+        old_client = _make_client(old_cfg.environment, api_base_url=old_cfg.api_base_url)
+        reporter = EventReporter(old_client, old_id)
+        reporter.queue_event(
+            WatcherEvent(
+                event_type=EventType.WATCHER_STOPPED,
+                message=f"Environment switched: {old_cfg.environment} -> {target}",
+                details={"from": old_cfg.environment, "to": target},
+            )
+        )
+        reporter.flush()
+    except Exception:
+        logger.debug("Could not emit environment-switch breadcrumb", exc_info=True)
+
+
+def _preview_seed_url(config_dir: Path) -> str | None:
+    """The preview deployment URL the local preview state DB was seeded against.
+
+    Returns None when no preview DB exists yet or the meta is absent (a DB
+    predating the key). Opens the DB only when present so the lookup never
+    creates an empty database as a side effect.
+    """
+    db_file = state_db_path(config_dir, "preview")
+    if not db_file.exists():
+        return None
+    try:
+        db = StateDB(db_file)
+        try:
+            return db.get_meta(PREVIEW_SEED_URL_META_KEY)
+        finally:
+            db.close()
+    except Exception:
+        logger.debug("Could not read preview seed URL", exc_info=True)
+        return None
+
+
+def _switch_environment(
+    path: Path,
+    cfg: WatcherConfig,
+    target: str,
+    *,
+    api_base_url: str | None = None,
+    api_key: str | None = None,
+    show_key: bool = False,
+    no_register: bool = False,
+) -> WatcherConfig:
+    """Switch the active environment, registering for the target if needed.
+
+    Returns the persisted config for *target* (so `config edit` can continue
+    editing from it). Raises `ClickException` and leaves the on-disk config
+    untouched on any validation or registration failure. The config is saved
+    before the (non-fatal) push to the target API, so a push failure leaves
+    the on-disk config updated while the API copy lags behind — by design,
+    since a push failure is a warning, not a hard error.
+    """
+    inst = cfg.instrument
+    config_dir = path.parent
+
+    if target == "preview":
+        if not api_base_url:
+            raise click.ClickException("--api-base-url is required when switching to 'preview'.")
+        api_base_url = api_base_url.rstrip("/")
+
+    # A preview redeploy points at a new database server-side, so the stored
+    # registration won't exist and local state must be reset. Compare against
+    # the URL the DB was seeded against (`meta`), falling back to the config.
+    preview_redeploy = False
+    if target == "preview" and cfg.environment == "preview" and api_base_url is not None:
+        seeded_url = _preview_seed_url(config_dir) or cfg.api_base_url
+        preview_redeploy = seeded_url is not None and api_base_url != seeded_url
+
+    if cfg.environment == target and not preview_redeploy:
+        click.echo(f"Already on environment '{target}'.")
+        return cfg
+
+    load_env(target)
+    if api_key is not None:
+        api_key = _clean_api_key(api_key)
+        save_api_key(api_key, target)
+    else:
+        existing = os.environ.get("DATA_HUB_API_KEY", "")
+        if existing:
+            api_key = existing
+        else:
+            api_key = _clean_api_key(click.prompt("DATA_HUB_API_KEY", hide_input=not show_key))
+            save_api_key(api_key, target)
+
+    client = _make_client(target, api_key=api_key, api_base_url=api_base_url)
+    try:
+        client.list_instruments()
+    except ApiError as exc:
+        raise click.ClickException(
+            f"Could not reach the {target} API with the provided key: {exc.message}\n"
+            "The environment was not switched."
+        ) from exc
+
+    watcher_ids = dict(cfg.watcher_ids)
+    if preview_redeploy:
+        watcher_ids.pop(target, None)
+        reset_state_db(config_dir, target)
+
+    existing_id = watcher_ids.get(target)
+    if existing_id:
+        # No per-watcher GET exists, so validate indirectly: a reachable
+        # instrument confirms credentials and target. A watcher deregistered
+        # server-side isn't caught here; re-registering is the recovery.
+        try:
+            client.get_instrument(inst.id)
+        except ApiError as exc:
+            raise click.ClickException(
+                f"Stored {target} watcher_id is no longer valid: {exc.message}"
+            ) from exc
+        watcher_id = existing_id
+    elif no_register:
+        raise click.ClickException(
+            f"No watcher is registered for '{target}' and --no-register was set."
+        )
+    else:
+        watcher_id = _register_watcher_for_switch(client, inst.id)
+        watcher_ids[target] = watcher_id
+        click.echo(f"Registered watcher for {target}: {watcher_id}")
+
+    new_cfg = WatcherConfig(
+        version=cfg.version,
+        environment=target,  # type: ignore[arg-type]  # validated by click.Choice
+        api_base_url=api_base_url if target == "preview" else None,
+        watcher_ids=watcher_ids,
+        initial_scan=cfg.initial_scan,
+        instrument=inst,
+    )
+    save_config(new_cfg, path)
+    click.echo(f"Config saved to {path}")
+
+    # Record which preview deployment this state DB was seeded against; the
+    # next switch reads it back via `_preview_seed_url` to decide whether the
+    # URL changed and the DB must be reset (see `preview_redeploy`).
+    if target == "preview" and api_base_url is not None:
+        try:
+            db = StateDB(state_db_path(config_dir, target))
+            db.set_meta(PREVIEW_SEED_URL_META_KEY, api_base_url)
+            db.close()
+        except Exception:
+            logger.debug("Could not record preview deployment URL", exc_info=True)
+
+    _push_config_to_api(client, watcher_id, path, trigger="env-switch")
+    _emit_switch_breadcrumb(cfg, target)
+    # The breadcrumb reloads the old env's `.env` with override, so restore the
+    # target key; otherwise a same-process follow-up like `config edit`'s
+    # post-edit push would hit the new env with the old key and fail silently.
+    os.environ["DATA_HUB_API_KEY"] = api_key
+
+    if sys.platform == "win32":
+        from data_hub_watcher.service import _rewrite_service_env_path
+
+        _rewrite_service_env_path(env_file_path(target))
+        click.echo(
+            "Service env-file updated. Restart to apply: "
+            "`data-hub-watcher service stop && data-hub-watcher service start`."
+        )
+    else:
+        click.echo("Restart the running `watch` process to apply the new environment.")
+
+    click.echo(click.style(f"\n✓ Switched to '{target}'.", fg="green", bold=True))
+    return new_cfg
+
+
 def _dry_run_scan(cfg: WatcherConfig) -> None:
     """Scan the watch directory and log what `watch` would do, without side effects."""
     inst = cfg.instrument
@@ -590,12 +796,72 @@ def config_validate(ctx: click.Context) -> None:
     click.echo(click.style(f"✓ Config is valid: {path}", fg="green"))
 
 
+@config.command("set-environment")
+@click.argument(
+    "environment",
+    type=click.Choice(list(SUPPORTED_ENVIRONMENTS), case_sensitive=False),
+)
+@click.option("--api-base-url", default=None, help="Required when environment is 'preview'.")
+@click.option("--api-key", default=None, help="API key for the target environment.")
+@click.option(
+    "--show-key",
+    is_flag=True,
+    help="Echo the API key as typed (useful on Windows terminals).",
+)
+@click.option(
+    "--no-register",
+    is_flag=True,
+    help="Fail instead of registering a new watcher if none is stored for the target env.",
+)
+@click.pass_context
+def config_set_environment(
+    ctx: click.Context,
+    environment: str,
+    api_base_url: str | None,
+    api_key: str | None,
+    show_key: bool,
+    no_register: bool,
+) -> None:
+    """Switch the watcher to a different API environment."""
+    path = _resolve_path(ctx)
+    cfg = load_config(path)
+    _switch_environment(
+        path,
+        cfg,
+        environment,
+        api_base_url=api_base_url,
+        api_key=api_key,
+        show_key=show_key,
+        no_register=no_register,
+    )
+
+
 @config.command("edit")
 @click.pass_context
 def config_edit(ctx: click.Context) -> None:
     """Re-prompt each config field with current values as defaults."""
     path = _resolve_path(ctx)
     cfg = load_config(path)
+
+    # Re-prompt for environment first; a change delegates to the full switch
+    # flow (re-registration, key resolution, state reset) before the rest of
+    # the edit runs against the freshly-saved config.
+    target_env = click.prompt(
+        "Environment",
+        type=click.Choice(list(SUPPORTED_ENVIRONMENTS), case_sensitive=False),
+        default=cfg.environment,
+    )
+    preview_url: str | None = None
+    if target_env == "preview":
+        preview_url = click.prompt(
+            "Preview deployment base URL",
+            default=cfg.api_base_url,
+        )
+    if target_env != cfg.environment or (
+        target_env == "preview" and preview_url is not None and preview_url != cfg.api_base_url
+    ):
+        cfg = _switch_environment(path, cfg, target_env, api_base_url=preview_url)
+
     inst = cfg.instrument
 
     watch_dir_str = click.prompt("Watch directory", default=str(inst.watch_directory))
@@ -633,7 +899,8 @@ def config_edit(ctx: click.Context) -> None:
         version=cfg.version,
         environment=cfg.environment,
         api_base_url=cfg.api_base_url,
-        watcher_id=cfg.watcher_id,
+        watcher_ids=cfg.watcher_ids,
+        initial_scan=cfg.initial_scan,
         instrument=InstrumentConfig(
             id=inst.id,
             watch_directory=watch_dir,
@@ -743,7 +1010,7 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
     # Step 4: Build the shared runtime (state DB, uploader, detector,
     # monitor, heartbeat — all wired identically to the Windows-service
     # path via data_hub_watcher.runtime).
-    db_path = DEFAULT_CONFIG_DIR / STATE_DB_FILENAME
+    db_path = resolve_state_db_path(DEFAULT_CONFIG_DIR, cfg.environment)
     rt = build_runtime(client=client, cfg=cfg, db_path=db_path)
 
     # Step 5: sync config (now that we have a reporter, failures are
@@ -835,7 +1102,7 @@ def upload(ctx: click.Context, file_path: str | None, run_id: str | None, dry_ru
     if detail.status == "pending":
         raise click.ClickException(f"Instrument {inst.id!r} is pending. Cannot upload yet.")
 
-    db_path = DEFAULT_CONFIG_DIR / STATE_DB_FILENAME
+    db_path = resolve_state_db_path(DEFAULT_CONFIG_DIR, cfg.environment)
     state_db = StateDB(db_path)
     counters = WatcherCounters()
     reporter = EventReporter(client, cfg.watcher_id)

@@ -85,7 +85,7 @@ class TestConfigRoundTrip:
             version=1,
             environment="preview",
             api_base_url=PREVIEW_URL,
-            watcher_id="w-123",
+            watcher_ids={"preview": "w-123"},
             instrument=_make_instrument(tmp_path),
         )
 
