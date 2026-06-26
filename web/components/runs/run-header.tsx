@@ -2,13 +2,13 @@
 
 import { Trash2 } from "lucide-react";
 import Link from "next/link";
+import { RunSwitcher } from "@/components/runs/run-switcher";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Breadcrumb,
   BreadcrumbItem,
   BreadcrumbLink,
   BreadcrumbList,
-  BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import type { RunDetail } from "@/lib/api/instrument-runs";
@@ -51,9 +51,7 @@ export function RunHeader({
             </BreadcrumbLink>
           </BreadcrumbItem>
           <BreadcrumbSeparator />
-          <BreadcrumbItem>
-            <BreadcrumbPage className="font-mono">{run.runId}</BreadcrumbPage>
-          </BreadcrumbItem>
+          <RunSwitcher run={run} />
         </BreadcrumbList>
       </Breadcrumb>
 
