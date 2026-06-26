@@ -2,6 +2,7 @@
 
 import { Trash2 } from "lucide-react";
 import Link from "next/link";
+import { RecordInstrumentVisit } from "@/components/recent-instrument-visit";
 import { RunSwitcher } from "@/components/runs/run-switcher";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -29,6 +30,10 @@ export function RunHeader({
 }) {
   return (
     <div className="flex flex-col gap-4">
+      <RecordInstrumentVisit
+        displayName={run.instrumentDisplayName}
+        instrumentId={run.instrumentId}
+      />
       <Breadcrumb>
         <BreadcrumbList>
           <BreadcrumbItem>
