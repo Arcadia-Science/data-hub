@@ -1,3 +1,4 @@
+import Image from "next/image";
 import type { Metadata } from "next/types";
 import { DevSignInForm } from "@/components/auth/dev-sign-in-form";
 import { Button } from "@/components/ui/button";
@@ -12,7 +13,14 @@ export default function LoginPage() {
     <div className="flex h-screen w-full items-center justify-center">
       <div className="mx-auto flex w-full max-w-md flex-col items-center gap-6">
         <div className="flex flex-col items-center gap-4 text-center">
-          <h1 className="font-semibold text-3xl tracking-tight">
+          <Image
+            alt="Data Hub"
+            height={64}
+            priority
+            src="/images/data-hub-logo.svg"
+            width={64}
+          />
+          <h1 className="mt-2 font-semibold text-3xl tracking-tight">
             Welcome to Data Hub
           </h1>
           <p className="text-muted-foreground">
