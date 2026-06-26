@@ -1,8 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="-60 -60 120 120" width="32" height="32" role="img" aria-label="Data Hub">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="6 6 88 88" width="32" height="32" role="img" aria-label="Data Hub">
   <title>Data Hub</title>
-  <circle r="55" fill="#5088C5"/>
-  <circle r="42" fill="#3D6FA8"/>
-  <circle r="29" fill="#2B5A8E"/>
-  <circle r="16" fill="#1E4470"/>
-  <circle r="6" fill="#5088C5"/>
+  <g stroke="#5088C5" stroke-width="4" stroke-linecap="round">
+    <line x1="50" y1="50" x2="82" y2="50"/>
+    <line x1="50" y1="50" x2="34" y2="22.3"/>
+    <line x1="50" y1="50" x2="34" y2="77.7"/>
+  </g>
+  <circle cx="66" cy="22.3" r="7" fill="#09090A"/>
+  <circle cx="18" cy="50" r="7" fill="#09090A"/>
+  <circle cx="66" cy="77.7" r="7" fill="#09090A"/>
+  <circle cx="82" cy="50" r="7" fill="#5088C5"/>
+  <circle cx="34" cy="22.3" r="7" fill="#5088C5"/>
+  <circle cx="34" cy="77.7" r="7" fill="#5088C5"/>
+  <circle cx="50" cy="50" r="11" fill="#5088C5"/>
 </svg>
