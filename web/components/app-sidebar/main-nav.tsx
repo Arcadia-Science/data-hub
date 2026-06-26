@@ -21,9 +21,14 @@ import {
   SidebarMenuSubItem,
 } from "@/components/ui/sidebar";
 import { useRecentInstruments } from "@/hooks/use-recent-instruments";
+import {
+  useRecentWatchers,
+  watcherNavLabel,
+} from "@/hooks/use-recent-watchers";
 import type { SidebarInstrument, SidebarWatcher } from "@/lib/api/sidebar";
 
 const SIDEBAR_RECENT_INSTRUMENTS_LIMIT = 10;
+const SIDEBAR_RECENT_WATCHERS_LIMIT = 10;
 
 interface MainNavProps {
   instruments: SidebarInstrument[];
@@ -33,6 +38,7 @@ interface MainNavProps {
 export function MainNav({ instruments, watchers }: MainNavProps) {
   const pathname = usePathname();
   const { recent: recentInstruments } = useRecentInstruments();
+  const { recent: recentWatchers } = useRecentWatchers();
 
   const recentlyViewedInstruments = useMemo(
     () => recentInstruments.slice(0, SIDEBAR_RECENT_INSTRUMENTS_LIMIT),
@@ -54,6 +60,28 @@ export function MainNav({ instruments, watchers }: MainNavProps) {
           label: instrument.displayName,
         })),
     [instruments, recentlyViewedIds]
+  );
+
+  const recentlyViewedWatchers = useMemo(
+    () => recentWatchers.slice(0, SIDEBAR_RECENT_WATCHERS_LIMIT),
+    [recentWatchers]
+  );
+
+  const recentlyViewedWatcherIds = useMemo(
+    () => new Set(recentlyViewedWatchers.map((entry) => entry.watcherId)),
+    [recentlyViewedWatchers]
+  );
+
+  const sidebarWatchers = useMemo(
+    () =>
+      watchers
+        .filter((watcher) => !recentlyViewedWatcherIds.has(watcher.id))
+        .map((watcher) => ({
+          key: watcher.id,
+          href: `/watchers/${watcher.id}`,
+          label: watcherNavLabel(watcher.id, watcher.hostname),
+        })),
+    [watchers, recentlyViewedWatcherIds]
   );
 
   return (
@@ -94,15 +122,13 @@ export function MainNav({ instruments, watchers }: MainNavProps) {
             basePath="/watchers"
             currentPath={pathname}
             icon={Radio}
-            items={watchers.map((watcher) => ({
-              key: watcher.id,
-              href: `/watchers/${watcher.id}`,
-              // Hostname is the canonical identifier for a watcher in the
-              // table view; fall back to the short id when missing so the
-              // row never collapses to an empty label.
-              label: watcher.hostname ?? `${watcher.id.slice(0, 8)}…`,
-            }))}
+            items={sidebarWatchers}
             label="Watchers"
+            recentlyViewedItems={recentlyViewedWatchers.map((watcher) => ({
+              key: watcher.watcherId,
+              href: `/watchers/${watcher.watcherId}`,
+              label: watcher.label,
+            }))}
             viewAllHref="/watchers"
           />
         </SidebarMenu>
@@ -157,14 +183,8 @@ function CollapsibleNavSection({
         </CollapsibleTrigger>
         <CollapsibleContent>
           <SidebarMenuSub>
-            {recentlyViewedItems.length > 0 ? (
-              <>
-                <SidebarMenuSubItem>
-                  <span className="px-2 py-1 font-medium text-muted-foreground text-xs">
-                    Recently viewed
-                  </span>
-                </SidebarMenuSubItem>
-                {recentlyViewedItems.map((item) => (
+            {recentlyViewedItems.length > 0
+              ? recentlyViewedItems.map((item) => (
                   <SidebarMenuSubItem key={`recent-${item.key}`}>
                     <SidebarMenuSubButton
                       asChild
@@ -175,9 +195,8 @@ function CollapsibleNavSection({
                       </Link>
                     </SidebarMenuSubButton>
                   </SidebarMenuSubItem>
-                ))}
-              </>
-            ) : null}
+                ))
+              : null}
             {items.map((item) => (
               <SidebarMenuSubItem key={item.key}>
                 <SidebarMenuSubButton
