@@ -17,6 +17,7 @@ export function DefaultRunDetail({
   instrumentId,
   runId,
   attributionsSlot,
+  runNavSlot,
 }: RunDetailProps) {
   const isDeleted = run.deletedAt !== null;
   const activeFileCount = fileStats.active;
@@ -24,7 +25,7 @@ export function DefaultRunDetail({
 
   return (
     <>
-      <RunDetail.Header run={run}>
+      <RunDetail.Header run={run} runNavSlot={runNavSlot}>
         {!isDeleted && (
           <DeleteRunDialog
             fileCount={activeFileCount}

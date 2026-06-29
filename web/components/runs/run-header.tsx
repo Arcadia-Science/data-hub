@@ -20,9 +20,12 @@ import { formatDateTime } from "@/lib/date";
 // the viewer's offset (disagreeing with the client-rendered files table).
 export function RunHeader({
   run,
+  runNavSlot,
   children,
 }: {
   run: RunDetail;
+  // Previous/next run navigation, rendered to the left of the action buttons.
+  runNavSlot?: React.ReactNode;
   children?: React.ReactNode;
 }) {
   return (
@@ -80,7 +83,10 @@ export function RunHeader({
           {run.runId}
         </h1>
 
-        <div className="flex items-center gap-2">{children}</div>
+        <div className="flex items-center gap-2">
+          {runNavSlot}
+          {children}
+        </div>
       </div>
     </div>
   );

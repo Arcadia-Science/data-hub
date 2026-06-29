@@ -254,6 +254,64 @@ const ALLOWED_SORT_FIELDS: Record<string, SQL | AnyColumn> = {
   updated_at: instrumentRuns.updatedAt,
 };
 
+// ---------------------------------------------------------------------------
+// Adjacent-run navigation for the run detail header.
+// ---------------------------------------------------------------------------
+
+// Resolves the runs immediately newer (`previousRunId`) and older
+// (`nextRunId`) than `current` within the same instrument, matching the runs
+// table's `coalesce(acquired_at, created_at) DESC` ordering. The `id` tiebreak
+// keeps neighbors deterministic when two runs share a timestamp; the list
+// query has no tiebreak, so equal-timestamp ordering is otherwise arbitrary.
+// Deleted runs are excluded to mirror the table's default. Wrapped in `cache()`
+// like `lookupRunByNaturalKey` so a single request reuses the result.
+export const getAdjacentRunIds = cache(
+  async function getAdjacentRunIds(current: {
+    acquiredAt: Date | null;
+    createdAt: Date;
+    id: string;
+    instrumentId: string;
+  }): Promise<{ nextRunId: string | null; previousRunId: string | null }> {
+    const cur = (current.acquiredAt ?? current.createdAt).toISOString();
+    const inSameInstrument = and(
+      eq(instrumentRuns.instrumentId, current.instrumentId),
+      isNull(instrumentRuns.deletedAt)
+    );
+
+    const [previous, next] = await Promise.all([
+      // Newer neighbor: smallest sort value strictly greater than current.
+      db
+        .select({ runId: instrumentRuns.runId })
+        .from(instrumentRuns)
+        .where(
+          and(
+            inSameInstrument,
+            sql`(${acquiredOrCreatedSql} > ${cur}::timestamptz or (${acquiredOrCreatedSql} = ${cur}::timestamptz and ${instrumentRuns.id} > ${current.id}))`
+          )
+        )
+        .orderBy(asc(acquiredOrCreatedSql), asc(instrumentRuns.id))
+        .limit(1),
+      // Older neighbor: greatest sort value strictly less than current.
+      db
+        .select({ runId: instrumentRuns.runId })
+        .from(instrumentRuns)
+        .where(
+          and(
+            inSameInstrument,
+            sql`(${acquiredOrCreatedSql} < ${cur}::timestamptz or (${acquiredOrCreatedSql} = ${cur}::timestamptz and ${instrumentRuns.id} < ${current.id}))`
+          )
+        )
+        .orderBy(desc(acquiredOrCreatedSql), desc(instrumentRuns.id))
+        .limit(1),
+    ]);
+
+    return {
+      previousRunId: previous[0]?.runId ?? null,
+      nextRunId: next[0]?.runId ?? null,
+    };
+  }
+);
+
 export async function buildRunListQuery(filters: RunListFilters) {
   const perPage = Math.min(Math.max(filters.perPage, 1), MAX_PER_PAGE);
   const conditions: SQL[] = [];

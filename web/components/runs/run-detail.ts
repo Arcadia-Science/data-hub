@@ -38,5 +38,8 @@ export interface RunDetailProps {
   reportImages: RunFile[];
   run: RunDetailType;
   runId: string;
+  // Previous/next run navigation for the header. Parent composes it so the
+  // server-side neighbor lookup stays at the page, like `attributionsSlot`.
+  runNavSlot: React.ReactNode;
   wellData: RawWellRow[];
 }
