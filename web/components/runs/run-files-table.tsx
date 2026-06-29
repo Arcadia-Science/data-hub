@@ -29,7 +29,7 @@ import {
 } from "@/components/ui/tooltip";
 import type { RunFile } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
-import { formatBytes } from "@/lib/utils";
+import { cn, formatBytes } from "@/lib/utils";
 import {
   FileSelectAllCheckbox,
   FileSelectCheckbox,
@@ -45,6 +45,12 @@ const DOWNLOADABLE_STATUSES = new Set([
 ]);
 
 const REPROCESSABLE_STATUSES = new Set(["completed", "failed"]);
+
+const CATEGORY_BADGE_CLASSES: Record<string, string> = {
+  raw: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
+  processed:
+    "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300",
+};
 
 export function statusLabel(file: RunFile): string {
   if (file.deletedAt !== null) {
@@ -170,7 +176,13 @@ function FileInfoCells({ file }: { file: RunFile }) {
         </span>
       </TableCell>
       <TableCell className="py-2">
-        <Badge className="capitalize" variant="outline">
+        <Badge
+          className={cn(
+            "capitalize",
+            CATEGORY_BADGE_CLASSES[file.category] ??
+              "bg-slate-100 text-slate-700 dark:bg-slate-950 dark:text-slate-300"
+          )}
+        >
           {file.category}
         </Badge>
       </TableCell>
