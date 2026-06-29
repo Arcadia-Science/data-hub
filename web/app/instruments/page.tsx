@@ -1,5 +1,6 @@
 import type { Metadata } from "next/types";
 import { SignInRequired } from "@/components/auth/sign-in-required";
+import { AddInstrumentDialog } from "@/components/instruments/add-instrument-dialog";
 import {
   InstrumentRowManagementActions,
   InstrumentsTable,
@@ -10,6 +11,7 @@ import {
   listInstrumentSubscriptions,
 } from "@/lib/api/notifications";
 import { auth } from "@/lib/auth";
+import { ADD_INSTRUMENT_DOCS_URL, MANAGING_TOKENS_DOCS_URL } from "@/lib/docs";
 
 const description = "Instruments connected to Data Hub.";
 
@@ -56,6 +58,10 @@ export default async function InstrumentsPage() {
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
       <div className="flex items-center justify-between">
         <h1 className="font-semibold text-2xl tracking-tight">Instruments</h1>
+        <AddInstrumentDialog
+          getTokenUrl={MANAGING_TOKENS_DOCS_URL}
+          setupGuideUrl={ADD_INSTRUMENT_DOCS_URL}
+        />
       </div>
       <InstrumentsTable
         data={instruments}

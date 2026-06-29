@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { InstrumentStatusBadge } from "@/components/instruments/instrument-status-badge";
 import { InstrumentNotificationSwitch } from "@/components/notifications/instrument-notification-switch";
 import { RecordInstrumentVisit } from "@/components/recent-instrument-visit";
 import {
@@ -9,9 +10,47 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import { getWatcherOnlineStatus } from "@/components/watchers/watcher-online-status";
+import {
+  getWatcherOnlineStatus,
+  type WatcherOnlineStatus,
+} from "@/components/watchers/watcher-online-status";
 import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type { InstrumentDetail } from "@/lib/api/instruments";
+
+// While an instrument is `pending` its lifecycle state (awaiting admin Confirm)
+// is the relevant signal, so it pre-empts the watcher connectivity badge. Once
+// active, the watcher badge — linked to the canonical watcher when present —
+// takes over.
+function renderStatusBadge(
+  instrument: InstrumentDetail,
+  watcherStatus: WatcherOnlineStatus
+) {
+  if (instrument.status === "pending") {
+    return <InstrumentStatusBadge className="px-2 py-3" status="pending" />;
+  }
+
+  const badge = (
+    <WatcherStatusBadge
+      className="px-2 py-3"
+      lastOnlineAt={instrument.lastWatcherHeartbeatAt}
+      status={watcherStatus}
+      verbose
+    />
+  );
+
+  if (instrument.activeWatcherId) {
+    return (
+      <Link
+        className="transition-colors hover:opacity-80"
+        href={`/watchers/${instrument.activeWatcherId}`}
+      >
+        {badge}
+      </Link>
+    );
+  }
+
+  return badge;
+}
 
 export function InstrumentHeader({
   instrument,
@@ -70,23 +109,7 @@ export function InstrumentHeader({
               masterMuted={notifications.masterMuted}
             />
           ) : null}
-          {instrument.activeWatcherId ? (
-            <Link href={`/watchers/${instrument.activeWatcherId}`}>
-              <WatcherStatusBadge
-                className="px-2 py-3 transition-colors hover:opacity-80"
-                lastOnlineAt={instrument.lastWatcherHeartbeatAt}
-                status={watcherStatus}
-                verbose
-              />
-            </Link>
-          ) : (
-            <WatcherStatusBadge
-              className="px-2 py-3"
-              lastOnlineAt={instrument.lastWatcherHeartbeatAt}
-              status={watcherStatus}
-              verbose
-            />
-          )}
+          {renderStatusBadge(instrument, watcherStatus)}
         </div>
       </div>
 

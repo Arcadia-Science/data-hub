@@ -2,6 +2,7 @@ import { SearchX } from "lucide-react";
 import type { ReactNode } from "react";
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import { EditInstrumentDialog } from "@/components/instruments/edit-instrument-dialog";
+import { InstrumentStatusBadge } from "@/components/instruments/instrument-status-badge";
 import { RowActionsCell } from "@/components/instruments/row-actions-cell";
 import { ClickableRow } from "@/components/instruments/runs-table/clickable-row";
 import { StatusActions } from "@/components/instruments/status-actions";
@@ -111,10 +112,14 @@ export function InstrumentsTable({
                   </span>
                 </TableCell>
                 <TableCell>
-                  <WatcherStatusBadge
-                    lastOnlineAt={row.lastWatcherHeartbeatAt}
-                    status={watcherStatus}
-                  />
+                  {row.status === "pending" ? (
+                    <InstrumentStatusBadge status="pending" />
+                  ) : (
+                    <WatcherStatusBadge
+                      lastOnlineAt={row.lastWatcherHeartbeatAt}
+                      status={watcherStatus}
+                    />
+                  )}
                 </TableCell>
                 <TableCell>
                   {row.filePatterns.length > 0 ? (

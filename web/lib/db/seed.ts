@@ -203,18 +203,31 @@ const WATCHER_STATUSES = ["watching", "registered", "stopped"] as const;
 
 export async function seedWatchers(
   db: Db,
-  instrumentIds: string[]
+  instruments: Pick<SeededInstrument, "id" | "status">[]
 ): Promise<SeededWatcher[]> {
-  if (instrumentIds.length === 0) {
+  // Mirror the register endpoint: only active and pending instruments accept a
+  // watcher. A pending instrument is seeded with a `registered` watcher (no
+  // heartbeats) to model the realistic "watcher registered, awaiting admin
+  // activation" state — instruments only ever exist because a watcher
+  // registered against them, so a pending instrument with no watcher is a
+  // state the real system can't produce.
+  const eligible = instruments.filter(
+    (i) => i.status === "active" || i.status === "pending"
+  );
+  if (eligible.length === 0) {
     return [];
   }
 
   const now = new Date();
-  const watcherValues = instrumentIds.map((instrumentId, idx) => {
-    const status = WATCHER_STATUSES[idx % WATCHER_STATUSES.length];
+  let activeIdx = 0;
+  const watcherValues = eligible.map((instrument, idx) => {
+    const status =
+      instrument.status === "pending"
+        ? ("registered" as const)
+        : WATCHER_STATUSES[activeIdx++ % WATCHER_STATUSES.length];
     return {
       id: crypto.randomUUID(),
-      instrumentId,
+      instrumentId: instrument.id,
       hostname: `seed-host-${idx + 1}`,
       osInfo: "Windows 11 23H2",
       watcherVersion: "9.9.9",
