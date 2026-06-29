@@ -46,7 +46,11 @@ function readRecentWatchers(): RecentWatcher[] {
 function writeRecentWatchers(watchers: RecentWatcher[]): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(watchers));
-    window.dispatchEvent(new Event(UPDATE_EVENT));
+    // Defer so other hook instances (e.g. MainNav) refresh after this
+    // setState commit, not synchronously inside the updater.
+    queueMicrotask(() => {
+      window.dispatchEvent(new Event(UPDATE_EVENT));
+    });
   } catch {
     // Private browsing or quota exceeded — ignore.
   }

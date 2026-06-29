@@ -534,7 +534,7 @@ function RunGroupNotificationRow({
                 <li key={run.id}>
                   <Link
                     className={cn(
-                      "flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 font-mono text-xs hover:bg-muted/80 focus-visible:bg-muted/80 focus-visible:outline-none",
+                      "flex min-h-4 cursor-pointer items-center gap-2 rounded px-1 py-1 font-mono text-xs hover:bg-muted/80 focus-visible:bg-muted/80 focus-visible:outline-none",
                       run.readAt === null
                         ? "text-foreground"
                         : "text-muted-foreground"
