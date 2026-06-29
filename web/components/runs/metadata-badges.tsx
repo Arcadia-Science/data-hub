@@ -96,11 +96,7 @@ export function MetadataFieldBadge({
   if (!value) {
     return <span className="text-muted-foreground">&mdash;</span>;
   }
-  return (
-    <Badge className={cn("font-mono", colorClass)} variant="outline">
-      {value}
-    </Badge>
-  );
+  return <Badge className={cn("font-mono", colorClass)}>{value}</Badge>;
 }
 
 function BadgeRow({
@@ -115,11 +111,7 @@ function BadgeRow({
   return (
     <div className={cn("flex flex-wrap gap-1", className)}>
       {values.map((v) => (
-        <Badge
-          className={cn("font-mono", colorMap?.[v])}
-          key={v}
-          variant="outline"
-        >
+        <Badge className={cn("font-mono", colorMap?.[v])} key={v}>
           {v}
         </Badge>
       ))}
@@ -171,11 +163,7 @@ export function TruncatedBadges({
       <TooltipTrigger asChild>
         <div className="flex flex-wrap gap-1">
           {visible.map((v) => (
-            <Badge
-              className={cn("font-mono", colorMap?.[v])}
-              key={v}
-              variant="outline"
-            >
+            <Badge className={cn("font-mono", colorMap?.[v])} key={v}>
               {v}
             </Badge>
           ))}

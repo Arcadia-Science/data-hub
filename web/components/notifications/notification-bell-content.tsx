@@ -272,8 +272,7 @@ function NotificationsHeader({
         {hasUnread ? (
           <Badge
             aria-label={`${unreadCount} unread`}
-            className="bg-primary/10 text-primary"
-            variant="secondary"
+            className="bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
           >
             {unreadCount > 99 ? "99+" : unreadCount} new
           </Badge>

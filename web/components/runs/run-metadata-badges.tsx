@@ -61,11 +61,7 @@ function ColorBadge({
   value: string;
   colorClass?: string;
 }) {
-  return (
-    <Badge className={cn("font-mono", colorClass)} variant="outline">
-      {value}
-    </Badge>
-  );
+  return <Badge className={cn("font-mono", colorClass)}>{value}</Badge>;
 }
 
 // ---------------------------------------------------------------------------
@@ -347,12 +343,10 @@ function relativeLuminance({
   return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
 }
 
-// Channel colors come straight from instrument metadata. To keep channel
-// badges visually consistent with the other metadata badges, we always use
-// the default outline border and carry the channel's identity on the dot and
-// text color alone. Near-white colors are blended with `--foreground` so the
-// text remains readable on light surfaces while staying vivid on dark ones,
-// and the dot is ringed with `--border` so a white swatch is still visible.
+// Channel colors come straight from instrument metadata. Near-white colors are
+// blended with `--foreground` so the text remains readable on light surfaces
+// while staying vivid on dark ones, and the dot is ringed with `--border` so a
+// white swatch is still visible.
 const NEAR_WHITE_LUMINANCE = 0.85;
 
 export interface ChannelBadgeStyle {
@@ -450,13 +444,13 @@ export function hasHinaMetadata(metadata: Record<string, unknown>) {
   );
 }
 
-// Inline-styled badge using an arbitrary hex color for the border + text.
+// Inline-styled badge using an arbitrary hex color for the label + dot.
 // Used for Hina channels since channel color is run-specific and can't be
 // baked into a static Tailwind palette.
 function ChannelBadge({ name, color }: HinaChannel) {
   const { badge, dot } = getHinaChannelBadgeStyle(color);
   return (
-    <Badge className="font-mono" style={badge} variant="outline">
+    <Badge className="bg-slate-100 font-mono dark:bg-slate-950" style={badge}>
       {color && (
         <span
           aria-hidden="true"
@@ -471,12 +465,12 @@ function ChannelBadge({ name, color }: HinaChannel) {
 
 // Tooltip variant of `ChannelBadge`. The default tooltip surface uses
 // `bg-foreground` + `text-background`, which inverts per theme — so the
-// badge's border and label inherit `currentColor` to stay readable on both
-// the light-mode dark tooltip and the dark-mode light tooltip. The dot keeps
-// the channel hex so the color cue is preserved.
+// badge label inherits `currentColor` to stay readable on both the light-mode
+// dark tooltip and the dark-mode light tooltip. The dot keeps the channel hex
+// so the color cue is preserved.
 function TooltipChannelBadge({ name, color }: HinaChannel) {
   return (
-    <Badge className="border-current font-mono text-current" variant="outline">
+    <Badge className="bg-background/15 font-mono text-current">
       {color && (
         <span
           aria-hidden="true"

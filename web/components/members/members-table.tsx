@@ -74,11 +74,11 @@ export function MembersTable({ data, currentUserId }: MembersTableProps) {
                 </TableCell>
                 <TableCell>
                   {member.isAdmin ? (
-                    <Badge variant="secondary">Admin</Badge>
-                  ) : (
-                    <Badge className="text-muted-foreground" variant="outline">
-                      Member
+                    <Badge className="bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300">
+                      Admin
                     </Badge>
+                  ) : (
+                    <Badge variant="outline">Member</Badge>
                   )}
                 </TableCell>
                 <TableCell className="text-right">

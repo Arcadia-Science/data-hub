@@ -74,41 +74,29 @@ function StatusBadge({ file }: { file: RunFile }) {
   switch (label) {
     case "Pending":
       return (
-        <Badge
-          className="border-amber-500/40 bg-amber-500/10 text-amber-400"
-          variant="outline"
-        >
+        <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300">
           {label}
         </Badge>
       );
     case "Uploading":
       return (
-        <Badge
-          className="gap-1 border-sky-500/40 bg-sky-500/10 text-sky-400"
-          variant="outline"
-        >
+        <Badge className="gap-1 bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300">
           <Loader2 className="size-3 animate-spin" />
           {label}
         </Badge>
       );
     case "Uploaded":
-      return <Badge variant="outline">{label}</Badge>;
+      return <Badge variant="secondary">{label}</Badge>;
     case "Processing":
       return (
-        <Badge
-          className="gap-1 border-blue-500/40 bg-blue-500/10 text-blue-400"
-          variant="outline"
-        >
+        <Badge className="gap-1 bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
           <Loader2 className="size-3 animate-spin" />
           {label}
         </Badge>
       );
     case "Completed":
       return (
-        <Badge
-          className="border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
-          variant="outline"
-        >
+        <Badge className="bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300">
           {label}
         </Badge>
       );
