@@ -1,7 +1,4 @@
-import Image from "next/image";
-import { DevSignInForm } from "@/components/auth/dev-sign-in-form";
-import { Button } from "@/components/ui/button";
-import { isDevAuthEnabled, signIn } from "@/lib/auth";
+import { AuthScreen } from "@/components/auth/auth-screen";
 
 interface SignInRequiredProps {
   /**
@@ -33,41 +30,12 @@ interface SignInRequiredProps {
  */
 export function SignInRequired({ callbackUrl, children }: SignInRequiredProps) {
   return (
-    <div className="flex h-[calc(100svh-3rem)] w-full items-center justify-center">
-      <div className="mx-auto flex w-full max-w-md flex-col items-center gap-6">
-        <div className="flex flex-col items-center gap-4 text-center">
-          <Image
-            alt="Data Hub"
-            height={64}
-            priority
-            src="/images/data-hub-logo.svg"
-            width={64}
-          />
-          <h1 className="mt-2 font-semibold text-3xl tracking-tight">
-            Sign in to Data Hub
-          </h1>
-          {children ? (
-            <p className="text-muted-foreground">{children}</p>
-          ) : null}
-        </div>
-        <form
-          action={async () => {
-            "use server";
-            await signIn("google", { redirectTo: callbackUrl });
-          }}
-          className="w-full"
-        >
-          <Button className="w-full cursor-pointer py-5 text-base" size="lg">
-            Sign in with Google
-          </Button>
-        </form>
-        {isDevAuthEnabled && (
-          <DevSignInForm
-            callbackUrl={callbackUrl}
-            inputId="sign-in-required-dev-email"
-          />
-        )}
-      </div>
-    </div>
+    <AuthScreen
+      callbackUrl={callbackUrl}
+      devInputId="sign-in-required-dev-email"
+      heading="Sign in to Data Hub"
+    >
+      {children ?? "Sign in with your Google Workspace account to continue."}
+    </AuthScreen>
   );
 }
