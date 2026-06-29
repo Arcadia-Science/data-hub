@@ -30,7 +30,7 @@ export function InstantRamanRunDetail({
 
   return (
     <>
-      <RunDetail.Header attributionsSlot={attributionsSlot} run={run}>
+      <RunDetail.Header run={run}>
         {!isDeleted && (
           <DeleteRunDialog
             fileCount={activeFileCount}
@@ -45,6 +45,7 @@ export function InstantRamanRunDetail({
       </RunDetail.Header>
 
       <RunDetail.FilesMetadataLayout>
+        <RunDetail.Metadata attributionsSlot={attributionsSlot} run={run} />
         <RunDetail.Files
           files={files}
           instrumentId={instrumentId}

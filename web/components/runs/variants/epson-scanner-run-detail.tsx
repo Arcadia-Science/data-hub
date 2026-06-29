@@ -23,7 +23,7 @@ export function EpsonScannerRunDetail({
 
   return (
     <>
-      <RunDetail.Header attributionsSlot={attributionsSlot} run={run}>
+      <RunDetail.Header run={run}>
         {!isDeleted && (
           <DeleteRunDialog
             fileCount={activeFileCount}
@@ -38,13 +38,13 @@ export function EpsonScannerRunDetail({
       </RunDetail.Header>
 
       <RunDetail.FilesMetadataLayout>
-        {hasEpsonScannerMetadata(run.metadata as Record<string, unknown>) && (
-          <RunDetail.Metadata>
+        <RunDetail.Metadata attributionsSlot={attributionsSlot} run={run}>
+          {hasEpsonScannerMetadata(run.metadata as Record<string, unknown>) && (
             <EpsonScannerRunBadges
               metadata={run.metadata as Record<string, unknown>}
             />
-          </RunDetail.Metadata>
-        )}
+          )}
+        </RunDetail.Metadata>
         <RunDetail.Files
           files={files}
           instrumentId={instrumentId}

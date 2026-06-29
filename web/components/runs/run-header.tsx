@@ -4,7 +4,6 @@ import { Trash2 } from "lucide-react";
 import Link from "next/link";
 import { RecordInstrumentVisit } from "@/components/recent-instrument-visit";
 import { RunSwitcher } from "@/components/runs/run-switcher";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -12,8 +11,8 @@ import {
   BreadcrumbList,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+import { UserAvatar } from "@/components/user-avatar";
 import type { RunDetail } from "@/lib/api/instrument-runs";
-import { avatarColor } from "@/lib/avatar-color";
 import { formatDateTime } from "@/lib/date";
 
 // Must stay a client component: `formatDateTime` resolves the timezone at
@@ -22,11 +21,9 @@ import { formatDateTime } from "@/lib/date";
 export function RunHeader({
   run,
   children,
-  attributionsSlot,
 }: {
   run: RunDetail;
   children?: React.ReactNode;
-  attributionsSlot?: React.ReactNode;
 }) {
   return (
     <div className="flex flex-col gap-4">
@@ -68,19 +65,7 @@ export function RunHeader({
             {run.deletedByUser && (
               <span className="flex items-center gap-1.5">
                 <span>by</span>
-                <Avatar size="sm">
-                  {run.deletedByUser.avatarUrl ? (
-                    <AvatarImage
-                      alt={run.deletedByUser.displayName}
-                      src={run.deletedByUser.avatarUrl}
-                    />
-                  ) : null}
-                  <AvatarFallback
-                    className={avatarColor(run.deletedByUser.userId)}
-                  >
-                    {run.deletedByUser.initials}
-                  </AvatarFallback>
-                </Avatar>
+                <UserAvatar size="sm" user={run.deletedByUser} />
                 <span className="font-medium">
                   {run.deletedByUser.displayName}
                 </span>
@@ -96,24 +81,6 @@ export function RunHeader({
         </h1>
 
         <div className="flex items-center gap-2">{children}</div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground text-sm">
-        {run.acquiredAt && (
-          <>
-            <span>Run started {formatDateTime(run.acquiredAt)}</span>
-            <span className="text-muted-foreground/40">&middot;</span>
-          </>
-        )}
-        <span>Reported {formatDateTime(run.createdAt)}</span>
-        <span className="text-muted-foreground/40">&middot;</span>
-        <span>Updated {formatDateTime(run.updatedAt)}</span>
-        {attributionsSlot && (
-          <>
-            <span className="text-muted-foreground/40">&middot;</span>
-            {attributionsSlot}
-          </>
-        )}
       </div>
     </div>
   );

@@ -301,7 +301,7 @@ export function PlateReaderRunDetail({
 
   return (
     <>
-      <RunDetail.Header attributionsSlot={attributionsSlot} run={run}>
+      <RunDetail.Header run={run}>
         {!isDeleted && (
           <DeleteRunDialog
             fileCount={activeFileCount}
@@ -316,13 +316,13 @@ export function PlateReaderRunDetail({
       </RunDetail.Header>
 
       <RunDetail.FilesMetadataLayout>
-        {hasPlateReaderMetadata(run.metadata as Record<string, unknown>) && (
-          <RunDetail.Metadata>
+        <RunDetail.Metadata attributionsSlot={attributionsSlot} run={run}>
+          {hasPlateReaderMetadata(run.metadata as Record<string, unknown>) && (
             <PlateReaderRunBadges
               metadata={run.metadata as Record<string, unknown>}
             />
-          </RunDetail.Metadata>
-        )}
+          )}
+        </RunDetail.Metadata>
         <RunDetail.Files
           files={files}
           instrumentId={instrumentId}

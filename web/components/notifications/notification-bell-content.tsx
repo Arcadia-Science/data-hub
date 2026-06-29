@@ -19,10 +19,9 @@ import {
   type NotificationItem,
   useNotifications,
 } from "@/components/notifications/notifications-provider";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { avatarColor } from "@/lib/avatar-color";
+import { UnknownUserAvatar, UserAvatar } from "@/components/user-avatar";
 import type { InstrumentType } from "@/lib/db/schema";
 import { cn, formatRelativeTime } from "@/lib/utils";
 
@@ -379,18 +378,17 @@ function CommentNotificationRow({
         onClick={onActivate}
       >
         {n.actor ? (
-          <Avatar size="sm">
-            {n.actor.avatarUrl ? (
-              <AvatarImage alt={n.actor.displayName} src={n.actor.avatarUrl} />
-            ) : null}
-            <AvatarFallback className={avatarColor(n.actor.id)}>
-              {n.actor.initials}
-            </AvatarFallback>
-          </Avatar>
+          <UserAvatar
+            size="sm"
+            user={{
+              userId: n.actor.id,
+              displayName: n.actor.displayName,
+              initials: n.actor.initials,
+              avatarUrl: n.actor.avatarUrl,
+            }}
+          />
         ) : (
-          <Avatar size="sm">
-            <AvatarFallback>?</AvatarFallback>
-          </Avatar>
+          <UnknownUserAvatar size="sm" />
         )}
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <p className="text-sm leading-snug">

@@ -26,8 +26,23 @@ import {
 import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
-// Shared row component: label on the left, badge(s) on the right
+// Shared field component: label above value(s)
 // ---------------------------------------------------------------------------
+
+export function MetadataField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="text-muted-foreground text-sm">{label}</span>
+      <div className="flex flex-wrap items-center gap-1">{children}</div>
+    </div>
+  );
+}
 
 function MetadataRow({
   label,
@@ -36,12 +51,7 @@ function MetadataRow({
   label: string;
   children: React.ReactNode;
 }) {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="shrink-0 text-muted-foreground text-xs">{label}</span>
-      {children}
-    </div>
-  );
+  return <MetadataField label={label}>{children}</MetadataField>;
 }
 
 function ColorBadge({

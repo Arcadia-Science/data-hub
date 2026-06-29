@@ -1,5 +1,4 @@
 import { AdminToggle } from "@/components/members/admin-toggle";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -9,7 +8,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { avatarColor, toInitials } from "@/lib/avatar-color";
+import { UserAvatar } from "@/components/user-avatar";
+import { toInitials } from "@/lib/avatar-color";
 
 export interface MemberRow {
   email: string | null;
@@ -48,14 +48,15 @@ export function MembersTable({ data, currentUserId }: MembersTableProps) {
               <TableRow key={member.id}>
                 <TableCell>
                   <div className="flex items-center gap-3">
-                    <Avatar size="sm">
-                      {member.image ? (
-                        <AvatarImage alt={displayName} src={member.image} />
-                      ) : null}
-                      <AvatarFallback className={avatarColor(member.id)}>
-                        {toInitials(displayName)}
-                      </AvatarFallback>
-                    </Avatar>
+                    <UserAvatar
+                      size="sm"
+                      user={{
+                        userId: member.id,
+                        displayName,
+                        initials: toInitials(displayName),
+                        avatarUrl: member.image,
+                      }}
+                    />
                     <div className="flex flex-col">
                       <span className="font-medium">
                         {displayName}

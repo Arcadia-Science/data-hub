@@ -20,6 +20,11 @@ export function formatDateTime(date: Date): string {
   return formatInTimeZone(date, getTimeZone(), "MMM d, yyyy h:mm a");
 }
 
+/** Formats a date as `"MMM d, h:mm a"`, e.g. `"Jun 26, 9:13 AM"`. */
+export function formatDateTimeShort(date: Date): string {
+  return formatInTimeZone(date, getTimeZone(), "MMM d, h:mm a");
+}
+
 /** Returns the date as a `"yyyy-MM-dd"` string for HTML date inputs. */
 export function toDateInputValue(date: Date): string {
   return formatInTimeZone(date, getTimeZone(), "yyyy-MM-dd");
