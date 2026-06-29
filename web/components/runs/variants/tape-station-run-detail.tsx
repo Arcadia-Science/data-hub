@@ -10,6 +10,7 @@ import {
 export function TapeStationRunDetail({
   run,
   files,
+  filesDownloadableCount,
   filesPagination,
   fileStats,
   reportFiles,
@@ -47,6 +48,7 @@ export function TapeStationRunDetail({
         </RunDetail.Metadata>
         <RunDetail.Files
           files={files}
+          filteredDownloadableCount={filesDownloadableCount}
           instrumentId={instrumentId}
           isDeleted={isDeleted}
           pagination={filesPagination}

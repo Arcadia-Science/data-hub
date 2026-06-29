@@ -10,6 +10,7 @@ import {
 export function EpsonScannerRunDetail({
   run,
   files,
+  filesDownloadableCount,
   filesPagination,
   fileStats,
   reportFiles,
@@ -47,6 +48,7 @@ export function EpsonScannerRunDetail({
         </RunDetail.Metadata>
         <RunDetail.Files
           files={files}
+          filteredDownloadableCount={filesDownloadableCount}
           instrumentId={instrumentId}
           isDeleted={isDeleted}
           pagination={filesPagination}

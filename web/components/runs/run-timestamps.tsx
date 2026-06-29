@@ -9,7 +9,7 @@ import { formatDateTimeShort } from "@/lib/date";
 // the viewer's offset.
 export function RunTimestamps({ run }: { run: RunDetail }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3 text-muted-foreground text-sm">
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3 text-muted-foreground text-xs">
       {run.acquiredAt && (
         <span className="inline-flex items-center gap-1.5">
           <Play aria-hidden="true" className="size-3.5 shrink-0" />

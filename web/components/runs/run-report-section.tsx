@@ -1,5 +1,6 @@
 import { ExternalLink } from "lucide-react";
 import { ColonyDataTable } from "@/components/runs/colony-data-table";
+import { RunSectionHeading } from "@/components/runs/run-section-heading";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { RunFile } from "@/lib/api/instrument-runs";
@@ -95,7 +96,7 @@ export function RunReportSection({ files }: { files: RunFile[] }) {
   if (totalCount === 0) {
     return (
       <div className="flex flex-col gap-2">
-        <h2 className="font-semibold text-sm">Report Data</h2>
+        <RunSectionHeading title="Report Data" />
         <Card size="sm">
           <CardContent>
             <p className="text-muted-foreground text-sm">
@@ -109,12 +110,7 @@ export function RunReportSection({ files }: { files: RunFile[] }) {
 
   return (
     <div className="flex flex-col gap-2">
-      <h2 className="font-semibold text-sm">
-        Report Data{" "}
-        <span className="ml-1 font-mono font-normal text-muted-foreground text-xs">
-          {totalCount} file(s)
-        </span>
-      </h2>
+      <RunSectionHeading countLabel={totalCount} title="Report Data" />
       <Card size="sm">
         <CardContent className="flex flex-col gap-6">
           {processedImages.map((file) => (

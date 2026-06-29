@@ -10,6 +10,7 @@ import {
 export function HinaMicroscopeRunDetail({
   run,
   files,
+  filesDownloadableCount,
   filesPagination,
   fileStats,
   reportImages,
@@ -45,6 +46,7 @@ export function HinaMicroscopeRunDetail({
         </RunDetail.Metadata>
         <RunDetail.Files
           files={files}
+          filteredDownloadableCount={filesDownloadableCount}
           instrumentId={instrumentId}
           isDeleted={isDeleted}
           pagination={filesPagination}

@@ -10,6 +10,7 @@ import {
 export function GelDocRunDetail({
   run,
   files,
+  filesDownloadableCount,
   filesPagination,
   fileStats,
   reportImages,
@@ -47,6 +48,7 @@ export function GelDocRunDetail({
         </RunDetail.Metadata>
         <RunDetail.Files
           files={files}
+          filteredDownloadableCount={filesDownloadableCount}
           instrumentId={instrumentId}
           isDeleted={isDeleted}
           pagination={filesPagination}

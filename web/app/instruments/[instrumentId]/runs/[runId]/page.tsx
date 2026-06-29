@@ -126,6 +126,7 @@ export default async function RunDetailPage({ params, searchParams }: Props) {
           }
           fileStats={fileStats}
           files={filesPage.data}
+          filesDownloadableCount={filesPage.downloadableCount}
           filesPagination={filesPage.pagination}
           instrumentId={instrumentId}
           reportFiles={reportFiles}

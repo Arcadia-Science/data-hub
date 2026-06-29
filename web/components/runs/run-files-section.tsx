@@ -6,6 +6,7 @@ import { debounce, useQueryStates } from "nuqs";
 import { useEffect, useTransition } from "react";
 import { toast } from "sonner";
 import { PaginationNav } from "@/components/pagination-nav";
+import { RunSectionHeading } from "@/components/runs/run-section-heading";
 import {
   TablePendingBoundary,
   TablePendingProvider,
@@ -44,9 +45,42 @@ import {
 // the URL and refetching the page.
 const SEARCH_DEBOUNCE_MS = 300;
 
+function formatFilesSectionCount(stats: RunFileStats): string | undefined {
+  const parts: string[] = [];
+  if (stats.rawActive > 0) {
+    parts.push(`${stats.rawActive} raw`);
+  }
+  if (stats.processedActive > 0) {
+    parts.push(`${stats.processedActive} processed`);
+  }
+  return parts.length > 0 ? parts.join(", ") : undefined;
+}
+
+const FILES_STATUS_LABELS: Record<Exclude<FilesStatusFilter, "all">, string> = {
+  raw: "Raw",
+  processed: "Processed",
+  pending: "Pending",
+  uploaded: "Uploaded",
+  processing: "Processing",
+  completed: "Completed",
+  failed: "Failed",
+};
+
+function filesStatusTriggerLabel(
+  status: FilesStatusFilter,
+  activeCount: number
+): string {
+  if (status === "all") {
+    return `All (${activeCount})`;
+  }
+  return FILES_STATUS_LABELS[status];
+}
+
 interface RunFilesSectionProps {
   // Current page of the server-paginated, filtered, sorted file list.
   files: RunFile[];
+  // Downloadable files matching the active table filters (S3-backed).
+  filteredDownloadableCount: number;
   instrumentId: string;
   isDeleted: boolean;
   pagination: RunFilesPage["pagination"];
@@ -93,6 +127,7 @@ export function RunFilesSection(props: RunFilesSectionProps) {
 
 function RunFilesSectionContent({
   files,
+  filteredDownloadableCount,
   pagination,
   stats,
   instrumentId,
@@ -167,7 +202,10 @@ function RunFilesSectionContent({
 
   return (
     <div className="flex flex-col gap-2">
-      <h2 className="font-semibold text-sm">Files</h2>
+      <RunSectionHeading
+        countLabel={formatFilesSectionCount(stats)}
+        title="Files"
+      />
       <div className="rounded-lg border bg-background dark:bg-muted">
         {/* Toolbar: search, filter, sort */}
         <div className="flex items-center gap-2 border-b px-3 py-2">
@@ -199,9 +237,7 @@ function RunFilesSectionContent({
           >
             <SelectTrigger className="h-8 text-sm" size="sm">
               <SelectValue>
-                {filters.files_status === "all"
-                  ? `All (${stats.active})`
-                  : undefined}
+                {filesStatusTriggerLabel(filters.files_status, stats.active)}
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
@@ -294,7 +330,7 @@ function RunFilesSectionContent({
             >
               <Download className="size-3" />
               {isFilterActive
-                ? "Download filtered"
+                ? `Download filtered (${filteredDownloadableCount})`
                 : `Download all (${downloadableCount})`}
             </Button>
           )}

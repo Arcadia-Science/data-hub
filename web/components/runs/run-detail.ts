@@ -29,6 +29,7 @@ export interface RunDetailProps {
   fileStats: RunFileStats;
   // Current page of the server-paginated files table.
   files: RunFile[];
+  filesDownloadableCount: RunFilesPage["downloadableCount"];
   filesPagination: RunFilesPage["pagination"];
   instrumentId: string;
   // Processed + PDF files for the report sections and well-data parsing.

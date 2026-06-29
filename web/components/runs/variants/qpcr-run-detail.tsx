@@ -10,6 +10,7 @@ import {
 export function QpcrRunDetail({
   run,
   files,
+  filesDownloadableCount,
   filesPagination,
   fileStats,
   reportFiles,
@@ -45,6 +46,7 @@ export function QpcrRunDetail({
         </RunDetail.Metadata>
         <RunDetail.Files
           files={files}
+          filteredDownloadableCount={filesDownloadableCount}
           instrumentId={instrumentId}
           isDeleted={isDeleted}
           pagination={filesPagination}

@@ -11,6 +11,7 @@ import {
   hasPlateReaderMetadata,
   PlateReaderRunBadges,
 } from "@/components/runs/run-metadata-badges";
+import { RunSectionHeading } from "@/components/runs/run-section-heading";
 import { Card, CardContent } from "@/components/ui/card";
 import type { RawWellRow } from "@/lib/api/instrument-runs";
 
@@ -237,12 +238,7 @@ function PlateMapSection({
 
   return (
     <div className="flex flex-col gap-2">
-      <h2 className="font-semibold text-sm">
-        Plate Maps{" "}
-        <span className="ml-1 font-mono font-normal text-muted-foreground text-xs">
-          {groups.length} map(s)
-        </span>
-      </h2>
+      <RunSectionHeading countLabel={groups.length} title="Plate Maps" />
       <Card size="sm">
         <CardContent className="flex flex-col gap-6">
           <div className="flex flex-col gap-10">
@@ -276,6 +272,7 @@ function PlateMapSection({
 export function PlateReaderRunDetail({
   run,
   files,
+  filesDownloadableCount,
   filesPagination,
   fileStats,
   wellData,
@@ -325,6 +322,7 @@ export function PlateReaderRunDetail({
         </RunDetail.Metadata>
         <RunDetail.Files
           files={files}
+          filteredDownloadableCount={filesDownloadableCount}
           instrumentId={instrumentId}
           isDeleted={isDeleted}
           pagination={filesPagination}

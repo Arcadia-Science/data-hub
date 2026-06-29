@@ -7,6 +7,7 @@ import { RunDetail } from "@/components/runs/run-detail";
 export function InstantRamanRunDetail({
   run,
   files,
+  filesDownloadableCount,
   filesPagination,
   fileStats,
   reportFiles,
@@ -48,6 +49,7 @@ export function InstantRamanRunDetail({
         <RunDetail.Metadata attributionsSlot={attributionsSlot} run={run} />
         <RunDetail.Files
           files={files}
+          filteredDownloadableCount={filesDownloadableCount}
           instrumentId={instrumentId}
           isDeleted={isDeleted}
           pagination={filesPagination}

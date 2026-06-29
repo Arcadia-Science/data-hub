@@ -1,4 +1,5 @@
 import { RamanSpectrumViewer } from "@/components/runs/raman-spectrum-viewer";
+import { RunSectionHeading } from "@/components/runs/run-section-heading";
 import { Card, CardContent } from "@/components/ui/card";
 
 export interface RamanSpectrumFileRef {
@@ -14,7 +15,7 @@ export function RamanReportSection({
   if (spectra.length === 0) {
     return (
       <div className="flex flex-col gap-2">
-        <h2 className="font-semibold text-sm">Report Data</h2>
+        <RunSectionHeading title="Report Data" />
         <Card size="sm">
           <CardContent>
             <p className="text-muted-foreground text-sm">
@@ -28,12 +29,7 @@ export function RamanReportSection({
 
   return (
     <div className="flex flex-col gap-2">
-      <h2 className="font-semibold text-sm">
-        Report Data{" "}
-        <span className="ml-1 font-mono font-normal text-muted-foreground text-xs">
-          {spectra.length} {spectra.length === 1 ? "spectrum" : "spectra"}
-        </span>
-      </h2>
+      <RunSectionHeading countLabel={spectra.length} title="Report Data" />
       <Card size="sm">
         <CardContent>
           <RamanSpectrumViewer spectra={spectra} />

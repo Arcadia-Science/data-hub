@@ -655,6 +655,9 @@ function runFilesOrderBy(sort: FilesSortField): SQL[] {
 
 export interface RunFilesPage {
   data: RunFile[];
+  // Files in the current filter that have S3 keys and can be zipped by the
+  // archive route (matches `loadDownloadableFiles` after id resolution).
+  downloadableCount: number;
   pagination: {
     page: number;
     per_page: number;
@@ -673,8 +676,11 @@ export async function buildRunFilesQuery(
 
   const where = and(...runFilesWhere(runInternalId, filters));
 
-  const [{ total }] = await db
-    .select({ total: sql<number>`cast(count(*) as int)` })
+  const [{ total, downloadableCount }] = await db
+    .select({
+      total: sql<number>`cast(count(*) as int)`,
+      downloadableCount: sql<number>`cast(count(*) filter (where ${files.s3Bucket} is not null and ${files.s3Key} is not null and ${files.deletedAt} is null) as int)`,
+    })
     .from(files)
     .where(where);
 
@@ -688,6 +694,7 @@ export async function buildRunFilesQuery(
 
   return {
     data,
+    downloadableCount,
     pagination: {
       page: safePage,
       per_page: safePerPage,
@@ -703,7 +710,10 @@ export async function buildRunFilesQuery(
 // run detail page's `generateMetadata`.
 export interface RunFileStats {
   active: number;
+  // Files awaiting an upload request (status = detected).
+  detected: number;
   dismissed: number;
+  failed: number;
   pending: number;
   processedActive: number;
   processing: number;
@@ -725,6 +735,8 @@ export async function getRunFileStats(
       dismissed: sql<number>`cast(count(*) filter (where ${files.deletedAt} is not null) as int)`,
       rawActive: sql<number>`cast(count(*) filter (where ${files.category} = 'raw' and ${activeNotDeleted}) as int)`,
       processedActive: sql<number>`cast(count(*) filter (where ${files.category} = 'processed' and ${activeNotDeleted}) as int)`,
+      detected: sql<number>`cast(count(*) filter (where ${files.status} = 'detected' and ${activeNotDeleted}) as int)`,
+      failed: sql<number>`cast(count(*) filter (where ${files.status} = 'failed' and ${activeNotDeleted}) as int)`,
       pending: sql<number>`cast(count(*) filter (where ${files.status} in ('detected', 'upload_requested') and ${activeNotDeleted}) as int)`,
       uploaded: sql<number>`cast(count(*) filter (where ${files.status} not in ('detected', 'upload_requested', 'processing') and ${activeNotDeleted}) as int)`,
       processing: sql<number>`cast(count(*) filter (where ${files.status} = 'processing' and ${activeNotDeleted}) as int)`,
