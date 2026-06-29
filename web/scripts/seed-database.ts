@@ -57,10 +57,7 @@ console.log("Seeding instruments…");
 const instruments = await seedInstruments(db);
 
 console.log("Seeding watchers + heartbeats + events…");
-await seedWatchers(
-  db,
-  instruments.filter((i) => i.status === "active").map((i) => i.id)
-);
+await seedWatchers(db, instruments);
 
 console.log("Seeding runs + files…");
 const activeInstruments = instruments.filter((i) => i.status === "active");
