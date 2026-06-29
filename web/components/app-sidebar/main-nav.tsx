@@ -3,6 +3,7 @@
 import { ChevronRight, Cpu, Home, type LucideIcon, Radio } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useMemo } from "react";
 import {
   Collapsible,
   CollapsibleContent,
@@ -19,7 +20,15 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
 } from "@/components/ui/sidebar";
+import { useRecentInstruments } from "@/hooks/use-recent-instruments";
+import {
+  useRecentWatchers,
+  watcherNavLabel,
+} from "@/hooks/use-recent-watchers";
 import type { SidebarInstrument, SidebarWatcher } from "@/lib/api/sidebar";
+
+const SIDEBAR_RECENT_INSTRUMENTS_LIMIT = 10;
+const SIDEBAR_RECENT_WATCHERS_LIMIT = 10;
 
 interface MainNavProps {
   instruments: SidebarInstrument[];
@@ -28,6 +37,52 @@ interface MainNavProps {
 
 export function MainNav({ instruments, watchers }: MainNavProps) {
   const pathname = usePathname();
+  const { recent: recentInstruments } = useRecentInstruments();
+  const { recent: recentWatchers } = useRecentWatchers();
+
+  const recentlyViewedInstruments = useMemo(
+    () => recentInstruments.slice(0, SIDEBAR_RECENT_INSTRUMENTS_LIMIT),
+    [recentInstruments]
+  );
+
+  const recentlyViewedIds = useMemo(
+    () => new Set(recentlyViewedInstruments.map((entry) => entry.instrumentId)),
+    [recentlyViewedInstruments]
+  );
+
+  const sidebarInstruments = useMemo(
+    () =>
+      instruments
+        .filter((instrument) => !recentlyViewedIds.has(instrument.id))
+        .map((instrument) => ({
+          key: instrument.id,
+          href: `/instruments/${instrument.id}`,
+          label: instrument.displayName,
+        })),
+    [instruments, recentlyViewedIds]
+  );
+
+  const recentlyViewedWatchers = useMemo(
+    () => recentWatchers.slice(0, SIDEBAR_RECENT_WATCHERS_LIMIT),
+    [recentWatchers]
+  );
+
+  const recentlyViewedWatcherIds = useMemo(
+    () => new Set(recentlyViewedWatchers.map((entry) => entry.watcherId)),
+    [recentlyViewedWatchers]
+  );
+
+  const sidebarWatchers = useMemo(
+    () =>
+      watchers
+        .filter((watcher) => !recentlyViewedWatcherIds.has(watcher.id))
+        .map((watcher) => ({
+          key: watcher.id,
+          href: `/watchers/${watcher.id}`,
+          label: watcherNavLabel(watcher.id, watcher.hostname),
+        })),
+    [watchers, recentlyViewedWatcherIds]
+  );
 
   return (
     <SidebarGroup>
@@ -51,12 +106,15 @@ export function MainNav({ instruments, watchers }: MainNavProps) {
             basePath="/instruments"
             currentPath={pathname}
             icon={Cpu}
-            items={instruments.map((instrument) => ({
-              key: instrument.id,
-              href: `/instruments/${instrument.id}`,
-              label: instrument.displayName,
-            }))}
+            items={sidebarInstruments}
             label="Instruments"
+            recentlyViewedItems={recentlyViewedInstruments.map(
+              (instrument) => ({
+                key: instrument.instrumentId,
+                href: `/instruments/${instrument.instrumentId}`,
+                label: instrument.displayName,
+              })
+            )}
             viewAllHref="/instruments"
           />
 
@@ -64,15 +122,13 @@ export function MainNav({ instruments, watchers }: MainNavProps) {
             basePath="/watchers"
             currentPath={pathname}
             icon={Radio}
-            items={watchers.map((watcher) => ({
-              key: watcher.id,
-              href: `/watchers/${watcher.id}`,
-              // Hostname is the canonical identifier for a watcher in the
-              // table view; fall back to the short id when missing so the
-              // row never collapses to an empty label.
-              label: watcher.hostname ?? `${watcher.id.slice(0, 8)}…`,
-            }))}
+            items={sidebarWatchers}
             label="Watchers"
+            recentlyViewedItems={recentlyViewedWatchers.map((watcher) => ({
+              key: watcher.watcherId,
+              href: `/watchers/${watcher.watcherId}`,
+              label: watcher.label,
+            }))}
             viewAllHref="/watchers"
           />
         </SidebarMenu>
@@ -88,8 +144,13 @@ interface CollapsibleNavSectionProps {
   icon: LucideIcon;
   items: Array<{ key: string; href: string; label: string }>;
   label: string;
+  recentlyViewedItems?: Array<{ key: string; href: string; label: string }>;
   /** Href for the trailing "View all" sub-item that opens the full list. */
   viewAllHref: string;
+}
+
+function isNavItemActive(currentPath: string, href: string): boolean {
+  return currentPath === href || currentPath.startsWith(`${href}/`);
 }
 
 function CollapsibleNavSection({
@@ -98,6 +159,7 @@ function CollapsibleNavSection({
   basePath,
   viewAllHref,
   items,
+  recentlyViewedItems = [],
   currentPath,
 }: CollapsibleNavSectionProps) {
   // Open the section by default whenever the user is anywhere within it so
@@ -121,11 +183,25 @@ function CollapsibleNavSection({
         </CollapsibleTrigger>
         <CollapsibleContent>
           <SidebarMenuSub>
+            {recentlyViewedItems.length > 0
+              ? recentlyViewedItems.map((item) => (
+                  <SidebarMenuSubItem key={`recent-${item.key}`}>
+                    <SidebarMenuSubButton
+                      asChild
+                      isActive={isNavItemActive(currentPath, item.href)}
+                    >
+                      <Link href={item.href}>
+                        <span className="truncate">{item.label}</span>
+                      </Link>
+                    </SidebarMenuSubButton>
+                  </SidebarMenuSubItem>
+                ))
+              : null}
             {items.map((item) => (
               <SidebarMenuSubItem key={item.key}>
                 <SidebarMenuSubButton
                   asChild
-                  isActive={currentPath === item.href}
+                  isActive={isNavItemActive(currentPath, item.href)}
                 >
                   <Link href={item.href}>
                     <span className="truncate">{item.label}</span>

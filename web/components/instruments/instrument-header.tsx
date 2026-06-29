@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { InstrumentNotificationSwitch } from "@/components/notifications/instrument-notification-switch";
+import { RecordInstrumentVisit } from "@/components/recent-instrument-visit";
 import { Badge } from "@/components/ui/badge";
 import {
   Breadcrumb,
@@ -33,6 +34,10 @@ export function InstrumentHeader({
 
   return (
     <div className="flex flex-col gap-2">
+      <RecordInstrumentVisit
+        displayName={instrument.displayName}
+        instrumentId={instrument.id}
+      />
       <Breadcrumb className="mb-2">
         <BreadcrumbList>
           <BreadcrumbItem>

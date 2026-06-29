@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { RecordWatcherVisit } from "@/components/recent-watcher-visit";
 import { Badge } from "@/components/ui/badge";
 import {
   Breadcrumb,
@@ -24,6 +25,7 @@ export function WatcherHeader({ watcher }: { watcher: WatcherDetail }) {
 
   return (
     <div className="flex flex-col gap-4">
+      <RecordWatcherVisit hostname={watcher.hostname} watcherId={watcher.id} />
       <Breadcrumb>
         <BreadcrumbList>
           <BreadcrumbItem>
