@@ -74,7 +74,13 @@ export function FileStatusColumnHeader() {
           className="size-3 text-muted-foreground"
         />
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-80 gap-4 p-4" side="bottom">
+      <PopoverContent
+        align="center"
+        avoidCollisions={false}
+        className="w-80 gap-4 p-4 shadow-2xl"
+        side="left"
+        sideOffset={16}
+      >
         <div className="flex items-start justify-between gap-4">
           <PopoverHeader>
             <PopoverTitle>File status</PopoverTitle>
