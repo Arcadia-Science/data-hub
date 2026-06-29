@@ -1,6 +1,12 @@
 "use client";
 
-import { ChevronsUpDown, LogOut, Settings } from "lucide-react";
+import {
+  BookOpen,
+  ChevronsUpDown,
+  ExternalLink,
+  LogOut,
+  Settings,
+} from "lucide-react";
 import Link from "next/link";
 import { useTransition } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -17,6 +23,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { DOCS_BASE_URL } from "@/lib/docs";
 
 interface UserMenuFooterProps {
   signOutAction: () => Promise<void>;
@@ -84,6 +91,13 @@ export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
             side={isMobile ? "bottom" : "top"}
             sideOffset={4}
           >
+            <DropdownMenuItem asChild>
+              <a href={DOCS_BASE_URL} rel="noopener noreferrer" target="_blank">
+                <BookOpen data-icon="inline-start" />
+                Docs
+                <ExternalLink className="ml-auto size-3 text-muted-foreground" />
+              </a>
+            </DropdownMenuItem>
             <DropdownMenuItem asChild>
               <Link href="/settings/notifications">
                 <Settings data-icon="inline-start" />

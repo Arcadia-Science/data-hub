@@ -22,11 +22,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import type { RunFile } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
 import { cn, formatBytes } from "@/lib/utils";
@@ -35,6 +30,8 @@ import {
   FileSelectCheckbox,
 } from "./file-select-checkbox";
 import { buildFileRef, useFileSelection } from "./file-selection-provider";
+import { FileStatusColumnHeader } from "./file-status-column-header";
+import { FileStatusIndicator } from "./file-status-indicator";
 import { WatcherGatedUploadButton } from "./watcher-gated-upload-button";
 
 const DOWNLOADABLE_STATUSES = new Set([
@@ -52,87 +49,6 @@ const CATEGORY_BADGE_CLASSES: Record<string, string> = {
     "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300",
 };
 
-export function statusLabel(file: RunFile): string {
-  if (file.deletedAt !== null) {
-    return "Dismissed";
-  }
-  switch (file.status) {
-    case "detected":
-      return "Pending";
-    case "upload_requested":
-      return "Uploading";
-    case "uploaded":
-      return "Uploaded";
-    case "processing":
-      return "Processing";
-    case "completed":
-      return "Completed";
-    case "failed":
-      return "Failed";
-    default:
-      return file.status;
-  }
-}
-
-function StatusBadge({ file }: { file: RunFile }) {
-  const label = statusLabel(file);
-
-  switch (label) {
-    case "Pending":
-      return (
-        <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300">
-          {label}
-        </Badge>
-      );
-    case "Uploading":
-      return (
-        <Badge className="gap-1 bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300">
-          <Loader2 className="size-3 animate-spin" />
-          {label}
-        </Badge>
-      );
-    case "Uploaded":
-      return <Badge variant="secondary">{label}</Badge>;
-    case "Processing":
-      return (
-        <Badge className="gap-1 bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
-          <Loader2 className="size-3 animate-spin" />
-          {label}
-        </Badge>
-      );
-    case "Completed":
-      return (
-        <Badge className="bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300">
-          {label}
-        </Badge>
-      );
-    case "Failed": {
-      const badge = <Badge variant="destructive">{label}</Badge>;
-      if (!file.errorMessage) {
-        return badge;
-      }
-      return (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span tabIndex={0}>{badge}</span>
-          </TooltipTrigger>
-          <TooltipContent className="max-w-sm" side="top">
-            {file.errorMessage}
-          </TooltipContent>
-        </Tooltip>
-      );
-    }
-    case "Dismissed":
-      return (
-        <Badge className="opacity-60" variant="secondary">
-          {label}
-        </Badge>
-      );
-    default:
-      return <Badge variant="secondary">{label}</Badge>;
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Shared table pieces used by both the editable and read-only variants.
 // ---------------------------------------------------------------------------
@@ -140,20 +56,12 @@ function StatusBadge({ file }: { file: RunFile }) {
 function FileColumnHeaders() {
   return (
     <>
-      <TableHead className="font-medium text-muted-foreground text-sm">
-        File name
-      </TableHead>
-      <TableHead className="font-medium text-muted-foreground text-sm">
-        Type
-      </TableHead>
-      <TableHead className="font-medium text-muted-foreground text-sm">
-        Size
-      </TableHead>
-      <TableHead className="font-medium text-muted-foreground text-sm">
-        Created
-      </TableHead>
-      <TableHead className="font-medium text-muted-foreground text-sm">
-        Status
+      <TableHead>File name</TableHead>
+      <TableHead>Type</TableHead>
+      <TableHead>Size</TableHead>
+      <TableHead>Created</TableHead>
+      <TableHead>
+        <FileStatusColumnHeader />
       </TableHead>
     </>
   );
@@ -196,8 +104,8 @@ function FileInfoCells({ file }: { file: RunFile }) {
             ? formatDateTime(file.createdAt)
             : "—"}
       </TableCell>
-      <TableCell className="py-2">
-        <StatusBadge file={file} />
+      <TableCell className="py-2 align-middle">
+        <FileStatusIndicator file={file} />
       </TableCell>
     </>
   );
