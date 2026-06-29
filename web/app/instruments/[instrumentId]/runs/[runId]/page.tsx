@@ -142,14 +142,20 @@ export default async function RunDetailPage({ params, searchParams }: Props) {
           runId={runId}
           runNavSlot={
             <RunNav
-              nextHref={
+              next={
                 adjacentRuns.nextRunId
-                  ? toRunHref(adjacentRuns.nextRunId)
+                  ? {
+                      href: toRunHref(adjacentRuns.nextRunId),
+                      runId: adjacentRuns.nextRunId,
+                    }
                   : null
               }
-              previousHref={
+              previous={
                 adjacentRuns.previousRunId
-                  ? toRunHref(adjacentRuns.previousRunId)
+                  ? {
+                      href: toRunHref(adjacentRuns.previousRunId),
+                      runId: adjacentRuns.previousRunId,
+                    }
                   : null
               }
             />

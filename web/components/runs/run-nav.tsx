@@ -9,55 +9,62 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
+interface AdjacentRun {
+  href: string;
+  runId: string;
+}
+
 // Previous/next navigation between an instrument's runs, ordered newest-first
-// to match the runs table. `previousHref` is the newer run, `nextHref` the
-// older one; a null href means we're at that end of the list, so the button
-// renders disabled rather than as a link.
+// to match the runs table. `previous` is the newer run, `next` the older one;
+// a null neighbor means we're at that end of the list, so the button renders
+// disabled rather than as a link.
 export function RunNav({
-  previousHref,
-  nextHref,
+  previous,
+  next,
 }: {
-  nextHref: string | null;
-  previousHref: string | null;
+  next: AdjacentRun | null;
+  previous: AdjacentRun | null;
 }) {
   return (
     <div className="flex items-center gap-1">
       <RunNavButton
-        href={previousHref}
+        direction="Previous"
         icon={<ChevronLeft />}
-        label="Previous (newer) run"
+        run={previous}
       />
-      <RunNavButton
-        href={nextHref}
-        icon={<ChevronRight />}
-        label="Next (older) run"
-      />
+      <RunNavButton direction="Next" icon={<ChevronRight />} run={next} />
     </div>
   );
 }
 
 function RunNavButton({
-  href,
+  direction,
   icon,
-  label,
+  run,
 }: {
-  href: string | null;
+  direction: "Previous" | "Next";
   icon: React.ReactNode;
-  label: string;
+  run: AdjacentRun | null;
 }) {
-  if (!href) {
+  if (!run) {
     return (
-      <Button aria-label={label} disabled size="icon-sm" variant="outline">
+      <Button
+        aria-label={`${direction} run`}
+        disabled
+        size="icon-sm"
+        variant="outline"
+      >
         {icon}
       </Button>
     );
   }
 
+  const label = `${direction} run: ${run.runId}`;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <Button aria-label={label} asChild size="icon-sm" variant="outline">
-          <Link href={href}>{icon}</Link>
+          <Link href={run.href}>{icon}</Link>
         </Button>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
