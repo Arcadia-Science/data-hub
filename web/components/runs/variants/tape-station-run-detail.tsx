@@ -10,12 +10,14 @@ import {
 export function TapeStationRunDetail({
   run,
   files,
+  filesDownloadableCount,
   filesPagination,
   fileStats,
   reportFiles,
   instrumentId,
   runId,
   attributionsSlot,
+  runNavSlot,
 }: RunDetailProps) {
   const isDeleted = run.deletedAt !== null;
   const activeFileCount = fileStats.active;
@@ -23,7 +25,7 @@ export function TapeStationRunDetail({
 
   return (
     <>
-      <RunDetail.Header attributionsSlot={attributionsSlot} run={run}>
+      <RunDetail.Header run={run} runNavSlot={runNavSlot}>
         {!isDeleted && (
           <DeleteRunDialog
             fileCount={activeFileCount}
@@ -38,15 +40,16 @@ export function TapeStationRunDetail({
       </RunDetail.Header>
 
       <RunDetail.FilesMetadataLayout>
-        {hasTapeStationMetadata(run.metadata as Record<string, unknown>) && (
-          <RunDetail.Metadata>
+        <RunDetail.Metadata attributionsSlot={attributionsSlot} run={run}>
+          {hasTapeStationMetadata(run.metadata as Record<string, unknown>) && (
             <TapeStationRunBadges
               metadata={run.metadata as Record<string, unknown>}
             />
-          </RunDetail.Metadata>
-        )}
+          )}
+        </RunDetail.Metadata>
         <RunDetail.Files
           files={files}
+          filteredDownloadableCount={filesDownloadableCount}
           instrumentId={instrumentId}
           isDeleted={isDeleted}
           pagination={filesPagination}

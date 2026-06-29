@@ -22,13 +22,14 @@ export const RunDetail = {
 };
 
 export interface RunDetailProps {
-  // Rendered below the header on every variant. Parent composes the
+  // Rendered in the summary card's "Ran by" field. Parent composes the
   // attribution UI so server-only user/session wiring stays at the page.
   attributionsSlot: React.ReactNode;
   // Aggregate per-run file counts (footer summary, variant counts).
   fileStats: RunFileStats;
   // Current page of the server-paginated files table.
   files: RunFile[];
+  filesDownloadableCount: RunFilesPage["downloadableCount"];
   filesPagination: RunFilesPage["pagination"];
   instrumentId: string;
   // Processed + PDF files for the report sections and well-data parsing.
@@ -37,5 +38,8 @@ export interface RunDetailProps {
   reportImages: RunFile[];
   run: RunDetailType;
   runId: string;
+  // Previous/next run navigation for the header. Parent composes it so the
+  // server-side neighbor lookup stays at the page, like `attributionsSlot`.
+  runNavSlot: React.ReactNode;
   wellData: RawWellRow[];
 }

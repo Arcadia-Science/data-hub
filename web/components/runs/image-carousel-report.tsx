@@ -2,6 +2,7 @@
 
 import { ExternalLink } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { RunSectionHeading } from "@/components/runs/run-section-heading";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -70,7 +71,7 @@ export function ImageCarouselReport({ files }: { files: RunFile[] }) {
   if (images.length === 0) {
     return (
       <div className="flex flex-col gap-2">
-        <h2 className="font-semibold text-sm">Report Data</h2>
+        <RunSectionHeading title="Report Data" />
         <Card size="sm">
           <CardContent>
             <p className="text-muted-foreground text-sm">
@@ -87,12 +88,7 @@ export function ImageCarouselReport({ files }: { files: RunFile[] }) {
 
   return (
     <div className="flex flex-col gap-2">
-      <h2 className="font-semibold text-sm">
-        Report Data{" "}
-        <span className="ml-1 font-mono font-normal text-muted-foreground text-xs">
-          {images.length} image(s)
-        </span>
-      </h2>
+      <RunSectionHeading countLabel={images.length} title="Report Data" />
       <Card size="sm">
         <CardContent className="flex flex-col gap-3">
           <div className="flex items-center justify-between gap-2">

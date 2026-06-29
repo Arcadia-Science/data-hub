@@ -5,52 +5,16 @@ import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { type MouseEvent, useOptimistic, useTransition } from "react";
 import { toast } from "sonner";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { UserAvatar } from "@/components/user-avatar";
 import type { RunAttribution } from "@/lib/api/instrument-runs";
+import { toInitials } from "@/lib/avatar-color";
 import { cn } from "@/lib/utils";
-
-// A small, deterministic palette keyed by userId hash so the same user always
-// gets the same color across rows. Tailwind tokens are baked in (we can't
-// interpolate class names safely).
-const AVATAR_PALETTE = [
-  "bg-blue-200 text-blue-900 dark:bg-blue-800 dark:text-blue-100",
-  "bg-emerald-200 text-emerald-900 dark:bg-emerald-800 dark:text-emerald-100",
-  "bg-violet-200 text-violet-900 dark:bg-violet-800 dark:text-violet-100",
-  "bg-amber-200 text-amber-900 dark:bg-amber-800 dark:text-amber-100",
-  "bg-rose-200 text-rose-900 dark:bg-rose-800 dark:text-rose-100",
-  "bg-teal-200 text-teal-900 dark:bg-teal-800 dark:text-teal-100",
-  "bg-fuchsia-200 text-fuchsia-900 dark:bg-fuchsia-800 dark:text-fuchsia-100",
-  "bg-orange-200 text-orange-900 dark:bg-orange-800 dark:text-orange-100",
-];
-
-function avatarColor(userId: string): string {
-  let hash = 0;
-  for (let i = 0; i < userId.length; i++) {
-    // biome-ignore lint/suspicious/noBitwiseOperators: | 0 coerces the hash to a 32-bit integer
-    hash = (hash * 31 + userId.charCodeAt(i)) | 0;
-  }
-  return AVATAR_PALETTE[Math.abs(hash) % AVATAR_PALETTE.length];
-}
-
-// Mirrors the server-side helper in lib/api/instrument-runs.ts so optimistic
-// attributions render with the same initials the server will echo back,
-// avoiding a fallback flip on reconcile.
-function toInitials(displayName: string): string {
-  const parts = displayName.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) {
-    return "?";
-  }
-  if (parts.length === 1) {
-    return parts[0].slice(0, 2).toUpperCase();
-  }
-  return (parts[0][0] + parts.at(-1)?.[0]).toUpperCase();
-}
 
 type Action =
   | { kind: "claim"; user: RunAttribution }
@@ -69,14 +33,112 @@ function applyOptimistic(
   return current.filter((a) => a.userId !== action.userId);
 }
 
+function AttributionAvatars({
+  attributions,
+  currentUserId,
+  showName,
+  compact,
+}: {
+  attributions: RunAttribution[];
+  currentUserId: string | null;
+  showName: boolean;
+  compact: boolean;
+}) {
+  const avatarClassName = cn(
+    compact
+      ? "size-5 ring-1 ring-background [&_[data-slot=avatar-fallback]]:text-[10px]"
+      : "ring-2 ring-background"
+  );
+  const nameClassName = compact
+    ? "font-medium text-foreground text-xs"
+    : "font-medium text-foreground text-sm";
+  const rowClassName = compact
+    ? "inline-flex h-5 items-center gap-1.5"
+    : "inline-flex items-center gap-2";
+
+  if (showName && attributions.length === 1) {
+    const attribution = attributions[0];
+    const isSelf = attribution.userId === currentUserId;
+    return (
+      <span className={rowClassName}>
+        <UserAvatar
+          className={cn(avatarClassName, isSelf && "ring-primary/30")}
+          data-self-attribution={isSelf || undefined}
+          size="sm"
+          user={attribution}
+        />
+        <span className={nameClassName}>{attribution.displayName}</span>
+      </span>
+    );
+  }
+
+  if (showName && attributions.length > 1) {
+    const hiddenCount = attributions.length - 1;
+    return (
+      <span className={rowClassName}>
+        <span className={cn("flex", compact ? "-space-x-1" : "-space-x-1.5")}>
+          {attributions.map((attribution) => {
+            const isSelf = attribution.userId === currentUserId;
+            return (
+              <Tooltip key={attribution.userId}>
+                <TooltipTrigger asChild>
+                  <UserAvatar
+                    className={cn(avatarClassName, isSelf && "ring-primary/30")}
+                    data-self-attribution={isSelf || undefined}
+                    size="sm"
+                    user={attribution}
+                  />
+                </TooltipTrigger>
+                <TooltipContent>{attribution.displayName}</TooltipContent>
+              </Tooltip>
+            );
+          })}
+        </span>
+        <span className={nameClassName}>
+          {attributions[0].displayName}
+          <span className="text-muted-foreground"> +{hiddenCount}</span>
+        </span>
+      </span>
+    );
+  }
+
+  return (
+    <div className="flex -space-x-1.5">
+      {attributions.map((attribution) => {
+        const isSelf = attribution.userId === currentUserId;
+        return (
+          <Tooltip key={attribution.userId}>
+            <TooltipTrigger asChild>
+              <UserAvatar
+                className={cn(
+                  "ring-2 ring-background",
+                  isSelf && "ring-primary/30"
+                )}
+                data-self-attribution={isSelf || undefined}
+                size="sm"
+                user={attribution}
+              />
+            </TooltipTrigger>
+            <TooltipContent>{attribution.displayName}</TooltipContent>
+          </Tooltip>
+        );
+      })}
+    </div>
+  );
+}
+
 export function RanByCell({
   instrumentId,
   runId,
   attributions,
+  showName = false,
+  compact = false,
 }: {
   instrumentId: string;
   runId: string;
   attributions: RunAttribution[];
+  showName?: boolean;
+  compact?: boolean;
 }) {
   const { data: session } = useSession();
   const currentUserId = session?.user?.id ?? null;
@@ -98,9 +160,6 @@ export function RanByCell({
     if (!currentUserId) {
       return;
     }
-    // Optimistic shape mirrors what the server will send back so the avatar
-    // bubble doesn't flip from a colored "YO" fallback to the real photo on
-    // reconcile. Pulls displayName / image straight from the session.
     const displayName = session?.user?.name ?? session?.user?.email ?? "You";
     const me: RunAttribution = {
       userId: currentUserId,
@@ -143,24 +202,28 @@ export function RanByCell({
     });
   }
 
-  // Each action is an icon-only button; its label lives in a tooltip so the
-  // cell width is naturally fixed. Both branches share the same wrapper height
-  // so rows don't reflow depending on whether a run has attributions.
+  const actionButtonSize = compact ? "size-5" : showName ? "size-7" : "size-6";
+  const actionIconSize = compact ? "size-3" : showName ? "size-4" : "size-3.5";
+  const rowHeight = compact ? "h-5" : "h-7";
+
   return optimistic.length === 0 ? (
-    <div className="flex h-7 items-center">
+    <div className={cn("flex items-center", rowHeight)}>
       {currentUserId ? (
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               aria-label="I ran this"
-              className="size-7 text-muted-foreground/70 hover:text-foreground"
+              className={cn(
+                actionButtonSize,
+                "text-muted-foreground/70 hover:text-foreground"
+              )}
               disabled={isPending}
               onClick={handleClaim}
               size="icon"
               type="button"
               variant="ghost"
             >
-              <UserPlus className="size-4" />
+              <UserPlus className={actionIconSize} />
             </Button>
           </TooltipTrigger>
           <TooltipContent>I ran this</TooltipContent>
@@ -168,8 +231,13 @@ export function RanByCell({
       ) : (
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="inline-flex size-7 items-center justify-center text-muted-foreground/60">
-              <UserPlus aria-hidden="true" className="size-4" />
+            <span
+              className={cn(
+                "inline-flex items-center justify-center text-muted-foreground/60",
+                actionButtonSize
+              )}
+            >
+              <UserPlus aria-hidden="true" className={actionIconSize} />
               <span className="sr-only">Unattributed</span>
             </span>
           </TooltipTrigger>
@@ -178,44 +246,21 @@ export function RanByCell({
       )}
     </div>
   ) : (
-    <div className="group/ranby flex h-7 items-center gap-1">
-      <div className="flex -space-x-1.5">
-        {optimistic.map((attribution) => {
-          const isSelf = attribution.userId === currentUserId;
-          return (
-            <Tooltip key={attribution.userId}>
-              <TooltipTrigger asChild>
-                <Avatar
-                  className={cn(
-                    "ring-2 ring-background",
-                    isSelf && "ring-primary/30"
-                  )}
-                  data-self-attribution={isSelf || undefined}
-                  size="sm"
-                >
-                  {attribution.avatarUrl ? (
-                    <AvatarImage
-                      alt={attribution.displayName}
-                      src={attribution.avatarUrl}
-                    />
-                  ) : null}
-                  <AvatarFallback className={avatarColor(attribution.userId)}>
-                    {attribution.initials}
-                  </AvatarFallback>
-                </Avatar>
-              </TooltipTrigger>
-              <TooltipContent>{attribution.displayName}</TooltipContent>
-            </Tooltip>
-          );
-        })}
-      </div>
+    <div className={cn("group/ranby flex items-center gap-1", rowHeight)}>
+      <AttributionAvatars
+        attributions={optimistic}
+        compact={compact}
+        currentUserId={currentUserId}
+        showName={showName}
+      />
       {isSelfAttributed ? (
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               aria-label="Remove my attribution"
               className={cn(
-                "size-6 text-muted-foreground/70 hover:text-foreground",
+                actionButtonSize,
+                "text-muted-foreground/70 hover:text-foreground",
                 "opacity-0 transition-opacity",
                 "group-has-[[data-self-attribution]:hover]/ranby:opacity-100",
                 "hover:opacity-100 focus-visible:opacity-100"
@@ -226,7 +271,7 @@ export function RanByCell({
               type="button"
               variant="ghost"
             >
-              <X className="size-3.5" />
+              <X className={actionIconSize} />
             </Button>
           </TooltipTrigger>
           <TooltipContent>Remove my attribution</TooltipContent>
@@ -236,14 +281,17 @@ export function RanByCell({
           <TooltipTrigger asChild>
             <Button
               aria-label="I ran this too"
-              className="size-6 text-muted-foreground/70 hover:text-foreground"
+              className={cn(
+                actionButtonSize,
+                "text-muted-foreground/70 hover:text-foreground"
+              )}
               disabled={isPending}
               onClick={handleClaim}
               size="icon"
               type="button"
               variant="ghost"
             >
-              <UserPlus className="size-3.5" />
+              <UserPlus className={actionIconSize} />
             </Button>
           </TooltipTrigger>
           <TooltipContent>I ran this too</TooltipContent>

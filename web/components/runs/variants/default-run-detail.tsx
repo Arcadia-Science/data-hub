@@ -10,12 +10,14 @@ import {
 export function DefaultRunDetail({
   run,
   files,
+  filesDownloadableCount,
   filesPagination,
   fileStats,
   reportFiles,
   instrumentId,
   runId,
   attributionsSlot,
+  runNavSlot,
 }: RunDetailProps) {
   const isDeleted = run.deletedAt !== null;
   const activeFileCount = fileStats.active;
@@ -23,7 +25,7 @@ export function DefaultRunDetail({
 
   return (
     <>
-      <RunDetail.Header attributionsSlot={attributionsSlot} run={run}>
+      <RunDetail.Header run={run} runNavSlot={runNavSlot}>
         {!isDeleted && (
           <DeleteRunDialog
             fileCount={activeFileCount}
@@ -38,15 +40,16 @@ export function DefaultRunDetail({
       </RunDetail.Header>
 
       <RunDetail.FilesMetadataLayout>
-        {hasDefaultMetadata(run.metadata as Record<string, unknown>) && (
-          <RunDetail.Metadata>
+        <RunDetail.Metadata attributionsSlot={attributionsSlot} run={run}>
+          {hasDefaultMetadata(run.metadata as Record<string, unknown>) && (
             <DefaultRunBadges
               metadata={run.metadata as Record<string, unknown>}
             />
-          </RunDetail.Metadata>
-        )}
+          )}
+        </RunDetail.Metadata>
         <RunDetail.Files
           files={files}
+          filteredDownloadableCount={filesDownloadableCount}
           instrumentId={instrumentId}
           isDeleted={isDeleted}
           pagination={filesPagination}

@@ -121,7 +121,7 @@ export default async function RootLayout({
       lang="en"
       suppressHydrationWarning
     >
-      <body>
+      <body suppressHydrationWarning>
         <SessionProvider session={session}>
           <ThemeProvider>
             <NuqsAdapter>

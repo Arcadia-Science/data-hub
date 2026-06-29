@@ -4,7 +4,6 @@ import type { Metadata } from "next/types";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import { CreateTokenDialog } from "@/components/tokens/create-token-dialog";
 import { DeleteTokenDialog } from "@/components/tokens/delete-token-dialog";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -19,8 +18,9 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { UserAvatar } from "@/components/user-avatar";
 import { auth } from "@/lib/auth";
-import { avatarColor, toInitials } from "@/lib/avatar-color";
+import { toInitials } from "@/lib/avatar-color";
 import { db } from "@/lib/db";
 import { personalAccessTokens, users } from "@/lib/db/schema";
 import { formatRelativeTime } from "@/lib/utils";
@@ -209,19 +209,15 @@ export default async function TokensPage() {
                       <TableCell>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <Avatar size="sm">
-                              {token.user.image ? (
-                                <AvatarImage
-                                  alt={displayName}
-                                  src={token.user.image}
-                                />
-                              ) : null}
-                              <AvatarFallback
-                                className={avatarColor(token.user.id)}
-                              >
-                                {toInitials(displayName)}
-                              </AvatarFallback>
-                            </Avatar>
+                            <UserAvatar
+                              size="sm"
+                              user={{
+                                userId: token.user.id,
+                                displayName,
+                                initials: toInitials(displayName),
+                                avatarUrl: token.user.image,
+                              }}
+                            />
                           </TooltipTrigger>
                           <TooltipContent>{displayName}</TooltipContent>
                         </Tooltip>

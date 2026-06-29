@@ -27,15 +27,15 @@ import { cn, formatRelativeTime } from "@/lib/utils";
 export type WatcherBadgeStatus = WatcherOnlineStatus | EffectiveStatus;
 
 const ONLINE_CLASSNAME =
-  "border-transparent bg-green-500/10 text-green-700 dark:bg-green-500/15 dark:text-green-400";
+  "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300";
 
 const OFFLINE_CLASSNAME =
-  "border-transparent bg-destructive/10 text-destructive dark:bg-destructive/20";
+  "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300";
 
-const MUTED_FILLED_CLASSNAME =
-  "border-transparent bg-muted text-muted-foreground";
+const MUTED_FILLED_CLASSNAME = "bg-muted text-muted-foreground";
 
-const MUTED_OUTLINED_CLASSNAME = "border-border text-muted-foreground";
+const MUTED_NEUTRAL_CLASSNAME =
+  "bg-slate-100 text-slate-700 dark:bg-slate-950 dark:text-slate-300";
 
 const STATUS_CONFIG: Record<
   WatcherBadgeStatus,
@@ -51,7 +51,7 @@ const STATUS_CONFIG: Record<
   no_watcher: {
     label: "No Watcher",
     Icon: WifiOff,
-    className: MUTED_OUTLINED_CLASSNAME,
+    className: MUTED_NEUTRAL_CLASSNAME,
   },
   // Per-watcher
   watching: { label: "Online", Icon: Radio, className: ONLINE_CLASSNAME },
@@ -67,7 +67,7 @@ const STATUS_CONFIG: Record<
   registered: {
     label: "Registered",
     Icon: Clock,
-    className: MUTED_OUTLINED_CLASSNAME,
+    className: MUTED_NEUTRAL_CLASSNAME,
   },
 };
 

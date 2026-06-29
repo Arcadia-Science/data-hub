@@ -11,6 +11,7 @@ import {
   hasPlateReaderMetadata,
   PlateReaderRunBadges,
 } from "@/components/runs/run-metadata-badges";
+import { RunSectionHeading } from "@/components/runs/run-section-heading";
 import { Card, CardContent } from "@/components/ui/card";
 import type { RawWellRow } from "@/lib/api/instrument-runs";
 
@@ -237,12 +238,7 @@ function PlateMapSection({
 
   return (
     <div className="flex flex-col gap-2">
-      <h2 className="font-semibold text-sm">
-        Plate Maps{" "}
-        <span className="ml-1 font-mono font-normal text-muted-foreground text-xs">
-          {groups.length} map(s)
-        </span>
-      </h2>
+      <RunSectionHeading countLabel={groups.length} title="Plate Maps" />
       <Card size="sm">
         <CardContent className="flex flex-col gap-6">
           <div className="flex flex-col gap-10">
@@ -276,12 +272,14 @@ function PlateMapSection({
 export function PlateReaderRunDetail({
   run,
   files,
+  filesDownloadableCount,
   filesPagination,
   fileStats,
   wellData,
   instrumentId,
   runId,
   attributionsSlot,
+  runNavSlot,
 }: RunDetailProps) {
   const isDeleted = run.deletedAt !== null;
   const activeFileCount = fileStats.active;
@@ -301,7 +299,7 @@ export function PlateReaderRunDetail({
 
   return (
     <>
-      <RunDetail.Header attributionsSlot={attributionsSlot} run={run}>
+      <RunDetail.Header run={run} runNavSlot={runNavSlot}>
         {!isDeleted && (
           <DeleteRunDialog
             fileCount={activeFileCount}
@@ -316,15 +314,16 @@ export function PlateReaderRunDetail({
       </RunDetail.Header>
 
       <RunDetail.FilesMetadataLayout>
-        {hasPlateReaderMetadata(run.metadata as Record<string, unknown>) && (
-          <RunDetail.Metadata>
+        <RunDetail.Metadata attributionsSlot={attributionsSlot} run={run}>
+          {hasPlateReaderMetadata(run.metadata as Record<string, unknown>) && (
             <PlateReaderRunBadges
               metadata={run.metadata as Record<string, unknown>}
             />
-          </RunDetail.Metadata>
-        )}
+          )}
+        </RunDetail.Metadata>
         <RunDetail.Files
           files={files}
+          filteredDownloadableCount={filesDownloadableCount}
           instrumentId={instrumentId}
           isDeleted={isDeleted}
           pagination={filesPagination}

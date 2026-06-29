@@ -7,12 +7,14 @@ import { RunDetail } from "@/components/runs/run-detail";
 export function InstantRamanRunDetail({
   run,
   files,
+  filesDownloadableCount,
   filesPagination,
   fileStats,
   reportFiles,
   instrumentId,
   runId,
   attributionsSlot,
+  runNavSlot,
 }: RunDetailProps) {
   const isDeleted = run.deletedAt !== null;
   const activeFileCount = fileStats.active;
@@ -30,7 +32,7 @@ export function InstantRamanRunDetail({
 
   return (
     <>
-      <RunDetail.Header attributionsSlot={attributionsSlot} run={run}>
+      <RunDetail.Header run={run} runNavSlot={runNavSlot}>
         {!isDeleted && (
           <DeleteRunDialog
             fileCount={activeFileCount}
@@ -45,8 +47,10 @@ export function InstantRamanRunDetail({
       </RunDetail.Header>
 
       <RunDetail.FilesMetadataLayout>
+        <RunDetail.Metadata attributionsSlot={attributionsSlot} run={run} />
         <RunDetail.Files
           files={files}
+          filteredDownloadableCount={filesDownloadableCount}
           instrumentId={instrumentId}
           isDeleted={isDeleted}
           pagination={filesPagination}

@@ -19,10 +19,9 @@ import {
   type NotificationItem,
   useNotifications,
 } from "@/components/notifications/notifications-provider";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { avatarColor } from "@/lib/avatar-color";
+import { UnknownUserAvatar, UserAvatar } from "@/components/user-avatar";
 import type { InstrumentType } from "@/lib/db/schema";
 import { cn, formatRelativeTime } from "@/lib/utils";
 
@@ -273,8 +272,7 @@ function NotificationsHeader({
         {hasUnread ? (
           <Badge
             aria-label={`${unreadCount} unread`}
-            className="bg-primary/10 text-primary"
-            variant="secondary"
+            className="bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
           >
             {unreadCount > 99 ? "99+" : unreadCount} new
           </Badge>
@@ -379,18 +377,17 @@ function CommentNotificationRow({
         onClick={onActivate}
       >
         {n.actor ? (
-          <Avatar size="sm">
-            {n.actor.avatarUrl ? (
-              <AvatarImage alt={n.actor.displayName} src={n.actor.avatarUrl} />
-            ) : null}
-            <AvatarFallback className={avatarColor(n.actor.id)}>
-              {n.actor.initials}
-            </AvatarFallback>
-          </Avatar>
+          <UserAvatar
+            size="sm"
+            user={{
+              userId: n.actor.id,
+              displayName: n.actor.displayName,
+              initials: n.actor.initials,
+              avatarUrl: n.actor.avatarUrl,
+            }}
+          />
         ) : (
-          <Avatar size="sm">
-            <AvatarFallback>?</AvatarFallback>
-          </Avatar>
+          <UnknownUserAvatar size="sm" />
         )}
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <p className="text-sm leading-snug">
@@ -536,7 +533,7 @@ function RunGroupNotificationRow({
                 <li key={run.id}>
                   <Link
                     className={cn(
-                      "flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 font-mono text-xs hover:bg-muted/80 focus-visible:bg-muted/80 focus-visible:outline-none",
+                      "flex min-h-4 cursor-pointer items-center gap-2 rounded px-1 py-1 font-mono text-xs hover:bg-muted/80 focus-visible:bg-muted/80 focus-visible:outline-none",
                       run.readAt === null
                         ? "text-foreground"
                         : "text-muted-foreground"

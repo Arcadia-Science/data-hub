@@ -254,6 +254,64 @@ const ALLOWED_SORT_FIELDS: Record<string, SQL | AnyColumn> = {
   updated_at: instrumentRuns.updatedAt,
 };
 
+// ---------------------------------------------------------------------------
+// Adjacent-run navigation for the run detail header.
+// ---------------------------------------------------------------------------
+
+// Resolves the runs immediately newer (`previousRunId`) and older
+// (`nextRunId`) than `current` within the same instrument, matching the runs
+// table's `coalesce(acquired_at, created_at) DESC` ordering. The `id` tiebreak
+// keeps neighbors deterministic when two runs share a timestamp; the list
+// query has no tiebreak, so equal-timestamp ordering is otherwise arbitrary.
+// Deleted runs are excluded to mirror the table's default. Wrapped in `cache()`
+// like `lookupRunByNaturalKey` so a single request reuses the result.
+export const getAdjacentRunIds = cache(
+  async function getAdjacentRunIds(current: {
+    acquiredAt: Date | null;
+    createdAt: Date;
+    id: string;
+    instrumentId: string;
+  }): Promise<{ nextRunId: string | null; previousRunId: string | null }> {
+    const cur = (current.acquiredAt ?? current.createdAt).toISOString();
+    const inSameInstrument = and(
+      eq(instrumentRuns.instrumentId, current.instrumentId),
+      isNull(instrumentRuns.deletedAt)
+    );
+
+    const [previous, next] = await Promise.all([
+      // Newer neighbor: smallest sort value strictly greater than current.
+      db
+        .select({ runId: instrumentRuns.runId })
+        .from(instrumentRuns)
+        .where(
+          and(
+            inSameInstrument,
+            sql`(${acquiredOrCreatedSql} > ${cur}::timestamptz or (${acquiredOrCreatedSql} = ${cur}::timestamptz and ${instrumentRuns.id} > ${current.id}))`
+          )
+        )
+        .orderBy(asc(acquiredOrCreatedSql), asc(instrumentRuns.id))
+        .limit(1),
+      // Older neighbor: greatest sort value strictly less than current.
+      db
+        .select({ runId: instrumentRuns.runId })
+        .from(instrumentRuns)
+        .where(
+          and(
+            inSameInstrument,
+            sql`(${acquiredOrCreatedSql} < ${cur}::timestamptz or (${acquiredOrCreatedSql} = ${cur}::timestamptz and ${instrumentRuns.id} < ${current.id}))`
+          )
+        )
+        .orderBy(desc(acquiredOrCreatedSql), desc(instrumentRuns.id))
+        .limit(1),
+    ]);
+
+    return {
+      previousRunId: previous[0]?.runId ?? null,
+      nextRunId: next[0]?.runId ?? null,
+    };
+  }
+);
+
 export async function buildRunListQuery(filters: RunListFilters) {
   const perPage = Math.min(Math.max(filters.perPage, 1), MAX_PER_PAGE);
   const conditions: SQL[] = [];
@@ -655,6 +713,9 @@ function runFilesOrderBy(sort: FilesSortField): SQL[] {
 
 export interface RunFilesPage {
   data: RunFile[];
+  // Files in the current filter that have S3 keys and can be zipped by the
+  // archive route (matches `loadDownloadableFiles` after id resolution).
+  downloadableCount: number;
   pagination: {
     page: number;
     per_page: number;
@@ -673,8 +734,11 @@ export async function buildRunFilesQuery(
 
   const where = and(...runFilesWhere(runInternalId, filters));
 
-  const [{ total }] = await db
-    .select({ total: sql<number>`cast(count(*) as int)` })
+  const [{ total, downloadableCount }] = await db
+    .select({
+      total: sql<number>`cast(count(*) as int)`,
+      downloadableCount: sql<number>`cast(count(*) filter (where ${files.s3Bucket} is not null and ${files.s3Key} is not null and ${files.deletedAt} is null) as int)`,
+    })
     .from(files)
     .where(where);
 
@@ -688,6 +752,7 @@ export async function buildRunFilesQuery(
 
   return {
     data,
+    downloadableCount,
     pagination: {
       page: safePage,
       per_page: safePerPage,
@@ -703,7 +768,10 @@ export async function buildRunFilesQuery(
 // run detail page's `generateMetadata`.
 export interface RunFileStats {
   active: number;
+  // Files awaiting an upload request (status = detected).
+  detected: number;
   dismissed: number;
+  failed: number;
   pending: number;
   processedActive: number;
   processing: number;
@@ -725,6 +793,8 @@ export async function getRunFileStats(
       dismissed: sql<number>`cast(count(*) filter (where ${files.deletedAt} is not null) as int)`,
       rawActive: sql<number>`cast(count(*) filter (where ${files.category} = 'raw' and ${activeNotDeleted}) as int)`,
       processedActive: sql<number>`cast(count(*) filter (where ${files.category} = 'processed' and ${activeNotDeleted}) as int)`,
+      detected: sql<number>`cast(count(*) filter (where ${files.status} = 'detected' and ${activeNotDeleted}) as int)`,
+      failed: sql<number>`cast(count(*) filter (where ${files.status} = 'failed' and ${activeNotDeleted}) as int)`,
       pending: sql<number>`cast(count(*) filter (where ${files.status} in ('detected', 'upload_requested') and ${activeNotDeleted}) as int)`,
       uploaded: sql<number>`cast(count(*) filter (where ${files.status} not in ('detected', 'upload_requested', 'processing') and ${activeNotDeleted}) as int)`,
       processing: sql<number>`cast(count(*) filter (where ${files.status} = 'processing' and ${activeNotDeleted}) as int)`,

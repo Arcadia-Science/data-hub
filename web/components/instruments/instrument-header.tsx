@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { InstrumentNotificationSwitch } from "@/components/notifications/instrument-notification-switch";
 import { RecordInstrumentVisit } from "@/components/recent-instrument-visit";
-import { Badge } from "@/components/ui/badge";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -22,8 +21,8 @@ export function InstrumentHeader({
   /**
    * Per-viewer notification state for this instrument. When omitted
    * (e.g. unauthenticated callers, or contexts that don't want to
-   * surface the switch), the action row falls back to the original
-   * watcher-status + run-count layout.
+   * surface the switch), the action row falls back to the watcher-status
+   * layout.
    */
   notifications?: {
     enabled: boolean;
@@ -59,11 +58,9 @@ export function InstrumentHeader({
       </Breadcrumb>
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="font-semibold text-2xl tracking-tight">
-            {instrument.displayName}
-          </h1>
-        </div>
+        <h1 className="font-semibold text-2xl tracking-tight">
+          {instrument.displayName}
+        </h1>
 
         <div className="flex items-center gap-2">
           {notifications ? (
@@ -90,15 +87,14 @@ export function InstrumentHeader({
               verbose
             />
           )}
-          <Badge className="px-2 py-3 font-mono text-xs" variant="outline">
-            {instrument.runCount} {instrument.runCount === 1 ? "run" : "runs"}
-          </Badge>
         </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground text-sm">
-        <span className="font-mono">{instrument.id}</span>
-        {instrument.activeWatcherId && instrument.activeWatcherHostname && (
+        <span>
+          {instrument.runCount} {instrument.runCount === 1 ? "run" : "runs"}
+        </span>
+        {instrument.activeWatcherId && instrument.activeWatcherHostname ? (
           <>
             <span>·</span>
             <Link
@@ -108,7 +104,7 @@ export function InstrumentHeader({
               {instrument.activeWatcherHostname}
             </Link>
           </>
-        )}
+        ) : null}
       </div>
     </div>
   );

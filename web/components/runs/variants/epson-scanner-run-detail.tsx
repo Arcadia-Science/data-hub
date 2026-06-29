@@ -10,12 +10,14 @@ import {
 export function EpsonScannerRunDetail({
   run,
   files,
+  filesDownloadableCount,
   filesPagination,
   fileStats,
   reportFiles,
   instrumentId,
   runId,
   attributionsSlot,
+  runNavSlot,
 }: RunDetailProps) {
   const isDeleted = run.deletedAt !== null;
   const activeFileCount = fileStats.active;
@@ -23,7 +25,7 @@ export function EpsonScannerRunDetail({
 
   return (
     <>
-      <RunDetail.Header attributionsSlot={attributionsSlot} run={run}>
+      <RunDetail.Header run={run} runNavSlot={runNavSlot}>
         {!isDeleted && (
           <DeleteRunDialog
             fileCount={activeFileCount}
@@ -38,15 +40,16 @@ export function EpsonScannerRunDetail({
       </RunDetail.Header>
 
       <RunDetail.FilesMetadataLayout>
-        {hasEpsonScannerMetadata(run.metadata as Record<string, unknown>) && (
-          <RunDetail.Metadata>
+        <RunDetail.Metadata attributionsSlot={attributionsSlot} run={run}>
+          {hasEpsonScannerMetadata(run.metadata as Record<string, unknown>) && (
             <EpsonScannerRunBadges
               metadata={run.metadata as Record<string, unknown>}
             />
-          </RunDetail.Metadata>
-        )}
+          )}
+        </RunDetail.Metadata>
         <RunDetail.Files
           files={files}
+          filteredDownloadableCount={filesDownloadableCount}
           instrumentId={instrumentId}
           isDeleted={isDeleted}
           pagination={filesPagination}

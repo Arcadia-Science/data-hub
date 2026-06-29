@@ -3,10 +3,12 @@ import type { Metadata } from "next/types";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import { RunAttributionsSection } from "@/components/runs/run-attributions-section";
 import { RunCommentsSection } from "@/components/runs/run-comments-section";
+import { RunNav } from "@/components/runs/run-nav";
 import { RunDetailVariant } from "@/components/runs/variants";
 import { WatcherStatusProvider } from "@/components/runs/watcher-status-provider";
 import {
   buildRunFilesQuery,
+  getAdjacentRunIds,
   getProcessedCsvData,
   getRunFileStats,
   getRunImageFiles,
@@ -93,6 +95,7 @@ export default async function RunDetailPage({ params, searchParams }: Props) {
     reportImages,
     instrument,
     comments,
+    adjacentRuns,
   ] = await Promise.all([
     buildRunFilesQuery(run.id, {
       page: filters.files_page,
@@ -107,11 +110,15 @@ export default async function RunDetailPage({ params, searchParams }: Props) {
     isImagingInstrument ? getRunImageFiles(run.id) : Promise.resolve([]),
     getInstrumentById(instrumentId),
     listCommentsForRun(run.id),
+    getAdjacentRunIds(run),
   ]);
   const wellData = await getProcessedCsvData(reportFiles);
   // Gate client-side upload actions on watcher availability — a queued
   // upload request is a no-op if no agent is around to action it.
   const isWatcherOnline = (instrument?.watchersOnline ?? 0) > 0;
+
+  const toRunHref = (rid: string) =>
+    `/instruments/${instrumentId}/runs/${encodeURIComponent(rid)}`;
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
@@ -126,12 +133,33 @@ export default async function RunDetailPage({ params, searchParams }: Props) {
           }
           fileStats={fileStats}
           files={filesPage.data}
+          filesDownloadableCount={filesPage.downloadableCount}
           filesPagination={filesPage.pagination}
           instrumentId={instrumentId}
           reportFiles={reportFiles}
           reportImages={reportImages}
           run={run}
           runId={runId}
+          runNavSlot={
+            <RunNav
+              next={
+                adjacentRuns.nextRunId
+                  ? {
+                      href: toRunHref(adjacentRuns.nextRunId),
+                      runId: adjacentRuns.nextRunId,
+                    }
+                  : null
+              }
+              previous={
+                adjacentRuns.previousRunId
+                  ? {
+                      href: toRunHref(adjacentRuns.previousRunId),
+                      runId: adjacentRuns.previousRunId,
+                    }
+                  : null
+              }
+            />
+          }
           wellData={wellData}
         />
         <RunCommentsSection

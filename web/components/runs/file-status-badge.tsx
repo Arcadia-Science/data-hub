@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 type FileStatus =
   | "detected"
@@ -13,13 +14,19 @@ const statusConfig: Record<
   {
     label: string;
     variant: "default" | "outline" | "secondary" | "destructive";
+    className?: string;
   }
 > = {
   detected: { label: "Detected", variant: "outline" },
   upload_requested: { label: "Upload Requested", variant: "secondary" },
   uploaded: { label: "Uploaded", variant: "secondary" },
   processing: { label: "Processing", variant: "default" },
-  completed: { label: "Completed", variant: "default" },
+  completed: {
+    label: "Completed",
+    variant: "default",
+    className:
+      "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300",
+  },
   failed: { label: "Failed", variant: "destructive" },
 };
 
@@ -30,7 +37,10 @@ export function FileStatusBadge({ status }: { status: string }) {
   };
 
   return (
-    <Badge className="text-[10px]" variant={config.variant}>
+    <Badge
+      className={cn("text-[10px]", config.className)}
+      variant={config.variant}
+    >
       {config.label}
     </Badge>
   );

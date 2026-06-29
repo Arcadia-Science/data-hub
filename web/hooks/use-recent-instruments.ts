@@ -42,7 +42,11 @@ function readRecentInstruments(): RecentInstrument[] {
 function writeRecentInstruments(instruments: RecentInstrument[]): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(instruments));
-    window.dispatchEvent(new Event(UPDATE_EVENT));
+    // Defer so other hook instances (e.g. MainNav) refresh after this
+    // setState commit, not synchronously inside the updater.
+    queueMicrotask(() => {
+      window.dispatchEvent(new Event(UPDATE_EVENT));
+    });
   } catch {
     // Private browsing or quota exceeded — ignore.
   }

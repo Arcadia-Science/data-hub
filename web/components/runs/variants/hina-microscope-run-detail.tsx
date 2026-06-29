@@ -10,12 +10,14 @@ import {
 export function HinaMicroscopeRunDetail({
   run,
   files,
+  filesDownloadableCount,
   filesPagination,
   fileStats,
   reportImages,
   instrumentId,
   runId,
   attributionsSlot,
+  runNavSlot,
 }: RunDetailProps) {
   const isDeleted = run.deletedAt !== null;
   const activeFileCount = fileStats.active;
@@ -23,7 +25,7 @@ export function HinaMicroscopeRunDetail({
 
   return (
     <>
-      <RunDetail.Header attributionsSlot={attributionsSlot} run={run}>
+      <RunDetail.Header run={run} runNavSlot={runNavSlot}>
         {!isDeleted && (
           <DeleteRunDialog
             fileCount={activeFileCount}
@@ -38,13 +40,14 @@ export function HinaMicroscopeRunDetail({
       </RunDetail.Header>
 
       <RunDetail.FilesMetadataLayout>
-        {hasHinaMetadata(run.metadata as Record<string, unknown>) && (
-          <RunDetail.Metadata>
+        <RunDetail.Metadata attributionsSlot={attributionsSlot} run={run}>
+          {hasHinaMetadata(run.metadata as Record<string, unknown>) && (
             <HinaRunBadges metadata={run.metadata as Record<string, unknown>} />
-          </RunDetail.Metadata>
-        )}
+          )}
+        </RunDetail.Metadata>
         <RunDetail.Files
           files={files}
+          filteredDownloadableCount={filesDownloadableCount}
           instrumentId={instrumentId}
           isDeleted={isDeleted}
           pagination={filesPagination}
