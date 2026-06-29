@@ -64,11 +64,11 @@ export function DeleteRunDialog({
     <AlertDialog onOpenChange={setOpen} open={open}>
       <AlertDialogTrigger asChild>
         <Button
-          className="h-7 gap-1 text-destructive text-xs hover:text-destructive"
+          className="gap-1.5 border-destructive/30 bg-background text-destructive text-sm hover:bg-destructive/5 hover:text-destructive"
           size="sm"
-          variant="ghost"
+          variant="outline"
         >
-          <Trash2 className="size-3" />
+          <Trash2 className="size-4" />
           Delete
         </Button>
       </AlertDialogTrigger>
