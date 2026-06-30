@@ -1,0 +1,70 @@
+name: Deploy Lambda function
+
+on:
+  push:
+    branches:
+      - staging
+      - production
+    paths:
+      - .github/workflows/deploy-lambda.yml
+      - lambda/**
+      - packages/shared/**
+      - infra/**
+      - uv.lock
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy-lambda:
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-west-1
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ github.ref_name }}-${{ github.sha }}
+        run: |
+          IMAGE_URI="${ECR_REGISTRY}/data-hub:${IMAGE_TAG}"
+          docker build \
+            --provenance=false \
+            --platform linux/amd64 \
+            -f lambda/Dockerfile \
+            -t "${IMAGE_URI}" \
+            .
+          docker push "${IMAGE_URI}"
+          echo "IMAGE_URI=${IMAGE_URI}" >> "$GITHUB_ENV"
+
+      - uses: aws-actions/setup-sam@v3
+
+      - name: Deploy SAM stack
+        working-directory: infra
+        run: |
+          sam deploy \
+            --config-env "${{ github.ref_name }}" \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --s3-bucket "${{ secrets.SAM_S3_BUCKET }}" \
+            --s3-prefix "data-hub-${{ github.ref_name }}" \
+            --no-resolve-s3 \
+            --image-repository "${{ steps.ecr-login.outputs.registry }}/data-hub" \
+            --parameter-overrides \
+              "EcrImageUri=${IMAGE_URI}" \
+              "DataHubApiUrl=${{ secrets.DATA_HUB_API_URL }}" \
+              "DataHubApiKey=${{ secrets.DATA_HUB_API_KEY }}" \
+              "Environment=${{ github.ref_name }}" \
+              "GitHubOidcProviderArn=${{ secrets.GH_OIDC_PROVIDER_ARN }}" \
+              "VercelOidcProviderArn=${{ secrets.VERCEL_OIDC_PROVIDER_ARN }}"

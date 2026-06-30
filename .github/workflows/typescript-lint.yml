@@ -1,0 +1,43 @@
+name: TypeScript lint and typecheck
+
+on:
+  push:
+    branches:
+      - staging
+      - production
+    paths:
+      - .github/workflows/typescript-lint.yml
+      - web/**
+      - Makefile
+  pull_request:
+    branches:
+      - staging
+      - production
+    paths:
+      - .github/workflows/typescript-lint.yml
+      - web/**
+      - Makefile
+
+jobs:
+  typescript-lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install packages
+        run: npm ci
+
+      # `ultracite check` runs Biome's combined formatter + linter check
+      # (read-only), replacing the separate Prettier `--check` + ESLint steps.
+      - name: Lint and format check
+        run: npm run lint:check
+
+      - name: Type check
+        run: npm run typecheck

@@ -1,0 +1,883 @@
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// ---------------------------------------------------------------------------
+// Mock the data-access layer so tests run without a database.
+// vi.hoisted ensures the mock data is available when vi.mock factories run
+// (vi.mock calls are hoisted above all other imports).
+// ---------------------------------------------------------------------------
+
+const {
+  MOCK_INSTRUMENT,
+  MOCK_GEL_DOC_INSTRUMENT,
+  MOCK_GENERIC_INSTRUMENT,
+  MOCK_FILE,
+} = vi.hoisted(() => ({
+  MOCK_INSTRUMENT: {
+    id: "test-plate-reader",
+    displayName: "Test Plate Reader",
+    status: "active",
+    instrumentType: "plate_reader",
+    filePatterns: ["*.txt"],
+    runCount: 3,
+    lastRunAt: new Date("2025-01-01"),
+    watcherCount: 1,
+    watchersOnline: 1,
+    createdAt: new Date("2024-01-01"),
+  },
+  MOCK_GEL_DOC_INSTRUMENT: {
+    id: "test-gel-doc",
+    displayName: "Test Gel Doc",
+    status: "active",
+    instrumentType: "gel_doc",
+    filePatterns: ["*.tif"],
+    runCount: 1,
+    lastRunAt: new Date("2025-01-01"),
+    watcherCount: 1,
+    watchersOnline: 1,
+    createdAt: new Date("2024-01-01"),
+  },
+  MOCK_GENERIC_INSTRUMENT: {
+    id: "test-generic",
+    displayName: "Test Generic",
+    status: "active",
+    instrumentType: "generic",
+    filePatterns: ["*.dat"],
+    runCount: 0,
+    lastRunAt: null,
+    watcherCount: 0,
+    watchersOnline: 0,
+    createdAt: new Date("2024-01-01"),
+  },
+  MOCK_FILE: {
+    id: 42,
+    instrumentRunId: "internal-1",
+    filename: "data.csv",
+    status: "completed",
+    s3Bucket: "test-bucket",
+    s3Key: "path/to/data.csv",
+    contentType: "text/csv",
+    sizeBytes: 1234,
+    category: "raw",
+    metadata: {},
+    errorMessage: null,
+    deletedAt: null,
+  },
+}));
+
+vi.mock("@/lib/api/instruments", () => ({
+  // The generic instrument is intentionally omitted from the list so we can
+  // assert that non-filterable types are filtered out of the filter-options
+  // resource template list.
+  getInstrumentListWithCounts: vi
+    .fn()
+    .mockResolvedValue([MOCK_INSTRUMENT, MOCK_GEL_DOC_INSTRUMENT]),
+  getInstrumentById: vi.fn().mockImplementation((id: string) => {
+    if (id === "test-plate-reader") {
+      return MOCK_INSTRUMENT;
+    }
+    if (id === "test-gel-doc") {
+      return MOCK_GEL_DOC_INSTRUMENT;
+    }
+    if (id === "test-generic") {
+      return MOCK_GENERIC_INSTRUMENT;
+    }
+    return null;
+  }),
+}));
+
+vi.mock("@/lib/api/instrument-runs", () => ({
+  buildRunListQuery: vi
+    .fn()
+    .mockResolvedValue({ runs: [], total: 0, page: 1, perPage: 20 }),
+  lookupRunByNaturalKey: vi
+    .fn()
+    .mockImplementation(async (_instId: string, runId: string) =>
+      runId === "run-1"
+        ? { id: "internal-1", instrumentId: _instId, runId }
+        : null
+    ),
+  getRunFilesPage: vi.fn().mockResolvedValue({
+    data: [],
+    pagination: { page: 1, per_page: 50, total: 0, total_pages: 0 },
+  }),
+  getPlateReaderFilterOptions: vi.fn().mockResolvedValue({
+    wavelengths: ["450"],
+    measurementModes: ["Absorbance"],
+    measurementTypes: ["Endpoint"],
+  }),
+  getGelDocFilterOptions: vi.fn().mockResolvedValue({
+    captureTypes: ["Chemi"],
+    imagingModes: ["Single"],
+    wavelengths: ["520"],
+    colors: ["Green"],
+  }),
+  getAttributionsByRunIds: vi.fn().mockResolvedValue(new Map()),
+  getRanByFilterOptions: vi
+    .fn()
+    .mockResolvedValue([{ userId: "u-1", displayName: "Alice" }]),
+}));
+
+// The write-tool happy path goes through the raw Drizzle client. Stub out
+// the chainable methods that `claim_run` / `unclaim_run` use so the tools
+// can be invoked without a real database. A real end-to-end write test
+// lives in the HTTP integration suite.
+vi.mock("@/lib/db", () => ({
+  db: {
+    insert: () => ({
+      values: () => ({
+        onConflictDoNothing: () => Promise.resolve(),
+      }),
+    }),
+    delete: () => ({
+      where: () => Promise.resolve(),
+    }),
+  },
+}));
+
+vi.mock("@/lib/api/dashboard", () => ({
+  getInstrumentSummaries: vi.fn().mockResolvedValue([]),
+  getInstruments: vi.fn().mockResolvedValue([
+    {
+      id: "test-plate-reader",
+      displayName: "Test Plate Reader",
+      instrumentType: "plate_reader",
+    },
+  ]),
+}));
+
+vi.mock("@/lib/api/watchers", () => ({
+  getWatcherList: vi.fn().mockResolvedValue([]),
+  getWatcherHeartbeats: vi.fn().mockResolvedValue({
+    rows: [
+      {
+        id: 1,
+        timestamp: new Date("2025-01-01T12:00:00Z"),
+        status: "watching",
+        uploadMode: "auto",
+        filesUploadedSinceLast: 2,
+        runsReportedSinceLast: 1,
+        errorsSinceLast: 0,
+        uptimeSeconds: 3600,
+      },
+    ],
+    total: 1,
+  }),
+}));
+
+vi.mock("@/lib/api/files", () => ({
+  getActiveFileById: vi
+    .fn()
+    .mockImplementation(async (id: number) => (id === 42 ? MOCK_FILE : null)),
+  lookupFileForDownload: vi.fn().mockImplementation((id: number) => {
+    if (id === 42) {
+      return {
+        ok: true,
+        filename: MOCK_FILE.filename,
+        s3Bucket: MOCK_FILE.s3Bucket,
+        s3Key: MOCK_FILE.s3Key,
+      };
+    }
+    if (id === 99) {
+      return { ok: false, reason: "not_uploaded" };
+    }
+    return { ok: false, reason: "not_found" };
+  }),
+}));
+
+// `prepareRunArchive` owns the cache-hit / build-kickoff branch on the
+// MCP `get_run_archive` tool. The default mock returns a `ready`
+// response so the happy-path test asserts on a presigned URL; the
+// "building" branch has its own override later in the suite.
+vi.mock("@/lib/api/run-archive", () => ({
+  prepareRunArchive: vi.fn().mockResolvedValue({
+    ok: true,
+    status: "ready",
+    downloadUrl: "https://s3.example.com/archive-signed-url",
+    sizeBytes: 4096,
+    filename: "run-1.zip",
+    expiresInSeconds: 900,
+    archiveBucket: "test-archives",
+    archiveKey: "runs/test-plate-reader/run-1/abc.zip",
+  }),
+}));
+
+vi.mock("@/lib/api/file-reprocessing", () => ({
+  reprocessFile: vi.fn().mockImplementation((id: number) => {
+    if (id === 42) {
+      return { ok: true, fileId: id };
+    }
+    return {
+      ok: false,
+      status: 404,
+      code: "NOT_FOUND",
+      message: `File '${id}' not found`,
+    };
+  }),
+}));
+
+vi.mock("@/lib/s3", () => ({
+  getPresignedDownloadUrl: vi
+    .fn()
+    .mockResolvedValue("https://s3.example.com/signed-url"),
+  // Mirror the real export so consumers (e.g. `tools.ts`) that import
+  // it for the response payload see a numeric value instead of
+  // `undefined`. Tests that read `expiresInSeconds` off a tool result
+  // assert `> 0`, so any positive number works here.
+  PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS: 15 * 60,
+}));
+
+// ---------------------------------------------------------------------------
+// Now import the registration functions (they'll pick up the mocked deps).
+// ---------------------------------------------------------------------------
+
+import { registerPrompts } from "@/lib/mcp/prompts";
+import { registerResources } from "@/lib/mcp/resources";
+import { registerTools } from "@/lib/mcp/tools";
+
+// ---------------------------------------------------------------------------
+// Test suite
+// ---------------------------------------------------------------------------
+
+describe("MCP Protocol (in-memory)", () => {
+  let client: Client;
+  let mcpServer: McpServer;
+
+  beforeEach(async () => {
+    mcpServer = new McpServer(
+      { name: "data-hub-test", version: "1.0.0" },
+      { capabilities: { tools: {}, resources: {}, prompts: {} } }
+    );
+    registerTools(mcpServer);
+    registerResources(mcpServer);
+    registerPrompts(mcpServer);
+
+    client = new Client({ name: "test-client", version: "1.0.0" });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    await Promise.all([
+      client.connect(clientTransport),
+      mcpServer.connect(serverTransport),
+    ]);
+  });
+
+  afterEach(async () => {
+    await client.close();
+    await mcpServer.close();
+  });
+
+  // ---- Tool registration --------------------------------------------------
+
+  const EXPECTED_TOOLS = [
+    "list_instruments",
+    "get_instrument",
+    "search_runs",
+    "get_run",
+    "list_run_files",
+    "get_system_status",
+    "list_watchers",
+    "get_file",
+    "get_file_download_url",
+    "get_run_archive",
+    "reprocess_file",
+    "get_watcher_heartbeats",
+    "claim_run",
+    "unclaim_run",
+    "list_run_attributors",
+  ] as const;
+
+  const WRITE_TOOLS = new Set(["reprocess_file", "claim_run", "unclaim_run"]);
+
+  it("registers all expected tools", async () => {
+    const { tools } = await client.listTools();
+    const names = tools.map((t) => t.name);
+    expect(names).toEqual(expect.arrayContaining([...EXPECTED_TOOLS]));
+    expect(names).toHaveLength(EXPECTED_TOOLS.length);
+  });
+
+  it("every tool has a non-empty description", async () => {
+    const { tools } = await client.listTools();
+    for (const tool of tools) {
+      expect(tool.description, `${tool.name} missing description`).toBeTruthy();
+    }
+  });
+
+  it("read-only tools are annotated as such; write tools are not", async () => {
+    const { tools } = await client.listTools();
+    for (const tool of tools) {
+      if (WRITE_TOOLS.has(tool.name)) {
+        expect(
+          tool.annotations?.readOnlyHint,
+          `${tool.name} should not be read-only`
+        ).toBe(false);
+      } else {
+        expect(
+          tool.annotations?.readOnlyHint,
+          `${tool.name} not read-only`
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("tools that require params declare them in inputSchema", async () => {
+    const { tools } = await client.listTools();
+    const getInstrument = tools.find((t) => t.name === "get_instrument");
+    expect(getInstrument?.inputSchema.properties).toHaveProperty(
+      "instrumentId"
+    );
+
+    const getRun = tools.find((t) => t.name === "get_run");
+    expect(getRun?.inputSchema.properties).toHaveProperty("instrumentId");
+    expect(getRun?.inputSchema.properties).toHaveProperty("runId");
+
+    const getFile = tools.find((t) => t.name === "get_file");
+    expect(getFile?.inputSchema.properties).toHaveProperty("fileId");
+
+    const reprocess = tools.find((t) => t.name === "reprocess_file");
+    expect(reprocess?.inputSchema.properties).toHaveProperty("fileId");
+
+    const heartbeats = tools.find((t) => t.name === "get_watcher_heartbeats");
+    expect(heartbeats?.inputSchema.properties).toHaveProperty("watcherId");
+
+    // Attribution tools intentionally do NOT expose a `userId` argument — the
+    // authenticated user is pulled from `authInfo.extra.userId` on the server
+    // so the wire API has no spoofable slot.
+    const claimRun = tools.find((t) => t.name === "claim_run");
+    expect(claimRun?.inputSchema.properties).toHaveProperty("instrumentId");
+    expect(claimRun?.inputSchema.properties).toHaveProperty("runId");
+    expect(claimRun?.inputSchema.properties).not.toHaveProperty("userId");
+
+    const unclaimRun = tools.find((t) => t.name === "unclaim_run");
+    expect(unclaimRun?.inputSchema.properties).toHaveProperty("instrumentId");
+    expect(unclaimRun?.inputSchema.properties).toHaveProperty("runId");
+    expect(unclaimRun?.inputSchema.properties).not.toHaveProperty("userId");
+
+    const listAttributors = tools.find(
+      (t) => t.name === "list_run_attributors"
+    );
+    expect(listAttributors?.inputSchema.properties).toHaveProperty(
+      "instrumentId"
+    );
+
+    // search_runs gained a `ranBy` filter alongside the new attribution tools.
+    const searchRuns = tools.find((t) => t.name === "search_runs");
+    expect(searchRuns?.inputSchema.properties).toHaveProperty("ranBy");
+  });
+
+  it("claim_run is annotated as write / non-destructive / idempotent", async () => {
+    const { tools } = await client.listTools();
+    const tool = tools.find((t) => t.name === "claim_run");
+    expect(tool?.annotations?.readOnlyHint).toBe(false);
+    expect(tool?.annotations?.destructiveHint).toBe(false);
+    expect(tool?.annotations?.idempotentHint).toBe(true);
+  });
+
+  it("unclaim_run is annotated as write / destructive / idempotent", async () => {
+    const { tools } = await client.listTools();
+    const tool = tools.find((t) => t.name === "unclaim_run");
+    expect(tool?.annotations?.readOnlyHint).toBe(false);
+    expect(tool?.annotations?.destructiveHint).toBe(true);
+    expect(tool?.annotations?.idempotentHint).toBe(true);
+  });
+
+  // ---- Tool execution (happy path) ----------------------------------------
+
+  function parseText(content: unknown): unknown {
+    const text = (content as Array<{ type: string; text: string }>)[0]?.text;
+    return JSON.parse(text ?? "");
+  }
+
+  it("list_instruments returns JSON text content", async () => {
+    const result = await client.callTool({
+      name: "list_instruments",
+      arguments: {},
+    });
+    expect(result.isError).toBeFalsy();
+    expect(parseText(result.content)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "test-plate-reader" }),
+      ])
+    );
+  });
+
+  it("get_instrument returns instrument detail", async () => {
+    const result = await client.callTool({
+      name: "get_instrument",
+      arguments: { instrumentId: "test-plate-reader" },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as { id: string };
+    expect(parsed.id).toBe("test-plate-reader");
+  });
+
+  it("search_runs returns paginated results", async () => {
+    const result = await client.callTool({
+      name: "search_runs",
+      arguments: { page: 1, perPage: 10 },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content);
+    expect(parsed).toHaveProperty("runs");
+    expect(parsed).toHaveProperty("total");
+  });
+
+  it("get_system_status returns data", async () => {
+    const result = await client.callTool({
+      name: "get_system_status",
+      arguments: {},
+    });
+    expect(result.isError).toBeFalsy();
+  });
+
+  it("list_watchers returns data", async () => {
+    const result = await client.callTool({
+      name: "list_watchers",
+      arguments: {},
+    });
+    expect(result.isError).toBeFalsy();
+  });
+
+  it("get_file returns the file record", async () => {
+    const result = await client.callTool({
+      name: "get_file",
+      arguments: { fileId: 42 },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as { id: number };
+    expect(parsed.id).toBe(42);
+  });
+
+  it("get_file_download_url returns a presigned URL", async () => {
+    const result = await client.callTool({
+      name: "get_file_download_url",
+      arguments: { fileId: 42 },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as {
+      fileId: number;
+      filename: string;
+      downloadUrl: string;
+      expiresInSeconds: number;
+    };
+    expect(parsed.fileId).toBe(42);
+    expect(parsed.downloadUrl).toContain("s3.example.com");
+    expect(parsed.expiresInSeconds).toBeGreaterThan(0);
+  });
+
+  it("get_run_archive returns a presigned URL on cache hit", async () => {
+    const result = await client.callTool({
+      name: "get_run_archive",
+      arguments: { instrumentId: "test-plate-reader", runId: "run-1" },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as {
+      status: string;
+      downloadUrl?: string;
+      filename?: string;
+      sizeBytes?: number;
+      expiresInSeconds?: number;
+      contentType?: string;
+    };
+    expect(parsed.status).toBe("ready");
+    expect(parsed.downloadUrl).toContain("s3.example.com");
+    expect(parsed.filename).toBe("run-1.zip");
+    expect(parsed.expiresInSeconds).toBe(900);
+    expect(parsed.contentType).toBe("application/zip");
+  });
+
+  it("get_run_archive returns a job and retry hint while building", async () => {
+    const { prepareRunArchive } = await import("@/lib/api/run-archive");
+    vi.mocked(prepareRunArchive).mockResolvedValueOnce({
+      ok: true,
+      status: "building",
+      jobId: "job-abc",
+      ownsBuild: true,
+      retryAfterSeconds: 5,
+    });
+
+    const result = await client.callTool({
+      name: "get_run_archive",
+      arguments: { instrumentId: "test-plate-reader", runId: "run-1" },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as {
+      status: string;
+      jobId?: string;
+      retryAfterSeconds?: number;
+      hint?: string;
+    };
+    expect(parsed.status).toBe("building");
+    expect(parsed.jobId).toBe("job-abc");
+    expect(parsed.retryAfterSeconds).toBe(5);
+    expect(parsed.hint).toMatch(/get_run_archive/);
+  });
+
+  it("get_run_archive surfaces a clear error when no files are downloadable", async () => {
+    const { prepareRunArchive } = await import("@/lib/api/run-archive");
+    vi.mocked(prepareRunArchive).mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      message: "No downloadable files for this run",
+    });
+
+    const result = await client.callTool({
+      name: "get_run_archive",
+      arguments: { instrumentId: "test-plate-reader", runId: "run-empty" },
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content).toEqual([
+      { type: "text", text: "No downloadable files for this run" },
+    ]);
+  });
+
+  it("reprocess_file succeeds for a reprocessable file", async () => {
+    const result = await client.callTool({
+      name: "reprocess_file",
+      arguments: { fileId: 42 },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as {
+      status: string;
+      fileId: number;
+    };
+    expect(parsed.status).toBe("processing");
+    expect(parsed.fileId).toBe(42);
+  });
+
+  it("get_watcher_heartbeats returns heartbeat history", async () => {
+    const result = await client.callTool({
+      name: "get_watcher_heartbeats",
+      arguments: { watcherId: "abc", hours: 12 },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as {
+      watcherId: string;
+      sinceIso: string;
+      lookbackHours: number;
+      total: number;
+      heartbeats: unknown[];
+    };
+    expect(parsed.watcherId).toBe("abc");
+    expect(parsed.lookbackHours).toBe(12);
+    expect(parsed.total).toBe(1);
+    expect(parsed.heartbeats).toHaveLength(1);
+    expect(parsed.sinceIso).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+  });
+
+  // ---- Tool execution (error paths) ---------------------------------------
+
+  it("get_instrument returns error for nonexistent instrument", async () => {
+    const result = await client.callTool({
+      name: "get_instrument",
+      arguments: { instrumentId: "nonexistent" },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ type: string; text: string }>)[0]
+      .text;
+    expect(text).toContain("not found");
+  });
+
+  it("get_run returns error for nonexistent run", async () => {
+    const result = await client.callTool({
+      name: "get_run",
+      arguments: { instrumentId: "test-plate-reader", runId: "nonexistent" },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ type: string; text: string }>)[0]
+      .text;
+    expect(text).toContain("not found");
+  });
+
+  it("list_run_files returns error for nonexistent run", async () => {
+    const result = await client.callTool({
+      name: "list_run_files",
+      arguments: { instrumentId: "test-plate-reader", runId: "nonexistent" },
+    });
+    expect(result.isError).toBe(true);
+  });
+
+  it("list_run_files returns a paginated payload and forwards page args", async () => {
+    const { getRunFilesPage } = await import("@/lib/api/instrument-runs");
+    vi.mocked(getRunFilesPage).mockResolvedValueOnce({
+      data: [
+        {
+          id: 1,
+          filename: "data.csv",
+          relativePath: "data.csv",
+          category: "raw",
+          status: "uploaded",
+          sizeBytes: 42,
+          contentType: "text/csv",
+          errorMessage: null,
+          createdAt: new Date("2026-01-01T00:00:00Z"),
+          uploadedAt: new Date("2026-01-01T00:00:00Z"),
+          processedAt: null,
+          // Fields below should be stripped from the MCP payload.
+          s3Bucket: "secret-bucket",
+          s3Key: "secret/key",
+          metadata: { huge: "blob" },
+        } as never,
+      ],
+      pagination: { page: 2, per_page: 10, total: 25, total_pages: 3 },
+    });
+
+    const result = await client.callTool({
+      name: "list_run_files",
+      arguments: {
+        instrumentId: "test-plate-reader",
+        runId: "run-1",
+        page: 2,
+        perPage: 10,
+      },
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(getRunFilesPage).toHaveBeenCalledWith("internal-1", {
+      page: 2,
+      perPage: 10,
+    });
+    const payload = parseText(result.content) as {
+      data: Record<string, unknown>[];
+      pagination: Record<string, unknown>;
+    };
+    expect(payload.pagination).toEqual({
+      page: 2,
+      per_page: 10,
+      total: 25,
+      total_pages: 3,
+    });
+    expect(payload.data[0]).not.toHaveProperty("s3Bucket");
+    expect(payload.data[0]).not.toHaveProperty("s3Key");
+    expect(payload.data[0]).not.toHaveProperty("metadata");
+    expect(payload.data[0].filename).toBe("data.csv");
+  });
+
+  it("get_file returns error for nonexistent file", async () => {
+    const result = await client.callTool({
+      name: "get_file",
+      arguments: { fileId: 999 },
+    });
+    expect(result.isError).toBe(true);
+  });
+
+  it("get_file_download_url returns error for unuploaded file", async () => {
+    const result = await client.callTool({
+      name: "get_file_download_url",
+      arguments: { fileId: 99 },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ type: string; text: string }>)[0]
+      .text;
+    expect(text).toContain("not been uploaded");
+  });
+
+  it("reprocess_file returns error when the core helper reports failure", async () => {
+    const result = await client.callTool({
+      name: "reprocess_file",
+      arguments: { fileId: 123 },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ type: string; text: string }>)[0]
+      .text;
+    expect(text).toContain("not found");
+    // The error payload prefixes the structured code so clients can branch
+    // on NOT_FOUND vs CONFLICT vs INTERNAL_ERROR without parsing the message.
+    expect(text).toContain("[NOT_FOUND]");
+  });
+
+  it("reprocess_file is annotated as destructive", async () => {
+    const { tools } = await client.listTools();
+    const tool = tools.find((t) => t.name === "reprocess_file");
+    expect(tool?.annotations?.readOnlyHint).toBe(false);
+    expect(tool?.annotations?.destructiveHint).toBe(true);
+  });
+
+  it("list_run_attributors returns the mocked list", async () => {
+    const result = await client.callTool({
+      name: "list_run_attributors",
+      arguments: { instrumentId: "test-plate-reader" },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as Array<{
+      userId: string;
+      displayName: string;
+    }>;
+    expect(parsed).toEqual([{ userId: "u-1", displayName: "Alice" }]);
+  });
+
+  // The in-memory transport does not supply `authInfo`, so the tool must
+  // refuse to attribute anything. The happy path lives in the HTTP suite
+  // where a real Bearer token resolves `authInfo.extra.userId`.
+  it("claim_run without authInfo reports an authenticated-user error", async () => {
+    const result = await client.callTool({
+      name: "claim_run",
+      arguments: { instrumentId: "test-plate-reader", runId: "run-1" },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ type: string; text: string }>)[0]
+      .text;
+    expect(text).toContain("Authenticated user not available");
+  });
+
+  it("unclaim_run without authInfo reports an authenticated-user error", async () => {
+    const result = await client.callTool({
+      name: "unclaim_run",
+      arguments: { instrumentId: "test-plate-reader", runId: "run-1" },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ type: string; text: string }>)[0]
+      .text;
+    expect(text).toContain("Authenticated user not available");
+  });
+
+  // ---- Resources -----------------------------------------------------------
+
+  it("lists resources including instruments", async () => {
+    const { resources } = await client.listResources();
+    expect(resources.some((r) => r.uri === "datahub://instruments")).toBe(true);
+  });
+
+  it("reads the instruments resource", async () => {
+    const { contents } = await client.readResource({
+      uri: "datahub://instruments",
+    });
+    expect(contents).toHaveLength(1);
+    expect(contents[0].mimeType).toBe("application/json");
+    expect("text" in contents[0]).toBe(true);
+    const parsed = JSON.parse(
+      (contents[0] as { uri: string; text: string }).text
+    );
+    expect(parsed).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "test-plate-reader" }),
+      ])
+    );
+  });
+
+  it("lists resource templates for filter options", async () => {
+    const { resourceTemplates } = await client.listResourceTemplates();
+    expect(
+      resourceTemplates.some((t) => t.uriTemplate.includes("filter-options"))
+    ).toBe(true);
+  });
+
+  it("filter-options list surfaces both plate-reader and gel-doc instruments", async () => {
+    const { resources } = await client.listResources();
+    const filterOptionUris = resources
+      .map((r) => r.uri)
+      .filter((uri) => uri.includes("/filter-options"));
+    expect(
+      filterOptionUris.some((uri) => uri.includes("test-plate-reader"))
+    ).toBe(true);
+    expect(filterOptionUris.some((uri) => uri.includes("test-gel-doc"))).toBe(
+      true
+    );
+  });
+
+  it("reads plate-reader filter options", async () => {
+    const { contents } = await client.readResource({
+      uri: "datahub://instruments/test-plate-reader/filter-options",
+    });
+    const parsed = JSON.parse(
+      (contents[0] as { uri: string; text: string }).text
+    );
+    expect(parsed).toHaveProperty("wavelengths");
+    expect(parsed).toHaveProperty("measurementModes");
+  });
+
+  it("reads gel-doc filter options", async () => {
+    const { contents } = await client.readResource({
+      uri: "datahub://instruments/test-gel-doc/filter-options",
+    });
+    const parsed = JSON.parse(
+      (contents[0] as { uri: string; text: string }).text
+    );
+    expect(parsed).toHaveProperty("captureTypes");
+    expect(parsed).toHaveProperty("colors");
+  });
+
+  it("filter-options read surfaces a structured error for unfilterable instrument types", async () => {
+    // MOCK_GENERIC_INSTRUMENT exists in getInstrumentById but has an
+    // instrumentType ('generic') that's not in FILTERABLE_INSTRUMENT_TYPES.
+    // The resource template should respond with an explanatory error object.
+    const { contents } = await client.readResource({
+      uri: "datahub://instruments/test-generic/filter-options",
+    });
+    const parsed = JSON.parse(
+      (contents[0] as { uri: string; text: string }).text
+    );
+    expect(parsed).toHaveProperty("error");
+    expect(String(parsed.error)).toContain("generic");
+  });
+
+  it("filter-options read surfaces a not-found error for unknown instrument IDs", async () => {
+    const { contents } = await client.readResource({
+      uri: "datahub://instruments/does-not-exist/filter-options",
+    });
+    const parsed = JSON.parse(
+      (contents[0] as { uri: string; text: string }).text
+    );
+    expect(parsed).toHaveProperty("error");
+    expect(String(parsed.error)).toContain("not found");
+  });
+
+  // ---- Prompts -------------------------------------------------------------
+
+  const EXPECTED_PROMPTS = [
+    "daily_summary",
+    "troubleshoot_instrument",
+    "compare_runs",
+  ] as const;
+
+  it("lists all expected prompts", async () => {
+    const { prompts } = await client.listPrompts();
+    const names = prompts.map((p) => p.name);
+    expect(names).toEqual(expect.arrayContaining([...EXPECTED_PROMPTS]));
+    expect(names).toHaveLength(EXPECTED_PROMPTS.length);
+  });
+
+  it("every prompt has a non-empty description", async () => {
+    const { prompts } = await client.listPrompts();
+    for (const prompt of prompts) {
+      expect(
+        prompt.description,
+        `${prompt.name} missing description`
+      ).toBeTruthy();
+    }
+  });
+
+  it("daily_summary prompt returns messages", async () => {
+    const result = await client.getPrompt({
+      name: "daily_summary",
+      arguments: { date: "2025-06-01" },
+    });
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0].role).toBe("user");
+    expect((result.messages[0].content as { text: string }).text).toContain(
+      "2025-06-01"
+    );
+  });
+
+  it("troubleshoot_instrument prompt references heartbeat tool", async () => {
+    const result = await client.getPrompt({
+      name: "troubleshoot_instrument",
+      arguments: { instrumentId: "my-inst" },
+    });
+    expect(result.messages).toHaveLength(1);
+    const text = (result.messages[0].content as { text: string }).text;
+    expect(text).toContain("my-inst");
+    expect(text).toContain("get_watcher_heartbeats");
+  });
+
+  it("compare_runs prompt includes both run IDs", async () => {
+    const result = await client.getPrompt({
+      name: "compare_runs",
+      arguments: { instrumentId: "my-inst", runId1: "run-1", runId2: "run-2" },
+    });
+    const text = (result.messages[0].content as { text: string }).text;
+    expect(text).toContain("run-1");
+    expect(text).toContain("run-2");
+  });
+});

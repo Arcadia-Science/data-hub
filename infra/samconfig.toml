@@ -1,0 +1,20 @@
+version = 0.1
+
+# Static deploy configuration per environment. Parameter overrides with
+# secret/dynamic values are passed via the Makefile (local) or the GitHub
+# Actions workflow (CI), where shell variable expansion works correctly.
+# SAM CLI does NOT expand environment variables inside samconfig.toml.
+
+[staging.deploy.parameters]
+stack_name = "data-hub-staging"
+s3_prefix = "data-hub-staging"
+region = "us-west-1"
+capabilities = "CAPABILITY_NAMED_IAM"
+confirm_changeset = true
+
+[production.deploy.parameters]
+stack_name = "data-hub-production"
+s3_prefix = "data-hub-production"
+region = "us-west-1"
+capabilities = "CAPABILITY_NAMED_IAM"
+confirm_changeset = true

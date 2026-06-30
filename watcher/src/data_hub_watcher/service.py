@@ -1,0 +1,861 @@
+"""Windows Service wrapper for the Data Hub Watcher.
+
+This module is only imported on Windows and requires the `pywin32` optional
+dependency (`pip install data-hub-watcher[windows-service]`).
+
+All win32 imports are done lazily inside each function so that:
+  1. The module can be imported on any platform for type-checking.
+  2. Pyright does not flag undefined variables on non-Windows hosts.
+
+When run as ``python -m data_hub_watcher.service`` by the Windows Service
+Control Manager, the ``__main__`` block at the bottom of this file starts
+the service control dispatcher.  This avoids depending on
+``pythonservice.exe`` (which frequently fails to activate the virtual
+environment created by ``uv``).
+"""
+
+from __future__ import annotations
+import logging
+import os
+import sys
+import threading
+import time
+from pathlib import Path
+from typing import Any
+
+from data_hub_watcher.constants import DEFAULT_CONFIG_DIR, SERVICE_NAME, WATCHER_LOG_DIR
+
+logger = logging.getLogger(__name__)
+
+SERVICE_DISPLAY_NAME = "Data Hub Watcher"
+SERVICE_DESCRIPTION = "Monitors instrument directories and uploads data files to Data Hub."
+
+_REG_KEY = rf"SYSTEM\CurrentControlSet\Services\{SERVICE_NAME}"
+_REG_CONFIG_PATH = "ConfigPath"
+_REG_ENV_PATH = "EnvPath"
+
+# Win32 system error codes returned by ``OpenService`` / ``CreateService``
+# while a service is in the asynchronous DeleteService teardown window.
+# Documented at https://learn.microsoft.com/windows/win32/debug/system-error-codes--1000-1299-.
+_ERROR_SERVICE_DOES_NOT_EXIST = 1060
+_ERROR_SERVICE_MARKED_FOR_DELETE = 1072
+
+# Windows services that must be running before the watcher can usefully
+# contact the Data Hub API. Declaring these as dependencies makes the SCM
+# wait for the TCP/IP stack and DNS resolver to be ready before it tries
+# to start the watcher. Combined with delayed-auto-start (below), this
+# avoids the classic "service starts at boot before the network is up,
+# fails its API health check, and stays stopped" failure mode.
+_SERVICE_DEPENDENCIES: list[str] = ["Tcpip", "Dnscache"]
+
+
+def install_service(config_path: Path, env_path: Path) -> None:
+    """Install the watcher as a Windows service with automatic start and recovery.
+
+    The service binary path is registered as
+    ``"<venv>/python.exe" -m data_hub_watcher.service`` so that the
+    virtual-environment's interpreter (and all installed packages) are
+    available when the SCM starts the process.
+
+    *config_path* and *env_path* are persisted to the service's registry
+    key so that ``SvcDoRun`` can locate them regardless of which Windows
+    user account the service runs under (typically Local System).
+
+    The service is registered with ``delayedstart=True`` and a dependency
+    on the TCP/IP and DNS-client services so it does not start until the
+    network stack is up after a reboot. Without this, lab PCs frequently
+    boot the service before any NIC has DHCP-leased an address, the
+    initial API call fails, and the service exits.
+    """
+    import win32service as ws  # type: ignore[import-untyped]
+    import win32serviceutil  # type: ignore[import-untyped]
+
+    class_path = f"{__name__}.DataHubWatcherService"
+
+    win32serviceutil.InstallService(
+        pythonClassString=class_path,
+        serviceName=SERVICE_NAME,
+        displayName=SERVICE_DISPLAY_NAME,
+        startType=ws.SERVICE_AUTO_START,
+        serviceDeps=_SERVICE_DEPENDENCIES,
+        exeName=sys.executable,
+        exeArgs="-m data_hub_watcher.service",
+        description=SERVICE_DESCRIPTION,
+        delayedstart=True,
+    )
+
+    _store_paths_in_registry(config_path, env_path)
+    _configure_recovery()
+    # Create the shared log directory up-front under the operator's
+    # (elevated) shell. On Windows ``C:\ProgramData\DataHubWatcher``
+    # inherits its ACL from ``C:\ProgramData`` — i.e. SYSTEM full
+    # control + Users: Modify on contained files/folders — so the
+    # service running under LocalSystem can write here and the
+    # operator can tail the file from their own shell without
+    # elevation. Doing this here rather than letting the first
+    # writer create it on demand avoids a race where, say, an early
+    # CLI invocation creates the directory with a non-default owner
+    # before the service tries to rotate the file.
+    WATCHER_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    # The worker template bakes its sentinel paths in at render time,
+    # so we render against the operator's chosen config directory
+    # (``config_path.parent``) rather than the import-time
+    # ``DEFAULT_CONFIG_DIR``. The two are equivalent for default
+    # installs but diverge when an operator passes a custom
+    # ``--config-path``, and — critically — diverge between the
+    # operator's user account and the LocalSystem account the service
+    # itself runs under. The matching read side in ``_run_service_loop``
+    # consults the registry for the same reason.
+    _install_upgrade_worker(config_path.parent)
+    logger.info("Service '%s' installed successfully", SERVICE_NAME)
+
+
+def _install_upgrade_worker(config_dir: Path) -> None:
+    """Drop the upgrade-worker PowerShell script and register the task.
+
+    Splits cleanly from ``install_service`` so unit tests can patch
+    just this function out (the SCM bits don't need to know about the
+    upgrade worker, and the upgrade-worker bits don't need a real
+    ``win32serviceutil`` to test). Failure here is logged but
+    re-raised so the operator running ``service install`` sees a clear
+    error rather than a silently-broken auto-update path.
+
+    *config_dir* must be the directory the running watcher service will
+    later use for its sentinels — the worker template bakes the
+    request/result paths in at render time, so a mismatch here results
+    in the worker reading from one directory while the service writes
+    to another (and the auto-update silently no-ops every tick).
+
+    The operator's uv tool directories are resolved here (rather than
+    inside the worker) because the SYSTEM account that later executes
+    the worker resolves them against the wrong profile —
+    ``C:\\Windows\\System32\\config\\systemprofile\\.local\\...`` rather
+    than ``C:\\Users\\<op>\\.local\\...``. We capture the operator's
+    paths once at install time and bake them into the rendered
+    template via ``UV_TOOL_DIR`` / ``UV_TOOL_BIN_DIR`` overrides; see
+    :func:`data_hub_watcher.upgrade_worker.resolve_uv_tool_dirs` for
+    the long form of the rationale.
+    """
+    from data_hub_watcher.scheduled_task import install_upgrade_task
+    from data_hub_watcher.self_update import (
+        UvExecutableNotFoundError,
+        _resolve_uv_executable,
+    )
+    from data_hub_watcher.upgrade_worker import (
+        UvToolDirResolutionError,
+        resolve_uv_tool_dirs,
+        write_worker_script,
+    )
+
+    uv_path, _tried = _resolve_uv_executable()
+    if uv_path is None:
+        # The same `UvExecutableNotFoundError` the in-process updater
+        # raises — re-uses the operator-facing message format so a
+        # ``service install`` failure here looks identical to a stuck
+        # ``self-update``, which lab-PC docs already cover.
+        raise UvExecutableNotFoundError(_tried)
+    try:
+        tool_dir, tool_bin_dir = resolve_uv_tool_dirs(uv_path)
+    except UvToolDirResolutionError:
+        # Re-raise so ``service install`` aborts loudly. Letting the
+        # install proceed with default tool dirs (i.e. omitting the
+        # env-var overrides) would just reproduce the SYSTEM-installs-
+        # to-wrong-place bug we're trying to fix.
+        raise
+
+    script_path = write_worker_script(
+        config_dir,
+        service_name=SERVICE_NAME,
+        tool_dir=tool_dir,
+        tool_bin_dir=tool_bin_dir,
+    )
+    install_upgrade_task(script_path)
+    logger.info(
+        "Upgrade worker script + scheduled task registered under %s (uv tool dir=%s, bin dir=%s)",
+        config_dir,
+        tool_dir,
+        tool_bin_dir,
+    )
+
+
+def _store_paths_in_registry(config_path: Path, env_path: Path) -> None:
+    """Write *config_path* and *env_path* into the service's registry key."""
+    import winreg  # type: ignore[import-untyped]
+
+    key = winreg.OpenKey(  # type: ignore[attr-defined]
+        winreg.HKEY_LOCAL_MACHINE,  # type: ignore[attr-defined]
+        _REG_KEY,
+        0,
+        winreg.KEY_SET_VALUE,  # type: ignore[attr-defined]
+    )
+    try:
+        winreg.SetValueEx(key, _REG_CONFIG_PATH, 0, winreg.REG_SZ, str(config_path))  # type: ignore[attr-defined]
+        winreg.SetValueEx(key, _REG_ENV_PATH, 0, winreg.REG_SZ, str(env_path))  # type: ignore[attr-defined]
+    finally:
+        winreg.CloseKey(key)  # type: ignore[attr-defined]
+
+
+def _rewrite_service_env_path(env_path: Path) -> None:
+    """Point the installed service at a new env file, keeping `ConfigPath`.
+
+    Called after an environment switch so a service restart loads the target
+    environment's `.env.<env>`. A host without an installed service (no
+    registry key) is a no-op so the switch still succeeds on CLI-only PCs.
+    """
+    try:
+        config_path, _ = _read_paths_from_registry()
+    except OSError:
+        return
+    _store_paths_in_registry(config_path, env_path)
+
+
+def _read_paths_from_registry() -> tuple[Path, Path]:
+    """Read config & env paths previously stored by ``install_service``."""
+    import winreg  # type: ignore[import-untyped]
+
+    key = winreg.OpenKey(  # type: ignore[attr-defined]
+        winreg.HKEY_LOCAL_MACHINE,  # type: ignore[attr-defined]
+        _REG_KEY,
+        0,
+        winreg.KEY_QUERY_VALUE,  # type: ignore[attr-defined]
+    )
+    try:
+        config_str, _ = winreg.QueryValueEx(key, _REG_CONFIG_PATH)  # type: ignore[attr-defined]
+        env_str, _ = winreg.QueryValueEx(key, _REG_ENV_PATH)  # type: ignore[attr-defined]
+    finally:
+        winreg.CloseKey(key)  # type: ignore[attr-defined]
+    return Path(config_str), Path(env_str)
+
+
+def _delete_paths_from_registry() -> None:
+    """Remove custom registry values written by ``install_service``.
+
+    Silently ignored if the key or values don't exist (e.g. the service
+    was installed before registry storage was added).
+    """
+    import winreg  # type: ignore[import-untyped]
+
+    try:
+        key = winreg.OpenKey(  # type: ignore[attr-defined]
+            winreg.HKEY_LOCAL_MACHINE,  # type: ignore[attr-defined]
+            _REG_KEY,
+            0,
+            winreg.KEY_SET_VALUE,  # type: ignore[attr-defined]
+        )
+    except OSError:
+        return
+
+    try:
+        for name in (_REG_CONFIG_PATH, _REG_ENV_PATH):
+            try:
+                winreg.DeleteValue(key, name)  # type: ignore[attr-defined]
+            except OSError:
+                pass
+    finally:
+        winreg.CloseKey(key)  # type: ignore[attr-defined]
+
+
+def _configure_recovery() -> None:
+    """Set the service to restart on first and second failure.
+
+    After two consecutive failures the service stops retrying to avoid a
+    crash loop (e.g. due to a persistent config or credential issue).
+    The failure counter resets after 24 h of healthy uptime.
+
+    We additionally set ``SERVICE_CONFIG_FAILURE_ACTIONS_FLAG`` so that
+    these recovery actions fire when ``SvcDoRun`` exits with a non-zero
+    code -- not only when the process actually crashes. Our startup
+    sequence reports controlled failures by raising ``SystemExit(1)``,
+    so without this flag the SCM would treat them as graceful stops and
+    never restart the service.
+    """
+    import win32service as ws  # type: ignore[import-untyped]
+
+    hscm = ws.OpenSCManager(None, None, ws.SC_MANAGER_ALL_ACCESS)
+    try:
+        hs = ws.OpenService(hscm, SERVICE_NAME, ws.SERVICE_ALL_ACCESS)
+        try:
+            # SC_ACTION_RESTART = 1, delay in milliseconds
+            actions = [
+                (1, 60_000),  # 1st failure: restart after 60 s
+                (1, 120_000),  # 2nd failure: restart after 120 s
+                (0, 0),  # subsequent: no action
+            ]
+            ws.ChangeServiceConfig2(
+                hs,
+                ws.SERVICE_CONFIG_FAILURE_ACTIONS,
+                {
+                    "ResetPeriod": 86400,
+                    "RebootMsg": "",
+                    "Command": "",
+                    "Actions": actions,
+                },
+            )
+            ws.ChangeServiceConfig2(
+                hs,
+                ws.SERVICE_CONFIG_FAILURE_ACTIONS_FLAG,
+                {"fFailureActionsOnNonCrashFailures": True},
+            )
+        finally:
+            ws.CloseServiceHandle(hs)
+    finally:
+        ws.CloseServiceHandle(hscm)
+
+
+def uninstall_service() -> None:
+    """Stop (if running) and remove the Windows service.
+
+    ``RemoveService`` deletes the ``HKLM\\...\\Services\\<name>`` key,
+    which includes the custom ``ConfigPath`` / ``EnvPath`` values written
+    by ``install_service``.  We still attempt an explicit cleanup first
+    so stale values are removed even if ``RemoveService`` only marks the
+    key for deferred deletion.
+    """
+    import win32serviceutil  # type: ignore[import-untyped]
+
+    try:
+        win32serviceutil.StopService(SERVICE_NAME)
+    except Exception:
+        pass  # already stopped or doesn't exist
+
+    # Try the registry first so we clean up the worker script in the
+    # operator's actual config directory rather than wherever
+    # ``DEFAULT_CONFIG_DIR`` happens to resolve in this process
+    # (it'd be wrong, e.g., if uninstall is invoked from an elevated
+    # ``runas /user:SYSTEM`` shell). If the registry read fails we fall
+    # back to ``DEFAULT_CONFIG_DIR`` so a partially-broken install
+    # doesn't block uninstall — leaving the script behind is harmless
+    # without the matching scheduled task.
+    try:
+        config_path, _env_path = _read_paths_from_registry()
+        worker_config_dir = config_path.parent
+    except OSError:
+        worker_config_dir = DEFAULT_CONFIG_DIR
+    _uninstall_upgrade_worker(worker_config_dir)
+    _delete_paths_from_registry()
+    win32serviceutil.RemoveService(SERVICE_NAME)
+    logger.info("Service '%s' removed", SERVICE_NAME)
+
+
+def _uninstall_upgrade_worker(config_dir: Path) -> None:
+    """Best-effort removal of the upgrade-worker scheduled task + script.
+
+    Idempotent (the underlying ``schtasks /Delete`` swallows
+    "task does not exist") and tolerant of older installs that never
+    registered the task — we don't want to block ``uninstall_service``
+    on a clean slate that's already clean.
+    """
+    from data_hub_watcher.scheduled_task import (
+        ScheduledTaskError,
+        uninstall_upgrade_task,
+    )
+    from data_hub_watcher.upgrade_worker import upgrade_worker_script_path
+
+    try:
+        uninstall_upgrade_task()
+    except ScheduledTaskError as exc:
+        logger.warning("Could not remove upgrade scheduled task: %s", exc)
+
+    script_path = upgrade_worker_script_path(config_dir)
+    try:
+        script_path.unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning("Could not remove upgrade worker script %s: %s", script_path, exc)
+
+
+def wait_for_service_removed(
+    *,
+    timeout_seconds: float = 30.0,
+    poll_interval_seconds: float = 0.5,
+) -> bool:
+    """Block until the service is fully removed from the SCM, or *timeout* elapses.
+
+    ``DeleteService`` (called via ``win32serviceutil.RemoveService``) is
+    asynchronous: Windows only *marks* the service for deletion, and the
+    actual record is removed once every open handle to it is closed —
+    including handles held by ``services.msc``, Event Viewer's "Services"
+    pane, Task Manager, and some antivirus / EDR agents that enumerate
+    services.  Until that happens, ``CreateService`` with the same name
+    fails with ``ERROR_SERVICE_MARKED_FOR_DELETE`` (1072), which is the
+    confusing error operators see when ``service reinstall`` runs back-to-
+    back uninstall + install on a host with the Services console open.
+
+    We poll the SCM with ``OpenService``: the service is fully gone the
+    moment that call raises ``ERROR_SERVICE_DOES_NOT_EXIST`` (1060).
+    Returns ``True`` if the service disappeared inside the deadline,
+    ``False`` if it's still hanging around — callers should treat the
+    latter as actionable (close ``services.msc`` and retry) rather than
+    a fatal SCM error.
+    """
+    import pywintypes  # type: ignore[import-untyped]
+    import win32service as ws  # type: ignore[import-untyped]
+
+    deadline = time.monotonic() + timeout_seconds
+    hscm = ws.OpenSCManager(None, None, ws.SC_MANAGER_CONNECT)
+    try:
+        while True:
+            try:
+                hs = ws.OpenService(hscm, SERVICE_NAME, ws.SERVICE_QUERY_STATUS)
+            except pywintypes.error as exc:
+                # winerror lives at index 0 of the (code, func, msg) tuple
+                # but pywintypes.error also exposes it as an attribute on
+                # modern pywin32. Prefer the attribute, fall back to args
+                # so this works against the MagicMock-based test fakes.
+                code = getattr(exc, "winerror", None)
+                if code is None and exc.args:
+                    code = exc.args[0]
+                if code == _ERROR_SERVICE_DOES_NOT_EXIST:
+                    return True
+                raise
+            else:
+                ws.CloseServiceHandle(hs)
+
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(poll_interval_seconds)
+    finally:
+        ws.CloseServiceHandle(hscm)
+
+
+def start_service() -> None:
+    import win32serviceutil  # type: ignore[import-untyped]
+
+    win32serviceutil.StartService(SERVICE_NAME)
+    logger.info("Service '%s' started", SERVICE_NAME)
+
+
+def stop_service() -> None:
+    import win32serviceutil  # type: ignore[import-untyped]
+
+    win32serviceutil.StopService(SERVICE_NAME)
+    logger.info("Service '%s' stopped", SERVICE_NAME)
+
+
+def query_service_status() -> dict[str, Any]:
+    """Return a dict with service status info for display."""
+    import win32service as ws  # type: ignore[import-untyped]
+
+    state_map = {
+        ws.SERVICE_STOPPED: "stopped",
+        ws.SERVICE_START_PENDING: "start_pending",
+        ws.SERVICE_STOP_PENDING: "stop_pending",
+        ws.SERVICE_RUNNING: "running",
+        ws.SERVICE_CONTINUE_PENDING: "continue_pending",
+        ws.SERVICE_PAUSE_PENDING: "pause_pending",
+        ws.SERVICE_PAUSED: "paused",
+    }
+
+    # Use QueryServiceStatusEx to get the extended status which includes the
+    # process ID.  The basic QueryServiceStatus only returns 7 fields
+    # (svcType, svcState, ctrlsAccepted, exitCode, svcSpecificExitCode,
+    # checkPoint, waitHint) — none of which is a PID.
+    hscm = ws.OpenSCManager(None, None, ws.SC_MANAGER_CONNECT)
+    try:
+        hs = ws.OpenService(hscm, SERVICE_NAME, ws.SERVICE_QUERY_STATUS)
+        try:
+            # QueryServiceStatusEx returns a SERVICE_STATUS_PROCESS dict with
+            # keys like CurrentState, ProcessId, etc.
+            status_ex: dict[str, Any] = ws.QueryServiceStatusEx(hs)  # type: ignore[assignment]
+            svc_state: int = status_ex["CurrentState"]
+            pid: int = status_ex.get("ProcessId", 0)
+            return {
+                "service_name": SERVICE_NAME,
+                "state": state_map.get(svc_state, f"unknown ({svc_state})"),
+                "pid": pid if pid and svc_state == ws.SERVICE_RUNNING else None,
+            }
+        finally:
+            ws.CloseServiceHandle(hs)
+    finally:
+        ws.CloseServiceHandle(hscm)
+
+
+def _repair_upgrade_worker_if_missing(config_dir: Path) -> None:
+    """Re-register the upgrade scheduled task on startup if it has gone missing.
+
+    Lab PCs that auto-update into the version that introduced the
+    out-of-process worker won't have run ``service install`` with the
+    new code, so the scheduled task simply isn't there — and the next
+    auto-update tick would fail loudly. Repairing on each service
+    startup means the host self-heals on the very next service restart
+    (which the auto-updater triggers anyway) for the common case where
+    the rendered worker script is still on disk and only the task
+    record was lost (e.g. an operator manually deleted it in
+    ``taskschd.msc``).
+
+    Critical scope limit: this helper does NOT re-render the worker
+    template. Re-rendering requires the *operator's* uv tool
+    directories from ``uv tool dir`` / ``uv tool dir --bin``, and the
+    service runs as LocalSystem so any uv invocation from here would
+    resolve those paths against the SYSTEM profile rather than the
+    operator's. A SYSTEM-rendered template would bake in the wrong
+    ``UV_TOOL_DIR`` / ``UV_TOOL_BIN_DIR`` and silently install future
+    upgrades into ``C:\\Windows\\System32\\config\\systemprofile\\
+    .local\\...`` instead of the operator's profile — exactly the bug
+    we're trying to prevent. If the rendered script is also missing
+    from *config_dir*, the only safe recovery is for the operator to
+    run ``data-hub-watcher service reinstall`` from their own shell;
+    we log a clear pointer and punt rather than render-against-SYSTEM
+    a worker that would corrupt the next auto-update.
+
+    *config_dir* must be the operator's resolved config directory (the
+    parent of the registry-stored config path) — see the comment on
+    :class:`~data_hub_watcher.runtime.WatcherRuntime.config_dir` for
+    why ``DEFAULT_CONFIG_DIR`` would resolve incorrectly here.
+
+    Failures are logged via the module logger — which on the service
+    path is attached to a :class:`_ServiceManagerHandler` so warnings
+    reach both ``watcher.log`` and the Windows Event Log — but do not
+    raise: a host that can't register the task should still be able
+    to run the watcher in its current version. The next auto-update
+    attempt will surface the missing task as an ``UPDATE_FAILED``
+    event with a clearer reason.
+    """
+    try:
+        from data_hub_watcher.scheduled_task import (
+            ScheduledTaskError,
+            install_upgrade_task,
+            task_exists,
+        )
+        from data_hub_watcher.upgrade_worker import upgrade_worker_script_path
+    except Exception as exc:
+        logger.warning("Cannot import upgrade worker modules during startup: %s", exc)
+        return
+
+    try:
+        present = task_exists()
+    except ScheduledTaskError as exc:
+        logger.warning(
+            "Could not query upgrade scheduled task: %s. "
+            "Auto-update may be unavailable until 'data-hub-watcher service "
+            "reinstall' is run.",
+            exc,
+        )
+        return
+
+    if present:
+        return
+
+    script_path = upgrade_worker_script_path(config_dir)
+    if not script_path.exists():
+        # We deliberately do NOT re-render here — see the docstring
+        # for why a SYSTEM-rendered template would silently break the
+        # very thing the repair is meant to fix.
+        logger.warning(
+            "Upgrade scheduled task is missing AND the rendered worker "
+            "script is absent from %s. Cannot self-repair "
+            "from a LocalSystem context. Run "
+            "'data-hub-watcher service reinstall' as Administrator to "
+            "re-render the worker against the operator's uv tool "
+            "directories and re-register the task.",
+            script_path,
+        )
+        return
+
+    logger.info(
+        "Upgrade scheduled task missing but worker script is present at "
+        "%s; re-registering the task pointing at the existing "
+        "rendered script.",
+        script_path,
+    )
+    try:
+        install_upgrade_task(script_path)
+    except (OSError, ScheduledTaskError) as exc:
+        logger.warning(
+            "Failed to register upgrade scheduled task: %s. "
+            "Run 'data-hub-watcher service reinstall' as Administrator to retry.",
+            exc,
+        )
+
+
+def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
+    """Run the watcher service loop until *stop_event* is set.
+
+    This is the testable body of ``DataHubWatcherService.SvcDoRun``.
+    Extracted as a top-level function so unit tests can exercise the
+    full startup sequence (registry read, env loading, API health
+    check, checksum sync, runtime build/start/stop) on any platform
+    by injecting a mock *sm* (servicemanager) and patching the
+    dependencies it pulls in. ``SvcDoRun`` itself becomes a thin
+    wrapper that imports ``servicemanager`` lazily and delegates here.
+
+    Any controlled failure exits the process with a non-zero status
+    via ``raise SystemExit(1)``. Combined with the
+    ``SERVICE_CONFIG_FAILURE_ACTIONS_FLAG`` set by
+    ``_configure_recovery``, the SCM treats such exits as service
+    failures and runs the configured restart actions. This is what
+    allows the service to recover from a transient API error at boot
+    -- the most common reason a freshly-rebooted lab PC fails to
+    bring the watcher back up.
+    """
+    import platform
+
+    from dotenv import load_dotenv
+
+    from data_hub_watcher.api_client import ApiError, DataHubClient
+    from data_hub_watcher.config_io import load_config
+    from data_hub_watcher.constants import (
+        API_URLS,
+        env_file_path,
+        resolve_state_db_path,
+    )
+    from data_hub_watcher.logging_setup import (
+        attach_servicemanager_handler,
+        setup_file_logging,
+    )
+    from data_hub_watcher.runtime import (
+        build_runtime,
+        classify_shutdown,
+        start_runtime,
+        stop_runtime,
+        sync_config_to_api,
+    )
+
+    # Wire up file logging + Windows Event Log routing BEFORE any
+    # other work, so a registry-read or env-load failure on the very
+    # next line still produces a record in ``watcher.log`` and the
+    # Event Log. Without this, every ``logger.*`` call made from the
+    # service path — including those from ``runtime``, ``uploader``,
+    # ``monitor``, ``heartbeat``, and ``updater`` — is silently
+    # dropped, which is the bug this whole module-level rework is
+    # closing.
+    log_path = setup_file_logging()
+    attach_servicemanager_handler(sm)
+    logger.info("%s starting (pid=%s, log=%s)", SERVICE_DISPLAY_NAME, os.getpid(), log_path)
+
+    # Read registry paths BEFORE the upgrade-worker self-repair so
+    # both have a single source of truth for the operator's config
+    # directory. Doing the repair first would force it to fall back
+    # to ``DEFAULT_CONFIG_DIR`` — which under LocalSystem points at
+    # the SYSTEM profile, not the operator's profile, and would bake
+    # the wrong sentinel paths into the regenerated worker script.
+    try:
+        path, env_path = _read_paths_from_registry()
+    except Exception as exc:
+        logger.error(
+            "Cannot read config/env paths from registry: %s. "
+            "Re-run 'data-hub-watcher service install'.",
+            exc,
+        )
+        raise SystemExit(1) from exc
+
+    _repair_upgrade_worker_if_missing(path.parent)
+
+    # Mirror the CLI's ``load_env`` semantics: load the base
+    # ``~/.data-hub/.env`` first (for any shared, non-secret values
+    # an operator may keep there), then overlay the registered env
+    # file (typically ``.env.<environment>``, or a custom path
+    # supplied via ``service install --env-path``) so its values win.
+    # Without the base-file load, an operator that splits shared
+    # config from per-environment secrets would see the service
+    # silently miss the shared half.
+    base_env = env_file_path()
+    if base_env != env_path and base_env.exists():
+        load_dotenv(base_env)
+    load_dotenv(env_path, override=True)
+    cfg = load_config(path)
+    inst = cfg.instrument
+
+    if cfg.environment == "preview":
+        # WatcherConfig's model validator guarantees api_base_url is
+        # set whenever environment is "preview"; the assertion is here
+        # to make that invariant visible to pyright.
+        assert cfg.api_base_url is not None
+        base_url = cfg.api_base_url
+    else:
+        base_url = API_URLS[cfg.environment]
+    client = DataHubClient(base_url)
+
+    # Step 1: Check instrument status (mirrors CLI watch startup)
+    try:
+        detail = client.get_instrument(inst.id)
+    except ApiError as exc:
+        logger.error("Cannot reach API during startup: %s", exc.message)
+        raise SystemExit(1) from exc
+
+    if detail.status == "pending":
+        logger.error(
+            "Instrument %r is still pending activation. "
+            "Service cannot start until the instrument is activated.",
+            inst.id,
+        )
+        raise SystemExit(1)
+
+    # build_runtime asserts cfg.watcher_id is set; surface that as
+    # a service-manager error rather than a hard crash so operators
+    # see a clear message in the Windows event log.
+    if not cfg.watcher_id:
+        logger.error("No watcher_id in config. Run 'data-hub-watcher init' first.")
+        raise SystemExit(1)
+
+    db_path = resolve_state_db_path(path.parent, cfg.environment)
+    # Pass the registry-resolved config directory through to the
+    # runtime so the auto-update sentinels land where the SYSTEM-owned
+    # upgrade worker (whose paths were baked in at install time
+    # against the same directory) actually reads from. See
+    # ``WatcherRuntime.config_dir`` for the gory details.
+    rt = build_runtime(client=client, cfg=cfg, db_path=db_path, config_dir=path.parent)
+
+    # Step 2: sync config checksum (now that we have a reporter, any
+    # failure surfaces as kind=config_sync_failed in the dashboard
+    # instead of only as a Windows-event-log warning that operators
+    # rarely read).
+    if sync_config_to_api(client, cfg.watcher_id, path, rt.reporter, trigger="startup"):
+        logger.info("Config synced to Data Hub")
+
+    start_runtime(rt, started_message=f"Service started on {platform.node()}")
+
+    logger.info("%s is running", SERVICE_DISPLAY_NAME)
+
+    # Wait for either the SCM's stop_event (operator-initiated stop, or
+    # OS shutdown) or the runtime's shutdown_event (in-process updater
+    # finished installing a new wheel and wants the SCM to restart us).
+    # Polling on a 1-second tick keeps wakeup latency low for both paths.
+    while not stop_event.is_set():
+        if rt.shutdown_event.wait(timeout=1.0):
+            break
+
+    # Classify before tearing the runtime down so the WATCHER_STOPPED
+    # event message reflects whether this is an upgrade-driven restart
+    # or a normal stop. Shared with the CLI ``watch`` path via
+    # ``classify_shutdown`` so the two entrypoints can't drift.
+    decision = classify_shutdown(rt, role="Service")
+    stop_runtime(rt, stopped_message=decision.stopped_message)
+
+    if decision.is_upgrade_restart:
+        logger.info("%s restarting to load upgraded watcher", SERVICE_DISPLAY_NAME)
+        # Exit non-zero so the SCM's failure-actions config kicks in and
+        # restarts the service on the configured 60 s delay. Without
+        # SERVICE_CONFIG_FAILURE_ACTIONS_FLAG this would look like a
+        # graceful exit and the SCM wouldn't restart us — see the long
+        # comment on `_configure_recovery` for details.
+        raise SystemExit(1)
+
+    logger.info("%s stopped", SERVICE_DISPLAY_NAME)
+
+
+def _create_service_class() -> type | None:
+    """Dynamically create the ServiceFramework subclass on Windows only.
+
+    The class is built at import time (not eagerly at top-of-module) so
+    that (a) the module can be imported safely on non-Windows for type
+    checking and tests, and (b) win32serviceutil can discover the class
+    by its qualified name for service registration.
+    """
+    if sys.platform != "win32":
+        return None
+
+    import win32service as ws  # type: ignore[import-untyped]
+    import win32serviceutil  # type: ignore[import-untyped]
+
+    class DataHubWatcherService(win32serviceutil.ServiceFramework):  # type: ignore[misc]
+        _svc_name_ = SERVICE_NAME
+        _svc_display_name_ = SERVICE_DISPLAY_NAME
+
+        def __init__(self, args: list[str]) -> None:
+            super().__init__(args)
+            self._stop_event = threading.Event()
+
+        def SvcDoRun(self) -> None:
+            import servicemanager  # type: ignore[import-untyped]
+
+            _run_service_loop(self._stop_event, servicemanager)
+
+        def SvcStop(self) -> None:
+            self.ReportServiceStatus(ws.SERVICE_STOP_PENDING)
+            self._stop_event.set()
+
+    return DataHubWatcherService
+
+
+# Materialise the class at module scope so win32serviceutil can find it by
+# qualified name (`data_hub_watcher.service.DataHubWatcherService`).
+_svc_cls = _create_service_class()
+if _svc_cls is not None:
+    DataHubWatcherService = _svc_cls  # noqa: F841
+
+
+# --- SCM entry point ---------------------------------------------------------
+# The service is registered with a binary path of:
+#   "<venv>/python.exe" -m data_hub_watcher.service
+# When the SCM starts the process, Python executes this __main__ block which
+# hands control to the service dispatcher.
+
+
+def _write_bootstrap_failure(exc_info: BaseException) -> None:
+    """Append the current exception traceback to the bootstrap log file.
+
+    This runs in the narrow window between Python starting and
+    ``StartServiceCtrlDispatcher`` handing control to our service
+    class. Failures here (broken venv, missing ``pywin32``, corrupt
+    bytecode, etc.) bypass every ``servicemanager.LogErrorMsg`` call
+    in this module because the dispatcher itself hasn't been wired
+    up yet — so without this side-channel the only signal an
+    operator sees is "the service started and exited immediately
+    with no log entries anywhere."
+
+    Only *unexpected* exceptions are captured here. ``SystemExit``
+    and ``KeyboardInterrupt`` are filtered out by the caller so a
+    clean upgrade restart (which raises ``SystemExit(1)`` to trigger
+    the SCM's recovery action) doesn't pollute the bootstrap log
+    with a misleading traceback.
+
+    We deliberately do not route through ``logging_setup`` here:
+    the failure modes we're capturing may include ``logging``,
+    ``pathlib``, or import-time failures in ``data_hub_watcher``
+    itself. Everything is wrapped in a nested ``try`` so a write
+    failure is silent — the original exception is re-raised by the
+    caller regardless.
+
+    The log lives alongside ``watcher.log`` (at
+    :data:`data_hub_watcher.constants.WATCHER_LOG_DIR`) so an
+    operator can tail one directory to see both pre- and
+    post-dispatcher failure trails.
+    """
+    import datetime
+    import traceback
+
+    try:
+        WATCHER_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        bootstrap_log = WATCHER_LOG_DIR / "service-bootstrap.log"
+        with bootstrap_log.open("a", encoding="utf-8") as fh:
+            timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            fh.write(f"\n--- {timestamp} bootstrap failure ---\n")
+            traceback.print_exception(type(exc_info), exc_info, exc_info.__traceback__, file=fh)
+    except Exception:
+        # Last-ditch: if even writing to the bootstrap log fails
+        # there is nothing useful we can do — the original
+        # exception will still propagate to the SCM as a non-zero
+        # exit code.
+        pass
+
+
+def _start_service_dispatcher() -> None:
+    """Hand control to the SCM dispatcher, capturing bootstrap-window failures.
+
+    Extracted from the ``__main__`` block so the bootstrap-capture
+    contract is unit-testable on non-Windows hosts. Only *unexpected*
+    exceptions are diverted into ``service-bootstrap.log`` —
+    ``SystemExit`` (the canonical "exit with non-zero" signal used
+    by ``_run_service_loop`` for upgrade restarts and several
+    early-exit failure modes) and ``KeyboardInterrupt`` (operator
+    Ctrl-C in interactive debug mode) are re-raised untouched so
+    they don't pollute the dedicated pre-dispatcher channel.
+    """
+    import servicemanager  # type: ignore[import-untyped]
+
+    try:
+        servicemanager.Initialize(SERVICE_NAME)  # type: ignore[attr-defined]
+        servicemanager.PrepareToHostSingle(_svc_cls)  # type: ignore[attr-defined]
+        servicemanager.StartServiceCtrlDispatcher()  # type: ignore[attr-defined]
+    except (SystemExit, KeyboardInterrupt):
+        raise
+    except BaseException as exc:
+        _write_bootstrap_failure(exc)
+        raise
+
+
+if __name__ == "__main__":
+    if _svc_cls is None:
+        raise SystemExit("This module must be run on Windows.")
+
+    _start_service_dispatcher()
