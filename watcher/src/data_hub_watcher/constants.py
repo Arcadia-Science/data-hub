@@ -71,6 +71,12 @@ WATCHER_LOG_DIR = _resolve_watcher_log_dir()
 SUPPORTED_ENVIRONMENTS: tuple[str, ...] = ("staging", "production", "preview")
 
 HEARTBEAT_INTERVAL_SECONDS = 60
+# Kept separate from ``HEARTBEAT_INTERVAL_SECONDS`` so the poll cadence can
+# diverge now that uploads no longer ride the heartbeat tick.
+UPLOAD_POLL_INTERVAL_SECONDS = 60
+# Bounded so a service stop doesn't hang on a large in-flight PUT; past this,
+# shutdown stops waiting for the worker and leaves the state DB open.
+UPLOAD_WORKER_STOP_TIMEOUT_SECONDS = 30
 DEFAULT_STABILITY_PERIOD_SECONDS = 5
 
 # Built-in presets for the ``init`` / ``config edit`` wizard.

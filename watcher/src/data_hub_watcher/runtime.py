@@ -22,6 +22,7 @@ from data_hub_watcher.constants import (
     DEFAULT_CONFIG_DIR,
     HEARTBEAT_INTERVAL_SECONDS,
     PRUNE_DAYS,
+    UPLOAD_WORKER_STOP_TIMEOUT_SECONDS,
 )
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import HeartbeatLoop, WatcherCounters
@@ -35,7 +36,7 @@ from data_hub_watcher.upgrade_worker import (
     clear_upgrade_result,
     read_upgrade_result,
 )
-from data_hub_watcher.uploader import Uploader
+from data_hub_watcher.uploader import Uploader, UploadQueueWorker
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,10 @@ class WatcherRuntime:
     # in their stop wait so a shutdown can be triggered from any thread.
     shutdown_event: threading.Event = field(default_factory=threading.Event)
     upgrade_restart_event: threading.Event = field(default_factory=threading.Event)
+    # Manual mode only: the thread that polls the upload queue off the
+    # heartbeat. ``None`` in auto mode, where uploads run on the monitor's
+    # stability-checker thread via the run detector's callback.
+    upload_worker: UploadQueueWorker | None = None
 
 
 @dataclass(frozen=True)
@@ -251,6 +256,11 @@ def build_runtime(
 
     is_auto = inst.upload_mode == "auto"
 
+    # Shared with the manual-mode ``UploadQueueWorker`` so a shutdown can
+    # interrupt an in-flight upload's backoff and abort between queued files;
+    # unused (but harmless) in auto mode.
+    upload_stop_event = threading.Event()
+
     uploader = Uploader(
         client=client,
         state_db=state_db,
@@ -262,7 +272,12 @@ def build_runtime(
         # Per-instrument knob, defaulted on the model so older configs
         # transparently inherit the new parallel-upload behaviour.
         upload_parallelism=inst.upload_parallelism,
+        stop_event=upload_stop_event,
     )
+
+    # Manual mode polls the server queue on its own thread; auto mode uploads
+    # via the run detector's callback on the stability-checker thread instead.
+    upload_worker = None if is_auto else UploadQueueWorker(uploader, stop_event=upload_stop_event)
 
     detector = RunDetector(
         pattern=inst.run_detection.pattern,
@@ -287,19 +302,10 @@ def build_runtime(
         seed_baseline=seed_baseline,
     )
 
-    # The heartbeat's `on_tick` hook is now multi-purpose:
-    #   1. In manual mode, poll the server's upload queue (uploads
-    #      naturally inherit the heartbeat cadence).
-    #   2. Always: feed the in-process auto-updater so it can count
-    #      idle ticks and run a server update-check roughly hourly.
-    # Each side wraps its own try/except so a failure on one side
-    # never blocks the other.
+    # Feeds the in-process auto-updater on every tick. Manual-mode upload
+    # polling used to run here too but moved to ``UploadQueueWorker`` so a
+    # slow upload can't delay a heartbeat.
     def _on_tick() -> None:
-        if not is_auto:
-            try:
-                uploader.poll_upload_queue()
-            except Exception:
-                logger.exception("Upload queue poll failed")
         try:
             updater.on_tick()
         except Exception:
@@ -329,6 +335,7 @@ def build_runtime(
         config_dir=effective_config_dir,
         shutdown_event=shutdown_event,
         upgrade_restart_event=upgrade_restart_event,
+        upload_worker=upload_worker,
     )
 
 
@@ -480,6 +487,10 @@ def start_runtime(rt: WatcherRuntime, *, started_message: str) -> None:
     rt.detector.hydrate_from_state_db()
 
     rt.heartbeat.start()
+    # Start manual-mode upload polling before the (potentially long) initial
+    # scan so queued uploads keep draining while the scan walks the backlog.
+    if rt.upload_worker is not None:
+        rt.upload_worker.start()
     rt.monitor.start()
 
 
@@ -551,6 +562,17 @@ def sync_config_to_api(
 def stop_runtime(rt: WatcherRuntime, *, stopped_message: str) -> None:
     """Shut everything down in reverse order and flush pending events."""
     rt.monitor.stop()
+    # ``StateDB.close`` assumes writer threads have joined; a large upload
+    # outliving the join once wrote post-close. Stop the worker first, and if
+    # it won't stop in time, skip the close rather than race it (the OS reaps).
+    upload_worker_stopped = True
+    if rt.upload_worker is not None:
+        upload_worker_stopped = rt.upload_worker.stop(timeout=UPLOAD_WORKER_STOP_TIMEOUT_SECONDS)
+        if not upload_worker_stopped:
+            logger.warning(
+                "Upload worker still running at shutdown; leaving the state DB "
+                "open so the in-flight upload can finish without a closed-DB error"
+            )
     rt.reporter.queue_event(
         WatcherEvent(
             event_type=EventType.WATCHER_STOPPED,
@@ -559,4 +581,5 @@ def stop_runtime(rt: WatcherRuntime, *, stopped_message: str) -> None:
     )
     rt.heartbeat.stop()
     rt.reporter.flush()
-    rt.state_db.close()
+    if upload_worker_stopped:
+        rt.state_db.close()
