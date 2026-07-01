@@ -149,3 +149,16 @@ html.dark .shiki span {
     @apply font-sans;
   }
 }
+
+/* Preview banner offsets; height matches `PREVIEW_BANNER_HEIGHT` / banner `h-8`. */
+html[data-preview-deployment] {
+  --banner-height: 2rem;
+}
+
+html[data-preview-deployment] body {
+  padding-top: var(--banner-height);
+}
+
+html[data-preview-deployment] [data-slot="sidebar-container"] {
+  top: var(--banner-height);
+}
