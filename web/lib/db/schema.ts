@@ -204,6 +204,34 @@ export const watcherReleaseConfig = pgTable(
   ]
 );
 
+// Singleton row holding the org-wide Slack incoming webhook URL for
+// channel notifications on new runs. Edited via the admin-only "Slack
+// channel" section on `/settings/notifications`. Previously sourced from
+// the `SLACK_WEBHOOK_URL` env var.
+//
+// When the table is empty (or `webhook_url` is NULL) channel notifications
+// are disabled — `sendSlackMessage` becomes a no-op.
+export const slackChannelConfig = pgTable(
+  "slack_channel_config",
+  {
+    id: boolean("id").primaryKey().default(true),
+    webhookUrl: text("webhook_url"),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+    updatedBy: text("updated_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+  },
+  (config) => [
+    check("slack_channel_config_singleton", sql`${config.id} = true`),
+  ]
+);
+
 export const personalAccessTokens = pgTable(
   "personal_access_tokens",
   {

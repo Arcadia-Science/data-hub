@@ -197,6 +197,13 @@
       "when": 1782334433553,
       "tag": "0027_futuristic_pyro",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1782935691822,
+      "tag": "0028_add_slack_channel_config",
+      "breakpoints": true
     }
   ]
 }

@@ -130,6 +130,23 @@ export async function seedWatcherReleaseConfig(db: Db): Promise<void> {
   );
 }
 
+// Singleton row for org-wide Slack channel notifications. Integration tests
+// pass the in-process capture-server URL; the dev seed leaves it unset so
+// channel notifications stay disabled until an admin configures the webhook.
+export async function seedSlackChannelConfig(
+  db: Db,
+  webhookUrl: string | null = null
+): Promise<void> {
+  await db.execute(
+    sql`INSERT INTO slack_channel_config (id, webhook_url)
+     VALUES (true, ${webhookUrl})
+     ON CONFLICT (id) DO UPDATE SET
+       webhook_url = EXCLUDED.webhook_url,
+       updated_at = now(),
+       updated_by = NULL`
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Instruments — one row per value in `instrumentTypeEnum.enumValues` so the
 // dashboard exercises every instrument-type-specific UI variant. One
