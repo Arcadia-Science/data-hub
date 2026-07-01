@@ -1,15 +1,11 @@
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
-import { z } from "zod";
 import { requireAdmin } from "@/lib/api/auth";
 import { apiError, VALIDATION_ERROR } from "@/lib/api/errors";
 import { db } from "@/lib/db";
 import { slackChannelConfig, users } from "@/lib/db/schema";
 import { upsertSlackChannelWebhookUrl } from "@/lib/slack/channel-config";
-import {
-  isValidSlackWebhookUrl,
-  normalizeSlackWebhookUrlInput,
-} from "@/lib/slack/webhook-url";
+import { slackChannelWebhookPutBodySchema } from "@/lib/slack/webhook-url";
 
 // Admin-only read/write of the singleton `slack_channel_config` row,
 // edited via the "Slack channel" section on `/settings/notifications`.
@@ -25,16 +21,7 @@ interface SlackChannelResponse {
   } | null;
 }
 
-const PutBodySchema = z.strictObject({
-  webhook_url: z
-    .string()
-    .nullish()
-    .transform(normalizeSlackWebhookUrlInput)
-    .refine((v) => v === null || isValidSlackWebhookUrl(v), {
-      message:
-        "webhook_url must be a Slack incoming webhook URL (https://hooks.slack.com/services/…)",
-    }),
-});
+const PutBodySchema = slackChannelWebhookPutBodySchema;
 
 async function readCurrent(): Promise<SlackChannelResponse> {
   const [row] = await db

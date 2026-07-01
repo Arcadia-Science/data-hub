@@ -13,7 +13,6 @@ import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { z } from "zod";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -30,7 +29,10 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { isValidSlackWebhookUrl } from "@/lib/slack/webhook-url";
+import {
+  slackChannelWebhookFormSchema,
+  slackWebhookUrlSchema,
+} from "@/lib/slack/webhook-url";
 import { formatRelativeTime } from "@/lib/utils";
 
 function SectionHeader({ configured }: { configured: boolean }) {
@@ -58,19 +60,6 @@ interface LastUpdated {
   byEmail: string | null;
   byName: string | null;
 }
-
-const formSchema = z.object({
-  webhookUrl: z.string().refine(
-    (v) => {
-      const trimmed = v.trim();
-      return trimmed.length === 0 || isValidSlackWebhookUrl(trimmed);
-    },
-    {
-      message:
-        "Use a Slack incoming webhook URL (https://hooks.slack.com/services/…).",
-    }
-  ),
-});
 
 // Decoy length only — must not reflect the stored webhook URL.
 const MASKED_LENGTH_MIN = 32;
@@ -100,19 +89,20 @@ function Form({
   const form = useForm({
     defaultValues: { webhookUrl: "" },
     validators: {
-      onBlur: formSchema,
-      onSubmit: formSchema,
+      onChange: slackChannelWebhookFormSchema,
+      onBlur: slackChannelWebhookFormSchema,
+      onSubmit: slackChannelWebhookFormSchema,
     },
     onSubmit: async ({ value }) => {
-      const trimmed = value.webhookUrl.trim();
-      if (trimmed.length === 0) {
+      const parsed = slackWebhookUrlSchema.safeParse(value.webhookUrl);
+      if (!parsed.success) {
         return;
       }
 
       const res = await fetch("/api/v1/settings/slack-channel", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ webhook_url: trimmed }),
+        body: JSON.stringify({ webhook_url: parsed.data }),
       });
 
       if (!res.ok) {
@@ -164,19 +154,21 @@ function Form({
           <FieldGroup>
             <form.Field name="webhookUrl">
               {(field) => {
-                const isInvalid =
-                  field.state.meta.isTouched && !field.state.meta.isValid;
                 const showMasked =
                   configured &&
                   !isReplacing &&
                   field.state.value.trim().length === 0;
+                const showFieldError =
+                  !showMasked &&
+                  field.state.value.trim().length > 0 &&
+                  !field.state.meta.isValid;
                 return (
-                  <Field data-invalid={isInvalid}>
+                  <Field data-invalid={showFieldError}>
                     <FieldLabel htmlFor={field.name}>
                       Incoming webhook URL
                     </FieldLabel>
                     <Input
-                      aria-invalid={isInvalid}
+                      aria-invalid={showFieldError}
                       aria-label={
                         showMasked
                           ? "Webhook configured — focus to replace"
@@ -224,9 +216,9 @@ function Form({
                         </>
                       )}
                     </FieldDescription>
-                    {isInvalid && (
+                    {showFieldError ? (
                       <FieldError errors={field.state.meta.errors} />
-                    )}
+                    ) : null}
                   </Field>
                 );
               }}
@@ -288,16 +280,19 @@ function Form({
             )}
           </div>
           <form.Subscribe
-            selector={(state) => ({
-              canSubmit: state.canSubmit,
-              isSubmitting: state.isSubmitting,
-              isDirty: state.isDirty,
-              hasValue: state.values.webhookUrl.trim().length > 0,
-            })}
+            selector={(state) => {
+              const trimmed = state.values.webhookUrl.trim();
+              return {
+                canSubmit: state.canSubmit,
+                isSubmitting: state.isSubmitting,
+                isDirty: state.isDirty,
+                isValidUrl: slackWebhookUrlSchema.safeParse(trimmed).success,
+              };
+            }}
           >
-            {({ canSubmit, isSubmitting, isDirty, hasValue }) => (
+            {({ canSubmit, isSubmitting, isDirty, isValidUrl }) => (
               <Button
-                disabled={!(canSubmit && isDirty && hasValue)}
+                disabled={!(canSubmit && isDirty && isValidUrl)}
                 onClick={() => form.handleSubmit()}
                 type="button"
               >
