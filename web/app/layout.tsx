@@ -8,6 +8,7 @@ import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { AppSidebar } from "@/components/app-sidebar";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { NotificationsProvider } from "@/components/notifications/notifications-provider";
+import { PreviewDeploymentBanner } from "@/components/preview-deployment-banner";
 import { ArchiveDownloadProvider } from "@/components/runs/archive-download-provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import {
@@ -110,6 +111,11 @@ export default async function RootLayout({
   const sidebarCookie = (await cookies()).get(SIDEBAR_COOKIE_NAME)?.value;
   const sidebarDefaultOpen = sidebarCookie !== "false";
 
+  // `--banner-height` is the single knob that offsets the body, the
+  // viewport-fixed sidebar, and the full-height auth screen for the preview
+  // banner. Left unset off preview, so each `var(..., 0px)` consumer is a no-op.
+  const isPreview = process.env.VERCEL_ENV === "preview";
+
   return (
     <html
       className={cn(
@@ -118,6 +124,7 @@ export default async function RootLayout({
         "font-sans",
         fontSans.variable
       )}
+      data-preview-deployment={isPreview ? "" : undefined}
       lang="en"
       suppressHydrationWarning
     >
@@ -126,6 +133,7 @@ export default async function RootLayout({
           <ThemeProvider>
             <NuqsAdapter>
               <TooltipProvider>
+                <PreviewDeploymentBanner />
                 {session ? (
                   <NotificationsProvider
                     initialUnreadCount={initialUnreadCount}
