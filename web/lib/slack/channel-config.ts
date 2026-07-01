@@ -6,6 +6,7 @@ export interface SlackChannelConfigForAdmin {
   configured: boolean;
   updatedAt: Date | null;
   updatedByEmail: string | null;
+  updatedById: string | null;
   updatedByName: string | null;
 }
 
@@ -22,6 +23,7 @@ export async function getSlackChannelConfigForAdmin(): Promise<SlackChannelConfi
     .select({
       webhookUrl: slackChannelConfig.webhookUrl,
       updatedAt: slackChannelConfig.updatedAt,
+      updatedById: users.id,
       updatedByName: users.name,
       updatedByEmail: users.email,
     })
@@ -32,6 +34,7 @@ export async function getSlackChannelConfigForAdmin(): Promise<SlackChannelConfi
     return {
       configured: false,
       updatedAt: null,
+      updatedById: null,
       updatedByName: null,
       updatedByEmail: null,
     };
@@ -40,6 +43,7 @@ export async function getSlackChannelConfigForAdmin(): Promise<SlackChannelConfi
   return {
     configured: row.webhookUrl != null && row.webhookUrl.length > 0,
     updatedAt: row.updatedAt,
+    updatedById: row.updatedById,
     updatedByName: row.updatedByName,
     updatedByEmail: row.updatedByEmail,
   };

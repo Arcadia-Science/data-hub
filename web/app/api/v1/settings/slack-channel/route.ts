@@ -1,10 +1,10 @@
-import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { requireAdmin } from "@/lib/api/auth";
 import { apiError, VALIDATION_ERROR } from "@/lib/api/errors";
-import { db } from "@/lib/db";
-import { slackChannelConfig, users } from "@/lib/db/schema";
-import { upsertSlackChannelWebhookUrl } from "@/lib/slack/channel-config";
+import {
+  getSlackChannelConfigForAdmin,
+  upsertSlackChannelWebhookUrl,
+} from "@/lib/slack/channel-config";
 import { slackChannelWebhookPutBodySchema } from "@/lib/slack/webhook-url";
 
 // Admin-only read/write of the singleton `slack_channel_config` row,
@@ -21,36 +21,17 @@ interface SlackChannelResponse {
   } | null;
 }
 
-const PutBodySchema = slackChannelWebhookPutBodySchema;
-
 async function readCurrent(): Promise<SlackChannelResponse> {
-  const [row] = await db
-    .select({
-      webhookUrl: slackChannelConfig.webhookUrl,
-      updatedAt: slackChannelConfig.updatedAt,
-      updatedById: users.id,
-      updatedByName: users.name,
-      updatedByEmail: users.email,
-    })
-    .from(slackChannelConfig)
-    .leftJoin(users, eq(users.id, slackChannelConfig.updatedBy));
-
-  if (!row) {
-    return {
-      configured: false,
-      updated_at: null,
-      updated_by: null,
-    };
-  }
+  const config = await getSlackChannelConfigForAdmin();
 
   return {
-    configured: row.webhookUrl != null && row.webhookUrl.length > 0,
-    updated_at: row.updatedAt.toISOString(),
-    updated_by: row.updatedById
+    configured: config.configured,
+    updated_at: config.updatedAt ? config.updatedAt.toISOString() : null,
+    updated_by: config.updatedById
       ? {
-          id: row.updatedById,
-          name: row.updatedByName,
-          email: row.updatedByEmail,
+          id: config.updatedById,
+          name: config.updatedByName,
+          email: config.updatedByEmail,
         }
       : null,
   };
@@ -78,7 +59,7 @@ export async function PUT(request: NextRequest) {
     return apiError(400, VALIDATION_ERROR, "Invalid JSON body");
   }
 
-  const parsed = PutBodySchema.safeParse(rawBody);
+  const parsed = slackChannelWebhookPutBodySchema.safeParse(rawBody);
   if (!parsed.success) {
     return apiError(400, VALIDATION_ERROR, "Invalid request body", {
       issues: parsed.error.issues.map((issue) => ({

@@ -11,7 +11,7 @@
 import { useForm } from "@tanstack/react-form";
 import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -75,10 +75,13 @@ function Form({
   const router = useRouter();
   const [removing, setRemoving] = useState(false);
   const [isReplacing, setIsReplacing] = useState(false);
-  const maskedLength = useMemo(
-    () => MASKED_LENGTH_MIN + Math.floor(Math.random() * MASKED_LENGTH_RANGE),
-    []
-  );
+  const [maskedLength, setMaskedLength] = useState(MASKED_LENGTH_MIN);
+
+  useEffect(() => {
+    setMaskedLength(
+      MASKED_LENGTH_MIN + Math.floor(Math.random() * MASKED_LENGTH_RANGE)
+    );
+  }, []);
 
   useEffect(() => {
     if (!configured) {

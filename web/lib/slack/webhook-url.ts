@@ -15,7 +15,6 @@ export const slackWebhookUrlSchema = z
   .string()
   .trim()
   .min(1, SLACK_WEBHOOK_URL_MESSAGE)
-  .url({ message: "Enter a valid HTTPS URL." })
   .refine((url) => SLACK_WEBHOOK_URL_REGEX.test(url), {
     message: SLACK_WEBHOOK_URL_MESSAGE,
   });
@@ -35,19 +34,10 @@ export function normalizeSlackWebhookUrlInput(
 /** Form field: empty while masked/idle; non-empty must match {@link slackWebhookUrlSchema}. */
 export const slackWebhookUrlInputSchema = z
   .string()
-  .superRefine((value, ctx) => {
-    const trimmed = value.trim();
-    if (trimmed.length === 0) {
-      return;
-    }
-    const result = slackWebhookUrlSchema.safeParse(trimmed);
-    if (!result.success) {
-      ctx.addIssue({
-        code: "custom",
-        message: result.error.issues[0]?.message ?? SLACK_WEBHOOK_URL_MESSAGE,
-      });
-    }
-  });
+  .refine(
+    (value) => value.trim().length === 0 || isValidSlackWebhookUrl(value),
+    { message: SLACK_WEBHOOK_URL_MESSAGE }
+  );
 
 export const slackChannelWebhookFormSchema = z.object({
   webhookUrl: slackWebhookUrlInputSchema,
@@ -62,17 +52,8 @@ export const slackChannelWebhookPutBodySchema = z.strictObject({
     .string()
     .nullish()
     .transform(normalizeSlackWebhookUrlInput)
-    .superRefine((value, ctx) => {
-      if (value === null) {
-        return;
-      }
-      const result = slackWebhookUrlSchema.safeParse(value);
-      if (!result.success) {
-        ctx.addIssue({
-          code: "custom",
-          message: result.error.issues[0]?.message ?? SLACK_WEBHOOK_URL_MESSAGE,
-        });
-      }
+    .refine((value) => value === null || isValidSlackWebhookUrl(value), {
+      message: SLACK_WEBHOOK_URL_MESSAGE,
     }),
 });
 
