@@ -4,10 +4,10 @@ import {
   api,
   clearCapturedSlackMessages,
   closeTestDb,
-  getCapturedSlackMessages,
   getTestDb,
   resetDb,
   seedTestUser,
+  waitForCapturedSlackMessages,
 } from "@/tests/integration/helpers";
 
 describe("Instrument Runs API", () => {
@@ -345,8 +345,7 @@ describe("Run creation Slack notification", () => {
     });
     expect(duplicate.status).toBe(200);
 
-    const messages = await getCapturedSlackMessages();
-    expect(messages.length).toBe(1);
+    const messages = await waitForCapturedSlackMessages(1);
     expect(messages[0].text).toContain(instrumentDisplayName);
     expect(messages[0].text).toContain(runId);
     expect(messages[0].text).toContain(

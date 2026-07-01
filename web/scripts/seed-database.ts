@@ -25,6 +25,7 @@ import {
   seedRunAttributions,
   seedRunComments,
   seedRuns,
+  seedSlackChannelConfig,
   seedTeammates,
   seedWatcherReleaseConfig,
   seedWatchers,
@@ -45,6 +46,9 @@ await clearAll(db);
 
 console.log("Seeding watcher_release_config…");
 await seedWatcherReleaseConfig(db);
+
+console.log("Seeding slack_channel_config…");
+await seedSlackChannelConfig(db);
 
 console.log("Seeding dev user…");
 const { userId, email, token } = await seedDevUser(db, {

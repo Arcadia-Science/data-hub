@@ -84,7 +84,7 @@ export async function setup() {
   // the real Slack API.
   //
   // The capture server handles:
-  //   POST /webhook            — incoming webhook (SLACK_WEBHOOK_URL)
+  //   POST /webhook            — incoming webhook (slack_channel_config)
   //   GET  /captured           — read webhook capture buffer
   //   POST /clear              — reset webhook buffer
   //   POST /api/chat.postMessage — Web API DM capture (__TEST_SLACK_API_URL)
@@ -203,12 +203,10 @@ export async function setup() {
     stdio: "pipe",
   });
 
-  // 2a. Seed the singleton `watcher_release_config` row with stable
-  //     defaults so the `update-check` endpoint returns deterministic
-  //     values during integration tests. Individual tests assert against
-  //     these exact strings (see `watchers.test.ts`). Previously this was
-  //     done via WATCHER_* env vars; the source of truth is now the DB,
-  //     edited via the admin-only /settings/watchers page.
+  // 2a. Seed singleton config rows with stable defaults for integration
+  //     tests. Individual tests assert against these values. Previously
+  //     watcher release used WATCHER_* env vars and Slack channel used
+  //     SLACK_WEBHOOK_URL; the source of truth is now the DB.
   const seedPool = new Pool({ connectionString: databaseUrl });
   try {
     await seedPool.query(`
@@ -223,6 +221,16 @@ export async function setup() {
         mandatory = excluded.mandatory,
         updated_at = now()
     `);
+    await seedPool.query(
+      `
+      INSERT INTO slack_channel_config (id, webhook_url)
+      VALUES (true, $1)
+      ON CONFLICT (id) DO UPDATE SET
+        webhook_url = excluded.webhook_url,
+        updated_at = now()
+    `,
+      [`${slackCaptureBaseUrl}/webhook`]
+    );
   } finally {
     await seedPool.end();
   }
@@ -254,9 +262,8 @@ export async function setup() {
       process.env.S3_RAW_DATA_BUCKET ?? "test-raw-data-bucket",
     // Watcher release-info defaults are seeded into the
     // `watcher_release_config` table above; the env-var fallback is gone.
-    // Point Slack webhook calls at the in-process capture server defined
-    // above so tests can assert on the messages without hitting Slack.
-    SLACK_WEBHOOK_URL: `${slackCaptureBaseUrl}/webhook`,
+    // Slack channel webhook URL is seeded into `slack_channel_config`
+    // above so tests can assert on captured payloads without hitting Slack.
     // Stub bot token so sendSlackDm's guard passes; the WebClient is
     // redirected to the capture server via __TEST_SLACK_API_URL.
     SLACK_BOT_TOKEN: "xoxb-test-bot-token",

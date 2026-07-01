@@ -173,7 +173,7 @@ In your GitHub repo, go to **Settings → Environments**, create a `staging` env
 | `DATA_HUB_API_URL` | Base API URL for the environment |
 | `DATA_HUB_API_KEY` | API key for Lambda → Data Hub authentication (also used by the Lambda's archive-job PATCH callback) |
 
-Slack notifications are sent by the **web app** (not the Lambda) when a new run is created. Configure `SLACK_WEBHOOK_URL` per environment in the Vercel dashboard alongside the other web app env vars listed below.
+Slack channel notifications are sent by the **web app** (not the Lambda) when a new run is created. Workspace admins configure the incoming webhook URL in Settings > Notifications > Slack channel (stored in the `slack_channel_config` DB table). After deploying, paste the webhook URL once in that UI before removing any legacy `SLACK_WEBHOOK_URL` env var from Vercel.
 
 You'll also need the `WebAppRoleArn` and `DataHubFunctionUrl` stack outputs to configure the Vercel web app. In the Vercel dashboard (under the appropriate environment), set:
 

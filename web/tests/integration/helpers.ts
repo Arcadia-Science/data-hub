@@ -6,6 +6,7 @@ import {
   clearAll,
   type SeedUserOptions,
   seedDevUser,
+  seedSlackChannelConfig,
   seedWatcherReleaseConfig,
 } from "@/lib/db/seed";
 
@@ -39,21 +40,24 @@ export async function closeTestDb() {
 }
 
 // TRUNCATE every `pgTable` declared in `lib/db/schema.ts`, then re-seed
-// the `watcher_release_config` singleton with the deterministic baseline
-// `9.9.9 / 0.1.0 / stable / false`. Tests previously hard-coded both the
-// table list and the singleton SQL inline; both now live in
-// `@/lib/db/seed` so adding a new table doesn't require touching this
-// file.
+// singleton config rows with deterministic baselines. Tests previously
+// hard-coded both the table list and the singleton SQL inline; both now
+// live in `@/lib/db/seed` so adding a new table doesn't require touching
+// this file.
 //
 // `clearAll` uses TRUNCATE CASCADE, which ignores the `ON DELETE SET NULL`
-// on `watcher_release_config.updated_by → user.id` and wipes the singleton
-// regardless of whether it's in the TRUNCATE list. Re-seeding it after
-// the clear keeps every test's update-check baseline identical to a
-// fresh global setup.
+// on singleton `updated_by → user.id` FKs and wipes the rows regardless
+// of whether they're in the TRUNCATE list. Re-seeding after the clear
+// keeps every test's baseline identical to a fresh global setup.
 export async function resetDb() {
   const db = getTestDb();
   await clearAll(db);
   await seedWatcherReleaseConfig(db);
+  const captureBase = process.env.__TEST_SLACK_CAPTURE_URL;
+  await seedSlackChannelConfig(
+    db,
+    captureBase ? `${captureBase}/webhook` : null
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -128,8 +132,9 @@ export async function api(
 
 // ---------------------------------------------------------------------------
 // Slack webhook capture — the global setup spawns an in-process HTTP server
-// that captures every payload posted to SLACK_WEBHOOK_URL. These helpers let
-// individual tests inspect and reset that capture buffer.
+// that captures every payload posted to the webhook URL stored in
+// `slack_channel_config`. These helpers let individual tests inspect and
+// reset that capture buffer.
 // ---------------------------------------------------------------------------
 
 function getSlackCaptureUrl(): string {
@@ -146,6 +151,22 @@ export async function getCapturedSlackMessages(): Promise<{ text: string }[]> {
     throw new Error(`Slack capture /captured returned ${res.status}`);
   }
   return res.json();
+}
+
+/** Poll until at least `minCount` webhook payloads arrive or timeout. */
+export async function waitForCapturedSlackMessages(
+  minCount: number,
+  { timeoutMs = 3000, intervalMs = 50 } = {}
+): Promise<{ text: string }[]> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const messages = await getCapturedSlackMessages();
+    if (messages.length >= minCount) {
+      return messages;
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  throw new Error(`Timed out waiting for ${minCount} Slack webhook message(s)`);
 }
 
 export async function clearCapturedSlackMessages(): Promise<void> {
