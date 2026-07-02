@@ -49,7 +49,6 @@ vercel env pull
 | `AWS_ROLE_ARN` | No | IAM role ARN for Vercel OIDC federation. Used to presign S3 URLs and SigV4-sign Lambda Function URL invocations (only needed on Vercel) |
 | `S3_RAW_DATA_BUCKET` | No | S3 bucket for raw data uploads (defaults to `arcadia-data-hub-raw-staging`) |
 | `LAMBDA_FUNCTION_URL` | No | Lambda Function URL. Required for file reprocessing and run-archive downloads. |
-| `SLACK_WEBHOOK_URL` | No | Slack incoming webhook URL — when set, the web app posts a channel notification each time a new run is created |
 | `SLACK_BOT_TOKEN` | No | Slack bot token (`xoxb-…`) — required for personal Slack DM notifications |
 | `SLACK_CLIENT_ID` | No | Slack app client ID — required for the "Connect to Slack" OAuth flow on Settings > Notifications |
 | `SLACK_CLIENT_SECRET` | No | Slack app client secret — required for the OAuth flow |

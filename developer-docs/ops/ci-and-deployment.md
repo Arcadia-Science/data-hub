@@ -2,7 +2,7 @@
 
 ## GitHub Actions
 
-Four workflows run on pushes to `staging`/`production` and on pull requests targeting those branches. A fifth (`publish-watcher.yml`) runs only on `watcher-v*` tag pushes and manual dispatch.
+Four workflows run on pushes to `staging`/`production` and on pull requests targeting those branches. A fifth (`apply-migrations.yml`) runs on merges to `staging`/`production` that touch migration files, and a sixth (`publish-watcher.yml`) runs only on `watcher-v*` tag pushes and manual dispatch.
 
 ### Python lint and typecheck (`python-lint.yml`)
 
@@ -27,6 +27,12 @@ Four workflows run on pushes to `staging`/`production` and on pull requests targ
 - Starts a Postgres 17 service container and Node.js 24.
 - `make fe-test-mcp` — runs in-memory MCP protocol tests (mocked data layer, no database).
 - `make fe-test-integration` — runs Vitest integration tests that test the API routes and MCP server over HTTP against a real database.
+
+### Apply database migrations (`apply-migrations.yml`)
+
+Triggered on pushes to `staging`/`production` (i.e. PR merges) that change files under `web/drizzle/`. The single job sets `environment: ${{ github.ref_name }}` so GitHub selects that environment's secrets and protection rules, then runs `npm run db:migrate` (Drizzle) against the environment's Render database using the environment's `DATABASE_URL` secret. A per-branch `concurrency` group prevents overlapping migration runs.
+
+Production is gated by a required-reviewer protection rule on the `production` GitHub environment, so production migrations pause for manual approval before applying. Each environment needs a `DATABASE_URL` secret pointing at its Render connection string, and the Render database must accept connections from GitHub-hosted runners.
 
 ### Publish watcher (`publish-watcher.yml`)
 
@@ -64,7 +70,7 @@ vercel env pull
 
 Staging and production each have a dedicated PostgreSQL instance hosted on [Render](https://dashboard.render.com/project/prj-d75d0jma2pns738r4110).
 
-Schema changes are applied with Drizzle:
+Merges to `staging`/`production` that change files under `web/drizzle/` automatically apply migrations via the [`apply-migrations.yml`](#apply-database-migrations-apply-migrationsyml) workflow (production is gated on manual approval). The commands below are for local runs or manual application:
 
 ```sh
 cd web
@@ -167,7 +173,7 @@ In your GitHub repo, go to **Settings → Environments**, create a `staging` env
 | `DATA_HUB_API_URL` | Base API URL for the environment |
 | `DATA_HUB_API_KEY` | API key for Lambda → Data Hub authentication (also used by the Lambda's archive-job PATCH callback) |
 
-Slack notifications are sent by the **web app** (not the Lambda) when a new run is created. Configure `SLACK_WEBHOOK_URL` per environment in the Vercel dashboard alongside the other web app env vars listed below.
+Slack channel notifications are sent by the **web app** (not the Lambda) when a new run is created. Workspace admins configure the incoming webhook URL in Settings > Notifications > Slack channel (stored in the `slack_channel_config` DB table). After deploying, paste the webhook URL once in that UI before removing any legacy `SLACK_WEBHOOK_URL` env var from Vercel.
 
 You'll also need the `WebAppRoleArn` and `DataHubFunctionUrl` stack outputs to configure the Vercel web app. In the Vercel dashboard (under the appropriate environment), set:
 

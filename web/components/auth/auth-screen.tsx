@@ -66,7 +66,7 @@ export function AuthScreen({
   children,
 }: AuthScreenProps) {
   return (
-    <div className="grid min-h-svh w-full lg:grid-cols-2">
+    <div className="grid min-h-[calc(100svh_-_var(--banner-height,0px))] w-full lg:grid-cols-2">
       <div className="flex flex-col bg-background">
         <div className="flex flex-1 flex-col justify-center px-8 py-12 sm:px-12 lg:px-16">
           <div className="mx-auto w-full max-w-md">

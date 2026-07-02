@@ -21,7 +21,7 @@ from data_hub_watcher.models import (
     UploadQueueResponse,
 )
 from data_hub_watcher.state import StateDB
-from data_hub_watcher.uploader import Uploader
+from data_hub_watcher.uploader import Uploader, UploadQueueWorker
 
 
 @pytest.fixture()
@@ -742,3 +742,136 @@ class TestPollUploadQueueAttemptCap:
         # The next poll retries the cancel rather than re-erroring on upload.
         uploader.poll_upload_queue()
         assert mock_client.cancel_upload_request.call_count == 2
+
+
+class TestUploaderStopEvent:
+    """A shutdown must interrupt uploads without recording a spurious failure."""
+
+    def _uploader_with_stop(
+        self,
+        mock_client: MagicMock,
+        state_db: StateDB,
+        tmp_path: Path,
+        stop_event: threading.Event,
+    ) -> Uploader:
+        return Uploader(
+            client=mock_client,
+            state_db=state_db,
+            event_reporter=MagicMock(spec=EventReporter),
+            counters=WatcherCounters(),
+            instrument_id="test-instrument",
+            watcher_id="watcher-123",
+            watch_directory=tmp_path,
+            stop_event=stop_event,
+        )
+
+    def test_stop_during_backoff_defers_without_failure(
+        self,
+        mock_client: MagicMock,
+        state_db: StateDB,
+        tmp_file: Path,
+        tmp_path: Path,
+    ) -> None:
+        stop = threading.Event()
+        stop.set()  # already stopping when the first attempt fails
+        up = self._uploader_with_stop(mock_client, state_db, tmp_path, stop)
+        mock_client.request_upload_url.return_value = PresignedUploadResponse(
+            upload_url="https://s3.example.com/presigned",
+            s3_bucket="test-bucket",
+            s3_key="k",
+            file_id=42,
+            expires_in=3600,
+            already_uploaded=False,
+        )
+
+        with patch.object(
+            Uploader, "_put_to_presigned_url", side_effect=ConnectionError("network down")
+        ) as mock_put:
+            result = up._upload_single(tmp_file, "RUN-001")
+
+        # Deferred, not failed: one attempt, no success PATCH, no error event
+        # or counter bump, so the request stays pending for the next start.
+        assert result is False
+        assert mock_put.call_count == 1
+        mock_client.mark_file_uploaded.assert_not_called()
+        assert up._counters.errors == 0
+        cast(MagicMock, up._reporter).queue_event.assert_not_called()
+
+    def test_poll_bails_between_files_when_stopping(
+        self,
+        mock_client: MagicMock,
+        state_db: StateDB,
+        tmp_path: Path,
+    ) -> None:
+        stop = threading.Event()
+        stop.set()
+        up = self._uploader_with_stop(mock_client, state_db, tmp_path, stop)
+        mock_client.get_upload_queue.return_value = UploadQueueResponse(
+            files=[
+                UploadQueueFile(
+                    id=1,
+                    instrument_id="test-instrument",
+                    run_id="R1",
+                    filename="a.csv",
+                    relative_path="a.csv",
+                ),
+                UploadQueueFile(
+                    id=2,
+                    instrument_id="test-instrument",
+                    run_id="R1",
+                    filename="b.csv",
+                    relative_path="b.csv",
+                ),
+            ]
+        )
+
+        with patch.object(Uploader, "_process_queued_file") as mock_process:
+            up.poll_upload_queue()
+
+        mock_process.assert_not_called()
+
+
+class TestUploadQueueWorker:
+    """The worker owns the poll loop and must stop cleanly for shutdown."""
+
+    def test_poll_once_swallows_exceptions(self) -> None:
+        uploader = MagicMock()
+        uploader.poll_upload_queue.side_effect = RuntimeError("boom")
+        worker = UploadQueueWorker(uploader, stop_event=threading.Event())
+
+        # A poll blowup must not escape and kill the thread.
+        worker._poll_once()
+
+        uploader.poll_upload_queue.assert_called_once_with()
+
+    def test_stop_joins_idle_worker(self) -> None:
+        uploader = MagicMock()
+        worker = UploadQueueWorker(uploader, stop_event=threading.Event(), interval_seconds=60)
+        worker.start()
+
+        # The loop waits on the stop event, so setting it returns the join
+        # immediately rather than after the 60s interval.
+        assert worker.stop(timeout=5) is True
+
+    def test_stop_reports_false_when_upload_in_flight(self) -> None:
+        # A poll stuck mid-upload past the join timeout must report unfinished
+        # so teardown skips closing the state DB out from under it.
+        in_poll = threading.Event()
+        release = threading.Event()
+
+        def blocking_poll() -> None:
+            in_poll.set()
+            release.wait(timeout=5)
+
+        uploader = MagicMock()
+        uploader.poll_upload_queue.side_effect = blocking_poll
+        # interval=0 so the loop enters the (blocking) poll right away.
+        worker = UploadQueueWorker(uploader, stop_event=threading.Event(), interval_seconds=0)
+        worker.start()
+        assert in_poll.wait(timeout=5)
+
+        try:
+            assert worker.stop(timeout=0.1) is False
+        finally:
+            # Let the blocked poll finish so the daemon thread exits cleanly.
+            release.set()

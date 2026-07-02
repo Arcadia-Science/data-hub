@@ -22,6 +22,7 @@ from requests.adapters import HTTPAdapter
 from data_hub_watcher.api_client import ApiError, DataHubClient
 from data_hub_watcher.constants import (
     MAX_QUEUE_FILE_ATTEMPTS,
+    UPLOAD_POLL_INTERVAL_SECONDS,
     UPLOAD_RETRY_BASE_DELAY,
     UPLOAD_RETRY_MAX,
 )
@@ -105,6 +106,7 @@ class Uploader:
         watcher_id: str,
         watch_directory: Path,
         upload_parallelism: int = 1,
+        stop_event: threading.Event | None = None,
     ) -> None:
         self._client = client
         self._state_db = state_db
@@ -116,18 +118,22 @@ class Uploader:
         if upload_parallelism < 1:
             raise ValueError(f"upload_parallelism must be >= 1, got {upload_parallelism}")
         self._parallelism = upload_parallelism
+        # When set (by the owning ``UploadQueueWorker``), a shutdown can
+        # interrupt the retry backoff and abort between queued files; ``None``
+        # for the one-shot ``upload`` CLI path, which never races a teardown.
+        self._stop_event = stop_event
         # Track consecutive upload-queue poll failures so the watcher
         # surfaces a ``kind=upload_queue_poll_failed`` event on the
         # 1st failure and every 10th repeat. The unthrottled case
-        # would emit one event per heartbeat tick during an outage,
-        # crowding out other signals on the dashboard.
-        # Mutated only from the heartbeat thread (manual mode), so
+        # would emit one event per poll during an outage, crowding out
+        # other signals on the dashboard.
+        # Mutated only from the upload worker thread (manual mode), so
         # not under any explicit lock.
         self._consecutive_queue_poll_failures = 0
         # Per-file upload-queue attempt bookkeeping, keyed by server file id.
         # Bounds retries before giving up (see ``_process_queued_file``) and
         # doubles as the emit-once throttle for the missing-file error. Pruned
-        # each poll, so a re-requested id starts fresh. Heartbeat thread only.
+        # each poll, so a re-requested id starts fresh. Upload worker thread only.
         self._queue_attempts: dict[int, _QueueAttempt] = {}
         # Single ``requests.Session`` shared across every S3 PUT
         # (parallel or serial). Keeps TLS connections alive between
@@ -230,10 +236,15 @@ class Uploader:
     # Manual-mode: poll the server queue
     # ------------------------------------------------------------------
 
+    def _stop_requested(self) -> bool:
+        return self._stop_event is not None and self._stop_event.is_set()
+
     def poll_upload_queue(self) -> None:
         """Fetch the upload queue and process each file.
 
-        Intended to be called on heartbeat ticks in manual mode.
+        Driven by the manual-mode ``UploadQueueWorker`` loop on its own
+        thread, decoupled from the heartbeat so a slow upload can't starve
+        the liveness signal.
         """
         try:
             queue = self._client.get_upload_queue(self._watcher_id)
@@ -278,13 +289,19 @@ class Uploader:
 
         logger.info("Upload queue has %d file(s)", len(queue.files))
         for qf in queue.files:
+            # Bail between files on shutdown so the worker's ``stop()`` can
+            # join promptly instead of draining the whole queue; the
+            # remaining files are picked up on the next start's poll.
+            if self._stop_requested():
+                logger.info("Stop requested; deferring %d queued file(s)", len(queue.files))
+                break
             self._process_queued_file(qf)
 
     def _process_queued_file(self, qf: UploadQueueFile) -> None:
-        """Attempt one queued file, bounding retries across heartbeat polls.
+        """Attempt one queued file, bounding retries across polls.
 
-        Manual-mode polling runs every heartbeat, so a file that can't be
-        uploaded -- missing on disk after a watch-directory change, or a
+        Manual-mode polling repeats on the worker's cadence, so a file that
+        can't be uploaded -- missing on disk after a watch-directory change, or a
         persistent upload error -- would otherwise re-error forever. We cap
         attempts at ``MAX_QUEUE_FILE_ATTEMPTS`` and then cancel the request
         server-side (revert to ``detected``) so it leaves the queue. The
@@ -509,6 +526,7 @@ class Uploader:
             return True
 
         last_exc: Exception | None = None
+        put_ok = False
 
         # Exponential backoff: 1s, 2s, 4s. Retries protect against transient
         # network errors common on lab-PC networks.
@@ -516,6 +534,7 @@ class Uploader:
         for attempt in range(UPLOAD_RETRY_MAX):
             try:
                 self._put_to_presigned_url(presigned.upload_url, path, content_type)
+                put_ok = True
                 break
             except Exception as exc:
                 last_exc = exc
@@ -528,8 +547,21 @@ class Uploader:
                     exc,
                     delay,
                 )
-                time.sleep(delay)
-        else:
+                # Wait on the stop event when present so a shutdown cuts the
+                # backoff short; falls back to a plain sleep for the one-shot
+                # ``upload`` path that has no worker/event.
+                if self._stop_event is not None:
+                    self._stop_event.wait(delay)
+                else:
+                    time.sleep(delay)
+            # Abandon the remaining retries on shutdown. Returning False (not a
+            # hard failure event) leaves the request pending so the next start
+            # re-uploads it, rather than recording a spurious upload error.
+            if self._stop_requested():
+                logger.info("Stop requested mid-upload; deferring %s", path.name)
+                return False
+
+        if not put_ok:
             logger.error("Upload failed after %d attempts: %s", UPLOAD_RETRY_MAX, path.name)
             self._reporter.queue_event(
                 WatcherEvent(
@@ -583,3 +615,59 @@ class Uploader:
         )
         logger.info("Uploaded %s → s3://%s/%s", path.name, s3_bucket, s3_key)
         return True
+
+
+class UploadQueueWorker:
+    """Polls the manual-mode upload queue on a dedicated long-lived thread.
+
+    Uploads used to run on the heartbeat tick, so a slow or large transfer
+    delayed heartbeats and the dashboard flagged a busy watcher as offline.
+    Owning the poll loop here keeps the heartbeat free, and the shared
+    ``stop_event`` lets a shutdown interrupt an upload so ``stop()`` can join
+    before ``StateDB.close`` runs (which assumes writer threads have joined).
+    """
+
+    def __init__(
+        self,
+        uploader: Uploader,
+        *,
+        stop_event: threading.Event,
+        interval_seconds: int = UPLOAD_POLL_INTERVAL_SECONDS,
+    ) -> None:
+        self._uploader = uploader
+        self._stop_event = stop_event
+        self._interval = interval_seconds
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True, name="upload-worker")
+        self._thread.start()
+
+    def stop(self, timeout: float | None = None) -> bool:
+        """Signal the loop and join it. Returns whether the thread exited.
+
+        A ``False`` return means an upload is still in flight past *timeout*
+        (a single S3 PUT can run up to its request timeout); the caller uses
+        this to avoid closing the state DB out from under the live upload.
+        """
+        self._stop_event.set()
+        if self._thread is None:
+            return True
+        self._thread.join(timeout=timeout)
+        return not self._thread.is_alive()
+
+    def _run(self) -> None:
+        # Wait first (parity with the previous heartbeat-driven cadence),
+        # then poll each interval until stop.
+        while not self._stop_event.wait(timeout=self._interval):
+            self._poll_once()
+
+    def _poll_once(self) -> None:
+        # ``poll_upload_queue`` already handles and reports poll failures; this
+        # guard only keeps an unexpected error from killing the thread and
+        # silently ending all future polls.
+        try:
+            self._uploader.poll_upload_queue()
+        except Exception:
+            logger.exception("Upload queue poll failed")
