@@ -6,11 +6,13 @@ regression previously broke manual-mode uploads because the service path
 forgot to wire `on_tick` on the `HeartbeatLoop`. These tests lock in the
 wiring contract per `upload_mode` so any future drift fails loudly:
 
-* auto mode    -> `detector._upload_cb` is `uploader.upload_files`
-                  and `heartbeat._on_tick` ticks the auto-updater only
-* manual mode  -> `detector._upload_cb` is `None`
-                  and `heartbeat._on_tick` polls `uploader.poll_upload_queue`
-                  *and* ticks the auto-updater
+* auto mode    -> `detector._upload_cb` is `uploader.upload_files`,
+                  `heartbeat._on_tick` ticks the auto-updater only, and
+                  `rt.upload_worker` is `None`
+* manual mode  -> `detector._upload_cb` is `None`, `heartbeat._on_tick`
+                  ticks the auto-updater only (uploads now run on the
+                  dedicated `UploadQueueWorker` thread, not the heartbeat),
+                  and `rt.upload_worker` is set
 """
 
 from __future__ import annotations
@@ -29,10 +31,12 @@ from data_hub_watcher.monitor import FileMonitor
 from data_hub_watcher.run_detector import RunDetector
 from data_hub_watcher.runtime import (
     ShutdownReason,
+    WatcherRuntime,
     _summarize_worker_failure,
     build_runtime,
     classify_shutdown,
     start_runtime,
+    stop_runtime,
 )
 from data_hub_watcher.state import StateDB
 from data_hub_watcher.updater import Updater, write_upgrade_marker
@@ -116,9 +120,20 @@ class TestBuildRuntimeAutoMode:
         finally:
             rt.state_db.close()
 
+    def test_auto_mode_has_no_upload_worker(self, tmp_path: Path, db_path: Path) -> None:
+        cfg = _make_config(tmp_path, upload_mode="auto")
+        rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
+
+        try:
+            # Auto-mode uploads run on the monitor's stability-checker thread
+            # via the detector callback, so there is no upload-queue worker.
+            assert rt.upload_worker is None
+        finally:
+            rt.state_db.close()
+
 
 class TestBuildRuntimeManualMode:
-    """Manual mode: heartbeat polls the upload queue, detector does not upload."""
+    """Manual mode: a dedicated worker polls the upload queue off the heartbeat."""
 
     def test_detector_upload_callback_is_none(self, tmp_path: Path, db_path: Path) -> None:
         cfg = _make_config(tmp_path, upload_mode="manual")
@@ -131,44 +146,37 @@ class TestBuildRuntimeManualMode:
         finally:
             rt.state_db.close()
 
-    def test_heartbeat_on_tick_polls_upload_queue(self, tmp_path: Path, db_path: Path) -> None:
+    def test_heartbeat_on_tick_does_not_poll_upload_queue(
+        self, tmp_path: Path, db_path: Path
+    ) -> None:
         cfg = _make_config(tmp_path, upload_mode="manual")
         rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
 
         try:
-            # The heartbeat must call `uploader.poll_upload_queue` on every
-            # tick — this is the bug the runtime extraction was fixing.
+            # Uploads moved off the heartbeat thread onto the worker, so the
+            # tick must only feed the updater — a slow upload can no longer
+            # delay a heartbeat and make a busy watcher look offline.
             assert rt.heartbeat._on_tick is not None
-
             rt.uploader.poll_upload_queue = MagicMock()  # type: ignore[method-assign]
             rt.updater.on_tick = MagicMock(return_value=None)  # type: ignore[method-assign]
             rt.heartbeat._on_tick()
-            rt.uploader.poll_upload_queue.assert_called_once_with()
-            # The same hook must also feed the auto-updater so its idle
-            # counter advances regardless of upload_mode.
+            rt.uploader.poll_upload_queue.assert_not_called()
             rt.updater.on_tick.assert_called_once_with()
         finally:
             rt.state_db.close()
 
-    def test_on_tick_swallows_poll_exceptions(self, tmp_path: Path, db_path: Path) -> None:
-        """Polling errors must not propagate out of the heartbeat tick,
-        otherwise one transient server blip kills the heartbeat thread
-        and the watcher goes silent until restart."""
+    def test_manual_mode_builds_upload_worker_sharing_stop_event(
+        self, tmp_path: Path, db_path: Path
+    ) -> None:
         cfg = _make_config(tmp_path, upload_mode="manual")
         rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
 
         try:
-            rt.uploader.poll_upload_queue = MagicMock(  # type: ignore[method-assign]
-                side_effect=RuntimeError("boom")
-            )
-            rt.updater.on_tick = MagicMock(return_value=None)  # type: ignore[method-assign]
-            assert rt.heartbeat._on_tick is not None
-            rt.heartbeat._on_tick()
-            rt.uploader.poll_upload_queue.assert_called_once_with()
-            # Updater must still tick even when the upload-queue poll
-            # blew up, otherwise a permanently-failing manual-mode
-            # poll would also disable auto-updates.
-            rt.updater.on_tick.assert_called_once_with()
+            # The worker must wrap this runtime's uploader and share its stop
+            # event so a shutdown can interrupt an in-flight upload.
+            assert rt.upload_worker is not None
+            assert rt.upload_worker._uploader is rt.uploader
+            assert rt.upload_worker._stop_event is rt.uploader._stop_event
         finally:
             rt.state_db.close()
 
@@ -187,6 +195,62 @@ class TestBuildRuntimeManualMode:
             rt.updater.on_tick.assert_called_once_with()
         finally:
             rt.state_db.close()
+
+
+class TestStopRuntimeUploadWorkerOrdering:
+    """`stop_runtime` must stop the upload worker before closing the state DB.
+
+    Regression guard for the prod "Cannot operate on a closed database" race:
+    a still-running upload wrote to the DB after `close()` because teardown
+    didn't wait for the upload thread.
+    """
+
+    @staticmethod
+    def _runtime_with_mocks(state_db: MagicMock, upload_worker: Any) -> WatcherRuntime:
+        return WatcherRuntime(
+            state_db=state_db,
+            counters=MagicMock(),
+            reporter=MagicMock(),
+            uploader=MagicMock(),
+            detector=MagicMock(),
+            monitor=MagicMock(),
+            heartbeat=MagicMock(),
+            updater=MagicMock(),
+            config_dir=Path("/tmp"),
+            upload_worker=upload_worker,
+        )
+
+    def test_closes_db_when_worker_stops_cleanly(self) -> None:
+        state_db = MagicMock()
+        worker = MagicMock()
+        worker.stop.return_value = True
+        rt = self._runtime_with_mocks(state_db, worker)
+
+        stop_runtime(rt, stopped_message="Watcher stopped")
+
+        worker.stop.assert_called_once()
+        state_db.close.assert_called_once_with()
+
+    def test_skips_close_when_worker_still_running(self) -> None:
+        # A large PUT outliving the join must not have the DB yanked out from
+        # under it; teardown leaves the connection open and lets the OS reap it.
+        state_db = MagicMock()
+        worker = MagicMock()
+        worker.stop.return_value = False
+        rt = self._runtime_with_mocks(state_db, worker)
+
+        stop_runtime(rt, stopped_message="Watcher stopped")
+
+        worker.stop.assert_called_once()
+        state_db.close.assert_not_called()
+
+    def test_closes_db_in_auto_mode_without_worker(self) -> None:
+        state_db = MagicMock()
+        rt = self._runtime_with_mocks(state_db, None)
+
+        stop_runtime(rt, stopped_message="Watcher stopped")
+
+        state_db.close.assert_called_once_with()
 
 
 class TestBuildRuntimeSharedDependencies:
