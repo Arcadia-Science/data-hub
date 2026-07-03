@@ -61,6 +61,14 @@ Resources:
       BucketName: !Sub "arcadia-data-hub-raw-${Environment}"
       VersioningConfiguration:
         Status: Enabled
+      # Pin Block Public Access on so it's guaranteed by IaC rather than the
+      # S3 account default. All access is via presigned URLs; nothing here is
+      # ever public.
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
       # Allow the web app to fetch raw files from the browser via the
       # `/api/v1/files/:id/download` 302-redirect to a presigned S3 URL.
       # Image/PDF previews bypass CORS via `<img>`/`<iframe>`, but client-side
@@ -178,6 +186,12 @@ Resources:
       BucketName: !Sub "arcadia-data-hub-processed-${Environment}"
       VersioningConfiguration:
         Status: Enabled
+      # See RawDataBucket — pinned on rather than relying on the S3 default.
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
       # See RawDataBucket for the CORS rationale — both buckets back the same
       # `/api/v1/files/:id/download` endpoint so they need parity.
       CorsConfiguration:
