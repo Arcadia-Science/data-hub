@@ -228,6 +228,84 @@ Resources:
         - Key: project
           Value: arcadia-data-hub
 
+  # ---- S3 bucket policies: deny object writes from unapproved principals ----
+  # The account grants all users full S3 access, so the identity policies above
+  # can't actually stop writes — only an explicit Deny (which beats every Allow)
+  # can. Each bucket exempts just its legitimate writer, plus root as break-glass.
+  # `s3:PutBucketPolicy` is intentionally not denied, to avoid self-lockout.
+
+  RawDataBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref RawDataBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyObjectWritesExceptWebApp
+            Effect: Deny
+            Principal: "*"
+            Action:
+              - s3:PutObject
+              - s3:PutObjectAcl
+              - s3:DeleteObject
+              - s3:DeleteObjectVersion
+              - s3:RestoreObject
+              - s3:AbortMultipartUpload
+            Resource: !Sub "arn:aws:s3:::arcadia-data-hub-raw-${Environment}/*"
+            Condition:
+              ArnNotLike:
+                aws:PrincipalArn:
+                  - !GetAtt WebAppS3Role.Arn
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:root"
+
+  ProcessedDataBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ProcessedDataBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyObjectWritesExceptLambda
+            Effect: Deny
+            Principal: "*"
+            Action:
+              - s3:PutObject
+              - s3:PutObjectAcl
+              - s3:DeleteObject
+              - s3:DeleteObjectVersion
+              - s3:RestoreObject
+              - s3:AbortMultipartUpload
+            Resource: !Sub "arn:aws:s3:::arcadia-data-hub-processed-${Environment}/*"
+            Condition:
+              ArnNotLike:
+                aws:PrincipalArn:
+                  - !GetAtt LambdaExecutionRole.Arn
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:root"
+
+  ArchivesBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArchivesBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyObjectWritesExceptLambda
+            Effect: Deny
+            Principal: "*"
+            Action:
+              - s3:PutObject
+              - s3:PutObjectAcl
+              - s3:DeleteObject
+              - s3:DeleteObjectVersion
+              - s3:RestoreObject
+              - s3:AbortMultipartUpload
+            Resource: !Sub "arn:aws:s3:::arcadia-data-hub-archives-${Environment}/*"
+            Condition:
+              ArnNotLike:
+                aws:PrincipalArn:
+                  - !GetAtt LambdaExecutionRole.Arn
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:root"
+
   # ---- Lambda function ----
 
   DataHubFunction:
