@@ -138,6 +138,14 @@ endif
 	@echo "Pushed $(ECR_REGISTRY)/data-hub:$(IMAGE_TAG)"
 
 # SAM infrastructure.
+# Lint both CloudFormation templates with cfn-lint (via `sam validate --lint`).
+# Offline and credential-free, so it's safe to run anywhere; kept out of
+# `check-all` because it needs the SAM CLI, which only deployers install.
+.PHONY: sam-validate
+sam-validate:
+	cd infra && sam validate --lint --region us-west-1 --template template.yaml
+	cd infra && sam validate --lint --region us-west-1 --template bootstrap.yaml
+
 .PHONY: sam-bootstrap
 sam-bootstrap:
 	aws cloudformation deploy \
