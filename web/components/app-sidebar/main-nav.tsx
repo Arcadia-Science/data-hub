@@ -77,7 +77,6 @@ export function MainNav({ instruments }: MainNavProps) {
           </SidebarMenuItem>
 
           <CollapsibleNavSection
-            basePath="/instruments"
             currentPath={pathname}
             icon={Cpu}
             items={sidebarInstruments}
@@ -111,8 +110,6 @@ export function MainNav({ instruments }: MainNavProps) {
 }
 
 interface CollapsibleNavSectionProps {
-  /** Pathname prefix used to determine the active/expanded state. */
-  basePath: string;
   currentPath: string;
   icon: LucideIcon;
   items: Array<{ key: string; href: string; label: string }>;
@@ -129,23 +126,13 @@ function isNavItemActive(currentPath: string, href: string): boolean {
 function CollapsibleNavSection({
   icon: Icon,
   label,
-  basePath,
   viewAllHref,
   items,
   recentlyViewedItems = [],
   currentPath,
 }: CollapsibleNavSectionProps) {
-  // Open the section by default whenever the user is anywhere within it so
-  // their current location stays visible without an extra click.
-  const isWithinSection =
-    currentPath === basePath || currentPath.startsWith(`${basePath}/`);
-
   return (
-    <Collapsible
-      asChild
-      className="group/collapsible"
-      defaultOpen={isWithinSection}
-    >
+    <Collapsible asChild className="group/collapsible" defaultOpen>
       <SidebarMenuItem>
         <CollapsibleTrigger asChild>
           <SidebarMenuButton tooltip={label}>
