@@ -3,6 +3,7 @@ import { KeyRound } from "lucide-react";
 import type { Metadata } from "next/types";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import { CreateTokenDialog } from "@/components/tokens/create-token-dialog";
+import { CreateTokenDisabledButton } from "@/components/tokens/create-token-disabled-button";
 import { DeleteTokenDialog } from "@/components/tokens/delete-token-dialog";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -123,9 +124,9 @@ export default async function TokensPage() {
     );
   }
 
-  // Composition over boolean props: the Create/Delete dialogs are mounted
-  // only for admins. Regular members see the same audit list but without
-  // the mutating affordances.
+  // Mount the create dialog only for admins. Non-admins get a disabled button
+  // with a tooltip so the form never enters the tree (and can't be re-enabled
+  // via DevTools).
   const isAdmin = session.user.isAdmin === true;
 
   // This is an internal-tool settings page; we intentionally show every PAT
@@ -166,7 +167,7 @@ export default async function TokensPage() {
               : "View personal access tokens for API authentication."}
           </p>
         </div>
-        {isAdmin ? <CreateTokenDialog /> : null}
+        {isAdmin ? <CreateTokenDialog /> : <CreateTokenDisabledButton />}
       </div>
 
       <div className="mt-6">
