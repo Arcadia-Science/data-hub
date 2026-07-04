@@ -1,14 +1,20 @@
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import type { Metadata } from "next/types";
+import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import { DashboardStatsCards } from "@/components/dashboard/dashboard-stats";
-import { RunsTable } from "@/components/dashboard/runs-table";
+import {
+  RunsTable,
+  RunsTableSkeleton,
+} from "@/components/dashboard/runs-table";
 import { RunsToolbar } from "@/components/dashboard/runs-toolbar";
 import { InstrumentsTable } from "@/components/instruments/instruments-table";
 import { RunBulkActionBar } from "@/components/instruments/runs-table/run-bulk-action-bar";
 import { RunSelectionProvider } from "@/components/instruments/runs-table/run-selection-provider";
 import { PaginationNav } from "@/components/pagination-nav";
+import { StatCardsSkeleton } from "@/components/skeletons/stat-cards-skeleton";
+import { TableSkeleton } from "@/components/skeletons/table-skeleton";
 import {
   TablePendingBoundary,
   TablePendingProvider,
@@ -18,6 +24,8 @@ import { buildRunListQuery } from "@/lib/api/instrument-runs";
 import { getRecentActiveInstrumentsForDashboard } from "@/lib/api/instruments";
 import { auth } from "@/lib/auth";
 import { dashboardParamsCache, hasActiveFilters } from "@/lib/search-params";
+
+type DashboardParams = Awaited<ReturnType<typeof dashboardParamsCache.parse>>;
 
 // `default: "Data Hub"` on the root metadata template already renders
 // `<title>Data Hub</title>` here, so we skip an explicit `title` and
@@ -30,6 +38,8 @@ export const metadata: Metadata = {
   openGraph: { title: "Data Hub", description },
   twitter: { title: "Data Hub", description },
 };
+
+const RECENT_INSTRUMENTS_LIMIT = 3;
 
 function last24hISOString(): string {
   return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
@@ -54,7 +64,88 @@ export default async function DashboardPage({
   }
 
   const params = dashboardParamsCache.parse(await searchParams);
+  const currentUserId = session.user?.id ?? null;
 
+  // Each section fetches its own data behind a Suspense boundary so the static
+  // shell (headings) paints immediately and the three data blocks stream in
+  // independently — a slow runs query no longer holds up the stats cards.
+  return (
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 p-6 2xl:w-7xl">
+      <Suspense fallback={<StatCardsSkeleton />}>
+        <DashboardStatsSection currentUserId={currentUserId} />
+      </Suspense>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="font-medium text-lg tracking-tight">Instruments</h2>
+        <Suspense
+          fallback={
+            <TableSkeleton
+              ariaLabel="Loading instruments"
+              headers={[
+                "Instrument",
+                "Status",
+                "File Patterns",
+                "Runs This Week",
+                "Last Run",
+              ]}
+              rows={3}
+            />
+          }
+        >
+          <DashboardInstrumentsSection />
+        </Suspense>
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="font-medium text-lg tracking-tight">Recent runs</h2>
+        <Suspense fallback={<RunsTableSkeleton />}>
+          <DashboardRunsSection currentUserId={currentUserId} params={params} />
+        </Suspense>
+      </section>
+    </div>
+  );
+}
+
+async function DashboardStatsSection({
+  currentUserId,
+}: {
+  currentUserId: string | null;
+}) {
+  const stats = await getDashboardStats(currentUserId);
+  return <DashboardStatsCards stats={stats} />;
+}
+
+async function DashboardInstrumentsSection() {
+  // Surface the three most recently active instruments. The focused query
+  // returns just those rows + the active total used by the "View all N" link,
+  // so we don't fetch the entire fleet to discard the long tail in JS.
+  const { rows, totalActive } = await getRecentActiveInstrumentsForDashboard(
+    RECENT_INSTRUMENTS_LIMIT
+  );
+
+  return (
+    <InstrumentsTable
+      data={rows}
+      footer={
+        <Link
+          className="flex items-center justify-center gap-1.5 px-4 py-2.5 text-muted-foreground text-sm transition-colors hover:bg-muted/50 hover:text-foreground"
+          href="/instruments"
+        >
+          View all {totalActive} instruments
+          <ArrowRight className="size-3.5" />
+        </Link>
+      }
+    />
+  );
+}
+
+async function DashboardRunsSection({
+  currentUserId,
+  params,
+}: {
+  currentUserId: string | null;
+  params: DashboardParams;
+}) {
   // Convert empty array to undefined so buildRunListQuery skips the filter
   // and returns runs across all instruments (the unfiltered default).
   const instrumentIds =
@@ -65,20 +156,9 @@ export default async function DashboardPage({
   // RunsDateFilter and keeps the initial payload bounded.
   const defaultDateFrom = last24hISOString();
 
-  const currentUserId = session.user?.id ?? null;
-
-  // Surface the three most recently active instruments on the dashboard. The
-  // focused query returns just those rows + the active total used by the
-  // "View all N" link, so we don't fetch the entire fleet to discard the
-  // long tail in JS. Pending/inactive instruments are filtered server-side.
-  const RECENT_INSTRUMENTS_LIMIT = 3;
-
-  // Fetch the toolbar instrument list, the dashboard instrument summary, the
-  // filtered run page, and the summary stats in parallel since none depend on
-  // the others.
-  const [instruments, recentInstruments, runResult, stats] = await Promise.all([
+  // The toolbar instrument list and the filtered run page are independent.
+  const [instruments, runResult] = await Promise.all([
     getInstruments(),
-    getRecentActiveInstrumentsForDashboard(RECENT_INSTRUMENTS_LIMIT),
     buildRunListQuery({
       instrumentId: instrumentIds,
       search: params.search || undefined,
@@ -88,11 +168,7 @@ export default async function DashboardPage({
       perPage: params.per_page,
       includeDeleted: params.include_deleted,
     }),
-    getDashboardStats(currentUserId),
   ]);
-
-  const { rows: recentActiveInstruments, totalActive: totalActiveInstruments } =
-    recentInstruments;
 
   const hasFilters = hasActiveFilters(params);
   const pendingUploadCount = runResult.data.filter(
@@ -108,49 +184,26 @@ export default async function DashboardPage({
     : 0;
 
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 p-6 2xl:w-7xl">
-      <DashboardStatsCards stats={stats} />
-
-      <section className="flex flex-col gap-3">
-        <h2 className="font-medium text-lg tracking-tight">Instruments</h2>
-        <InstrumentsTable
-          data={recentActiveInstruments}
-          footer={
-            <Link
-              className="flex items-center justify-center gap-1.5 px-4 py-2.5 text-muted-foreground text-sm transition-colors hover:bg-muted/50 hover:text-foreground"
-              href="/instruments"
-            >
-              View all {totalActiveInstruments} instruments
-              <ArrowRight className="size-3.5" />
-            </Link>
-          }
+    <RunSelectionProvider>
+      <TablePendingProvider>
+        <RunsToolbar instruments={instruments} />
+        <RunBulkActionBar />
+        <TablePendingBoundary>
+          <RunsTable
+            data={runResult.data}
+            hasFilters={hasFilters}
+            pendingUploadCount={pendingUploadCount}
+            ranByYouCount={ranByYouCount}
+            totalCount={runResult.pagination.total}
+            unattributedCount={unattributedCount}
+          />
+        </TablePendingBoundary>
+        <PaginationNav
+          page={runResult.pagination.page}
+          pageParam="page"
+          totalPages={runResult.pagination.total_pages}
         />
-      </section>
-
-      <section className="flex flex-col gap-3">
-        <h2 className="font-medium text-lg tracking-tight">Recent runs</h2>
-        <RunSelectionProvider>
-          <TablePendingProvider>
-            <RunsToolbar instruments={instruments} />
-            <RunBulkActionBar />
-            <TablePendingBoundary>
-              <RunsTable
-                data={runResult.data}
-                hasFilters={hasFilters}
-                pendingUploadCount={pendingUploadCount}
-                ranByYouCount={ranByYouCount}
-                totalCount={runResult.pagination.total}
-                unattributedCount={unattributedCount}
-              />
-            </TablePendingBoundary>
-            <PaginationNav
-              page={runResult.pagination.page}
-              pageParam="page"
-              totalPages={runResult.pagination.total_pages}
-            />
-          </TablePendingProvider>
-        </RunSelectionProvider>
-      </section>
-    </div>
+      </TablePendingProvider>
+    </RunSelectionProvider>
   );
 }

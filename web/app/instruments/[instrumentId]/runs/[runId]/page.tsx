@@ -1,11 +1,14 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next/types";
+import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import { RunAttributionsSection } from "@/components/runs/run-attributions-section";
 import { RunCommentsSection } from "@/components/runs/run-comments-section";
 import { RunNav } from "@/components/runs/run-nav";
 import { RunDetailVariant } from "@/components/runs/variants";
 import { WatcherStatusProvider } from "@/components/runs/watcher-status-provider";
+import { TableSkeleton } from "@/components/skeletons/table-skeleton";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   buildRunFilesQuery,
   getAdjacentRunIds,
@@ -15,6 +18,7 @@ import {
   getRunPdfFiles,
   getRunReportFiles,
   lookupRunByNaturalKey,
+  type RunDetail,
 } from "@/lib/api/instrument-runs";
 import { getInstrumentById } from "@/lib/api/instruments";
 import { listCommentsForRun } from "@/lib/api/run-comments";
@@ -23,6 +27,8 @@ import { formatDate } from "@/lib/date";
 import { runDetailParamsCache } from "@/lib/search-params";
 
 const FILES_PER_PAGE = 10;
+
+type RunDetailFilters = Awaited<ReturnType<typeof runDetailParamsCache.parse>>;
 
 interface Props {
   params: Promise<{ instrumentId: string; runId: string }>;
@@ -84,6 +90,63 @@ export default async function RunDetailPage({ params, searchParams }: Props) {
     notFound();
   }
 
+  // The file/report content and the comments thread are independent, so they
+  // stream in separate Suspense boundaries — a slow comments query no longer
+  // holds up the run's files, and vice versa.
+  return (
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
+      <Suspense fallback={<RunContentSkeleton />}>
+        <RunDetailContent
+          filters={filters}
+          instrumentId={instrumentId}
+          run={run}
+          runId={runId}
+        />
+      </Suspense>
+      <Suspense fallback={<RunCommentsSkeleton />}>
+        <RunCommentsLoader run={run} />
+      </Suspense>
+    </div>
+  );
+}
+
+function RunContentSkeleton() {
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2">
+        <Skeleton className="mb-2 h-4 w-72" />
+        <div className="flex items-center justify-between">
+          <Skeleton className="h-8 w-72" />
+          <Skeleton className="h-8 w-40" />
+        </div>
+        <Skeleton className="h-4 w-52" />
+      </div>
+      <Skeleton className="h-40 w-full rounded-lg" />
+      <TableSkeleton ariaLabel="Loading files" columns={4} rows={6} />
+    </div>
+  );
+}
+
+function RunCommentsSkeleton() {
+  return (
+    <div className="flex flex-col gap-2">
+      <Skeleton className="h-6 w-32" />
+      <Skeleton className="h-24 w-full max-w-xl rounded-lg" />
+    </div>
+  );
+}
+
+async function RunDetailContent({
+  run,
+  instrumentId,
+  runId,
+  filters,
+}: {
+  run: RunDetail;
+  instrumentId: string;
+  runId: string;
+  filters: RunDetailFilters;
+}) {
   // Only imaging instruments use the image carousel, and only TapeStation uses
   // the PDF carousel — gate the extra queries so other variants don't pay.
   const isImagingInstrument =
@@ -91,6 +154,11 @@ export default async function RunDetailPage({ params, searchParams }: Props) {
     run.instrumentType === "hina_microscope";
   const isPdfInstrument = run.instrumentType === "tape_station";
 
+  // `wellData` derives from the report files, so it can't run in the same
+  // fan-out as its own input. Chaining it off `reportFilesPromise` keeps it in
+  // the single `Promise.all` batch instead of a sequential await afterward, so
+  // CSV processing overlaps the other queries rather than tacking latency on.
+  const reportFilesPromise = getRunReportFiles(run.id);
   const [
     filesPage,
     fileStats,
@@ -98,8 +166,8 @@ export default async function RunDetailPage({ params, searchParams }: Props) {
     reportImages,
     reportPdfs,
     instrument,
-    comments,
     adjacentRuns,
+    wellData,
   ] = await Promise.all([
     buildRunFilesQuery(run.id, {
       page: filters.files_page,
@@ -110,14 +178,14 @@ export default async function RunDetailPage({ params, searchParams }: Props) {
       includeDismissed: filters.files_dismissed,
     }),
     getRunFileStats(run.id),
-    getRunReportFiles(run.id),
+    reportFilesPromise,
     isImagingInstrument ? getRunImageFiles(run.id) : Promise.resolve([]),
     isPdfInstrument ? getRunPdfFiles(run.id) : Promise.resolve([]),
     getInstrumentById(instrumentId),
-    listCommentsForRun(run.id),
     getAdjacentRunIds(run),
+    reportFilesPromise.then((rf) => getProcessedCsvData(rf)),
   ]);
-  const wellData = await getProcessedCsvData(reportFiles);
+
   // Gate client-side upload actions on watcher availability — a queued
   // upload request is a no-op if no agent is around to action it.
   const isWatcherOnline = (instrument?.watchersOnline ?? 0) > 0;
@@ -126,54 +194,58 @@ export default async function RunDetailPage({ params, searchParams }: Props) {
     `/instruments/${instrumentId}/runs/${encodeURIComponent(rid)}`;
 
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
-      <WatcherStatusProvider isWatcherOnline={isWatcherOnline}>
-        <RunDetailVariant
-          attributionsSlot={
-            <RunAttributionsSection
-              attributions={run.attributions}
-              instrumentId={run.instrumentId}
-              runId={run.runId}
-            />
-          }
-          fileStats={fileStats}
-          files={filesPage.data}
-          filesDownloadableCount={filesPage.downloadableCount}
-          filesPagination={filesPage.pagination}
-          instrumentId={instrumentId}
-          reportFiles={reportFiles}
-          reportImages={reportImages}
-          reportPdfs={reportPdfs}
-          run={run}
-          runId={runId}
-          runNavSlot={
-            <RunNav
-              next={
-                adjacentRuns.nextRunId
-                  ? {
-                      href: toRunHref(adjacentRuns.nextRunId),
-                      runId: adjacentRuns.nextRunId,
-                    }
-                  : null
-              }
-              previous={
-                adjacentRuns.previousRunId
-                  ? {
-                      href: toRunHref(adjacentRuns.previousRunId),
-                      runId: adjacentRuns.previousRunId,
-                    }
-                  : null
-              }
-            />
-          }
-          wellData={wellData}
-        />
-        <RunCommentsSection
-          comments={comments}
-          instrumentId={run.instrumentId}
-          runId={run.runId}
-        />
-      </WatcherStatusProvider>
-    </div>
+    <WatcherStatusProvider isWatcherOnline={isWatcherOnline}>
+      <RunDetailVariant
+        attributionsSlot={
+          <RunAttributionsSection
+            attributions={run.attributions}
+            instrumentId={run.instrumentId}
+            runId={run.runId}
+          />
+        }
+        fileStats={fileStats}
+        files={filesPage.data}
+        filesDownloadableCount={filesPage.downloadableCount}
+        filesPagination={filesPage.pagination}
+        instrumentId={instrumentId}
+        reportFiles={reportFiles}
+        reportImages={reportImages}
+        reportPdfs={reportPdfs}
+        run={run}
+        runId={runId}
+        runNavSlot={
+          <RunNav
+            next={
+              adjacentRuns.nextRunId
+                ? {
+                    href: toRunHref(adjacentRuns.nextRunId),
+                    runId: adjacentRuns.nextRunId,
+                  }
+                : null
+            }
+            previous={
+              adjacentRuns.previousRunId
+                ? {
+                    href: toRunHref(adjacentRuns.previousRunId),
+                    runId: adjacentRuns.previousRunId,
+                  }
+                : null
+            }
+          />
+        }
+        wellData={wellData}
+      />
+    </WatcherStatusProvider>
+  );
+}
+
+async function RunCommentsLoader({ run }: { run: RunDetail }) {
+  const comments = await listCommentsForRun(run.id);
+  return (
+    <RunCommentsSection
+      comments={comments}
+      instrumentId={run.instrumentId}
+      runId={run.runId}
+    />
   );
 }

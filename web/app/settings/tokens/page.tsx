@@ -1,7 +1,9 @@
 import { desc, eq } from "drizzle-orm";
 import { KeyRound } from "lucide-react";
 import type { Metadata } from "next/types";
+import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
+import { TableSkeleton } from "@/components/skeletons/table-skeleton";
 import { CreateTokenDialog } from "@/components/tokens/create-token-dialog";
 import { CreateTokenDisabledButton } from "@/components/tokens/create-token-disabled-button";
 import { DeleteTokenDialog } from "@/components/tokens/delete-token-dialog";
@@ -129,6 +131,39 @@ export default async function TokensPage() {
   // via DevTools).
   const isAdmin = session.user.isAdmin === true;
 
+  return (
+    <div>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="font-semibold text-lg tracking-tight">
+            Access Tokens
+          </h2>
+          <p className="text-muted-foreground text-sm">
+            {isAdmin
+              ? "Manage personal access tokens for API authentication."
+              : "View personal access tokens for API authentication."}
+          </p>
+        </div>
+        {isAdmin ? <CreateTokenDialog /> : <CreateTokenDisabledButton />}
+      </div>
+
+      <div className="mt-6">
+        <Suspense
+          fallback={
+            <TableSkeleton
+              ariaLabel="Loading access tokens"
+              columns={isAdmin ? 8 : 7}
+            />
+          }
+        >
+          <TokensSection isAdmin={isAdmin} />
+        </Suspense>
+      </div>
+    </div>
+  );
+}
+
+async function TokensSection({ isAdmin }: { isAdmin: boolean }) {
   // This is an internal-tool settings page; we intentionally show every PAT
   // across the workspace so admins can audit them.
   const tokens = await db
@@ -155,132 +190,111 @@ export default async function TokensPage() {
     expiresAt ? expiresAt < new Date() : false;
 
   return (
-    <div>
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="font-semibold text-lg tracking-tight">
-            Access Tokens
-          </h2>
-          <p className="text-muted-foreground text-sm">
+    <>
+      {tokens.length === 0 ? (
+        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed bg-background py-12 dark:bg-muted">
+          <KeyRound className="size-10 text-muted-foreground/50" />
+          <p className="mt-3 font-medium text-muted-foreground text-sm">
+            No access tokens yet
+          </p>
+          <p className="mt-1 text-muted-foreground/70 text-sm">
             {isAdmin
-              ? "Manage personal access tokens for API authentication."
-              : "View personal access tokens for API authentication."}
+              ? "Create a token to authenticate with the API."
+              : "Ask an admin to create a token for you."}
           </p>
         </div>
-        {isAdmin ? <CreateTokenDialog /> : <CreateTokenDisabledButton />}
-      </div>
-
-      <div className="mt-6">
-        {tokens.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-lg border border-dashed bg-background py-12 dark:bg-muted">
-            <KeyRound className="size-10 text-muted-foreground/50" />
-            <p className="mt-3 font-medium text-muted-foreground text-sm">
-              No access tokens yet
-            </p>
-            <p className="mt-1 text-muted-foreground/70 text-sm">
-              {isAdmin
-                ? "Create a token to authenticate with the API."
-                : "Ask an admin to create a token for you."}
-            </p>
-          </div>
-        ) : (
-          <div className="rounded-lg border bg-background dark:bg-muted">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>User</TableHead>
-                  <TableHead>Token</TableHead>
-                  <TableHead>Scopes</TableHead>
-                  <TableHead>Last used</TableHead>
-                  <TableHead>Expires</TableHead>
-                  <TableHead>Created</TableHead>
-                  {isAdmin ? <TableHead className="w-12" /> : null}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {tokens.map((token) => {
-                  const displayName =
-                    token.user.name ?? token.user.email ?? "Unknown";
-                  return (
-                    <TableRow key={token.id}>
-                      <TableCell className="font-medium">
-                        {token.name}
-                      </TableCell>
-                      <TableCell>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <UserAvatar
-                              size="sm"
-                              user={{
-                                userId: token.user.id,
-                                displayName,
-                                initials: toInitials(displayName),
-                                avatarUrl: token.user.image,
-                              }}
-                            />
-                          </TooltipTrigger>
-                          <TooltipContent>{displayName}</TooltipContent>
-                        </Tooltip>
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          className="font-mono text-xs"
-                          variant="secondary"
-                        >
-                          {token.tokenPrefix}…
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <TokenScopeBadges scopes={token.scopes} />
-                      </TableCell>
-                      <TableCell
-                        className="text-muted-foreground"
-                        suppressHydrationWarning
-                      >
-                        {token.lastUsedAt
-                          ? formatRelativeTime(token.lastUsedAt)
-                          : "Never"}
-                      </TableCell>
-                      <TableCell suppressHydrationWarning>
-                        {token.expiresAt ? (
-                          <span
-                            className={
-                              isExpired(token.expiresAt)
-                                ? "text-destructive"
-                                : "text-muted-foreground"
-                            }
-                          >
-                            {isExpired(token.expiresAt)
-                              ? "Expired"
-                              : formatRelativeTime(token.expiresAt)}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground">Never</span>
-                        )}
-                      </TableCell>
-                      <TableCell
-                        className="text-muted-foreground"
-                        suppressHydrationWarning
-                      >
-                        {formatRelativeTime(token.createdAt)}
-                      </TableCell>
-                      {isAdmin ? (
-                        <TableCell>
-                          <DeleteTokenDialog
-                            tokenId={token.id}
-                            tokenName={token.name}
+      ) : (
+        <div className="rounded-lg border bg-background dark:bg-muted">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>User</TableHead>
+                <TableHead>Token</TableHead>
+                <TableHead>Scopes</TableHead>
+                <TableHead>Last used</TableHead>
+                <TableHead>Expires</TableHead>
+                <TableHead>Created</TableHead>
+                {isAdmin ? <TableHead className="w-12" /> : null}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {tokens.map((token) => {
+                const displayName =
+                  token.user.name ?? token.user.email ?? "Unknown";
+                return (
+                  <TableRow key={token.id}>
+                    <TableCell className="font-medium">{token.name}</TableCell>
+                    <TableCell>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <UserAvatar
+                            size="sm"
+                            user={{
+                              userId: token.user.id,
+                              displayName,
+                              initials: toInitials(displayName),
+                              avatarUrl: token.user.image,
+                            }}
                           />
-                        </TableCell>
-                      ) : null}
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-      </div>
-    </div>
+                        </TooltipTrigger>
+                        <TooltipContent>{displayName}</TooltipContent>
+                      </Tooltip>
+                    </TableCell>
+                    <TableCell>
+                      <Badge className="font-mono text-xs" variant="secondary">
+                        {token.tokenPrefix}…
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <TokenScopeBadges scopes={token.scopes} />
+                    </TableCell>
+                    <TableCell
+                      className="text-muted-foreground"
+                      suppressHydrationWarning
+                    >
+                      {token.lastUsedAt
+                        ? formatRelativeTime(token.lastUsedAt)
+                        : "Never"}
+                    </TableCell>
+                    <TableCell suppressHydrationWarning>
+                      {token.expiresAt ? (
+                        <span
+                          className={
+                            isExpired(token.expiresAt)
+                              ? "text-destructive"
+                              : "text-muted-foreground"
+                          }
+                        >
+                          {isExpired(token.expiresAt)
+                            ? "Expired"
+                            : formatRelativeTime(token.expiresAt)}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">Never</span>
+                      )}
+                    </TableCell>
+                    <TableCell
+                      className="text-muted-foreground"
+                      suppressHydrationWarning
+                    >
+                      {formatRelativeTime(token.createdAt)}
+                    </TableCell>
+                    {isAdmin ? (
+                      <TableCell>
+                        <DeleteTokenDialog
+                          tokenId={token.id}
+                          tokenName={token.name}
+                        />
+                      </TableCell>
+                    ) : null}
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </>
   );
 }
