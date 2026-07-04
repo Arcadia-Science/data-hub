@@ -6,15 +6,7 @@ import {
   hasTapeStationMetadata,
   TapeStationRunBadges,
 } from "@/components/runs/run-metadata-badges";
-import type { RunFile } from "@/lib/api/instrument-runs";
-
-const PDF_EXTENSION = /\.pdf$/i;
-
-function isPdfFile(file: RunFile): boolean {
-  return (
-    file.contentType === "application/pdf" || PDF_EXTENSION.test(file.filename)
-  );
-}
+import { isPdfFile } from "@/lib/runs/run-file-types";
 
 export function TapeStationRunDetail({
   run,

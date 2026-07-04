@@ -14,23 +14,7 @@ import {
   CarouselPrevious,
 } from "@/components/ui/carousel";
 import type { RunFile } from "@/lib/api/instrument-runs";
-
-// Browser-displayable formats only; `.tif`/`.nd2` raw captures can't render.
-const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp)$/i;
-const RENDERABLE_CONTENT_TYPES = new Set([
-  "image/png",
-  "image/jpeg",
-  "image/gif",
-  "image/webp",
-]);
-
-function isImageFile(file: RunFile): boolean {
-  return (
-    (file.contentType !== null &&
-      RENDERABLE_CONTENT_TYPES.has(file.contentType)) ||
-    IMAGE_EXTENSIONS.test(file.filename)
-  );
-}
+import { isBrowserRenderableImageFile } from "@/lib/runs/run-file-types";
 
 function sortByFilename(a: RunFile, b: RunFile): number {
   return a.filename.localeCompare(b.filename, undefined, { numeric: true });
@@ -43,7 +27,7 @@ export function ImageCarouselReport({ files }: { files: RunFile[] }) {
   const images = useMemo(
     () =>
       files
-        .filter((f) => f.deletedAt === null && isImageFile(f))
+        .filter((f) => f.deletedAt === null && isBrowserRenderableImageFile(f))
         .sort(sortByFilename),
     [files]
   );

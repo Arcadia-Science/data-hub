@@ -4,27 +4,7 @@ import { RunSectionHeading } from "@/components/runs/run-section-heading";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { RunFile } from "@/lib/api/instrument-runs";
-
-const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|svg|tiff?)$/i;
-const PDF_EXTENSION = /\.pdf$/i;
-const CSV_EXTENSION = /\.csv$/i;
-
-function isImageFile(file: RunFile): boolean {
-  return (
-    file.contentType?.startsWith("image/") === true ||
-    IMAGE_EXTENSIONS.test(file.filename)
-  );
-}
-
-function isPdfFile(file: RunFile): boolean {
-  return (
-    file.contentType === "application/pdf" || PDF_EXTENSION.test(file.filename)
-  );
-}
-
-function isCsvFile(file: RunFile): boolean {
-  return file.contentType === "text/csv" || CSV_EXTENSION.test(file.filename);
-}
+import { isCsvFile, isImageFile, isPdfFile } from "@/lib/runs/run-file-types";
 
 function ProcessedImagePreview({ file }: { file: RunFile }) {
   const downloadUrl = `/api/v1/files/${file.id}/download`;

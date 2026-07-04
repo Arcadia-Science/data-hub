@@ -14,14 +14,7 @@ import {
   CarouselPrevious,
 } from "@/components/ui/carousel";
 import type { RunFile } from "@/lib/api/instrument-runs";
-
-const PDF_EXTENSION = /\.pdf$/i;
-
-function isPdfFile(file: RunFile): boolean {
-  return (
-    file.contentType === "application/pdf" || PDF_EXTENSION.test(file.filename)
-  );
-}
+import { isPdfFile } from "@/lib/runs/run-file-types";
 
 function sortByFilename(a: RunFile, b: RunFile): number {
   return a.filename.localeCompare(b.filename, undefined, { numeric: true });
