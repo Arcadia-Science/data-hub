@@ -12,19 +12,17 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
-import type { SidebarInstrument, SidebarWatcher } from "@/lib/api/sidebar";
+import type { SidebarInstrument } from "@/lib/api/sidebar";
 
 interface AppSidebarProps {
   instruments: SidebarInstrument[];
   session: Session;
   signOutAction: () => Promise<void>;
-  watchers: SidebarWatcher[];
 }
 
 export function AppSidebar({
   session,
   instruments,
-  watchers,
   signOutAction,
 }: AppSidebarProps) {
   return (
@@ -55,7 +53,6 @@ export function AppSidebar({
       <AppSidebarContent
         instruments={instruments}
         isAdmin={session.user.isAdmin === true}
-        watchers={watchers}
       />
       <SidebarFooter>
         <UserMenuFooter signOutAction={signOutAction} user={session.user} />

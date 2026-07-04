@@ -1,20 +1,15 @@
 import { eq, isNull, sql } from "drizzle-orm";
 import { cache } from "react";
 import { db } from "@/lib/db";
-import { instrumentRuns, instruments, watchers } from "@/lib/db/schema";
+import { instrumentRuns, instruments } from "@/lib/db/schema";
 
 export interface SidebarInstrument {
   displayName: string;
   id: string;
 }
 
-export interface SidebarWatcher {
-  hostname: string | null;
-  id: string;
-}
-
-// Cap the sidebar lists so the nav stays scannable even on workspaces with
-// many instruments/watchers. The "View all" sub-item links to the full page.
+// Cap the sidebar list so the nav stays scannable even on workspaces with
+// many instruments. The "View all" sub-item links to the full page.
 const SIDEBAR_LIST_LIMIT = 4;
 
 // Trimmed query for the navigation sidebar: the most recently active
@@ -48,23 +43,6 @@ export const getSidebarInstruments = cache(
       .leftJoin(lastRunSq, eq(lastRunSq.instrumentId, instruments.id))
       .where(eq(instruments.status, "active"))
       .orderBy(sql`${lastRunSq.lastRunAt} desc nulls last`)
-      .limit(SIDEBAR_LIST_LIMIT);
-  }
-);
-
-// Most recently heartbeating non-deregistered watchers. `nulls last` so
-// freshly-registered watchers that haven't sent a heartbeat yet don't
-// dominate the top of the list.
-export const getSidebarWatchers = cache(
-  async function getSidebarWatchers(): Promise<SidebarWatcher[]> {
-    return await db
-      .select({
-        id: watchers.id,
-        hostname: watchers.hostname,
-      })
-      .from(watchers)
-      .where(isNull(watchers.deletedAt))
-      .orderBy(sql`${watchers.lastHeartbeatAt} desc nulls last`)
       .limit(SIDEBAR_LIST_LIMIT);
   }
 );

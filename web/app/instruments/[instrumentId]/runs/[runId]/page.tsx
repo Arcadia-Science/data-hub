@@ -12,6 +12,7 @@ import {
   getProcessedCsvData,
   getRunFileStats,
   getRunImageFiles,
+  getRunPdfFiles,
   getRunReportFiles,
   lookupRunByNaturalKey,
 } from "@/lib/api/instrument-runs";
@@ -83,16 +84,19 @@ export default async function RunDetailPage({ params, searchParams }: Props) {
     notFound();
   }
 
-  // Only imaging instruments use the carousel, so only they pay for the query.
+  // Only imaging instruments use the image carousel, and only TapeStation uses
+  // the PDF carousel — gate the extra queries so other variants don't pay.
   const isImagingInstrument =
     run.instrumentType === "gel_doc" ||
     run.instrumentType === "hina_microscope";
+  const isPdfInstrument = run.instrumentType === "tape_station";
 
   const [
     filesPage,
     fileStats,
     reportFiles,
     reportImages,
+    reportPdfs,
     instrument,
     comments,
     adjacentRuns,
@@ -108,6 +112,7 @@ export default async function RunDetailPage({ params, searchParams }: Props) {
     getRunFileStats(run.id),
     getRunReportFiles(run.id),
     isImagingInstrument ? getRunImageFiles(run.id) : Promise.resolve([]),
+    isPdfInstrument ? getRunPdfFiles(run.id) : Promise.resolve([]),
     getInstrumentById(instrumentId),
     listCommentsForRun(run.id),
     getAdjacentRunIds(run),
@@ -138,6 +143,7 @@ export default async function RunDetailPage({ params, searchParams }: Props) {
           instrumentId={instrumentId}
           reportFiles={reportFiles}
           reportImages={reportImages}
+          reportPdfs={reportPdfs}
           run={run}
           runId={runId}
           runNavSlot={
