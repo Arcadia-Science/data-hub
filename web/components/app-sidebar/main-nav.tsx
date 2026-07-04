@@ -21,24 +21,17 @@ import {
   SidebarMenuSubItem,
 } from "@/components/ui/sidebar";
 import { useRecentInstruments } from "@/hooks/use-recent-instruments";
-import {
-  useRecentWatchers,
-  watcherNavLabel,
-} from "@/hooks/use-recent-watchers";
-import type { SidebarInstrument, SidebarWatcher } from "@/lib/api/sidebar";
+import type { SidebarInstrument } from "@/lib/api/sidebar";
 
 const SIDEBAR_RECENT_INSTRUMENTS_LIMIT = 10;
-const SIDEBAR_RECENT_WATCHERS_LIMIT = 10;
 
 interface MainNavProps {
   instruments: SidebarInstrument[];
-  watchers: SidebarWatcher[];
 }
 
-export function MainNav({ instruments, watchers }: MainNavProps) {
+export function MainNav({ instruments }: MainNavProps) {
   const pathname = usePathname();
   const { recent: recentInstruments } = useRecentInstruments();
-  const { recent: recentWatchers } = useRecentWatchers();
 
   const recentlyViewedInstruments = useMemo(
     () => recentInstruments.slice(0, SIDEBAR_RECENT_INSTRUMENTS_LIMIT),
@@ -62,27 +55,8 @@ export function MainNav({ instruments, watchers }: MainNavProps) {
     [instruments, recentlyViewedIds]
   );
 
-  const recentlyViewedWatchers = useMemo(
-    () => recentWatchers.slice(0, SIDEBAR_RECENT_WATCHERS_LIMIT),
-    [recentWatchers]
-  );
-
-  const recentlyViewedWatcherIds = useMemo(
-    () => new Set(recentlyViewedWatchers.map((entry) => entry.watcherId)),
-    [recentlyViewedWatchers]
-  );
-
-  const sidebarWatchers = useMemo(
-    () =>
-      watchers
-        .filter((watcher) => !recentlyViewedWatcherIds.has(watcher.id))
-        .map((watcher) => ({
-          key: watcher.id,
-          href: `/watchers/${watcher.id}`,
-          label: watcherNavLabel(watcher.id, watcher.hostname),
-        })),
-    [watchers, recentlyViewedWatcherIds]
-  );
+  const isWatchersActive =
+    pathname === "/watchers" || pathname.startsWith("/watchers/");
 
   return (
     <SidebarGroup>
@@ -118,19 +92,18 @@ export function MainNav({ instruments, watchers }: MainNavProps) {
             viewAllHref="/instruments"
           />
 
-          <CollapsibleNavSection
-            basePath="/watchers"
-            currentPath={pathname}
-            icon={Radio}
-            items={sidebarWatchers}
-            label="Watchers"
-            recentlyViewedItems={recentlyViewedWatchers.map((watcher) => ({
-              key: watcher.watcherId,
-              href: `/watchers/${watcher.watcherId}`,
-              label: watcher.label,
-            }))}
-            viewAllHref="/watchers"
-          />
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              asChild
+              isActive={isWatchersActive}
+              tooltip="Watchers"
+            >
+              <Link href="/watchers">
+                <Radio />
+                <span>Watchers</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
         </SidebarMenu>
       </SidebarGroupContent>
     </SidebarGroup>
