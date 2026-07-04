@@ -867,6 +867,29 @@ export async function getRunImageFiles(
     .limit(CAROUSEL_IMAGE_LIMIT);
 }
 
+// PDFs for the TapeStation carousel. Like `getRunImageFiles`, only files with
+// S3 bytes are included so the preview never 404s mid-upload.
+export async function getRunPdfFiles(
+  runInternalId: string
+): Promise<RunFile[]> {
+  return await db
+    .select()
+    .from(files)
+    .where(
+      and(
+        eq(files.instrumentRunId, runInternalId),
+        isNull(files.deletedAt),
+        sql`${files.s3Bucket} is not null and ${files.s3Key} is not null`,
+        sql`(
+          ${files.contentType} = 'application/pdf'
+          or lower(${files.filename}) like '%.pdf'
+        )`
+      )
+    )
+    .orderBy(files.filename)
+    .limit(CAROUSEL_IMAGE_LIMIT);
+}
+
 // Resolve the file IDs matching the current table filters, used by the
 // archive route so "Download all" honors active filters across every page.
 export async function getFilteredFileIds(

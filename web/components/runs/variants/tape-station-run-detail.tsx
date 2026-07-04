@@ -6,6 +6,15 @@ import {
   hasTapeStationMetadata,
   TapeStationRunBadges,
 } from "@/components/runs/run-metadata-badges";
+import type { RunFile } from "@/lib/api/instrument-runs";
+
+const PDF_EXTENSION = /\.pdf$/i;
+
+function isPdfFile(file: RunFile): boolean {
+  return (
+    file.contentType === "application/pdf" || PDF_EXTENSION.test(file.filename)
+  );
+}
 
 export function TapeStationRunDetail({
   run,
@@ -14,6 +23,7 @@ export function TapeStationRunDetail({
   filesPagination,
   fileStats,
   reportFiles,
+  reportPdfs,
   instrumentId,
   runId,
   attributionsSlot,
@@ -22,6 +32,7 @@ export function TapeStationRunDetail({
   const isDeleted = run.deletedAt !== null;
   const activeFileCount = fileStats.active;
   const hasProcessedFiles = fileStats.processedActive > 0;
+  const csvReportFiles = reportFiles.filter((f) => !isPdfFile(f));
 
   return (
     <>
@@ -58,7 +69,15 @@ export function TapeStationRunDetail({
         />
       </RunDetail.FilesMetadataLayout>
 
-      <RunDetail.Report files={reportFiles} />
+      {reportPdfs.length > 0 || csvReportFiles.length === 0 ? (
+        <RunDetail.PdfCarousel files={reportPdfs} />
+      ) : null}
+      {csvReportFiles.length > 0 && (
+        <RunDetail.Report
+          files={csvReportFiles}
+          title={reportPdfs.length > 0 ? "Peak tables" : undefined}
+        />
+      )}
     </>
   );
 }

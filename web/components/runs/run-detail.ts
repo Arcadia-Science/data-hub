@@ -1,4 +1,5 @@
 import { ImageCarouselReport } from "@/components/runs/image-carousel-report";
+import { PdfCarouselReport } from "@/components/runs/pdf-carousel-report";
 import { RunFilesMetadataLayout } from "@/components/runs/run-files-metadata-layout";
 import { RunFilesSection } from "@/components/runs/run-files-section";
 import { RunHeader } from "@/components/runs/run-header";
@@ -19,6 +20,7 @@ export const RunDetail = {
   FilesMetadataLayout: RunFilesMetadataLayout,
   Report: RunReportSection,
   ImageCarousel: ImageCarouselReport,
+  PdfCarousel: PdfCarouselReport,
 };
 
 export interface RunDetailProps {
@@ -36,6 +38,8 @@ export interface RunDetailProps {
   reportFiles: RunFile[];
   // Images for the imaging-instrument carousel; empty for other instruments.
   reportImages: RunFile[];
+  // PDFs for the TapeStation carousel; empty for other instruments.
+  reportPdfs: RunFile[];
   run: RunDetailType;
   runId: string;
   // Previous/next run navigation for the header. Parent composes it so the

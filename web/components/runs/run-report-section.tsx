@@ -79,7 +79,13 @@ function PdfPreview({ file }: { file: RunFile }) {
   );
 }
 
-export function RunReportSection({ files }: { files: RunFile[] }) {
+export function RunReportSection({
+  files,
+  title = "Report Data",
+}: {
+  files: RunFile[];
+  title?: string;
+}) {
   const processedCsvs = files.filter(
     (f) => f.category === "processed" && f.deletedAt === null && isCsvFile(f)
   );
@@ -96,7 +102,7 @@ export function RunReportSection({ files }: { files: RunFile[] }) {
   if (totalCount === 0) {
     return (
       <div className="flex flex-col gap-2">
-        <RunSectionHeading title="Report Data" />
+        <RunSectionHeading title={title} />
         <Card size="sm">
           <CardContent>
             <p className="text-muted-foreground text-sm">
@@ -110,7 +116,7 @@ export function RunReportSection({ files }: { files: RunFile[] }) {
 
   return (
     <div className="flex flex-col gap-2">
-      <RunSectionHeading countLabel={totalCount} title="Report Data" />
+      <RunSectionHeading countLabel={totalCount} title={title} />
       <Card size="sm">
         <CardContent className="flex flex-col gap-6">
           {processedImages.map((file) => (
