@@ -20,7 +20,7 @@ import {
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { countUnread } from "@/lib/api/notifications";
-import { getSidebarInstruments, getSidebarWatchers } from "@/lib/api/sidebar";
+import { getSidebarInstruments } from "@/lib/api/sidebar";
 import { auth, signOut } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
@@ -97,13 +97,9 @@ export default async function RootLayout({
   // notification bell renders with an accurate badge on first paint —
   // the partial `idx_notifications_user_id_unread` index keeps the
   // count cheap regardless of total notification volume.
-  const [instruments, watchers, initialUnreadCount] = session
-    ? await Promise.all([
-        getSidebarInstruments(),
-        getSidebarWatchers(),
-        countUnread(session.user.id),
-      ])
-    : [[], [], 0];
+  const [instruments, initialUnreadCount] = session
+    ? await Promise.all([getSidebarInstruments(), countUnread(session.user.id)])
+    : [[], 0];
 
   // Hydrate the sidebar's open/collapsed state from the cookie that
   // `SidebarProvider` writes on toggle. Defaulting to `true` keeps the
@@ -147,7 +143,6 @@ export default async function RootLayout({
                             "use server";
                             await signOut({ redirectTo: "/login" });
                           }}
-                          watchers={watchers}
                         />
                         <SidebarInset className="pb-12">
                           <header className="flex h-12 shrink-0 items-center justify-between gap-2 px-4">

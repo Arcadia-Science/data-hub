@@ -1,0 +1,35 @@
+name: Infra template validation
+
+on:
+  push:
+    branches:
+      - staging
+      - production
+    paths:
+      - .github/workflows/infra-validate.yml
+      - infra/**
+      - Makefile
+  pull_request:
+    branches:
+      - staging
+      - production
+    paths:
+      - .github/workflows/infra-validate.yml
+      - infra/**
+      - Makefile
+
+jobs:
+  infra-validate:
+    runs-on: ubuntu-latest
+    # `sam validate --lint` runs cfn-lint offline (no AWS credentials needed),
+    # but the SAM CLI still wants a region to be resolvable.
+    env:
+      AWS_DEFAULT_REGION: us-west-1
+    steps:
+      - uses: actions/checkout@v6
+      - uses: aws-actions/setup-sam@v3
+        with:
+          use-installer: true
+
+      - name: Validate CloudFormation templates
+        run: make sam-validate

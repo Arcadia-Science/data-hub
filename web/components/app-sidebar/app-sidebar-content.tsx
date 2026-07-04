@@ -4,12 +4,11 @@ import { usePathname } from "next/navigation";
 import { MainNav } from "@/components/app-sidebar/main-nav";
 import { SettingsNav } from "@/components/app-sidebar/settings-nav";
 import { SidebarContent } from "@/components/ui/sidebar";
-import type { SidebarInstrument, SidebarWatcher } from "@/lib/api/sidebar";
+import type { SidebarInstrument } from "@/lib/api/sidebar";
 
 interface AppSidebarContentProps {
   instruments: SidebarInstrument[];
   isAdmin: boolean;
-  watchers: SidebarWatcher[];
 }
 
 // Centralizes the "main vs. settings" mode toggle so the rest of the sidebar
@@ -18,7 +17,6 @@ interface AppSidebarContentProps {
 // restores the main view automatically.
 export function AppSidebarContent({
   instruments,
-  watchers,
   isAdmin,
 }: AppSidebarContentProps) {
   const pathname = usePathname();
@@ -29,7 +27,7 @@ export function AppSidebarContent({
       {isSettings ? (
         <SettingsNav isAdmin={isAdmin} />
       ) : (
-        <MainNav instruments={instruments} watchers={watchers} />
+        <MainNav instruments={instruments} />
       )}
     </SidebarContent>
   );

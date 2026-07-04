@@ -4,27 +4,7 @@ import { RunSectionHeading } from "@/components/runs/run-section-heading";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { RunFile } from "@/lib/api/instrument-runs";
-
-const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|svg|tiff?)$/i;
-const PDF_EXTENSION = /\.pdf$/i;
-const CSV_EXTENSION = /\.csv$/i;
-
-function isImageFile(file: RunFile): boolean {
-  return (
-    file.contentType?.startsWith("image/") === true ||
-    IMAGE_EXTENSIONS.test(file.filename)
-  );
-}
-
-function isPdfFile(file: RunFile): boolean {
-  return (
-    file.contentType === "application/pdf" || PDF_EXTENSION.test(file.filename)
-  );
-}
-
-function isCsvFile(file: RunFile): boolean {
-  return file.contentType === "text/csv" || CSV_EXTENSION.test(file.filename);
-}
+import { isCsvFile, isImageFile, isPdfFile } from "@/lib/runs/run-file-types";
 
 function ProcessedImagePreview({ file }: { file: RunFile }) {
   const downloadUrl = `/api/v1/files/${file.id}/download`;
@@ -79,7 +59,13 @@ function PdfPreview({ file }: { file: RunFile }) {
   );
 }
 
-export function RunReportSection({ files }: { files: RunFile[] }) {
+export function RunReportSection({
+  files,
+  title = "Report Data",
+}: {
+  files: RunFile[];
+  title?: string;
+}) {
   const processedCsvs = files.filter(
     (f) => f.category === "processed" && f.deletedAt === null && isCsvFile(f)
   );
@@ -96,7 +82,7 @@ export function RunReportSection({ files }: { files: RunFile[] }) {
   if (totalCount === 0) {
     return (
       <div className="flex flex-col gap-2">
-        <RunSectionHeading title="Report Data" />
+        <RunSectionHeading title={title} />
         <Card size="sm">
           <CardContent>
             <p className="text-muted-foreground text-sm">
@@ -110,7 +96,7 @@ export function RunReportSection({ files }: { files: RunFile[] }) {
 
   return (
     <div className="flex flex-col gap-2">
-      <RunSectionHeading countLabel={totalCount} title="Report Data" />
+      <RunSectionHeading countLabel={totalCount} title={title} />
       <Card size="sm">
         <CardContent className="flex flex-col gap-6">
           {processedImages.map((file) => (
