@@ -61,14 +61,11 @@ Resources:
       BucketName: !Sub "arcadia-data-hub-raw-${Environment}"
       VersioningConfiguration:
         Status: Enabled
-      # Pin Block Public Access on so it's guaranteed by IaC rather than the
-      # S3 account default. All access is via presigned URLs; nothing here is
-      # ever public.
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
+      # Block Public Access is left to the S3 account default (all on) rather
+      # than pinned here: the CI deploy role can't call
+      # `s3:PutBucketPublicAccessBlock`, so managing it in-stack breaks
+      # automated deploys. Nothing here is ever public — access is via
+      # presigned URLs.
       # Allow the web app to fetch raw files from the browser via the
       # `/api/v1/files/:id/download` 302-redirect to a presigned S3 URL.
       # Image/PDF previews bypass CORS via `<img>`/`<iframe>`, but client-side
@@ -186,12 +183,7 @@ Resources:
       BucketName: !Sub "arcadia-data-hub-processed-${Environment}"
       VersioningConfiguration:
         Status: Enabled
-      # See RawDataBucket — pinned on rather than relying on the S3 default.
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
+      # See RawDataBucket — BPA left to the S3 account default so CI can deploy.
       # See RawDataBucket for the CORS rationale — both buckets back the same
       # `/api/v1/files/:id/download` endpoint so they need parity.
       CorsConfiguration:
