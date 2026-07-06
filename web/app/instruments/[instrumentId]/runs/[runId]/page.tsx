@@ -87,34 +87,56 @@ export default async function RunDetailPage({ params, searchParams }: Props) {
     );
   }
 
-  const run = await lookupRunByNaturalKey(instrumentId, runId);
-  if (!run) {
-    notFound();
-  }
-
-  // The file/report content and the comments thread are independent, so they
-  // stream in separate Suspense boundaries — a slow comments query no longer
-  // holds up the run's files, and vice versa.
+  // Run lookup and heavy fetches live inside Suspense so the shell + skeletons
+  // paint immediately on navigation. `lookupRunByNaturalKey` is `cache()`-deduped
+  // across the content and comments loaders on the same request.
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
-      <Suspense
-        fallback={<RunContentSkeleton instrumentType={run.instrumentType} />}
-      >
+      <Suspense fallback={<RunContentSkeleton instrumentType="generic" />}>
         <RunDetailContent
           filters={filters}
           instrumentId={instrumentId}
-          run={run}
           runId={runId}
         />
       </Suspense>
       <Suspense fallback={<RunCommentsSkeleton />}>
-        <RunCommentsLoader run={run} />
+        <RunCommentsLoader instrumentId={instrumentId} runId={runId} />
       </Suspense>
     </div>
   );
 }
 
 async function RunDetailContent({
+  instrumentId,
+  runId,
+  filters,
+}: {
+  instrumentId: string;
+  runId: string;
+  filters: RunDetailFilters;
+}) {
+  const run = await lookupRunByNaturalKey(instrumentId, runId);
+  if (!run) {
+    notFound();
+  }
+
+  // Instrument type is unknown to the outer fallback, so stream file/report
+  // fetches behind a typed skeleton once the natural-key lookup resolves.
+  return (
+    <Suspense
+      fallback={<RunContentSkeleton instrumentType={run.instrumentType} />}
+    >
+      <RunDetailContentBody
+        filters={filters}
+        instrumentId={instrumentId}
+        run={run}
+        runId={runId}
+      />
+    </Suspense>
+  );
+}
+
+async function RunDetailContentBody({
   run,
   instrumentId,
   runId,
@@ -217,7 +239,18 @@ async function RunDetailContent({
   );
 }
 
-async function RunCommentsLoader({ run }: { run: RunDetail }) {
+async function RunCommentsLoader({
+  instrumentId,
+  runId,
+}: {
+  instrumentId: string;
+  runId: string;
+}) {
+  const run = await lookupRunByNaturalKey(instrumentId, runId);
+  if (!run) {
+    notFound();
+  }
+
   const comments = await listCommentsForRun(run.id);
   return (
     <RunCommentsSection
