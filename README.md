@@ -82,3 +82,11 @@ make py-test-integration
 # Run API integration tests (requires Postgres).
 make fe-test-integration
 ```
+
+## License
+
+Data Hub is released under the [MIT License](LICENSE). Copyright (c) 2026 Arcadia Science.
+
+"Data Hub" and "Arcadia Science", along with related names and logos, are marks of
+Arcadia Science. The MIT License covers the source code only and does not grant any
+right to use these names or logos.
