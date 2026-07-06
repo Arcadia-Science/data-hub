@@ -204,6 +204,13 @@
       "when": 1782935691822,
       "tag": "0028_add_slack_channel_config",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1783365397666,
+      "tag": "0029_add_search_trgm_indexes",
+      "breakpoints": true
     }
   ]
 }

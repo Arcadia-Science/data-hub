@@ -10,6 +10,7 @@ import { NotificationBell } from "@/components/notifications/notification-bell";
 import { NotificationsProvider } from "@/components/notifications/notifications-provider";
 import { PreviewDeploymentBanner } from "@/components/preview-deployment-banner";
 import { ArchiveDownloadProvider } from "@/components/runs/archive-download-provider";
+import { SearchTrigger } from "@/components/search/search-trigger";
 import { ThemeProvider } from "@/components/theme-provider";
 import {
   SIDEBAR_COOKIE_NAME,
@@ -145,9 +146,14 @@ export default async function RootLayout({
                           }}
                         />
                         <SidebarInset className="pb-12">
-                          <header className="flex h-12 shrink-0 items-center justify-between gap-2 px-4">
-                            <SidebarTrigger />
-                            <NotificationBell />
+                          <header className="flex h-14 shrink-0 items-center justify-between gap-2 px-4">
+                            <div className="flex h-8 items-center">
+                              <SidebarTrigger />
+                            </div>
+                            <div className="flex h-8 items-center gap-2">
+                              <SearchTrigger />
+                              <NotificationBell />
+                            </div>
                           </header>
                           {children}
                         </SidebarInset>
