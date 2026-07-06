@@ -147,7 +147,7 @@ function StatusStrip({
   );
 }
 
-function HeartbeatChartSkeleton() {
+export function HeartbeatChartSkeleton() {
   return (
     <div className="flex flex-col gap-3 rounded-lg border bg-background p-4 dark:bg-muted">
       <Skeleton className="h-64 w-full" />

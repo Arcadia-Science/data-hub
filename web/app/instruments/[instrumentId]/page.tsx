@@ -1,7 +1,11 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next/types";
+import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
-import { InstrumentHeader } from "@/components/instruments/instrument-header";
+import {
+  InstrumentHeader,
+  InstrumentHeaderSkeleton,
+} from "@/components/instruments/instrument-header";
 import { InstrumentRunsToolbar } from "@/components/instruments/instrument-runs-toolbar";
 import {
   InstrumentRunsTableShell,
@@ -12,6 +16,7 @@ import { DefaultRunsTable } from "@/components/instruments/runs-table/default-ru
 import { EpsonScannerRunsTable } from "@/components/instruments/runs-table/epson-scanner-runs-table";
 import { GelDocRunsTable } from "@/components/instruments/runs-table/gel-doc-runs-table";
 import { HinaRunsTable } from "@/components/instruments/runs-table/hina-runs-table";
+import { InstrumentRunsSkeleton } from "@/components/instruments/runs-table/instrument-runs-skeleton";
 import { PlateReaderRunsTable } from "@/components/instruments/runs-table/plate-reader-runs-table";
 import { QpcrRunsTable } from "@/components/instruments/runs-table/qpcr-runs-table";
 import { RunBulkActionBar } from "@/components/instruments/runs-table/run-bulk-action-bar";
@@ -34,6 +39,10 @@ import {
 } from "@/lib/api/notifications";
 import { auth } from "@/lib/auth";
 import { instrumentDetailParamsCache } from "@/lib/search-params";
+
+type InstrumentDetailFilters = Awaited<
+  ReturnType<typeof instrumentDetailParamsCache.parse>
+>;
 
 interface Props {
   params: Promise<{ instrumentId: string }>;
@@ -144,47 +153,109 @@ export default async function InstrumentDetailPage({
   }
 
   const filters = instrumentDetailParamsCache.parse(await searchParams);
+  const userId = session.user.id;
 
-  // Parallel fetch: instrument metadata (for header), paginated runs
-  // (for table), and the viewer's notification prefs + per-instrument
-  // subscription state are independent queries.
-  const [instrument, runResult, notificationPrefs, notificationSubscriptions] =
+  // The header and the runs table stream independently: each is its own
+  // Suspense child so their queries run in parallel (the shared
+  // `getInstrumentById` is `cache()`-deduped) and the header paints without
+  // waiting on the heavier runs / filter-option queries.
+  return (
+    <div className="mx-auto flex w-full min-w-0 max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
+      <Suspense fallback={<InstrumentHeaderSkeleton />}>
+        <InstrumentHeaderSection instrumentId={instrumentId} userId={userId} />
+      </Suspense>
+      <Suspense fallback={<InstrumentRunsSkeleton />}>
+        <InstrumentRunsSection
+          filters={filters}
+          instrumentId={instrumentId}
+          userId={userId}
+        />
+      </Suspense>
+    </div>
+  );
+}
+
+async function InstrumentHeaderSection({
+  instrumentId,
+  userId,
+}: {
+  instrumentId: string;
+  userId: string;
+}) {
+  // Header data: instrument metadata plus the viewer's notification prefs +
+  // per-instrument subscription state. All independent, so fetch together.
+  const [instrument, notificationPrefs, notificationSubscriptions] =
     await Promise.all([
       getInstrumentById(instrumentId),
-      buildRunListQuery({
-        instrumentId,
-        search: filters.search || undefined,
-        dateFrom: filters.date_from ?? undefined,
-        dateTo: filters.date_to ?? undefined,
-        page: filters.page,
-        perPage: filters.per_page,
-        includeDeleted: filters.include_deleted,
-        wavelength: filters.wavelength ?? undefined,
-        measurementMode: filters.measurement_mode ?? undefined,
-        measurementType: filters.measurement_type ?? undefined,
-        captureType: filters.capture_type ?? undefined,
-        imagingMode: filters.imaging_mode ?? undefined,
-        gelWavelength: filters.gel_wavelength ?? undefined,
-        gelColor: filters.gel_color ?? undefined,
-        dyeChannel: filters.dye_channel ?? undefined,
-        hinaChannel: filters.hina_channel ?? undefined,
-        hinaDimension: filters.hina_dimension ?? undefined,
-        hinaSize: filters.hina_size ?? undefined,
-        dpi: filters.dpi ?? undefined,
-        colorMode: filters.color_mode ?? undefined,
-        ranBy: filters.ran_by ?? undefined,
-      }),
-      getPreferences(session.user.id),
-      listInstrumentSubscriptions(session.user.id),
+      getPreferences(userId),
+      listInstrumentSubscriptions(userId),
     ]);
 
   if (!instrument) {
     notFound();
   }
 
-  // Fetch whichever per-instrument filter options apply, in parallel with
-  // the attribution dropdown options.
-  const [filterOptions, ranByUsers] = await Promise.all([
+  // The subscription list always contains every instrument (left-joined
+  // against `instruments`) so a missing entry would mean a stale read —
+  // fall back to `false` defensively.
+  const subscriptionForThisInstrument = notificationSubscriptions.find(
+    (s) => s.instrumentId === instrumentId
+  );
+
+  return (
+    <InstrumentHeader
+      instrument={instrument}
+      notifications={{
+        enabled: subscriptionForThisInstrument?.enabled ?? false,
+        masterMuted: notificationPrefs.runsAllMuted,
+      }}
+    />
+  );
+}
+
+async function InstrumentRunsSection({
+  instrumentId,
+  filters,
+  userId,
+}: {
+  instrumentId: string;
+  filters: InstrumentDetailFilters;
+  userId: string;
+}) {
+  // `getInstrumentById` is `cache()`-deduped, so this resolves against the
+  // same fetch the header section kicked off — no second query. We need it
+  // here for the run-table variant + filter-option discriminator.
+  const instrument = await getInstrumentById(instrumentId);
+  if (!instrument) {
+    notFound();
+  }
+
+  // Paginated runs plus the per-instrument filter options and attribution
+  // dropdown options are independent once we know the instrument type.
+  const [runResult, filterOptions, ranByUsers] = await Promise.all([
+    buildRunListQuery({
+      instrumentId,
+      search: filters.search || undefined,
+      dateFrom: filters.date_from ?? undefined,
+      dateTo: filters.date_to ?? undefined,
+      page: filters.page,
+      perPage: filters.per_page,
+      includeDeleted: filters.include_deleted,
+      wavelength: filters.wavelength ?? undefined,
+      measurementMode: filters.measurement_mode ?? undefined,
+      measurementType: filters.measurement_type ?? undefined,
+      captureType: filters.capture_type ?? undefined,
+      imagingMode: filters.imaging_mode ?? undefined,
+      gelWavelength: filters.gel_wavelength ?? undefined,
+      gelColor: filters.gel_color ?? undefined,
+      dyeChannel: filters.dye_channel ?? undefined,
+      hinaChannel: filters.hina_channel ?? undefined,
+      hinaDimension: filters.hina_dimension ?? undefined,
+      hinaSize: filters.hina_size ?? undefined,
+      dpi: filters.dpi ?? undefined,
+      colorMode: filters.color_mode ?? undefined,
+      ranBy: filters.ran_by ?? undefined,
+    }),
     getInstrumentFilterOptions(instrument.instrumentType, instrumentId),
     getRanByFilterOptions(instrumentId),
   ]);
@@ -209,51 +280,32 @@ export default async function InstrumentDetailPage({
     filters.color_mode !== null ||
     filters.ran_by !== null;
 
-  const currentUserId = session.user?.id ?? null;
   const pendingUploadCount = runResult.data.filter(
     (row) => row.files_pending_upload > 0
   ).length;
   const unattributedCount = runResult.data.filter(
     (row) => row.attributions.length === 0
   ).length;
-  const ranByYouCount = currentUserId
-    ? runResult.data.filter((row) =>
-        row.attributions.some((a) => a.userId === currentUserId)
-      ).length
-    : 0;
+  const ranByYouCount = runResult.data.filter((row) =>
+    row.attributions.some((a) => a.userId === userId)
+  ).length;
 
   // Build the "Ran By" dropdown options: the current user (labelled "You"),
   // pinned to the top if they've attributed anything here, followed by other
   // attributors by display name, then the "Unattributed" sentinel.
-  const meOption = currentUserId
-    ? ranByUsers.find((u) => u.userId === currentUserId)
-    : undefined;
+  const meOption = ranByUsers.find((u) => u.userId === userId);
   const ranByOptions = [
     ...(meOption ? [{ value: meOption.userId, label: "You" }] : []),
     ...ranByUsers
-      .filter((u) => u.userId !== currentUserId)
+      .filter((u) => u.userId !== userId)
       .map((u) => ({ value: u.userId, label: u.displayName })),
     { value: "unattributed", label: "Unattributed" },
   ];
 
-  // The subscription list always contains every instrument (left-joined
-  // against `instruments`) so a missing entry would mean a stale read —
-  // fall back to `false` defensively.
-  const subscriptionForThisInstrument = notificationSubscriptions.find(
-    (s) => s.instrumentId === instrumentId
-  );
-
   return (
-    <div className="mx-auto flex w-full min-w-0 max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
-      <InstrumentHeader
-        instrument={instrument}
-        notifications={{
-          enabled: subscriptionForThisInstrument?.enabled ?? false,
-          masterMuted: notificationPrefs.runsAllMuted,
-        }}
-      />
-      <RunSelectionProvider>
-        <TablePendingProvider>
+    <RunSelectionProvider>
+      <TablePendingProvider>
+        <div className="flex flex-col gap-3">
           <InstrumentRunsToolbar />
           <RunBulkActionBar />
           <TablePendingBoundary>
@@ -279,8 +331,8 @@ export default async function InstrumentDetailPage({
             pageParam="page"
             totalPages={runResult.pagination.total_pages}
           />
-        </TablePendingProvider>
-      </RunSelectionProvider>
-    </div>
+        </div>
+      </TablePendingProvider>
+    </RunSelectionProvider>
   );
 }

@@ -1,8 +1,12 @@
 import { asc } from "drizzle-orm";
 import { ShieldOff } from "lucide-react";
 import type { Metadata } from "next/types";
+import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
-import { MembersTable } from "@/components/members/members-table";
+import {
+  MembersTable,
+  MembersTableSkeleton,
+} from "@/components/members/members-table";
 import { SettingsPageContent } from "@/components/settings/settings-page-content";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -48,17 +52,6 @@ export default async function MembersPage() {
     );
   }
 
-  const members = await db
-    .select({
-      id: users.id,
-      name: users.name,
-      email: users.email,
-      image: users.image,
-      isAdmin: users.isAdmin,
-    })
-    .from(users)
-    .orderBy(asc(users.email));
-
   return (
     <SettingsPageContent>
       <div className="flex items-center justify-between">
@@ -71,8 +64,25 @@ export default async function MembersPage() {
       </div>
 
       <div className="mt-6">
-        <MembersTable currentUserId={session.user.id} data={members} />
+        <Suspense fallback={<MembersTableSkeleton />}>
+          <MembersSection currentUserId={session.user.id} />
+        </Suspense>
       </div>
     </SettingsPageContent>
   );
+}
+
+async function MembersSection({ currentUserId }: { currentUserId: string }) {
+  const members = await db
+    .select({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      image: users.image,
+      isAdmin: users.isAdmin,
+    })
+    .from(users)
+    .orderBy(asc(users.email));
+
+  return <MembersTable currentUserId={currentUserId} data={members} />;
 }

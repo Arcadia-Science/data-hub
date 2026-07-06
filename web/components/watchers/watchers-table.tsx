@@ -1,5 +1,6 @@
 import { SearchX } from "lucide-react";
 import { ClickableRow } from "@/components/instruments/runs-table/clickable-row";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -12,6 +13,73 @@ import { DeregisterDialog } from "@/components/watchers/deregister-dialog";
 import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type { WatcherListItem } from "@/lib/api/watchers";
 import { cn, formatRelativeTime } from "@/lib/utils";
+
+/**
+ * Placeholder mirroring `WatchersTable` columns and row height (mono ID,
+ * badge-sized status, deregister action) so streamed content swaps in
+ * without layout shift.
+ */
+export function WatchersTableSkeleton({
+  rows = 7,
+  withActions = true,
+  ariaLabel = "Loading watchers",
+}: {
+  rows?: number;
+  withActions?: boolean;
+  ariaLabel?: string;
+}) {
+  return (
+    <div
+      aria-busy="true"
+      aria-label={ariaLabel}
+      className="rounded-lg border bg-background dark:bg-muted"
+      role="status"
+    >
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Watcher ID</TableHead>
+            <TableHead>Instrument</TableHead>
+            <TableHead>Hostname</TableHead>
+            <TableHead>Version</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Last Heartbeat</TableHead>
+            {withActions ? <TableHead className="w-[80px]" /> : null}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {Array.from({ length: rows }).map((_, i) => (
+            <TableRow key={i}>
+              <TableCell>
+                <Skeleton className="h-4 w-16" />
+              </TableCell>
+              <TableCell>
+                <Skeleton className="h-4 w-40" />
+              </TableCell>
+              <TableCell>
+                <Skeleton className="h-4 w-24" />
+              </TableCell>
+              <TableCell>
+                <Skeleton className="h-4 w-12" />
+              </TableCell>
+              <TableCell>
+                <Skeleton className="h-5 w-24" />
+              </TableCell>
+              <TableCell>
+                <Skeleton className="h-4 w-20" />
+              </TableCell>
+              {withActions ? (
+                <TableCell>
+                  <Skeleton className="h-7 w-24" />
+                </TableCell>
+              ) : null}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
 
 export function WatchersTable({
   data,
