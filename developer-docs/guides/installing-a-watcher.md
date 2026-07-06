@@ -186,7 +186,7 @@ The watcher can't reach the Data Hub API. Check:
 
 - Your internet connection.
 - That the correct environment is set in the config (`staging`, `production`, or `preview`).
-- That the API URL is reachable: `https://data-hub.arcadiascience.com` (production), `https://data-hub-env-staging-arcadia-science.vercel.app` (staging), or the custom URL you provided (preview).
+- That the API URL is reachable.
 
 ### Files aren't being detected
 

@@ -58,13 +58,6 @@ Environment-specific configuration is managed through environment variables, nev
 
 Run `make check-all` before pushing. CI enforces the same checks.
 
-## Environments
-
-| Environment | API URL | S3 bucket |
-| --- | --- | --- |
-| Staging | `https://data-hub-env-staging-arcadia-science.vercel.app/api/v1` | `arcadia-data-hub-raw-staging` |
-| Production | `https://data-hub.arcadiascience.com/api/v1` | `arcadia-data-hub-raw-production` |
-
 ## Testing
 
 - Tests are co-located with each package: `lambda/tests/`, `watcher/tests/`, `packages/shared/tests/`.

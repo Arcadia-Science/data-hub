@@ -76,8 +76,9 @@ Resources:
           - AllowedMethods:
               - GET
               - HEAD
+            # Modify this to include your web app domain.
             AllowedOrigins:
-              - "https://data-hub.arcadiascience.com"
+              - "https://datahub.arcadiascience.com"
               - "https://*.vercel.app"
               - "http://localhost:3000"
             AllowedHeaders:
@@ -191,8 +192,9 @@ Resources:
           - AllowedMethods:
               - GET
               - HEAD
+            # Modify this to include your web app domain.
             AllowedOrigins:
-              - "https://data-hub.arcadiascience.com"
+              - "https://datahub.arcadiascience.com"
               - "https://*.vercel.app"
               - "http://localhost:3000"
             AllowedHeaders:

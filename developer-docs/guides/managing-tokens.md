@@ -20,7 +20,7 @@ The plaintext token is displayed once — **copy it immediately**. It cannot be 
 ### Via the API
 
 ```sh
-curl -X POST https://data-hub.arcadiascience.com/api/v1/tokens \
+curl -X POST https://datahub.example.com/api/v1/tokens \
   -H "Cookie: <session-cookie>" \
   -H "Content-Type: application/json" \
   -d '{"name": "FPLC watcher", "expires_at": "2027-01-01T00:00:00Z"}'
@@ -51,7 +51,7 @@ Add Data Hub to your MCP client configuration. For example, in Claude Desktop (`
 {
   "mcpServers": {
     "data-hub": {
-      "url": "https://data-hub.arcadiascience.com/api/v1/mcp",
+      "url": "https://datahub.example.com/api/v1/mcp",
       "headers": {
         "Authorization": "Bearer dhub_abc123..."
       }
@@ -66,7 +66,7 @@ Or in Cursor (`.cursor/mcp.json`):
 {
   "mcpServers": {
     "data-hub": {
-      "url": "https://data-hub.arcadiascience.com/api/v1/mcp",
+      "url": "https://datahub.example.com/api/v1/mcp",
       "headers": {
         "Authorization": "Bearer dhub_abc123..."
       }
@@ -82,7 +82,7 @@ See the [MCP server docs](../reference/mcp.md) for the full list of tools, resou
 Pass the token in the `Authorization` header:
 
 ```sh
-curl https://data-hub.arcadiascience.com/api/v1/instruments \
+curl https://datahub.example.com/api/v1/instruments \
   -H "Authorization: Bearer dhub_abc123..."
 ```
 
@@ -113,7 +113,7 @@ The token is immediately invalidated. Any watcher or client using it will start 
 ### Via the API
 
 ```sh
-curl -X DELETE https://data-hub.arcadiascience.com/api/v1/tokens/<token-id> \
+curl -X DELETE https://datahub.example.com/api/v1/tokens/<token-id> \
   -H "Cookie: <session-cookie>"
 ```
 

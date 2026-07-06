@@ -31,11 +31,8 @@ import { dashboardParamsCache, hasActiveFilters } from "@/lib/search-params";
 
 type DashboardParams = Awaited<ReturnType<typeof dashboardParamsCache.parse>>;
 
-// `default: "Data Hub"` on the root metadata template already renders
-// `<title>Data Hub</title>` here, so we skip an explicit `title` and
-// override only the openGraph / twitter fields that need a strong
-// `og:title` for link previews.
-const description = "Instruments, runs, and watchers at Arcadia Science.";
+const description =
+  "A central hub for your lab's instruments, runs, and files.";
 
 export const metadata: Metadata = {
   description,
