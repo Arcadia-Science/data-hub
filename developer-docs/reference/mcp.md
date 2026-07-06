@@ -20,7 +20,7 @@ Edit `claude_desktop_config.json` (macOS: `~/Library/Application Support/Claude/
 {
   "mcpServers": {
     "data-hub": {
-      "url": "https://data-hub.arcadiascience.com/api/v1/mcp",
+      "url": "https://datahub.example.com/api/v1/mcp",
       "headers": {
         "Authorization": "Bearer dhub_abc123..."
       }
@@ -39,7 +39,7 @@ Edit `.cursor/mcp.json` in your project or `~/.cursor/mcp.json` globally:
 {
   "mcpServers": {
     "data-hub": {
-      "url": "https://data-hub.arcadiascience.com/api/v1/mcp",
+      "url": "https://datahub.example.com/api/v1/mcp",
       "headers": {
         "Authorization": "Bearer dhub_abc123..."
       }
@@ -54,7 +54,7 @@ Reload Cursor. Tools are invoked via the agent automatically when relevant.
 
 The endpoint follows the MCP Streamable HTTP spec, so any compliant client works. Configure it with:
 
-- **URL**: `https://data-hub.arcadiascience.com/api/v1/mcp`
+- **URL**: `https://datahub.example.com/api/v1/mcp`
 - **Transport**: Streamable HTTP (`GET` for the SSE stream, `POST` for client messages)
 - **Auth header**: `Authorization: Bearer <your-token>`
 
@@ -146,7 +146,7 @@ The Bearer token is missing, mistyped, revoked, or expired. Verify the token at 
 - Confirm the server is listed under `mcpServers` in the client config.
 - Check for JSON syntax errors in the config file.
 - Restart the client after editing — most clients don't hot-reload MCP server definitions.
-- Hit `https://data-hub.arcadiascience.com/api/v1/mcp` with `curl -H "Authorization: Bearer <token>"` to confirm the endpoint responds.
+- Hit `https://datahub.example.com/api/v1/mcp` with `curl -H "Authorization: Bearer <token>"` to confirm the endpoint responds.
 
 ### `get_file_download_url` vs. `get_run_archive`
 

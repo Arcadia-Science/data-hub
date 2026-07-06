@@ -157,7 +157,7 @@ class TestRunIdExtractionPosix:
 class TestRunIdExtractionWindows:
     """Verify that backslash paths are POSIX-normalized before matching."""
 
-    WATCH_DIR = r"D:\ArcadiaJOBS2023\JOBS_2023 Projects\Backup"
+    WATCH_DIR = r"D:\InstrumentData\JOBS_2023 Projects\Backup"
 
     def test_filename_prefix(self) -> None:
         pat = _preset_pattern("filename_prefix")
