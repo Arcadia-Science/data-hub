@@ -3,6 +3,7 @@
 import { SearchIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { GlobalSearch } from "@/components/search/global-search";
+import { Button } from "@/components/ui/button";
 
 // Returns true when the keydown originated from an editable field, so a
 // global ⌘K/Ctrl+K doesn't hijack a shortcut a text field might own.
@@ -53,20 +54,22 @@ export function SearchTrigger() {
 
   return (
     <>
-      <button
+      <Button
         aria-label="Search runs, files, or instruments"
-        className="flex h-8 items-center gap-2 rounded-md border bg-background px-2.5 text-muted-foreground text-sm transition-colors hover:bg-muted hover:text-foreground sm:w-64 dark:bg-muted/40"
+        className="justify-start gap-2 font-normal text-muted-foreground sm:w-64 dark:bg-muted/40"
         onClick={() => setOpen(true)}
+        size="sm"
         type="button"
+        variant="outline"
       >
-        <SearchIcon className="size-4 shrink-0" />
+        <SearchIcon />
         <span className="hidden truncate sm:inline">Search…</span>
         {shortcutHint ? (
           <kbd className="ml-auto hidden rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px] sm:inline">
             {shortcutHint}
           </kbd>
         ) : null}
-      </button>
+      </Button>
       <GlobalSearch onOpenChange={setOpen} open={open} />
     </>
   );

@@ -146,9 +146,11 @@ export default async function RootLayout({
                           }}
                         />
                         <SidebarInset className="pb-12">
-                          <header className="flex h-12 shrink-0 items-center justify-between gap-2 px-4">
-                            <SidebarTrigger />
-                            <div className="flex items-center gap-2">
+                          <header className="flex h-14 shrink-0 items-center justify-between gap-2 px-4">
+                            <div className="flex h-8 items-center">
+                              <SidebarTrigger />
+                            </div>
+                            <div className="flex h-8 items-center gap-2">
                               <SearchTrigger />
                               <NotificationBell />
                             </div>

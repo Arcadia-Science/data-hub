@@ -155,7 +155,7 @@ export function GlobalSearch({
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent
-        className="top-[12%] w-full max-w-[720px] translate-y-0 gap-0 overflow-hidden p-0"
+        className="top-[12%] w-full translate-y-0 gap-0 overflow-hidden p-0 sm:max-w-[600px]"
         showCloseButton={false}
       >
         <DialogTitle className="sr-only">Search Data Hub</DialogTitle>
