@@ -274,34 +274,46 @@ export const personalAccessTokens = pgTable(
   (token) => [index("idx_personal_access_tokens_user_id").on(token.userId)]
 );
 
-export const instruments = pgTable("instruments", {
-  // Kebab-case identifier (e.g., `spectramax-id3-plate-reader`). Also used as
-  // the first segment of the S3 key (`{instrument_id}/{run_id}/{filename}`).
-  id: text("id").primaryKey(),
-  // Human-readable name (e.g., "SpectraMax iD3 Plate Reader").
-  displayName: text("display_name").notNull(),
-  // New instruments registered via the watcher CLI start as `pending` until
-  // confirmed by an admin.
-  status: instrumentStatusEnum("status").notNull().default("active"),
-  // Categorises the instrument for variant-specific UI (e.g., plate reader
-  // runs display a plate map grid). Defaults to "generic" for existing rows.
-  instrumentType: instrumentTypeEnum("instrument_type")
-    .notNull()
-    .default("generic"),
-  createdAt: timestamp("created_at", {
-    withTimezone: true,
-    mode: "date",
-  })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp("updated_at", {
-    withTimezone: true,
-    mode: "date",
-  })
-    .notNull()
-    .defaultNow()
-    .$onUpdate(() => new Date()),
-});
+export const instruments = pgTable(
+  "instruments",
+  {
+    // Kebab-case identifier (e.g., `spectramax-id3-plate-reader`). Also used as
+    // the first segment of the S3 key (`{instrument_id}/{run_id}/{filename}`).
+    id: text("id").primaryKey(),
+    // Human-readable name (e.g., "SpectraMax iD3 Plate Reader").
+    displayName: text("display_name").notNull(),
+    // New instruments registered via the watcher CLI start as `pending` until
+    // confirmed by an admin.
+    status: instrumentStatusEnum("status").notNull().default("active"),
+    // Categorises the instrument for variant-specific UI (e.g., plate reader
+    // runs display a plate map grid). Defaults to "generic" for existing rows.
+    instrumentType: instrumentTypeEnum("instrument_type")
+      .notNull()
+      .default("generic"),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (instrument) => [
+    // Trigram GIN index backing the case-insensitive `ilike '%…%'` display-name
+    // match in global search. Requires the `pg_trgm` extension (created in
+    // migration 0029).
+    index("idx_instruments_display_name_trgm").using(
+      "gin",
+      sql`${instrument.displayName} gin_trgm_ops`
+    ),
+  ]
+);
 
 export const watchers = pgTable(
   "watchers",
@@ -516,6 +528,14 @@ export const instrumentRuns = pgTable(
       )
       .where(sql`${run.deletedAt} is null`),
     index("idx_instrument_runs_metadata_gin").using("gin", run.metadata),
+    // Trigram GIN index backing the case-insensitive `ilike '%…%'` run-id
+    // match in global search (and the dashboard run search). Requires the
+    // `pg_trgm` extension (created in migration 0029). Without it these
+    // substring scans are sequential.
+    index("idx_instrument_runs_run_id_trgm").using(
+      "gin",
+      sql`${run.runId} gin_trgm_ops`
+    ),
   ]
 );
 
@@ -625,6 +645,13 @@ export const files = pgTable(
         sql`${file.uploadRequestedAt} is not null and ${file.uploadedAt} is null and ${file.deletedAt} is null`
       ),
     index("idx_files_metadata_gin").using("gin", file.metadata),
+    // Trigram GIN index backing the case-insensitive `ilike '%…%'` filename
+    // match used by global search and the per-run files table. Scoped to
+    // active rows since both callers filter out soft-deleted files. Requires
+    // the `pg_trgm` extension (created in migration 0029).
+    index("idx_files_filename_trgm")
+      .using("gin", sql`${file.filename} gin_trgm_ops`)
+      .where(sql`${file.deletedAt} is null`),
   ]
 );
 

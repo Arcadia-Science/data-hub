@@ -79,6 +79,17 @@ export async function setup() {
 
   const databaseUrl = `${PG_URL}/${TEST_DB}`;
 
+  // The trigram GIN indexes in schema.ts reference `gin_trgm_ops`, which only
+  // exists once the pg_trgm extension is installed. `drizzle-kit push` (below)
+  // does not create extensions, so ensure it exists on the fresh test DB first.
+  const trgmClient = new Client({ connectionString: databaseUrl });
+  await trgmClient.connect();
+  try {
+    await trgmClient.query("CREATE EXTENSION IF NOT EXISTS pg_trgm");
+  } finally {
+    await trgmClient.end();
+  }
+
   // Stand up an in-process HTTP capture server so tests can assert on
   // outgoing Slack webhook calls and Slack Web API DMs without depending on
   // the real Slack API.
