@@ -594,8 +594,8 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
     from data_hub_watcher.api_client import ApiError, DataHubClient
     from data_hub_watcher.config_io import load_config
     from data_hub_watcher.constants import (
+        API_URLS,
         env_file_path,
-        resolve_api_url,
         resolve_state_db_path,
     )
     from data_hub_watcher.logging_setup import (
@@ -662,7 +662,7 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
         assert cfg.api_base_url is not None
         base_url = cfg.api_base_url
     else:
-        base_url = resolve_api_url(cfg.environment)
+        base_url = API_URLS[cfg.environment]
     client = DataHubClient(base_url)
 
     # Step 1: Check instrument status (mirrors CLI watch startup)
