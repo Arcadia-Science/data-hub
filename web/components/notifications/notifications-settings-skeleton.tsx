@@ -1,3 +1,5 @@
+"use client";
+
 import { SlackChannelCard } from "@/components/notifications/slack-channel-card";
 import { SlackConnectionCard } from "@/components/notifications/slack-connection-card";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
