@@ -1,5 +1,6 @@
 import { AdminToggle } from "@/components/members/admin-toggle";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -26,6 +27,61 @@ interface MembersTableProps {
    */
   currentUserId: string;
   data: MemberRow[];
+}
+
+/**
+ * Placeholder mirroring `MembersTable` columns (avatar + name, email, role
+ * badge, admin switch) so streamed content swaps in without layout shift.
+ */
+export function MembersTableSkeleton({
+  rows = 3,
+  ariaLabel = "Loading members",
+}: {
+  rows?: number;
+  ariaLabel?: string;
+}) {
+  return (
+    <div
+      aria-busy="true"
+      aria-label={ariaLabel}
+      className="rounded-lg border bg-background dark:bg-muted"
+      role="status"
+    >
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Member</TableHead>
+            <TableHead>Email</TableHead>
+            <TableHead>Role</TableHead>
+            <TableHead className="w-28 text-right">Admin</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {Array.from({ length: rows }).map((_, i) => (
+            <TableRow key={i}>
+              <TableCell>
+                <div className="flex items-center gap-3">
+                  <Skeleton className="size-6 shrink-0 rounded-full" />
+                  <Skeleton className="h-4 w-28" />
+                </div>
+              </TableCell>
+              <TableCell>
+                <Skeleton className="h-4 w-36" />
+              </TableCell>
+              <TableCell>
+                <Skeleton className="h-5 w-16 rounded-full" />
+              </TableCell>
+              <TableCell className="text-right">
+                <div className="flex justify-end">
+                  <Skeleton className="h-[18.4px] w-8 rounded-full" />
+                </div>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
 }
 
 export function MembersTable({ data, currentUserId }: MembersTableProps) {

@@ -1,7 +1,15 @@
 import type { ReactNode } from "react";
 import { Card } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { DashboardStats } from "@/lib/api/dashboard";
 import { cn, formatBytes } from "@/lib/utils";
+
+const DASHBOARD_STAT_LABELS = [
+  "Runs in the last 24 hours",
+  "Runs in the last 7 days",
+  "Pending uploads",
+  "My runs this week",
+] as const;
 
 const numberFormatter = new Intl.NumberFormat("en-US");
 
@@ -51,6 +59,27 @@ function DataGeneratedSubline({
   return <span>{formatBytes(bytes)} generated</span>;
 }
 
+export function StatCardsSkeleton() {
+  return (
+    <div
+      aria-busy="true"
+      aria-label="Loading stats"
+      className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4"
+      role="status"
+    >
+      {DASHBOARD_STAT_LABELS.map((label) => (
+        <Card className="gap-2 py-4" key={label} size="sm">
+          <div className="px-4">
+            <p className="font-medium text-muted-foreground text-xs">{label}</p>
+            <Skeleton className="mt-1.5 h-6 w-10" />
+            <Skeleton className="mt-1.5 h-4 w-full" />
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
 export function DashboardStatsCards({ stats }: { stats: DashboardStats }) {
   const { runsLast24Hours, pendingUploads, runsThisWeek } = stats;
 
@@ -61,7 +90,7 @@ export function DashboardStatsCards({ stats }: { stats: DashboardStats }) {
   return (
     <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
       <StatCard
-        label="Runs in the last 24 hours"
+        label={DASHBOARD_STAT_LABELS[0]}
         subline={
           <DataGeneratedSubline
             bytes={runsLast24Hours.bytesGenerated}
@@ -71,7 +100,7 @@ export function DashboardStatsCards({ stats }: { stats: DashboardStats }) {
         value={formatNumber(runsLast24Hours.total)}
       />
       <StatCard
-        label="Runs in the last 7 days"
+        label={DASHBOARD_STAT_LABELS[1]}
         subline={
           <DataGeneratedSubline
             bytes={runsThisWeek.bytesGenerated}
@@ -81,7 +110,7 @@ export function DashboardStatsCards({ stats }: { stats: DashboardStats }) {
         value={formatNumber(runsThisWeek.total)}
       />
       <StatCard
-        label="Pending uploads"
+        label={DASHBOARD_STAT_LABELS[2]}
         subline={
           pendingUploads.count > 0
             ? `${formatBytes(pendingUploads.totalBytes)} queued`
@@ -91,7 +120,7 @@ export function DashboardStatsCards({ stats }: { stats: DashboardStats }) {
         valueClassName={pendingHasBacklog ? "text-destructive" : undefined}
       />
       <StatCard
-        label="My runs this week"
+        label={DASHBOARD_STAT_LABELS[3]}
         subline={
           runsThisWeek.unattributed > 0
             ? `${formatNumber(runsThisWeek.unattributed)} unattributed`

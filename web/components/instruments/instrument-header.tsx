@@ -10,12 +10,34 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   getWatcherOnlineStatus,
   type WatcherOnlineStatus,
 } from "@/components/watchers/watcher-online-status";
 import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type { InstrumentDetail } from "@/lib/api/instruments";
+
+export function InstrumentHeaderSkeleton() {
+  return (
+    <div
+      aria-busy="true"
+      aria-label="Loading instrument"
+      className="flex flex-col gap-2"
+      role="status"
+    >
+      <Skeleton className="mb-2 h-4 w-56" />
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <Skeleton className="h-8 w-64" />
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-[18.4px] w-8 rounded-full" />
+          <Skeleton className="h-[18.4px] w-28 rounded-4xl" />
+        </div>
+      </div>
+      <Skeleton className="h-5 w-48" />
+    </div>
+  );
+}
 
 // While an instrument is `pending` its lifecycle state (awaiting admin Confirm)
 // is the relevant signal, so it pre-empts the watcher connectivity badge. Once
