@@ -1,9 +1,24 @@
 "use client";
 
 import { SearchIcon } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
-import { GlobalSearch } from "@/components/search/global-search";
 import { Button } from "@/components/ui/button";
+
+// `GlobalSearch` pulls in cmdk plus the result-row/highlight components, none
+// of which are needed until the palette is actually opened. This trigger is
+// mounted on every authenticated page (root layout header), so keeping it out
+// of the initial bundle matters more than it would for a one-off dialog.
+const GlobalSearch = dynamic(
+  () => import("@/components/search/global-search").then((m) => m.GlobalSearch),
+  { ssr: false }
+);
+
+// Warms the module cache so opening the palette (click or ⌘K) feels instant
+// once the user has shown intent by hovering/focusing the trigger.
+function preloadGlobalSearch() {
+  import("@/components/search/global-search");
+}
 
 // Returns true when the keydown originated from an editable field, so a
 // global ⌘K/Ctrl+K doesn't hijack a shortcut a text field might own.
@@ -58,6 +73,8 @@ export function SearchTrigger() {
         aria-label="Search runs, files, or instruments"
         className="justify-start gap-2 font-normal text-muted-foreground sm:w-64 dark:bg-muted/40"
         onClick={() => setOpen(true)}
+        onFocus={preloadGlobalSearch}
+        onMouseEnter={preloadGlobalSearch}
         size="sm"
         type="button"
         variant="outline"
