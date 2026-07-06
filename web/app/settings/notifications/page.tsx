@@ -2,8 +2,8 @@ import type { Metadata } from "next/types";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import { NotificationsSettingsForm } from "@/components/notifications/notifications-settings-form";
+import { NotificationsSettingsFormSkeleton } from "@/components/notifications/notifications-settings-skeleton";
 import { SettingsPageContent } from "@/components/settings/settings-page-content";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   getPreferences,
   listInstrumentSubscriptions,
@@ -51,7 +51,9 @@ export default async function NotificationsSettingsPage() {
           header paints first) and satisfies the `useSearchParams` requirement
           inside the client form.
         */}
-        <Suspense fallback={<Skeleton className="h-96 w-full rounded-lg" />}>
+        <Suspense
+          fallback={<NotificationsSettingsFormSkeleton isAdmin={isAdmin} />}
+        >
           <NotificationsFormSection
             isAdmin={isAdmin}
             userId={session.user.id}

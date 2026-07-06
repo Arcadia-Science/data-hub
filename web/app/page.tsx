@@ -3,18 +3,22 @@ import Link from "next/link";
 import type { Metadata } from "next/types";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
-import { DashboardStatsCards } from "@/components/dashboard/dashboard-stats";
 import {
+  DashboardStatsCards,
+  StatCardsSkeleton,
+} from "@/components/dashboard/dashboard-stats";
+import {
+  DashboardRunsSkeleton,
   RunsTable,
-  RunsTableSkeleton,
 } from "@/components/dashboard/runs-table";
 import { RunsToolbar } from "@/components/dashboard/runs-toolbar";
-import { InstrumentsTable } from "@/components/instruments/instruments-table";
+import {
+  InstrumentsTable,
+  InstrumentsTableSkeleton,
+} from "@/components/instruments/instruments-table";
 import { RunBulkActionBar } from "@/components/instruments/runs-table/run-bulk-action-bar";
 import { RunSelectionProvider } from "@/components/instruments/runs-table/run-selection-provider";
 import { PaginationNav } from "@/components/pagination-nav";
-import { StatCardsSkeleton } from "@/components/skeletons/stat-cards-skeleton";
-import { TableSkeleton } from "@/components/skeletons/table-skeleton";
 import {
   TablePendingBoundary,
   TablePendingProvider,
@@ -79,16 +83,11 @@ export default async function DashboardPage({
         <h2 className="font-medium text-lg tracking-tight">Instruments</h2>
         <Suspense
           fallback={
-            <TableSkeleton
-              ariaLabel="Loading instruments"
-              headers={[
-                "Instrument",
-                "Status",
-                "File Patterns",
-                "Runs This Week",
-                "Last Run",
-              ]}
+            <InstrumentsTableSkeleton
+              footerLabel="View all instruments"
               rows={3}
+              withFooter
+              withNotifications={false}
             />
           }
         >
@@ -98,7 +97,7 @@ export default async function DashboardPage({
 
       <section className="flex flex-col gap-3">
         <h2 className="font-medium text-lg tracking-tight">Recent runs</h2>
-        <Suspense fallback={<RunsTableSkeleton />}>
+        <Suspense fallback={<DashboardRunsSkeleton />}>
           <DashboardRunsSection currentUserId={currentUserId} params={params} />
         </Suspense>
       </section>
@@ -186,23 +185,25 @@ async function DashboardRunsSection({
   return (
     <RunSelectionProvider>
       <TablePendingProvider>
-        <RunsToolbar instruments={instruments} />
-        <RunBulkActionBar />
-        <TablePendingBoundary>
-          <RunsTable
-            data={runResult.data}
-            hasFilters={hasFilters}
-            pendingUploadCount={pendingUploadCount}
-            ranByYouCount={ranByYouCount}
-            totalCount={runResult.pagination.total}
-            unattributedCount={unattributedCount}
+        <div className="flex flex-col gap-3">
+          <RunsToolbar instruments={instruments} />
+          <RunBulkActionBar />
+          <TablePendingBoundary>
+            <RunsTable
+              data={runResult.data}
+              hasFilters={hasFilters}
+              pendingUploadCount={pendingUploadCount}
+              ranByYouCount={ranByYouCount}
+              totalCount={runResult.pagination.total}
+              unattributedCount={unattributedCount}
+            />
+          </TablePendingBoundary>
+          <PaginationNav
+            page={runResult.pagination.page}
+            pageParam="page"
+            totalPages={runResult.pagination.total_pages}
           />
-        </TablePendingBoundary>
-        <PaginationNav
-          page={runResult.pagination.page}
-          pageParam="page"
-          totalPages={runResult.pagination.total_pages}
-        />
+        </div>
       </TablePendingProvider>
     </RunSelectionProvider>
   );

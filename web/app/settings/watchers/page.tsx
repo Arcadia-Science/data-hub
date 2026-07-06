@@ -4,8 +4,8 @@ import type { Metadata } from "next/types";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import { SettingsPageContent } from "@/components/settings/settings-page-content";
-import { Skeleton } from "@/components/ui/skeleton";
 import { WatcherReleaseForm } from "@/components/watcher-release/watcher-release-form";
+import { WatcherReleaseFormSkeleton } from "@/components/watcher-release/watcher-release-form-skeleton";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users, watcherReleaseConfig } from "@/lib/db/schema";
@@ -74,7 +74,7 @@ export default async function WatchersSettingsPage() {
       </div>
 
       <div className="mt-6">
-        <Suspense fallback={<Skeleton className="h-64 w-full rounded-lg" />}>
+        <Suspense fallback={<WatcherReleaseFormSkeleton />}>
           <WatcherReleaseSection />
         </Suspense>
       </div>

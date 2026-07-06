@@ -12,6 +12,12 @@ import { TapeStationRunDetail } from "./tape-station-run-detail";
 export type RunDetailVariantProps = RunDetailProps;
 
 export function RunDetailVariant(props: RunDetailVariantProps) {
+  return (
+    <div className="flex flex-col gap-6">{renderRunDetailVariant(props)}</div>
+  );
+}
+
+function renderRunDetailVariant(props: RunDetailVariantProps) {
   switch (props.run.instrumentType) {
     case "plate_reader":
       return <PlateReaderRunDetail {...props} />;

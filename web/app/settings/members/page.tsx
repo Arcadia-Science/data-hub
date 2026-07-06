@@ -3,9 +3,11 @@ import { ShieldOff } from "lucide-react";
 import type { Metadata } from "next/types";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
-import { MembersTable } from "@/components/members/members-table";
+import {
+  MembersTable,
+  MembersTableSkeleton,
+} from "@/components/members/members-table";
 import { SettingsPageContent } from "@/components/settings/settings-page-content";
-import { TableSkeleton } from "@/components/skeletons/table-skeleton";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
@@ -62,14 +64,7 @@ export default async function MembersPage() {
       </div>
 
       <div className="mt-6">
-        <Suspense
-          fallback={
-            <TableSkeleton
-              ariaLabel="Loading members"
-              headers={["Member", "Email", "Role", ""]}
-            />
-          }
-        >
+        <Suspense fallback={<MembersTableSkeleton />}>
           <MembersSection currentUserId={session.user.id} />
         </Suspense>
       </div>

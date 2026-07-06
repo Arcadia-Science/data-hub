@@ -1,11 +1,15 @@
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next/types";
 import { Suspense } from "react";
-import { Skeleton } from "@/components/ui/skeleton";
-import { HeartbeatChartSkeleton } from "@/components/watchers/heartbeat-chart";
 import { WatcherConfig } from "@/components/watchers/watcher-config";
-import { WatcherDetailTabs } from "@/components/watchers/watcher-detail-tabs";
-import { WatcherHeader } from "@/components/watchers/watcher-header";
+import {
+  WatcherDetailTabs,
+  WatcherDetailTabsSkeleton,
+} from "@/components/watchers/watcher-detail-tabs";
+import {
+  WatcherHeader,
+  WatcherHeaderSkeleton,
+} from "@/components/watchers/watcher-header";
 import {
   getAllWatcherHeartbeats,
   getWatcherById,
@@ -65,25 +69,9 @@ export default async function WatcherDetailPage({
       <Suspense fallback={<WatcherHeaderSkeleton />}>
         <WatcherHeaderSection watcherId={watcherId} />
       </Suspense>
-      <Suspense
-        fallback={
-          <div className="flex flex-col gap-4">
-            <Skeleton className="h-9 w-72" />
-            <HeartbeatChartSkeleton />
-          </div>
-        }
-      >
+      <Suspense fallback={<WatcherDetailTabsSkeleton />}>
         <WatcherTabsSection filters={filters} watcherId={watcherId} />
       </Suspense>
-    </div>
-  );
-}
-
-function WatcherHeaderSkeleton() {
-  return (
-    <div className="flex flex-col gap-2">
-      <Skeleton className="h-8 w-64" />
-      <Skeleton className="h-4 w-48" />
     </div>
   );
 }

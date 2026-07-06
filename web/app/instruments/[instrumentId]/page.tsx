@@ -2,8 +2,10 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next/types";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
-import { RunsTableSkeleton } from "@/components/dashboard/runs-table";
-import { InstrumentHeader } from "@/components/instruments/instrument-header";
+import {
+  InstrumentHeader,
+  InstrumentHeaderSkeleton,
+} from "@/components/instruments/instrument-header";
 import { InstrumentRunsToolbar } from "@/components/instruments/instrument-runs-toolbar";
 import {
   InstrumentRunsTableShell,
@@ -14,6 +16,7 @@ import { DefaultRunsTable } from "@/components/instruments/runs-table/default-ru
 import { EpsonScannerRunsTable } from "@/components/instruments/runs-table/epson-scanner-runs-table";
 import { GelDocRunsTable } from "@/components/instruments/runs-table/gel-doc-runs-table";
 import { HinaRunsTable } from "@/components/instruments/runs-table/hina-runs-table";
+import { InstrumentRunsSkeleton } from "@/components/instruments/runs-table/instrument-runs-skeleton";
 import { PlateReaderRunsTable } from "@/components/instruments/runs-table/plate-reader-runs-table";
 import { QpcrRunsTable } from "@/components/instruments/runs-table/qpcr-runs-table";
 import { RunBulkActionBar } from "@/components/instruments/runs-table/run-bulk-action-bar";
@@ -23,7 +26,6 @@ import {
   TablePendingBoundary,
   TablePendingProvider,
 } from "@/components/table-pending";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   buildRunListQuery,
   getInstrumentFilterOptions,
@@ -162,26 +164,13 @@ export default async function InstrumentDetailPage({
       <Suspense fallback={<InstrumentHeaderSkeleton />}>
         <InstrumentHeaderSection instrumentId={instrumentId} userId={userId} />
       </Suspense>
-      <Suspense fallback={<RunsTableSkeleton />}>
+      <Suspense fallback={<InstrumentRunsSkeleton />}>
         <InstrumentRunsSection
           filters={filters}
           instrumentId={instrumentId}
           userId={userId}
         />
       </Suspense>
-    </div>
-  );
-}
-
-function InstrumentHeaderSkeleton() {
-  return (
-    <div className="flex flex-col gap-2">
-      <Skeleton className="mb-2 h-4 w-56" />
-      <div className="flex items-center justify-between">
-        <Skeleton className="h-8 w-64" />
-        <Skeleton className="h-7 w-28" />
-      </div>
-      <Skeleton className="h-4 w-40" />
     </div>
   );
 }
@@ -316,31 +305,33 @@ async function InstrumentRunsSection({
   return (
     <RunSelectionProvider>
       <TablePendingProvider>
-        <InstrumentRunsToolbar />
-        <RunBulkActionBar />
-        <TablePendingBoundary>
-          <InstrumentRunsTableShell
-            hasFilters={hasFilters}
-            isEmpty={runResult.data.length === 0}
-            pendingUploadCount={pendingUploadCount}
-            ranByYouCount={ranByYouCount}
-            shownCount={runResult.data.length}
-            totalCount={runResult.pagination.total}
-            unattributedCount={unattributedCount}
-          >
-            {renderRunsTableVariant(
-              filterOptions,
-              runResult.data,
-              instrumentId,
-              ranByOptions
-            )}
-          </InstrumentRunsTableShell>
-        </TablePendingBoundary>
-        <PaginationNav
-          page={runResult.pagination.page}
-          pageParam="page"
-          totalPages={runResult.pagination.total_pages}
-        />
+        <div className="flex flex-col gap-3">
+          <InstrumentRunsToolbar />
+          <RunBulkActionBar />
+          <TablePendingBoundary>
+            <InstrumentRunsTableShell
+              hasFilters={hasFilters}
+              isEmpty={runResult.data.length === 0}
+              pendingUploadCount={pendingUploadCount}
+              ranByYouCount={ranByYouCount}
+              shownCount={runResult.data.length}
+              totalCount={runResult.pagination.total}
+              unattributedCount={unattributedCount}
+            >
+              {renderRunsTableVariant(
+                filterOptions,
+                runResult.data,
+                instrumentId,
+                ranByOptions
+              )}
+            </InstrumentRunsTableShell>
+          </TablePendingBoundary>
+          <PaginationNav
+            page={runResult.pagination.page}
+            pageParam="page"
+            totalPages={runResult.pagination.total_pages}
+          />
+        </div>
       </TablePendingProvider>
     </RunSelectionProvider>
   );

@@ -222,3 +222,45 @@ export function RunsTableSkeleton() {
     </div>
   );
 }
+
+function RunsToolbarSkeleton() {
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Skeleton className="h-9 w-64" />
+          <Skeleton className="h-9 w-32" />
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Skeleton className="h-9 w-32" />
+          <Skeleton className="h-9 w-28" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RunsTableEmptyPlaceholder() {
+  return (
+    <div
+      aria-hidden
+      className="rounded-lg border border-dashed bg-background py-16 dark:bg-muted"
+    />
+  );
+}
+
+// Dashboard default is often an empty filtered run list (24h lookback) with the
+// toolbar above it — not a populated table — so mirror that shell here.
+export function DashboardRunsSkeleton() {
+  return (
+    <div
+      aria-busy="true"
+      aria-label="Loading recent runs"
+      className="flex flex-col gap-3"
+      role="status"
+    >
+      <RunsToolbarSkeleton />
+      <RunsTableEmptyPlaceholder />
+    </div>
+  );
+}

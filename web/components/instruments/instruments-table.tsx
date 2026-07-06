@@ -1,4 +1,4 @@
-import { SearchX } from "lucide-react";
+import { ArrowRight, SearchX } from "lucide-react";
 import type { ReactNode } from "react";
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import { EditInstrumentDialog } from "@/components/instruments/edit-instrument-dialog";
@@ -8,6 +8,7 @@ import { ClickableRow } from "@/components/instruments/runs-table/clickable-row"
 import { StatusActions } from "@/components/instruments/status-actions";
 import { InstrumentNotificationsCell } from "@/components/notifications/instrument-notifications-cell";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -19,6 +20,107 @@ import {
 import { getWatcherOnlineStatus } from "@/components/watchers/watcher-online-status";
 import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type { InstrumentListItem } from "@/lib/api/instruments";
+
+/**
+ * Placeholder that mirrors `InstrumentsTable` column layout and row height
+ * (two-line instrument cell, badge-sized status/patterns, notify switch,
+ * optional actions) so streamed content swaps in without layout shift.
+ */
+export function InstrumentsTableSkeleton({
+  rows = 8,
+  withNotifications = true,
+  withRowActions = false,
+  withFooter = false,
+  footerLabel,
+  ariaLabel = "Loading instruments",
+}: {
+  rows?: number;
+  withNotifications?: boolean;
+  withRowActions?: boolean;
+  withFooter?: boolean;
+  footerLabel?: string;
+  ariaLabel?: string;
+}) {
+  return (
+    <div
+      aria-busy="true"
+      aria-label={ariaLabel}
+      className="rounded-lg border bg-background dark:bg-muted"
+      role="status"
+    >
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Instrument</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>File Patterns</TableHead>
+            <TableHead>Runs This Week</TableHead>
+            <TableHead>Last Run</TableHead>
+            {withNotifications ? (
+              <TableHead className="w-[80px]">Notify</TableHead>
+            ) : null}
+            {withRowActions ? <TableHead className="w-[100px]" /> : null}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {Array.from({ length: rows }).map((_, i) => (
+            <TableRow className="text-sm" key={i}>
+              <TableCell>
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="mt-0.5 h-4 w-24" />
+              </TableCell>
+              <TableCell>
+                <Skeleton className="h-5 w-20" />
+              </TableCell>
+              <TableCell>
+                <Skeleton className="h-5 w-16" />
+              </TableCell>
+              <TableCell>
+                <Skeleton className="h-4 w-8" />
+              </TableCell>
+              <TableCell>
+                <Skeleton className="h-4 w-20" />
+              </TableCell>
+              {withNotifications ? (
+                <TableCell>
+                  <Skeleton className="h-3.5 w-6 rounded-full" />
+                </TableCell>
+              ) : null}
+              {withRowActions ? (
+                <TableCell>
+                  <Skeleton className="h-8 w-16" />
+                </TableCell>
+              ) : null}
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      {withFooter ? (
+        <div className="border-t">
+          <div className="flex items-center justify-center gap-1.5 px-4 py-2.5 text-muted-foreground text-sm">
+            {footerLabel ?? <Skeleton className="h-4 w-44" />}
+            {footerLabel ? <ArrowRight className="size-3.5" /> : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Skeleton for the full `/instruments` management table (all catalogue rows). */
+export function InstrumentsListPageSkeleton({
+  withRowActions = false,
+}: {
+  withRowActions?: boolean;
+}) {
+  return (
+    <InstrumentsTableSkeleton
+      rows={8}
+      withNotifications
+      withRowActions={withRowActions}
+    />
+  );
+}
 
 /**
  * Default row actions used by the management page: an approval action for

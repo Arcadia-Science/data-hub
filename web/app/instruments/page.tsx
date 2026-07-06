@@ -4,9 +4,9 @@ import { SignInRequired } from "@/components/auth/sign-in-required";
 import { AddInstrumentDialog } from "@/components/instruments/add-instrument-dialog";
 import {
   InstrumentRowManagementActions,
+  InstrumentsListPageSkeleton,
   InstrumentsTable,
 } from "@/components/instruments/instruments-table";
-import { TableSkeleton } from "@/components/skeletons/table-skeleton";
 import { getInstrumentListWithCounts } from "@/lib/api/instruments";
 import {
   getPreferences,
@@ -53,19 +53,7 @@ export default async function InstrumentsPage() {
         />
       </div>
       <Suspense
-        fallback={
-          <TableSkeleton
-            ariaLabel="Loading instruments"
-            headers={[
-              "Instrument",
-              "Status",
-              "File Patterns",
-              "Runs This Week",
-              "Last Run",
-              "Notify",
-            ]}
-          />
-        }
+        fallback={<InstrumentsListPageSkeleton withRowActions={isAdmin} />}
       >
         <InstrumentsListSection isAdmin={isAdmin} userId={session.user.id} />
       </Suspense>

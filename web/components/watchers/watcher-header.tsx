@@ -10,6 +10,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+import { Skeleton } from "@/components/ui/skeleton";
 import { DeregisterDialog } from "@/components/watchers/deregister-dialog";
 import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type { WatcherDetail } from "@/lib/api/watchers";
@@ -19,6 +20,30 @@ import { formatRelativeTime } from "@/lib/utils";
 // Must stay a client component: `formatDate` resolves the timezone at runtime,
 // so server rendering uses UTC and can land a date on the wrong calendar day
 // near midnight.
+export function WatcherHeaderSkeleton() {
+  return (
+    <div
+      aria-busy="true"
+      aria-label="Loading watcher"
+      className="flex flex-col gap-4"
+      role="status"
+    >
+      <Skeleton className="h-4 w-56" />
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-8 w-40" />
+            <Skeleton className="h-5 w-24 rounded-full" />
+            <Skeleton className="h-5 w-14 rounded-full" />
+          </div>
+          <Skeleton className="h-7 w-24" />
+        </div>
+        <Skeleton className="h-5 w-96 max-w-full" />
+      </div>
+    </div>
+  );
+}
+
 export function WatcherHeader({ watcher }: { watcher: WatcherDetail }) {
   const isDeregistered = !!watcher.deletedAt;
 

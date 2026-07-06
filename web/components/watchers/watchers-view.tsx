@@ -2,8 +2,30 @@
 
 import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { WatchersTable } from "@/components/watchers/watchers-table";
+import {
+  WatchersTable,
+  WatchersTableSkeleton,
+} from "@/components/watchers/watchers-table";
 import type { WatcherListItem } from "@/lib/api/watchers";
+
+export function WatchersViewSkeleton() {
+  return (
+    <div aria-busy="true" aria-label="Loading watchers" role="status">
+      <Tabs defaultValue="active">
+        <TabsList variant="line">
+          <TabsTrigger value="active">Active</TabsTrigger>
+          <TabsTrigger value="deregistered">Deregistered</TabsTrigger>
+        </TabsList>
+        <TabsContent className="mt-2" value="active">
+          <WatchersTableSkeleton />
+        </TabsContent>
+        <TabsContent className="mt-2" value="deregistered">
+          <WatchersTableSkeleton />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
 
 type Tab = "active" | "deregistered";
 

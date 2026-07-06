@@ -1,8 +1,10 @@
 import type { Metadata } from "next/types";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
-import { TableSkeleton } from "@/components/skeletons/table-skeleton";
-import { WatchersView } from "@/components/watchers/watchers-view";
+import {
+  WatchersView,
+  WatchersViewSkeleton,
+} from "@/components/watchers/watchers-view";
 import { getWatcherList } from "@/lib/api/watchers";
 import { auth } from "@/lib/auth";
 
@@ -30,9 +32,7 @@ export default async function WatchersPage() {
       <div className="flex items-center justify-between">
         <h1 className="font-semibold text-2xl tracking-tight">Watchers</h1>
       </div>
-      <Suspense
-        fallback={<TableSkeleton ariaLabel="Loading watchers" columns={5} />}
-      >
+      <Suspense fallback={<WatchersViewSkeleton />}>
         <WatchersListSection />
       </Suspense>
     </div>

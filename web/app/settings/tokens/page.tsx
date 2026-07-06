@@ -3,10 +3,10 @@ import { KeyRound } from "lucide-react";
 import type { Metadata } from "next/types";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
-import { TableSkeleton } from "@/components/skeletons/table-skeleton";
 import { CreateTokenDialog } from "@/components/tokens/create-token-dialog";
 import { CreateTokenDisabledButton } from "@/components/tokens/create-token-disabled-button";
 import { DeleteTokenDialog } from "@/components/tokens/delete-token-dialog";
+import { TokensTableSkeleton } from "@/components/tokens/tokens-table-skeleton";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -148,14 +148,7 @@ export default async function TokensPage() {
       </div>
 
       <div className="mt-6">
-        <Suspense
-          fallback={
-            <TableSkeleton
-              ariaLabel="Loading access tokens"
-              columns={isAdmin ? 8 : 7}
-            />
-          }
-        >
+        <Suspense fallback={<TokensTableSkeleton withAdmin={isAdmin} />}>
           <TokensSection isAdmin={isAdmin} />
         </Suspense>
       </div>

@@ -1,7 +1,6 @@
-import { RunsTableSkeleton } from "@/components/dashboard/runs-table";
-import { PageHeaderSkeleton } from "@/components/skeletons/page-header-skeleton";
-import { StatCardsSkeleton } from "@/components/skeletons/stat-cards-skeleton";
-import { TableSkeleton } from "@/components/skeletons/table-skeleton";
+import { StatCardsSkeleton } from "@/components/dashboard/dashboard-stats";
+import { DashboardRunsSkeleton } from "@/components/dashboard/runs-table";
+import { InstrumentsTableSkeleton } from "@/components/instruments/instruments-table";
 
 export default function DashboardLoading() {
   return (
@@ -9,23 +8,18 @@ export default function DashboardLoading() {
       <StatCardsSkeleton />
 
       <section className="flex flex-col gap-3">
-        <PageHeaderSkeleton />
-        <TableSkeleton
-          ariaLabel="Loading instruments"
-          headers={[
-            "Instrument",
-            "Status",
-            "File Patterns",
-            "Runs This Week",
-            "Last Run",
-          ]}
+        <h2 className="font-medium text-lg tracking-tight">Instruments</h2>
+        <InstrumentsTableSkeleton
+          footerLabel="View all instruments"
           rows={3}
+          withFooter
+          withNotifications={false}
         />
       </section>
 
       <section className="flex flex-col gap-3">
-        <PageHeaderSkeleton />
-        <RunsTableSkeleton />
+        <h2 className="font-medium text-lg tracking-tight">Recent runs</h2>
+        <DashboardRunsSkeleton />
       </section>
     </div>
   );
