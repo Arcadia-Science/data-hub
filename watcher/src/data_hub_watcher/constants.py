@@ -7,10 +7,41 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-API_URLS: dict[str, str] = {
-    "staging": "https://data-hub-env-staging-arcadia-science.vercel.app/api/v1",
-    "production": "https://data-hub.arcadiascience.com/api/v1",
+# Env vars a self-hosted deployment sets (typically in ``~/.data-hub/.env``)
+# to point the built-in ``staging`` / ``production`` environments at its own
+# Data Hub. The ``example.com`` placeholders in ``DEFAULT_API_URLS`` are
+# intentional: an unconfigured environment should fail against a dead host
+# rather than silently reach someone else's server. The ``preview``
+# environment has no default at all — it always requires an explicit
+# ``api_base_url`` in the config.
+STAGING_API_URL_ENV_VAR = "DATA_HUB_STAGING_API_URL"
+PRODUCTION_API_URL_ENV_VAR = "DATA_HUB_PRODUCTION_API_URL"
+
+DEFAULT_API_URLS: dict[str, str] = {
+    "staging": "https://datahub-staging.example.com/api/v1",
+    "production": "https://datahub.example.com/api/v1",
 }
+
+_API_URL_ENV_VARS: dict[str, str] = {
+    "staging": STAGING_API_URL_ENV_VAR,
+    "production": PRODUCTION_API_URL_ENV_VAR,
+}
+
+
+def resolve_api_url(environment: str) -> str:
+    """Return the API base URL for a built-in (non-preview) environment.
+
+    Prefers the per-environment override env var so operators can retarget
+    ``staging`` / ``production`` without a code change, falling back to the
+    ``example.com`` placeholder in ``DEFAULT_API_URLS``. Call this after
+    ``load_env`` so a value set in ``~/.data-hub/.env`` is visible.
+    """
+    env_var = _API_URL_ENV_VARS.get(environment)
+    if env_var:
+        override = os.environ.get(env_var)
+        if override:
+            return override
+    return DEFAULT_API_URLS[environment]
 
 
 def _read_watcher_version() -> str:

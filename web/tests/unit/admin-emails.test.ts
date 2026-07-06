@@ -35,40 +35,40 @@ describe("admin-emails helper", () => {
   });
 
   it("parses a single email", async () => {
-    const { isAdminEmail } = await loadHelper("alice@arcadia.com");
-    expect(isAdminEmail("alice@arcadia.com")).toBe(true);
-    expect(isAdminEmail("bob@arcadia.com")).toBe(false);
+    const { isAdminEmail } = await loadHelper("alice@example.com");
+    expect(isAdminEmail("alice@example.com")).toBe(true);
+    expect(isAdminEmail("bob@example.com")).toBe(false);
   });
 
   it("parses a comma-separated list", async () => {
     const { getAdminEmails, isAdminEmail } = await loadHelper(
-      "alice@arcadia.com,bob@arcadia.com,carol@arcadia.com"
+      "alice@example.com,bob@example.com,carol@example.com"
     );
     expect(getAdminEmails().size).toBe(3);
-    expect(isAdminEmail("alice@arcadia.com")).toBe(true);
-    expect(isAdminEmail("bob@arcadia.com")).toBe(true);
-    expect(isAdminEmail("carol@arcadia.com")).toBe(true);
+    expect(isAdminEmail("alice@example.com")).toBe(true);
+    expect(isAdminEmail("bob@example.com")).toBe(true);
+    expect(isAdminEmail("carol@example.com")).toBe(true);
   });
 
   it("treats comparisons as case-insensitive and trims whitespace", async () => {
     const { isAdminEmail } = await loadHelper(
-      "  Alice@arcadia.com , bob@arcadia.com  "
+      "  Alice@example.com , bob@example.com  "
     );
-    expect(isAdminEmail("ALICE@arcadia.com")).toBe(true);
-    expect(isAdminEmail("bob@ARCADIA.com")).toBe(true);
-    expect(isAdminEmail("  bob@arcadia.com  ")).toBe(true);
-    expect(isAdminEmail("carol@arcadia.com")).toBe(false);
+    expect(isAdminEmail("ALICE@example.com")).toBe(true);
+    expect(isAdminEmail("bob@EXAMPLE.com")).toBe(true);
+    expect(isAdminEmail("  bob@example.com  ")).toBe(true);
+    expect(isAdminEmail("carol@example.com")).toBe(false);
   });
 
   it("rejects null / undefined / empty inputs", async () => {
-    const { isAdminEmail } = await loadHelper("alice@arcadia.com");
+    const { isAdminEmail } = await loadHelper("alice@example.com");
     expect(isAdminEmail(null)).toBe(false);
     expect(isAdminEmail(undefined)).toBe(false);
     expect(isAdminEmail("")).toBe(false);
   });
 
   it("ignores empty entries from leading/trailing/double commas", async () => {
-    const { getAdminEmails } = await loadHelper(",,alice@arcadia.com,,");
+    const { getAdminEmails } = await loadHelper(",,alice@example.com,,");
     expect(getAdminEmails().size).toBe(1);
   });
 });

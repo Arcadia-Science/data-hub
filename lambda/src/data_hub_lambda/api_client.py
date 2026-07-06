@@ -40,7 +40,7 @@ class DataHubClient:
         timeout: tuple[float, float] = DEFAULT_TIMEOUT,
     ) -> None:
         # base_url should include the API version prefix (e.g.,
-        # "https://data-hub.arcadiascience.com/api/v1") — method paths
+        # "https://datahub.example.com/api/v1") — method paths
         # are appended relative to it.
         self.base_url = base_url.rstrip("/")
         self._timeout = timeout

@@ -13,7 +13,7 @@ from pydantic import ValidationError
 
 from data_hub_watcher.cli import _make_client
 from data_hub_watcher.config_io import load_config, save_config
-from data_hub_watcher.constants import API_URLS
+from data_hub_watcher.constants import resolve_api_url
 from data_hub_watcher.models import InstrumentConfig, RunDetectionConfig, WatcherConfig
 
 PREVIEW_URL = "https://data-hub-git-my-branch.vercel.app/api/v1"
@@ -146,14 +146,33 @@ class TestMakeClient:
         with pytest.raises(click.ClickException, match="api_base_url is required"):
             _make_client("preview")
 
-    def test_staging_uses_hardcoded_url(self) -> None:
+    def test_staging_uses_resolved_url(self) -> None:
         client = _make_client("staging")
-        assert client.base_url == API_URLS["staging"]
+        assert client.base_url == resolve_api_url("staging")
 
-    def test_production_uses_hardcoded_url(self) -> None:
+    def test_production_uses_resolved_url(self) -> None:
         client = _make_client("production")
-        assert client.base_url == API_URLS["production"]
+        assert client.base_url == resolve_api_url("production")
 
     def test_staging_ignores_api_base_url(self) -> None:
         client = _make_client("staging", api_base_url="https://should-be-ignored.example.com")
-        assert client.base_url == API_URLS["staging"]
+        assert client.base_url == resolve_api_url("staging")
+
+
+# ------------------------------------------------------------------
+# Group 4: env-var overrides for built-in environments
+# ------------------------------------------------------------------
+
+
+class TestResolveApiUrl:
+    def test_defaults_to_placeholder_when_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("DATA_HUB_STAGING_API_URL", raising=False)
+        monkeypatch.delenv("DATA_HUB_PRODUCTION_API_URL", raising=False)
+        assert resolve_api_url("staging").endswith(".example.com/api/v1")
+        assert resolve_api_url("production").endswith(".example.com/api/v1")
+
+    def test_env_var_overrides_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        override = "https://data-hub.mylab.internal/api/v1"
+        monkeypatch.setenv("DATA_HUB_PRODUCTION_API_URL", override)
+        assert resolve_api_url("production") == override
+        assert _make_client("production").base_url == override

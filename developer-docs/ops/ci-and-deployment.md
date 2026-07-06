@@ -136,7 +136,7 @@ cp infra/.env.example infra/.env.staging
 
 ```
 ECR_IMAGE_URI=<image-uri-from-step-2>
-DATA_HUB_API_URL=https://data-hub-env-staging-arcadia-science.vercel.app/api/v1
+DATA_HUB_API_URL=https://datahub-staging.example.com/api/v1
 DATA_HUB_API_KEY=<your-api-key>
 GITHUB_OIDC_PROVIDER_ARN=<github-oidc-arn-from-step-1>
 VERCEL_OIDC_PROVIDER_ARN=<vercel-oidc-arn-from-step-1>

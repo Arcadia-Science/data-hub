@@ -15,7 +15,6 @@ import click
 from data_hub_watcher.api_client import ApiError, DataHubClient
 from data_hub_watcher.config_io import config_checksum, load_config, save_config
 from data_hub_watcher.constants import (
-    API_URLS,
     DEFAULT_CONFIG_DIR,
     DEFAULT_STABILITY_PERIOD_SECONDS,
     RUN_DETECTION_PRESETS,
@@ -24,6 +23,7 @@ from data_hub_watcher.constants import (
     env_file_path,
     load_env,
     reset_state_db,
+    resolve_api_url,
     resolve_config_path,
     resolve_state_db_path,
     save_api_key,
@@ -150,7 +150,7 @@ def _make_client(
             raise click.ClickException("api_base_url is required for the 'preview' environment.")
         base_url = api_base_url
     else:
-        base_url = API_URLS[environment]
+        base_url = resolve_api_url(environment)
     return DataHubClient(base_url, api_key=api_key)
 
 
