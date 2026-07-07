@@ -43,7 +43,7 @@ All commands accept two global flags:
 
 Interactive setup wizard that:
 
-1. Prompts for the environment (`staging`, `production`, or `preview`). Choosing `preview` also prompts for a custom API base URL.
+1. Prompts for the environment (`staging`, `production`, or `preview`) and the Data Hub API base URL for it. There is no built-in default URL — each environment points at whatever deployment you host — and the URL is saved per environment so switching back later reuses it without re-prompting.
 2. Prompts for an API key (or reads `DATA_HUB_API_KEY` from the environment). The key is saved to a per-environment file at `~/.data-hub/.env.<environment>` (e.g. `.env.staging`), so switching between environments later doesn't require re-entering it.
 3. Fetches existing instruments from the API or registers a new one.
 4. Prompts for the watch directory, file patterns, run detection pattern, stability period, and upload mode.
@@ -137,7 +137,8 @@ The config file lives at `~/.data-hub/config.yaml` by default. Override with `--
 ```yaml
 version: 1
 environment: production          # "staging", "production", or "preview"
-api_base_url: null               # required when environment is "preview"
+api_base_urls:                   # one API base URL per environment (no default)
+  production: https://datahub.example.com/api/v1
 watcher_ids:                     # one registration id per environment
   production: <assigned-by-api>
 initial_scan: null               # null (default), "full", or "new-only"
@@ -177,17 +178,21 @@ A config written by an older watcher used a single top-level `watcher_id`. It is
 
 ### Switching environments
 
-A single PC can move between `staging`, `production`, and `preview` and back. Because staging and production are separate Data Hub deployments with separate databases, each holds its own watcher registration — `watcher_ids` stores one id per environment, and the credentials live in per-environment `~/.data-hub/.env.<environment>` files.
+A single PC can move between `staging`, `production`, and `preview` and back. Because these are separate Data Hub deployments with separate databases, each holds its own watcher registration and its own API base URL — `watcher_ids` stores one id per environment, `api_base_urls` stores one URL per environment, and the credentials live in per-environment `~/.data-hub/.env.<environment>` files.
+
+The first switch to an environment needs its URL via `--api-base-url`; later switches reuse the stored value, so you never re-enter it.
 
 Switch with:
 
 ```sh
-# Switch to staging (reuses a stored registration, or registers one).
-uv run data-hub-watcher config set-environment staging
+# First switch to an environment: provide its base URL (stored for next time).
+uv run data-hub-watcher config set-environment staging \
+  --api-base-url https://datahub-staging.example.com/api/v1
 
-# Point at a preview deployment (the base URL is required).
-uv run data-hub-watcher config set-environment preview \
-  --api-base-url https://data-hub-git-my-branch.vercel.app/api/v1
+# Subsequent switches reuse the stored URL — no flag needed.
+uv run data-hub-watcher config set-environment production \
+  --api-base-url https://datahub.example.com/api/v1
+uv run data-hub-watcher config set-environment staging
 ```
 
 `config edit` also re-prompts for the environment and runs the same switch flow when it changes. Useful flags: `--api-key` (otherwise the key is read from the env file or prompted), `--show-key`, and `--no-register` (fail instead of registering a new watcher if none is stored for the target).
