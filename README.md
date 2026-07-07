@@ -14,15 +14,15 @@ flowchart LR
 
 ## Repository structure
 
-| Directory | Description | Docs |
-| --- | --- | --- |
-| `web/` | Next.js web application and REST API (Vercel) | [API reference](https://arcadia-data-hub-docs.vercel.app/docs/api-reference) |
-| `lambda/` | AWS Lambda function for instrument data processing | [Lambda docs](developer-docs/lambda.md) |
-| `watcher/` | CLI agent for lab instrument PCs | [Watcher docs](developer-docs/watcher.md) |
-| `packages/shared/` | Shared Python library (S3, enums, test infra) | [Shared library](developer-docs/shared-library.md) |
-| `developer-docs/` | Project documentation | [Index](developer-docs/README.md) |
+| Directory | Description |
+| --- | --- |
+| `web/` | Next.js web application and REST API (Vercel) |
+| `lambda/` | AWS Lambda function for instrument data processing |
+| `watcher/` | CLI agent for lab instrument PCs |
+| `packages/shared/` | Shared Python library (S3, enums, test infra) |
+| `developer-docs/` | Project documentation |
 
-## Quick start
+## Getting started
 
 ```sh
 # Install Python packages (all workspace members).
@@ -41,18 +41,14 @@ cd web && createdb data-hub-local && npm run db:push && cd ..
 make dev
 ```
 
-See the full [Getting Started guide](developer-docs/getting-started.md) for prerequisites and details.
+See the full [Getting started guide](developer-docs/getting-started.md) for prerequisites and details. Don't have AWS/Google credentials? [Local development](developer-docs/local-development.md) covers a zero-credential setup for the web app + API + database alone (no watcher or Lambda needed).
 
-## Documentation
+Developer docs live in [developer-docs/](developer-docs/README.md). You can find user documentation (self-hosted deployment, watcher installation, adding an instrument, managing tokens) on the [docs site](https://arcadia-data-hub-docs.vercel.app/).
 
-User, operator, and admin documentation (installing a watcher, adding an instrument, managing tokens, deployment) lives on the [docs site](https://arcadia-data-hub-docs.vercel.app/), not in this repository.
-
-Documentation for developing Data Hub itself lives in [developer-docs/](developer-docs/README.md), starting with [Getting started](developer-docs/getting-started.md).
-
-## Development
+## Checks and tests
 
 ```sh
-# Run formatting, linting, and type checking.
+# Format, lint, and type-check everything.
 make check-all
 
 # Run all Python tests.
@@ -64,7 +60,7 @@ make py-test-unit
 # Run Python integration tests (requires Postgres).
 make py-test-integration
 
-# Run web app unit + in-memory MCP tests.
+# Run web app unit tests.
 make fe-test-unit
 
 # Run API integration tests (requires Postgres).

@@ -3,7 +3,7 @@
 Documentation for developing Data Hub itself. User, operator, and admin
 documentation (installing a watcher, adding an instrument, managing tokens,
 deployment) lives on the [docs site](https://arcadia-data-hub-docs.vercel.app/)
-instead — see the root [README](../README.md#documentation) for that split.
+instead — see the root [README](../README.md#getting-started) for that split.
 
 - [Getting started](getting-started.md) — development setup, environment variables, running locally
 - [Local development](local-development.md) — zero-credential dev workflow for the web app + API + database (no watcher / Lambda needed)
