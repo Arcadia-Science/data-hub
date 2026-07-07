@@ -45,23 +45,16 @@ See the full [Getting Started guide](developer-docs/getting-started.md) for prer
 
 ## Documentation
 
-User, operator, and admin documentation (installing a watcher, adding an
-instrument, managing tokens, deployment) lives on the
-[docs site](https://arcadia-data-hub-docs.vercel.app/), not in this repository.
-The docs below are for people developing Data Hub itself.
+User, operator, and admin documentation (installing a watcher, adding an instrument, managing tokens, deployment) lives on the [docs site](https://arcadia-data-hub-docs.vercel.app/), not in this repository. The docs below are for people developing Data Hub itself.
 
-### Guides
-
-- [Local development](developer-docs/local-development.md) — zero-credential dev workflow for the web app + API + database (no watcher / Lambda needed)
-
-### Reference
-
-- [Architecture](developer-docs/architecture.md) — system overview, data flow, and design decisions
 - [Getting started](developer-docs/getting-started.md) — development setup, environment variables, running locally
+- [Local development](developer-docs/local-development.md) — zero-credential dev workflow for the web app + API + database (no watcher / Lambda needed)
+- [Architecture](developer-docs/architecture.md) — system overview, data flow, and design decisions
 - [Watcher](developer-docs/reference/watcher.md) — CLI commands, configuration, run detection, upload modes
 - [Lambda](developer-docs/reference/lambda.md) — processing pipeline, supported instruments, adding new instruments
 - [Shared library](developer-docs/reference/shared-library.md) — module reference for `data-hub-shared`
 - [CI and deployment](developer-docs/ops/ci-and-deployment.md) — GitHub Actions, Vercel, Render, Lambda deployment
+- [Run archives](developer-docs/ops/run-archives.md) — "Download all" flow, cache/dedup model, and on-call runbook
 - [Conventions](developer-docs/conventions.md) — S3 key layout, instrument IDs, code style, environments
 
 ## Development
@@ -87,6 +80,4 @@ make fe-test-integration
 
 Data Hub is released under the [MIT License](LICENSE). Copyright (c) 2026 Arcadia Science.
 
-"Data Hub" and "Arcadia Science", along with related names and logos, are marks of
-Arcadia Science. The MIT License covers the source code only and does not grant any
-right to use these names or logos.
+"Data Hub" and "Arcadia Science", along with related names and logos, are marks of Arcadia Science. The MIT License covers the source code only and does not grant any right to use these names or logos.
