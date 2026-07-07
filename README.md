@@ -14,15 +14,15 @@ flowchart LR
 
 ## Repository structure
 
-| Directory | Description | Docs |
-| --- | --- | --- |
-| `web/` | Next.js web application and REST API (Vercel) | [API reference](developer-docs/reference/api.md) |
-| `lambda/` | AWS Lambda function for instrument data processing | [Lambda docs](developer-docs/reference/lambda.md) |
-| `watcher/` | CLI agent for lab instrument PCs | [Watcher docs](developer-docs/reference/watcher.md) |
-| `packages/shared/` | Shared Python library (S3, enums, test infra) | [Shared library](developer-docs/reference/shared-library.md) |
-| `developer-docs/` | Project documentation | — |
+| Directory | Description |
+| --- | --- |
+| `web/` | Next.js web application and REST API (Vercel) |
+| `lambda/` | AWS Lambda function for instrument data processing |
+| `watcher/` | CLI agent for lab instrument PCs |
+| `packages/shared/` | Shared Python library (S3, enums, test infra) |
+| `developer-docs/` | Project documentation |
 
-## Quick start
+## Getting started
 
 ```sh
 # Install Python packages (all workspace members).
@@ -41,33 +41,14 @@ cd web && createdb data-hub-local && npm run db:push && cd ..
 make dev
 ```
 
-See the full [Getting Started guide](developer-docs/getting-started.md) for prerequisites and details.
+See the full [Getting started guide](developer-docs/getting-started.md) for prerequisites and details. Don't have AWS/Google credentials? [Local development](developer-docs/local-development.md) covers a zero-credential setup for the web app + API + database alone (no watcher or Lambda needed).
 
-## Documentation
+Developer docs live in [developer-docs/](developer-docs/README.md). You can find user documentation (self-hosted deployment, watcher installation, adding an instrument, managing tokens) on the [docs site](https://arcadia-data-hub-docs.vercel.app/).
 
-### Guides
-
-- [Local development](developer-docs/local-development.md) — zero-credential dev workflow for the web app + API + database (no watcher / Lambda needed)
-- [Adding an instrument](developer-docs/guides/adding-an-instrument.md) — end-to-end: watcher setup, activation, optional Lambda preprocessing
-- [Installing a watcher](developer-docs/guides/installing-a-watcher.md) — lab operator focused: init, watch, troubleshooting
-- [Managing tokens](developer-docs/guides/managing-tokens.md) — creating, using, and revoking API tokens
-
-### Reference
-
-- [Architecture](developer-docs/architecture.md) — system overview, data flow, and design decisions
-- [Getting started](developer-docs/getting-started.md) — development setup, environment variables, running locally
-- [Watcher](developer-docs/reference/watcher.md) — CLI commands, configuration, run detection, upload modes
-- [Lambda](developer-docs/reference/lambda.md) — processing pipeline, supported instruments, adding new instruments
-- [REST API](developer-docs/reference/api.md) — endpoint reference and authentication
-- [MCP server](developer-docs/reference/mcp.md) — tools, resources, prompts, and installation for Claude Desktop / Cursor
-- [Shared library](developer-docs/reference/shared-library.md) — module reference for `data-hub-shared`
-- [CI and deployment](developer-docs/ops/ci-and-deployment.md) — GitHub Actions, Vercel, Render, Lambda deployment
-- [Conventions](developer-docs/conventions.md) — S3 key layout, instrument IDs, code style, environments
-
-## Development
+## Checks and tests
 
 ```sh
-# Run formatting, linting, and type checking.
+# Format, lint, and type-check everything.
 make check-all
 
 # Run all Python tests.
@@ -79,6 +60,9 @@ make py-test-unit
 # Run Python integration tests (requires Postgres).
 make py-test-integration
 
+# Run web app unit tests.
+make fe-test-unit
+
 # Run API integration tests (requires Postgres).
 make fe-test-integration
 ```
@@ -87,6 +71,4 @@ make fe-test-integration
 
 Data Hub is released under the [MIT License](LICENSE). Copyright (c) 2026 Arcadia Science.
 
-"Data Hub" and "Arcadia Science", along with related names and logos, are marks of
-Arcadia Science. The MIT License covers the source code only and does not grant any
-right to use these names or logos.
+"Data Hub" and "Arcadia Science", along with related names and logos, are marks of Arcadia Science. The MIT License covers the source code only and does not grant any right to use these names or logos.

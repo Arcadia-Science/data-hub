@@ -505,7 +505,7 @@ Resources:
                   - iam:DetachRolePolicy
                   - iam:TagRole
                   # iam:DeleteRole is intentionally omitted — role replacement
-                  # requires an admin deploy (see ops/ci-and-deployment.md).
+                  # requires an admin deploy (see developer-docs/ci-and-deployment.md).
                 Resource:
                   - !Sub "arn:aws:iam::${AWS::AccountId}:role/data-hub-*-${Environment}"
 

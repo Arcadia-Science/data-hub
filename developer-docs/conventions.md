@@ -60,7 +60,8 @@ Run `make check-all` before pushing. CI enforces the same checks.
 
 ## Testing
 
-- Tests are co-located with each package: `lambda/tests/`, `watcher/tests/`, `packages/shared/tests/`.
-- Integration tests are marked with `@pytest.mark.integration` and require Postgres + a running Next.js server.
-- The shared `testing.py` module provides the `start_test_server()` context manager that handles all setup and teardown.
-- Unit tests should not require any external services.
+Tests are co-located with each package (`lambda/tests/`, `watcher/tests/`,
+`web/tests/`); unit tests need no external services, integration tests need
+Postgres + a built Next.js server. See [Testing](testing.md) for the full
+per-package breakdown, the shared `start_test_server()` fixture pattern, and
+how S3 is mocked in Lambda's integration suite.

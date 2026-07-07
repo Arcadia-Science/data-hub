@@ -133,12 +133,12 @@ Some features depend on services that aren't running in this workflow. Each one 
 | File reprocessing | The reprocess endpoint returns null and no Lambda is invoked | Same |
 | Slack channel notifications on new runs | `console.warn` only, no HTTP call | Configure an incoming webhook URL in Settings > Notifications > Slack channel (admins only) |
 | Slack DM notifications / Connect to Slack | `console.warn` only; the "Connect to Slack" button redirects to Slack but the callback will error without credentials | Set `SLACK_BOT_TOKEN`, `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET` |
-| Watcher uploads → Lambda → API loop | Not exercised end-to-end; the seed inserts the resulting rows directly. For Lambda-only smoke testing, see [Testing the Lambda end-to-end](#testing-the-lambda-end-to-end) below | Run the watcher (`reference/watcher.md`) and the Lambda (`reference/lambda.md`) end-to-end |
+| Watcher uploads → Lambda → API loop | Not exercised end-to-end; the seed inserts the resulting rows directly. For Lambda-only smoke testing, see [Testing the Lambda end-to-end](#testing-the-lambda-end-to-end) below | Run the watcher (`watcher.md`) and the Lambda (`lambda.md`) end-to-end |
 | Sign in with Google | The button still renders but OAuth callback will 4xx without `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | `vercel env pull` per `getting-started.md` |
 
 ## Testing the Lambda end-to-end
 
-Working on a `process_file()` module (or wiring up a brand new one — see [Adding an instrument](guides/adding-an-instrument.md)) and want to run it against the local web app without standing up real S3? The lambda CLI ships a `handler` subcommand that drives `lambda_handler` end-to-end against a gitignored directory mirroring the S3 layout.
+Working on a `process_file()` module (or wiring up a brand new one — see [Lambda → Adding a new instrument](lambda.md#adding-a-new-instrument)) and want to run it against the local web app without standing up real S3? The lambda CLI ships a `handler` subcommand that drives `lambda_handler` end-to-end against a gitignored directory mirroring the S3 layout.
 
 ```sh
 cd lambda
@@ -226,5 +226,5 @@ The same builders back the integration test harness in [web/tests/integration/he
 
 - [Getting started](getting-started.md) — full setup with real Google OAuth and AWS credentials.
 - [Architecture](architecture.md) — system overview and data flow.
-- [REST API](reference/api.md) — endpoint reference for the seeded PAT.
-- [MCP server](reference/mcp.md) — Model Context Protocol tools at `/api/v1/mcp`.
+- [REST API](https://arcadia-data-hub-docs.vercel.app/docs/api-reference) — endpoint reference for the seeded PAT.
+- [MCP server](https://arcadia-data-hub-docs.vercel.app/docs/mcp-server) — Model Context Protocol tools at `/api/v1/mcp`.

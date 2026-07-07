@@ -25,7 +25,7 @@ Four workflows run on pushes to `staging`/`production` and on pull requests targ
 ### TypeScript tests (`typescript-test.yml`)
 
 - Starts a Postgres 17 service container and Node.js 24.
-- `make fe-test-mcp` — runs in-memory MCP protocol tests (mocked data layer, no database).
+- `make fe-test-unit` — runs `tests/unit/` and `tests/mcp/` (in-memory MCP protocol tests) together; no Postgres, no Next.js server, no global setup. See [Testing](testing.md).
 - `make fe-test-integration` — runs Vitest integration tests that test the API routes and MCP server over HTTP against a real database.
 
 ### Apply database migrations (`apply-migrations.yml`)
@@ -200,7 +200,7 @@ Secrets (`DATA_HUB_API_KEY`, etc.) are stored in GitHub environment secrets scop
 
 #### Local deployment
 
-Local deployment requires the following tools in addition to the [general prerequisites](../getting-started.md#prerequisites):
+Local deployment requires the following tools in addition to the [general prerequisites](getting-started.md#prerequisites):
 
 - [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) — used for bootstrap commands and ECR login.
 - [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html) — used by `make sam-deploy` to package and deploy CloudFormation stacks. Install with `brew install aws-sam-cli` on macOS.
@@ -228,7 +228,7 @@ make sam-deploy ENV=staging
 
 ### Watcher (PyPI)
 
-The `data-hub-watcher` Python package is published to [PyPI](https://pypi.org/project/data-hub-watcher/) so lab PCs can install and self-update via `uv tool install data-hub-watcher`. The full release flow — version bump, tag, approval, env-var roll-out, mandatory updates, and rollback — is documented in the operator-facing [Upgrading the watcher](../guides/upgrading-the-watcher.md) guide; this section is intentionally a pointer rather than a second source of truth so the two can't drift.
+The `data-hub-watcher` Python package is published to [PyPI](https://pypi.org/project/data-hub-watcher/) so lab PCs can install and self-update via `uv tool install data-hub-watcher`. The full release flow — version bump, tag, approval, env-var roll-out, mandatory updates, and rollback — is documented in the admin-facing [Managing watchers → Releases and fleet updates](https://arcadia-data-hub-docs.vercel.app/docs/managing-watchers#releases-and-fleet-updates) guide; this section is intentionally a pointer rather than a second source of truth so the two can't drift.
 
 Trusted publishing is configured under **Project → Publishing** on PyPI for `Arcadia-Science/data-hub` and the workflow `publish-watcher.yml`; no API token lives in repo secrets. If trust is ever revoked or rotated, update it there and re-run the workflow.
 
