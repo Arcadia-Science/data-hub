@@ -53,8 +53,8 @@ jobs:
         run: npm ci
         working-directory: web
 
-      - name: Run MCP tests
-        run: make fe-test-mcp
+      - name: Run unit tests
+        run: make fe-test-unit
 
       - name: Run API integration tests
         run: make fe-test-integration

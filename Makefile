@@ -59,9 +59,9 @@ fe-lint:
 fe-typecheck:
 	cd web && npm run typecheck
 
-.PHONY: fe-test-mcp
-fe-test-mcp:
-	cd web && npm run test:mcp
+.PHONY: fe-test-unit
+fe-test-unit:
+	cd web && npm run test:unit
 
 .PHONY: fe-test-integration
 fe-test-integration:
@@ -69,7 +69,7 @@ fe-test-integration:
 
 .PHONY: fe-test
 fe-test:
-	cd web && npm run test:mcp && npm run test:integration
+	cd web && npm run test:unit && npm run test:integration
 
 .PHONY: dev
 dev:

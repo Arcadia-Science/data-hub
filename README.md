@@ -17,10 +17,10 @@ flowchart LR
 | Directory | Description | Docs |
 | --- | --- | --- |
 | `web/` | Next.js web application and REST API (Vercel) | [API reference](https://arcadia-data-hub-docs.vercel.app/docs/api-reference) |
-| `lambda/` | AWS Lambda function for instrument data processing | [Lambda docs](developer-docs/reference/lambda.md) |
-| `watcher/` | CLI agent for lab instrument PCs | [Watcher docs](developer-docs/reference/watcher.md) |
-| `packages/shared/` | Shared Python library (S3, enums, test infra) | [Shared library](developer-docs/reference/shared-library.md) |
-| `developer-docs/` | Project documentation | — |
+| `lambda/` | AWS Lambda function for instrument data processing | [Lambda docs](developer-docs/lambda.md) |
+| `watcher/` | CLI agent for lab instrument PCs | [Watcher docs](developer-docs/watcher.md) |
+| `packages/shared/` | Shared Python library (S3, enums, test infra) | [Shared library](developer-docs/shared-library.md) |
+| `developer-docs/` | Project documentation | [Index](developer-docs/README.md) |
 
 ## Quick start
 
@@ -45,17 +45,9 @@ See the full [Getting Started guide](developer-docs/getting-started.md) for prer
 
 ## Documentation
 
-User, operator, and admin documentation (installing a watcher, adding an instrument, managing tokens, deployment) lives on the [docs site](https://arcadia-data-hub-docs.vercel.app/), not in this repository. The docs below are for people developing Data Hub itself.
+User, operator, and admin documentation (installing a watcher, adding an instrument, managing tokens, deployment) lives on the [docs site](https://arcadia-data-hub-docs.vercel.app/), not in this repository.
 
-- [Getting started](developer-docs/getting-started.md) — development setup, environment variables, running locally
-- [Local development](developer-docs/local-development.md) — zero-credential dev workflow for the web app + API + database (no watcher / Lambda needed)
-- [Architecture](developer-docs/architecture.md) — system overview, data flow, and design decisions
-- [Watcher](developer-docs/reference/watcher.md) — CLI commands, configuration, run detection, upload modes
-- [Lambda](developer-docs/reference/lambda.md) — processing pipeline, supported instruments, adding new instruments
-- [Shared library](developer-docs/reference/shared-library.md) — module reference for `data-hub-shared`
-- [CI and deployment](developer-docs/ops/ci-and-deployment.md) — GitHub Actions, Vercel, Render, Lambda deployment
-- [Run archives](developer-docs/ops/run-archives.md) — "Download all" flow, cache/dedup model, and on-call runbook
-- [Conventions](developer-docs/conventions.md) — S3 key layout, instrument IDs, code style, environments
+Documentation for developing Data Hub itself lives in [developer-docs/](developer-docs/README.md), starting with [Getting started](developer-docs/getting-started.md).
 
 ## Development
 
@@ -71,6 +63,9 @@ make py-test-unit
 
 # Run Python integration tests (requires Postgres).
 make py-test-integration
+
+# Run web app unit + in-memory MCP tests.
+make fe-test-unit
 
 # Run API integration tests (requires Postgres).
 make fe-test-integration
