@@ -494,6 +494,16 @@ Resources:
                   - !Sub "arn:aws:s3:::arcadia-data-hub-raw-${Environment}"
                   - !Sub "arn:aws:s3:::arcadia-data-hub-processed-${Environment}"
                   - !Sub "arn:aws:s3:::arcadia-data-hub-archives-${Environment}"
+              # Same rationale as notifications above — lets CI roll out CORS
+              # changes on the data buckets without an admin deploy.
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketCORS
+                  - s3:PutBucketCORS
+                Resource:
+                  - !Sub "arn:aws:s3:::arcadia-data-hub-raw-${Environment}"
+                  - !Sub "arn:aws:s3:::arcadia-data-hub-processed-${Environment}"
+                  - !Sub "arn:aws:s3:::arcadia-data-hub-archives-${Environment}"
               - Effect: Allow
                 Action:
                   - iam:GetRole

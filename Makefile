@@ -172,6 +172,15 @@ endif
 		"GitHubOidcProviderArn=$(GITHUB_OIDC_PROVIDER_ARN)" \
 		"VercelOidcProviderArn=$(VERCEL_OIDC_PROVIDER_ARN)"
 
+# Usage: make sam-status ENV=staging
+.PHONY: sam-status
+sam-status:
+ifndef ENV
+	$(error ENV is required, e.g. make sam-status ENV=staging)
+endif
+	aws cloudformation describe-stacks --stack-name data-hub-$(ENV) \
+		--region us-west-1 --query 'Stacks[0].StackStatus' --output text
+
 # Usage: make sam-teardown ENV=staging
 .PHONY: sam-teardown
 sam-teardown:
