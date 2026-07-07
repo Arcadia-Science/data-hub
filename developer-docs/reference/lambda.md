@@ -72,6 +72,8 @@ Slack channel notifications are sent by the **web app** (`web/lib/slack.ts`), no
 
 4. **Add tests.** Add unit tests in `lambda/tests/` for the new processor.
 
+5. **Configure the S3 trigger and deploy.** See [Deploying AWS infrastructure → Adding a Lambda processor for a new instrument](https://arcadia-data-hub-docs.vercel.app/docs/deploying-aws-infrastructure#adding-a-lambda-processor-for-a-new-instrument) for the `infra/template.yaml` trigger entry and the deploy steps.
+
 ## Local processing CLI
 
 The `data-hub-process` CLI lets you exercise instrument-specific parsing and processing locally. Most subcommands run a single processor in isolation against a file on disk and print the result; the `handler` subcommand drives `lambda_handler` end-to-end against a local S3 mirror and the dev API.

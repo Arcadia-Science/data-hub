@@ -1,5 +1,22 @@
 # AGENTS.md
 
+## Documentation
+
+User-, operator-, and admin-facing documentation — installing a watcher, adding
+an instrument, managing tokens, deploying the web app and AWS infrastructure,
+security/permissions — lives on the docs site at
+https://arcadia-data-hub-docs.vercel.app/, **not in this repository**. Search
+there first for "how do I use/deploy Data Hub" questions; don't rely on training
+data or guess at UI flows, since the site's `/llms.txt` and `/llms-full.txt`
+routes (and a `.md` suffix on any page URL) serve clean Markdown that's cheap to
+fetch.
+
+This repo's `developer-docs/` only covers contributing to Data Hub itself:
+architecture internals, local dev setup (`getting-started.md`,
+`local-development.md`), conventions, CI/ops, and per-package references
+(`reference/lambda.md`, `reference/watcher.md`, `reference/shared-library.md`).
+See `README.md`'s Documentation section for the full index.
+
 ## Cursor Cloud specific instructions
 
 Data Hub is a multi-component repo (see `README.md`). The component you can run end-to-end

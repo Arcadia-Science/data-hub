@@ -16,7 +16,7 @@ flowchart LR
 
 | Directory | Description | Docs |
 | --- | --- | --- |
-| `web/` | Next.js web application and REST API (Vercel) | [API reference](developer-docs/reference/api.md) |
+| `web/` | Next.js web application and REST API (Vercel) | [API reference](https://arcadia-data-hub-docs.vercel.app/docs/api-reference) |
 | `lambda/` | AWS Lambda function for instrument data processing | [Lambda docs](developer-docs/reference/lambda.md) |
 | `watcher/` | CLI agent for lab instrument PCs | [Watcher docs](developer-docs/reference/watcher.md) |
 | `packages/shared/` | Shared Python library (S3, enums, test infra) | [Shared library](developer-docs/reference/shared-library.md) |
@@ -45,12 +45,14 @@ See the full [Getting Started guide](developer-docs/getting-started.md) for prer
 
 ## Documentation
 
+User, operator, and admin documentation (installing a watcher, adding an
+instrument, managing tokens, deployment) lives on the
+[docs site](https://arcadia-data-hub-docs.vercel.app/), not in this repository.
+The docs below are for people developing Data Hub itself.
+
 ### Guides
 
 - [Local development](developer-docs/local-development.md) — zero-credential dev workflow for the web app + API + database (no watcher / Lambda needed)
-- [Adding an instrument](developer-docs/guides/adding-an-instrument.md) — end-to-end: watcher setup, activation, optional Lambda preprocessing
-- [Installing a watcher](developer-docs/guides/installing-a-watcher.md) — lab operator focused: init, watch, troubleshooting
-- [Managing tokens](developer-docs/guides/managing-tokens.md) — creating, using, and revoking API tokens
 
 ### Reference
 
@@ -58,8 +60,6 @@ See the full [Getting Started guide](developer-docs/getting-started.md) for prer
 - [Getting started](developer-docs/getting-started.md) — development setup, environment variables, running locally
 - [Watcher](developer-docs/reference/watcher.md) — CLI commands, configuration, run detection, upload modes
 - [Lambda](developer-docs/reference/lambda.md) — processing pipeline, supported instruments, adding new instruments
-- [REST API](developer-docs/reference/api.md) — endpoint reference and authentication
-- [MCP server](developer-docs/reference/mcp.md) — tools, resources, prompts, and installation for Claude Desktop / Cursor
 - [Shared library](developer-docs/reference/shared-library.md) — module reference for `data-hub-shared`
 - [CI and deployment](developer-docs/ops/ci-and-deployment.md) — GitHub Actions, Vercel, Render, Lambda deployment
 - [Conventions](developer-docs/conventions.md) — S3 key layout, instrument IDs, code style, environments
