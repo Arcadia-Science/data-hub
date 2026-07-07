@@ -31,15 +31,23 @@ def _write_config(
     *,
     environment: str,
     watcher_ids: dict[str, str],
-    api_base_url: str | None = None,
+    api_base_urls: dict[str, str] | None = None,
 ) -> Path:
     watch_dir = tmp_path / "data"
     watch_dir.mkdir(exist_ok=True)
     (watch_dir / "RUN001_sample.csv").write_text("a,b\n1,2\n")
+    # Default: give the stable staging/production environments a stored URL so
+    # switching between them reuses it without needing --api-base-url. Preview
+    # is intentionally left out so the "no stored URL" path stays testable.
+    if api_base_urls is None:
+        api_base_urls = {
+            "staging": "https://staging.example.test/api/v1",
+            "production": "https://production.example.test/api/v1",
+        }
     cfg = WatcherConfig(
         version=1,
         environment=environment,  # type: ignore[arg-type]
-        api_base_url=api_base_url,
+        api_base_urls=api_base_urls,
         watcher_ids=watcher_ids,
         instrument=InstrumentConfig(
             id="test-instrument",
@@ -183,7 +191,7 @@ class TestPreviewRedeploy:
             tmp_path,
             environment="preview",
             watcher_ids={"preview": "w-prev-a"},
-            api_base_url=PREVIEW_A,
+            api_base_urls={"preview": PREVIEW_A},
         )
 
         result = _invoke(
@@ -211,7 +219,7 @@ class TestPreviewRedeploy:
             tmp_path,
             environment="preview",
             watcher_ids={"preview": "w-prev-a"},
-            api_base_url=PREVIEW_A,
+            api_base_urls={"preview": PREVIEW_A},
         )
 
         result = _invoke(

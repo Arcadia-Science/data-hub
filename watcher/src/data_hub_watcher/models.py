@@ -72,7 +72,13 @@ class InstrumentConfig(BaseModel):
 class WatcherConfig(BaseModel):
     version: Literal[1]
     environment: Literal["staging", "production", "preview"]
-    api_base_url: str | None = None
+    # One API base URL per environment, keyed by the `environment` literal, so
+    # a single PC can switch between staging/production/preview without
+    # re-entering the URL each time. There is no baked-in default: every
+    # environment a host actually uses must have its URL set (prompted at
+    # `init`, reused on switch). The active environment's URL is exposed via
+    # the `api_base_url` property below.
+    api_base_urls: dict[str, str] = Field(default_factory=dict)
     # One watcher_id per environment so a single PC can switch between
     # staging/production/preview without losing the registration it already
     # holds in each. Keyed by the `environment` literal.
@@ -85,21 +91,38 @@ class WatcherConfig(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _migrate_legacy_watcher_id(cls, data: Any) -> Any:
-        # Pre-multi-env configs (and pre-multi-env constructor calls) carry a
-        # single top-level `watcher_id`. Lift it into `watcher_ids` under the
-        # active environment so on-disk configs migrate transparently on load.
-        if isinstance(data, dict) and "watcher_id" in data and "watcher_ids" not in data:
+    def _migrate_legacy_fields(cls, data: Any) -> Any:
+        # Pre-multi-env configs (and pre-multi-env constructor calls) carry
+        # single top-level `watcher_id` / `api_base_url` scalars. Lift them
+        # into their per-environment maps under the active environment so
+        # on-disk configs (and legacy `api_base_url=` kwargs) migrate
+        # transparently on load.
+        if not isinstance(data, dict):
+            return data
+        env = data.get("environment")
+        if "watcher_id" in data and "watcher_ids" not in data:
             legacy = data.pop("watcher_id")
-            env = data.get("environment")
             if legacy and env:
                 data["watcher_ids"] = {env: legacy}
+        if "api_base_url" in data and "api_base_urls" not in data:
+            legacy_url = data.pop("api_base_url")
+            if legacy_url and env:
+                data["api_base_urls"] = {env: legacy_url}
+        elif "api_base_url" in data:
+            # Both the scalar and the map were supplied; drop the scalar so it
+            # isn't flagged as an unexpected field.
+            data.pop("api_base_url")
         return data
 
     @property
     def watcher_id(self) -> str | None:
         """The watcher_id registered for the active environment, if any."""
         return self.watcher_ids.get(self.environment)
+
+    @property
+    def api_base_url(self) -> str | None:
+        """The API base URL configured for the active environment, if any."""
+        return self.api_base_urls.get(self.environment)
 
     def resolve_initial_scan(self) -> Literal["full", "new-only"]:
         """Effective initial-scan mode, defaulting by environment when unset.
@@ -111,12 +134,6 @@ class WatcherConfig(BaseModel):
         if self.initial_scan is not None:
             return self.initial_scan
         return "full" if self.environment == "production" else "new-only"
-
-    @model_validator(mode="after")
-    def _validate_preview_url(self) -> WatcherConfig:
-        if self.environment == "preview" and not self.api_base_url:
-            raise ValueError("api_base_url is required when environment is 'preview'")
-        return self
 
     @model_validator(mode="after")
     def _emit_warnings(self) -> WatcherConfig:
