@@ -28,7 +28,7 @@ const STATUS_CONFIG: Record<
       "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300",
   },
   inactive: {
-    label: "Inactive",
+    label: "Retired",
     Icon: Power,
     className: "bg-muted text-muted-foreground",
   },

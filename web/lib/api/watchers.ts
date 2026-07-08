@@ -86,7 +86,8 @@ export const UPLOAD_REQUEST_REVERT_GRACE_MS = 15 * 60 * 1000;
 type UploadRevertReason =
   | "watcher_stopped"
   | "watcher_deregistered"
-  | "watcher_offline_sweep";
+  | "watcher_offline_sweep"
+  | "instrument_retired";
 
 /**
  * Reverts an instrument's pending upload requests to `detected` when no watcher
@@ -128,6 +129,55 @@ export async function revertUploadQueueIfWatcherOffline(opts: {
   });
 
   return revertedIds.length;
+}
+
+/**
+ * Soft-deletes a single already-resolved, still-active watcher and reverts its
+ * instrument's upload queue when no watcher remains to drain it. Shared by the
+ * watcher DELETE route and instrument retirement so both teardown paths behave
+ * identically. Returns the `deleted_at` timestamp for the response payload.
+ */
+export async function deregisterWatcherRow(
+  watcher: { id: string; instrumentId: string },
+  reason: UploadRevertReason
+): Promise<Date> {
+  const now = new Date();
+  await db
+    .update(watchers)
+    .set({ deletedAt: now })
+    .where(eq(watchers.id, watcher.id));
+
+  // Must run after the soft-delete so the helper's online check excludes this
+  // watcher; otherwise a deregistered instrument's queue would sit undrained.
+  await revertUploadQueueIfWatcherOffline({
+    instrumentId: watcher.instrumentId,
+    watcherId: watcher.id,
+    reason,
+  });
+
+  return now;
+}
+
+/**
+ * Deregisters every active watcher attached to an instrument. Invoked when an
+ * instrument is retired (`status: "inactive"`) so its agents stop heartbeating.
+ * Returns the number of watchers deregistered.
+ */
+export async function deregisterInstrumentWatchers(
+  instrumentId: string
+): Promise<number> {
+  const active = await db
+    .select({ id: watchers.id, instrumentId: watchers.instrumentId })
+    .from(watchers)
+    .where(
+      and(eq(watchers.instrumentId, instrumentId), isNull(watchers.deletedAt))
+    );
+
+  for (const watcher of active) {
+    await deregisterWatcherRow(watcher, "instrument_retired");
+  }
+
+  return active.length;
 }
 
 interface WatcherLike {

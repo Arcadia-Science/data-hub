@@ -1,8 +1,8 @@
 "use client";
 
-import { Loader2, Pencil } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,7 +12,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -45,16 +44,29 @@ export function EditInstrumentDialog({
   instrumentId,
   displayName,
   instrumentType,
+  open,
+  onOpenChange,
 }: {
   instrumentId: string;
   displayName: string;
   instrumentType: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
   const [name, setName] = useState(displayName);
   const [type, setType] = useState(instrumentType);
   const [isPending, startTransition] = useTransition();
+
+  // Re-sync form state from props whenever the dialog opens so it reflects any
+  // server-side changes since the last edit. The dialog is opened
+  // programmatically by its parent menu, so `onOpenChange` alone wouldn't fire.
+  useEffect(() => {
+    if (open) {
+      setName(displayName);
+      setType(instrumentType);
+    }
+  }, [open, displayName, instrumentType]);
 
   // Disable Save until the user actually changes something — comparing the
   // trimmed name avoids treating whitespace-only edits as a real change.
@@ -79,30 +91,13 @@ export function EditInstrumentDialog({
       }
 
       toast.success("Instrument updated");
-      setOpen(false);
+      onOpenChange(false);
       router.refresh();
     });
   }
 
   return (
-    <Dialog
-      onOpenChange={(value) => {
-        setOpen(value);
-        // Re-sync form state from props on open so the dialog reflects any
-        // server-side changes since the last time it was opened.
-        if (value) {
-          setName(displayName);
-          setType(instrumentType);
-        }
-      }}
-      open={open}
-    >
-      <DialogTrigger asChild>
-        <Button className="flex gap-2 text-xs" size="sm" variant="ghost">
-          <Pencil className="size-3.5" />
-          <span>Edit</span>
-        </Button>
-      </DialogTrigger>
+    <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Edit instrument</DialogTitle>

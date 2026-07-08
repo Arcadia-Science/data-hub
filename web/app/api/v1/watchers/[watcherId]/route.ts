@@ -10,8 +10,8 @@ import {
 import { isValidUUID } from "@/lib/api/validators";
 import {
   computeEffectiveStatus,
+  deregisterWatcherRow,
   findActiveWatcher,
-  revertUploadQueueIfWatcherOffline,
 } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { instruments, watchers } from "@/lib/db/schema";
@@ -90,19 +90,10 @@ export async function DELETE(
     return apiError(409, CONFLICT, "Watcher is already deleted");
   }
 
-  const now = new Date();
-  await db
-    .update(watchers)
-    .set({ deletedAt: now })
-    .where(eq(watchers.id, watcherId));
-
-  // Must run after the soft-delete so the helper's online check excludes this
-  // watcher; otherwise a deregistered instrument's queue would sit undrained.
-  await revertUploadQueueIfWatcherOffline({
-    instrumentId: watcher.instrumentId,
-    watcherId,
-    reason: "watcher_deregistered",
-  });
+  const now = await deregisterWatcherRow(
+    { id: watcher.id, instrumentId: watcher.instrumentId },
+    "watcher_deregistered"
+  );
 
   return Response.json({ id: watcherId, deleted_at: now });
 }

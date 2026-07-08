@@ -2,6 +2,7 @@ import { and, count, eq, isNull } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { authorize, requireAdminForSession } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
+import { deregisterInstrumentWatchers } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import {
   instrumentRuns,
@@ -167,6 +168,13 @@ export async function PATCH(
       created_at: instruments.createdAt,
       updated_at: instruments.updatedAt,
     });
+
+  // Retiring an instrument tears down its watchers so agents stop heartbeating
+  // and any pending uploads drain out. This is unconditional — there's no live
+  // watcher for a retired instrument to talk to.
+  if (updates.status === "inactive") {
+    await deregisterInstrumentWatchers(instrumentId);
+  }
 
   return Response.json(updated);
 }

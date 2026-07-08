@@ -3,10 +3,9 @@ import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import { AddInstrumentDialog } from "@/components/instruments/add-instrument-dialog";
 import {
-  InstrumentRowManagementActions,
-  InstrumentsListPageSkeleton,
-  InstrumentsTable,
-} from "@/components/instruments/instruments-table";
+  InstrumentsView,
+  InstrumentsViewSkeleton,
+} from "@/components/instruments/instruments-view";
 import { getInstrumentListWithCounts } from "@/lib/api/instruments";
 import {
   getPreferences,
@@ -34,14 +33,12 @@ export default async function InstrumentsPage() {
     );
   }
 
-  // Composition: the management actions cell (Edit dialog + Confirm
-  // pending button) is rendered only for admins. Regular members see the
-  // same listing without the trailing actions column. InstrumentsTable
-  // already supports `renderRowActions` being omitted entirely, so no
-  // table-level prop changes are needed.
+  // Row actions (Edit / Retire / Reactivate + the pending Confirm button) are
+  // admin-only; regular members see the same listing without them. The tabs
+  // themselves are visible to everyone.
   const isAdmin = session.user.isAdmin === true;
 
-  // Header renders immediately; the table streams so a slow catalogue query
+  // Header renders immediately; the tabs stream so a slow catalogue query
   // doesn't hold up the "Add instrument" affordance.
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
@@ -52,9 +49,7 @@ export default async function InstrumentsPage() {
           setupGuideUrl={ADD_INSTRUMENT_DOCS_URL}
         />
       </div>
-      <Suspense
-        fallback={<InstrumentsListPageSkeleton withRowActions={isAdmin} />}
-      >
+      <Suspense fallback={<InstrumentsViewSkeleton withRowActions={isAdmin} />}>
         <InstrumentsListSection isAdmin={isAdmin} userId={session.user.id} />
       </Suspense>
     </div>
@@ -83,14 +78,23 @@ async function InstrumentsListSection({
     subscriptions.map((s) => [s.instrumentId, s.enabled])
   );
 
+  // Partition by lifecycle status for the tabs. The catalogue is small, so a
+  // single query + client-side split is cheaper than three status-filtered
+  // queries (mirrors the watchers page).
+  const activeData = instruments.filter((i) => i.status === "active");
+  const pendingData = instruments.filter((i) => i.status === "pending");
+  const retiredData = instruments.filter((i) => i.status === "inactive");
+
   return (
-    <InstrumentsTable
-      data={instruments}
+    <InstrumentsView
+      activeData={activeData}
+      isAdmin={isAdmin}
       notifications={{
         subscriptions: subscriptionMap,
         masterMuted: prefs.runsAllMuted,
       }}
-      renderRowActions={isAdmin ? InstrumentRowManagementActions : undefined}
+      pendingData={pendingData}
+      retiredData={retiredData}
     />
   );
 }
