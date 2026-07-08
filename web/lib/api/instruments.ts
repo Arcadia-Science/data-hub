@@ -315,14 +315,16 @@ export const getRecentActiveInstrumentsForDashboard = cache(
 );
 
 export interface InstrumentDetail {
-  /** Desktop hostname of the canonical active watcher, if any. */
+  /** Desktop hostname of the canonical watcher, if any. */
   activeWatcherHostname: string | null;
   /**
    * The "canonical" watcher for this instrument, used to render watcher
-   * affordances in the instrument header. When multiple watchers are
+   * affordances in the instrument header. When multiple live watchers are
    * attached, the most recently heartbeating one wins; ties (or instruments
    * whose watchers have never heartbeated) fall back to the first watcher
-   * by `createdAt`.
+   * by `createdAt`. When no live watcher remains, this points at the most
+   * recently deregistered watcher so the header can still link to its
+   * read-only detail page — the counts below stay based on live watchers.
    */
   activeWatcherId: string | null;
   createdAt: Date;
@@ -353,7 +355,7 @@ export const getInstrumentById = cache(async function getInstrumentById(
     return null;
   }
 
-  const [runCountResult, watcherRows] = await Promise.all([
+  const [runCountResult, allWatcherRows] = await Promise.all([
     db
       .select({ value: count() })
       .from(instrumentRuns)
@@ -371,12 +373,17 @@ export const getInstrumentById = cache(async function getInstrumentById(
         lastHeartbeatAt: watchers.lastHeartbeatAt,
         createdAt: watchers.createdAt,
         configYaml: watchers.configYaml,
+        deletedAt: watchers.deletedAt,
       })
       .from(watchers)
-      .where(
-        and(eq(watchers.instrumentId, instrumentId), isNull(watchers.deletedAt))
-      ),
+      .where(eq(watchers.instrumentId, instrumentId)),
   ]);
+
+  // Counts, file patterns, and heartbeat roll-ups reflect *live* watchers only:
+  // a deregistered watcher isn't watching anything, so it shouldn't inflate the
+  // online/offline tallies. Deregistered rows are kept around solely to resolve
+  // the canonical watcher link below.
+  const watcherRows = allWatcherRows.filter((w) => w.deletedAt === null);
 
   const staleThreshold = new Date(
     Date.now() - HEARTBEAT_STALE_MINUTES * 60 * 1000
@@ -422,6 +429,20 @@ export const getInstrumentById = cache(async function getInstrumentById(
           (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
         )[0]);
 
+  // An instrument stays associated with its watcher even after the agent is
+  // deregistered (e.g. when the instrument is retired). When no live watcher
+  // remains, fall back to the most recently deregistered one so the header can
+  // still link to its (now read-only) detail page instead of reading as if the
+  // instrument never had a watcher.
+  const canonicalWatcher =
+    activeWatcher ??
+    allWatcherRows
+      .filter((w) => w.deletedAt !== null)
+      .sort(
+        (a, b) => (b.deletedAt?.getTime() ?? 0) - (a.deletedAt?.getTime() ?? 0)
+      )[0] ??
+    null;
+
   return {
     id: instrument.id,
     displayName: instrument.displayName,
@@ -435,7 +456,7 @@ export const getInstrumentById = cache(async function getInstrumentById(
     watchersOnline,
     watchersOffline,
     lastWatcherHeartbeatAt,
-    activeWatcherId: activeWatcher?.id ?? null,
-    activeWatcherHostname: activeWatcher?.hostname ?? null,
+    activeWatcherId: canonicalWatcher?.id ?? null,
+    activeWatcherHostname: canonicalWatcher?.hostname ?? null,
   };
 });

@@ -39,16 +39,20 @@ export function InstrumentHeaderSkeleton() {
   );
 }
 
-// While an instrument is `pending` its lifecycle state (awaiting admin Confirm)
-// is the relevant signal, so it pre-empts the watcher connectivity badge. Once
-// active, the watcher badge — linked to the canonical watcher when present —
-// takes over.
+// While an instrument is `pending` (awaiting admin Confirm) or `inactive`
+// (retired), its lifecycle state is the relevant signal, so it pre-empts the
+// watcher connectivity badge — a retired instrument's watcher is deregistered,
+// and surfacing "No Watcher"/"Offline" there reads as a fault rather than an
+// intentional decommission. Only active instruments show the watcher badge,
+// linked to the canonical watcher when present.
 function renderStatusBadge(
   instrument: InstrumentDetail,
   watcherStatus: WatcherOnlineStatus
 ) {
-  if (instrument.status === "pending") {
-    return <InstrumentStatusBadge className="px-2 py-3" status="pending" />;
+  if (instrument.status === "pending" || instrument.status === "inactive") {
+    return (
+      <InstrumentStatusBadge className="px-2 py-3" status={instrument.status} />
+    );
   }
 
   const badge = (
