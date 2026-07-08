@@ -71,16 +71,11 @@ export function WatcherHeader({ watcher }: { watcher: WatcherDetail }) {
         </BreadcrumbList>
       </Breadcrumb>
 
-      {/* Deregistered watchers get a muted, dashed-border treatment to
-          visually signal that this is historical data. The deregister action
-          is hidden since the watcher is already soft-deleted. */}
-      <div
-        className={
-          isDeregistered
-            ? "flex flex-col gap-3 rounded-lg border border-dashed p-4 opacity-70"
-            : "flex flex-col gap-3"
-        }
-      >
+      {/* Deregistered watchers are signalled by the "Deregistered" badge and
+          the deregistered-on date below — not by fading the whole header,
+          which made the text too faint to read. The deregister action is
+          still hidden since the watcher is already soft-deleted. */}
+      <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <h1 className="font-semibold text-2xl tracking-tight">
@@ -95,11 +90,7 @@ export function WatcherHeader({ watcher }: { watcher: WatcherDetail }) {
                 v{watcher.watcherVersion}
               </Badge>
             )}
-            {isDeregistered && (
-              <Badge className="text-[10px]" variant="secondary">
-                Deregistered
-              </Badge>
-            )}
+            {isDeregistered && <Badge variant="secondary">Deregistered</Badge>}
           </div>
 
           {!isDeregistered && (

@@ -58,7 +58,9 @@ export function RunsTable({
   const runRefs: RunRef[] = data.map(runRowToRef);
 
   return (
-    <div className="rounded-lg border bg-background dark:bg-muted">
+    // `isolate` contains the rows' internal `z-10` (status icon / run-id link)
+    // so they don't paint over the fixed sidebar, which shares `z-10`.
+    <div className="isolate rounded-lg border bg-background dark:bg-muted">
       <Table>
         <TableHeader>
           <TableRow>

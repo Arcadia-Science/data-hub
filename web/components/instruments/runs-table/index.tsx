@@ -66,7 +66,10 @@ export function InstrumentRunsTableShell({
   }
 
   return (
-    <div className="rounded-lg border bg-background dark:bg-muted">
+    // `isolate` keeps the rows' internal `z-10` (status icon / run-id link)
+    // contained in a local stacking context so they don't paint over the
+    // fixed sidebar, which shares the same `z-10` in the root context.
+    <div className="isolate rounded-lg border bg-background dark:bg-muted">
       {children}
       <RunsTableFooter
         pendingUploadCount={pendingUploadCount}
