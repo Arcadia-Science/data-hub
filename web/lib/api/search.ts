@@ -69,7 +69,12 @@ export interface SearchInstrumentResult {
   runCount: number;
   status: "pending" | "active" | "inactive";
   type: "instrument";
-  watcherStatus: WatcherOnlineStatus;
+  // `deregistered` marks an active instrument whose only watcher has been
+  // deregistered (retired then reactivated) — distinct from `no_watcher`
+  // (never had one). Lifecycle states (`pending`/`inactive`) are shown via the
+  // instrument status badge instead, so this only matters when `status` is
+  // `active`.
+  watcherStatus: WatcherOnlineStatus | "deregistered";
 }
 
 export interface GlobalSearchResult {
@@ -257,7 +262,10 @@ async function searchInstruments(
           id: row.id,
           displayName: row.displayName,
           status: row.status,
-          watcherStatus: getWatcherOnlineStatus(row),
+          watcherStatus:
+            row.watcherCount === 0 && row.hasDeregisteredWatcher
+              ? ("deregistered" as const)
+              : getWatcherOnlineStatus(row),
           lastWatcherHeartbeatAt: row.lastWatcherHeartbeatAt
             ? row.lastWatcherHeartbeatAt.toISOString()
             : null,

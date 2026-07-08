@@ -9,6 +9,7 @@ import {
   Image as ImageIcon,
   type LucideIcon,
 } from "lucide-react";
+import { InstrumentStatusBadge } from "@/components/instruments/instrument-status-badge";
 import { Highlight } from "@/components/search/highlight";
 import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type {
@@ -148,14 +149,21 @@ export function SearchInstrumentRow({
     <ResultRowShell
       icon={Cpu}
       stat={
-        <WatcherStatusBadge
-          lastOnlineAt={
-            result.lastWatcherHeartbeatAt
-              ? new Date(result.lastWatcherHeartbeatAt)
-              : null
-          }
-          status={result.watcherStatus}
-        />
+        // `pending`/`inactive` are lifecycle states that supersede watcher
+        // connectivity (mirrors the instruments table). Active instruments
+        // show the watcher badge, including the `deregistered` case.
+        result.status === "active" ? (
+          <WatcherStatusBadge
+            lastOnlineAt={
+              result.lastWatcherHeartbeatAt
+                ? new Date(result.lastWatcherHeartbeatAt)
+                : null
+            }
+            status={result.watcherStatus}
+          />
+        ) : (
+          <InstrumentStatusBadge status={result.status} />
+        )
       }
     >
       <span className={cn("truncate font-medium text-sm")}>
