@@ -4,7 +4,7 @@ The "Download all" actions on the run detail page and the runs table deliver eve
 
 Each archive can mix files from the raw bucket and the processed bucket in a single zip. This matters for instruments that produce processed artifacts via Lambda preprocessing (SpectraMax raw `.xls` → processed CSV; Hina `.nd2` → processed JPG; Azure 600 Gel Doc `.tif` → processed PNG): the run's file rows reference both buckets, and "Download all" zips them together.
 
-This page covers the end-to-end flow, the cache + dedup model, and the on-call runbook. For the Lambda invocation contract, see [Lambda → Function URL (archive build)](lambda.md#function-url-archive-build). For the HTTP endpoints, see [REST API → Archive jobs](https://arcadia-data-hub-docs.vercel.app/docs/api-reference#archive-jobs).
+This page covers the end-to-end flow, the cache + dedup model, and the on-call runbook. For the Lambda invocation contract, see [Lambda → Function URL (archive build)](lambda.md#function-url-archive-build). For the HTTP endpoints, see [REST API → Archive jobs](https://datahub.arcadiascience.com/docs/api-reference#archive-jobs).
 
 ## Flow
 
