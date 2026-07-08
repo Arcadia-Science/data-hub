@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  Archive,
-  EllipsisVertical,
-  Eye,
-  Pencil,
-  RotateCcw,
-} from "lucide-react";
-import Link from "next/link";
+import { Archive, EllipsisVertical, Pencil, RotateCcw } from "lucide-react";
 import { useState } from "react";
 import { EditInstrumentDialog } from "@/components/instruments/edit-instrument-dialog";
 import { ReactivateInstrumentDialog } from "@/components/instruments/reactivate-instrument-dialog";
@@ -55,12 +48,6 @@ export function InstrumentRowActions({ row }: { row: InstrumentListItem }) {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-44">
-          <DropdownMenuItem asChild>
-            <Link href={`/instruments/${row.id}`}>
-              <Eye className="size-3.5" />
-              View details
-            </Link>
-          </DropdownMenuItem>
           <DropdownMenuItem
             onSelect={(e) => {
               e.preventDefault();
