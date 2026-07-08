@@ -76,7 +76,7 @@ async function NotificationsFormSection({
   const [prefs, subscriptions, slackConn, slackChannelConfig] =
     await Promise.all([
       getPreferences(userId),
-      listInstrumentSubscriptions(userId),
+      listInstrumentSubscriptions(userId, { activeOnly: true }),
       getSlackConnection(userId),
       isAdmin ? getSlackChannelConfigForAdmin() : Promise.resolve(null),
     ]);
