@@ -1,3 +1,5 @@
+import { withMicrofrontends } from "@vercel/microfrontends/next/config";
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // Belt-and-braces against search indexing: the `robots` field in the root
@@ -15,4 +17,4 @@ const nextConfig = {
   },
 };
 
-export default nextConfig;
+export default withMicrofrontends(nextConfig);
