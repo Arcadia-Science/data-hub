@@ -11,11 +11,7 @@ import type { InstrumentListItem } from "@/lib/api/instruments";
 
 type Tab = "active" | "pending" | "retired";
 
-export function InstrumentsViewSkeleton({
-  withRowActions = false,
-}: {
-  withRowActions?: boolean;
-}) {
+export function InstrumentsViewSkeleton() {
   return (
     <div aria-busy="true" aria-label="Loading instruments" role="status">
       <Tabs defaultValue="active">
@@ -25,10 +21,11 @@ export function InstrumentsViewSkeleton({
           <TabsTrigger value="retired">Retired</TabsTrigger>
         </TabsList>
         <TabsContent className="mt-2" value="active">
-          <InstrumentsTableSkeleton
-            withNotifications
-            withRowActions={withRowActions}
-          />
+          {/* The trailing actions column is intentionally omitted from the
+              skeleton: it's admin-only and its three-dot menu renders
+              instantly once the row data streams in, so a placeholder there
+              just adds flicker. */}
+          <InstrumentsTableSkeleton withNotifications />
         </TabsContent>
       </Tabs>
     </div>

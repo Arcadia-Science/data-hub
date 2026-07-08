@@ -68,7 +68,7 @@ export function InstrumentRowActions({ row }: { row: InstrumentListItem }) {
               }}
             >
               <RotateCcw className="size-3.5" />
-              Reactivate instrument
+              Reactivate
             </DropdownMenuItem>
           ) : (
             <DropdownMenuItem
@@ -80,7 +80,7 @@ export function InstrumentRowActions({ row }: { row: InstrumentListItem }) {
               variant="destructive"
             >
               <Archive className="size-3.5" />
-              Retire instrument
+              Retire
             </DropdownMenuItem>
           )}
         </DropdownMenuContent>

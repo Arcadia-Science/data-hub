@@ -36,7 +36,7 @@ function InstrumentRunsToolbarSkeleton() {
 // Per-instrument run tables omit the Instrument column present on the dashboard
 // variant; footer + row layout mirror `DefaultRunsTable` inside
 // `InstrumentRunsTableShell`.
-export function InstrumentRunsTableSkeleton({ rows = 5 }: { rows?: number }) {
+export function InstrumentRunsTableSkeleton({ rows = 10 }: { rows?: number }) {
   return (
     <div className="rounded-lg border bg-background dark:bg-muted">
       <Table>

@@ -164,7 +164,13 @@ export function InstrumentsTable({
         </TableHeader>
         <TableBody>
           {data.map((row) => {
-            const watcherStatus = getWatcherOnlineStatus(row);
+            // An active instrument with no live watcher but a deregistered one
+            // (e.g. retired then reactivated) reads as "Deregistered" rather
+            // than "No Watcher", matching the instrument header.
+            const watcherStatus =
+              row.watcherCount === 0 && row.hasDeregisteredWatcher
+                ? "deregistered"
+                : getWatcherOnlineStatus(row);
             return (
               <ClickableRow
                 className="text-sm"

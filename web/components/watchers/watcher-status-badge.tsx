@@ -1,6 +1,6 @@
 "use client";
 
-import { Clock, Power, Radio, WifiOff } from "lucide-react";
+import { Clock, Power, Radio, Unplug, WifiOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
   Tooltip,
@@ -24,7 +24,13 @@ import { cn, formatRelativeTime } from "@/lib/utils";
  * can't tell why an instrument's watchers are silent, while the per-watcher
  * badge can.
  */
-export type WatcherBadgeStatus = WatcherOnlineStatus | EffectiveStatus;
+export type WatcherBadgeStatus =
+  | WatcherOnlineStatus
+  | EffectiveStatus
+  // Instrument-level: the instrument is active but its only watcher has been
+  // deregistered (e.g. retired then reactivated). Distinct from `no_watcher`
+  // (never had one) so the header can still link to the deregistered watcher.
+  | "deregistered";
 
 const ONLINE_CLASSNAME =
   "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300";
@@ -51,6 +57,11 @@ const STATUS_CONFIG: Record<
   no_watcher: {
     label: "No Watcher",
     Icon: WifiOff,
+    className: MUTED_NEUTRAL_CLASSNAME,
+  },
+  deregistered: {
+    label: "Deregistered",
+    Icon: Unplug,
     className: MUTED_NEUTRAL_CLASSNAME,
   },
   // Per-watcher

@@ -59,7 +59,9 @@ function renderStatusBadge(
     <WatcherStatusBadge
       className="px-2 py-3"
       lastOnlineAt={instrument.lastWatcherHeartbeatAt}
-      status={watcherStatus}
+      status={
+        instrument.activeWatcherDeregistered ? "deregistered" : watcherStatus
+      }
       verbose
     />
   );

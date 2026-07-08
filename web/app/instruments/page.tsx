@@ -49,7 +49,7 @@ export default async function InstrumentsPage() {
           setupGuideUrl={ADD_INSTRUMENT_DOCS_URL}
         />
       </div>
-      <Suspense fallback={<InstrumentsViewSkeleton withRowActions={isAdmin} />}>
+      <Suspense fallback={<InstrumentsViewSkeleton />}>
         <InstrumentsListSection isAdmin={isAdmin} userId={session.user.id} />
       </Suspense>
     </div>
