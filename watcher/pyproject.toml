@@ -42,7 +42,7 @@ Homepage = "https://github.com/Arcadia-Science/data-hub"
 # the PyPI page actually needs. The developer-facing `developer-docs/watcher.md`
 # describes the editable-checkout workflow and is reachable from the
 # repository link below.
-Documentation = "https://arcadia-data-hub-docs.vercel.app/docs/installing-a-watcher"
+Documentation = "https://datahub.arcadiascience.com/docs/installing-a-watcher"
 Repository = "https://github.com/Arcadia-Science/data-hub"
 Issues = "https://github.com/Arcadia-Science/data-hub/issues"
 

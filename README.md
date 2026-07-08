@@ -43,7 +43,7 @@ make dev
 
 See the full [Getting started guide](developer-docs/getting-started.md) for prerequisites and details. Don't have AWS/Google credentials? [Local development](developer-docs/local-development.md) covers a zero-credential setup for the web app + API + database alone (no watcher or Lambda needed).
 
-Developer docs live in [developer-docs/](developer-docs/README.md). You can find user documentation (self-hosted deployment, watcher installation, adding an instrument, managing tokens) on the [docs site](https://arcadia-data-hub-docs.vercel.app/).
+Developer docs live in [developer-docs/](developer-docs/README.md). You can find user documentation (self-hosted deployment, watcher installation, adding an instrument, managing tokens) on the [docs site](https://datahub.arcadiascience.com/docs).
 
 ## Checks and tests
 
