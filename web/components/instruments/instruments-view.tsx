@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { InstrumentRowActions } from "@/components/instruments/instrument-row-actions";
+import { InstrumentActions } from "@/components/instruments/instrument-actions";
 import {
   InstrumentsTable,
   InstrumentsTableSkeleton,
@@ -53,10 +53,10 @@ export function InstrumentsView({
 }) {
   const [tab, setTab] = useState<Tab>("active");
 
-  // `InstrumentRowActions` uses hooks, so it must be rendered as JSX rather
+  // `InstrumentActions` uses hooks, so it must be rendered as JSX rather
   // than invoked as a plain function. Only admins get row actions.
   const renderRowActions = isAdmin
-    ? (row: InstrumentListItem) => <InstrumentRowActions row={row} />
+    ? (row: InstrumentListItem) => <InstrumentActions instrument={row} />
     : undefined;
 
   return (

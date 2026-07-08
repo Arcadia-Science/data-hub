@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { InstrumentActions } from "@/components/instruments/instrument-actions";
 import { InstrumentStatusBadge } from "@/components/instruments/instrument-status-badge";
 import { InstrumentNotificationSwitch } from "@/components/notifications/instrument-notification-switch";
 import { RecordInstrumentVisit } from "@/components/recent-instrument-visit";
@@ -27,14 +28,16 @@ export function InstrumentHeaderSkeleton() {
       role="status"
     >
       <Skeleton className="mb-2 h-4 w-56" />
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <Skeleton className="h-8 w-64" />
-        <div className="flex items-center gap-2">
-          <Skeleton className="h-[18.4px] w-8 rounded-full" />
-          <Skeleton className="h-[18.4px] w-28 rounded-4xl" />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-col gap-3">
+          <Skeleton className="h-8 w-64" />
+          <Skeleton className="h-5 w-72" />
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Skeleton className="h-8 w-36 rounded-md" />
+          <Skeleton className="h-8 w-8 rounded-md" />
         </div>
       </div>
-      <Skeleton className="h-5 w-48" />
     </div>
   );
 }
@@ -43,53 +46,40 @@ export function InstrumentHeaderSkeleton() {
 // (retired), its lifecycle state is the relevant signal, so it pre-empts the
 // watcher connectivity badge — a retired instrument's watcher is deregistered,
 // and surfacing "No Watcher"/"Offline" there reads as a fault rather than an
-// intentional decommission. Only active instruments show the watcher badge,
-// linked to the canonical watcher when present.
+// intentional decommission. Only active instruments show the watcher badge.
+// The badge sits inline in the metadata row (next to the run count and the
+// linked hostname), so it stays compact and unlinked — the hostname beside it
+// is the dedicated link to the (possibly deregistered) watcher.
 function renderStatusBadge(
   instrument: InstrumentDetail,
   watcherStatus: WatcherOnlineStatus
 ) {
   if (instrument.status === "pending" || instrument.status === "inactive") {
-    return (
-      <InstrumentStatusBadge className="px-2 py-3" status={instrument.status} />
-    );
+    return <InstrumentStatusBadge status={instrument.status} />;
   }
 
-  const badge = (
+  return (
     <WatcherStatusBadge
-      className="px-2 py-3"
       lastOnlineAt={instrument.lastWatcherHeartbeatAt}
       status={
         instrument.activeWatcherDeregistered ? "deregistered" : watcherStatus
       }
-      verbose
     />
   );
-
-  if (instrument.activeWatcherId) {
-    return (
-      <Link
-        className="transition-colors hover:opacity-80"
-        href={`/watchers/${instrument.activeWatcherId}`}
-      >
-        {badge}
-      </Link>
-    );
-  }
-
-  return badge;
 }
 
 export function InstrumentHeader({
   instrument,
   notifications,
+  isAdmin = false,
 }: {
   instrument: InstrumentDetail;
+  /** Admins get the inline Edit / Retire / Reactivate actions. */
+  isAdmin?: boolean;
   /**
    * Per-viewer notification state for this instrument. When omitted
    * (e.g. unauthenticated callers, or contexts that don't want to
-   * surface the switch), the action row falls back to the watcher-status
-   * layout.
+   * surface the switch), the notifications control is hidden.
    */
   notifications?: {
     enabled: boolean;
@@ -124,38 +114,46 @@ export function InstrumentHeader({
         </BreadcrumbList>
       </Breadcrumb>
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="font-semibold text-2xl tracking-tight">
-          {instrument.displayName}
-        </h1>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 flex-col gap-3">
+          <h1 className="font-semibold text-2xl tracking-tight">
+            {instrument.displayName}
+          </h1>
 
-        <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground text-sm">
+            {renderStatusBadge(instrument, watcherStatus)}
+            <span>·</span>
+            <span>
+              {instrument.runCount} {instrument.runCount === 1 ? "run" : "runs"}
+            </span>
+            {instrument.activeWatcherId && instrument.activeWatcherHostname ? (
+              <>
+                <span>·</span>
+                <Link
+                  className="hover:text-foreground hover:underline"
+                  href={`/watchers/${instrument.activeWatcherId}`}
+                >
+                  {instrument.activeWatcherHostname}
+                </Link>
+              </>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
           {notifications ? (
             <InstrumentNotificationSwitch
               initialEnabled={notifications.enabled}
               instrumentId={instrument.id}
               masterMuted={notifications.masterMuted}
+              size="sm"
+              variant="button"
             />
           ) : null}
-          {renderStatusBadge(instrument, watcherStatus)}
+          {isAdmin ? (
+            <InstrumentActions instrument={instrument} variant="expanded" />
+          ) : null}
         </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground text-sm">
-        <span>
-          {instrument.runCount} {instrument.runCount === 1 ? "run" : "runs"}
-        </span>
-        {instrument.activeWatcherId && instrument.activeWatcherHostname ? (
-          <>
-            <span>·</span>
-            <Link
-              className="hover:text-foreground hover:underline"
-              href={`/watchers/${instrument.activeWatcherId}`}
-            >
-              {instrument.activeWatcherHostname}
-            </Link>
-          </>
-        ) : null}
       </div>
     </div>
   );
