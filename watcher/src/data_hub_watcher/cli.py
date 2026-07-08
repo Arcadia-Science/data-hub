@@ -15,7 +15,6 @@ import click
 from data_hub_watcher.api_client import ApiError, DataHubClient
 from data_hub_watcher.config_io import config_checksum, load_config, save_config
 from data_hub_watcher.constants import (
-    API_URLS,
     DEFAULT_CONFIG_DIR,
     DEFAULT_STABILITY_PERIOD_SECONDS,
     RUN_DETECTION_PRESETS,
@@ -145,13 +144,16 @@ def _clean_api_key(value: str) -> str:
 def _make_client(
     environment: str, api_key: str | None = None, api_base_url: str | None = None
 ) -> DataHubClient:
-    if environment == "preview":
-        if not api_base_url:
-            raise click.ClickException("api_base_url is required for the 'preview' environment.")
-        base_url = api_base_url
-    else:
-        base_url = API_URLS[environment]
-    return DataHubClient(base_url, api_key=api_key)
+    # Every environment gets its URL from config now — there is no baked-in
+    # default — so a missing URL is a hard error rather than a silent fall
+    # through to someone else's server.
+    if not api_base_url:
+        raise click.ClickException(
+            f"No API base URL is configured for the '{environment}' environment. "
+            "Set one with `data-hub-watcher init` or "
+            f"`data-hub-watcher config set-environment {environment} --api-base-url <url>`."
+        )
+    return DataHubClient(api_base_url, api_key=api_key)
 
 
 def _load_and_client(ctx: click.Context) -> tuple[WatcherConfig, DataHubClient, Path]:
@@ -205,12 +207,15 @@ def init(ctx: click.Context, show_key: bool) -> None:
         type=click.Choice(list(SUPPORTED_ENVIRONMENTS), case_sensitive=False),
     )
 
-    api_base_url: str | None = None
-    if environment == "preview":
-        raw_url: str = click.prompt(
-            "Preview deployment base URL (e.g. https://data-hub-git-my-branch.vercel.app/api/v1)"
-        )
-        api_base_url = raw_url.rstrip("/")
+    # Every environment needs its own Data Hub API base URL; there is no
+    # baked-in default. Preview points at an ephemeral branch deploy, the
+    # others at the operator's own staging/production host.
+    url_example = (
+        "https://data-hub-git-my-branch.vercel.app/api/v1"
+        if environment == "preview"
+        else "https://datahub.example.com/api/v1"
+    )
+    api_base_url: str = click.prompt(f"Data Hub API base URL (e.g. {url_example})").rstrip("/")
 
     # 2. API key — overlay any existing per-environment env file so the user
     # doesn't have to re-enter a key they've already saved for this target.
@@ -332,7 +337,7 @@ def init(ctx: click.Context, show_key: bool) -> None:
     config = WatcherConfig(
         version=1,
         environment=environment,
-        api_base_url=api_base_url,
+        api_base_urls={environment: api_base_url},
         watcher_ids={environment: watcher_id},
         instrument=InstrumentConfig(
             id=selected.id,
@@ -576,20 +581,30 @@ def _switch_environment(
     inst = cfg.instrument
     config_dir = path.parent
 
-    if target == "preview":
-        if not api_base_url:
-            raise click.ClickException("--api-base-url is required when switching to 'preview'.")
-        api_base_url = api_base_url.rstrip("/")
+    # Resolve the target environment's API base URL: an explicit --api-base-url
+    # wins, otherwise reuse the URL already stored for that environment so
+    # switching back never re-prompts. With neither available we can't build a
+    # client, so fail before any network or credential work.
+    stored_url = cfg.api_base_urls.get(target)
+    if api_base_url:
+        target_url = api_base_url.rstrip("/")
+    elif stored_url:
+        target_url = stored_url
+    else:
+        raise click.ClickException(
+            f"--api-base-url is required to switch to '{target}': "
+            "no API base URL is stored for it yet."
+        )
 
     # A preview redeploy points at a new database server-side, so the stored
     # registration won't exist and local state must be reset. Compare against
     # the URL the DB was seeded against (`meta`), falling back to the config.
     preview_redeploy = False
-    if target == "preview" and cfg.environment == "preview" and api_base_url is not None:
-        seeded_url = _preview_seed_url(config_dir) or cfg.api_base_url
-        preview_redeploy = seeded_url is not None and api_base_url != seeded_url
+    if target == "preview" and cfg.environment == "preview":
+        seeded_url = _preview_seed_url(config_dir) or stored_url
+        preview_redeploy = seeded_url is not None and target_url != seeded_url
 
-    if cfg.environment == target and not preview_redeploy:
+    if cfg.environment == target and target_url == stored_url and not preview_redeploy:
         click.echo(f"Already on environment '{target}'.")
         return cfg
 
@@ -605,7 +620,7 @@ def _switch_environment(
             api_key = _clean_api_key(click.prompt("DATA_HUB_API_KEY", hide_input=not show_key))
             save_api_key(api_key, target)
 
-    client = _make_client(target, api_key=api_key, api_base_url=api_base_url)
+    client = _make_client(target, api_key=api_key, api_base_url=target_url)
     try:
         client.list_instruments()
     except ApiError as exc:
@@ -640,10 +655,13 @@ def _switch_environment(
         watcher_ids[target] = watcher_id
         click.echo(f"Registered watcher for {target}: {watcher_id}")
 
+    # Preserve every other environment's stored URL; only (re)set the target's.
+    api_base_urls = {**cfg.api_base_urls, target: target_url}
+
     new_cfg = WatcherConfig(
         version=cfg.version,
         environment=target,  # type: ignore[arg-type]  # validated by click.Choice
-        api_base_url=api_base_url if target == "preview" else None,
+        api_base_urls=api_base_urls,
         watcher_ids=watcher_ids,
         initial_scan=cfg.initial_scan,
         instrument=inst,
@@ -654,10 +672,10 @@ def _switch_environment(
     # Record which preview deployment this state DB was seeded against; the
     # next switch reads it back via `_preview_seed_url` to decide whether the
     # URL changed and the DB must be reset (see `preview_redeploy`).
-    if target == "preview" and api_base_url is not None:
+    if target == "preview":
         try:
             db = StateDB(state_db_path(config_dir, target))
-            db.set_meta(PREVIEW_SEED_URL_META_KEY, api_base_url)
+            db.set_meta(PREVIEW_SEED_URL_META_KEY, target_url)
             db.close()
         except Exception:
             logger.debug("Could not record preview deployment URL", exc_info=True)
@@ -801,7 +819,12 @@ def config_validate(ctx: click.Context) -> None:
     "environment",
     type=click.Choice(list(SUPPORTED_ENVIRONMENTS), case_sensitive=False),
 )
-@click.option("--api-base-url", default=None, help="Required when environment is 'preview'.")
+@click.option(
+    "--api-base-url",
+    default=None,
+    help="API base URL for the target environment. Required the first time you "
+    "switch to an environment; reused from config on later switches.",
+)
 @click.option("--api-key", default=None, help="API key for the target environment.")
 @click.option(
     "--show-key",
@@ -845,22 +868,20 @@ def config_edit(ctx: click.Context) -> None:
 
     # Re-prompt for environment first; a change delegates to the full switch
     # flow (re-registration, key resolution, state reset) before the rest of
-    # the edit runs against the freshly-saved config.
+    # the edit runs against the freshly-saved config. The switch reuses the
+    # target env's stored URL, prompting via --api-base-url only when none is
+    # saved yet, so no URL prompt is needed here.
     target_env = click.prompt(
         "Environment",
         type=click.Choice(list(SUPPORTED_ENVIRONMENTS), case_sensitive=False),
         default=cfg.environment,
     )
-    preview_url: str | None = None
-    if target_env == "preview":
-        preview_url = click.prompt(
-            "Preview deployment base URL",
-            default=cfg.api_base_url,
-        )
-    if target_env != cfg.environment or (
-        target_env == "preview" and preview_url is not None and preview_url != cfg.api_base_url
-    ):
-        cfg = _switch_environment(path, cfg, target_env, api_base_url=preview_url)
+    if target_env != cfg.environment:
+        stored_url = cfg.api_base_urls.get(target_env)
+        api_base_url = None
+        if not stored_url:
+            api_base_url = click.prompt(f"Data Hub API base URL for {target_env}").rstrip("/")
+        cfg = _switch_environment(path, cfg, target_env, api_base_url=api_base_url)
 
     inst = cfg.instrument
 
@@ -898,7 +919,7 @@ def config_edit(ctx: click.Context) -> None:
     new_config = WatcherConfig(
         version=cfg.version,
         environment=cfg.environment,
-        api_base_url=cfg.api_base_url,
+        api_base_urls=cfg.api_base_urls,
         watcher_ids=cfg.watcher_ids,
         initial_scan=cfg.initial_scan,
         instrument=InstrumentConfig(

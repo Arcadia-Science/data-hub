@@ -329,7 +329,9 @@ class TestBuildRuntimeBaselineSeeding:
         return WatcherConfig(
             version=1,
             environment=environment,  # type: ignore[arg-type]
-            api_base_url="https://x.example/api/v1" if environment == "preview" else None,
+            api_base_urls={environment: "https://x.example/api/v1"}
+            if environment == "preview"
+            else {},
             watcher_ids={environment: "w-test"},
             initial_scan=initial_scan,
             instrument=InstrumentConfig(

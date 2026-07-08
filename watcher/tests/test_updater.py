@@ -79,7 +79,9 @@ def _make_config(
     return WatcherConfig(
         version=1,
         environment=environment,  # type: ignore[arg-type]
-        api_base_url="https://example.test/api/v1" if environment == "preview" else None,
+        api_base_urls={environment: "https://example.test/api/v1"}
+        if environment == "preview"
+        else {},
         watcher_ids={environment: "w-test"},
         instrument=instrument,
     )

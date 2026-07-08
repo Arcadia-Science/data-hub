@@ -1006,6 +1006,7 @@ def _make_config(
     return WatcherConfig(
         version=1,
         environment=environment,  # type: ignore[arg-type]
+        api_base_urls={environment: f"https://{environment}.example.test/api/v1"},
         watcher_ids={environment: watcher_id} if watcher_id else {},
         instrument=instrument,
     )

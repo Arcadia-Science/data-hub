@@ -1,0 +1,18 @@
+{
+  "$schema": "https://openapi.vercel.sh/microfrontends.json",
+  "applications": {
+    "data-hub": {
+      "packageName": "data-hub-web",
+      "development": {
+        "fallback": "datahub.arcadiascience.com"
+      }
+    },
+    "data-hub-docs": {
+      "packageName": "docs",
+      "development": {
+        "fallback": "arcadia-data-hub-docs.vercel.app"
+      },
+      "routing": [{ "paths": ["/docs/:path*"] }]
+    }
+  }
+}

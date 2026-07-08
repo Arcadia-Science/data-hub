@@ -59,9 +59,9 @@ fe-lint:
 fe-typecheck:
 	cd web && npm run typecheck
 
-.PHONY: fe-test-mcp
-fe-test-mcp:
-	cd web && npm run test:mcp
+.PHONY: fe-test-unit
+fe-test-unit:
+	cd web && npm run test:unit
 
 .PHONY: fe-test-integration
 fe-test-integration:
@@ -69,7 +69,7 @@ fe-test-integration:
 
 .PHONY: fe-test
 fe-test:
-	cd web && npm run test:mcp && npm run test:integration
+	cd web && npm run test:unit && npm run test:integration
 
 .PHONY: dev
 dev:
@@ -171,6 +171,15 @@ endif
 		"DataHubApiKey=$(DATA_HUB_API_KEY)" \
 		"GitHubOidcProviderArn=$(GITHUB_OIDC_PROVIDER_ARN)" \
 		"VercelOidcProviderArn=$(VERCEL_OIDC_PROVIDER_ARN)"
+
+# Usage: make sam-status ENV=staging
+.PHONY: sam-status
+sam-status:
+ifndef ENV
+	$(error ENV is required, e.g. make sam-status ENV=staging)
+endif
+	aws cloudformation describe-stacks --stack-name data-hub-$(ENV) \
+		--region us-west-1 --query 'Stacks[0].StackStatus' --output text
 
 # Usage: make sam-teardown ENV=staging
 .PHONY: sam-teardown

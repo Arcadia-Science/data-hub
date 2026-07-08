@@ -1,6 +1,8 @@
-"""Unit tests for the 'preview' environment option.
+"""Unit tests for per-environment API base URLs.
 
-Covers model validation, YAML config round-trips, and client construction.
+Covers model validation (now lenient — a config may lack a URL), YAML config
+round-trips, legacy `api_base_url` migration, and client construction (which
+requires a URL for every environment).
 """
 
 from __future__ import annotations
@@ -9,11 +11,9 @@ from pathlib import Path
 import click
 import pytest
 import yaml
-from pydantic import ValidationError
 
 from data_hub_watcher.cli import _make_client
 from data_hub_watcher.config_io import load_config, save_config
-from data_hub_watcher.constants import API_URLS
 from data_hub_watcher.models import InstrumentConfig, RunDetectionConfig, WatcherConfig
 
 PREVIEW_URL = "https://data-hub-git-my-branch.vercel.app/api/v1"
@@ -33,44 +33,47 @@ def _make_instrument(tmp_path: Path) -> InstrumentConfig:
 
 
 # ------------------------------------------------------------------
-# Group 1: WatcherConfig model validation
+# Group 1: WatcherConfig model validation (lenient — URL optional)
 # ------------------------------------------------------------------
 
 
 class TestWatcherConfigValidation:
-    def test_preview_requires_api_base_url(self, tmp_path: Path) -> None:
-        with pytest.raises(ValidationError, match="api_base_url is required"):
-            WatcherConfig(
-                version=1,
-                environment="preview",
-                instrument=_make_instrument(tmp_path),
-            )
-
-    def test_preview_with_api_base_url_succeeds(self, tmp_path: Path) -> None:
+    def test_config_without_url_is_valid(self, tmp_path: Path) -> None:
+        # No environment requires a URL at the model layer anymore; the URL is
+        # enforced when a client is built (see TestMakeClient).
         cfg = WatcherConfig(
             version=1,
             environment="preview",
-            api_base_url=PREVIEW_URL,
             instrument=_make_instrument(tmp_path),
         )
-        assert cfg.environment == "preview"
+        assert cfg.api_base_url is None
+        assert cfg.api_base_urls == {}
+
+    def test_legacy_api_base_url_migrates_to_map(self, tmp_path: Path) -> None:
+        # `api_base_url` is no longer a field, so exercise the legacy scalar
+        # via `model_validate` (what `load_config` uses) rather than a kwarg.
+        cfg = WatcherConfig.model_validate(
+            {
+                "version": 1,
+                "environment": "preview",
+                "api_base_url": PREVIEW_URL,
+                "instrument": _make_instrument(tmp_path).model_dump(mode="json"),
+            }
+        )
+        assert cfg.api_base_urls == {"preview": PREVIEW_URL}
         assert cfg.api_base_url == PREVIEW_URL
 
-    def test_staging_does_not_require_api_base_url(self, tmp_path: Path) -> None:
+    def test_api_base_url_reflects_active_environment(self, tmp_path: Path) -> None:
         cfg = WatcherConfig(
             version=1,
             environment="staging",
+            api_base_urls={
+                "staging": "https://staging.example.test/api/v1",
+                "production": "https://prod.example.test/api/v1",
+            },
             instrument=_make_instrument(tmp_path),
         )
-        assert cfg.api_base_url is None
-
-    def test_production_does_not_require_api_base_url(self, tmp_path: Path) -> None:
-        cfg = WatcherConfig(
-            version=1,
-            environment="production",
-            instrument=_make_instrument(tmp_path),
-        )
-        assert cfg.api_base_url is None
+        assert cfg.api_base_url == "https://staging.example.test/api/v1"
 
 
 # ------------------------------------------------------------------
@@ -79,12 +82,12 @@ class TestWatcherConfigValidation:
 
 
 class TestConfigRoundTrip:
-    def test_preview_config_round_trip(self, tmp_path: Path) -> None:
+    def test_round_trip_preserves_all_urls(self, tmp_path: Path) -> None:
         path = tmp_path / "config.yaml"
         original = WatcherConfig(
             version=1,
             environment="preview",
-            api_base_url=PREVIEW_URL,
+            api_base_urls={"preview": PREVIEW_URL},
             watcher_ids={"preview": "w-123"},
             instrument=_make_instrument(tmp_path),
         )
@@ -93,10 +96,11 @@ class TestConfigRoundTrip:
         loaded = load_config(path)
 
         assert loaded.environment == "preview"
+        assert loaded.api_base_urls == {"preview": PREVIEW_URL}
         assert loaded.api_base_url == PREVIEW_URL
         assert loaded.watcher_id == "w-123"
 
-    def test_preview_yaml_without_url_fails_to_load(self, tmp_path: Path) -> None:
+    def test_legacy_scalar_url_in_yaml_migrates_on_load(self, tmp_path: Path) -> None:
         path = tmp_path / "config.yaml"
         watch_dir = tmp_path / "data"
         watch_dir.mkdir(exist_ok=True)
@@ -105,6 +109,7 @@ class TestConfigRoundTrip:
         raw = {
             "version": 1,
             "environment": "preview",
+            "api_base_url": PREVIEW_URL,
             "instrument": {
                 "id": "test-instrument",
                 "watch_directory": str(watch_dir),
@@ -114,10 +119,11 @@ class TestConfigRoundTrip:
         }
         path.write_text(yaml.dump(raw), encoding="utf-8")
 
-        with pytest.raises(click.ClickException, match="api_base_url is required"):
-            load_config(path)
+        loaded = load_config(path)
+        assert loaded.api_base_urls == {"preview": PREVIEW_URL}
+        assert loaded.api_base_url == PREVIEW_URL
 
-    def test_staging_config_omits_api_base_url_in_yaml(self, tmp_path: Path) -> None:
+    def test_config_without_url_omits_scalar_in_yaml(self, tmp_path: Path) -> None:
         path = tmp_path / "config.yaml"
         cfg = WatcherConfig(
             version=1,
@@ -126,34 +132,31 @@ class TestConfigRoundTrip:
         )
 
         save_config(cfg, path)
-        raw_yaml = path.read_text(encoding="utf-8")
-        data = yaml.safe_load(raw_yaml)
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
 
-        assert data.get("api_base_url") is None
+        assert "api_base_url" not in data
+        assert data.get("api_base_urls") == {}
 
 
 # ------------------------------------------------------------------
-# Group 3: _make_client helper
+# Group 3: _make_client helper (URL required for every environment)
 # ------------------------------------------------------------------
 
 
 class TestMakeClient:
-    def test_preview_uses_custom_url(self) -> None:
+    def test_uses_provided_url(self) -> None:
         client = _make_client("preview", api_base_url=PREVIEW_URL)
         assert client.base_url == PREVIEW_URL
 
-    def test_preview_without_url_raises(self) -> None:
-        with pytest.raises(click.ClickException, match="api_base_url is required"):
+    def test_staging_uses_provided_url(self) -> None:
+        url = "https://staging.example.test/api/v1"
+        client = _make_client("staging", api_base_url=url)
+        assert client.base_url == url
+
+    def test_missing_url_raises(self) -> None:
+        with pytest.raises(click.ClickException, match="No API base URL is configured"):
             _make_client("preview")
 
-    def test_staging_uses_hardcoded_url(self) -> None:
-        client = _make_client("staging")
-        assert client.base_url == API_URLS["staging"]
-
-    def test_production_uses_hardcoded_url(self) -> None:
-        client = _make_client("production")
-        assert client.base_url == API_URLS["production"]
-
-    def test_staging_ignores_api_base_url(self) -> None:
-        client = _make_client("staging", api_base_url="https://should-be-ignored.example.com")
-        assert client.base_url == API_URLS["staging"]
+    def test_missing_url_raises_for_staging(self) -> None:
+        with pytest.raises(click.ClickException, match="No API base URL is configured"):
+            _make_client("staging")

@@ -7,11 +7,6 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-API_URLS: dict[str, str] = {
-    "staging": "https://data-hub-env-staging-arcadia-science.vercel.app/api/v1",
-    "production": "https://data-hub.arcadiascience.com/api/v1",
-}
-
 
 def _read_watcher_version() -> str:
     # Resolve the installed distribution version once at import time so the
@@ -213,7 +208,7 @@ def state_db_path(config_dir: Path, environment: str) -> Path:
 
     Keyed by `environment` (not `watcher_id`) so a deregister/re-register on
     the same host reuses the existing dedup history instead of re-uploading
-    the whole backlog. See `developer-docs/reference/watcher.md` for the rationale.
+    the whole backlog. See `developer-docs/watcher.md` for the rationale.
     """
     return config_dir / f"watcher-{environment}.db"
 

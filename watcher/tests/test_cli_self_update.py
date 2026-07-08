@@ -43,6 +43,7 @@ def _make_config(tmp_path: Path) -> WatcherConfig:
     return WatcherConfig(
         version=1,
         environment="staging",
+        api_base_urls={"staging": "https://staging.example.test/api/v1"},
         watcher_ids={"staging": "w-test"},
         instrument=InstrumentConfig(
             id="test-instrument",

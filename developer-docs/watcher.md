@@ -30,7 +30,7 @@ uv run data-hub-watcher init
 uv run data-hub-watcher watch
 ```
 
-For lab-PC installs (PyPI), see [Installing a watcher](../guides/installing-a-watcher.md). For releasing new versions and how the in-place upgrade flow works (CLI `self-update` and the Windows-service auto-updater), see [Upgrading the watcher](../guides/upgrading-the-watcher.md).
+For lab-PC installs (PyPI), see [Installing a watcher](https://arcadia-data-hub-docs.vercel.app/docs/installing-a-watcher). For releasing new versions and how the in-place upgrade flow works (CLI `self-update` and the Windows-service auto-updater), see [Upgrading the watcher](https://arcadia-data-hub-docs.vercel.app/docs/upgrading-the-watcher).
 
 ## Commands
 
@@ -43,7 +43,7 @@ All commands accept two global flags:
 
 Interactive setup wizard that:
 
-1. Prompts for the environment (`staging`, `production`, or `preview`). Choosing `preview` also prompts for a custom API base URL.
+1. Prompts for the environment (`staging`, `production`, or `preview`) and the Data Hub API base URL for it. There is no built-in default URL — each environment points at whatever deployment you host — and the URL is saved per environment so switching back later reuses it without re-prompting.
 2. Prompts for an API key (or reads `DATA_HUB_API_KEY` from the environment). The key is saved to a per-environment file at `~/.data-hub/.env.<environment>` (e.g. `.env.staging`), so switching between environments later doesn't require re-entering it.
 3. Fetches existing instruments from the API or registers a new one.
 4. Prompts for the watch directory, file patterns, run detection pattern, stability period, and upload mode.
@@ -71,7 +71,7 @@ While running:
 - **Upload worker** (manual mode only) polls the server's upload queue on its own long-lived thread every 60 seconds, decoupled from the heartbeat so a slow or large upload can't delay heartbeats and make a busy watcher look offline. On shutdown it is stopped and joined before the state DB is closed. Auto mode has no worker: uploads run on the monitor's stability-checker thread via the run detector's upload callback.
 - **Heartbeat loop** sends periodic heartbeats (every 60 seconds) to the API. The payload includes the watcher version, instrument ID, watch directory, upload mode, per-interval activity counters, and process uptime; a final `status="stopped"` heartbeat is sent on graceful shutdown.
 - **Event reporter** batches and flushes lifecycle events (started, stopped, file uploaded, errors) to the API. See [Observability](#observability) for the full taxonomy.
-- **Auto-updater** runs from the same heartbeat tick on every platform — not only Windows services. It polls `GET /watchers/:id/update-check` roughly hourly and applies new releases when the watcher has been idle long enough not to clobber an in-flight run. The full activity-window guard, mandatory-update behavior, and rollback flow are documented in [Upgrading the watcher](../guides/upgrading-the-watcher.md); auto-update is hard-disabled in the `preview` environment.
+- **Auto-updater** runs from the same heartbeat tick on every platform — not only Windows services. It polls `GET /watchers/:id/update-check` roughly hourly and applies new releases when the watcher has been idle long enough not to clobber an in-flight run. The full activity-window guard, mandatory-update behavior, and rollback flow are documented in [Upgrading the watcher](https://arcadia-data-hub-docs.vercel.app/docs/upgrading-the-watcher); auto-update is hard-disabled in the `preview` environment.
 
 Use `--dry-run` to validate config and preview what would happen without starting the monitor.
 
@@ -126,7 +126,7 @@ Manage the watcher as a Windows service:
 
 ### `self-update`
 
-Checks the API for a newer published version and runs the appropriate `uv tool install --reinstall` (or `pip install -U`) subprocess in place. See [Upgrading the watcher](../guides/upgrading-the-watcher.md) for the supported install methods, the activity-window guard, mandatory updates, and rollback flow.
+Checks the API for a newer published version and runs the appropriate `uv tool install --reinstall` (or `pip install -U`) subprocess in place. See [Upgrading the watcher](https://arcadia-data-hub-docs.vercel.app/docs/upgrading-the-watcher) for the supported install methods, the activity-window guard, mandatory updates, and rollback flow.
 
 ## Configuration
 
@@ -137,7 +137,8 @@ The config file lives at `~/.data-hub/config.yaml` by default. Override with `--
 ```yaml
 version: 1
 environment: production          # "staging", "production", or "preview"
-api_base_url: null               # required when environment is "preview"
+api_base_urls:                   # one API base URL per environment (no default)
+  production: https://datahub.example.com/api/v1
 watcher_ids:                     # one registration id per environment
   production: <assigned-by-api>
 initial_scan: null               # null (default), "full", or "new-only"
@@ -177,17 +178,21 @@ A config written by an older watcher used a single top-level `watcher_id`. It is
 
 ### Switching environments
 
-A single PC can move between `staging`, `production`, and `preview` and back. Because staging and production are separate Data Hub deployments with separate databases, each holds its own watcher registration — `watcher_ids` stores one id per environment, and the credentials live in per-environment `~/.data-hub/.env.<environment>` files.
+A single PC can move between `staging`, `production`, and `preview` and back. Because these are separate Data Hub deployments with separate databases, each holds its own watcher registration and its own API base URL — `watcher_ids` stores one id per environment, `api_base_urls` stores one URL per environment, and the credentials live in per-environment `~/.data-hub/.env.<environment>` files.
+
+The first switch to an environment needs its URL via `--api-base-url`; later switches reuse the stored value, so you never re-enter it.
 
 Switch with:
 
 ```sh
-# Switch to staging (reuses a stored registration, or registers one).
-uv run data-hub-watcher config set-environment staging
+# First switch to an environment: provide its base URL (stored for next time).
+uv run data-hub-watcher config set-environment staging \
+  --api-base-url https://datahub-staging.example.com/api/v1
 
-# Point at a preview deployment (the base URL is required).
-uv run data-hub-watcher config set-environment preview \
-  --api-base-url https://data-hub-git-my-branch.vercel.app/api/v1
+# Subsequent switches reuse the stored URL — no flag needed.
+uv run data-hub-watcher config set-environment production \
+  --api-base-url https://datahub.example.com/api/v1
+uv run data-hub-watcher config set-environment staging
 ```
 
 `config edit` also re-prompts for the environment and runs the same switch flow when it changes. Useful flags: `--api-key` (otherwise the key is read from the env file or prompted), `--show-key`, and `--no-register` (fail instead of registering a new watcher if none is stored for the target).

@@ -594,7 +594,6 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
     from data_hub_watcher.api_client import ApiError, DataHubClient
     from data_hub_watcher.config_io import load_config
     from data_hub_watcher.constants import (
-        API_URLS,
         env_file_path,
         resolve_state_db_path,
     )
@@ -655,14 +654,19 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
     cfg = load_config(path)
     inst = cfg.instrument
 
-    if cfg.environment == "preview":
-        # WatcherConfig's model validator guarantees api_base_url is
-        # set whenever environment is "preview"; the assertion is here
-        # to make that invariant visible to pyright.
-        assert cfg.api_base_url is not None
-        base_url = cfg.api_base_url
-    else:
-        base_url = API_URLS[cfg.environment]
+    base_url = cfg.api_base_url
+    if not base_url:
+        # No baked-in default exists anymore; a config without a URL for the
+        # active environment can't build a client. Fail loudly so the operator
+        # re-runs `config set-environment` rather than the service silently
+        # looping on connection errors.
+        logger.error(
+            "No API base URL configured for environment %r. "
+            "Re-run 'data-hub-watcher config set-environment %s --api-base-url <url>'.",
+            cfg.environment,
+            cfg.environment,
+        )
+        raise SystemExit(1)
     client = DataHubClient(base_url)
 
     # Step 1: Check instrument status (mirrors CLI watch startup)
