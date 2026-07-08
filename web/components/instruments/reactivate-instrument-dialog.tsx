@@ -16,9 +16,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-// Controlled reactivate dialog opened from the row "..." menu for retired
-// instruments. Sets the instrument back to `active`; previously deregistered
-// watchers do not reconnect automatically — a watcher must re-register.
+// Sets the instrument back to `active`. Previously deregistered watchers do
+// not reconnect automatically — a watcher must re-register.
 export function ReactivateInstrumentDialog({
   instrumentId,
   displayName,

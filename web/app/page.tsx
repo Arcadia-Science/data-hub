@@ -153,8 +153,7 @@ async function DashboardRunsSection({
   const defaultDateFrom = last24hISOString();
 
   // The toolbar instrument list and the filtered run page are independent.
-  // The dropdown only offers active instruments — retired/pending ones aren't
-  // useful filter targets on the dashboard (mirrors the active-only tables).
+  // Only active instruments are useful filter targets on the dashboard.
   const [instruments, runResult] = await Promise.all([
     getInstruments({ activeOnly: true }),
     buildRunListQuery({

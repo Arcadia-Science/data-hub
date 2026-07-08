@@ -19,10 +19,8 @@ const SIDEBAR_LIST_LIMIT = 4;
 //
 // Wrapped in `cache()` so the layout and any descendants share a single
 // result per request.
-// All active instrument IDs, used client-side to prune the sidebar's
-// "recently viewed" list (localStorage) down to instruments that are still
-// active — retired/pending ones shouldn't linger in the nav. Returns just IDs
-// so the payload stays small even on large workspaces.
+// Used to prune the sidebar's client-side "recently viewed" list down to
+// instruments that are still active.
 export const getActiveInstrumentIds = cache(
   async function getActiveInstrumentIds(): Promise<string[]> {
     const rows = await db

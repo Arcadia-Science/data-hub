@@ -27,9 +27,8 @@ import { cn, formatRelativeTime } from "@/lib/utils";
 export type WatcherBadgeStatus =
   | WatcherOnlineStatus
   | EffectiveStatus
-  // Instrument-level: the instrument is active but its only watcher has been
-  // deregistered (e.g. retired then reactivated). Distinct from `no_watcher`
-  // (never had one) so the header can still link to the deregistered watcher.
+  // Active instrument whose only watcher was deregistered. Distinct from
+  // `no_watcher` (never had one), so the header can still link to the watcher.
   | "deregistered";
 
 const ONLINE_CLASSNAME =

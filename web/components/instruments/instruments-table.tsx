@@ -164,9 +164,8 @@ export function InstrumentsTable({
         </TableHeader>
         <TableBody>
           {data.map((row) => {
-            // An active instrument with no live watcher but a deregistered one
-            // (e.g. retired then reactivated) reads as "Deregistered" rather
-            // than "No Watcher", matching the instrument header.
+            // Active + no live watcher but a deregistered one reads as
+            // "Deregistered" rather than "No Watcher".
             const watcherStatus =
               row.watcherCount === 0 && row.hasDeregisteredWatcher
                 ? "deregistered"
@@ -190,8 +189,6 @@ export function InstrumentsTable({
                       status={watcherStatus}
                     />
                   ) : (
-                    // `pending` and `inactive` (Retired) are lifecycle states
-                    // that supersede watcher connectivity.
                     <InstrumentStatusBadge status={row.status} />
                   )}
                 </TableCell>

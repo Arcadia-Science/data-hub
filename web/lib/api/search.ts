@@ -69,11 +69,8 @@ export interface SearchInstrumentResult {
   runCount: number;
   status: "pending" | "active" | "inactive";
   type: "instrument";
-  // `deregistered` marks an active instrument whose only watcher has been
-  // deregistered (retired then reactivated) — distinct from `no_watcher`
-  // (never had one). Lifecycle states (`pending`/`inactive`) are shown via the
-  // instrument status badge instead, so this only matters when `status` is
-  // `active`.
+  // `deregistered` (active instrument, only watcher deregistered) is distinct
+  // from `no_watcher`. Only meaningful when `status` is `active`.
   watcherStatus: WatcherOnlineStatus | "deregistered";
 }
 

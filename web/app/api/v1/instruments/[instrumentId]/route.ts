@@ -169,9 +169,7 @@ export async function PATCH(
       updated_at: instruments.updatedAt,
     });
 
-  // Retiring an instrument tears down its watchers so agents stop heartbeating
-  // and any pending uploads drain out. This is unconditional — there's no live
-  // watcher for a retired instrument to talk to.
+  // A retired instrument has no live agent, so always tear down its watchers.
   if (updates.status === "inactive") {
     await deregisterInstrumentWatchers(instrumentId);
   }

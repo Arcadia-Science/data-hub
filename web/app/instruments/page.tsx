@@ -33,9 +33,7 @@ export default async function InstrumentsPage() {
     );
   }
 
-  // Row actions (Edit / Retire / Reactivate + the pending Confirm button) are
-  // admin-only; regular members see the same listing without them. The tabs
-  // themselves are visible to everyone.
+  // Row actions are admin-only; everyone else sees the same listing tabs.
   const isAdmin = session.user.isAdmin === true;
 
   // Header renders immediately; the tabs stream so a slow catalogue query
@@ -78,9 +76,8 @@ async function InstrumentsListSection({
     subscriptions.map((s) => [s.instrumentId, s.enabled])
   );
 
-  // Partition by lifecycle status for the tabs. The catalogue is small, so a
-  // single query + client-side split is cheaper than three status-filtered
-  // queries (mirrors the watchers page).
+  // The catalogue is small, so one query plus a client-side split beats three
+  // status-filtered queries.
   const activeData = instruments.filter((i) => i.status === "active");
   const pendingData = instruments.filter((i) => i.status === "pending");
   const retiredData = instruments.filter((i) => i.status === "inactive");

@@ -39,9 +39,8 @@ export function MainNav({ activeInstrumentIds, instruments }: MainNavProps) {
     [activeInstrumentIds]
   );
 
-  // The recently-viewed list is client-only (localStorage), so prune it to
-  // instruments that are still active — a retired/pending instrument the user
-  // once visited shouldn't linger in the nav.
+  // Prune the localStorage-backed list to still-active instruments so a
+  // retired/pending one the user once visited doesn't linger in the nav.
   const recentlyViewedInstruments = useMemo(
     () =>
       recentInstruments

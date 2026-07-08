@@ -71,10 +71,8 @@ export function WatcherHeader({ watcher }: { watcher: WatcherDetail }) {
         </BreadcrumbList>
       </Breadcrumb>
 
-      {/* Deregistered watchers are signalled by the "Deregistered" badge and
-          the deregistered-on date below — not by fading the whole header,
-          which made the text too faint to read. The deregister action is
-          still hidden since the watcher is already soft-deleted. */}
+      {/* Deregistration is signalled by the badge and date below, not by
+          fading the header (which made the text too faint to read). */}
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">

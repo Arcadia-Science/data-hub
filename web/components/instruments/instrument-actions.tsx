@@ -16,9 +16,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { InstrumentListItem } from "@/lib/api/instruments";
 
-// The subset of instrument fields the admin actions need. Both the table row
-// (`InstrumentListItem`) and the detail header (`InstrumentDetail`) satisfy
-// this, so the same component drives both surfaces.
+// Both `InstrumentListItem` (table) and `InstrumentDetail` (header) satisfy
+// this, so one component drives both surfaces.
 export type InstrumentActionTarget = Pick<
   InstrumentListItem,
   | "displayName"
@@ -29,19 +28,8 @@ export type InstrumentActionTarget = Pick<
   | "watcherCount"
 >;
 
-/**
- * Admin actions for an instrument: an inline Confirm button for pending
- * instruments plus dialogs for Edit / Retire / Reactivate, wired to
- * trigger-less controlled dialogs (same pattern as the runs table's
- * `RunRowActions`).
- *
- * `variant` controls the layout:
- *  - `menu` (default) — everything lives inside a compact three-dot menu, for
- *    the dense instruments table.
- *  - `expanded` — Edit is pulled out as its own labelled button beside the
- *    three-dot menu (which keeps Retire/Reactivate), for the roomier
- *    instrument-detail header.
- */
+// `variant` picks the layout: `menu` folds Edit into the three-dot menu (dense
+// table); `expanded` pulls Edit out as its own button beside the menu (header).
 export function InstrumentActions({
   instrument,
   variant = "menu",

@@ -132,10 +132,9 @@ export async function revertUploadQueueIfWatcherOffline(opts: {
 }
 
 /**
- * Soft-deletes a single already-resolved, still-active watcher and reverts its
- * instrument's upload queue when no watcher remains to drain it. Shared by the
- * watcher DELETE route and instrument retirement so both teardown paths behave
- * identically. Returns the `deleted_at` timestamp for the response payload.
+ * Soft-deletes a resolved watcher and reverts its instrument's upload queue.
+ * Shared by the watcher DELETE route and instrument retirement so both
+ * teardown paths behave identically. Returns the `deleted_at` timestamp.
  */
 export async function deregisterWatcherRow(
   watcher: { id: string; instrumentId: string },
@@ -158,11 +157,7 @@ export async function deregisterWatcherRow(
   return now;
 }
 
-/**
- * Deregisters every active watcher attached to an instrument. Invoked when an
- * instrument is retired (`status: "inactive"`) so its agents stop heartbeating.
- * Returns the number of watchers deregistered.
- */
+/** Deregisters every active watcher attached to an instrument (on retire). */
 export async function deregisterInstrumentWatchers(
   instrumentId: string
 ): Promise<number> {

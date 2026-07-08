@@ -58,9 +58,8 @@ export function EditInstrumentDialog({
   const [type, setType] = useState(instrumentType);
   const [isPending, startTransition] = useTransition();
 
-  // Re-sync form state from props whenever the dialog opens so it reflects any
-  // server-side changes since the last edit. The dialog is opened
-  // programmatically by its parent menu, so `onOpenChange` alone wouldn't fire.
+  // Re-sync form state from props each time the dialog opens so it reflects
+  // any server-side changes since the last edit.
   useEffect(() => {
     if (open) {
       setName(displayName);

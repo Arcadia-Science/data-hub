@@ -42,14 +42,9 @@ export function InstrumentHeaderSkeleton() {
   );
 }
 
-// While an instrument is `pending` (awaiting admin Confirm) or `inactive`
-// (retired), its lifecycle state is the relevant signal, so it pre-empts the
-// watcher connectivity badge — a retired instrument's watcher is deregistered,
-// and surfacing "No Watcher"/"Offline" there reads as a fault rather than an
-// intentional decommission. Only active instruments show the watcher badge.
-// The badge sits inline in the metadata row (next to the run count and the
-// linked hostname), so it stays compact and unlinked — the hostname beside it
-// is the dedicated link to the (possibly deregistered) watcher.
+// For `pending`/`inactive` instruments the lifecycle badge pre-empts the
+// watcher badge, since "No Watcher"/"Offline" would read as a fault rather than
+// an intentional decommission. The hostname beside it links to the watcher.
 function renderStatusBadge(
   instrument: InstrumentDetail,
   watcherStatus: WatcherOnlineStatus

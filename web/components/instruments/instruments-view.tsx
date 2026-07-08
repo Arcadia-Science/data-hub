@@ -21,10 +21,8 @@ export function InstrumentsViewSkeleton() {
           <TabsTrigger value="retired">Retired</TabsTrigger>
         </TabsList>
         <TabsContent className="mt-2" value="active">
-          {/* The trailing actions column is intentionally omitted from the
-              skeleton: it's admin-only and its three-dot menu renders
-              instantly once the row data streams in, so a placeholder there
-              just adds flicker. */}
+          {/* Actions column omitted: it's admin-only and renders instantly,
+              so a placeholder just adds flicker. */}
           <InstrumentsTableSkeleton withNotifications />
         </TabsContent>
       </Tabs>
@@ -32,9 +30,8 @@ export function InstrumentsViewSkeleton() {
   );
 }
 
-// Both partitions are pre-fetched on the server and passed down, so switching
-// tabs is purely client-side (no refetch — the instrument catalogue is small
-// enough to hold in memory, mirroring the watchers view).
+// All partitions are pre-fetched on the server, so tab switching needs no
+// refetch (the instrument catalogue is small).
 export function InstrumentsView({
   activeData,
   pendingData,
@@ -53,8 +50,7 @@ export function InstrumentsView({
 }) {
   const [tab, setTab] = useState<Tab>("active");
 
-  // `InstrumentActions` uses hooks, so it must be rendered as JSX rather
-  // than invoked as a plain function. Only admins get row actions.
+  // `InstrumentActions` uses hooks, so render it as JSX, not a function call.
   const renderRowActions = isAdmin
     ? (row: InstrumentListItem) => <InstrumentActions instrument={row} />
     : undefined;

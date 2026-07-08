@@ -14,10 +14,8 @@ export interface InstrumentListItem {
   displayName: string;
   filePatterns: string[];
   /**
-   * True when the instrument has at least one deregistered (soft-deleted)
-   * watcher. Combined with `watcherCount === 0`, lets the table show
-   * "Deregistered" rather than "No Watcher" for e.g. a reactivated instrument
-   * whose watcher was removed on retirement.
+   * True when the instrument has a deregistered watcher. With
+   * `watcherCount === 0`, distinguishes "Deregistered" from "No Watcher".
    */
   hasDeregisteredWatcher: boolean;
   id: string;
@@ -130,11 +128,9 @@ function buildRunCountSubquery() {
 }
 
 function buildWatcherCountSubquery() {
-  // Aggregates over *all* watcher rows (no `deleted_at` filter) so instruments
-  // whose only watcher has been deregistered still appear here — the per-column
-  // `filter (...)` clauses keep the live counts live while also exposing a
-  // deregistered tally the table uses to show a "Deregistered" badge instead of
-  // "No Watcher".
+  // No `deleted_at` filter so instruments whose only watcher was deregistered
+  // still appear; the per-column `filter (...)` clauses keep live counts live
+  // while also exposing a deregistered tally.
   return db
     .select({
       instrumentId: watchers.instrumentId,
@@ -340,23 +336,18 @@ export const getRecentActiveInstrumentsForDashboard = cache(
 
 export interface InstrumentDetail {
   /**
-   * True when `activeWatcherId` points at a deregistered (soft-deleted)
-   * watcher because no live watcher remains — e.g. an instrument that was
-   * retired and later reactivated. Lets the header distinguish "watcher was
-   * deregistered" from "never had a watcher" instead of both reading as
-   * "No Watcher".
+   * True when `activeWatcherId` is a deregistered watcher (no live one
+   * remains). Lets the header distinguish "was deregistered" from "never had
+   * a watcher".
    */
   activeWatcherDeregistered: boolean;
   /** Desktop hostname of the canonical watcher, if any. */
   activeWatcherHostname: string | null;
   /**
-   * The "canonical" watcher for this instrument, used to render watcher
-   * affordances in the instrument header. When multiple live watchers are
-   * attached, the most recently heartbeating one wins; ties (or instruments
-   * whose watchers have never heartbeated) fall back to the first watcher
-   * by `createdAt`. When no live watcher remains, this points at the most
-   * recently deregistered watcher so the header can still link to its
-   * read-only detail page — the counts below stay based on live watchers.
+   * The "canonical" watcher for the header: the most recently heartbeating
+   * live watcher, else the earliest by `createdAt`. When no live watcher
+   * remains, falls back to the most recently deregistered one so the header
+   * can still link to it (counts below stay based on live watchers).
    */
   activeWatcherId: string | null;
   createdAt: Date;
@@ -411,10 +402,8 @@ export const getInstrumentById = cache(async function getInstrumentById(
       .where(eq(watchers.instrumentId, instrumentId)),
   ]);
 
-  // Counts, file patterns, and heartbeat roll-ups reflect *live* watchers only:
-  // a deregistered watcher isn't watching anything, so it shouldn't inflate the
-  // online/offline tallies. Deregistered rows are kept around solely to resolve
-  // the canonical watcher link below.
+  // Counts and roll-ups use live watchers only; deregistered rows are kept
+  // just to resolve the canonical watcher link below.
   const watcherRows = allWatcherRows.filter((w) => w.deletedAt === null);
 
   const staleThreshold = new Date(
@@ -461,11 +450,8 @@ export const getInstrumentById = cache(async function getInstrumentById(
           (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
         )[0]);
 
-  // An instrument stays associated with its watcher even after the agent is
-  // deregistered (e.g. when the instrument is retired). When no live watcher
-  // remains, fall back to the most recently deregistered one so the header can
-  // still link to its (now read-only) detail page instead of reading as if the
-  // instrument never had a watcher.
+  // Fall back to the most recently deregistered watcher so the header can
+  // still link to it once no live watcher remains (e.g. after retirement).
   const canonicalWatcher =
     activeWatcher ??
     allWatcherRows

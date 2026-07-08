@@ -17,9 +17,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 
-// Controlled retire dialog opened from the row "..." menu. Retiring soft-sets
-// the instrument to `inactive` (surfaced as "Retired") and always deregisters
-// its watchers server-side — there's no live agent for a retired instrument.
+// Sets the instrument to `inactive` (shown as "Retired"); the server always
+// deregisters its watchers as part of the same request.
 export function RetireInstrumentDialog({
   instrumentId,
   displayName,

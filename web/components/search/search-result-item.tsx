@@ -149,9 +149,8 @@ export function SearchInstrumentRow({
     <ResultRowShell
       icon={Cpu}
       stat={
-        // `pending`/`inactive` are lifecycle states that supersede watcher
-        // connectivity (mirrors the instruments table). Active instruments
-        // show the watcher badge, including the `deregistered` case.
+        // Lifecycle badge for `pending`/`inactive`, watcher badge otherwise
+        // (mirrors the instruments table).
         result.status === "active" ? (
           <WatcherStatusBadge
             lastOnlineAt={

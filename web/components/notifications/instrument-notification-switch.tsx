@@ -11,14 +11,8 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
-// Composition over a `tooltip` boolean prop: the Tooltip is wrapped here
-// so callers don't have to know about the active vs muted copy. Four
-// places mount this component — the per-instrument cell in the
-// instruments table, the per-instrument list inside the Notifications
-// settings form (both `switch` variant), and the instrument-detail header
-// (`button` variant, a labelled pill) — and they all want identical
-// behaviour.
-
+// The Tooltip is wrapped here so callers don't have to know about the active
+// vs muted copy.
 export function InstrumentNotificationSwitch({
   instrumentId,
   initialEnabled,
@@ -109,11 +103,9 @@ export function InstrumentNotificationSwitch({
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          {/* The whole pill is the toggle: it's a `<label>` bound to the
-              switch, so clicking anywhere on it flips the control, and the
-              tooltip fires on hover over the entire area rather than just the
-              toggle. The bell + text are phrasing content; the switch is the
-              label's single labelable control, so the markup stays valid. */}
+          {/* A `<label>` bound to the switch makes the whole pill toggle it and
+              hover the tooltip. The switch is the label's only labelable
+              control, so the markup stays valid. */}
           <label
             className={cn(
               "flex h-8 items-center gap-2 rounded-md border bg-background px-2.5 shadow-xs transition-colors",
