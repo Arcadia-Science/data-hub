@@ -26,27 +26,16 @@ import type { SidebarInstrument } from "@/lib/api/sidebar";
 const SIDEBAR_RECENT_INSTRUMENTS_LIMIT = 10;
 
 interface MainNavProps {
-  activeInstrumentIds: string[];
   instruments: SidebarInstrument[];
 }
 
-export function MainNav({ activeInstrumentIds, instruments }: MainNavProps) {
+export function MainNav({ instruments }: MainNavProps) {
   const pathname = usePathname();
   const { recent: recentInstruments } = useRecentInstruments();
 
-  const activeIdSet = useMemo(
-    () => new Set(activeInstrumentIds),
-    [activeInstrumentIds]
-  );
-
-  // Prune the localStorage-backed list to still-active instruments so a
-  // retired/pending one the user once visited doesn't linger in the nav.
   const recentlyViewedInstruments = useMemo(
-    () =>
-      recentInstruments
-        .filter((entry) => activeIdSet.has(entry.instrumentId))
-        .slice(0, SIDEBAR_RECENT_INSTRUMENTS_LIMIT),
-    [recentInstruments, activeIdSet]
+    () => recentInstruments.slice(0, SIDEBAR_RECENT_INSTRUMENTS_LIMIT),
+    [recentInstruments]
   );
 
   const recentlyViewedIds = useMemo(

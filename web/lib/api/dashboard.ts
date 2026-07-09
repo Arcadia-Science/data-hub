@@ -96,9 +96,11 @@ export const getInstrumentSummaries = cache(
   }
 );
 
-export const getInstruments = cache(async function getInstruments(opts?: {
-  activeOnly?: boolean;
-}) {
+// `activeOnly` is a primitive so `cache()` dedupes calls with the same value
+// within a request; an options object would key on identity and miss.
+export const getInstruments = cache(async function getInstruments(
+  activeOnly = false
+) {
   return await db
     .select({
       id: instruments.id,
@@ -106,7 +108,7 @@ export const getInstruments = cache(async function getInstruments(opts?: {
       status: instruments.status,
     })
     .from(instruments)
-    .where(opts?.activeOnly ? eq(instruments.status, "active") : undefined)
+    .where(activeOnly ? eq(instruments.status, "active") : undefined)
     .orderBy(instruments.displayName);
 });
 

@@ -7,7 +7,6 @@ import { SidebarContent } from "@/components/ui/sidebar";
 import type { SidebarInstrument } from "@/lib/api/sidebar";
 
 interface AppSidebarContentProps {
-  activeInstrumentIds: string[];
   instruments: SidebarInstrument[];
   isAdmin: boolean;
 }
@@ -17,7 +16,6 @@ interface AppSidebarContentProps {
 // navigates to /settings/* the sidebar swaps in place; navigating away
 // restores the main view automatically.
 export function AppSidebarContent({
-  activeInstrumentIds,
   instruments,
   isAdmin,
 }: AppSidebarContentProps) {
@@ -29,10 +27,7 @@ export function AppSidebarContent({
       {isSettings ? (
         <SettingsNav isAdmin={isAdmin} />
       ) : (
-        <MainNav
-          activeInstrumentIds={activeInstrumentIds}
-          instruments={instruments}
-        />
+        <MainNav instruments={instruments} />
       )}
     </SidebarContent>
   );

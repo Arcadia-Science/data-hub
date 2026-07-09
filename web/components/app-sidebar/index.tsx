@@ -15,7 +15,6 @@ import {
 import type { SidebarInstrument } from "@/lib/api/sidebar";
 
 interface AppSidebarProps {
-  activeInstrumentIds: string[];
   instruments: SidebarInstrument[];
   session: Session;
   signOutAction: () => Promise<void>;
@@ -24,7 +23,6 @@ interface AppSidebarProps {
 export function AppSidebar({
   session,
   instruments,
-  activeInstrumentIds,
   signOutAction,
 }: AppSidebarProps) {
   return (
@@ -53,7 +51,6 @@ export function AppSidebar({
         </SidebarMenu>
       </SidebarHeader>
       <AppSidebarContent
-        activeInstrumentIds={activeInstrumentIds}
         instruments={instruments}
         isAdmin={session.user.isAdmin === true}
       />

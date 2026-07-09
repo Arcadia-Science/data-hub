@@ -136,7 +136,10 @@ export function InstrumentHeader({
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          {notifications ? (
+          {/* Retired/pending instruments emit no new runs, so the subscribe
+              pill would be a dead control — hide it outside the active state
+              (matches `/settings/notifications`, which lists active only). */}
+          {notifications && instrument.status === "active" ? (
             <InstrumentNotificationSwitch
               initialEnabled={notifications.enabled}
               instrumentId={instrument.id}

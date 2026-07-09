@@ -156,23 +156,30 @@ export async function PATCH(
     return apiError(400, VALIDATION_ERROR, "No valid fields to update");
   }
 
-  const [updated] = await db
-    .update(instruments)
-    .set(updates)
-    .where(eq(instruments.id, instrumentId))
-    .returning({
-      id: instruments.id,
-      display_name: instruments.displayName,
-      status: instruments.status,
-      instrument_type: instruments.instrumentType,
-      created_at: instruments.createdAt,
-      updated_at: instruments.updatedAt,
-    });
+  // Retirement flips the status and tears down every watcher; both run in one
+  // transaction so a mid-teardown failure can't leave the instrument
+  // `inactive` while its watchers stay live and heartbeating.
+  const updated = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(instruments)
+      .set(updates)
+      .where(eq(instruments.id, instrumentId))
+      .returning({
+        id: instruments.id,
+        display_name: instruments.displayName,
+        status: instruments.status,
+        instrument_type: instruments.instrumentType,
+        created_at: instruments.createdAt,
+        updated_at: instruments.updatedAt,
+      });
 
-  // A retired instrument has no live agent, so always tear down its watchers.
-  if (updates.status === "inactive") {
-    await deregisterInstrumentWatchers(instrumentId);
-  }
+    // A retired instrument has no live agent, so always tear down its watchers.
+    if (updates.status === "inactive") {
+      await deregisterInstrumentWatchers(instrumentId, tx);
+    }
+
+    return row;
+  });
 
   return Response.json(updated);
 }

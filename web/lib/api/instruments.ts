@@ -1,7 +1,7 @@
 import { and, count, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { cache } from "react";
 import YAML from "yaml";
-import { db } from "@/lib/db";
+import { type DbExecutor, db } from "@/lib/db";
 import {
   type InstrumentType,
   instrumentRuns,
@@ -43,13 +43,14 @@ const HEARTBEAT_STALE_MINUTES = 5;
  * perpetual "Uploading" spinner with no error.
  */
 export async function instrumentHasOnlineWatcher(
-  instrumentId: string
+  instrumentId: string,
+  executor: DbExecutor = db
 ): Promise<boolean> {
   const staleThreshold = new Date(
     Date.now() - HEARTBEAT_STALE_MINUTES * 60 * 1000
   );
 
-  const [row] = await db
+  const [row] = await executor
     .select({ value: count() })
     .from(watchers)
     .where(

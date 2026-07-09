@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { InstrumentActions } from "@/components/instruments/instrument-actions";
 import {
   InstrumentsTable,
@@ -51,9 +51,12 @@ export function InstrumentsView({
   const [tab, setTab] = useState<Tab>("active");
 
   // `InstrumentActions` uses hooks, so render it as JSX, not a function call.
-  const renderRowActions = isAdmin
-    ? (row: InstrumentListItem) => <InstrumentActions instrument={row} />
-    : undefined;
+  // Memoized so tab switches don't hand the tables a fresh function each render.
+  const renderRow = useCallback(
+    (row: InstrumentListItem) => <InstrumentActions instrument={row} />,
+    []
+  );
+  const renderRowActions = isAdmin ? renderRow : undefined;
 
   return (
     <Tabs onValueChange={(v) => setTab(v as Tab)} value={tab}>

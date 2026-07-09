@@ -2,7 +2,7 @@ import { and, asc, count, desc, eq, gte, inArray, isNull } from "drizzle-orm";
 import { cache } from "react";
 import YAML from "yaml";
 import { instrumentHasOnlineWatcher } from "@/lib/api/instruments";
-import { db } from "@/lib/db";
+import { type DbExecutor, db } from "@/lib/db";
 import {
   files,
   instrumentRuns,
@@ -55,9 +55,10 @@ export function extractWatchDirectory(
  * (ENG-1397). Returns the reverted file ids (for event reporting).
  */
 export async function revertPendingUploadRequests(
-  instrumentId: string
+  instrumentId: string,
+  executor: DbExecutor = db
 ): Promise<number[]> {
-  const reverted = await db
+  const reverted = await executor
     .update(files)
     .set({ status: "detected", uploadRequestedAt: null })
     .where(
@@ -96,16 +97,22 @@ type UploadRevertReason =
  * but lets the sweep attribute an event to a soft-deleted watcher without
  * touching a live one.
  */
-export async function revertUploadQueueIfWatcherOffline(opts: {
-  instrumentId: string;
-  watcherId: string;
-  reason: UploadRevertReason;
-}): Promise<number> {
-  if (await instrumentHasOnlineWatcher(opts.instrumentId)) {
+export async function revertUploadQueueIfWatcherOffline(
+  opts: {
+    instrumentId: string;
+    watcherId: string;
+    reason: UploadRevertReason;
+  },
+  executor: DbExecutor = db
+): Promise<number> {
+  if (await instrumentHasOnlineWatcher(opts.instrumentId, executor)) {
     return 0;
   }
 
-  const revertedIds = await revertPendingUploadRequests(opts.instrumentId);
+  const revertedIds = await revertPendingUploadRequests(
+    opts.instrumentId,
+    executor
+  );
   if (revertedIds.length === 0) {
     return 0;
   }
@@ -116,7 +123,7 @@ export async function revertUploadQueueIfWatcherOffline(opts: {
   const eventType: "watcher_stopped" | "error" =
     opts.reason === "watcher_offline_sweep" ? "error" : "watcher_stopped";
 
-  await db.insert(watcherEvents).values({
+  await executor.insert(watcherEvents).values({
     watcherId: opts.watcherId,
     eventType,
     message: `Reverted ${revertedIds.length} pending upload request(s) — no online watcher to upload them`,
@@ -138,30 +145,39 @@ export async function revertUploadQueueIfWatcherOffline(opts: {
  */
 export async function deregisterWatcherRow(
   watcher: { id: string; instrumentId: string },
-  reason: UploadRevertReason
+  reason: UploadRevertReason,
+  executor: DbExecutor = db
 ): Promise<Date> {
   const now = new Date();
-  await db
+  await executor
     .update(watchers)
     .set({ deletedAt: now })
     .where(eq(watchers.id, watcher.id));
 
   // Must run after the soft-delete so the helper's online check excludes this
   // watcher; otherwise a deregistered instrument's queue would sit undrained.
-  await revertUploadQueueIfWatcherOffline({
-    instrumentId: watcher.instrumentId,
-    watcherId: watcher.id,
-    reason,
-  });
+  await revertUploadQueueIfWatcherOffline(
+    {
+      instrumentId: watcher.instrumentId,
+      watcherId: watcher.id,
+      reason,
+    },
+    executor
+  );
 
   return now;
 }
 
-/** Deregisters every active watcher attached to an instrument (on retire). */
+/**
+ * Deregisters every active watcher attached to an instrument (on retire).
+ * Accepts an `executor` so the caller can run it inside the same transaction
+ * as the status flip, keeping retirement atomic.
+ */
 export async function deregisterInstrumentWatchers(
-  instrumentId: string
+  instrumentId: string,
+  executor: DbExecutor = db
 ): Promise<number> {
-  const active = await db
+  const active = await executor
     .select({ id: watchers.id, instrumentId: watchers.instrumentId })
     .from(watchers)
     .where(
@@ -169,7 +185,7 @@ export async function deregisterInstrumentWatchers(
     );
 
   for (const watcher of active) {
-    await deregisterWatcherRow(watcher, "instrument_retired");
+    await deregisterWatcherRow(watcher, "instrument_retired", executor);
   }
 
   return active.length;

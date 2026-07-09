@@ -155,7 +155,7 @@ async function DashboardRunsSection({
   // The toolbar instrument list and the filtered run page are independent.
   // Only active instruments are useful filter targets on the dashboard.
   const [instruments, runResult] = await Promise.all([
-    getInstruments({ activeOnly: true }),
+    getInstruments(true),
     buildRunListQuery({
       instrumentId: instrumentIds,
       search: params.search || undefined,
