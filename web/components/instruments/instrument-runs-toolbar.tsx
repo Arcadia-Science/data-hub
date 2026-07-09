@@ -25,6 +25,7 @@ export function InstrumentRunsToolbar() {
     filters.date_from !== null ||
     filters.date_to !== null ||
     filters.include_deleted ||
+    filters.run_status.length > 0 ||
     filters.wavelength !== null ||
     filters.measurement_mode !== null ||
     filters.measurement_type !== null;
@@ -35,6 +36,7 @@ export function InstrumentRunsToolbar() {
       date_from: null,
       date_to: null,
       include_deleted: false,
+      run_status: [],
       wavelength: null,
       measurement_mode: null,
       measurement_type: null,
@@ -84,6 +86,8 @@ export function InstrumentRunsToolbar() {
             onChange={({ includeDeleted }) =>
               setFilters({ include_deleted: includeDeleted, page: 1 })
             }
+            onStatusChange={(next) => setFilters({ run_status: next, page: 1 })}
+            selectedStatuses={filters.run_status}
             values={{ includeDeleted: filters.include_deleted }}
           />
         </div>

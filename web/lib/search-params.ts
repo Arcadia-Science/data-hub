@@ -6,6 +6,7 @@ import {
   parseAsString,
   parseAsStringLiteral,
 } from "nuqs/server";
+import { RUN_STATUS_VALUES, type RunStatus } from "@/lib/runs/run-status";
 
 // All dashboard filter/pagination state lives in the URL via nuqs. This makes
 // filter combinations shareable via link and keeps the server component in
@@ -16,6 +17,10 @@ export const dashboardSearchParams = {
   date_from: parseAsString.withOptions({ clearOnDefault: true }),
   date_to: parseAsString.withOptions({ clearOnDefault: true }),
   include_deleted: parseAsBoolean.withDefault(false),
+  // Derived run status, multi-select. Empty array = no filter (show all).
+  run_status: parseAsArrayOf(parseAsStringLiteral(RUN_STATUS_VALUES))
+    .withDefault([])
+    .withOptions({ clearOnDefault: true }),
   page: parseAsInteger.withDefault(1),
   per_page: parseAsInteger.withDefault(10),
 };
@@ -56,6 +61,10 @@ export const instrumentDetailSearchParams = {
   color_mode: parseAsString,
   // Attribution filter: either a userId or the reserved sentinel "unattributed".
   ran_by: parseAsString,
+  // Derived run status, multi-select. Empty array = no filter (show all).
+  run_status: parseAsArrayOf(parseAsStringLiteral(RUN_STATUS_VALUES))
+    .withDefault([])
+    .withOptions({ clearOnDefault: true }),
 };
 
 export const instrumentDetailParamsCache = createSearchParamsCache(
@@ -111,10 +120,12 @@ export function hasActiveFilters(params: {
   search: string;
   instrument_id: string[];
   include_deleted: boolean;
+  run_status: RunStatus[];
 }): boolean {
   return (
     params.search !== "" ||
     params.instrument_id.length > 0 ||
-    params.include_deleted
+    params.include_deleted ||
+    params.run_status.length > 0
   );
 }
