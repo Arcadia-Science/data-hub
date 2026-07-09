@@ -144,6 +144,15 @@ export async function PATCH(
   const updates: Record<string, unknown> = {};
   if ("status" in body) {
     updates.status = body.status;
+    // Keep the retirement audit fields in lockstep with the status: only an
+    // `inactive` instrument has a retirer.
+    if (body.status === "inactive") {
+      updates.retiredAt = new Date();
+      updates.retiredBy = authResult.userId;
+    } else {
+      updates.retiredAt = null;
+      updates.retiredBy = null;
+    }
   }
   if ("display_name" in body) {
     updates.displayName = body.display_name;
@@ -173,9 +182,10 @@ export async function PATCH(
         updated_at: instruments.updatedAt,
       });
 
-    // A retired instrument has no live agent, so always tear down its watchers.
+    // A retired instrument has no live agent, so always tear down its watchers,
+    // attributing the teardown to the same actor that retired it.
     if (updates.status === "inactive") {
-      await deregisterInstrumentWatchers(instrumentId, tx);
+      await deregisterInstrumentWatchers(instrumentId, authResult.userId, tx);
     }
 
     return row;

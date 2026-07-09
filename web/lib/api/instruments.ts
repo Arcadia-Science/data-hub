@@ -1,11 +1,13 @@
 import { and, count, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { cache } from "react";
 import YAML from "yaml";
+import { type ActorUser, resolveActorUser } from "@/lib/api/actor";
 import { type DbExecutor, db } from "@/lib/db";
 import {
   type InstrumentType,
   instrumentRuns,
   instruments,
+  users,
   watchers,
 } from "@/lib/db/schema";
 
@@ -358,6 +360,10 @@ export interface InstrumentDetail {
   instrumentType: InstrumentType;
   /** Most recent heartbeat from any watcher attached to this instrument. */
   lastWatcherHeartbeatAt: Date | null;
+  /** When the instrument was retired; null unless `status` is `inactive`. */
+  retiredAt: Date | null;
+  /** Who retired the instrument; null when unknown or not retired. */
+  retiredByUser: ActorUser | null;
   runCount: number;
   status: "pending" | "active" | "inactive";
   updatedAt: Date;
@@ -370,8 +376,23 @@ export const getInstrumentById = cache(async function getInstrumentById(
   instrumentId: string
 ): Promise<InstrumentDetail | null> {
   const [instrument] = await db
-    .select()
+    .select({
+      id: instruments.id,
+      displayName: instruments.displayName,
+      status: instruments.status,
+      instrumentType: instruments.instrumentType,
+      createdAt: instruments.createdAt,
+      updatedAt: instruments.updatedAt,
+      retiredAt: instruments.retiredAt,
+      retiredBy: instruments.retiredBy,
+      retiredByName: users.name,
+      retiredByEmail: users.email,
+      retiredByImage: users.image,
+    })
     .from(instruments)
+    // Resolve the retirer for display; all NULL when active or retired before
+    // `retired_by` existed.
+    .leftJoin(users, eq(users.id, instruments.retiredBy))
     .where(eq(instruments.id, instrumentId))
     .limit(1);
 
@@ -470,6 +491,13 @@ export const getInstrumentById = cache(async function getInstrumentById(
     filePatterns: mergeFilePatterns(watcherRows.map((w) => w.configYaml)),
     createdAt: instrument.createdAt,
     updatedAt: instrument.updatedAt,
+    retiredAt: instrument.retiredAt,
+    retiredByUser: resolveActorUser({
+      userId: instrument.retiredBy,
+      name: instrument.retiredByName,
+      email: instrument.retiredByEmail,
+      image: instrument.retiredByImage,
+    }),
     runCount: runCountResult[0].value,
     watcherCount: watcherRows.length,
     watchersOnline,

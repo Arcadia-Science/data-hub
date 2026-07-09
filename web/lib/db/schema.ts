@@ -303,6 +303,19 @@ export const instruments = pgTable(
       .notNull()
       .defaultNow()
       .$onUpdate(() => new Date()),
+    // When the instrument was retired (status set to `inactive`). NULL while
+    // active/pending; cleared again on reactivation. Distinct from `updatedAt`,
+    // which any edit bumps.
+    retiredAt: timestamp("retired_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    // Who retired the instrument, captured from the acting session/PAT user.
+    // NULL while active and for rows retired before this column existed.
+    // `set null` on user deletion so removing a user never blocks on history.
+    retiredBy: text("retired_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
   },
   (instrument) => [
     // Trigram GIN index backing the case-insensitive `ilike '%…%'` display-name
@@ -360,6 +373,13 @@ export const watchers = pgTable(
     deletedAt: timestamp("deleted_at", {
       withTimezone: true,
       mode: "date",
+    }),
+    // Who deregistered this watcher (the soft-delete actor), captured from the
+    // acting session/PAT user. NULL while active and for rows deregistered
+    // before this column existed. `set null` on user deletion so removing a
+    // user never blocks on history.
+    deregisteredBy: text("deregistered_by").references(() => users.id, {
+      onDelete: "set null",
     }),
   },
   (watcher) => [

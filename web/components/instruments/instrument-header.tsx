@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import { InstrumentActions } from "@/components/instruments/instrument-actions";
 import { InstrumentStatusBadge } from "@/components/instruments/instrument-status-badge";
@@ -12,13 +14,18 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { Skeleton } from "@/components/ui/skeleton";
+import { UserAvatar } from "@/components/user-avatar";
 import {
   getWatcherOnlineStatus,
   type WatcherOnlineStatus,
 } from "@/components/watchers/watcher-online-status";
 import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type { InstrumentDetail } from "@/lib/api/instruments";
+import { formatDate } from "@/lib/date";
 
+// Must stay a client component: the retired-by line's `formatDate` resolves the
+// timezone at runtime, so server rendering would use UTC and can land the date
+// on the wrong calendar day near midnight.
 export function InstrumentHeaderSkeleton() {
   return (
     <div
@@ -130,6 +137,23 @@ export function InstrumentHeader({
                 >
                   {instrument.activeWatcherHostname}
                 </Link>
+              </>
+            ) : null}
+            {instrument.status === "inactive" && instrument.retiredAt ? (
+              <>
+                <span>·</span>
+                <span className="flex items-center gap-1.5">
+                  <span>Retired {formatDate(instrument.retiredAt)}</span>
+                  {instrument.retiredByUser ? (
+                    <span className="flex items-center gap-1.5">
+                      <span>by</span>
+                      <UserAvatar size="sm" user={instrument.retiredByUser} />
+                      <span className="font-medium text-foreground">
+                        {instrument.retiredByUser.displayName}
+                      </span>
+                    </span>
+                  ) : null}
+                </span>
               </>
             ) : null}
           </div>

@@ -11,6 +11,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { Skeleton } from "@/components/ui/skeleton";
+import { UserAvatar } from "@/components/user-avatar";
 import { DeregisterDialog } from "@/components/watchers/deregister-dialog";
 import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type { WatcherDetail } from "@/lib/api/watchers";
@@ -123,7 +124,18 @@ export function WatcherHeader({ watcher }: { watcher: WatcherDetail }) {
           {isDeregistered && watcher.deletedAt && (
             <>
               <span>·</span>
-              <span>Deregistered {formatDate(watcher.deletedAt)}</span>
+              <span className="flex items-center gap-1.5">
+                <span>Deregistered {formatDate(watcher.deletedAt)}</span>
+                {watcher.deregisteredByUser && (
+                  <span className="flex items-center gap-1.5">
+                    <span>by</span>
+                    <UserAvatar size="sm" user={watcher.deregisteredByUser} />
+                    <span className="font-medium text-foreground">
+                      {watcher.deregisteredByUser.displayName}
+                    </span>
+                  </span>
+                )}
+              </span>
             </>
           )}
         </div>

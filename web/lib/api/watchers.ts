@@ -1,12 +1,14 @@
 import { and, asc, count, desc, eq, gte, inArray, isNull } from "drizzle-orm";
 import { cache } from "react";
 import YAML from "yaml";
+import { type ActorUser, resolveActorUser } from "@/lib/api/actor";
 import { instrumentHasOnlineWatcher } from "@/lib/api/instruments";
 import { type DbExecutor, db } from "@/lib/db";
 import {
   files,
   instrumentRuns,
   instruments,
+  users,
   watcherEvents,
   watcherEventTypeEnum,
   watcherHeartbeats,
@@ -146,12 +148,15 @@ export async function revertUploadQueueIfWatcherOffline(
 export async function deregisterWatcherRow(
   watcher: { id: string; instrumentId: string },
   reason: UploadRevertReason,
+  // The acting session/PAT user, recorded on the row for the "Deregistered by"
+  // display. Null only when no caller identity is available.
+  actorId: string | null,
   executor: DbExecutor = db
 ): Promise<Date> {
   const now = new Date();
   await executor
     .update(watchers)
-    .set({ deletedAt: now })
+    .set({ deletedAt: now, deregisteredBy: actorId })
     .where(eq(watchers.id, watcher.id));
 
   // Must run after the soft-delete so the helper's online check excludes this
@@ -175,6 +180,7 @@ export async function deregisterWatcherRow(
  */
 export async function deregisterInstrumentWatchers(
   instrumentId: string,
+  actorId: string | null,
   executor: DbExecutor = db
 ): Promise<number> {
   const active = await executor
@@ -185,7 +191,12 @@ export async function deregisterInstrumentWatchers(
     );
 
   for (const watcher of active) {
-    await deregisterWatcherRow(watcher, "instrument_retired", executor);
+    await deregisterWatcherRow(
+      watcher,
+      "instrument_retired",
+      actorId,
+      executor
+    );
   }
 
   return active.length;
@@ -284,6 +295,8 @@ export type WatcherDetail = WatcherListItem & {
   configYaml: string | null;
   configChecksum: string | null;
   updatedAt: Date;
+  /** Who deregistered the watcher; null when live or unknown. */
+  deregisteredByUser: ActorUser | null;
 };
 
 // React.cache() deduplicates calls within a single request — used by both
@@ -306,9 +319,16 @@ export const getWatcherById = cache(async function getWatcherById(
       createdAt: watchers.createdAt,
       updatedAt: watchers.updatedAt,
       deletedAt: watchers.deletedAt,
+      deregisteredBy: watchers.deregisteredBy,
+      deregisteredByName: users.name,
+      deregisteredByEmail: users.email,
+      deregisteredByImage: users.image,
     })
     .from(watchers)
     .leftJoin(instruments, eq(instruments.id, watchers.instrumentId))
+    // Resolve the actor who deregistered the watcher for display; all NULL
+    // when live or deregistered before `deregistered_by` existed.
+    .leftJoin(users, eq(users.id, watchers.deregisteredBy))
     // No deletedAt filter — the detail page renders deregistered watchers too,
     // with muted styling and historical data still visible.
     .where(eq(watchers.id, watcherId))
@@ -332,6 +352,12 @@ export const getWatcherById = cache(async function getWatcherById(
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     deletedAt: row.deletedAt,
+    deregisteredByUser: resolveActorUser({
+      userId: row.deregisteredBy,
+      name: row.deregisteredByName,
+      email: row.deregisteredByEmail,
+      image: row.deregisteredByImage,
+    }),
   };
 });
 

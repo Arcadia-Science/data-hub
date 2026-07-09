@@ -92,7 +92,8 @@ export async function DELETE(
 
   const now = await deregisterWatcherRow(
     { id: watcher.id, instrumentId: watcher.instrumentId },
-    "watcher_deregistered"
+    "watcher_deregistered",
+    authResult.userId
   );
 
   return Response.json({ id: watcherId, deleted_at: now });
