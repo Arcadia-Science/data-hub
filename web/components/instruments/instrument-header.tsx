@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { InstrumentActions } from "@/components/instruments/instrument-actions";
 import { InstrumentStatusBadge } from "@/components/instruments/instrument-status-badge";
 import { InstrumentNotificationSwitch } from "@/components/notifications/instrument-notification-switch";
 import { RecordInstrumentVisit } from "@/components/recent-instrument-visit";
@@ -11,13 +14,18 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { Skeleton } from "@/components/ui/skeleton";
+import { UserAvatar } from "@/components/user-avatar";
 import {
   getWatcherOnlineStatus,
   type WatcherOnlineStatus,
 } from "@/components/watchers/watcher-online-status";
 import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type { InstrumentDetail } from "@/lib/api/instruments";
+import { formatDate } from "@/lib/date";
 
+// Must stay a client component: the retired-by line's `formatDate` resolves the
+// timezone at runtime, so server rendering would use UTC and can land the date
+// on the wrong calendar day near midnight.
 export function InstrumentHeaderSkeleton() {
   return (
     <div
@@ -27,63 +35,53 @@ export function InstrumentHeaderSkeleton() {
       role="status"
     >
       <Skeleton className="mb-2 h-4 w-56" />
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <Skeleton className="h-8 w-64" />
-        <div className="flex items-center gap-2">
-          <Skeleton className="h-[18.4px] w-8 rounded-full" />
-          <Skeleton className="h-[18.4px] w-28 rounded-4xl" />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-col gap-3">
+          <Skeleton className="h-8 w-64" />
+          <Skeleton className="h-5 w-72" />
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Skeleton className="h-8 w-36 rounded-md" />
+          <Skeleton className="h-8 w-8 rounded-md" />
         </div>
       </div>
-      <Skeleton className="h-5 w-48" />
     </div>
   );
 }
 
-// While an instrument is `pending` its lifecycle state (awaiting admin Confirm)
-// is the relevant signal, so it pre-empts the watcher connectivity badge. Once
-// active, the watcher badge — linked to the canonical watcher when present —
-// takes over.
+// For `pending`/`inactive` instruments the lifecycle badge pre-empts the
+// watcher badge, since "No Watcher"/"Offline" would read as a fault rather than
+// an intentional decommission. The hostname beside it links to the watcher.
 function renderStatusBadge(
   instrument: InstrumentDetail,
   watcherStatus: WatcherOnlineStatus
 ) {
-  if (instrument.status === "pending") {
-    return <InstrumentStatusBadge className="px-2 py-3" status="pending" />;
+  if (instrument.status === "pending" || instrument.status === "inactive") {
+    return <InstrumentStatusBadge status={instrument.status} />;
   }
 
-  const badge = (
+  return (
     <WatcherStatusBadge
-      className="px-2 py-3"
       lastOnlineAt={instrument.lastWatcherHeartbeatAt}
-      status={watcherStatus}
-      verbose
+      status={
+        instrument.activeWatcherDeregistered ? "deregistered" : watcherStatus
+      }
     />
   );
-
-  if (instrument.activeWatcherId) {
-    return (
-      <Link
-        className="transition-colors hover:opacity-80"
-        href={`/watchers/${instrument.activeWatcherId}`}
-      >
-        {badge}
-      </Link>
-    );
-  }
-
-  return badge;
 }
 
 export function InstrumentHeader({
   instrument,
   notifications,
+  isAdmin = false,
 }: {
   instrument: InstrumentDetail;
+  /** Admins get the inline Edit / Retire / Reactivate actions. */
+  isAdmin?: boolean;
   /**
    * Per-viewer notification state for this instrument. When omitted
    * (e.g. unauthenticated callers, or contexts that don't want to
-   * surface the switch), the action row falls back to the watcher-status
-   * layout.
+   * surface the switch), the notifications control is hidden.
    */
   notifications?: {
     enabled: boolean;
@@ -118,38 +116,66 @@ export function InstrumentHeader({
         </BreadcrumbList>
       </Breadcrumb>
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="font-semibold text-2xl tracking-tight">
-          {instrument.displayName}
-        </h1>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 flex-col gap-3">
+          <h1 className="font-semibold text-2xl tracking-tight">
+            {instrument.displayName}
+          </h1>
 
-        <div className="flex items-center gap-2">
-          {notifications ? (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground text-sm">
+            {renderStatusBadge(instrument, watcherStatus)}
+            <span>·</span>
+            <span>
+              {instrument.runCount} {instrument.runCount === 1 ? "run" : "runs"}
+            </span>
+            {instrument.activeWatcherId && instrument.activeWatcherHostname ? (
+              <>
+                <span>·</span>
+                <Link
+                  className="hover:text-foreground hover:underline"
+                  href={`/watchers/${instrument.activeWatcherId}`}
+                >
+                  {instrument.activeWatcherHostname}
+                </Link>
+              </>
+            ) : null}
+            {instrument.status === "inactive" && instrument.retiredAt ? (
+              <>
+                <span>·</span>
+                <span className="flex items-center gap-1.5">
+                  <span>Retired {formatDate(instrument.retiredAt)}</span>
+                  {instrument.retiredByUser ? (
+                    <span className="flex items-center gap-1.5">
+                      <span>by</span>
+                      <UserAvatar size="sm" user={instrument.retiredByUser} />
+                      <span className="font-medium text-foreground">
+                        {instrument.retiredByUser.displayName}
+                      </span>
+                    </span>
+                  ) : null}
+                </span>
+              </>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
+          {/* Retired/pending instruments emit no new runs, so the subscribe
+              pill would be a dead control — hide it outside the active state
+              (matches `/settings/notifications`, which lists active only). */}
+          {notifications && instrument.status === "active" ? (
             <InstrumentNotificationSwitch
               initialEnabled={notifications.enabled}
               instrumentId={instrument.id}
               masterMuted={notifications.masterMuted}
+              size="sm"
+              variant="button"
             />
           ) : null}
-          {renderStatusBadge(instrument, watcherStatus)}
+          {isAdmin ? (
+            <InstrumentActions instrument={instrument} variant="expanded" />
+          ) : null}
         </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground text-sm">
-        <span>
-          {instrument.runCount} {instrument.runCount === 1 ? "run" : "runs"}
-        </span>
-        {instrument.activeWatcherId && instrument.activeWatcherHostname ? (
-          <>
-            <span>·</span>
-            <Link
-              className="hover:text-foreground hover:underline"
-              href={`/watchers/${instrument.activeWatcherId}`}
-            >
-              {instrument.activeWatcherHostname}
-            </Link>
-          </>
-        ) : null}
       </div>
     </div>
   );

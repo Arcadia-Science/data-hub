@@ -136,7 +136,8 @@ export interface InstrumentSubscriptionRow {
 }
 
 export async function listInstrumentSubscriptions(
-  userId: string
+  userId: string,
+  opts?: { activeOnly?: boolean }
 ): Promise<InstrumentSubscriptionRow[]> {
   const rows = await db
     .select({
@@ -152,6 +153,7 @@ export async function listInstrumentSubscriptions(
         eq(instrumentNotificationSubscriptions.userId, userId)
       )
     )
+    .where(opts?.activeOnly ? eq(instruments.status, "active") : undefined)
     .orderBy(asc(instruments.displayName));
 
   return rows.map((r) => ({

@@ -11,6 +11,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { Skeleton } from "@/components/ui/skeleton";
+import { UserAvatar } from "@/components/user-avatar";
 import { DeregisterDialog } from "@/components/watchers/deregister-dialog";
 import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type { WatcherDetail } from "@/lib/api/watchers";
@@ -71,16 +72,9 @@ export function WatcherHeader({ watcher }: { watcher: WatcherDetail }) {
         </BreadcrumbList>
       </Breadcrumb>
 
-      {/* Deregistered watchers get a muted, dashed-border treatment to
-          visually signal that this is historical data. The deregister action
-          is hidden since the watcher is already soft-deleted. */}
-      <div
-        className={
-          isDeregistered
-            ? "flex flex-col gap-3 rounded-lg border border-dashed p-4 opacity-70"
-            : "flex flex-col gap-3"
-        }
-      >
+      {/* Deregistration is signalled by the badge and date below, not by
+          fading the header (which made the text too faint to read). */}
+      <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <h1 className="font-semibold text-2xl tracking-tight">
@@ -95,11 +89,7 @@ export function WatcherHeader({ watcher }: { watcher: WatcherDetail }) {
                 v{watcher.watcherVersion}
               </Badge>
             )}
-            {isDeregistered && (
-              <Badge className="text-[10px]" variant="secondary">
-                Deregistered
-              </Badge>
-            )}
+            {isDeregistered && <Badge variant="secondary">Deregistered</Badge>}
           </div>
 
           {!isDeregistered && (
@@ -134,7 +124,18 @@ export function WatcherHeader({ watcher }: { watcher: WatcherDetail }) {
           {isDeregistered && watcher.deletedAt && (
             <>
               <span>·</span>
-              <span>Deregistered {formatDate(watcher.deletedAt)}</span>
+              <span className="flex items-center gap-1.5">
+                <span>Deregistered {formatDate(watcher.deletedAt)}</span>
+                {watcher.deregisteredByUser && (
+                  <span className="flex items-center gap-1.5">
+                    <span>by</span>
+                    <UserAvatar size="sm" user={watcher.deregisteredByUser} />
+                    <span className="font-medium text-foreground">
+                      {watcher.deregisteredByUser.displayName}
+                    </span>
+                  </span>
+                )}
+              </span>
             </>
           )}
         </div>

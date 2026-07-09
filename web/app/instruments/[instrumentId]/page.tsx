@@ -159,10 +159,16 @@ export default async function InstrumentDetailPage({
   // Suspense child so their queries run in parallel (the shared
   // `getInstrumentById` is `cache()`-deduped) and the header paints without
   // waiting on the heavier runs / filter-option queries.
+  const isAdmin = session.user.isAdmin === true;
+
   return (
     <div className="mx-auto flex w-full min-w-0 max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
       <Suspense fallback={<InstrumentHeaderSkeleton />}>
-        <InstrumentHeaderSection instrumentId={instrumentId} userId={userId} />
+        <InstrumentHeaderSection
+          instrumentId={instrumentId}
+          isAdmin={isAdmin}
+          userId={userId}
+        />
       </Suspense>
       <Suspense fallback={<InstrumentRunsSkeleton />}>
         <InstrumentRunsSection
@@ -177,9 +183,11 @@ export default async function InstrumentDetailPage({
 
 async function InstrumentHeaderSection({
   instrumentId,
+  isAdmin,
   userId,
 }: {
   instrumentId: string;
+  isAdmin: boolean;
   userId: string;
 }) {
   // Header data: instrument metadata plus the viewer's notification prefs +
@@ -205,6 +213,7 @@ async function InstrumentHeaderSection({
   return (
     <InstrumentHeader
       instrument={instrument}
+      isAdmin={isAdmin}
       notifications={{
         enabled: subscriptionForThisInstrument?.enabled ?? false,
         masterMuted: notificationPrefs.runsAllMuted,

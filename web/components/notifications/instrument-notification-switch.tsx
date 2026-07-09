@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { Bell } from "lucide-react";
+import { useId, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -8,27 +9,31 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 
-// Composition over a `tooltip` boolean prop: the Tooltip is wrapped here
-// so callers don't have to know about the active vs muted copy. Three
-// places mount this component — the per-instrument cell in the
-// instruments table, the row in the InstrumentHeader's action area, and
-// the per-instrument list inside the Notifications settings form — and
-// they all want identical behaviour.
-
+// The Tooltip is wrapped here so callers don't have to know about the active
+// vs muted copy.
 export function InstrumentNotificationSwitch({
   instrumentId,
   initialEnabled,
   masterMuted,
   size = "default",
+  variant = "switch",
   ariaLabel = "Notify me about new runs on this instrument",
 }: {
   instrumentId: string;
   initialEnabled: boolean;
   masterMuted: boolean;
   size?: "sm" | "default";
+  /**
+   * `switch` renders a bare toggle (table cell, settings list). `button`
+   * renders a labelled pill — a bell icon, "Notifications", and the toggle —
+   * where the *entire* pill is clickable and hover shows the tooltip.
+   */
+  variant?: "switch" | "button";
   ariaLabel?: string;
 }) {
+  const switchId = useId();
   // Optimistic local state mirrors the row's `enabled` column. We flip
   // it immediately for visual feedback and roll back if the server says
   // no — the alternative ("await the round-trip then update") makes the
@@ -75,29 +80,60 @@ export function InstrumentNotificationSwitch({
   // is true — the user's per-instrument intent is preserved through a
   // master toggle round-trip — but the switch reads as off until the
   // master mute is cleared.
+  const disabled = masterMuted || isPending;
+
+  const tooltip = masterMuted
+    ? "All instrument notifications muted in Settings"
+    : enabled
+      ? "Notifying you about new runs on this instrument"
+      : "Click to be notified about new runs on this instrument";
+
+  const control = (
+    <Switch
+      aria-label={ariaLabel}
+      checked={enabled && !masterMuted}
+      disabled={disabled}
+      id={switchId}
+      onCheckedChange={handleChange}
+      size={size}
+    />
+  );
+
+  if (variant === "button") {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          {/* A `<label>` bound to the switch makes the whole pill toggle it and
+              hover the tooltip. The switch is the label's only labelable
+              control, so the markup stays valid. */}
+          <label
+            className={cn(
+              "flex h-8 items-center gap-2 rounded-md border bg-background px-2.5 shadow-xs transition-colors",
+              disabled
+                ? "cursor-not-allowed opacity-70"
+                : "cursor-pointer hover:bg-muted"
+            )}
+            htmlFor={switchId}
+          >
+            <Bell className="size-3.5 text-muted-foreground" />
+            <span className="text-sm">Notifications</span>
+            {control}
+          </label>
+        </TooltipTrigger>
+        <TooltipContent>{tooltip}</TooltipContent>
+      </Tooltip>
+    );
+  }
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         {/* The wrapper span keeps the tooltip target hoverable even when
             the switch is disabled — a disabled Radix Switch swallows
             pointer events otherwise. */}
-        <span className="inline-flex">
-          <Switch
-            aria-label={ariaLabel}
-            checked={enabled && !masterMuted}
-            disabled={masterMuted || isPending}
-            onCheckedChange={handleChange}
-            size={size}
-          />
-        </span>
+        <span className="inline-flex">{control}</span>
       </TooltipTrigger>
-      <TooltipContent>
-        {masterMuted
-          ? "All instrument notifications muted in Settings"
-          : enabled
-            ? "Notifying you about new runs on this instrument"
-            : "Click to be notified about new runs on this instrument"}
-      </TooltipContent>
+      <TooltipContent>{tooltip}</TooltipContent>
     </Tooltip>
   );
 }
