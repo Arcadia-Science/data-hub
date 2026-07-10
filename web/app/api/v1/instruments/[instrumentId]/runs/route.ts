@@ -4,7 +4,7 @@ import { authorize } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { buildRunListQuery, parseAcquiredAt } from "@/lib/api/instrument-runs";
 import { notifyRunCreated } from "@/lib/api/notifications";
-import { parseIntParam } from "@/lib/api/validators";
+import { parseIntParam, parseRunStatusParam } from "@/lib/api/validators";
 import { db } from "@/lib/db";
 import { files, instrumentRuns, instruments, watchers } from "@/lib/db/schema";
 import { sendSlackMessage } from "@/lib/slack";
@@ -258,6 +258,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     }),
     includeDeleted: searchParams.get("include_deleted") === "true",
     ranBy: searchParams.get("ran_by") ?? undefined,
+    statuses: parseRunStatusParam(searchParams),
   });
 
   return Response.json(result);

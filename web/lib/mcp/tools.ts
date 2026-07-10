@@ -22,6 +22,7 @@ import { hasScope, type Scope } from "@/lib/api/scopes";
 import { getWatcherHeartbeats, getWatcherList } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { runAttributions } from "@/lib/db/schema";
+import { RUN_STATUS_VALUES } from "@/lib/runs/run-status";
 import {
   getPresignedDownloadUrl,
   PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS,
@@ -177,7 +178,7 @@ export function registerTools(server: McpServer) {
     {
       title: "Search Runs",
       description:
-        "Search instrument runs with filtering, pagination, and sorting. Supports plate reader metadata filters (wavelength, measurement mode/type).",
+        "Search instrument runs with filtering, pagination, and sorting. Supports run status filters and plate reader metadata filters (wavelength, measurement mode/type).",
       inputSchema: {
         instrumentId: z
           .union([z.string(), z.array(z.string())])
@@ -244,6 +245,12 @@ export function registerTools(server: McpServer) {
           .describe(
             'Filter by attributor. Pass a user id to match runs attributed to that user, or the literal "unattributed" to match runs with no attributions. Use list_run_attributors to discover valid user ids.'
           ),
+        status: z
+          .array(z.enum(RUN_STATUS_VALUES))
+          .optional()
+          .describe(
+            "Filter by derived run status (OR'd together). Status is derived from a run's raw file states, priority-exclusive: failed (any file failed), pending (files awaiting upload), uploaded (awaiting processing), processing, completed (all done), empty (no files)."
+          ),
       },
       annotations: { readOnlyHint: true },
     },
@@ -267,6 +274,7 @@ export function registerTools(server: McpServer) {
         measurementMode: args.measurementMode,
         measurementType: args.measurementType,
         ranBy: args.ranBy,
+        statuses: args.status,
       });
       return textResult(result);
     }

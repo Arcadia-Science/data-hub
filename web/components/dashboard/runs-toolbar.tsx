@@ -57,6 +57,7 @@ export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
       date_from: null,
       date_to: null,
       include_deleted: false,
+      status: [],
       page: 1,
     });
   }
@@ -160,6 +161,8 @@ export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
             onChange={({ includeDeleted }) =>
               setFilters({ include_deleted: includeDeleted, page: 1 })
             }
+            onStatusChange={(next) => setFilters({ status: next, page: 1 })}
+            selectedStatuses={filters.status}
             values={{ includeDeleted: filters.include_deleted }}
           />
         </div>

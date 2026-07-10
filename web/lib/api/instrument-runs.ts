@@ -1,6 +1,16 @@
 import { parse } from "csv-parse/sync";
 import type { AnyColumn, SQL } from "drizzle-orm";
-import { and, asc, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNull,
+  or,
+  sql,
+} from "drizzle-orm";
 import { cache } from "react";
 import { formatHinaSizes } from "@/components/runs/run-metadata-badges";
 import { db } from "@/lib/db";
@@ -12,6 +22,7 @@ import {
   runAttributions,
   users,
 } from "@/lib/db/schema";
+import type { RunStatus } from "@/lib/runs/run-status";
 import { getS3ObjectStream } from "@/lib/s3";
 
 // ---------------------------------------------------------------------------
@@ -235,6 +246,8 @@ interface RunListFilters {
   search?: string;
   sort?: string;
   source?: string;
+  // Derived run statuses to match (OR'd together). Undefined/empty = no filter.
+  statuses?: RunStatus[];
   wavelength?: string;
 }
 
@@ -253,6 +266,43 @@ const ALLOWED_SORT_FIELDS: Record<string, SQL | AnyColumn> = {
   created_at: instrumentRuns.createdAt,
   updated_at: instrumentRuns.updatedAt,
 };
+
+// Mirrors the aggregate LEFT JOIN's scope so the filter matches the shown icon.
+const rawFileScopeSql = sql`${files.instrumentRunId} = ${instrumentRuns.id} and ${files.category} = 'raw' and ${files.deletedAt} is null`;
+
+function existsRawFileWithStatus(statusSql: SQL): SQL {
+  return sql`exists (select 1 from ${files} where ${rawFileScopeSql} and ${statusSql})`;
+}
+
+// Priority-exclusive (NOT) EXISTS predicate per derived status, mirroring
+// `deriveRunStatus`. Correlated subqueries (not a HAVING over the aggregate)
+// keep the pagination COUNT off a `files` join and on the status/run indexes.
+function runStatusCondition(status: RunStatus): SQL {
+  const failed = existsRawFileWithStatus(sql`${files.status} = 'failed'`);
+  const pending = existsRawFileWithStatus(
+    sql`${files.status} in ('detected', 'upload_requested')`
+  );
+  const uploaded = existsRawFileWithStatus(sql`${files.status} = 'uploaded'`);
+  const processing = existsRawFileWithStatus(
+    sql`${files.status} = 'processing'`
+  );
+  const completed = existsRawFileWithStatus(sql`${files.status} = 'completed'`);
+
+  switch (status) {
+    case "failed":
+      return failed;
+    case "pending":
+      return sql`(not ${failed} and ${pending})`;
+    case "uploaded":
+      return sql`(not ${failed} and not ${pending} and ${uploaded})`;
+    case "processing":
+      return sql`(not ${failed} and not ${pending} and not ${uploaded} and ${processing})`;
+    case "completed":
+      return sql`(not ${failed} and not ${pending} and not ${uploaded} and not ${processing} and ${completed})`;
+    default:
+      return sql`not exists (select 1 from ${files} where ${rawFileScopeSql})`;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Adjacent-run navigation for the run detail header.
@@ -456,6 +506,13 @@ export async function buildRunListQuery(filters: RunListFilters) {
     conditions.push(
       sql`exists (select 1 from ${runAttributions} where ${runAttributions.runId} = ${instrumentRuns.id} and ${runAttributions.userId} = ${filters.ranBy})`
     );
+  }
+
+  if (filters.statuses && filters.statuses.length > 0) {
+    const statusOr = or(...filters.statuses.map(runStatusCondition));
+    if (statusOr) {
+      conditions.push(statusOr);
+    }
   }
 
   const where = conditions.length > 0 ? and(...conditions) : undefined;

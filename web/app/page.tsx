@@ -164,6 +164,7 @@ async function DashboardRunsSection({
       page: params.page,
       perPage: params.per_page,
       includeDeleted: params.include_deleted,
+      statuses: params.status.length > 0 ? params.status : undefined,
     }),
   ]);
 
