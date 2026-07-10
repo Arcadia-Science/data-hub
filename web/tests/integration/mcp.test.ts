@@ -326,7 +326,9 @@ describe("MCP Server (HTTP)", () => {
       scopedToken
     );
     expect(claim.isError).toBe(true);
-    expect(claim.content[0].text).toMatch(/missing required scope: runs:write/);
+    expect(claim.content[0].text).toMatch(
+      /missing required scope: runs:attribute/
+    );
   });
 
   it("['files:read'] can call get_file but not reprocess_file", async () => {
@@ -348,7 +350,7 @@ describe("MCP Server (HTTP)", () => {
     );
     expect(reprocess.isError).toBe(true);
     expect(reprocess.content[0].text).toMatch(
-      /missing required scope: files:write/
+      /missing required scope: files:reprocess/
     );
   });
 

@@ -24,7 +24,7 @@ const REPROCESSABLE_STATUSES = ["completed", "failed"] as const;
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authorize(request, "runs:write");
+  const authResult = await authorize(request, "runs:reprocess");
   if (authResult instanceof Response) {
     return authResult;
   }

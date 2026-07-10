@@ -58,7 +58,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authorize(request, "runs:write");
+  const authResult = await authorize(request, "runs:comment");
   if (authResult instanceof Response) {
     return authResult;
   }
