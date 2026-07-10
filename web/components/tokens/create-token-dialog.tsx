@@ -168,7 +168,9 @@ function CreateTokenForm({
 
   // Resources that have a write-type scope selected but not their `:read`.
   // Scopes stay atomic (write never implies read), so this is a common
-  // footgun for interactive tooling — surface it as a soft warning.
+  // footgun for interactive tooling — surface it as a soft warning. It is
+  // suppressed for exact preset matches below: machine presets (Watcher,
+  // Lambda) legitimately write resources they never GET.
   const missingReadResources = useMemo(() => {
     const missing = new Set<string>();
     for (const scope of selected) {
@@ -314,7 +316,7 @@ function CreateTokenForm({
             </CollapsibleContent>
           </Collapsible>
           <CapabilitySummary scopes={selectedList} />
-          {missingReadResources.length > 0 ? (
+          {activePresetId === null && missingReadResources.length > 0 ? (
             <Alert variant="destructive">
               <TriangleAlert />
               <AlertDescription>
@@ -452,11 +454,13 @@ function ScopeRow({
       />
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="flex items-center gap-1.5">
-            {meta.label}
-            {meta.destructive ? (
-              <TriangleAlert className="size-3 text-amber-600 dark:text-amber-500" />
-            ) : null}
+          <span className="flex flex-1 items-center justify-between gap-2">
+            <span className="flex items-center gap-1.5">
+              {meta.label}
+              {meta.destructive ? (
+                <TriangleAlert className="size-3 text-amber-600 dark:text-amber-500" />
+              ) : null}
+            </span>
             <code className="text-muted-foreground text-xs">{scope}</code>
           </span>
         </TooltipTrigger>
