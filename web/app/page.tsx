@@ -213,7 +213,7 @@ async function DashboardRunsSection({
     <RunSelectionProvider>
       <TablePendingProvider>
         <div className="flex flex-col gap-3">
-          <RunsToolbar instruments={instruments} />
+          <RunsToolbar dateDefaultPreset="24h" instruments={instruments} />
           <RunBulkActionBar />
           <TablePendingBoundary>
             <RunsTable
