@@ -75,7 +75,6 @@ export const RUN_STATUS_OPTIONS = RUN_STATUS_VALUES.map((value) => ({
 }));
 
 export interface RunStatusCounts {
-  fileCount: number;
   filesCompleted: number;
   filesFailed: number;
   filesPendingUpload: number;
@@ -83,8 +82,9 @@ export interface RunStatusCounts {
   filesUploaded: number;
 }
 
-// Collapse per-run file aggregates into one status. Mirrors the SQL predicates:
-// a run with files always hits a bucket, so `empty` only fires at zero files.
+// Keep the priority order in sync with the SQL predicates in
+// `buildRunListQuery`. Every non-deleted raw file falls into one bucket (the
+// `file_status` enum has no other values), so `empty` needs no `fileCount`.
 export function deriveRunStatus(counts: RunStatusCounts): RunStatus {
   if (counts.filesFailed > 0) {
     return "failed";

@@ -26,7 +26,6 @@ export function RunStatusIcon({
   errorMessages: string[];
 }) {
   const status = deriveRunStatus({
-    fileCount,
     filesCompleted,
     filesFailed,
     filesPendingUpload,
