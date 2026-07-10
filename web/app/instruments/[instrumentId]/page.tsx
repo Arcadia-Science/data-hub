@@ -264,7 +264,7 @@ async function InstrumentRunsSection({
       dpi: filters.dpi ?? undefined,
       colorMode: filters.color_mode ?? undefined,
       ranBy: filters.ran_by ?? undefined,
-      statuses: filters.run_status.length > 0 ? filters.run_status : undefined,
+      statuses: filters.status.length > 0 ? filters.status : undefined,
     }),
     getInstrumentFilterOptions(instrument.instrumentType, instrumentId),
     getRanByFilterOptions(instrumentId),
@@ -289,7 +289,7 @@ async function InstrumentRunsSection({
     filters.dpi !== null ||
     filters.color_mode !== null ||
     filters.ran_by !== null ||
-    filters.run_status.length > 0;
+    filters.status.length > 0;
 
   const pendingUploadCount = runResult.data.filter(
     (row) => row.files_pending_upload > 0

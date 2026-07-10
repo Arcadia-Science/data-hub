@@ -18,7 +18,7 @@ export const dashboardSearchParams = {
   date_to: parseAsString.withOptions({ clearOnDefault: true }),
   include_deleted: parseAsBoolean.withDefault(false),
   // Derived run status, multi-select. Empty array = no filter (show all).
-  run_status: parseAsArrayOf(parseAsStringLiteral(RUN_STATUS_VALUES))
+  status: parseAsArrayOf(parseAsStringLiteral(RUN_STATUS_VALUES))
     .withDefault([])
     .withOptions({ clearOnDefault: true }),
   page: parseAsInteger.withDefault(1),
@@ -62,7 +62,7 @@ export const instrumentDetailSearchParams = {
   // Attribution filter: either a userId or the reserved sentinel "unattributed".
   ran_by: parseAsString,
   // Derived run status, multi-select. Empty array = no filter (show all).
-  run_status: parseAsArrayOf(parseAsStringLiteral(RUN_STATUS_VALUES))
+  status: parseAsArrayOf(parseAsStringLiteral(RUN_STATUS_VALUES))
     .withDefault([])
     .withOptions({ clearOnDefault: true }),
 };
@@ -120,12 +120,12 @@ export function hasActiveFilters(params: {
   search: string;
   instrument_id: string[];
   include_deleted: boolean;
-  run_status: RunStatus[];
+  status: RunStatus[];
 }): boolean {
   return (
     params.search !== "" ||
     params.instrument_id.length > 0 ||
     params.include_deleted ||
-    params.run_status.length > 0
+    params.status.length > 0
   );
 }
