@@ -1,5 +1,6 @@
 import { and, desc, eq, isNull, type SQL, sql } from "drizzle-orm";
 import { cache } from "react";
+import type { UserAvatarUser } from "@/components/user-avatar";
 import { db } from "@/lib/db";
 import {
   files,
@@ -10,6 +11,7 @@ import {
   users,
   watchers,
 } from "@/lib/db/schema";
+import { toInitials } from "@/lib/utils";
 
 export interface InstrumentSummary {
   displayName: string;
@@ -375,8 +377,8 @@ export const getMyRunsStats = cache(async function getMyRunsStats(
 
 export interface TopAttributor {
   bytesGenerated: number;
-  displayName: string;
   runCount: number;
+  user: UserAvatarUser;
 }
 
 /**
@@ -395,8 +397,10 @@ export const getTopAttributorThisWeek = cache(
     // the byte sum isn't double-counted.
     const [row] = await db
       .select({
+        userId: users.id,
         name: users.name,
         email: users.email,
+        image: users.image,
         runCount: sql<number>`cast(${runCountExpr} as int)`,
         bytesGenerated: sql<string>`${bytesExpr}`,
       })
@@ -418,7 +422,7 @@ export const getTopAttributorThisWeek = cache(
           sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '7 days'`
         )
       )
-      .groupBy(runAttributions.userId, users.name, users.email)
+      .groupBy(users.id, users.name, users.email, users.image)
       .orderBy(desc(runCountExpr), desc(bytesExpr))
       .limit(1);
 
@@ -426,8 +430,14 @@ export const getTopAttributorThisWeek = cache(
       return null;
     }
 
+    const displayName = row.name ?? row.email ?? "Unknown";
     return {
-      displayName: row.name ?? row.email ?? "Unknown",
+      user: {
+        userId: row.userId,
+        displayName,
+        initials: toInitials(displayName),
+        avatarUrl: row.image,
+      },
       runCount: row.runCount,
       bytesGenerated: Number(row.bytesGenerated),
     };

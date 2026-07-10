@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { UserAvatar } from "@/components/user-avatar";
 import type {
   DashboardStats,
   MyRunsStats,
@@ -26,6 +27,13 @@ const numberFormatter = new Intl.NumberFormat("en-US");
 
 export function formatNumber(n: number): string {
   return numberFormatter.format(n);
+}
+
+// The leaderboard card shows only the given (first) name to keep the value
+// compact next to the avatar; falls back to the full label when there's no
+// whitespace to split on (e.g. an email-only display name).
+function firstName(displayName: string): string {
+  return displayName.trim().split(/\s+/)[0] || displayName;
 }
 
 export function StatCard({
@@ -151,10 +159,21 @@ export function DashboardStatsCards({
             ? `${formatNumber(topAttributor.runCount)} runs · ${formatBytes(topAttributor.bytesGenerated)} generated`
             : "No attributed runs this week"
         }
-        value={topAttributor ? topAttributor.displayName : "—"}
-        // The leaderboard value is a name, not a number, so drop the numeric
-        // sizing used by the count cards.
-        valueClassName="truncate text-xl"
+        value={
+          topAttributor ? (
+            <span className="flex items-center gap-2">
+              <UserAvatar size="sm" user={topAttributor.user} />
+              <span className="truncate">
+                {firstName(topAttributor.user.displayName)}
+              </span>
+            </span>
+          ) : (
+            "—"
+          )
+        }
+        // The leaderboard value is a name + avatar, not a number, so drop the
+        // numeric sizing used by the count cards.
+        valueClassName="text-xl"
       />
     </div>
   );
