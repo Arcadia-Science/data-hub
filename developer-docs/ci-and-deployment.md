@@ -30,9 +30,9 @@ Four workflows run on pushes to `staging`/`production` and on pull requests targ
 
 ### Apply database migrations (`apply-migrations.yml`)
 
-Triggered on pushes to `staging`/`production` (i.e. PR merges) that change files under `web/drizzle/`. The single job sets `environment: ${{ github.ref_name }}` so GitHub selects that environment's secrets and protection rules, then runs `npm run db:migrate` (Drizzle) against the environment's Render database using the environment's `DATABASE_URL` secret. A per-branch `concurrency` group prevents overlapping migration runs.
+Triggered on pushes to `staging`/`production` (i.e. PR merges) that change files under `web/drizzle/`. The single job sets `environment: ${{ github.ref_name }}` so GitHub selects that environment's secrets and protection rules, then runs `npm run db:migrate` (Drizzle) against the environment's PostgreSQL database using the environment's `DATABASE_URL` secret. A per-branch `concurrency` group prevents overlapping migration runs.
 
-Production is gated by a required-reviewer protection rule on the `production` GitHub environment, so production migrations pause for manual approval before applying. Each environment needs a `DATABASE_URL` secret pointing at its Render connection string, and the Render database must accept connections from GitHub-hosted runners.
+Production is gated by a required-reviewer protection rule on the `production` GitHub environment, so production migrations pause for manual approval before applying. Each environment needs a `DATABASE_URL` secret pointing at its PostgreSQL connection string, and that database must accept connections from GitHub-hosted runners.
 
 ### Publish watcher (`publish-watcher.yml`)
 
@@ -59,7 +59,7 @@ Data Hub is self-hosted, running across three backend pieces per environment: a 
 
 ### Web application (Vercel)
 
-The Next.js app is deployed on [Vercel](https://vercel.com/arcadia-science/data-hub). Every branch and commit generates a preview deployment. Merges to `staging` and `production` deploy to their respective environments automatically.
+The Next.js app is deployed on [Vercel](https://vercel.com). Every branch and commit generates a preview deployment. Merges to `staging` and `production` deploy to their respective environments automatically.
 
 Environment variables are managed in the Vercel dashboard and can be pulled locally with:
 
@@ -68,9 +68,9 @@ cd web
 vercel env pull
 ```
 
-### Database (Render)
+### Database (PostgreSQL)
 
-Staging and production each have a dedicated PostgreSQL instance hosted on [Render](https://dashboard.render.com/project/prj-d75d0jma2pns738r4110).
+Give each environment (`staging`, `production`) its own dedicated PostgreSQL instance on any Postgres host.
 
 Merges to `staging`/`production` that change files under `web/drizzle/` automatically apply migrations via the [`apply-migrations.yml`](#apply-database-migrations-apply-migrationsyml) workflow (production is gated on manual approval). The commands below are for local runs or manual application:
 
