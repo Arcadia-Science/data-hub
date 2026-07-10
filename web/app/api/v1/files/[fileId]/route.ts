@@ -42,7 +42,7 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
 // ---------------------------------------------------------------------------
 
 export async function PATCH(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authorize(request, "files:write");
+  const authResult = await authorize(request, "files:update");
   if (authResult instanceof Response) {
     return authResult;
   }
@@ -198,7 +198,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 // ---------------------------------------------------------------------------
 
 export async function DELETE(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authorize(request, "files:write");
+  const authResult = await authorize(request, "files:delete");
   if (authResult instanceof Response) {
     return authResult;
   }

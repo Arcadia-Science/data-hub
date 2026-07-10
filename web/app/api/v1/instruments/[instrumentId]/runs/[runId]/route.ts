@@ -104,7 +104,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
 // ---------------------------------------------------------------------------
 
 export async function PATCH(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authorize(request, "runs:write");
+  const authResult = await authorize(request, "runs:update");
   if (authResult instanceof Response) {
     return authResult;
   }
@@ -227,7 +227,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 // ---------------------------------------------------------------------------
 
 export async function DELETE(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authorize(request, "runs:write");
+  const authResult = await authorize(request, "runs:delete");
   if (authResult instanceof Response) {
     return authResult;
   }

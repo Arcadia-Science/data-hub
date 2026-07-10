@@ -15,7 +15,7 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ watcherId: string }> }
 ) {
-  const authResult = await authorize(request, "watchers:write");
+  const authResult = await authorize(request, "watchers:report");
   if (authResult instanceof Response) {
     return authResult;
   }

@@ -56,16 +56,17 @@ describe("PAT scopes", () => {
     expect(postRes.status).toBe(403);
     const body = await postRes.json();
     expect(body.error.code).toBe("FORBIDDEN");
-    expect(body.error.message).toMatch(/missing required scope: runs:write/);
+    expect(body.error.message).toMatch(/missing required scope: runs:create/);
   });
 
   // -------------------------------------------------------------------------
-  // runs:write — allowed to POST. (We don't assert GET-denied here because
-  // some callers grant both `:read` and `:write` for the same noun, and the
-  // route enforcement is the same one tested in the read-only case above.)
+  // Legacy 'runs:write' — a coarse scope minted before the fine-grained
+  // split. `hasScope` expands it, so it still satisfies the fine `runs:create`
+  // the POST route now requires. Guards the backward-compat path for deployed
+  // watcher/Lambda tokens.
   // -------------------------------------------------------------------------
 
-  it("['runs:write'] can POST runs", async () => {
+  it("legacy ['runs:write'] still satisfies runs:create on POST", async () => {
     const { token } = await seedTestUser({ scopes: ["runs:write"] });
 
     const postRes = await api(`/api/v1/instruments/${instrumentId}/runs`, {
@@ -172,7 +173,7 @@ describe("PAT scopes", () => {
     const getRes = await api("/api/v1/watchers", { token });
     expect(getRes.status).toBe(200);
 
-    // POST /watchers/register requires `watchers:write`. We send a
+    // POST /watchers/register requires `watchers:report`. We send a
     // well-formed body referencing a non-existent instrument; the scope
     // guard runs before the lookup, so 403 = scope-fail and any other
     // 4xx = scope-pass.
@@ -184,7 +185,7 @@ describe("PAT scopes", () => {
     expect(postRes.status).toBe(403);
     const body = await postRes.json();
     expect(body.error.message).toMatch(
-      /missing required scope: watchers:write/
+      /missing required scope: watchers:report/
     );
   });
 
@@ -224,9 +225,9 @@ describe("PAT scopes", () => {
   // implicit hierarchy to `hasScope`.
   // -------------------------------------------------------------------------
 
-  it("['runs:read', 'files:write'] grants exactly those scopes and nothing else", async () => {
+  it("['runs:read', 'files:update'] grants exactly those scopes and nothing else", async () => {
     const { token } = await seedTestUser({
-      scopes: ["runs:read", "files:write"],
+      scopes: ["runs:read", "files:update"],
     });
 
     // runs:read → GET succeeds
@@ -235,7 +236,7 @@ describe("PAT scopes", () => {
     });
     expect(runsGet.status).toBe(200);
 
-    // runs:write → POST denied (no implicit `:write` from `:read`)
+    // runs:create → POST denied (reading runs never implies creating them)
     const runsPost = await api(`/api/v1/instruments/${instrumentId}/runs`, {
       method: "POST",
       token,
@@ -243,10 +244,10 @@ describe("PAT scopes", () => {
     });
     expect(runsPost.status).toBe(403);
     expect((await runsPost.json()).error.message).toMatch(
-      /missing required scope: runs:write/
+      /missing required scope: runs:create/
     );
 
-    // files:write → PATCH passes the scope guard. The file doesn't exist
+    // files:update → PATCH passes the scope guard. The file doesn't exist
     // so we get a 404 from the not-found branch, not 403 from the guard.
     const filesPatch = await api("/api/v1/files/99999", {
       method: "PATCH",

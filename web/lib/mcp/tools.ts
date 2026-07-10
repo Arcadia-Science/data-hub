@@ -547,7 +547,7 @@ export function registerTools(server: McpServer) {
       annotations: { readOnlyHint: false, destructiveHint: true },
     },
     async ({ fileId }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "files:write");
+      const scopeError = requireMcpScope(authInfo, "files:reprocess");
       if (scopeError) {
         return scopeError;
       }
@@ -616,7 +616,7 @@ export function registerTools(server: McpServer) {
       },
     },
     async ({ instrumentId, runId }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "runs:write");
+      const scopeError = requireMcpScope(authInfo, "runs:attribute");
       if (scopeError) {
         return scopeError;
       }
@@ -662,7 +662,7 @@ export function registerTools(server: McpServer) {
       },
     },
     async ({ instrumentId, runId }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "runs:write");
+      const scopeError = requireMcpScope(authInfo, "runs:attribute");
       if (scopeError) {
         return scopeError;
       }
