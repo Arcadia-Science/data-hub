@@ -72,7 +72,7 @@ All environment variables can be pulled from the Vercel project using the [Verce
 vercel env pull
 ```
 
-You can also manually copy and paste these from the project's [Environment Variables](https://vercel.com/arcadia-science/data-hub/settings/environment-variables) page.
+You can also manually copy and paste these from your Vercel project's Environment Variables page.
 
 See the table below for a summary of environment variables configured for this application.
 
@@ -95,14 +95,12 @@ Run `npm run precommit` locally before pushing to catch the same issues earlier.
 
 ## Deployment
 
+Data Hub is self-hosted. See the [First-time deployment guide](../developer-docs/first-time-deployment.md) for standing up an environment and [CI and deployment](../developer-docs/ci-and-deployment.md) for how deploys run.
+
 ### Web application
 
 The Data Hub web application is deployed on Vercel. Every branch (as well as every commit) in the repository generates a unique preview deployment.
 
-You can find the Vercel project [here](https://vercel.com/arcadia-science/data-hub).
-
 ### Database
 
-Data Hub has two main environments: staging and production. Each environment uses its own dedicated database instance, both of which are hosted on Render.
-
-You can find the Render project [here](https://dashboard.render.com/project/prj-d75d0jma2pns738r4110).
+Data Hub has two main environments: staging and production. Each environment uses its own dedicated PostgreSQL instance, which you can host on any Postgres service.

@@ -30,9 +30,9 @@ Four workflows run on pushes to `staging`/`production` and on pull requests targ
 
 ### Apply database migrations (`apply-migrations.yml`)
 
-Triggered on pushes to `staging`/`production` (i.e. PR merges) that change files under `web/drizzle/`. The single job sets `environment: ${{ github.ref_name }}` so GitHub selects that environment's secrets and protection rules, then runs `npm run db:migrate` (Drizzle) against the environment's Render database using the environment's `DATABASE_URL` secret. A per-branch `concurrency` group prevents overlapping migration runs.
+Triggered on pushes to `staging`/`production` (i.e. PR merges) that change files under `web/drizzle/`. The single job sets `environment: ${{ github.ref_name }}` so GitHub selects that environment's secrets and protection rules, then runs `npm run db:migrate` (Drizzle) against the environment's PostgreSQL database using the environment's `DATABASE_URL` secret. A per-branch `concurrency` group prevents overlapping migration runs.
 
-Production is gated by a required-reviewer protection rule on the `production` GitHub environment, so production migrations pause for manual approval before applying. Each environment needs a `DATABASE_URL` secret pointing at its Render connection string, and the Render database must accept connections from GitHub-hosted runners.
+Production is gated by a required-reviewer protection rule on the `production` GitHub environment, so production migrations pause for manual approval before applying. Each environment needs a `DATABASE_URL` secret pointing at its PostgreSQL connection string, and that database must accept connections from GitHub-hosted runners.
 
 ### Publish watcher (`publish-watcher.yml`)
 
@@ -55,9 +55,11 @@ Feature branches target `staging` via pull requests. CI runs on every PR and on 
 
 ## Deployment
 
+Data Hub is self-hosted, running across three backend pieces per environment: a PostgreSQL database, the Next.js web app plus REST API on Vercel, and the AWS S3 + Lambda stack. To stand up a new environment from scratch, follow the step-by-step [First-time deployment](first-time-deployment.md) guide. This section is the reference for how each piece is deployed and how CI redeploys it afterward.
+
 ### Web application (Vercel)
 
-The Next.js app is deployed on [Vercel](https://vercel.com/arcadia-science/data-hub). Every branch and commit generates a preview deployment. Merges to `staging` and `production` deploy to their respective environments automatically.
+The Next.js app is deployed on [Vercel](https://vercel.com). Every branch and commit generates a preview deployment. Merges to `staging` and `production` deploy to their respective environments automatically.
 
 Environment variables are managed in the Vercel dashboard and can be pulled locally with:
 
@@ -66,9 +68,9 @@ cd web
 vercel env pull
 ```
 
-### Database (Render)
+### Database (PostgreSQL)
 
-Staging and production each have a dedicated PostgreSQL instance hosted on [Render](https://dashboard.render.com/project/prj-d75d0jma2pns738r4110).
+Give each environment (`staging`, `production`) its own dedicated PostgreSQL instance on any Postgres host.
 
 Merges to `staging`/`production` that change files under `web/drizzle/` automatically apply migrations via the [`apply-migrations.yml`](#apply-database-migrations-apply-migrationsyml) workflow (production is gated on manual approval). The commands below are for local runs or manual application:
 
@@ -94,95 +96,9 @@ The Lambda function is deployed as a Docker container image via [AWS SAM](https:
 - S3 event triggers for each supported instrument
 - IAM roles for Lambda execution, GitHub Actions deployment (OIDC), and Vercel web app S3 access (OIDC)
 
-A separate bootstrap stack (`infra/bootstrap.yaml`) creates shared resources — the ECR repository, the GitHub OIDC identity provider, and the Vercel OIDC identity provider — and only needs to be deployed once:
+A separate bootstrap stack (`infra/bootstrap.yaml`) creates shared per-account resources — the ECR repository, the GitHub OIDC identity provider, and the Vercel OIDC identity provider — and only needs to be deployed once (`make sam-bootstrap`).
 
-```sh
-make sam-bootstrap
-```
-
-#### First-time AWS setup
-
-After deploying the bootstrap stack, follow these steps to bring up the first environment. You need admin-level AWS credentials for the initial deploy (the CI role cannot create stacks from scratch).
-
-**1. Get the bootstrap stack outputs:**
-
-```sh
-aws cloudformation describe-stacks \
-  --stack-name data-hub-bootstrap \
-  --region us-west-1 \
-  --query "Stacks[0].Outputs"
-```
-
-Note the `GitHubOidcProviderArn`, `VercelOidcProviderArn`, and `EcrRepositoryUri` values — you'll need them in steps 3 and 4 below.
-
-> **Note:** If your AWS account already has an OIDC provider for `token.actions.githubusercontent.com` (from another project), the bootstrap stack will fail with an `AWS::EarlyValidation::ResourceExistenceCheck` error. In that case, remove the `GitHubOidcProvider` resource from `bootstrap.yaml` (or skip the bootstrap stack entirely) and use the existing provider's ARN. Check with `aws iam list-open-id-connect-providers`.
-
-**2. Build and push the Docker image to ECR:**
-
-```sh
-make docker-build-lambda
-make docker-push-lambda ENV=staging
-```
-
-This logs in to ECR, tags the image as `staging-<short-sha>`, and pushes it. The ECR registry is derived from your AWS account ID automatically.
-
-**3. Deploy the per-environment stack:**
-
-Create an `infra/.env.staging` file (use `infra/.env.example` as a template) and fill in the values:
-
-```sh
-cp infra/.env.example infra/.env.staging
-```
-
-```
-ECR_IMAGE_URI=<image-uri-from-step-2>
-DATA_HUB_API_URL=https://datahub-staging.example.com/api/v1
-DATA_HUB_API_KEY=<your-api-key>
-GITHUB_OIDC_PROVIDER_ARN=<github-oidc-arn-from-step-1>
-VERCEL_OIDC_PROVIDER_ARN=<vercel-oidc-arn-from-step-1>
-```
-
-Then deploy:
-
-```sh
-make sam-deploy ENV=staging
-```
-
-The Makefile automatically loads `infra/.env.staging` when `ENV=staging` is set. Repeat with an `infra/.env.production` file and `make sam-deploy ENV=production` when ready. These `infra/.env.*` files are gitignored (only `infra/.env.example` is tracked).
-
-**4. Configure GitHub environment secrets:**
-
-After the stack deploys, grab the deploy role ARN:
-
-```sh
-aws cloudformation describe-stacks \
-  --stack-name data-hub-staging \
-  --region us-west-1 \
-  --query "Stacks[0].Outputs[?OutputKey=='DeployRoleArn'].OutputValue" \
-  --output text
-```
-
-In your GitHub repo, go to **Settings → Environments**, create a `staging` environment (and later `production`), and add these secrets:
-
-| Secret | Value |
-| --- | --- |
-| `AWS_DEPLOY_ROLE_ARN` | Deploy role ARN from the stack output |
-| `GH_OIDC_PROVIDER_ARN` | GitHub OIDC provider ARN from the bootstrap stack |
-| `VERCEL_OIDC_PROVIDER_ARN` | Vercel OIDC provider ARN from the bootstrap stack |
-| `SAM_S3_BUCKET` | SAM CLI managed S3 bucket name (see `sam deploy` output, e.g. `aws-sam-cli-managed-default-samclisourcebucket-*`) |
-| `DATA_HUB_API_URL` | Base API URL for the environment |
-| `DATA_HUB_API_KEY` | API key for Lambda → Data Hub authentication (also used by the Lambda's archive-job PATCH callback) |
-
-Slack channel notifications are sent by the **web app** (not the Lambda) when a new run is created. Workspace admins configure the incoming webhook URL in Settings > Notifications > Slack channel (stored in the `slack_channel_config` DB table). After deploying, paste the webhook URL once in that UI before removing any legacy `SLACK_WEBHOOK_URL` env var from Vercel.
-
-You'll also need the `WebAppRoleArn` and `DataHubFunctionUrl` stack outputs to configure the Vercel web app. In the Vercel dashboard (under the appropriate environment), set:
-
-| Vercel env var | Value |
-| --- | --- |
-| `AWS_ROLE_ARN` | `WebAppRoleArn` stack output — lets the web app generate presigned S3 URLs **and** SigV4-sign Lambda Function URL invocations via OIDC federation |
-| `LAMBDA_FUNCTION_URL` | `DataHubFunctionUrl` stack output — the Lambda Function URL for manual reprocessing and archive builds |
-
-Once secrets are set, the CI workflow handles all subsequent deploys automatically.
+Standing up the stack for the first time — the one-time bootstrap, building and pushing the image, the initial `make sam-deploy`, and wiring the GitHub environment secrets and Vercel outputs — is covered step by step in [First-time deployment](first-time-deployment.md). The rest of this section is the reference for deploys after the stack exists.
 
 #### Automated deployment (`deploy-lambda.yml`)
 
@@ -208,7 +124,7 @@ Local deployment requires the following tools in addition to the [general prereq
 - [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html) — used by `make sam-deploy` to package and deploy CloudFormation stacks. Install with `brew install aws-sam-cli` on macOS.
 - AWS credentials configured (`aws configure` or environment variables) with permission to deploy the stack.
 
-Create an environment-specific `.env` file if you haven't already (see [first-time setup](#first-time-aws-setup) for details on each variable):
+Create an environment-specific `.env` file if you haven't already (see [First-time deployment → Deploy the AWS infrastructure](first-time-deployment.md#4-deploy-the-aws-infrastructure) for details on each variable):
 
 ```sh
 cp infra/.env.example infra/.env.staging
@@ -227,6 +143,24 @@ make docker-push-lambda ENV=staging
 # Deploy to staging (loads infra/.env.staging automatically).
 make sam-deploy ENV=staging
 ```
+
+#### Adding an S3 trigger for a new instrument
+
+Instruments that support automated preprocessing need an S3 event trigger so the Lambda runs as files land. The processor code lives in `data-hub-lambda` (see [Lambda → Adding a new instrument](lambda.md#adding-a-new-instrument)); this is the infrastructure half. Add a `LambdaConfiguration` entry to the `RawDataBucket` resource's `NotificationConfiguration` in `infra/template.yaml`:
+
+```yaml
+- Event: s3:ObjectCreated:*
+  Filter:
+    S3Key:
+      Rules:
+        - Name: prefix
+          Value: <instrument-id>/
+        - Name: suffix
+          Value: .csv
+  Function: !GetAtt DataHubFunction.Arn
+```
+
+The CI deploy role has permission to roll new triggers out, so the trigger goes live on the next deploy — either the [automated workflow](#automated-deployment-deploy-lambdayml) or a manual `make sam-deploy`. No manual AWS step is needed once the code and trigger are merged.
 
 ### Watcher (PyPI)
 

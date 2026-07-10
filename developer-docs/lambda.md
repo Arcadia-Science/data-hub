@@ -72,7 +72,7 @@ Slack channel notifications are sent by the **web app** (`web/lib/slack.ts`), no
 
 4. **Add tests.** Add unit tests in `lambda/tests/` for the new processor.
 
-5. **Configure the S3 trigger and deploy.** See [Deploying AWS infrastructure → Adding a Lambda processor for a new instrument](https://datahub.arcadiascience.com/docs/deploying-aws-infrastructure#adding-a-lambda-processor-for-a-new-instrument) for the `infra/template.yaml` trigger entry and the deploy steps.
+5. **Configure the S3 trigger and deploy.** See [CI and deployment → Adding an S3 trigger for a new instrument](ci-and-deployment.md#adding-an-s3-trigger-for-a-new-instrument) for the `infra/template.yaml` trigger entry and the deploy steps.
 
 ## Local processing CLI
 

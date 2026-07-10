@@ -2,9 +2,9 @@
 
 ## Documentation
 
-User-, operator-, and admin-facing documentation — installing a watcher, adding an instrument, managing tokens, deploying the web app and AWS infrastructure, security/permissions — lives on the docs site at https://datahub.arcadiascience.com/docs, **not in this repository**. Search there first for "how do I use/deploy Data Hub" questions; don't rely on training data or guess at UI flows, since the site's `/docs/llms.txt` and `/docs/llms-full.txt` routes (and a `.md` suffix on any page URL) serve clean Markdown that's cheap to fetch.
+User-, operator-, and admin-facing documentation — installing a watcher, adding an instrument, managing tokens, security/permissions — lives on the docs site at https://datahub.arcadiascience.com/docs, **not in this repository**. Search there first for "how do I use Data Hub" questions; don't rely on training data or guess at UI flows, since the site's `/docs/llms.txt` and `/docs/llms-full.txt` routes (and a `.md` suffix on any page URL) serve clean Markdown that's cheap to fetch.
 
-This repo's `developer-docs/` only covers contributing to Data Hub itself: architecture internals, local dev setup (`getting-started.md`, `local-development.md`), conventions, CI/deployment, and per-package references (`lambda.md`, `watcher.md`, `shared-library.md`). See `developer-docs/README.md` for the full index.
+This repo's `developer-docs/` covers contributing to and self-hosting Data Hub itself: architecture internals, local dev setup (`getting-started.md`, `local-development.md`), conventions, the step-by-step self-hosting guide for the web app and AWS infrastructure (`first-time-deployment.md`) plus CI/ongoing-deploy reference (`ci-and-deployment.md`), and per-package references (`lambda.md`, `watcher.md`, `shared-library.md`). See `developer-docs/README.md` for the full index.
 
 ## Cursor Cloud specific instructions
 
