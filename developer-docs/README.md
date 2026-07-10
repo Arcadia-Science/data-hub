@@ -2,7 +2,7 @@
 
 Documentation for developing and self-hosting Data Hub itself, including
 deploying the web app and AWS infrastructure (see
-[CI and deployment](ci-and-deployment.md)). User, operator, and admin
+[First-time deployment](first-time-deployment.md)). User, operator, and admin
 documentation (installing a watcher, adding an instrument, managing tokens)
 lives on the [docs site](https://datahub.arcadiascience.com/docs) instead —
 see the root [README](../README.md#getting-started) for that split.
@@ -14,6 +14,7 @@ see the root [README](../README.md#getting-started) for that split.
 - [Watcher](watcher.md) — CLI commands, configuration, run detection, upload modes
 - [Lambda](lambda.md) — processing pipeline, supported instruments, adding new instruments
 - [Shared library](shared-library.md) — module reference for `data-hub-shared`
-- [CI and deployment](ci-and-deployment.md) — GitHub Actions, plus the self-hosted deployment guide (Vercel web app, Render database, AWS Lambda/S3)
+- [First-time deployment](first-time-deployment.md) — step-by-step self-hosting guide: database, Vercel web app, and AWS S3 + Lambda
+- [CI and deployment](ci-and-deployment.md) — GitHub Actions workflows, branch strategy, and how CI redeploys each piece
 - [Run archives](run-archives.md) — "Download all" flow, cache/dedup model, and on-call runbook
 - [Conventions](conventions.md) — S3 key layout, instrument IDs, code style, environments
