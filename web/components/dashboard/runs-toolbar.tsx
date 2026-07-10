@@ -58,6 +58,7 @@ export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
       date_to: null,
       include_deleted: false,
       status: [],
+      ran_by: null,
       page: 1,
     });
   }

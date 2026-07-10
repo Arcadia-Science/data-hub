@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, type SQL, sql } from "drizzle-orm";
 import { cache } from "react";
 import { db } from "@/lib/db";
 import {
@@ -6,6 +6,8 @@ import {
   instrumentRuns,
   instruments,
   runAttributions,
+  runComments,
+  users,
   watchers,
 } from "@/lib/db/schema";
 
@@ -241,3 +243,193 @@ export const getDashboardStats = cache(async function getDashboardStats(
     },
   };
 });
+
+export interface MyRunsStats {
+  commentsLast7Days: {
+    count: number;
+  };
+  pendingUploads: {
+    count: number;
+    totalBytes: number;
+  };
+  runsLast7Days: {
+    total: number;
+    bytesGenerated: number;
+  };
+  runsLast24Hours: {
+    total: number;
+    bytesGenerated: number;
+  };
+}
+
+// Correlated EXISTS against `run_attributions`, matching the `ranBy` predicate
+// used by `buildRunListQuery` so the "My runs" cards count the same runs the
+// table below them lists.
+function attributedToUser(userId: string): SQL {
+  return sql`exists (select 1 from ${runAttributions} where ${runAttributions.runId} = ${instrumentRuns.id} and ${runAttributions.userId} = ${userId})`;
+}
+
+/**
+ * Aggregates the four "My runs" summary metrics, all scoped to runs the viewer
+ * is attributed to. Like `getDashboardStats`, each metric is a single
+ * COUNT/SUM issued in parallel to keep the per-query plans simple.
+ *
+ * Unlike the fleet dashboard, this is intentionally not restricted to active
+ * instruments — a user's own runs stay relevant even after an instrument is
+ * retired, and this matches the unrestricted `ranBy` run list on the page.
+ * `cache()` keys on `userId` so parallel requests from different users don't
+ * collide.
+ */
+export const getMyRunsStats = cache(async function getMyRunsStats(
+  userId: string
+): Promise<MyRunsStats> {
+  const attributed = attributedToUser(userId);
+
+  const [[runsRow], [bytesRow], [commentsRow], [pendingRow]] =
+    await Promise.all([
+      // Both run-count windows in one pass — the 24-hour window is a subset of
+      // the weekly window, so a FILTER clause gives us both from one scan.
+      db
+        .select({
+          last24Hours: sql<number>`cast(count(*) filter (where coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '24 hours') as int)`,
+          last7Days: sql<number>`cast(count(*) as int)`,
+        })
+        .from(instrumentRuns)
+        .where(
+          and(
+            isNull(instrumentRuns.deletedAt),
+            sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '7 days'`,
+            attributed
+          )
+        ),
+      // Bytes generated, anchored to each run's acquisition time so the windows
+      // line up with the run-count cards above.
+      db
+        .select({
+          bytesLast24Hours: sql<string>`coalesce(sum(${files.sizeBytes}) filter (where coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '24 hours'), 0)`,
+          bytesLast7Days: sql<string>`coalesce(sum(${files.sizeBytes}), 0)`,
+        })
+        .from(files)
+        .innerJoin(instrumentRuns, eq(files.instrumentRunId, instrumentRuns.id))
+        .where(
+          and(
+            isNull(files.deletedAt),
+            isNull(instrumentRuns.deletedAt),
+            sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '7 days'`,
+            attributed
+          )
+        ),
+      // Comments left in the last 7 days on runs the viewer is attributed to
+      // (including the viewer's own comments).
+      db
+        .select({
+          count: sql<number>`cast(count(*) as int)`,
+        })
+        .from(runComments)
+        .innerJoin(instrumentRuns, eq(instrumentRuns.id, runComments.runId))
+        .where(
+          and(
+            isNull(runComments.deletedAt),
+            isNull(instrumentRuns.deletedAt),
+            sql`${runComments.createdAt} > now() - interval '7 days'`,
+            attributed
+          )
+        ),
+      // Pending uploads across all of the viewer's attributed runs (no time
+      // window — a stuck upload from last month still needs attention).
+      db
+        .select({
+          count: sql<number>`cast(count(*) as int)`,
+          totalBytes: sql<number>`cast(coalesce(sum(${files.sizeBytes}), 0) as bigint)`,
+        })
+        .from(files)
+        .innerJoin(instrumentRuns, eq(files.instrumentRunId, instrumentRuns.id))
+        .where(
+          and(
+            isNull(files.deletedAt),
+            isNull(instrumentRuns.deletedAt),
+            sql`${files.status} in ('detected', 'upload_requested')`,
+            attributed
+          )
+        ),
+    ]);
+
+  return {
+    runsLast24Hours: {
+      total: runsRow?.last24Hours ?? 0,
+      bytesGenerated: Number(bytesRow?.bytesLast24Hours ?? 0),
+    },
+    runsLast7Days: {
+      total: runsRow?.last7Days ?? 0,
+      bytesGenerated: Number(bytesRow?.bytesLast7Days ?? 0),
+    },
+    commentsLast7Days: {
+      count: commentsRow?.count ?? 0,
+    },
+    pendingUploads: {
+      count: pendingRow?.count ?? 0,
+      totalBytes: Number(pendingRow?.totalBytes ?? 0),
+    },
+  };
+});
+
+export interface TopAttributor {
+  bytesGenerated: number;
+  displayName: string;
+  runCount: number;
+}
+
+/**
+ * The user attributed to the most active-instrument runs in the last 7 days,
+ * with the volume of data across those runs. Ties are broken by data
+ * generated. Returns null when no runs were attributed this week. Powers the
+ * "Most runs this week" leaderboard card on the dashboard.
+ */
+export const getTopAttributorThisWeek = cache(
+  async function getTopAttributorThisWeek(): Promise<TopAttributor | null> {
+    const runCountExpr = sql`count(distinct ${instrumentRuns.id})`;
+    const bytesExpr = sql`coalesce(sum(${files.sizeBytes}), 0)`;
+
+    // Each (run, file) pair is one joined row, but counting distinct run ids
+    // keeps the run tally correct, and every file belongs to exactly one run so
+    // the byte sum isn't double-counted.
+    const [row] = await db
+      .select({
+        name: users.name,
+        email: users.email,
+        runCount: sql<number>`cast(${runCountExpr} as int)`,
+        bytesGenerated: sql<string>`${bytesExpr}`,
+      })
+      .from(runAttributions)
+      .innerJoin(instrumentRuns, eq(instrumentRuns.id, runAttributions.runId))
+      .innerJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
+      .innerJoin(users, eq(users.id, runAttributions.userId))
+      .leftJoin(
+        files,
+        and(
+          eq(files.instrumentRunId, instrumentRuns.id),
+          isNull(files.deletedAt)
+        )
+      )
+      .where(
+        and(
+          eq(instruments.status, "active"),
+          isNull(instrumentRuns.deletedAt),
+          sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '7 days'`
+        )
+      )
+      .groupBy(runAttributions.userId, users.name, users.email)
+      .orderBy(desc(runCountExpr), desc(bytesExpr))
+      .limit(1);
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      displayName: row.name ?? row.email ?? "Unknown",
+      runCount: row.runCount,
+      bytesGenerated: Number(row.bytesGenerated),
+    };
+  }
+);

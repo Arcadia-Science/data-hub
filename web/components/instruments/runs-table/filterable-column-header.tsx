@@ -1,8 +1,12 @@
 "use client";
 
 import { ChevronsUpDown, ListFilter } from "lucide-react";
-import { useQueryStates } from "nuqs";
-import type { inferParserType } from "nuqs/server";
+import {
+  type Nullable,
+  type UseQueryStatesKeysMap,
+  useQueryStates,
+  type Values,
+} from "nuqs";
 import { useTablePending } from "@/components/table-pending";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,23 +20,25 @@ import {
 import { instrumentDetailSearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 
-type InstrumentDetailFilters = inferParserType<
-  typeof instrumentDetailSearchParams
->;
+// The header drives a single nullable-string radio filter and resets the page,
+// so it works with any nuqs parser map exposing the target column key plus a
+// `page` key. Defaults to the per-instrument params; the dashboard tables pass
+// `dashboardSearchParams` instead.
+type ColumnFilterKeyMap = UseQueryStatesKeysMap & { page: unknown };
 
-// Filter-column params are the nullable-string entries in the nuqs map
-// (`parseAsString` without a default). Keys whose parser carries a default
-// — page/per_page/search/include_deleted — aren't column filters and get
-// excluded automatically here. Adding a new `parseAsString` filter to
-// `instrumentDetailSearchParams` makes it a valid `paramKey` with no
-// hand-maintenance needed at this boundary.
-export type FilterParamKey = {
-  [K in keyof InstrumentDetailFilters]: null extends InstrumentDetailFilters[K]
-    ? InstrumentDetailFilters[K] extends string | null
+// Column-filter keys are the nullable-string entries in the parser map
+// (`parseAsString` without a default). Keys whose parser carries a default —
+// page/per_page/search/include_deleted — resolve to non-null values and are
+// excluded automatically, so adding a new `parseAsString` filter to a params
+// map makes it a valid `paramKey` with no hand-maintenance here.
+type FilterParamKey<KeyMap extends UseQueryStatesKeysMap> = {
+  [K in keyof Values<KeyMap>]: null extends Values<KeyMap>[K]
+    ? Values<KeyMap>[K] extends string | null
       ? K
       : never
     : never;
-}[keyof InstrumentDetailFilters];
+}[keyof Values<KeyMap>] &
+  string;
 
 // Options accept either plain strings (value == label) or { value, label }
 // pairs for cases where the URL-stable value and the display label differ
@@ -46,23 +52,27 @@ function normalizeOption(option: FilterOption): {
   return typeof option === "string" ? { value: option, label: option } : option;
 }
 
-export function FilterableColumnHeader({
+export function FilterableColumnHeader<
+  KeyMap extends ColumnFilterKeyMap = typeof instrumentDetailSearchParams,
+>({
   label,
   paramKey,
   options,
+  searchParams = instrumentDetailSearchParams as unknown as KeyMap,
 }: {
   label: string;
-  paramKey: FilterParamKey;
+  paramKey: FilterParamKey<KeyMap>;
   options: FilterOption[];
+  searchParams?: KeyMap;
 }) {
   const { startTransition } = useTablePending();
-  const [filters, setFilters] = useQueryStates(instrumentDetailSearchParams, {
+  const [filters, setFilters] = useQueryStates(searchParams, {
     shallow: false,
     throttleMs: 300,
     startTransition,
   });
 
-  const currentValue = filters[paramKey];
+  const currentValue = (filters[paramKey] ?? null) as string | null;
 
   return (
     <DropdownMenu>
@@ -86,17 +96,20 @@ export function FilterableColumnHeader({
       <DropdownMenuContent align="start" className="w-48">
         <DropdownMenuRadioGroup
           onValueChange={(value) =>
-            setFilters({ [paramKey]: value || null, page: 1 })
+            setFilters({
+              [paramKey]: value || null,
+              page: 1,
+            } as Partial<Nullable<Values<KeyMap>>>)
           }
           value={currentValue ?? ""}
         >
           <DropdownMenuRadioItem value="">All</DropdownMenuRadioItem>
           <DropdownMenuSeparator />
           {options.map((option) => {
-            const { value, label } = normalizeOption(option);
+            const { value, label: optionLabel } = normalizeOption(option);
             return (
               <DropdownMenuRadioItem key={value} value={value}>
-                {label}
+                {optionLabel}
               </DropdownMenuRadioItem>
             );
           })}

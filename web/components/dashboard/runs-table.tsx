@@ -2,6 +2,8 @@ import { SearchX } from "lucide-react";
 import Link from "next/link";
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import { AcquiredColumnHeader } from "@/components/instruments/runs-table/acquired-column-header";
+import { FilterableColumnHeader } from "@/components/instruments/runs-table/filterable-column-header";
+import type { RanByOption } from "@/components/instruments/runs-table/index";
 import { RanByCell } from "@/components/instruments/runs-table/ran-by-cell";
 import { RawFileColumnHeader } from "@/components/instruments/runs-table/raw-file-column-header";
 import { RunIdLabel } from "@/components/instruments/runs-table/run-id-label";
@@ -25,6 +27,7 @@ import {
 } from "@/components/ui/table";
 import type { RunListRow } from "@/lib/api/instrument-runs";
 import { runRowToRef } from "@/lib/runs/row-actions";
+import { dashboardSearchParams } from "@/lib/search-params";
 import { cn, formatBytes } from "@/lib/utils";
 
 export function RunsTable({
@@ -34,6 +37,7 @@ export function RunsTable({
   pendingUploadCount,
   unattributedCount,
   ranByYouCount,
+  ranByOptions,
 }: {
   data: RunListRow[];
   hasFilters: boolean;
@@ -41,6 +45,10 @@ export function RunsTable({
   pendingUploadCount: number;
   unattributedCount: number;
   ranByYouCount: number;
+  // When provided, the "Ran By" column becomes a filterable dropdown bound to
+  // `dashboardSearchParams.ran_by`. Omitted on the "My runs" page, where every
+  // row is the viewer, so a plain header is rendered instead.
+  ranByOptions?: RanByOption[];
 }) {
   if (data.length === 0) {
     return (
@@ -75,7 +83,18 @@ export function RunsTable({
             <TableHead className="text-right">
               <RawFileColumnHeader label="Size" />
             </TableHead>
-            <TableHead>Ran By</TableHead>
+            <TableHead>
+              {ranByOptions ? (
+                <FilterableColumnHeader
+                  label="Ran By"
+                  options={ranByOptions}
+                  paramKey="ran_by"
+                  searchParams={dashboardSearchParams}
+                />
+              ) : (
+                "Ran By"
+              )}
+            </TableHead>
             <TableHead className="text-right">
               <AcquiredColumnHeader />
             </TableHead>

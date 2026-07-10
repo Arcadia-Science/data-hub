@@ -21,6 +21,9 @@ export const dashboardSearchParams = {
   status: parseAsArrayOf(parseAsStringLiteral(RUN_STATUS_VALUES))
     .withDefault([])
     .withOptions({ clearOnDefault: true }),
+  // Attribution filter: either a userId or the reserved sentinel
+  // "unattributed". Mirrors `instrumentDetailSearchParams.ran_by`.
+  ran_by: parseAsString,
   page: parseAsInteger.withDefault(1),
   per_page: parseAsInteger.withDefault(10),
 };
@@ -121,11 +124,13 @@ export function hasActiveFilters(params: {
   instrument_id: string[];
   include_deleted: boolean;
   status: RunStatus[];
+  ran_by: string | null;
 }): boolean {
   return (
     params.search !== "" ||
     params.instrument_id.length > 0 ||
     params.include_deleted ||
-    params.status.length > 0
+    params.status.length > 0 ||
+    params.ran_by !== null
   );
 }

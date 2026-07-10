@@ -23,8 +23,15 @@ import {
   TablePendingBoundary,
   TablePendingProvider,
 } from "@/components/table-pending";
-import { getDashboardStats, getInstruments } from "@/lib/api/dashboard";
-import { buildRunListQuery } from "@/lib/api/instrument-runs";
+import {
+  getDashboardStats,
+  getInstruments,
+  getTopAttributorThisWeek,
+} from "@/lib/api/dashboard";
+import {
+  buildRunListQuery,
+  getRanByFilterOptions,
+} from "@/lib/api/instrument-runs";
 import { getRecentActiveInstrumentsForDashboard } from "@/lib/api/instruments";
 import { auth } from "@/lib/auth";
 import { dashboardParamsCache, hasActiveFilters } from "@/lib/search-params";
@@ -107,8 +114,12 @@ async function DashboardStatsSection({
 }: {
   currentUserId: string | null;
 }) {
-  const stats = await getDashboardStats(currentUserId);
-  return <DashboardStatsCards stats={stats} />;
+  // The fleet stats and the leaderboard card are independent aggregates.
+  const [stats, topAttributor] = await Promise.all([
+    getDashboardStats(currentUserId),
+    getTopAttributorThisWeek(),
+  ]);
+  return <DashboardStatsCards stats={stats} topAttributor={topAttributor} />;
 }
 
 async function DashboardInstrumentsSection() {
@@ -152,10 +163,12 @@ async function DashboardRunsSection({
   // RunsDateFilter and keeps the initial payload bounded.
   const defaultDateFrom = last24hISOString();
 
-  // The toolbar instrument list and the filtered run page are independent.
-  // Only active instruments are useful filter targets on the dashboard.
-  const [instruments, runResult] = await Promise.all([
+  // The toolbar instrument list, the fleet-wide attributor options, and the
+  // filtered run page are all independent. Only active instruments are useful
+  // filter targets on the dashboard.
+  const [instruments, ranByUsers, runResult] = await Promise.all([
     getInstruments(true),
+    getRanByFilterOptions(),
     buildRunListQuery({
       instrumentId: instrumentIds,
       search: params.search || undefined,
@@ -164,9 +177,24 @@ async function DashboardRunsSection({
       page: params.page,
       perPage: params.per_page,
       includeDeleted: params.include_deleted,
+      ranBy: params.ran_by ?? undefined,
       statuses: params.status.length > 0 ? params.status : undefined,
     }),
   ]);
+
+  // Current user pinned as "You" at the top (if they've attributed anything),
+  // then other attributors by display name, then the "Unattributed" sentinel —
+  // matching the per-instrument page's dropdown.
+  const meOption = currentUserId
+    ? ranByUsers.find((u) => u.userId === currentUserId)
+    : undefined;
+  const ranByOptions = [
+    ...(meOption ? [{ value: meOption.userId, label: "You" }] : []),
+    ...ranByUsers
+      .filter((u) => u.userId !== currentUserId)
+      .map((u) => ({ value: u.userId, label: u.displayName })),
+    { value: "unattributed", label: "Unattributed" },
+  ];
 
   const hasFilters = hasActiveFilters(params);
   const pendingUploadCount = runResult.data.filter(
@@ -192,6 +220,7 @@ async function DashboardRunsSection({
               data={runResult.data}
               hasFilters={hasFilters}
               pendingUploadCount={pendingUploadCount}
+              ranByOptions={ranByOptions}
               ranByYouCount={ranByYouCount}
               totalCount={runResult.pagination.total}
               unattributedCount={unattributedCount}

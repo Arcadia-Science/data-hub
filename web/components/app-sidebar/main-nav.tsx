@@ -1,6 +1,13 @@
 "use client";
 
-import { ChevronRight, Cpu, Home, type LucideIcon, Radio } from "lucide-react";
+import {
+  ChevronRight,
+  Cpu,
+  Home,
+  ListChecks,
+  type LucideIcon,
+  Radio,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMemo } from "react";
@@ -72,6 +79,19 @@ export function MainNav({ instruments }: MainNavProps) {
               <Link href="/">
                 <Home />
                 <span>Home</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              asChild
+              isActive={pathname === "/my-runs"}
+              tooltip="My runs"
+            >
+              <Link href="/my-runs">
+                <ListChecks />
+                <span>My runs</span>
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>

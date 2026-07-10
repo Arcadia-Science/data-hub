@@ -1,23 +1,34 @@
 import type { ReactNode } from "react";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { DashboardStats } from "@/lib/api/dashboard";
+import type {
+  DashboardStats,
+  MyRunsStats,
+  TopAttributor,
+} from "@/lib/api/dashboard";
 import { cn, formatBytes } from "@/lib/utils";
 
 const DASHBOARD_STAT_LABELS = [
   "Runs in the last 24 hours",
   "Runs in the last 7 days",
   "Pending uploads",
-  "My runs this week",
+  "Most runs this week",
+] as const;
+
+const MY_RUNS_STAT_LABELS = [
+  "Runs in the last 24 hours",
+  "Runs in the last 7 days",
+  "Comments in the last 7 days",
+  "Pending uploads",
 ] as const;
 
 const numberFormatter = new Intl.NumberFormat("en-US");
 
-function formatNumber(n: number): string {
+export function formatNumber(n: number): string {
   return numberFormatter.format(n);
 }
 
-function StatCard({
+export function StatCard({
   label,
   value,
   subline,
@@ -46,7 +57,7 @@ function StatCard({
   );
 }
 
-function DataGeneratedSubline({
+export function DataGeneratedSubline({
   bytes,
   emptyLabel,
 }: {
@@ -59,7 +70,11 @@ function DataGeneratedSubline({
   return <span>{formatBytes(bytes)} generated</span>;
 }
 
-export function StatCardsSkeleton() {
+export function StatCardsSkeleton({
+  labels = DASHBOARD_STAT_LABELS,
+}: {
+  labels?: readonly string[];
+} = {}) {
   return (
     <div
       aria-busy="true"
@@ -67,7 +82,7 @@ export function StatCardsSkeleton() {
       className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4"
       role="status"
     >
-      {DASHBOARD_STAT_LABELS.map((label) => (
+      {labels.map((label) => (
         <Card className="gap-2 py-4" key={label} size="sm">
           <div className="px-4">
             <p className="font-medium text-muted-foreground text-xs">{label}</p>
@@ -80,7 +95,17 @@ export function StatCardsSkeleton() {
   );
 }
 
-export function DashboardStatsCards({ stats }: { stats: DashboardStats }) {
+export function MyRunsStatsCardsSkeleton() {
+  return <StatCardsSkeleton labels={MY_RUNS_STAT_LABELS} />;
+}
+
+export function DashboardStatsCards({
+  stats,
+  topAttributor,
+}: {
+  stats: DashboardStats;
+  topAttributor: TopAttributor | null;
+}) {
   const { runsLast24Hours, pendingUploads, runsThisWeek } = stats;
 
   // Highlight pending uploads in red once a backlog forms — a non-zero queue
@@ -122,11 +147,65 @@ export function DashboardStatsCards({ stats }: { stats: DashboardStats }) {
       <StatCard
         label={DASHBOARD_STAT_LABELS[3]}
         subline={
-          runsThisWeek.unattributed > 0
-            ? `${formatNumber(runsThisWeek.unattributed)} unattributed`
-            : "All runs attributed"
+          topAttributor
+            ? `${formatNumber(topAttributor.runCount)} runs · ${formatBytes(topAttributor.bytesGenerated)} generated`
+            : "No attributed runs this week"
         }
-        value={formatNumber(runsThisWeek.mine)}
+        value={topAttributor ? topAttributor.displayName : "—"}
+        // The leaderboard value is a name, not a number, so drop the numeric
+        // sizing used by the count cards.
+        valueClassName="truncate text-xl"
+      />
+    </div>
+  );
+}
+
+export function MyRunsStatsCards({ stats }: { stats: MyRunsStats }) {
+  const { runsLast24Hours, runsLast7Days, commentsLast7Days, pendingUploads } =
+    stats;
+
+  const pendingHasBacklog = pendingUploads.count > 0;
+
+  return (
+    <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+      <StatCard
+        label={MY_RUNS_STAT_LABELS[0]}
+        subline={
+          <DataGeneratedSubline
+            bytes={runsLast24Hours.bytesGenerated}
+            emptyLabel="No data generated in the last 24 hours"
+          />
+        }
+        value={formatNumber(runsLast24Hours.total)}
+      />
+      <StatCard
+        label={MY_RUNS_STAT_LABELS[1]}
+        subline={
+          <DataGeneratedSubline
+            bytes={runsLast7Days.bytesGenerated}
+            emptyLabel="No data generated in the last 7 days"
+          />
+        }
+        value={formatNumber(runsLast7Days.total)}
+      />
+      <StatCard
+        label={MY_RUNS_STAT_LABELS[2]}
+        subline={
+          commentsLast7Days.count > 0
+            ? "on your runs"
+            : "No comments in the last 7 days"
+        }
+        value={formatNumber(commentsLast7Days.count)}
+      />
+      <StatCard
+        label={MY_RUNS_STAT_LABELS[3]}
+        subline={
+          pendingUploads.count > 0
+            ? `${formatBytes(pendingUploads.totalBytes)} queued`
+            : "Upload queue is clear"
+        }
+        value={formatNumber(pendingUploads.count)}
+        valueClassName={pendingHasBacklog ? "text-destructive" : undefined}
       />
     </div>
   );
