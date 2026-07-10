@@ -55,6 +55,32 @@ Feature branches target `staging` via pull requests. CI runs on every PR and on 
 
 ## Deployment
 
+Data Hub is self-hosted: before anyone can install a watcher or sign in, your team deploys three pieces of backend infrastructure. Give each environment (`staging`, `production`) its own database and its own AWS stack — they are independent deployments.
+
+| Resource | What it is | Where it runs |
+| --- | --- | --- |
+| **PostgreSQL database** | System of record for instruments, runs, files, watchers, and tokens. | Any PostgreSQL host (e.g. Render, Supabase, Neon). |
+| **Web app + REST API** | The Next.js app that serves the dashboard, REST API, and MCP server. | Vercel. |
+| **AWS infrastructure** | S3 buckets for raw/processed/archive data and the Lambda that preprocesses uploads. | AWS (via SAM). |
+
+The web app and the AWS stack depend on each other's outputs, so the web app goes up first (to mint a URL and an API key), then AWS, then the AWS outputs are fed back into the web app:
+
+```mermaid
+flowchart LR
+    DB[(PostgreSQL)] --> Web[Vercel web app]
+    Web -->|URL + API key| AWS[AWS S3 + Lambda]
+    AWS -->|role ARN + function URL| Web
+    Web --> Ready[Watchers can connect]
+```
+
+1. **Provision a PostgreSQL database** for the environment on any host you like (see [Database (Render)](#database-render)).
+2. **Deploy the web app to Vercel** (see [Web application (Vercel)](#web-application-vercel)). Set `DATABASE_URL` and `ADMIN_EMAILS`, apply the migrations, then sign in as an admin and create a personal access token for the Lambda to use.
+3. **Bootstrap AWS once per account** with `make sam-bootstrap` (see [Lambda (AWS)](#lambda-aws)).
+4. **Deploy the per-environment AWS stack** (see [First-time AWS setup](#first-time-aws-setup)). It needs the web app's URL and the API key from step 2, and it produces the stack outputs you'll need next.
+5. **Finish wiring the web app** by setting `AWS_ROLE_ARN` and `LAMBDA_FUNCTION_URL` in Vercel from the AWS stack outputs, so the app can mint presigned S3 URLs and invoke the Lambda.
+
+The web app deploys successfully before the AWS stack exists; its AWS-dependent features (uploads, reprocessing, run archives) don't work until step 5 wires the outputs back in.
+
 ### Web application (Vercel)
 
 The Next.js app is deployed on [Vercel](https://vercel.com/arcadia-science/data-hub). Every branch and commit generates a preview deployment. Merges to `staging` and `production` deploy to their respective environments automatically.
@@ -227,6 +253,24 @@ make docker-push-lambda ENV=staging
 # Deploy to staging (loads infra/.env.staging automatically).
 make sam-deploy ENV=staging
 ```
+
+#### Adding an S3 trigger for a new instrument
+
+Instruments that support automated preprocessing need an S3 event trigger so the Lambda runs as files land. The processor code lives in `data-hub-lambda` (see [Lambda → Adding a new instrument](lambda.md#adding-a-new-instrument)); this is the infrastructure half. Add a `LambdaConfiguration` entry to the `RawDataBucket` resource's `NotificationConfiguration` in `infra/template.yaml`:
+
+```yaml
+- Event: s3:ObjectCreated:*
+  Filter:
+    S3Key:
+      Rules:
+        - Name: prefix
+          Value: <instrument-id>/
+        - Name: suffix
+          Value: .csv
+  Function: !GetAtt DataHubFunction.Arn
+```
+
+The CI deploy role has permission to roll new triggers out, so the trigger goes live on the next deploy — either the [automated workflow](#automated-deployment-deploy-lambdayml) or a manual `make sam-deploy`. No manual AWS step is needed once the code and trigger are merged.
 
 ### Watcher (PyPI)
 
