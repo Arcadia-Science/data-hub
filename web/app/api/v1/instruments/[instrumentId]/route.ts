@@ -2,6 +2,7 @@ import { and, count, eq, isNull } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { authorize, requireAdminForSession } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
+import { deregisterInstrumentWatchers } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import {
   instrumentRuns,
@@ -143,6 +144,15 @@ export async function PATCH(
   const updates: Record<string, unknown> = {};
   if ("status" in body) {
     updates.status = body.status;
+    // Keep the retirement audit fields in lockstep with the status: only an
+    // `inactive` instrument has a retirer.
+    if (body.status === "inactive") {
+      updates.retiredAt = new Date();
+      updates.retiredBy = authResult.userId;
+    } else {
+      updates.retiredAt = null;
+      updates.retiredBy = null;
+    }
   }
   if ("display_name" in body) {
     updates.displayName = body.display_name;
@@ -155,18 +165,31 @@ export async function PATCH(
     return apiError(400, VALIDATION_ERROR, "No valid fields to update");
   }
 
-  const [updated] = await db
-    .update(instruments)
-    .set(updates)
-    .where(eq(instruments.id, instrumentId))
-    .returning({
-      id: instruments.id,
-      display_name: instruments.displayName,
-      status: instruments.status,
-      instrument_type: instruments.instrumentType,
-      created_at: instruments.createdAt,
-      updated_at: instruments.updatedAt,
-    });
+  // Retirement flips the status and tears down every watcher; both run in one
+  // transaction so a mid-teardown failure can't leave the instrument
+  // `inactive` while its watchers stay live and heartbeating.
+  const updated = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(instruments)
+      .set(updates)
+      .where(eq(instruments.id, instrumentId))
+      .returning({
+        id: instruments.id,
+        display_name: instruments.displayName,
+        status: instruments.status,
+        instrument_type: instruments.instrumentType,
+        created_at: instruments.createdAt,
+        updated_at: instruments.updatedAt,
+      });
+
+    // A retired instrument has no live agent, so always tear down its watchers,
+    // attributing the teardown to the same actor that retired it.
+    if (updates.status === "inactive") {
+      await deregisterInstrumentWatchers(instrumentId, authResult.userId, tx);
+    }
+
+    return row;
+  });
 
   return Response.json(updated);
 }

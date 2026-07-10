@@ -43,3 +43,9 @@ if (!globalForDb.dbPool) {
 }
 
 export const db = drizzle(globalForDb.dbPool, { schema });
+
+// Either the pooled `db` or a transaction handle. Functions that accept this
+// can run standalone or enlist in a caller's `db.transaction(...)`.
+export type DbExecutor =
+  | typeof db
+  | Parameters<Parameters<typeof db.transaction>[0]>[0];

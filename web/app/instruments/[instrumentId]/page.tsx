@@ -159,10 +159,16 @@ export default async function InstrumentDetailPage({
   // Suspense child so their queries run in parallel (the shared
   // `getInstrumentById` is `cache()`-deduped) and the header paints without
   // waiting on the heavier runs / filter-option queries.
+  const isAdmin = session.user.isAdmin === true;
+
   return (
     <div className="mx-auto flex w-full min-w-0 max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
       <Suspense fallback={<InstrumentHeaderSkeleton />}>
-        <InstrumentHeaderSection instrumentId={instrumentId} userId={userId} />
+        <InstrumentHeaderSection
+          instrumentId={instrumentId}
+          isAdmin={isAdmin}
+          userId={userId}
+        />
       </Suspense>
       <Suspense fallback={<InstrumentRunsSkeleton />}>
         <InstrumentRunsSection
@@ -177,9 +183,11 @@ export default async function InstrumentDetailPage({
 
 async function InstrumentHeaderSection({
   instrumentId,
+  isAdmin,
   userId,
 }: {
   instrumentId: string;
+  isAdmin: boolean;
   userId: string;
 }) {
   // Header data: instrument metadata plus the viewer's notification prefs +
@@ -205,6 +213,7 @@ async function InstrumentHeaderSection({
   return (
     <InstrumentHeader
       instrument={instrument}
+      isAdmin={isAdmin}
       notifications={{
         enabled: subscriptionForThisInstrument?.enabled ?? false,
         masterMuted: notificationPrefs.runsAllMuted,
@@ -255,6 +264,7 @@ async function InstrumentRunsSection({
       dpi: filters.dpi ?? undefined,
       colorMode: filters.color_mode ?? undefined,
       ranBy: filters.ran_by ?? undefined,
+      statuses: filters.status.length > 0 ? filters.status : undefined,
     }),
     getInstrumentFilterOptions(instrument.instrumentType, instrumentId),
     getRanByFilterOptions(instrumentId),
@@ -278,7 +288,8 @@ async function InstrumentRunsSection({
     filters.hina_size !== null ||
     filters.dpi !== null ||
     filters.color_mode !== null ||
-    filters.ran_by !== null;
+    filters.ran_by !== null ||
+    filters.status.length > 0;
 
   const pendingUploadCount = runResult.data.filter(
     (row) => row.files_pending_upload > 0

@@ -1,11 +1,9 @@
 import { ArrowRight, SearchX } from "lucide-react";
 import type { ReactNode } from "react";
 import { RelativeTime } from "@/components/dashboard/relative-time";
-import { EditInstrumentDialog } from "@/components/instruments/edit-instrument-dialog";
 import { InstrumentStatusBadge } from "@/components/instruments/instrument-status-badge";
 import { RowActionsCell } from "@/components/instruments/row-actions-cell";
 import { ClickableRow } from "@/components/instruments/runs-table/clickable-row";
-import { StatusActions } from "@/components/instruments/status-actions";
 import { InstrumentNotificationsCell } from "@/components/notifications/instrument-notifications-cell";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -107,48 +105,16 @@ export function InstrumentsTableSkeleton({
   );
 }
 
-/** Skeleton for the full `/instruments` management table (all catalogue rows). */
-export function InstrumentsListPageSkeleton({
-  withRowActions = false,
-}: {
-  withRowActions?: boolean;
-}) {
-  return (
-    <InstrumentsTableSkeleton
-      rows={8}
-      withNotifications
-      withRowActions={withRowActions}
-    />
-  );
-}
-
-/**
- * Default row actions used by the management page: an approval action for
- * pending instruments and an edit dialog for everyone. Exported so the
- * `/instruments` page can pass it directly to `<InstrumentsTable renderRowActions={...} />`
- * while contexts without management intent (e.g. the dashboard) simply omit
- * the prop and the actions column disappears entirely.
- */
-export function InstrumentRowManagementActions(row: InstrumentListItem) {
-  return (
-    <div className="flex items-center justify-end gap-1">
-      {row.status === "pending" && <StatusActions instrumentId={row.id} />}
-      <EditInstrumentDialog
-        displayName={row.displayName}
-        instrumentId={row.id}
-        instrumentType={row.instrumentType}
-      />
-    </div>
-  );
-}
-
 export function InstrumentsTable({
   data,
   footer,
   renderRowActions,
   notifications,
+  emptyMessage = "No instruments configured yet.",
 }: {
   data: InstrumentListItem[];
+  /** Message shown in the empty state; per-tab callers override the default. */
+  emptyMessage?: string;
   /**
    * Optional content rendered inside the bordered container, below the table.
    * Used on the dashboard to surface a "View all" link beneath a truncated list.
@@ -175,9 +141,7 @@ export function InstrumentsTable({
     return (
       <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-background py-16 dark:bg-muted">
         <SearchX className="size-8 text-muted-foreground" />
-        <p className="text-muted-foreground text-sm">
-          No instruments configured yet.
-        </p>
+        <p className="text-muted-foreground text-sm">{emptyMessage}</p>
       </div>
     );
   }
@@ -200,7 +164,12 @@ export function InstrumentsTable({
         </TableHeader>
         <TableBody>
           {data.map((row) => {
-            const watcherStatus = getWatcherOnlineStatus(row);
+            // Active + no live watcher but a deregistered one reads as
+            // "Deregistered" rather than "No Watcher".
+            const watcherStatus =
+              row.watcherCount === 0 && row.hasDeregisteredWatcher
+                ? "deregistered"
+                : getWatcherOnlineStatus(row);
             return (
               <ClickableRow
                 className="text-sm"
@@ -214,13 +183,13 @@ export function InstrumentsTable({
                   </span>
                 </TableCell>
                 <TableCell>
-                  {row.status === "pending" ? (
-                    <InstrumentStatusBadge status="pending" />
-                  ) : (
+                  {row.status === "active" ? (
                     <WatcherStatusBadge
                       lastOnlineAt={row.lastWatcherHeartbeatAt}
                       status={watcherStatus}
                     />
+                  ) : (
+                    <InstrumentStatusBadge status={row.status} />
                   )}
                 </TableCell>
                 <TableCell>

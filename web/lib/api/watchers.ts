@@ -1,12 +1,14 @@
 import { and, asc, count, desc, eq, gte, inArray, isNull } from "drizzle-orm";
 import { cache } from "react";
 import YAML from "yaml";
+import { type ActorUser, resolveActorUser } from "@/lib/api/actor";
 import { instrumentHasOnlineWatcher } from "@/lib/api/instruments";
-import { db } from "@/lib/db";
+import { type DbExecutor, db } from "@/lib/db";
 import {
   files,
   instrumentRuns,
   instruments,
+  users,
   watcherEvents,
   watcherEventTypeEnum,
   watcherHeartbeats,
@@ -55,9 +57,10 @@ export function extractWatchDirectory(
  * (ENG-1397). Returns the reverted file ids (for event reporting).
  */
 export async function revertPendingUploadRequests(
-  instrumentId: string
+  instrumentId: string,
+  executor: DbExecutor = db
 ): Promise<number[]> {
-  const reverted = await db
+  const reverted = await executor
     .update(files)
     .set({ status: "detected", uploadRequestedAt: null })
     .where(
@@ -86,7 +89,8 @@ export const UPLOAD_REQUEST_REVERT_GRACE_MS = 15 * 60 * 1000;
 type UploadRevertReason =
   | "watcher_stopped"
   | "watcher_deregistered"
-  | "watcher_offline_sweep";
+  | "watcher_offline_sweep"
+  | "instrument_retired";
 
 /**
  * Reverts an instrument's pending upload requests to `detected` when no watcher
@@ -95,16 +99,22 @@ type UploadRevertReason =
  * but lets the sweep attribute an event to a soft-deleted watcher without
  * touching a live one.
  */
-export async function revertUploadQueueIfWatcherOffline(opts: {
-  instrumentId: string;
-  watcherId: string;
-  reason: UploadRevertReason;
-}): Promise<number> {
-  if (await instrumentHasOnlineWatcher(opts.instrumentId)) {
+export async function revertUploadQueueIfWatcherOffline(
+  opts: {
+    instrumentId: string;
+    watcherId: string;
+    reason: UploadRevertReason;
+  },
+  executor: DbExecutor = db
+): Promise<number> {
+  if (await instrumentHasOnlineWatcher(opts.instrumentId, executor)) {
     return 0;
   }
 
-  const revertedIds = await revertPendingUploadRequests(opts.instrumentId);
+  const revertedIds = await revertPendingUploadRequests(
+    opts.instrumentId,
+    executor
+  );
   if (revertedIds.length === 0) {
     return 0;
   }
@@ -115,7 +125,7 @@ export async function revertUploadQueueIfWatcherOffline(opts: {
   const eventType: "watcher_stopped" | "error" =
     opts.reason === "watcher_offline_sweep" ? "error" : "watcher_stopped";
 
-  await db.insert(watcherEvents).values({
+  await executor.insert(watcherEvents).values({
     watcherId: opts.watcherId,
     eventType,
     message: `Reverted ${revertedIds.length} pending upload request(s) — no online watcher to upload them`,
@@ -128,6 +138,68 @@ export async function revertUploadQueueIfWatcherOffline(opts: {
   });
 
   return revertedIds.length;
+}
+
+/**
+ * Soft-deletes a resolved watcher and reverts its instrument's upload queue.
+ * Shared by the watcher DELETE route and instrument retirement so both
+ * teardown paths behave identically. Returns the `deleted_at` timestamp.
+ */
+export async function deregisterWatcherRow(
+  watcher: { id: string; instrumentId: string },
+  reason: UploadRevertReason,
+  // The acting session/PAT user, recorded on the row for the "Deregistered by"
+  // display. Null only when no caller identity is available.
+  actorId: string | null,
+  executor: DbExecutor = db
+): Promise<Date> {
+  const now = new Date();
+  await executor
+    .update(watchers)
+    .set({ deletedAt: now, deregisteredBy: actorId })
+    .where(eq(watchers.id, watcher.id));
+
+  // Must run after the soft-delete so the helper's online check excludes this
+  // watcher; otherwise a deregistered instrument's queue would sit undrained.
+  await revertUploadQueueIfWatcherOffline(
+    {
+      instrumentId: watcher.instrumentId,
+      watcherId: watcher.id,
+      reason,
+    },
+    executor
+  );
+
+  return now;
+}
+
+/**
+ * Deregisters every active watcher attached to an instrument (on retire).
+ * Accepts an `executor` so the caller can run it inside the same transaction
+ * as the status flip, keeping retirement atomic.
+ */
+export async function deregisterInstrumentWatchers(
+  instrumentId: string,
+  actorId: string | null,
+  executor: DbExecutor = db
+): Promise<number> {
+  const active = await executor
+    .select({ id: watchers.id, instrumentId: watchers.instrumentId })
+    .from(watchers)
+    .where(
+      and(eq(watchers.instrumentId, instrumentId), isNull(watchers.deletedAt))
+    );
+
+  for (const watcher of active) {
+    await deregisterWatcherRow(
+      watcher,
+      "instrument_retired",
+      actorId,
+      executor
+    );
+  }
+
+  return active.length;
 }
 
 interface WatcherLike {
@@ -223,6 +295,8 @@ export type WatcherDetail = WatcherListItem & {
   configYaml: string | null;
   configChecksum: string | null;
   updatedAt: Date;
+  /** Who deregistered the watcher; null when live or unknown. */
+  deregisteredByUser: ActorUser | null;
 };
 
 // React.cache() deduplicates calls within a single request — used by both
@@ -245,9 +319,16 @@ export const getWatcherById = cache(async function getWatcherById(
       createdAt: watchers.createdAt,
       updatedAt: watchers.updatedAt,
       deletedAt: watchers.deletedAt,
+      deregisteredBy: watchers.deregisteredBy,
+      deregisteredByName: users.name,
+      deregisteredByEmail: users.email,
+      deregisteredByImage: users.image,
     })
     .from(watchers)
     .leftJoin(instruments, eq(instruments.id, watchers.instrumentId))
+    // Resolve the actor who deregistered the watcher for display; all NULL
+    // when live or deregistered before `deregistered_by` existed.
+    .leftJoin(users, eq(users.id, watchers.deregisteredBy))
     // No deletedAt filter — the detail page renders deregistered watchers too,
     // with muted styling and historical data still visible.
     .where(eq(watchers.id, watcherId))
@@ -271,6 +352,12 @@ export const getWatcherById = cache(async function getWatcherById(
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     deletedAt: row.deletedAt,
+    deregisteredByUser: resolveActorUser({
+      userId: row.deregisteredBy,
+      name: row.deregisteredByName,
+      email: row.deregisteredByEmail,
+      image: row.deregisteredByImage,
+    }),
   };
 });
 

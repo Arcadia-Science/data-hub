@@ -153,8 +153,9 @@ async function DashboardRunsSection({
   const defaultDateFrom = last24hISOString();
 
   // The toolbar instrument list and the filtered run page are independent.
+  // Only active instruments are useful filter targets on the dashboard.
   const [instruments, runResult] = await Promise.all([
-    getInstruments(),
+    getInstruments(true),
     buildRunListQuery({
       instrumentId: instrumentIds,
       search: params.search || undefined,
@@ -163,6 +164,7 @@ async function DashboardRunsSection({
       page: params.page,
       perPage: params.per_page,
       includeDeleted: params.include_deleted,
+      statuses: params.status.length > 0 ? params.status : undefined,
     }),
   ]);
 

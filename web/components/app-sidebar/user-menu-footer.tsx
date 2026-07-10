@@ -23,7 +23,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { DOCS_BASE_URL } from "@/lib/docs";
+import { DOCS_URL } from "@/lib/docs";
 
 interface UserMenuFooterProps {
   signOutAction: () => Promise<void>;
@@ -92,7 +92,7 @@ export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
             sideOffset={4}
           >
             <DropdownMenuItem asChild>
-              <a href={DOCS_BASE_URL} rel="noopener noreferrer" target="_blank">
+              <a href={DOCS_URL} rel="noopener noreferrer" target="_blank">
                 <BookOpen data-icon="inline-start" />
                 Docs
                 <ExternalLink className="ml-auto size-3 text-muted-foreground" />

@@ -1,17 +1,11 @@
 "use client";
 
 import {
-  CircleCheck,
-  CircleDashed,
-  CircleX,
-  Clock,
-  LoaderCircle,
-} from "lucide-react";
-import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { deriveRunStatus, RUN_STATUS_META } from "@/lib/runs/run-status";
 import { cn } from "@/lib/utils";
 
 export function RunStatusIcon({
@@ -31,28 +25,23 @@ export function RunStatusIcon({
   filesProcessing: number;
   errorMessages: string[];
 }) {
+  const status = deriveRunStatus({
+    filesCompleted,
+    filesFailed,
+    filesPendingUpload,
+    filesUploaded,
+    filesProcessing,
+  });
+  const { Icon, colorClassName, spin } = RUN_STATUS_META[status];
+
   const hasFailed = filesFailed > 0;
-  const hasProcessing = filesProcessing > 0;
-  const hasUploaded = filesUploaded > 0;
   const hasPending = filesPendingUpload > 0;
+  const hasUploaded = filesUploaded > 0;
+  const hasProcessing = filesProcessing > 0;
   const hasCompleted = filesCompleted > 0;
 
-  // Icon priority: Error > Processing > Completed > Uploaded > Pending upload.
-  // Fallback (no files at all) shows the healthy "completed" icon.
-  const icon = hasFailed ? (
-    <CircleX className="size-4 text-destructive" />
-  ) : hasProcessing ? (
-    <LoaderCircle className="size-4 animate-spin text-sky-500" />
-  ) : hasCompleted ? (
-    <CircleCheck className="size-4 text-green-600 dark:text-green-500" />
-  ) : hasUploaded ? (
-    <CircleDashed className="size-4 text-muted-foreground" />
-  ) : hasPending ? (
-    <Clock className="size-4 text-amber-500" />
-  ) : (
-    <CircleCheck className="size-4 text-green-600 dark:text-green-500" />
-  );
-
+  // Tooltip lists every non-empty bucket in priority order, so a run reveals
+  // its lower-priority states on hover even though the icon shows only the top.
   const lines: string[] = [];
   if (hasFailed) {
     if (errorMessages.length > 0) {
@@ -82,13 +71,17 @@ export function RunStatusIcon({
     );
   }
   if (lines.length === 0) {
-    lines.push("All files processed successfully");
+    lines.push("No files");
   }
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="relative z-10 flex shrink-0">{icon}</span>
+        <span className="relative z-10 flex shrink-0">
+          <Icon
+            className={cn("size-4", colorClassName, spin && "animate-spin")}
+          />
+        </span>
       </TooltipTrigger>
       <TooltipContent
         className={cn(

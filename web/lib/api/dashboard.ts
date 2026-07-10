@@ -96,7 +96,11 @@ export const getInstrumentSummaries = cache(
   }
 );
 
-export const getInstruments = cache(async function getInstruments() {
+// `activeOnly` is a primitive so `cache()` dedupes calls with the same value
+// within a request; an options object would key on identity and miss.
+export const getInstruments = cache(async function getInstruments(
+  activeOnly = false
+) {
   return await db
     .select({
       id: instruments.id,
@@ -104,6 +108,7 @@ export const getInstruments = cache(async function getInstruments() {
       status: instruments.status,
     })
     .from(instruments)
+    .where(activeOnly ? eq(instruments.status, "active") : undefined)
     .orderBy(instruments.displayName);
 });
 
@@ -149,8 +154,10 @@ export const getDashboardStats = cache(async function getDashboardStats(
         total: sql<number>`cast(count(*) as int)`,
       })
       .from(instrumentRuns)
+      .innerJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
       .where(
         and(
+          eq(instruments.status, "active"),
           isNull(instrumentRuns.deletedAt),
           sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '24 hours'`
         )
@@ -171,8 +178,10 @@ export const getDashboardStats = cache(async function getDashboardStats(
       })
       .from(files)
       .innerJoin(instrumentRuns, eq(files.instrumentRunId, instrumentRuns.id))
+      .innerJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
       .where(
         and(
+          eq(instruments.status, "active"),
           isNull(files.deletedAt),
           isNull(instrumentRuns.deletedAt),
           sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '7 days'`
@@ -184,8 +193,11 @@ export const getDashboardStats = cache(async function getDashboardStats(
         totalBytes: sql<number>`cast(coalesce(sum(${files.sizeBytes}), 0) as bigint)`,
       })
       .from(files)
+      .innerJoin(instrumentRuns, eq(files.instrumentRunId, instrumentRuns.id))
+      .innerJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
       .where(
         and(
+          eq(instruments.status, "active"),
           isNull(files.deletedAt),
           sql`${files.status} in ('detected', 'upload_requested')`
         )
@@ -201,8 +213,10 @@ export const getDashboardStats = cache(async function getDashboardStats(
         unattributed: sql<number>`cast(count(*) filter (where not exists (select 1 from ${runAttributions} where ${runAttributions.runId} = ${instrumentRuns.id})) as int)`,
       })
       .from(instrumentRuns)
+      .innerJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
       .where(
         and(
+          eq(instruments.status, "active"),
           isNull(instrumentRuns.deletedAt),
           sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '7 days'`
         )

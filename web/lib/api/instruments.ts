@@ -1,11 +1,13 @@
 import { and, count, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { cache } from "react";
 import YAML from "yaml";
-import { db } from "@/lib/db";
+import { type ActorUser, resolveActorUser } from "@/lib/api/actor";
+import { type DbExecutor, db } from "@/lib/db";
 import {
   type InstrumentType,
   instrumentRuns,
   instruments,
+  users,
   watchers,
 } from "@/lib/db/schema";
 
@@ -13,6 +15,11 @@ export interface InstrumentListItem {
   createdAt: Date;
   displayName: string;
   filePatterns: string[];
+  /**
+   * True when the instrument has a deregistered watcher. With
+   * `watcherCount === 0`, distinguishes "Deregistered" from "No Watcher".
+   */
+  hasDeregisteredWatcher: boolean;
   id: string;
   instrumentType: InstrumentType;
   lastRunAt: Date | null;
@@ -38,13 +45,14 @@ const HEARTBEAT_STALE_MINUTES = 5;
  * perpetual "Uploading" spinner with no error.
  */
 export async function instrumentHasOnlineWatcher(
-  instrumentId: string
+  instrumentId: string,
+  executor: DbExecutor = db
 ): Promise<boolean> {
   const staleThreshold = new Date(
     Date.now() - HEARTBEAT_STALE_MINUTES * 60 * 1000
   );
 
-  const [row] = await db
+  const [row] = await executor
     .select({ value: count() })
     .from(watchers)
     .where(
@@ -123,20 +131,30 @@ function buildRunCountSubquery() {
 }
 
 function buildWatcherCountSubquery() {
+  // No `deleted_at` filter so instruments whose only watcher was deregistered
+  // still appear; the per-column `filter (...)` clauses keep live counts live
+  // while also exposing a deregistered tally.
   return db
     .select({
       instrumentId: watchers.instrumentId,
-      count: sql<number>`cast(count(*) as int)`.as("watcher_count"),
+      count:
+        sql<number>`cast(count(*) filter (where ${watchers.deletedAt} is null) as int)`.as(
+          "watcher_count"
+        ),
       online:
-        sql<number>`cast(count(*) filter (where ${watchers.status} = 'watching' and ${watchers.lastHeartbeatAt} > now() - interval '${sql.raw(String(HEARTBEAT_STALE_MINUTES))} minutes') as int)`.as(
+        sql<number>`cast(count(*) filter (where ${watchers.status} = 'watching' and ${watchers.lastHeartbeatAt} > now() - interval '${sql.raw(String(HEARTBEAT_STALE_MINUTES))} minutes' and ${watchers.deletedAt} is null) as int)`.as(
           "online_count"
         ),
-      lastHeartbeatAt: sql<Date | null>`max(${watchers.lastHeartbeatAt})`.as(
-        "last_heartbeat_at"
-      ),
+      deregistered:
+        sql<number>`cast(count(*) filter (where ${watchers.deletedAt} is not null) as int)`.as(
+          "deregistered_count"
+        ),
+      lastHeartbeatAt:
+        sql<Date | null>`max(${watchers.lastHeartbeatAt}) filter (where ${watchers.deletedAt} is null)`.as(
+          "last_heartbeat_at"
+        ),
     })
     .from(watchers)
-    .where(isNull(watchers.deletedAt))
     .groupBy(watchers.instrumentId)
     .as("watcher_counts");
 }
@@ -155,6 +173,7 @@ interface InstrumentListRow {
   runsThisWeek: number;
   status: "pending" | "active" | "inactive";
   watcherCount: number;
+  watchersDeregistered: number;
   watchersOnline: number;
 }
 
@@ -162,13 +181,15 @@ function hydrateInstrumentRow(
   row: InstrumentListRow,
   configsByInstrument: Map<string, (string | null)[]>
 ): InstrumentListItem {
+  const { watchersDeregistered, ...rest } = row;
   return {
-    ...row,
+    ...rest,
     lastRunAt: row.lastRunAt ? new Date(row.lastRunAt) : null,
     lastWatcherHeartbeatAt: row.lastWatcherHeartbeatAt
       ? new Date(row.lastWatcherHeartbeatAt)
       : null,
     filePatterns: mergeFilePatterns(configsByInstrument.get(row.id) ?? []),
+    hasDeregisteredWatcher: watchersDeregistered > 0,
   };
 }
 
@@ -207,6 +228,7 @@ export const getInstrumentListWithCounts = cache(
           lastRunAt: runCountSq.lastRunAt,
           watcherCount: sql<number>`coalesce(${watcherCountSq.count}, 0)`,
           watchersOnline: sql<number>`coalesce(${watcherCountSq.online}, 0)`,
+          watchersDeregistered: sql<number>`coalesce(${watcherCountSq.deregistered}, 0)`,
           lastWatcherHeartbeatAt: watcherCountSq.lastHeartbeatAt,
         })
         .from(instruments)
@@ -265,6 +287,7 @@ export const getRecentActiveInstrumentsForDashboard = cache(
           lastRunAt: runCountSq.lastRunAt,
           watcherCount: sql<number>`coalesce(${watcherCountSq.count}, 0)`,
           watchersOnline: sql<number>`coalesce(${watcherCountSq.online}, 0)`,
+          watchersDeregistered: sql<number>`coalesce(${watcherCountSq.deregistered}, 0)`,
           lastWatcherHeartbeatAt: watcherCountSq.lastHeartbeatAt,
         })
         .from(instruments)
@@ -315,14 +338,19 @@ export const getRecentActiveInstrumentsForDashboard = cache(
 );
 
 export interface InstrumentDetail {
-  /** Desktop hostname of the canonical active watcher, if any. */
+  /**
+   * True when `activeWatcherId` is a deregistered watcher (no live one
+   * remains). Lets the header distinguish "was deregistered" from "never had
+   * a watcher".
+   */
+  activeWatcherDeregistered: boolean;
+  /** Desktop hostname of the canonical watcher, if any. */
   activeWatcherHostname: string | null;
   /**
-   * The "canonical" watcher for this instrument, used to render watcher
-   * affordances in the instrument header. When multiple watchers are
-   * attached, the most recently heartbeating one wins; ties (or instruments
-   * whose watchers have never heartbeated) fall back to the first watcher
-   * by `createdAt`.
+   * The "canonical" watcher for the header: the most recently heartbeating
+   * live watcher, else the earliest by `createdAt`. When no live watcher
+   * remains, falls back to the most recently deregistered one so the header
+   * can still link to it (counts below stay based on live watchers).
    */
   activeWatcherId: string | null;
   createdAt: Date;
@@ -332,6 +360,10 @@ export interface InstrumentDetail {
   instrumentType: InstrumentType;
   /** Most recent heartbeat from any watcher attached to this instrument. */
   lastWatcherHeartbeatAt: Date | null;
+  /** When the instrument was retired; null unless `status` is `inactive`. */
+  retiredAt: Date | null;
+  /** Who retired the instrument; null when unknown or not retired. */
+  retiredByUser: ActorUser | null;
   runCount: number;
   status: "pending" | "active" | "inactive";
   updatedAt: Date;
@@ -344,8 +376,23 @@ export const getInstrumentById = cache(async function getInstrumentById(
   instrumentId: string
 ): Promise<InstrumentDetail | null> {
   const [instrument] = await db
-    .select()
+    .select({
+      id: instruments.id,
+      displayName: instruments.displayName,
+      status: instruments.status,
+      instrumentType: instruments.instrumentType,
+      createdAt: instruments.createdAt,
+      updatedAt: instruments.updatedAt,
+      retiredAt: instruments.retiredAt,
+      retiredBy: instruments.retiredBy,
+      retiredByName: users.name,
+      retiredByEmail: users.email,
+      retiredByImage: users.image,
+    })
     .from(instruments)
+    // Resolve the retirer for display; all NULL when active or retired before
+    // `retired_by` existed.
+    .leftJoin(users, eq(users.id, instruments.retiredBy))
     .where(eq(instruments.id, instrumentId))
     .limit(1);
 
@@ -353,7 +400,7 @@ export const getInstrumentById = cache(async function getInstrumentById(
     return null;
   }
 
-  const [runCountResult, watcherRows] = await Promise.all([
+  const [runCountResult, allWatcherRows] = await Promise.all([
     db
       .select({ value: count() })
       .from(instrumentRuns)
@@ -371,12 +418,15 @@ export const getInstrumentById = cache(async function getInstrumentById(
         lastHeartbeatAt: watchers.lastHeartbeatAt,
         createdAt: watchers.createdAt,
         configYaml: watchers.configYaml,
+        deletedAt: watchers.deletedAt,
       })
       .from(watchers)
-      .where(
-        and(eq(watchers.instrumentId, instrumentId), isNull(watchers.deletedAt))
-      ),
+      .where(eq(watchers.instrumentId, instrumentId)),
   ]);
+
+  // Counts and roll-ups use live watchers only; deregistered rows are kept
+  // just to resolve the canonical watcher link below.
+  const watcherRows = allWatcherRows.filter((w) => w.deletedAt === null);
 
   const staleThreshold = new Date(
     Date.now() - HEARTBEAT_STALE_MINUTES * 60 * 1000
@@ -422,6 +472,17 @@ export const getInstrumentById = cache(async function getInstrumentById(
           (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
         )[0]);
 
+  // Fall back to the most recently deregistered watcher so the header can
+  // still link to it once no live watcher remains (e.g. after retirement).
+  const canonicalWatcher =
+    activeWatcher ??
+    allWatcherRows
+      .filter((w) => w.deletedAt !== null)
+      .sort(
+        (a, b) => (b.deletedAt?.getTime() ?? 0) - (a.deletedAt?.getTime() ?? 0)
+      )[0] ??
+    null;
+
   return {
     id: instrument.id,
     displayName: instrument.displayName,
@@ -430,12 +491,21 @@ export const getInstrumentById = cache(async function getInstrumentById(
     filePatterns: mergeFilePatterns(watcherRows.map((w) => w.configYaml)),
     createdAt: instrument.createdAt,
     updatedAt: instrument.updatedAt,
+    retiredAt: instrument.retiredAt,
+    retiredByUser: resolveActorUser({
+      userId: instrument.retiredBy,
+      name: instrument.retiredByName,
+      email: instrument.retiredByEmail,
+      image: instrument.retiredByImage,
+    }),
     runCount: runCountResult[0].value,
     watcherCount: watcherRows.length,
     watchersOnline,
     watchersOffline,
     lastWatcherHeartbeatAt,
-    activeWatcherId: activeWatcher?.id ?? null,
-    activeWatcherHostname: activeWatcher?.hostname ?? null,
+    activeWatcherId: canonicalWatcher?.id ?? null,
+    activeWatcherHostname: canonicalWatcher?.hostname ?? null,
+    activeWatcherDeregistered:
+      activeWatcher === null && canonicalWatcher !== null,
   };
 });

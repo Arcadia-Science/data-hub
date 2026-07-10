@@ -9,12 +9,15 @@ import {
   CommandGroup,
   CommandItem,
   CommandList,
+  CommandSeparator,
 } from "@/components/ui/command";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { RUN_STATUS_OPTIONS, type RunStatus } from "@/lib/runs/run-status";
+import { cn } from "@/lib/utils";
 
 interface FilterValues {
   includeDeleted: boolean;
@@ -33,15 +36,29 @@ const FILTERS: readonly FilterDef[] = [
 export function RunFiltersCombobox({
   values,
   onChange,
+  selectedStatuses,
+  onStatusChange,
 }: {
   values: FilterValues;
   onChange: (next: FilterValues) => void;
+  // When both are provided, a multi-select STATUS group is rendered.
+  selectedStatuses?: RunStatus[];
+  onStatusChange?: (next: RunStatus[]) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const activeCount = FILTERS.reduce(
-    (count, f) => (values[f.key] ? count + 1 : count),
-    0
-  );
+  const showStatus =
+    selectedStatuses !== undefined && onStatusChange !== undefined;
+  const activeCount =
+    FILTERS.reduce((count, f) => (values[f.key] ? count + 1 : count), 0) +
+    (selectedStatuses?.length ?? 0);
+
+  function toggleStatus(status: RunStatus) {
+    const current = selectedStatuses ?? [];
+    const next = current.includes(status)
+      ? current.filter((s) => s !== status)
+      : [...current, status];
+    onStatusChange?.(next);
+  }
 
   return (
     <Popover onOpenChange={setOpen} open={open}>
@@ -84,6 +101,33 @@ export function RunFiltersCombobox({
                 );
               })}
             </CommandGroup>
+            {showStatus && (
+              <>
+                <CommandSeparator />
+                <CommandGroup heading="Status">
+                  {RUN_STATUS_OPTIONS.map((status) => {
+                    const Icon = status.Icon;
+                    const active = selectedStatuses?.includes(status.value);
+                    return (
+                      <CommandItem
+                        data-checked={active}
+                        key={status.value}
+                        onSelect={() => toggleStatus(status.value)}
+                        value={status.label}
+                      >
+                        <Icon
+                          className={cn(
+                            status.colorClassName,
+                            status.spin && "animate-spin"
+                          )}
+                        />
+                        {status.label}
+                      </CommandItem>
+                    );
+                  })}
+                </CommandGroup>
+              </>
+            )}
           </CommandList>
         </Command>
       </PopoverContent>

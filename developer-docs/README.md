@@ -2,7 +2,7 @@
 
 Documentation for developing Data Hub itself. User, operator, and admin
 documentation (installing a watcher, adding an instrument, managing tokens,
-deployment) lives on the [docs site](https://arcadia-data-hub-docs.vercel.app/)
+deployment) lives on the [docs site](https://datahub.arcadiascience.com/docs)
 instead — see the root [README](../README.md#getting-started) for that split.
 
 - [Getting started](getting-started.md) — development setup, environment variables, running locally

@@ -3,7 +3,7 @@ import Image from "next/image";
 import { DevSignInForm } from "@/components/auth/dev-sign-in-form";
 import { Button } from "@/components/ui/button";
 import { isDevAuthEnabled, signIn } from "@/lib/auth";
-import { DOCS_BASE_URL, QUICKSTART_DOCS_URL } from "@/lib/docs";
+import { DOCS_URL, QUICKSTART_DOCS_URL } from "@/lib/docs";
 
 interface AuthScreenProps {
   callbackUrl: string;
@@ -131,7 +131,7 @@ export function AuthScreen({
             </a>
             <a
               className="transition-colors hover:text-foreground"
-              href={DOCS_BASE_URL}
+              href={DOCS_URL}
               rel="noopener noreferrer"
               target="_blank"
             >
