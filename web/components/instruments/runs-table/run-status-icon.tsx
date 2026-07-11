@@ -57,7 +57,7 @@ export function RunStatusIcon({
   }
   if (hasUploaded) {
     lines.push(
-      `${filesUploaded} file${filesUploaded > 1 ? "s" : ""} awaiting processing`
+      `${filesUploaded} file${filesUploaded > 1 ? "s" : ""} uploaded`
     );
   }
   if (hasProcessing) {

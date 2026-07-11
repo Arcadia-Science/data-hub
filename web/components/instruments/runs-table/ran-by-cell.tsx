@@ -45,19 +45,16 @@ function AttributionAvatars({
   currentUserId: string | null;
   showName: boolean;
   compact: boolean;
-  // Links each avatar to the attributed user's runs page. Off in the runs
-  // table (rows already navigate to the run); on in the run detail metadata.
+  // Links each attributor to their runs page. Off in the runs table (rows
+  // already navigate to the run); on in the run detail metadata.
   linkToProfile: boolean;
 }) {
-  const Avatar = linkToProfile ? UserAvatarLink : UserAvatar;
   const avatarClassName = cn(
     compact
       ? "size-5 ring-1 ring-background [&_[data-slot=avatar-fallback]]:text-[10px]"
       : "ring-2 ring-background"
   );
-  const nameClassName = compact
-    ? "font-medium text-foreground text-xs"
-    : "font-medium text-foreground text-sm";
+  const nameClassName = "font-medium text-foreground text-sm";
   const rowClassName = compact
     ? "inline-flex h-5 items-center gap-1.5"
     : "inline-flex items-center gap-2";
@@ -65,11 +62,18 @@ function AttributionAvatars({
   if (showName && attributions.length === 1) {
     const attribution = attributions[0];
     const isSelf = attribution.userId === currentUserId;
+    const avatarProps = {
+      className: cn(avatarClassName, isSelf && "ring-primary/30"),
+      "data-self-attribution": isSelf || undefined,
+      size: "sm" as const,
+      user: attribution,
+    };
     if (linkToProfile) {
       return (
         <UserAvatarLink
-          className={cn(avatarClassName, isSelf && "ring-primary/30")}
-          data-self-attribution={isSelf || undefined}
+          avatarClassName={avatarProps.className}
+          className={rowClassName}
+          data-self-attribution={avatarProps["data-self-attribution"]}
           size="sm"
           user={attribution}
         >
@@ -79,12 +83,7 @@ function AttributionAvatars({
     }
     return (
       <span className={rowClassName}>
-        <UserAvatar
-          className={cn(avatarClassName, isSelf && "ring-primary/30")}
-          data-self-attribution={isSelf || undefined}
-          size="sm"
-          user={attribution}
-        />
+        <UserAvatar {...avatarProps} />
         <span className={nameClassName}>{attribution.displayName}</span>
       </span>
     );
@@ -98,15 +97,25 @@ function AttributionAvatars({
         <span className={cn("flex", compact ? "-space-x-1" : "-space-x-1.5")}>
           {attributions.map((attribution) => {
             const isSelf = attribution.userId === currentUserId;
+            const ringClass = cn(avatarClassName, isSelf && "ring-primary/30");
             return (
               <Tooltip key={attribution.userId}>
                 <TooltipTrigger asChild>
-                  <Avatar
-                    className={cn(avatarClassName, isSelf && "ring-primary/30")}
-                    data-self-attribution={isSelf || undefined}
-                    size="sm"
-                    user={attribution}
-                  />
+                  {linkToProfile ? (
+                    <UserAvatarLink
+                      avatarClassName={ringClass}
+                      data-self-attribution={isSelf || undefined}
+                      size="sm"
+                      user={attribution}
+                    />
+                  ) : (
+                    <UserAvatar
+                      className={ringClass}
+                      data-self-attribution={isSelf || undefined}
+                      size="sm"
+                      user={attribution}
+                    />
+                  )}
                 </TooltipTrigger>
                 <TooltipContent>{attribution.displayName}</TooltipContent>
               </Tooltip>
@@ -114,8 +123,14 @@ function AttributionAvatars({
           })}
         </span>
         {linkToProfile ? (
+          // Name links to the first attributor; stacked avatars above each
+          // link to their own profile (wrapping avatar+name isn't possible
+          // when the first avatar sits in a shared stack).
           <Link
-            className={cn(nameClassName, "hover:underline")}
+            className={cn(
+              nameClassName,
+              "rounded-sm outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring"
+            )}
             href={`/users/${first.userId}`}
           >
             {first.displayName}
@@ -135,18 +150,28 @@ function AttributionAvatars({
     <div className="flex -space-x-1.5">
       {attributions.map((attribution) => {
         const isSelf = attribution.userId === currentUserId;
+        const ringClass = cn(
+          "ring-2 ring-background",
+          isSelf && "ring-primary/30"
+        );
         return (
           <Tooltip key={attribution.userId}>
             <TooltipTrigger asChild>
-              <Avatar
-                className={cn(
-                  "ring-2 ring-background",
-                  isSelf && "ring-primary/30"
-                )}
-                data-self-attribution={isSelf || undefined}
-                size="sm"
-                user={attribution}
-              />
+              {linkToProfile ? (
+                <UserAvatarLink
+                  avatarClassName={ringClass}
+                  data-self-attribution={isSelf || undefined}
+                  size="sm"
+                  user={attribution}
+                />
+              ) : (
+                <UserAvatar
+                  className={ringClass}
+                  data-self-attribution={isSelf || undefined}
+                  size="sm"
+                  user={attribution}
+                />
+              )}
             </TooltipTrigger>
             <TooltipContent>{attribution.displayName}</TooltipContent>
           </Tooltip>

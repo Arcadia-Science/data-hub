@@ -33,14 +33,15 @@ export function UserAvatar({
   );
 }
 
-// A separate composed component rather than a `clickable` prop on `UserAvatar`,
-// so the plain avatar stays usable where a nested link would be invalid (inside
-// another link or a control that owns the click). Forwards `ref`/props to the
-// `Link` so it can act as a Radix `asChild` trigger (e.g. inside a tooltip).
-// Pass the display name as `children` so avatar + name share one hit target.
+// Composed link rather than a `clickable` prop on `UserAvatar`, so the plain
+// avatar stays usable where a nested link would be invalid. Pass the display
+// name (or other label) as `children` so the hit target covers avatar + text;
+// omit children for avatar-only links (e.g. stacked attribution tooltips).
+// Forwards `ref`/props to the `Link` so it can act as a Radix `asChild` trigger.
 export function UserAvatarLink({
   user,
   size = "sm",
+  avatarClassName,
   className,
   children,
   ref,
@@ -48,21 +49,22 @@ export function UserAvatarLink({
 }: {
   user: UserAvatarUser;
   size?: "default" | "sm" | "lg";
+  avatarClassName?: string;
   className?: string;
   children?: ReactNode;
 } & Omit<ComponentProps<typeof Link>, "href">) {
   return (
     <Link
-      aria-label={children ? undefined : `View ${user.displayName}'s runs`}
+      aria-label={`View ${user.displayName}'s runs`}
       className={cn(
-        "inline-flex items-center outline-none ring-ring ring-offset-2 ring-offset-background transition-opacity hover:opacity-80 focus-visible:ring-2",
-        children ? "gap-1.5 rounded-sm" : "rounded-full"
+        "inline-flex items-center gap-1.5 rounded-sm outline-none ring-ring ring-offset-2 ring-offset-background transition-opacity hover:opacity-80 focus-visible:ring-2",
+        className
       )}
       href={`/users/${user.userId}`}
       ref={ref}
       {...props}
     >
-      <UserAvatar className={className} size={size} user={user} />
+      <UserAvatar className={avatarClassName} size={size} user={user} />
       {children}
     </Link>
   );
