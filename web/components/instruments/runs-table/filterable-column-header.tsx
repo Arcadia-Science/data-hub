@@ -17,14 +17,21 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { instrumentDetailSearchParams } from "@/lib/search-params";
+import {
+  dashboardSearchParams,
+  instrumentDetailSearchParams,
+} from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 
-// The header drives a single nullable-string radio filter and resets the page,
-// so it works with any nuqs parser map exposing the target column key plus a
-// `page` key. Defaults to the per-instrument params; the dashboard tables pass
-// `dashboardSearchParams` instead.
-type ColumnFilterKeyMap = UseQueryStatesKeysMap & { page: unknown };
+// Resolved inside this client module so Server Components can pick a source by
+// string without shipping parser objects (and their `eq`/`parse` functions)
+// across the RSC boundary.
+const PARAMS_BY_SOURCE = {
+  instrument: instrumentDetailSearchParams,
+  dashboard: dashboardSearchParams,
+} as const;
+
+type ParamsSource = keyof typeof PARAMS_BY_SOURCE;
 
 // Column-filter keys are the nullable-string entries in the parser map
 // (`parseAsString` without a default). Keys whose parser carries a default —
@@ -53,18 +60,21 @@ function normalizeOption(option: FilterOption): {
 }
 
 export function FilterableColumnHeader<
-  KeyMap extends ColumnFilterKeyMap = typeof instrumentDetailSearchParams,
+  Source extends ParamsSource = "instrument",
 >({
   label,
   paramKey,
   options,
-  searchParams = instrumentDetailSearchParams as unknown as KeyMap,
+  paramsSource = "instrument" as Source,
 }: {
   label: string;
-  paramKey: FilterParamKey<KeyMap>;
+  paramKey: FilterParamKey<(typeof PARAMS_BY_SOURCE)[Source]>;
   options: FilterOption[];
-  searchParams?: KeyMap;
+  // Which shared nuqs map to bind. Keep this a string — never pass the parser
+  // object itself from a Server Component.
+  paramsSource?: Source;
 }) {
+  const searchParams = PARAMS_BY_SOURCE[paramsSource];
   const { startTransition } = useTablePending();
   const [filters, setFilters] = useQueryStates(searchParams, {
     shallow: false,
@@ -99,7 +109,7 @@ export function FilterableColumnHeader<
             setFilters({
               [paramKey]: value || null,
               page: 1,
-            } as Partial<Nullable<Values<KeyMap>>>)
+            } as Partial<Nullable<Values<(typeof PARAMS_BY_SOURCE)[Source]>>>)
           }
           value={currentValue ?? ""}
         >
