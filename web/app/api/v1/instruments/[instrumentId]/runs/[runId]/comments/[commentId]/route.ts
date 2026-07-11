@@ -38,7 +38,7 @@ async function preflight(
   // Both PATCH and DELETE on this route mutate comment state, so both
   // require runs:write. Bake the check into the shared preflight so a
   // future verb added here can't accidentally skip it.
-  const authResult = await authorize(request, "runs:write");
+  const authResult = await authorize(request, "runs:comment");
   if (authResult instanceof Response) {
     return { kind: "error", response: authResult };
   }

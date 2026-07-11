@@ -10,7 +10,7 @@ on:
       - web/drizzle/**
 
 # Serialize migration runs per environment so two merges can't apply
-# migrations against the same Render database concurrently.
+# migrations against the same database concurrently.
 concurrency:
   group: apply-migrations-${{ github.ref_name }}
   cancel-in-progress: false

@@ -43,7 +43,7 @@ export const RUN_STATUS_META: Record<RunStatus, RunStatusMeta> = {
     colorClassName: "text-amber-500",
   },
   uploaded: {
-    label: "Awaiting processing",
+    label: "Uploaded",
     description: "Files are uploaded and waiting in the processing queue",
     Icon: CircleDashed,
     colorClassName: "text-muted-foreground",

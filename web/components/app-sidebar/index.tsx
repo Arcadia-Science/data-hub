@@ -51,6 +51,7 @@ export function AppSidebar({
         </SidebarMenu>
       </SidebarHeader>
       <AppSidebarContent
+        currentUserId={session.user.id}
         instruments={instruments}
         isAdmin={session.user.isAdmin === true}
       />

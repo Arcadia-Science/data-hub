@@ -11,7 +11,7 @@ import { db } from "@/lib/db";
 import { instruments, watchers } from "@/lib/db/schema";
 
 export async function POST(request: NextRequest) {
-  const authResult = await authorize(request, "watchers:write");
+  const authResult = await authorize(request, "watchers:report");
   if (authResult instanceof Response) {
     return authResult;
   }

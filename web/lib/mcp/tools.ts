@@ -249,7 +249,7 @@ export function registerTools(server: McpServer) {
           .array(z.enum(RUN_STATUS_VALUES))
           .optional()
           .describe(
-            "Filter by derived run status (OR'd together). Status is derived from a run's raw file states, priority-exclusive: failed (any file failed), pending (files awaiting upload), uploaded (awaiting processing), processing, completed (all done), empty (no files)."
+            "Filter by derived run status (OR'd together). Status is derived from a run's raw file states, priority-exclusive: failed (any file failed), pending (files awaiting upload), uploaded, processing, completed (all done), empty (no files)."
           ),
       },
       annotations: { readOnlyHint: true },
@@ -547,7 +547,7 @@ export function registerTools(server: McpServer) {
       annotations: { readOnlyHint: false, destructiveHint: true },
     },
     async ({ fileId }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "files:write");
+      const scopeError = requireMcpScope(authInfo, "files:reprocess");
       if (scopeError) {
         return scopeError;
       }
@@ -616,7 +616,7 @@ export function registerTools(server: McpServer) {
       },
     },
     async ({ instrumentId, runId }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "runs:write");
+      const scopeError = requireMcpScope(authInfo, "runs:attribute");
       if (scopeError) {
         return scopeError;
       }
@@ -662,7 +662,7 @@ export function registerTools(server: McpServer) {
       },
     },
     async ({ instrumentId, runId }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "runs:write");
+      const scopeError = requireMcpScope(authInfo, "runs:attribute");
       if (scopeError) {
         return scopeError;
       }

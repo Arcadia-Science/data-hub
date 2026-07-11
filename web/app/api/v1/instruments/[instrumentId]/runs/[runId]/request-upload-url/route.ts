@@ -36,7 +36,7 @@ const UPLOADED_OR_LATER_STATUSES = new Set([
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authorize(request, "runs:write");
+  const authResult = await authorize(request, "runs:upload");
   if (authResult instanceof Response) {
     return authResult;
   }

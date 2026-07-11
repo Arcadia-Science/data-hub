@@ -1,13 +1,17 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, type SQL, sql } from "drizzle-orm";
 import { cache } from "react";
+import type { UserAvatarUser } from "@/components/user-avatar";
 import { db } from "@/lib/db";
 import {
   files,
   instrumentRuns,
   instruments,
   runAttributions,
+  runComments,
+  users,
   watchers,
 } from "@/lib/db/schema";
+import { toInitials } from "@/lib/utils";
 
 export interface InstrumentSummary {
   displayName: string;
@@ -124,8 +128,6 @@ export interface DashboardStats {
   runsThisWeek: {
     total: number;
     bytesGenerated: number;
-    mine: number;
-    unattributed: number;
   };
 }
 
@@ -136,108 +138,331 @@ export interface DashboardStats {
  * row-multiplication problems we'd hit joining instruments × runs × files ×
  * attributions in a single statement.
  *
- * Wrapped in `cache()` so duplicate calls within the same request (e.g. layout
- * + page) share a result. The cache key includes `currentUserId`, so different
- * users on parallel requests don't collide.
+ * Fleet-wide and viewer-independent, so it's `cache()`-deduped without a key —
+ * duplicate calls within a request (e.g. layout + page) share one result.
  */
-export const getDashboardStats = cache(async function getDashboardStats(
-  currentUserId: string | null
-): Promise<DashboardStats> {
-  const [
-    [runsLast24HoursRow],
-    [bytesGeneratedRow],
-    [pendingRow],
-    [runsThisWeekRow],
-  ] = await Promise.all([
-    db
-      .select({
-        total: sql<number>`cast(count(*) as int)`,
-      })
-      .from(instrumentRuns)
-      .innerJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
-      .where(
-        and(
-          eq(instruments.status, "active"),
-          isNull(instrumentRuns.deletedAt),
-          sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '24 hours'`
-        )
-      ),
-    // Span the last 24 hours + the past 7 days in a single pass; the 24-hour
-    // window is a subset of the weekly window, so FILTER clauses give us both
-    // with one index scan. Bytes are attributed to the file's owning run so
-    // the time window matches the corresponding "Runs in the last X" card —
-    // this avoids the null-`processedAt` blind spot for not-yet-processed
-    // files (which still represent data the instrument generated). Windows
-    // are anchored to the run's actual acquisition time when known so
-    // backfilled historical data doesn't pollute the "last 24h"/"this week"
-    // counts.
-    db
-      .select({
-        bytesLast24Hours: sql<string>`coalesce(sum(${files.sizeBytes}) filter (where coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '24 hours'), 0)`,
-        bytesWeek: sql<string>`coalesce(sum(${files.sizeBytes}), 0)`,
-      })
-      .from(files)
-      .innerJoin(instrumentRuns, eq(files.instrumentRunId, instrumentRuns.id))
-      .innerJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
-      .where(
-        and(
-          eq(instruments.status, "active"),
-          isNull(files.deletedAt),
-          isNull(instrumentRuns.deletedAt),
-          sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '7 days'`
-        )
-      ),
-    db
-      .select({
-        count: sql<number>`cast(count(*) as int)`,
-        totalBytes: sql<number>`cast(coalesce(sum(${files.sizeBytes}), 0) as bigint)`,
-      })
-      .from(files)
-      .innerJoin(instrumentRuns, eq(files.instrumentRunId, instrumentRuns.id))
-      .innerJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
-      .where(
-        and(
-          eq(instruments.status, "active"),
-          isNull(files.deletedAt),
-          sql`${files.status} in ('detected', 'upload_requested')`
-        )
-      ),
-    // "Mine" requires a user; the unattributed count is fleet-wide and
-    // independent of the viewer.
-    db
-      .select({
-        total: sql<number>`cast(count(*) as int)`,
-        mine: currentUserId
-          ? sql<number>`cast(count(*) filter (where exists (select 1 from ${runAttributions} where ${runAttributions.runId} = ${instrumentRuns.id} and ${runAttributions.userId} = ${currentUserId})) as int)`
-          : sql<number>`cast(0 as int)`,
-        unattributed: sql<number>`cast(count(*) filter (where not exists (select 1 from ${runAttributions} where ${runAttributions.runId} = ${instrumentRuns.id})) as int)`,
-      })
-      .from(instrumentRuns)
-      .innerJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
-      .where(
-        and(
-          eq(instruments.status, "active"),
-          isNull(instrumentRuns.deletedAt),
-          sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '7 days'`
-        )
-      ),
-  ]);
+export const getDashboardStats = cache(
+  async function getDashboardStats(): Promise<DashboardStats> {
+    const [
+      [runsLast24HoursRow],
+      [bytesGeneratedRow],
+      [pendingRow],
+      [runsThisWeekRow],
+    ] = await Promise.all([
+      db
+        .select({
+          total: sql<number>`cast(count(*) as int)`,
+        })
+        .from(instrumentRuns)
+        .innerJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
+        .where(
+          and(
+            eq(instruments.status, "active"),
+            isNull(instrumentRuns.deletedAt),
+            sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '24 hours'`
+          )
+        ),
+      // Span the last 24 hours + the past 7 days in a single pass; the 24-hour
+      // window is a subset of the weekly window, so FILTER clauses give us both
+      // with one index scan. Bytes are attributed to the file's owning run so
+      // the time window matches the corresponding "Runs in the last X" card —
+      // this avoids the null-`processedAt` blind spot for not-yet-processed
+      // files (which still represent data the instrument generated). Windows
+      // are anchored to the run's actual acquisition time when known so
+      // backfilled historical data doesn't pollute the "last 24h"/"this week"
+      // counts.
+      db
+        .select({
+          bytesLast24Hours: sql<string>`coalesce(sum(${files.sizeBytes}) filter (where coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '24 hours'), 0)`,
+          bytesWeek: sql<string>`coalesce(sum(${files.sizeBytes}), 0)`,
+        })
+        .from(files)
+        .innerJoin(instrumentRuns, eq(files.instrumentRunId, instrumentRuns.id))
+        .innerJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
+        .where(
+          and(
+            eq(instruments.status, "active"),
+            isNull(files.deletedAt),
+            isNull(instrumentRuns.deletedAt),
+            sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '7 days'`
+          )
+        ),
+      db
+        .select({
+          count: sql<number>`cast(count(*) as int)`,
+          totalBytes: sql<number>`cast(coalesce(sum(${files.sizeBytes}), 0) as bigint)`,
+        })
+        .from(files)
+        .innerJoin(instrumentRuns, eq(files.instrumentRunId, instrumentRuns.id))
+        .innerJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
+        .where(
+          and(
+            eq(instruments.status, "active"),
+            isNull(files.deletedAt),
+            sql`${files.status} in ('detected', 'upload_requested')`
+          )
+        ),
+      db
+        .select({
+          total: sql<number>`cast(count(*) as int)`,
+        })
+        .from(instrumentRuns)
+        .innerJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
+        .where(
+          and(
+            eq(instruments.status, "active"),
+            isNull(instrumentRuns.deletedAt),
+            sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '7 days'`
+          )
+        ),
+    ]);
+
+    return {
+      runsLast24Hours: {
+        total: runsLast24HoursRow?.total ?? 0,
+        // bigint sums come back as strings from pg; coerce explicitly.
+        bytesGenerated: Number(bytesGeneratedRow?.bytesLast24Hours ?? 0),
+      },
+      pendingUploads: {
+        count: pendingRow?.count ?? 0,
+        totalBytes: Number(pendingRow?.totalBytes ?? 0),
+      },
+      runsThisWeek: {
+        total: runsThisWeekRow?.total ?? 0,
+        bytesGenerated: Number(bytesGeneratedRow?.bytesWeek ?? 0),
+      },
+    };
+  }
+);
+
+export interface UserProfile extends UserAvatarUser {
+  email: string | null;
+}
+
+// Returns null on an unknown id so the page can `notFound()`. `cache()`-keyed
+// on `userId` so the page header and `generateMetadata` share one lookup.
+export const getUserProfile = cache(async function getUserProfile(
+  userId: string
+): Promise<UserProfile | null> {
+  const [row] = await db
+    .select({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      image: users.image,
+    })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  if (!row) {
+    return null;
+  }
+
+  const displayName = row.name ?? row.email ?? "Unknown user";
+  return {
+    userId: row.id,
+    displayName,
+    initials: toInitials(displayName),
+    avatarUrl: row.image,
+    email: row.email,
+  };
+});
+
+export interface MyRunsStats {
+  commentsLast7Days: {
+    count: number;
+  };
+  pendingUploads: {
+    count: number;
+    totalBytes: number;
+  };
+  runsLast7Days: {
+    total: number;
+    bytesGenerated: number;
+  };
+  runsLast24Hours: {
+    total: number;
+    bytesGenerated: number;
+  };
+}
+
+// Correlated EXISTS against `run_attributions`, matching the `ranBy` predicate
+// used by `buildRunListQuery` so the "My runs" cards count the same runs the
+// table below them lists.
+function attributedToUser(userId: string): SQL {
+  return sql`exists (select 1 from ${runAttributions} where ${runAttributions.runId} = ${instrumentRuns.id} and ${runAttributions.userId} = ${userId})`;
+}
+
+/**
+ * Aggregates the four "My runs" summary metrics, all scoped to runs the viewer
+ * is attributed to. Like `getDashboardStats`, each metric is a single
+ * COUNT/SUM issued in parallel to keep the per-query plans simple.
+ *
+ * Unlike the fleet dashboard, this is intentionally not restricted to active
+ * instruments — a user's own runs stay relevant even after an instrument is
+ * retired, and this matches the unrestricted `ranBy` run list on the page.
+ * `cache()` keys on `userId` so parallel requests from different users don't
+ * collide.
+ */
+export const getMyRunsStats = cache(async function getMyRunsStats(
+  userId: string
+): Promise<MyRunsStats> {
+  const attributed = attributedToUser(userId);
+
+  const [[runsRow], [bytesRow], [commentsRow], [pendingRow]] =
+    await Promise.all([
+      // Both run-count windows in one pass — the 24-hour window is a subset of
+      // the weekly window, so a FILTER clause gives us both from one scan.
+      db
+        .select({
+          last24Hours: sql<number>`cast(count(*) filter (where coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '24 hours') as int)`,
+          last7Days: sql<number>`cast(count(*) as int)`,
+        })
+        .from(instrumentRuns)
+        .where(
+          and(
+            isNull(instrumentRuns.deletedAt),
+            sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '7 days'`,
+            attributed
+          )
+        ),
+      // Bytes generated, anchored to each run's acquisition time so the windows
+      // line up with the run-count cards above.
+      db
+        .select({
+          bytesLast24Hours: sql<string>`coalesce(sum(${files.sizeBytes}) filter (where coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '24 hours'), 0)`,
+          bytesLast7Days: sql<string>`coalesce(sum(${files.sizeBytes}), 0)`,
+        })
+        .from(files)
+        .innerJoin(instrumentRuns, eq(files.instrumentRunId, instrumentRuns.id))
+        .where(
+          and(
+            isNull(files.deletedAt),
+            isNull(instrumentRuns.deletedAt),
+            sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '7 days'`,
+            attributed
+          )
+        ),
+      // Comments left in the last 7 days on runs the viewer is attributed to
+      // (including the viewer's own comments).
+      db
+        .select({
+          count: sql<number>`cast(count(*) as int)`,
+        })
+        .from(runComments)
+        .innerJoin(instrumentRuns, eq(instrumentRuns.id, runComments.runId))
+        .where(
+          and(
+            isNull(runComments.deletedAt),
+            isNull(instrumentRuns.deletedAt),
+            sql`${runComments.createdAt} > now() - interval '7 days'`,
+            attributed
+          )
+        ),
+      // Pending uploads across all of the viewer's attributed runs (no time
+      // window — a stuck upload from last month still needs attention).
+      db
+        .select({
+          count: sql<number>`cast(count(*) as int)`,
+          totalBytes: sql<number>`cast(coalesce(sum(${files.sizeBytes}), 0) as bigint)`,
+        })
+        .from(files)
+        .innerJoin(instrumentRuns, eq(files.instrumentRunId, instrumentRuns.id))
+        .where(
+          and(
+            isNull(files.deletedAt),
+            isNull(instrumentRuns.deletedAt),
+            sql`${files.status} in ('detected', 'upload_requested')`,
+            attributed
+          )
+        ),
+    ]);
 
   return {
     runsLast24Hours: {
-      total: runsLast24HoursRow?.total ?? 0,
-      // bigint sums come back as strings from pg; coerce explicitly.
-      bytesGenerated: Number(bytesGeneratedRow?.bytesLast24Hours ?? 0),
+      total: runsRow?.last24Hours ?? 0,
+      bytesGenerated: Number(bytesRow?.bytesLast24Hours ?? 0),
+    },
+    runsLast7Days: {
+      total: runsRow?.last7Days ?? 0,
+      bytesGenerated: Number(bytesRow?.bytesLast7Days ?? 0),
+    },
+    commentsLast7Days: {
+      count: commentsRow?.count ?? 0,
     },
     pendingUploads: {
       count: pendingRow?.count ?? 0,
       totalBytes: Number(pendingRow?.totalBytes ?? 0),
     },
-    runsThisWeek: {
-      total: runsThisWeekRow?.total ?? 0,
-      bytesGenerated: Number(bytesGeneratedRow?.bytesWeek ?? 0),
-      mine: runsThisWeekRow?.mine ?? 0,
-      unattributed: runsThisWeekRow?.unattributed ?? 0,
-    },
   };
 });
+
+export interface TopAttributor {
+  bytesGenerated: number;
+  runCount: number;
+  user: UserAvatarUser;
+}
+
+/**
+ * The user attributed to the most active-instrument runs in the last 7 days,
+ * with the volume of data across those runs. Ties are broken by data
+ * generated. Returns null when no runs were attributed this week. Powers the
+ * "Most runs this week" leaderboard card on the dashboard.
+ */
+export const getTopAttributorThisWeek = cache(
+  async function getTopAttributorThisWeek(): Promise<TopAttributor | null> {
+    const runCountExpr = sql`count(distinct ${instrumentRuns.id})`;
+    const bytesExpr = sql`coalesce(sum(${files.sizeBytes}), 0)`;
+
+    // Each (run, file) pair is one joined row, but counting distinct run ids
+    // keeps the run tally correct, and every file belongs to exactly one run so
+    // the byte sum isn't double-counted.
+    const [row] = await db
+      .select({
+        userId: users.id,
+        name: users.name,
+        email: users.email,
+        image: users.image,
+        runCount: sql<number>`cast(${runCountExpr} as int)`,
+        bytesGenerated: sql<string>`${bytesExpr}`,
+      })
+      .from(runAttributions)
+      .innerJoin(instrumentRuns, eq(instrumentRuns.id, runAttributions.runId))
+      .innerJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
+      .innerJoin(users, eq(users.id, runAttributions.userId))
+      .leftJoin(
+        files,
+        and(
+          eq(files.instrumentRunId, instrumentRuns.id),
+          isNull(files.deletedAt)
+        )
+      )
+      .where(
+        and(
+          eq(instruments.status, "active"),
+          isNull(instrumentRuns.deletedAt),
+          sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '7 days'`
+        )
+      )
+      .groupBy(users.id, users.name, users.email, users.image)
+      .orderBy(desc(runCountExpr), desc(bytesExpr))
+      .limit(1);
+
+    if (!row) {
+      return null;
+    }
+
+    const displayName = row.name ?? row.email ?? "Unknown";
+    return {
+      user: {
+        userId: row.userId,
+        displayName,
+        initials: toInitials(displayName),
+        avatarUrl: row.image,
+      },
+      runCount: row.runCount,
+      bytesGenerated: Number(row.bytesGenerated),
+    };
+  }
+);

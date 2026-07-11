@@ -2,6 +2,8 @@ import { SearchX } from "lucide-react";
 import Link from "next/link";
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import { AcquiredColumnHeader } from "@/components/instruments/runs-table/acquired-column-header";
+import { FilterableColumnHeader } from "@/components/instruments/runs-table/filterable-column-header";
+import type { RanByOption } from "@/components/instruments/runs-table/index";
 import { RanByCell } from "@/components/instruments/runs-table/ran-by-cell";
 import { RawFileColumnHeader } from "@/components/instruments/runs-table/raw-file-column-header";
 import { RunIdLabel } from "@/components/instruments/runs-table/run-id-label";
@@ -25,6 +27,7 @@ import {
 } from "@/components/ui/table";
 import type { RunListRow } from "@/lib/api/instrument-runs";
 import { runRowToRef } from "@/lib/runs/row-actions";
+import { dashboardSearchParams } from "@/lib/search-params";
 import { cn, formatBytes } from "@/lib/utils";
 
 export function RunsTable({
@@ -34,6 +37,9 @@ export function RunsTable({
   pendingUploadCount,
   unattributedCount,
   ranByYouCount,
+  ranByOptions,
+  ranByLabel,
+  emptyLabel = "No instrument runs yet.",
 }: {
   data: RunListRow[];
   hasFilters: boolean;
@@ -41,15 +47,23 @@ export function RunsTable({
   pendingUploadCount: number;
   unattributedCount: number;
   ranByYouCount: number;
+  // When provided, the "Ran By" column becomes a filterable dropdown bound to
+  // `dashboardSearchParams.ran_by`. Omitted on a member's runs page, where every
+  // row is the same user, so a plain header is rendered instead.
+  ranByOptions?: RanByOption[];
+  // Footer suffix for the ran-by count; third-person on another member's page.
+  ranByLabel?: string;
+  // Copy shown when there are no rows and no active filters. Overridden on a
+  // member's runs page, where "No instrument runs yet." would misdescribe the
+  // user-scoped list.
+  emptyLabel?: string;
 }) {
   if (data.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-background py-16 dark:bg-muted">
         <SearchX className="size-8 text-muted-foreground" />
         <p className="text-muted-foreground text-sm">
-          {hasFilters
-            ? "No runs match your filters."
-            : "No instrument runs yet."}
+          {hasFilters ? "No runs match your filters." : emptyLabel}
         </p>
       </div>
     );
@@ -75,7 +89,18 @@ export function RunsTable({
             <TableHead className="text-right">
               <RawFileColumnHeader label="Size" />
             </TableHead>
-            <TableHead>Ran By</TableHead>
+            <TableHead>
+              {ranByOptions ? (
+                <FilterableColumnHeader
+                  label="Ran By"
+                  options={ranByOptions}
+                  paramKey="ran_by"
+                  searchParams={dashboardSearchParams}
+                />
+              ) : (
+                "Ran By"
+              )}
+            </TableHead>
             <TableHead className="text-right">
               <AcquiredColumnHeader />
             </TableHead>
@@ -161,6 +186,7 @@ export function RunsTable({
       </Table>
       <RunsTableFooter
         pendingUploadCount={pendingUploadCount}
+        ranByLabel={ranByLabel}
         ranByYouCount={ranByYouCount}
         shownCount={data.length}
         totalCount={totalCount}

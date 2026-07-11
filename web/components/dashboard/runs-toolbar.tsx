@@ -4,7 +4,10 @@ import { Check, ChevronsUpDown, Search, X } from "lucide-react";
 import { useQueryStates } from "nuqs";
 import { useState } from "react";
 import { RunFiltersCombobox } from "@/components/runs/run-filters-combobox";
-import { RunsDateFilter } from "@/components/runs/runs-date-filter";
+import {
+  type PresetId,
+  RunsDateFilter,
+} from "@/components/runs/runs-date-filter";
 import { useTablePending } from "@/components/table-pending";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,7 +33,16 @@ interface Instrument {
   id: string;
 }
 
-export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
+export function RunsToolbar({
+  instruments,
+  dateDefaultPreset,
+}: {
+  instruments: Instrument[];
+  // The page's server-side default date window, reflected in the date filter's
+  // label/highlight. Omitted on pages that show all runs by default (e.g. "My
+  // runs"), which surfaces an "All time" option instead.
+  dateDefaultPreset?: PresetId;
+}) {
   const { startTransition } = useTablePending();
   const [filters, setFilters] = useQueryStates(dashboardSearchParams, {
     shallow: false,
@@ -58,6 +70,7 @@ export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
       date_to: null,
       include_deleted: false,
       status: [],
+      ran_by: null,
       page: 1,
     });
   }
@@ -146,7 +159,7 @@ export function RunsToolbar({ instruments }: { instruments: Instrument[] }) {
 
           <RunsDateFilter
             align="end"
-            defaultPreset="24h"
+            defaultPreset={dateDefaultPreset}
             onChange={(range) =>
               setFilters({
                 date_from: range.from,

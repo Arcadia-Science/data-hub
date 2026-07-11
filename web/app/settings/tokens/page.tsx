@@ -22,6 +22,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { UserAvatar } from "@/components/user-avatar";
+import { LEGACY_SCOPE_EXPANSIONS } from "@/lib/api/scopes";
 import { auth } from "@/lib/auth";
 import { toInitials } from "@/lib/avatar-color";
 import { db } from "@/lib/db";
@@ -44,13 +45,35 @@ export const metadata: Metadata = {
 //      shouldn't appear in practice — but rendering an explicit empty
 //      state here is much clearer than a silently-empty cell if it ever
 //      does happen (e.g. a manual SQL update).
-//   2. `["*"]` (backfill wildcard) → single "Full access" pill so legacy
-//      tokens stand out at a glance.
+//   2. `["*"]` (backfill wildcard) → single "Full access (legacy)" pill so
+//      pre-scope tokens stand out and read as rotation candidates.
 //   3. Single explicit scope → that scope as a badge, no tooltip needed
 //      because everything is already visible.
 //   4. Multiple explicit scopes → first scope (sorted) plus a "+N"
 //      counter badge. Hovering the cell reveals the full list in a
 //      tooltip so the table stays scannable on tokens with many scopes.
+//
+// Deprecated coarse `:write` scopes (superseded by fine-grained actions but
+// still honored on old tokens) render with an amber tint wherever they
+// appear, flagging them for re-issue.
+const LEGACY_COARSE_SCOPES = new Set(Object.keys(LEGACY_SCOPE_EXPANSIONS));
+
+function ScopeBadge({ scope }: { scope: string }) {
+  const isLegacy = LEGACY_COARSE_SCOPES.has(scope);
+  return (
+    <Badge
+      className={
+        isLegacy
+          ? "font-mono text-amber-600 text-xs dark:text-amber-500"
+          : "font-mono text-xs"
+      }
+      variant="secondary"
+    >
+      {scope}
+    </Badge>
+  );
+}
+
 function TokenScopeBadges({ scopes }: { scopes: string[] }) {
   if (scopes.length === 0) {
     return (
@@ -65,8 +88,11 @@ function TokenScopeBadges({ scopes }: { scopes: string[] }) {
 
   if (scopes.length === 1 && scopes[0] === "*") {
     return (
-      <Badge className="text-xs" variant="secondary">
-        Full access
+      <Badge
+        className="text-amber-600 text-xs dark:text-amber-500"
+        variant="secondary"
+      >
+        Full access (legacy)
       </Badge>
     );
   }
@@ -77,11 +103,7 @@ function TokenScopeBadges({ scopes }: { scopes: string[] }) {
   const sorted = [...scopes].sort();
 
   if (sorted.length === 1) {
-    return (
-      <Badge className="font-mono text-xs" variant="secondary">
-        {sorted[0]}
-      </Badge>
-    );
+    return <ScopeBadge scope={sorted[0]} />;
   }
 
   const [first, ...rest] = sorted;
@@ -89,9 +111,7 @@ function TokenScopeBadges({ scopes }: { scopes: string[] }) {
     <Tooltip>
       <TooltipTrigger asChild>
         <div className="flex w-fit flex-wrap items-center gap-1">
-          <Badge className="font-mono text-xs" variant="secondary">
-            {first}
-          </Badge>
+          <ScopeBadge scope={first} />
           <Badge className="text-xs" variant="secondary">
             +{rest.length}
           </Badge>
@@ -100,7 +120,16 @@ function TokenScopeBadges({ scopes }: { scopes: string[] }) {
       <TooltipContent>
         <div className="flex flex-col gap-0.5 font-mono text-xs">
           {sorted.map((scope) => (
-            <span key={scope}>{scope}</span>
+            <span
+              className={
+                LEGACY_COARSE_SCOPES.has(scope)
+                  ? "text-amber-600 dark:text-amber-500"
+                  : undefined
+              }
+              key={scope}
+            >
+              {scope}
+            </span>
           ))}
         </div>
       </TooltipContent>

@@ -17,7 +17,7 @@ interface RouteContext {
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authorize(request, "files:write");
+  const authResult = await authorize(request, "files:reprocess");
   if (authResult instanceof Response) {
     return authResult;
   }

@@ -1343,7 +1343,7 @@ export interface RanByFilterOption {
 }
 
 export async function getRanByFilterOptions(
-  instrumentId: string
+  instrumentId?: string
 ): Promise<RanByFilterOption[]> {
   const rows = await db
     .selectDistinct({
@@ -1356,7 +1356,11 @@ export async function getRanByFilterOptions(
     .innerJoin(instrumentRuns, eq(instrumentRuns.id, runAttributions.runId))
     .where(
       and(
-        eq(instrumentRuns.instrumentId, instrumentId),
+        // Fleet-wide (dashboard) when no instrument is given; otherwise scope
+        // to the one instrument's attributors.
+        instrumentId
+          ? eq(instrumentRuns.instrumentId, instrumentId)
+          : undefined,
         isNull(instrumentRuns.deletedAt)
       )
     )
