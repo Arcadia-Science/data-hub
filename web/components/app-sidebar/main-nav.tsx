@@ -33,11 +33,13 @@ import type { SidebarInstrument } from "@/lib/api/sidebar";
 const SIDEBAR_RECENT_INSTRUMENTS_LIMIT = 10;
 
 interface MainNavProps {
+  currentUserId: string;
   instruments: SidebarInstrument[];
 }
 
-export function MainNav({ instruments }: MainNavProps) {
+export function MainNav({ currentUserId, instruments }: MainNavProps) {
   const pathname = usePathname();
+  const myRunsHref = `/users/${currentUserId}`;
   const { recent: recentInstruments } = useRecentInstruments();
 
   const recentlyViewedInstruments = useMemo(
@@ -86,10 +88,10 @@ export function MainNav({ instruments }: MainNavProps) {
           <SidebarMenuItem>
             <SidebarMenuButton
               asChild
-              isActive={pathname === "/my-runs"}
+              isActive={pathname === myRunsHref}
               tooltip="My runs"
             >
-              <Link href="/my-runs">
+              <Link href={myRunsHref}>
                 <ListChecks />
                 <span>My runs</span>
               </Link>

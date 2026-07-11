@@ -15,7 +15,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -25,6 +24,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
+import { UserAvatarLink } from "@/components/user-avatar";
 import type { RunCommentDto } from "@/lib/api/run-comments";
 
 // Comment timestamps may arrive as Date objects (server-rendered initial
@@ -110,15 +110,16 @@ export function RunCommentItem({
   return (
     <>
       <article className="flex gap-3">
-        <Avatar className="mt-0.5 shrink-0" size="sm">
-          {comment.user.avatarUrl ? (
-            <AvatarImage
-              alt={comment.user.displayName}
-              src={comment.user.avatarUrl}
-            />
-          ) : null}
-          <AvatarFallback>{comment.user.initials}</AvatarFallback>
-        </Avatar>
+        <UserAvatarLink
+          className="mt-0.5 shrink-0"
+          size="sm"
+          user={{
+            userId: comment.user.id,
+            displayName: comment.user.displayName,
+            initials: comment.user.initials,
+            avatarUrl: comment.user.avatarUrl,
+          }}
+        />
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <div className="flex items-start justify-between gap-2">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground text-sm">

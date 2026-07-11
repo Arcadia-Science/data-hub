@@ -179,7 +179,15 @@ export function DashboardStatsCards({
   );
 }
 
-export function MyRunsStatsCards({ stats }: { stats: MyRunsStats }) {
+export function MyRunsStatsCards({
+  stats,
+  // Only the comments card is possessive; the page passes the third-person form
+  // ("Comments on Nadia's runs") when viewing another member.
+  commentsLabel = MY_RUNS_STAT_LABELS[2],
+}: {
+  stats: MyRunsStats;
+  commentsLabel?: string;
+}) {
   const { runsLast24Hours, runsLast7Days, commentsLast7Days, pendingUploads } =
     stats;
 
@@ -208,7 +216,7 @@ export function MyRunsStatsCards({ stats }: { stats: MyRunsStats }) {
         value={formatNumber(runsLast7Days.total)}
       />
       <StatCard
-        label={MY_RUNS_STAT_LABELS[2]}
+        label={commentsLabel}
         subline={
           commentsLast7Days.count > 0
             ? "in the last 7 days"

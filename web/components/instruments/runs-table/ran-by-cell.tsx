@@ -11,7 +11,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { UserAvatar } from "@/components/user-avatar";
+import { UserAvatar, UserAvatarLink } from "@/components/user-avatar";
 import type { RunAttribution } from "@/lib/api/instrument-runs";
 import { toInitials } from "@/lib/avatar-color";
 import { cn } from "@/lib/utils";
@@ -38,12 +38,17 @@ function AttributionAvatars({
   currentUserId,
   showName,
   compact,
+  linkToProfile,
 }: {
   attributions: RunAttribution[];
   currentUserId: string | null;
   showName: boolean;
   compact: boolean;
+  // Links each avatar to the attributed user's runs page. Off in the runs
+  // table (rows already navigate to the run); on in the run detail metadata.
+  linkToProfile: boolean;
 }) {
+  const Avatar = linkToProfile ? UserAvatarLink : UserAvatar;
   const avatarClassName = cn(
     compact
       ? "size-5 ring-1 ring-background [&_[data-slot=avatar-fallback]]:text-[10px]"
@@ -61,7 +66,7 @@ function AttributionAvatars({
     const isSelf = attribution.userId === currentUserId;
     return (
       <span className={rowClassName}>
-        <UserAvatar
+        <Avatar
           className={cn(avatarClassName, isSelf && "ring-primary/30")}
           data-self-attribution={isSelf || undefined}
           size="sm"
@@ -82,7 +87,7 @@ function AttributionAvatars({
             return (
               <Tooltip key={attribution.userId}>
                 <TooltipTrigger asChild>
-                  <UserAvatar
+                  <Avatar
                     className={cn(avatarClassName, isSelf && "ring-primary/30")}
                     data-self-attribution={isSelf || undefined}
                     size="sm"
@@ -109,7 +114,7 @@ function AttributionAvatars({
         return (
           <Tooltip key={attribution.userId}>
             <TooltipTrigger asChild>
-              <UserAvatar
+              <Avatar
                 className={cn(
                   "ring-2 ring-background",
                   isSelf && "ring-primary/30"
@@ -133,12 +138,14 @@ export function RanByCell({
   attributions,
   showName = false,
   compact = false,
+  linkToProfile = false,
 }: {
   instrumentId: string;
   runId: string;
   attributions: RunAttribution[];
   showName?: boolean;
   compact?: boolean;
+  linkToProfile?: boolean;
 }) {
   const { data: session } = useSession();
   const currentUserId = session?.user?.id ?? null;
@@ -251,6 +258,7 @@ export function RanByCell({
         attributions={optimistic}
         compact={compact}
         currentUserId={currentUserId}
+        linkToProfile={linkToProfile}
         showName={showName}
       />
       {isSelfAttributed ? (

@@ -235,6 +235,40 @@ export const getDashboardStats = cache(
   }
 );
 
+export interface UserProfile extends UserAvatarUser {
+  email: string | null;
+}
+
+// Returns null on an unknown id so the page can `notFound()`. `cache()`-keyed
+// on `userId` so the page header and `generateMetadata` share one lookup.
+export const getUserProfile = cache(async function getUserProfile(
+  userId: string
+): Promise<UserProfile | null> {
+  const [row] = await db
+    .select({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      image: users.image,
+    })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  if (!row) {
+    return null;
+  }
+
+  const displayName = row.name ?? row.email ?? "Unknown user";
+  return {
+    userId: row.id,
+    displayName,
+    initials: toInitials(displayName),
+    avatarUrl: row.image,
+    email: row.email,
+  };
+});
+
 export interface MyRunsStats {
   commentsLast7Days: {
     count: number;
