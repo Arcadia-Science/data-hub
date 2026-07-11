@@ -11,7 +11,7 @@ import {
   BreadcrumbList,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import { UserAvatar } from "@/components/user-avatar";
+import { UserAvatarLink } from "@/components/user-avatar";
 import type { RunDetail } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
 
@@ -68,10 +68,11 @@ export function RunHeader({
             {run.deletedByUser && (
               <span className="flex items-center gap-1.5">
                 <span>by</span>
-                <UserAvatar size="sm" user={run.deletedByUser} />
-                <span className="font-medium">
-                  {run.deletedByUser.displayName}
-                </span>
+                <UserAvatarLink size="sm" user={run.deletedByUser}>
+                  <span className="font-medium">
+                    {run.deletedByUser.displayName}
+                  </span>
+                </UserAvatarLink>
               </span>
             )}
           </span>

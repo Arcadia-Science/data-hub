@@ -9,7 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { UserAvatar } from "@/components/user-avatar";
+import { UserAvatarLink } from "@/components/user-avatar";
 import { toInitials } from "@/lib/avatar-color";
 
 export interface MemberRow {
@@ -103,27 +103,25 @@ export function MembersTable({ data, currentUserId }: MembersTableProps) {
             return (
               <TableRow key={member.id}>
                 <TableCell>
-                  <div className="flex items-center gap-3">
-                    <UserAvatar
-                      size="sm"
-                      user={{
-                        userId: member.id,
-                        displayName,
-                        initials: toInitials(displayName),
-                        avatarUrl: member.image,
-                      }}
-                    />
-                    <div className="flex flex-col">
-                      <span className="font-medium">
-                        {displayName}
-                        {isSelf ? (
-                          <span className="ml-1.5 text-muted-foreground text-xs">
-                            (you)
-                          </span>
-                        ) : null}
-                      </span>
-                    </div>
-                  </div>
+                  <UserAvatarLink
+                    className="gap-3"
+                    size="sm"
+                    user={{
+                      userId: member.id,
+                      displayName,
+                      initials: toInitials(displayName),
+                      avatarUrl: member.image,
+                    }}
+                  >
+                    <span className="font-medium">
+                      {displayName}
+                      {isSelf ? (
+                        <span className="ml-1.5 text-muted-foreground text-xs">
+                          (you)
+                        </span>
+                      ) : null}
+                    </span>
+                  </UserAvatarLink>
                 </TableCell>
                 <TableCell className="text-muted-foreground">
                   {member.email ?? "—"}
