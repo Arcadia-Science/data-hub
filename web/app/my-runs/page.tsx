@@ -123,6 +123,7 @@ async function MyRunsSection({
           <TablePendingBoundary>
             <RunsTable
               data={runResult.data}
+              emptyLabel="No runs attributed to you yet."
               hasFilters={hasFilters}
               pendingUploadCount={pendingUploadCount}
               ranByYouCount={ranByYouCount}

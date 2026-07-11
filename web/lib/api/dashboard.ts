@@ -128,8 +128,6 @@ export interface DashboardStats {
   runsThisWeek: {
     total: number;
     bytesGenerated: number;
-    mine: number;
-    unattributed: number;
   };
 }
 
@@ -140,111 +138,102 @@ export interface DashboardStats {
  * row-multiplication problems we'd hit joining instruments × runs × files ×
  * attributions in a single statement.
  *
- * Wrapped in `cache()` so duplicate calls within the same request (e.g. layout
- * + page) share a result. The cache key includes `currentUserId`, so different
- * users on parallel requests don't collide.
+ * Fleet-wide and viewer-independent, so it's `cache()`-deduped without a key —
+ * duplicate calls within a request (e.g. layout + page) share one result.
  */
-export const getDashboardStats = cache(async function getDashboardStats(
-  currentUserId: string | null
-): Promise<DashboardStats> {
-  const [
-    [runsLast24HoursRow],
-    [bytesGeneratedRow],
-    [pendingRow],
-    [runsThisWeekRow],
-  ] = await Promise.all([
-    db
-      .select({
-        total: sql<number>`cast(count(*) as int)`,
-      })
-      .from(instrumentRuns)
-      .innerJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
-      .where(
-        and(
-          eq(instruments.status, "active"),
-          isNull(instrumentRuns.deletedAt),
-          sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '24 hours'`
-        )
-      ),
-    // Span the last 24 hours + the past 7 days in a single pass; the 24-hour
-    // window is a subset of the weekly window, so FILTER clauses give us both
-    // with one index scan. Bytes are attributed to the file's owning run so
-    // the time window matches the corresponding "Runs in the last X" card —
-    // this avoids the null-`processedAt` blind spot for not-yet-processed
-    // files (which still represent data the instrument generated). Windows
-    // are anchored to the run's actual acquisition time when known so
-    // backfilled historical data doesn't pollute the "last 24h"/"this week"
-    // counts.
-    db
-      .select({
-        bytesLast24Hours: sql<string>`coalesce(sum(${files.sizeBytes}) filter (where coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '24 hours'), 0)`,
-        bytesWeek: sql<string>`coalesce(sum(${files.sizeBytes}), 0)`,
-      })
-      .from(files)
-      .innerJoin(instrumentRuns, eq(files.instrumentRunId, instrumentRuns.id))
-      .innerJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
-      .where(
-        and(
-          eq(instruments.status, "active"),
-          isNull(files.deletedAt),
-          isNull(instrumentRuns.deletedAt),
-          sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '7 days'`
-        )
-      ),
-    db
-      .select({
-        count: sql<number>`cast(count(*) as int)`,
-        totalBytes: sql<number>`cast(coalesce(sum(${files.sizeBytes}), 0) as bigint)`,
-      })
-      .from(files)
-      .innerJoin(instrumentRuns, eq(files.instrumentRunId, instrumentRuns.id))
-      .innerJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
-      .where(
-        and(
-          eq(instruments.status, "active"),
-          isNull(files.deletedAt),
-          sql`${files.status} in ('detected', 'upload_requested')`
-        )
-      ),
-    // "Mine" requires a user; the unattributed count is fleet-wide and
-    // independent of the viewer.
-    db
-      .select({
-        total: sql<number>`cast(count(*) as int)`,
-        mine: currentUserId
-          ? sql<number>`cast(count(*) filter (where exists (select 1 from ${runAttributions} where ${runAttributions.runId} = ${instrumentRuns.id} and ${runAttributions.userId} = ${currentUserId})) as int)`
-          : sql<number>`cast(0 as int)`,
-        unattributed: sql<number>`cast(count(*) filter (where not exists (select 1 from ${runAttributions} where ${runAttributions.runId} = ${instrumentRuns.id})) as int)`,
-      })
-      .from(instrumentRuns)
-      .innerJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
-      .where(
-        and(
-          eq(instruments.status, "active"),
-          isNull(instrumentRuns.deletedAt),
-          sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '7 days'`
-        )
-      ),
-  ]);
+export const getDashboardStats = cache(
+  async function getDashboardStats(): Promise<DashboardStats> {
+    const [
+      [runsLast24HoursRow],
+      [bytesGeneratedRow],
+      [pendingRow],
+      [runsThisWeekRow],
+    ] = await Promise.all([
+      db
+        .select({
+          total: sql<number>`cast(count(*) as int)`,
+        })
+        .from(instrumentRuns)
+        .innerJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
+        .where(
+          and(
+            eq(instruments.status, "active"),
+            isNull(instrumentRuns.deletedAt),
+            sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '24 hours'`
+          )
+        ),
+      // Span the last 24 hours + the past 7 days in a single pass; the 24-hour
+      // window is a subset of the weekly window, so FILTER clauses give us both
+      // with one index scan. Bytes are attributed to the file's owning run so
+      // the time window matches the corresponding "Runs in the last X" card —
+      // this avoids the null-`processedAt` blind spot for not-yet-processed
+      // files (which still represent data the instrument generated). Windows
+      // are anchored to the run's actual acquisition time when known so
+      // backfilled historical data doesn't pollute the "last 24h"/"this week"
+      // counts.
+      db
+        .select({
+          bytesLast24Hours: sql<string>`coalesce(sum(${files.sizeBytes}) filter (where coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '24 hours'), 0)`,
+          bytesWeek: sql<string>`coalesce(sum(${files.sizeBytes}), 0)`,
+        })
+        .from(files)
+        .innerJoin(instrumentRuns, eq(files.instrumentRunId, instrumentRuns.id))
+        .innerJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
+        .where(
+          and(
+            eq(instruments.status, "active"),
+            isNull(files.deletedAt),
+            isNull(instrumentRuns.deletedAt),
+            sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '7 days'`
+          )
+        ),
+      db
+        .select({
+          count: sql<number>`cast(count(*) as int)`,
+          totalBytes: sql<number>`cast(coalesce(sum(${files.sizeBytes}), 0) as bigint)`,
+        })
+        .from(files)
+        .innerJoin(instrumentRuns, eq(files.instrumentRunId, instrumentRuns.id))
+        .innerJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
+        .where(
+          and(
+            eq(instruments.status, "active"),
+            isNull(files.deletedAt),
+            sql`${files.status} in ('detected', 'upload_requested')`
+          )
+        ),
+      db
+        .select({
+          total: sql<number>`cast(count(*) as int)`,
+        })
+        .from(instrumentRuns)
+        .innerJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
+        .where(
+          and(
+            eq(instruments.status, "active"),
+            isNull(instrumentRuns.deletedAt),
+            sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '7 days'`
+          )
+        ),
+    ]);
 
-  return {
-    runsLast24Hours: {
-      total: runsLast24HoursRow?.total ?? 0,
-      // bigint sums come back as strings from pg; coerce explicitly.
-      bytesGenerated: Number(bytesGeneratedRow?.bytesLast24Hours ?? 0),
-    },
-    pendingUploads: {
-      count: pendingRow?.count ?? 0,
-      totalBytes: Number(pendingRow?.totalBytes ?? 0),
-    },
-    runsThisWeek: {
-      total: runsThisWeekRow?.total ?? 0,
-      bytesGenerated: Number(bytesGeneratedRow?.bytesWeek ?? 0),
-      mine: runsThisWeekRow?.mine ?? 0,
-      unattributed: runsThisWeekRow?.unattributed ?? 0,
-    },
-  };
-});
+    return {
+      runsLast24Hours: {
+        total: runsLast24HoursRow?.total ?? 0,
+        // bigint sums come back as strings from pg; coerce explicitly.
+        bytesGenerated: Number(bytesGeneratedRow?.bytesLast24Hours ?? 0),
+      },
+      pendingUploads: {
+        count: pendingRow?.count ?? 0,
+        totalBytes: Number(pendingRow?.totalBytes ?? 0),
+      },
+      runsThisWeek: {
+        total: runsThisWeekRow?.total ?? 0,
+        bytesGenerated: Number(bytesGeneratedRow?.bytesWeek ?? 0),
+      },
+    };
+  }
+);
 
 export interface MyRunsStats {
   commentsLast7Days: {

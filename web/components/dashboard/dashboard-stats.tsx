@@ -19,13 +19,13 @@ const DASHBOARD_STAT_LABELS = [
 const MY_RUNS_STAT_LABELS = [
   "Runs in the last 24 hours",
   "Runs in the last 7 days",
-  "Comments in the last 7 days",
+  "Comments on your runs",
   "Pending uploads",
 ] as const;
 
 const numberFormatter = new Intl.NumberFormat("en-US");
 
-export function formatNumber(n: number): string {
+function formatNumber(n: number): string {
   return numberFormatter.format(n);
 }
 
@@ -36,7 +36,7 @@ function firstName(displayName: string): string {
   return displayName.trim().split(/\s+/)[0] || displayName;
 }
 
-export function StatCard({
+function StatCard({
   label,
   value,
   subline,
@@ -65,7 +65,7 @@ export function StatCard({
   );
 }
 
-export function DataGeneratedSubline({
+function DataGeneratedSubline({
   bytes,
   emptyLabel,
 }: {
@@ -211,8 +211,8 @@ export function MyRunsStatsCards({ stats }: { stats: MyRunsStats }) {
         label={MY_RUNS_STAT_LABELS[2]}
         subline={
           commentsLast7Days.count > 0
-            ? "on your runs"
-            : "No comments in the last 7 days"
+            ? "in the last 7 days"
+            : "None in the last 7 days"
         }
         value={formatNumber(commentsLast7Days.count)}
       />

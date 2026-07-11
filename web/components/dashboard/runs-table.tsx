@@ -38,6 +38,7 @@ export function RunsTable({
   unattributedCount,
   ranByYouCount,
   ranByOptions,
+  emptyLabel = "No instrument runs yet.",
 }: {
   data: RunListRow[];
   hasFilters: boolean;
@@ -49,15 +50,17 @@ export function RunsTable({
   // `dashboardSearchParams.ran_by`. Omitted on the "My runs" page, where every
   // row is the viewer, so a plain header is rendered instead.
   ranByOptions?: RanByOption[];
+  // Copy shown when there are no rows and no active filters. Overridden on the
+  // "My runs" page, where "No instrument runs yet." would misdescribe the
+  // viewer-scoped list.
+  emptyLabel?: string;
 }) {
   if (data.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-background py-16 dark:bg-muted">
         <SearchX className="size-8 text-muted-foreground" />
         <p className="text-muted-foreground text-sm">
-          {hasFilters
-            ? "No runs match your filters."
-            : "No instrument runs yet."}
+          {hasFilters ? "No runs match your filters." : emptyLabel}
         </p>
       </div>
     );

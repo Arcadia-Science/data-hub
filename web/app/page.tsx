@@ -80,7 +80,7 @@ export default async function DashboardPage({
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 p-6 2xl:w-7xl">
       <Suspense fallback={<StatCardsSkeleton />}>
-        <DashboardStatsSection currentUserId={currentUserId} />
+        <DashboardStatsSection />
       </Suspense>
 
       <section className="flex flex-col gap-3">
@@ -109,14 +109,10 @@ export default async function DashboardPage({
   );
 }
 
-async function DashboardStatsSection({
-  currentUserId,
-}: {
-  currentUserId: string | null;
-}) {
+async function DashboardStatsSection() {
   // The fleet stats and the leaderboard card are independent aggregates.
   const [stats, topAttributor] = await Promise.all([
-    getDashboardStats(currentUserId),
+    getDashboardStats(),
     getTopAttributorThisWeek(),
   ]);
   return <DashboardStatsCards stats={stats} topAttributor={topAttributor} />;
