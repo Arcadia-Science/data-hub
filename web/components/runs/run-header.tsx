@@ -68,10 +68,11 @@ export function RunHeader({
             {run.deletedByUser && (
               <span className="flex items-center gap-1.5">
                 <span>by</span>
-                <UserAvatarLink size="sm" user={run.deletedByUser} />
-                <span className="font-medium">
-                  {run.deletedByUser.displayName}
-                </span>
+                <UserAvatarLink size="sm" user={run.deletedByUser}>
+                  <span className="font-medium">
+                    {run.deletedByUser.displayName}
+                  </span>
+                </UserAvatarLink>
               </span>
             )}
           </span>

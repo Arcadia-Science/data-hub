@@ -1,6 +1,7 @@
 "use client";
 
 import { UserPlus, X } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { type MouseEvent, useOptimistic, useTransition } from "react";
@@ -64,9 +65,21 @@ function AttributionAvatars({
   if (showName && attributions.length === 1) {
     const attribution = attributions[0];
     const isSelf = attribution.userId === currentUserId;
+    if (linkToProfile) {
+      return (
+        <UserAvatarLink
+          className={cn(avatarClassName, isSelf && "ring-primary/30")}
+          data-self-attribution={isSelf || undefined}
+          size="sm"
+          user={attribution}
+        >
+          <span className={nameClassName}>{attribution.displayName}</span>
+        </UserAvatarLink>
+      );
+    }
     return (
       <span className={rowClassName}>
-        <Avatar
+        <UserAvatar
           className={cn(avatarClassName, isSelf && "ring-primary/30")}
           data-self-attribution={isSelf || undefined}
           size="sm"
@@ -79,6 +92,7 @@ function AttributionAvatars({
 
   if (showName && attributions.length > 1) {
     const hiddenCount = attributions.length - 1;
+    const first = attributions[0];
     return (
       <span className={rowClassName}>
         <span className={cn("flex", compact ? "-space-x-1" : "-space-x-1.5")}>
@@ -99,10 +113,20 @@ function AttributionAvatars({
             );
           })}
         </span>
-        <span className={nameClassName}>
-          {attributions[0].displayName}
-          <span className="text-muted-foreground"> +{hiddenCount}</span>
-        </span>
+        {linkToProfile ? (
+          <Link
+            className={cn(nameClassName, "hover:underline")}
+            href={`/users/${first.userId}`}
+          >
+            {first.displayName}
+            <span className="text-muted-foreground"> +{hiddenCount}</span>
+          </Link>
+        ) : (
+          <span className={nameClassName}>
+            {first.displayName}
+            <span className="text-muted-foreground"> +{hiddenCount}</span>
+          </span>
+        )}
       </span>
     );
   }
