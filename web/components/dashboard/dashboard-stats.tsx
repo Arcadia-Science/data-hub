@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { UserAvatar } from "@/components/user-avatar";
+import { UserAvatarLink } from "@/components/user-avatar";
 import type {
   DashboardStats,
   MyRunsStats,
@@ -161,12 +161,15 @@ export function DashboardStatsCards({
         }
         value={
           topAttributor ? (
-            <span className="flex items-center gap-2">
-              <UserAvatar size="sm" user={topAttributor.user} />
+            <UserAvatarLink
+              className="gap-2"
+              size="sm"
+              user={topAttributor.user}
+            >
               <span className="truncate">
                 {firstName(topAttributor.user.displayName)}
               </span>
-            </span>
+            </UserAvatarLink>
           ) : (
             "—"
           )
