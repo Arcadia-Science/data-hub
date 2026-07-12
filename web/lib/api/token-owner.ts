@@ -24,7 +24,9 @@ export async function resolveTokenOwnerUserId(
   }
 
   const userId = requestedUserId.trim();
-  if (!(await userExists(userId))) {
+  // The caller is authenticated, so it exists — skip the DB round-trip for
+  // self-mints (the UI always sends `user_id`, even for the minting admin).
+  if (userId !== callerUserId && !(await userExists(userId))) {
     return { ok: false, error: "user_id does not match a known user" };
   }
 

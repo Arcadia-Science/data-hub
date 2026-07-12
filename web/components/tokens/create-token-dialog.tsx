@@ -279,11 +279,13 @@ function CreateTokenForm({
     });
   }, []);
 
+  // A failed roster fetch falls back to a self-mint rather than blocking;
+  // only an in-flight load (no error yet) gates submit.
   const canSubmit =
     Boolean(name.trim()) &&
     selected.size > 0 &&
     Boolean(ownerId) &&
-    users !== null &&
+    (users !== null || usersError) &&
     !isPending;
 
   const handleCreate = () => {
@@ -336,8 +338,9 @@ function CreateTokenForm({
         <div className="grid gap-2">
           <Label htmlFor="token-owner">User</Label>
           {usersError ? (
-            <p className="text-destructive text-sm">
-              Failed to load workspace members. Close and try again.
+            <p className="text-muted-foreground text-sm">
+              Couldn't load workspace members. This token will be created for
+              you — reopen the dialog to choose a different owner.
             </p>
           ) : (
             <Select

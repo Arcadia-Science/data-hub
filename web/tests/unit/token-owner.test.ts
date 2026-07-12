@@ -34,6 +34,17 @@ describe("resolveTokenOwnerUserId", () => {
     expect(userExists).toHaveBeenCalledWith(bobId);
   });
 
+  it("skips the existence check when minting for the caller", async () => {
+    const userExists = vi.fn();
+    const result = await resolveTokenOwnerUserId(
+      callerId,
+      callerId,
+      userExists
+    );
+    expect(result).toEqual({ ok: true, userId: callerId });
+    expect(userExists).not.toHaveBeenCalled();
+  });
+
   it("trims whitespace around user_id", async () => {
     const bobId = "bob-user-id";
     const userExists = vi.fn(async (id: string) => id === bobId);
