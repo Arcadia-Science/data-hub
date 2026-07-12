@@ -60,8 +60,7 @@ async function prepareUploadTarget(
     };
   }
 
-  // Uploads are performed by the watcher agent. Reject up front when offline
-  // so files are not left stuck in `upload_requested`.
+  // Reject offline early so rows aren't left stuck in `upload_requested`.
   if (!(await instrumentHasOnlineWatcher(run.instrumentId))) {
     return {
       ok: false,
@@ -75,7 +74,7 @@ async function prepareUploadTarget(
   return { ok: true, run };
 }
 
-// Queue specific detected files for watcher upload. Shared by REST and MCP.
+// Shared by REST `request-upload` and MCP `request_run_upload`.
 export async function requestRunUploads(input: {
   instrumentId: string;
   runId: string;
@@ -191,7 +190,7 @@ export async function requestRunUploads(input: {
   };
 }
 
-// Queue every `detected` file on a run. Shared by REST and MCP.
+// Shared by REST `request-upload-all` and MCP `request_run_upload_all`.
 export async function requestAllRunUploads(
   instrumentId: string,
   runId: string

@@ -18,7 +18,7 @@ export type RunLifecycleResult =
       message: string;
     };
 
-// Soft-delete a run by natural key. Shared by REST DELETE and MCP `delete_run`.
+// Shared by REST DELETE and MCP `delete_run` so soft-delete semantics stay identical.
 export async function softDeleteRun(input: {
   instrumentId: string;
   runId: string;
@@ -58,7 +58,7 @@ export async function softDeleteRun(input: {
   };
 }
 
-// Clear soft-delete markers. Shared by REST restore and MCP `restore_run`.
+// Shared by REST restore and MCP `restore_run`.
 export async function restoreRun(
   instrumentId: string,
   runId: string

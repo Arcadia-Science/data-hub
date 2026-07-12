@@ -170,9 +170,7 @@ export type ReprocessRunResult =
       message: string;
     };
 
-// Run-level batch reprocess used by REST `…/reprocess` and MCP `reprocess_run`.
-// Eligible files are `completed` or `failed` and not soft-deleted; each goes
-// through `reprocessFile` so state-machine checks stay identical.
+// Batches through `reprocessFile` so REST and MCP share the same per-file checks.
 export async function reprocessRun(
   instrumentId: string,
   runId: string

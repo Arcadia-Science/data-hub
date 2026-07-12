@@ -239,8 +239,7 @@ export interface UserProfile extends UserAvatarUser {
   email: string | null;
 }
 
-// Raw user row for MCP `get_me` / `datahub://me` — identity for the PAT owner,
-// including admin flag. Distinct from `UserProfile` which is avatar-oriented.
+// For MCP `get_me` / `datahub://me`. Distinct from avatar-oriented `UserProfile`.
 export interface AuthenticatedUser {
   email: string | null;
   id: string;

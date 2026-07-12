@@ -849,8 +849,6 @@ export function registerTools(server: McpServer) {
     }
   );
 
-  // ---- Comments ------------------------------------------------------------
-
   server.registerTool(
     "list_run_comments",
     {
@@ -931,8 +929,8 @@ export function registerTools(server: McpServer) {
         ? `https://${process.env.VERCEL_URL}`
         : undefined;
 
-      // Fire-and-forget: in-app notifications still land when origin is absent;
-      // Slack DMs that need deep links are skipped without it.
+      // In-app notifications still fire when `origin` is absent; Slack DMs that
+      // need deep links are skipped (see `notifyComment`).
       void notifyComment({
         runInternalId: run.id,
         commentId: comment.id,
@@ -1022,8 +1020,6 @@ export function registerTools(server: McpServer) {
 
       const existing = await getCommentForAuthorCheck(commentId);
       if (!existing) {
-        // Already deleted or never existed — treat as success for idempotency
-        // when it was ours; if unknown, still return not found.
         return errorResult(`Comment '${commentId}' not found.`);
       }
       if (existing.userId !== userId) {
@@ -1034,8 +1030,6 @@ export function registerTools(server: McpServer) {
       return textResult({ id: commentId, deleted: true });
     }
   );
-
-  // ---- Run lifecycle -------------------------------------------------------
 
   server.registerTool(
     "reprocess_run",
@@ -1130,8 +1124,6 @@ export function registerTools(server: McpServer) {
       });
     }
   );
-
-  // ---- Uploads / dismiss ---------------------------------------------------
 
   server.registerTool(
     "request_run_upload",

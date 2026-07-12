@@ -11,8 +11,7 @@ import { toInitials } from "@/lib/utils";
 // 403 vs 404 distinction). Reads are open to any authenticated user.
 // ---------------------------------------------------------------------------
 
-// Cap on the markdown source we accept. Generous for prose, well below any
-// jsonb / text limit. Bumping is a shared change for REST and MCP.
+// Cap shared by REST and MCP. Generous for prose; well below jsonb/text limits.
 export const COMMENT_MAX_BODY_LENGTH = 10_000;
 
 export function validateCommentBody(

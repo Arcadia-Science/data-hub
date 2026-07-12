@@ -8,8 +8,7 @@ import {
 } from "@/lib/api/instruments";
 import type { InstrumentType } from "@/lib/db/schema";
 
-// Instrument types that expose a structured filter-options resource. Must stay
-// aligned with filters accepted by `search_runs` / `buildRunListQuery`.
+// Instrument types with structured filter-options. Must match `search_runs` args.
 const FILTERABLE_INSTRUMENT_TYPES = new Set<InstrumentType>([
   "plate_reader",
   "gel_doc",

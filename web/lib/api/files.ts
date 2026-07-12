@@ -73,8 +73,8 @@ export type DismissFileResult =
       message: string;
     };
 
-// Soft-delete a pre-upload file (`detected` / `upload_requested`). Shared by
-// REST DELETE /files/:id and MCP `dismiss_file`.
+// Pre-upload dismiss only — once a file is on S3, deletion stays at the run boundary.
+// Shared by REST DELETE `/files/:id` and MCP `dismiss_file`.
 export async function dismissFile(fileId: number): Promise<DismissFileResult> {
   const [file] = await db
     .select()
