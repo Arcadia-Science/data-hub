@@ -226,6 +226,12 @@ vi.mock("@/lib/api/files", () => ({
     }
     return { ok: false, reason: "not_found" };
   }),
+  dismissFile: vi.fn().mockResolvedValue({
+    ok: true,
+    id: 1,
+    filename: "a.txt",
+    deletedAt: new Date(),
+  }),
 }));
 
 // `prepareRunArchive` owns the cache-hit / build-kickoff branch on the
@@ -257,6 +263,69 @@ vi.mock("@/lib/api/file-reprocessing", () => ({
       message: `File '${id}' not found`,
     };
   }),
+  reprocessRun: vi.fn().mockResolvedValue({
+    ok: true,
+    instrumentId: "test-plate-reader",
+    runId: "run-1",
+    filesQueued: 1,
+    filesFailed: 0,
+  }),
+}));
+
+vi.mock("@/lib/api/run-lifecycle", () => ({
+  softDeleteRun: vi.fn().mockResolvedValue({
+    ok: true,
+    instrumentId: "test-plate-reader",
+    runId: "run-1",
+    deletedAt: new Date("2025-01-01"),
+    deletedBy: "user-from-auth",
+  }),
+  restoreRun: vi.fn().mockResolvedValue({
+    ok: true,
+    instrumentId: "test-plate-reader",
+    runId: "run-1",
+    deletedAt: null,
+  }),
+}));
+
+vi.mock("@/lib/api/run-uploads", () => ({
+  requestRunUploads: vi.fn().mockResolvedValue({
+    ok: true,
+    instrumentId: "test-plate-reader",
+    runId: "run-1",
+    filesQueued: 1,
+    files: [{ id: 1, filename: "a.txt", uploadRequestedAt: new Date() }],
+  }),
+  requestAllRunUploads: vi.fn().mockResolvedValue({
+    ok: true,
+    instrumentId: "test-plate-reader",
+    runId: "run-1",
+    filesQueued: 2,
+  }),
+}));
+
+vi.mock("@/lib/api/run-comments", () => ({
+  listCommentsForRun: vi.fn().mockResolvedValue([]),
+  createComment: vi.fn().mockResolvedValue({
+    id: "c-1",
+    body: "hi",
+    created_at: new Date(),
+    edited_at: null,
+    user: { id: "u-1", displayName: "Alice", initials: "A", avatarUrl: null },
+  }),
+  getCommentForAuthorCheck: vi.fn().mockResolvedValue(null),
+  updateComment: vi.fn().mockResolvedValue(null),
+  softDeleteComment: vi.fn().mockResolvedValue(false),
+  validateCommentBody: vi.fn().mockImplementation((body: unknown) => {
+    if (typeof body !== "string" || body.trim().length === 0) {
+      return { ok: false, message: "body must not be empty" };
+    }
+    return { ok: true, body };
+  }),
+}));
+
+vi.mock("@/lib/api/notifications", () => ({
+  notifyComment: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/s3", () => ({
@@ -329,9 +398,32 @@ describe("MCP Protocol (in-memory)", () => {
     "claim_run",
     "unclaim_run",
     "list_run_attributors",
+    "list_run_comments",
+    "add_run_comment",
+    "edit_run_comment",
+    "delete_run_comment",
+    "reprocess_run",
+    "delete_run",
+    "restore_run",
+    "request_run_upload",
+    "request_run_upload_all",
+    "dismiss_file",
   ] as const;
 
-  const WRITE_TOOLS = new Set(["reprocess_file", "claim_run", "unclaim_run"]);
+  const WRITE_TOOLS = new Set([
+    "reprocess_file",
+    "claim_run",
+    "unclaim_run",
+    "add_run_comment",
+    "edit_run_comment",
+    "delete_run_comment",
+    "reprocess_run",
+    "delete_run",
+    "restore_run",
+    "request_run_upload",
+    "request_run_upload_all",
+    "dismiss_file",
+  ]);
 
   it("registers all expected tools", async () => {
     const { tools } = await client.listTools();

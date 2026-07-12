@@ -12,6 +12,7 @@ import {
   getCommentForAuthorCheck,
   softDeleteComment,
   updateComment,
+  validateCommentBody,
 } from "@/lib/api/run-comments";
 
 interface RouteContext {
@@ -21,8 +22,6 @@ interface RouteContext {
     commentId: string;
   }>;
 }
-
-const MAX_BODY_LENGTH = 10_000;
 
 type PreflightResult =
   | { kind: "ok"; userId: string; commentId: string }
@@ -115,22 +114,15 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     return apiError(400, VALIDATION_ERROR, "body must be a string");
   }
 
-  const trimmed = payload.body.trim();
-  if (trimmed.length === 0) {
-    return apiError(400, VALIDATION_ERROR, "body must not be empty");
-  }
-  if (payload.body.length > MAX_BODY_LENGTH) {
-    return apiError(
-      400,
-      VALIDATION_ERROR,
-      `body must be at most ${MAX_BODY_LENGTH} characters`
-    );
+  const validated = validateCommentBody(payload.body);
+  if (!validated.ok) {
+    return apiError(400, VALIDATION_ERROR, validated.message);
   }
 
   const updated = await updateComment({
     commentId: pre.commentId,
     userId: pre.userId,
-    body: payload.body,
+    body: validated.body,
   });
 
   // Race condition: comment soft-deleted between the preflight lookup and

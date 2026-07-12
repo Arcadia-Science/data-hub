@@ -164,7 +164,11 @@ describe("MCP Server (HTTP)", () => {
     expect(toolNames).toContain("list_run_attributors");
     expect(toolNames).toContain("global_search");
     expect(toolNames).toContain("get_me");
-    expect(toolNames).toHaveLength(17);
+    expect(toolNames).toContain("list_run_comments");
+    expect(toolNames).toContain("reprocess_run");
+    expect(toolNames).toContain("delete_run");
+    expect(toolNames).toContain("dismiss_file");
+    expect(toolNames).toHaveLength(27);
   });
 
   // ---- Tool execution (end-to-end) -----------------------------------------

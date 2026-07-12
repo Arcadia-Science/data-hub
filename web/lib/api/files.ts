@@ -64,6 +64,66 @@ export async function lookupFileForDownload(
   };
 }
 
+export type DismissFileResult =
+  | { ok: true; id: number; filename: string; deletedAt: Date }
+  | {
+      ok: false;
+      status: number;
+      code: "NOT_FOUND" | "CONFLICT";
+      message: string;
+    };
+
+// Soft-delete a pre-upload file (`detected` / `upload_requested`). Shared by
+// REST DELETE /files/:id and MCP `dismiss_file`.
+export async function dismissFile(fileId: number): Promise<DismissFileResult> {
+  const [file] = await db
+    .select()
+    .from(files)
+    .where(eq(files.id, fileId))
+    .limit(1);
+
+  if (!file) {
+    return {
+      ok: false,
+      status: 404,
+      code: "NOT_FOUND",
+      message: `File '${fileId}' not found`,
+    };
+  }
+
+  if (file.deletedAt) {
+    return {
+      ok: false,
+      status: 409,
+      code: "CONFLICT",
+      message: "File is already deleted",
+    };
+  }
+
+  if (file.status !== "detected" && file.status !== "upload_requested") {
+    return {
+      ok: false,
+      status: 409,
+      code: "CONFLICT",
+      message: `Cannot dismiss a file in '${file.status}' status — only 'detected' or 'upload_requested' files can be dismissed`,
+    };
+  }
+
+  const now = new Date();
+  await db.update(files).set({ deletedAt: now }).where(eq(files.id, fileId));
+  await db
+    .update(instrumentRuns)
+    .set({ updatedAt: now })
+    .where(eq(instrumentRuns.id, file.instrumentRunId));
+
+  return {
+    ok: true,
+    id: file.id,
+    filename: file.filename,
+    deletedAt: now,
+  };
+}
+
 export interface DownloadableRunFilesSummary {
   count: number;
   // Sum of `size_bytes` across all matching files, or null when at least one

@@ -3,8 +3,12 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getInstrumentSummaries, getUserById } from "@/lib/api/dashboard";
-import { reprocessFile } from "@/lib/api/file-reprocessing";
-import { getActiveFileById, lookupFileForDownload } from "@/lib/api/files";
+import { reprocessFile, reprocessRun } from "@/lib/api/file-reprocessing";
+import {
+  dismissFile,
+  getActiveFileById,
+  lookupFileForDownload,
+} from "@/lib/api/files";
 import {
   buildRunListQuery,
   getAttributionsByRunIds,
@@ -17,12 +21,23 @@ import {
   getInstrumentById,
   getInstrumentListWithCounts,
 } from "@/lib/api/instruments";
+import { notifyComment } from "@/lib/api/notifications";
 import { prepareRunArchive } from "@/lib/api/run-archive";
-import { globalSearch } from "@/lib/api/search";
+import {
+  createComment,
+  getCommentForAuthorCheck,
+  listCommentsForRun,
+  softDeleteComment,
+  updateComment,
+  validateCommentBody,
+} from "@/lib/api/run-comments";
+import { restoreRun, softDeleteRun } from "@/lib/api/run-lifecycle";
+import { requestAllRunUploads, requestRunUploads } from "@/lib/api/run-uploads";
 import { hasScope, type Scope } from "@/lib/api/scopes";
+import { globalSearch } from "@/lib/api/search";
 import { getWatcherHeartbeats, getWatcherList } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
-import { runAttributions } from "@/lib/db/schema";
+import { runAttributions, users } from "@/lib/db/schema";
 import { RUN_STATUS_VALUES } from "@/lib/runs/run-status";
 import {
   getPresignedDownloadUrl,
@@ -831,6 +846,386 @@ export function registerTools(server: McpServer) {
       }
       const attributors = await getRanByFilterOptions(instrumentId);
       return textResult(attributors);
+    }
+  );
+
+  // ---- Comments ------------------------------------------------------------
+
+  server.registerTool(
+    "list_run_comments",
+    {
+      title: "List Run Comments",
+      description:
+        "List comments on a run (oldest first), including author display info.",
+      inputSchema: {
+        instrumentId: z.string().describe("Instrument identifier"),
+        runId: z.string().describe("Run identifier within the instrument"),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ instrumentId, runId }, { authInfo }) => {
+      const scopeError = requireMcpScope(authInfo, "runs:read");
+      if (scopeError) {
+        return scopeError;
+      }
+      const run = await lookupRunByNaturalKey(instrumentId, runId);
+      if (!run) {
+        return errorResult(
+          `Run '${runId}' not found for instrument '${instrumentId}'.`
+        );
+      }
+      const comments = await listCommentsForRun(run.id);
+      return textResult({ comments });
+    }
+  );
+
+  server.registerTool(
+    "add_run_comment",
+    {
+      title: "Add Run Comment",
+      description:
+        "Add a comment on a run as the authenticated user. Author is taken from the token — you cannot comment as another user.",
+      inputSchema: {
+        instrumentId: z.string().describe("Instrument identifier"),
+        runId: z.string().describe("Run identifier within the instrument"),
+        body: z.string().describe("Markdown comment body"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async ({ instrumentId, runId, body }, { authInfo }) => {
+      const scopeError = requireMcpScope(authInfo, "runs:comment");
+      if (scopeError) {
+        return scopeError;
+      }
+      const userId = authInfo?.extra?.userId as string | undefined;
+      if (!userId) {
+        return errorResult("Authenticated user not available on this session.");
+      }
+      const validated = validateCommentBody(body);
+      if (!validated.ok) {
+        return errorResult(validated.message);
+      }
+      const run = await lookupRunByNaturalKey(instrumentId, runId);
+      if (!run) {
+        return errorResult(
+          `Run '${runId}' not found for instrument '${instrumentId}'.`
+        );
+      }
+      if (run.deletedAt) {
+        return errorResult("Cannot comment on a soft-deleted run.");
+      }
+
+      const comment = await createComment({
+        runInternalId: run.id,
+        userId,
+        body: validated.body,
+      });
+
+      const [author] = await db
+        .select({ name: users.name, email: users.email })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+      const authorDisplayName = author?.name ?? author?.email ?? "Someone";
+      const origin = process.env.VERCEL_URL
+        ? `https://${process.env.VERCEL_URL}`
+        : undefined;
+
+      // Fire-and-forget: in-app notifications still land when origin is absent;
+      // Slack DMs that need deep links are skipped without it.
+      void notifyComment({
+        runInternalId: run.id,
+        commentId: comment.id,
+        authorUserId: userId,
+        authorDisplayName,
+        instrumentId,
+        instrumentDisplayName: run.instrumentDisplayName,
+        runDisplayId: runId,
+        commentBody: validated.body,
+        origin,
+      });
+
+      return textResult(comment);
+    }
+  );
+
+  server.registerTool(
+    "edit_run_comment",
+    {
+      title: "Edit Run Comment",
+      description:
+        "Edit one of your own comments. Returns an error if the comment is missing or authored by someone else.",
+      inputSchema: {
+        commentId: z.string().describe("Comment UUID"),
+        body: z.string().describe("Updated markdown body"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async ({ commentId, body }, { authInfo }) => {
+      const scopeError = requireMcpScope(authInfo, "runs:comment");
+      if (scopeError) {
+        return scopeError;
+      }
+      const userId = authInfo?.extra?.userId as string | undefined;
+      if (!userId) {
+        return errorResult("Authenticated user not available on this session.");
+      }
+      const validated = validateCommentBody(body);
+      if (!validated.ok) {
+        return errorResult(validated.message);
+      }
+
+      const existing = await getCommentForAuthorCheck(commentId);
+      if (!existing) {
+        return errorResult(`Comment '${commentId}' not found.`);
+      }
+      if (existing.userId !== userId) {
+        return errorResult("You can only edit your own comments.");
+      }
+
+      const updated = await updateComment({
+        commentId,
+        userId,
+        body: validated.body,
+      });
+      if (!updated) {
+        return errorResult(`Comment '${commentId}' not found.`);
+      }
+      return textResult(updated);
+    }
+  );
+
+  server.registerTool(
+    "delete_run_comment",
+    {
+      title: "Delete Run Comment",
+      description:
+        "Soft-delete one of your own comments. Idempotent if already deleted.",
+      inputSchema: {
+        commentId: z.string().describe("Comment UUID"),
+      },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+      },
+    },
+    async ({ commentId }, { authInfo }) => {
+      const scopeError = requireMcpScope(authInfo, "runs:comment");
+      if (scopeError) {
+        return scopeError;
+      }
+      const userId = authInfo?.extra?.userId as string | undefined;
+      if (!userId) {
+        return errorResult("Authenticated user not available on this session.");
+      }
+
+      const existing = await getCommentForAuthorCheck(commentId);
+      if (!existing) {
+        // Already deleted or never existed — treat as success for idempotency
+        // when it was ours; if unknown, still return not found.
+        return errorResult(`Comment '${commentId}' not found.`);
+      }
+      if (existing.userId !== userId) {
+        return errorResult("You can only delete your own comments.");
+      }
+
+      await softDeleteComment({ commentId, userId });
+      return textResult({ id: commentId, deleted: true });
+    }
+  );
+
+  // ---- Run lifecycle -------------------------------------------------------
+
+  server.registerTool(
+    "reprocess_run",
+    {
+      title: "Reprocess Run",
+      description:
+        "Re-run Lambda processing for every completed or failed file on a run. Prefer this over looping reprocess_file for bulk retries after a parser fix.",
+      inputSchema: {
+        instrumentId: z.string().describe("Instrument identifier"),
+        runId: z.string().describe("Run identifier within the instrument"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true },
+    },
+    async ({ instrumentId, runId }, { authInfo }) => {
+      const scopeError = requireMcpScope(authInfo, "runs:reprocess");
+      if (scopeError) {
+        return scopeError;
+      }
+      const result = await reprocessRun(instrumentId, runId);
+      if (!result.ok) {
+        return errorResult(result.message);
+      }
+      return textResult({
+        instrumentId: result.instrumentId,
+        runId: result.runId,
+        filesQueued: result.filesQueued,
+        filesFailed: result.filesFailed,
+      });
+    }
+  );
+
+  server.registerTool(
+    "delete_run",
+    {
+      title: "Delete Run",
+      description:
+        "Soft-delete a run (sets deleted_at). Does not remove files or S3 objects. Use restore_run to undo.",
+      inputSchema: {
+        instrumentId: z.string().describe("Instrument identifier"),
+        runId: z.string().describe("Run identifier within the instrument"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true },
+    },
+    async ({ instrumentId, runId }, { authInfo }) => {
+      const scopeError = requireMcpScope(authInfo, "runs:delete");
+      if (scopeError) {
+        return scopeError;
+      }
+      const userId = (authInfo?.extra?.userId as string | undefined) ?? null;
+      const result = await softDeleteRun({
+        instrumentId,
+        runId,
+        deletedBy: userId,
+      });
+      if (!result.ok) {
+        return errorResult(result.message);
+      }
+      return textResult({
+        instrumentId: result.instrumentId,
+        runId: result.runId,
+        deletedAt: result.deletedAt,
+        deletedBy: result.deletedBy,
+      });
+    }
+  );
+
+  server.registerTool(
+    "restore_run",
+    {
+      title: "Restore Run",
+      description:
+        "Restore a soft-deleted run by clearing deleted_at. No-op conflict if the run is not deleted.",
+      inputSchema: {
+        instrumentId: z.string().describe("Instrument identifier"),
+        runId: z.string().describe("Run identifier within the instrument"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async ({ instrumentId, runId }, { authInfo }) => {
+      const scopeError = requireMcpScope(authInfo, "runs:delete");
+      if (scopeError) {
+        return scopeError;
+      }
+      const result = await restoreRun(instrumentId, runId);
+      if (!result.ok) {
+        return errorResult(result.message);
+      }
+      return textResult({
+        instrumentId: result.instrumentId,
+        runId: result.runId,
+        deletedAt: result.deletedAt,
+      });
+    }
+  );
+
+  // ---- Uploads / dismiss ---------------------------------------------------
+
+  server.registerTool(
+    "request_run_upload",
+    {
+      title: "Request Run Upload",
+      description:
+        "Queue specific detected files for watcher upload (max 100). Requires an online watcher. Idempotent for files already in upload_requested.",
+      inputSchema: {
+        instrumentId: z.string().describe("Instrument identifier"),
+        runId: z.string().describe("Run identifier within the instrument"),
+        fileIds: z
+          .array(z.number().int())
+          .min(1)
+          .max(100)
+          .describe("Numeric file IDs to queue"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async ({ instrumentId, runId, fileIds }, { authInfo }) => {
+      const scopeError = requireMcpScope(authInfo, "runs:upload");
+      if (scopeError) {
+        return scopeError;
+      }
+      const result = await requestRunUploads({
+        instrumentId,
+        runId,
+        fileIds,
+      });
+      if (!result.ok) {
+        return errorResult(result.message);
+      }
+      return textResult({
+        instrumentId: result.instrumentId,
+        runId: result.runId,
+        filesQueued: result.filesQueued,
+        files: result.files,
+      });
+    }
+  );
+
+  server.registerTool(
+    "request_run_upload_all",
+    {
+      title: "Request Run Upload All",
+      description:
+        "Queue every detected file on a run for watcher upload. Requires an online watcher.",
+      inputSchema: {
+        instrumentId: z.string().describe("Instrument identifier"),
+        runId: z.string().describe("Run identifier within the instrument"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false },
+    },
+    async ({ instrumentId, runId }, { authInfo }) => {
+      const scopeError = requireMcpScope(authInfo, "runs:upload");
+      if (scopeError) {
+        return scopeError;
+      }
+      const result = await requestAllRunUploads(instrumentId, runId);
+      if (!result.ok) {
+        return errorResult(result.message);
+      }
+      return textResult({
+        instrumentId: result.instrumentId,
+        runId: result.runId,
+        filesQueued: result.filesQueued,
+      });
+    }
+  );
+
+  server.registerTool(
+    "dismiss_file",
+    {
+      title: "Dismiss File",
+      description:
+        "Soft-delete a detected or upload_requested file (UI 'dismiss'). Uploaded files cannot be dismissed — delete the run instead.",
+      inputSchema: {
+        fileId: z.number().int().describe("Numeric file ID"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true },
+    },
+    async ({ fileId }, { authInfo }) => {
+      const scopeError = requireMcpScope(authInfo, "files:delete");
+      if (scopeError) {
+        return scopeError;
+      }
+      const result = await dismissFile(fileId);
+      if (!result.ok) {
+        return errorResult(result.message);
+      }
+      return textResult({
+        id: result.id,
+        filename: result.filename,
+        deletedAt: result.deletedAt,
+      });
     }
   );
 }

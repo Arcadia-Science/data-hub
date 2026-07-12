@@ -10,17 +10,17 @@ import {
 } from "@/lib/api/errors";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { notifyComment } from "@/lib/api/notifications";
-import { createComment, listCommentsForRun } from "@/lib/api/run-comments";
+import {
+  createComment,
+  listCommentsForRun,
+  validateCommentBody,
+} from "@/lib/api/run-comments";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 
 interface RouteContext {
   params: Promise<{ instrumentId: string; runId: string }>;
 }
-
-// Cap on the markdown source we accept. Generous for prose, well below any
-// jsonb / text limit. Bumping is a route-only change — no migration needed.
-const MAX_BODY_LENGTH = 10_000;
 
 // ---------------------------------------------------------------------------
 // GET /api/v1/instruments/:instrumentId/runs/:runId/comments
@@ -88,22 +88,15 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     return apiError(400, VALIDATION_ERROR, "body must be a string");
   }
 
-  const trimmed = payload.body.trim();
-  if (trimmed.length === 0) {
-    return apiError(400, VALIDATION_ERROR, "body must not be empty");
-  }
-  if (payload.body.length > MAX_BODY_LENGTH) {
-    return apiError(
-      400,
-      VALIDATION_ERROR,
-      `body must be at most ${MAX_BODY_LENGTH} characters`
-    );
+  const validated = validateCommentBody(payload.body);
+  if (!validated.ok) {
+    return apiError(400, VALIDATION_ERROR, validated.message);
   }
 
   const comment = await createComment({
     runInternalId: run.id,
     userId: authResult.userId,
-    body: payload.body,
+    body: validated.body,
   });
 
   // Fan out to attributees + prior commenters after the response is sent.
@@ -126,7 +119,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       instrumentId,
       instrumentDisplayName: run.instrumentDisplayName,
       runDisplayId: runId,
-      commentBody: payload.body as string,
+      commentBody: validated.body,
       origin: new URL(request.url).origin,
     });
   });

@@ -7,6 +7,7 @@ import {
   NOT_FOUND,
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
+import { dismissFile } from "@/lib/api/files";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 
@@ -209,44 +210,16 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
     return apiError(400, VALIDATION_ERROR, "Invalid file ID");
   }
 
-  const [file] = await db
-    .select()
-    .from(files)
-    .where(eq(files.id, numericId))
-    .limit(1);
+  const result = await dismissFile(numericId);
 
-  if (!file) {
-    return apiError(404, NOT_FOUND, `File '${fileId}' not found`);
+  if (!result.ok) {
+    const code = result.code === "NOT_FOUND" ? NOT_FOUND : CONFLICT;
+    return apiError(result.status, code, result.message);
   }
-
-  if (file.deletedAt) {
-    return apiError(409, CONFLICT, "File is already deleted");
-  }
-
-  // Only pre-upload files can be dismissed individually. Once uploaded to S3,
-  // soft-deletion must go through the run-level DELETE so deletion state stays
-  // coherent at the run boundary.
-  if (file.status !== "detected" && file.status !== "upload_requested") {
-    return apiError(
-      409,
-      CONFLICT,
-      `Cannot dismiss a file in '${file.status}' status — only 'detected' or 'upload_requested' files can be dismissed`
-    );
-  }
-
-  const now = new Date();
-
-  await db.update(files).set({ deletedAt: now }).where(eq(files.id, numericId));
-
-  // Touch the parent run so the UI can detect the change.
-  await db
-    .update(instrumentRuns)
-    .set({ updatedAt: now })
-    .where(eq(instrumentRuns.id, file.instrumentRunId));
 
   return Response.json({
-    id: file.id,
-    filename: file.filename,
-    deleted_at: now,
+    id: result.id,
+    filename: result.filename,
+    deleted_at: result.deletedAt,
   });
 }

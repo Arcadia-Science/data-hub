@@ -1,10 +1,11 @@
-import { eq } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { after } from "next/server";
+import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 import { hasInvokeCredentials, signLambdaInvoke } from "@/lib/lambda";
 
-const REPROCESSABLE_STATUSES = ["failed", "completed"];
+const REPROCESSABLE_STATUSES = ["failed", "completed"] as const;
 
 function getLambdaUrl(): string | null {
   const url = process.env.LAMBDA_FUNCTION_URL;
@@ -55,7 +56,7 @@ export async function reprocessFile(fileId: number): Promise<ReprocessResult> {
     };
   }
 
-  if (!REPROCESSABLE_STATUSES.includes(file.status)) {
+  if (!(REPROCESSABLE_STATUSES as readonly string[]).includes(file.status)) {
     return {
       ok: false,
       status: 409,
@@ -152,4 +153,79 @@ export async function reprocessFile(fileId: number): Promise<ReprocessResult> {
   });
 
   return { ok: true, fileId };
+}
+
+export type ReprocessRunResult =
+  | {
+      ok: true;
+      instrumentId: string;
+      runId: string;
+      filesQueued: number;
+      filesFailed: number;
+    }
+  | {
+      ok: false;
+      status: number;
+      code: "NOT_FOUND" | "CONFLICT";
+      message: string;
+    };
+
+// Run-level batch reprocess used by REST `…/reprocess` and MCP `reprocess_run`.
+// Eligible files are `completed` or `failed` and not soft-deleted; each goes
+// through `reprocessFile` so state-machine checks stay identical.
+export async function reprocessRun(
+  instrumentId: string,
+  runId: string
+): Promise<ReprocessRunResult> {
+  const run = await lookupRunByNaturalKey(instrumentId, runId);
+
+  if (!run) {
+    return {
+      ok: false,
+      status: 404,
+      code: "NOT_FOUND",
+      message: `Run '${runId}' not found for instrument '${instrumentId}'`,
+    };
+  }
+
+  if (run.deletedAt) {
+    return {
+      ok: false,
+      status: 409,
+      code: "CONFLICT",
+      message: "Cannot reprocess a soft-deleted run",
+    };
+  }
+
+  const eligible = await db
+    .select({ id: files.id })
+    .from(files)
+    .where(
+      and(
+        eq(files.instrumentRunId, run.id),
+        inArray(files.status, [...REPROCESSABLE_STATUSES]),
+        isNull(files.deletedAt)
+      )
+    );
+
+  if (eligible.length === 0) {
+    return {
+      ok: true,
+      instrumentId: run.instrumentId,
+      runId: run.runId,
+      filesQueued: 0,
+      filesFailed: 0,
+    };
+  }
+
+  const results = await Promise.all(eligible.map((f) => reprocessFile(f.id)));
+  const filesQueued = results.filter((r) => r.ok).length;
+
+  return {
+    ok: true,
+    instrumentId: run.instrumentId,
+    runId: run.runId,
+    filesQueued,
+    filesFailed: results.length - filesQueued,
+  };
 }

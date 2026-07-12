@@ -11,6 +11,7 @@ import {
   lookupRunByNaturalKey,
   parseAcquiredAt,
 } from "@/lib/api/instrument-runs";
+import { softDeleteRun } from "@/lib/api/run-lifecycle";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 import { getPresignedDownloadUrl } from "@/lib/s3";
@@ -233,30 +234,21 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
   }
 
   const { instrumentId, runId } = await params;
-  const run = await lookupRunByNaturalKey(instrumentId, runId);
+  const result = await softDeleteRun({
+    instrumentId,
+    runId,
+    deletedBy: authResult.userId,
+  });
 
-  if (!run) {
-    return apiError(
-      404,
-      NOT_FOUND,
-      `Run '${runId}' not found for instrument '${instrumentId}'`
-    );
+  if (!result.ok) {
+    const code = result.code === "NOT_FOUND" ? NOT_FOUND : CONFLICT;
+    return apiError(result.status, code, result.message);
   }
-
-  if (run.deletedAt) {
-    return apiError(409, CONFLICT, "Run is already deleted");
-  }
-
-  const now = new Date();
-  await db
-    .update(instrumentRuns)
-    .set({ deletedAt: now, deletedBy: authResult.userId })
-    .where(eq(instrumentRuns.id, run.id));
 
   return Response.json({
-    instrument_id: run.instrumentId,
-    run_id: run.runId,
-    deleted_at: now,
-    deleted_by: authResult.userId,
+    instrument_id: result.instrumentId,
+    run_id: result.runId,
+    deleted_at: result.deletedAt,
+    deleted_by: result.deletedBy,
   });
 }

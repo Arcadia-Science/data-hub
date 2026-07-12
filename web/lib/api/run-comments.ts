@@ -11,6 +11,29 @@ import { toInitials } from "@/lib/utils";
 // 403 vs 404 distinction). Reads are open to any authenticated user.
 // ---------------------------------------------------------------------------
 
+// Cap on the markdown source we accept. Generous for prose, well below any
+// jsonb / text limit. Bumping is a shared change for REST and MCP.
+export const COMMENT_MAX_BODY_LENGTH = 10_000;
+
+export function validateCommentBody(
+  body: unknown
+): { ok: true; body: string } | { ok: false; message: string } {
+  if (typeof body !== "string") {
+    return { ok: false, message: "body must be a string" };
+  }
+  const trimmed = body.trim();
+  if (trimmed.length === 0) {
+    return { ok: false, message: "body must not be empty" };
+  }
+  if (body.length > COMMENT_MAX_BODY_LENGTH) {
+    return {
+      ok: false,
+      message: `body must be at most ${COMMENT_MAX_BODY_LENGTH} characters`,
+    };
+  }
+  return { ok: true, body };
+}
+
 export interface RunCommentDto {
   body: string;
   created_at: Date;
