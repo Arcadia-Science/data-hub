@@ -547,20 +547,20 @@ function ScopeRow({
         id={`scope-${scope}`}
         onCheckedChange={() => onToggle(scope)}
       />
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="flex flex-1 items-center justify-between gap-2">
+      <span className="flex flex-1 items-center justify-between gap-2">
+        <Tooltip>
+          <TooltipTrigger asChild>
             <span className="flex items-center gap-1.5">
               {meta.label}
               {meta.destructive ? (
                 <TriangleAlert className="size-3 text-amber-600 dark:text-amber-500" />
               ) : null}
             </span>
-            <code className="text-muted-foreground text-xs">{scope}</code>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent>{meta.description}</TooltipContent>
-      </Tooltip>
+          </TooltipTrigger>
+          <TooltipContent side="right">{meta.description}</TooltipContent>
+        </Tooltip>
+        <code className="text-muted-foreground text-xs">{scope}</code>
+      </span>
     </label>
   );
 }
