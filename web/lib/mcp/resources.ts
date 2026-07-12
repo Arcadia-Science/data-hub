@@ -1,18 +1,39 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { getInstruments } from "@/lib/api/dashboard";
-import {
-  getGelDocFilterOptions,
-  getPlateReaderFilterOptions,
-} from "@/lib/api/instrument-runs";
+import { getInstruments, getUserById } from "@/lib/api/dashboard";
+import { getInstrumentFilterOptions } from "@/lib/api/instrument-runs";
 import {
   getInstrumentById,
   getInstrumentListWithCounts,
 } from "@/lib/api/instruments";
+import type { InstrumentType } from "@/lib/db/schema";
 
-// Instrument types that expose a structured filter-options resource. Generic
-// instruments have no predefined metadata schema so they're excluded.
-const FILTERABLE_INSTRUMENT_TYPES = new Set(["plate_reader", "gel_doc"]);
+// Instrument types that expose a structured filter-options resource. Must stay
+// aligned with filters accepted by `search_runs` / `buildRunListQuery`.
+const FILTERABLE_INSTRUMENT_TYPES = new Set<InstrumentType>([
+  "plate_reader",
+  "gel_doc",
+  "qpcr",
+  "hina_microscope",
+  "epson_v700_scanner",
+]);
+
+function filterOptionsDescription(instrumentType: InstrumentType): string {
+  switch (instrumentType) {
+    case "plate_reader":
+      return "Available wavelength, measurement mode, and measurement type values";
+    case "gel_doc":
+      return "Available capture type, imaging mode, wavelength, and color values";
+    case "qpcr":
+      return "Available dye channel values";
+    case "hina_microscope":
+      return "Available channel, dimension, and size values";
+    case "epson_v700_scanner":
+      return "Available DPI and color mode values";
+    default:
+      return "Available filter values";
+  }
+}
 
 export function registerResources(server: McpServer) {
   server.registerResource(
@@ -38,6 +59,61 @@ export function registerResources(server: McpServer) {
   );
 
   server.registerResource(
+    "me",
+    "datahub://me",
+    {
+      description:
+        "Authenticated PAT owner's identity (id, name, email, image, isAdmin). Same payload as the get_me tool.",
+      mimeType: "application/json",
+    },
+    async (_uri, extra) => {
+      const userId = extra.authInfo?.extra?.userId as string | undefined;
+      if (!userId) {
+        return {
+          contents: [
+            {
+              uri: "datahub://me",
+              mimeType: "application/json",
+              text: JSON.stringify(
+                { error: "Authenticated user not available on this session." },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+
+      const user = await getUserById(userId);
+      if (!user) {
+        return {
+          contents: [
+            {
+              uri: "datahub://me",
+              mimeType: "application/json",
+              text: JSON.stringify(
+                { error: `User '${userId}' not found.` },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+
+      return {
+        contents: [
+          {
+            uri: "datahub://me",
+            mimeType: "application/json",
+            text: JSON.stringify(user, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  server.registerResource(
     "instrument-filter-options",
     new ResourceTemplate(
       "datahub://instruments/{instrumentId}/filter-options",
@@ -51,10 +127,7 @@ export function registerResources(server: McpServer) {
             resources: filterable.map((i) => ({
               uri: `datahub://instruments/${i.id}/filter-options`,
               name: `${i.displayName} filter options`,
-              description:
-                i.instrumentType === "plate_reader"
-                  ? `Available wavelength, measurement mode, and measurement type values for ${i.displayName}`
-                  : `Available capture type, imaging mode, wavelength, and color values for ${i.displayName}`,
+              description: `${filterOptionsDescription(i.instrumentType)} for ${i.displayName}`,
               mimeType: "application/json",
             })),
           };
@@ -63,7 +136,7 @@ export function registerResources(server: McpServer) {
     ),
     {
       description:
-        "Available filter values for an instrument. Plate readers expose wavelengths and measurement modes/types; gel-doc instruments expose capture types, imaging modes, wavelengths, and colors. Helps build valid search_runs queries.",
+        "Available filter values for an instrument. Values map directly to search_runs metadata filter arguments (wavelength/measurementMode/measurementType for plate readers; captureType/imagingMode/gelWavelength/gelColor for gel-doc; dyeChannel for qPCR; hinaChannel/hinaDimension/hinaSize for Hina; dpi/colorMode for Epson).",
       mimeType: "application/json",
     },
     async (_uri, variables) => {
@@ -86,8 +159,6 @@ export function registerResources(server: McpServer) {
         };
       }
 
-      // Resolve the instrument type so we can call the correct options
-      // function. Unknown or unfilterable types return an explanatory error.
       const instrument = await getInstrumentById(instrumentId);
       if (!instrument) {
         return {
@@ -105,23 +176,24 @@ export function registerResources(server: McpServer) {
         };
       }
 
-      let options: unknown;
-      if (instrument.instrumentType === "plate_reader") {
-        options = await getPlateReaderFilterOptions(instrumentId);
-      } else if (instrument.instrumentType === "gel_doc") {
-        options = await getGelDocFilterOptions(instrumentId);
-      } else {
-        options = {
-          error: `Instrument type '${instrument.instrumentType}' has no structured filter options`,
-        };
-      }
+      const result = await getInstrumentFilterOptions(
+        instrument.instrumentType,
+        instrumentId
+      );
+
+      const payload =
+        result.kind === "default"
+          ? {
+              error: `Instrument type '${instrument.instrumentType}' has no structured filter options`,
+            }
+          : result.options;
 
       return {
         contents: [
           {
             uri: _uri.href,
             mimeType: "application/json",
-            text: JSON.stringify(options, null, 2),
+            text: JSON.stringify(payload, null, 2),
           },
         ],
       };

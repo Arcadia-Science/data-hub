@@ -2,7 +2,7 @@ import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { getInstrumentSummaries } from "@/lib/api/dashboard";
+import { getInstrumentSummaries, getUserById } from "@/lib/api/dashboard";
 import { reprocessFile } from "@/lib/api/file-reprocessing";
 import { getActiveFileById, lookupFileForDownload } from "@/lib/api/files";
 import {
@@ -18,6 +18,7 @@ import {
   getInstrumentListWithCounts,
 } from "@/lib/api/instruments";
 import { prepareRunArchive } from "@/lib/api/run-archive";
+import { globalSearch } from "@/lib/api/search";
 import { hasScope, type Scope } from "@/lib/api/scopes";
 import { getWatcherHeartbeats, getWatcherList } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
@@ -27,6 +28,10 @@ import {
   getPresignedDownloadUrl,
   PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS,
 } from "@/lib/s3";
+import { MIN_QUERY_LENGTH } from "@/lib/search-constants";
+
+// Sentinel for `search_runs.ranBy`: resolve to the authenticated PAT owner.
+const RAN_BY_ME_SENTINEL = "me";
 
 function textResult(data: unknown) {
   return {
@@ -178,7 +183,7 @@ export function registerTools(server: McpServer) {
     {
       title: "Search Runs",
       description:
-        "Search instrument runs with filtering, pagination, and sorting. Supports run status filters and plate reader metadata filters (wavelength, measurement mode/type).",
+        "Search instrument runs with filtering, pagination, and sorting. Supports run status filters and instrument-metadata filters (plate reader, gel-doc, qPCR, Hina microscope, Epson scanner). Use global_search when the query may match filenames, instrument names, or attributor names rather than run IDs. Discover valid metadata filter values via the datahub://instruments/{id}/filter-options resource.",
       inputSchema: {
         instrumentId: z
           .union([z.string(), z.array(z.string())])
@@ -191,7 +196,7 @@ export function registerTools(server: McpServer) {
         search: z
           .string()
           .optional()
-          .describe("Search text matched against run ID"),
+          .describe("Search text matched against run ID only"),
         dateFrom: z
           .string()
           .optional()
@@ -239,11 +244,50 @@ export function registerTools(server: McpServer) {
           .string()
           .optional()
           .describe("Plate reader: filter by measurement type"),
+        captureType: z
+          .string()
+          .optional()
+          .describe("Gel-doc: filter by capture type"),
+        imagingMode: z
+          .string()
+          .optional()
+          .describe("Gel-doc: filter by imaging mode"),
+        gelWavelength: z
+          .string()
+          .optional()
+          .describe("Gel-doc: filter by wavelength"),
+        gelColor: z.string().optional().describe("Gel-doc: filter by color"),
+        dyeChannel: z
+          .string()
+          .optional()
+          .describe("qPCR: filter by dye channel"),
+        hinaChannel: z
+          .string()
+          .optional()
+          .describe("Hina microscope: filter by channel name"),
+        hinaDimension: z
+          .string()
+          .optional()
+          .describe("Hina microscope: filter by dimension"),
+        hinaSize: z
+          .string()
+          .optional()
+          .describe(
+            "Hina microscope: filter by sizes JSON object string (from filter-options)"
+          ),
+        dpi: z
+          .string()
+          .optional()
+          .describe("Epson scanner: filter by DPI (e.g. '300')"),
+        colorMode: z
+          .string()
+          .optional()
+          .describe("Epson scanner: filter by color mode (e.g. 'rgb', 'bw')"),
         ranBy: z
           .string()
           .optional()
           .describe(
-            'Filter by attributor. Pass a user id to match runs attributed to that user, or the literal "unattributed" to match runs with no attributions. Use list_run_attributors to discover valid user ids.'
+            'Filter by attributor. Pass a user id, the literal "me" for the authenticated token owner, or "unattributed" for runs with no attributions. Use get_me for your user id, or list_run_attributors to discover colleagues.'
           ),
         status: z
           .array(z.enum(RUN_STATUS_VALUES))
@@ -259,6 +303,18 @@ export function registerTools(server: McpServer) {
       if (scopeError) {
         return scopeError;
       }
+
+      let ranBy = args.ranBy;
+      if (ranBy === RAN_BY_ME_SENTINEL) {
+        const userId = authInfo?.extra?.userId as string | undefined;
+        if (!userId) {
+          return errorResult(
+            'ranBy="me" requires an authenticated user on this session. Use get_me to confirm identity, or pass a concrete user id.'
+          );
+        }
+        ranBy = userId;
+      }
+
       const result = await buildRunListQuery({
         instrumentId: args.instrumentId,
         source: args.source,
@@ -273,10 +329,74 @@ export function registerTools(server: McpServer) {
         wavelength: args.wavelength,
         measurementMode: args.measurementMode,
         measurementType: args.measurementType,
-        ranBy: args.ranBy,
+        captureType: args.captureType,
+        imagingMode: args.imagingMode,
+        gelWavelength: args.gelWavelength,
+        gelColor: args.gelColor,
+        dyeChannel: args.dyeChannel,
+        hinaChannel: args.hinaChannel,
+        hinaDimension: args.hinaDimension,
+        hinaSize: args.hinaSize,
+        dpi: args.dpi,
+        colorMode: args.colorMode,
+        ranBy,
         statuses: args.status,
       });
       return textResult(result);
+    }
+  );
+
+  server.registerTool(
+    "global_search",
+    {
+      title: "Global Search",
+      description:
+        "Fuzzy search across runs, files, and instruments (same backend as the UI ⌘K palette). Prefer this over search_runs when the query may match a filename, instrument display name, or attributor name. Queries shorter than 2 characters return empty results.",
+      inputSchema: {
+        query: z.string().describe("Search query (min 2 characters)"),
+        scope: z
+          .enum(["all", "runs", "files", "instruments"])
+          .optional()
+          .describe("Limit results to one entity type (default: all)"),
+      },
+      annotations: { readOnlyHint: true },
+    },
+    async ({ query, scope }, { authInfo }) => {
+      const scopeError = requireMcpScope(authInfo, "runs:read");
+      if (scopeError) {
+        return scopeError;
+      }
+      if (query.trim().length < MIN_QUERY_LENGTH) {
+        return errorResult(
+          `Query must be at least ${MIN_QUERY_LENGTH} characters.`
+        );
+      }
+      const result = await globalSearch({
+        query,
+        scope: scope ?? "all",
+      });
+      return textResult(result);
+    }
+  );
+
+  server.registerTool(
+    "get_me",
+    {
+      title: "Get Me",
+      description:
+        'Return the authenticated PAT owner\'s identity (id, name, email, image, isAdmin). Use the returned id with search_runs ranBy=, or pass ranBy="me" instead.',
+      annotations: { readOnlyHint: true },
+    },
+    async ({ authInfo }) => {
+      const userId = authInfo?.extra?.userId as string | undefined;
+      if (!userId) {
+        return errorResult("Authenticated user not available on this session.");
+      }
+      const user = await getUserById(userId);
+      if (!user) {
+        return errorResult(`User '${userId}' not found.`);
+      }
+      return textResult(user);
     }
   );
 

@@ -239,6 +239,34 @@ export interface UserProfile extends UserAvatarUser {
   email: string | null;
 }
 
+// Raw user row for MCP `get_me` / `datahub://me` — identity for the PAT owner,
+// including admin flag. Distinct from `UserProfile` which is avatar-oriented.
+export interface AuthenticatedUser {
+  email: string | null;
+  id: string;
+  image: string | null;
+  isAdmin: boolean;
+  name: string | null;
+}
+
+export async function getUserById(
+  userId: string
+): Promise<AuthenticatedUser | null> {
+  const [row] = await db
+    .select({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      image: users.image,
+      isAdmin: users.isAdmin,
+    })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  return row ?? null;
+}
+
 // Returns null on an unknown id so the page can `notFound()`. `cache()`-keyed
 // on `userId` so the page header and `generateMetadata` share one lookup.
 export const getUserProfile = cache(async function getUserProfile(

@@ -162,7 +162,9 @@ describe("MCP Server (HTTP)", () => {
     expect(toolNames).toContain("claim_run");
     expect(toolNames).toContain("unclaim_run");
     expect(toolNames).toContain("list_run_attributors");
-    expect(toolNames).toHaveLength(15);
+    expect(toolNames).toContain("global_search");
+    expect(toolNames).toContain("get_me");
+    expect(toolNames).toHaveLength(17);
   });
 
   // ---- Tool execution (end-to-end) -----------------------------------------
@@ -274,6 +276,40 @@ describe("MCP Server (HTTP)", () => {
       (r: { run_id: string }) => r.run_id
     );
     expect(unattributedRunIds).not.toContain(runId);
+  });
+
+  it('search_runs ranBy="me" resolves to the token owner', async () => {
+    await callTool("claim_run", { instrumentId, runId });
+
+    const result = await callTool("search_runs", {
+      instrumentId,
+      ranBy: "me",
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = JSON.parse(result.content[0].text);
+    const runIds = parsed.data.map((r: { run_id: string }) => r.run_id);
+    expect(runIds).toContain(runId);
+  });
+
+  it("get_me returns the authenticated token owner", async () => {
+    const result = await callTool("get_me", {});
+    expect(result.isError).toBeFalsy();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.id).toBe(userId);
+    expect(parsed).toHaveProperty("email");
+    expect(parsed).toHaveProperty("isAdmin");
+  });
+
+  it("global_search finds the seeded instrument by name", async () => {
+    const result = await callTool("global_search", {
+      query: "MCP Test",
+      scope: "instruments",
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.instruments).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: instrumentId })])
+    );
   });
 
   it("list_run_attributors returns the set of attributors for an instrument", async () => {

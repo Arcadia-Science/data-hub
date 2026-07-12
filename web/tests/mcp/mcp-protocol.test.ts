@@ -103,17 +103,38 @@ vi.mock("@/lib/api/instrument-runs", () => ({
     data: [],
     pagination: { page: 1, per_page: 50, total: 0, total_pages: 0 },
   }),
-  getPlateReaderFilterOptions: vi.fn().mockResolvedValue({
-    wavelengths: ["450"],
-    measurementModes: ["Absorbance"],
-    measurementTypes: ["Endpoint"],
-  }),
-  getGelDocFilterOptions: vi.fn().mockResolvedValue({
-    captureTypes: ["Chemi"],
-    imagingModes: ["Single"],
-    wavelengths: ["520"],
-    colors: ["Green"],
-  }),
+  getInstrumentFilterOptions: vi
+    .fn()
+    .mockImplementation((instrumentType: string) => {
+      if (instrumentType === "plate_reader") {
+        return {
+          kind: "plate_reader",
+          options: {
+            wavelengths: ["450"],
+            measurementModes: ["Absorbance"],
+            measurementTypes: ["Endpoint"],
+          },
+        };
+      }
+      if (instrumentType === "gel_doc") {
+        return {
+          kind: "gel_doc",
+          options: {
+            captureTypes: ["Chemi"],
+            imagingModes: ["Single"],
+            wavelengths: ["520"],
+            colors: ["Green"],
+          },
+        };
+      }
+      if (instrumentType === "qpcr") {
+        return {
+          kind: "qpcr",
+          options: { dyeChannels: ["SYBR"] },
+        };
+      }
+      return { kind: "default" };
+    }),
   getAttributionsByRunIds: vi.fn().mockResolvedValue(new Map()),
   getRanByFilterOptions: vi
     .fn()
@@ -146,6 +167,26 @@ vi.mock("@/lib/api/dashboard", () => ({
       instrumentType: "plate_reader",
     },
   ]),
+  getUserById: vi.fn().mockImplementation(async (id: string) =>
+    id === "user-from-auth"
+      ? {
+          id: "user-from-auth",
+          name: "Test User",
+          email: "test@example.com",
+          image: null,
+          isAdmin: false,
+        }
+      : null
+  ),
+}));
+
+vi.mock("@/lib/api/search", () => ({
+  globalSearch: vi.fn().mockResolvedValue({
+    runs: [],
+    files: [],
+    instruments: [],
+    counts: { runs: 0, files: 0, instruments: 0, total: 0 },
+  }),
 }));
 
 vi.mock("@/lib/api/watchers", () => ({
@@ -274,6 +315,8 @@ describe("MCP Protocol (in-memory)", () => {
     "list_instruments",
     "get_instrument",
     "search_runs",
+    "global_search",
+    "get_me",
     "get_run",
     "list_run_files",
     "get_system_status",
@@ -361,9 +404,17 @@ describe("MCP Protocol (in-memory)", () => {
       "instrumentId"
     );
 
-    // search_runs gained a `ranBy` filter alongside the new attribution tools.
+    // search_runs gained a `ranBy` filter alongside the new attribution tools,
+    // plus instrument-type metadata filters used by the UI run tables.
     const searchRuns = tools.find((t) => t.name === "search_runs");
     expect(searchRuns?.inputSchema.properties).toHaveProperty("ranBy");
+    expect(searchRuns?.inputSchema.properties).toHaveProperty("captureType");
+    expect(searchRuns?.inputSchema.properties).toHaveProperty("dyeChannel");
+    expect(searchRuns?.inputSchema.properties).toHaveProperty("hinaChannel");
+    expect(searchRuns?.inputSchema.properties).toHaveProperty("dpi");
+
+    const globalSearch = tools.find((t) => t.name === "global_search");
+    expect(globalSearch?.inputSchema.properties).toHaveProperty("query");
   });
 
   it("claim_run is annotated as write / non-destructive / idempotent", async () => {
@@ -421,6 +472,67 @@ describe("MCP Protocol (in-memory)", () => {
     const parsed = parseText(result.content);
     expect(parsed).toHaveProperty("runs");
     expect(parsed).toHaveProperty("total");
+  });
+
+  it("search_runs forwards gel-doc and qPCR metadata filters", async () => {
+    const { buildRunListQuery } = await import("@/lib/api/instrument-runs");
+    await client.callTool({
+      name: "search_runs",
+      arguments: {
+        captureType: "Chemi",
+        gelWavelength: "520",
+        dyeChannel: "SYBR",
+      },
+    });
+    expect(buildRunListQuery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        captureType: "Chemi",
+        gelWavelength: "520",
+        dyeChannel: "SYBR",
+      })
+    );
+  });
+
+  it('search_runs rejects ranBy="me" without auth', async () => {
+    const result = await client.callTool({
+      name: "search_runs",
+      arguments: { ranBy: "me" },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ type: string; text: string }>)[0]
+      ?.text;
+    expect(text).toContain('ranBy="me"');
+  });
+
+  it("global_search returns grouped results", async () => {
+    const result = await client.callTool({
+      name: "global_search",
+      arguments: { query: "plate" },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as {
+      counts: { total: number };
+    };
+    expect(parsed).toHaveProperty("runs");
+    expect(parsed).toHaveProperty("files");
+    expect(parsed).toHaveProperty("instruments");
+    expect(parsed.counts).toHaveProperty("total");
+  });
+
+  it("global_search rejects short queries", async () => {
+    const result = await client.callTool({
+      name: "global_search",
+      arguments: { query: "a" },
+    });
+    expect(result.isError).toBe(true);
+  });
+
+  it("get_me errors without auth on the in-memory transport", async () => {
+    const result = await client.callTool({
+      name: "get_me",
+      arguments: {},
+    });
+    expect(result.isError).toBe(true);
   });
 
   it("get_system_status returns data", async () => {
@@ -734,9 +846,11 @@ describe("MCP Protocol (in-memory)", () => {
 
   // ---- Resources -----------------------------------------------------------
 
-  it("lists resources including instruments", async () => {
+  it("lists resources including instruments and me", async () => {
     const { resources } = await client.listResources();
-    expect(resources.some((r) => r.uri === "datahub://instruments")).toBe(true);
+    const uris = resources.map((r) => r.uri);
+    expect(uris).toContain("datahub://instruments");
+    expect(uris).toContain("datahub://me");
   });
 
   it("reads the instruments resource", async () => {
