@@ -191,6 +191,13 @@ vi.mock("@/lib/api/search", () => ({
 
 vi.mock("@/lib/api/watchers", () => ({
   getWatcherList: vi.fn().mockResolvedValue([]),
+  getWatcherById: vi.fn().mockResolvedValue(null),
+  getWatcherEvents: vi.fn().mockResolvedValue({
+    rows: [],
+    total: 0,
+    page: 1,
+    pageSize: 50,
+  }),
   getWatcherHeartbeats: vi.fn().mockResolvedValue({
     rows: [
       {
@@ -205,6 +212,31 @@ vi.mock("@/lib/api/watchers", () => ({
       },
     ],
     total: 1,
+  }),
+}));
+
+vi.mock("@/lib/api/run-reports", () => ({
+  buildRunReport: vi.fn().mockResolvedValue({
+    ok: true,
+    instrumentId: "test-plate-reader",
+    runId: "run-1",
+    instrumentType: "plate_reader",
+    metadata: {},
+    fileCounts: { completed: 1 },
+    processedCsv: {
+      rowCount: 1,
+      columns: ["Well", "Value"],
+      sampleRows: [{ Well: "A1", Value: "0.1" }],
+      sampleRowLimit: 20,
+    },
+    images: [],
+    reportFiles: [],
+    failureSummary: { byStatus: { completed: 1 }, failed: [], totalFiles: 1 },
+  }),
+  getRunFailureSummary: vi.fn().mockResolvedValue({
+    byStatus: { completed: 1 },
+    failed: [],
+    totalFiles: 1,
   }),
 }));
 
@@ -387,9 +419,12 @@ describe("MCP Protocol (in-memory)", () => {
     "global_search",
     "get_me",
     "get_run",
+    "get_run_report",
     "list_run_files",
     "get_system_status",
     "list_watchers",
+    "get_watcher",
+    "list_watcher_events",
     "get_file",
     "get_file_download_url",
     "get_run_archive",
@@ -466,6 +501,7 @@ describe("MCP Protocol (in-memory)", () => {
     const getRun = tools.find((t) => t.name === "get_run");
     expect(getRun?.inputSchema.properties).toHaveProperty("instrumentId");
     expect(getRun?.inputSchema.properties).toHaveProperty("runId");
+    expect(getRun?.inputSchema.properties).toHaveProperty("include");
 
     const getFile = tools.find((t) => t.name === "get_file");
     expect(getFile?.inputSchema.properties).toHaveProperty("fileId");
@@ -790,8 +826,38 @@ describe("MCP Protocol (in-memory)", () => {
     });
     expect(result.isError).toBe(true);
     const text = (result.content as Array<{ type: string; text: string }>)[0]
-      .text;
+      ?.text;
     expect(text).toContain("not found");
+  });
+
+  it("get_run include=failure_summary attaches summary", async () => {
+    const { getRunFailureSummary } = await import("@/lib/api/run-reports");
+    const result = await client.callTool({
+      name: "get_run",
+      arguments: {
+        instrumentId: "test-plate-reader",
+        runId: "run-1",
+        include: ["failure_summary"],
+      },
+    });
+    expect(result.isError).toBeFalsy();
+    expect(getRunFailureSummary).toHaveBeenCalled();
+    const parsed = parseText(result.content) as {
+      failureSummary: { totalFiles: number };
+    };
+    expect(parsed.failureSummary).toHaveProperty("totalFiles");
+  });
+
+  it("get_run_report returns bounded processed CSV sample", async () => {
+    const result = await client.callTool({
+      name: "get_run_report",
+      arguments: { instrumentId: "test-plate-reader", runId: "run-1" },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as {
+      processedCsv: { sampleRowLimit: number };
+    };
+    expect(parsed.processedCsv.sampleRowLimit).toBe(20);
   });
 
   it("list_run_files returns error for nonexistent run", async () => {
