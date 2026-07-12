@@ -602,6 +602,22 @@ describe("MCP Protocol (in-memory)", () => {
     expect(parsed).toHaveProperty("total");
   });
 
+  it("search_runs rejects invalid metadata filters with allowed values", async () => {
+    const result = await client.callTool({
+      name: "search_runs",
+      arguments: {
+        instrumentId: "test-plate-reader",
+        wavelength: "999",
+      },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ type: string; text: string }>)[0]
+      ?.text;
+    expect(text).toContain("Invalid wavelength");
+    expect(text).toContain("450");
+    expect(text).toContain("filter-options");
+  });
+
   it("search_runs forwards gel-doc and qPCR metadata filters", async () => {
     const { buildRunListQuery } = await import("@/lib/api/instrument-runs");
     await client.callTool({
@@ -1004,11 +1020,23 @@ describe("MCP Protocol (in-memory)", () => {
 
   // ---- Resources -----------------------------------------------------------
 
-  it("lists resources including instruments and me", async () => {
+  it("lists resources including instruments, me, and glossary", async () => {
     const { resources } = await client.listResources();
     const uris = resources.map((r) => r.uri);
     expect(uris).toContain("datahub://instruments");
     expect(uris).toContain("datahub://me");
+    expect(uris).toContain("datahub://glossary");
+  });
+
+  it("reads the glossary resource", async () => {
+    const { contents } = await client.readResource({
+      uri: "datahub://glossary",
+    });
+    const parsed = JSON.parse(
+      (contents[0] as { uri: string; text: string }).text
+    );
+    expect(parsed).toHaveProperty("runStatus");
+    expect(parsed).toHaveProperty("toolRouting");
   });
 
   it("reads the instruments resource", async () => {
@@ -1101,6 +1129,10 @@ describe("MCP Protocol (in-memory)", () => {
     "daily_summary",
     "troubleshoot_instrument",
     "compare_runs",
+    "find_my_runs",
+    "explain_failed_run",
+    "claim_unattributed_runs",
+    "summarize_instrument_week",
   ] as const;
 
   it("lists all expected prompts", async () => {

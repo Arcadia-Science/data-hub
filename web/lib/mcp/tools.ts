@@ -45,6 +45,7 @@ import {
 } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { runAttributions, users, watcherEventTypeEnum } from "@/lib/db/schema";
+import { validateSearchRunsMetadataFilters } from "@/lib/mcp/validate-run-filters";
 import { RUN_STATUS_VALUES } from "@/lib/runs/run-status";
 import {
   getPresignedDownloadUrl,
@@ -205,7 +206,7 @@ export function registerTools(server: McpServer) {
     {
       title: "Search Runs",
       description:
-        "Search instrument runs with filtering, pagination, and sorting. Supports run status filters and instrument-metadata filters (plate reader, gel-doc, qPCR, Hina microscope, Epson scanner). Use global_search when the query may match filenames, instrument names, or attributor names rather than run IDs. Discover valid metadata filter values via the datahub://instruments/{id}/filter-options resource.",
+        "Search instrument runs with filtering, pagination, and sorting. Supports run status filters and instrument-metadata filters (plate reader, gel-doc, qPCR, Hina microscope, Epson scanner). Prefer global_search when the query may match filenames, instrument names, or attributor names rather than run IDs. Discover valid metadata filter values via datahub://instruments/{id}/filter-options (or datahub://glossary for routing tips).",
       inputSchema: {
         instrumentId: z
           .union([z.string(), z.array(z.string())])
@@ -337,6 +338,32 @@ export function registerTools(server: McpServer) {
         ranBy = userId;
       }
 
+      const singleInstrumentId =
+        typeof args.instrumentId === "string" ? args.instrumentId : undefined;
+      if (singleInstrumentId) {
+        const filterError = await validateSearchRunsMetadataFilters(
+          singleInstrumentId,
+          {
+            wavelength: args.wavelength,
+            measurementMode: args.measurementMode,
+            measurementType: args.measurementType,
+            captureType: args.captureType,
+            imagingMode: args.imagingMode,
+            gelWavelength: args.gelWavelength,
+            gelColor: args.gelColor,
+            dyeChannel: args.dyeChannel,
+            hinaChannel: args.hinaChannel,
+            hinaDimension: args.hinaDimension,
+            hinaSize: args.hinaSize,
+            dpi: args.dpi,
+            colorMode: args.colorMode,
+          }
+        );
+        if (filterError) {
+          return errorResult(filterError);
+        }
+      }
+
       const result = await buildRunListQuery({
         instrumentId: args.instrumentId,
         source: args.source,
@@ -373,7 +400,7 @@ export function registerTools(server: McpServer) {
     {
       title: "Global Search",
       description:
-        "Fuzzy search across runs, files, and instruments (same backend as the UI ⌘K palette). Prefer this over search_runs when the query may match a filename, instrument display name, or attributor name. Queries shorter than 2 characters return empty results.",
+        "Fuzzy search across runs, files, and instruments (same backend as the UI ⌘K palette). Prefer this over search_runs when the query may match a filename, instrument display name, or attributor name. Use search_runs for date/status/metadata filters. Queries shorter than 2 characters are rejected.",
       inputSchema: {
         query: z.string().describe("Search query (min 2 characters)"),
         scope: z

@@ -7,6 +7,7 @@ import {
   getInstrumentListWithCounts,
 } from "@/lib/api/instruments";
 import type { InstrumentType } from "@/lib/db/schema";
+import { DATAHUB_GLOSSARY } from "@/lib/mcp/glossary";
 
 // Instrument types with structured filter-options. Must match `search_runs` args.
 const FILTERABLE_INSTRUMENT_TYPES = new Set<InstrumentType>([
@@ -110,6 +111,25 @@ export function registerResources(server: McpServer) {
         ],
       };
     }
+  );
+
+  server.registerResource(
+    "glossary",
+    "datahub://glossary",
+    {
+      description:
+        "Static reference: run status derivation, instrument types, ranBy literals, archive polling, and tool-routing tips.",
+      mimeType: "application/json",
+    },
+    async () => ({
+      contents: [
+        {
+          uri: "datahub://glossary",
+          mimeType: "application/json",
+          text: JSON.stringify(DATAHUB_GLOSSARY, null, 2),
+        },
+      ],
+    })
   );
 
   server.registerResource(
