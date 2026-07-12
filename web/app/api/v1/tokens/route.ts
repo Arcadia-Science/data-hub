@@ -3,8 +3,9 @@ import type { NextRequest } from "next/server";
 import { requireAdmin, requireSession } from "@/lib/api/auth";
 import { apiError, UNAUTHORIZED, VALIDATION_ERROR } from "@/lib/api/errors";
 import { validateRequestedScopes } from "@/lib/api/scopes";
+import { resolveTokenOwnerUserId } from "@/lib/api/token-owner";
 import { db } from "@/lib/db";
-import { personalAccessTokens } from "@/lib/db/schema";
+import { personalAccessTokens, users } from "@/lib/db/schema";
 import { generateToken, getTokenPrefix, hashToken } from "@/lib/tokens";
 
 export async function GET() {
@@ -44,7 +45,12 @@ export async function POST(request: NextRequest) {
     return authResult;
   }
 
-  let body: { name?: string; expires_at?: string; scopes?: unknown };
+  let body: {
+    name?: string;
+    expires_at?: string;
+    scopes?: unknown;
+    user_id?: unknown;
+  };
   try {
     body = await request.json();
   } catch {
@@ -65,6 +71,22 @@ export async function POST(request: NextRequest) {
     return apiError(400, VALIDATION_ERROR, validation.error);
   }
   const scopes = validation.scopes;
+
+  const owner = await resolveTokenOwnerUserId(
+    body.user_id,
+    authResult.userId,
+    async (id) => {
+      const [row] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.id, id))
+        .limit(1);
+      return Boolean(row);
+    }
+  );
+  if (!owner.ok) {
+    return apiError(400, VALIDATION_ERROR, owner.error);
+  }
 
   let expiresAt: Date | null = null;
   if (body.expires_at) {
@@ -94,7 +116,7 @@ export async function POST(request: NextRequest) {
   const [inserted] = await db
     .insert(personalAccessTokens)
     .values({
-      userId: authResult.userId,
+      userId: owner.userId,
       name,
       tokenHash,
       tokenPrefix,

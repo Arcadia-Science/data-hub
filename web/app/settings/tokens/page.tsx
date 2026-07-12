@@ -173,7 +173,11 @@ export default async function TokensPage() {
               : "View personal access tokens for API authentication."}
           </p>
         </div>
-        {isAdmin ? <CreateTokenDialog /> : <CreateTokenDisabledButton />}
+        {isAdmin ? (
+          <CreateTokenDialog currentUserId={session.user.id} />
+        ) : (
+          <CreateTokenDisabledButton />
+        )}
       </div>
 
       <div className="mt-6">
