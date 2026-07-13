@@ -113,8 +113,7 @@ function buildRunCountSubquery(weekStartISO: string) {
   // "today" but the data is older) don't pollute the recent-runs window
   // or get reported as the most recent activity. Falls back to created_at
   // for Lambda-only and pre-backfill runs where acquired_at is NULL.
-  // `weekStartISO` is Monday 00:00 in the viewer's timezone (UTC when no
-  // timezone cookie is present).
+  // `weekStartISO` is Monday 00:00 from `getViewerTimeZone()` (cookie → IP → UTC).
   return db
     .select({
       instrumentId: instrumentRuns.instrumentId,

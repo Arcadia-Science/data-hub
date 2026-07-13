@@ -140,9 +140,9 @@ export interface DashboardStats {
  * row-multiplication problems we'd hit joining instruments × runs × files ×
  * attributions in a single statement.
  *
- * Fleet-wide and viewer-independent, so it's `cache()`-deduped without a key —
- * duplicate calls within a request (e.g. layout + page) share one result.
- * Day/week windows use the viewer's timezone cookie (UTC if absent).
+ * Fleet-wide counts, keyed only by the viewer's timezone (cookie → Vercel IP
+ * zone → UTC). Zero-arg `cache()` is safe within a request: one timezone, one
+ * result shared by duplicate callers (e.g. layout + page).
  */
 export const getDashboardStats = cache(
   async function getDashboardStats(): Promise<DashboardStats> {
@@ -336,7 +336,7 @@ function attributedToUser(userId: string): SQL {
  * instruments — a user's own runs stay relevant even after an instrument is
  * retired, and this matches the unrestricted `ranBy` run list on the page.
  * `cache()` keys on `userId` so parallel requests from different users don't
- * collide. Day/week windows use the viewer's timezone cookie (UTC if absent).
+ * collide. Day/week windows use `getViewerTimeZone()` (cookie → IP → UTC).
  */
 export const getMyRunsStats = cache(async function getMyRunsStats(
   userId: string

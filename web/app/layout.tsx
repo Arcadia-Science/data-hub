@@ -25,6 +25,7 @@ import { countUnread } from "@/lib/api/notifications";
 import { getSidebarInstruments } from "@/lib/api/sidebar";
 import { auth, signOut } from "@/lib/auth";
 import { cn } from "@/lib/utils";
+import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
 const fontSans = Geist({ subsets: ["latin"], variable: "--font-sans" });
 
@@ -108,6 +109,9 @@ export default async function RootLayout({
   // first-visit experience expanded.
   const sidebarCookie = (await cookies()).get(SIDEBAR_COOKIE_NAME)?.value;
   const sidebarDefaultOpen = sidebarCookie !== "false";
+  // Deduped with page/stats callers via React.cache(); passed to the client
+  // sync so we can skip refresh when the server zone already matches.
+  const serverTimeZone = await getViewerTimeZone();
 
   // `--banner-height` is the single knob that offsets the body, the
   // viewport-fixed sidebar, and the full-height auth screen for the preview
@@ -129,7 +133,7 @@ export default async function RootLayout({
       <body suppressHydrationWarning>
         <SessionProvider session={session}>
           <ThemeProvider>
-            <TimezoneCookieSync />
+            <TimezoneCookieSync serverTimeZone={serverTimeZone} />
             <NuqsAdapter>
               <TooltipProvider>
                 <PreviewDeploymentBanner />

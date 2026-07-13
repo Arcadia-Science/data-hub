@@ -2,7 +2,7 @@
 
 import { Calendar as CalendarIcon, Check, ChevronDown } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -68,6 +68,10 @@ function withinTolerance(aMs: number, bMs: number): boolean {
   return Math.abs(aMs - bMs) < CALENDAR_TOLERANCE_MS;
 }
 
+function rangesEqual(a: DateRange, b: DateRange): boolean {
+  return a.from === b.from && a.to === b.to;
+}
+
 /**
  * Resolves a preset to URL `date_from` / `date_to` values.
  *
@@ -102,6 +106,12 @@ function rangeForPreset(id: PresetId): DateRange {
   }
 }
 
+/**
+ * Infer which preset matches URL bounds. On Mondays (and the 1st), today /
+ * this-week / this-month share a midnight `from`, so we prefer the shortest
+ * window (today → week → month). Interactive picks that collide are kept via
+ * `pinnedPreset` in `RunsDateFilter`.
+ */
 function resolveActivePreset(value: DateRange): PresetId | null {
   if (!value.from) {
     return null;
@@ -129,7 +139,7 @@ function resolveActivePreset(value: DateRange): PresetId | null {
     return null;
   }
 
-  // Open-ended calendar presets.
+  // Open-ended calendar presets (shortest match first — see docstring).
   if (withinTolerance(fromMs, Date.parse(startOfTodayISO(tz)))) {
     return "today";
   }
@@ -160,10 +170,13 @@ function presetLabel(id: PresetId): string {
   return PRESETS.find((p) => p.id === id)?.label ?? "Date range";
 }
 
-function resolveLabel(value: DateRange, defaultPreset?: PresetId): string {
-  const preset = resolveActivePreset(value);
-  if (preset) {
-    return presetLabel(preset);
+function resolveLabel(
+  value: DateRange,
+  activePreset: PresetId | null,
+  defaultPreset?: PresetId
+): string {
+  if (activePreset) {
+    return presetLabel(activePreset);
   }
   if (value.from && value.to) {
     return formatDateRange(new Date(value.from), new Date(value.to));
@@ -209,22 +222,18 @@ export function RunsDateFilter({
 }) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<"presets" | "custom">("presets");
+  // When today / this-week / this-month share a midnight cutoff, keep the
+  // preset the user last clicked so the popover highlight matches intent.
+  const [pinnedPreset, setPinnedPreset] = useState<PresetId | null>(null);
 
   const isEmpty = value.from === null && value.to === null;
-  const activePreset = useMemo(() => {
-    const resolved = resolveActivePreset(value);
-    if (resolved) {
-      return resolved;
-    }
-    if (isEmpty && defaultPreset) {
-      return defaultPreset;
-    }
-    return null;
-  }, [value, isEmpty, defaultPreset]);
-  const label = useMemo(
-    () => resolveLabel(value, defaultPreset),
-    [value, defaultPreset]
-  );
+  const pinMatches =
+    pinnedPreset !== null && rangesEqual(value, rangeForPreset(pinnedPreset));
+  const resolved = resolveActivePreset(value);
+  const activePreset = pinMatches
+    ? pinnedPreset
+    : (resolved ?? (isEmpty && defaultPreset ? defaultPreset : null));
+  const label = resolveLabel(value, activePreset, defaultPreset);
   const isCustom =
     activePreset === null && (value.from !== null || value.to !== null);
 
@@ -237,16 +246,19 @@ export function RunsDateFilter({
   }
 
   function applyPreset(preset: Preset) {
+    setPinnedPreset(preset.id);
     onChange(rangeForPreset(preset.id));
     setOpen(false);
   }
 
   function clearRange() {
+    setPinnedPreset(null);
     onChange({ from: null, to: null });
     setOpen(false);
   }
 
   function applyCustom(range: { from: Date; to: Date }) {
+    setPinnedPreset(null);
     // Snap start to 00:00 and end to 23:59:59.999 of the selected local day.
     const start = new Date(range.from);
     start.setHours(0, 0, 0, 0);

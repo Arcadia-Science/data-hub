@@ -152,17 +152,15 @@ async function DashboardRunsSection({
   const instrumentIds =
     params.instrument_id.length > 0 ? params.instrument_id : undefined;
 
-  // When no explicit date filter is set, default to the start of today in the
-  // viewer's timezone. This matches the "Today" label surfaced by the
-  // dashboard's RunsDateFilter and keeps the initial payload bounded.
+  // Start independent toolbar fetches immediately; only the run list needs the
+  // viewer timezone for the default "today" lookback.
+  const instrumentsPromise = getInstruments(true);
+  const ranByUsersPromise = getRanByFilterOptions();
   const defaultDateFrom = startOfTodayISO(await getViewerTimeZone());
 
-  // The toolbar instrument list, the fleet-wide attributor options, and the
-  // filtered run page are all independent. Only active instruments are useful
-  // filter targets on the dashboard.
   const [instruments, ranByUsers, runResult] = await Promise.all([
-    getInstruments(true),
-    getRanByFilterOptions(),
+    instrumentsPromise,
+    ranByUsersPromise,
     buildRunListQuery({
       instrumentId: instrumentIds,
       search: params.search || undefined,
