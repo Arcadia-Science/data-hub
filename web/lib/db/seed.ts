@@ -14,6 +14,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getTableName, isTable, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
+import {
+  startOfLastWeekEndDayISO,
+  startOfLastWeekISO,
+  startOfMonthISO,
+  startOfTodayISO,
+  startOfWeekISO,
+} from "@/lib/date";
 import { generateToken, getTokenPrefix, hashToken } from "@/lib/tokens";
 // biome-ignore lint/performance/noNamespaceImport: seed needs the full schema module for Db typing and table iteration
 import * as schema from "./schema";
@@ -342,11 +349,11 @@ export interface InstrumentFixture {
 // run ids that look like real ones from that instrument (the qPCR
 // `process_file` documents `Experiment_YYYYMMDD`; the gel-doc and
 // plate-reader modules treat the filename stem as the run id, so
-// these mirror those formats). The run-id list length sets how many
-// runs `seedRuns` produces for fixture-bearing instruments; other
-// instruments keep the count argument and use synthetic
-// `seed-run-N` ids. Adding a new entry here is enough to make every
-// seeded run for that instrument type render real bytes (provided
+// these mirror those formats). Keep the run-id list at least as long as
+// the `seedRuns` default count so every fixture-bearing run gets a
+// realistic id; other instruments keep the count argument and use
+// synthetic `seed-run-N` ids. Adding a new entry here is enough to make
+// every seeded run for that instrument type render real bytes (provided
 // `LOCAL_S3_MIRROR` is set).
 //
 // Exported so `web/scripts/process-fixtures.ts` can re-derive the
@@ -364,6 +371,9 @@ export const INSTRUMENT_FIXTURES: Partial<
       "Experiment_20260115",
       "Experiment_20260108",
       "Experiment_20260101",
+      "Experiment_20251225",
+      "Experiment_20251218",
+      "Experiment_20251211",
     ],
   },
   gel_doc: {
@@ -375,6 +385,9 @@ export const INSTRUMENT_FIXTURES: Partial<
       "26.01.19_11.05.42",
       "26.01.12_14.22.18",
       "26.01.05_09.30.00",
+      "25.12.29_16.40.00",
+      "25.12.22_13.15.00",
+      "25.12.15_10.00.00",
     ],
   },
   plate_reader: {
@@ -386,6 +399,9 @@ export const INSTRUMENT_FIXTURES: Partial<
       "011526_AR_GFP_endpoint",
       "010826_DK_OD600",
       "010126_AR_OD750",
+      "122525_DK_OD600",
+      "121825_AR_OD750",
+      "121125_DK_GFP_endpoint",
     ],
   },
 };
@@ -405,10 +421,62 @@ export const FIXTURES_DIR = path.resolve(
   "fixtures"
 );
 
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+
+/**
+ * Calendar-relative `acquired_at` timestamps so local reseeds exercise the
+ * dashboard date presets (Today / Yesterday / This week / Last 7 days / …)
+ * and the today / this-week stat cards. Uses the host IANA timezone — the
+ * same zone the browser cookie syncs for local `make db-reseed` workflows.
+ */
+function seedAcquiredAtSchedule(now: Date = new Date()): Date[] {
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const todayStart = new Date(startOfTodayISO(timeZone, now)).getTime();
+  const weekStart = new Date(startOfWeekISO(timeZone, now)).getTime();
+  const lastWeekStart = new Date(startOfLastWeekISO(timeZone, now)).getTime();
+  const lastWeekSunday = new Date(
+    startOfLastWeekEndDayISO(timeZone, now)
+  ).getTime();
+  const monthStart = new Date(startOfMonthISO(timeZone, now)).getTime();
+
+  // Prefer Tuesday noon of this week; on Mon/Tue fall back to shortly after
+  // week start so the stamp stays in "this week" and still before `now`.
+  let earlierThisWeek = weekStart + 1.5 * DAY_MS;
+  if (earlierThisWeek >= todayStart) {
+    earlierThisWeek = weekStart + HOUR_MS;
+  }
+  if (earlierThisWeek >= now.getTime()) {
+    earlierThisWeek = now.getTime() - 30 * 60_000;
+  }
+
+  // Earlier this month, preferably outside the rolling 14-day window so
+  // "This month" and "Last 2 weeks" diverge. Clamp into the month when
+  // reseeding early in the calendar month.
+  let earlierThisMonth = now.getTime() - 16 * DAY_MS;
+  if (earlierThisMonth < monthStart) {
+    earlierThisMonth = monthStart + HOUR_MS;
+  }
+  if (earlierThisMonth >= now.getTime()) {
+    earlierThisMonth = now.getTime() - HOUR_MS;
+  }
+
+  return [
+    new Date(now.getTime() - 2 * HOUR_MS), // Today
+    new Date(todayStart - 12 * HOUR_MS), // Yesterday
+    new Date(earlierThisWeek), // This week (not today)
+    new Date(lastWeekStart + 2.5 * DAY_MS), // Last 7 days / prior calendar week
+    new Date(lastWeekSunday + 12 * HOUR_MS), // Last 7–14 days
+    new Date(now.getTime() - 10 * DAY_MS), // Last 2 weeks (rolling)
+    new Date(now.getTime() - 22 * DAY_MS), // Last 4 weeks (rolling)
+    new Date(earlierThisMonth), // This month / older custom ranges
+  ];
+}
+
 export async function seedRuns(
   db: Db,
   instrumentId: string,
-  count = 5,
+  count = 8,
   instrumentType?: schema.InstrumentType
 ): Promise<SeededRun[]> {
   if (count <= 0) {
@@ -427,13 +495,13 @@ export async function seedRuns(
   // fine.
   const fixtureRunIds = fixture?.runIds.slice(0, count);
 
-  // Spread runs across the last ~2 weeks (3, 6, 9, 12, 15 days back for
-  // count = 5) so UI date filters like "This week" / "Last 2 weeks"
-  // return non-empty, differing result sets.
-  const now = new Date();
-  const dayMs = 24 * 60 * 60_000;
+  // Place runs on calendar-aware stamps so Today / Yesterday / This week /
+  // Last 7 days / Last 2 weeks / This month / Last 4 weeks presets each return
+  // a non-empty, differing set after a local reseed.
+  const schedule = seedAcquiredAtSchedule();
   const runValues = Array.from({ length: count }, (_, i) => {
-    const acquiredAt = new Date(now.getTime() - (i + 1) * 3 * dayMs);
+    const acquiredAt =
+      schedule[i] ?? new Date(Date.now() - (i + 1) * 3 * DAY_MS);
     return {
       instrumentId,
       runId: fixtureRunIds?.[i] ?? `seed-run-${i + 1}`,
@@ -544,10 +612,16 @@ export async function seedRunComments(
   if (runs.length === 0) {
     return;
   }
+  // Stamp most comments as "this week" and a couple as last week so the
+  // user-runs "Comments this week" card is a proper subset of total comments.
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const weekStartMs = new Date(startOfWeekISO(timeZone)).getTime();
+  const lastWeekCommentAt = new Date(weekStartMs - 2 * DAY_MS);
   const rows = runs.map((run, i) => ({
     runId: run.id,
     userId,
     body: `Seeded comment ${i + 1} on **${run.runId}** — looks good!`,
+    createdAt: i % 4 === 3 ? lastWeekCommentAt : new Date(),
   }));
   await db.insert(schema.runComments).values(rows);
 }

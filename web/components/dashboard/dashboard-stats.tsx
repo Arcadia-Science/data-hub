@@ -175,8 +175,8 @@ export function DashboardStatsCards({
           )
         }
         // The leaderboard value is a name + avatar, not a number, so drop the
-        // numeric sizing used by the count cards.
-        valueClassName="text-xl"
+        // numeric sizing and tighten the label gap so the row sits closer.
+        valueClassName="mt-0.5 text-xl"
       />
     </div>
   );
