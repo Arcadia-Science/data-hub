@@ -1069,15 +1069,21 @@ export interface ProcessedCsvSummary {
   columns: string[];
   rowCount: number;
   sampleRows: RawWellRow[];
+  // True when `scanLimit` was hit and reading stopped early, so `rowCount` is
+  // a floor rather than the exact total.
+  truncated: boolean;
 }
 
 // Streaming counterpart to `getProcessedCsvData` for report/summary callers.
 // Streams each CSV row-by-row and retains only up to `sampleLimit` rows, so
-// peak memory stays bounded by the sample rather than the full plate grid(s)
-// even for large multi-CSV runs. `rowCount` still reflects every row scanned.
+// peak memory stays bounded by the sample rather than the full plate grid(s).
+// Reading also stops once `scanLimit` rows have been seen, bounding wall-clock
+// cost (and download bytes) so a pathological multi-CSV run can't blow the
+// MCP route's request budget just to compute a total.
 export async function getProcessedCsvSummary(
   runFiles: RunFile[],
-  sampleLimit: number
+  sampleLimit: number,
+  scanLimit: number
 ): Promise<ProcessedCsvSummary> {
   const csvFiles = runFiles.filter(
     (f) =>
@@ -1090,14 +1096,19 @@ export async function getProcessedCsvSummary(
 
   const sampleRows: RawWellRow[] = [];
   let rowCount = 0;
+  let truncated = false;
 
   for (const file of csvFiles) {
+    if (truncated) {
+      break;
+    }
     const { s3Bucket, s3Key } = file;
     if (!(s3Bucket && s3Key)) {
       continue;
     }
+    let stream: import("node:stream").Readable | undefined;
     try {
-      const stream = await getS3ObjectStream(s3Bucket, s3Key);
+      stream = await getS3ObjectStream(s3Bucket, s3Key);
       const parser = stream.pipe(
         parseCsvStream({ columns: true, skip_empty_lines: true, trim: true })
       );
@@ -1106,18 +1117,26 @@ export async function getProcessedCsvSummary(
         if (sampleRows.length < sampleLimit) {
           sampleRows.push(record as RawWellRow);
         }
+        if (rowCount >= scanLimit) {
+          truncated = true;
+          break;
+        }
       }
     } catch (err) {
       // Mirror `getProcessedCsvData`: a bad CSV is skipped, not fatal. Rows
       // read before a mid-stream error still count toward the summary.
       console.error(`Failed to fetch processed CSV ${s3Key}:`, err);
+    } finally {
+      // Breaking the for-await destroys the parser but not the piped source,
+      // so destroy it explicitly to stop downloading the rest of the object.
+      stream?.destroy();
     }
   }
 
   const columns =
     sampleRows.length > 0 ? Object.keys(sampleRows[0]).sort() : [];
 
-  return { rowCount, columns, sampleRows };
+  return { columns, rowCount, sampleRows, truncated };
 }
 
 // ---------------------------------------------------------------------------

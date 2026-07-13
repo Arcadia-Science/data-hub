@@ -228,6 +228,7 @@ vi.mock("@/lib/api/run-reports", () => ({
       columns: ["Well", "Value"],
       sampleRows: [{ Well: "A1", Value: "0.1" }],
       sampleRowLimit: 20,
+      truncated: false,
     },
     images: [],
     reportFiles: [],
@@ -307,6 +308,7 @@ vi.mock("@/lib/api/file-reprocessing", () => ({
 vi.mock("@/lib/api/run-lifecycle", () => ({
   softDeleteRun: vi.fn().mockResolvedValue({
     ok: true,
+    id: "internal-1",
     instrumentId: "test-plate-reader",
     runId: "run-1",
     deletedAt: new Date("2025-01-01"),
@@ -314,6 +316,7 @@ vi.mock("@/lib/api/run-lifecycle", () => ({
   }),
   restoreRun: vi.fn().mockResolvedValue({
     ok: true,
+    id: "internal-1",
     instrumentId: "test-plate-reader",
     runId: "run-1",
     deletedAt: null,

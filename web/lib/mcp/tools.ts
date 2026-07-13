@@ -1,6 +1,7 @@
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { and, eq } from "drizzle-orm";
+import { after } from "next/server";
 import { z } from "zod";
 import { getInstrumentSummaries, getUserById } from "@/lib/api/dashboard";
 import { reprocessFile, reprocessRun } from "@/lib/api/file-reprocessing";
@@ -45,7 +46,7 @@ import {
   getWatcherList,
 } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
-import { runAttributions, users, watcherEventTypeEnum } from "@/lib/db/schema";
+import { runAttributions, watcherEventTypeEnum } from "@/lib/db/schema";
 import { validateSearchRunsMetadataFilters } from "@/lib/mcp/validate-run-filters";
 import { RUN_STATUS_VALUES } from "@/lib/runs/run-status";
 import {
@@ -412,6 +413,10 @@ export function registerTools(server: McpServer) {
       annotations: { readOnlyHint: true },
     },
     async ({ query, scope }, { authInfo }) => {
+      // Intentionally gated on runs:read alone, mirroring the REST palette
+      // endpoint (`GET /api/v1/search`). A runs:read-only token can therefore
+      // see filenames here; that's the existing product contract for search,
+      // not an MCP-specific broadening.
       const scopeError = requireMcpScope(authInfo, "runs:read");
       if (scopeError) {
         return scopeError;
@@ -465,7 +470,7 @@ export function registerTools(server: McpServer) {
           )
           .optional()
           .describe(
-            "Optional extras. attributions are always included; files returns the first page (50) via list_run_files shape."
+            'Optional extras. "attributions" is accepted but redundant — attributions are always included. "files" returns the first page (50) via list_run_files shape.'
           ),
       },
       annotations: { readOnlyHint: true },
@@ -1120,28 +1125,30 @@ export function registerTools(server: McpServer) {
         body: validated.body,
       });
 
-      const [author] = await db
-        .select({ name: users.name, email: users.email })
-        .from(users)
-        .where(eq(users.id, userId))
-        .limit(1);
+      const author = await getUserById(userId);
       const authorDisplayName = author?.name ?? author?.email ?? "Someone";
-      const origin = process.env.VERCEL_URL
-        ? `https://${process.env.VERCEL_URL}`
+      // MCP tools have no request URL, so derive deep-link host from env. Use
+      // the canonical production domain rather than VERCEL_URL (the
+      // per-deployment host); absent it, notifyComment skips Slack deep links.
+      const origin = process.env.VERCEL_PROJECT_PRODUCTION_URL
+        ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
         : undefined;
 
-      // In-app notifications still fire when `origin` is absent; Slack DMs that
-      // need deep links are skipped (see `notifyComment`).
-      void notifyComment({
-        runInternalId: run.id,
-        commentId: comment.id,
-        authorUserId: userId,
-        authorDisplayName,
-        instrumentId,
-        instrumentDisplayName: run.instrumentDisplayName,
-        runDisplayId: runId,
-        commentBody: validated.body,
-        origin,
+      // Defer with after() so the fan-out runs after the response flushes.
+      // A bare un-awaited promise can be dropped when the serverless runtime
+      // freezes on return; this matches the REST comment route.
+      after(async () => {
+        await notifyComment({
+          runInternalId: run.id,
+          commentId: comment.id,
+          authorUserId: userId,
+          authorDisplayName,
+          instrumentId,
+          instrumentDisplayName: run.instrumentDisplayName,
+          runDisplayId: runId,
+          commentBody: validated.body,
+          origin,
+        });
       });
 
       return textResult(comment);
@@ -1245,6 +1252,9 @@ export function registerTools(server: McpServer) {
         instrumentId: z.string().describe("Instrument identifier"),
         runId: z.string().describe("Run identifier within the instrument"),
       },
+      // destructiveHint mirrors reprocess_file: this overwrites processed
+      // artifacts and resets per-file status in bulk, so clients should
+      // confirm even though no data is deleted.
       annotations: { readOnlyHint: false, destructiveHint: true },
     },
     async ({ instrumentId, runId }, { authInfo }) => {

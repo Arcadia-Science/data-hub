@@ -11,6 +11,10 @@ import { files } from "@/lib/db/schema";
 
 // Keep agent payloads small: enough to reason, not a full plate grid dump.
 export const RUN_REPORT_CSV_SAMPLE_ROWS = 20;
+// Upper bound on rows read to compute `rowCount`. Generous for real plates
+// (a 1536-well run is well under this) but caps the work for pathological
+// multi-CSV runs so the report can't exceed the MCP route's time budget.
+export const RUN_REPORT_CSV_MAX_SCAN_ROWS = 10_000;
 export const RUN_REPORT_ERROR_MESSAGE_MAX = 500;
 
 export interface RunFailureSummary {
@@ -89,6 +93,8 @@ export type RunReportResult =
         columns: string[];
         sampleRows: Record<string, string>[];
         sampleRowLimit: number;
+        // rowCount is a floor (scan cap hit) rather than the exact total.
+        truncated: boolean;
       } | null;
       images: ReturnType<typeof toReportFileRef>[];
       reportFiles: ReturnType<typeof toReportFileRef>[];
@@ -116,12 +122,15 @@ export async function buildRunReport(
     getRunImageFiles(run.id),
   ]);
 
-  // Stream + sample so a run with large/many processed CSVs doesn't get fully
-  // buffered just to keep the first `RUN_REPORT_CSV_SAMPLE_ROWS` rows.
-  const { rowCount, columns, sampleRows } = await getProcessedCsvSummary(
-    reportFiles,
-    RUN_REPORT_CSV_SAMPLE_ROWS
-  );
+  // Stream + sample with a scan cap so a run with large/many processed CSVs
+  // is neither fully buffered nor fully read just to keep the first
+  // `RUN_REPORT_CSV_SAMPLE_ROWS` rows.
+  const { rowCount, columns, sampleRows, truncated } =
+    await getProcessedCsvSummary(
+      reportFiles,
+      RUN_REPORT_CSV_SAMPLE_ROWS,
+      RUN_REPORT_CSV_MAX_SCAN_ROWS
+    );
   const processedCsv =
     rowCount > 0
       ? {
@@ -129,6 +138,7 @@ export async function buildRunReport(
           columns,
           sampleRows,
           sampleRowLimit: RUN_REPORT_CSV_SAMPLE_ROWS,
+          truncated,
         }
       : null;
 

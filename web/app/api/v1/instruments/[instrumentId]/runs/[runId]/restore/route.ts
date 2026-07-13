@@ -30,6 +30,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   }
 
   return Response.json({
+    id: result.id,
     instrument_id: result.instrumentId,
     run_id: result.runId,
     deleted_at: result.deletedAt,

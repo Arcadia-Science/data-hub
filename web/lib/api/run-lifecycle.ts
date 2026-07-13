@@ -6,6 +6,9 @@ import { instrumentRuns } from "@/lib/db/schema";
 export type RunLifecycleResult =
   | {
       ok: true;
+      // Internal run UUID. The v1 restore endpoint has always echoed this, so
+      // it's carried through the shared result to preserve that contract.
+      id: string;
       instrumentId: string;
       runId: string;
       deletedAt: Date | null;
@@ -51,6 +54,7 @@ export async function softDeleteRun(input: {
 
   return {
     ok: true,
+    id: run.id,
     instrumentId: run.instrumentId,
     runId: run.runId,
     deletedAt: now,
@@ -99,6 +103,7 @@ export async function restoreRun(
 
   return {
     ok: true,
+    id: restored.id,
     instrumentId: restored.instrumentId,
     runId: restored.runId,
     deletedAt: restored.deletedAt,
