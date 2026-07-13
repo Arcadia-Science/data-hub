@@ -2,6 +2,7 @@ import { and, count, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { cache } from "react";
 import YAML from "yaml";
 import { type ActorUser, resolveActorUser } from "@/lib/api/actor";
+import { startOfWeekISO } from "@/lib/date";
 import { type DbExecutor, db } from "@/lib/db";
 import {
   type InstrumentType,
@@ -10,6 +11,7 @@ import {
   users,
   watchers,
 } from "@/lib/db/schema";
+import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
 export interface InstrumentListItem {
   createdAt: Date;
@@ -105,18 +107,20 @@ function mergeFilePatterns(configs: (string | null)[]): string[] {
 // focused dashboard query. Inlined helpers (rather than module-level
 // constants) so each caller gets a fresh drizzle alias and the queries can
 // be composed independently.
-function buildRunCountSubquery() {
+function buildRunCountSubquery(weekStartISO: string) {
   // `runsThisWeek` and `lastRunAt` are anchored to the run's true
   // acquisition time when known so backfilled runs (where created_at is
   // "today" but the data is older) don't pollute the recent-runs window
   // or get reported as the most recent activity. Falls back to created_at
   // for Lambda-only and pre-backfill runs where acquired_at is NULL.
+  // `weekStartISO` is Monday 00:00 in the viewer's timezone (UTC when no
+  // timezone cookie is present).
   return db
     .select({
       instrumentId: instrumentRuns.instrumentId,
       count: sql<number>`cast(count(*) as int)`.as("run_count"),
       countThisWeek:
-        sql<number>`cast(count(*) filter (where coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '7 days') as int)`.as(
+        sql<number>`cast(count(*) filter (where coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) >= ${weekStartISO}::timestamptz) as int)`.as(
           "run_count_this_week"
         ),
       lastRunAt:
@@ -212,7 +216,8 @@ function indexConfigsByInstrument(
 // (e.g. layout + page) share a single result.
 export const getInstrumentListWithCounts = cache(
   async function getInstrumentListWithCounts(): Promise<InstrumentListItem[]> {
-    const runCountSq = buildRunCountSubquery();
+    const weekStart = startOfWeekISO(await getViewerTimeZone());
+    const runCountSq = buildRunCountSubquery(weekStart);
     const watcherCountSq = buildWatcherCountSubquery();
 
     const [rows, watcherConfigs] = await Promise.all([
@@ -270,7 +275,8 @@ export const getRecentActiveInstrumentsForDashboard = cache(
   async function getRecentActiveInstrumentsForDashboard(
     limit: number
   ): Promise<DashboardInstrumentSummary> {
-    const runCountSq = buildRunCountSubquery();
+    const weekStart = startOfWeekISO(await getViewerTimeZone());
+    const runCountSq = buildRunCountSubquery(weekStart);
     const watcherCountSq = buildWatcherCountSubquery();
 
     // Row fetch and the active-count run in parallel; they share no data.

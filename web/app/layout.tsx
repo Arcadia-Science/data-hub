@@ -12,6 +12,7 @@ import { PreviewDeploymentBanner } from "@/components/preview-deployment-banner"
 import { ArchiveDownloadProvider } from "@/components/runs/archive-download-provider";
 import { SearchTrigger } from "@/components/search/search-trigger";
 import { ThemeProvider } from "@/components/theme-provider";
+import { TimezoneCookieSync } from "@/components/timezone-cookie-sync";
 import {
   SIDEBAR_COOKIE_NAME,
   SidebarInset,
@@ -128,6 +129,7 @@ export default async function RootLayout({
       <body suppressHydrationWarning>
         <SessionProvider session={session}>
           <ThemeProvider>
+            <TimezoneCookieSync />
             <NuqsAdapter>
               <TooltipProvider>
                 <PreviewDeploymentBanner />

@@ -10,15 +10,15 @@ import type {
 import { cn, formatBytes } from "@/lib/utils";
 
 const DASHBOARD_STAT_LABELS = [
-  "Runs in the last 24 hours",
-  "Runs in the last 7 days",
+  "Runs today",
+  "Runs this week",
   "Pending uploads",
   "Most runs this week",
 ] as const;
 
 const MY_RUNS_STAT_LABELS = [
-  "Runs in the last 24 hours",
-  "Runs in the last 7 days",
+  "Runs today",
+  "Runs this week",
   "Comments on your runs",
   "Pending uploads",
 ] as const;
@@ -114,7 +114,7 @@ export function DashboardStatsCards({
   stats: DashboardStats;
   topAttributor: TopAttributor | null;
 }) {
-  const { runsLast24Hours, pendingUploads, runsThisWeek } = stats;
+  const { runsToday, pendingUploads, runsThisWeek } = stats;
 
   // Highlight pending uploads in red once a backlog forms — a non-zero queue
   // is a routine signal of attention, not an error.
@@ -126,11 +126,11 @@ export function DashboardStatsCards({
         label={DASHBOARD_STAT_LABELS[0]}
         subline={
           <DataGeneratedSubline
-            bytes={runsLast24Hours.bytesGenerated}
-            emptyLabel="No data generated in the last 24 hours"
+            bytes={runsToday.bytesGenerated}
+            emptyLabel="No data generated today"
           />
         }
-        value={formatNumber(runsLast24Hours.total)}
+        value={formatNumber(runsToday.total)}
       />
       <StatCard
         label={DASHBOARD_STAT_LABELS[1]}
@@ -191,8 +191,7 @@ export function MyRunsStatsCards({
   stats: MyRunsStats;
   commentsLabel?: string;
 }) {
-  const { runsLast24Hours, runsLast7Days, commentsLast7Days, pendingUploads } =
-    stats;
+  const { runsToday, runsThisWeek, commentsThisWeek, pendingUploads } = stats;
 
   const pendingHasBacklog = pendingUploads.count > 0;
 
@@ -202,30 +201,26 @@ export function MyRunsStatsCards({
         label={MY_RUNS_STAT_LABELS[0]}
         subline={
           <DataGeneratedSubline
-            bytes={runsLast24Hours.bytesGenerated}
-            emptyLabel="No data generated in the last 24 hours"
+            bytes={runsToday.bytesGenerated}
+            emptyLabel="No data generated today"
           />
         }
-        value={formatNumber(runsLast24Hours.total)}
+        value={formatNumber(runsToday.total)}
       />
       <StatCard
         label={MY_RUNS_STAT_LABELS[1]}
         subline={
           <DataGeneratedSubline
-            bytes={runsLast7Days.bytesGenerated}
-            emptyLabel="No data generated in the last 7 days"
+            bytes={runsThisWeek.bytesGenerated}
+            emptyLabel="No data generated this week"
           />
         }
-        value={formatNumber(runsLast7Days.total)}
+        value={formatNumber(runsThisWeek.total)}
       />
       <StatCard
         label={commentsLabel}
-        subline={
-          commentsLast7Days.count > 0
-            ? "in the last 7 days"
-            : "None in the last 7 days"
-        }
-        value={formatNumber(commentsLast7Days.count)}
+        subline={commentsThisWeek.count > 0 ? "this week" : "None this week"}
+        value={formatNumber(commentsThisWeek.count)}
       />
       <StatCard
         label={MY_RUNS_STAT_LABELS[3]}

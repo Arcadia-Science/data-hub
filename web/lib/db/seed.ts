@@ -428,7 +428,7 @@ export async function seedRuns(
   const fixtureRunIds = fixture?.runIds.slice(0, count);
 
   // Spread runs across the last ~2 weeks (3, 6, 9, 12, 15 days back for
-  // count = 5) so UI date filters like "last 7 days" / "last 14 days"
+  // count = 5) so UI date filters like "This week" / "Last 2 weeks"
   // return non-empty, differing result sets.
   const now = new Date();
   const dayMs = 24 * 60 * 60_000;

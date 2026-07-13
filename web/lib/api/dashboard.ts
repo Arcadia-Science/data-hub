@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull, type SQL, sql } from "drizzle-orm";
 import { cache } from "react";
 import type { UserAvatarUser } from "@/components/user-avatar";
+import { startOfTodayISO, startOfWeekISO } from "@/lib/date";
 import { db } from "@/lib/db";
 import {
   files,
@@ -12,6 +13,7 @@ import {
   watchers,
 } from "@/lib/db/schema";
 import { toInitials } from "@/lib/utils";
+import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
 export interface InstrumentSummary {
   displayName: string;
@@ -121,11 +123,11 @@ export interface DashboardStats {
     count: number;
     totalBytes: number;
   };
-  runsLast24Hours: {
+  runsThisWeek: {
     total: number;
     bytesGenerated: number;
   };
-  runsThisWeek: {
+  runsToday: {
     total: number;
     bytesGenerated: number;
   };
@@ -140,11 +142,16 @@ export interface DashboardStats {
  *
  * Fleet-wide and viewer-independent, so it's `cache()`-deduped without a key —
  * duplicate calls within a request (e.g. layout + page) share one result.
+ * Day/week windows use the viewer's timezone cookie (UTC if absent).
  */
 export const getDashboardStats = cache(
   async function getDashboardStats(): Promise<DashboardStats> {
+    const timeZone = await getViewerTimeZone();
+    const todayStart = startOfTodayISO(timeZone);
+    const weekStart = startOfWeekISO(timeZone);
+
     const [
-      [runsLast24HoursRow],
+      [runsTodayRow],
       [bytesGeneratedRow],
       [pendingRow],
       [runsThisWeekRow],
@@ -159,21 +166,20 @@ export const getDashboardStats = cache(
           and(
             eq(instruments.status, "active"),
             isNull(instrumentRuns.deletedAt),
-            sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '24 hours'`
+            sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) >= ${todayStart}::timestamptz`
           )
         ),
-      // Span the last 24 hours + the past 7 days in a single pass; the 24-hour
-      // window is a subset of the weekly window, so FILTER clauses give us both
-      // with one index scan. Bytes are attributed to the file's owning run so
-      // the time window matches the corresponding "Runs in the last X" card —
-      // this avoids the null-`processedAt` blind spot for not-yet-processed
+      // Span today + this calendar week in a single pass; today is a subset
+      // of the weekly window, so FILTER clauses give us both with one index
+      // scan. Bytes are attributed to the file's owning run so the time
+      // window matches the corresponding "Runs today"/"Runs this week" card
+      // — this avoids the null-`processedAt` blind spot for not-yet-processed
       // files (which still represent data the instrument generated). Windows
       // are anchored to the run's actual acquisition time when known so
-      // backfilled historical data doesn't pollute the "last 24h"/"this week"
-      // counts.
+      // backfilled historical data doesn't pollute the today/this-week counts.
       db
         .select({
-          bytesLast24Hours: sql<string>`coalesce(sum(${files.sizeBytes}) filter (where coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '24 hours'), 0)`,
+          bytesToday: sql<string>`coalesce(sum(${files.sizeBytes}) filter (where coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) >= ${todayStart}::timestamptz), 0)`,
           bytesWeek: sql<string>`coalesce(sum(${files.sizeBytes}), 0)`,
         })
         .from(files)
@@ -184,7 +190,7 @@ export const getDashboardStats = cache(
             eq(instruments.status, "active"),
             isNull(files.deletedAt),
             isNull(instrumentRuns.deletedAt),
-            sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '7 days'`
+            sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) >= ${weekStart}::timestamptz`
           )
         ),
       db
@@ -212,16 +218,16 @@ export const getDashboardStats = cache(
           and(
             eq(instruments.status, "active"),
             isNull(instrumentRuns.deletedAt),
-            sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '7 days'`
+            sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) >= ${weekStart}::timestamptz`
           )
         ),
     ]);
 
     return {
-      runsLast24Hours: {
-        total: runsLast24HoursRow?.total ?? 0,
+      runsToday: {
+        total: runsTodayRow?.total ?? 0,
         // bigint sums come back as strings from pg; coerce explicitly.
-        bytesGenerated: Number(bytesGeneratedRow?.bytesLast24Hours ?? 0),
+        bytesGenerated: Number(bytesGeneratedRow?.bytesToday ?? 0),
       },
       pendingUploads: {
         count: pendingRow?.count ?? 0,
@@ -297,18 +303,18 @@ export const getUserProfile = cache(async function getUserProfile(
 });
 
 export interface MyRunsStats {
-  commentsLast7Days: {
+  commentsThisWeek: {
     count: number;
   };
   pendingUploads: {
     count: number;
     totalBytes: number;
   };
-  runsLast7Days: {
+  runsThisWeek: {
     total: number;
     bytesGenerated: number;
   };
-  runsLast24Hours: {
+  runsToday: {
     total: number;
     bytesGenerated: number;
   };
@@ -330,27 +336,30 @@ function attributedToUser(userId: string): SQL {
  * instruments — a user's own runs stay relevant even after an instrument is
  * retired, and this matches the unrestricted `ranBy` run list on the page.
  * `cache()` keys on `userId` so parallel requests from different users don't
- * collide.
+ * collide. Day/week windows use the viewer's timezone cookie (UTC if absent).
  */
 export const getMyRunsStats = cache(async function getMyRunsStats(
   userId: string
 ): Promise<MyRunsStats> {
   const attributed = attributedToUser(userId);
+  const timeZone = await getViewerTimeZone();
+  const todayStart = startOfTodayISO(timeZone);
+  const weekStart = startOfWeekISO(timeZone);
 
   const [[runsRow], [bytesRow], [commentsRow], [pendingRow]] =
     await Promise.all([
-      // Both run-count windows in one pass — the 24-hour window is a subset of
-      // the weekly window, so a FILTER clause gives us both from one scan.
+      // Both run-count windows in one pass — today is a subset of this week,
+      // so a FILTER clause gives us both from one scan.
       db
         .select({
-          last24Hours: sql<number>`cast(count(*) filter (where coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '24 hours') as int)`,
-          last7Days: sql<number>`cast(count(*) as int)`,
+          today: sql<number>`cast(count(*) filter (where coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) >= ${todayStart}::timestamptz) as int)`,
+          thisWeek: sql<number>`cast(count(*) as int)`,
         })
         .from(instrumentRuns)
         .where(
           and(
             isNull(instrumentRuns.deletedAt),
-            sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '7 days'`,
+            sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) >= ${weekStart}::timestamptz`,
             attributed
           )
         ),
@@ -358,8 +367,8 @@ export const getMyRunsStats = cache(async function getMyRunsStats(
       // line up with the run-count cards above.
       db
         .select({
-          bytesLast24Hours: sql<string>`coalesce(sum(${files.sizeBytes}) filter (where coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '24 hours'), 0)`,
-          bytesLast7Days: sql<string>`coalesce(sum(${files.sizeBytes}), 0)`,
+          bytesToday: sql<string>`coalesce(sum(${files.sizeBytes}) filter (where coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) >= ${todayStart}::timestamptz), 0)`,
+          bytesThisWeek: sql<string>`coalesce(sum(${files.sizeBytes}), 0)`,
         })
         .from(files)
         .innerJoin(instrumentRuns, eq(files.instrumentRunId, instrumentRuns.id))
@@ -367,11 +376,11 @@ export const getMyRunsStats = cache(async function getMyRunsStats(
           and(
             isNull(files.deletedAt),
             isNull(instrumentRuns.deletedAt),
-            sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '7 days'`,
+            sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) >= ${weekStart}::timestamptz`,
             attributed
           )
         ),
-      // Comments left in the last 7 days on runs the viewer is attributed to
+      // Comments left this calendar week on runs the viewer is attributed to
       // (including the viewer's own comments).
       db
         .select({
@@ -383,7 +392,7 @@ export const getMyRunsStats = cache(async function getMyRunsStats(
           and(
             isNull(runComments.deletedAt),
             isNull(instrumentRuns.deletedAt),
-            sql`${runComments.createdAt} > now() - interval '7 days'`,
+            sql`${runComments.createdAt} >= ${weekStart}::timestamptz`,
             attributed
           )
         ),
@@ -407,15 +416,15 @@ export const getMyRunsStats = cache(async function getMyRunsStats(
     ]);
 
   return {
-    runsLast24Hours: {
-      total: runsRow?.last24Hours ?? 0,
-      bytesGenerated: Number(bytesRow?.bytesLast24Hours ?? 0),
+    runsToday: {
+      total: runsRow?.today ?? 0,
+      bytesGenerated: Number(bytesRow?.bytesToday ?? 0),
     },
-    runsLast7Days: {
-      total: runsRow?.last7Days ?? 0,
-      bytesGenerated: Number(bytesRow?.bytesLast7Days ?? 0),
+    runsThisWeek: {
+      total: runsRow?.thisWeek ?? 0,
+      bytesGenerated: Number(bytesRow?.bytesThisWeek ?? 0),
     },
-    commentsLast7Days: {
+    commentsThisWeek: {
       count: commentsRow?.count ?? 0,
     },
     pendingUploads: {
@@ -432,13 +441,16 @@ export interface TopAttributor {
 }
 
 /**
- * The user attributed to the most active-instrument runs in the last 7 days,
- * with the volume of data across those runs. Ties are broken by data
- * generated. Returns null when no runs were attributed this week. Powers the
- * "Most runs this week" leaderboard card on the dashboard.
+ * The user attributed to the most active-instrument runs this calendar week
+ * (Monday midnight in the viewer's timezone), with the volume of data across
+ * those runs. Ties are broken by data generated. Returns null when no runs
+ * were attributed this week. Powers the "Most runs this week" leaderboard
+ * card on the dashboard.
  */
 export const getTopAttributorThisWeek = cache(
   async function getTopAttributorThisWeek(): Promise<TopAttributor | null> {
+    const timeZone = await getViewerTimeZone();
+    const weekStart = startOfWeekISO(timeZone);
     const runCountExpr = sql`count(distinct ${instrumentRuns.id})`;
     const bytesExpr = sql`coalesce(sum(${files.sizeBytes}), 0)`;
 
@@ -469,7 +481,7 @@ export const getTopAttributorThisWeek = cache(
         and(
           eq(instruments.status, "active"),
           isNull(instrumentRuns.deletedAt),
-          sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) > now() - interval '7 days'`
+          sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt}) >= ${weekStart}::timestamptz`
         )
       )
       .groupBy(users.id, users.name, users.email, users.image)

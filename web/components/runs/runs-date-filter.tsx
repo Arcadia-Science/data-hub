@@ -10,7 +10,16 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
-import { formatDateRange } from "@/lib/date";
+import {
+  formatDateRange,
+  getBrowserTimeZone,
+  startOfLastWeekEndDayISO,
+  startOfLastWeekISO,
+  startOfMonthISO,
+  startOfTodayISO,
+  startOfWeekISO,
+  startOfYesterdayISO,
+} from "@/lib/date";
 import { cn } from "@/lib/utils";
 
 export interface DateRange {
@@ -18,48 +27,138 @@ export interface DateRange {
   to: string | null;
 }
 
-export type PresetId = "24h" | "3d" | "1w" | "2w" | "1m";
+export type PresetId =
+  | "today"
+  | "yesterday"
+  | "week"
+  | "last_week"
+  | "2w"
+  | "month"
+  | "1m";
 
 interface Preset {
-  days: number;
   id: PresetId;
   label: string;
 }
 
 // Module-scoped so we don't reallocate on every render.
 const PRESETS: readonly Preset[] = [
-  { id: "24h", label: "Last 24 hours", days: 1 },
-  { id: "3d", label: "Last 3 days", days: 3 },
-  { id: "1w", label: "Last week", days: 7 },
-  { id: "2w", label: "Last 2 weeks", days: 14 },
-  { id: "1m", label: "Last month", days: 30 },
+  { id: "today", label: "Today" },
+  { id: "yesterday", label: "Yesterday" },
+  { id: "week", label: "This week" },
+  { id: "last_week", label: "Last week" },
+  { id: "2w", label: "Last 2 weeks" },
+  { id: "month", label: "This month" },
+  { id: "1m", label: "Last month" },
 ] as const;
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+/** Calendar presets are exact midnight cutoffs; allow a small clock skew. */
+const CALENDAR_TOLERANCE_MS = 60_000;
 
 function isoDaysAgo(days: number): string {
   return new Date(Date.now() - days * MS_PER_DAY).toISOString();
 }
 
+function withinTolerance(aMs: number, bMs: number): boolean {
+  return Math.abs(aMs - bMs) < CALENDAR_TOLERANCE_MS;
+}
+
+/**
+ * Resolves a preset to URL `date_from` / `date_to` values.
+ *
+ * Open-ended presets (today / this week / this month / rolling) leave `to`
+ * null. Bounded presets set `to` to the start of the inclusive end day so the
+ * list API's "advance date_to by one day" rule yields the correct exclusive
+ * upper bound (start of today / this Monday).
+ */
+function rangeForPreset(id: PresetId): DateRange {
+  const tz = getBrowserTimeZone();
+  switch (id) {
+    case "today":
+      return { from: startOfTodayISO(tz), to: null };
+    case "yesterday": {
+      const start = startOfYesterdayISO(tz);
+      return { from: start, to: start };
+    }
+    case "week":
+      return { from: startOfWeekISO(tz), to: null };
+    case "last_week":
+      return {
+        from: startOfLastWeekISO(tz),
+        to: startOfLastWeekEndDayISO(tz),
+      };
+    case "2w":
+      return { from: isoDaysAgo(14), to: null };
+    case "month":
+      return { from: startOfMonthISO(tz), to: null };
+    case "1m":
+      return { from: isoDaysAgo(30), to: null };
+    default: {
+      const _exhaustive: never = id;
+      throw new Error(`Unhandled preset: ${_exhaustive}`);
+    }
+  }
+}
+
 function resolveActivePreset(value: DateRange): PresetId | null {
-  if (!value.from || value.to) {
+  if (!value.from) {
     return null;
   }
   const fromMs = Date.parse(value.from);
   if (Number.isNaN(fromMs)) {
     return null;
   }
-  const now = Date.now();
-  // Pick the closest preset within a half-day tolerance so a value written a
+  const toMs = value.to ? Date.parse(value.to) : null;
+  if (value.to && (toMs === null || Number.isNaN(toMs))) {
+    return null;
+  }
+
+  const tz = getBrowserTimeZone();
+
+  // Bounded calendar presets (require both ends).
+  if (toMs !== null) {
+    const yesterdayStart = Date.parse(startOfYesterdayISO(tz));
+    if (
+      withinTolerance(fromMs, yesterdayStart) &&
+      withinTolerance(toMs, yesterdayStart)
+    ) {
+      return "yesterday";
+    }
+    if (
+      withinTolerance(fromMs, Date.parse(startOfLastWeekISO(tz))) &&
+      withinTolerance(toMs, Date.parse(startOfLastWeekEndDayISO(tz)))
+    ) {
+      return "last_week";
+    }
+    return null;
+  }
+
+  // Open-ended calendar presets.
+  if (withinTolerance(fromMs, Date.parse(startOfTodayISO(tz)))) {
+    return "today";
+  }
+  if (withinTolerance(fromMs, Date.parse(startOfWeekISO(tz)))) {
+    return "week";
+  }
+  if (withinTolerance(fromMs, Date.parse(startOfMonthISO(tz)))) {
+    return "month";
+  }
+
+  // Rolling presets: closest within a half-day tolerance so a value written a
   // few minutes ago still lights up its preset on subsequent renders.
+  const now = Date.now();
   let best: PresetId | null = null;
   let bestDiff = Number.POSITIVE_INFINITY;
-  for (const preset of PRESETS) {
-    const target = now - preset.days * MS_PER_DAY;
+  for (const [id, days] of [
+    ["2w", 14],
+    ["1m", 30],
+  ] as const) {
+    const target = now - days * MS_PER_DAY;
     const diff = Math.abs(target - fromMs);
     if (diff < MS_PER_DAY / 2 && diff < bestDiff) {
       bestDiff = diff;
-      best = preset.id;
+      best = id;
     }
   }
   return best;
@@ -146,7 +245,7 @@ export function RunsDateFilter({
   }
 
   function applyPreset(preset: Preset) {
-    onChange({ from: isoDaysAgo(preset.days), to: null });
+    onChange(rangeForPreset(preset.id));
     setOpen(false);
   }
 
