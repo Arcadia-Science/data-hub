@@ -21,6 +21,7 @@
     "db:reseed": "npm run db:reset && npm run db:push && npm run db:seed",
     "db:process-fixtures": "tsx scripts/process-seeded-fixtures.ts",
     "db:clear-runs": "tsx scripts/clear-run-file-records.ts",
+    "openapi:generate": "tsx scripts/generate-openapi.ts",
     "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:unit:watch": "vitest --config vitest.unit.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
@@ -29,6 +30,7 @@
     "check-all": "npm run check && npm run test-all && npm run build"
   },
   "dependencies": {
+    "@asteasolutions/zod-to-openapi": "^8.5.0",
     "@auth/drizzle-adapter": "^1.11.1",
     "@aws-sdk/client-s3": "^3.1021.0",
     "@aws-sdk/s3-request-presigner": "^3.1021.0",

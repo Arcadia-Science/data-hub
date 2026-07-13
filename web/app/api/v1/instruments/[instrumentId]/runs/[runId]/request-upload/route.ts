@@ -1,10 +1,7 @@
 import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
-import {
-  apiError,
-  apiErrorFromResult,
-  VALIDATION_ERROR,
-} from "@/lib/api/errors";
+import { apiErrorFromResult } from "@/lib/api/errors";
+import { readJsonBody, requestUploadBody } from "@/lib/api/openapi";
 import { requestRunUploads } from "@/lib/api/run-uploads";
 
 interface RouteContext {
@@ -26,16 +23,14 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
   const { instrumentId, runId } = await params;
 
-  let body: Record<string, unknown>;
-  try {
-    body = await request.json();
-  } catch {
-    return apiError(400, VALIDATION_ERROR, "Invalid JSON body");
+  const body = await readJsonBody(request, requestUploadBody);
+  if (body instanceof Response) {
+    return body;
   }
 
   // Pass raw ids through; `requestRunUploads` fails closed on non-integers.
   // Filtering here would silently drop bad entries and queue the rest.
-  const fileIds: unknown[] = Array.isArray(body.file_ids) ? body.file_ids : [];
+  const fileIds = body.file_ids;
 
   const result = await requestRunUploads({ instrumentId, runId, fileIds });
 

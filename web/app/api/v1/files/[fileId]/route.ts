@@ -9,6 +9,7 @@ import {
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
 import { dismissFile } from "@/lib/api/files";
+import { patchFileBody, readJsonBody } from "@/lib/api/openapi";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 
@@ -84,18 +85,16 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     );
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = await request.json();
-  } catch {
-    return apiError(400, VALIDATION_ERROR, "Invalid JSON body");
+  const body = await readJsonBody(request, patchFileBody);
+  if (body instanceof Response) {
+    return body;
   }
 
   const updates: Record<string, unknown> = {};
   const now = new Date();
 
   // Status transition validation.
-  if ("status" in body && typeof body.status === "string") {
+  if (body.status !== undefined) {
     const allowed = VALID_TRANSITIONS[file.status];
     if (!allowed?.includes(body.status)) {
       return apiError(
@@ -130,31 +129,26 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   }
 
   // S3 info — set when transitioning to "uploaded" (watcher path).
-  if (typeof body.s3_bucket === "string") {
+  if (body.s3_bucket !== undefined) {
     updates.s3Bucket = body.s3_bucket;
   }
-  if (typeof body.s3_key === "string") {
+  if (body.s3_key !== undefined) {
     updates.s3Key = body.s3_key;
   }
-  if (typeof body.content_type === "string") {
+  if (body.content_type !== undefined) {
     updates.contentType = body.content_type;
   }
-  if (typeof body.size_bytes === "number") {
+  if (body.size_bytes !== undefined) {
     updates.sizeBytes = body.size_bytes;
   }
 
   // Metadata — flat JSON object set by the Lambda after processing.
-  if (
-    "metadata" in body &&
-    typeof body.metadata === "object" &&
-    body.metadata !== null &&
-    !Array.isArray(body.metadata)
-  ) {
+  if (body.metadata !== undefined) {
     updates.metadata = body.metadata;
   }
 
   // Error message — set when status transitions to "failed".
-  if (typeof body.error_message === "string") {
+  if (body.error_message !== undefined) {
     updates.errorMessage = body.error_message;
   }
 

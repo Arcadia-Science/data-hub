@@ -7,6 +7,7 @@ import {
   NOT_FOUND,
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
+import { readJsonBody, registerWatcherBody } from "@/lib/api/openapi";
 import { db } from "@/lib/db";
 import { instruments, watchers } from "@/lib/db/schema";
 
@@ -16,22 +17,12 @@ export async function POST(request: NextRequest) {
     return authResult;
   }
 
-  let body: {
-    instrument_id?: string;
-    hostname?: string;
-    os_info?: string;
-  };
-  try {
-    body = await request.json();
-  } catch {
-    return apiError(400, VALIDATION_ERROR, "Invalid JSON body");
+  const body = await readJsonBody(request, registerWatcherBody);
+  if (body instanceof Response) {
+    return body;
   }
 
-  const instrumentId =
-    typeof body.instrument_id === "string" ? body.instrument_id.trim() : "";
-  if (!instrumentId) {
-    return apiError(400, VALIDATION_ERROR, "instrument_id is required");
-  }
+  const instrumentId = body.instrument_id;
 
   const [instrument] = await db
     .select({ id: instruments.id, status: instruments.status })

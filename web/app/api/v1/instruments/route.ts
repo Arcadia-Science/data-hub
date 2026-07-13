@@ -1,14 +1,10 @@
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
-import { apiError, CONFLICT, VALIDATION_ERROR } from "@/lib/api/errors";
-import { isValidKebabCase } from "@/lib/api/validators";
+import { apiError, CONFLICT } from "@/lib/api/errors";
+import { createInstrumentBody, readJsonBody } from "@/lib/api/openapi";
 import { db } from "@/lib/db";
-import {
-  type InstrumentType,
-  instruments,
-  VALID_INSTRUMENT_TYPES,
-} from "@/lib/db/schema";
+import { instruments } from "@/lib/db/schema";
 
 export async function GET(request: NextRequest) {
   const authResult = await authorize(request, "instruments:read");
@@ -34,24 +30,11 @@ export async function POST(request: NextRequest) {
     return authResult;
   }
 
-  let body: { id?: string; display_name?: string; instrument_type?: string };
-  try {
-    body = await request.json();
-  } catch {
-    return apiError(400, VALIDATION_ERROR, "Invalid JSON body");
+  const body = await readJsonBody(request, createInstrumentBody);
+  if (body instanceof Response) {
+    return body;
   }
-
-  const id = typeof body.id === "string" ? body.id.trim() : "";
-  if (!id) {
-    return apiError(400, VALIDATION_ERROR, "id is required");
-  }
-  if (!isValidKebabCase(id)) {
-    return apiError(
-      400,
-      VALIDATION_ERROR,
-      "id must be lowercase kebab-case (e.g., my-instrument)"
-    );
-  }
+  const id = body.id;
 
   const existing = await db
     .select({ id: instruments.id })
@@ -65,19 +48,14 @@ export async function POST(request: NextRequest) {
 
   // Default display name is derived from the kebab-case ID:
   // "spectramax-id3-plate-reader" → "Spectramax Id3 Plate Reader"
-  const displayName =
-    typeof body.display_name === "string" && body.display_name.trim()
-      ? body.display_name.trim()
-      : id
-          .split("-")
-          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-          .join(" ");
+  const displayName = body.display_name
+    ? body.display_name
+    : id
+        .split("-")
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ");
 
-  const instrumentType: InstrumentType =
-    typeof body.instrument_type === "string" &&
-    (VALID_INSTRUMENT_TYPES as readonly string[]).includes(body.instrument_type)
-      ? (body.instrument_type as InstrumentType)
-      : "generic";
+  const instrumentType = body.instrument_type ?? "generic";
 
   const [created] = await db
     .insert(instruments)

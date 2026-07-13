@@ -6,12 +6,12 @@ import {
   apiErrorFromResult,
   CONFLICT,
   NOT_FOUND,
-  VALIDATION_ERROR,
 } from "@/lib/api/errors";
 import {
   lookupRunByNaturalKey,
   parseAcquiredAt,
 } from "@/lib/api/instrument-runs";
+import { patchRunBody, readJsonBody } from "@/lib/api/openapi";
 import { softDeleteRun } from "@/lib/api/run-lifecycle";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
@@ -126,25 +126,15 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     return apiError(409, CONFLICT, "Cannot update a soft-deleted run");
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = await request.json();
-  } catch {
-    return apiError(400, VALIDATION_ERROR, "Invalid JSON body");
+  const body = await readJsonBody(request, patchRunBody);
+  if (body instanceof Response) {
+    return body;
   }
 
   // Metadata is a full replacement (not a deep merge). The Lambda writes the
   // complete metadata object after processing. Patch-by-key would require a
   // read-then-merge cycle that adds complexity with no benefit at current scale.
-  if ("metadata" in body) {
-    if (
-      typeof body.metadata !== "object" ||
-      body.metadata === null ||
-      Array.isArray(body.metadata)
-    ) {
-      return apiError(400, VALIDATION_ERROR, "metadata must be a JSON object");
-    }
-
+  if (body.metadata !== undefined) {
     await db
       .update(instrumentRuns)
       .set({ metadata: body.metadata })
@@ -171,9 +161,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   }
 
   // Handle detected_files upsert (watcher reporting new files for a run).
-  const detectedFiles = Array.isArray(body.detected_files)
-    ? body.detected_files
-    : [];
+  const detectedFiles = body.detected_files ?? [];
 
   if (detectedFiles.length > 0) {
     const now = new Date();
