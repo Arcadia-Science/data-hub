@@ -110,14 +110,14 @@ You can also run `npm run db:seed` on its own — it calls the schema-driven `cl
 | `watchers` | 7 (for active instruments) | Rotates through `watching` / `registered` / `stopped` |
 | `watcher_heartbeats` | ~10 per watching watcher | Spread over the last hour |
 | `watcher_events` | 3 per watching watcher | `watcher_started`, `config_synced`, `file_uploaded` |
-| `instrument_runs` | 5 per active instrument | Spread across the last ~2 weeks (3, 6, 9, 12, 15 days back), alternating `lambda` / `watcher` source |
+| `instrument_runs` | 8 per active instrument | Calendar-relative `acquired_at` (today, yesterday, this week, ~7d / ~10d / ~22d / earlier this month) so date-filter presets and today/this-week stats have distinct non-empty sets; alternating `lambda` / `watcher` source |
 | `files` | 3 per run, or 1 for fixture-bearing runs | Mix of `uploaded` / `completed` / `failed` (and `raw` / `processed` for the 3-file shape). qPCR / gel doc / plate reader runs render exactly one row — the real fixture, bytes copied into `LOCAL_S3_MIRROR` (see [Working with file bytes locally](#working-with-file-bytes-locally)) |
-| `run_comments` | 1 per run | Authored by the dev user |
+| `run_comments` | 1 per run | Authored by the dev user; most stamped this week, every 4th last week |
 | `run_attributions` | 1 per run | Dev user attributed |
 | `archive_jobs` | 3 | One each of `ready` / `building` / `failed` |
 | `watcher_release_config` | 1 (singleton) | `9.9.9 / 0.1.0 / stable / false` |
 
-Externally-visible identifiers used in URLs and API paths are deterministic across reseeds, so screenshots, bug reports, and `curl` examples stay stable. Instrument types backed by a real lambda `process_file` (qPCR, gel doc, plate reader) use the canonical kebab-case ids the lambda expects (`azure-cielo-qpcr`, `azure-600-gel-doc`, `spectramax-id3-plate-reader`) with realistic-looking run ids (`Experiment_20260129`, `26.02.02_10.45.05`, `012926_AR_OD600`, …). Other instrument types use cosmetic `seed-<type>` ids and `seed-run-1`…`seed-run-5` since they don't round-trip through any pipeline.
+Externally-visible identifiers used in URLs and API paths are deterministic across reseeds, so screenshots, bug reports, and `curl` examples stay stable. Instrument types backed by a real lambda `process_file` (qPCR, gel doc, plate reader) use the canonical kebab-case ids the lambda expects (`azure-cielo-qpcr`, `azure-600-gel-doc`, `spectramax-id3-plate-reader`) with realistic-looking run ids (`Experiment_20260129`, `26.02.02_10.45.05`, `012926_AR_OD600`, …). Other instrument types use cosmetic `seed-<type>` ids and `seed-run-1`…`seed-run-8` since they don't round-trip through any pipeline.
 
 Surrogate UUIDs (watcher IDs, archive job IDs, the per-row primary keys on `instrument_runs` and `files`) and the PAT plaintext are regenerated on every reseed — the seed does not use Faker but it does call `crypto.randomUUID()` and `crypto.randomBytes()` where the schema needs server-side IDs.
 

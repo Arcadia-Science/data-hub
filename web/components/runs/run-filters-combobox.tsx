@@ -17,7 +17,6 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { RUN_STATUS_OPTIONS, type RunStatus } from "@/lib/runs/run-status";
-import { cn } from "@/lib/utils";
 
 interface FilterValues {
   includeDeleted: boolean;
@@ -115,12 +114,7 @@ export function RunFiltersCombobox({
                         onSelect={() => toggleStatus(status.value)}
                         value={status.label}
                       >
-                        <Icon
-                          className={cn(
-                            status.colorClassName,
-                            status.spin && "animate-spin"
-                          )}
-                        />
+                        <Icon className={status.colorClassName} />
                         {status.label}
                       </CommandItem>
                     );
