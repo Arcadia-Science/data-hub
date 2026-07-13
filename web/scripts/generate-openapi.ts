@@ -1,3 +1,5 @@
+// Optional local dump for inspection. Output is gitignored; production
+// serves the schema from GET /api/v1/openapi.json (built statically).
 import { writeFile } from "node:fs/promises";
 import { buildOpenApiDocument } from "@/lib/api/openapi";
 
