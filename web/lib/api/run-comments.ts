@@ -169,6 +169,24 @@ export async function getCommentForAuthorCheck(
   return row ?? null;
 }
 
+// Like `getCommentForAuthorCheck` but includes already soft-deleted rows, so
+// the delete path can stay idempotent: re-deleting your own comment still
+// resolves the author and succeeds instead of 404-ing on the missing row.
+export async function getCommentForDeleteAuthorCheck(
+  commentId: string
+): Promise<{ id: string; userId: string; deletedAt: Date | null } | null> {
+  const [row] = await db
+    .select({
+      id: runComments.id,
+      userId: runComments.userId,
+      deletedAt: runComments.deletedAt,
+    })
+    .from(runComments)
+    .where(eq(runComments.id, commentId))
+    .limit(1);
+  return row ?? null;
+}
+
 // ---------------------------------------------------------------------------
 // Update — author-only via the `where` clause. Returns null if nothing
 // matched (caller has already distinguished 404 vs 403 via the lookup).

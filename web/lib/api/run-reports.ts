@@ -1,6 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
 import {
-  getProcessedCsvData,
+  getProcessedCsvSummary,
   getRunImageFiles,
   getRunReportFiles,
   lookupRunByNaturalKey,
@@ -116,14 +116,16 @@ export async function buildRunReport(
     getRunImageFiles(run.id),
   ]);
 
-  const wellData = await getProcessedCsvData(reportFiles);
-  const columns =
-    wellData.length > 0 ? Object.keys(wellData[0]).sort() : ([] as string[]);
-  const sampleRows = wellData.slice(0, RUN_REPORT_CSV_SAMPLE_ROWS);
+  // Stream + sample so a run with large/many processed CSVs doesn't get fully
+  // buffered just to keep the first `RUN_REPORT_CSV_SAMPLE_ROWS` rows.
+  const { rowCount, columns, sampleRows } = await getProcessedCsvSummary(
+    reportFiles,
+    RUN_REPORT_CSV_SAMPLE_ROWS
+  );
   const processedCsv =
-    wellData.length > 0
+    rowCount > 0
       ? {
-          rowCount: wellData.length,
+          rowCount,
           columns,
           sampleRows,
           sampleRowLimit: RUN_REPORT_CSV_SAMPLE_ROWS,

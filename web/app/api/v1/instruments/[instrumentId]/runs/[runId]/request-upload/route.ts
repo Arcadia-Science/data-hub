@@ -35,10 +35,9 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     return apiError(400, VALIDATION_ERROR, "Invalid JSON body");
   }
 
-  const rawFileIds = Array.isArray(body.file_ids) ? body.file_ids : [];
-  const fileIds = rawFileIds.filter(
-    (id: unknown): id is number => typeof id === "number"
-  );
+  // Pass raw ids through; `requestRunUploads` fails closed on non-integers.
+  // Filtering here would silently drop bad entries and queue the rest.
+  const fileIds: unknown[] = Array.isArray(body.file_ids) ? body.file_ids : [];
 
   const result = await requestRunUploads({ instrumentId, runId, fileIds });
 

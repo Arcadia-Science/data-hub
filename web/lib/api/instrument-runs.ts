@@ -1,3 +1,4 @@
+import { parse as parseCsvStream } from "csv-parse";
 import { parse } from "csv-parse/sync";
 import type { AnyColumn, SQL } from "drizzle-orm";
 import {
@@ -1062,6 +1063,61 @@ export async function getProcessedCsvData(
   );
 
   return results.flat();
+}
+
+export interface ProcessedCsvSummary {
+  columns: string[];
+  rowCount: number;
+  sampleRows: RawWellRow[];
+}
+
+// Streaming counterpart to `getProcessedCsvData` for report/summary callers.
+// Streams each CSV row-by-row and retains only up to `sampleLimit` rows, so
+// peak memory stays bounded by the sample rather than the full plate grid(s)
+// even for large multi-CSV runs. `rowCount` still reflects every row scanned.
+export async function getProcessedCsvSummary(
+  runFiles: RunFile[],
+  sampleLimit: number
+): Promise<ProcessedCsvSummary> {
+  const csvFiles = runFiles.filter(
+    (f) =>
+      f.category === "processed" &&
+      f.deletedAt === null &&
+      f.filename.endsWith(".csv") &&
+      f.s3Bucket &&
+      f.s3Key
+  );
+
+  const sampleRows: RawWellRow[] = [];
+  let rowCount = 0;
+
+  for (const file of csvFiles) {
+    const { s3Bucket, s3Key } = file;
+    if (!(s3Bucket && s3Key)) {
+      continue;
+    }
+    try {
+      const stream = await getS3ObjectStream(s3Bucket, s3Key);
+      const parser = stream.pipe(
+        parseCsvStream({ columns: true, skip_empty_lines: true, trim: true })
+      );
+      for await (const record of parser) {
+        rowCount++;
+        if (sampleRows.length < sampleLimit) {
+          sampleRows.push(record as RawWellRow);
+        }
+      }
+    } catch (err) {
+      // Mirror `getProcessedCsvData`: a bad CSV is skipped, not fatal. Rows
+      // read before a mid-stream error still count toward the summary.
+      console.error(`Failed to fetch processed CSV ${s3Key}:`, err);
+    }
+  }
+
+  const columns =
+    sampleRows.length > 0 ? Object.keys(sampleRows[0]).sort() : [];
+
+  return { rowCount, columns, sampleRows };
 }
 
 // ---------------------------------------------------------------------------

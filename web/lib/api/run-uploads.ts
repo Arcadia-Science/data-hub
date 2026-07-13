@@ -74,11 +74,13 @@ async function prepareUploadTarget(
   return { ok: true, run };
 }
 
-// Shared by REST `request-upload` and MCP `request_run_upload`.
+// Shared by REST `request-upload` and MCP `request_run_upload`. `fileIds` is
+// raw caller input; this is the single validation gate and fails closed so a
+// garbled batch can't queue a partial set.
 export async function requestRunUploads(input: {
   instrumentId: string;
   runId: string;
-  fileIds: number[];
+  fileIds: readonly unknown[];
 }): Promise<RequestUploadResult> {
   const prepared = await prepareUploadTarget(input.instrumentId, input.runId);
   if (!prepared.ok) {
@@ -86,9 +88,9 @@ export async function requestRunUploads(input: {
   }
 
   const { run } = prepared;
-  const { fileIds } = input;
+  const { fileIds: rawFileIds } = input;
 
-  if (fileIds.length === 0) {
+  if (rawFileIds.length === 0) {
     return {
       ok: false,
       status: 400,
@@ -96,7 +98,7 @@ export async function requestRunUploads(input: {
       message: "file_ids must be a non-empty array",
     };
   }
-  if (fileIds.length > MAX_UPLOAD_FILE_IDS) {
+  if (rawFileIds.length > MAX_UPLOAD_FILE_IDS) {
     return {
       ok: false,
       status: 400,
@@ -104,7 +106,9 @@ export async function requestRunUploads(input: {
       message: `file_ids cannot exceed ${MAX_UPLOAD_FILE_IDS} entries`,
     };
   }
-  if (!fileIds.every((id) => Number.isInteger(id))) {
+  if (
+    !rawFileIds.every((id) => typeof id === "number" && Number.isInteger(id))
+  ) {
     return {
       ok: false,
       status: 400,
@@ -112,6 +116,7 @@ export async function requestRunUploads(input: {
       message: "file_ids must contain only integer values",
     };
   }
+  const fileIds = rawFileIds as number[];
 
   const requestedFiles = await db
     .select()

@@ -342,6 +342,164 @@ describe("MCP Server (HTTP)", () => {
     expect(parsed.attributions[0].userId).toBe(userId);
   });
 
+  // ---- Comment mutations (end-to-end) --------------------------------------
+  //
+  // Exercises the add/edit/delete tools through the HTTP boundary where a real
+  // Bearer token resolves `authInfo.extra.userId`. Covers author-only
+  // enforcement (a second user's token is rejected) and the documented
+  // idempotency of delete_run_comment.
+
+  it("add/edit/delete_run_comment round-trips and enforces author-only", async () => {
+    const add = await callTool("add_run_comment", {
+      instrumentId,
+      runId,
+      body: "hello from mcp",
+    });
+    expect(add.isError).toBeFalsy();
+    const created = JSON.parse(add.content[0].text) as { id: string };
+    expect(created.id).toBeTruthy();
+
+    // A different user cannot edit or delete the comment.
+    const editOther = await callTool(
+      "edit_run_comment",
+      { commentId: created.id, body: "tampered" },
+      tokenB
+    );
+    expect(editOther.isError).toBe(true);
+    expect(editOther.content[0].text).toMatch(/only edit your own/i);
+
+    const deleteOther = await callTool(
+      "delete_run_comment",
+      { commentId: created.id },
+      tokenB
+    );
+    expect(deleteOther.isError).toBe(true);
+    expect(deleteOther.content[0].text).toMatch(/only delete your own/i);
+
+    const edit = await callTool("edit_run_comment", {
+      commentId: created.id,
+      body: "edited body",
+    });
+    expect(edit.isError).toBeFalsy();
+    expect(JSON.parse(edit.content[0].text).body).toBe("edited body");
+
+    // Deleting twice both succeed — the tool is documented as idempotent.
+    const del1 = await callTool("delete_run_comment", {
+      commentId: created.id,
+    });
+    expect(del1.isError).toBeFalsy();
+    expect(JSON.parse(del1.content[0].text).deleted).toBe(true);
+
+    const del2 = await callTool("delete_run_comment", {
+      commentId: created.id,
+    });
+    expect(del2.isError).toBeFalsy();
+    expect(JSON.parse(del2.content[0].text).deleted).toBe(true);
+  });
+
+  // ---- Upload requests (end-to-end) ----------------------------------------
+
+  it("request_run_upload queues detected files and rejects unknown ids", async () => {
+    const db = getTestDb();
+    const uploadInstrument = "mcp-upload-instrument";
+    const uploadRun = "mcp-upload-run";
+
+    await db.insert(schema.instruments).values({
+      id: uploadInstrument,
+      displayName: "MCP Upload Instrument",
+      status: "active",
+      instrumentType: "plate_reader",
+    });
+    await db.insert(schema.watchers).values({
+      instrumentId: uploadInstrument,
+      hostname: "online-pc",
+      status: "watching",
+      lastHeartbeatAt: new Date(),
+    });
+    const [run] = await db
+      .insert(schema.instrumentRuns)
+      .values({
+        instrumentId: uploadInstrument,
+        runId: uploadRun,
+        source: "watcher",
+      })
+      .returning({ id: schema.instrumentRuns.id });
+    const inserted = await db
+      .insert(schema.files)
+      .values([
+        { instrumentRunId: run.id, filename: "a.csv", relativePath: "a.csv" },
+        { instrumentRunId: run.id, filename: "b.csv", relativePath: "b.csv" },
+      ])
+      .returning({ id: schema.files.id });
+    const uploadFileIds = inserted.map((f) => f.id);
+
+    const ok = await callTool("request_run_upload", {
+      instrumentId: uploadInstrument,
+      runId: uploadRun,
+      fileIds: uploadFileIds,
+    });
+    expect(ok.isError).toBeFalsy();
+    expect(JSON.parse(ok.content[0].text).filesQueued).toBe(2);
+
+    // An id that isn't part of this run is rejected by the shared helper.
+    const badId = await callTool("request_run_upload", {
+      instrumentId: uploadInstrument,
+      runId: uploadRun,
+      fileIds: [999_999],
+    });
+    expect(badId.isError).toBe(true);
+    expect(badId.content[0].text).toMatch(/not found/i);
+  });
+
+  // ---- Delete / restore round-trip (end-to-end) ----------------------------
+
+  it("delete_run then restore_run round-trips the soft-delete", async () => {
+    const db = getTestDb();
+    const lifecycleInstrument = "mcp-lifecycle-instrument";
+    const lifecycleRun = "mcp-lifecycle-run";
+
+    await db.insert(schema.instruments).values({
+      id: lifecycleInstrument,
+      displayName: "MCP Lifecycle Instrument",
+      status: "active",
+      instrumentType: "plate_reader",
+    });
+    await db.insert(schema.instrumentRuns).values({
+      instrumentId: lifecycleInstrument,
+      runId: lifecycleRun,
+      source: "lambda",
+    });
+
+    const del = await callTool("delete_run", {
+      instrumentId: lifecycleInstrument,
+      runId: lifecycleRun,
+    });
+    expect(del.isError).toBeFalsy();
+    expect(JSON.parse(del.content[0].text).deletedAt).toBeTruthy();
+
+    // get_run still resolves the run but now surfaces the soft-delete stamp.
+    const afterDelete = await callTool("get_run", {
+      instrumentId: lifecycleInstrument,
+      runId: lifecycleRun,
+    });
+    expect(afterDelete.isError).toBeFalsy();
+    expect(JSON.parse(afterDelete.content[0].text).deletedAt).toBeTruthy();
+
+    const restore = await callTool("restore_run", {
+      instrumentId: lifecycleInstrument,
+      runId: lifecycleRun,
+    });
+    expect(restore.isError).toBeFalsy();
+    expect(JSON.parse(restore.content[0].text).deletedAt).toBeNull();
+
+    const afterRestore = await callTool("get_run", {
+      instrumentId: lifecycleInstrument,
+      runId: lifecycleRun,
+    });
+    expect(afterRestore.isError).toBeFalsy();
+    expect(JSON.parse(afterRestore.content[0].text).deletedAt).toBeNull();
+  });
+
   // ---- PAT scope enforcement -----------------------------------------------
   //
   // Each MCP tool calls `requireMcpScope(authInfo, "<resource>:<action>")`

@@ -26,6 +26,7 @@ import { prepareRunArchive } from "@/lib/api/run-archive";
 import {
   createComment,
   getCommentForAuthorCheck,
+  getCommentForDeleteAuthorCheck,
   listCommentsForRun,
   softDeleteComment,
   updateComment,
@@ -1218,7 +1219,10 @@ export function registerTools(server: McpServer) {
         return errorResult("Authenticated user not available on this session.");
       }
 
-      const existing = await getCommentForAuthorCheck(commentId);
+      // Look up including soft-deleted rows so a repeat delete stays
+      // idempotent: `softDeleteComment` no-ops when already deleted and we
+      // still report success rather than a spurious "not found".
+      const existing = await getCommentForDeleteAuthorCheck(commentId);
       if (!existing) {
         return errorResult(`Comment '${commentId}' not found.`);
       }

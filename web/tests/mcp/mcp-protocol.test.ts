@@ -346,6 +346,7 @@ vi.mock("@/lib/api/run-comments", () => ({
     user: { id: "u-1", displayName: "Alice", initials: "A", avatarUrl: null },
   }),
   getCommentForAuthorCheck: vi.fn().mockResolvedValue(null),
+  getCommentForDeleteAuthorCheck: vi.fn().mockResolvedValue(null),
   updateComment: vi.fn().mockResolvedValue(null),
   softDeleteComment: vi.fn().mockResolvedValue(false),
   validateCommentBody: vi.fn().mockImplementation((body: unknown) => {
