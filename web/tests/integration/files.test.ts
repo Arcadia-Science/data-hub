@@ -411,6 +411,18 @@ describe("Files API", () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.deleted_at).toBeTruthy();
+    expect(data.already_applied).toBe(false);
+  });
+
+  it("DELETE is idempotent — re-dismissing an already-deleted file succeeds", async () => {
+    const res = await api(`/api/v1/files/${secondFileId}`, {
+      method: "DELETE",
+      token,
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.already_applied).toBe(true);
+    expect(data.deleted_at).toBeTruthy();
   });
 
   // Once a file has been uploaded to S3, it can only be removed via the

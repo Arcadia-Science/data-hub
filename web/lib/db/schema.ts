@@ -236,7 +236,8 @@ export const personalAccessTokens = pgTable(
   "personal_access_tokens",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    // The user who created this token.
+    // Token owner / acting identity for Bearer auth and write attribution.
+    // An admin may mint a token bound to another user (e.g. an MCP client).
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),

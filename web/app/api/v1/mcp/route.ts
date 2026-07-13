@@ -30,6 +30,11 @@ const handler = createMcpHandler(
 // MCP-specific scope vocabulary and no connect-time gate beyond a valid
 // token. The `*` wildcard from legacy/backfilled tokens is honored by
 // `hasScope`, so deployed watchers and the Lambda keep working.
+//
+// TODO: Replace admin-minted PATs with an OAuth authorization-code flow so
+// members can authorize their own MCP client. Binding a PAT to a user fixes
+// write attribution (claim_run, etc.), but sharing a long-lived secret is a
+// stopgap until each user can grant access without an admin minting a token.
 const verifyToken = async (
   req: Request,
   bearerToken?: string

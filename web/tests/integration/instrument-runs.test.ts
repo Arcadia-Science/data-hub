@@ -250,14 +250,19 @@ describe("Instrument Runs API", () => {
     expect(data.run_id).toBe("run-001");
     // The acting user (the PAT's owner) is recorded as the deleter.
     expect(data.deleted_by).toBe(userId);
+    expect(data.already_applied).toBe(false);
   });
 
-  it("DELETE returns 409 for already-deleted run", async () => {
+  it("DELETE is idempotent — re-deleting an already-deleted run succeeds", async () => {
     const res = await api(`/api/v1/instruments/${instrumentId}/runs/run-001`, {
       method: "DELETE",
       token,
     });
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.already_applied).toBe(true);
+    expect(data.deleted_at).toBeTruthy();
+    expect(data.run_id).toBe("run-001");
   });
 
   it("GET excludes soft-deleted runs by default", async () => {

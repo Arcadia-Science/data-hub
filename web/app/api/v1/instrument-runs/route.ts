@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import { buildRunListQuery } from "@/lib/api/instrument-runs";
+import { parseRunMetadataFilters } from "@/lib/api/run-metadata-filters";
 import { parseIntParam, parseRunStatusParam } from "@/lib/api/validators";
 
 // ---------------------------------------------------------------------------
@@ -39,6 +40,7 @@ export async function GET(request: NextRequest) {
     includeDeleted: searchParams.get("include_deleted") === "true",
     ranBy: searchParams.get("ran_by") ?? undefined,
     statuses: parseRunStatusParam(searchParams),
+    ...parseRunMetadataFilters(searchParams),
   });
 
   return Response.json(result);

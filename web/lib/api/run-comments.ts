@@ -1,4 +1,6 @@
 import { and, asc, eq, isNull } from "drizzle-orm";
+import { after } from "next/server";
+import { notifyComment } from "@/lib/api/notifications";
 import { db } from "@/lib/db";
 import { runComments, users } from "@/lib/db/schema";
 import { toInitials } from "@/lib/utils";
@@ -10,6 +12,28 @@ import { toInitials } from "@/lib/utils";
 // (defense in depth) and by the route handler (which can return a clean
 // 403 vs 404 distinction). Reads are open to any authenticated user.
 // ---------------------------------------------------------------------------
+
+// Cap shared by REST and MCP. Generous for prose; well below jsonb/text limits.
+export const COMMENT_MAX_BODY_LENGTH = 10_000;
+
+export function validateCommentBody(
+  body: unknown
+): { ok: true; body: string } | { ok: false; message: string } {
+  if (typeof body !== "string") {
+    return { ok: false, message: "body must be a string" };
+  }
+  const trimmed = body.trim();
+  if (trimmed.length === 0) {
+    return { ok: false, message: "body must not be empty" };
+  }
+  if (body.length > COMMENT_MAX_BODY_LENGTH) {
+    return {
+      ok: false,
+      message: `body must be at most ${COMMENT_MAX_BODY_LENGTH} characters`,
+    };
+  }
+  return { ok: true, body };
+}
 
 export interface RunCommentDto {
   body: string;
@@ -127,6 +151,42 @@ export async function createComment(input: {
   });
 }
 
+// Shared by REST POST comments and MCP `add_run_comment`: create the row,
+// then defer Slack/in-app fan-out with `after()` so serverless freezes don't
+// drop the promise. Callers supply `origin` when they have a request URL
+// (REST) or a production host env (MCP).
+export async function createCommentAndNotify(input: {
+  runInternalId: string;
+  userId: string;
+  body: string;
+  instrumentId: string;
+  instrumentDisplayName: string;
+  runDisplayId: string;
+  origin?: string;
+}): Promise<RunCommentDto> {
+  const comment = await createComment({
+    runInternalId: input.runInternalId,
+    userId: input.userId,
+    body: input.body,
+  });
+
+  after(async () => {
+    await notifyComment({
+      runInternalId: input.runInternalId,
+      commentId: comment.id,
+      authorUserId: input.userId,
+      authorDisplayName: comment.user.displayName,
+      instrumentId: input.instrumentId,
+      instrumentDisplayName: input.instrumentDisplayName,
+      runDisplayId: input.runDisplayId,
+      commentBody: input.body,
+      origin: input.origin,
+    });
+  });
+
+  return comment;
+}
+
 // ---------------------------------------------------------------------------
 // Lookup — used by routes to distinguish 404 (missing/soft-deleted) from
 // 403 (exists but caller is not the author).
@@ -143,6 +203,24 @@ export async function getCommentForAuthorCheck(
     })
     .from(runComments)
     .where(and(eq(runComments.id, commentId), isNull(runComments.deletedAt)))
+    .limit(1);
+  return row ?? null;
+}
+
+// Like `getCommentForAuthorCheck` but includes already soft-deleted rows, so
+// the delete path can stay idempotent: re-deleting your own comment still
+// resolves the author and succeeds instead of 404-ing on the missing row.
+export async function getCommentForDeleteAuthorCheck(
+  commentId: string
+): Promise<{ id: string; userId: string; deletedAt: Date | null } | null> {
+  const [row] = await db
+    .select({
+      id: runComments.id,
+      userId: runComments.userId,
+      deletedAt: runComments.deletedAt,
+    })
+    .from(runComments)
+    .where(eq(runComments.id, commentId))
     .limit(1);
   return row ?? null;
 }
