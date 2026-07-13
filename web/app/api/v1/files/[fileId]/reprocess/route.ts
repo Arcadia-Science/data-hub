@@ -1,6 +1,10 @@
 import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
-import { apiError, VALIDATION_ERROR } from "@/lib/api/errors";
+import {
+  apiError,
+  apiErrorFromResult,
+  VALIDATION_ERROR,
+} from "@/lib/api/errors";
 import { reprocessFile } from "@/lib/api/file-reprocessing";
 
 interface RouteContext {
@@ -30,11 +34,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
   const result = await reprocessFile(numericId);
   if (!result.ok) {
-    // ReprocessResult.code is the literal union ("NOT_FOUND" | "CONFLICT" |
-    // "INTERNAL_ERROR") which matches the string values of the NOT_FOUND /
-    // CONFLICT / INTERNAL_ERROR constants, so it can be passed straight
-    // through to apiError.
-    return apiError(result.status, result.code, result.message, result.details);
+    return apiErrorFromResult(result);
   }
 
   return Response.json({ status: "processing", file_id: result.fileId });

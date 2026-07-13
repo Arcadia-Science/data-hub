@@ -60,39 +60,3 @@ export function parseRunStatusParam(
   }
   return seen.size > 0 ? [...seen] : undefined;
 }
-
-// Instrument-metadata filters shared by REST list routes and the MCP
-// `search_runs` tool. Query keys are snake_case to match the instrument
-// page's URL params; returned keys are camelCase for `buildRunListQuery`.
-export function parseRunMetadataFilters(searchParams: URLSearchParams): {
-  captureType?: string;
-  colorMode?: string;
-  dpi?: string;
-  dyeChannel?: string;
-  gelColor?: string;
-  gelWavelength?: string;
-  hinaChannel?: string;
-  hinaDimension?: string;
-  hinaSize?: string;
-  imagingMode?: string;
-  measurementMode?: string;
-  measurementType?: string;
-  wavelength?: string;
-} {
-  const opt = (key: string) => searchParams.get(key) ?? undefined;
-  return {
-    wavelength: opt("wavelength"),
-    measurementMode: opt("measurement_mode"),
-    measurementType: opt("measurement_type"),
-    captureType: opt("capture_type"),
-    imagingMode: opt("imaging_mode"),
-    gelWavelength: opt("gel_wavelength"),
-    gelColor: opt("gel_color"),
-    dyeChannel: opt("dye_channel"),
-    hinaChannel: opt("hina_channel"),
-    hinaDimension: opt("hina_dimension"),
-    hinaSize: opt("hina_size"),
-    dpi: opt("dpi"),
-    colorMode: opt("color_mode"),
-  };
-}

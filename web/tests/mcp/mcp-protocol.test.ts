@@ -351,6 +351,13 @@ vi.mock("@/lib/api/run-comments", () => ({
     edited_at: null,
     user: { id: "u-1", displayName: "Alice", initials: "A", avatarUrl: null },
   }),
+  createCommentAndNotify: vi.fn().mockResolvedValue({
+    id: "c-1",
+    body: "hi",
+    created_at: new Date(),
+    edited_at: null,
+    user: { id: "u-1", displayName: "Alice", initials: "A", avatarUrl: null },
+  }),
   getCommentForAuthorCheck: vi.fn().mockResolvedValue(null),
   getCommentForDeleteAuthorCheck: vi.fn().mockResolvedValue(null),
   updateComment: vi.fn().mockResolvedValue(null),

@@ -1,4 +1,6 @@
 import { and, asc, eq, isNull } from "drizzle-orm";
+import { after } from "next/server";
+import { notifyComment } from "@/lib/api/notifications";
 import { db } from "@/lib/db";
 import { runComments, users } from "@/lib/db/schema";
 import { toInitials } from "@/lib/utils";
@@ -147,6 +149,42 @@ export async function createComment(input: {
     userEmail: user?.email ?? null,
     userImage: user?.image ?? null,
   });
+}
+
+// Shared by REST POST comments and MCP `add_run_comment`: create the row,
+// then defer Slack/in-app fan-out with `after()` so serverless freezes don't
+// drop the promise. Callers supply `origin` when they have a request URL
+// (REST) or a production host env (MCP).
+export async function createCommentAndNotify(input: {
+  runInternalId: string;
+  userId: string;
+  body: string;
+  instrumentId: string;
+  instrumentDisplayName: string;
+  runDisplayId: string;
+  origin?: string;
+}): Promise<RunCommentDto> {
+  const comment = await createComment({
+    runInternalId: input.runInternalId,
+    userId: input.userId,
+    body: input.body,
+  });
+
+  after(async () => {
+    await notifyComment({
+      runInternalId: input.runInternalId,
+      commentId: comment.id,
+      authorUserId: input.userId,
+      authorDisplayName: comment.user.displayName,
+      instrumentId: input.instrumentId,
+      instrumentDisplayName: input.instrumentDisplayName,
+      runDisplayId: input.runDisplayId,
+      commentBody: input.body,
+      origin: input.origin,
+    });
+  });
+
+  return comment;
 }
 
 // ---------------------------------------------------------------------------

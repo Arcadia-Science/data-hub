@@ -24,3 +24,15 @@ export function apiError(
     { status }
   );
 }
+
+// Shared helpers return `{ ok: false, status, code, message }`; map them to
+// the wire error shape without per-route switch statements. `code` values
+// already match the constants above (`NOT_FOUND`, `WATCHER_OFFLINE`, …).
+export function apiErrorFromResult(result: {
+  status: number;
+  code: string;
+  message: string;
+  details?: Record<string, unknown>;
+}): Response {
+  return apiError(result.status, result.code, result.message, result.details);
+}

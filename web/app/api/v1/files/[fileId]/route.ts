@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import {
   apiError,
+  apiErrorFromResult,
   CONFLICT,
   NOT_FOUND,
   VALIDATION_ERROR,
@@ -213,8 +214,7 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
   const result = await dismissFile(numericId);
 
   if (!result.ok) {
-    const code = result.code === "NOT_FOUND" ? NOT_FOUND : CONFLICT;
-    return apiError(result.status, code, result.message);
+    return apiErrorFromResult(result);
   }
 
   return Response.json({

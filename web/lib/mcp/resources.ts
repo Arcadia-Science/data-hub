@@ -8,6 +8,7 @@ import {
 } from "@/lib/api/instruments";
 import type { InstrumentType } from "@/lib/db/schema";
 import { DATAHUB_GLOSSARY } from "@/lib/mcp/glossary";
+import { getMcpUserId } from "@/lib/mcp/tools/helpers";
 
 // Instrument types with structured filter-options. Must match `search_runs` args.
 const FILTERABLE_INSTRUMENT_TYPES = new Set<InstrumentType>([
@@ -67,7 +68,7 @@ export function registerResources(server: McpServer) {
       mimeType: "application/json",
     },
     async (_uri, extra) => {
-      const userId = extra.authInfo?.extra?.userId as string | undefined;
+      const userId = getMcpUserId(extra.authInfo);
       if (!userId) {
         return {
           contents: [

@@ -215,29 +215,13 @@ export function parseAcquiredAt(body: Record<string, unknown>): Date | null {
 // Used by both per-instrument and cross-instrument list endpoints.
 // ---------------------------------------------------------------------------
 
-interface RunListFilters {
-  captureType?: string;
-  colorMode?: string;
+import type { RunMetadataFilterArgs } from "@/lib/api/run-metadata-filters";
+
+interface RunListFilters extends RunMetadataFilterArgs {
   dateFrom?: string;
   dateTo?: string;
-  // Epson V700 Scanner derived metadata. `dpi` is a numeric string (e.g. "300",
-  // "600") and `colorMode` is the canonical "rgb"/"bw" string written by the
-  // Lambda's TIFF metadata parser.
-  dpi?: string;
-  dyeChannel?: string;
-  gelColor?: string;
-  gelWavelength?: string;
-  hinaChannel?: string;
-  hinaDimension?: string;
-  // Raw sizes JSONB object serialized as a string; compared via jsonb equality
-  // so key ordering differences between client serialization and stored value
-  // don't matter.
-  hinaSize?: string;
-  imagingMode?: string;
   includeDeleted: boolean;
   instrumentId?: string | string[];
-  measurementMode?: string;
-  measurementType?: string;
   order?: string;
   page: number;
   perPage: number;
@@ -249,7 +233,6 @@ interface RunListFilters {
   source?: string;
   // Derived run statuses to match (OR'd together). Undefined/empty = no filter.
   statuses?: RunStatus[];
-  wavelength?: string;
 }
 
 const UNATTRIBUTED_SENTINEL = "unattributed";

@@ -1,6 +1,4 @@
-import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
-import { after } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import {
   apiError,
@@ -9,14 +7,11 @@ import {
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
-import { notifyComment } from "@/lib/api/notifications";
 import {
-  createComment,
+  createCommentAndNotify,
   listCommentsForRun,
   validateCommentBody,
 } from "@/lib/api/run-comments";
-import { db } from "@/lib/db";
-import { users } from "@/lib/db/schema";
 
 interface RouteContext {
   params: Promise<{ instrumentId: string; runId: string }>;
@@ -93,35 +88,14 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     return apiError(400, VALIDATION_ERROR, validated.message);
   }
 
-  const comment = await createComment({
+  const comment = await createCommentAndNotify({
     runInternalId: run.id,
     userId: authResult.userId,
     body: validated.body,
-  });
-
-  // Fan out to attributees + prior commenters after the response is sent.
-  // Fetch the author's display name here (before the response) so the
-  // closure captures a concrete string rather than making a DB call inside
-  // the deferred `after()` block where request context may be gone.
-  const [author] = await db
-    .select({ name: users.name, email: users.email })
-    .from(users)
-    .where(eq(users.id, authResult.userId))
-    .limit(1);
-  const authorDisplayName = author?.name ?? author?.email ?? "Someone";
-
-  after(async () => {
-    await notifyComment({
-      runInternalId: run.id,
-      commentId: comment.id,
-      authorUserId: authResult.userId,
-      authorDisplayName,
-      instrumentId,
-      instrumentDisplayName: run.instrumentDisplayName,
-      runDisplayId: runId,
-      commentBody: validated.body,
-      origin: new URL(request.url).origin,
-    });
+    instrumentId,
+    instrumentDisplayName: run.instrumentDisplayName,
+    runDisplayId: runId,
+    origin: new URL(request.url).origin,
   });
 
   return Response.json(comment, { status: 201 });

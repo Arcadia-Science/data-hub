@@ -2,10 +2,8 @@ import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import {
   apiError,
-  CONFLICT,
-  NOT_FOUND,
+  apiErrorFromResult,
   VALIDATION_ERROR,
-  WATCHER_OFFLINE,
 } from "@/lib/api/errors";
 import { requestRunUploads } from "@/lib/api/run-uploads";
 
@@ -42,16 +40,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   const result = await requestRunUploads({ instrumentId, runId, fileIds });
 
   if (!result.ok) {
-    if (result.code === "NOT_FOUND") {
-      return apiError(result.status, NOT_FOUND, result.message);
-    }
-    if (result.code === "WATCHER_OFFLINE") {
-      return apiError(result.status, WATCHER_OFFLINE, result.message);
-    }
-    if (result.code === "CONFLICT") {
-      return apiError(result.status, CONFLICT, result.message);
-    }
-    return apiError(result.status, VALIDATION_ERROR, result.message);
+    return apiErrorFromResult(result);
   }
 
   return Response.json({

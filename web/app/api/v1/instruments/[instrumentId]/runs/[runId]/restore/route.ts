@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
-import { apiError, CONFLICT, NOT_FOUND } from "@/lib/api/errors";
+import { apiErrorFromResult } from "@/lib/api/errors";
 import { restoreRun } from "@/lib/api/run-lifecycle";
 
 interface RouteContext {
@@ -26,8 +26,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   const result = await restoreRun(instrumentId, runId);
 
   if (!result.ok) {
-    const code = result.code === "NOT_FOUND" ? NOT_FOUND : CONFLICT;
-    return apiError(result.status, code, result.message);
+    return apiErrorFromResult(result);
   }
 
   return Response.json({

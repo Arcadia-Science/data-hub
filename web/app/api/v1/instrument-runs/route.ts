@@ -1,11 +1,8 @@
 import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import { buildRunListQuery } from "@/lib/api/instrument-runs";
-import {
-  parseIntParam,
-  parseRunMetadataFilters,
-  parseRunStatusParam,
-} from "@/lib/api/validators";
+import { parseRunMetadataFilters } from "@/lib/api/run-metadata-filters";
+import { parseIntParam, parseRunStatusParam } from "@/lib/api/validators";
 
 // ---------------------------------------------------------------------------
 // GET /api/v1/instrument-runs

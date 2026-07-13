@@ -4,11 +4,8 @@ import { authorize } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { buildRunListQuery, parseAcquiredAt } from "@/lib/api/instrument-runs";
 import { notifyRunCreated } from "@/lib/api/notifications";
-import {
-  parseIntParam,
-  parseRunMetadataFilters,
-  parseRunStatusParam,
-} from "@/lib/api/validators";
+import { parseRunMetadataFilters } from "@/lib/api/run-metadata-filters";
+import { parseIntParam, parseRunStatusParam } from "@/lib/api/validators";
 import { db } from "@/lib/db";
 import { files, instrumentRuns, instruments, watchers } from "@/lib/db/schema";
 import { sendSlackMessage } from "@/lib/slack";

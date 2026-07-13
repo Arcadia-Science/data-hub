@@ -1,11 +1,6 @@
 import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
-import {
-  apiError,
-  CONFLICT,
-  NOT_FOUND,
-  WATCHER_OFFLINE,
-} from "@/lib/api/errors";
+import { apiErrorFromResult } from "@/lib/api/errors";
 import { requestAllRunUploads } from "@/lib/api/run-uploads";
 
 interface RouteContext {
@@ -29,13 +24,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   const result = await requestAllRunUploads(instrumentId, runId);
 
   if (!result.ok) {
-    if (result.code === "NOT_FOUND") {
-      return apiError(result.status, NOT_FOUND, result.message);
-    }
-    if (result.code === "WATCHER_OFFLINE") {
-      return apiError(result.status, WATCHER_OFFLINE, result.message);
-    }
-    return apiError(result.status, CONFLICT, result.message);
+    return apiErrorFromResult(result);
   }
 
   return Response.json({
