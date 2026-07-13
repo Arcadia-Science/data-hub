@@ -65,7 +65,15 @@ export async function lookupFileForDownload(
 }
 
 export type DismissFileResult =
-  | { ok: true; id: number; filename: string; deletedAt: Date }
+  | {
+      ok: true;
+      id: number;
+      filename: string;
+      deletedAt: Date;
+      // True when the file was already soft-deleted, so the call made no change.
+      // Lets `dismiss_file` / DELETE stay idempotent (success, not 409).
+      alreadyApplied: boolean;
+    }
   | {
       ok: false;
       status: number;
@@ -92,11 +100,14 @@ export async function dismissFile(fileId: number): Promise<DismissFileResult> {
   }
 
   if (file.deletedAt) {
+    // Idempotent: already dismissed, so report success with the existing
+    // deletion timestamp instead of a 409 conflict.
     return {
-      ok: false,
-      status: 409,
-      code: "CONFLICT",
-      message: "File is already deleted",
+      ok: true,
+      id: file.id,
+      filename: file.filename,
+      deletedAt: file.deletedAt,
+      alreadyApplied: true,
     };
   }
 
@@ -121,6 +132,7 @@ export async function dismissFile(fileId: number): Promise<DismissFileResult> {
     id: file.id,
     filename: file.filename,
     deletedAt: now,
+    alreadyApplied: false,
   };
 }
 

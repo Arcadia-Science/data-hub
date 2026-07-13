@@ -1280,12 +1280,16 @@ export function registerTools(server: McpServer) {
     {
       title: "Delete Run",
       description:
-        "Soft-delete a run (sets deleted_at). Does not remove files or S3 objects. Use restore_run to undo.",
+        "Soft-delete a run (sets deleted_at). Does not remove files or S3 objects. Use restore_run to undo. Idempotent: deleting an already-deleted run succeeds as a no-op.",
       inputSchema: {
         instrumentId: z.string().describe("Instrument identifier"),
         runId: z.string().describe("Run identifier within the instrument"),
       },
-      annotations: { readOnlyHint: false, destructiveHint: true },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+      },
     },
     async ({ instrumentId, runId }, { authInfo }) => {
       const scopeError = requireMcpScope(authInfo, "runs:delete");
@@ -1306,6 +1310,7 @@ export function registerTools(server: McpServer) {
         runId: result.runId,
         deletedAt: result.deletedAt,
         deletedBy: result.deletedBy,
+        alreadyApplied: result.alreadyApplied,
       });
     }
   );
@@ -1315,12 +1320,16 @@ export function registerTools(server: McpServer) {
     {
       title: "Restore Run",
       description:
-        "Restore a soft-deleted run by clearing deleted_at. No-op conflict if the run is not deleted.",
+        "Restore a soft-deleted run by clearing deleted_at. Idempotent: restoring a run that is not deleted succeeds as a no-op.",
       inputSchema: {
         instrumentId: z.string().describe("Instrument identifier"),
         runId: z.string().describe("Run identifier within the instrument"),
       },
-      annotations: { readOnlyHint: false, destructiveHint: false },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
     },
     async ({ instrumentId, runId }, { authInfo }) => {
       const scopeError = requireMcpScope(authInfo, "runs:delete");
@@ -1335,6 +1344,7 @@ export function registerTools(server: McpServer) {
         instrumentId: result.instrumentId,
         runId: result.runId,
         deletedAt: result.deletedAt,
+        alreadyApplied: result.alreadyApplied,
       });
     }
   );
@@ -1354,7 +1364,11 @@ export function registerTools(server: McpServer) {
           .max(100)
           .describe("Numeric file IDs to queue"),
       },
-      annotations: { readOnlyHint: false, destructiveHint: false },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
     },
     async ({ instrumentId, runId, fileIds }, { authInfo }) => {
       const scopeError = requireMcpScope(authInfo, "runs:upload");
@@ -1388,7 +1402,11 @@ export function registerTools(server: McpServer) {
         instrumentId: z.string().describe("Instrument identifier"),
         runId: z.string().describe("Run identifier within the instrument"),
       },
-      annotations: { readOnlyHint: false, destructiveHint: false },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
     },
     async ({ instrumentId, runId }, { authInfo }) => {
       const scopeError = requireMcpScope(authInfo, "runs:upload");
@@ -1412,11 +1430,15 @@ export function registerTools(server: McpServer) {
     {
       title: "Dismiss File",
       description:
-        "Soft-delete a detected or upload_requested file (UI 'dismiss'). Uploaded files cannot be dismissed — delete the run instead.",
+        "Soft-delete a detected or upload_requested file (UI 'dismiss'). Uploaded files cannot be dismissed — delete the run instead. Idempotent: dismissing an already-dismissed file succeeds as a no-op.",
       inputSchema: {
         fileId: z.number().int().describe("Numeric file ID"),
       },
-      annotations: { readOnlyHint: false, destructiveHint: true },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+      },
     },
     async ({ fileId }, { authInfo }) => {
       const scopeError = requireMcpScope(authInfo, "files:delete");
@@ -1431,6 +1453,7 @@ export function registerTools(server: McpServer) {
         id: result.id,
         filename: result.filename,
         deletedAt: result.deletedAt,
+        alreadyApplied: result.alreadyApplied,
       });
     }
   );

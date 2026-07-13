@@ -250,5 +250,6 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
     run_id: result.runId,
     deleted_at: result.deletedAt,
     deleted_by: result.deletedBy,
+    already_applied: result.alreadyApplied,
   });
 }

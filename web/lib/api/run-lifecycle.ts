@@ -13,6 +13,10 @@ export type RunLifecycleResult =
       runId: string;
       deletedAt: Date | null;
       deletedBy?: string | null;
+      // True when the run was already in the requested state, so the call made
+      // no change. Lets delete/restore stay idempotent (success, not 409) while
+      // still letting callers tell a no-op apart from a real transition.
+      alreadyApplied: boolean;
     }
   | {
       ok: false;
@@ -38,11 +42,16 @@ export async function softDeleteRun(input: {
   }
 
   if (run.deletedAt) {
+    // Idempotent: the run is already soft-deleted, so report success with the
+    // existing deletion metadata instead of a 409 conflict.
     return {
-      ok: false,
-      status: 409,
-      code: "CONFLICT",
-      message: "Run is already deleted",
+      ok: true,
+      id: run.id,
+      instrumentId: run.instrumentId,
+      runId: run.runId,
+      deletedAt: run.deletedAt,
+      deletedBy: run.deletedBy,
+      alreadyApplied: true,
     };
   }
 
@@ -59,6 +68,7 @@ export async function softDeleteRun(input: {
     runId: run.runId,
     deletedAt: now,
     deletedBy: input.deletedBy,
+    alreadyApplied: false,
   };
 }
 
@@ -78,11 +88,15 @@ export async function restoreRun(
   }
 
   if (!run.deletedAt) {
+    // Idempotent: the run is already live, so there's nothing to clear — report
+    // success rather than a 409 conflict.
     return {
-      ok: false,
-      status: 409,
-      code: "CONFLICT",
-      message: "Run is not deleted — nothing to restore",
+      ok: true,
+      id: run.id,
+      instrumentId: run.instrumentId,
+      runId: run.runId,
+      deletedAt: null,
+      alreadyApplied: true,
     };
   }
 
@@ -107,5 +121,6 @@ export async function restoreRun(
     instrumentId: restored.instrumentId,
     runId: restored.runId,
     deletedAt: restored.deletedAt,
+    alreadyApplied: false,
   };
 }

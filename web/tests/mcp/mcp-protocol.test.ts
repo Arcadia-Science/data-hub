@@ -264,6 +264,7 @@ vi.mock("@/lib/api/files", () => ({
     id: 1,
     filename: "a.txt",
     deletedAt: new Date(),
+    alreadyApplied: false,
   }),
 }));
 
@@ -313,6 +314,7 @@ vi.mock("@/lib/api/run-lifecycle", () => ({
     runId: "run-1",
     deletedAt: new Date("2025-01-01"),
     deletedBy: "user-from-auth",
+    alreadyApplied: false,
   }),
   restoreRun: vi.fn().mockResolvedValue({
     ok: true,
@@ -320,6 +322,7 @@ vi.mock("@/lib/api/run-lifecycle", () => ({
     instrumentId: "test-plate-reader",
     runId: "run-1",
     deletedAt: null,
+    alreadyApplied: false,
   }),
 }));
 
@@ -563,6 +566,36 @@ describe("MCP Protocol (in-memory)", () => {
     expect(tool?.annotations?.readOnlyHint).toBe(false);
     expect(tool?.annotations?.destructiveHint).toBe(true);
     expect(tool?.annotations?.idempotentHint).toBe(true);
+  });
+
+  it("request_run_upload tools are annotated as write / non-destructive / idempotent", async () => {
+    const { tools } = await client.listTools();
+    for (const name of ["request_run_upload", "request_run_upload_all"]) {
+      const tool = tools.find((t) => t.name === name);
+      expect(tool?.annotations?.readOnlyHint, `${name} not read-only`).toBe(
+        false
+      );
+      expect(
+        tool?.annotations?.destructiveHint,
+        `${name} non-destructive`
+      ).toBe(false);
+      expect(tool?.annotations?.idempotentHint, `${name} idempotent`).toBe(
+        true
+      );
+    }
+  });
+
+  it("soft-delete / restore / dismiss tools are annotated idempotent", async () => {
+    const { tools } = await client.listTools();
+    for (const name of ["delete_run", "restore_run", "dismiss_file"]) {
+      const tool = tools.find((t) => t.name === name);
+      expect(tool?.annotations?.readOnlyHint, `${name} not read-only`).toBe(
+        false
+      );
+      expect(tool?.annotations?.idempotentHint, `${name} idempotent`).toBe(
+        true
+      );
+    }
   });
 
   // ---- Tool execution (happy path) ----------------------------------------

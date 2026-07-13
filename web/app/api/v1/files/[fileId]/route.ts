@@ -221,5 +221,6 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
     id: result.id,
     filename: result.filename,
     deleted_at: result.deletedAt,
+    already_applied: result.alreadyApplied,
   });
 }

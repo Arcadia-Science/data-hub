@@ -475,7 +475,20 @@ describe("MCP Server (HTTP)", () => {
       runId: lifecycleRun,
     });
     expect(del.isError).toBeFalsy();
-    expect(JSON.parse(del.content[0].text).deletedAt).toBeTruthy();
+    const delParsed = JSON.parse(del.content[0].text);
+    expect(delParsed.deletedAt).toBeTruthy();
+    expect(delParsed.alreadyApplied).toBe(false);
+
+    // Deleting again is an idempotent no-op: still success, flagged as such,
+    // and the original deletion timestamp is preserved.
+    const delAgain = await callTool("delete_run", {
+      instrumentId: lifecycleInstrument,
+      runId: lifecycleRun,
+    });
+    expect(delAgain.isError).toBeFalsy();
+    const delAgainParsed = JSON.parse(delAgain.content[0].text);
+    expect(delAgainParsed.alreadyApplied).toBe(true);
+    expect(delAgainParsed.deletedAt).toBe(delParsed.deletedAt);
 
     // get_run still resolves the run but now surfaces the soft-delete stamp.
     const afterDelete = await callTool("get_run", {
@@ -490,7 +503,19 @@ describe("MCP Server (HTTP)", () => {
       runId: lifecycleRun,
     });
     expect(restore.isError).toBeFalsy();
-    expect(JSON.parse(restore.content[0].text).deletedAt).toBeNull();
+    const restoreParsed = JSON.parse(restore.content[0].text);
+    expect(restoreParsed.deletedAt).toBeNull();
+    expect(restoreParsed.alreadyApplied).toBe(false);
+
+    // Restoring an already-live run is an idempotent no-op.
+    const restoreAgain = await callTool("restore_run", {
+      instrumentId: lifecycleInstrument,
+      runId: lifecycleRun,
+    });
+    expect(restoreAgain.isError).toBeFalsy();
+    const restoreAgainParsed = JSON.parse(restoreAgain.content[0].text);
+    expect(restoreAgainParsed.deletedAt).toBeNull();
+    expect(restoreAgainParsed.alreadyApplied).toBe(true);
 
     const afterRestore = await callTool("get_run", {
       instrumentId: lifecycleInstrument,

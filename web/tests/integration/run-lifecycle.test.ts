@@ -69,15 +69,38 @@ describe("Run lifecycle API (delete / restore)", () => {
     expect(body.instrument_id).toBe(instrumentId);
     expect(body.run_id).toBe(runId);
     expect(body.deleted_at).toBeNull();
+    expect(body.already_applied).toBe(false);
   });
 
-  it("restore on a run that isn't deleted returns 409", async () => {
+  it("restore on a run that isn't deleted is an idempotent no-op", async () => {
     const res = await api(
       `/api/v1/instruments/${instrumentId}/runs/${runId}/restore`,
       { method: "POST", token }
     );
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.error.code).toBe("CONFLICT");
+    expect(body.deleted_at).toBeNull();
+    expect(body.already_applied).toBe(true);
+  });
+
+  it("delete on an already-deleted run is an idempotent no-op", async () => {
+    const first = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${runId}`,
+      { method: "DELETE", token }
+    );
+    expect(first.status).toBe(200);
+    const firstBody = await first.json();
+    expect(firstBody.already_applied).toBe(false);
+    expect(firstBody.deleted_at).toBeTruthy();
+
+    const second = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${runId}`,
+      { method: "DELETE", token }
+    );
+    expect(second.status).toBe(200);
+    const secondBody = await second.json();
+    expect(secondBody.already_applied).toBe(true);
+    // The deletion timestamp is preserved from the first delete, not bumped.
+    expect(secondBody.deleted_at).toBe(firstBody.deleted_at);
   });
 });

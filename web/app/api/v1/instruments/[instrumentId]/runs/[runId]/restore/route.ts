@@ -10,9 +10,10 @@ interface RouteContext {
 // ---------------------------------------------------------------------------
 // POST /api/v1/instruments/:instrumentId/runs/:runId/restore
 //
-// Restores a soft-deleted run by clearing deleted_at. Rejects with 409 if the
-// run was never deleted. Data Hub never hard-deletes runs or S3 objects, so
-// restore always succeeds for a previously soft-deleted run.
+// Restores a soft-deleted run by clearing deleted_at. Idempotent: restoring a
+// run that was never deleted succeeds as a no-op (`already_applied: true`).
+// Data Hub never hard-deletes runs or S3 objects, so restore always succeeds
+// for a previously soft-deleted run.
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
@@ -34,5 +35,6 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     instrument_id: result.instrumentId,
     run_id: result.runId,
     deleted_at: result.deletedAt,
+    already_applied: result.alreadyApplied,
   });
 }
