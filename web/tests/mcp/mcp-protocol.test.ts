@@ -103,17 +103,38 @@ vi.mock("@/lib/api/instrument-runs", () => ({
     data: [],
     pagination: { page: 1, per_page: 50, total: 0, total_pages: 0 },
   }),
-  getPlateReaderFilterOptions: vi.fn().mockResolvedValue({
-    wavelengths: ["450"],
-    measurementModes: ["Absorbance"],
-    measurementTypes: ["Endpoint"],
-  }),
-  getGelDocFilterOptions: vi.fn().mockResolvedValue({
-    captureTypes: ["Chemi"],
-    imagingModes: ["Single"],
-    wavelengths: ["520"],
-    colors: ["Green"],
-  }),
+  getInstrumentFilterOptions: vi
+    .fn()
+    .mockImplementation((instrumentType: string) => {
+      if (instrumentType === "plate_reader") {
+        return {
+          kind: "plate_reader",
+          options: {
+            wavelengths: ["450"],
+            measurementModes: ["Absorbance"],
+            measurementTypes: ["Endpoint"],
+          },
+        };
+      }
+      if (instrumentType === "gel_doc") {
+        return {
+          kind: "gel_doc",
+          options: {
+            captureTypes: ["Chemi"],
+            imagingModes: ["Single"],
+            wavelengths: ["520"],
+            colors: ["Green"],
+          },
+        };
+      }
+      if (instrumentType === "qpcr") {
+        return {
+          kind: "qpcr",
+          options: { dyeChannels: ["SYBR"] },
+        };
+      }
+      return { kind: "default" };
+    }),
   getAttributionsByRunIds: vi.fn().mockResolvedValue(new Map()),
   getRanByFilterOptions: vi
     .fn()
@@ -146,10 +167,37 @@ vi.mock("@/lib/api/dashboard", () => ({
       instrumentType: "plate_reader",
     },
   ]),
+  getUserById: vi.fn().mockImplementation(async (id: string) =>
+    id === "user-from-auth"
+      ? {
+          id: "user-from-auth",
+          name: "Test User",
+          email: "test@example.com",
+          image: null,
+          isAdmin: false,
+        }
+      : null
+  ),
+}));
+
+vi.mock("@/lib/api/search", () => ({
+  globalSearch: vi.fn().mockResolvedValue({
+    runs: [],
+    files: [],
+    instruments: [],
+    counts: { runs: 0, files: 0, instruments: 0, total: 0 },
+  }),
 }));
 
 vi.mock("@/lib/api/watchers", () => ({
   getWatcherList: vi.fn().mockResolvedValue([]),
+  getWatcherById: vi.fn().mockResolvedValue(null),
+  getWatcherEvents: vi.fn().mockResolvedValue({
+    rows: [],
+    total: 0,
+    page: 1,
+    pageSize: 50,
+  }),
   getWatcherHeartbeats: vi.fn().mockResolvedValue({
     rows: [
       {
@@ -164,6 +212,32 @@ vi.mock("@/lib/api/watchers", () => ({
       },
     ],
     total: 1,
+  }),
+}));
+
+vi.mock("@/lib/api/run-reports", () => ({
+  buildRunReport: vi.fn().mockResolvedValue({
+    ok: true,
+    instrumentId: "test-plate-reader",
+    runId: "run-1",
+    instrumentType: "plate_reader",
+    metadata: {},
+    fileCounts: { completed: 1 },
+    processedCsv: {
+      rowCount: 1,
+      columns: ["Well", "Value"],
+      sampleRows: [{ Well: "A1", Value: "0.1" }],
+      sampleRowLimit: 20,
+      truncated: false,
+    },
+    images: [],
+    reportFiles: [],
+    failureSummary: { byStatus: { completed: 1 }, failed: [], totalFiles: 1 },
+  }),
+  getRunFailureSummary: vi.fn().mockResolvedValue({
+    byStatus: { completed: 1 },
+    failed: [],
+    totalFiles: 1,
   }),
 }));
 
@@ -184,6 +258,13 @@ vi.mock("@/lib/api/files", () => ({
       return { ok: false, reason: "not_uploaded" };
     }
     return { ok: false, reason: "not_found" };
+  }),
+  dismissFile: vi.fn().mockResolvedValue({
+    ok: true,
+    id: 1,
+    filename: "a.txt",
+    deletedAt: new Date(),
+    alreadyApplied: false,
   }),
 }));
 
@@ -216,6 +297,81 @@ vi.mock("@/lib/api/file-reprocessing", () => ({
       message: `File '${id}' not found`,
     };
   }),
+  reprocessRun: vi.fn().mockResolvedValue({
+    ok: true,
+    instrumentId: "test-plate-reader",
+    runId: "run-1",
+    filesQueued: 1,
+    filesFailed: 0,
+  }),
+}));
+
+vi.mock("@/lib/api/run-lifecycle", () => ({
+  softDeleteRun: vi.fn().mockResolvedValue({
+    ok: true,
+    id: "internal-1",
+    instrumentId: "test-plate-reader",
+    runId: "run-1",
+    deletedAt: new Date("2025-01-01"),
+    deletedBy: "user-from-auth",
+    alreadyApplied: false,
+  }),
+  restoreRun: vi.fn().mockResolvedValue({
+    ok: true,
+    id: "internal-1",
+    instrumentId: "test-plate-reader",
+    runId: "run-1",
+    deletedAt: null,
+    alreadyApplied: false,
+  }),
+}));
+
+vi.mock("@/lib/api/run-uploads", () => ({
+  requestRunUploads: vi.fn().mockResolvedValue({
+    ok: true,
+    instrumentId: "test-plate-reader",
+    runId: "run-1",
+    filesQueued: 1,
+    files: [{ id: 1, filename: "a.txt", uploadRequestedAt: new Date() }],
+  }),
+  requestAllRunUploads: vi.fn().mockResolvedValue({
+    ok: true,
+    instrumentId: "test-plate-reader",
+    runId: "run-1",
+    filesQueued: 2,
+  }),
+}));
+
+vi.mock("@/lib/api/run-comments", () => ({
+  listCommentsForRun: vi.fn().mockResolvedValue([]),
+  createComment: vi.fn().mockResolvedValue({
+    id: "c-1",
+    body: "hi",
+    created_at: new Date(),
+    edited_at: null,
+    user: { id: "u-1", displayName: "Alice", initials: "A", avatarUrl: null },
+  }),
+  createCommentAndNotify: vi.fn().mockResolvedValue({
+    id: "c-1",
+    body: "hi",
+    created_at: new Date(),
+    edited_at: null,
+    user: { id: "u-1", displayName: "Alice", initials: "A", avatarUrl: null },
+  }),
+  getCommentForAuthorCheck: vi.fn().mockResolvedValue(null),
+  getCommentForDeleteAuthorCheck: vi.fn().mockResolvedValue(null),
+  updateComment: vi.fn().mockResolvedValue(null),
+  softDeleteComment: vi.fn().mockResolvedValue(false),
+  validateCommentBody: vi.fn().mockImplementation((body: unknown) => {
+    if (typeof body !== "string" || body.trim().length === 0) {
+      return { ok: false, message: "body must not be empty" };
+    }
+    return { ok: true, body };
+  }),
+}));
+
+vi.mock("@/lib/api/notifications", () => ({
+  notifyComment: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/s3", () => ({
@@ -274,10 +430,15 @@ describe("MCP Protocol (in-memory)", () => {
     "list_instruments",
     "get_instrument",
     "search_runs",
+    "global_search",
+    "get_me",
     "get_run",
+    "get_run_report",
     "list_run_files",
     "get_system_status",
     "list_watchers",
+    "get_watcher",
+    "list_watcher_events",
     "get_file",
     "get_file_download_url",
     "get_run_archive",
@@ -286,9 +447,32 @@ describe("MCP Protocol (in-memory)", () => {
     "claim_run",
     "unclaim_run",
     "list_run_attributors",
+    "list_run_comments",
+    "add_run_comment",
+    "edit_run_comment",
+    "delete_run_comment",
+    "reprocess_run",
+    "delete_run",
+    "restore_run",
+    "request_run_upload",
+    "request_run_upload_all",
+    "dismiss_file",
   ] as const;
 
-  const WRITE_TOOLS = new Set(["reprocess_file", "claim_run", "unclaim_run"]);
+  const WRITE_TOOLS = new Set([
+    "reprocess_file",
+    "claim_run",
+    "unclaim_run",
+    "add_run_comment",
+    "edit_run_comment",
+    "delete_run_comment",
+    "reprocess_run",
+    "delete_run",
+    "restore_run",
+    "request_run_upload",
+    "request_run_upload_all",
+    "dismiss_file",
+  ]);
 
   it("registers all expected tools", async () => {
     const { tools } = await client.listTools();
@@ -331,6 +515,7 @@ describe("MCP Protocol (in-memory)", () => {
     const getRun = tools.find((t) => t.name === "get_run");
     expect(getRun?.inputSchema.properties).toHaveProperty("instrumentId");
     expect(getRun?.inputSchema.properties).toHaveProperty("runId");
+    expect(getRun?.inputSchema.properties).toHaveProperty("include");
 
     const getFile = tools.find((t) => t.name === "get_file");
     expect(getFile?.inputSchema.properties).toHaveProperty("fileId");
@@ -361,9 +546,17 @@ describe("MCP Protocol (in-memory)", () => {
       "instrumentId"
     );
 
-    // search_runs gained a `ranBy` filter alongside the new attribution tools.
+    // search_runs gained a `ranBy` filter alongside the new attribution tools,
+    // plus instrument-type metadata filters used by the UI run tables.
     const searchRuns = tools.find((t) => t.name === "search_runs");
     expect(searchRuns?.inputSchema.properties).toHaveProperty("ranBy");
+    expect(searchRuns?.inputSchema.properties).toHaveProperty("captureType");
+    expect(searchRuns?.inputSchema.properties).toHaveProperty("dyeChannel");
+    expect(searchRuns?.inputSchema.properties).toHaveProperty("hinaChannel");
+    expect(searchRuns?.inputSchema.properties).toHaveProperty("dpi");
+
+    const globalSearch = tools.find((t) => t.name === "global_search");
+    expect(globalSearch?.inputSchema.properties).toHaveProperty("query");
   });
 
   it("claim_run is annotated as write / non-destructive / idempotent", async () => {
@@ -380,6 +573,36 @@ describe("MCP Protocol (in-memory)", () => {
     expect(tool?.annotations?.readOnlyHint).toBe(false);
     expect(tool?.annotations?.destructiveHint).toBe(true);
     expect(tool?.annotations?.idempotentHint).toBe(true);
+  });
+
+  it("request_run_upload tools are annotated as write / non-destructive / idempotent", async () => {
+    const { tools } = await client.listTools();
+    for (const name of ["request_run_upload", "request_run_upload_all"]) {
+      const tool = tools.find((t) => t.name === name);
+      expect(tool?.annotations?.readOnlyHint, `${name} not read-only`).toBe(
+        false
+      );
+      expect(
+        tool?.annotations?.destructiveHint,
+        `${name} non-destructive`
+      ).toBe(false);
+      expect(tool?.annotations?.idempotentHint, `${name} idempotent`).toBe(
+        true
+      );
+    }
+  });
+
+  it("soft-delete / restore / dismiss tools are annotated idempotent", async () => {
+    const { tools } = await client.listTools();
+    for (const name of ["delete_run", "restore_run", "dismiss_file"]) {
+      const tool = tools.find((t) => t.name === name);
+      expect(tool?.annotations?.readOnlyHint, `${name} not read-only`).toBe(
+        false
+      );
+      expect(tool?.annotations?.idempotentHint, `${name} idempotent`).toBe(
+        true
+      );
+    }
   });
 
   // ---- Tool execution (happy path) ----------------------------------------
@@ -421,6 +644,83 @@ describe("MCP Protocol (in-memory)", () => {
     const parsed = parseText(result.content);
     expect(parsed).toHaveProperty("runs");
     expect(parsed).toHaveProperty("total");
+  });
+
+  it("search_runs rejects invalid metadata filters with allowed values", async () => {
+    const result = await client.callTool({
+      name: "search_runs",
+      arguments: {
+        instrumentId: "test-plate-reader",
+        wavelength: "999",
+      },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ type: string; text: string }>)[0]
+      ?.text;
+    expect(text).toContain("Invalid wavelength");
+    expect(text).toContain("450");
+    expect(text).toContain("filter-options");
+  });
+
+  it("search_runs forwards gel-doc and qPCR metadata filters", async () => {
+    const { buildRunListQuery } = await import("@/lib/api/instrument-runs");
+    await client.callTool({
+      name: "search_runs",
+      arguments: {
+        captureType: "Chemi",
+        gelWavelength: "520",
+        dyeChannel: "SYBR",
+      },
+    });
+    expect(buildRunListQuery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        captureType: "Chemi",
+        gelWavelength: "520",
+        dyeChannel: "SYBR",
+      })
+    );
+  });
+
+  it('search_runs rejects ranBy="me" without auth', async () => {
+    const result = await client.callTool({
+      name: "search_runs",
+      arguments: { ranBy: "me" },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ type: string; text: string }>)[0]
+      ?.text;
+    expect(text).toContain('ranBy="me"');
+  });
+
+  it("global_search returns grouped results", async () => {
+    const result = await client.callTool({
+      name: "global_search",
+      arguments: { query: "plate" },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as {
+      counts: { total: number };
+    };
+    expect(parsed).toHaveProperty("runs");
+    expect(parsed).toHaveProperty("files");
+    expect(parsed).toHaveProperty("instruments");
+    expect(parsed.counts).toHaveProperty("total");
+  });
+
+  it("global_search rejects short queries", async () => {
+    const result = await client.callTool({
+      name: "global_search",
+      arguments: { query: "a" },
+    });
+    expect(result.isError).toBe(true);
+  });
+
+  it("get_me errors without auth on the in-memory transport", async () => {
+    const result = await client.callTool({
+      name: "get_me",
+      arguments: {},
+    });
+    expect(result.isError).toBe(true);
   });
 
   it("get_system_status returns data", async () => {
@@ -586,8 +886,38 @@ describe("MCP Protocol (in-memory)", () => {
     });
     expect(result.isError).toBe(true);
     const text = (result.content as Array<{ type: string; text: string }>)[0]
-      .text;
+      ?.text;
     expect(text).toContain("not found");
+  });
+
+  it("get_run include=failure_summary attaches summary", async () => {
+    const { getRunFailureSummary } = await import("@/lib/api/run-reports");
+    const result = await client.callTool({
+      name: "get_run",
+      arguments: {
+        instrumentId: "test-plate-reader",
+        runId: "run-1",
+        include: ["failure_summary"],
+      },
+    });
+    expect(result.isError).toBeFalsy();
+    expect(getRunFailureSummary).toHaveBeenCalled();
+    const parsed = parseText(result.content) as {
+      failureSummary: { totalFiles: number };
+    };
+    expect(parsed.failureSummary).toHaveProperty("totalFiles");
+  });
+
+  it("get_run_report returns bounded processed CSV sample", async () => {
+    const result = await client.callTool({
+      name: "get_run_report",
+      arguments: { instrumentId: "test-plate-reader", runId: "run-1" },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as {
+      processedCsv: { sampleRowLimit: number };
+    };
+    expect(parsed.processedCsv.sampleRowLimit).toBe(20);
   });
 
   it("list_run_files returns error for nonexistent run", async () => {
@@ -734,9 +1064,23 @@ describe("MCP Protocol (in-memory)", () => {
 
   // ---- Resources -----------------------------------------------------------
 
-  it("lists resources including instruments", async () => {
+  it("lists resources including instruments, me, and glossary", async () => {
     const { resources } = await client.listResources();
-    expect(resources.some((r) => r.uri === "datahub://instruments")).toBe(true);
+    const uris = resources.map((r) => r.uri);
+    expect(uris).toContain("datahub://instruments");
+    expect(uris).toContain("datahub://me");
+    expect(uris).toContain("datahub://glossary");
+  });
+
+  it("reads the glossary resource", async () => {
+    const { contents } = await client.readResource({
+      uri: "datahub://glossary",
+    });
+    const parsed = JSON.parse(
+      (contents[0] as { uri: string; text: string }).text
+    );
+    expect(parsed).toHaveProperty("runStatus");
+    expect(parsed).toHaveProperty("toolRouting");
   });
 
   it("reads the instruments resource", async () => {
@@ -829,6 +1173,10 @@ describe("MCP Protocol (in-memory)", () => {
     "daily_summary",
     "troubleshoot_instrument",
     "compare_runs",
+    "find_my_runs",
+    "explain_failed_run",
+    "claim_unattributed_runs",
+    "summarize_instrument_week",
   ] as const;
 
   it("lists all expected prompts", async () => {

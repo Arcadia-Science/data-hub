@@ -1,3 +1,4 @@
+import { parse as parseCsvStream } from "csv-parse";
 import { parse } from "csv-parse/sync";
 import type { AnyColumn, SQL } from "drizzle-orm";
 import {
@@ -214,29 +215,13 @@ export function parseAcquiredAt(body: Record<string, unknown>): Date | null {
 // Used by both per-instrument and cross-instrument list endpoints.
 // ---------------------------------------------------------------------------
 
-interface RunListFilters {
-  captureType?: string;
-  colorMode?: string;
+import type { RunMetadataFilterArgs } from "@/lib/api/run-metadata-filters";
+
+interface RunListFilters extends RunMetadataFilterArgs {
   dateFrom?: string;
   dateTo?: string;
-  // Epson V700 Scanner derived metadata. `dpi` is a numeric string (e.g. "300",
-  // "600") and `colorMode` is the canonical "rgb"/"bw" string written by the
-  // Lambda's TIFF metadata parser.
-  dpi?: string;
-  dyeChannel?: string;
-  gelColor?: string;
-  gelWavelength?: string;
-  hinaChannel?: string;
-  hinaDimension?: string;
-  // Raw sizes JSONB object serialized as a string; compared via jsonb equality
-  // so key ordering differences between client serialization and stored value
-  // don't matter.
-  hinaSize?: string;
-  imagingMode?: string;
   includeDeleted: boolean;
   instrumentId?: string | string[];
-  measurementMode?: string;
-  measurementType?: string;
   order?: string;
   page: number;
   perPage: number;
@@ -248,7 +233,6 @@ interface RunListFilters {
   source?: string;
   // Derived run statuses to match (OR'd together). Undefined/empty = no filter.
   statuses?: RunStatus[];
-  wavelength?: string;
 }
 
 const UNATTRIBUTED_SENTINEL = "unattributed";
@@ -1062,6 +1046,80 @@ export async function getProcessedCsvData(
   );
 
   return results.flat();
+}
+
+export interface ProcessedCsvSummary {
+  columns: string[];
+  rowCount: number;
+  sampleRows: RawWellRow[];
+  // True when `scanLimit` was hit and reading stopped early, so `rowCount` is
+  // a floor rather than the exact total.
+  truncated: boolean;
+}
+
+// Streaming counterpart to `getProcessedCsvData` for report/summary callers.
+// Streams each CSV row-by-row and retains only up to `sampleLimit` rows, so
+// peak memory stays bounded by the sample rather than the full plate grid(s).
+// Reading also stops once `scanLimit` rows have been seen, bounding wall-clock
+// cost (and download bytes) so a pathological multi-CSV run can't blow the
+// MCP route's request budget just to compute a total.
+export async function getProcessedCsvSummary(
+  runFiles: RunFile[],
+  sampleLimit: number,
+  scanLimit: number
+): Promise<ProcessedCsvSummary> {
+  const csvFiles = runFiles.filter(
+    (f) =>
+      f.category === "processed" &&
+      f.deletedAt === null &&
+      f.filename.endsWith(".csv") &&
+      f.s3Bucket &&
+      f.s3Key
+  );
+
+  const sampleRows: RawWellRow[] = [];
+  let rowCount = 0;
+  let truncated = false;
+
+  for (const file of csvFiles) {
+    if (truncated) {
+      break;
+    }
+    const { s3Bucket, s3Key } = file;
+    if (!(s3Bucket && s3Key)) {
+      continue;
+    }
+    let stream: import("node:stream").Readable | undefined;
+    try {
+      stream = await getS3ObjectStream(s3Bucket, s3Key);
+      const parser = stream.pipe(
+        parseCsvStream({ columns: true, skip_empty_lines: true, trim: true })
+      );
+      for await (const record of parser) {
+        rowCount++;
+        if (sampleRows.length < sampleLimit) {
+          sampleRows.push(record as RawWellRow);
+        }
+        if (rowCount >= scanLimit) {
+          truncated = true;
+          break;
+        }
+      }
+    } catch (err) {
+      // Mirror `getProcessedCsvData`: a bad CSV is skipped, not fatal. Rows
+      // read before a mid-stream error still count toward the summary.
+      console.error(`Failed to fetch processed CSV ${s3Key}:`, err);
+    } finally {
+      // Breaking the for-await destroys the parser but not the piped source,
+      // so destroy it explicitly to stop downloading the rest of the object.
+      stream?.destroy();
+    }
+  }
+
+  const columns =
+    sampleRows.length > 0 ? Object.keys(sampleRows[0]).sort() : [];
+
+  return { columns, rowCount, sampleRows, truncated };
 }
 
 // ---------------------------------------------------------------------------
