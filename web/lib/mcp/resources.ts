@@ -9,6 +9,12 @@ import {
 import type { InstrumentType } from "@/lib/db/schema";
 import { DATAHUB_GLOSSARY } from "@/lib/mcp/glossary";
 import { getMcpUserId } from "@/lib/mcp/tools/helpers";
+import {
+  glossaryResource,
+  instrumentFilterOptionsResource,
+  instrumentsResource,
+  meResource,
+} from "./resources.defs";
 
 // Instrument types with structured filter-options. Must match `search_runs` args.
 const FILTERABLE_INSTRUMENT_TYPES = new Set<InstrumentType>([
@@ -38,20 +44,19 @@ function filterOptionsDescription(instrumentType: InstrumentType): string {
 
 export function registerResources(server: McpServer) {
   server.registerResource(
-    "instruments",
-    "datahub://instruments",
+    instrumentsResource.name,
+    instrumentsResource.uri,
     {
-      description:
-        "List of all instrument IDs, display names, and types. Use as reference context when constructing tool calls.",
-      mimeType: "application/json",
+      description: instrumentsResource.description,
+      mimeType: instrumentsResource.mimeType,
     },
     async () => {
       const instruments = await getInstruments();
       return {
         contents: [
           {
-            uri: "datahub://instruments",
-            mimeType: "application/json",
+            uri: instrumentsResource.uri,
+            mimeType: instrumentsResource.mimeType,
             text: JSON.stringify(instruments, null, 2),
           },
         ],
@@ -60,12 +65,11 @@ export function registerResources(server: McpServer) {
   );
 
   server.registerResource(
-    "me",
-    "datahub://me",
+    meResource.name,
+    meResource.uri,
     {
-      description:
-        "Authenticated PAT owner's identity (id, name, email, image, isAdmin). Same payload as the get_me tool.",
-      mimeType: "application/json",
+      description: meResource.description,
+      mimeType: meResource.mimeType,
     },
     async (_uri, extra) => {
       const userId = getMcpUserId(extra.authInfo);
@@ -73,8 +77,8 @@ export function registerResources(server: McpServer) {
         return {
           contents: [
             {
-              uri: "datahub://me",
-              mimeType: "application/json",
+              uri: meResource.uri,
+              mimeType: meResource.mimeType,
               text: JSON.stringify(
                 { error: "Authenticated user not available on this session." },
                 null,
@@ -90,8 +94,8 @@ export function registerResources(server: McpServer) {
         return {
           contents: [
             {
-              uri: "datahub://me",
-              mimeType: "application/json",
+              uri: meResource.uri,
+              mimeType: meResource.mimeType,
               text: JSON.stringify(
                 { error: `User '${userId}' not found.` },
                 null,
@@ -105,8 +109,8 @@ export function registerResources(server: McpServer) {
       return {
         contents: [
           {
-            uri: "datahub://me",
-            mimeType: "application/json",
+            uri: meResource.uri,
+            mimeType: meResource.mimeType,
             text: JSON.stringify(user, null, 2),
           },
         ],
@@ -115,18 +119,17 @@ export function registerResources(server: McpServer) {
   );
 
   server.registerResource(
-    "glossary",
-    "datahub://glossary",
+    glossaryResource.name,
+    glossaryResource.uri,
     {
-      description:
-        "Static reference: run status derivation, instrument types, ranBy literals, archive polling, and tool-routing tips.",
-      mimeType: "application/json",
+      description: glossaryResource.description,
+      mimeType: glossaryResource.mimeType,
     },
     async () => ({
       contents: [
         {
-          uri: "datahub://glossary",
-          mimeType: "application/json",
+          uri: glossaryResource.uri,
+          mimeType: glossaryResource.mimeType,
           text: JSON.stringify(DATAHUB_GLOSSARY, null, 2),
         },
       ],
@@ -134,30 +137,26 @@ export function registerResources(server: McpServer) {
   );
 
   server.registerResource(
-    "instrument-filter-options",
-    new ResourceTemplate(
-      "datahub://instruments/{instrumentId}/filter-options",
-      {
-        list: async () => {
-          const instruments = await getInstrumentListWithCounts();
-          const filterable = instruments.filter((i) =>
-            FILTERABLE_INSTRUMENT_TYPES.has(i.instrumentType)
-          );
-          return {
-            resources: filterable.map((i) => ({
-              uri: `datahub://instruments/${i.id}/filter-options`,
-              name: `${i.displayName} filter options`,
-              description: `${filterOptionsDescription(i.instrumentType)} for ${i.displayName}`,
-              mimeType: "application/json",
-            })),
-          };
-        },
-      }
-    ),
+    instrumentFilterOptionsResource.name,
+    new ResourceTemplate(instrumentFilterOptionsResource.uriTemplate, {
+      list: async () => {
+        const instruments = await getInstrumentListWithCounts();
+        const filterable = instruments.filter((i) =>
+          FILTERABLE_INSTRUMENT_TYPES.has(i.instrumentType)
+        );
+        return {
+          resources: filterable.map((i) => ({
+            uri: `datahub://instruments/${i.id}/filter-options`,
+            name: `${i.displayName} filter options`,
+            description: `${filterOptionsDescription(i.instrumentType)} for ${i.displayName}`,
+            mimeType: "application/json",
+          })),
+        };
+      },
+    }),
     {
-      description:
-        "Available filter values for an instrument. Values map directly to search_runs metadata filter arguments (wavelength/measurementMode/measurementType for plate readers; captureType/imagingMode/gelWavelength/gelColor for gel-doc; dyeChannel for qPCR; hinaChannel/hinaDimension/hinaSize for Hina; dpi/colorMode for Epson).",
-      mimeType: "application/json",
+      description: instrumentFilterOptionsResource.description,
+      mimeType: instrumentFilterOptionsResource.mimeType,
     },
     async (_uri, variables) => {
       const instrumentId = Array.isArray(variables.instrumentId)
