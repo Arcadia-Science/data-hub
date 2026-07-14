@@ -45,6 +45,9 @@ export const reprocessFileTool = {
   group: "files",
   scope: "files:reprocess",
   inputSchema: { fileId: z.number().int().describe("Numeric file ID") },
+  // destructiveHint is true because the tool resets status/errorMessage/
+  // processedAt. The Lambda re-processes the file, but the mutation is
+  // irreversible from the tool's perspective and clients should confirm.
   annotations: { readOnlyHint: false, destructiveHint: true },
 } as const satisfies McpToolDef;
 

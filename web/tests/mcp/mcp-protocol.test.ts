@@ -432,38 +432,7 @@ describe("MCP Protocol (in-memory)", () => {
 
   // ---- Tool registration --------------------------------------------------
 
-  const EXPECTED_TOOLS = [
-    "list_instruments",
-    "get_instrument",
-    "search_runs",
-    "global_search",
-    "get_me",
-    "get_run",
-    "get_run_report",
-    "list_run_files",
-    "get_system_status",
-    "list_watchers",
-    "get_watcher",
-    "list_watcher_events",
-    "get_file",
-    "get_file_download_url",
-    "get_run_archive",
-    "reprocess_file",
-    "get_watcher_heartbeats",
-    "claim_run",
-    "unclaim_run",
-    "list_run_attributors",
-    "list_run_comments",
-    "add_run_comment",
-    "edit_run_comment",
-    "delete_run_comment",
-    "reprocess_run",
-    "delete_run",
-    "restore_run",
-    "request_run_upload",
-    "request_run_upload_all",
-    "dismiss_file",
-  ] as const;
+  const EXPECTED_TOOLS = MCP_TOOL_DEFS.map((t) => t.name);
 
   const WRITE_TOOLS = new Set([
     "reprocess_file",
@@ -1228,15 +1197,7 @@ describe("MCP Protocol (in-memory)", () => {
 
   // ---- Prompts -------------------------------------------------------------
 
-  const EXPECTED_PROMPTS = [
-    "daily_summary",
-    "troubleshoot_instrument",
-    "compare_runs",
-    "find_my_runs",
-    "explain_failed_run",
-    "claim_unattributed_runs",
-    "summarize_instrument_week",
-  ] as const;
+  const EXPECTED_PROMPTS = MCP_PROMPT_DEFS.map((p) => p.name);
 
   it("lists all expected prompts", async () => {
     const { prompts } = await client.listPrompts();
