@@ -82,7 +82,7 @@ npm run db:migrate
 
 ### Create an API key for the Lambda
 
-Sign in with an account listed in `ADMIN_EMAILS`, then create a personal access token under Settings. The AWS stack and the Lambda use this token as `DATA_HUB_API_KEY` to call the Data Hub API, so create it now and keep it for [step 4](#4-deploy-the-aws-infrastructure). See [Managing tokens](https://datahub.arcadiascience.com/docs/managing-tokens) for the token UI.
+Sign in with an account listed in `ADMIN_EMAILS`, then create a personal access token under Settings. The AWS stack and the Lambda use this token as `DATA_HUB_API_KEY` to call the Data Hub API, so create it now and keep it for [step 4](#4-deploy-the-aws-infrastructure). See [Issue and revoke tokens](https://datahub.arcadiascience.com/docs/manage-tokens) for the token UI.
 
 ## 3. Bootstrap AWS (once per account)
 
@@ -180,4 +180,4 @@ The S3 bucket names default to `arcadia-data-hub-raw-<env>` and `arcadia-data-hu
 
 ## After the backend is up
 
-The environment is ready: lab operators can install watchers and start uploading. Point them at the [Quickstart](https://datahub.arcadiascience.com/docs/quickstart). Every subsequent deploy — web app, migrations, and Lambda — runs through CI; see [CI and deployment](ci-and-deployment.md) for the workflows, the automated Lambda deploy, and manual redeploys.
+The environment is ready: lab operators can install watchers and start uploading. Point them at [Set up an instrument](https://datahub.arcadiascience.com/docs/set-up-an-instrument). Every subsequent deploy — web app, migrations, and Lambda — runs through CI; see [CI and deployment](ci-and-deployment.md) for the workflows, the automated Lambda deploy, and manual redeploys.

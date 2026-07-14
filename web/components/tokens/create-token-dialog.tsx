@@ -103,9 +103,6 @@ function computeExpiresAt(days: string): string | undefined {
 }
 
 function userLabel(user: WorkspaceUser): string {
-  if (user.name && user.email) {
-    return `${user.name} (${user.email})`;
-  }
   return user.name ?? user.email ?? user.id;
 }
 
