@@ -1,4 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+  commentDeleted,
+  commentsListResponse,
+  runComment,
+} from "@/lib/api/openapi";
 import { instruments } from "@/lib/db/schema";
 import {
   api,
@@ -100,6 +105,9 @@ describe("Run Comments API", () => {
     expect(created.id).toBeTruthy();
     expect(created.body).toBe("Hello **world**");
     expect(created.edited_at).toBeNull();
+    // Drift guard: live responses must match their documented OpenAPI schemas
+    // (responses aren't validated at runtime, so this is the only backstop).
+    runComment.parse(created);
 
     const res = await api(commentsPath(runId), { token: tokenA });
     expect(res.status).toBe(200);
@@ -109,6 +117,7 @@ describe("Run Comments API", () => {
     expect(body.comments[0].user.id).toBe(userIdA);
     expect(body.comments[0].user.displayName).toBeTruthy();
     expect(body.comments[0].user.initials).toBeTruthy();
+    commentsListResponse.parse(body);
   });
 
   it("POST returns 400 for missing body field", async () => {
@@ -167,6 +176,7 @@ describe("Run Comments API", () => {
     const updated = await res.json();
     expect(updated.body).toBe("second draft");
     expect(updated.edited_at).toBeTruthy();
+    runComment.parse(updated);
   });
 
   it("PATCH by another user returns 403 FORBIDDEN", async () => {
@@ -205,6 +215,7 @@ describe("Run Comments API", () => {
       token: tokenA,
     });
     expect(del.status).toBe(200);
+    commentDeleted.parse(await del.json());
 
     const list = await api(commentsPath(runId), { token: tokenA });
     const body = await list.json();

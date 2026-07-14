@@ -2,6 +2,7 @@ import { and, desc, eq, gte, inArray } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
+import { readJsonBody, watcherEventBody } from "@/lib/api/openapi";
 import {
   isValidUUID,
   parseDateParam,
@@ -36,49 +37,14 @@ export async function POST(
     return apiError(404, NOT_FOUND, `Watcher '${watcherId}' not found`);
   }
 
-  let body: { events?: unknown[] };
-  try {
-    body = await request.json();
-  } catch {
-    return apiError(400, VALIDATION_ERROR, "Invalid JSON body");
-  }
-
-  if (!Array.isArray(body.events) || body.events.length === 0) {
-    return apiError(
-      400,
-      VALIDATION_ERROR,
-      "events array is required and must not be empty"
-    );
-  }
-
-  if (body.events.length > 100) {
-    return apiError(400, VALIDATION_ERROR, "Maximum 100 events per request");
-  }
-
-  interface EventInput {
-    details?: Record<string, unknown>;
-    event_type: string;
-    message: string;
-    timestamp: string;
+  const body = await readJsonBody(request, watcherEventBody);
+  if (body instanceof Response) {
+    return body;
   }
 
   const values: (typeof watcherEvents.$inferInsert)[] = [];
   for (let i = 0; i < body.events.length; i++) {
-    const evt = body.events[i] as EventInput;
-    if (!(evt.event_type && evt.timestamp && evt.message)) {
-      return apiError(
-        400,
-        VALIDATION_ERROR,
-        `Event at index ${i} requires event_type, timestamp, and message`
-      );
-    }
-    if (!VALID_EVENT_TYPES.has(evt.event_type)) {
-      return apiError(
-        400,
-        VALIDATION_ERROR,
-        `Invalid event_type '${evt.event_type}' at index ${i}`
-      );
-    }
+    const evt = body.events[i];
     const ts = new Date(evt.timestamp);
     if (Number.isNaN(ts.getTime())) {
       return apiError(400, VALIDATION_ERROR, `Invalid timestamp at index ${i}`);

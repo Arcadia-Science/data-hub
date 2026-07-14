@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { uploadQueued } from "@/lib/api/openapi";
 import { files, instrumentRuns, instruments, watchers } from "@/lib/db/schema";
 import {
   api,
@@ -129,6 +130,9 @@ describe("Request Upload — file_ids validation", () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.files_queued).toBe(fileIds.length);
+    // Drift guard: the live response must match its documented OpenAPI schema
+    // (responses aren't validated at runtime, so this is the only backstop).
+    uploadQueued.parse(data);
     expect(await fileStatuses()).toEqual([
       "upload_requested",
       "upload_requested",

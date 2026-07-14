@@ -276,7 +276,7 @@ function RunsTableEmptyPlaceholder() {
   );
 }
 
-// Dashboard default is often an empty filtered run list (24h lookback) with the
+// Dashboard default is often an empty filtered run list (today lookback) with the
 // toolbar above it — not a populated table — so mirror that shell here.
 export function DashboardRunsSkeleton() {
   return (

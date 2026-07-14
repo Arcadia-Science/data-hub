@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { attributionsResponse, runDetail } from "@/lib/api/openapi";
 import { instruments } from "@/lib/db/schema";
 import {
   api,
@@ -93,6 +94,9 @@ describe("Run Attributions API", () => {
     expect(body.attributions[0].userId).toBe(userIdA);
     expect(body.attributions[0].displayName).toBeTruthy();
     expect(body.attributions[0].initials).toBeTruthy();
+    // Drift guard: live responses must match their documented OpenAPI schemas
+    // (responses aren't validated at runtime, so this is the only backstop).
+    attributionsResponse.parse(body);
   });
 
   it("PUT is idempotent — claiming twice still yields one entry", async () => {
@@ -141,6 +145,7 @@ describe("Run Attributions API", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.attributions).toEqual([]);
+    attributionsResponse.parse(body);
   });
 
   it("DELETE is idempotent — deleting when no attribution exists is a no-op", async () => {
@@ -251,5 +256,6 @@ describe("Run Attributions API", () => {
     expect(Array.isArray(body.attributions)).toBe(true);
     expect(body.attributions).toHaveLength(1);
     expect(body.attributions[0].userId).toBe(userIdA);
+    runDetail.parse(body);
   });
 });

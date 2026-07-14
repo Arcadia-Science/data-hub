@@ -2,14 +2,10 @@ import { and, count, eq, isNull } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { authorize, requireAdminForSession } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
+import { patchInstrumentBody, readJsonBody } from "@/lib/api/openapi";
 import { deregisterInstrumentWatchers } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
-import {
-  instrumentRuns,
-  instruments,
-  VALID_INSTRUMENT_TYPES,
-  watchers,
-} from "@/lib/db/schema";
+import { instrumentRuns, instruments, watchers } from "@/lib/db/schema";
 
 export async function GET(
   request: NextRequest,
@@ -63,12 +59,6 @@ export async function GET(
   });
 }
 
-const ALLOWED_PATCH_FIELDS = new Set([
-  "status",
-  "display_name",
-  "instrument_type",
-]);
-
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ instrumentId: string }> }
@@ -89,21 +79,9 @@ export async function PATCH(
 
   const { instrumentId } = await params;
 
-  let body: Record<string, unknown>;
-  try {
-    body = await request.json();
-  } catch {
-    return apiError(400, VALIDATION_ERROR, "Invalid JSON body");
-  }
-
-  const unknownKeys = Object.keys(body).filter(
-    (k) => !ALLOWED_PATCH_FIELDS.has(k)
-  );
-  if (unknownKeys.length > 0) {
-    return apiError(400, VALIDATION_ERROR, "Unknown fields", {
-      unknown_fields: unknownKeys,
-      allowed_fields: [...ALLOWED_PATCH_FIELDS],
-    });
+  const body = await readJsonBody(request, patchInstrumentBody);
+  if (body instanceof Response) {
+    return body;
   }
 
   const [existing] = await db
@@ -116,33 +94,8 @@ export async function PATCH(
     return apiError(404, NOT_FOUND, `Instrument '${instrumentId}' not found`);
   }
 
-  const VALID_INSTRUMENT_STATUSES = ["pending", "active", "inactive"];
-  if (
-    "status" in body &&
-    !VALID_INSTRUMENT_STATUSES.includes(body.status as string)
-  ) {
-    return apiError(
-      400,
-      VALIDATION_ERROR,
-      `Invalid status — must be one of: ${VALID_INSTRUMENT_STATUSES.join(", ")}`
-    );
-  }
-
-  if (
-    "instrument_type" in body &&
-    !(VALID_INSTRUMENT_TYPES as readonly string[]).includes(
-      body.instrument_type as string
-    )
-  ) {
-    return apiError(
-      400,
-      VALIDATION_ERROR,
-      `Invalid instrument_type — must be one of: ${VALID_INSTRUMENT_TYPES.join(", ")}`
-    );
-  }
-
   const updates: Record<string, unknown> = {};
-  if ("status" in body) {
+  if (body.status !== undefined) {
     updates.status = body.status;
     // Keep the retirement audit fields in lockstep with the status: only an
     // `inactive` instrument has a retirer.
@@ -154,10 +107,10 @@ export async function PATCH(
       updates.retiredBy = null;
     }
   }
-  if ("display_name" in body) {
+  if (body.display_name !== undefined) {
     updates.displayName = body.display_name;
   }
-  if ("instrument_type" in body) {
+  if (body.instrument_type !== undefined) {
     updates.instrumentType = body.instrument_type;
   }
 

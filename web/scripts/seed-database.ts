@@ -68,7 +68,7 @@ const activeInstruments = instruments.filter((i) => i.status === "active");
 const runs: SeededRun[] = [];
 for (const instrument of activeInstruments) {
   runs.push(
-    ...(await seedRuns(db, instrument.id, 5, instrument.instrumentType))
+    ...(await seedRuns(db, instrument.id, 8, instrument.instrumentType))
   );
 }
 

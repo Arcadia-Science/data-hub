@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
+import { readJsonBody, watcherConfigBody } from "@/lib/api/openapi";
 import { isValidUUID } from "@/lib/api/validators";
 import {
   extractWatchDirectory,
@@ -30,22 +31,9 @@ export async function PUT(
     return apiError(404, NOT_FOUND, `Watcher '${watcherId}' not found`);
   }
 
-  let body: { config_checksum?: string; config_yaml?: string };
-  try {
-    body = await request.json();
-  } catch {
-    return apiError(400, VALIDATION_ERROR, "Invalid JSON body");
-  }
-
-  if (
-    typeof body.config_checksum !== "string" ||
-    typeof body.config_yaml !== "string"
-  ) {
-    return apiError(
-      400,
-      VALIDATION_ERROR,
-      "config_checksum and config_yaml are required"
-    );
+  const body = await readJsonBody(request, watcherConfigBody);
+  if (body instanceof Response) {
+    return body;
   }
 
   const previousWatchDir = extractWatchDirectory(watcher.configYaml);

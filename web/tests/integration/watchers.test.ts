@@ -1,4 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+  watcherChecksumResponse,
+  watcherDeleted,
+  watcherDetail,
+  watcherEventCreated,
+  watcherEventsListResponse,
+  watcherHeartbeatAck,
+  watcherHeartbeatsListResponse,
+  watcherListResponse,
+  watcherRegistered,
+  watcherUpdateCheckResponse,
+} from "@/lib/api/openapi";
 import { instruments } from "@/lib/db/schema";
 import {
   api,
@@ -51,6 +63,9 @@ describe("Watchers API", () => {
     const data = await res.json();
     expect(data.watcher_id).toBeTruthy();
     watcherId = data.watcher_id;
+    // Drift guard: live responses must match their documented OpenAPI schemas
+    // (responses aren't validated at runtime, so this is the only backstop).
+    watcherRegistered.parse(data);
   });
 
   // Enforces the 1:1 active-watcher-per-instrument invariant. The DB-level
@@ -126,6 +141,7 @@ describe("Watchers API", () => {
     expect(watcher).toBeTruthy();
     expect(watcher.instrument_id).toBe(instrumentId);
     expect(watcher.hostname).toBe("lab-pc-01");
+    watcherListResponse.parse(body);
   });
 
   it("GET /api/v1/watchers filters by instrument_id", async () => {
@@ -160,6 +176,7 @@ describe("Watchers API", () => {
     expect(data.instrument_id).toBe(instrumentId);
     expect(data.hostname).toBe("lab-pc-01");
     expect(data.os_info).toBe("Windows 11");
+    watcherDetail.parse(data);
   });
 
   it("GET /api/v1/watchers/:id returns 404 for nonexistent watcher", async () => {
@@ -199,6 +216,7 @@ describe("Watchers API", () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.ok).toBe(true);
+    watcherHeartbeatAck.parse(data);
   });
 
   it("POST /api/v1/watchers/:id/heartbeat rejects missing status", async () => {
@@ -222,6 +240,7 @@ describe("Watchers API", () => {
     const body = await res.json();
     expect(body.data.length).toBeGreaterThanOrEqual(1);
     expect(body.data[0].status).toBe("watching");
+    watcherHeartbeatsListResponse.parse(body);
   });
 
   // -------------------------------------------------------------------------
@@ -253,6 +272,7 @@ describe("Watchers API", () => {
     expect(res.status).toBe(201);
     const data = await res.json();
     expect(data.received).toBe(2);
+    watcherEventCreated.parse(data);
   });
 
   it("POST /api/v1/watchers/:id/events rejects empty events array", async () => {
@@ -326,6 +346,7 @@ describe("Watchers API", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data.length).toBeGreaterThanOrEqual(2);
+    watcherEventsListResponse.parse(body);
   });
 
   it("GET /api/v1/watchers/:id/events filters by event_type", async () => {
@@ -359,6 +380,7 @@ describe("Watchers API", () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.config_checksum).toBe("abc123");
+    watcherChecksumResponse.parse(data);
   });
 
   it("PUT /api/v1/watchers/:id/config rejects missing fields", async () => {
@@ -381,6 +403,7 @@ describe("Watchers API", () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.config_checksum).toBe("abc123");
+    watcherChecksumResponse.parse(data);
   });
 
   // -------------------------------------------------------------------------
@@ -403,6 +426,7 @@ describe("Watchers API", () => {
       channel: "stable",
       mandatory: false,
     });
+    watcherUpdateCheckResponse.parse(data);
   });
 
   it("GET /api/v1/watchers/:id/update-check requires authentication", async () => {
@@ -440,6 +464,7 @@ describe("Watchers API", () => {
     const data = await res.json();
     expect(data.id).toBe(watcherId);
     expect(data.deleted_at).toBeTruthy();
+    watcherDeleted.parse(data);
   });
 
   it("DELETE /api/v1/watchers/:id returns 409 for already-deleted watcher", async () => {

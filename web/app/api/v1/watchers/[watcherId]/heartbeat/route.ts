@@ -7,6 +7,7 @@ import {
   UPGRADE_REQUIRED,
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
+import { heartbeatBody, readJsonBody } from "@/lib/api/openapi";
 import { isValidUUID } from "@/lib/api/validators";
 import { isBelowFloor } from "@/lib/api/watcher-versions";
 import {
@@ -39,33 +40,13 @@ export async function POST(
     return apiError(404, NOT_FOUND, `Watcher '${watcherId}' not found`);
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = await request.json();
-  } catch {
-    return apiError(400, VALIDATION_ERROR, "Invalid JSON body");
+  const body = await readJsonBody(request, heartbeatBody);
+  if (body instanceof Response) {
+    return body;
   }
+  const status = body.status;
 
-  const VALID_WATCHER_STATUSES = ["registered", "watching", "stopped"] as const;
-  const status = body.status as string | undefined;
-  if (!status) {
-    return apiError(400, VALIDATION_ERROR, "status is required");
-  }
-  if (
-    !VALID_WATCHER_STATUSES.includes(
-      status as (typeof VALID_WATCHER_STATUSES)[number]
-    )
-  ) {
-    return apiError(
-      400,
-      VALIDATION_ERROR,
-      `Invalid status '${status}' — must be one of: ${VALID_WATCHER_STATUSES.join(", ")}`
-    );
-  }
-
-  const timestamp = body.timestamp
-    ? new Date(body.timestamp as string)
-    : new Date();
+  const timestamp = body.timestamp ? new Date(body.timestamp) : new Date();
   if (Number.isNaN(timestamp.getTime())) {
     return apiError(400, VALIDATION_ERROR, "Invalid timestamp");
   }
@@ -78,10 +59,7 @@ export async function POST(
   // heartbeat after a manual upgrade is judged on the new version, not
   // the stale stored one. The singleton constraint on
   // `watcher_release_config` keeps this a constant-cost select.
-  const reportedVersion =
-    typeof body.watcher_version === "string" && body.watcher_version
-      ? body.watcher_version
-      : null;
+  const reportedVersion = body.watcher_version || null;
   const [releaseRow] = await db
     .select({
       minSupportedVersion: watcherReleaseConfig.minSupportedVersion,
@@ -119,19 +97,17 @@ export async function POST(
       watcherId,
       timestamp,
       status,
-      uploadMode: (body.upload_mode as "auto" | "manual") ?? null,
-      filesUploadedSinceLast:
-        (body.files_uploaded_since_last_heartbeat as number) ?? 0,
-      runsReportedSinceLast:
-        (body.runs_reported_since_last_heartbeat as number) ?? 0,
-      errorsSinceLast: (body.errors_since_last_heartbeat as number) ?? 0,
-      uptimeSeconds: (body.uptime_seconds as number) ?? null,
+      uploadMode: body.upload_mode ?? null,
+      filesUploadedSinceLast: body.files_uploaded_since_last_heartbeat ?? 0,
+      runsReportedSinceLast: body.runs_reported_since_last_heartbeat ?? 0,
+      errorsSinceLast: body.errors_since_last_heartbeat ?? 0,
+      uptimeSeconds: body.uptime_seconds ?? null,
     }),
     db
       .update(watchers)
       .set({
         lastHeartbeatAt: new Date(),
-        status: status as "registered" | "watching" | "stopped",
+        status,
         // Older watchers (pre-version-reporting) won't include this field —
         // fall back to the existing value rather than nulling it out so the
         // dashboard keeps the last-known version visible.

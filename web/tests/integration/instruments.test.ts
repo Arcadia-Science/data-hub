@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { instrumentDetail, instrumentListItem } from "@/lib/api/openapi";
 import {
   api,
   closeTestDb,
@@ -35,6 +36,9 @@ describe("Instruments API", () => {
     expect(data.id).toBe("test-instrument");
     expect(data.display_name).toBe("Test Instrument");
     expect(data.status).toBe("pending");
+    // Drift guard: live responses must match their documented OpenAPI schemas
+    // (responses aren't validated at runtime, so this is the only backstop).
+    instrumentDetail.parse(data);
   });
 
   // When no display_name is provided, the API derives one from the kebab-case
@@ -95,6 +99,7 @@ describe("Instruments API", () => {
     expect(
       data.find((i: { id: string }) => i.id === "test-instrument")
     ).toBeTruthy();
+    instrumentListItem.array().parse(data);
   });
 
   // -------------------------------------------------------------------------
@@ -109,6 +114,7 @@ describe("Instruments API", () => {
     expect(data.display_name).toBe("Test Instrument");
     expect(data).toHaveProperty("run_count");
     expect(data).toHaveProperty("watcher_count");
+    instrumentDetail.parse(data);
   });
 
   it("GET /api/v1/instruments/:id returns 404 for nonexistent id", async () => {
@@ -131,6 +137,7 @@ describe("Instruments API", () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe("active");
+    instrumentDetail.parse(data);
   });
 
   it("PATCH /api/v1/instruments/:id updates display_name", async () => {

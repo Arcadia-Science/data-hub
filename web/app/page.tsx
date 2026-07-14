@@ -34,7 +34,9 @@ import {
 } from "@/lib/api/instrument-runs";
 import { getRecentActiveInstrumentsForDashboard } from "@/lib/api/instruments";
 import { auth } from "@/lib/auth";
+import { startOfTodayISO } from "@/lib/date";
 import { dashboardParamsCache, hasActiveFilters } from "@/lib/search-params";
+import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
 type DashboardParams = Awaited<ReturnType<typeof dashboardParamsCache.parse>>;
 
@@ -48,10 +50,6 @@ export const metadata: Metadata = {
 };
 
 const RECENT_INSTRUMENTS_LIMIT = 3;
-
-function last24hISOString(): string {
-  return new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-}
 
 export default async function DashboardPage({
   searchParams,
@@ -154,17 +152,15 @@ async function DashboardRunsSection({
   const instrumentIds =
     params.instrument_id.length > 0 ? params.instrument_id : undefined;
 
-  // When no explicit date filter is set, default to a 24-hour lookback. This
-  // matches the "Last 24 hours" label surfaced by the dashboard's
-  // RunsDateFilter and keeps the initial payload bounded.
-  const defaultDateFrom = last24hISOString();
+  // Start independent toolbar fetches immediately; only the run list needs the
+  // viewer timezone for the default "today" lookback.
+  const instrumentsPromise = getInstruments(true);
+  const ranByUsersPromise = getRanByFilterOptions();
+  const defaultDateFrom = startOfTodayISO(await getViewerTimeZone());
 
-  // The toolbar instrument list, the fleet-wide attributor options, and the
-  // filtered run page are all independent. Only active instruments are useful
-  // filter targets on the dashboard.
   const [instruments, ranByUsers, runResult] = await Promise.all([
-    getInstruments(true),
-    getRanByFilterOptions(),
+    instrumentsPromise,
+    ranByUsersPromise,
     buildRunListQuery({
       instrumentId: instrumentIds,
       search: params.search || undefined,
@@ -209,7 +205,7 @@ async function DashboardRunsSection({
     <RunSelectionProvider>
       <TablePendingProvider>
         <div className="flex flex-col gap-3">
-          <RunsToolbar dateDefaultPreset="24h" instruments={instruments} />
+          <RunsToolbar dateDefaultPreset="today" instruments={instruments} />
           <RunBulkActionBar />
           <TablePendingBoundary>
             <RunsTable

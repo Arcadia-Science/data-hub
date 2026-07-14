@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
+import { patchArchiveJobBody, readJsonBody } from "@/lib/api/openapi";
 import { isValidUUID } from "@/lib/api/validators";
 import { db } from "@/lib/db";
 import { archiveJobs } from "@/lib/db/schema";
@@ -31,14 +32,6 @@ interface RouteContext {
 
 const TERMINAL_STATUSES = new Set(["ready", "failed"]);
 
-interface PatchBody {
-  archive_bucket?: unknown;
-  archive_key?: unknown;
-  error_message?: unknown;
-  size_bytes?: unknown;
-  status?: unknown;
-}
-
 export async function PATCH(request: NextRequest, { params }: RouteContext) {
   const authResult = await authorize(request, "archive-jobs:write");
   if (authResult instanceof Response) {
@@ -50,31 +43,13 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     return apiError(400, VALIDATION_ERROR, "Invalid job ID format");
   }
 
-  let body: PatchBody;
-  try {
-    body = (await request.json()) as PatchBody;
-  } catch {
-    return apiError(400, VALIDATION_ERROR, "Invalid JSON body");
+  const body = await readJsonBody(request, patchArchiveJobBody);
+  if (body instanceof Response) {
+    return body;
   }
+  const status = body.status;
 
-  if (
-    typeof body.status !== "string" ||
-    !["pending", "building", "ready", "failed"].includes(body.status)
-  ) {
-    return apiError(
-      400,
-      VALIDATION_ERROR,
-      "status must be one of pending|building|ready|failed"
-    );
-  }
-
-  const status = body.status as "pending" | "building" | "ready" | "failed";
-
-  if (
-    status === "ready" &&
-    (typeof body.archive_bucket !== "string" ||
-      typeof body.archive_key !== "string")
-  ) {
+  if (status === "ready" && !(body.archive_bucket && body.archive_key)) {
     return apiError(
       400,
       VALIDATION_ERROR,
@@ -83,16 +58,16 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   }
 
   const update: Partial<typeof archiveJobs.$inferInsert> = { status };
-  if (typeof body.archive_bucket === "string") {
+  if (body.archive_bucket !== undefined) {
     update.archiveBucket = body.archive_bucket;
   }
-  if (typeof body.archive_key === "string") {
+  if (body.archive_key !== undefined) {
     update.archiveKey = body.archive_key;
   }
-  if (typeof body.size_bytes === "number") {
+  if (body.size_bytes !== undefined) {
     update.sizeBytes = body.size_bytes;
   }
-  if (typeof body.error_message === "string") {
+  if (body.error_message !== undefined) {
     update.errorMessage = body.error_message;
   }
   if (TERMINAL_STATUSES.has(status)) {

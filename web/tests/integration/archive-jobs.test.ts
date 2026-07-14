@@ -5,6 +5,7 @@ import {
   STUCK_BUILD_ERROR_MESSAGE,
   STUCK_BUILD_TIMEOUT_MS,
 } from "@/lib/api/archive-jobs";
+import { archiveJobDetail } from "@/lib/api/openapi";
 import { archiveJobs, instrumentRuns, instruments } from "@/lib/db/schema";
 import {
   closeTestDb,
@@ -161,6 +162,9 @@ describe("Archive Jobs API", () => {
     const body = await res.json();
     expect(body.status).toBe("ready");
     expect(body.completed_at).not.toBeNull();
+    // Drift guard: the live response must match its documented OpenAPI schema
+    // (responses aren't validated at runtime, so this is the only backstop).
+    archiveJobDetail.parse(body);
 
     // Verify the row was actually updated rather than just the response shaped.
     const [stored] = await db

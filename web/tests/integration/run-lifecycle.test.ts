@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { runDeleted, runRestored } from "@/lib/api/openapi";
 import { instrumentRuns, instruments } from "@/lib/db/schema";
 import {
   api,
@@ -70,6 +71,9 @@ describe("Run lifecycle API (delete / restore)", () => {
     expect(body.run_id).toBe(runId);
     expect(body.deleted_at).toBeNull();
     expect(body.already_applied).toBe(false);
+    // Drift guard: live responses must match their documented OpenAPI schemas
+    // (responses aren't validated at runtime, so this is the only backstop).
+    runRestored.parse(body);
   });
 
   it("restore on a run that isn't deleted is an idempotent no-op", async () => {
@@ -92,6 +96,7 @@ describe("Run lifecycle API (delete / restore)", () => {
     const firstBody = await first.json();
     expect(firstBody.already_applied).toBe(false);
     expect(firstBody.deleted_at).toBeTruthy();
+    runDeleted.parse(firstBody);
 
     const second = await api(
       `/api/v1/instruments/${instrumentId}/runs/${runId}`,
