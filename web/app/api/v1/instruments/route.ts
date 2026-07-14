@@ -48,6 +48,7 @@ export async function POST(request: NextRequest) {
 
   // Default display name is derived from the kebab-case ID:
   // "spectramax-id3-plate-reader" → "Spectramax Id3 Plate Reader"
+  // `display_name` is trimmed by the schema; empty string means "use default".
   const displayName = body.display_name
     ? body.display_name
     : id

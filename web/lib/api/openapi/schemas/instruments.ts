@@ -9,13 +9,14 @@ export const createInstrumentBody = z.object({
   id: z
     .string()
     .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "Must be lowercase kebab-case"),
-  display_name: z.string().min(1).optional(),
+  // Trim so whitespace-only values fall through to the id-derived default.
+  display_name: z.string().trim().optional(),
   instrument_type: instrumentTypeSchema.optional(),
 });
 
 export const patchInstrumentBody = z.object({
   status: instrumentStatusSchema.optional(),
-  display_name: z.string().min(1).optional(),
+  display_name: z.string().trim().min(1).optional(),
   instrument_type: instrumentTypeSchema.optional(),
 });
 

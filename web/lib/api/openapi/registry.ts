@@ -33,8 +33,22 @@ export const instrumentIdParam = z
   .openapi({ example: "plate-reader" });
 export const runIdParam = z.string().openapi({ example: "run-2026-001" });
 export const watcherIdParam = z.string().uuid();
-export const fileIdParam = z.coerce.number().int();
-export const commentIdParam = z.coerce.number().int();
+// Path params are always present; avoid z.coerce.number() which Zod 4 treats
+// as nullable and which zod-to-openapi then emits as required: false.
+export const fileIdParam = z
+  .number()
+  .int()
+  .openapi({
+    param: { required: true },
+    example: 1,
+  });
+export const commentIdParam = z
+  .number()
+  .int()
+  .openapi({
+    param: { required: true },
+    example: 1,
+  });
 export const archiveJobIdParam = z.string().uuid();
 
 export function jsonResponse(

@@ -16,7 +16,7 @@ export const detectedFileSchema = z.object({
 });
 
 export const createRunBody = z.object({
-  run_id: z.string().min(1),
+  run_id: z.string().trim().min(1),
   source: runSourceSchema,
   watcher_id: z.string().uuid().optional(),
   acquired_at: isoDateTime.optional(),
@@ -96,7 +96,7 @@ export const runDetail = runListItem.extend({
 });
 
 export const requestUploadBody = z.object({
-  file_ids: z.array(z.union([z.string(), z.number()])),
+  file_ids: z.array(z.union([z.string(), z.number()])).min(1),
 });
 export const requestUploadUrlBody = z.object({
   filename: z.string().min(1),

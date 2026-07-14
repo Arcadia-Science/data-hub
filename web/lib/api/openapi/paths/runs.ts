@@ -116,7 +116,7 @@ registry.registerPath({
   path: "/instruments/{instrumentId}/runs/{runId}/restore",
   operationId: "restoreInstrumentRun",
   summary: "Restore a run",
-  description: scoped("runs:restore"),
+  description: scoped("runs:delete"),
   tags: tag,
   security: bearerSecurity,
   request: { params: runParams },

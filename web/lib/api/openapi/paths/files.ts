@@ -90,7 +90,7 @@ registry.registerPath({
   path: "/instruments/{instrumentId}/runs/{runId}/download-archive",
   operationId: "downloadRunArchive",
   summary: "Download a run archive",
-  description: "Requires scope `runs:read`.",
+  description: "Requires scope `files:read`.",
   tags: ["Files"],
   security: bearerSecurity,
   request: { params: runParams },
