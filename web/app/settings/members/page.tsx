@@ -53,7 +53,7 @@ export default async function MembersPage() {
   }
 
   return (
-    <SettingsPageContent>
+    <SettingsPageContent className="w-3/4">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="font-semibold text-lg tracking-tight">Members</h2>

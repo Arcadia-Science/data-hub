@@ -22,7 +22,7 @@ data-hub-watcher self-update    # check for and apply package updates
 data-hub-watcher service install  # Windows: install as a service
 ```
 
-See [the operator guide](https://datahub.arcadiascience.com/docs/installing-a-watcher) for the full setup walk-through, configuration reference, and troubleshooting.
+See [the operator guide](https://datahub.arcadiascience.com/docs/install-the-watcher) for the full setup walk-through, configuration reference, and troubleshooting.
 
 ## License
 

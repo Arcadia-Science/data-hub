@@ -226,5 +226,5 @@ The same builders back the integration test harness in [web/tests/integration/he
 
 - [Getting started](getting-started.md) — full setup with real Google OAuth and AWS credentials.
 - [Architecture](architecture.md) — system overview and data flow.
-- [REST API](https://datahub.arcadiascience.com/docs/api-reference) — endpoint reference for the seeded PAT.
-- [MCP server](https://datahub.arcadiascience.com/docs/mcp-server) — Model Context Protocol tools at `/api/v1/mcp`.
+- [REST API](https://datahub.arcadiascience.com/docs/api) — on-ramp and generated endpoints for the seeded PAT.
+- [MCP](https://datahub.arcadiascience.com/docs/mcp) — Model Context Protocol tools at `/api/v1/mcp`.

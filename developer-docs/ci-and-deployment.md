@@ -164,7 +164,7 @@ The CI deploy role has permission to roll new triggers out, so the trigger goes 
 
 ### Watcher (PyPI)
 
-The `data-hub-watcher` Python package is published to [PyPI](https://pypi.org/project/data-hub-watcher/) so lab PCs can install and self-update via `uv tool install data-hub-watcher`. The full release flow — version bump, tag, approval, env-var roll-out, mandatory updates, and rollback — is documented in the admin-facing [Managing watchers → Releases and fleet updates](https://datahub.arcadiascience.com/docs/managing-watchers#releases-and-fleet-updates) guide; this section is intentionally a pointer rather than a second source of truth so the two can't drift.
+The `data-hub-watcher` Python package is published to [PyPI](https://pypi.org/project/data-hub-watcher/) so lab PCs can install and self-update via `uv tool install data-hub-watcher`. The full release flow — version bump, tag, approval, env-var roll-out, mandatory updates, and rollback — is documented in the admin-facing [Roll out watcher releases](https://datahub.arcadiascience.com/docs/watcher-releases) guide; this section is intentionally a pointer rather than a second source of truth so the two can't drift.
 
 Trusted publishing is configured under **Project → Publishing** on PyPI for `Arcadia-Science/data-hub` and the workflow `publish-watcher.yml`; no API token lives in repo secrets. If trust is ever revoked or rotated, update it there and re-run the workflow.
 
