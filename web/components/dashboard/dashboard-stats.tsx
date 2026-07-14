@@ -53,7 +53,9 @@ function StatCard({
         <p className="font-medium text-muted-foreground text-xs">{label}</p>
         <p
           className={cn(
-            "mt-1.5 font-heading font-semibold text-2xl tabular-nums leading-none tracking-tight",
+            // `h-7` matches the leaderboard avatar (`size-sm`) so every value
+            // row shares one height and the sublines stay aligned.
+            "mt-1.5 flex h-7 items-center font-heading font-semibold text-2xl tabular-nums leading-none tracking-tight",
             valueClassName
           )}
         >
@@ -94,7 +96,7 @@ export function StatCardsSkeleton({
         <Card className="gap-2 py-4" key={label} size="sm">
           <div className="px-4">
             <p className="font-medium text-muted-foreground text-xs">{label}</p>
-            <Skeleton className="mt-1.5 h-6 w-10" />
+            <Skeleton className="mt-1.5 h-7 w-10" />
             <Skeleton className="mt-1.5 h-4 w-full" />
           </div>
         </Card>
@@ -174,9 +176,7 @@ export function DashboardStatsCards({
             "—"
           )
         }
-        // The leaderboard value is a name + avatar, not a number, so drop the
-        // numeric sizing and tighten the label gap so the row sits closer.
-        valueClassName="mt-0.5 text-xl"
+        valueClassName="text-xl"
       />
     </div>
   );
