@@ -43,7 +43,7 @@ make dev
 
 See the full [Getting started guide](developer-docs/getting-started.md) for prerequisites and details. Don't have AWS/Google credentials? [Local development](developer-docs/local-development.md) covers a zero-credential setup for the web app + API + database alone (no watcher or Lambda needed).
 
-Developer docs live in [developer-docs/](developer-docs/README.md), including the step-by-step guide to self-hosting Data Hub (deploying the web app and AWS infrastructure — see [First-time deployment](developer-docs/first-time-deployment.md)). You can find user documentation (watcher installation, adding an instrument, managing tokens) on the [docs site](https://datahub.arcadiascience.com/docs).
+Developer docs live in [developer-docs/](developer-docs/README.md), including the step-by-step guide to self-hosting Data Hub (deploying the web app and AWS infrastructure — see [First-time deployment](developer-docs/first-time-deployment.md)). You can find user documentation (watcher installation, setting up an instrument, managing tokens) on the [docs site](https://datahub.arcadiascience.com/docs).
 
 ## Checks and tests
 
