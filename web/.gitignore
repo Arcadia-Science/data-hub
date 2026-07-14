@@ -40,3 +40,6 @@ next-env.d.ts
 # Local OpenAPI dump from `npm run openapi:generate` (not committed;
 # production serves the schema from GET /api/v1/openapi.json).
 /openapi.json
+# Optional local dump from `npm run mcp-catalog:generate` (same idea;
+# production serves GET /api/v1/mcp/schema.json).
+/mcp-catalog.json

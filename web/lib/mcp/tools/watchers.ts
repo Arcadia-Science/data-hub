@@ -1,5 +1,4 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z } from "zod";
 import {
   type EffectiveStatus,
   getWatcherById,
@@ -7,40 +6,23 @@ import {
   getWatcherHeartbeats,
   getWatcherList,
 } from "@/lib/api/watchers";
-import { watcherEventTypeEnum } from "@/lib/db/schema";
+import { toolRegistrationConfig } from "@/lib/mcp/catalog/register";
 import {
   errorResult,
   requireMcpScope,
   textResult,
 } from "@/lib/mcp/tools/helpers";
+import {
+  getWatcherHeartbeatsTool,
+  getWatcherTool,
+  listWatcherEventsTool,
+  listWatchersTool,
+} from "./watchers.defs";
 
 export function registerWatcherTools(server: McpServer) {
   server.registerTool(
-    "list_watchers",
-    {
-      title: "List Watchers",
-      description:
-        "List watcher agents with effective status, hostname, instrument assignment, and last heartbeat. Optionally include deregistered watchers or filter by effective status.",
-      inputSchema: {
-        instrumentId: z
-          .string()
-          .optional()
-          .describe("Filter watchers to a specific instrument"),
-        includeDeleted: z
-          .boolean()
-          .optional()
-          .describe(
-            "Include soft-deleted (deregistered) watchers (default: false)"
-          ),
-        status: z
-          .enum(["registered", "watching", "stopped", "stale"])
-          .optional()
-          .describe(
-            "Filter by effective status (stale is computed from heartbeat age)"
-          ),
-      },
-      annotations: { readOnlyHint: true },
-    },
+    listWatchersTool.name,
+    toolRegistrationConfig(listWatchersTool),
     async ({ instrumentId, includeDeleted, status }, { authInfo }) => {
       const scopeError = requireMcpScope(authInfo, "watchers:read");
       if (scopeError) {
@@ -62,16 +44,8 @@ export function registerWatcherTools(server: McpServer) {
   );
 
   server.registerTool(
-    "get_watcher",
-    {
-      title: "Get Watcher",
-      description:
-        "Get watcher detail including config YAML, OS info, effective status, and deregistration actor when applicable.",
-      inputSchema: {
-        watcherId: z.string().describe("Watcher UUID"),
-      },
-      annotations: { readOnlyHint: true },
-    },
+    getWatcherTool.name,
+    toolRegistrationConfig(getWatcherTool),
     async ({ watcherId }, { authInfo }) => {
       const scopeError = requireMcpScope(authInfo, "watchers:read");
       if (scopeError) {
@@ -86,40 +60,8 @@ export function registerWatcherTools(server: McpServer) {
   );
 
   server.registerTool(
-    "list_watcher_events",
-    {
-      title: "List Watcher Events",
-      description:
-        "Paginated watcher event log (uploads, errors, config sync, update lifecycle). Useful after get_watcher_heartbeats when diagnosing failures.",
-      inputSchema: {
-        watcherId: z.string().describe("Watcher UUID"),
-        hours: z
-          .number()
-          .int()
-          .min(1)
-          .max(168)
-          .optional()
-          .describe("Lookback window in hours (default: 24, max: 168)"),
-        eventTypes: z
-          .array(z.enum(watcherEventTypeEnum.enumValues))
-          .optional()
-          .describe("Filter to specific event types"),
-        page: z
-          .number()
-          .int()
-          .min(1)
-          .optional()
-          .describe("Page number (default: 1)"),
-        pageSize: z
-          .number()
-          .int()
-          .min(1)
-          .max(100)
-          .optional()
-          .describe("Results per page (default: 50, max: 100)"),
-      },
-      annotations: { readOnlyHint: true },
-    },
+    listWatcherEventsTool.name,
+    toolRegistrationConfig(listWatcherEventsTool),
     async ({ watcherId, hours, eventTypes, page, pageSize }, { authInfo }) => {
       const scopeError = requireMcpScope(authInfo, "watchers:read");
       if (scopeError) {
@@ -143,23 +85,8 @@ export function registerWatcherTools(server: McpServer) {
   );
 
   server.registerTool(
-    "get_watcher_heartbeats",
-    {
-      title: "Get Watcher Heartbeats",
-      description:
-        "Get recent heartbeat history for a watcher agent, useful for diagnosing connectivity gaps and error trends. Returns up to 100 most recent heartbeats within the lookback window.",
-      inputSchema: {
-        watcherId: z.string().describe("Watcher UUID"),
-        hours: z
-          .number()
-          .int()
-          .min(1)
-          .max(168)
-          .optional()
-          .describe("Lookback window in hours (default: 24, max: 168)"),
-      },
-      annotations: { readOnlyHint: true },
-    },
+    getWatcherHeartbeatsTool.name,
+    toolRegistrationConfig(getWatcherHeartbeatsTool),
     async ({ watcherId, hours }, { authInfo }) => {
       const scopeError = requireMcpScope(authInfo, "watchers:read");
       if (scopeError) {

@@ -389,6 +389,12 @@ vi.mock("@/lib/s3", () => ({
 // Now import the registration functions (they'll pick up the mocked deps).
 // ---------------------------------------------------------------------------
 
+import {
+  buildMcpCatalogDocument,
+  MCP_PROMPT_DEFS,
+  MCP_RESOURCE_DEFS,
+  MCP_TOOL_DEFS,
+} from "@/lib/mcp/catalog";
 import { registerPrompts } from "@/lib/mcp/prompts";
 import { registerResources } from "@/lib/mcp/resources";
 import { registerTools } from "@/lib/mcp/tools";
@@ -426,38 +432,7 @@ describe("MCP Protocol (in-memory)", () => {
 
   // ---- Tool registration --------------------------------------------------
 
-  const EXPECTED_TOOLS = [
-    "list_instruments",
-    "get_instrument",
-    "search_runs",
-    "global_search",
-    "get_me",
-    "get_run",
-    "get_run_report",
-    "list_run_files",
-    "get_system_status",
-    "list_watchers",
-    "get_watcher",
-    "list_watcher_events",
-    "get_file",
-    "get_file_download_url",
-    "get_run_archive",
-    "reprocess_file",
-    "get_watcher_heartbeats",
-    "claim_run",
-    "unclaim_run",
-    "list_run_attributors",
-    "list_run_comments",
-    "add_run_comment",
-    "edit_run_comment",
-    "delete_run_comment",
-    "reprocess_run",
-    "delete_run",
-    "restore_run",
-    "request_run_upload",
-    "request_run_upload_all",
-    "dismiss_file",
-  ] as const;
+  const EXPECTED_TOOLS = MCP_TOOL_DEFS.map((t) => t.name);
 
   const WRITE_TOOLS = new Set([
     "reprocess_file",
@@ -479,6 +454,59 @@ describe("MCP Protocol (in-memory)", () => {
     const names = tools.map((t) => t.name);
     expect(names).toEqual(expect.arrayContaining([...EXPECTED_TOOLS]));
     expect(names).toHaveLength(EXPECTED_TOOLS.length);
+  });
+
+  it("registered tool names match the MCP catalog document", async () => {
+    const { tools } = await client.listTools();
+    const live = new Set(tools.map((t) => t.name));
+    const catalog = new Set(MCP_TOOL_DEFS.map((t) => t.name));
+    const document = new Set(
+      buildMcpCatalogDocument().tools.map((t) => t.name)
+    );
+    expect(live).toEqual(catalog);
+    expect(document).toEqual(catalog);
+  });
+
+  it("registered prompt names match the MCP catalog document", async () => {
+    const { prompts } = await client.listPrompts();
+    const live = new Set(prompts.map((p) => p.name));
+    const catalog = new Set(MCP_PROMPT_DEFS.map((p) => p.name));
+    const document = new Set(
+      buildMcpCatalogDocument().prompts.map((p) => p.name)
+    );
+    expect(live).toEqual(catalog);
+    expect(document).toEqual(catalog);
+  });
+
+  it("registered resource names match the MCP catalog document", async () => {
+    const { resources } = await client.listResources();
+    const { resourceTemplates } = await client.listResourceTemplates();
+    const document = buildMcpCatalogDocument();
+
+    const catalogStatic = MCP_RESOURCE_DEFS.filter((r) => r.kind === "static");
+    const catalogTemplates = MCP_RESOURCE_DEFS.filter(
+      (r) => r.kind === "template"
+    );
+
+    const liveStaticNames = new Set(
+      resources
+        .filter((r) => catalogStatic.some((c) => c.uri === r.uri))
+        .map((r) => r.name)
+    );
+    expect(liveStaticNames).toEqual(new Set(catalogStatic.map((r) => r.name)));
+    expect(
+      new Set(document.resources.filter((r) => r.uri).map((r) => r.name))
+    ).toEqual(new Set(catalogStatic.map((r) => r.name)));
+
+    const liveTemplateNames = new Set(resourceTemplates.map((r) => r.name));
+    expect(liveTemplateNames).toEqual(
+      new Set(catalogTemplates.map((r) => r.name))
+    );
+    expect(
+      new Set(
+        document.resources.filter((r) => r.uriTemplate).map((r) => r.name)
+      )
+    ).toEqual(new Set(catalogTemplates.map((r) => r.name)));
   });
 
   it("every tool has a non-empty description", async () => {
@@ -1169,15 +1197,7 @@ describe("MCP Protocol (in-memory)", () => {
 
   // ---- Prompts -------------------------------------------------------------
 
-  const EXPECTED_PROMPTS = [
-    "daily_summary",
-    "troubleshoot_instrument",
-    "compare_runs",
-    "find_my_runs",
-    "explain_failed_run",
-    "claim_unattributed_runs",
-    "summarize_instrument_week",
-  ] as const;
+  const EXPECTED_PROMPTS = MCP_PROMPT_DEFS.map((p) => p.name);
 
   it("lists all expected prompts", async () => {
     const { prompts } = await client.listPrompts();
