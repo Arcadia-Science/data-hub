@@ -6,7 +6,7 @@ import {
   jsonResponse,
   registry,
 } from "../registry";
-import { patchArchiveJobBody } from "../schemas/archive";
+import { archiveJobDetail, patchArchiveJobBody } from "../schemas/archive";
 
 registry.registerPath({
   method: "patch",
@@ -21,7 +21,7 @@ registry.registerPath({
     body: { content: { "application/json": { schema: patchArchiveJobBody } } },
   },
   responses: {
-    200: jsonResponse("Updated archive job.", z.unknown()),
+    200: jsonResponse("Updated archive job.", archiveJobDetail),
     ...errorResponses(),
   },
 });

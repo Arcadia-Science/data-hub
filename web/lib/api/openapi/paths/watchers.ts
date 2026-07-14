@@ -9,8 +9,19 @@ import {
 import {
   heartbeatBody,
   registerWatcherBody,
+  watcherChecksumResponse,
   watcherConfigBody,
+  watcherDeleted,
+  watcherDetail,
   watcherEventBody,
+  watcherEventCreated,
+  watcherEventsListResponse,
+  watcherHeartbeatAck,
+  watcherHeartbeatsListResponse,
+  watcherListResponse,
+  watcherRegistered,
+  watcherUpdateCheckResponse,
+  watcherUploadQueueResponse,
 } from "../schemas/watchers";
 
 const watcherParams = z.object({ watcherId: watcherIdParam });
@@ -27,6 +38,7 @@ const operation = (
   operationId: string,
   summary: string,
   scope: string,
+  responseSchema: z.ZodType,
   request?: object
 ) =>
   registry.registerPath({
@@ -38,7 +50,7 @@ const operation = (
     tags: ["Watchers"],
     security: bearerSecurity,
     ...(request ? { request } : {}),
-    responses: responses(`${summary}.`),
+    responses: responses(`${summary}.`, responseSchema),
   });
 
 operation(
@@ -47,6 +59,7 @@ operation(
   "listWatchers",
   "List watchers",
   "watchers:read",
+  watcherListResponse,
   {
     query: z.object({
       instrument_id: z.string().optional(),
@@ -65,10 +78,7 @@ registry.registerPath({
   security: bearerSecurity,
   request: { body: body(registerWatcherBody) },
   responses: {
-    201: jsonResponse(
-      "Registered watcher.",
-      z.object({ watcher_id: z.string().uuid() })
-    ),
+    201: jsonResponse("Registered watcher.", watcherRegistered),
     ...errorResponses(),
   },
 });
@@ -78,6 +88,7 @@ operation(
   "getWatcher",
   "Get a watcher",
   "watchers:read",
+  watcherDetail,
   { params: watcherParams }
 );
 operation(
@@ -86,6 +97,7 @@ operation(
   "deleteWatcher",
   "Deregister a watcher",
   "watchers:admin",
+  watcherDeleted,
   { params: watcherParams }
 );
 operation(
@@ -94,6 +106,7 @@ operation(
   "updateWatcherConfig",
   "Update watcher configuration",
   "watchers:report",
+  watcherChecksumResponse,
   { params: watcherParams, body: body(watcherConfigBody) }
 );
 operation(
@@ -102,6 +115,7 @@ operation(
   "getWatcherConfigChecksum",
   "Get watcher configuration checksum",
   "watchers:read",
+  watcherChecksumResponse,
   { params: watcherParams }
 );
 registry.registerPath({
@@ -114,7 +128,7 @@ registry.registerPath({
   security: bearerSecurity,
   request: { params: watcherParams, body: body(watcherEventBody) },
   responses: {
-    201: jsonResponse("Created event.", z.unknown()),
+    201: jsonResponse("Created event.", watcherEventCreated),
     ...errorResponses(),
   },
 });
@@ -124,6 +138,7 @@ operation(
   "listWatcherEvents",
   "List watcher events",
   "watchers:read",
+  watcherEventsListResponse,
   { params: watcherParams }
 );
 operation(
@@ -132,6 +147,7 @@ operation(
   "recordWatcherHeartbeat",
   "Record a watcher heartbeat",
   "watchers:report",
+  watcherHeartbeatAck,
   { params: watcherParams, body: body(heartbeatBody) }
 );
 operation(
@@ -140,6 +156,7 @@ operation(
   "listWatcherHeartbeats",
   "List watcher heartbeats",
   "watchers:read",
+  watcherHeartbeatsListResponse,
   { params: watcherParams }
 );
 operation(
@@ -148,6 +165,7 @@ operation(
   "getWatcherUploadQueue",
   "Get watcher upload queue",
   "watchers:read",
+  watcherUploadQueueResponse,
   { params: watcherParams }
 );
 operation(
@@ -156,5 +174,6 @@ operation(
   "checkWatcherUpdate",
   "Check watcher update availability",
   "watchers:read",
+  watcherUpdateCheckResponse,
   { params: watcherParams }
 );

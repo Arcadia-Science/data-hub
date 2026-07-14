@@ -1,5 +1,6 @@
 import { inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { watcherUploadQueueResponse } from "@/lib/api/openapi";
 import { files, instruments } from "@/lib/db/schema";
 import {
   api,
@@ -107,7 +108,11 @@ describe("Upload request cancellation on watch-directory change", () => {
     const before = await api(`/api/v1/watchers/${watcherId}/upload-queue`, {
       token,
     });
-    expect((await before.json()).files).toHaveLength(2);
+    const beforeBody = await before.json();
+    expect(beforeBody.files).toHaveLength(2);
+    // Drift guard: the live response must match its documented OpenAPI schema
+    // (responses aren't validated at runtime, so this is the only backstop).
+    watcherUploadQueueResponse.parse(beforeBody);
 
     const res = await api(`/api/v1/watchers/${watcherId}/config`, {
       method: "PUT",

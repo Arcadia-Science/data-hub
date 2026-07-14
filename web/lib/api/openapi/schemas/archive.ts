@@ -11,12 +11,14 @@ export const patchArchiveJobBody = z.object({
   error_message: z.string().nullable().optional(),
 });
 
-export const archiveJobDetail = z.object({
-  id: z.string().uuid(),
-  status: archiveJobStatusSchema,
-  archive_bucket: z.string().nullable().optional(),
-  archive_key: z.string().nullable().optional(),
-  size_bytes: z.number().int().nullable().optional(),
-  error_message: z.string().nullable().optional(),
-  completed_at: isoDateTime.nullable().optional(),
-});
+export const archiveJobDetail = z
+  .object({
+    id: z.string().uuid(),
+    status: archiveJobStatusSchema,
+    archive_bucket: z.string().nullable(),
+    archive_key: z.string().nullable(),
+    size_bytes: z.number().int().nullable(),
+    error_message: z.string().nullable(),
+    completed_at: isoDateTime.nullable(),
+  })
+  .openapi("ArchiveJobDetail");

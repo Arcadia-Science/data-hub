@@ -1,4 +1,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  runCreated,
+  runDeleted,
+  runDetail,
+  runListResponse,
+  runUpdated,
+} from "@/lib/api/openapi";
 import { instruments } from "@/lib/db/schema";
 import {
   api,
@@ -47,6 +54,9 @@ describe("Instrument Runs API", () => {
     expect(data.run_id).toBe("run-001");
     expect(data.source).toBe("lambda");
     expect(data.id).toBeTruthy();
+    // Drift guard: the live response must match its documented OpenAPI schema
+    // (responses aren't validated at runtime, so this is the only backstop).
+    runCreated.parse(data);
   });
 
   // Run creation is idempotent on (instrument_id, run_id). This handles the
@@ -61,6 +71,7 @@ describe("Instrument Runs API", () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.run_id).toBe("run-001");
+    runCreated.parse(data);
   });
 
   it("POST rejects missing run_id", async () => {
@@ -137,6 +148,7 @@ describe("Instrument Runs API", () => {
     expect(body.data.length).toBeGreaterThanOrEqual(2);
     expect(body.pagination).toBeTruthy();
     expect(body.pagination.total).toBeGreaterThanOrEqual(2);
+    runListResponse.parse(body);
   });
 
   it("GET supports source filter", async () => {
@@ -161,6 +173,7 @@ describe("Instrument Runs API", () => {
     const body = await res.json();
     expect(body.data.length).toBeGreaterThanOrEqual(2);
     expect(body.pagination).toBeTruthy();
+    runListResponse.parse(body);
   });
 
   it("GET /api/v1/instrument-runs supports instrument_id filter", async () => {
@@ -189,6 +202,7 @@ describe("Instrument Runs API", () => {
     expect(data.instrument_id).toBe(instrumentId);
     expect(data).toHaveProperty("files");
     expect(data).toHaveProperty("metadata");
+    runDetail.parse(data);
   });
 
   it("GET returns 404 for nonexistent run", async () => {
@@ -214,6 +228,7 @@ describe("Instrument Runs API", () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.metadata).toEqual({ assay: "Bradford", plate: "96-well" });
+    runUpdated.parse(data);
   });
 
   it("PATCH rejects non-object metadata", async () => {
@@ -251,6 +266,7 @@ describe("Instrument Runs API", () => {
     // The acting user (the PAT's owner) is recorded as the deleter.
     expect(data.deleted_by).toBe(userId);
     expect(data.already_applied).toBe(false);
+    runDeleted.parse(data);
   });
 
   it("DELETE is idempotent — re-deleting an already-deleted run succeeds", async () => {

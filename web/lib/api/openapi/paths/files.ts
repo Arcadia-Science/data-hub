@@ -8,7 +8,13 @@ import {
   registry,
   runIdParam,
 } from "../registry";
-import { createFileBody, fileDetail, patchFileBody } from "../schemas/files";
+import {
+  createFileBody,
+  fileDetail,
+  fileDismissed,
+  fileReprocessed,
+  patchFileBody,
+} from "../schemas/files";
 
 const fileParams = z.object({ fileId: fileIdParam });
 const runParams = z.object({
@@ -58,7 +64,7 @@ registry.registerPath({
   tags: ["Files"],
   security: bearerSecurity,
   request: { params: fileParams },
-  responses: responses("Dismissal result."),
+  responses: responses("Dismissal result.", fileDismissed),
 });
 registry.registerPath({
   method: "get",
@@ -83,7 +89,7 @@ registry.registerPath({
   tags: ["Files"],
   security: bearerSecurity,
   request: { params: fileParams },
-  responses: responses("Reprocessing result."),
+  responses: responses("Reprocessing result.", fileReprocessed),
 });
 registry.registerPath({
   method: "get",

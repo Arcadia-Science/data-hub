@@ -9,14 +9,26 @@ import {
   runIdParam,
 } from "../registry";
 import {
+  attributionsResponse,
   commentBody,
+  commentDeleted,
+  commentsListResponse,
   createRunBody,
   patchRunBody,
   requestUploadBody,
   requestUploadUrlBody,
+  runComment,
+  runCreated,
+  runDeleted,
   runDetail,
   runListQuery,
   runListResponse,
+  runReprocessed,
+  runRestored,
+  runUpdated,
+  uploadAllQueued,
+  uploadQueued,
+  uploadUrlResponse,
 } from "../schemas/runs";
 import { searchQuery, searchResponse } from "../schemas/search";
 
@@ -73,8 +85,8 @@ registry.registerPath({
     body: body(createRunBody),
   },
   responses: {
-    200: jsonResponse("Existing run.", z.unknown()),
-    201: jsonResponse("Created run.", z.unknown()),
+    200: jsonResponse("Existing run.", runCreated),
+    201: jsonResponse("Created run.", runCreated),
     ...errorResponses(),
   },
 });
@@ -98,7 +110,7 @@ registry.registerPath({
   tags: tag,
   security: bearerSecurity,
   request: { params: runParams, body: body(patchRunBody) },
-  responses: ok("Updated run.", runDetail),
+  responses: ok("Updated run.", runUpdated),
 });
 registry.registerPath({
   method: "delete",
@@ -109,7 +121,7 @@ registry.registerPath({
   tags: tag,
   security: bearerSecurity,
   request: { params: runParams },
-  responses: ok("Deletion result.", z.unknown()),
+  responses: ok("Deletion result.", runDeleted),
 });
 registry.registerPath({
   method: "post",
@@ -120,7 +132,7 @@ registry.registerPath({
   tags: tag,
   security: bearerSecurity,
   request: { params: runParams },
-  responses: ok("Restored run.", z.unknown()),
+  responses: ok("Restored run.", runRestored),
 });
 registry.registerPath({
   method: "post",
@@ -131,7 +143,7 @@ registry.registerPath({
   tags: tag,
   security: bearerSecurity,
   request: { params: runParams },
-  responses: ok("Reprocessing result.", z.unknown()),
+  responses: ok("Reprocessing result.", runReprocessed),
 });
 registry.registerPath({
   method: "get",
@@ -153,7 +165,7 @@ registry.registerPath({
   tags: tag,
   security: bearerSecurity,
   request: { params: runParams, body: body(requestUploadBody) },
-  responses: ok("Queued files.", z.unknown()),
+  responses: ok("Queued files.", uploadQueued),
 });
 registry.registerPath({
   method: "post",
@@ -164,7 +176,7 @@ registry.registerPath({
   tags: tag,
   security: bearerSecurity,
   request: { params: runParams },
-  responses: ok("Queued files.", z.unknown()),
+  responses: ok("Queued files.", uploadAllQueued),
 });
 registry.registerPath({
   method: "post",
@@ -175,7 +187,7 @@ registry.registerPath({
   tags: tag,
   security: bearerSecurity,
   request: { params: runParams, body: body(requestUploadUrlBody) },
-  responses: ok("Upload URL.", z.unknown()),
+  responses: ok("Upload URL.", uploadUrlResponse),
 });
 registry.registerPath({
   method: "put",
@@ -186,7 +198,7 @@ registry.registerPath({
   tags: tag,
   security: bearerSecurity,
   request: { params: runParams },
-  responses: ok("Attributions.", z.unknown()),
+  responses: ok("Attributions.", attributionsResponse),
 });
 registry.registerPath({
   method: "delete",
@@ -197,7 +209,7 @@ registry.registerPath({
   tags: tag,
   security: bearerSecurity,
   request: { params: runParams },
-  responses: ok("Attributions.", z.unknown()),
+  responses: ok("Attributions.", attributionsResponse),
 });
 registry.registerPath({
   method: "get",
@@ -208,7 +220,7 @@ registry.registerPath({
   tags: tag,
   security: bearerSecurity,
   request: { params: runParams },
-  responses: ok("Comments.", z.unknown()),
+  responses: ok("Comments.", commentsListResponse),
 });
 registry.registerPath({
   method: "post",
@@ -220,7 +232,7 @@ registry.registerPath({
   security: bearerSecurity,
   request: { params: runParams, body: body(commentBody) },
   responses: {
-    201: jsonResponse("Created comment.", z.unknown()),
+    201: jsonResponse("Created comment.", runComment),
     ...errorResponses(),
   },
 });
@@ -233,7 +245,7 @@ registry.registerPath({
   tags: tag,
   security: bearerSecurity,
   request: { params: commentParams, body: body(commentBody) },
-  responses: ok("Updated comment.", z.unknown()),
+  responses: ok("Updated comment.", runComment),
 });
 registry.registerPath({
   method: "delete",
@@ -244,5 +256,5 @@ registry.registerPath({
   tags: tag,
   security: bearerSecurity,
   request: { params: commentParams },
-  responses: ok("Deleted comment.", z.unknown()),
+  responses: ok("Deleted comment.", commentDeleted),
 });

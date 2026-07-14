@@ -52,47 +52,139 @@ export const runListQuery = z.object({
     .openapi({ description: "Metadata value filter." }),
 });
 
-export const fileResponse = z.object({
-  id: z.number().int(),
-  instrument_run_id: z.string().uuid().optional(),
-  filename: z.string(),
-  relative_path: z.string(),
-  s3_bucket: z.string().nullable(),
-  s3_key: z.string().nullable(),
-  content_type: z.string().nullable(),
-  size_bytes: z.number().nullable(),
-  category: fileCategorySchema,
-  status: fileStatusSchema,
-  metadata: z.record(z.string(), z.unknown()).nullable(),
-  error_message: z.string().nullable(),
-  created_at: isoDateTime,
-  download_url: z.string().url().nullable().optional(),
-});
+const metadataObject = z.record(z.string(), z.unknown());
 
-export const runListItem = z.object({
-  id: z.string().uuid(),
-  instrument_id: z.string(),
-  instrument_display_name: z.string().nullable().optional(),
-  run_id: z.string(),
-  source: runSourceSchema,
-  status: runStatusSchema,
-  metadata: z.record(z.string(), z.unknown()).nullable(),
-  acquired_at: isoDateTime.nullable(),
-  created_at: isoDateTime,
-});
+// A user who has claimed a run. Wire shape mixes `userId` with camelCase
+// display fields — mirror it exactly rather than "fixing" the casing here.
+export const attribution = z
+  .object({
+    userId: z.string(),
+    displayName: z.string(),
+    initials: z.string(),
+    avatarUrl: z.string().nullable(),
+  })
+  .openapi("RunAttribution");
+
+export const runCreated = z
+  .object({
+    id: z.string().uuid(),
+    instrument_id: z.string(),
+    run_id: z.string(),
+    source: runSourceSchema,
+  })
+  .openapi("RunCreated");
+
+export const runUpdated = z
+  .object({
+    id: z.string().uuid(),
+    instrument_id: z.string(),
+    instrument_display_name: z.string().nullable(),
+    run_id: z.string(),
+    source: runSourceSchema,
+    watcher_id: z.string().uuid().nullable(),
+    metadata: metadataObject.nullable(),
+    created_at: isoDateTime,
+    acquired_at: isoDateTime.nullable(),
+    updated_at: isoDateTime,
+    deleted_at: isoDateTime.nullable(),
+  })
+  .openapi("RunUpdated");
+
+// File sub-object embedded in run detail. Distinct from the top-level file
+// resource: it carries a presigned `download_url` and omits `s3_bucket`.
+export const runDetailFile = z
+  .object({
+    id: z.number().int(),
+    filename: z.string(),
+    relative_path: z.string(),
+    s3_key: z.string().nullable(),
+    content_type: z.string().nullable(),
+    size_bytes: z.number().nullable(),
+    category: fileCategorySchema,
+    status: fileStatusSchema,
+    metadata: metadataObject.nullable(),
+    error_message: z.string().nullable(),
+    detected_at: isoDateTime.nullable(),
+    upload_requested_at: isoDateTime.nullable(),
+    uploaded_at: isoDateTime.nullable(),
+    processed_at: isoDateTime.nullable(),
+    download_url: z.string().url().nullable(),
+    created_at: isoDateTime,
+    file_created_at: isoDateTime.nullable(),
+  })
+  .openapi("RunDetailFile");
+
+export const runDetail = z
+  .object({
+    id: z.string().uuid(),
+    instrument_id: z.string(),
+    instrument_display_name: z.string().nullable(),
+    run_id: z.string(),
+    source: runSourceSchema,
+    watcher_id: z.string().uuid().nullable(),
+    created_at: isoDateTime,
+    acquired_at: isoDateTime.nullable(),
+    updated_at: isoDateTime,
+    deleted_at: isoDateTime.nullable(),
+    deleted_by: z.string().nullable(),
+    metadata: metadataObject.nullable(),
+    attributions: z.array(attribution),
+    files: z.array(runDetailFile),
+  })
+  .openapi("RunDetail");
+
+export const runListItem = z
+  .object({
+    id: z.string().uuid(),
+    instrument_id: z.string(),
+    instrument_display_name: z.string().nullable(),
+    run_id: z.string(),
+    source: runSourceSchema,
+    metadata: metadataObject.nullable(),
+    created_at: isoDateTime,
+    acquired_at: isoDateTime.nullable(),
+    updated_at: isoDateTime,
+    deleted_at: isoDateTime.nullable(),
+    file_count: z.number().int(),
+    files_completed: z.number().int(),
+    files_failed: z.number().int(),
+    files_pending_upload: z.number().int(),
+    files_uploaded: z.number().int(),
+    files_processing: z.number().int(),
+    // Aggregated with a `bigint` cast, which the driver may surface as a
+    // string on large totals.
+    total_size_bytes: z.union([z.number(), z.string()]),
+    error_messages: z.array(z.string()),
+    attributions: z.array(attribution),
+  })
+  .openapi("RunListItem");
 
 export const runListResponse = z.object({
   data: z.array(runListItem),
   pagination: paginationSchema,
 });
 
-export const runDetail = runListItem.extend({
-  watcher_id: z.string().uuid().nullable(),
-  updated_at: isoDateTime,
+export const runDeleted = z.object({
+  instrument_id: z.string(),
+  run_id: z.string(),
   deleted_at: isoDateTime.nullable(),
   deleted_by: z.string().nullable(),
-  attributions: z.array(z.unknown()),
-  files: z.array(fileResponse),
+  already_applied: z.boolean(),
+});
+
+export const runRestored = z.object({
+  id: z.string().uuid(),
+  instrument_id: z.string(),
+  run_id: z.string(),
+  deleted_at: isoDateTime.nullable(),
+  already_applied: z.boolean(),
+});
+
+export const runReprocessed = z.object({
+  instrument_id: z.string(),
+  run_id: z.string(),
+  files_queued: z.number().int(),
+  files_failed: z.number().int(),
 });
 
 export const requestUploadBody = z.object({
@@ -105,3 +197,73 @@ export const requestUploadUrlBody = z.object({
   file_created_at: isoDateTime.optional(),
 });
 export const commentBody = z.object({ body: z.string().min(1).max(10_000) });
+
+export const uploadQueued = z.object({
+  instrument_id: z.string(),
+  run_id: z.string(),
+  files_queued: z.number().int(),
+  files: z
+    .array(
+      z.object({
+        id: z.number().int(),
+        filename: z.string(),
+        upload_requested_at: isoDateTime.nullable(),
+      })
+    )
+    .optional(),
+});
+
+export const uploadAllQueued = z.object({
+  instrument_id: z.string(),
+  run_id: z.string(),
+  files_queued: z.number().int(),
+});
+
+export const uploadUrlResponse = z
+  .union([
+    z.object({
+      already_uploaded: z.literal(true),
+      file_id: z.number().int(),
+      s3_bucket: z.string().nullable(),
+      s3_key: z.string().nullable(),
+    }),
+    z.object({
+      already_uploaded: z.literal(false),
+      upload_url: z.string().url(),
+      s3_bucket: z.string(),
+      s3_key: z.string(),
+      file_id: z.number().int(),
+      expires_in: z.number().int(),
+    }),
+  ])
+  .openapi("UploadUrlResponse");
+
+export const attributionsResponse = z.object({
+  attributions: z.array(attribution),
+});
+
+const commentUser = z.object({
+  id: z.string(),
+  displayName: z.string(),
+  initials: z.string(),
+  avatarUrl: z.string().nullable(),
+});
+
+export const runComment = z
+  .object({
+    id: z.string().uuid(),
+    body: z.string(),
+    user: commentUser,
+    created_at: isoDateTime,
+    edited_at: isoDateTime.nullable(),
+  })
+  .openapi("RunComment");
+
+export const commentsListResponse = z.object({
+  comments: z.array(runComment),
+});
+
+export const commentDeleted = z.object({
+  id: z.string(),
+  deleted: z.literal(true),
+});

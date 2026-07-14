@@ -43,12 +43,9 @@ export const fileIdParam = z
     example: 1,
   });
 export const commentIdParam = z
-  .number()
-  .int()
-  .openapi({
-    param: { required: true },
-    example: 1,
-  });
+  .string()
+  .uuid()
+  .openapi({ example: "3f1a2b4c-5d6e-7f80-9a1b-2c3d4e5f6071" });
 export const archiveJobIdParam = z.string().uuid();
 
 export function jsonResponse(
