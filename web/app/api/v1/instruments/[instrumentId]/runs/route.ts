@@ -4,6 +4,7 @@ import { authorize } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { buildRunListQuery, parseAcquiredAt } from "@/lib/api/instrument-runs";
 import { notifyRunCreated } from "@/lib/api/notifications";
+import { createRunBody, readJsonBody } from "@/lib/api/openapi";
 import { parseRunMetadataFilters } from "@/lib/api/run-metadata-filters";
 import { parseIntParam, parseRunStatusParam } from "@/lib/api/validators";
 import { db } from "@/lib/db";
@@ -43,29 +44,14 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     return apiError(404, NOT_FOUND, `Instrument '${instrumentId}' not found`);
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = await request.json();
-  } catch {
-    return apiError(400, VALIDATION_ERROR, "Invalid JSON body");
+  const body = await readJsonBody(request, createRunBody);
+  if (body instanceof Response) {
+    return body;
   }
-
-  const runId = typeof body.run_id === "string" ? body.run_id.trim() : "";
-  if (!runId) {
-    return apiError(400, VALIDATION_ERROR, "run_id is required");
-  }
-
+  const runId = body.run_id;
   const source = body.source;
-  if (source !== "lambda" && source !== "watcher") {
-    return apiError(
-      400,
-      VALIDATION_ERROR,
-      'source must be "lambda" or "watcher"'
-    );
-  }
 
-  const watcherId =
-    typeof body.watcher_id === "string" ? body.watcher_id : null;
+  const watcherId = body.watcher_id ?? null;
 
   // Parse the watcher-supplied acquired_at, falling back to the floor of
   // any detected_files[].file_created_at when omitted. This is defense-in-
@@ -151,9 +137,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
   // Watcher payloads may include detected files to bulk-insert alongside
   // the run. Duplicates (same run + relative_path) are silently skipped.
-  const detectedFiles = Array.isArray(body.detected_files)
-    ? body.detected_files
-    : [];
+  const detectedFiles = body.detected_files ?? [];
 
   if (detectedFiles.length > 0) {
     const now = new Date();

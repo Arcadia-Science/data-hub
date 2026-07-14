@@ -1,13 +1,9 @@
 import { and, eq, isNull } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
-import {
-  apiError,
-  CONFLICT,
-  NOT_FOUND,
-  VALIDATION_ERROR,
-} from "@/lib/api/errors";
+import { apiError, CONFLICT, NOT_FOUND } from "@/lib/api/errors";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
+import { createFileBody, readJsonBody } from "@/lib/api/openapi";
 import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
 
@@ -52,33 +48,17 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     return apiError(409, CONFLICT, "Cannot add files to a soft-deleted run");
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = await request.json();
-  } catch {
-    return apiError(400, VALIDATION_ERROR, "Invalid JSON body");
+  const body = await readJsonBody(request, createFileBody);
+  if (body instanceof Response) {
+    return body;
   }
 
-  const s3Bucket =
-    typeof body.s3_bucket === "string" ? body.s3_bucket.trim() : "";
-  const s3Key = typeof body.s3_key === "string" ? body.s3_key.trim() : "";
-  const filename =
-    typeof body.filename === "string" ? body.filename.trim() : "";
-
-  if (!(s3Bucket && s3Key && filename)) {
-    return apiError(
-      400,
-      VALIDATION_ERROR,
-      "s3_bucket, s3_key, and filename are required"
-    );
-  }
-
-  const contentType =
-    typeof body.content_type === "string" ? body.content_type : null;
-  const sizeBytes =
-    typeof body.size_bytes === "number" ? body.size_bytes : null;
-  const category =
-    body.category === "processed" ? ("processed" as const) : ("raw" as const);
+  const s3Bucket = body.s3_bucket;
+  const s3Key = body.s3_key;
+  const filename = body.filename;
+  const contentType = body.content_type ?? null;
+  const sizeBytes = body.size_bytes ?? null;
+  const category = body.category ?? "raw";
 
   const now = new Date();
 

@@ -94,6 +94,10 @@ db-process-fixtures:
 fe-build:
 	cd web && npm run build
 
+.PHONY: openapi-generate
+openapi-generate:
+	cd web && npm run openapi:generate
+
 # Formatting, linting, and type checking.
 .PHONY: py-check
 py-check:

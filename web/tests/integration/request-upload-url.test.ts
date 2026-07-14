@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { uploadUrlResponse } from "@/lib/api/openapi";
 import { instruments } from "@/lib/db/schema";
 import {
   api,
@@ -66,6 +67,9 @@ describe("Request Upload URL API", () => {
     expect(data.file_id).toBeGreaterThan(0);
     expect(data.expires_in).toBe(3600);
     expect(data.already_uploaded).toBe(false);
+    // Drift guard: the live response must match its documented OpenAPI schema
+    // (responses aren't validated at runtime, so this is the only backstop).
+    uploadUrlResponse.parse(data);
   });
 
   it("creates a file record if none exists", async () => {
@@ -135,6 +139,7 @@ describe("Request Upload URL API", () => {
     const data = await res.json();
     expect(data.already_uploaded).toBe(true);
     expect(data.file_id).toBe(fileId);
+    uploadUrlResponse.parse(data);
   });
 
   // -------------------------------------------------------------------------

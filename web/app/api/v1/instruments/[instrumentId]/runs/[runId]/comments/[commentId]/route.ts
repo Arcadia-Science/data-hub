@@ -8,6 +8,7 @@ import {
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
+import { commentBody, readJsonBody } from "@/lib/api/openapi";
 import {
   getCommentForAuthorCheck,
   softDeleteComment,
@@ -103,15 +104,9 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     return pre.response;
   }
 
-  let payload: Record<string, unknown>;
-  try {
-    payload = await request.json();
-  } catch {
-    return apiError(400, VALIDATION_ERROR, "Invalid JSON body");
-  }
-
-  if (typeof payload.body !== "string") {
-    return apiError(400, VALIDATION_ERROR, "body must be a string");
+  const payload = await readJsonBody(request, commentBody);
+  if (payload instanceof Response) {
+    return payload;
   }
 
   const validated = validateCommentBody(payload.body);

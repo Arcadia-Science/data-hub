@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { fileDetail, fileDismissed } from "@/lib/api/openapi";
 import { instruments, files as schemaFiles } from "@/lib/db/schema";
 import {
   api,
@@ -117,6 +118,9 @@ describe("Files API", () => {
     expect(data.category).toBe("processed");
     expect(data.relative_path).toBe("processed_output.csv");
     lambdaFileId = data.id;
+    // Drift guard: live responses must match their documented OpenAPI schemas
+    // (responses aren't validated at runtime, so this is the only backstop).
+    fileDetail.parse(data);
   });
 
   // Reconcile case 1: the watcher reported a detected row first, then the
@@ -304,6 +308,7 @@ describe("Files API", () => {
     expect(data.status).toBe("uploaded");
     expect(data.s3_bucket).toBe("test-bucket");
     expect(data.uploaded_at).toBeTruthy();
+    fileDetail.parse(data);
   });
 
   it("PATCH transitions uploaded → processing", async () => {
@@ -412,6 +417,7 @@ describe("Files API", () => {
     const data = await res.json();
     expect(data.deleted_at).toBeTruthy();
     expect(data.already_applied).toBe(false);
+    fileDismissed.parse(data);
   });
 
   it("DELETE is idempotent — re-dismissing an already-deleted file succeeds", async () => {

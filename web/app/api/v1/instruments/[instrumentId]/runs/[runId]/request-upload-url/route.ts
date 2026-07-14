@@ -6,9 +6,9 @@ import {
   CONFLICT,
   INTERNAL_ERROR,
   NOT_FOUND,
-  VALIDATION_ERROR,
 } from "@/lib/api/errors";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
+import { readJsonBody, requestUploadUrlBody } from "@/lib/api/openapi";
 import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
 import { getPresignedUploadUrl, getS3RawDataBucket } from "@/lib/s3";
@@ -56,27 +56,17 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     return apiError(409, CONFLICT, "Cannot upload files to a soft-deleted run");
   }
 
-  let body: Record<string, unknown>;
-  try {
-    body = await request.json();
-  } catch {
-    return apiError(400, VALIDATION_ERROR, "Invalid JSON body");
+  const body = await readJsonBody(request, requestUploadUrlBody);
+  if (body instanceof Response) {
+    return body;
   }
 
-  const filename =
-    typeof body.filename === "string" ? body.filename.trim() : "";
-  if (!filename) {
-    return apiError(400, VALIDATION_ERROR, "filename is required");
-  }
-
-  const contentType =
-    typeof body.content_type === "string" ? body.content_type : undefined;
-  const sizeBytes =
-    typeof body.size_bytes === "number" ? body.size_bytes : undefined;
-  const fileCreatedAt =
-    typeof body.file_created_at === "string"
-      ? new Date(body.file_created_at)
-      : null;
+  const filename = body.filename;
+  const contentType = body.content_type;
+  const sizeBytes = body.size_bytes;
+  const fileCreatedAt = body.file_created_at
+    ? new Date(body.file_created_at)
+    : null;
 
   // Look up existing file record by run + filename.  The file may have been
   // created by report_run with a full relative_path (e.g. "EXP-001/data.csv"),

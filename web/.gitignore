@@ -36,3 +36,7 @@ pnpm-debug.log*
 *.tsbuildinfo
 next-env.d.ts
 .vercel
+
+# Local OpenAPI dump from `npm run openapi:generate` (not committed;
+# production serves the schema from GET /api/v1/openapi.json).
+/openapi.json
