@@ -222,3 +222,6 @@ __marimo__/
 
 # Local S3 mirror used by `data-hub-process handler` (see developer-docs/local-development.md).
 lambda/.local-s3/
+
+# Local dump of the watcher Click CLI catalog (copy into data-hub-docs).
+watcher/cli-catalog.snapshot.json
