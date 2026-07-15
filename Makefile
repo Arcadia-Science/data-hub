@@ -46,6 +46,13 @@ py-check-watcher-version:
 	fi; \
 	echo "OK: tag $$TAG matches watcher/pyproject.toml version $$VERSION"
 
+# Write a gitignored Click CLI catalog dump for the docs site.
+# Copy watcher/cli-catalog.snapshot.json to
+# data-hub-docs/src/lib/cli-catalog.snapshot.json and commit it there.
+.PHONY: py-watcher-cli-catalog
+py-watcher-cli-catalog:
+	uv run python -m data_hub_watcher.cli_catalog watcher/cli-catalog.snapshot.json
+
 # Web app.
 .PHONY: fe-format
 fe-format:

@@ -6,6 +6,14 @@ User-, operator-, and admin-facing documentation — installing a watcher, setti
 
 This repo's `developer-docs/` covers contributing to and self-hosting Data Hub itself: architecture internals, local dev setup (`getting-started.md`, `local-development.md`), conventions, the step-by-step self-hosting guide for the web app and AWS infrastructure (`first-time-deployment.md`) plus CI/ongoing-deploy reference (`ci-and-deployment.md`), and per-package references (`lambda.md`, `watcher.md`, `shared-library.md`). See `developer-docs/README.md` for the full index.
 
+### Watcher CLI catalog (docs site)
+
+The public [Watcher CLI](https://datahub.arcadiascience.com/docs/cli-reference) page renders from a JSON catalog generated from Click in `watcher/src/data_hub_watcher/cli_catalog.py`.
+
+1. Change CLI help or options in `watcher/src/data_hub_watcher/cli.py`.
+2. Run `make py-watcher-cli-catalog` (writes a gitignored `watcher/cli-catalog.snapshot.json`).
+3. Copy that file to `data-hub-docs/src/lib/cli-catalog.snapshot.json` and commit it in the docs repo.
+
 ## Cursor Cloud specific instructions
 
 Data Hub is a multi-component repo (see `README.md`). The component you can run end-to-end locally with zero external credentials is the **Next.js web app + REST API + PostgreSQL** (`web/`). The `lambda/`, `watcher/`, and `packages/shared/` Python packages are exercised via tests and a local S3 mirror — no real AWS is needed for local work.
