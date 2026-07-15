@@ -1,7 +1,10 @@
 """Build a machine-readable catalog of the watcher Click CLI.
 
-Used by docs (via a committed snapshot) and a drift test so help text and
-flags stay in sync with ``cli.py`` without hand-maintaining MDX tables.
+The docs site renders its CLI reference from a committed snapshot of this
+catalog, so help text and flags come straight from ``cli.py`` instead of
+hand-maintained MDX tables. The tests here are smoke checks on the walker; they
+don't guard the docs snapshot from going stale, since that copy lives in the
+data-hub-docs repo and is refreshed manually via ``make py-watcher-cli-catalog``.
 """
 
 from __future__ import annotations
@@ -175,6 +178,11 @@ def build_cli_catalog(
     }
 
 
+def _serialize(catalog: dict[str, Any]) -> str:
+    # sort_keys keeps snapshot diffs stable regardless of walker insertion order.
+    return f"{json.dumps(catalog, indent=2, sort_keys=True)}\n"
+
+
 def write_cli_catalog_snapshot(
     path: Path | None = None,
     *,
@@ -183,7 +191,7 @@ def write_cli_catalog_snapshot(
     """Write the catalog JSON (pretty-printed, trailing newline)."""
     target = path or DEFAULT_SNAPSHOT_PATH
     doc = catalog if catalog is not None else build_cli_catalog()
-    target.write_text(f"{json.dumps(doc, indent=2, sort_keys=True)}\n", encoding="utf-8")
+    target.write_text(_serialize(doc), encoding="utf-8")
     return target
 
 
@@ -197,12 +205,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    catalog = build_cli_catalog()
-    payload = f"{json.dumps(catalog, indent=2, sort_keys=True)}\n"
     if args:
-        Path(args[0]).write_text(payload, encoding="utf-8")
+        write_cli_catalog_snapshot(Path(args[0]))
     else:
-        sys.stdout.write(payload)
+        sys.stdout.write(_serialize(build_cli_catalog()))
     return 0
 
 
