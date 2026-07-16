@@ -289,16 +289,17 @@ describe("Files API", () => {
   // PATCH /api/v1/files/:fileId — watcher path (detected → uploaded)
   // -------------------------------------------------------------------------
 
-  // Watcher path: after the watcher uploads the file to S3, it calls PATCH
-  // to transition detected → uploaded and attach the S3 coordinates.
-  it("PATCH transitions detected → uploaded with S3 info", async () => {
+  // Watcher path: detected → uploaded. The S3 location is derived server-side,
+  // so the hostile s3_bucket / s3_key sent here must be ignored and the
+  // canonical location rebuilt from DB state.
+  it("PATCH transitions detected → uploaded and derives the S3 location", async () => {
     const res = await api(`/api/v1/files/${fileId}`, {
       method: "PATCH",
       token,
       body: {
         status: "uploaded",
-        s3_bucket: "test-bucket",
-        s3_key: `${instrumentId}/${runId}/sample.csv`,
+        s3_bucket: "attacker-controlled-bucket",
+        s3_key: "someones-private-data/secret-export.csv",
         content_type: "text/csv",
         size_bytes: 512,
       },
@@ -306,7 +307,8 @@ describe("Files API", () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe("uploaded");
-    expect(data.s3_bucket).toBe("test-bucket");
+    expect(data.s3_bucket).toBe("test-raw-data-bucket");
+    expect(data.s3_key).toBe(`${instrumentId}/${runId}/sample.csv`);
     expect(data.uploaded_at).toBeTruthy();
     fileDetail.parse(data);
   });
@@ -383,7 +385,7 @@ describe("Files API", () => {
     expect(res.status).toBe(404);
   });
 
-  // Watcher cancel path (ENG-1397): after giving up on a queued file the
+  // Watcher cancel path: after giving up on a queued file the
   // watcher reverts it upload_requested → detected, which must clear
   // upload_requested_at so the row leaves the upload queue.
   it("PATCH transitions upload_requested → detected and clears upload_requested_at", async () => {

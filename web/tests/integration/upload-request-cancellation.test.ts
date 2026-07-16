@@ -14,7 +14,7 @@ import {
 // request points at a relative path anchored to the old root and can no
 // longer be resolved by the watcher. The config PUT handler reverts those
 // files to `detected` (clearing upload_requested_at) so they drop out of the
-// upload queue instead of erroring on every heartbeat poll (ENG-1397).
+// upload queue instead of erroring on every heartbeat poll.
 describe("Upload request cancellation on watch-directory change", () => {
   let token: string;
   let watcherId: string;

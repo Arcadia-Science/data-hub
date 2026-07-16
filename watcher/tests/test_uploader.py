@@ -79,11 +79,11 @@ class TestUploadSingle:
 
         assert result is True
         mock_put.assert_called_once()
+        # The server derives the S3 location itself, so the watcher only
+        # reports the status and content type.
         mock_client.mark_file_uploaded.assert_called_once_with(
             42,
             {
-                "s3_bucket": "test-bucket",
-                "s3_key": "test-instrument/RUN-001/test_data.csv",
                 "content_type": "text/csv",
                 "status": "uploaded",
             },
@@ -603,7 +603,7 @@ class TestPollUploadQueueAttemptCap:
     a file that keeps failing to upload) would otherwise re-error forever.
     The watcher surfaces the visible error once, retries up to
     ``MAX_QUEUE_FILE_ATTEMPTS`` polls, then cancels the request server-side
-    so it leaves the queue (ENG-1397).
+    so it leaves the queue.
     """
 
     @staticmethod
