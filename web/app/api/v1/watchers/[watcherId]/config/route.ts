@@ -49,7 +49,7 @@ export async function PUT(
 
   // A watch_directory change orphans every pending request: each carries a
   // relative_path under the old root that no longer resolves. Revert them to
-  // `detected` to drain the queue instead of erroring each poll (ENG-1397).
+  // `detected` to drain the queue instead of erroring each poll.
   // Gated on a known previous dir so first-push / unrelated edits don't
   // revert spuriously.
   if (previousWatchDir && nextWatchDir && previousWatchDir !== nextWatchDir) {

@@ -8,9 +8,32 @@ import {
   runStatusSchema,
 } from "./common";
 
+// Rejects path traversal in watcher-reported file locations. The watcher
+// joins these onto its watch directory and reads the result, so an
+// unchecked `..` segment or absolute path lets a malicious run exfiltrate
+// arbitrary files from the instrument PC. Watchers run on
+// Windows too, hence we also reject `\` and drive paths, not just `/`.
+function isSafeRelativePath(value: string): boolean {
+  if (value.includes("\0")) {
+    return false;
+  }
+  // Absolute: POSIX `/foo`, Windows UNC/drive-relative `\foo`, or drive
+  // paths like `C:\foo`/`C:foo`.
+  if (/^([/\\]|[a-zA-Z]:)/.test(value)) {
+    return false;
+  }
+  // Any `..` segment (either separator) can escape the watch directory.
+  return !value.split(/[/\\]/).includes("..");
+}
+
+const safeRelativePath = z.string().min(1).refine(isSafeRelativePath, {
+  message:
+    "must be a relative path without '..' segments, absolute prefixes, or null bytes",
+});
+
 export const detectedFileSchema = z.object({
-  relative_path: z.string().min(1),
-  filename: z.string().min(1),
+  relative_path: safeRelativePath,
+  filename: safeRelativePath,
   size_bytes: z.number().int().nonnegative().optional(),
   file_created_at: isoDateTime.optional(),
 });
@@ -191,7 +214,10 @@ export const requestUploadBody = z.object({
   file_ids: z.array(z.union([z.string(), z.number()])).min(1),
 });
 export const requestUploadUrlBody = z.object({
-  filename: z.string().min(1),
+  // Persisted as `relative_path` and joined into the S3 key, so it flows to
+  // the watcher's upload queue just like `detected_files`; guard it with the
+  // same path-traversal check.
+  filename: safeRelativePath,
   content_type: z.string().optional(),
   size_bytes: z.number().optional(),
   file_created_at: isoDateTime.optional(),

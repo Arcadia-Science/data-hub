@@ -10,10 +10,11 @@ export const createFileBody = z.object({
   category: fileCategorySchema.optional(),
 });
 
+// No `s3_bucket` / `s3_key`: the server derives the canonical S3 location on
+// the `uploaded` transition, so accepting them from the client only let a
+// caller repoint a file at an arbitrary object.
 export const patchFileBody = z.object({
   status: fileStatusSchema.optional(),
-  s3_bucket: z.string().optional(),
-  s3_key: z.string().optional(),
   content_type: z.string().optional(),
   size_bytes: z.number().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),

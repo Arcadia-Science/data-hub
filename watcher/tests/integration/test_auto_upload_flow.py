@@ -222,15 +222,14 @@ class TestMarkFileUploaded:
         result = client.mark_file_uploaded(
             file_id,
             {
-                "s3_bucket": "test-bucket",
-                "s3_key": f"{instrument_id}/EXP-001/data_001.csv",
                 "content_type": "text/csv",
                 "status": "uploaded",
             },
         )
         assert result.status == "uploaded"
-        assert result.s3_bucket == "test-bucket"
+        # The server derives the location from the run's key and the filename.
         assert result.s3_key == f"{instrument_id}/EXP-001/data_001.csv"
+        assert result.s3_bucket
         assert result.content_type == "text/csv"
         assert result.uploaded_at is not None
 
@@ -277,8 +276,6 @@ class TestRequestUploadUrl:
         client.mark_file_uploaded(
             file_id,
             {
-                "s3_bucket": "test-bucket",
-                "s3_key": f"{instrument_id}/EXP-001/data_001.csv",
                 "content_type": "text/csv",
                 "status": "uploaded",
             },
@@ -326,17 +323,18 @@ class TestQueueModePresignedUploadFlow:
         assert presigned.file_id == file_id
         assert presigned.already_uploaded is False
 
-        # After uploading to S3, the watcher notifies the API.
+        # After uploading to S3, the watcher notifies the API. The server
+        # derives the S3 location itself, so the watcher only sends status/type.
         result = client.mark_file_uploaded(
             presigned.file_id,
             {
-                "s3_bucket": presigned.s3_bucket,
-                "s3_key": presigned.s3_key,
                 "content_type": "text/csv",
                 "status": "uploaded",
             },
         )
         assert result.status == "uploaded"
+        assert result.s3_bucket == presigned.s3_bucket
+        assert result.s3_key == presigned.s3_key
 
 
 # ------------------------------------------------------------------
@@ -377,8 +375,6 @@ class TestFullAutoModeLifecycle:
         uploaded = client.mark_file_uploaded(
             file_id,
             {
-                "s3_bucket": "test-bucket",
-                "s3_key": f"{instrument_id}/LIFECYCLE-001/raw.csv",
                 "content_type": "text/csv",
                 "status": "uploaded",
             },

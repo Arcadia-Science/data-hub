@@ -105,8 +105,6 @@ class TestManualUploadQueue:
         client.mark_file_uploaded(
             file_id,
             {
-                "s3_bucket": "test-bucket",
-                "s3_key": f"{instrument_id}/MANUAL-001/data.csv",
                 "content_type": "text/csv",
                 "status": "uploaded",
             },

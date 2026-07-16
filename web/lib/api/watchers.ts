@@ -53,8 +53,8 @@ export function extractWatchDirectory(
  *
  * Called when a watcher's `watch_directory` changes: every queued file's
  * `relative_path` was anchored to the old root, so none resolve under the
- * new one and the watcher would otherwise re-error on each heartbeat poll
- * (ENG-1397). Returns the reverted file ids (for event reporting).
+ * new one and the watcher would otherwise re-error on each heartbeat poll.
+ * Returns the reverted file ids (for event reporting).
  */
 export async function revertPendingUploadRequests(
   instrumentId: string,
