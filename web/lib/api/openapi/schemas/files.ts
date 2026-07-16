@@ -10,10 +10,9 @@ export const createFileBody = z.object({
   category: fileCategorySchema.optional(),
 });
 
-// `s3_bucket` / `s3_key` are intentionally absent: the server derives the
-// canonical S3 location itself on the `uploaded` transition (see the PATCH
-// handler). Accepting them from the client let any `files:update` caller
-// repoint a record at an arbitrary object (ENG-1450).
+// No `s3_bucket` / `s3_key`: the server derives the canonical S3 location on
+// the `uploaded` transition, so accepting them from the client only let a
+// caller repoint a file at an arbitrary object (ENG-1450).
 export const patchFileBody = z.object({
   status: fileStatusSchema.optional(),
   content_type: z.string().optional(),

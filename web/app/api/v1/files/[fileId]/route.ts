@@ -117,12 +117,9 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     if (body.status === "uploaded") {
       updates.uploadedAt = now;
 
-      // Derive the S3 location server-side instead of trusting the caller.
-      // The watcher only ever echoes back the bucket/key that
-      // `request-upload-url` already computed, so accepting those fields on
-      // the wire bought nothing but let any `files:update` caller repoint a
-      // record at an arbitrary object (ENG-1450). Rebuild the same canonical
-      // `{instrumentId}/{runId}/{filename}` key from trusted DB state.
+      // Derive the S3 location from trusted DB state, not the request: the
+      // watcher only echoed back what `request-upload-url` already computed,
+      // and accepting it let any caller repoint a file (ENG-1450).
       if (!parentRun) {
         return apiError(404, NOT_FOUND, `File '${fileId}' not found`);
       }

@@ -289,16 +289,9 @@ describe("Files API", () => {
   // PATCH /api/v1/files/:fileId — watcher path (detected → uploaded)
   // -------------------------------------------------------------------------
 
-  // Watcher path: after the watcher uploads the file to S3, it calls PATCH
-  // to transition detected → uploaded. The S3 location is derived server-side
-  // from the run's natural key and filename (S3_RAW_DATA_BUCKET defaults to
-  // "test-raw-data-bucket" in the integration harness) — the client no longer
-  // supplies it.
-  //
-  // The request also carries a hostile s3_bucket / s3_key to prove the
-  // ENG-1450 regression is closed: those keys are dropped by the request
-  // schema and the location is rebuilt from trusted DB state, so the attempt
-  // to repoint the file at an arbitrary object is silently ignored.
+  // Watcher path: detected → uploaded. The S3 location is derived server-side,
+  // so the hostile s3_bucket / s3_key sent here must be ignored and the
+  // canonical location rebuilt from DB state (ENG-1450 regression).
   it("PATCH transitions detected → uploaded and derives the S3 location", async () => {
     const res = await api(`/api/v1/files/${fileId}`, {
       method: "PATCH",
