@@ -12,7 +12,7 @@ export const createFileBody = z.object({
 
 // No `s3_bucket` / `s3_key`: the server derives the canonical S3 location on
 // the `uploaded` transition, so accepting them from the client only let a
-// caller repoint a file at an arbitrary object (ENG-1450).
+// caller repoint a file at an arbitrary object.
 export const patchFileBody = z.object({
   status: fileStatusSchema.optional(),
   content_type: z.string().optional(),

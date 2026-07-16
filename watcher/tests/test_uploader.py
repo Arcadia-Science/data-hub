@@ -603,7 +603,7 @@ class TestPollUploadQueueAttemptCap:
     a file that keeps failing to upload) would otherwise re-error forever.
     The watcher surfaces the visible error once, retries up to
     ``MAX_QUEUE_FILE_ATTEMPTS`` polls, then cancels the request server-side
-    so it leaves the queue (ENG-1397).
+    so it leaves the queue.
     """
 
     @staticmethod

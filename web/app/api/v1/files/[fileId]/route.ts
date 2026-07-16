@@ -25,7 +25,7 @@ interface RouteContext {
 //   Reprocessing:   completed|failed → processing → completed|failed
 //   Cancel request: upload_requested → detected (watcher gave up locating
 //                   the local file after repeated polls; clears the queue
-//                   entry — see ENG-1397)
+//                   entry)
 const VALID_TRANSITIONS: Record<string, string[]> = {
   detected: ["uploaded"],
   upload_requested: ["uploaded", "detected"],
@@ -119,7 +119,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 
       // Derive the S3 location from trusted DB state, not the request: the
       // watcher only echoed back what `request-upload-url` already computed,
-      // and accepting it let any caller repoint a file (ENG-1450).
+      // and accepting it let any caller repoint a file at an arbitrary object.
       if (!parentRun) {
         return apiError(404, NOT_FOUND, `File '${fileId}' not found`);
       }

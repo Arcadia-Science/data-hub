@@ -291,7 +291,7 @@ describe("Files API", () => {
 
   // Watcher path: detected → uploaded. The S3 location is derived server-side,
   // so the hostile s3_bucket / s3_key sent here must be ignored and the
-  // canonical location rebuilt from DB state (ENG-1450 regression).
+  // canonical location rebuilt from DB state.
   it("PATCH transitions detected → uploaded and derives the S3 location", async () => {
     const res = await api(`/api/v1/files/${fileId}`, {
       method: "PATCH",
@@ -385,7 +385,7 @@ describe("Files API", () => {
     expect(res.status).toBe(404);
   });
 
-  // Watcher cancel path (ENG-1397): after giving up on a queued file the
+  // Watcher cancel path: after giving up on a queued file the
   // watcher reverts it upload_requested → detected, which must clear
   // upload_requested_at so the row leaves the upload queue.
   it("PATCH transitions upload_requested → detected and clears upload_requested_at", async () => {
