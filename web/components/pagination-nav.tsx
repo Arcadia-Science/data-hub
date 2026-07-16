@@ -62,7 +62,7 @@ export function PaginationNav({
     pageParam,
     parseAsInteger
       .withDefault(1)
-      .withOptions({ shallow: false, startTransition })
+      .withOptions({ shallow: false, history: "push", startTransition })
   );
 
   if (totalPages <= 1) {
