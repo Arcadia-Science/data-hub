@@ -290,15 +290,23 @@ describe("Files API", () => {
   // -------------------------------------------------------------------------
 
   // Watcher path: after the watcher uploads the file to S3, it calls PATCH
-  // to transition detected → uploaded and attach the S3 coordinates.
-  it("PATCH transitions detected → uploaded with S3 info", async () => {
+  // to transition detected → uploaded. The S3 location is derived server-side
+  // from the run's natural key and filename (S3_RAW_DATA_BUCKET defaults to
+  // "test-raw-data-bucket" in the integration harness) — the client no longer
+  // supplies it.
+  //
+  // The request also carries a hostile s3_bucket / s3_key to prove the
+  // ENG-1450 regression is closed: those keys are dropped by the request
+  // schema and the location is rebuilt from trusted DB state, so the attempt
+  // to repoint the file at an arbitrary object is silently ignored.
+  it("PATCH transitions detected → uploaded and derives the S3 location", async () => {
     const res = await api(`/api/v1/files/${fileId}`, {
       method: "PATCH",
       token,
       body: {
         status: "uploaded",
-        s3_bucket: "test-bucket",
-        s3_key: `${instrumentId}/${runId}/sample.csv`,
+        s3_bucket: "attacker-controlled-bucket",
+        s3_key: "someones-private-data/secret-export.csv",
         content_type: "text/csv",
         size_bytes: 512,
       },
@@ -306,7 +314,8 @@ describe("Files API", () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.status).toBe("uploaded");
-    expect(data.s3_bucket).toBe("test-bucket");
+    expect(data.s3_bucket).toBe("test-raw-data-bucket");
+    expect(data.s3_key).toBe(`${instrumentId}/${runId}/sample.csv`);
     expect(data.uploaded_at).toBeTruthy();
     fileDetail.parse(data);
   });

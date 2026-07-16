@@ -10,10 +10,12 @@ export const createFileBody = z.object({
   category: fileCategorySchema.optional(),
 });
 
+// `s3_bucket` / `s3_key` are intentionally absent: the server derives the
+// canonical S3 location itself on the `uploaded` transition (see the PATCH
+// handler). Accepting them from the client let any `files:update` caller
+// repoint a record at an arbitrary object (ENG-1450).
 export const patchFileBody = z.object({
   status: fileStatusSchema.optional(),
-  s3_bucket: z.string().optional(),
-  s3_key: z.string().optional(),
   content_type: z.string().optional(),
   size_bytes: z.number().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),

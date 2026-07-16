@@ -5,6 +5,7 @@ import {
   apiError,
   apiErrorFromResult,
   CONFLICT,
+  INTERNAL_ERROR,
   NOT_FOUND,
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
@@ -12,6 +13,7 @@ import { dismissFile } from "@/lib/api/files";
 import { patchFileBody, readJsonBody } from "@/lib/api/openapi";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
+import { getS3RawDataBucket } from "@/lib/s3";
 
 interface RouteContext {
   params: Promise<{ fileId: string }>;
@@ -70,9 +72,14 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     return apiError(409, CONFLICT, "Cannot update a soft-deleted file");
   }
 
-  // Verify the parent run is not soft-deleted.
+  // Verify the parent run is not soft-deleted. Its natural key also feeds the
+  // server-derived S3 location on the `uploaded` transition below.
   const [parentRun] = await db
-    .select({ deletedAt: instrumentRuns.deletedAt })
+    .select({
+      deletedAt: instrumentRuns.deletedAt,
+      instrumentId: instrumentRuns.instrumentId,
+      runId: instrumentRuns.runId,
+    })
     .from(instrumentRuns)
     .where(eq(instrumentRuns.id, file.instrumentRunId))
     .limit(1);
@@ -109,6 +116,28 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 
     if (body.status === "uploaded") {
       updates.uploadedAt = now;
+
+      // Derive the S3 location server-side instead of trusting the caller.
+      // The watcher only ever echoes back the bucket/key that
+      // `request-upload-url` already computed, so accepting those fields on
+      // the wire bought nothing but let any `files:update` caller repoint a
+      // record at an arbitrary object (ENG-1450). Rebuild the same canonical
+      // `{instrumentId}/{runId}/{filename}` key from trusted DB state.
+      if (!parentRun) {
+        return apiError(404, NOT_FOUND, `File '${fileId}' not found`);
+      }
+      let bucket: string;
+      try {
+        bucket = getS3RawDataBucket();
+      } catch {
+        return apiError(
+          500,
+          INTERNAL_ERROR,
+          "S3 bucket configuration is missing"
+        );
+      }
+      updates.s3Bucket = bucket;
+      updates.s3Key = `${parentRun.instrumentId}/${parentRun.runId}/${file.filename}`;
     }
     // Reverting a pending request back to detected (watcher cancel): clear
     // upload_requested_at so the row leaves the upload queue, whose filter
@@ -128,13 +157,6 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     }
   }
 
-  // S3 info — set when transitioning to "uploaded" (watcher path).
-  if (body.s3_bucket !== undefined) {
-    updates.s3Bucket = body.s3_bucket;
-  }
-  if (body.s3_key !== undefined) {
-    updates.s3Key = body.s3_key;
-  }
   if (body.content_type !== undefined) {
     updates.contentType = body.content_type;
   }
