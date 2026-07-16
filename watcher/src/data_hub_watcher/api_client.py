@@ -232,8 +232,8 @@ class DataHubClient:
         )
         return PresignedUploadResponse.model_validate(resp.json())
 
-    def mark_file_uploaded(self, file_id: int, s3_info: dict[str, Any]) -> FileResponse:
-        resp = self._request("PATCH", f"/files/{file_id}", json=s3_info)
+    def mark_file_uploaded(self, file_id: int, updates: dict[str, Any]) -> FileResponse:
+        resp = self._request("PATCH", f"/files/{file_id}", json=updates)
         return FileResponse.model_validate(resp.json())
 
     def cancel_upload_request(self, file_id: int) -> FileResponse:

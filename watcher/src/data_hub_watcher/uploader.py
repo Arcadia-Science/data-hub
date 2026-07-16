@@ -574,13 +574,12 @@ class Uploader:
             return False
 
         # Notify API — treat a failed PATCH as an upload failure so the file
-        # is not recorded in the dedup DB and will be retried next time.
+        # is not recorded in the dedup DB and will be retried next time. The
+        # server derives the S3 location itself, so we only send status/type.
         try:
             self._client.mark_file_uploaded(
                 file_id,
                 {
-                    "s3_bucket": s3_bucket,
-                    "s3_key": s3_key,
                     "content_type": content_type,
                     "status": "uploaded",
                 },

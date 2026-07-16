@@ -1,6 +1,6 @@
 [project]
 name = "data-hub-watcher"
-version = "0.5.0"
+version = "0.5.1"
 description = "File-watcher agent for lab instrument PCs that ingests data into Data Hub."
 readme = "README.md"
 requires-python = ">=3.12"

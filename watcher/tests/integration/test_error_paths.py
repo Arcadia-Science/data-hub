@@ -44,8 +44,6 @@ class TestNotFound:
             client.mark_file_uploaded(
                 99999,
                 {
-                    "s3_bucket": "b",
-                    "s3_key": "k",
                     "content_type": "text/csv",
                     "status": "uploaded",
                 },
@@ -144,16 +142,14 @@ class TestConflict:
         )
         file_id = _get_file_id(integration_env.db_dsn, "EXP-CONFLICT", "f.csv")
 
-        s3_info = {
-            "s3_bucket": "b",
-            "s3_key": "k",
+        updates = {
             "content_type": "text/csv",
             "status": "uploaded",
         }
-        client.mark_file_uploaded(file_id, s3_info)
+        client.mark_file_uploaded(file_id, updates)
 
         with pytest.raises(ApiError) as exc_info:
-            client.mark_file_uploaded(file_id, s3_info)
+            client.mark_file_uploaded(file_id, updates)
         assert exc_info.value.status_code == 409
 
     def test_update_deleted_run_409(

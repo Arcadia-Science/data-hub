@@ -79,11 +79,11 @@ class TestUploadSingle:
 
         assert result is True
         mock_put.assert_called_once()
+        # The server derives the S3 location itself, so the watcher only
+        # reports the status and content type.
         mock_client.mark_file_uploaded.assert_called_once_with(
             42,
             {
-                "s3_bucket": "test-bucket",
-                "s3_key": "test-instrument/RUN-001/test_data.csv",
                 "content_type": "text/csv",
                 "status": "uploaded",
             },
