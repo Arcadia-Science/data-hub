@@ -8,7 +8,7 @@ import {
   parseDateParam,
   parseIntParam,
 } from "@/lib/api/validators";
-import { findActiveWatcher } from "@/lib/api/watchers";
+import { enforceWatcherBinding, findActiveWatcher } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { watcherEvents, watcherEventTypeEnum } from "@/lib/db/schema";
 
@@ -35,6 +35,11 @@ export async function POST(
   const watcher = await findActiveWatcher(watcherId);
   if (!watcher) {
     return apiError(404, NOT_FOUND, `Watcher '${watcherId}' not found`);
+  }
+
+  const bindingError = await enforceWatcherBinding(authResult, watcher);
+  if (bindingError) {
+    return bindingError;
   }
 
   const body = await readJsonBody(request, watcherEventBody);

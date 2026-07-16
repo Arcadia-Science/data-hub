@@ -85,6 +85,9 @@ export interface SeedUserOptions {
 export interface SeedUserResult {
   email: string;
   token: string;
+  // PAT row id — used by watcher-binding tests that assert
+  // `watchers.registered_by_token` matches the registering credential.
+  tokenId: string;
   userId: string;
 }
 
@@ -103,16 +106,19 @@ export async function seedDevUser(
   });
 
   const plaintext = generateToken();
-  await db.insert(schema.personalAccessTokens).values({
-    userId,
-    name: "seeded-token",
-    tokenHash: hashToken(plaintext),
-    tokenPrefix: getTokenPrefix(plaintext),
-    scopes: options.scopes ?? ["*"],
-    expiresAt: options.expiresAt === undefined ? null : options.expiresAt,
-  });
+  const [pat] = await db
+    .insert(schema.personalAccessTokens)
+    .values({
+      userId,
+      name: "seeded-token",
+      tokenHash: hashToken(plaintext),
+      tokenPrefix: getTokenPrefix(plaintext),
+      scopes: options.scopes ?? ["*"],
+      expiresAt: options.expiresAt === undefined ? null : options.expiresAt,
+    })
+    .returning({ id: schema.personalAccessTokens.id });
 
-  return { userId, email, token: plaintext };
+  return { userId, email, token: plaintext, tokenId: pat.id };
 }
 
 // ---------------------------------------------------------------------------

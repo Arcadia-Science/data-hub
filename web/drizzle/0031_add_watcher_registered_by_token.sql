@@ -1,0 +1,2 @@
+ALTER TABLE "watchers" ADD COLUMN "registered_by_token" uuid;--> statement-breakpoint
+ALTER TABLE "watchers" ADD CONSTRAINT "watchers_registered_by_token_personal_access_tokens_id_fk" FOREIGN KEY ("registered_by_token") REFERENCES "public"."personal_access_tokens"("id") ON DELETE set null ON UPDATE no action;

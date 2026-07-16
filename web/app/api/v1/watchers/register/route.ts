@@ -72,6 +72,9 @@ export async function POST(request: NextRequest) {
       hostname: body.hostname ?? null,
       osInfo: body.os_info ?? null,
       status: "registered",
+      // Bind this watcher to the registering PAT so later ops can't be
+      // driven by a different watchers:report token (cross-control IDOR).
+      registeredByToken: authResult.tokenId,
     })
     .returning({ id: watchers.id });
 

@@ -218,6 +218,13 @@
       "when": 1783557726363,
       "tag": "0030_mature_manta",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1784234686620,
+      "tag": "0031_add_watcher_registered_by_token",
+      "breakpoints": true
     }
   ]
 }
