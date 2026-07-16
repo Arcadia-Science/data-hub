@@ -54,6 +54,24 @@ def _guess_content_type(path: Path) -> str | None:
     return content_type
 
 
+def _resolve_within(watch_dir: Path, relative: str) -> Path | None:
+    """Resolve *relative* under *watch_dir*, or ``None`` if it escapes.
+
+    Defense-in-depth against path traversal in server-supplied queue paths:
+    the server validates ``relative_path`` too, but the watcher must never
+    read outside its watch directory even if a malicious or buggy
+    server sends ``../`` or an absolute path. Containment is checked on the
+    *resolved* paths, not the raw string, because ``..`` segments (and an
+    absolute ``relative`` that discards ``watch_dir`` entirely) only collapse
+    after resolution.
+    """
+    base = watch_dir.resolve()
+    candidate = (base / relative).resolve()
+    if candidate == base or base in candidate.parents:
+        return candidate
+    return None
+
+
 def _relative_path(path: Path, watch_dir: Path) -> str:
     """Return *path* as a forward-slash relative to *watch_dir*.
 
@@ -317,7 +335,31 @@ class Uploader:
             self._cancel_queued_file(qf, attempt.reason if attempt else "unknown")
             return
 
-        local_path = self._watch_dir / (qf.relative_path or qf.filename)
+        raw_relative = qf.relative_path or qf.filename
+        local_path = _resolve_within(self._watch_dir, raw_relative)
+        if local_path is None:
+            # Path escapes the watch directory (traversal or absolute).
+            # Cancel rather than retry -- a re-poll resolves identically.
+            logger.error(
+                "Rejected queued file with unsafe path: %r (file_id=%s)",
+                raw_relative,
+                qf.id,
+            )
+            self._reporter.queue_event(
+                WatcherEvent(
+                    event_type=EventType.ERROR,
+                    message=f"Rejected unsafe upload path: {qf.filename}",
+                    details={
+                        "kind": "unsafe_upload_path",
+                        "file_id": qf.id,
+                        "relative_path": raw_relative,
+                    },
+                )
+            )
+            self._bump_errors()
+            self._cancel_queued_file(qf, "unsafe_path")
+            return
+
         if local_path.exists():
             ok = self._upload_single(local_path, qf.run_id)
             reason = "upload_failed"

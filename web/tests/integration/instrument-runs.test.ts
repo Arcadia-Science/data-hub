@@ -135,6 +135,45 @@ describe("Instrument Runs API", () => {
     expect(detailData.files.length).toBe(2);
   });
 
+  // Path traversal guard: the watcher joins `relative_path` onto
+  // its watch directory and reads the result, so a `..`/absolute path would
+  // let an attacker exfiltrate arbitrary files from the instrument PC. The
+  // API must reject such payloads before they ever reach the files table.
+  it.each([
+    "../../etc/passwd",
+    "../escape.csv",
+    "sub/../../escape.csv",
+    "/etc/passwd",
+    "C:\\Windows\\system32\\config\\SAM",
+    "..\\..\\secret.csv",
+  ])("POST rejects detected_files with unsafe relative_path %s", async (bad) => {
+    const res = await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: {
+        run_id: `traversal-${encodeURIComponent(bad)}`,
+        source: "watcher",
+        detected_files: [{ relative_path: bad, filename: "passwd" }],
+      },
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("POST rejects detected_files with unsafe filename", async () => {
+    const res = await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: {
+        run_id: "traversal-filename",
+        source: "watcher",
+        detected_files: [
+          { relative_path: "safe.csv", filename: "../../etc/passwd" },
+        ],
+      },
+    });
+    expect(res.status).toBe(400);
+  });
+
   // -------------------------------------------------------------------------
   // GET /api/v1/instruments/:instrumentId/runs
   // -------------------------------------------------------------------------
