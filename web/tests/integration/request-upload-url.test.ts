@@ -158,6 +158,28 @@ describe("Request Upload URL API", () => {
     expect(res.status).toBe(400);
   });
 
+  // Path traversal guard: the filename is persisted as
+  // `relative_path` and joined into the S3 key, so a `..`/absolute value must
+  // be rejected before it can reach the watcher's upload queue.
+  it.each([
+    "../../etc/passwd",
+    "../escape.csv",
+    "sub/../../escape.csv",
+    "/etc/passwd",
+    "C:\\Windows\\system32\\config\\SAM",
+    "..\\..\\secret.csv",
+  ])("rejects unsafe filename %s", async (bad) => {
+    const res = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${runId}/request-upload-url`,
+      {
+        method: "POST",
+        token,
+        body: { filename: bad },
+      }
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("returns 404 for nonexistent instrument/run", async () => {
     const res = await api(
       `/api/v1/instruments/${instrumentId}/runs/nonexistent-run/request-upload-url`,

@@ -135,7 +135,7 @@ describe("Instrument Runs API", () => {
     expect(detailData.files.length).toBe(2);
   });
 
-  // Path traversal guard (ENG-1452): the watcher joins `relative_path` onto
+  // Path traversal guard: the watcher joins `relative_path` onto
   // its watch directory and reads the result, so a `..`/absolute path would
   // let an attacker exfiltrate arbitrary files from the instrument PC. The
   // API must reject such payloads before they ever reach the files table.

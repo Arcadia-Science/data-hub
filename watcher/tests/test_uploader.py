@@ -747,7 +747,7 @@ class TestPollUploadQueueAttemptCap:
 class TestUploadQueuePathTraversal:
     """A queued file whose path escapes the watch directory is refused.
 
-    Defense-in-depth for ENG-1452: even if a malicious or buggy server sends
+    Defense-in-depth: even if a malicious or buggy server sends
     a ``relative_path`` with ``..`` segments or an absolute path, the watcher
     must never read (and upload) a file from outside its watch directory. The
     request is cancelled immediately rather than retried, since a re-poll
