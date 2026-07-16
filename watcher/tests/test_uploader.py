@@ -744,6 +744,90 @@ class TestPollUploadQueueAttemptCap:
         assert mock_client.cancel_upload_request.call_count == 2
 
 
+class TestUploadQueuePathTraversal:
+    """A queued file whose path escapes the watch directory is refused.
+
+    Defense-in-depth for ENG-1452: even if a malicious or buggy server sends
+    a ``relative_path`` with ``..`` segments or an absolute path, the watcher
+    must never read (and upload) a file from outside its watch directory. The
+    request is cancelled immediately rather than retried, since a re-poll
+    would resolve to the same unsafe path.
+    """
+
+    @pytest.mark.parametrize(
+        "relative_path",
+        [
+            "../../etc/passwd",
+            "../outside.txt",
+            "sub/../../escape.txt",
+            "/etc/passwd",
+        ],
+    )
+    def test_unsafe_path_is_refused_and_cancelled(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+        tmp_path: Path,
+        relative_path: str,
+    ) -> None:
+        # Create the would-be target outside the watch dir to prove that even
+        # an existing file is never read when the path escapes containment.
+        outside = tmp_path.parent / "escape.txt"
+        outside.write_text("secret")
+
+        mock_client.get_upload_queue.return_value = UploadQueueResponse(
+            files=[
+                UploadQueueFile(
+                    id=99,
+                    instrument_id="test-instrument",
+                    run_id="RUN-EVIL",
+                    filename="passwd",
+                    relative_path=relative_path,
+                )
+            ]
+        )
+
+        with patch.object(uploader, "_upload_single") as mock_upload:
+            uploader.poll_upload_queue()
+
+        # Never read/uploaded, and the request is cancelled on the first poll.
+        mock_upload.assert_not_called()
+        mock_client.cancel_upload_request.assert_called_once_with(99)
+        assert uploader._counters.errors == 1
+
+        reporter_mock = cast(MagicMock, uploader._reporter)
+        event = reporter_mock.queue_event.call_args.args[0]
+        assert event.details["kind"] == "unsafe_upload_path"
+
+    def test_safe_nested_relative_path_is_allowed(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        nested = tmp_path / "sub" / "dir"
+        nested.mkdir(parents=True)
+        (nested / "data.csv").write_text("x")
+
+        mock_client.get_upload_queue.return_value = UploadQueueResponse(
+            files=[
+                UploadQueueFile(
+                    id=7,
+                    instrument_id="test-instrument",
+                    run_id="RUN-OK",
+                    filename="data.csv",
+                    relative_path="sub/dir/data.csv",
+                )
+            ]
+        )
+
+        with patch.object(uploader, "_upload_single", return_value=True) as mock_upload:
+            uploader.poll_upload_queue()
+
+        mock_upload.assert_called_once()
+        mock_client.cancel_upload_request.assert_not_called()
+
+
 class TestUploaderStopEvent:
     """A shutdown must interrupt uploads without recording a spurious failure."""
 
