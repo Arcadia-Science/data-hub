@@ -1,0 +1,1 @@
+ALTER TABLE "watcher_release_config" DROP COLUMN "channel";

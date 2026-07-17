@@ -54,7 +54,6 @@ def _info(
 ) -> WatcherUpdateInfoResponse:
     return WatcherUpdateInfoResponse(
         latest_version=latest,
-        channel="stable",
         mandatory=mandatory,
     )
 

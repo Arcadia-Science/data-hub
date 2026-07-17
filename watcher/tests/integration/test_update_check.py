@@ -28,7 +28,6 @@ class TestUpdateCheck:
         # regardless of where the real release line is.
         assert info.latest_version == "9.9.9"
         assert info.min_supported_version == "0.1.0"
-        assert info.channel == "stable"
         assert info.mandatory is False
 
     def test_get_update_info_returns_404_for_soft_deleted_watcher(

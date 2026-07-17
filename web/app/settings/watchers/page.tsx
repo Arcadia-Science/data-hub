@@ -9,6 +9,7 @@ import { WatcherReleaseFormSkeleton } from "@/components/watcher-release/watcher
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users, watcherReleaseConfig } from "@/lib/db/schema";
+import { fetchWatcherVersions } from "@/lib/pypi";
 
 export const metadata: Metadata = {
   title: "Watchers",
@@ -89,25 +90,30 @@ async function WatcherReleaseSection() {
   // "last updated by" line is a constant-cost query regardless of fleet
   // size. Returns `undefined` when no admin has saved yet — the form
   // renders blank defaults in that case.
-  const [row] = await db
-    .select({
-      latestVersion: watcherReleaseConfig.latestVersion,
-      minSupportedVersion: watcherReleaseConfig.minSupportedVersion,
-      channel: watcherReleaseConfig.channel,
-      mandatory: watcherReleaseConfig.mandatory,
-      updatedAt: watcherReleaseConfig.updatedAt,
-      updatedByName: users.name,
-      updatedByEmail: users.email,
-    })
-    .from(watcherReleaseConfig)
-    .leftJoin(users, eq(users.id, watcherReleaseConfig.updatedBy));
+  //
+  // PyPI versions are fetched in parallel with the DB read so the
+  // settings page doesn't waterfall (`async-parallel`).
+  const [[row], pypi] = await Promise.all([
+    db
+      .select({
+        latestVersion: watcherReleaseConfig.latestVersion,
+        minSupportedVersion: watcherReleaseConfig.minSupportedVersion,
+        mandatory: watcherReleaseConfig.mandatory,
+        updatedAt: watcherReleaseConfig.updatedAt,
+        updatedByName: users.name,
+        updatedByEmail: users.email,
+      })
+      .from(watcherReleaseConfig)
+      .leftJoin(users, eq(users.id, watcherReleaseConfig.updatedBy)),
+    fetchWatcherVersions(),
+  ]);
 
   return (
     <WatcherReleaseForm
+      availableVersions={pypi.versions}
       initial={{
         latestVersion: row?.latestVersion ?? "",
         minSupportedVersion: row?.minSupportedVersion ?? "",
-        channel: row?.channel ?? "stable",
         mandatory: row?.mandatory ?? false,
       }}
       // Only the primitive form values + the small "last updated"
@@ -122,6 +128,7 @@ async function WatcherReleaseSection() {
             }
           : null
       }
+      pypiReachable={pypi.ok}
     />
   );
 }

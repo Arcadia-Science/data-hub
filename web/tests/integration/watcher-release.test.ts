@@ -54,7 +54,6 @@ describe("Watcher Release API admin gate", () => {
       body: {
         latest_version: "1.0.0",
         min_supported_version: null,
-        channel: "stable",
         mandatory: false,
       },
     });
@@ -67,7 +66,6 @@ describe("Watcher Release API admin gate", () => {
       body: {
         latest_version: "1.0.0",
         min_supported_version: null,
-        channel: "stable",
         mandatory: false,
       },
     });
@@ -123,7 +121,6 @@ describe("Watcher Release singleton flows through update-check", () => {
         id: true,
         latestVersion: "9.9.9",
         minSupportedVersion: "0.1.0",
-        channel: "stable",
         mandatory: false,
       })
       .onConflictDoUpdate({
@@ -131,7 +128,6 @@ describe("Watcher Release singleton flows through update-check", () => {
         set: {
           latestVersion: "9.9.9",
           minSupportedVersion: "0.1.0",
-          channel: "stable",
           mandatory: false,
         },
       });
@@ -149,7 +145,6 @@ describe("Watcher Release singleton flows through update-check", () => {
         id: true,
         latestVersion: "1.2.3",
         minSupportedVersion: "1.0.0",
-        channel: "beta",
         mandatory: true,
       })
       .onConflictDoUpdate({
@@ -157,7 +152,6 @@ describe("Watcher Release singleton flows through update-check", () => {
         set: {
           latestVersion: "1.2.3",
           minSupportedVersion: "1.0.0",
-          channel: "beta",
           mandatory: true,
         },
       });
@@ -169,7 +163,6 @@ describe("Watcher Release singleton flows through update-check", () => {
     expect(await res.json()).toEqual({
       latest_version: "1.2.3",
       min_supported_version: "1.0.0",
-      channel: "beta",
       mandatory: true,
     });
   });
@@ -186,7 +179,6 @@ describe("Watcher Release singleton flows through update-check", () => {
         id: true,
         latestVersion: null,
         minSupportedVersion: null,
-        channel: "stable",
         mandatory: true,
       })
       .onConflictDoUpdate({
@@ -194,7 +186,6 @@ describe("Watcher Release singleton flows through update-check", () => {
         set: {
           latestVersion: null,
           minSupportedVersion: null,
-          channel: "stable",
           mandatory: true,
         },
       });
@@ -206,7 +197,6 @@ describe("Watcher Release singleton flows through update-check", () => {
     expect(await res.json()).toEqual({
       latest_version: null,
       min_supported_version: null,
-      channel: "stable",
       mandatory: false,
     });
   });
@@ -227,7 +217,6 @@ describe("Watcher Release singleton flows through update-check", () => {
     expect(await res.json()).toEqual({
       latest_version: null,
       min_supported_version: null,
-      channel: "stable",
       mandatory: false,
     });
   });
@@ -240,9 +229,7 @@ describe("Watcher Release singleton flows through update-check", () => {
     // halves of the invariant should break together.
     const db = getTestDb();
     await expect(
-      db.execute(
-        sql`INSERT INTO watcher_release_config (id, channel) VALUES (false, 'stable')`
-      )
+      db.execute(sql`INSERT INTO watcher_release_config (id) VALUES (false)`)
     ).rejects.toThrow();
   });
 });
@@ -269,7 +256,6 @@ describe("Heartbeat enforces watcher_release_config.min_supported_version", () =
         id: true,
         latestVersion: "9.9.9",
         minSupportedVersion: floor,
-        channel: "stable",
         mandatory: false,
       })
       .onConflictDoUpdate({
@@ -277,7 +263,6 @@ describe("Heartbeat enforces watcher_release_config.min_supported_version", () =
         set: {
           latestVersion: "9.9.9",
           minSupportedVersion: floor,
-          channel: "stable",
           mandatory: false,
         },
       });
@@ -342,7 +327,6 @@ describe("Heartbeat enforces watcher_release_config.min_supported_version", () =
           current_version: "0.5.0",
           min_supported_version: "1.0.0",
           latest_version: "9.9.9",
-          channel: "stable",
         },
       },
     });

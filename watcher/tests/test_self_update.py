@@ -121,13 +121,11 @@ def _info(
     *,
     latest: str | None = "0.3.0",
     minimum: str | None = None,
-    channel: str = "stable",
     mandatory: bool = False,
 ) -> WatcherUpdateInfoResponse:
     return WatcherUpdateInfoResponse(
         latest_version=latest,
         min_supported_version=minimum,
-        channel=channel,
         mandatory=mandatory,
     )
 

@@ -155,7 +155,7 @@ export const sessions = pgTable(
 // `GET /api/v1/watchers/:id/update-check` and edited via the admin-only
 // `/settings/watchers` page. Previously sourced from the
 // `WATCHER_LATEST_VERSION` / `WATCHER_MIN_SUPPORTED_VERSION` /
-// `WATCHER_RELEASE_CHANNEL` / `WATCHER_MANDATORY_UPDATE` env vars.
+// `WATCHER_MANDATORY_UPDATE` env vars.
 //
 // The `id boolean PRIMARY KEY DEFAULT true` + check constraint is the
 // standard Postgres singleton trick — schema-level guarantee of at most
@@ -177,9 +177,6 @@ export const watcherReleaseConfig = pgTable(
     // (see `app/api/v1/watchers/[watcherId]/heartbeat/route.ts`) so they
     // can't continue checking in without self-updating first.
     minSupportedVersion: text("min_supported_version"),
-    // Defaults to "stable"; surfaced in the response and shown in
-    // `self-update` output.
-    channel: text("channel").notNull().default("stable"),
     // When true, the release skips the watcher's activity-window guard so
     // mid-acquisition PCs upgrade immediately. Has no effect when
     // `latest_version` is NULL — `update-check` collapses it to false on

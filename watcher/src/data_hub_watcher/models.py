@@ -311,5 +311,4 @@ class WatcherUpdateInfoResponse(BaseModel):
 
     latest_version: str | None = None
     min_supported_version: str | None = None
-    channel: str = "stable"
     mandatory: bool = False

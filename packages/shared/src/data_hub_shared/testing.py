@@ -167,7 +167,6 @@ def seed_watcher_release(
     *,
     latest_version: str = "9.9.9",
     min_supported_version: str = "0.1.0",
-    channel: str = "stable",
     mandatory: bool = False,
 ) -> None:
     """Upsert the singleton ``watcher_release_config`` row.
@@ -182,16 +181,15 @@ def seed_watcher_release(
     with conn.cursor() as cur:
         cur.execute(
             """INSERT INTO watcher_release_config
-                   (id, latest_version, min_supported_version, channel, mandatory)
+                   (id, latest_version, min_supported_version, mandatory)
                VALUES
-                   (true, %s, %s, %s, %s)
+                   (true, %s, %s, %s)
                ON CONFLICT (id) DO UPDATE SET
                    latest_version = EXCLUDED.latest_version,
                    min_supported_version = EXCLUDED.min_supported_version,
-                   channel = EXCLUDED.channel,
                    mandatory = EXCLUDED.mandatory,
                    updated_at = now()""",
-            (latest_version, min_supported_version, channel, mandatory),
+            (latest_version, min_supported_version, mandatory),
         )
     conn.close()
 

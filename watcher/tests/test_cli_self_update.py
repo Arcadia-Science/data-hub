@@ -73,7 +73,6 @@ def configured(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     fake_client = MagicMock(name="DataHubClient")
     fake_client.get_update_info.return_value = WatcherUpdateInfoResponse(
         latest_version="9.9.9",
-        channel="stable",
         mandatory=False,
     )
     monkeypatch.setattr(cli_module, "DataHubClient", lambda *_a, **_kw: fake_client)

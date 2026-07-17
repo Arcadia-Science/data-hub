@@ -16,7 +16,6 @@ import { watcherReleaseConfig } from "@/lib/db/schema";
  * client treats it as "no update available".
  */
 interface WatcherReleaseInfo {
-  channel: string;
   latest_version: string | null;
   mandatory: boolean;
   min_supported_version: string | null;
@@ -30,14 +29,12 @@ async function readReleaseInfo(): Promise<WatcherReleaseInfo> {
     return {
       latest_version: null,
       min_supported_version: null,
-      channel: "stable",
       mandatory: false,
     };
   }
   return {
     latest_version: row.latestVersion,
     min_supported_version: row.minSupportedVersion,
-    channel: row.channel,
     // Collapsing mandatory→false when no version is advertised keeps the
     // wire response self-consistent. The watcher's mandatory branch is
     // gated on `latest_version` anyway, but mirroring that invariant

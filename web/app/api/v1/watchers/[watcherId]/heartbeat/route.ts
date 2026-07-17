@@ -70,7 +70,6 @@ export async function POST(
     .select({
       minSupportedVersion: watcherReleaseConfig.minSupportedVersion,
       latestVersion: watcherReleaseConfig.latestVersion,
-      channel: watcherReleaseConfig.channel,
     })
     .from(watcherReleaseConfig);
 
@@ -86,7 +85,6 @@ export async function POST(
         current_version: reportedVersion,
         min_supported_version: releaseRow.minSupportedVersion,
         latest_version: releaseRow.latestVersion,
-        channel: releaseRow.channel,
       }
     );
   }
