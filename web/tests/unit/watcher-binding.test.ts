@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { AuthResult } from "@/lib/api/auth";
-import { decideWatcherBinding } from "@/lib/api/watchers";
+import { decideWatcherBinding } from "@/lib/api/watcher-binding";
 
-// Pure decision coverage for watcher↔PAT binding. The TOFU claim path and
-// HTTP 403/200 behaviour live in the integration suite — this file only
-// pins the session-exempt / match / mismatch branches that don't need a DB
-// (the integration harness has no session cookies).
+// Pure decision coverage for watcher↔PAT binding. Imports the DB-free
+// helper directly so the unit suite never loads `@/lib/db`. The TOFU claim
+// path and HTTP 403/200 behaviour live in the integration suite (which has
+// no session cookies).
 
 function sessionAuth(): AuthResult {
   return {

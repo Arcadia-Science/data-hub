@@ -5,6 +5,7 @@ import { type ActorUser, resolveActorUser } from "@/lib/api/actor";
 import type { AuthResult } from "@/lib/api/auth";
 import { apiError, FORBIDDEN } from "@/lib/api/errors";
 import { instrumentHasOnlineWatcher } from "@/lib/api/instruments";
+import { decideWatcherBinding } from "@/lib/api/watcher-binding";
 import { type DbExecutor, db } from "@/lib/db";
 import {
   files,
@@ -27,29 +28,6 @@ export async function findActiveWatcher(watcherId: string) {
     .limit(1);
 
   return watcher ?? null;
-}
-
-export type WatcherBindingVerdict = "allow" | "deny" | "tofu";
-
-/**
- * Pure binding decision used by {@link enforceWatcherBinding}. Extracted so
- * session/match/mismatch can be unit-tested without a DB (the integration
- * harness has no session cookies).
- */
-export function decideWatcherBinding(
-  authResult: AuthResult,
-  registeredByToken: string | null
-): WatcherBindingVerdict {
-  if (authResult.authMethod === "session") {
-    return "allow";
-  }
-  if (!authResult.tokenId) {
-    return "deny";
-  }
-  if (registeredByToken === null) {
-    return "tofu";
-  }
-  return registeredByToken === authResult.tokenId ? "allow" : "deny";
 }
 
 /**
