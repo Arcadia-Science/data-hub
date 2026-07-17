@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
-import { authorize } from "@/lib/api/auth";
+import { authorize, requireAdminForSession } from "@/lib/api/auth";
 import {
   apiError,
   CONFLICT,
@@ -63,6 +63,13 @@ export async function DELETE(
   const authResult = await authorize(request, "watchers:admin");
   if (authResult instanceof Response) {
     return authResult;
+  }
+
+  // Browser callers (the Deregister dialog on `/watchers`) must additionally
+  // be admins. PAT callers pass through purely on the `watchers:admin` scope.
+  const adminGate = await requireAdminForSession(authResult);
+  if (adminGate) {
+    return adminGate;
   }
 
   const { watcherId } = await params;

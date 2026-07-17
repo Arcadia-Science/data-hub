@@ -61,13 +61,15 @@ export default async function WatcherDetailPage({
   const { watcherId } = await params;
   const filters = watcherDetailParamsCache.parse(await searchParams);
 
+  const isAdmin = session.user.isAdmin === true;
+
   // The header and the heartbeat/events tabs stream independently; the shared
   // `getWatcherById` lookup is `cache()`-deduped so both sections resolve
   // against a single query while their heavier data fetches run in parallel.
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
       <Suspense fallback={<WatcherHeaderSkeleton />}>
-        <WatcherHeaderSection watcherId={watcherId} />
+        <WatcherHeaderSection isAdmin={isAdmin} watcherId={watcherId} />
       </Suspense>
       <Suspense fallback={<WatcherDetailTabsSkeleton />}>
         <WatcherTabsSection filters={filters} watcherId={watcherId} />
@@ -76,12 +78,18 @@ export default async function WatcherDetailPage({
   );
 }
 
-async function WatcherHeaderSection({ watcherId }: { watcherId: string }) {
+async function WatcherHeaderSection({
+  watcherId,
+  isAdmin,
+}: {
+  watcherId: string;
+  isAdmin: boolean;
+}) {
   const watcher = await getWatcherById(watcherId);
   if (!watcher) {
     notFound();
   }
-  return <WatcherHeader watcher={watcher} />;
+  return <WatcherHeader isAdmin={isAdmin} watcher={watcher} />;
 }
 
 async function WatcherTabsSection({
