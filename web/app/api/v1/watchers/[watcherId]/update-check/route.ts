@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { isValidUUID } from "@/lib/api/validators";
-import { findActiveWatcher } from "@/lib/api/watchers";
+import { enforceWatcherBinding, findActiveWatcher } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { watcherReleaseConfig } from "@/lib/db/schema";
 
@@ -67,6 +67,11 @@ export async function GET(
   const watcher = await findActiveWatcher(watcherId);
   if (!watcher) {
     return apiError(404, NOT_FOUND, `Watcher '${watcherId}' not found`);
+  }
+
+  const bindingError = await enforceWatcherBinding(authResult, watcher);
+  if (bindingError) {
+    return bindingError;
   }
 
   return Response.json(await readReleaseInfo());

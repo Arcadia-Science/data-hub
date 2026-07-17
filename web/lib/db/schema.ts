@@ -382,6 +382,14 @@ export const watchers = pgTable(
     deregisteredBy: text("deregistered_by").references(() => users.id, {
       onDelete: "set null",
     }),
+    // PAT that registered this watcher. Watcher-scoped ops (heartbeat, config,
+    // events, upload-queue, update-check) require the same PAT. NULL for
+    // pre-binding rows (claimed trust-on-first-use) and session registrations.
+    // `set null` on token delete so rotation can re-claim via TOFU.
+    registeredByToken: uuid("registered_by_token").references(
+      () => personalAccessTokens.id,
+      { onDelete: "set null" }
+    ),
   },
   (watcher) => [
     // Partial unique index — at most one active watcher per instrument.

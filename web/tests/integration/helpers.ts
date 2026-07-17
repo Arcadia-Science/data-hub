@@ -82,11 +82,11 @@ export async function resetDb() {
 export async function seedTestUser(
   options?: Pick<SeedUserOptions, "expiresAt" | "scopes" | "isAdmin">
 ) {
-  const { userId, token } = await seedDevUser(getTestDb(), {
+  const { userId, token, tokenId } = await seedDevUser(getTestDb(), {
     ...options,
     name: "Test User",
   });
-  return { userId, token };
+  return { userId, token, tokenId };
 }
 
 // ---------------------------------------------------------------------------

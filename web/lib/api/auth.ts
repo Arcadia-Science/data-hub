@@ -15,6 +15,9 @@ export interface AuthResult {
   // (NextAuth) authentication is treated as fully privileged and always
   // returns `["*"]`, so `hasScope` is a no-op for browser sessions.
   scopes: string[];
+  // PAT row id for token auth; null for sessions. Used to bind watchers to
+  // the credential that registered them (see `enforceWatcherBinding`).
+  tokenId: string | null;
   userId: string;
 }
 
@@ -66,7 +69,12 @@ async function validatePat(
       .where(eq(personalAccessTokens.id, pat.id));
   });
 
-  return { userId: pat.userId, authMethod: "token", scopes: pat.scopes };
+  return {
+    userId: pat.userId,
+    authMethod: "token",
+    scopes: pat.scopes,
+    tokenId: pat.id,
+  };
 }
 
 /**
@@ -83,7 +91,12 @@ export async function authenticateRequest(
 ): Promise<AuthResult | null> {
   const session = await auth();
   if (session?.user?.id) {
-    return { userId: session.user.id, authMethod: "session", scopes: ["*"] };
+    return {
+      userId: session.user.id,
+      authMethod: "session",
+      scopes: ["*"],
+      tokenId: null,
+    };
   }
 
   return validatePat(request.headers.get("authorization"));
@@ -103,7 +116,12 @@ export async function authenticateWithToken(
 export async function requireSession(): Promise<AuthResult | null> {
   const session = await auth();
   if (session?.user?.id) {
-    return { userId: session.user.id, authMethod: "session", scopes: ["*"] };
+    return {
+      userId: session.user.id,
+      authMethod: "session",
+      scopes: ["*"],
+      tokenId: null,
+    };
   }
   return null;
 }

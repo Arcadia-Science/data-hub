@@ -11,6 +11,7 @@ import { heartbeatBody, readJsonBody } from "@/lib/api/openapi";
 import { isValidUUID } from "@/lib/api/validators";
 import { isBelowFloor } from "@/lib/api/watcher-versions";
 import {
+  enforceWatcherBinding,
   findActiveWatcher,
   revertUploadQueueIfWatcherOffline,
 } from "@/lib/api/watchers";
@@ -38,6 +39,11 @@ export async function POST(
   const watcher = await findActiveWatcher(watcherId);
   if (!watcher) {
     return apiError(404, NOT_FOUND, `Watcher '${watcherId}' not found`);
+  }
+
+  const bindingError = await enforceWatcherBinding(authResult, watcher);
+  if (bindingError) {
+    return bindingError;
   }
 
   const body = await readJsonBody(request, heartbeatBody);
