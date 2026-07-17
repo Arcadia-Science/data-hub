@@ -209,3 +209,25 @@ export async function authorize(
   }
   return authResult;
 }
+
+// Same contract as {@link authorize}, but PAT-only — sessions are never
+// consulted. Use for machine-to-machine routes (e.g. Lambda file create)
+// where accepting a browser session would grant `*` scope and open an
+// attack surface that PATs with least-privilege scopes avoid.
+export async function authorizeToken(
+  request: NextRequest,
+  scope: Scope
+): Promise<AuthResult | Response> {
+  const authResult = await authenticateWithToken(request);
+  if (!authResult) {
+    return apiError(401, UNAUTHORIZED, "Authentication required");
+  }
+  if (!hasScope(authResult, scope)) {
+    return apiError(
+      403,
+      FORBIDDEN,
+      `Token is missing required scope: ${scope}`
+    );
+  }
+  return authResult;
+}
