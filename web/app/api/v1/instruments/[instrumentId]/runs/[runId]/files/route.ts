@@ -1,6 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
 import type { NextRequest } from "next/server";
-import { authorize } from "@/lib/api/auth";
+import { authorizeToken } from "@/lib/api/auth";
 import { apiError, CONFLICT, NOT_FOUND } from "@/lib/api/errors";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { createFileBody, readJsonBody } from "@/lib/api/openapi";
@@ -23,12 +23,16 @@ interface RouteContext {
 // starts in "uploaded" status because the Lambda already has the file in S3
 // by the time it calls this endpoint.
 //
+// PAT-only (no browser sessions): session auth carries `*` scope, and
+// accepting it let any signed-in user overwrite a pre-upload file's
+// s3_bucket/s3_key via the adoption branch below (ENG-1455).
+//
 // Idempotent on s3_key: if a file with the same key already exists (partial
 // unique index), returns the existing record with 200 instead of 201.
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authorize(request, "files:create");
+  const authResult = await authorizeToken(request, "files:create");
   if (authResult instanceof Response) {
     return authResult;
   }

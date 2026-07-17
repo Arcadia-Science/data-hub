@@ -285,6 +285,33 @@ describe("Files API", () => {
     expect(res.status).toBe(404);
   });
 
+  // Pins the scope check on authorizeToken (PAT-only helper used by this
+  // route). A valid PAT without files:create must not reach the create /
+  // adopt logic — the same surface a browser session with `*` used to
+  // abuse via S3 location injection (ENG-1455).
+  it("POST returns 403 without files:create scope", async () => {
+    const { token: scopedToken } = await seedTestUser({
+      scopes: ["files:read"],
+    });
+
+    const res = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${runId}/files`,
+      {
+        method: "POST",
+        token: scopedToken,
+        body: {
+          s3_bucket: "test-bucket",
+          s3_key: `${instrumentId}/${runId}/scope-denied.csv`,
+          filename: "scope-denied.csv",
+        },
+      }
+    );
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error.code).toBe("FORBIDDEN");
+    expect(body.error.message).toMatch(/missing required scope: files:create/);
+  });
+
   // -------------------------------------------------------------------------
   // PATCH /api/v1/files/:fileId — watcher path (detected → uploaded)
   // -------------------------------------------------------------------------
