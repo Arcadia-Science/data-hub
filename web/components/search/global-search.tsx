@@ -5,9 +5,11 @@ import { Clock, SearchIcon, SearchX } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import {
+  SearchCommentRow,
   SearchFileRow,
   SearchInstrumentRow,
   SearchRunRow,
+  SearchUserRow,
 } from "@/components/search/search-result-item";
 import { useRecentSearches } from "@/components/search/use-recent-searches";
 import {
@@ -23,10 +25,12 @@ import {
 } from "@/components/ui/dialog";
 import type {
   GlobalSearchResult,
+  SearchCommentResult,
   SearchFileResult,
   SearchInstrumentResult,
   SearchRunResult,
   SearchScope,
+  SearchUserResult,
 } from "@/lib/api/search";
 import { MIN_QUERY_LENGTH } from "@/lib/search-constants";
 import { cn } from "@/lib/utils";
@@ -38,13 +42,24 @@ const SCOPE_TABS: { id: SearchScope; label: string }[] = [
   { id: "runs", label: "Runs" },
   { id: "files", label: "Files" },
   { id: "instruments", label: "Instruments" },
+  { id: "users", label: "Users" },
+  { id: "comments", label: "Comments" },
 ];
 
 const EMPTY_RESULT: GlobalSearchResult = {
   runs: [],
   files: [],
   instruments: [],
-  counts: { runs: 0, files: 0, instruments: 0, total: 0 },
+  users: [],
+  comments: [],
+  counts: {
+    runs: 0,
+    files: 0,
+    instruments: 0,
+    users: 0,
+    comments: 0,
+    total: 0,
+  },
 };
 
 function runHref(run: SearchRunResult): string {
@@ -61,6 +76,16 @@ function fileHref(file: SearchFileResult): string {
 
 function instrumentHref(instrument: SearchInstrumentResult): string {
   return `/instruments/${instrument.id}`;
+}
+
+function userHref(user: SearchUserResult): string {
+  return `/users/${user.id}`;
+}
+
+function commentHref(comment: SearchCommentResult): string {
+  return `/instruments/${comment.instrumentId}/runs/${encodeURIComponent(
+    comment.runId
+  )}#comment-${comment.id}`;
 }
 
 function Kbd({ children }: { children: React.ReactNode }) {
@@ -144,6 +169,30 @@ export function GlobalSearch({
     (href: string) => {
       addRecent(trimmed);
       onOpenChange(false);
+
+      // Same-pathname `#comment-{id}` links must not go through App Router
+      // `push` alone — it uses pushState and does not fire `hashchange`, so
+      // the comments list would never scroll when already on the run page.
+      const url = new URL(href, window.location.origin);
+      if (
+        url.hash.startsWith("#comment-") &&
+        url.pathname === window.location.pathname
+      ) {
+        if (url.hash === window.location.hash) {
+          document
+            .getElementById(url.hash.slice(1))
+            ?.scrollIntoView({ block: "center" });
+        } else {
+          window.history.pushState(
+            null,
+            "",
+            `${url.pathname}${url.search}${url.hash}`
+          );
+          window.dispatchEvent(new HashChangeEvent("hashchange"));
+        }
+        return;
+      }
+
       router.push(href);
     },
     [addRecent, trimmed, onOpenChange, router]
@@ -160,12 +209,12 @@ export function GlobalSearch({
       >
         <DialogTitle className="sr-only">Search Data Hub</DialogTitle>
         <DialogDescription className="sr-only">
-          Search across runs, files, and instruments.
+          Search across runs, files, instruments, users, and comments.
         </DialogDescription>
 
         <CommandPrimitive
-          className="flex w-full flex-col"
-          label="Search runs, files, or instruments"
+          className="flex w-full min-w-0 max-w-full flex-col overflow-hidden"
+          label="Search runs, files, instruments, users, or comments"
           loop
           shouldFilter={false}
         >
@@ -176,17 +225,17 @@ export function GlobalSearch({
             <CommandPrimitive.Input
               className="flex h-12 w-full bg-transparent text-base outline-none placeholder:text-muted-foreground"
               onValueChange={setQuery}
-              placeholder="Search runs, files, or instruments"
+              placeholder="Search runs, files, instruments, users, or comments"
               value={query}
             />
             <Kbd>esc</Kbd>
           </div>
 
-          <div className="flex items-center gap-1 border-b px-2 py-2">
+          <div className="flex items-center gap-0.5 overflow-x-auto border-b px-2 py-2">
             {SCOPE_TABS.map((tab) => (
               <button
                 className={cn(
-                  "rounded-md px-3 py-1 font-medium text-sm transition-colors",
+                  "shrink-0 rounded-md px-2.5 py-1 font-medium text-sm transition-colors",
                   scope === tab.id
                     ? "bg-primary/10 text-primary"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -213,7 +262,7 @@ export function GlobalSearch({
             </div>
           ) : null}
 
-          <CommandList className="max-h-[420px] px-2 pb-2">
+          <CommandList className="max-h-[420px] min-w-0 px-2 pb-2">
             {showRecent ? (
               <RecentSearches
                 onSelect={(value) => setQuery(value)}
@@ -271,6 +320,34 @@ export function GlobalSearch({
                     ))}
                   </CommandGroup>
                 ) : null}
+
+                {result.users.length > 0 ? (
+                  <CommandGroup heading="Users">
+                    {result.users.map((user) => (
+                      <CommandItem
+                        key={user.id}
+                        onSelect={() => navigate(userHref(user))}
+                        value={`user:${user.id}`}
+                      >
+                        <SearchUserRow query={trimmed} result={user} />
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                ) : null}
+
+                {result.comments.length > 0 ? (
+                  <CommandGroup heading="Comments">
+                    {result.comments.map((comment) => (
+                      <CommandItem
+                        key={comment.id}
+                        onSelect={() => navigate(commentHref(comment))}
+                        value={`comment:${comment.id}`}
+                      >
+                        <SearchCommentRow query={trimmed} result={comment} />
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                ) : null}
               </>
             ) : null}
           </CommandList>
@@ -306,7 +383,7 @@ function RecentSearches({
       <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
         <SearchIcon className="size-7 text-muted-foreground" />
         <p className="text-muted-foreground text-sm">
-          Search runs, files, or instruments
+          Search runs, files, instruments, users, or comments
         </p>
       </div>
     );

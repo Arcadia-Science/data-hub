@@ -27,6 +27,7 @@
     "test:unit:watch": "vitest --config vitest.unit.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:integration:watch": "vitest --config vitest.integration.config.ts",
+    "test": "npm run test:unit && npm run test:integration",
     "check": "npm run lint:check && npm run typecheck",
     "check-all": "npm run check && npm run test-all && npm run build"
   },

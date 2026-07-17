@@ -734,6 +734,11 @@ export const runComments = pgTable(
       comment.createdAt.desc()
     ),
     index("idx_run_comments_user_id").on(comment.userId),
+    // Trigram GIN index backing global-search `ilike '%…%'` on comment bodies.
+    // Scoped to active rows; requires `pg_trgm` (created in migration 0029).
+    index("idx_run_comments_body_trgm")
+      .using("gin", sql`${comment.body} gin_trgm_ops`)
+      .where(sql`${comment.deletedAt} is null`),
   ]
 );
 

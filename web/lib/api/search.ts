@@ -1,4 +1,14 @@
-import { and, desc, eq, ilike, isNull, or, type SQL, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  ilike,
+  isNull,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import {
   getWatcherOnlineStatus,
   type WatcherOnlineStatus,
@@ -10,15 +20,25 @@ import {
   instrumentRuns,
   instruments,
   runAttributions,
+  runComments,
   users,
 } from "@/lib/db/schema";
+import { commentBodyPreview } from "@/lib/search-comment-preview";
 import { MIN_QUERY_LENGTH } from "@/lib/search-constants";
 
-// Global search across the three top-level entities. Backed by the pg_trgm
-// GIN indexes added in migration 0029 so the `ilike '%…%'` scans stay fast as
-// the run/file tables grow (one instrument alone already carries 600+ runs).
+// Global search across top-level entities. Backed by the pg_trgm GIN indexes
+// so the `ilike '%…%'` scans stay fast as the run/file/comment tables grow.
+// Users (name/email) are intentionally searchable with the same `runs:read`
+// gate as everything else — Data Hub has no row-level member privacy, and the
+// Users scope mirrors the members directory / attributor picker.
 
-export type SearchScope = "all" | "runs" | "files" | "instruments";
+export type SearchScope =
+  | "all"
+  | "runs"
+  | "files"
+  | "instruments"
+  | "users"
+  | "comments";
 
 // Per-group cap when searching everything at once ("All" tab). Matches the
 // mockups. A scoped search (single tab) uses SCOPED_LIMIT so "Show all"
@@ -74,18 +94,42 @@ export interface SearchInstrumentResult {
   watcherStatus: WatcherOnlineStatus | "deregistered";
 }
 
+export interface SearchUserResult {
+  email: string | null;
+  id: string;
+  image: string | null;
+  name: string | null;
+  type: "user";
+}
+
+export interface SearchCommentResult {
+  bodyPreview: string;
+  createdAt: string;
+  id: string;
+  instrumentId: string;
+  instrumentName: string;
+  runId: string;
+  type: "comment";
+  userId: string;
+  userName: string;
+}
+
 export interface GlobalSearchResult {
+  comments: SearchCommentResult[];
   counts: {
-    runs: number;
+    comments: number;
     files: number;
     instruments: number;
+    runs: number;
     // Sum of the *visible* (capped) results — this is the "N results for …"
     // figure the header shows, matching what the user actually sees.
     total: number;
+    users: number;
   };
   files: SearchFileResult[];
   instruments: SearchInstrumentResult[];
   runs: SearchRunResult[];
+  users: SearchUserResult[];
 }
 
 // Escapes LIKE wildcards so user input matches literally. A filename like
@@ -282,6 +326,111 @@ async function searchInstruments(
   return matched;
 }
 
+async function searchUsers(
+  query: string,
+  limit: number
+): Promise<SearchUserResult[]> {
+  const escaped = escapeLike(query);
+  const substring = `%${escaped}%`;
+  const prefix = `${escaped}%`;
+
+  // Prefix on display name outranks email prefix, then any substring hit.
+  const relevance = sql<number>`case
+    when ${users.name} ilike ${prefix} then 2
+    when ${users.email} ilike ${prefix} then 1
+    else 0
+  end`;
+
+  const rows = await db
+    .select({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      image: users.image,
+    })
+    .from(users)
+    .where(
+      or(ilike(users.name, substring), ilike(users.email, substring)) as SQL
+    )
+    .orderBy(desc(relevance), asc(users.name), asc(users.email))
+    .limit(limit);
+
+  return rows.map((row) => ({
+    type: "user" as const,
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    image: row.image,
+  }));
+}
+
+async function searchComments(
+  query: string,
+  limit: number
+): Promise<SearchCommentResult[]> {
+  const escaped = escapeLike(query);
+  const substring = `%${escaped}%`;
+  const prefix = `${escaped}%`;
+
+  const relevance = sql<number>`case when ${runComments.body} ilike ${prefix} then 1 else 0 end`;
+
+  const rows = await db
+    .select({
+      id: runComments.id,
+      body: runComments.body,
+      createdAt: runComments.createdAt,
+      userId: users.id,
+      userName: users.name,
+      userEmail: users.email,
+      runId: instrumentRuns.runId,
+      instrumentId: instrumentRuns.instrumentId,
+      instrumentName: instruments.displayName,
+    })
+    .from(runComments)
+    .innerJoin(instrumentRuns, eq(runComments.runId, instrumentRuns.id))
+    .innerJoin(instruments, eq(instrumentRuns.instrumentId, instruments.id))
+    .innerJoin(users, eq(runComments.userId, users.id))
+    .where(
+      and(
+        isNull(runComments.deletedAt),
+        isNull(instrumentRuns.deletedAt),
+        ilike(runComments.body, substring)
+      )
+    )
+    .orderBy(desc(relevance), desc(runComments.createdAt))
+    .limit(limit);
+
+  return rows.map((row) => ({
+    type: "comment" as const,
+    id: row.id,
+    bodyPreview: commentBodyPreview(row.body, query),
+    createdAt: row.createdAt.toISOString(),
+    userId: row.userId,
+    userName: row.userName ?? row.userEmail ?? "Unknown",
+    runId: row.runId,
+    instrumentId: row.instrumentId,
+    instrumentName: row.instrumentName,
+  }));
+}
+
+function emptyResult(): GlobalSearchResult {
+  return {
+    runs: [],
+    files: [],
+    instruments: [],
+    users: [],
+    comments: [],
+    counts: {
+      runs: 0,
+      files: 0,
+      instruments: 0,
+      users: 0,
+      comments: 0,
+      total: 0,
+    },
+  };
+}
+
 export async function globalSearch({
   query,
   scope = "all",
@@ -291,15 +440,8 @@ export async function globalSearch({
 }): Promise<GlobalSearchResult> {
   const trimmed = query.trim();
 
-  const empty: GlobalSearchResult = {
-    runs: [],
-    files: [],
-    instruments: [],
-    counts: { runs: 0, files: 0, instruments: 0, total: 0 },
-  };
-
   if (trimmed.length < MIN_QUERY_LENGTH) {
-    return empty;
+    return emptyResult();
   }
 
   const runLimit =
@@ -312,24 +454,46 @@ export async function globalSearch({
       : scope === "instruments"
         ? SCOPED_LIMIT
         : 0;
+  const userLimit =
+    scope === "all" ? ALL_TAB_PER_GROUP : scope === "users" ? SCOPED_LIMIT : 0;
+  const commentLimit =
+    scope === "all"
+      ? ALL_TAB_PER_GROUP
+      : scope === "comments"
+        ? SCOPED_LIMIT
+        : 0;
 
-  const [runs, filesResult, instrumentsResult] = await Promise.all([
-    runLimit > 0 ? searchRuns(trimmed, runLimit) : Promise.resolve([]),
-    fileLimit > 0 ? searchFiles(trimmed, fileLimit) : Promise.resolve([]),
-    instrumentLimit > 0
-      ? searchInstruments(trimmed, instrumentLimit)
-      : Promise.resolve([]),
-  ]);
+  const [runs, filesResult, instrumentsResult, usersResult, commentsResult] =
+    await Promise.all([
+      runLimit > 0 ? searchRuns(trimmed, runLimit) : Promise.resolve([]),
+      fileLimit > 0 ? searchFiles(trimmed, fileLimit) : Promise.resolve([]),
+      instrumentLimit > 0
+        ? searchInstruments(trimmed, instrumentLimit)
+        : Promise.resolve([]),
+      userLimit > 0 ? searchUsers(trimmed, userLimit) : Promise.resolve([]),
+      commentLimit > 0
+        ? searchComments(trimmed, commentLimit)
+        : Promise.resolve([]),
+    ]);
 
   return {
     runs,
     files: filesResult,
     instruments: instrumentsResult,
+    users: usersResult,
+    comments: commentsResult,
     counts: {
       runs: runs.length,
       files: filesResult.length,
       instruments: instrumentsResult.length,
-      total: runs.length + filesResult.length + instrumentsResult.length,
+      users: usersResult.length,
+      comments: commentsResult.length,
+      total:
+        runs.length +
+        filesResult.length +
+        instrumentsResult.length +
+        usersResult.length +
+        commentsResult.length,
     },
   };
 }

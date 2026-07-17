@@ -225,6 +225,13 @@
       "when": 1784234686620,
       "tag": "0031_add_watcher_registered_by_token",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1784308273738,
+      "tag": "0032_add_run_comments_body_trgm",
+      "breakpoints": true
     }
   ]
 }

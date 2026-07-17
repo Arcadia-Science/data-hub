@@ -67,6 +67,10 @@ export function RunCommentItem({
   const [isDeleting, startDeletingTransition] = useTransition();
 
   const isAuthor = currentUserId !== null && comment.user.id === currentUserId;
+  // Deep-link target for notifications / global search (`#comment-{id}`).
+  // Scroll-into-view lives on `RunCommentsList` so one listener covers the
+  // whole list (including same-page hash changes).
+  const anchorId = `comment-${comment.id}`;
 
   const trimmed = draft.trim();
   const tooLong = draft.length > MAX_BODY_LENGTH;
@@ -109,7 +113,7 @@ export function RunCommentItem({
 
   return (
     <>
-      <article className="flex flex-col gap-1.5">
+      <article className="flex flex-col gap-1.5" id={anchorId}>
         <div className="flex items-start justify-between gap-2">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground text-sm">
             <UserAvatarLink
