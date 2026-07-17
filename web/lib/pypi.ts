@@ -9,9 +9,15 @@ interface PypiPackageJson {
   releases?: Record<string, PypiReleaseFile[] | undefined>;
 }
 
+export interface WatcherVersionOption {
+  /** ISO-8601 upload time of the newest file in the release; null if unknown. */
+  uploadedAt: string | null;
+  version: string;
+}
+
 export interface WatcherVersionsResult {
   ok: boolean;
-  versions: string[];
+  versions: WatcherVersionOption[];
 }
 
 /**
@@ -37,7 +43,7 @@ export async function fetchWatcherVersions(): Promise<WatcherVersionsResult> {
       return { ok: false, versions: [] };
     }
 
-    const ranked: { version: string; uploadedAt: number }[] = [];
+    const ranked: { version: string; uploadedAtMs: number }[] = [];
     for (const [version, files] of Object.entries(releases)) {
       if (!Array.isArray(files) || files.length === 0) {
         continue;
@@ -57,13 +63,22 @@ export async function fetchWatcherVersions(): Promise<WatcherVersionsResult> {
           maxUpload = ts;
         }
       }
-      ranked.push({ version, uploadedAt: maxUpload });
+      ranked.push({ version, uploadedAtMs: maxUpload });
     }
 
     // Newest-first by upload time matches PyPI's "Release history" order
     // without reimplementing PEP 440 comparison in JS.
-    ranked.sort((a, b) => b.uploadedAt - a.uploadedAt);
-    return { ok: true, versions: ranked.map((entry) => entry.version) };
+    ranked.sort((a, b) => b.uploadedAtMs - a.uploadedAtMs);
+    return {
+      ok: true,
+      versions: ranked.map((entry) => ({
+        version: entry.version,
+        uploadedAt:
+          entry.uploadedAtMs > 0
+            ? new Date(entry.uploadedAtMs).toISOString()
+            : null,
+      })),
+    };
   } catch {
     return { ok: false, versions: [] };
   }

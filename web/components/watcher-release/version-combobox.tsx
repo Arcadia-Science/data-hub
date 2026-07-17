@@ -17,6 +17,8 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { formatDate } from "@/lib/date";
+import type { WatcherVersionOption } from "@/lib/pypi";
 import { cn } from "@/lib/utils";
 
 const NONE_VALUE = "";
@@ -30,7 +32,7 @@ interface VersionComboboxProps {
   onChange: (value: string) => void;
   placeholder?: string;
   value: string;
-  versions: string[];
+  versions: WatcherVersionOption[];
 }
 
 export function VersionCombobox({
@@ -49,7 +51,9 @@ export function VersionCombobox({
   // Keep a saved value that isn't on PyPI selectable (test pins like
   // `9.9.9`, yanked releases, or a version published after our cache).
   const currentMissing =
-    value.length > 0 && !versions.includes(value) ? value : null;
+    value.length > 0 && !versions.some((entry) => entry.version === value)
+      ? value
+      : null;
 
   function select(next: string) {
     onChange(next);
@@ -120,14 +124,21 @@ export function VersionCombobox({
             ) : null}
             <CommandSeparator />
             <CommandGroup heading="PyPI releases">
-              {versions.map((version) => (
+              {versions.map((entry) => (
                 <CommandItem
-                  data-checked={value === version}
-                  key={version}
-                  onSelect={() => select(version)}
-                  value={version}
+                  data-checked={value === entry.version}
+                  key={entry.version}
+                  onSelect={() => select(entry.version)}
+                  value={entry.version}
                 >
-                  <span className="font-mono">{version}</span>
+                  <span className="flex min-w-0 flex-1 items-center justify-between gap-3">
+                    <span className="font-mono">{entry.version}</span>
+                    {entry.uploadedAt ? (
+                      <span className="shrink-0 text-muted-foreground text-xs tabular-nums">
+                        {formatDate(new Date(entry.uploadedAt))}
+                      </span>
+                    ) : null}
+                  </span>
                 </CommandItem>
               ))}
             </CommandGroup>

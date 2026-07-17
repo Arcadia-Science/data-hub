@@ -17,6 +17,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { VersionField } from "@/components/watcher-release/version-field";
 import { VERSION_MESSAGE, VERSION_REGEX } from "@/lib/api/watcher-versions";
+import type { WatcherVersionOption } from "@/lib/pypi";
 import { formatRelativeTime } from "@/lib/utils";
 
 // Both version fields treat "" as "unset", so empty strings always pass —
@@ -45,7 +46,7 @@ interface LastUpdated {
 }
 
 interface WatcherReleaseFormProps {
-  availableVersions: string[];
+  availableVersions: WatcherVersionOption[];
   initial: WatcherReleaseFormValues;
   lastUpdated: LastUpdated | null;
   pypiReachable: boolean;

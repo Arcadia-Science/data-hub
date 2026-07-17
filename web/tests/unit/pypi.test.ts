@@ -30,7 +30,11 @@ describe("fetchWatcherVersions", () => {
 
     await expect(fetchWatcherVersions()).resolves.toEqual({
       ok: true,
-      versions: ["0.3.0", "0.2.0", "0.1.0"],
+      versions: [
+        { version: "0.3.0", uploadedAt: "2024-06-01T00:00:00.000Z" },
+        { version: "0.2.0", uploadedAt: "2024-03-01T00:00:00.000Z" },
+        { version: "0.1.0", uploadedAt: "2024-01-01T00:00:00.000Z" },
+      ],
     });
   });
 
@@ -69,7 +73,10 @@ describe("fetchWatcherVersions", () => {
 
     await expect(fetchWatcherVersions()).resolves.toEqual({
       ok: true,
-      versions: ["0.4.0-partial", "0.1.0"],
+      versions: [
+        { version: "0.4.0-partial", uploadedAt: "2024-04-02T00:00:00.000Z" },
+        { version: "0.1.0", uploadedAt: "2024-01-01T00:00:00.000Z" },
+      ],
     });
   });
 

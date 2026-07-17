@@ -9,9 +9,10 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { VersionCombobox } from "@/components/watcher-release/version-combobox";
+import type { WatcherVersionOption } from "@/lib/pypi";
 
 interface VersionFieldProps {
-  availableVersions: string[];
+  availableVersions: WatcherVersionOption[];
   description: ReactNode;
   errors?: Array<{ message?: string } | undefined>;
   id: string;
