@@ -44,14 +44,14 @@ export function MembersTableSkeleton({
     <div
       aria-busy="true"
       aria-label={ariaLabel}
-      className="rounded-lg border bg-background dark:bg-muted"
+      className="overflow-hidden rounded-lg border bg-background dark:bg-muted"
       role="status"
     >
-      <Table>
+      <Table className="table-fixed">
         <TableHeader>
           <TableRow>
-            <TableHead>Member</TableHead>
-            <TableHead>Email</TableHead>
+            <TableHead className="w-[40%]">Member</TableHead>
+            <TableHead className="w-[35%]">Email</TableHead>
             <TableHead>Role</TableHead>
             <TableHead className="w-28 text-right">Admin</TableHead>
           </TableRow>
@@ -60,18 +60,18 @@ export function MembersTableSkeleton({
           {Array.from({ length: rows }).map((_, i) => (
             <TableRow key={i}>
               <TableCell>
-                <div className="flex items-center gap-3">
+                <div className="flex min-w-0 items-center gap-3">
                   <Skeleton className="size-6 shrink-0 rounded-full" />
-                  <Skeleton className="h-4 w-28" />
+                  <Skeleton className="h-4 w-28 max-w-full" />
                 </div>
               </TableCell>
               <TableCell>
-                <Skeleton className="h-4 w-36" />
+                <Skeleton className="h-4 w-36 max-w-full" />
               </TableCell>
               <TableCell>
                 <Skeleton className="h-5 w-16 rounded-full" />
               </TableCell>
-              <TableCell className="text-right">
+              <TableCell className="overflow-hidden text-right">
                 <div className="flex justify-end">
                   <Skeleton className="h-[18.4px] w-8 rounded-full" />
                 </div>
@@ -86,12 +86,14 @@ export function MembersTableSkeleton({
 
 export function MembersTable({ data, currentUserId }: MembersTableProps) {
   return (
-    <div className="rounded-lg border bg-background dark:bg-muted">
-      <Table>
+    // overflow-hidden clips sub-pixel / switch hit-target bleed that otherwise
+    // leaves a ~5px horizontal scrollbar on the shared table container.
+    <div className="overflow-hidden rounded-lg border bg-background dark:bg-muted">
+      <Table className="table-fixed">
         <TableHeader>
           <TableRow>
-            <TableHead>Member</TableHead>
-            <TableHead>Email</TableHead>
+            <TableHead className="w-[40%]">Member</TableHead>
+            <TableHead className="w-[35%]">Email</TableHead>
             <TableHead>Role</TableHead>
             <TableHead className="w-28 text-right">Admin</TableHead>
           </TableRow>
@@ -102,9 +104,9 @@ export function MembersTable({ data, currentUserId }: MembersTableProps) {
             const isSelf = member.id === currentUserId;
             return (
               <TableRow key={member.id}>
-                <TableCell>
+                <TableCell className="max-w-0">
                   <UserAvatarLink
-                    className="gap-3"
+                    className="flex w-full min-w-0 gap-3"
                     size="sm"
                     user={{
                       userId: member.id,
@@ -113,7 +115,7 @@ export function MembersTable({ data, currentUserId }: MembersTableProps) {
                       avatarUrl: member.image,
                     }}
                   >
-                    <span className="font-medium">
+                    <span className="truncate font-medium">
                       {displayName}
                       {isSelf ? (
                         <span className="ml-1.5 text-muted-foreground text-xs">
@@ -123,7 +125,7 @@ export function MembersTable({ data, currentUserId }: MembersTableProps) {
                     </span>
                   </UserAvatarLink>
                 </TableCell>
-                <TableCell className="text-muted-foreground">
+                <TableCell className="max-w-0 truncate text-muted-foreground">
                   {member.email ?? "—"}
                 </TableCell>
                 <TableCell>
@@ -135,7 +137,7 @@ export function MembersTable({ data, currentUserId }: MembersTableProps) {
                     <Badge variant="outline">Member</Badge>
                   )}
                 </TableCell>
-                <TableCell className="text-right">
+                <TableCell className="overflow-hidden text-right">
                   <div className="flex justify-end">
                     <AdminToggle
                       displayName={displayName}
