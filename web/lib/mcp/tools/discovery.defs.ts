@@ -5,7 +5,7 @@ export const globalSearchTool = {
   name: "global_search",
   title: "Global Search",
   description:
-    "Fuzzy search across runs, files, instruments, users, and comments (same backend as the UI ⌘K palette). Prefer this over search_runs when the query may match a filename, instrument display name, attributor name, user, or comment body. Use search_runs for date/status/metadata filters. Queries shorter than 2 characters are rejected.",
+    "Fuzzy search across runs, files, instruments, users, and comments (same backend as the UI ⌘K palette). Prefer this over search_runs when the query may match a filename, instrument display name, attributor name, user, or comment body. The users scope returns workspace member names/emails to any caller with runs:read (no row-level member privacy). Use search_runs for date/status/metadata filters. Queries shorter than 2 characters are rejected.",
   group: "discovery",
   scope: "runs:read",
   inputSchema: {

@@ -23,10 +23,14 @@ import {
   runComments,
   users,
 } from "@/lib/db/schema";
+import { commentBodyPreview } from "@/lib/search-comment-preview";
 import { MIN_QUERY_LENGTH } from "@/lib/search-constants";
 
 // Global search across top-level entities. Backed by the pg_trgm GIN indexes
 // so the `ilike '%…%'` scans stay fast as the run/file/comment tables grow.
+// Users (name/email) are intentionally searchable with the same `runs:read`
+// gate as everything else — Data Hub has no row-level member privacy, and the
+// Users scope mirrors the members directory / attributor picker.
 
 export type SearchScope =
   | "all"
@@ -41,9 +45,6 @@ export type SearchScope =
 // surfaces a longer list without a dedicated results page.
 const ALL_TAB_PER_GROUP = 5;
 const SCOPED_LIMIT = 25;
-
-// Short plain-text snippet for the ⌘K list — full body is matched in SQL.
-const COMMENT_PREVIEW_MAX = 120;
 
 // Why a run surfaced. `run_id` is the run's own title (highest relevance);
 // `file` means a contained filename matched (drives the "Contains …" line);
@@ -136,14 +137,6 @@ export interface GlobalSearchResult {
 // pattern. Mirrors the escaping already used in `buildRunListQuery`.
 function escapeLike(query: string): string {
   return query.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
-}
-
-function commentBodyPreview(body: string): string {
-  const collapsed = body.replace(/\s+/g, " ").trim();
-  if (collapsed.length <= COMMENT_PREVIEW_MAX) {
-    return collapsed;
-  }
-  return `${collapsed.slice(0, COMMENT_PREVIEW_MAX).trimEnd()}…`;
 }
 
 const acquiredOrCreated = sql`coalesce(${instrumentRuns.acquiredAt}, ${instrumentRuns.createdAt})`;
@@ -410,7 +403,7 @@ async function searchComments(
   return rows.map((row) => ({
     type: "comment" as const,
     id: row.id,
-    bodyPreview: commentBodyPreview(row.body),
+    bodyPreview: commentBodyPreview(row.body, query),
     createdAt: row.createdAt.toISOString(),
     userId: row.userId,
     userName: row.userName ?? row.userEmail ?? "Unknown",

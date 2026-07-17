@@ -9,10 +9,10 @@ import {
   Image as ImageIcon,
   type LucideIcon,
   MessageSquare,
-  User,
 } from "lucide-react";
 import { InstrumentStatusBadge } from "@/components/instruments/instrument-status-badge";
 import { Highlight } from "@/components/search/highlight";
+import { UserAvatar } from "@/components/user-avatar";
 import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type {
   SearchCommentResult,
@@ -21,7 +21,7 @@ import type {
   SearchRunResult,
   SearchUserResult,
 } from "@/lib/api/search";
-import { cn, formatBytes, formatRelativeTime } from "@/lib/utils";
+import { cn, formatBytes, formatRelativeTime, toInitials } from "@/lib/utils";
 
 const IMAGE_EXTENSIONS = new Set([
   "png",
@@ -61,19 +61,25 @@ function iconForFilename(filename: string): LucideIcon {
   return FileIcon;
 }
 
-// Shared row scaffold: leading icon, a flexible text column, and a right stat.
+function ResultRowIcon({ icon: Icon }: { icon: LucideIcon }) {
+  return <Icon className="size-4 shrink-0 text-muted-foreground" />;
+}
+
+// Shared row scaffold: leading glyph/avatar, a flexible text column, and an
+// optional right-hand stat. `leading` is a slot so user rows can pass an
+// avatar without a boolean mode on the shell.
 function ResultRowShell({
-  icon: Icon,
+  leading,
   children,
   stat,
 }: {
-  icon: LucideIcon;
+  leading: React.ReactNode;
   children: React.ReactNode;
   stat?: React.ReactNode;
 }) {
   return (
     <>
-      <Icon className="size-4 shrink-0 text-muted-foreground" />
+      {leading}
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">{children}</div>
       {stat == null ? null : (
         <div className="ml-auto shrink-0 whitespace-nowrap pl-2 text-muted-foreground text-xs">
@@ -98,7 +104,7 @@ export function SearchRunRow({
   const when = result.acquiredAt ?? result.createdAt;
   return (
     <ResultRowShell
-      icon={Activity}
+      leading={<ResultRowIcon icon={Activity} />}
       stat={`${result.fileCount} ${result.fileCount === 1 ? "file" : "files"} · ${formatBytes(result.totalSizeBytes)}`}
     >
       <span className="block truncate font-medium font-mono text-sm">
@@ -129,7 +135,7 @@ export function SearchFileRow({
 }) {
   return (
     <ResultRowShell
-      icon={iconForFilename(result.filename)}
+      leading={<ResultRowIcon icon={iconForFilename(result.filename)} />}
       stat={formatBytes(result.sizeBytes)}
     >
       <span className="block truncate font-medium font-mono text-sm">
@@ -153,7 +159,7 @@ export function SearchInstrumentRow({
 }) {
   return (
     <ResultRowShell
-      icon={Cpu}
+      leading={<ResultRowIcon icon={Cpu} />}
       stat={
         // Lifecycle badge for `pending`/`inactive`, watcher badge otherwise
         // (mirrors the instruments table).
@@ -200,7 +206,19 @@ export function SearchUserRow({
 }) {
   const title = result.name ?? result.email ?? "Unknown";
   return (
-    <ResultRowShell icon={User}>
+    <ResultRowShell
+      leading={
+        <UserAvatar
+          size="sm"
+          user={{
+            userId: result.id,
+            displayName: title,
+            initials: toInitials(title),
+            avatarUrl: result.image,
+          }}
+        />
+      }
+    >
       <span className="block truncate font-medium text-sm">
         <Highlight query={query} text={title} />
       </span>
@@ -222,7 +240,7 @@ export function SearchCommentRow({
 }) {
   return (
     <ResultRowShell
-      icon={MessageSquare}
+      leading={<ResultRowIcon icon={MessageSquare} />}
       stat={formatRelativeTime(result.createdAt)}
     >
       <span className="block truncate font-medium text-sm">

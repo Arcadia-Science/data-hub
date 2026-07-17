@@ -169,6 +169,30 @@ export function GlobalSearch({
     (href: string) => {
       addRecent(trimmed);
       onOpenChange(false);
+
+      // Same-pathname `#comment-{id}` links must not go through App Router
+      // `push` alone — it uses pushState and does not fire `hashchange`, so
+      // the comments list would never scroll when already on the run page.
+      const url = new URL(href, window.location.origin);
+      if (
+        url.hash.startsWith("#comment-") &&
+        url.pathname === window.location.pathname
+      ) {
+        if (url.hash === window.location.hash) {
+          document
+            .getElementById(url.hash.slice(1))
+            ?.scrollIntoView({ block: "center" });
+        } else {
+          window.history.pushState(
+            null,
+            "",
+            `${url.pathname}${url.search}${url.hash}`
+          );
+          window.dispatchEvent(new HashChangeEvent("hashchange"));
+        }
+        return;
+      }
+
       router.push(href);
     },
     [addRecent, trimmed, onOpenChange, router]

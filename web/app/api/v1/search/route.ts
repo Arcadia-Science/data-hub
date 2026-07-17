@@ -8,7 +8,9 @@ import { globalSearch, type SearchScope } from "@/lib/api/search";
 // Cross-entity global search powering the ⌘K palette. Returns grouped,
 // relevance-ordered matches over runs, files, instruments, users, and
 // comments. There is no row-level scoping in Data Hub, so any caller with
-// `runs:read` sees the same set the rest of the app exposes.
+// `runs:read` sees the same set the rest of the app exposes — including
+// workspace member names and emails under the Users scope (intentional;
+// mirrors the members directory / attributor picker).
 // ---------------------------------------------------------------------------
 
 const VALID_SCOPES: ReadonlySet<SearchScope> = new Set([

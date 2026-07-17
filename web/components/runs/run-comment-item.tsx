@@ -2,7 +2,7 @@
 
 import { Loader2, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import {
@@ -67,16 +67,10 @@ export function RunCommentItem({
   const [isDeleting, startDeletingTransition] = useTransition();
 
   const isAuthor = currentUserId !== null && comment.user.id === currentUserId;
+  // Deep-link target for notifications / global search (`#comment-{id}`).
+  // Scroll-into-view lives on `RunCommentsList` so one listener covers the
+  // whole list (including same-page hash changes).
   const anchorId = `comment-${comment.id}`;
-
-  // Deep links from notifications / global search use `#comment-{id}`; scroll
-  // the matching article into view once it mounts.
-  useEffect(() => {
-    if (window.location.hash !== `#${anchorId}`) {
-      return;
-    }
-    document.getElementById(anchorId)?.scrollIntoView({ block: "center" });
-  }, [anchorId]);
 
   const trimmed = draft.trim();
   const tooLong = draft.length > MAX_BODY_LENGTH;

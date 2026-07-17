@@ -116,6 +116,13 @@ describe("Global search API", () => {
         body: "Soft-deleted note about UBE2A should not match",
         deletedAt: new Date(),
       },
+      {
+        runId: specialRunUuid,
+        userId: authorUserId,
+        // Match sits past the preview window; markdown should be stripped and
+        // the snippet should recenter on the hit rather than the head.
+        body: `${"**pad** ".repeat(40)}late marker ZYZZYVA-TOKEN in **bold**`,
+      },
     ]);
   });
 
@@ -227,6 +234,15 @@ describe("Global search API", () => {
     expect(result.comments[0]?.instrumentId).toBe("hina-microscope");
     expect(result.comments[0]?.userId).toBe(authorUserId);
     expect(result.users).toHaveLength(0);
+  });
+
+  it("windows comment previews around the match and strips markdown", async () => {
+    const result = await search(token, "ZYZZYVA-TOKEN", "comments");
+    expect(result.comments).toHaveLength(1);
+    const preview = result.comments[0]?.bodyPreview ?? "";
+    expect(preview).toContain("ZYZZYVA-TOKEN");
+    expect(preview).not.toContain("**");
+    expect(preview.startsWith("…")).toBe(true);
   });
 
   it("includes users and comments in all-scope counts", async () => {
