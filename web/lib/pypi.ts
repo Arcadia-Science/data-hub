@@ -16,14 +16,15 @@ export interface WatcherVersionsResult {
 
 /**
  * Fetches published `data-hub-watcher` versions from the PyPI JSON API.
- * Cached for an hour so the settings page doesn't hammer PyPI on every
- * admin visit. Returns `{ ok: false, versions: [] }` on any failure so
- * the form can fall back to free-text inputs.
+ * Cached for five minutes so the settings page stays responsive after a
+ * fresh publish without hammering PyPI on every admin visit. Returns
+ * `{ ok: false, versions: [] }` on any failure so the form can fall back
+ * to free-text inputs.
  */
 export async function fetchWatcherVersions(): Promise<WatcherVersionsResult> {
   try {
     const res = await fetch(PYPI_WATCHER_URL, {
-      next: { revalidate: 3600 },
+      next: { revalidate: 300 },
       headers: { Accept: "application/json" },
     });
     if (!res.ok) {

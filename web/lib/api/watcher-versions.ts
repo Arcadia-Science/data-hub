@@ -1,11 +1,19 @@
-// Loose PEP 440-ish ordering. Mirrors the VERSION_REGEX used by
-// `app/api/v1/settings/watcher-release/route.ts` and the form in
-// `components/watcher-release/watcher-release-form.tsx` — together they're
-// the single source of truth for which version shapes the platform
-// understands. Doing real PEP 440 ordering here would mean either a
-// dependency or ~200 lines of spec code; the shapes we actually advertise
-// (X.Y.Z, X.Y.Z.postN, X.Y.ZrcN, X.Y.Z-dev0) all fit cleanly under this
-// simpler model so we keep the implementation small.
+// Loose PEP 440-ish version match / ordering. Shared by the admin
+// watcher-release PUT route, the settings form, and heartbeat floor
+// checks so a typo is rejected with the same rule everywhere.
+//
+// Covers the values we advertise (`9.9.9`, `0.1.0`) plus common
+// `1.2.3rc1` / `1.2.3.post1` shapes. We intentionally don't validate
+// against PyPI on write; a typo surfaces as an `update_failed` event
+// from the fleet — the same failure mode operators already debug.
+//
+// Real PEP 440 ordering would mean either a dependency or ~200 lines of
+// spec code; the shapes we actually use all fit this simpler model.
+
+export const VERSION_REGEX = /^(\d+)\.(\d+)\.(\d+)([.-].+)?$/;
+
+export const VERSION_MESSAGE =
+  "Use a PEP 440-style version like 1.2.3 or 1.2.3rc1.";
 
 interface ParsedVersion {
   core: [number, number, number];
@@ -15,7 +23,7 @@ interface ParsedVersion {
 }
 
 function parseLoose(v: string): ParsedVersion | null {
-  const m = /^(\d+)\.(\d+)\.(\d+)([.-].+)?$/.exec(v.trim());
+  const m = VERSION_REGEX.exec(v.trim());
   if (!m) {
     return null;
   }

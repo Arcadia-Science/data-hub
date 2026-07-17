@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/api/auth";
 import { apiError, VALIDATION_ERROR } from "@/lib/api/errors";
+import { VERSION_REGEX } from "@/lib/api/watcher-versions";
 import { db } from "@/lib/db";
 import { users, watcherReleaseConfig } from "@/lib/db/schema";
 
@@ -11,13 +12,6 @@ import { users, watcherReleaseConfig } from "@/lib/db/schema";
 // the same row but is open to any watcher-scoped PAT — this route is
 // the privileged write path and is therefore session-only via
 // `requireAdmin()`, matching the `/api/v1/users/[userId]` PATCH model.
-
-// Loose PEP-440-style version match — covers the values we already
-// advertise (`9.9.9`, `0.1.0`) plus the common `1.2.3rc1` / `1.2.3.post1`
-// shapes. We intentionally don't validate against PyPI here; a typo will
-// surface to operators as an `update_failed` event from the fleet, which
-// is the same failure mode they already debug today.
-const VERSION_REGEX = /^\d+\.\d+\.\d+([.-].+)?$/;
 
 // Trim and collapse `""` to `null` so the wire contract stays "empty
 // means unset" everywhere — operators don't have to remember to send

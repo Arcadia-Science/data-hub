@@ -1,7 +1,7 @@
 "use client";
 
-import { Check, ChevronsUpDown } from "lucide-react";
-import { useState } from "react";
+import { ChevronsUpDown } from "lucide-react";
+import { useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -45,6 +45,7 @@ export function VersionCombobox({
   versions,
 }: VersionComboboxProps) {
   const [open, setOpen] = useState(false);
+  const listId = useId();
   // Keep a saved value that isn't on PyPI selectable (test pins like
   // `9.9.9`, yanked releases, or a version published after our cache).
   const currentMissing =
@@ -67,6 +68,7 @@ export function VersionCombobox({
     >
       <PopoverTrigger asChild>
         <Button
+          aria-controls={listId}
           aria-expanded={open}
           aria-invalid={ariaInvalid}
           className="h-9 w-full justify-between font-mono font-normal"
@@ -88,7 +90,7 @@ export function VersionCombobox({
       >
         <Command>
           <CommandInput placeholder="Search versions..." />
-          <CommandList>
+          <CommandList id={listId}>
             <CommandEmpty>No versions found.</CommandEmpty>
             <CommandGroup>
               <CommandItem
@@ -96,12 +98,6 @@ export function VersionCombobox({
                 onSelect={() => select(NONE_VALUE)}
                 value={noneLabel}
               >
-                <Check
-                  className={cn(
-                    "size-4",
-                    value.length === 0 ? "opacity-100" : "opacity-0"
-                  )}
-                />
                 <span className="text-muted-foreground">{noneLabel}</span>
               </CommandItem>
             </CommandGroup>
@@ -110,11 +106,10 @@ export function VersionCombobox({
                 <CommandSeparator />
                 <CommandGroup heading="Current">
                   <CommandItem
-                    data-checked
+                    data-checked={true}
                     onSelect={() => select(currentMissing)}
                     value={`${currentMissing} current`}
                   >
-                    <Check className="size-4 opacity-100" />
                     <span className="font-mono">
                       {currentMissing}{" "}
                       <span className="text-muted-foreground">(current)</span>
@@ -125,25 +120,16 @@ export function VersionCombobox({
             ) : null}
             <CommandSeparator />
             <CommandGroup heading="PyPI releases">
-              {versions.map((version) => {
-                const selected = value === version;
-                return (
-                  <CommandItem
-                    data-checked={selected}
-                    key={version}
-                    onSelect={() => select(version)}
-                    value={version}
-                  >
-                    <Check
-                      className={cn(
-                        "size-4",
-                        selected ? "opacity-100" : "opacity-0"
-                      )}
-                    />
-                    <span className="font-mono">{version}</span>
-                  </CommandItem>
-                );
-              })}
+              {versions.map((version) => (
+                <CommandItem
+                  data-checked={value === version}
+                  key={version}
+                  onSelect={() => select(version)}
+                  value={version}
+                >
+                  <span className="font-mono">{version}</span>
+                </CommandItem>
+              ))}
             </CommandGroup>
           </CommandList>
         </Command>
