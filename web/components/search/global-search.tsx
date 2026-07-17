@@ -189,7 +189,7 @@ export function GlobalSearch({
         </DialogDescription>
 
         <CommandPrimitive
-          className="flex w-full flex-col"
+          className="flex w-full min-w-0 max-w-full flex-col overflow-hidden"
           label="Search runs, files, instruments, users, or comments"
           loop
           shouldFilter={false}
@@ -238,7 +238,7 @@ export function GlobalSearch({
             </div>
           ) : null}
 
-          <CommandList className="max-h-[420px] px-2 pb-2">
+          <CommandList className="max-h-[420px] min-w-0 px-2 pb-2">
             {showRecent ? (
               <RecentSearches
                 onSelect={(value) => setQuery(value)}
