@@ -32,10 +32,9 @@ function normalizeVersionInput(v: string | null | undefined): string | null {
 
 // PUT semantics: missing fields take their defaults rather than
 // silently preserving the existing row's value. The form always sends
-// all four, so this only affects hand-crafted callers — for whom a
+// all three, so this only affects hand-crafted callers — for whom a
 // uniform "replace with these (or defaults)" rule is far less surprising
-// than the previous mix where `channel`/`mandatory` defaulted but
-// `latest_version`/`min_supported_version` were preserved.
+// than a mix where some fields defaulted and others were preserved.
 const PutBodySchema = z.strictObject({
   latest_version: z
     .string()
@@ -51,13 +50,6 @@ const PutBodySchema = z.strictObject({
     .refine((v) => v === null || VERSION_REGEX.test(v), {
       message: "min_supported_version is not a valid PEP 440-style version",
     }),
-  channel: z
-    .string()
-    .optional()
-    .transform((v) => (v ?? "stable").trim())
-    .refine((v) => v.length > 0, {
-      message: "channel must be a non-empty string",
-    }),
   mandatory: z
     .boolean()
     .optional()
@@ -65,7 +57,6 @@ const PutBodySchema = z.strictObject({
 });
 
 interface WatcherReleaseResponse {
-  channel: string;
   latest_version: string | null;
   mandatory: boolean;
   min_supported_version: string | null;
@@ -80,7 +71,6 @@ interface WatcherReleaseResponse {
 const EMPTY_RESPONSE: WatcherReleaseResponse = {
   latest_version: null,
   min_supported_version: null,
-  channel: "stable",
   mandatory: false,
   updated_at: null,
   updated_by: null,
@@ -94,7 +84,6 @@ async function readCurrent(): Promise<WatcherReleaseResponse> {
     .select({
       latestVersion: watcherReleaseConfig.latestVersion,
       minSupportedVersion: watcherReleaseConfig.minSupportedVersion,
-      channel: watcherReleaseConfig.channel,
       mandatory: watcherReleaseConfig.mandatory,
       updatedAt: watcherReleaseConfig.updatedAt,
       updatedById: users.id,
@@ -111,7 +100,6 @@ async function readCurrent(): Promise<WatcherReleaseResponse> {
   return {
     latest_version: row.latestVersion,
     min_supported_version: row.minSupportedVersion,
-    channel: row.channel,
     mandatory: row.mandatory,
     updated_at: row.updatedAt.toISOString(),
     updated_by: row.updatedById
@@ -160,7 +148,6 @@ export async function PUT(request: NextRequest) {
   const {
     latest_version: latestVersion,
     min_supported_version: minSupportedVersion,
-    channel,
     mandatory,
   } = parsed.data;
 
@@ -174,7 +161,6 @@ export async function PUT(request: NextRequest) {
       id: true,
       latestVersion,
       minSupportedVersion,
-      channel,
       mandatory,
       updatedAt: now,
       updatedBy: authResult.userId,
@@ -184,7 +170,6 @@ export async function PUT(request: NextRequest) {
       set: {
         latestVersion,
         minSupportedVersion,
-        channel,
         mandatory,
         updatedAt: now,
         updatedBy: authResult.userId,

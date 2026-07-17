@@ -423,7 +423,6 @@ describe("Watchers API", () => {
     expect(data).toEqual({
       latest_version: "9.9.9",
       min_supported_version: "0.1.0",
-      channel: "stable",
       mandatory: false,
     });
     watcherUpdateCheckResponse.parse(data);

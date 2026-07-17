@@ -222,13 +222,12 @@ export async function setup() {
   try {
     await seedPool.query(`
       INSERT INTO watcher_release_config
-        (id, latest_version, min_supported_version, channel, mandatory)
+        (id, latest_version, min_supported_version, mandatory)
       VALUES
-        (true, '9.9.9', '0.1.0', 'stable', false)
+        (true, '9.9.9', '0.1.0', false)
       ON CONFLICT (id) DO UPDATE SET
         latest_version = excluded.latest_version,
         min_supported_version = excluded.min_supported_version,
-        channel = excluded.channel,
         mandatory = excluded.mandatory,
         updated_at = now()
     `);

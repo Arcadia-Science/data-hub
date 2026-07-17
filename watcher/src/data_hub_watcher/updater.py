@@ -542,7 +542,6 @@ class Updater:
         details_started: dict[str, Any] = {
             "current_version": WATCHER_VERSION,
             "target_version": target,
-            "channel": info.channel,
             "mandatory": info.mandatory,
             "install_method": method.value,
         }
@@ -752,7 +751,6 @@ class Updater:
         details_started: dict[str, Any] = {
             "current_version": WATCHER_VERSION,
             "target_version": target,
-            "channel": info.channel,
             "mandatory": info.mandatory,
             "install_method": method.value,
             "via_worker": True,

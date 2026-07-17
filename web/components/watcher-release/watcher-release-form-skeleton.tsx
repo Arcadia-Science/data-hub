@@ -49,7 +49,6 @@ export function WatcherReleaseFormSkeleton() {
         <div className="flex flex-col gap-7">
           <VersionFieldSkeleton labelWidth="w-28" />
           <VersionFieldSkeleton labelWidth="w-44" />
-          <VersionFieldSkeleton descriptionLines={1} labelWidth="w-28" />
           <MandatoryUpdateFieldSkeleton />
         </div>
       </CardContent>

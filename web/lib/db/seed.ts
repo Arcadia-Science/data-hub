@@ -130,13 +130,12 @@ export async function seedDevUser(
 export async function seedWatcherReleaseConfig(db: Db): Promise<void> {
   await db.execute(
     sql`INSERT INTO watcher_release_config
-       (id, latest_version, min_supported_version, channel, mandatory)
+       (id, latest_version, min_supported_version, mandatory)
      VALUES
-       (true, '9.9.9', '0.1.0', 'stable', false)
+       (true, '9.9.9', '0.1.0', false)
      ON CONFLICT (id) DO UPDATE SET
        latest_version = EXCLUDED.latest_version,
        min_supported_version = EXCLUDED.min_supported_version,
-       channel = EXCLUDED.channel,
        mandatory = EXCLUDED.mandatory,
        updated_at = now(),
        updated_by = NULL`

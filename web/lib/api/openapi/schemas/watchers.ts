@@ -132,7 +132,6 @@ export const watcherUploadQueueResponse = z.object({
 });
 
 export const watcherUpdateCheckResponse = z.object({
-  channel: z.string(),
   latest_version: z.string().nullable(),
   mandatory: z.boolean(),
   min_supported_version: z.string().nullable(),

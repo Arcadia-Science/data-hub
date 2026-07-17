@@ -36,8 +36,7 @@ logger = logging.getLogger(__name__)
 
 PACKAGE_NAME = "data-hub-watcher"
 
-# Default index for `pip install` invocations. PyPI is hard-coded for now;
-# can be made configurable per channel later.
+# Default index for `pip install` / `uv tool install` invocations.
 DEFAULT_INDEX_URL = "https://pypi.org/simple/"
 
 

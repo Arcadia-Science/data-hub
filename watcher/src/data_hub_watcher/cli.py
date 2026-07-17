@@ -1219,7 +1219,7 @@ def self_update(ctx: click.Context, check: bool, force: bool) -> None:
 
     target_label = info.latest_version or "(none configured)"
     mandatory_label = " [mandatory]" if info.mandatory else ""
-    click.echo(f"Server target:   {target_label} (channel={info.channel}){mandatory_label}")
+    click.echo(f"Server target:   {target_label}{mandatory_label}")
 
     decision = evaluate_update(info, force=force)
 
