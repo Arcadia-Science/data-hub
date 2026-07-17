@@ -1,0 +1,1 @@
+CREATE INDEX "idx_run_comments_body_trgm" ON "run_comments" USING gin ("body" gin_trgm_ops) WHERE "run_comments"."deleted_at" is null;

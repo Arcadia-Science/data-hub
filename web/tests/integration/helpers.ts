@@ -80,13 +80,16 @@ export async function resetDb() {
 // but exposing the option here keeps the seeding helper future-proof for
 // any cookie-based session test harness layered on later.
 export async function seedTestUser(
-  options?: Pick<SeedUserOptions, "expiresAt" | "scopes" | "isAdmin">
+  options?: Pick<
+    SeedUserOptions,
+    "expiresAt" | "scopes" | "isAdmin" | "name" | "email"
+  >
 ) {
-  const { userId, token } = await seedDevUser(getTestDb(), {
-    ...options,
+  const { userId, token, tokenId } = await seedDevUser(getTestDb(), {
     name: "Test User",
+    ...options,
   });
-  return { userId, token };
+  return { userId, token, tokenId };
 }
 
 // ---------------------------------------------------------------------------

@@ -218,6 +218,27 @@
       "when": 1783557726363,
       "tag": "0030_mature_manta",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1784234686620,
+      "tag": "0031_add_watcher_registered_by_token",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1784308273738,
+      "tag": "0032_add_run_comments_body_trgm",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1784320580169,
+      "tag": "0033_steady_wasp",
+      "breakpoints": true
     }
   ]
 }

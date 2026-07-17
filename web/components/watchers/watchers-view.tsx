@@ -8,7 +8,11 @@ import {
 } from "@/components/watchers/watchers-table";
 import type { WatcherListItem } from "@/lib/api/watchers";
 
-export function WatchersViewSkeleton() {
+export function WatchersViewSkeleton({
+  isAdmin = false,
+}: {
+  isAdmin?: boolean;
+}) {
   return (
     <div aria-busy="true" aria-label="Loading watchers" role="status">
       <Tabs defaultValue="active">
@@ -17,10 +21,10 @@ export function WatchersViewSkeleton() {
           <TabsTrigger value="deregistered">Deregistered</TabsTrigger>
         </TabsList>
         <TabsContent className="mt-2" value="active">
-          <WatchersTableSkeleton />
+          <WatchersTableSkeleton withActions={isAdmin} />
         </TabsContent>
         <TabsContent className="mt-2" value="deregistered">
-          <WatchersTableSkeleton />
+          <WatchersTableSkeleton withActions={false} />
         </TabsContent>
       </Tabs>
     </div>
@@ -35,9 +39,12 @@ type Tab = "active" | "deregistered";
 export function WatchersView({
   activeData,
   deregisteredData,
+  isAdmin = false,
 }: {
   activeData: WatcherListItem[];
   deregisteredData: WatcherListItem[];
+  /** Admins get the inline Deregister action on active rows. */
+  isAdmin?: boolean;
 }) {
   const [tab, setTab] = useState<Tab>("active");
 
@@ -50,7 +57,7 @@ export function WatchersView({
         </TabsTrigger>
       </TabsList>
       <TabsContent className="mt-2" value="active">
-        <WatchersTable data={activeData} />
+        <WatchersTable data={activeData} isAdmin={isAdmin} />
       </TabsContent>
       <TabsContent className="mt-2" value="deregistered">
         <WatchersTable data={deregisteredData} isDeregisteredView />

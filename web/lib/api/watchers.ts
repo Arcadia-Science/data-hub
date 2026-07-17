@@ -2,7 +2,10 @@ import { and, asc, count, desc, eq, gte, inArray, isNull } from "drizzle-orm";
 import { cache } from "react";
 import YAML from "yaml";
 import { type ActorUser, resolveActorUser } from "@/lib/api/actor";
+import type { AuthResult } from "@/lib/api/auth";
+import { apiError, FORBIDDEN } from "@/lib/api/errors";
 import { instrumentHasOnlineWatcher } from "@/lib/api/instruments";
+import { decideWatcherBinding } from "@/lib/api/watcher-binding";
 import { type DbExecutor, db } from "@/lib/db";
 import {
   files,
@@ -25,6 +28,56 @@ export async function findActiveWatcher(watcherId: string) {
     .limit(1);
 
   return watcher ?? null;
+}
+
+/**
+ * Returns null when the caller may act on this watcher, or a Response the
+ * handler should return. Sessions are fully privileged (browser admins).
+ * Token callers must match the watcher's registered PAT. A null binding is
+ * claimed trust-on-first-use (atomic), then enforced thereafter.
+ */
+export async function enforceWatcherBinding(
+  authResult: AuthResult,
+  watcher: { id: string; registeredByToken: string | null }
+): Promise<Response | null> {
+  const verdict = decideWatcherBinding(authResult, watcher.registeredByToken);
+
+  if (verdict === "allow") {
+    return null;
+  }
+  if (verdict === "deny") {
+    return apiError(403, FORBIDDEN, "Token is not authorized for this watcher");
+  }
+
+  // `decideWatcherBinding` only returns "tofu" when tokenId is set.
+  const tokenId = authResult.tokenId;
+  if (!tokenId) {
+    return apiError(403, FORBIDDEN, "Token is not authorized for this watcher");
+  }
+
+  // TOFU: first token to check in claims the row. The `is null` guard
+  // makes concurrent claims atomic — the loser re-reads and is denied.
+  const claimed = await db
+    .update(watchers)
+    .set({ registeredByToken: tokenId })
+    .where(and(eq(watchers.id, watcher.id), isNull(watchers.registeredByToken)))
+    .returning({ id: watchers.id });
+
+  if (claimed.length > 0) {
+    return null;
+  }
+
+  const [current] = await db
+    .select({ registeredByToken: watchers.registeredByToken })
+    .from(watchers)
+    .where(eq(watchers.id, watcher.id))
+    .limit(1);
+
+  if (current?.registeredByToken === tokenId) {
+    return null;
+  }
+
+  return apiError(403, FORBIDDEN, "Token is not authorized for this watcher");
 }
 
 /**

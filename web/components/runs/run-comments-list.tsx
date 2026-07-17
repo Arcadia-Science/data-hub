@@ -1,12 +1,22 @@
 "use client";
 
 import { useSession } from "next-auth/react";
-import { useOptimistic, useState } from "react";
+import { useEffect, useOptimistic, useState } from "react";
 import { RunCommentForm } from "@/components/runs/run-comment-form";
 import { RunCommentItem } from "@/components/runs/run-comment-item";
 import { Card } from "@/components/ui/card";
 import type { RunCommentDto } from "@/lib/api/run-comments";
 import { toInitials } from "@/lib/utils";
+
+const COMMENT_HASH_PREFIX = "#comment-";
+
+function scrollToCommentHash() {
+  const { hash } = window.location;
+  if (!hash.startsWith(COMMENT_HASH_PREFIX)) {
+    return;
+  }
+  document.getElementById(hash.slice(1))?.scrollIntoView({ block: "center" });
+}
 
 type Action =
   | { kind: "create"; comment: RunCommentDto }
@@ -60,6 +70,15 @@ export function RunCommentsList({
 
   const [committed, setCommitted] = useState(initialComments);
   const [optimistic, dispatch] = useOptimistic(committed, applyOptimistic);
+
+  // One listener for the whole list (not per-item). Covers initial deep links
+  // and same-page `#comment-{id}` changes; `global-search` dispatches
+  // `hashchange` after pushState because App Router won't.
+  useEffect(() => {
+    scrollToCommentHash();
+    window.addEventListener("hashchange", scrollToCommentHash);
+    return () => window.removeEventListener("hashchange", scrollToCommentHash);
+  }, []);
 
   // Build a comment-shaped object for the optimistic create. The id is a
   // client-generated `temp-…` so the row is keyable; the real id replaces

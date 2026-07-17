@@ -155,7 +155,7 @@ export const sessions = pgTable(
 // `GET /api/v1/watchers/:id/update-check` and edited via the admin-only
 // `/settings/watchers` page. Previously sourced from the
 // `WATCHER_LATEST_VERSION` / `WATCHER_MIN_SUPPORTED_VERSION` /
-// `WATCHER_RELEASE_CHANNEL` / `WATCHER_MANDATORY_UPDATE` env vars.
+// `WATCHER_MANDATORY_UPDATE` env vars.
 //
 // The `id boolean PRIMARY KEY DEFAULT true` + check constraint is the
 // standard Postgres singleton trick — schema-level guarantee of at most
@@ -177,9 +177,6 @@ export const watcherReleaseConfig = pgTable(
     // (see `app/api/v1/watchers/[watcherId]/heartbeat/route.ts`) so they
     // can't continue checking in without self-updating first.
     minSupportedVersion: text("min_supported_version"),
-    // Defaults to "stable"; surfaced in the response and shown in
-    // `self-update` output.
-    channel: text("channel").notNull().default("stable"),
     // When true, the release skips the watcher's activity-window guard so
     // mid-acquisition PCs upgrade immediately. Has no effect when
     // `latest_version` is NULL — `update-check` collapses it to false on
@@ -382,6 +379,14 @@ export const watchers = pgTable(
     deregisteredBy: text("deregistered_by").references(() => users.id, {
       onDelete: "set null",
     }),
+    // PAT that registered this watcher. Watcher-scoped ops (heartbeat, config,
+    // events, upload-queue, update-check) require the same PAT. NULL for
+    // pre-binding rows (claimed trust-on-first-use) and session registrations.
+    // `set null` on token delete so rotation can re-claim via TOFU.
+    registeredByToken: uuid("registered_by_token").references(
+      () => personalAccessTokens.id,
+      { onDelete: "set null" }
+    ),
   },
   (watcher) => [
     // Partial unique index — at most one active watcher per instrument.
@@ -726,6 +731,11 @@ export const runComments = pgTable(
       comment.createdAt.desc()
     ),
     index("idx_run_comments_user_id").on(comment.userId),
+    // Trigram GIN index backing global-search `ilike '%…%'` on comment bodies.
+    // Scoped to active rows; requires `pg_trgm` (created in migration 0029).
+    index("idx_run_comments_body_trgm")
+      .using("gin", sql`${comment.body} gin_trgm_ops`)
+      .where(sql`${comment.deletedAt} is null`),
   ]
 );
 

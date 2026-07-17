@@ -132,6 +132,17 @@ Checks the API for a newer published version and runs the appropriate `uv tool i
 
 The config file lives at `~/.data-hub/config.yaml` by default. Override with `--config` or the `DATA_HUB_CONFIG_PATH` environment variable. The API key is stored separately in `~/.data-hub/.env.<environment>` (e.g. `.env.staging`, `.env.production`, or `.env.preview`); the legacy `~/.data-hub/.env` is also loaded for backwards compatibility, with the per-environment file taking precedence.
 
+### API key binding and rotation
+
+Each watcher is bound to the personal access token (PAT) that registered it. Heartbeats, config sync, events, upload-queue polls, and update-checks from a different PAT receive `403 Forbidden`. Prefer **one PAT per instrument PC** so a compromised key on one machine cannot control other watchers.
+
+When you rotate a PC's PAT:
+
+1. **Recommended for a straight rotation:** delete the old PAT in the Data Hub UI (Settings → Tokens). That nulls `watchers.registered_by_token`; the next check-in with the new key re-claims the binding (trust-on-first-use). Update `~/.data-hub/.env.<environment>` with the new key before the watcher checks in again.
+2. **Clean reinstall:** deregister the watcher in the UI (Watchers → open the watcher → Deregister), then re-run `data-hub-watcher init` on the PC with the new PAT. That registers a fresh watcher row bound to the new credential.
+
+There is no token-adoptable API for rebinding an already-claimed watcher — any such endpoint gated by `watchers:report` would reopen cross-watcher control.
+
 ### Config file format
 
 ```yaml

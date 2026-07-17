@@ -11,6 +11,7 @@ import { heartbeatBody, readJsonBody } from "@/lib/api/openapi";
 import { isValidUUID } from "@/lib/api/validators";
 import { isBelowFloor } from "@/lib/api/watcher-versions";
 import {
+  enforceWatcherBinding,
   findActiveWatcher,
   revertUploadQueueIfWatcherOffline,
 } from "@/lib/api/watchers";
@@ -40,6 +41,11 @@ export async function POST(
     return apiError(404, NOT_FOUND, `Watcher '${watcherId}' not found`);
   }
 
+  const bindingError = await enforceWatcherBinding(authResult, watcher);
+  if (bindingError) {
+    return bindingError;
+  }
+
   const body = await readJsonBody(request, heartbeatBody);
   if (body instanceof Response) {
     return body;
@@ -64,7 +70,6 @@ export async function POST(
     .select({
       minSupportedVersion: watcherReleaseConfig.minSupportedVersion,
       latestVersion: watcherReleaseConfig.latestVersion,
-      channel: watcherReleaseConfig.channel,
     })
     .from(watcherReleaseConfig);
 
@@ -80,7 +85,6 @@ export async function POST(
         current_version: reportedVersion,
         min_supported_version: releaseRow.minSupportedVersion,
         latest_version: releaseRow.latestVersion,
-        channel: releaseRow.channel,
       }
     );
   }

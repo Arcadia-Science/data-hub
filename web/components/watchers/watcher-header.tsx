@@ -45,7 +45,14 @@ export function WatcherHeaderSkeleton() {
   );
 }
 
-export function WatcherHeader({ watcher }: { watcher: WatcherDetail }) {
+export function WatcherHeader({
+  watcher,
+  isAdmin = false,
+}: {
+  watcher: WatcherDetail;
+  /** Admins get the Deregister action when the watcher is still active. */
+  isAdmin?: boolean;
+}) {
   const isDeregistered = !!watcher.deletedAt;
 
   return (
@@ -92,12 +99,12 @@ export function WatcherHeader({ watcher }: { watcher: WatcherDetail }) {
             {isDeregistered && <Badge variant="secondary">Deregistered</Badge>}
           </div>
 
-          {!isDeregistered && (
+          {isAdmin && !isDeregistered ? (
             <DeregisterDialog
               hostname={watcher.hostname}
               watcherId={watcher.id}
             />
-          )}
+          ) : null}
         </div>
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground text-sm">

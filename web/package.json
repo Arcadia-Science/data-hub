@@ -27,6 +27,7 @@
     "test:unit:watch": "vitest --config vitest.unit.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:integration:watch": "vitest --config vitest.integration.config.ts",
+    "test": "npm run test:unit && npm run test:integration",
     "check": "npm run lint:check && npm run typecheck",
     "check-all": "npm run check && npm run test-all && npm run build"
   },
@@ -84,9 +85,12 @@
     "drizzle-kit": "^0.31.10",
     "postcss": "^8",
     "tailwindcss": "^4.2.1",
-    "tsx": "^4.21.0",
+    "tsx": "^4.23.1",
     "typescript": "^5.9.3",
     "ultracite": "^7.8.3",
     "vitest": "^4.1.2"
+  },
+  "overrides": {
+    "esbuild": "^0.28.1"
   }
 }

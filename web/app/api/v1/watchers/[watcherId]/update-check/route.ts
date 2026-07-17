@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { isValidUUID } from "@/lib/api/validators";
-import { findActiveWatcher } from "@/lib/api/watchers";
+import { enforceWatcherBinding, findActiveWatcher } from "@/lib/api/watchers";
 import { db } from "@/lib/db";
 import { watcherReleaseConfig } from "@/lib/db/schema";
 
@@ -16,7 +16,6 @@ import { watcherReleaseConfig } from "@/lib/db/schema";
  * client treats it as "no update available".
  */
 interface WatcherReleaseInfo {
-  channel: string;
   latest_version: string | null;
   mandatory: boolean;
   min_supported_version: string | null;
@@ -30,14 +29,12 @@ async function readReleaseInfo(): Promise<WatcherReleaseInfo> {
     return {
       latest_version: null,
       min_supported_version: null,
-      channel: "stable",
       mandatory: false,
     };
   }
   return {
     latest_version: row.latestVersion,
     min_supported_version: row.minSupportedVersion,
-    channel: row.channel,
     // Collapsing mandatory→false when no version is advertised keeps the
     // wire response self-consistent. The watcher's mandatory branch is
     // gated on `latest_version` anyway, but mirroring that invariant
@@ -67,6 +64,11 @@ export async function GET(
   const watcher = await findActiveWatcher(watcherId);
   if (!watcher) {
     return apiError(404, NOT_FOUND, `Watcher '${watcherId}' not found`);
+  }
+
+  const bindingError = await enforceWatcherBinding(authResult, watcher);
+  if (bindingError) {
+    return bindingError;
   }
 
   return Response.json(await readReleaseInfo());

@@ -11,20 +11,14 @@ import {
   Field,
   FieldContent,
   FieldDescription,
-  FieldError,
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { VersionField } from "@/components/watcher-release/version-field";
+import { VERSION_MESSAGE, VERSION_REGEX } from "@/lib/api/watcher-versions";
+import type { WatcherVersionOption } from "@/lib/pypi";
 import { formatRelativeTime } from "@/lib/utils";
-
-// Loose PEP 440-ish version match. Mirrors VERSION_REGEX in
-// app/api/v1/settings/watcher-release/route.ts so the client surfaces the
-// same rule the server enforces — typos are caught inline rather than
-// round-tripping through the API just to get a 400 back.
-const VERSION_REGEX = /^\d+\.\d+\.\d+([.-].+)?$/;
-const VERSION_MESSAGE = "Use a PEP 440-style version like 1.2.3 or 1.2.3rc1.";
 
 // Both version fields treat "" as "unset", so empty strings always pass —
 // the server's normaliser collapses "" → null on the wire. We only enforce
@@ -40,9 +34,6 @@ const optionalVersion = z.string().refine(
 const formSchema = z.object({
   latestVersion: optionalVersion,
   minSupportedVersion: optionalVersion,
-  channel: z
-    .string()
-    .refine((v) => v.trim().length > 0, { message: "Channel can't be empty." }),
   mandatory: z.boolean(),
 });
 
@@ -55,13 +46,17 @@ interface LastUpdated {
 }
 
 interface WatcherReleaseFormProps {
+  availableVersions: WatcherVersionOption[];
   initial: WatcherReleaseFormValues;
   lastUpdated: LastUpdated | null;
+  pypiReachable: boolean;
 }
 
 export function WatcherReleaseForm({
+  availableVersions,
   initial,
   lastUpdated,
+  pypiReachable,
 }: WatcherReleaseFormProps) {
   const router = useRouter();
 
@@ -77,6 +72,11 @@ export function WatcherReleaseForm({
       onSubmit: formSchema,
     },
     onSubmit: async ({ value }) => {
+      // Trim before the wire and before reset so free-text whitespace
+      // doesn't leave isDirty=false with a value that differs from the
+      // server-persisted row after refresh.
+      const latestVersion = value.latestVersion.trim();
+      const minSupportedVersion = value.minSupportedVersion.trim();
       const res = await fetch("/api/v1/settings/watcher-release", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -84,9 +84,8 @@ export function WatcherReleaseForm({
           // Server accepts string|null; sending the trimmed string
           // (possibly empty) lets the server's normaliser convert ""→null
           // so the wire contract stays "empty means unset" everywhere.
-          latest_version: value.latestVersion.trim() || null,
-          min_supported_version: value.minSupportedVersion.trim() || null,
-          channel: value.channel.trim(),
+          latest_version: latestVersion || null,
+          min_supported_version: minSupportedVersion || null,
           // The server collapses mandatory→false on read when
           // latest_version is null, so we don't need to mirror that on
           // write — keep the user's explicit choice in the row.
@@ -104,7 +103,11 @@ export function WatcherReleaseForm({
       // Re-baseline to the saved values so `isDirty` resets and the Save
       // button disables until the next edit. router.refresh() still re-runs
       // the server component so the "last updated by" line re-renders.
-      form.reset(value);
+      form.reset({
+        latestVersion,
+        minSupportedVersion,
+        mandatory: value.mandatory,
+      });
       router.refresh();
     },
   });
@@ -134,30 +137,28 @@ export function WatcherReleaseForm({
                 const isInvalid =
                   field.state.meta.isTouched && !field.state.meta.isValid;
                 return (
-                  <Field data-invalid={isInvalid}>
-                    <FieldLabel htmlFor={field.name}>Latest version</FieldLabel>
-                    <Input
-                      aria-invalid={isInvalid}
-                      autoComplete="off"
-                      className="font-mono"
-                      id={field.name}
-                      name={field.name}
-                      onBlur={field.handleBlur}
-                      onChange={(e) => field.handleChange(e.target.value)}
-                      placeholder="e.g. 0.4.2"
-                      spellCheck={false}
-                      value={field.state.value}
-                    />
-                    <FieldDescription>
-                      The release watchers will self-upgrade to. Leave blank to
-                      temporarily disable self-updates (the endpoint returns{" "}
-                      <code className="font-mono">latest_version: null</code>{" "}
-                      and clients skip the upgrade).
-                    </FieldDescription>
-                    {isInvalid && (
-                      <FieldError errors={field.state.meta.errors} />
-                    )}
-                  </Field>
+                  <VersionField
+                    availableVersions={availableVersions}
+                    description={
+                      <>
+                        The release watchers will self-upgrade to. Leave blank
+                        to temporarily disable self-updates (the endpoint
+                        returns{" "}
+                        <code className="font-mono">latest_version: null</code>{" "}
+                        and clients skip the upgrade).
+                      </>
+                    }
+                    errors={field.state.meta.errors}
+                    id={field.name}
+                    isInvalid={isInvalid}
+                    label="Latest version"
+                    noneLabel="None — disable self-updates"
+                    onBlur={field.handleBlur}
+                    onChange={field.handleChange}
+                    placeholder="e.g. 0.4.2"
+                    pypiReachable={pypiReachable}
+                    value={field.state.value}
+                  />
                 );
               }}
             </form.Field>
@@ -167,67 +168,28 @@ export function WatcherReleaseForm({
                 const isInvalid =
                   field.state.meta.isTouched && !field.state.meta.isValid;
                 return (
-                  <Field data-invalid={isInvalid}>
-                    <FieldLabel htmlFor={field.name}>
-                      Minimum supported version
-                    </FieldLabel>
-                    <Input
-                      aria-invalid={isInvalid}
-                      autoComplete="off"
-                      className="font-mono"
-                      id={field.name}
-                      name={field.name}
-                      onBlur={field.handleBlur}
-                      onChange={(e) => field.handleChange(e.target.value)}
-                      placeholder="e.g. 0.1.0"
-                      spellCheck={false}
-                      value={field.state.value}
-                    />
-                    <FieldDescription>
-                      Optional floor. Watchers reporting an installed version
-                      below this have their heartbeats rejected with{" "}
-                      <code className="font-mono">426 Upgrade Required</code>,
-                      forcing them to self-update before they can check in
-                      again. Leave blank to disable the floor.
-                    </FieldDescription>
-                    {isInvalid && (
-                      <FieldError errors={field.state.meta.errors} />
-                    )}
-                  </Field>
-                );
-              }}
-            </form.Field>
-
-            <form.Field name="channel">
-              {(field) => {
-                const isInvalid =
-                  field.state.meta.isTouched && !field.state.meta.isValid;
-                return (
-                  <Field data-invalid={isInvalid}>
-                    <FieldLabel htmlFor={field.name}>
-                      Release channel
-                    </FieldLabel>
-                    <Input
-                      aria-invalid={isInvalid}
-                      autoComplete="off"
-                      className="font-mono"
-                      id={field.name}
-                      name={field.name}
-                      onBlur={field.handleBlur}
-                      onChange={(e) => field.handleChange(e.target.value)}
-                      placeholder="stable"
-                      spellCheck={false}
-                      value={field.state.value}
-                    />
-                    <FieldDescription>
-                      Defaults to <code className="font-mono">stable</code>.
-                      Surfaced in the response and shown in{" "}
-                      <code className="font-mono">self-update</code> output.
-                    </FieldDescription>
-                    {isInvalid && (
-                      <FieldError errors={field.state.meta.errors} />
-                    )}
-                  </Field>
+                  <VersionField
+                    availableVersions={availableVersions}
+                    description={
+                      <>
+                        Optional floor. Watchers reporting an installed version
+                        below this have their heartbeats rejected with{" "}
+                        <code className="font-mono">426 Upgrade Required</code>,
+                        forcing them to self-update before they can check in
+                        again. Leave blank to disable the floor.
+                      </>
+                    }
+                    errors={field.state.meta.errors}
+                    id={field.name}
+                    isInvalid={isInvalid}
+                    label="Minimum supported version"
+                    noneLabel="None — no version floor"
+                    onBlur={field.handleBlur}
+                    onChange={field.handleChange}
+                    placeholder="e.g. 0.1.0"
+                    pypiReachable={pypiReachable}
+                    value={field.state.value}
+                  />
                 );
               }}
             </form.Field>
@@ -324,14 +286,10 @@ export function WatcherReleaseForm({
                 canSubmit: state.canSubmit,
                 isSubmitting: state.isSubmitting,
                 isDirty: state.isDirty,
-                channelEmpty: state.values.channel.trim().length === 0,
               })}
             >
-              {({ canSubmit, isSubmitting, isDirty, channelEmpty }) => (
-                <Button
-                  disabled={!canSubmit || channelEmpty || !isDirty}
-                  type="submit"
-                >
+              {({ canSubmit, isSubmitting, isDirty }) => (
+                <Button disabled={!(canSubmit && isDirty)} type="submit">
                   {isSubmitting ? (
                     <Loader2
                       className="animate-spin"

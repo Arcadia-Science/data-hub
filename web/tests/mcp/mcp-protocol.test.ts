@@ -185,7 +185,16 @@ vi.mock("@/lib/api/search", () => ({
     runs: [],
     files: [],
     instruments: [],
-    counts: { runs: 0, files: 0, instruments: 0, total: 0 },
+    users: [],
+    comments: [],
+    counts: {
+      runs: 0,
+      files: 0,
+      instruments: 0,
+      users: 0,
+      comments: 0,
+      total: 0,
+    },
   }),
 }));
 
@@ -732,6 +741,8 @@ describe("MCP Protocol (in-memory)", () => {
     expect(parsed).toHaveProperty("runs");
     expect(parsed).toHaveProperty("files");
     expect(parsed).toHaveProperty("instruments");
+    expect(parsed).toHaveProperty("users");
+    expect(parsed).toHaveProperty("comments");
     expect(parsed.counts).toHaveProperty("total");
   });
 
