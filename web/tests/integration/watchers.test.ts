@@ -453,6 +453,23 @@ describe("Watchers API", () => {
   // DELETE /api/v1/watchers/:watcherId
   // -------------------------------------------------------------------------
 
+  it("DELETE /api/v1/watchers/:id returns 403 without watchers:admin scope", async () => {
+    const { token: readOnlyToken } = await seedTestUser({
+      scopes: ["watchers:read"],
+    });
+
+    const res = await api(`/api/v1/watchers/${watcherId}`, {
+      method: "DELETE",
+      token: readOnlyToken,
+    });
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error.code).toBe("FORBIDDEN");
+    expect(body.error.message).toMatch(
+      /missing required scope: watchers:admin/
+    );
+  });
+
   // Watchers are soft-deleted (deleted_at set) rather than physically removed,
   // preserving the audit trail of heartbeats and events for debugging.
   it("DELETE /api/v1/watchers/:id soft-deletes the watcher", async () => {

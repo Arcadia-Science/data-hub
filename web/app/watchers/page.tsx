@@ -27,19 +27,22 @@ export default async function WatchersPage() {
     );
   }
 
+  // Deregister is admin-only; everyone else sees the same listing tabs.
+  const isAdmin = session.user.isAdmin === true;
+
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
       <div className="flex items-center justify-between">
         <h1 className="font-semibold text-2xl tracking-tight">Watchers</h1>
       </div>
-      <Suspense fallback={<WatchersViewSkeleton />}>
-        <WatchersListSection />
+      <Suspense fallback={<WatchersViewSkeleton isAdmin={isAdmin} />}>
+        <WatchersListSection isAdmin={isAdmin} />
       </Suspense>
     </div>
   );
 }
 
-async function WatchersListSection() {
+async function WatchersListSection({ isAdmin }: { isAdmin: boolean }) {
   // Fetch all watchers in a single query and partition client-side. The total
   // count is small (typically <50), so this avoids two separate DB round-trips
   // and lets the toggle between active/deregistered be instant (no refetch).
@@ -48,5 +51,11 @@ async function WatchersListSection() {
   const active = allWatchers.filter((w) => !w.deletedAt);
   const deregistered = allWatchers.filter((w) => w.deletedAt);
 
-  return <WatchersView activeData={active} deregisteredData={deregistered} />;
+  return (
+    <WatchersView
+      activeData={active}
+      deregisteredData={deregistered}
+      isAdmin={isAdmin}
+    />
+  );
 }

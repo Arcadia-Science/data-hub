@@ -84,10 +84,15 @@ export function WatchersTableSkeleton({
 export function WatchersTable({
   data,
   isDeregisteredView = false,
+  isAdmin = false,
 }: {
   data: WatcherListItem[];
   isDeregisteredView?: boolean;
+  /** Admins get the inline Deregister action on active rows. */
+  isAdmin?: boolean;
 }) {
+  const showActions = !isDeregisteredView && isAdmin;
+
   if (data.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-background py-16 dark:bg-muted">
@@ -112,7 +117,7 @@ export function WatchersTable({
             <TableHead>Version</TableHead>
             <TableHead>Status</TableHead>
             <TableHead>Last Heartbeat</TableHead>
-            {!isDeregisteredView && <TableHead className="w-[80px]" />}
+            {showActions ? <TableHead className="w-[80px]" /> : null}
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -160,7 +165,7 @@ export function WatchersTable({
                     : "—"}
                 </span>
               </TableCell>
-              {!isDeregisteredView && (
+              {showActions ? (
                 <TableCell onClick={(e) => e.stopPropagation()}>
                   {!row.deletedAt && (
                     <DeregisterDialog
@@ -169,7 +174,7 @@ export function WatchersTable({
                     />
                   )}
                 </TableCell>
-              )}
+              ) : null}
             </ClickableRow>
           ))}
         </TableBody>
