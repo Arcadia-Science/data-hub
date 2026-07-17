@@ -22,7 +22,7 @@ export const DATAHUB_GLOSSARY = {
     "get_run_archive may return { status: 'building', retryAfterSeconds }. Call again after the wait until status is 'ready'.",
   toolRouting: {
     vagueDiscovery:
-      "Prefer global_search when the query may match filenames, instrument names, or attributor names. Prefer search_runs for structured filters (date, status, metadata).",
+      "Prefer global_search when the query may match filenames, instrument names, user names/emails, or comment bodies. Prefer search_runs for structured filters (date, status, metadata).",
     myRuns: 'search_runs with ranBy="me", or get_me then ranBy=<id>.',
     experimentalResults:
       "Prefer get_run_report for bounded CSV samples and failure summaries over downloading full files.",

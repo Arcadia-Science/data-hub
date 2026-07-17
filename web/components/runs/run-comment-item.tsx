@@ -2,7 +2,7 @@
 
 import { Loader2, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import {
@@ -67,6 +67,16 @@ export function RunCommentItem({
   const [isDeleting, startDeletingTransition] = useTransition();
 
   const isAuthor = currentUserId !== null && comment.user.id === currentUserId;
+  const anchorId = `comment-${comment.id}`;
+
+  // Deep links from notifications / global search use `#comment-{id}`; scroll
+  // the matching article into view once it mounts.
+  useEffect(() => {
+    if (window.location.hash !== `#${anchorId}`) {
+      return;
+    }
+    document.getElementById(anchorId)?.scrollIntoView({ block: "center" });
+  }, [anchorId]);
 
   const trimmed = draft.trim();
   const tooLong = draft.length > MAX_BODY_LENGTH;
@@ -109,7 +119,7 @@ export function RunCommentItem({
 
   return (
     <>
-      <article className="flex flex-col gap-1.5">
+      <article className="flex flex-col gap-1.5" id={anchorId}>
         <div className="flex items-start justify-between gap-2">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground text-sm">
             <UserAvatarLink

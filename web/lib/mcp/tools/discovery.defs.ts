@@ -5,13 +5,13 @@ export const globalSearchTool = {
   name: "global_search",
   title: "Global Search",
   description:
-    "Fuzzy search across runs, files, and instruments (same backend as the UI ⌘K palette). Prefer this over search_runs when the query may match a filename, instrument display name, or attributor name. Use search_runs for date/status/metadata filters. Queries shorter than 2 characters are rejected.",
+    "Fuzzy search across runs, files, instruments, users, and comments (same backend as the UI ⌘K palette). Prefer this over search_runs when the query may match a filename, instrument display name, attributor name, user, or comment body. Use search_runs for date/status/metadata filters. Queries shorter than 2 characters are rejected.",
   group: "discovery",
   scope: "runs:read",
   inputSchema: {
     query: z.string().describe("Search query (min 2 characters)"),
     scope: z
-      .enum(["all", "runs", "files", "instruments"])
+      .enum(["all", "runs", "files", "instruments", "users", "comments"])
       .optional()
       .describe("Limit results to one entity type (default: all)"),
   },

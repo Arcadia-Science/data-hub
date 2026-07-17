@@ -1,6 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { GlobalSearchResult } from "@/lib/api/search";
-import { files, instrumentRuns, instruments, watchers } from "@/lib/db/schema";
+import {
+  files,
+  instrumentRuns,
+  instruments,
+  runComments,
+  watchers,
+} from "@/lib/db/schema";
 import {
   api,
   closeTestDb,
@@ -49,10 +55,16 @@ async function search(
 
 describe("Global search API", () => {
   let token: string;
+  let authorUserId: string;
+  let specialRunUuid: string;
 
   beforeAll(async () => {
     await resetDb();
     ({ token } = await seedTestUser());
+    ({ userId: authorUserId } = await seedTestUser({
+      name: "Dakota Lab",
+      email: "dakota.search@example.com",
+    }));
 
     const db = getTestDb();
     await db.insert(instruments).values([
@@ -87,9 +99,23 @@ describe("Global search API", () => {
     await seedRun("hina-microscope", "20260630_101502_204", ["scan_009.nd2"]);
     // Literal special characters: `photo.*jpg` must match a `.*jpg` query while
     // `photoXjpg` must not (the query is never treated as a regex/glob).
-    await seedRun("hina-microscope", "special-run", [
+    specialRunUuid = await seedRun("hina-microscope", "special-run", [
       "photo.*jpg",
       "photoXjpg",
+    ]);
+
+    await db.insert(runComments).values([
+      {
+        runId: specialRunUuid,
+        userId: authorUserId,
+        body: "Growth curve looks promising after UBE2A rescue",
+      },
+      {
+        runId: specialRunUuid,
+        userId: authorUserId,
+        body: "Soft-deleted note about UBE2A should not match",
+        deletedAt: new Date(),
+      },
     ]);
   });
 
@@ -108,6 +134,8 @@ describe("Global search API", () => {
     expect(result.runs).toHaveLength(0);
     expect(result.files).toHaveLength(0);
     expect(result.instruments).toHaveLength(0);
+    expect(result.users).toHaveLength(0);
+    expect(result.comments).toHaveLength(0);
   });
 
   it("matches a run by its run id", async () => {
@@ -157,6 +185,8 @@ describe("Global search API", () => {
     expect(result.runs.length).toBeGreaterThan(0);
     expect(result.files).toHaveLength(0);
     expect(result.instruments).toHaveLength(0);
+    expect(result.users).toHaveLength(0);
+    expect(result.comments).toHaveLength(0);
   });
 
   it("treats special characters in the query literally, not as a pattern", async () => {
@@ -174,5 +204,40 @@ describe("Global search API", () => {
     expect(instrument).toBeDefined();
     expect(instrument?.matchReason).toBe("pattern");
     expect(instrument?.runCount).toBe(0);
+  });
+
+  it("matches users by name and email", async () => {
+    const byName = await search(token, "Dakota", "users");
+    expect(byName.users).toHaveLength(1);
+    expect(byName.users[0]?.name).toBe("Dakota Lab");
+    expect(byName.users[0]?.email).toBe("dakota.search@example.com");
+    expect(byName.runs).toHaveLength(0);
+    expect(byName.comments).toHaveLength(0);
+
+    const byEmail = await search(token, "dakota.search", "users");
+    expect(byEmail.users).toHaveLength(1);
+    expect(byEmail.users[0]?.id).toBe(authorUserId);
+  });
+
+  it("matches comments by body and excludes soft-deleted comments", async () => {
+    const result = await search(token, "UBE2A", "comments");
+    expect(result.comments).toHaveLength(1);
+    expect(result.comments[0]?.bodyPreview).toContain("Growth curve");
+    expect(result.comments[0]?.runId).toBe("special-run");
+    expect(result.comments[0]?.instrumentId).toBe("hina-microscope");
+    expect(result.comments[0]?.userId).toBe(authorUserId);
+    expect(result.users).toHaveLength(0);
+  });
+
+  it("includes users and comments in all-scope counts", async () => {
+    const result = await search(token, "Dakota");
+    expect(result.counts.users).toBeGreaterThan(0);
+    expect(result.counts.total).toBe(
+      result.counts.runs +
+        result.counts.files +
+        result.counts.instruments +
+        result.counts.users +
+        result.counts.comments
+    );
   });
 });

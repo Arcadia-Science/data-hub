@@ -732,6 +732,8 @@ describe("MCP Protocol (in-memory)", () => {
     expect(parsed).toHaveProperty("runs");
     expect(parsed).toHaveProperty("files");
     expect(parsed).toHaveProperty("instruments");
+    expect(parsed).toHaveProperty("users");
+    expect(parsed).toHaveProperty("comments");
     expect(parsed.counts).toHaveProperty("total");
   });
 
