@@ -14,6 +14,7 @@ import {
 import { RunSectionHeading } from "@/components/runs/run-section-heading";
 import { Card, CardContent } from "@/components/ui/card";
 import type { RawWellRow } from "@/lib/api/instrument-runs";
+import { sortTimeKeys } from "@/lib/runs/sort-kinetic-time-keys";
 
 /** Measurement types whose well values are numeric and benefit from color-coded heatmaps. */
 const HEATMAP_MEASUREMENT_TYPES = new Set(["Endpoint", "Well Scan", "Kinetic"]);
@@ -49,27 +50,6 @@ type PlateMapGroup =
       timeLabels: string[];
       frames: PlateWellData[][];
     };
-
-/**
- * Sort time-point keys so kinetic slider frames appear in chronological order.
- * Numeric timestamps (e.g. seconds) are sorted numerically; non-numeric labels
- * fall back to locale-aware natural sort.
- */
-function sortTimeKeys(keys: string[]): string[] {
-  const unique = [...new Set(keys)];
-  const allNumeric = unique.every((k) => {
-    if (k === "") {
-      return false;
-    }
-    return Number.isFinite(Number(k));
-  });
-  if (allNumeric) {
-    return unique.sort((a, b) => Number(a) - Number(b));
-  }
-  return unique.sort((a, b) =>
-    a.localeCompare(b, undefined, { numeric: true })
-  );
-}
 
 /**
  * Groups kinetic CSV rows into time-indexed plate map frames, one group per

@@ -156,7 +156,7 @@ export function PlateMapGrid({
   const colLabels = Array.from({ length: cols }, (_, i) => String(i + 1));
 
   return (
-    <div className="flex w-fit flex-col gap-3">
+    <div className="flex w-full min-w-[75%] flex-col gap-3">
       {(plateName || wavelength) && (
         <div className="flex items-baseline justify-between gap-4">
           <h4 className="font-medium font-mono text-foreground text-sm leading-snug">
@@ -171,9 +171,9 @@ export function PlateMapGrid({
       )}
       <div className="overflow-x-auto">
         <div
-          className="inline-grid gap-0.5 text-center"
+          className="grid w-full gap-0.5 text-center"
           style={{
-            gridTemplateColumns: `2rem repeat(${cols}, minmax(3rem, 1fr))`,
+            gridTemplateColumns: `2rem repeat(${cols}, minmax(0, 1fr))`,
           }}
         >
           {/* Column headers */}
@@ -256,8 +256,10 @@ export function PlateMapGrid({
 
 function PlasmaColorBar({ min, max }: { min: number; max: number }) {
   return (
-    <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-      <span className="font-mono">{formatCellValue(min)}</span>
+    <div className="flex items-center gap-2 text-muted-foreground text-xs">
+      <span className="shrink-0 font-mono tabular-nums">
+        {formatCellValue(min)}
+      </span>
       <div
         className="h-3 flex-1 rounded-sm"
         style={{
@@ -265,7 +267,9 @@ function PlasmaColorBar({ min, max }: { min: number; max: number }) {
             "linear-gradient(to right, rgb(13,8,135), rgb(189,55,134), rgb(253,202,38), rgb(240,249,33))",
         }}
       />
-      <span className="font-mono">{formatCellValue(max)}</span>
+      <span className="shrink-0 font-mono tabular-nums">
+        {formatCellValue(max)}
+      </span>
     </div>
   );
 }
@@ -326,7 +330,7 @@ export function KineticPlateMapWithTimeSlider({
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex w-full min-w-[75%] flex-col gap-3">
       <PlateMapGrid
         data={frames[selectedIndex]}
         heatmap={heatmap}
@@ -338,18 +342,12 @@ export function KineticPlateMapWithTimeSlider({
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between gap-2 text-muted-foreground text-xs">
             <span>Time</span>
-            <span
-              className="min-w-0 truncate font-mono text-foreground tabular-nums"
-              title={timeLabels[selectedIndex] ?? ""}
-            >
+            <span className="font-mono text-foreground tabular-nums">
               {timeLabels[selectedIndex] ?? "—"}
             </span>
           </div>
           <div className="flex items-center gap-2">
-            <span
-              className="w-10 shrink-0 truncate text-center font-mono text-[10px] text-muted-foreground"
-              title={timeLabels[0]}
-            >
+            <span className="shrink-0 font-mono text-muted-foreground text-xs tabular-nums">
               {timeLabels[0]}
             </span>
             <Slider
@@ -361,10 +359,7 @@ export function KineticPlateMapWithTimeSlider({
               step={1}
               value={[selectedIndex]}
             />
-            <span
-              className="w-10 shrink-0 truncate text-center font-mono text-[10px] text-muted-foreground"
-              title={timeLabels[maxIdx]}
-            >
+            <span className="shrink-0 font-mono text-muted-foreground text-xs tabular-nums">
               {timeLabels[maxIdx]}
             </span>
           </div>
