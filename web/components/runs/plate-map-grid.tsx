@@ -7,6 +7,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 
 export interface PlateWellData {
   value: unknown;
@@ -84,6 +85,7 @@ function heatmapColor(
 }
 
 interface PlateMapGridProps {
+  className?: string;
   data: unknown;
   heatmap?: boolean;
   /** When heatmap is on, use this scale instead of inferring min/max from `data`. */
@@ -93,6 +95,7 @@ interface PlateMapGridProps {
 }
 
 export function PlateMapGrid({
+  className,
   data,
   heatmap = false,
   heatmapRange,
@@ -156,7 +159,7 @@ export function PlateMapGrid({
   const colLabels = Array.from({ length: cols }, (_, i) => String(i + 1));
 
   return (
-    <div className="flex w-fit flex-col gap-3">
+    <div className={cn("flex w-3/4 flex-col gap-3", className)}>
       {(plateName || wavelength) && (
         <div className="flex items-baseline justify-between gap-4">
           <h4 className="font-medium font-mono text-foreground text-sm leading-snug">
@@ -171,15 +174,19 @@ export function PlateMapGrid({
       )}
       <div className="overflow-x-auto">
         <div
-          className="inline-grid gap-0.5 text-center"
+          className="grid w-full gap-0.5 text-center"
           style={{
-            gridTemplateColumns: `2rem repeat(${cols}, minmax(3rem, 1fr))`,
+            // Extra column for the vertical color bar, sized to its labels.
+            gridTemplateColumns:
+              heatmap && hasRange
+                ? `2rem repeat(${cols}, minmax(0, 1fr)) auto`
+                : `2rem repeat(${cols}, minmax(0, 1fr))`,
           }}
         >
           {/* Column headers */}
           {colLabels.map((c, ci) => (
             <div
-              className="py-1 font-medium text-muted-foreground text-xs"
+              className="py-1 font-medium text-muted-foreground text-sm"
               key={c}
               style={{ gridRow: 1, gridColumn: ci + 2 }}
             >
@@ -191,7 +198,7 @@ export function PlateMapGrid({
           {rowLabels.map((rowLabel, ri) => (
             <Fragment key={rowLabel}>
               <div
-                className="flex items-center justify-center font-medium text-muted-foreground text-xs"
+                className="flex items-center justify-center font-medium text-muted-foreground text-sm"
                 style={{ gridRow: ri + 2, gridColumn: 1 }}
               >
                 {rowLabel}
@@ -215,8 +222,8 @@ export function PlateMapGrid({
                       <div
                         className={
                           useHeatmap
-                            ? "flex aspect-square items-center justify-center rounded font-mono text-[10px] transition-colors"
-                            : `flex aspect-square items-center justify-center rounded border font-mono text-xs ${
+                            ? "flex aspect-square items-center justify-center rounded font-mono text-xs transition-colors"
+                            : `flex aspect-square items-center justify-center rounded border font-mono text-sm ${
                                 hasValue
                                   ? "border-border bg-muted/50"
                                   : "border-transparent"
@@ -246,26 +253,42 @@ export function PlateMapGrid({
               })}
             </Fragment>
           ))}
+
+          {/*
+            Color bar shares the plate grid so the rectangle aligns with wells
+            A…H; max/min sit in the header row and a trailing row.
+          */}
+          {heatmap && hasRange && (
+            <>
+              <div
+                className="ml-4 flex items-end justify-center pb-0.5 text-muted-foreground text-xs"
+                style={{ gridRow: 1, gridColumn: cols + 3 }}
+              >
+                <span className="font-mono tabular-nums">
+                  {formatCellValue(vMax)}
+                </span>
+              </div>
+              <div
+                className="ml-4 w-4 self-stretch overflow-hidden rounded-md"
+                style={{
+                  gridRow: `2 / ${rows + 2}`,
+                  gridColumn: cols + 3,
+                  background:
+                    "linear-gradient(to top, rgb(13,8,135), rgb(189,55,134), rgb(253,202,38), rgb(240,249,33))",
+                }}
+              />
+              <div
+                className="ml-4 flex items-start justify-center pt-0.5 text-muted-foreground text-xs"
+                style={{ gridRow: rows + 2, gridColumn: cols + 3 }}
+              >
+                <span className="font-mono tabular-nums">
+                  {formatCellValue(vMin)}
+                </span>
+              </div>
+            </>
+          )}
         </div>
       </div>
-
-      {heatmap && hasRange && <PlasmaColorBar max={vMax} min={vMin} />}
-    </div>
-  );
-}
-
-function PlasmaColorBar({ min, max }: { min: number; max: number }) {
-  return (
-    <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-      <span className="font-mono">{formatCellValue(min)}</span>
-      <div
-        className="h-3 flex-1 rounded-sm"
-        style={{
-          background:
-            "linear-gradient(to right, rgb(13,8,135), rgb(189,55,134), rgb(253,202,38), rgb(240,249,33))",
-        }}
-      />
-      <span className="font-mono">{formatCellValue(max)}</span>
     </div>
   );
 }
@@ -325,9 +348,13 @@ export function KineticPlateMapWithTimeSlider({
     return null;
   }
 
+  // Thumb centers track from 0–100%; avoid div-by-zero on a single frame.
+  const thumbPercent = maxIdx === 0 ? 0 : (selectedIndex / maxIdx) * 100;
+
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex w-3/4 flex-col gap-3">
       <PlateMapGrid
+        className="w-full"
         data={frames[selectedIndex]}
         heatmap={heatmap}
         heatmapRange={heatmapRange}
@@ -335,39 +362,31 @@ export function KineticPlateMapWithTimeSlider({
         wavelength={wavelength}
       />
       {frames.length > 1 && (
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between gap-2 text-muted-foreground text-xs">
-            <span>Time</span>
-            <span
-              className="min-w-0 truncate font-mono text-foreground tabular-nums"
-              title={timeLabels[selectedIndex] ?? ""}
+        <div className="mt-3 flex items-center gap-2">
+          <span className="shrink-0 font-mono text-muted-foreground text-xs tabular-nums">
+            {timeLabels[0]}
+          </span>
+          <div className="relative min-w-0 flex-1">
+            <div
+              aria-hidden
+              className="pointer-events-none absolute bottom-full z-10 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-foreground px-1.5 py-0.5 font-mono text-background text-xs tabular-nums"
+              style={{ left: `${thumbPercent}%` }}
             >
               {timeLabels[selectedIndex] ?? "—"}
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span
-              className="w-10 shrink-0 truncate text-center font-mono text-[10px] text-muted-foreground"
-              title={timeLabels[0]}
-            >
-              {timeLabels[0]}
-            </span>
+            </div>
             <Slider
               aria-label="Select measurement time"
-              className="flex-1 py-1"
+              className="w-full py-1"
               max={maxIdx}
               min={0}
               onValueChange={(v) => setIndex(v[0] ?? 0)}
               step={1}
               value={[selectedIndex]}
             />
-            <span
-              className="w-10 shrink-0 truncate text-center font-mono text-[10px] text-muted-foreground"
-              title={timeLabels[maxIdx]}
-            >
-              {timeLabels[maxIdx]}
-            </span>
           </div>
+          <span className="shrink-0 font-mono text-muted-foreground text-xs tabular-nums">
+            {timeLabels[maxIdx]}
+          </span>
         </div>
       )}
     </div>
