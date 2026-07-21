@@ -7,6 +7,7 @@ const DOCS_ORIGIN =
 // The docs site is served under `/docs` on the product's domain (Vercel
 // Microfrontends), so every docs link hangs off `${DOCS_ORIGIN}/docs`.
 export const DOCS_URL = `${DOCS_ORIGIN}/docs`;
-export const QUICKSTART_DOCS_URL = `${DOCS_URL}/quickstart`;
-export const ADD_INSTRUMENT_DOCS_URL = `${DOCS_URL}/adding-an-instrument`;
-export const MANAGING_TOKENS_DOCS_URL = `${DOCS_URL}/managing-tokens`;
+// Slugs must match data-hub-docs `content/docs/*.mdx` (and meta.json).
+export const QUICKSTART_DOCS_URL = `${DOCS_URL}/overview`;
+export const ADD_INSTRUMENT_DOCS_URL = `${DOCS_URL}/set-up-an-instrument`;
+export const MANAGING_TOKENS_DOCS_URL = `${DOCS_URL}/manage-tokens`;

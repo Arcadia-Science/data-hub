@@ -108,6 +108,10 @@ class FileMonitor:
     stability_period:
         Seconds a file's size + mtime must remain unchanged before it is
         considered stable.
+    max_stability_wait_seconds:
+        Seconds from first sighting after which a still-changing file is
+        abandoned with a ``stability_timeout`` event. Defaults to
+        ``MAX_STABILITY_WAIT_SECONDS``.
     on_stable_file:
         Called with the `Path` of each stable file.
     state_db:
@@ -133,6 +137,7 @@ class FileMonitor:
         recursive: bool = False,
         event_reporter: EventReporter | None = None,
         seed_baseline: bool = False,
+        max_stability_wait_seconds: int = MAX_STABILITY_WAIT_SECONDS,
     ) -> None:
         self._watch_dir = watch_directory
         self._patterns = file_patterns
@@ -143,6 +148,7 @@ class FileMonitor:
         # per file; this is one regex match instead.
         self._matches_name = _compile_pattern_matcher(file_patterns)
         self._stability_period = stability_period
+        self._max_stability_wait_seconds = max_stability_wait_seconds
         self._on_stable = on_stable_file
         self._state_db = state_db
         self._recursive = recursive
@@ -446,12 +452,13 @@ class FileMonitor:
 
         A file is "stable" when its size and mtime haven't changed for the full
         stability period.  If the file keeps changing beyond
-        MAX_STABILITY_WAIT_SECONDS it is abandoned — this guards against files
-        that are continuously appended to (e.g. active log streams).
+        ``max_stability_wait_seconds`` it is abandoned — this guards against
+        files that are continuously appended to (e.g. active log streams).
         """
         now = time.monotonic()
         stable: list[Path] = []
         timed_out: list[Path] = []
+        max_wait = self._max_stability_wait_seconds
 
         with self._lock:
             for path, pf in list(self._pending.items()):
@@ -471,7 +478,7 @@ class FileMonitor:
                 if elapsed_since_change >= self._stability_period:
                     stable.append(path)
                     del self._pending[path]
-                elif (now - pf.first_seen) >= MAX_STABILITY_WAIT_SECONDS:
+                elif (now - pf.first_seen) >= max_wait:
                     timed_out.append(path)
                     del self._pending[path]
 
@@ -479,14 +486,14 @@ class FileMonitor:
             logger.error(
                 "File %s did not stabilise within %ds — skipping",
                 path,
-                MAX_STABILITY_WAIT_SECONDS,
+                max_wait,
             )
             if self._reporter is not None:
                 self._reporter.report_error(
                     "stability_timeout",
-                    f"File {path.name} did not stabilise within {MAX_STABILITY_WAIT_SECONDS}s",
+                    f"File {path.name} did not stabilise within {max_wait}s",
                     path=str(path),
-                    max_wait_seconds=MAX_STABILITY_WAIT_SECONDS,
+                    max_wait_seconds=max_wait,
                 )
 
         for path in stable:
