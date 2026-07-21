@@ -295,6 +295,7 @@ def build_runtime(
         watch_directory=inst.watch_directory,
         file_patterns=inst.file_patterns,
         stability_period=inst.stability_period_seconds,
+        max_stability_wait_seconds=inst.max_stability_wait_seconds,
         on_stable_file=detector.on_stable_file,
         state_db=state_db,
         recursive=inst.run_detection.recursive,

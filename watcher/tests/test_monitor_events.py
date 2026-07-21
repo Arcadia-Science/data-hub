@@ -3,13 +3,13 @@
 Two anomalies that previously only logged locally now surface as
 ``EventType.ERROR`` events:
 
-* ``kind=stability_timeout`` -- a file kept changing past
-  ``MAX_STABILITY_WAIT_SECONDS`` and was abandoned.
+* ``kind=stability_timeout`` -- a file kept changing past the
+  configured ``max_stability_wait_seconds`` and was abandoned.
 * ``kind=stable_callback_failed`` -- the on-stable-file callback raised.
 
-Tests drive ``_check_pending`` directly (with monkey-patched ``time``
-and a forced-out-of-window ``first_seen``) so we don't have to wait
-the real 5-minute stability window in unit tests.
+Tests drive ``_check_pending`` directly (with a forced-out-of-window
+``first_seen``) so we don't have to wait the real stability window in
+unit tests.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from data_hub_watcher.constants import MAX_STABILITY_WAIT_SECONDS
 from data_hub_watcher.events import EventReporter
 from data_hub_watcher.monitor import FileMonitor, _PendingFile
 from data_hub_watcher.state import StateDB
@@ -45,11 +46,13 @@ def _make_monitor(
     *,
     on_stable_file: MagicMock | None = None,
     reporter: MagicMock | None = None,
+    max_stability_wait_seconds: int = MAX_STABILITY_WAIT_SECONDS,
 ) -> FileMonitor:
     return FileMonitor(
         watch_directory=watch_dir,
         file_patterns=["*.csv"],
         stability_period=1,
+        max_stability_wait_seconds=max_stability_wait_seconds,
         on_stable_file=on_stable_file or MagicMock(),
         state_db=state_db,
         recursive=False,
@@ -59,8 +62,6 @@ def _make_monitor(
 
 class TestStabilityTimeout:
     def test_emits_event_for_abandoned_file(self, watch_dir: Path, state_db: StateDB) -> None:
-        from data_hub_watcher.constants import MAX_STABILITY_WAIT_SECONDS
-
         reporter = MagicMock(spec=EventReporter)
         monitor = _make_monitor(watch_dir, state_db, reporter=reporter)
 
@@ -69,8 +70,8 @@ class TestStabilityTimeout:
         st = f.stat()
 
         # Manually plant a pending entry whose first_seen is older than
-        # MAX_STABILITY_WAIT_SECONDS so _check_pending classifies it as
-        # timed out without waiting 5 minutes in the test.
+        # the default max wait so _check_pending classifies it as timed
+        # out without waiting in the test.
         now = time.monotonic()
         monitor._pending[f] = _PendingFile(
             path=f,
@@ -91,6 +92,35 @@ class TestStabilityTimeout:
         assert call.kwargs["path"] == str(f)
         assert call.kwargs["max_wait_seconds"] == MAX_STABILITY_WAIT_SECONDS
 
+    def test_uses_configured_max_wait(self, watch_dir: Path, state_db: StateDB) -> None:
+        reporter = MagicMock(spec=EventReporter)
+        custom_max_wait = 10
+        monitor = _make_monitor(
+            watch_dir,
+            state_db,
+            reporter=reporter,
+            max_stability_wait_seconds=custom_max_wait,
+        )
+
+        f = watch_dir / "growing.csv"
+        f.write_text("a")
+        st = f.stat()
+        now = time.monotonic()
+        monitor._pending[f] = _PendingFile(
+            path=f,
+            size=st.st_size,
+            mtime=st.st_mtime,
+            first_seen=now - custom_max_wait - 1,
+            last_changed=now,
+        )
+
+        monitor._check_pending()
+
+        assert f not in monitor._pending
+        call = reporter.report_error.call_args
+        assert call.args[0] == "stability_timeout"
+        assert call.kwargs["max_wait_seconds"] == custom_max_wait
+
     def test_no_reporter_does_not_crash(self, watch_dir: Path, state_db: StateDB) -> None:
         """A FileMonitor built without a reporter must still function.
 
@@ -98,8 +128,6 @@ class TestStabilityTimeout:
         The timeout path used to log only; it should keep doing so
         without raising when the reporter is absent.
         """
-        from data_hub_watcher.constants import MAX_STABILITY_WAIT_SECONDS
-
         monitor = _make_monitor(watch_dir, state_db, reporter=None)
         f = watch_dir / "growing.csv"
         f.write_text("a")

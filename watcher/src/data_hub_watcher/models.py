@@ -8,6 +8,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from data_hub_watcher.constants import MAX_STABILITY_WAIT_SECONDS
+
 logger = logging.getLogger(__name__)
 
 
@@ -41,6 +43,11 @@ class InstrumentConfig(BaseModel):
     enabled: bool = True
     upload_mode: Literal["auto", "manual"] = "auto"
     stability_period_seconds: int = Field(default=5, ge=1, le=300)
+    # Cap on how long a still-changing file may stay pending before the
+    # monitor abandons it with a stability_timeout event. Defaults to
+    # MAX_STABILITY_WAIT_SECONDS so existing YAMLs keep today's 5-minute
+    # behaviour; raise for instruments that write large files for longer.
+    max_stability_wait_seconds: int = Field(default=MAX_STABILITY_WAIT_SECONDS, ge=1, le=86400)
     # Maximum number of files to upload concurrently for a single
     # detected run (auto mode) or queue poll. The default of 4 balances
     # S3 throughput against lab-PC network and CPU budgets; instruments
@@ -67,6 +74,19 @@ class InstrumentConfig(BaseModel):
         if not expanded.is_dir():
             raise ValueError(f"Watch directory is not a directory: {expanded}")
         return expanded
+
+    @model_validator(mode="after")
+    def _max_wait_covers_stability_period(self) -> InstrumentConfig:
+        # A file must stay unchanged for stability_period_seconds before
+        # it can become stable; if the abandon cap is shorter, every file
+        # that takes any time to finish writing would time out first.
+        if self.max_stability_wait_seconds < self.stability_period_seconds:
+            raise ValueError(
+                "max_stability_wait_seconds "
+                f"({self.max_stability_wait_seconds}) must be >= "
+                f"stability_period_seconds ({self.stability_period_seconds})"
+            )
+        return self
 
 
 class WatcherConfig(BaseModel):
