@@ -10,7 +10,7 @@
 // database should be reproducible from the same seed call sequence.
 
 import { createHash } from "node:crypto";
-import { copyFile, mkdir } from "node:fs/promises";
+import { copyFile, mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getTableName, isTable, sql } from "drizzle-orm";
@@ -617,10 +617,11 @@ export async function seedWatchers(
 // Runs + files — keys live under `RAW_BUCKET` so the lambda CLI's
 // `--raw-bucket` default and any `LOCAL_S3_MIRROR` directory layout
 // match. When `LOCAL_S3_MIRROR` is set in dev, `seedRuns` also copies
-// the fixture from `lambda/tests/fixtures/` for instruments listed in
-// `INSTRUMENT_FIXTURES` so seeded runs render real bytes in the
-// dashboard out of the box. Other instruments get realistic filenames
-// (no bytes) patterned after production.
+// fixtures from `lambda/tests/fixtures/` for instruments listed in
+// `INSTRUMENT_FIXTURES` (cycling every listed file across runs) so
+// seeded runs render real bytes in the dashboard out of the box.
+// Other instruments get realistic filenames (no bytes) patterned
+// after production.
 // ---------------------------------------------------------------------------
 
 export interface SeededRun {
@@ -739,18 +740,71 @@ function instantRamanFiles(siteCount: number): SyntheticFileSpec[] {
   return files;
 }
 
-export interface InstrumentFixture {
+export interface FixtureFileSpec {
   contentType: string;
   filename: string;
+}
+
+export interface InstrumentFixture {
+  // Every available lambda fixture for this instrument; `seedRuns`
+  // cycles them across the instrument's seeded runs so docs screenshots
+  // cover each measurement / imaging mode, not just one example file.
+  files: readonly FixtureFileSpec[];
   runIds: readonly string[];
 }
 
+const SPECTRAMAX_FIXTURE_FILES: readonly FixtureFileSpec[] = [
+  {
+    filename: "spectramax_plate_reader_endpoint.xls",
+    contentType: "application/vnd.ms-excel",
+  },
+  {
+    filename: "spectramax_plate_reader_endpoint_flat.xls",
+    contentType: "application/vnd.ms-excel",
+  },
+  {
+    filename: "spectramax_plate_reader_endpoint_sparse.xls",
+    contentType: "application/vnd.ms-excel",
+  },
+  {
+    filename: "spectramax_plate_reader_fluorescence.xls",
+    contentType: "application/vnd.ms-excel",
+  },
+  {
+    filename: "spectramax_plate_reader_kinetic.xls",
+    contentType: "application/vnd.ms-excel",
+  },
+  {
+    filename: "spectramax_plate_reader_well_scan.xls",
+    contentType: "application/vnd.ms-excel",
+  },
+];
+
+const GEL_DOC_FIXTURE_FILES: readonly FixtureFileSpec[] = [
+  {
+    filename: "azure_600_gel_doc_example.tif",
+    contentType: "image/tiff",
+  },
+  {
+    filename: "azure_600_gel_doc_fluorescence.tif",
+    contentType: "image/tiff",
+  },
+  {
+    filename: "azure_600_gel_doc_true_color.tif",
+    contentType: "image/tiff",
+  },
+];
+
 // Keyed by instrument id (not type) so both SpectraMax readers can share
-// the same fixture file under distinct ids / run-id lists.
+// the same fixture set under distinct ids / run-id lists.
 export const INSTRUMENT_FIXTURES: Record<string, InstrumentFixture> = {
   "azure-cielo-qpcr": {
-    filename: "azure_cielo_qpcr_example.csv",
-    contentType: "text/csv",
+    files: [
+      {
+        filename: "azure_cielo_qpcr_example.csv",
+        contentType: "text/csv",
+      },
+    ],
     runIds: [
       "Experiment_20260129",
       "Experiment_20260122",
@@ -763,8 +817,7 @@ export const INSTRUMENT_FIXTURES: Record<string, InstrumentFixture> = {
     ],
   },
   "azure-600-gel-doc": {
-    filename: "azure_600_gel_doc_example.tif",
-    contentType: "image/tiff",
+    files: GEL_DOC_FIXTURE_FILES,
     runIds: [
       "26.02.02_10.45.05",
       "26.01.26_15.10.30",
@@ -777,31 +830,31 @@ export const INSTRUMENT_FIXTURES: Record<string, InstrumentFixture> = {
     ],
   },
   "spectramax-id3-plate-reader": {
-    filename: "spectramax_plate_reader_endpoint.xls",
-    contentType: "application/vnd.ms-excel",
+    files: SPECTRAMAX_FIXTURE_FILES,
+    // Names track the cycled fixture order (endpoint → flat → sparse →
+    // fluorescence → kinetic → well-scan → …).
     runIds: [
-      "012926_AR_OD600",
-      "012226_DK_OD750",
-      "011526_AR_GFP_endpoint",
-      "010826_DK_OD600",
-      "010126_AR_OD750",
-      "122525_DK_OD600",
+      "012926_AR_OD750",
+      "012226_DK_OD595_flat",
+      "011526_AR_OD600_sparse",
+      "010826_DK_GFP_endpoint",
+      "010126_AR_OD595_kinetic",
+      "122525_DK_OD595_wellscan",
       "121825_AR_OD750",
-      "121125_DK_GFP_endpoint",
+      "121125_DK_OD595_flat",
     ],
   },
   "spectramax-id5-plate-reader": {
-    filename: "spectramax_plate_reader_endpoint.xls",
-    contentType: "application/vnd.ms-excel",
+    files: SPECTRAMAX_FIXTURE_FILES,
     runIds: [
-      "260721_bradford_AAA",
-      "260720_OD600_BBB",
-      "260716_BCA_CCC",
+      "260721_OD750_AAA",
+      "260720_OD595_flat_BBB",
+      "260716_OD600_sparse_CCC",
       "260714_fluo_DDD",
-      "260710_OvernightOD_EEE",
-      "260705_GFP_FFF",
+      "260710_OD595_kinetic_EEE",
+      "260705_OD595_wellscan_FFF",
       "260628_OD750_GGG",
-      "260620_endpoint_HHH",
+      "260620_OD595_flat_HHH",
     ],
   },
 };
@@ -1065,17 +1118,41 @@ export async function seedRuns(
       runId: schema.instrumentRuns.runId,
     });
 
+  const fixtureForRun = (runIdx: number): FixtureFileSpec | undefined => {
+    if (!fixture || fixture.files.length === 0) {
+      return;
+    }
+    return fixture.files[runIdx % fixture.files.length];
+  };
+
+  // Cache fixture sizes once so multi-run seeds don't re-stat the same file.
+  const fixtureSizeByName = new Map<string, number>();
+  if (fixture) {
+    await Promise.all(
+      fixture.files.map(async (file) => {
+        const { size } = await stat(path.resolve(FIXTURES_DIR, file.filename));
+        fixtureSizeByName.set(file.filename, size);
+      })
+    );
+  }
+
   const fileRows = fixture
     ? runs.map((run, runIdx) => {
+        const file = fixtureForRun(runIdx);
+        if (!file) {
+          throw new Error(
+            `INSTRUMENT_FIXTURES[${instrumentId}] has no fixture files`
+          );
+        }
         const status = seedFileStatus(runIdx, 0);
         return {
           instrumentRunId: run.id,
-          relativePath: fixture.filename,
+          relativePath: file.filename,
           s3Bucket: RAW_BUCKET,
-          s3Key: `${run.instrumentId}/${run.runId}/${fixture.filename}`,
-          filename: fixture.filename,
-          contentType: fixture.contentType,
-          sizeBytes: 1024,
+          s3Key: `${run.instrumentId}/${run.runId}/${file.filename}`,
+          filename: file.filename,
+          contentType: file.contentType,
+          sizeBytes: fixtureSizeByName.get(file.filename) ?? 1024,
           category: "raw" as const,
           status,
           metadata: { seeded: true },
@@ -1123,22 +1200,26 @@ export async function seedRuns(
       .values(fileRows.slice(i, i + FILE_INSERT_CHUNK));
   }
 
-  // If the local-mirror env var is set and this instrument has a fixture,
-  // copy the fixture bytes into
-  // `<LOCAL_S3_MIRROR>/<RAW_BUCKET>/<instrumentId>/<runId>/<filename>`
-  // for every run. The web app's local-mirror route then serves them
-  // when the dashboard requests `/api/v1/files/<id>/download`.
+  // If the local-mirror env var is set and this instrument has fixtures,
+  // copy each run's fixture bytes into
+  // `<LOCAL_S3_MIRROR>/<RAW_BUCKET>/<instrumentId>/<runId>/<filename>`.
+  // The web app's local-mirror route then serves them when the dashboard
+  // requests `/api/v1/files/<id>/download`.
   const mirrorRoot = process.env.LOCAL_S3_MIRROR;
   if (mirrorRoot && fixture) {
-    const src = path.resolve(FIXTURES_DIR, fixture.filename);
     await Promise.all(
-      runs.map(async (run) => {
+      runs.map(async (run, runIdx) => {
+        const file = fixtureForRun(runIdx);
+        if (!file) {
+          return;
+        }
+        const src = path.resolve(FIXTURES_DIR, file.filename);
         const dest = path.resolve(
           mirrorRoot,
           RAW_BUCKET,
           run.instrumentId,
           run.runId,
-          fixture.filename
+          file.filename
         );
         await mkdir(path.dirname(dest), { recursive: true });
         await copyFile(src, dest);

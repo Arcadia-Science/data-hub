@@ -183,14 +183,14 @@ The wiring lives in [lambda/src/data_hub_lambda/cli.py](../lambda/src/data_hub_l
 
 What this gets you out of the box after `make db-reseed`:
 
-| Instrument type | Seeded fixture | Where it comes from |
+| Instrument type | Seeded fixtures (cycled across runs) | Where they come from |
 | --- | --- | --- |
 | qPCR | `azure_cielo_qpcr_example.csv` | `lambda/tests/fixtures/` |
-| Gel doc | `azure_600_gel_doc_example.tif` | `lambda/tests/fixtures/` |
-| Plate reader | `spectramax_plate_reader_endpoint.xls` | `lambda/tests/fixtures/` |
+| Gel doc | `azure_600_gel_doc_{example,fluorescence,true_color}.tif` | `lambda/tests/fixtures/` |
+| Plate reader (iD3 + iD5) | `spectramax_plate_reader_{endpoint,endpoint_flat,endpoint_sparse,fluorescence,kinetic,well_scan}.xls` | `lambda/tests/fixtures/` |
 | Other instruments | none — files 404 in the mirror | Stage real bytes via `data-hub-process handler` |
 
-The seed copies the fixture into `<LOCAL_S3_MIRROR>/test-raw-data-bucket/<instrument-id>/<run-id>/<filename>` for every seeded run on those instruments, so navigating to `/instruments/azure-cielo-qpcr/runs/Experiment_20260129` shows a real CSV in the file browser, the colony / plate-reader viewers fetch real bytes via `/api/v1/files/<id>/download`, and PNG / TIFF / PDF previews on `RunReportSection` render without 404s. Fixture-bearing runs only have the real fixture file — the synthetic CSV siblings other instruments still get are dropped so the UI only shows files that actually exist on disk.
+The seed cycles every available fixture for an instrument across its seeded runs (so gel-doc screenshots include Chemiluminescence, Fluorescence, and True Color Imaging, not eight copies of the same chemi TIFF). Each run gets one fixture copied to `<LOCAL_S3_MIRROR>/test-raw-data-bucket/<instrument-id>/<run-id>/<filename>`, so navigating to `/instruments/azure-cielo-qpcr/runs/Experiment_20260129` shows a real CSV in the file browser, the colony / plate-reader viewers fetch real bytes via `/api/v1/files/<id>/download`, and PNG / TIFF / PDF previews on `RunReportSection` render without 404s. Fixture-bearing runs only have the real fixture file — the synthetic CSV siblings other instruments still get are dropped so the UI only shows files that actually exist on disk.
 
 When the dev API is reachable during seeding, the seed also drives `data-hub-process handler` over each fixture-bearing run so the dashboard renders processed artifacts (gel-doc PNGs, plate-reader CSVs, qPCR metadata) immediately after a reseed. If the API isn't up yet (`npm run db:reseed` ran before `npm run dev`), the seed prints a hint and skips the step — you can re-run it on its own once the dev server is reachable:
 
@@ -209,7 +209,7 @@ Components don't need to change — every existing run viewer already fetches `/
 
 A few details worth knowing:
 
-- Adding fixtures for more instruments means an `INSTRUMENT_FIXTURES` entry in [web/lib/db/seed.ts](../web/lib/db/seed.ts) keyed by the kebab-case instrument id from `data_hub_shared.enums.Instrument` (`{ filename, contentType, runIds }`) pointing at any file under `lambda/tests/fixtures/`. The handler rejects unknown instrument ids because `parse_s3_event` only accepts values from that enum.
+- Adding fixtures for more instruments means an `INSTRUMENT_FIXTURES` entry in [web/lib/db/seed.ts](../web/lib/db/seed.ts) keyed by the kebab-case instrument id from `data_hub_shared.enums.Instrument` (`{ files: [{ filename, contentType }, …], runIds }`) pointing at files under `lambda/tests/fixtures/`. List every fixture you want cycled across seeded runs. The handler rejects unknown instrument ids because `parse_s3_event` only accepts values from that enum.
 - The route is gated on `NODE_ENV !== "production"` AND `LOCAL_S3_MIRROR` set; either condition unmet returns 404 unconditionally, so a production build can never expose the filesystem.
 - The MCP tool at `/api/v1/mcp` returns a relative `/api/local-s3/...` URL when the mirror is active — browsers resolve it against the current origin, but non-browser MCP clients on localhost may need to prefix with `http://localhost:3000`.
 
