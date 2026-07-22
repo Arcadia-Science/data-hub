@@ -674,7 +674,8 @@ function hinaNd2Files(count: number): SyntheticFileSpec[] {
     const pointIdx = String(i % 9).padStart(4, "0");
     const seq = String(i).padStart(4, "0");
     return {
-      filename: `Well${well}_Point${well}_${pointIdx}_Channelbrightfield,FITC BP,TRITC BP_Seq${seq}.nd2`,
+      // Channel label is seed-prefixed so basenames never match prod nd2 names.
+      filename: `Well${well}_Point${well}_${pointIdx}_ChannelSEED_BF,SEED_FITC,SEED_TRITC_Seq${seq}.nd2`,
       contentType: "image/nd2",
       category: "raw" as const,
       sizeBytes: HINA_ND2_BYTES,
@@ -713,6 +714,8 @@ function hinaRunMetadata(runIdx: number): Record<string, unknown> {
 }
 
 function instantRamanFiles(siteCount: number): SyntheticFileSpec[] {
+  // Prefix keeps the prod well-site shape without colliding with real
+  // InstantRaman basenames like `H10-Site_0.csv`.
   const wells = ["A01", "B05", "C10", "D03", "E08", "F12", "G02", "H10"];
   const files: SyntheticFileSpec[] = [];
   for (let i = 0; i < siteCount; i++) {
@@ -720,13 +723,13 @@ function instantRamanFiles(siteCount: number): SyntheticFileSpec[] {
     const site = Math.floor(i / wells.length);
     files.push(
       {
-        filename: `${well}-Site_${site}.csv`,
+        filename: `SYN-${well}-Site_${site}.csv`,
         contentType: "text/csv",
         category: "raw",
         sizeBytes: 93_000,
       },
       {
-        filename: `${well}-Site_${site}.json`,
+        filename: `SYN-${well}-Site_${site}.json`,
         contentType: "application/json",
         category: "raw",
         sizeBytes: 4300,
@@ -918,15 +921,16 @@ const SYNTHETIC_RUN_SHAPES: Record<string, SyntheticRunShape> = {
     metadataForRun: (_runId, runIdx) => hinaRunMetadata(runIdx),
   },
   "epson-v700-scanner": {
+    // Fully synthetic stems (not redacted prod initials like RAF→AAA).
     runIds: [
-      "20260715_AAA_003",
-      "20260715_AAA_002",
-      "20260715_AAA_001",
-      "20260713_BBB_ref_dips_300dpi_003",
-      "20260709_CCC_kinetic_endpoint_300dpi_002",
-      "20260707_DDD_replica_plate1_300dpi001",
-      "20260707_DDD_replica_plate2_600dpi001",
-      "20260701_EEE_colony_screen_300dpi001",
+      "20260801_SYN_colony_300dpi_003",
+      "20260801_SYN_colony_300dpi_002",
+      "20260801_SYN_colony_300dpi_001",
+      "20260728_SYN_ref_grid_300dpi_003",
+      "20260722_SYN_kinetic_endpoint_300dpi_002",
+      "20260718_SYN_replica_plate1_300dpi001",
+      "20260718_SYN_replica_plate2_600dpi001",
+      "20260712_SYN_colony_screen_300dpi001",
     ],
     filesForRun: (runId) => [
       {
