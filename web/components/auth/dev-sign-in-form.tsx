@@ -42,10 +42,10 @@ export function DevSignInForm({
         <div className="flex flex-col gap-1.5">
           <Label htmlFor={inputId}>Email</Label>
           <Input
-            defaultValue="dev@local"
+            defaultValue="alice@example.com"
             id={inputId}
             name="email"
-            placeholder="dev@local"
+            placeholder="alice@example.com"
             required
             type="email"
           />

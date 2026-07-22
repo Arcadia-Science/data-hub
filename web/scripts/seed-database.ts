@@ -1,7 +1,7 @@
 // Seed the local development database with a believable steady state:
-// a workspace admin user + PAT, one instrument per type, watchers with
-// heartbeats / events, runs with files, comments, attributions, and
-// archive jobs in each lifecycle state.
+// Alice Zimmerman (admin) + teammates, the production instrument catalog
+// plus one pending instrument, watchers with heartbeats / events, runs
+// with realistic filenames, comments, attributions, and archive jobs.
 //
 // Usage:
 //   npm run db:seed           # seed on top of whatever's there
@@ -16,6 +16,9 @@
 import * as schema from "@/lib/db/schema";
 import {
   clearAll,
+  SEED_ADMIN_EMAIL,
+  SEED_ADMIN_NAME,
+  SEED_WATCHER_VERSION,
   type SeededRun,
   seedArchiveJobs,
   seedDevUser,
@@ -45,15 +48,18 @@ console.log("Clearing existing rows…");
 await clearAll(db);
 
 console.log("Seeding watcher_release_config…");
-await seedWatcherReleaseConfig(db);
+await seedWatcherReleaseConfig(db, {
+  latestVersion: SEED_WATCHER_VERSION,
+  minSupportedVersion: "0.1.0",
+});
 
 console.log("Seeding slack_channel_config…");
 await seedSlackChannelConfig(db);
 
-console.log("Seeding dev user…");
+console.log("Seeding admin user…");
 const { userId, email, token } = await seedDevUser(db, {
-  email: "dev@local",
-  name: "Dev User",
+  email: SEED_ADMIN_EMAIL,
+  name: SEED_ADMIN_NAME,
   isAdmin: true,
 });
 
@@ -67,22 +73,25 @@ console.log("Seeding runs + files…");
 const activeInstruments = instruments.filter((i) => i.status === "active");
 const runs: SeededRun[] = [];
 for (const instrument of activeInstruments) {
-  runs.push(
-    ...(await seedRuns(db, instrument.id, 8, instrument.instrumentType))
-  );
+  runs.push(...(await seedRuns(db, instrument.id, 8)));
 }
 
+console.log("Seeding teammate users…");
+const teammates = await seedTeammates(db);
+
 console.log("Seeding run comments + attributions…");
-await seedRunComments(db, runs, userId);
-await seedRunAttributions(db, runs, userId);
+const commentAuthors = [
+  { id: userId, name: SEED_ADMIN_NAME },
+  ...teammates.map((t) => ({ id: t.id, name: t.name })),
+];
+await seedRunComments(db, runs, commentAuthors);
+const attributionUserIds = [userId, ...teammates.slice(0, 8).map((t) => t.id)];
+await seedRunAttributions(db, runs, attributionUserIds);
 
 console.log("Seeding archive_jobs…");
 await seedArchiveJobs(db, runs, userId);
 
-console.log("Seeding teammate users (notification actors)…");
-const teammates = await seedTeammates(db, 2);
-
-console.log("Seeding instrument subscriptions for the dev user…");
+console.log("Seeding instrument subscriptions for the admin…");
 await seedInstrumentSubscriptions(
   db,
   userId,

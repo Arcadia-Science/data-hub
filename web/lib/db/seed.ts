@@ -1,15 +1,16 @@
 // Shared seed builders used by both the local dev seed script
 // (`scripts/seed-database.ts` → `npm run db:seed`) and the integration test
 // helpers (`tests/integration/helpers.ts`). Centralizing them in `lib/`
-// keeps the token-generation logic, instrument-type coverage, and TRUNCATE
-// list in sync between the two consumers — adding a new table to the
-// schema only requires updating this file.
+// keeps the token-generation logic, instrument catalog, and TRUNCATE list
+// in sync between the two consumers — adding a new table to the schema
+// only requires updating this file.
 //
 // The functions are intentionally minimal and deterministic: no Faker, no
 // randomness beyond UUIDs / token bytes. Bug reports against a seeded
 // database should be reproducible from the same seed call sequence.
 
-import { copyFile, mkdir } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { copyFile, mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getTableName, isTable, sql } from "drizzle-orm";
@@ -33,6 +34,17 @@ export type Db = NodePgDatabase<typeof schema>;
 // directory under `LOCAL_S3_MIRROR` use the same string.
 export const RAW_BUCKET = "test-raw-data-bucket";
 export const ARCHIVES_BUCKET = "test-archives-bucket";
+
+// Stable admin identity for local sign-in / fixture processing. Emails use
+// `@example.com` so docs screenshots look like real accounts without
+// implying a real domain.
+export const SEED_ADMIN_EMAIL = "alice@example.com";
+export const SEED_ADMIN_NAME = "Alice Zimmerman";
+
+// Matches production watcher builds so the update-check UI doesn't nag
+// during docs screenshots. Integration tests keep the historical 9.9.9
+// default via `seedWatcherReleaseConfig`'s parameter default.
+export const SEED_WATCHER_VERSION = "0.5.3";
 
 // ---------------------------------------------------------------------------
 // clearAll — schema-driven TRUNCATE of every `pgTable` declared in
@@ -127,12 +139,20 @@ export async function seedDevUser(
 // want a stable baseline so the endpoint returns deterministic values.
 // ---------------------------------------------------------------------------
 
-export async function seedWatcherReleaseConfig(db: Db): Promise<void> {
+export async function seedWatcherReleaseConfig(
+  db: Db,
+  options: {
+    latestVersion?: string;
+    minSupportedVersion?: string;
+  } = {}
+): Promise<void> {
+  const latestVersion = options.latestVersion ?? "9.9.9";
+  const minSupportedVersion = options.minSupportedVersion ?? "0.1.0";
   await db.execute(
     sql`INSERT INTO watcher_release_config
        (id, latest_version, min_supported_version, mandatory)
      VALUES
-       (true, '9.9.9', '0.1.0', false)
+       (true, ${latestVersion}, ${minSupportedVersion}, false)
      ON CONFLICT (id) DO UPDATE SET
        latest_version = EXCLUDED.latest_version,
        min_supported_version = EXCLUDED.min_supported_version,
@@ -160,62 +180,316 @@ export async function seedSlackChannelConfig(
 }
 
 // ---------------------------------------------------------------------------
-// Instruments — one row per value in `instrumentTypeEnum.enumValues` so the
-// dashboard exercises every instrument-type-specific UI variant. One
-// instrument is seeded as `pending` so the activation flow shows up.
+// Instruments — mirrors the production catalog (ids + display names) so docs
+// screenshots look real, plus one pending instrument for the activate-
+// instrument admin UI. `azure-cielo-qpcr` stays typed as `qpcr` locally so
+// fixture processing still runs even though prod currently marks it generic.
 // ---------------------------------------------------------------------------
 
 export interface SeededInstrument {
+  // Watcher config YAML snapped from production, with `{{WATCHER_ID}}`
+  // substituted at seed time so the Configuration tab shows a real
+  // instrument block (watch dir, patterns, run detection) instead of a
+  // placeholder comment.
+  configYamlTemplate: string;
   displayName: string;
+  hostname: string;
   id: string;
   instrumentType: schema.InstrumentType;
+  osInfo: string;
   status: "pending" | "active" | "inactive";
+  watcherStatus: "registered" | "watching" | "stopped";
 }
 
-const INSTRUMENT_LABELS: Record<schema.InstrumentType, string> = {
-  generic: "Generic Lab Instrument",
-  plate_reader: "SpectraMax iD3 Plate Reader",
-  gel_doc: "Azure 600 Gel Doc",
-  qpcr: "Azure Cielo qPCR",
-  tape_station: "Agilent TapeStation",
-  hina_microscope: "Hina Microscope",
-  epson_v700_scanner: "Epson V700 Scanner",
-  instant_raman: "Instant Raman Spectrometer",
-};
+// Shared local preamble so seeded configs point at the dev API rather than
+// production URLs / UUIDs. Instrument blocks below are production snapshots.
+function localWatcherConfigPreamble(): string {
+  return `version: 1
+environment: local
+api_base_urls:
+  local: http://localhost:3000/api/v1
+watcher_ids:
+  local: {{WATCHER_ID}}
+initial_scan: null
+`;
+}
 
-// Instrument types that map to a canonical kebab-case id baked into the
-// lambda's `Instrument` enum and hardcoded inside each `process_file`.
-// Using the canonical id here means seeded files live at the same
-// `<bucket>/<instrument-id>/<run-id>/<filename>` path the lambda
-// `process_file` modules read from, so a dev can run
-// `data-hub-process handler` against a seeded run with no path
-// rewriting. Other instrument types fall back to the cosmetic
-// `seed-<type>` id since they don't have a canonical pipeline yet.
-//
-// Exported so `web/scripts/process-fixtures.ts` can map seeded rows
-// back to the same canonical ids when invoking the handler.
-export const CANONICAL_INSTRUMENT_ID: Partial<
-  Record<schema.InstrumentType, string>
-> = {
-  qpcr: "azure-cielo-qpcr",
-  gel_doc: "azure-600-gel-doc",
-  plate_reader: "spectramax-id3-plate-reader",
-};
+function buildSeedConfigYaml(instrumentBlock: string): string {
+  return `${localWatcherConfigPreamble()}${instrumentBlock}`;
+}
+
+function renderWatcherConfig(
+  template: string,
+  watcherId: string
+): { configChecksum: string; configYaml: string } {
+  const configYaml = template.replaceAll("{{WATCHER_ID}}", watcherId);
+  const configChecksum = `sha256:${createHash("sha256").update(configYaml).digest("hex")}`;
+  return { configYaml, configChecksum };
+}
+
+// Production hostnames / display names / watcher configs, snapshotted for
+// local realism. Pending row is local-only (prod has no pending instruments).
+export const SEED_INSTRUMENTS: readonly SeededInstrument[] = [
+  {
+    id: "agilent-4150-tapestation",
+    displayName: "Agilent 4150 TapeStation",
+    instrumentType: "tape_station",
+    status: "active",
+    hostname: "DESKTOP-85DT2MG",
+    osInfo: "Windows 11",
+    watcherStatus: "watching",
+    configYamlTemplate: buildSeedConfigYaml(`instrument:
+  id: agilent-4150-tapestation
+  watch_directory: C:\\Users\\Arcadia User\\Documents\\Agilent\\TapeStation Data
+  file_patterns:
+  - '*.pdf'
+  - '*.csv'
+  enabled: true
+  upload_mode: auto
+  stability_period_seconds: 5
+  upload_parallelism: 4
+  run_detection:
+    pattern: ([^/]+)/[^/]+$
+    recursive: true
+`),
+  },
+  {
+    id: "unchained-labs-aunty",
+    displayName: "Aunty",
+    instrumentType: "generic",
+    status: "active",
+    hostname: "Aunty-1075",
+    osInfo: "Windows 11",
+    watcherStatus: "watching",
+    configYamlTemplate: buildSeedConfigYaml(`instrument:
+  id: unchained-labs-aunty
+  watch_directory: C:\\Aunty\\Export
+  file_patterns:
+  - '*.xlsx'
+  enabled: true
+  upload_mode: auto
+  stability_period_seconds: 5
+  upload_parallelism: 4
+  run_detection:
+    pattern: (\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2})
+    recursive: true
+`),
+  },
+  {
+    id: "azure-600-gel-doc",
+    displayName: "Azure 600 Gel Doc",
+    instrumentType: "gel_doc",
+    status: "active",
+    hostname: "WIN-G7U3JO19L7O",
+    osInfo: "Windows 11",
+    watcherStatus: "watching",
+    configYamlTemplate: buildSeedConfigYaml(`instrument:
+  id: azure-600-gel-doc
+  watch_directory: C:\\Data
+  file_patterns:
+  - '*.tif'
+  - .*jpg
+  enabled: true
+  upload_mode: auto
+  stability_period_seconds: 5
+  upload_parallelism: 4
+  run_detection:
+    pattern: ^(?:.+/)?([^/]+?)\\.[^/.]+$
+    recursive: false
+`),
+  },
+  {
+    id: "azure-cielo-qpcr",
+    displayName: "Azure Cielo qPCR",
+    instrumentType: "qpcr",
+    status: "active",
+    hostname: "DESKTOP-7JE1NCI",
+    osInfo: "Windows 10",
+    watcherStatus: "stopped",
+    configYamlTemplate: buildSeedConfigYaml(`instrument:
+  id: azure-cielo-qpcr
+  watch_directory: C:\\Users\\Public\\Documents\\Azure Biosystems\\Azure qPCR
+  file_patterns:
+  - '*.csv'
+  - '*.pdf'
+  enabled: true
+  upload_mode: auto
+  stability_period_seconds: 5
+  run_detection:
+    pattern: (Experiment_\\d{8}(?:\\d{6})?)
+    recursive: true
+`),
+  },
+  {
+    id: "epson-v700-scanner",
+    displayName: "Epson v700 Scanner",
+    instrumentType: "epson_v700_scanner",
+    status: "active",
+    hostname: "WIN-G7U3JO19L7O",
+    osInfo: "Windows 11",
+    watcherStatus: "watching",
+    configYamlTemplate: buildSeedConfigYaml(`instrument:
+  id: epson-v700-scanner
+  watch_directory: C:\\Users\\raymo\\ScanData
+  file_patterns:
+  - '*.tif'
+  - '*.tiff'
+  enabled: true
+  upload_mode: auto
+  stability_period_seconds: 5
+  upload_parallelism: 4
+  run_detection:
+    pattern: ^(?:.+/)?([^/]+?)\\.[^/.]+$
+    recursive: true
+`),
+  },
+  {
+    id: "hina-microscope",
+    displayName: "Hina Microscope",
+    instrumentType: "hina_microscope",
+    status: "active",
+    hostname: "DESKTOP-2UV5Q0A",
+    osInfo: "Windows 10",
+    watcherStatus: "watching",
+    configYamlTemplate: buildSeedConfigYaml(`instrument:
+  id: hina-microscope
+  watch_directory: D:\\ArcadiaJOBS2026
+  file_patterns:
+  - '*.nd2'
+  enabled: true
+  upload_mode: manual
+  stability_period_seconds: 10
+  upload_parallelism: 4
+  run_detection:
+    pattern: ([^/]+)/[^/]+$
+    recursive: true
+`),
+  },
+  {
+    id: "instantraman",
+    displayName: "InstantRaman",
+    instrumentType: "instant_raman",
+    status: "active",
+    hostname: "DESKTOP-5B1P1V5",
+    osInfo: "Windows 10",
+    watcherStatus: "stopped",
+    configYamlTemplate: buildSeedConfigYaml(`instrument:
+  id: instantraman
+  watch_directory: \\\\ARC-NAS-01\\Microscopy\\Wasatch-Raman_785
+  file_patterns:
+  - '*.csv'
+  - '*.json'
+  enabled: true
+  upload_mode: auto
+  stability_period_seconds: 5
+  upload_parallelism: 4
+  run_detection:
+    pattern: ([^/]+)/[^/]+$
+    recursive: true
+`),
+  },
+  {
+    id: "jolene-fplc",
+    displayName: "Jolene FPLC",
+    instrumentType: "generic",
+    status: "active",
+    hostname: "DESKTOP-30488S0",
+    osInfo: "Windows 11",
+    watcherStatus: "watching",
+    configYamlTemplate: buildSeedConfigYaml(`instrument:
+  id: jolene-fplc
+  watch_directory: C:\\Users\\Peanut\\Documents
+  file_patterns:
+  - '*.csv'
+  - '*.pdf'
+  enabled: true
+  upload_mode: auto
+  stability_period_seconds: 5
+  upload_parallelism: 4
+  run_detection:
+    pattern: (?:^|/)(\\d{6})
+    recursive: true
+`),
+  },
+  {
+    id: "spectramax-id3-plate-reader",
+    displayName: "SpectraMax iD3 Plate Reader",
+    instrumentType: "plate_reader",
+    status: "active",
+    hostname: "DESKTOP-13T085J",
+    osInfo: "Windows 11",
+    watcherStatus: "watching",
+    configYamlTemplate: buildSeedConfigYaml(`instrument:
+  id: spectramax-id3-plate-reader
+  watch_directory: C:\\Users\\LabEquipment\\Documents\\SMP73
+  file_patterns:
+  - '*.xls'
+  enabled: true
+  upload_mode: auto
+  stability_period_seconds: 5
+  upload_parallelism: 4
+  run_detection:
+    pattern: ^(?:.+/)?([^/]+?)\\.[^/.]+$
+    recursive: false
+`),
+  },
+  {
+    id: "spectramax-id5-plate-reader",
+    displayName: "SpectraMax iD5 Plate Reader",
+    instrumentType: "plate_reader",
+    status: "active",
+    hostname: "iD5_SpectraMax",
+    osInfo: "Windows 11",
+    watcherStatus: "watching",
+    configYamlTemplate: buildSeedConfigYaml(`instrument:
+  id: spectramax-id5-plate-reader
+  watch_directory: C:\\Users\\LabEquipment\\Documents\\SMP74
+  file_patterns:
+  - '*.xls'
+  enabled: true
+  upload_mode: auto
+  stability_period_seconds: 5
+  upload_parallelism: 4
+  run_detection:
+    pattern: ^(?:.+/)?([^/]+?)\\.[^/.]+$
+    recursive: false
+`),
+  },
+  {
+    id: "seed-pending-instrument",
+    displayName: "Pending Lab Instrument",
+    instrumentType: "generic",
+    status: "pending",
+    hostname: "LAB-PC-PENDING",
+    osInfo: "Windows 11",
+    watcherStatus: "registered",
+    configYamlTemplate: buildSeedConfigYaml(`instrument:
+  id: seed-pending-instrument
+  watch_directory: C:\\Data\\PendingInstrument
+  file_patterns:
+  - '*.csv'
+  enabled: true
+  upload_mode: auto
+  stability_period_seconds: 5
+  upload_parallelism: 4
+  run_detection:
+    pattern: ^(?:.+/)?([^/]+?)\\.[^/.]+$
+    recursive: true
+`),
+  },
+];
 
 export async function seedInstruments(db: Db): Promise<SeededInstrument[]> {
-  const rows: SeededInstrument[] = schema.VALID_INSTRUMENT_TYPES.map(
-    (type, idx) => ({
-      id: CANONICAL_INSTRUMENT_ID[type] ?? `seed-${type.replace(/_/g, "-")}`,
-      displayName: INSTRUMENT_LABELS[type],
-      instrumentType: type,
-      // First row pending so the "activate instrument" admin flow is
-      // exercised; everything else active.
-      status: idx === 0 ? ("pending" as const) : ("active" as const),
+  const rows = SEED_INSTRUMENTS.map(
+    ({ id, displayName, instrumentType, status }) => ({
+      id,
+      displayName,
+      instrumentType,
+      status,
     })
   );
-
   await db.insert(schema.instruments).values(rows);
-  return rows;
+  return [...SEED_INSTRUMENTS];
 }
 
 // ---------------------------------------------------------------------------
@@ -228,11 +502,9 @@ export interface SeededWatcher {
   status: "registered" | "watching" | "stopped";
 }
 
-const WATCHER_STATUSES = ["watching", "registered", "stopped"] as const;
-
 export async function seedWatchers(
   db: Db,
-  instruments: Pick<SeededInstrument, "id" | "status">[]
+  instruments: SeededInstrument[]
 ): Promise<SeededWatcher[]> {
   // Mirror the register endpoint: only active and pending instruments accept a
   // watcher. A pending instrument is seeded with a `registered` watcher (no
@@ -248,20 +520,24 @@ export async function seedWatchers(
   }
 
   const now = new Date();
-  let activeIdx = 0;
-  const watcherValues = eligible.map((instrument, idx) => {
+  const watcherValues = eligible.map((instrument) => {
     const status =
       instrument.status === "pending"
         ? ("registered" as const)
-        : WATCHER_STATUSES[activeIdx++ % WATCHER_STATUSES.length];
+        : instrument.watcherStatus;
+    const id = crypto.randomUUID();
+    const { configYaml, configChecksum } = renderWatcherConfig(
+      instrument.configYamlTemplate,
+      id
+    );
     return {
-      id: crypto.randomUUID(),
+      id,
       instrumentId: instrument.id,
-      hostname: `seed-host-${idx + 1}`,
-      osInfo: "Windows 11 23H2",
-      watcherVersion: "9.9.9",
-      configChecksum: `seed-checksum-${idx + 1}`,
-      configYaml: "# seeded watcher config\n",
+      hostname: instrument.hostname,
+      osInfo: instrument.osInfo,
+      watcherVersion: SEED_WATCHER_VERSION,
+      configChecksum,
+      configYaml,
       lastHeartbeatAt: status === "watching" ? now : null,
       status,
     };
@@ -314,8 +590,8 @@ export async function seedWatchers(
       {
         watcherId,
         eventType: "file_uploaded" as const,
-        message: "Uploaded data_001.csv to S3",
-        details: { filename: "data_001.csv" },
+        message: "Uploaded latest run files to S3",
+        details: {},
         timestamp: new Date(now.getTime() - 10 * 60_000),
       },
     ]);
@@ -329,10 +605,11 @@ export async function seedWatchers(
 // Runs + files — keys live under `RAW_BUCKET` so the lambda CLI's
 // `--raw-bucket` default and any `LOCAL_S3_MIRROR` directory layout
 // match. When `LOCAL_S3_MIRROR` is set in dev, `seedRuns` also copies
-// the fixture from `lambda/tests/fixtures/` for instruments listed in
-// `INSTRUMENT_FIXTURES` so seeded runs render real bytes in the
-// dashboard out of the box. Other instruments still 404 — devs use
-// `data-hub-process handler` to stage real files for those.
+// fixtures from `lambda/tests/fixtures/` for instruments listed in
+// `INSTRUMENT_FIXTURES` (cycling every listed file across runs) so
+// seeded runs render real bytes in the dashboard out of the box.
+// Other instruments get realistic filenames (no bytes) patterned
+// after production.
 // ---------------------------------------------------------------------------
 
 export interface SeededRun {
@@ -341,35 +618,181 @@ export interface SeededRun {
   runId: string;
 }
 
-const FILE_STATUSES = ["uploaded", "completed", "failed"] as const;
+type SeedFileStatus = "uploaded" | "completed" | "failed";
 
-export interface InstrumentFixture {
+interface SyntheticFileSpec {
+  category: "raw" | "processed";
   contentType: string;
   filename: string;
+  sizeBytes?: number;
+}
+
+interface SyntheticRunShape {
+  filesForRun: (runId: string, runIdx: number) => SyntheticFileSpec[];
+  metadataForRun?: (runId: string, runIdx: number) => Record<string, unknown>;
   runIds: readonly string[];
 }
 
-// Maps each instrument-type that has a fixture file checked into the
-// repo to its fixture filename, content-type, and a stable list of
-// run ids that look like real ones from that instrument (the qPCR
-// `process_file` documents `Experiment_YYYYMMDD`; the gel-doc and
-// plate-reader modules treat the filename stem as the run id, so
-// these mirror those formats). Keep the run-id list at least as long as
-// the `seedRuns` default count so every fixture-bearing run gets a
-// realistic id; other instruments keep the count argument and use
-// synthetic `seed-run-N` ids. Adding a new entry here is enough to make
-// every seeded run for that instrument type render real bytes (provided
-// `LOCAL_S3_MIRROR` is set).
-//
-// Exported so `web/scripts/process-fixtures.ts` can re-derive the
-// triples `(canonical_instrument_id, run_id, filename)` that need
-// to be processed without re-running the seed.
-export const INSTRUMENT_FIXTURES: Partial<
-  Record<schema.InstrumentType, InstrumentFixture>
-> = {
-  qpcr: {
-    filename: "azure_cielo_qpcr_example.csv",
-    contentType: "text/csv",
+// Prefer healthy runs for docs screenshots. Exactly one failed run and one
+// uploaded run per instrument — the old status cycle painted every
+// multi-file run red because at least one file always landed on `failed`.
+function seedFileStatus(runIdx: number, fileIdx: number): SeedFileStatus {
+  // One failed run (first file only) so the status filter / icon still show.
+  if (runIdx === 5 && fileIdx === 0) {
+    return "failed";
+  }
+  // One uploaded-but-unprocessed run for status variety.
+  if (runIdx === 2) {
+    return "uploaded";
+  }
+  return "completed";
+}
+
+const FILE_INSERT_CHUNK = 500;
+// Typical Hina .nd2 size from production (~30.7 MiB).
+const HINA_ND2_BYTES = 32_190_464;
+// File counts per seeded Hina run — large enough for tens–hundreds of GB
+// on the bigger runs without making every reseed take minutes.
+const HINA_FILE_COUNTS = [270, 864, 120, 480, 2000, 216, 972, 96] as const;
+
+function hinaNd2Files(count: number): SyntheticFileSpec[] {
+  return Array.from({ length: count }, (_, i) => {
+    const wellRow = String.fromCharCode(65 + (Math.floor(i / 12) % 8));
+    const wellCol = String((i % 12) + 1).padStart(2, "0");
+    const well = `${wellRow}${wellCol}`;
+    const pointIdx = String(i % 9).padStart(4, "0");
+    const seq = String(i).padStart(4, "0");
+    return {
+      // Channel label is seed-prefixed so basenames never match prod nd2 names.
+      filename: `Well${well}_Point${well}_${pointIdx}_ChannelSEED_BF,SEED_FITC,SEED_TRITC_Seq${seq}.nd2`,
+      contentType: "image/nd2",
+      category: "raw" as const,
+      sizeBytes: HINA_ND2_BYTES,
+    };
+  });
+}
+
+function hinaRunMetadata(runIdx: number): Record<string, unknown> {
+  const withZ = runIdx % 3 === 1;
+  return {
+    sizes: withZ
+      ? { C: 3, X: 2304, Y: 2304, Z: 5 }
+      : { C: 3, X: 2304, Y: 2304 },
+    channels: [
+      {
+        name: "BRIGHTFIELD",
+        color: "#ffffff",
+        emission_nm: null,
+        excitation_nm: null,
+      },
+      {
+        name: "FITC",
+        color: "#07ff00",
+        emission_nm: 512,
+        excitation_nm: 488,
+      },
+      {
+        name: "TRITC",
+        color: "#ffbf00",
+        emission_nm: 595,
+        excitation_nm: 561,
+      },
+    ],
+    dimensions: withZ ? ["MULTICHANNEL", "Z_STACK"] : ["MULTICHANNEL"],
+  };
+}
+
+function instantRamanFiles(siteCount: number): SyntheticFileSpec[] {
+  // Prefix keeps the prod well-site shape without colliding with real
+  // InstantRaman basenames like `H10-Site_0.csv`.
+  const wells = ["A01", "B05", "C10", "D03", "E08", "F12", "G02", "H10"];
+  const files: SyntheticFileSpec[] = [];
+  for (let i = 0; i < siteCount; i++) {
+    const well = wells[i % wells.length];
+    const site = Math.floor(i / wells.length);
+    files.push(
+      {
+        filename: `SYN-${well}-Site_${site}.csv`,
+        contentType: "text/csv",
+        category: "raw",
+        sizeBytes: 93_000,
+      },
+      {
+        filename: `SYN-${well}-Site_${site}.json`,
+        contentType: "application/json",
+        category: "raw",
+        sizeBytes: 4300,
+      }
+    );
+  }
+  return files;
+}
+
+export interface FixtureFileSpec {
+  contentType: string;
+  filename: string;
+}
+
+export interface InstrumentFixture {
+  // Every available lambda fixture for this instrument; `seedRuns`
+  // cycles them across the instrument's seeded runs so docs screenshots
+  // cover each measurement / imaging mode, not just one example file.
+  files: readonly FixtureFileSpec[];
+  runIds: readonly string[];
+}
+
+const SPECTRAMAX_FIXTURE_FILES: readonly FixtureFileSpec[] = [
+  {
+    filename: "spectramax_plate_reader_endpoint.xls",
+    contentType: "application/vnd.ms-excel",
+  },
+  {
+    filename: "spectramax_plate_reader_endpoint_flat.xls",
+    contentType: "application/vnd.ms-excel",
+  },
+  {
+    filename: "spectramax_plate_reader_endpoint_sparse.xls",
+    contentType: "application/vnd.ms-excel",
+  },
+  {
+    filename: "spectramax_plate_reader_fluorescence.xls",
+    contentType: "application/vnd.ms-excel",
+  },
+  {
+    filename: "spectramax_plate_reader_kinetic.xls",
+    contentType: "application/vnd.ms-excel",
+  },
+  {
+    filename: "spectramax_plate_reader_well_scan.xls",
+    contentType: "application/vnd.ms-excel",
+  },
+];
+
+const GEL_DOC_FIXTURE_FILES: readonly FixtureFileSpec[] = [
+  {
+    filename: "azure_600_gel_doc_example.tif",
+    contentType: "image/tiff",
+  },
+  {
+    filename: "azure_600_gel_doc_fluorescence.tif",
+    contentType: "image/tiff",
+  },
+  {
+    filename: "azure_600_gel_doc_true_color.tif",
+    contentType: "image/tiff",
+  },
+];
+
+// Keyed by instrument id (not type) so both SpectraMax readers can share
+// the same fixture set under distinct ids / run-id lists.
+export const INSTRUMENT_FIXTURES: Record<string, InstrumentFixture> = {
+  "azure-cielo-qpcr": {
+    files: [
+      {
+        filename: "azure_cielo_qpcr_example.csv",
+        contentType: "text/csv",
+      },
+    ],
     runIds: [
       "Experiment_20260129",
       "Experiment_20260122",
@@ -381,9 +804,8 @@ export const INSTRUMENT_FIXTURES: Partial<
       "Experiment_20251211",
     ],
   },
-  gel_doc: {
-    filename: "azure_600_gel_doc_example.tif",
-    contentType: "image/tiff",
+  "azure-600-gel-doc": {
+    files: GEL_DOC_FIXTURE_FILES,
     runIds: [
       "26.02.02_10.45.05",
       "26.01.26_15.10.30",
@@ -395,19 +817,186 @@ export const INSTRUMENT_FIXTURES: Partial<
       "25.12.15_10.00.00",
     ],
   },
-  plate_reader: {
-    filename: "spectramax_plate_reader_endpoint.xls",
-    contentType: "application/vnd.ms-excel",
+  "spectramax-id3-plate-reader": {
+    files: SPECTRAMAX_FIXTURE_FILES,
+    // Names track the cycled fixture order (endpoint → flat → sparse →
+    // fluorescence → kinetic → well-scan → endpoint → flat).
     runIds: [
-      "012926_AR_OD600",
-      "012226_DK_OD750",
-      "011526_AR_GFP_endpoint",
-      "010826_DK_OD600",
-      "010126_AR_OD750",
-      "122525_DK_OD600",
+      "012926_AR_OD750",
+      "012226_DK_OD595_flat",
+      "011526_AR_OD600_sparse",
+      "010826_DK_GFP_fluo",
+      "010126_AR_OD595_kinetic",
+      "122525_DK_OD595_wellscan",
       "121825_AR_OD750",
-      "121125_DK_GFP_endpoint",
+      "121125_DK_OD595_flat",
     ],
+  },
+  "spectramax-id5-plate-reader": {
+    files: SPECTRAMAX_FIXTURE_FILES,
+    // Same fixture cycle as iD3; stems stay distinct per reader.
+    runIds: [
+      "260721_OD750_AAA",
+      "260720_OD595_flat_BBB",
+      "260716_OD600_sparse_CCC",
+      "260714_GFP_fluo_DDD",
+      "260710_OD595_kinetic_EEE",
+      "260705_OD595_wellscan_FFF",
+      "260628_OD750_GGG",
+      "260620_OD595_flat_HHH",
+    ],
+  },
+};
+
+// Filename / run-id patterns snapped from production shapes, with synthetic
+// stems so we never echo real lab filenames into the repo.
+const SYNTHETIC_RUN_SHAPES: Record<string, SyntheticRunShape> = {
+  "agilent-4150-tapestation": {
+    // Prod-shaped timestamps/assay suffixes; dates chosen to avoid real runs.
+    runIds: [
+      "2026-03-15 - 09-15-22-gDNA",
+      "2026-03-14 - 11-42-08-gDNA",
+      "2026-03-14 - 13-08-33-HSD1000",
+      "2026-03-12 - 10-21-45-gDNA",
+      "2026-03-11 - 15-04-12-gDNA",
+      "2026-03-10 - 14-36-51-HSD1000",
+      "2026-03-09 - 11-18-07-gDNA",
+      "2026-03-08 - 09-52-39-gDNA",
+    ],
+    filesForRun: (runId) => {
+      const pdfStem = runId.replace(/-(\d{2})-(\d{2})-(\d{2})/, ".$1.$2.$3");
+      return [
+        {
+          filename: `${runId}_compactPeakTable.csv`,
+          contentType: "text/csv",
+          category: "raw",
+        },
+        {
+          filename: `${runId}_Electropherogram.csv`,
+          contentType: "text/csv",
+          category: "raw",
+        },
+        {
+          filename: `${runId}_sampleTable.csv`,
+          contentType: "text/csv",
+          category: "raw",
+        },
+        {
+          filename: `${pdfStem}.pdf`,
+          contentType: "application/pdf",
+          category: "raw",
+        },
+      ];
+    },
+  },
+  "unchained-labs-aunty": {
+    // Prod-shaped ISO-ish stems; timestamps chosen to avoid real runs.
+    runIds: [
+      "2026-03-15T09-22-11",
+      "2026-03-15T09-18-44",
+      "2026-03-14T14-05-33",
+      "2026-03-13T16-41-09",
+      "2026-03-12T11-27-52",
+      "2026-03-11T10-13-28",
+      "2026-03-10T15-56-07",
+      "2026-03-09T08-34-19",
+    ],
+    filesForRun: (runId) => [
+      {
+        filename: `Aunty_export_${runId}.xlsx`,
+        contentType:
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        category: "raw",
+      },
+    ],
+  },
+  "jolene-fplc": {
+    runIds: [
+      "260721",
+      "260714",
+      "260707",
+      "260630",
+      "260623",
+      "260616",
+      "260609",
+      "260602",
+    ],
+    filesForRun: (runId) => [
+      {
+        filename: `${runId}_fraction-tables.pdf`,
+        contentType: "application/pdf",
+        category: "raw",
+      },
+      {
+        filename: `${runId}_chromatogram.pdf`,
+        contentType: "application/pdf",
+        category: "raw",
+      },
+      {
+        filename: `${runId}_fraction-tables.csv`,
+        contentType: "text/csv",
+        category: "raw",
+      },
+      {
+        filename: `${runId}_chromatogram.csv`,
+        contentType: "text/csv",
+        category: "raw",
+      },
+    ],
+  },
+  "hina-microscope": {
+    // Prod-shaped YYYYMMDD_HHMMSS_### stems; stamps chosen to avoid real runs.
+    runIds: [
+      "20260315_091522_101",
+      "20260314_114208_214",
+      "20260313_130833_307",
+      "20260312_152145_418",
+      "20260311_100412_522",
+      "20260310_143651_633",
+      "20260309_111807_744",
+      "20260308_095239_855",
+    ],
+    // Hundreds–thousands of .nd2 files at ~30 MiB each so totals land in
+    // the tens of GB (and ~60 GB on the largest run), matching production.
+    filesForRun: (_runId, runIdx) =>
+      hinaNd2Files(HINA_FILE_COUNTS[runIdx] ?? 96),
+    metadataForRun: (_runId, runIdx) => hinaRunMetadata(runIdx),
+  },
+  "epson-v700-scanner": {
+    // Fully synthetic stems (not redacted prod initials like RAF→AAA).
+    runIds: [
+      "20260801_SYN_colony_300dpi_003",
+      "20260801_SYN_colony_300dpi_002",
+      "20260801_SYN_colony_300dpi_001",
+      "20260728_SYN_ref_grid_300dpi_003",
+      "20260722_SYN_kinetic_endpoint_300dpi_002",
+      "20260718_SYN_replica_plate1_300dpi001",
+      "20260718_SYN_replica_plate2_600dpi001",
+      "20260712_SYN_colony_screen_300dpi001",
+    ],
+    filesForRun: (runId) => [
+      {
+        filename: `${runId}.tif`,
+        contentType: "image/tiff",
+        category: "raw",
+      },
+    ],
+  },
+  instantraman: {
+    // Prod-shaped freeform experiment names; none copied from production.
+    runIds: [
+      "yeast_plate_a_785",
+      "yeast_plate_b_830",
+      "biotin_droplet_rep1",
+      "culture_dilution_001",
+      "culture_dilution_002",
+      "dmso_control_rep1",
+      "steel_blank_series_rep1",
+      "dried_spot_series_a",
+    ],
+    // Hundreds of csv/json site pairs per run (production often has 200–4000+).
+    filesForRun: (_runId, runIdx) =>
+      instantRamanFiles([120, 250, 80, 400, 180, 60, 300, 90][runIdx] ?? 100),
   },
 };
 
@@ -481,24 +1070,15 @@ function seedAcquiredAtSchedule(now: Date = new Date()): Date[] {
 export async function seedRuns(
   db: Db,
   instrumentId: string,
-  count = 8,
-  instrumentType?: schema.InstrumentType
+  count = 8
 ): Promise<SeededRun[]> {
   if (count <= 0) {
     return [];
   }
 
-  const fixture = instrumentType
-    ? INSTRUMENT_FIXTURES[instrumentType]
-    : undefined;
-
-  // Fixture-bearing instruments take their run-id strings from the
-  // canonical-looking list (capped at `count` so the caller still
-  // controls the run total). Other instruments keep the synthetic
-  // `seed-run-N` ids — those rows aren't expected to round-trip
-  // through any real `process_file`, so a generic identifier is
-  // fine.
-  const fixtureRunIds = fixture?.runIds.slice(0, count);
+  const fixture = INSTRUMENT_FIXTURES[instrumentId];
+  const synthetic = SYNTHETIC_RUN_SHAPES[instrumentId];
+  const runIds = (fixture?.runIds ?? synthetic?.runIds)?.slice(0, count);
 
   // Place runs on calendar-aware stamps so Today / Yesterday / This week /
   // Last 7 days / Last 2 weeks / This month / Last 4 weeks presets each return
@@ -507,11 +1087,13 @@ export async function seedRuns(
   const runValues = Array.from({ length: count }, (_, i) => {
     const acquiredAt =
       schedule[i] ?? new Date(Date.now() - (i + 1) * 3 * DAY_MS);
+    const runId = runIds?.[i] ?? `run-${i + 1}`;
+    const extraMeta = synthetic?.metadataForRun?.(runId, i) ?? {};
     return {
       instrumentId,
-      runId: fixtureRunIds?.[i] ?? `seed-run-${i + 1}`,
+      runId,
       source: (i % 2 === 0 ? "lambda" : "watcher") as "lambda" | "watcher",
-      metadata: { seeded: true, sample_count: 96 - i },
+      metadata: { seeded: true, ...extraMeta },
       acquiredAt,
     };
   });
@@ -525,23 +1107,41 @@ export async function seedRuns(
       runId: schema.instrumentRuns.runId,
     });
 
-  // Fixture-bearing runs render exactly one file row — the real
-  // fixture — so the UI doesn't show synthetic CSV siblings next to
-  // a real `.tif` / `.xls`. Status still cycles across the 5 runs
-  // (uploaded → completed → failed → uploaded → completed) for UI
-  // mix. Other instruments keep the historical 3-files-per-run
-  // shape (raw, raw, processed) with synthetic CSV names.
+  const fixtureForRun = (runIdx: number): FixtureFileSpec | undefined => {
+    if (!fixture || fixture.files.length === 0) {
+      return;
+    }
+    return fixture.files[runIdx % fixture.files.length];
+  };
+
+  // Cache fixture sizes once so multi-run seeds don't re-stat the same file.
+  const fixtureSizeByName = new Map<string, number>();
+  if (fixture) {
+    await Promise.all(
+      fixture.files.map(async (file) => {
+        const { size } = await stat(path.resolve(FIXTURES_DIR, file.filename));
+        fixtureSizeByName.set(file.filename, size);
+      })
+    );
+  }
+
   const fileRows = fixture
     ? runs.map((run, runIdx) => {
-        const status = FILE_STATUSES[runIdx % FILE_STATUSES.length];
+        const file = fixtureForRun(runIdx);
+        if (!file) {
+          throw new Error(
+            `INSTRUMENT_FIXTURES[${instrumentId}] has no fixture files`
+          );
+        }
+        const status = seedFileStatus(runIdx, 0);
         return {
           instrumentRunId: run.id,
-          relativePath: fixture.filename,
+          relativePath: file.filename,
           s3Bucket: RAW_BUCKET,
-          s3Key: `${run.instrumentId}/${run.runId}/${fixture.filename}`,
-          filename: fixture.filename,
-          contentType: fixture.contentType,
-          sizeBytes: 1024,
+          s3Key: `${run.instrumentId}/${run.runId}/${file.filename}`,
+          filename: file.filename,
+          contentType: file.contentType,
+          sizeBytes: fixtureSizeByName.get(file.filename) ?? 1024,
           category: "raw" as const,
           status,
           metadata: { seeded: true },
@@ -551,20 +1151,27 @@ export async function seedRuns(
           processedAt: status === "completed" ? new Date() : null,
         };
       })
-    : runs.flatMap((run, runIdx) =>
-        Array.from({ length: 3 }, (_, fi) => {
-          const status = FILE_STATUSES[(runIdx + fi) % FILE_STATUSES.length];
-          const category = fi === 2 ? ("processed" as const) : ("raw" as const);
-          const filename = `${category}_${fi + 1}.csv`;
+    : runs.flatMap((run, runIdx) => {
+        const specs =
+          synthetic?.filesForRun(run.runId, runIdx) ??
+          ([
+            {
+              filename: "data_001.csv",
+              contentType: "text/csv",
+              category: "raw" as const,
+            },
+          ] satisfies SyntheticFileSpec[]);
+        return specs.map((spec, fi) => {
+          const status = seedFileStatus(runIdx, fi);
           return {
             instrumentRunId: run.id,
-            relativePath: filename,
+            relativePath: spec.filename,
             s3Bucket: RAW_BUCKET,
-            s3Key: `${run.instrumentId}/${run.runId}/${filename}`,
-            filename,
-            contentType: "text/csv",
-            sizeBytes: 1024 * (fi + 1),
-            category,
+            s3Key: `${run.instrumentId}/${run.runId}/${spec.filename}`,
+            filename: spec.filename,
+            contentType: spec.contentType,
+            sizeBytes: spec.sizeBytes ?? 1024 * (fi + 1),
+            category: spec.category,
             status,
             metadata: { seeded: true },
             errorMessage:
@@ -572,29 +1179,36 @@ export async function seedRuns(
             uploadedAt: status === "failed" ? null : new Date(),
             processedAt: status === "completed" ? new Date() : null,
           };
-        })
-      );
-  await db.insert(schema.files).values(fileRows);
+        });
+      });
 
-  // If the local-mirror env var is set and this instrument type has
-  // a fixture, copy the fixture bytes into
-  // `<LOCAL_S3_MIRROR>/<RAW_BUCKET>/<instrumentId>/<runId>/<filename>`
-  // for every run. The web app's local-mirror route then serves them
-  // when the dashboard requests `/api/v1/files/<id>/download`.
-  // Production-safety: `LOCAL_S3_MIRROR` is ignored in production by
-  // `getLocalMirrorRoot` anyway, but seeding is also strictly a dev
-  // workflow so this branch only fires locally regardless.
+  // Chunk large inserts (Hina can seed thousands of file rows per reseed).
+  for (let i = 0; i < fileRows.length; i += FILE_INSERT_CHUNK) {
+    await db
+      .insert(schema.files)
+      .values(fileRows.slice(i, i + FILE_INSERT_CHUNK));
+  }
+
+  // If the local-mirror env var is set and this instrument has fixtures,
+  // copy each run's fixture bytes into
+  // `<LOCAL_S3_MIRROR>/<RAW_BUCKET>/<instrumentId>/<runId>/<filename>`.
+  // The web app's local-mirror route then serves them when the dashboard
+  // requests `/api/v1/files/<id>/download`.
   const mirrorRoot = process.env.LOCAL_S3_MIRROR;
   if (mirrorRoot && fixture) {
-    const src = path.resolve(FIXTURES_DIR, fixture.filename);
     await Promise.all(
-      runs.map(async (run) => {
+      runs.map(async (run, runIdx) => {
+        const file = fixtureForRun(runIdx);
+        if (!file) {
+          return;
+        }
+        const src = path.resolve(FIXTURES_DIR, file.filename);
         const dest = path.resolve(
           mirrorRoot,
           RAW_BUCKET,
           run.instrumentId,
           run.runId,
-          fixture.filename
+          file.filename
         );
         await mkdir(path.dirname(dest), { recursive: true });
         await copyFile(src, dest);
@@ -609,37 +1223,307 @@ export async function seedRuns(
 // Run comments + attributions
 // ---------------------------------------------------------------------------
 
+export interface SeedCommentAuthor {
+  id: string;
+  name: string;
+}
+
+interface CommentThreadBeat {
+  authorIndex: number;
+  body: string;
+  // Offset from "now" in hours (positive = in the past).
+  hoursAgo: number;
+}
+
+// Curated multi-turn threads so run pages look like a real lab workspace
+// rather than "Seeded comment N". Indices into the authors array passed to
+// `seedRunComments` (0 = Alice / admin). Threads are keyed by instrument so
+// docs screenshots don't show gel talk on a TapeStation run.
+const COMMENT_THREADS_BY_INSTRUMENT: Record<string, CommentThreadBeat[][]> = {
+  "azure-600-gel-doc": [
+    [
+      {
+        authorIndex: 1,
+        body: "@Alice — does lane 3 look overexposed to you, or am I misreading the contrast?",
+        hoursAgo: 5,
+      },
+      {
+        authorIndex: 0,
+        body: "A bit hot on the blue channel. Try re-exporting with auto-levels off and I'll take another look.",
+        hoursAgo: 4.5,
+      },
+      {
+        authorIndex: 1,
+        body: "Re-exported — much cleaner. Leaving the original on the run for comparison.",
+        hoursAgo: 3,
+      },
+    ],
+    [
+      {
+        authorIndex: 6,
+        body: "@Alice can we reprocess this? The preview PNG looks washed out compared to the TIFF.",
+        hoursAgo: 12,
+      },
+      {
+        authorIndex: 0,
+        body: "Reprocessing now — chemiluminescence and fluorescence can need different stretch settings.",
+        hoursAgo: 11,
+      },
+      {
+        authorIndex: 6,
+        body: "Looks good after reprocess. Thanks!",
+        hoursAgo: 10,
+      },
+    ],
+  ],
+  "azure-cielo-qpcr": [
+    [
+      {
+        authorIndex: 3,
+        body: "Cq values look consistent across tech replicates. Anyone else seeing the late amp in H12?",
+        hoursAgo: 26,
+      },
+      {
+        authorIndex: 4,
+        body: "@David H12 was the NTC — expected. Everything else looks good to proceed.",
+        hoursAgo: 25,
+      },
+    ],
+    [
+      {
+        authorIndex: 2,
+        body: "Quick note: standards were freshly diluted this morning (lot BCA-221).",
+        hoursAgo: 8,
+      },
+      {
+        authorIndex: 0,
+        body: "Thanks @Carol — that matches the curve shape. Claiming this one.",
+        hoursAgo: 7,
+      },
+    ],
+  ],
+  "spectramax-id3-plate-reader": [
+    [
+      {
+        authorIndex: 5,
+        body: "Plate map is in the notebook under 2026-07-14 / ELM Comp. Rows A–D are 1:5 dilutions.",
+        hoursAgo: 30,
+      },
+    ],
+    [
+      {
+        authorIndex: 2,
+        body: "OD595 kinetic looks clean after blank subtraction. Claiming this one.",
+        hoursAgo: 8,
+      },
+      {
+        authorIndex: 0,
+        body: "Thanks @Carol — agreed on the curve shape.",
+        hoursAgo: 7,
+      },
+    ],
+  ],
+  "spectramax-id5-plate-reader": [
+    [
+      {
+        authorIndex: 5,
+        body: "Well-scan heatmap matches the endpoint plate map. Rows A–D are 1:5 dilutions.",
+        hoursAgo: 30,
+      },
+    ],
+    [
+      {
+        authorIndex: 2,
+        body: "Fluorescence endpoint looks consistent across tech replicates.",
+        hoursAgo: 8,
+      },
+      {
+        authorIndex: 0,
+        body: "Thanks @Carol — claiming this one.",
+        hoursAgo: 7,
+      },
+    ],
+  ],
+  "agilent-4150-tapestation": [
+    [
+      {
+        authorIndex: 7,
+        body: "DIN for the gDNA ladder was within range. Moving these samples to library prep.",
+        hoursAgo: 48,
+      },
+      {
+        authorIndex: 8,
+        body: "Noted — I'll pull the electropherogram into the QC sheet.",
+        hoursAgo: 46,
+      },
+    ],
+    [
+      {
+        authorIndex: 9,
+        body: "Question: should we keep the failed upload row or dismiss it? Watcher retried successfully on the next heartbeat.",
+        hoursAgo: 6,
+      },
+      {
+        authorIndex: 0,
+        body: "Dismiss the failed one — the completed sibling is the source of truth.",
+        hoursAgo: 5.5,
+      },
+    ],
+  ],
+  "hina-microscope": [
+    [
+      {
+        authorIndex: 10,
+        body: "Z-stack looks solid through planes 2–4. Plane 1 is a bit dim on FITC.",
+        hoursAgo: 2,
+      },
+    ],
+    [
+      {
+        authorIndex: 1,
+        body: "@Alice — channel labels look right (BF / FITC / TRITC). OK to keep the full well grid?",
+        hoursAgo: 5,
+      },
+      {
+        authorIndex: 0,
+        body: "Yes — keep all points. We can subsample later if storage becomes an issue.",
+        hoursAgo: 4.5,
+      },
+    ],
+  ],
+  "epson-v700-scanner": [
+    [
+      {
+        authorIndex: 6,
+        body: "@Alice can we reprocess this? The preview PNG looks washed out compared to the TIFF.",
+        hoursAgo: 12,
+      },
+      {
+        authorIndex: 0,
+        body: "Reprocessing now. If it still looks off, check the scanner DPI — 300 vs 600 changes the preview a lot.",
+        hoursAgo: 11,
+      },
+      {
+        authorIndex: 6,
+        body: "Looks good after reprocess. Thanks!",
+        hoursAgo: 10,
+      },
+    ],
+  ],
+  instantraman: [
+    [
+      {
+        authorIndex: 3,
+        body: "Site spectra look consistent across the plate. Anyone else seeing the outlier at H10?",
+        hoursAgo: 26,
+      },
+      {
+        authorIndex: 4,
+        body: "@David H10 was the solvent blank — expected. Everything else looks good to proceed.",
+        hoursAgo: 25,
+      },
+    ],
+  ],
+};
+
+// Fallback for instruments without a dedicated thread pool (Aunty, Jolene, …).
+const GENERIC_COMMENT_THREADS: CommentThreadBeat[][] = [
+  [
+    {
+      authorIndex: 9,
+      body: "Question: should we keep the failed upload row or dismiss it? Watcher retried successfully on the next heartbeat.",
+      hoursAgo: 6,
+    },
+    {
+      authorIndex: 0,
+      body: "Dismiss the failed one — the completed sibling is the source of truth.",
+      hoursAgo: 5.5,
+    },
+  ],
+  [
+    {
+      authorIndex: 2,
+      body: "Logged in the notebook under today's date. Claiming this one.",
+      hoursAgo: 8,
+    },
+    {
+      authorIndex: 0,
+      body: "Thanks @Carol — looks consistent with the prior replicate.",
+      hoursAgo: 7,
+    },
+  ],
+];
+
 export async function seedRunComments(
   db: Db,
   runs: SeededRun[],
-  userId: string
+  authors: SeedCommentAuthor[]
 ): Promise<void> {
-  if (runs.length === 0) {
+  if (runs.length === 0 || authors.length === 0) {
     return;
   }
-  // Stamp most comments as "this week" and a couple as last week so the
-  // user-runs "Comments this week" card is a proper subset of total comments.
+
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const weekStartMs = new Date(startOfWeekISO(timeZone)).getTime();
   const lastWeekCommentAt = new Date(weekStartMs - 2 * DAY_MS);
-  const rows = runs.map((run, i) => ({
-    runId: run.id,
-    userId,
-    body: `Seeded comment ${i + 1} on **${run.runId}** — looks good!`,
-    createdAt: i % 4 === 3 ? lastWeekCommentAt : new Date(),
-  }));
+  const now = Date.now();
+
+  type CommentInsert = typeof schema.runComments.$inferInsert;
+  const rows: CommentInsert[] = [];
+  // Per-instrument index so thread selection stays stable for a given
+  // instrument regardless of how many runs other instruments contributed.
+  const instrumentRunIdx = new Map<string, number>();
+
+  for (const [runIndex, run] of runs.entries()) {
+    const idxOnInstrument = instrumentRunIdx.get(run.instrumentId) ?? 0;
+    instrumentRunIdx.set(run.instrumentId, idxOnInstrument + 1);
+
+    // Rich threads on every third run; everyone else gets a short note so
+    // the comments column isn't empty in list views.
+    if (idxOnInstrument % 3 === 0) {
+      const pool =
+        COMMENT_THREADS_BY_INSTRUMENT[run.instrumentId] ??
+        GENERIC_COMMENT_THREADS;
+      const thread = pool[idxOnInstrument % pool.length];
+      for (const beat of thread) {
+        const author = authors[beat.authorIndex % authors.length];
+        rows.push({
+          runId: run.id,
+          userId: author.id,
+          body: beat.body,
+          createdAt: new Date(now - beat.hoursAgo * HOUR_MS),
+        });
+      }
+      continue;
+    }
+
+    const author = authors[(runIndex + 1) % authors.length];
+    rows.push({
+      runId: run.id,
+      userId: author.id,
+      body:
+        idxOnInstrument % 4 === 3
+          ? `Checked ${run.runId} last week — looks consistent with the prior replicate.`
+          : `Logged ${run.runId}. Samples stored in box ${String.fromCharCode(65 + (runIndex % 6))}-${(runIndex % 9) + 1}.`,
+      createdAt: idxOnInstrument % 4 === 3 ? lastWeekCommentAt : new Date(),
+    });
+  }
+
   await db.insert(schema.runComments).values(rows);
 }
 
 export async function seedRunAttributions(
   db: Db,
   runs: SeededRun[],
-  userId: string
+  userIds: string[]
 ): Promise<void> {
-  if (runs.length === 0) {
+  if (runs.length === 0 || userIds.length === 0) {
     return;
   }
-  const rows = runs.map((run) => ({ runId: run.id, userId }));
+  const rows = runs.map((run, i) => ({
+    runId: run.id,
+    userId: userIds[i % userIds.length],
+  }));
   await db.insert(schema.runAttributions).values(rows);
 }
 
@@ -657,18 +1541,40 @@ export interface SeededTeammate {
   name: string;
 }
 
-// Fixed preset list (rather than randomized) so reseeds produce stable
-// identities — screenshots / bug reports referencing "Lucy" keep matching
-// after a `db:reseed`.
+// Fixed presets: first names A→Z, last names Z→A (Alice Zimmerman … Zoe
+// Anderson). Alice is seeded separately as admin. Deterministic so
+// screenshots / bug reports keep matching after a `db:reseed`.
 const TEAMMATE_PRESETS: Omit<SeededTeammate, "id">[] = [
-  { name: "Lucy Hurlbut", email: "lucy@local" },
-  { name: "Marcus Chen", email: "marcus@local" },
-  { name: "Priya Patel", email: "priya@local" },
+  { name: "Bob Young", email: "bob@example.com" },
+  { name: "Carol Xu", email: "carol@example.com" },
+  { name: "David Watson", email: "david@example.com" },
+  { name: "Emma Vargas", email: "emma@example.com" },
+  { name: "Frank Upton", email: "frank@example.com" },
+  { name: "Grace Torres", email: "grace@example.com" },
+  { name: "Henry Sullivan", email: "henry@example.com" },
+  { name: "Iris Rivera", email: "iris@example.com" },
+  { name: "Jack Quigley", email: "jack@example.com" },
+  { name: "Kate Parker", email: "kate@example.com" },
+  { name: "Leo Owens", email: "leo@example.com" },
+  { name: "Maria Nguyen", email: "maria@example.com" },
+  { name: "Nina Mitchell", email: "nina@example.com" },
+  { name: "Oscar Larson", email: "oscar@example.com" },
+  { name: "Paula Keller", email: "paula@example.com" },
+  { name: "Quinn Johnson", email: "quinn@example.com" },
+  { name: "Rachel Ingram", email: "rachel@example.com" },
+  { name: "Sam Hughes", email: "sam@example.com" },
+  { name: "Tina Garcia", email: "tina@example.com" },
+  { name: "Uma Foster", email: "uma@example.com" },
+  { name: "Victor Edwards", email: "victor@example.com" },
+  { name: "Wendy Dawson", email: "wendy@example.com" },
+  { name: "Xavier Carter", email: "xavier@example.com" },
+  { name: "Yara Benson", email: "yara@example.com" },
+  { name: "Zoe Anderson", email: "zoe@example.com" },
 ];
 
 export async function seedTeammates(
   db: Db,
-  count = 2
+  count = TEAMMATE_PRESETS.length
 ): Promise<SeededTeammate[]> {
   const chosen = TEAMMATE_PRESETS.slice(0, Math.max(0, count));
   if (chosen.length === 0) {
@@ -723,11 +1629,10 @@ export async function seedInstrumentSubscriptions(
 //     read-vs-unread visual contrast and the "Earlier" section both show
 //     up after the first popover open.
 //
-// All notifications target a single recipient (the dev user). Comments
+// All notifications target a single recipient (the admin user). Comments
 // authored by the teammates are inserted here as well so the popover can
 // surface their body preview without depending on `seedRunComments`
-// having already inserted teammate comments — that builder only seeds
-// dev-user comments to satisfy the comment_participated precondition.
+// having already inserted teammate comments.
 // ---------------------------------------------------------------------------
 
 export interface SeededNotifications {
@@ -780,9 +1685,18 @@ export async function seedNotifications(
   // -------------------------------------------------------------------------
 
   const primaryTeammate = teammates[0];
-  const todayCommentTargets = runs.slice(0, 2);
+  // Prefer plate-reader runs so the OD-worded today comments match the
+  // instrument in the notification deep-link (falls back to any runs).
+  const plateReaderRuns = runs.filter(
+    (r) =>
+      r.instrumentId === "spectramax-id3-plate-reader" ||
+      r.instrumentId === "spectramax-id5-plate-reader"
+  );
+  const todayCommentTargets = (
+    plateReaderRuns.length >= 2 ? plateReaderRuns : runs
+  ).slice(0, 2);
   const todayCommentBodies = [
-    "@dev can you take a look at the OD readings on plate 3? Something looks off…",
+    "@Alice can you take a look at the OD readings on plate 3? Something looks off…",
     "Nevermind — I see what happened. The well was contaminated.",
   ];
 
@@ -852,7 +1766,7 @@ export async function seedNotifications(
   // -------------------------------------------------------------------------
   // Earlier: one already-read `comment_participated` row to exercise both
   // the "Earlier" bucket and the read-row treatment (dimmed background, no
-  // left rail). The dev user has a seeded comment on every run via
+  // left rail). The admin has seeded comments on many runs via
   // `seedRunComments`, so any run qualifies for the participated trigger.
   // -------------------------------------------------------------------------
 
@@ -907,7 +1821,7 @@ export async function seedArchiveJobs(
       archiveBucket: status === "ready" ? ARCHIVES_BUCKET : null,
       archiveKey:
         status === "ready"
-          ? `runs/${run.instrumentId}/${run.runId}/seed.zip`
+          ? `runs/${run.instrumentId}/${run.runId}/archive.zip`
           : null,
       sizeBytes: status === "ready" ? 1_048_576 : null,
       status,

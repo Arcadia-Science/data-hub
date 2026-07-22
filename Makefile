@@ -83,7 +83,7 @@ dev:
 	cd web && npm run dev
 
 # Reset the local Postgres database, re-push the Drizzle schema, and load
-# a deterministic seed (dev user + PAT, one instrument per type, watchers,
+# a deterministic seed (Alice + teammates, prod instrument catalog, watchers,
 # runs, files, comments, attributions, archive jobs). See
 # developer-docs/local-development.md for the full local-only dev workflow.
 .PHONY: db-reseed

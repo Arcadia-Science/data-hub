@@ -24,7 +24,7 @@ Standard commands live in the `Makefile`, `web/package.json`, `developer-docs/ge
 
 - **PostgreSQL must be started on every fresh VM** — the cluster is installed and the data (roles + databases) persist in the snapshot, but the server process is not running at boot: `sudo pg_ctlcluster 16 main start` (or `sudo service postgresql start`).
 - Postgres is reachable at `postgres://postgres:postgres@127.0.0.1:5432`. Databases `data-hub-local` (dev) and `data_hub_test` (integration tests) already exist. The integration harness (`web/tests/integration/global-setup.ts`) hardcodes these same credentials and creates `data_hub_test` itself if missing.
-- **Web dev server:** `make dev` (Next.js + Turbopack on http://localhost:3000). Sign in at `/login` with the "Sign in (dev)" button using email `dev@local` (workspace admin; no password).
+- **Web dev server:** `make dev` (Next.js + Turbopack on http://localhost:3000). Sign in at `/login` with the "Sign in (dev)" button using email `alice@example.com` (workspace admin; no password).
 
 ### Environment file
 
