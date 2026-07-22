@@ -1434,7 +1434,7 @@ const TEAMMATE_PRESETS: Omit<SeededTeammate, "id">[] = [
   { name: "Carol Xu", email: "carol@example.com" },
   { name: "David Watson", email: "david@example.com" },
   { name: "Emma Vargas", email: "emma@example.com" },
-  { name: "Frank Underwood", email: "frank@example.com" },
+  { name: "Frank Upton", email: "frank@example.com" },
   { name: "Grace Torres", email: "grace@example.com" },
   { name: "Henry Sullivan", email: "henry@example.com" },
   { name: "Iris Rivera", email: "iris@example.com" },
