@@ -479,18 +479,6 @@ export const SEED_INSTRUMENTS: readonly SeededInstrument[] = [
   },
 ];
 
-// Instrument ids that have a real lambda `process_file` pipeline. Kept as a
-// type→id map for callers that still think in instrument types; fixtures
-// themselves are keyed by instrument id below so both SpectraMax readers
-// can share the same `.xls` fixture under distinct ids.
-export const CANONICAL_INSTRUMENT_ID: Partial<
-  Record<schema.InstrumentType, string>
-> = {
-  qpcr: "azure-cielo-qpcr",
-  gel_doc: "azure-600-gel-doc",
-  plate_reader: "spectramax-id3-plate-reader",
-};
-
 export async function seedInstruments(db: Db): Promise<SeededInstrument[]> {
   const rows = SEED_INSTRUMENTS.map(
     ({ id, displayName, instrumentType, status }) => ({
@@ -832,12 +820,12 @@ export const INSTRUMENT_FIXTURES: Record<string, InstrumentFixture> = {
   "spectramax-id3-plate-reader": {
     files: SPECTRAMAX_FIXTURE_FILES,
     // Names track the cycled fixture order (endpoint → flat → sparse →
-    // fluorescence → kinetic → well-scan → …).
+    // fluorescence → kinetic → well-scan → endpoint → flat).
     runIds: [
       "012926_AR_OD750",
       "012226_DK_OD595_flat",
       "011526_AR_OD600_sparse",
-      "010826_DK_GFP_endpoint",
+      "010826_DK_GFP_fluo",
       "010126_AR_OD595_kinetic",
       "122525_DK_OD595_wellscan",
       "121825_AR_OD750",
@@ -846,11 +834,12 @@ export const INSTRUMENT_FIXTURES: Record<string, InstrumentFixture> = {
   },
   "spectramax-id5-plate-reader": {
     files: SPECTRAMAX_FIXTURE_FILES,
+    // Same fixture cycle as iD3; stems stay distinct per reader.
     runIds: [
       "260721_OD750_AAA",
       "260720_OD595_flat_BBB",
       "260716_OD600_sparse_CCC",
-      "260714_fluo_DDD",
+      "260714_GFP_fluo_DDD",
       "260710_OD595_kinetic_EEE",
       "260705_OD595_wellscan_FFF",
       "260628_OD750_GGG",
@@ -1248,85 +1237,197 @@ interface CommentThreadBeat {
 
 // Curated multi-turn threads so run pages look like a real lab workspace
 // rather than "Seeded comment N". Indices into the authors array passed to
-// `seedRunComments` (0 = Alice / admin).
-const COMMENT_THREADS: CommentThreadBeat[][] = [
-  [
-    {
-      authorIndex: 1,
-      body: "@Alice — does lane 3 look overexposed to you, or am I misreading the contrast?",
-      hoursAgo: 5,
-    },
-    {
-      authorIndex: 0,
-      body: "A bit hot on the blue channel. Try re-exporting with auto-levels off and I'll take another look.",
-      hoursAgo: 4.5,
-    },
-    {
-      authorIndex: 1,
-      body: "Re-exported — much cleaner. Leaving the original on the run for comparison.",
-      hoursAgo: 3,
-    },
+// `seedRunComments` (0 = Alice / admin). Threads are keyed by instrument so
+// docs screenshots don't show gel talk on a TapeStation run.
+const COMMENT_THREADS_BY_INSTRUMENT: Record<string, CommentThreadBeat[][]> = {
+  "azure-600-gel-doc": [
+    [
+      {
+        authorIndex: 1,
+        body: "@Alice — does lane 3 look overexposed to you, or am I misreading the contrast?",
+        hoursAgo: 5,
+      },
+      {
+        authorIndex: 0,
+        body: "A bit hot on the blue channel. Try re-exporting with auto-levels off and I'll take another look.",
+        hoursAgo: 4.5,
+      },
+      {
+        authorIndex: 1,
+        body: "Re-exported — much cleaner. Leaving the original on the run for comparison.",
+        hoursAgo: 3,
+      },
+    ],
+    [
+      {
+        authorIndex: 6,
+        body: "@Alice can we reprocess this? The preview PNG looks washed out compared to the TIFF.",
+        hoursAgo: 12,
+      },
+      {
+        authorIndex: 0,
+        body: "Reprocessing now — chemiluminescence and fluorescence can need different stretch settings.",
+        hoursAgo: 11,
+      },
+      {
+        authorIndex: 6,
+        body: "Looks good after reprocess. Thanks!",
+        hoursAgo: 10,
+      },
+    ],
   ],
-  [
-    {
-      authorIndex: 2,
-      body: "Quick note: standards were freshly diluted this morning (lot BCA-221).",
-      hoursAgo: 8,
-    },
-    {
-      authorIndex: 0,
-      body: "Thanks @Carol — that matches the curve shape. Claiming this one.",
-      hoursAgo: 7,
-    },
+  "azure-cielo-qpcr": [
+    [
+      {
+        authorIndex: 3,
+        body: "Cq values look consistent across tech replicates. Anyone else seeing the late amp in H12?",
+        hoursAgo: 26,
+      },
+      {
+        authorIndex: 4,
+        body: "@David H12 was the NTC — expected. Everything else looks good to proceed.",
+        hoursAgo: 25,
+      },
+    ],
+    [
+      {
+        authorIndex: 2,
+        body: "Quick note: standards were freshly diluted this morning (lot BCA-221).",
+        hoursAgo: 8,
+      },
+      {
+        authorIndex: 0,
+        body: "Thanks @Carol — that matches the curve shape. Claiming this one.",
+        hoursAgo: 7,
+      },
+    ],
   ],
-  [
-    {
-      authorIndex: 3,
-      body: "Cq values look consistent across tech replicates. Anyone else seeing the late amp in H12?",
-      hoursAgo: 26,
-    },
-    {
-      authorIndex: 4,
-      body: "@Carol H12 was the NTC — expected. Everything else looks good to proceed.",
-      hoursAgo: 25,
-    },
+  "spectramax-id3-plate-reader": [
+    [
+      {
+        authorIndex: 5,
+        body: "Plate map is in the notebook under 2026-07-14 / ELM Comp. Rows A–D are 1:5 dilutions.",
+        hoursAgo: 30,
+      },
+    ],
+    [
+      {
+        authorIndex: 2,
+        body: "OD595 kinetic looks clean after blank subtraction. Claiming this one.",
+        hoursAgo: 8,
+      },
+      {
+        authorIndex: 0,
+        body: "Thanks @Carol — agreed on the curve shape.",
+        hoursAgo: 7,
+      },
+    ],
   ],
-  [
-    {
-      authorIndex: 5,
-      body: "Plate map is in the notebook under 2026-07-14 / ELM Comp. Rows A–D are 1:5 dilutions.",
-      hoursAgo: 30,
-    },
+  "spectramax-id5-plate-reader": [
+    [
+      {
+        authorIndex: 5,
+        body: "Well-scan heatmap matches the endpoint plate map. Rows A–D are 1:5 dilutions.",
+        hoursAgo: 30,
+      },
+    ],
+    [
+      {
+        authorIndex: 2,
+        body: "Fluorescence endpoint looks consistent across tech replicates.",
+        hoursAgo: 8,
+      },
+      {
+        authorIndex: 0,
+        body: "Thanks @Carol — claiming this one.",
+        hoursAgo: 7,
+      },
+    ],
   ],
-  [
-    {
-      authorIndex: 6,
-      body: "@Alice can we reprocess this? The preview PNG looks washed out compared to the TIFF.",
-      hoursAgo: 12,
-    },
-    {
-      authorIndex: 0,
-      body: "Reprocessing now. If it still looks off, check the scanner DPI — 300 vs 600 changes the preview a lot.",
-      hoursAgo: 11,
-    },
-    {
-      authorIndex: 6,
-      body: "Looks good after reprocess. Thanks!",
-      hoursAgo: 10,
-    },
+  "agilent-4150-tapestation": [
+    [
+      {
+        authorIndex: 7,
+        body: "DIN for the gDNA ladder was within range. Moving these samples to library prep.",
+        hoursAgo: 48,
+      },
+      {
+        authorIndex: 8,
+        body: "Noted — I'll pull the electropherogram into the QC sheet.",
+        hoursAgo: 46,
+      },
+    ],
+    [
+      {
+        authorIndex: 9,
+        body: "Question: should we keep the failed upload row or dismiss it? Watcher retried successfully on the next heartbeat.",
+        hoursAgo: 6,
+      },
+      {
+        authorIndex: 0,
+        body: "Dismiss the failed one — the completed sibling is the source of truth.",
+        hoursAgo: 5.5,
+      },
+    ],
   ],
-  [
-    {
-      authorIndex: 7,
-      body: "DIN for the gDNA ladder was within range. Moving these samples to library prep.",
-      hoursAgo: 48,
-    },
-    {
-      authorIndex: 8,
-      body: "Noted — I'll pull the electropherogram into the QC sheet.",
-      hoursAgo: 46,
-    },
+  "hina-microscope": [
+    [
+      {
+        authorIndex: 10,
+        body: "Z-stack looks solid through planes 2–4. Plane 1 is a bit dim on FITC.",
+        hoursAgo: 2,
+      },
+    ],
+    [
+      {
+        authorIndex: 1,
+        body: "@Alice — channel labels look right (BF / FITC / TRITC). OK to keep the full well grid?",
+        hoursAgo: 5,
+      },
+      {
+        authorIndex: 0,
+        body: "Yes — keep all points. We can subsample later if storage becomes an issue.",
+        hoursAgo: 4.5,
+      },
+    ],
   ],
+  "epson-v700-scanner": [
+    [
+      {
+        authorIndex: 6,
+        body: "@Alice can we reprocess this? The preview PNG looks washed out compared to the TIFF.",
+        hoursAgo: 12,
+      },
+      {
+        authorIndex: 0,
+        body: "Reprocessing now. If it still looks off, check the scanner DPI — 300 vs 600 changes the preview a lot.",
+        hoursAgo: 11,
+      },
+      {
+        authorIndex: 6,
+        body: "Looks good after reprocess. Thanks!",
+        hoursAgo: 10,
+      },
+    ],
+  ],
+  instantraman: [
+    [
+      {
+        authorIndex: 3,
+        body: "Site spectra look consistent across the plate. Anyone else seeing the outlier at H10?",
+        hoursAgo: 26,
+      },
+      {
+        authorIndex: 4,
+        body: "@David H10 was the solvent blank — expected. Everything else looks good to proceed.",
+        hoursAgo: 25,
+      },
+    ],
+  ],
+};
+
+// Fallback for instruments without a dedicated thread pool (Aunty, Jolene, …).
+const GENERIC_COMMENT_THREADS: CommentThreadBeat[][] = [
   [
     {
       authorIndex: 9,
@@ -1341,9 +1442,14 @@ const COMMENT_THREADS: CommentThreadBeat[][] = [
   ],
   [
     {
-      authorIndex: 10,
-      body: "Z-stack looks solid through planes 2–4. Plane 1 is a bit dim on FITC.",
-      hoursAgo: 2,
+      authorIndex: 2,
+      body: "Logged in the notebook under today's date. Claiming this one.",
+      hoursAgo: 8,
+    },
+    {
+      authorIndex: 0,
+      body: "Thanks @Carol — looks consistent with the prior replicate.",
+      hoursAgo: 7,
     },
   ],
 ];
@@ -1364,12 +1470,21 @@ export async function seedRunComments(
 
   type CommentInsert = typeof schema.runComments.$inferInsert;
   const rows: CommentInsert[] = [];
+  // Per-instrument index so thread selection stays stable for a given
+  // instrument regardless of how many runs other instruments contributed.
+  const instrumentRunIdx = new Map<string, number>();
 
   for (const [runIndex, run] of runs.entries()) {
+    const idxOnInstrument = instrumentRunIdx.get(run.instrumentId) ?? 0;
+    instrumentRunIdx.set(run.instrumentId, idxOnInstrument + 1);
+
     // Rich threads on every third run; everyone else gets a short note so
     // the comments column isn't empty in list views.
-    if (runIndex % 3 === 0) {
-      const thread = COMMENT_THREADS[runIndex % COMMENT_THREADS.length];
+    if (idxOnInstrument % 3 === 0) {
+      const pool =
+        COMMENT_THREADS_BY_INSTRUMENT[run.instrumentId] ??
+        GENERIC_COMMENT_THREADS;
+      const thread = pool[idxOnInstrument % pool.length];
       for (const beat of thread) {
         const author = authors[beat.authorIndex % authors.length];
         rows.push({
@@ -1387,10 +1502,10 @@ export async function seedRunComments(
       runId: run.id,
       userId: author.id,
       body:
-        runIndex % 4 === 3
+        idxOnInstrument % 4 === 3
           ? `Checked ${run.runId} last week — looks consistent with the prior replicate.`
           : `Logged ${run.runId}. Samples stored in box ${String.fromCharCode(65 + (runIndex % 6))}-${(runIndex % 9) + 1}.`,
-      createdAt: runIndex % 4 === 3 ? lastWeekCommentAt : new Date(),
+      createdAt: idxOnInstrument % 4 === 3 ? lastWeekCommentAt : new Date(),
     });
   }
 
@@ -1570,7 +1685,16 @@ export async function seedNotifications(
   // -------------------------------------------------------------------------
 
   const primaryTeammate = teammates[0];
-  const todayCommentTargets = runs.slice(0, 2);
+  // Prefer plate-reader runs so the OD-worded today comments match the
+  // instrument in the notification deep-link (falls back to any runs).
+  const plateReaderRuns = runs.filter(
+    (r) =>
+      r.instrumentId === "spectramax-id3-plate-reader" ||
+      r.instrumentId === "spectramax-id5-plate-reader"
+  );
+  const todayCommentTargets = (
+    plateReaderRuns.length >= 2 ? plateReaderRuns : runs
+  ).slice(0, 2);
   const todayCommentBodies = [
     "@Alice can you take a look at the OD readings on plate 3? Something looks off…",
     "Nevermind — I see what happened. The well was contaminated.",

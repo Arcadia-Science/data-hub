@@ -95,7 +95,10 @@ async function getFixtureTriples(db: Db): Promise<FixtureTriple[]> {
     }
     // Join `files` → `instrument_runs` to find every fixture-named
     // raw file under this instrument. Each run may use a different
-    // fixture from the set (seed cycles them).
+    // fixture from the set (seed cycles them). Only process
+    // `completed` rows — `seedFileStatus` leaves one `failed` and one
+    // `uploaded` run per instrument for status-filter UI, and the
+    // handler would otherwise overwrite those to `completed`.
     const rows = await db
       .select({
         runId: schema.instrumentRuns.runId,
@@ -110,7 +113,8 @@ async function getFixtureTriples(db: Db): Promise<FixtureTriple[]> {
         and(
           eq(schema.instrumentRuns.instrumentId, instrumentId),
           inArray(schema.files.filename, filenames),
-          eq(schema.files.category, "raw")
+          eq(schema.files.category, "raw"),
+          eq(schema.files.status, "completed")
         )
       );
 
@@ -225,7 +229,7 @@ export async function processSeededFixtures(
   }
 
   // Skip 3: nothing to do. Likely means the DB hasn't been seeded
-  // yet, or the canonical instrument ids drifted from this script.
+  // yet, or INSTRUMENT_FIXTURES keys drifted from seeded instrument ids.
   const triples = await getFixtureTriples(db);
   if (triples.length === 0) {
     if (log) {
