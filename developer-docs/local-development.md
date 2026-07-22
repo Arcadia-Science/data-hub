@@ -20,7 +20,7 @@ make db-reseed
 make dev
 ```
 
-Sign in at `/login` using the "Sign in (dev)" button with the seeded `dev@local` email — no password, no Google Workspace.
+Sign in at `/login` using the "Sign in (dev)" button with the seeded `alice@example.com` email — no password, no Google Workspace.
 
 ## Prerequisites
 
@@ -66,7 +66,7 @@ Explicitly **do not** set the following — leaving them unset is what makes the
 
 ## Sign in (dev only)
 
-`web/lib/auth.ts` registers a `Credentials` provider with id `"dev"` when `process.env.NODE_ENV !== "production"`. The `/login` page renders a matching "Sign in (dev)" form under the Google button. The form accepts any email present in the `user` table and mints a session via the existing JWT strategy — `users.is_admin` is read on sign-in just like for Google sign-ins, so the seeded `dev@local` lands as a workspace admin.
+`web/lib/auth.ts` registers a `Credentials` provider with id `"dev"` when `process.env.NODE_ENV !== "production"`. The `/login` page renders a matching "Sign in (dev)" form under the Google button. The form accepts any email present in the `user` table and mints a session via the existing JWT strategy — `users.is_admin` is read on sign-in just like for Google sign-ins, so the seeded `alice@example.com` lands as a workspace admin.
 
 The dev provider is **not** instantiated in production builds. The form is also conditionally rendered server-side, so a production `npm run build` never ships the affordance.
 
@@ -104,20 +104,20 @@ You can also run `npm run db:seed` on its own — it calls the schema-driven `cl
 
 | Entity | Count | Notes |
 | --- | --- | --- |
-| `user` | 1 | `dev@local`, `is_admin = true` |
-| `personal_access_tokens` | 1 | Wildcard scope, no expiry |
-| `instruments` | 8 (one per `instrument_type`) | First row is `pending`; rest `active` |
-| `watchers` | 7 (for active instruments) | Rotates through `watching` / `registered` / `stopped` |
+| `user` | 26 | `alice@example.com` (admin) + Bob–Zoe teammates (`@example.com`) |
+| `personal_access_tokens` | 1 | Wildcard scope, no expiry (Alice) |
+| `instruments` | 11 | Production catalog (10 active) + 1 pending for the activate-instrument UI |
+| `watchers` | 11 (one per instrument) | Prod-like hostnames; mix of `watching` / `registered` / `stopped` |
 | `watcher_heartbeats` | ~10 per watching watcher | Spread over the last hour |
 | `watcher_events` | 3 per watching watcher | `watcher_started`, `config_synced`, `file_uploaded` |
 | `instrument_runs` | 8 per active instrument | Calendar-relative `acquired_at` (today, yesterday, this week, ~7d / ~10d / ~22d / earlier this month) so date-filter presets and today/this-week stats have distinct non-empty sets; alternating `lambda` / `watcher` source |
-| `files` | 3 per run, or 1 for fixture-bearing runs | Mix of `uploaded` / `completed` / `failed` (and `raw` / `processed` for the 3-file shape). qPCR / gel doc / plate reader runs render exactly one row — the real fixture, bytes copied into `LOCAL_S3_MIRROR` (see [Working with file bytes locally](#working-with-file-bytes-locally)) |
-| `run_comments` | 1 per run | Authored by the dev user; most stamped this week, every 4th last week |
-| `run_attributions` | 1 per run | Dev user attributed |
+| `files` | 1–4 per run | Mix of `uploaded` / `completed` / `failed`. Fixture instruments (qPCR, gel doc, both SpectraMax readers) render the real fixture bytes in `LOCAL_S3_MIRROR`; other instruments use production-shaped synthetic filenames (see [Working with file bytes locally](#working-with-file-bytes-locally)) |
+| `run_comments` | multi-author threads | Q&A / notes across Alice + teammates; richer threads on ~⅓ of runs |
+| `run_attributions` | 1 per run | Rotated across Alice + teammates |
 | `archive_jobs` | 3 | One each of `ready` / `building` / `failed` |
-| `watcher_release_config` | 1 (singleton) | `9.9.9 / 0.1.0 / stable / false` |
+| `watcher_release_config` | 1 (singleton) | `0.5.3 / 0.1.0 / false` (matches seeded watcher version) |
 
-Externally-visible identifiers used in URLs and API paths are deterministic across reseeds, so screenshots, bug reports, and `curl` examples stay stable. Instrument types backed by a real lambda `process_file` (qPCR, gel doc, plate reader) use the canonical kebab-case ids the lambda expects (`azure-cielo-qpcr`, `azure-600-gel-doc`, `spectramax-id3-plate-reader`) with realistic-looking run ids (`Experiment_20260129`, `26.02.02_10.45.05`, `012926_AR_OD600`, …). Other instrument types use cosmetic `seed-<type>` ids and `seed-run-1`…`seed-run-8` since they don't round-trip through any pipeline.
+Externally-visible identifiers used in URLs and API paths are deterministic across reseeds, so screenshots, bug reports, and `curl` examples stay stable. Instrument ids and display names mirror production (`agilent-4150-tapestation`, `instantraman`, `spectramax-id5-plate-reader`, …). Fixture-backed instruments keep realistic run ids (`Experiment_20260129`, `26.02.02_10.45.05`, `012926_AR_OD600`, …); other instruments use production-shaped synthetic run ids and filenames.
 
 Surrogate UUIDs (watcher IDs, archive job IDs, the per-row primary keys on `instrument_runs` and `files`) and the PAT plaintext are regenerated on every reseed — the seed does not use Faker but it does call `crypto.randomUUID()` and `crypto.randomBytes()` where the schema needs server-side IDs.
 
@@ -201,7 +201,7 @@ npm run dev
 npm run db:process-fixtures
 ```
 
-`npm run db:process-fixtures` mints a fresh PAT for `dev@local`, re-derives the fixture-bearing `(instrument_id, run_id, filename)` triples from the database, and spawns `data-hub-process handler` for each. The wiring lives in [web/scripts/process-fixtures.ts](../web/scripts/process-fixtures.ts) — it's the same module the seed calls — so anything that works during a reseed also works post-hoc.
+`npm run db:process-fixtures` mints a fresh PAT for `alice@example.com`, re-derives the fixture-bearing `(instrument_id, run_id, filename)` triples from the database, and spawns `data-hub-process handler` for each. The wiring lives in [web/scripts/process-fixtures.ts](../web/scripts/process-fixtures.ts) — it's the same module the seed calls — so anything that works during a reseed also works post-hoc.
 
 For instrument types without a fixture (or new file types you're adding components for), the existing CLI flow stays the same: run `data-hub-process handler <instrument-id> <run-id> <filename> --source <FILE>` and the dashboard picks up the file the moment the API row lands.
 
@@ -209,7 +209,7 @@ Components don't need to change — every existing run viewer already fetches `/
 
 A few details worth knowing:
 
-- Adding fixtures for more instruments is two paired entries in [web/lib/db/seed.ts](../web/lib/db/seed.ts): an `INSTRUMENT_FIXTURES` row (`{ filename, contentType, runIds }`) pointing at any file under `lambda/tests/fixtures/`, and a `CANONICAL_INSTRUMENT_ID` mapping to the kebab-case id from `data_hub_shared.enums.Instrument`. Without the canonical id, the seed-time handler step rejects the instrument because `parse_s3_event` only accepts values from that enum.
+- Adding fixtures for more instruments means an `INSTRUMENT_FIXTURES` entry in [web/lib/db/seed.ts](../web/lib/db/seed.ts) keyed by the kebab-case instrument id from `data_hub_shared.enums.Instrument` (`{ filename, contentType, runIds }`) pointing at any file under `lambda/tests/fixtures/`. The handler rejects unknown instrument ids because `parse_s3_event` only accepts values from that enum.
 - The route is gated on `NODE_ENV !== "production"` AND `LOCAL_S3_MIRROR` set; either condition unmet returns 404 unconditionally, so a production build can never expose the filesystem.
 - The MCP tool at `/api/v1/mcp` returns a relative `/api/local-s3/...` URL when the mirror is active — browsers resolve it against the current origin, but non-browser MCP clients on localhost may need to prefix with `http://localhost:3000`.
 

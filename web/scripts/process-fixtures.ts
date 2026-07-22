@@ -24,11 +24,7 @@ import { and, eq } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 // biome-ignore lint/performance/noNamespaceImport: drizzle scripts need the full schema module for Db typing
 import * as schema from "@/lib/db/schema";
-import {
-  CANONICAL_INSTRUMENT_ID,
-  FIXTURES_DIR,
-  INSTRUMENT_FIXTURES,
-} from "@/lib/db/seed";
+import { FIXTURES_DIR, INSTRUMENT_FIXTURES } from "@/lib/db/seed";
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -90,20 +86,13 @@ async function probeApi(apiUrl: string, apiKey: string): Promise<boolean> {
 // source of truth.
 async function getFixtureTriples(db: Db): Promise<FixtureTriple[]> {
   const triples: FixtureTriple[] = [];
-  for (const [instrumentType, fixture] of Object.entries(INSTRUMENT_FIXTURES)) {
-    if (!fixture) {
-      continue;
-    }
-    const canonicalId =
-      CANONICAL_INSTRUMENT_ID[instrumentType as schema.InstrumentType];
-    if (!canonicalId) {
-      continue;
-    }
-
+  // Fixtures are keyed by instrument id so both SpectraMax readers (and
+  // any future duplicates of a type) process independently.
+  for (const [instrumentId, fixture] of Object.entries(INSTRUMENT_FIXTURES)) {
     // Join `files` → `instrument_runs` to find every fixture-named
-    // raw file under the canonical instrument. The seed only writes
-    // one such row per run, but joining defends against a dev
-    // having added more via `data-hub-process handler` directly.
+    // raw file under this instrument. The seed only writes one such
+    // row per run, but joining defends against a dev having added
+    // more via `data-hub-process handler` directly.
     const rows = await db
       .select({ runId: schema.instrumentRuns.runId })
       .from(schema.files)
@@ -113,7 +102,7 @@ async function getFixtureTriples(db: Db): Promise<FixtureTriple[]> {
       )
       .where(
         and(
-          eq(schema.instrumentRuns.instrumentId, canonicalId),
+          eq(schema.instrumentRuns.instrumentId, instrumentId),
           eq(schema.files.filename, fixture.filename),
           eq(schema.files.category, "raw")
         )
@@ -121,7 +110,7 @@ async function getFixtureTriples(db: Db): Promise<FixtureTriple[]> {
 
     for (const row of rows) {
       triples.push({
-        instrumentId: canonicalId,
+        instrumentId,
         runId: row.runId,
         filename: fixture.filename,
       });
