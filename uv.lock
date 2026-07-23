@@ -370,7 +370,7 @@ array = [
 
 [[package]]
 name = "data-hub-lambda"
-version = "0.2.0"
+version = "0.0.0"
 source = { editable = "lambda" }
 dependencies = [
     { name = "arcadia-microscopy-tools" },
@@ -401,7 +401,7 @@ requires-dist = [
 
 [[package]]
 name = "data-hub-shared"
-version = "0.1.0"
+version = "0.0.0"
 source = { editable = "packages/shared" }
 dependencies = [
     { name = "boto3" },
@@ -416,7 +416,7 @@ requires-dist = [
 
 [[package]]
 name = "data-hub-watcher"
-version = "0.5.4"
+version = "1.0.0"
 source = { editable = "watcher" }
 dependencies = [
     { name = "click" },

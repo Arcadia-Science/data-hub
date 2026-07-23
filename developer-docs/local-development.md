@@ -115,7 +115,7 @@ You can also run `npm run db:seed` on its own — it calls the schema-driven `cl
 | `run_comments` | multi-author threads | Q&A / notes across Alice + teammates; richer threads on ~⅓ of runs |
 | `run_attributions` | 1 per run | Rotated across Alice + teammates |
 | `archive_jobs` | 3 | One each of `ready` / `building` / `failed` |
-| `watcher_release_config` | 1 (singleton) | `0.5.3 / 0.1.0 / false` (matches seeded watcher version) |
+| `watcher_release_config` | 1 (singleton) | `1.0.0 / 0.1.0 / false` (matches seeded watcher version) |
 
 Externally-visible identifiers used in URLs and API paths are deterministic across reseeds, so screenshots, bug reports, and `curl` examples stay stable. Instrument ids and display names mirror production (`agilent-4150-tapestation`, `instantraman`, `spectramax-id5-plate-reader`, …). Fixture-backed instruments keep realistic run ids (`Experiment_20260129`, `26.02.02_10.45.05`, `012926_AR_OD600`, …); other instruments use production-shaped synthetic run ids and filenames.
 

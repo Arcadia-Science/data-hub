@@ -44,7 +44,7 @@ export const SEED_ADMIN_NAME = "Alice Zimmerman";
 // Matches production watcher builds so the update-check UI doesn't nag
 // during docs screenshots. Integration tests keep the historical 9.9.9
 // default via `seedWatcherReleaseConfig`'s parameter default.
-export const SEED_WATCHER_VERSION = "0.5.3";
+export const SEED_WATCHER_VERSION = "1.0.0";
 
 // ---------------------------------------------------------------------------
 // clearAll — schema-driven TRUNCATE of every `pgTable` declared in
