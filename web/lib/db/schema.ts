@@ -338,7 +338,7 @@ export const watchers = pgTable(
     hostname: text("hostname"),
     // OS description (e.g., "Windows 11 23H2").
     osInfo: text("os_info"),
-    // Installed watcher package version (PEP 440, e.g. "0.2.0"). Reported on
+    // Installed watcher package version (PEP 440, e.g. "1.0.0"). Reported on
     // every heartbeat. NULL until a watcher running >= 0.3.0 first checks in.
     watcherVersion: text("watcher_version"),
     // SHA-256 of the last-pushed config YAML.

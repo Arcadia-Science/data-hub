@@ -20,15 +20,11 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 // biome-ignore lint/performance/noNamespaceImport: drizzle scripts need the full schema module for Db typing
 import * as schema from "@/lib/db/schema";
-import {
-  CANONICAL_INSTRUMENT_ID,
-  FIXTURES_DIR,
-  INSTRUMENT_FIXTURES,
-} from "@/lib/db/seed";
+import { FIXTURES_DIR, INSTRUMENT_FIXTURES } from "@/lib/db/seed";
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -90,22 +86,24 @@ async function probeApi(apiUrl: string, apiKey: string): Promise<boolean> {
 // source of truth.
 async function getFixtureTriples(db: Db): Promise<FixtureTriple[]> {
   const triples: FixtureTriple[] = [];
-  for (const [instrumentType, fixture] of Object.entries(INSTRUMENT_FIXTURES)) {
-    if (!fixture) {
+  // Fixtures are keyed by instrument id so both SpectraMax readers (and
+  // any future duplicates of a type) process independently.
+  for (const [instrumentId, fixture] of Object.entries(INSTRUMENT_FIXTURES)) {
+    const filenames = fixture.files.map((f) => f.filename);
+    if (filenames.length === 0) {
       continue;
     }
-    const canonicalId =
-      CANONICAL_INSTRUMENT_ID[instrumentType as schema.InstrumentType];
-    if (!canonicalId) {
-      continue;
-    }
-
     // Join `files` → `instrument_runs` to find every fixture-named
-    // raw file under the canonical instrument. The seed only writes
-    // one such row per run, but joining defends against a dev
-    // having added more via `data-hub-process handler` directly.
+    // raw file under this instrument. Each run may use a different
+    // fixture from the set (seed cycles them). Only process
+    // `completed` rows — `seedFileStatus` leaves one `failed` and one
+    // `uploaded` run per instrument for status-filter UI, and the
+    // handler would otherwise overwrite those to `completed`.
     const rows = await db
-      .select({ runId: schema.instrumentRuns.runId })
+      .select({
+        runId: schema.instrumentRuns.runId,
+        filename: schema.files.filename,
+      })
       .from(schema.files)
       .innerJoin(
         schema.instrumentRuns,
@@ -113,17 +111,18 @@ async function getFixtureTriples(db: Db): Promise<FixtureTriple[]> {
       )
       .where(
         and(
-          eq(schema.instrumentRuns.instrumentId, canonicalId),
-          eq(schema.files.filename, fixture.filename),
-          eq(schema.files.category, "raw")
+          eq(schema.instrumentRuns.instrumentId, instrumentId),
+          inArray(schema.files.filename, filenames),
+          eq(schema.files.category, "raw"),
+          eq(schema.files.status, "completed")
         )
       );
 
     for (const row of rows) {
       triples.push({
-        instrumentId: canonicalId,
+        instrumentId,
         runId: row.runId,
-        filename: fixture.filename,
+        filename: row.filename,
       });
     }
   }
@@ -230,7 +229,7 @@ export async function processSeededFixtures(
   }
 
   // Skip 3: nothing to do. Likely means the DB hasn't been seeded
-  // yet, or the canonical instrument ids drifted from this script.
+  // yet, or INSTRUMENT_FIXTURES keys drifted from seeded instrument ids.
   const triples = await getFixtureTriples(db);
   if (triples.length === 0) {
     if (log) {

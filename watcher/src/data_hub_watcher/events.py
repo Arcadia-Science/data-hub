@@ -19,8 +19,9 @@ a database migration. Known ``kind`` values, with their per-kind
   "status_code", "error", "file_count"}``.
 * ``config_sync_failed`` -- the startup ``PUT /watchers/:id/config``
   call raised ``ApiError``. ``details = {"kind", "checksum", "error"}``.
-* ``stability_timeout`` -- a file kept changing past
-  ``MAX_STABILITY_WAIT_SECONDS`` and was abandoned.
+* ``stability_timeout`` -- a file kept changing past the configured
+  ``max_stability_wait_seconds`` (default ``MAX_STABILITY_WAIT_SECONDS``)
+  and was abandoned.
   ``details = {"kind", "path", "max_wait_seconds"}``.
 * ``stable_callback_failed`` -- the on-stable-file callback raised.
   ``details = {"kind", "path", "error"}``.

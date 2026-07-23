@@ -1,10 +1,9 @@
 """Unit tests for ``RunDetectionConfig`` validation.
 
-Also covers the ``InstrumentConfig.upload_parallelism`` field added
-alongside the parallel-upload optimisation -- it lives here rather
-than in its own file because the existing ``RunDetectionConfig``
-suite is the closest neighbour and the field is a small additive
-concern.
+Also covers small additive ``InstrumentConfig`` fields
+(``upload_parallelism``, ``max_stability_wait_seconds``) -- they live
+here rather than in their own files because this suite is the closest
+neighbour.
 """
 
 from __future__ import annotations
@@ -13,6 +12,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from data_hub_watcher.constants import MAX_STABILITY_WAIT_SECONDS
 from data_hub_watcher.models import InstrumentConfig, RunDetectionConfig
 
 
@@ -54,6 +54,8 @@ def _make_instrument(
     tmp_path: Path,
     *,
     upload_parallelism: int | None = None,
+    stability_period_seconds: int | None = None,
+    max_stability_wait_seconds: int | None = None,
 ) -> InstrumentConfig:
     watch_dir = tmp_path / "data"
     watch_dir.mkdir()
@@ -66,6 +68,10 @@ def _make_instrument(
     }
     if upload_parallelism is not None:
         kwargs["upload_parallelism"] = upload_parallelism
+    if stability_period_seconds is not None:
+        kwargs["stability_period_seconds"] = stability_period_seconds
+    if max_stability_wait_seconds is not None:
+        kwargs["max_stability_wait_seconds"] = max_stability_wait_seconds
     return InstrumentConfig(**kwargs)  # type: ignore[arg-type]
 
 
@@ -100,3 +106,47 @@ class TestUploadParallelism:
     def test_above_cap_rejected(self, tmp_path: Path) -> None:
         with pytest.raises(ValidationError, match="less than or equal to 32"):
             _make_instrument(tmp_path, upload_parallelism=64)
+
+
+class TestMaxStabilityWaitSeconds:
+    """Validation rules for ``InstrumentConfig.max_stability_wait_seconds``.
+
+    Defaulted to ``MAX_STABILITY_WAIT_SECONDS`` so existing config YAMLs
+    keep today's 5-minute abandon behaviour. Must be at least the
+    stability period so a file can become stable before it is abandoned.
+    """
+
+    def test_defaults_to_constant(self, tmp_path: Path) -> None:
+        cfg = _make_instrument(tmp_path)
+        assert cfg.max_stability_wait_seconds == MAX_STABILITY_WAIT_SECONDS
+
+    def test_explicit_minimum_of_one(self, tmp_path: Path) -> None:
+        cfg = _make_instrument(
+            tmp_path,
+            stability_period_seconds=1,
+            max_stability_wait_seconds=1,
+        )
+        assert cfg.max_stability_wait_seconds == 1
+
+    def test_explicit_maximum_of_one_day(self, tmp_path: Path) -> None:
+        cfg = _make_instrument(tmp_path, max_stability_wait_seconds=86400)
+        assert cfg.max_stability_wait_seconds == 86400
+
+    def test_zero_rejected(self, tmp_path: Path) -> None:
+        with pytest.raises(ValidationError, match="greater than or equal to 1"):
+            _make_instrument(tmp_path, max_stability_wait_seconds=0)
+
+    def test_above_cap_rejected(self, tmp_path: Path) -> None:
+        with pytest.raises(ValidationError, match="less than or equal to 86400"):
+            _make_instrument(tmp_path, max_stability_wait_seconds=86401)
+
+    def test_shorter_than_stability_period_rejected(self, tmp_path: Path) -> None:
+        with pytest.raises(
+            ValidationError,
+            match="max_stability_wait_seconds .* must be >= stability_period_seconds",
+        ):
+            _make_instrument(
+                tmp_path,
+                stability_period_seconds=60,
+                max_stability_wait_seconds=30,
+            )

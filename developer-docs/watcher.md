@@ -65,7 +65,7 @@ Starts the file monitoring loop. Before entering the loop it:
 
 While running:
 
-- **File monitor** watches the directory for new/modified files using `watchdog` and waits for each file to stabilize (size + mtime unchanged for the configured stability period). Files that keep changing for longer than 5 minutes are abandoned and surface as a `stability_timeout` error event.
+- **File monitor** watches the directory for new/modified files using `watchdog` and waits for each file to stabilize (size + mtime unchanged for the configured stability period). Files that keep changing past `max_stability_wait_seconds` (default 5 minutes) are abandoned and surface as a `stability_timeout` error event.
 - **Run detector** groups stable files into runs by applying the configured regex to each file's relative path. The first file for a run triggers `POST /instruments/:id/runs`; subsequent files for the same run incrementally `PATCH` only the new entries onto the manifest. Files inside the watch tree that don't match the pattern emit a `pattern_mismatch` event (throttled to one per parent directory) so misconfigured patterns surface in the dashboard.
 - **Uploader** requests a presigned S3 URL from the API and uploads each file via HTTP PUT (auto mode), or processes the server's upload queue (manual mode). The watcher does not need AWS credentials. Each upload retries up to 3 times with exponential backoff (1, 2, 4 s) and is recorded locally with its SHA-256 so retries and restarts don't re-upload the same bytes. In manual mode, queue-poll failures are throttled (1st failure, then every 10th) to keep a sustained outage visible without flooding the events stream.
 - **Upload worker** (manual mode only) polls the server's upload queue on its own long-lived thread every 60 seconds, decoupled from the heartbeat so a slow or large upload can't delay heartbeats and make a busy watcher look offline. On shutdown it is stopped and joined before the state DB is closed. Auto mode has no worker: uploads run on the monitor's stability-checker thread via the run detector's upload callback.
@@ -162,6 +162,7 @@ instrument:
   enabled: true
   upload_mode: auto              # "auto" or "manual"
   stability_period_seconds: 5    # 1–300
+  max_stability_wait_seconds: 300  # 1–86400; must be >= stability_period_seconds
   run_detection:
     pattern: '^([^/]+)/'         # regex with one capture group (run ID)
     recursive: true
@@ -281,7 +282,7 @@ The watcher's primary observability surface is the per-watcher event log served 
 | --- | --- |
 | `run_report_failed` | POST/PATCH against `/instruments/:id/runs[/:run_id]` failed. `details` includes `operation`, `status_code`, `file_count`. |
 | `config_sync_failed` | The startup `PUT /watchers/:id/config` (or its checksum probe) failed. |
-| `stability_timeout` | A file kept changing past 5 minutes and was abandoned. |
+| `stability_timeout` | A file kept changing past the configured max wait (default 5 minutes) and was abandoned. `details.max_wait_seconds` reports the cap used. |
 | `stable_callback_failed` | The on-stable-file callback raised. |
 | `pattern_mismatch` | A file inside the watch tree did not match `run_detection.pattern`. Throttled to one emission per parent directory per process. |
 | `events_dropped` | Synthetic event prepended after one or more prior batches were dropped. `details.dropped_count` reports the gap size. |

@@ -1,6 +1,6 @@
 {
   "name": "data-hub-web",
-  "version": "0.0.1",
+  "version": "0.0.0",
   "type": "module",
   "private": true,
   "license": "MIT",
@@ -91,6 +91,9 @@
     "vitest": "^4.1.2"
   },
   "overrides": {
-    "esbuild": "^0.28.1"
+    "body-parser": "^2.3.0",
+    "brace-expansion": "^5.0.7",
+    "esbuild": "^0.28.1",
+    "js-yaml": "^4.3.0"
   }
 }

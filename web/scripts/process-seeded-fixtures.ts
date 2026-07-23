@@ -18,6 +18,7 @@
 
 // biome-ignore lint/performance/noNamespaceImport: drizzle scripts need the full schema module for Db typing
 import * as schema from "@/lib/db/schema";
+import { SEED_ADMIN_EMAIL } from "@/lib/db/seed";
 import { generateToken, getTokenPrefix, hashToken } from "@/lib/tokens";
 import "dotenv/config";
 import { eq } from "drizzle-orm";
@@ -32,20 +33,20 @@ const pool = new Pool({ connectionString: databaseUrl });
 const db = drizzle(pool, { schema });
 
 try {
-  // Find the seeded dev user. We look up by email rather than by
-  // UUID because the seed regenerates UUIDs on every reseed, but
-  // `dev@local` is the stable identifier the seed prints at the
-  // end. If the dev has manually changed it, fall back to the first
-  // admin row — better than failing.
-  const [devUser] = await db
+  // Find the seeded admin. We look up by email rather than by UUID
+  // because the seed regenerates UUIDs on every reseed, but
+  // `SEED_ADMIN_EMAIL` is the stable identifier the seed prints at
+  // the end. If the dev has manually changed it, fall back to the
+  // first admin row — better than failing.
+  const [adminUser] = await db
     .select({ id: schema.users.id })
     .from(schema.users)
-    .where(eq(schema.users.email, "dev@local"))
+    .where(eq(schema.users.email, SEED_ADMIN_EMAIL))
     .limit(1);
 
-  if (!devUser) {
+  if (!adminUser) {
     console.error(
-      "db:process-fixtures: could not find dev@local user. Run `npm run db:seed` first."
+      `db:process-fixtures: could not find ${SEED_ADMIN_EMAIL} user. Run \`npm run db:seed\` first.`
     );
     process.exit(1);
   }
@@ -55,7 +56,7 @@ try {
   // processing succeeds.
   const plaintext = generateToken();
   await db.insert(schema.personalAccessTokens).values({
-    userId: devUser.id,
+    userId: adminUser.id,
     name: "db:process-fixtures",
     tokenHash: hashToken(plaintext),
     tokenPrefix: getTokenPrefix(plaintext),

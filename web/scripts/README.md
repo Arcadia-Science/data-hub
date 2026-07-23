@@ -39,11 +39,12 @@ npm run db:push
 
 ## `seed-database.ts`
 
-Populates the database with a believable steady state: a workspace admin user
-(`dev@local`) + PAT, one instrument per type, watchers with heartbeats/events,
-runs with files, comments, attributions, and archive jobs in each lifecycle
-state. Clears existing rows first, then prints a sign-in email and a fresh PAT
-for API calls.
+Populates the database with a believable steady state: Alice Zimmerman
+(`alice@example.com`, admin) + A–Z-first / Z–A-last teammates, the production
+instrument catalog plus one pending instrument, watchers with
+heartbeats/events, runs with realistic filenames, multi-author comments,
+attributions, and archive jobs in each lifecycle state. Clears existing rows
+first, then prints a sign-in email and a fresh PAT for API calls.
 
 ### Usage
 
