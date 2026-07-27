@@ -3,9 +3,9 @@ import { after } from "next/server";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
+import { isProcessableInstrument } from "@/lib/instruments/processable-ids";
 import { hasInvokeCredentials, signLambdaInvoke } from "@/lib/lambda";
-
-const REPROCESSABLE_STATUSES = ["failed", "completed"] as const;
+import { REPROCESSABLE_STATUSES } from "@/lib/runs/reprocessable-statuses";
 
 function getLambdaUrl(): string | null {
   const url = process.env.LAMBDA_FUNCTION_URL;
@@ -61,7 +61,7 @@ export async function reprocessFile(fileId: number): Promise<ReprocessResult> {
       ok: false,
       status: 409,
       code: "CONFLICT",
-      message: `Cannot reprocess a file in '${file.status}' status — only 'failed' or 'completed' files can be reprocessed`,
+      message: `Cannot reprocess a file in '${file.status}' status — only 'uploaded', 'failed', or 'completed' files can be reprocessed`,
     };
   }
 
@@ -75,7 +75,10 @@ export async function reprocessFile(fileId: number): Promise<ReprocessResult> {
   }
 
   const [parentRun] = await db
-    .select({ deletedAt: instrumentRuns.deletedAt })
+    .select({
+      deletedAt: instrumentRuns.deletedAt,
+      instrumentId: instrumentRuns.instrumentId,
+    })
     .from(instrumentRuns)
     .where(eq(instrumentRuns.id, file.instrumentRunId))
     .limit(1);
@@ -86,6 +89,17 @@ export async function reprocessFile(fileId: number): Promise<ReprocessResult> {
       status: 409,
       code: "CONFLICT",
       message: "Cannot reprocess a file whose parent run is soft-deleted",
+    };
+  }
+
+  if (!(parentRun && isProcessableInstrument(parentRun.instrumentId))) {
+    return {
+      ok: false,
+      status: 409,
+      code: "CONFLICT",
+      message: parentRun
+        ? `Instrument '${parentRun.instrumentId}' has no Lambda processor — cannot reprocess`
+        : "Cannot reprocess a file with no parent run",
     };
   }
 
@@ -175,6 +189,15 @@ export async function reprocessRun(
   instrumentId: string,
   runId: string
 ): Promise<ReprocessRunResult> {
+  if (!isProcessableInstrument(instrumentId)) {
+    return {
+      ok: false,
+      status: 409,
+      code: "CONFLICT",
+      message: `Instrument '${instrumentId}' has no Lambda processor — cannot reprocess`,
+    };
+  }
+
   const run = await lookupRunByNaturalKey(instrumentId, runId);
 
   if (!run) {

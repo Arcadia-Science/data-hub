@@ -357,6 +357,7 @@ function RunFilesSectionContent({
           ) : isDeleted ? (
             <ReadOnlyRunFilesTable
               files={files}
+              instrumentId={instrumentId}
               isPending={isPending}
               onReprocess={(id) =>
                 handleSingleReprocess(id, startTransition, router)
@@ -365,6 +366,7 @@ function RunFilesSectionContent({
           ) : (
             <EditableRunFilesTable
               files={files}
+              instrumentId={instrumentId}
               isPending={isPending}
               onDismiss={(id) =>
                 handleSingleDismiss(id, startTransition, router)

@@ -14,8 +14,9 @@ interface RouteContext {
 // ---------------------------------------------------------------------------
 // POST /api/v1/files/:fileId/reprocess
 //
-// Transitions a failed or completed file back to "processing" and invokes
-// the Lambda Function URL to re-run the instrument's process_file workflow.
+// Transitions an uploaded, failed, or completed file back to "processing"
+// and invokes the Lambda Function URL to re-run the instrument's
+// process_file workflow.
 // The core logic lives in lib/api/file-reprocessing.ts so the MCP server
 // can reuse it.
 // ---------------------------------------------------------------------------

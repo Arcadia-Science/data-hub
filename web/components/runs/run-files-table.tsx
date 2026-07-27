@@ -24,6 +24,8 @@ import {
 } from "@/components/ui/table";
 import type { RunFile } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
+import { isProcessableInstrument } from "@/lib/instruments/processable-ids";
+import { REPROCESSABLE_STATUSES } from "@/lib/runs/reprocessable-statuses";
 import { cn, formatBytes } from "@/lib/utils";
 import {
   FileSelectAllCheckbox,
@@ -41,7 +43,7 @@ const DOWNLOADABLE_STATUSES = new Set([
   "failed",
 ]);
 
-const REPROCESSABLE_STATUSES = new Set(["completed", "failed"]);
+const REPROCESSABLE_STATUS_SET = new Set<string>(REPROCESSABLE_STATUSES);
 
 const CATEGORY_BADGE_CLASSES: Record<string, string> = {
   raw: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
@@ -212,28 +214,31 @@ function UploadDismissActions({
   );
 }
 
-function canReprocess(file: RunFile): boolean {
+function canReprocess(file: RunFile, instrumentId: string): boolean {
   return (
     file.deletedAt === null &&
-    REPROCESSABLE_STATUSES.has(file.status) &&
+    isProcessableInstrument(instrumentId) &&
+    REPROCESSABLE_STATUS_SET.has(file.status) &&
     file.s3Key !== null
   );
 }
 
 // ---------------------------------------------------------------------------
 // Read-only variant: no selection column, no upload/dismiss. Reprocessing is
-// still allowed for completed/failed files so operators can recover report
-// data without restoring the run.
+// still allowed for uploaded/completed/failed files so operators can recover
+// report data or kick stuck uploads without restoring the run.
 // ---------------------------------------------------------------------------
 
 export interface ReadOnlyRunFilesTableProps {
   files: RunFile[];
+  instrumentId: string;
   isPending: boolean;
   onReprocess: (id: number) => void;
 }
 
 export function ReadOnlyRunFilesTable({
   files,
+  instrumentId,
   isPending,
   onReprocess,
 }: ReadOnlyRunFilesTableProps) {
@@ -255,7 +260,7 @@ export function ReadOnlyRunFilesTable({
             >
               <FileInfoCells file={file} />
               <TableCell className="py-2 pr-3">
-                {canReprocess(file) && (
+                {canReprocess(file, instrumentId) ? (
                   <div className="flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
                     <ReprocessAction
                       file={file}
@@ -263,7 +268,7 @@ export function ReadOnlyRunFilesTable({
                       onReprocess={onReprocess}
                     />
                   </div>
-                )}
+                ) : null}
               </TableCell>
             </TableRow>
           );
@@ -283,6 +288,7 @@ export function ReadOnlyRunFilesTable({
 
 export interface EditableRunFilesTableProps {
   files: RunFile[];
+  instrumentId: string;
   isPending: boolean;
   onDismiss: (id: number) => void;
   onReprocess: (id: number) => void;
@@ -291,6 +297,7 @@ export interface EditableRunFilesTableProps {
 
 export function EditableRunFilesTable({
   files,
+  instrumentId,
   isPending,
   onUpload,
   onDismiss,
@@ -305,7 +312,7 @@ export function EditableRunFilesTable({
   const visibleSelectableRefs: NonNullable<ReturnType<typeof buildFileRef>>[] =
     [];
   for (const file of files) {
-    const ref = buildFileRef(file);
+    const ref = buildFileRef(file, instrumentId);
     refsByFileId.set(file.id, ref);
     if (ref) {
       visibleSelectableRefs.push(ref);
@@ -334,7 +341,7 @@ export function EditableRunFilesTable({
           const ref = refsByFileId.get(file.id) ?? null;
           const isSelected = ref ? meta.isSelected(ref.id) : false;
           const canDoUploadDismiss = !isDismissed && file.status === "detected";
-          const canDoReprocess = canReprocess(file);
+          const canDoReprocess = canReprocess(file, instrumentId);
 
           // Reveal classes: hide per-row actions while a bulk selection is
           // active (the bar is the single entry point) but keep the JSX

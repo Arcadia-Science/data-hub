@@ -18,6 +18,7 @@ import {
 export interface ReprocessRunTarget {
   filesCompleted: number;
   filesFailed: number;
+  filesUploaded: number;
   instrumentId: string;
   runId: string;
 }
@@ -76,7 +77,7 @@ export function ReprocessRunsDialog({
 
   const runCount = runs.length;
   const eligibleFiles = runs.reduce(
-    (sum, r) => sum + r.filesCompleted + r.filesFailed,
+    (sum, r) => sum + r.filesCompleted + r.filesFailed + r.filesUploaded,
     0
   );
 
@@ -115,8 +116,8 @@ export function ReprocessRunsDialog({
             This will re-run the processing pipeline on{" "}
             <strong>{eligibleFiles}</strong>{" "}
             {eligibleFiles === 1 ? "file" : "files"} currently in the{" "}
-            <em>completed</em> or <em>failed</em> state. Results will overwrite
-            any existing processed artifacts.
+            <em>uploaded</em>, <em>completed</em>, or <em>failed</em> state.
+            Results will overwrite any existing processed artifacts.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

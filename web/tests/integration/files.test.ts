@@ -23,7 +23,9 @@ import {
 // Tests drive each through its full lifecycle to verify the state machine.
 describe("Files API", () => {
   let token: string;
-  const instrumentId = "files-test-instrument";
+  // Use a known processable instrument ID so reprocess eligibility reaches
+  // the Lambda-config check (see `isProcessableInstrument`).
+  const instrumentId = "akta-fplc";
   const runId = "files-test-run";
   let fileId: number;
   let secondFileId: number;
@@ -37,7 +39,7 @@ describe("Files API", () => {
     const db = getTestDb();
     await db.insert(instruments).values({
       id: instrumentId,
-      displayName: "Files Test Instrument",
+      displayName: "Akta FPLC",
       status: "active",
     });
 
@@ -487,6 +489,7 @@ describe("Files API", () => {
   //   secondFileId (sample2.csv)      → detected, soft-deleted
   //   thirdFileId (sample3.csv)       → detected, not deleted
   //   lambdaFileId (processed_output) → failed, has S3 info
+  // Uploaded eligibility is covered by a dedicated run/file created below.
   // -------------------------------------------------------------------------
 
   it("REPROCESS returns 401 without auth", async () => {
@@ -583,7 +586,7 @@ describe("Files API", () => {
     expect(data.error.message).toContain("parent run");
   });
 
-  // These two tests verify that both reprocessable statuses (failed and
+  // These tests verify that reprocessable statuses (uploaded, failed, and
   // completed) pass all validation guards. They return 503 because the
   // test server has no LAMBDA_FUNCTION_URL configured.
   it("REPROCESS returns 503 for failed file when Lambda is not configured", async () => {
@@ -604,5 +607,75 @@ describe("Files API", () => {
     expect(res.status).toBe(503);
     const data = await res.json();
     expect(data.error.message).toContain("not configured");
+  });
+
+  it("REPROCESS returns 503 for uploaded file when Lambda is not configured", async () => {
+    const uploadedRunId = "reprocess-uploaded-run";
+    await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: { run_id: uploadedRunId, source: "lambda" },
+    });
+    const createFileRes = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${uploadedRunId}/files`,
+      {
+        method: "POST",
+        token,
+        body: {
+          s3_bucket: "test-bucket",
+          s3_key: `${instrumentId}/${uploadedRunId}/stuck.csv`,
+          filename: "stuck.csv",
+        },
+      }
+    );
+    expect(createFileRes.status).toBe(201);
+    const createdFile = await createFileRes.json();
+    expect(createdFile.status).toBe("uploaded");
+
+    const res = await api(`/api/v1/files/${createdFile.id}/reprocess`, {
+      method: "POST",
+      token,
+    });
+    expect(res.status).toBe(503);
+    const data = await res.json();
+    expect(data.error.message).toContain("not configured");
+  });
+
+  it("REPROCESS returns 409 for instrument without a Lambda processor", async () => {
+    const noProcessorId = "files-no-processor-instrument";
+    const db = getTestDb();
+    await db.insert(instruments).values({
+      id: noProcessorId,
+      displayName: "No Processor Instrument",
+      status: "active",
+    });
+    const noProcessorRunId = "reprocess-no-processor-run";
+    await api(`/api/v1/instruments/${noProcessorId}/runs`, {
+      method: "POST",
+      token,
+      body: { run_id: noProcessorRunId, source: "lambda" },
+    });
+    const createFileRes = await api(
+      `/api/v1/instruments/${noProcessorId}/runs/${noProcessorRunId}/files`,
+      {
+        method: "POST",
+        token,
+        body: {
+          s3_bucket: "test-bucket",
+          s3_key: `${noProcessorId}/${noProcessorRunId}/data.csv`,
+          filename: "data.csv",
+        },
+      }
+    );
+    expect(createFileRes.status).toBe(201);
+    const createdFile = await createFileRes.json();
+
+    const res = await api(`/api/v1/files/${createdFile.id}/reprocess`, {
+      method: "POST",
+      token,
+    });
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.error.message).toContain("no Lambda processor");
   });
 });
