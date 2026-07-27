@@ -22,10 +22,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { VALID_INSTRUMENT_TYPES } from "@/lib/db/schema";
+import { type InstrumentType, VALID_INSTRUMENT_TYPES } from "@/lib/db/schema";
 import { isProcessableInstrumentType } from "@/lib/instruments/processable-types";
 
-const TYPE_LABELS: Record<string, string> = {
+const TYPE_LABELS: Record<InstrumentType, string> = {
   generic: "Generic",
   plate_reader: "Plate Reader",
   gel_doc: "Gel Doc",
@@ -39,12 +39,12 @@ const TYPE_LABELS: Record<string, string> = {
 
 const INSTRUMENT_TYPE_OPTIONS = VALID_INSTRUMENT_TYPES.map((value) => ({
   value,
-  label: TYPE_LABELS[value] ?? value,
+  label: TYPE_LABELS[value],
 }));
 
 function processingBoundaryWarning(
-  fromType: string,
-  toType: string
+  fromType: InstrumentType,
+  toType: InstrumentType
 ): string | null {
   const wasProcessable = isProcessableInstrumentType(fromType);
   const willBeProcessable = isProcessableInstrumentType(toType);
@@ -52,8 +52,7 @@ function processingBoundaryWarning(
     return "Files will no longer be processed automatically.";
   }
   if (!wasProcessable && willBeProcessable) {
-    const label = TYPE_LABELS[toType] ?? toType;
-    return `New uploads will be processed by the ${label} processor.`;
+    return `New uploads will be processed by the ${TYPE_LABELS[toType]} processor.`;
   }
   return null;
 }
@@ -67,13 +66,13 @@ export function EditInstrumentDialog({
 }: {
   instrumentId: string;
   displayName: string;
-  instrumentType: string;
+  instrumentType: InstrumentType;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   const router = useRouter();
   const [name, setName] = useState(displayName);
-  const [type, setType] = useState(instrumentType);
+  const [type, setType] = useState<InstrumentType>(instrumentType);
   const [isPending, startTransition] = useTransition();
 
   // Re-sync form state from props each time the dialog opens so it reflects
@@ -141,7 +140,10 @@ export function EditInstrumentDialog({
           </div>
           <div className="grid gap-2">
             <Label htmlFor="edit-type">Instrument type</Label>
-            <Select onValueChange={setType} value={type}>
+            <Select
+              onValueChange={(value) => setType(value as InstrumentType)}
+              value={type}
+            >
               <SelectTrigger className="w-full" id="edit-type">
                 <SelectValue />
               </SelectTrigger>

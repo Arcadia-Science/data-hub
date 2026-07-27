@@ -39,6 +39,15 @@ DEFAULT_TIMEOUT: tuple[float, float] = (5, 30)
 _GET_INSTRUMENT_ATTEMPTS = 3
 _GET_INSTRUMENT_BACKOFF_SECONDS = (0.5, 1.5, 3.0)
 
+# Warm-container cache: multi-file runs hit the same instrument repeatedly.
+_INSTRUMENT_CACHE_TTL_SECONDS = 60.0
+_instrument_cache: dict[str, tuple[float, InstrumentResponse]] = {}
+
+
+def clear_instrument_cache() -> None:
+    """Drop cached instrument lookups (tests / type edits mid-invocation)."""
+    _instrument_cache.clear()
+
 
 class DataHubClient:
     """HTTP client for the Data Hub API (Lambda caller)."""
@@ -108,12 +117,23 @@ class DataHubClient:
 
         Retries connection errors, timeouts, and 5xx responses. 404 and
         401/403 are raised immediately so the handler can classify them.
+        Successful responses are cached for ``_INSTRUMENT_CACHE_TTL_SECONDS``
+        so a multi-file run does not re-fetch the same instrument per file.
         """
+        now = time.monotonic()
+        cached = _instrument_cache.get(instrument_id)
+        if cached is not None:
+            cached_at, instrument = cached
+            if now - cached_at < _INSTRUMENT_CACHE_TTL_SECONDS:
+                return instrument
+
         last_error: ApiError | None = None
         for attempt in range(_GET_INSTRUMENT_ATTEMPTS):
             try:
                 resp = self._request("GET", f"/instruments/{instrument_id}")
-                return InstrumentResponse.model_validate(resp.json())
+                instrument = InstrumentResponse.model_validate(resp.json())
+                _instrument_cache[instrument_id] = (time.monotonic(), instrument)
+                return instrument
             except ApiError as exc:
                 last_error = exc
                 is_transient = exc.status_code == 0 or exc.status_code >= 500
@@ -129,8 +149,9 @@ class DataHubClient:
                     delay,
                 )
                 time.sleep(delay)
-        # Unreachable: the loop always returns or raises.
-        assert last_error is not None
+        # The loop always returns or raises; keep a real raise for -O.
+        if last_error is None:
+            raise RuntimeError("get_instrument retry loop completed without result")
         raise last_error
 
     # ------------------------------------------------------------------

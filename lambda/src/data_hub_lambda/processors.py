@@ -31,15 +31,6 @@ class ProcessorEntry:
     matches_filename: Callable[[str], bool]
 
 
-def _ends_with(suffix: str) -> Callable[[str], bool]:
-    lower = suffix.lower()
-
-    def _match(filename: str) -> bool:
-        return filename.lower().endswith(lower)
-
-    return _match
-
-
 def _ends_with_any(*suffixes: str) -> Callable[[str], bool]:
     lowers = tuple(s.lower() for s in suffixes)
 
@@ -53,11 +44,11 @@ def _ends_with_any(*suffixes: str) -> Callable[[str], bool]:
 PROCESSORS: dict[str, ProcessorEntry] = {
     "qpcr": ProcessorEntry(
         process_file=azure_cielo_qpcr.process_file,
-        matches_filename=_ends_with("_cq values.csv"),
+        matches_filename=_ends_with_any("_cq values.csv"),
     ),
     "plate_reader": ProcessorEntry(
         process_file=spectramax_plate_reader.process_file,
-        matches_filename=_ends_with(".xls"),
+        matches_filename=_ends_with_any(".xls"),
     ),
     "gel_doc": ProcessorEntry(
         process_file=azure_600_gel_doc.process_file,
@@ -65,11 +56,11 @@ PROCESSORS: dict[str, ProcessorEntry] = {
     ),
     "tape_station": ProcessorEntry(
         process_file=agilent_4150_tapestation.process_file,
-        matches_filename=_ends_with(".pdf"),
+        matches_filename=_ends_with_any(".pdf"),
     ),
     "hina_microscope": ProcessorEntry(
         process_file=hina_microscope.process_file,
-        matches_filename=_ends_with(".nd2"),
+        matches_filename=_ends_with_any(".nd2"),
     ),
     "epson_v700_scanner": ProcessorEntry(
         process_file=epson_v700_scanner.process_file,
@@ -77,7 +68,7 @@ PROCESSORS: dict[str, ProcessorEntry] = {
     ),
     "fplc": ProcessorEntry(
         process_file=akta_fplc.process_file,
-        matches_filename=_ends_with(".pdf"),
+        matches_filename=_ends_with_any(".pdf"),
     ),
 }
 

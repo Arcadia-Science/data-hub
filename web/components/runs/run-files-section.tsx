@@ -29,6 +29,7 @@ import type {
   RunFileStats,
   RunFilesPage,
 } from "@/lib/api/instrument-runs";
+import type { InstrumentType } from "@/lib/db/schema";
 import { runDetailSearchParams } from "@/lib/search-params";
 import { FileBulkActionBar } from "./file-bulk-action-bar";
 import {
@@ -83,7 +84,7 @@ interface RunFilesSectionProps {
   filteredDownloadableCount: number;
   instrumentId: string;
   // Selects the Lambda processor / reprocess gate (not the instrument ID).
-  instrumentType: string;
+  instrumentType: InstrumentType;
   isDeleted: boolean;
   pagination: RunFilesPage["pagination"];
   runId: string;

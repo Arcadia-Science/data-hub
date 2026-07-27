@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/table";
 import type { RunFile } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
+import type { InstrumentType } from "@/lib/db/schema";
 import { isProcessableInstrumentType } from "@/lib/instruments/processable-types";
 import { REPROCESSABLE_STATUSES } from "@/lib/runs/reprocessable-statuses";
 import { cn, formatBytes } from "@/lib/utils";
@@ -214,7 +215,7 @@ function UploadDismissActions({
   );
 }
 
-function canReprocess(file: RunFile, instrumentType: string): boolean {
+function canReprocess(file: RunFile, instrumentType: InstrumentType): boolean {
   return (
     file.deletedAt === null &&
     isProcessableInstrumentType(instrumentType) &&
@@ -231,7 +232,7 @@ function canReprocess(file: RunFile, instrumentType: string): boolean {
 
 export interface ReadOnlyRunFilesTableProps {
   files: RunFile[];
-  instrumentType: string;
+  instrumentType: InstrumentType;
   isPending: boolean;
   onReprocess: (id: number) => void;
 }
@@ -288,7 +289,7 @@ export function ReadOnlyRunFilesTable({
 
 export interface EditableRunFilesTableProps {
   files: RunFile[];
-  instrumentType: string;
+  instrumentType: InstrumentType;
   isPending: boolean;
   onDismiss: (id: number) => void;
   onReprocess: (id: number) => void;

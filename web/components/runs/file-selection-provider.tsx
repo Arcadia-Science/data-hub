@@ -2,6 +2,7 @@
 
 import { createContext, use, useCallback, useMemo, useState } from "react";
 import type { RunFile } from "@/lib/api/instrument-runs";
+import type { InstrumentType } from "@/lib/db/schema";
 import { isProcessableInstrumentType } from "@/lib/instruments/processable-types";
 import { REPROCESSABLE_STATUSES } from "@/lib/runs/reprocessable-statuses";
 
@@ -40,7 +41,7 @@ export interface FileRef {
 // the same as "no checkbox in this row".
 export function buildFileRef(
   file: RunFile,
-  instrumentType: string
+  instrumentType: InstrumentType
 ): FileRef | null {
   if (file.deletedAt !== null) {
     return null;

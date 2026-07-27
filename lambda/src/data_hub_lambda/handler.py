@@ -256,6 +256,51 @@ def _post_archive_job_status(
 
 
 # ------------------------------------------------------------------
+# Reprocess failure recovery
+# ------------------------------------------------------------------
+
+
+def _fail_reprocess_file(
+    instrument_id: str,
+    run_id: str,
+    filename: str,
+    error_message: str,
+) -> None:
+    """PATCH the file to failed so a Function URL no-op can't leave it in processing.
+
+    The web app transitions the file to ``processing`` before invoking the
+    Function URL. Resolves the row via the idempotent ``create_file`` upsert
+    (returns the existing record) and marks it failed. Failures here are
+    logged but not re-raised — the caller has already decided not to process.
+    """
+    from data_hub_shared.config import config
+
+    try:
+        client = get_client()
+        s3_bucket = config.AWS_S3_RAW_DATA_BUCKET or ""
+        s3_key = f"{instrument_id}/{run_id}/{filename}"
+        file_record = client.create_file(
+            instrument_id=instrument_id,
+            run_id=run_id,
+            s3_bucket=s3_bucket,
+            s3_key=s3_key,
+            filename=filename,
+        )
+        client.update_file(
+            file_record.id,
+            status="failed",
+            error_message=error_message,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to mark reprocess file %s/%s/%s as failed",
+            instrument_id,
+            run_id,
+            filename,
+        )
+
+
+# ------------------------------------------------------------------
 # Main handler
 # ------------------------------------------------------------------
 
@@ -303,21 +348,19 @@ def lambda_handler(event: dict[str, Any], context: Context) -> dict[str, Any] | 
     logger.info("Instrument ID: '%s'", instrument_id)
     logger.info("Run ID: '%s'", run_id)
 
-    # Cheap pre-filter for the catch-all S3 notification: skip the API call
-    # when no processor could possibly want this filename.
-    if apply_filename_gates and not matches_any_processor_gate(filename):
-        logger.info(
-            "No processor filename gate matches %s; skipping.",
-            filename,
-        )
-        return None
-
-    # Pre-cleanup: if the previous invocation on this warm container was
-    # SIGKILL'd (e.g. OOM), the `finally` block below didn't run and stale
-    # downloads may still be sitting in /tmp. Wipe them before we start.
+    # Pre-cleanup before the filename gate so warm containers recover from
+    # a prior OOM even when the catch-all notification mostly no-ops.
     _cleanup_tmp()
 
     try:
+        # Skip the API call when no processor could possibly want this filename.
+        if apply_filename_gates and not matches_any_processor_gate(filename):
+            logger.info(
+                "No processor filename gate matches %s; skipping.",
+                filename,
+            )
+            return None
+
         try:
             instrument = get_client().get_instrument(instrument_id)
         except ApiError as exc:
@@ -327,6 +370,13 @@ def lambda_handler(event: dict[str, Any], context: Context) -> dict[str, Any] | 
                     instrument_id,
                     filename,
                 )
+                if is_function_url:
+                    _fail_reprocess_file(
+                        instrument_id,
+                        run_id,
+                        filename,
+                        f"Instrument '{instrument_id}' not found",
+                    )
                 return None
             if exc.status_code in (401, 403):
                 logger.error(
@@ -349,12 +399,15 @@ def lambda_handler(event: dict[str, Any], context: Context) -> dict[str, Any] | 
 
         processor = get_processor(instrument.instrument_type)
         if processor is None:
+            message = f"No Lambda processor for instrument_type='{instrument.instrument_type}'"
             logger.info(
-                "No processor for instrument_type=%s (instrument %s); skipping %s.",
-                instrument.instrument_type,
+                "%s (instrument %s); skipping %s.",
+                message,
                 instrument_id,
                 filename,
             )
+            if is_function_url:
+                _fail_reprocess_file(instrument_id, run_id, filename, message)
             return None
 
         if apply_filename_gates and not processor.matches_filename(filename):
