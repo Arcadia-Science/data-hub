@@ -4,7 +4,7 @@ import type {
   RunRef,
   RunStats,
 } from "@/components/instruments/runs-table/run-selection-provider";
-import { isProcessableInstrument } from "@/lib/instruments/processable-ids";
+import { isProcessableInstrumentType } from "@/lib/instruments/processable-types";
 
 // ---------------------------------------------------------------------------
 // Predicates that decide which row-level / bulk actions are available for a
@@ -14,8 +14,8 @@ import { isProcessableInstrument } from "@/lib/instruments/processable-ids";
 // - Upload:    at least one file still waiting to be uploaded.
 // - Download:  at least one file has made it to S3 (i.e. is not `detected`
 //              or `upload_requested`).
-// - Reprocess: instrument has a Lambda processor and at least one file is in
-//              `uploaded`, `completed`, or `failed`.
+// - Reprocess: instrument_type has a Lambda processor and at least one file
+//              is in `uploaded`, `completed`, or `failed`.
 // - Delete:    the run isn't already soft-deleted.
 // ---------------------------------------------------------------------------
 
@@ -34,7 +34,7 @@ export function canDownloadRun(row: RunRow): boolean {
 export function canReprocessRun(row: RunRow): boolean {
   return (
     row.deleted_at === null &&
-    isProcessableInstrument(row.instrument_id) &&
+    isProcessableInstrumentType(row.instrument_type) &&
     row.files_completed + row.files_failed + row.files_uploaded > 0
   );
 }

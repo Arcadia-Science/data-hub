@@ -82,6 +82,8 @@ interface RunFilesSectionProps {
   // Downloadable files matching the active table filters (S3-backed).
   filteredDownloadableCount: number;
   instrumentId: string;
+  // Selects the Lambda processor / reprocess gate (not the instrument ID).
+  instrumentType: string;
   isDeleted: boolean;
   pagination: RunFilesPage["pagination"];
   runId: string;
@@ -131,6 +133,7 @@ function RunFilesSectionContent({
   pagination,
   stats,
   instrumentId,
+  instrumentType,
   runId,
   isDeleted,
 }: RunFilesSectionProps) {
@@ -357,7 +360,7 @@ function RunFilesSectionContent({
           ) : isDeleted ? (
             <ReadOnlyRunFilesTable
               files={files}
-              instrumentId={instrumentId}
+              instrumentType={instrumentType}
               isPending={isPending}
               onReprocess={(id) =>
                 handleSingleReprocess(id, startTransition, router)
@@ -366,7 +369,7 @@ function RunFilesSectionContent({
           ) : (
             <EditableRunFilesTable
               files={files}
-              instrumentId={instrumentId}
+              instrumentType={instrumentType}
               isPending={isPending}
               onDismiss={(id) =>
                 handleSingleDismiss(id, startTransition, router)

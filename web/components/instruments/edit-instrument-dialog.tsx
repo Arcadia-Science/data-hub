@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { VALID_INSTRUMENT_TYPES } from "@/lib/db/schema";
+import { isProcessableInstrumentType } from "@/lib/instruments/processable-types";
 
 const TYPE_LABELS: Record<string, string> = {
   generic: "Generic",
@@ -33,12 +34,29 @@ const TYPE_LABELS: Record<string, string> = {
   hina_microscope: "Hina Microscope",
   epson_v700_scanner: "Epson V700 Scanner",
   instant_raman: "InstantRaman",
+  fplc: "FPLC",
 };
 
 const INSTRUMENT_TYPE_OPTIONS = VALID_INSTRUMENT_TYPES.map((value) => ({
   value,
   label: TYPE_LABELS[value] ?? value,
 }));
+
+function processingBoundaryWarning(
+  fromType: string,
+  toType: string
+): string | null {
+  const wasProcessable = isProcessableInstrumentType(fromType);
+  const willBeProcessable = isProcessableInstrumentType(toType);
+  if (wasProcessable && !willBeProcessable) {
+    return "Files will no longer be processed automatically.";
+  }
+  if (!wasProcessable && willBeProcessable) {
+    const label = TYPE_LABELS[toType] ?? toType;
+    return `New uploads will be processed by the ${label} processor.`;
+  }
+  return null;
+}
 
 export function EditInstrumentDialog({
   instrumentId,
@@ -71,6 +89,11 @@ export function EditInstrumentDialog({
   // trimmed name avoids treating whitespace-only edits as a real change.
   const isUnchanged =
     name.trim() === displayName.trim() && type === instrumentType;
+
+  const typeWarning =
+    type === instrumentType
+      ? null
+      : processingBoundaryWarning(instrumentType, type);
 
   function handleSave() {
     startTransition(async () => {
@@ -131,8 +154,17 @@ export function EditInstrumentDialog({
               </SelectContent>
             </Select>
             <p className="text-muted-foreground text-xs">
-              Controls the run detail page layout.
+              Controls the run detail page layout and which Lambda processor
+              handles new uploads.
             </p>
+            {typeWarning ? (
+              <p
+                className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-amber-950 text-xs dark:text-amber-100"
+                role="status"
+              >
+                {typeWarning}
+              </p>
+            ) : null}
           </div>
         </div>
         <DialogFooter>

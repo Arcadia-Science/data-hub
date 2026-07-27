@@ -2,8 +2,8 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { after } from "next/server";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { db } from "@/lib/db";
-import { files, instrumentRuns } from "@/lib/db/schema";
-import { isProcessableInstrument } from "@/lib/instruments/processable-ids";
+import { files, instrumentRuns, instruments } from "@/lib/db/schema";
+import { isProcessableInstrumentType } from "@/lib/instruments/processable-types";
 import { hasInvokeCredentials, signLambdaInvoke } from "@/lib/lambda";
 import { REPROCESSABLE_STATUSES } from "@/lib/runs/reprocessable-statuses";
 
@@ -78,8 +78,10 @@ export async function reprocessFile(fileId: number): Promise<ReprocessResult> {
     .select({
       deletedAt: instrumentRuns.deletedAt,
       instrumentId: instrumentRuns.instrumentId,
+      instrumentType: instruments.instrumentType,
     })
     .from(instrumentRuns)
+    .innerJoin(instruments, eq(instrumentRuns.instrumentId, instruments.id))
     .where(eq(instrumentRuns.id, file.instrumentRunId))
     .limit(1);
 
@@ -92,13 +94,13 @@ export async function reprocessFile(fileId: number): Promise<ReprocessResult> {
     };
   }
 
-  if (!(parentRun && isProcessableInstrument(parentRun.instrumentId))) {
+  if (!(parentRun && isProcessableInstrumentType(parentRun.instrumentType))) {
     return {
       ok: false,
       status: 409,
       code: "CONFLICT",
       message: parentRun
-        ? `Instrument '${parentRun.instrumentId}' has no Lambda processor — cannot reprocess`
+        ? `Instrument type '${parentRun.instrumentType}' has no Lambda processor — cannot reprocess`
         : "Cannot reprocess a file with no parent run",
     };
   }
@@ -189,15 +191,6 @@ export async function reprocessRun(
   instrumentId: string,
   runId: string
 ): Promise<ReprocessRunResult> {
-  if (!isProcessableInstrument(instrumentId)) {
-    return {
-      ok: false,
-      status: 409,
-      code: "CONFLICT",
-      message: `Instrument '${instrumentId}' has no Lambda processor — cannot reprocess`,
-    };
-  }
-
   const run = await lookupRunByNaturalKey(instrumentId, runId);
 
   if (!run) {
@@ -215,6 +208,15 @@ export async function reprocessRun(
       status: 409,
       code: "CONFLICT",
       message: "Cannot reprocess a soft-deleted run",
+    };
+  }
+
+  if (!isProcessableInstrumentType(run.instrumentType)) {
+    return {
+      ok: false,
+      status: 409,
+      code: "CONFLICT",
+      message: `Instrument type '${run.instrumentType}' has no Lambda processor — cannot reprocess`,
     };
   }
 

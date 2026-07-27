@@ -27,11 +27,7 @@ Currently supported instruments:
 
 ### `constants`
 
-Maps between instrument IDs and human-readable display names:
-
-```python
-from data_hub_shared.constants import INSTRUMENT_ID_TO_NAME_MAP, INSTRUMENT_NAME_TO_ID_MAP
-```
+Reserved for cross-package constants. Instrument display names live in the web app's `instruments` table; Lambda dispatch uses `instrument_type` rather than a shared ID→name map.
 
 ### `config`
 

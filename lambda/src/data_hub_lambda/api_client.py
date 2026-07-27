@@ -1,11 +1,17 @@
 from __future__ import annotations
 import logging
 import os
+import time
 from typing import Any
 
 import requests
 
-from data_hub_lambda.models import ApiErrorDetail, FileResponse, RunResponse
+from data_hub_lambda.models import (
+    ApiErrorDetail,
+    FileResponse,
+    InstrumentResponse,
+    RunResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +34,10 @@ class ApiError(Exception):
 # (connect_timeout, read_timeout) in seconds. The read timeout is generous
 # because the runs and files endpoints perform upsert queries under the hood.
 DEFAULT_TIMEOUT: tuple[float, float] = (5, 30)
+
+# Bounded in-invocation retries for transient get_instrument failures.
+_GET_INSTRUMENT_ATTEMPTS = 3
+_GET_INSTRUMENT_BACKOFF_SECONDS = (0.5, 1.5, 3.0)
 
 
 class DataHubClient:
@@ -88,6 +98,40 @@ class DataHubClient:
         if not resp.ok:
             self._handle_error(resp)
         return resp
+
+    # ------------------------------------------------------------------
+    # Instruments
+    # ------------------------------------------------------------------
+
+    def get_instrument(self, instrument_id: str) -> InstrumentResponse:
+        """Fetch an instrument by ID, with bounded retry on transient errors.
+
+        Retries connection errors, timeouts, and 5xx responses. 404 and
+        401/403 are raised immediately so the handler can classify them.
+        """
+        last_error: ApiError | None = None
+        for attempt in range(_GET_INSTRUMENT_ATTEMPTS):
+            try:
+                resp = self._request("GET", f"/instruments/{instrument_id}")
+                return InstrumentResponse.model_validate(resp.json())
+            except ApiError as exc:
+                last_error = exc
+                is_transient = exc.status_code == 0 or exc.status_code >= 500
+                if not is_transient or attempt == _GET_INSTRUMENT_ATTEMPTS - 1:
+                    raise
+                delay = _GET_INSTRUMENT_BACKOFF_SECONDS[attempt]
+                logger.warning(
+                    "Transient error fetching instrument %s (attempt %d/%d): %s; retrying in %.1fs",
+                    instrument_id,
+                    attempt + 1,
+                    _GET_INSTRUMENT_ATTEMPTS,
+                    exc,
+                    delay,
+                )
+                time.sleep(delay)
+        # Unreachable: the loop always returns or raises.
+        assert last_error is not None
+        raise last_error
 
     # ------------------------------------------------------------------
     # Runs

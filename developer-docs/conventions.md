@@ -10,25 +10,27 @@ All raw data files are stored in S3 with the key pattern:
 {instrument_id}/{run_id}/{filename}
 ```
 
-- **`instrument_id`** — kebab-case identifier matching the `Instrument` enum (e.g., `akta-fplc`).
+- **`instrument_id`** — kebab-case identifier for the instrument row (e.g., `akta-fplc`).
 - **`run_id`** — unique identifier for the run, either extracted from the filename prefix or from a subdirectory name.
 - **`filename`** — the original filename.
 
 The S3 bucket name follows the template `arcadia-data-hub-raw-{environment}`, where `environment` is `staging` or `production`.
 
-## Instrument IDs
+## Instrument IDs and types
 
 Instrument IDs are kebab-case strings (lowercase letters, numbers, hyphens). They serve as:
 
 - S3 key prefixes
 - API resource identifiers
-- Enum values in `data_hub_shared.enums.Instrument`
+- Primary keys on the `instruments` table
 
-When adding a new instrument, the ID must be registered in three places:
+Lambda dispatch and web reprocess eligibility use **`instrument_type`**, not the ID. When adding a processable instrument:
 
-1. `Instrument` enum in `packages/shared/src/data_hub_shared/enums.py`
-2. `INSTRUMENT_ID_TO_NAME_MAP` in `packages/shared/src/data_hub_shared/constants.py`
-3. Dispatch logic in `lambda/src/data_hub_lambda/handler.py`
+1. Set (or add) the appropriate `instrument_type` on the instrument row
+2. Register a processor for that type in `lambda/src/data_hub_lambda/processors.py`
+3. Add the same type to `PROCESSABLE_INSTRUMENT_TYPES` in `web/lib/instruments/processable-types.ts`
+
+The shared `Instrument` enum in `packages/shared` is optional legacy naming for watcher/CLI display — it is not the Lambda support gate.
 
 ## Environment variables
 

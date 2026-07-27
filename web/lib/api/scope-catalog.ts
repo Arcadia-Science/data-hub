@@ -177,6 +177,7 @@ export const SCOPE_PRESETS: ScopePreset[] = [
     label: "Lambda",
     description: "For the processing Lambda writing runs and file results.",
     scopes: [
+      "instruments:read",
       "runs:create",
       "runs:update",
       "files:create",

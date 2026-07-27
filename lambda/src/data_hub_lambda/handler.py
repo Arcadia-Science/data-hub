@@ -11,17 +11,9 @@ from urllib.parse import unquote_plus
 from aws_lambda_typing.context import Context
 from aws_lambda_typing.events.s3 import S3Event
 
-from data_hub_lambda import (
-    agilent_4150_tapestation,
-    akta_fplc,
-    archive_builder,
-    azure_600_gel_doc,
-    azure_cielo_qpcr,
-    epson_v700_scanner,
-    hina_microscope,
-    spectramax_plate_reader,
-)
-from data_hub_shared.enums import Instrument
+from data_hub_lambda import archive_builder
+from data_hub_lambda.api_client import ApiError, get_client
+from data_hub_lambda.processors import get_processor, matches_any_processor_gate
 from data_hub_shared.logger import get_named_logger
 
 logger = get_named_logger(__name__)
@@ -52,7 +44,7 @@ def parse_s3_event(event: S3Event) -> S3EventInfo:
         An `S3EventInfo` with all fields populated.
 
     Raises:
-        ValueError: If the event payload is malformed or the instrument is unsupported.
+        ValueError: If the event payload is malformed or the key shape is wrong.
     """
     record = event["Records"][0]
     if not record:
@@ -67,19 +59,12 @@ def parse_s3_event(event: S3Event) -> S3EventInfo:
     if not match:
         raise ValueError(f"Object key does not match expected pattern: {s3_key}")
 
-    instrument_id = match.group(1)
-    run_id = match.group(2)
-    filename = match.group(3)
-
-    if instrument_id not in {member.value for member in Instrument}:
-        raise ValueError(f"This instrument is not currently supported: {instrument_id}")
-
     return S3EventInfo(
-        instrument_id=instrument_id,
-        run_id=run_id,
+        instrument_id=match.group(1),
+        run_id=match.group(2),
         s3_bucket=s3_bucket,
         s3_key=s3_key,
-        filename=filename,
+        filename=match.group(3),
     )
 
 
@@ -276,13 +261,23 @@ def _post_archive_job_status(
 
 
 def lambda_handler(event: dict[str, Any], context: Context) -> dict[str, Any] | None:
-    """Top-level Lambda handler dispatching to instrument workflows."""
+    """Top-level Lambda handler dispatching to instrument workflows.
+
+    Dispatch is by ``instrument_type`` (fetched from the API), not instrument
+    ID. Filename gates filter the S3 firehose; explicit reprocess via the
+    Function URL bypasses those gates so user-initiated work can't strand
+    a file in ``processing``.
+    """
     logger.info("Received event: %s", pformat(event))
+
+    # Capture before unwrapping so reprocess (Function URL) can skip gates.
+    is_function_url = _is_function_url_event(event)
+    apply_filename_gates = not is_function_url
 
     # Function URL invocations carry a requestContext with an http key.
     # AWS_IAM auth is enforced by Lambda before the handler runs, so we
     # only need to unwrap the inner JSON payload here.
-    if _is_function_url_event(event):
+    if is_function_url:
         payload = _parse_function_url_body(event)
         if payload is None:
             return {"statusCode": 400, "body": "Invalid JSON body"}
@@ -304,8 +299,18 @@ def lambda_handler(event: dict[str, Any], context: Context) -> dict[str, Any] | 
 
     instrument_id = event_info.instrument_id
     run_id = event_info.run_id
+    filename = event_info.filename
     logger.info("Instrument ID: '%s'", instrument_id)
     logger.info("Run ID: '%s'", run_id)
+
+    # Cheap pre-filter for the catch-all S3 notification: skip the API call
+    # when no processor could possibly want this filename.
+    if apply_filename_gates and not matches_any_processor_gate(filename):
+        logger.info(
+            "No processor filename gate matches %s; skipping.",
+            filename,
+        )
+        return None
 
     # Pre-cleanup: if the previous invocation on this warm container was
     # SIGKILL'd (e.g. OOM), the `finally` block below didn't run and stale
@@ -313,58 +318,64 @@ def lambda_handler(event: dict[str, Any], context: Context) -> dict[str, Any] | 
     _cleanup_tmp()
 
     try:
-        logger.info("Processing file %s...", event_info.filename)
-
-        if instrument_id == Instrument.AKTA_FPLC.value:
-            akta_fplc.process_file(
-                run_id=event_info.run_id,
-                filename=event_info.filename,
+        try:
+            instrument = get_client().get_instrument(instrument_id)
+        except ApiError as exc:
+            if exc.status_code == 404:
+                logger.info(
+                    "Instrument %s not found; skipping %s.",
+                    instrument_id,
+                    filename,
+                )
+                return None
+            if exc.status_code in (401, 403):
+                logger.error(
+                    "Auth failure fetching instrument %s (status %d): %s. "
+                    "Check that DATA_HUB_API_KEY includes instruments:read.",
+                    instrument_id,
+                    exc.status_code,
+                    exc.message,
+                )
+                raise
+            # Transient errors already retried inside get_instrument; re-raise
+            # so the async S3 path can retry the invocation.
+            logger.error(
+                "Failed to fetch instrument %s after retries (status %d): %s",
+                instrument_id,
+                exc.status_code,
+                exc.message,
             )
+            raise
 
-        elif instrument_id == Instrument.AGILENT_4150_TAPESTATION.value:
-            agilent_4150_tapestation.process_file(
-                run_id=event_info.run_id,
-                filename=event_info.filename,
+        processor = get_processor(instrument.instrument_type)
+        if processor is None:
+            logger.info(
+                "No processor for instrument_type=%s (instrument %s); skipping %s.",
+                instrument.instrument_type,
+                instrument_id,
+                filename,
             )
-
-        elif instrument_id == Instrument.AZURE_600_GEL_DOC.value:
-            azure_600_gel_doc.process_file(
-                run_id=event_info.run_id,
-                filename=event_info.filename,
-            )
-
-        elif instrument_id == Instrument.AZURE_CIELO_QPCR.value:
-            azure_cielo_qpcr.process_file(
-                run_id=event_info.run_id,
-                filename=event_info.filename,
-            )
-
-        elif instrument_id == Instrument.EPSON_V700_SCANNER.value:
-            epson_v700_scanner.process_file(
-                run_id=event_info.run_id,
-                filename=event_info.filename,
-            )
-
-        elif instrument_id == Instrument.HINA_MICROSCOPE.value:
-            hina_microscope.process_file(
-                run_id=event_info.run_id,
-                filename=event_info.filename,
-            )
-
-        elif instrument_id in (
-            Instrument.SPECTRAMAX_ID3_PLATE_READER.value,
-            Instrument.SPECTRAMAX_ID5_PLATE_READER.value,
-        ):
-            spectramax_plate_reader.process_file(
-                instrument_id=event_info.instrument_id,  # pyright: ignore[reportArgumentType]
-                run_id=event_info.run_id,
-                filename=event_info.filename,
-            )
-
-        else:
-            logger.error("Unsupported instrument: %s", instrument_id)
             return None
 
+        if apply_filename_gates and not processor.matches_filename(filename):
+            logger.info(
+                "Filename %s does not match gate for instrument_type=%s; skipping.",
+                filename,
+                instrument.instrument_type,
+            )
+            return None
+
+        logger.info(
+            "Processing file %s with instrument_type=%s...",
+            filename,
+            instrument.instrument_type,
+        )
+        processor.process_file(instrument_id, run_id, filename)
+
+    except ApiError:
+        # Auth / exhausted-retry failures: re-raise so Lambda retries (S3)
+        # or returns 500 (Function URL). Do not swallow.
+        raise
     except Exception:
         # Per-file failure is already PATCHed back to the web app's file row
         # (status='failed', error_message=...) by each instrument's

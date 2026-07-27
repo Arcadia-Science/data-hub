@@ -1,6 +1,5 @@
 from __future__ import annotations
 import logging
-from typing import Literal
 
 from data_hub_lambda.api_client import get_client
 from data_hub_lambda.spectramax_plate_reader.utils import parse_metadata, parse_raw_well_data
@@ -9,10 +8,8 @@ from data_hub_shared.config import config
 
 logger = logging.getLogger(__name__)
 
-InstrumentType = Literal["spectramax-id3-plate-reader", "spectramax-id5-plate-reader"]
 
-
-def process_file(instrument_id: InstrumentType, run_id: str, filename: str) -> None:
+def process_file(instrument_id: str, run_id: str, filename: str) -> None:
     """Process a single SpectraMax plate reader file through the Data Hub API.
 
     Args:

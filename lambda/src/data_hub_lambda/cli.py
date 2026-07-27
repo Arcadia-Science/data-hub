@@ -306,14 +306,9 @@ def handler(
 
     from data_hub_lambda.handler import lambda_handler
     from data_hub_lambda.local_s3_mirror import make_mock_context, patched_s3
-    from data_hub_shared.enums import Instrument
 
-    valid_ids = sorted(member.value for member in Instrument)
-    if instrument_id not in valid_ids:
-        raise click.BadParameter(
-            f"Unknown instrument_id '{instrument_id}'. Valid values: {', '.join(valid_ids)}",
-            param_hint="INSTRUMENT_ID",
-        )
+    # Instrument existence / type is resolved by the handler via the API —
+    # an unknown ID no-ops there rather than failing CLI argument validation.
 
     for var in ("DATA_HUB_API_URL", "DATA_HUB_API_KEY"):
         if not os.environ.get(var):

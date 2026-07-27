@@ -51,6 +51,7 @@ export function EpsonScannerRunDetail({
           files={files}
           filteredDownloadableCount={filesDownloadableCount}
           instrumentId={instrumentId}
+          instrumentType={run.instrumentType}
           isDeleted={isDeleted}
           pagination={filesPagination}
           runId={runId}
