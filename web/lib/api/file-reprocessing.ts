@@ -4,8 +4,7 @@ import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 import { hasInvokeCredentials, signLambdaInvoke } from "@/lib/lambda";
-
-const REPROCESSABLE_STATUSES = ["failed", "completed"] as const;
+import { REPROCESSABLE_STATUSES } from "@/lib/runs/reprocessable-statuses";
 
 function getLambdaUrl(): string | null {
   const url = process.env.LAMBDA_FUNCTION_URL;
@@ -61,7 +60,7 @@ export async function reprocessFile(fileId: number): Promise<ReprocessResult> {
       ok: false,
       status: 409,
       code: "CONFLICT",
-      message: `Cannot reprocess a file in '${file.status}' status — only 'failed' or 'completed' files can be reprocessed`,
+      message: `Cannot reprocess a file in '${file.status}' status — only 'uploaded', 'failed', or 'completed' files can be reprocessed`,
     };
   }
 

@@ -2,6 +2,7 @@
 
 import { createContext, use, useCallback, useMemo, useState } from "react";
 import type { RunFile } from "@/lib/api/instrument-runs";
+import { REPROCESSABLE_STATUSES } from "@/lib/runs/reprocessable-statuses";
 
 // ---------------------------------------------------------------------------
 // File selection provider for the run files table. Mirrors RunSelectionProvider
@@ -18,7 +19,7 @@ const DOWNLOADABLE_STATUSES = new Set([
   "failed",
 ]);
 
-const REPROCESSABLE_STATUSES = new Set(["completed", "failed"]);
+const REPROCESSABLE_STATUS_SET = new Set<string>(REPROCESSABLE_STATUSES);
 
 export interface FileCaps {
   dismiss: boolean;
@@ -43,7 +44,7 @@ export function buildFileRef(file: RunFile): FileRef | null {
   const isDetected = file.status === "detected";
   const canDownload = DOWNLOADABLE_STATUSES.has(file.status);
   const canReprocess =
-    REPROCESSABLE_STATUSES.has(file.status) && file.s3Key !== null;
+    REPROCESSABLE_STATUS_SET.has(file.status) && file.s3Key !== null;
   if (!(isDetected || canDownload)) {
     return null;
   }

@@ -13,7 +13,7 @@ import type {
 // - Upload:    at least one file still waiting to be uploaded.
 // - Download:  at least one file has made it to S3 (i.e. is not `detected`
 //              or `upload_requested`).
-// - Reprocess: at least one file is in `completed` or `failed` status.
+// - Reprocess: at least one file is in `uploaded`, `completed`, or `failed`.
 // - Delete:    the run isn't already soft-deleted.
 // ---------------------------------------------------------------------------
 
@@ -30,7 +30,10 @@ export function canDownloadRun(row: RunRow): boolean {
 }
 
 export function canReprocessRun(row: RunRow): boolean {
-  return row.deleted_at === null && row.files_completed + row.files_failed > 0;
+  return (
+    row.deleted_at === null &&
+    row.files_completed + row.files_failed + row.files_uploaded > 0
+  );
 }
 
 export function canDeleteRun(row: RunRow): boolean {
@@ -51,6 +54,7 @@ export function computeRunStats(row: RunRow): RunStats {
     fileCount: row.file_count,
     filesCompleted: row.files_completed,
     filesFailed: row.files_failed,
+    filesUploaded: row.files_uploaded,
   };
 }
 

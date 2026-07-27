@@ -199,6 +199,7 @@ export function RunRowActions({ row }: { row: RunRow }) {
             runId: row.run_id,
             filesCompleted: row.files_completed,
             filesFailed: row.files_failed,
+            filesUploaded: row.files_uploaded,
           },
         ]}
       />

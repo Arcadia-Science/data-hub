@@ -16,6 +16,7 @@ export interface RunStats {
   fileCount: number;
   filesCompleted: number;
   filesFailed: number;
+  filesUploaded: number;
 }
 
 export interface RunRef {

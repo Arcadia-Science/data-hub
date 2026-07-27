@@ -139,7 +139,7 @@ registry.registerPath({
   path: "/instruments/{instrumentId}/runs/{runId}/reprocess",
   operationId: "reprocessInstrumentRun",
   summary: "Reprocess a run",
-  description: scoped("runs:reprocess"),
+  description: `${scoped("runs:reprocess")} Reprocesses every \`uploaded\`, \`failed\`, or \`completed\` file on the run.`,
   tags: tag,
   security: bearerSecurity,
   request: { params: runParams },

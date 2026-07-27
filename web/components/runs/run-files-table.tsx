@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/table";
 import type { RunFile } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
+import { REPROCESSABLE_STATUSES } from "@/lib/runs/reprocessable-statuses";
 import { cn, formatBytes } from "@/lib/utils";
 import {
   FileSelectAllCheckbox,
@@ -41,7 +42,7 @@ const DOWNLOADABLE_STATUSES = new Set([
   "failed",
 ]);
 
-const REPROCESSABLE_STATUSES = new Set(["completed", "failed"]);
+const REPROCESSABLE_STATUS_SET = new Set<string>(REPROCESSABLE_STATUSES);
 
 const CATEGORY_BADGE_CLASSES: Record<string, string> = {
   raw: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
@@ -215,15 +216,15 @@ function UploadDismissActions({
 function canReprocess(file: RunFile): boolean {
   return (
     file.deletedAt === null &&
-    REPROCESSABLE_STATUSES.has(file.status) &&
+    REPROCESSABLE_STATUS_SET.has(file.status) &&
     file.s3Key !== null
   );
 }
 
 // ---------------------------------------------------------------------------
 // Read-only variant: no selection column, no upload/dismiss. Reprocessing is
-// still allowed for completed/failed files so operators can recover report
-// data without restoring the run.
+// still allowed for uploaded/completed/failed files so operators can recover
+// report data or kick stuck uploads without restoring the run.
 // ---------------------------------------------------------------------------
 
 export interface ReadOnlyRunFilesTableProps {
