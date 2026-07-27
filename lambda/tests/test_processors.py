@@ -114,6 +114,47 @@ class TestInstrumentCache:
 
         assert request.call_count == 2
 
+    def test_get_instrument_retries_transient_once(self) -> None:
+        client = DataHubClient(base_url="https://example.test/api/v1")
+        payload = {
+            "id": "azure-cielo-qpcr",
+            "display_name": "Azure Cielo qPCR",
+            "status": "active",
+            "instrument_type": "qpcr",
+        }
+        ok = MagicMock()
+        ok.json.return_value = payload
+        with (
+            patch.object(
+                client,
+                "_request",
+                side_effect=[ApiError("boom", status_code=503), ok],
+            ) as request,
+            patch("data_hub_lambda.api_client.time.sleep") as sleep,
+        ):
+            instrument = client.get_instrument("azure-cielo-qpcr")
+
+        assert instrument.instrument_type == "qpcr"
+        assert request.call_count == 2
+        sleep.assert_called_once_with(0.5)
+
+    def test_get_instrument_does_not_sleep_through_long_outages(self) -> None:
+        client = DataHubClient(base_url="https://example.test/api/v1")
+        with (
+            patch.object(
+                client,
+                "_request",
+                side_effect=ApiError("boom", status_code=503),
+            ) as request,
+            patch("data_hub_lambda.api_client.time.sleep") as sleep,
+            pytest.raises(ApiError) as exc_info,
+        ):
+            client.get_instrument("azure-cielo-qpcr")
+
+        assert exc_info.value.status_code == 503
+        assert request.call_count == 2
+        sleep.assert_called_once_with(0.5)
+
 
 class TestHandlerDispatch:
     """Dispatch paths that used to be ID if/elif branches."""

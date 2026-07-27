@@ -35,9 +35,11 @@ class ApiError(Exception):
 # because the runs and files endpoints perform upsert queries under the hood.
 DEFAULT_TIMEOUT: tuple[float, float] = (5, 30)
 
-# Bounded in-invocation retries for transient get_instrument failures.
-_GET_INSTRUMENT_ATTEMPTS = 3
-_GET_INSTRUMENT_BACKOFF_SECONDS = (0.5, 1.5, 3.0)
+# One short in-invocation retry for blips. Longer outages rely on Lambda's
+# async retries for S3 events — those waits are free; time.sleep here bills
+# at the function's full memory size.
+_GET_INSTRUMENT_ATTEMPTS = 2
+_GET_INSTRUMENT_BACKOFF_SECONDS = (0.5,)
 
 # Warm-container cache: multi-file runs hit the same instrument repeatedly.
 _INSTRUMENT_CACHE_TTL_SECONDS = 60.0
@@ -113,10 +115,12 @@ class DataHubClient:
     # ------------------------------------------------------------------
 
     def get_instrument(self, instrument_id: str) -> InstrumentResponse:
-        """Fetch an instrument by ID, with bounded retry on transient errors.
+        """Fetch an instrument by ID, with one short retry on transient errors.
 
-        Retries connection errors, timeouts, and 5xx responses. 404 and
-        401/403 are raised immediately so the handler can classify them.
+        Retries connection errors, timeouts, and 5xx once after a brief sleep.
+        404 and 401/403 are raised immediately so the handler can classify
+        them. Exhausted transient failures are re-raised so S3-triggered
+        invocations can use Lambda's async retries (unbilled backoff).
         Successful responses are cached for ``_INSTRUMENT_CACHE_TTL_SECONDS``
         so a multi-file run does not re-fetch the same instrument per file.
         """
