@@ -41,7 +41,7 @@ export const reprocessFileTool = {
   name: "reprocess_file",
   title: "Reprocess File",
   description:
-    "Re-run the Lambda processing workflow for an uploaded, failed, or completed file. Transitions the file back to 'processing'. Use this to retry after a parser fix, transient Lambda failure, or a stuck upload that never entered processing.",
+    "Re-run the Lambda processing workflow for an uploaded, failed, or completed file on an instrument that has a Lambda processor. Transitions the file back to 'processing'. Use this to retry after a parser fix, transient Lambda failure, or a stuck upload that never entered processing.",
   group: "files",
   scope: "files:reprocess",
   inputSchema: { fileId: z.number().int().describe("Numeric file ID") },

@@ -70,9 +70,11 @@ Slack channel notifications are sent by the **web app** (`web/lib/slack.ts`), no
 
 3. **Register the dispatch.** Add an `elif` branch in the `lambda_handler` function in `lambda/src/data_hub_lambda/handler.py` that maps the new instrument ID to your `process_file` function.
 
-4. **Add tests.** Add unit tests in `lambda/tests/` for the new processor.
+4. **Expose reprocess in the web app.** Add the instrument ID to `PROCESSABLE_INSTRUMENT_IDS` in `web/lib/instruments/processable-ids.ts` so the UI and API allow reprocessing for that instrument.
 
-5. **Configure the S3 trigger and deploy.** See [CI and deployment → Adding an S3 trigger for a new instrument](ci-and-deployment.md#adding-an-s3-trigger-for-a-new-instrument) for the `infra/template.yaml` trigger entry and the deploy steps.
+5. **Add tests.** Add unit tests in `lambda/tests/` for the new processor.
+
+6. **Configure the S3 trigger and deploy.** See [CI and deployment → Adding an S3 trigger for a new instrument](ci-and-deployment.md#adding-an-s3-trigger-for-a-new-instrument) for the `infra/template.yaml` trigger entry and the deploy steps.
 
 ## Local processing CLI
 

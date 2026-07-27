@@ -2,6 +2,7 @@
 
 import { createContext, use, useCallback, useMemo, useState } from "react";
 import type { RunFile } from "@/lib/api/instrument-runs";
+import { isProcessableInstrument } from "@/lib/instruments/processable-ids";
 import { REPROCESSABLE_STATUSES } from "@/lib/runs/reprocessable-statuses";
 
 // ---------------------------------------------------------------------------
@@ -37,14 +38,19 @@ export interface FileRef {
 // Returns null for rows that should not participate in selection at all
 // (dismissed files, transient `upload_requested` rows). Caller treats null
 // the same as "no checkbox in this row".
-export function buildFileRef(file: RunFile): FileRef | null {
+export function buildFileRef(
+  file: RunFile,
+  instrumentId: string
+): FileRef | null {
   if (file.deletedAt !== null) {
     return null;
   }
   const isDetected = file.status === "detected";
   const canDownload = DOWNLOADABLE_STATUSES.has(file.status);
   const canReprocess =
-    REPROCESSABLE_STATUS_SET.has(file.status) && file.s3Key !== null;
+    isProcessableInstrument(instrumentId) &&
+    REPROCESSABLE_STATUS_SET.has(file.status) &&
+    file.s3Key !== null;
   if (!(isDetected || canDownload)) {
     return null;
   }
