@@ -1,0 +1,47 @@
+cff-version: 1.2.0
+message: If you use this software, please cite the associated publication.
+title: 'Data Hub: Automated capture and processing of lab instrument data'
+doi: 10.57844/arcadia-kdw3-emfz
+authors:
+- family-names: Amiri
+  given-names: Wasim
+  affiliation: Arcadia Science
+  orcid: https://orcid.org/0009-0004-5815-6283
+- family-names: Bell
+  given-names: Audrey
+  affiliation: Arcadia Science
+  orcid: https://orcid.org/0009-0008-2270-1613
+- family-names: Hosny
+  given-names: Ahmed
+  affiliation: Arcadia Science
+  orcid: https://orcid.org/0000-0002-1844-481X
+- family-names: Kohli
+  given-names: Peter
+  affiliation: Arcadia Science
+  orcid: https://orcid.org/0009-0007-7637-2897
+- family-names: Lane
+  given-names: Ryan
+  affiliation: Arcadia Science
+  orcid: https://orcid.org/0000-0002-5887-2069
+preferred-citation:
+  title: 'Data Hub: Automated capture and processing of lab instrument data'
+  type: article
+  doi: 10.57844/arcadia-kdw3-emfz
+  authors:
+  - family-names: Amiri
+    given-names: Wasim
+    affiliation: Arcadia Science
+    orcid: https://orcid.org/0009-0004-5815-6283
+  - family-names: Hosny
+    given-names: Ahmed
+    affiliation: Arcadia Science
+    orcid: https://orcid.org/0000-0002-1844-481X
+  - family-names: Kohli
+    given-names: Peter
+    affiliation: Arcadia Science
+    orcid: https://orcid.org/0009-0007-7637-2897
+  - family-names: Lane
+    given-names: Ryan
+    affiliation: Arcadia Science
+    orcid: https://orcid.org/0000-0002-5887-2069
+  year: 2026
