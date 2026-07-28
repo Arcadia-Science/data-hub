@@ -6,14 +6,11 @@ from data_hub_lambda.hina_microscope.image_processing import ND2Processor
 from data_hub_lambda.hina_microscope.parse_metadata import parse_metadata
 from data_hub_shared import s3_utils
 from data_hub_shared.config import config
-from data_hub_shared.enums import Instrument
 
 logger = logging.getLogger(__name__)
 
-INSTRUMENT_ID = Instrument.HINA_MICROSCOPE.value
 
-
-def process_file(run_id: str, filename: str) -> None:
+def process_file(instrument_id: str, run_id: str, filename: str) -> None:
     """Process a single Hina microscope ND2 file through the Data Hub API.
 
     Downloads the raw ND2, runs it through the image processing pipeline to
@@ -24,6 +21,7 @@ def process_file(run_id: str, filename: str) -> None:
     skip the metadata step.
 
     Args:
+        instrument_id: The instrument ID from the S3 key / event.
         run_id: The run ID (grouping key for files in a single imaging session).
         filename: The original filename (e.g. `well_A1_xy01.nd2`).
     """
@@ -31,12 +29,12 @@ def process_file(run_id: str, filename: str) -> None:
 
     client = get_client()
     s3_bucket = config.AWS_S3_RAW_DATA_BUCKET
-    s3_key = f"{INSTRUMENT_ID}/{run_id}/{filename}"
+    s3_key = f"{instrument_id}/{run_id}/{filename}"
 
-    run = client.ensure_run(INSTRUMENT_ID, run_id)
+    run = client.ensure_run(instrument_id, run_id)
 
     file_record = client.create_file(
-        instrument_id=INSTRUMENT_ID,
+        instrument_id=instrument_id,
         run_id=run_id,
         s3_bucket=s3_bucket or "",
         s3_key=s3_key,
@@ -47,7 +45,7 @@ def process_file(run_id: str, filename: str) -> None:
     try:
         client.update_file(file_id, status="processing")
 
-        raw_data_dir = config.LOCAL_RAW_DATA_DIRPATH / INSTRUMENT_ID / run_id
+        raw_data_dir = config.LOCAL_RAW_DATA_DIRPATH / instrument_id / run_id
         local_file_path = raw_data_dir / filename
         s3_utils.download_file(f"s3://{s3_bucket}/{s3_key}", local_file_path)
         logger.info("Downloaded %s to %s", filename, local_file_path)
@@ -57,12 +55,12 @@ def process_file(run_id: str, filename: str) -> None:
         jpg_file_path = processor.export_jpg()
 
         processed_bucket = config.AWS_S3_PROCESSED_DATA_BUCKET
-        jpg_s3_key = f"{INSTRUMENT_ID}/{run_id}/{jpg_file_path.name}"
+        jpg_s3_key = f"{instrument_id}/{run_id}/{jpg_file_path.name}"
         s3_utils.upload_file(jpg_file_path, f"s3://{processed_bucket}/{jpg_s3_key}")
         logger.info("Uploaded processed image to s3://%s/%s", processed_bucket, jpg_s3_key)
 
         processed_file = client.create_file(
-            instrument_id=INSTRUMENT_ID,
+            instrument_id=instrument_id,
             run_id=run_id,
             s3_bucket=processed_bucket or "",
             s3_key=jpg_s3_key,
@@ -80,7 +78,7 @@ def process_file(run_id: str, filename: str) -> None:
         # parse and store it once — on the first file to arrive.
         if not run.metadata:
             metadata = parse_metadata(processor.image)
-            client.update_run(INSTRUMENT_ID, run_id, metadata=metadata)
+            client.update_run(instrument_id, run_id, metadata=metadata)
             logger.info("Parsed and stored run-level metadata for %s", run_id)
         else:
             logger.info("Run %s already has metadata; skipping metadata step.", run_id)

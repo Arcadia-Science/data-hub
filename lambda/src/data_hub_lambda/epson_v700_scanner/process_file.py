@@ -9,14 +9,11 @@ from data_hub_lambda.epson_v700_scanner.colony_detection import (
 from data_hub_lambda.epson_v700_scanner.image_processing import TiffProcessor
 from data_hub_shared import s3_utils
 from data_hub_shared.config import config
-from data_hub_shared.enums import Instrument
 
 logger = logging.getLogger(__name__)
 
-INSTRUMENT_ID = Instrument.EPSON_V700_SCANNER.value
 
-
-def process_file(run_id: str, filename: str) -> None:
+def process_file(instrument_id: str, run_id: str, filename: str) -> None:
     """Process a single Epson V700 Scanner file through the Data Hub API.
 
     Downloads the raw TIFF, resizes it to a web-friendly JPEG, uploads the
@@ -24,6 +21,7 @@ def process_file(run_id: str, filename: str) -> None:
     both files via the API.
 
     Args:
+        instrument_id: The instrument ID from the S3 key / event.
         run_id: The run ID.
         filename: The original filename (e.g. ``scan_001.tif``).
     """
@@ -31,12 +29,12 @@ def process_file(run_id: str, filename: str) -> None:
 
     client = get_client()
     s3_bucket = config.AWS_S3_RAW_DATA_BUCKET
-    s3_key = f"{INSTRUMENT_ID}/{run_id}/{filename}"
+    s3_key = f"{instrument_id}/{run_id}/{filename}"
 
-    client.ensure_run(INSTRUMENT_ID, run_id)
+    client.ensure_run(instrument_id, run_id)
 
     file_record = client.create_file(
-        instrument_id=INSTRUMENT_ID,
+        instrument_id=instrument_id,
         run_id=run_id,
         s3_bucket=s3_bucket or "",
         s3_key=s3_key,
@@ -47,7 +45,7 @@ def process_file(run_id: str, filename: str) -> None:
     try:
         client.update_file(file_id, status="processing")
 
-        raw_data_dir = config.LOCAL_RAW_DATA_DIRPATH / INSTRUMENT_ID / run_id
+        raw_data_dir = config.LOCAL_RAW_DATA_DIRPATH / instrument_id / run_id
         local_file_path = raw_data_dir / filename
         s3_utils.download_file(f"s3://{s3_bucket}/{s3_key}", local_file_path)
         logger.info("Downloaded %s to %s", filename, local_file_path)
@@ -66,12 +64,12 @@ def process_file(run_id: str, filename: str) -> None:
         )
 
         processed_bucket = config.AWS_S3_PROCESSED_DATA_BUCKET
-        jpg_s3_key = f"{INSTRUMENT_ID}/{run_id}/{jpg_file_path.name}"
+        jpg_s3_key = f"{instrument_id}/{run_id}/{jpg_file_path.name}"
         s3_utils.upload_file(jpg_file_path, f"s3://{processed_bucket}/{jpg_s3_key}")
         logger.info("Uploaded processed image to s3://%s/%s", processed_bucket, jpg_s3_key)
 
         processed_file = client.create_file(
-            instrument_id=INSTRUMENT_ID,
+            instrument_id=instrument_id,
             run_id=run_id,
             s3_bucket=processed_bucket or "",
             s3_key=jpg_s3_key,
@@ -92,10 +90,10 @@ def process_file(run_id: str, filename: str) -> None:
                 pipeline.to_dataframes(),
                 raw_data_dir / csv_name,
             )
-            csv_s3_key = f"{INSTRUMENT_ID}/{run_id}/{csv_name}"
+            csv_s3_key = f"{instrument_id}/{run_id}/{csv_name}"
             s3_utils.upload_file(csv_path, f"s3://{processed_bucket}/{csv_s3_key}")
             csv_file = client.create_file(
-                instrument_id=INSTRUMENT_ID,
+                instrument_id=instrument_id,
                 run_id=run_id,
                 s3_bucket=processed_bucket or "",
                 s3_key=csv_s3_key,
@@ -112,7 +110,7 @@ def process_file(run_id: str, filename: str) -> None:
 
         logger.info("Parsed metadata: %s", metadata)
 
-        client.update_run(INSTRUMENT_ID, run_id, metadata=metadata)
+        client.update_run(instrument_id, run_id, metadata=metadata)
         client.update_file(file_id, status="completed")
         logger.info("File %s marked as completed.", filename)
 

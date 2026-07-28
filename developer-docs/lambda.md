@@ -8,10 +8,11 @@ The Lambda has three invocation paths:
 
 ### S3 trigger (automatic)
 
-1. An S3 `PutObject` event triggers the Lambda function.
+1. An S3 `ObjectCreated:*` event on the raw bucket triggers the Lambda (catch-all; no per-instrument prefix/suffix filters).
 2. The handler parses the S3 key to extract the instrument ID, run ID, and filename. The expected key layout is `{instrument_id}/{run_id}/{filename}`.
-3. It dispatches to the appropriate instrument processor based on the instrument ID.
-4. The processor downloads the raw file from S3, preprocesses it (e.g., extracting metadata), and creates/updates the run and files via the Data Hub API.
+3. For S3-triggered events, a cheap union of processor filename gates runs first. Non-matching files no-op without an API call.
+4. The handler fetches the instrument via `GET /instruments/:id` and looks up a processor by `instrument_type` in `data_hub_lambda.processors`. Unmapped types (including `generic`) and per-type gate failures no-op.
+5. The processor downloads the raw file from S3, preprocesses it, and creates/updates the run and files via the Data Hub API using the event's `instrument_id`.
 
 Slack notifications are sent by the **web app**, not the Lambda — see [Slack notifications](#slack-notifications) below.
 
@@ -19,11 +20,11 @@ Slack notifications are sent by the **web app**, not the Lambda — see [Slack n
 
 When a file fails processing (or needs to be re-run), users can trigger reprocessing from the run detail page in the web app. This invokes the Lambda's Function URL instead of going through S3:
 
-1. The user clicks **Reprocess** on a failed or completed file in the web dashboard.
+1. The user clicks **Reprocess** on an uploaded, failed, or completed file in the web dashboard.
 2. The web app's `POST /api/v1/files/:fileId/reprocess` endpoint transitions the file to `processing` status, clears any previous error, and sends a POST request to the Lambda Function URL.
 3. The Function URL is configured with `AuthType: AWS_IAM`, so the web app SigV4-signs the request using credentials it gets via Vercel OIDC federation (the `WebAppS3Role` IAM role, which has `lambda:InvokeFunctionUrl` on this function's ARN). The body is a JSON payload containing a synthetic S3 event.
 4. The Lambda handler detects the Function URL invocation (via `requestContext` in the event) and parses the S3 event from the request body. Inbound auth is enforced by AWS itself in front of the function — the handler never sees an unauthenticated request.
-5. From here, processing follows the same dispatch logic as the S3 trigger path (steps 2–4 above).
+5. From here, processing follows the same type-based dispatch as the S3 trigger path, except **filename gates are skipped** — a user clicking Reprocess has stated intent, so the handler must not leave the file stranded in `processing`.
 
 ### Function URL (archive build)
 
@@ -36,43 +37,48 @@ The web app's `GET /api/v1/instruments/:instrumentId/runs/:runId/download-archiv
 
 See [Run archives](run-archives.md) for the full flow, S3 bucket layout, cache semantics, and operator runbook.
 
-## Supported instruments
+## Supported instrument types
 
-| Instrument | Module | Instrument ID |
+Dispatch is by `instrument_type` (Postgres/TS enum), not instrument ID. The registry lives in `lambda/src/data_hub_lambda/processors.py`; the web reprocess gate mirrors the same keys in `web/lib/instruments/processable-types.ts`.
+
+| `instrument_type` | Module | Filename gate (S3 events only) |
 | --- | --- | --- |
-| Agilent 4150 TapeStation | `agilent_4150_tapestation` | `agilent-4150-tapestation` |
-| Akta FPLC | `akta_fplc` | `akta-fplc` |
-| Azure 600 Gel Doc | `azure_600_gel_doc` | `azure-600-gel-doc` |
-| Azure Cielo qPCR | `azure_cielo_qpcr` | `azure-cielo-qpcr` |
-| Epson V700 Scanner | `epson_v700_scanner` | `epson-v700-scanner` |
-| Hina Microscope | `hina_microscope` | `hina-microscope` |
-| InstantRaman | _(no Lambda processor)_ | `instant-raman` |
-| SpectraMax iD3 Plate Reader | `spectramax_plate_reader` | `spectramax-id3-plate-reader` |
-| SpectraMax iD5 Plate Reader | `spectramax_plate_reader` | `spectramax-id5-plate-reader` |
+| `tape_station` | `agilent_4150_tapestation` | `.pdf` |
+| `fplc` | `akta_fplc` | `.pdf` |
+| `gel_doc` | `azure_600_gel_doc` | `.tif` / `.tiff` |
+| `qpcr` | `azure_cielo_qpcr` | ends with `_cq values.csv` |
+| `epson_v700_scanner` | `epson_v700_scanner` | `.tif` / `.tiff` |
+| `hina_microscope` | `hina_microscope` | `.nd2` |
+| `plate_reader` | `spectramax_plate_reader` | `.xls` |
+| `generic`, `instant_raman` | — | — |
 
-Each processor module exposes a `process_file()` function that accepts the run ID and filename (and instrument ID for SpectraMax readers) and reports progress back through the Data Hub API.
+**One type = one vendor's output format.** Names like `qpcr` and `fplc` sound generic, but the parsers behind them are vendor-specific (Azure Cielo, ÄKTA, …). Adding a second vendor under an existing type requires splitting the type, not reusing it.
+
+Seeded `jolene-fplc` stays `generic` until an operator confirms its PDFs match the ÄKTA processor and edits the type to `fplc`. Typing an unknown FPLC as `fplc` would feed non-ÄKTA files into that parser.
+
+Each processor module exposes `process_file(instrument_id, run_id, filename)` and reports progress through the Data Hub API.
 
 ## Slack notifications
 
 Slack channel notifications are sent by the **web app** (`web/lib/slack.ts`), not the Lambda. When the Lambda's `process_file` calls `POST /api/v1/instruments/:instrumentId/runs` to register a newly-detected run, that endpoint posts a single message per run to the incoming webhook URL configured in Settings > Notifications > Slack channel (workspace admins only). Subsequent files for the same run do not re-notify because the upsert is idempotent on `(instrument_id, run_id)`. File-level failures remain visible in the web app via the file row's `status='failed'` and `error_message` fields.
 
-## Adding a new instrument
+## Adding a new instrument / processor
 
-1. **Register the instrument.** Add a new member to the `Instrument` enum in `packages/shared/src/data_hub_shared/enums.py` and a corresponding entry in the `INSTRUMENT_ID_TO_NAME_MAP` in `packages/shared/src/data_hub_shared/constants.py`.
+1. **Add or reuse an `instrument_type`.** If this is a new vendor format, extend `instrumentTypeEnum` in `web/lib/db/schema.ts` and generate an `ALTER TYPE ... ADD VALUE` migration. Create the instrument row in the web app with that type (or edit an existing row). The shared `Instrument` enum in `packages/shared` is optional — only needed for watcher/CLI display naming, not for Lambda dispatch.
 
-2. **Create a processor module.** Add a new module under `lambda/src/data_hub_lambda/` (e.g., `new_instrument.py`). It must expose:
+2. **Create a processor module** under `lambda/src/data_hub_lambda/` that exposes:
 
    ```python
-   def process_file(run_id: str, filename: str) -> None:
+   def process_file(instrument_id: str, run_id: str, filename: str) -> None:
        """Process a file, reporting progress via the Data Hub API."""
        ...
    ```
 
-3. **Register the dispatch.** Add an `elif` branch in the `lambda_handler` function in `lambda/src/data_hub_lambda/handler.py` that maps the new instrument ID to your `process_file` function.
+3. **Register it** in `lambda/src/data_hub_lambda/processors.py` (type → `process_file` + `matches_filename`) and add the same type string to `PROCESSABLE_INSTRUMENT_TYPES` in `web/lib/instruments/processable-types.ts`.
 
-4. **Add tests.** Add unit tests in `lambda/tests/` for the new processor.
+4. **Add tests** for the processor and for the new registry gate.
 
-5. **Configure the S3 trigger and deploy.** See [CI and deployment → Adding an S3 trigger for a new instrument](ci-and-deployment.md#adding-an-s3-trigger-for-a-new-instrument) for the `infra/template.yaml` trigger entry and the deploy steps.
+5. **Deploy the Lambda image.** The raw bucket already notifies on all `ObjectCreated:*` events — no new S3 trigger entry is required.
 
 ## Local processing CLI
 

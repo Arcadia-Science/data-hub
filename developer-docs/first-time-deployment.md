@@ -82,7 +82,11 @@ npm run db:migrate
 
 ### Create an API key for the Lambda
 
-Sign in with an account listed in `ADMIN_EMAILS`, then create a personal access token under Settings. The AWS stack and the Lambda use this token as `DATA_HUB_API_KEY` to call the Data Hub API, so create it now and keep it for [step 4](#4-deploy-the-aws-infrastructure). See [Issue and revoke tokens](https://datahub.arcadiascience.com/docs/manage-tokens) for the token UI.
+Sign in with an account listed in `ADMIN_EMAILS`, then create a personal access token under Settings. Use the **Lambda** scope preset (or an equivalent list that includes `instruments:read`, `runs:create`, `runs:update`, `files:create`, `files:update`, and `archive-jobs:write`). The Lambda looks up each instrument's type before dispatching, so a token without `instruments:read` will 403 on every S3 event.
+
+The AWS stack and the Lambda use this token as `DATA_HUB_API_KEY` to call the Data Hub API, so create it now and keep it for [step 4](#4-deploy-the-aws-infrastructure). See [Issue and revoke tokens](https://datahub.arcadiascience.com/docs/manage-tokens) for the token UI.
+
+If you previously minted a Lambda token from an older preset that omitted `instruments:read`, revoke it and create a new one with the updated Lambda preset, then update the `DATA_HUB_API_KEY` secret / SAM parameter for each environment.
 
 ## 3. Bootstrap AWS (once per account)
 
@@ -96,7 +100,7 @@ make sam-bootstrap
 
 ## 4. Deploy the AWS infrastructure
 
-The storage and processing layer — the S3 buckets and the data-processing Lambda — is defined in `infra/template.yaml` and deployed with [AWS SAM](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/). The stack creates the raw/processed S3 buckets, the Lambda function (container image, function URL), the per-instrument S3 event triggers, and the IAM roles for Lambda execution, CI deploys (OIDC), and Vercel web app S3 access (OIDC).
+The storage and processing layer — the S3 buckets and the data-processing Lambda — is defined in `infra/template.yaml` and deployed with [AWS SAM](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/). The stack creates the raw/processed S3 buckets, the Lambda function (container image, function URL), a catch-all S3 `ObjectCreated:*` notification on the raw bucket, and the IAM roles for Lambda execution, CI deploys (OIDC), and Vercel web app S3 access (OIDC).
 
 **1. Get the bootstrap stack outputs.**
 

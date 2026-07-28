@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   fileCategorySchema,
   fileStatusSchema,
+  instrumentTypeSchema,
   isoDateTime,
   paginationSchema,
   runSourceSchema,
@@ -161,6 +162,7 @@ export const runListItem = z
     id: z.string().uuid(),
     instrument_id: z.string(),
     instrument_display_name: z.string().nullable(),
+    instrument_type: instrumentTypeSchema,
     run_id: z.string(),
     source: runSourceSchema,
     metadata: metadataObject.nullable(),

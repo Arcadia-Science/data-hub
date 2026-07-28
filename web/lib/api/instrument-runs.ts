@@ -566,6 +566,7 @@ export async function buildRunListQuery(filters: RunListFilters) {
       id: instrumentRuns.id,
       instrument_id: instrumentRuns.instrumentId,
       instrument_display_name: instruments.displayName,
+      instrument_type: instruments.instrumentType,
       run_id: instrumentRuns.runId,
       source: instrumentRuns.source,
       metadata: instrumentRuns.metadata,
@@ -592,7 +593,11 @@ export async function buildRunListQuery(filters: RunListFilters) {
       )
     )
     .where(where)
-    .groupBy(instrumentRuns.id, instruments.displayName)
+    .groupBy(
+      instrumentRuns.id,
+      instruments.displayName,
+      instruments.instrumentType
+    )
     .orderBy(orderFn(sortCol))
     .limit(perPage)
     .offset(offset);

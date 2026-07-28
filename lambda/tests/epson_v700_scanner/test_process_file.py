@@ -104,7 +104,11 @@ class TestProcessFileHappyPath:
         ):
             from data_hub_lambda.epson_v700_scanner.process_file import process_file
 
-            process_file(run_id="run-xyz", filename="scan.tif")
+            process_file(
+                instrument_id="epson-v700-scanner",
+                run_id="run-xyz",
+                filename="scan.tif",
+            )
 
         client.ensure_run.assert_called_once()
         assert client.create_file.call_count == 2
@@ -127,7 +131,11 @@ class TestProcessFileHappyPath:
         ):
             from data_hub_lambda.epson_v700_scanner.process_file import process_file
 
-            process_file(run_id="run-xyz", filename="scan.tif")
+            process_file(
+                instrument_id="epson-v700-scanner",
+                run_id="run-xyz",
+                filename="scan.tif",
+            )
 
         patched_converter.export_jpg.assert_called_once()
 
@@ -151,7 +159,11 @@ class TestProcessFileHappyPath:
         ):
             from data_hub_lambda.epson_v700_scanner.process_file import process_file
 
-            process_file(run_id="run-xyz", filename="scan.tif")
+            process_file(
+                instrument_id="epson-v700-scanner",
+                run_id="run-xyz",
+                filename="scan.tif",
+            )
 
         client.update_run.assert_called_once()
         _, kwargs = client.update_run.call_args
@@ -173,7 +185,11 @@ class TestProcessFileHappyPath:
         ):
             from data_hub_lambda.epson_v700_scanner.process_file import process_file
 
-            process_file(run_id="run-xyz", filename="scan.tif")
+            process_file(
+                instrument_id="epson-v700-scanner",
+                run_id="run-xyz",
+                filename="scan.tif",
+            )
 
         statuses = [
             call.kwargs.get("status")
@@ -201,7 +217,11 @@ class TestProcessFileFailure:
             from data_hub_lambda.epson_v700_scanner.process_file import process_file
 
             with pytest.raises(RuntimeError, match="boom"):
-                process_file(run_id="run-xyz", filename="broken.tif")
+                process_file(
+                    instrument_id="epson-v700-scanner",
+                    run_id="run-xyz",
+                    filename="broken.tif",
+                )
 
         statuses = [
             call.kwargs.get("status")

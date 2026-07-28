@@ -1,11 +1,17 @@
 from __future__ import annotations
 import logging
 import os
+import time
 from typing import Any
 
 import requests
 
-from data_hub_lambda.models import ApiErrorDetail, FileResponse, RunResponse
+from data_hub_lambda.models import (
+    ApiErrorDetail,
+    FileResponse,
+    InstrumentResponse,
+    RunResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +34,21 @@ class ApiError(Exception):
 # (connect_timeout, read_timeout) in seconds. The read timeout is generous
 # because the runs and files endpoints perform upsert queries under the hood.
 DEFAULT_TIMEOUT: tuple[float, float] = (5, 30)
+
+# One short in-invocation retry for blips. Longer outages rely on Lambda's
+# async retries for S3 events — those waits are free; time.sleep here bills
+# at the function's full memory size.
+_GET_INSTRUMENT_ATTEMPTS = 2
+_GET_INSTRUMENT_BACKOFF_SECONDS = (0.5,)
+
+# Warm-container cache: multi-file runs hit the same instrument repeatedly.
+_INSTRUMENT_CACHE_TTL_SECONDS = 60.0
+_instrument_cache: dict[str, tuple[float, InstrumentResponse]] = {}
+
+
+def clear_instrument_cache() -> None:
+    """Drop cached instrument lookups (tests / type edits mid-invocation)."""
+    _instrument_cache.clear()
 
 
 class DataHubClient:
@@ -88,6 +109,54 @@ class DataHubClient:
         if not resp.ok:
             self._handle_error(resp)
         return resp
+
+    # ------------------------------------------------------------------
+    # Instruments
+    # ------------------------------------------------------------------
+
+    def get_instrument(self, instrument_id: str) -> InstrumentResponse:
+        """Fetch an instrument by ID, with one short retry on transient errors.
+
+        Retries connection errors, timeouts, and 5xx once after a brief sleep.
+        404 and 401/403 are raised immediately so the handler can classify
+        them. Exhausted transient failures are re-raised so S3-triggered
+        invocations can use Lambda's async retries (unbilled backoff).
+        Successful responses are cached for ``_INSTRUMENT_CACHE_TTL_SECONDS``
+        so a multi-file run does not re-fetch the same instrument per file.
+        """
+        now = time.monotonic()
+        cached = _instrument_cache.get(instrument_id)
+        if cached is not None:
+            cached_at, instrument = cached
+            if now - cached_at < _INSTRUMENT_CACHE_TTL_SECONDS:
+                return instrument
+
+        last_error: ApiError | None = None
+        for attempt in range(_GET_INSTRUMENT_ATTEMPTS):
+            try:
+                resp = self._request("GET", f"/instruments/{instrument_id}")
+                instrument = InstrumentResponse.model_validate(resp.json())
+                _instrument_cache[instrument_id] = (time.monotonic(), instrument)
+                return instrument
+            except ApiError as exc:
+                last_error = exc
+                is_transient = exc.status_code == 0 or exc.status_code >= 500
+                if not is_transient or attempt == _GET_INSTRUMENT_ATTEMPTS - 1:
+                    raise
+                delay = _GET_INSTRUMENT_BACKOFF_SECONDS[attempt]
+                logger.warning(
+                    "Transient error fetching instrument %s (attempt %d/%d): %s; retrying in %.1fs",
+                    instrument_id,
+                    attempt + 1,
+                    _GET_INSTRUMENT_ATTEMPTS,
+                    exc,
+                    delay,
+                )
+                time.sleep(delay)
+        # The loop always returns or raises; keep a real raise for -O.
+        if last_error is None:
+            raise RuntimeError("get_instrument retry loop completed without result")
+        raise last_error
 
     # ------------------------------------------------------------------
     # Runs

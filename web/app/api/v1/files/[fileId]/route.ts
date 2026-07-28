@@ -22,7 +22,7 @@ interface RouteContext {
 // Enforced state machine for file status transitions:
 //   Watcher flow:   detected → [upload_requested →] uploaded → processing → completed|failed
 //   Lambda flow:    (created as "uploaded" via POST .../files) → processing → completed|failed
-//   Reprocessing:   completed|failed → processing → completed|failed
+//   Reprocessing:   uploaded|completed|failed → processing → completed|failed
 //   Cancel request: upload_requested → detected (watcher gave up locating
 //                   the local file after repeated polls; clears the queue
 //                   entry)

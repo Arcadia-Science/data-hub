@@ -110,7 +110,7 @@ On pushes to `staging` or `production`, the **Deploy Lambda** workflow:
 
 Secrets (`DATA_HUB_API_KEY`, etc.) are stored in GitHub environment secrets scoped to each environment.
 
-> **Note:** The CI deploy role has intentionally narrow permissions — enough to push a new container image, update the existing CloudFormation stack, modify the data buckets' S3 event notifications (so new instrument triggers roll out via CI), and update the data buckets' CORS configuration, but _not_ enough to create the stack from scratch or to add/remove S3 buckets or Lambda functions. Initial stack creation and structural infrastructure changes must be performed by an admin with broader AWS permissions. Once the stack exists, routine image-update deploys and new-trigger rollouts through CI work without issue.
+> **Note:** The CI deploy role has intentionally narrow permissions — enough to push a new container image, update the existing CloudFormation stack, modify the data buckets' S3 event notifications, and update the data buckets' CORS configuration, but _not_ enough to create the stack from scratch or to add/remove S3 buckets or Lambda functions. Initial stack creation and structural infrastructure changes must be performed by an admin with broader AWS permissions. Once the stack exists, routine image-update deploys through CI work without issue.
 >
 > The deploy that first grants `s3:PutBucketCORS` must be run by an admin via `make sam-deploy` (CI can't grant itself a permission and use it in the same changeset). CORS edits after that roll out through CI.
 >
@@ -144,23 +144,9 @@ make docker-push-lambda ENV=staging
 make sam-deploy ENV=staging
 ```
 
-#### Adding an S3 trigger for a new instrument
+#### S3 notifications
 
-Instruments that support automated preprocessing need an S3 event trigger so the Lambda runs as files land. The processor code lives in `data-hub-lambda` (see [Lambda → Adding a new instrument](lambda.md#adding-a-new-instrument)); this is the infrastructure half. Add a `LambdaConfiguration` entry to the `RawDataBucket` resource's `NotificationConfiguration` in `infra/template.yaml`:
-
-```yaml
-- Event: s3:ObjectCreated:*
-  Filter:
-    S3Key:
-      Rules:
-        - Name: prefix
-          Value: <instrument-id>/
-        - Name: suffix
-          Value: .csv
-  Function: !GetAtt DataHubFunction.Arn
-```
-
-The CI deploy role has permission to roll new triggers out, so the trigger goes live on the next deploy — either the [automated workflow](#automated-deployment-deploy-lambdayml) or a manual `make sam-deploy`. No manual AWS step is needed once the code and trigger are merged.
+The raw bucket uses a single catch-all `ObjectCreated:*` notification on the Lambda. New instrument types do **not** need a new `LambdaConfiguration` entry — register a processor by `instrument_type` instead (see [Lambda → Adding a new instrument / processor](lambda.md#adding-a-new-instrument--processor)). Deploy the type-dispatch handler before changing notification filters when rolling this out to an environment that still has per-ID rules.
 
 ### Watcher (PyPI)
 

@@ -6,7 +6,7 @@
 
 ### `enums`
 
-Defines the `Instrument` enum, whose kebab-case values are used as S3 key prefixes and as the canonical instrument identifiers throughout the system.
+Defines the optional `Instrument` enum for watcher/CLI display naming. Lambda dispatch and reprocess eligibility use `instrument_type` on the web app's `instruments` table, not this enum.
 
 ```python
 from data_hub_shared.enums import Instrument
@@ -14,7 +14,7 @@ from data_hub_shared.enums import Instrument
 Instrument.AKTA_FPLC.value  # "akta-fplc"
 ```
 
-Currently supported instruments:
+Enum members available for display naming:
 
 | Enum member | Value |
 | --- | --- |
@@ -27,11 +27,7 @@ Currently supported instruments:
 
 ### `constants`
 
-Maps between instrument IDs and human-readable display names:
-
-```python
-from data_hub_shared.constants import INSTRUMENT_ID_TO_NAME_MAP, INSTRUMENT_NAME_TO_ID_MAP
-```
+Reserved for cross-package constants. Instrument display names live in the web app's `instruments` table; Lambda dispatch uses `instrument_type` rather than a shared ID→name map.
 
 ### `config`
 

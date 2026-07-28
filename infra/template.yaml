@@ -88,89 +88,12 @@ Resources:
               - Content-Length
             MaxAge: 3600
       NotificationConfiguration:
+        # Catch-all: the Lambda handler resolves instrument_type via the API
+        # and applies per-processor filename gates. Deploy the type-dispatch
+        # handler before (or with) this notification change — an older
+        # ID-dispatched handler would process every ObjectCreated event.
         LambdaConfigurations:
           - Event: s3:ObjectCreated:*
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: agilent-4150-tapestation/
-                  - Name: suffix
-                    Value: .pdf
-            Function: !GetAtt DataHubFunction.Arn
-          - Event: s3:ObjectCreated:*
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: akta-fplc/
-                  - Name: suffix
-                    Value: .pdf
-            Function: !GetAtt DataHubFunction.Arn
-          - Event: s3:ObjectCreated:*
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: azure-600-gel-doc/
-                  - Name: suffix
-                    Value: .tif
-            Function: !GetAtt DataHubFunction.Arn
-          - Event: s3:ObjectCreated:*
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: azure-cielo-qpcr/
-                  - Name: suffix
-                    # S3 requires spaces in filter values to be replaced
-                    # with `+` — this matches keys ending in `_Cq Values.csv`.
-                    Value: _Cq+Values.csv
-            Function: !GetAtt DataHubFunction.Arn
-          - Event: s3:ObjectCreated:*
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: epson-v700-scanner/
-                  - Name: suffix
-                    Value: .tif
-            Function: !GetAtt DataHubFunction.Arn
-          - Event: s3:ObjectCreated:*
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: epson-v700-scanner/
-                  - Name: suffix
-                    Value: .tiff
-            Function: !GetAtt DataHubFunction.Arn
-          - Event: s3:ObjectCreated:*
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: hina-microscope/
-                  - Name: suffix
-                    Value: .nd2
-            Function: !GetAtt DataHubFunction.Arn
-          - Event: s3:ObjectCreated:*
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: spectramax-id3-plate-reader/
-                  - Name: suffix
-                    Value: .xls
-            Function: !GetAtt DataHubFunction.Arn
-          - Event: s3:ObjectCreated:*
-            Filter:
-              S3Key:
-                Rules:
-                  - Name: prefix
-                    Value: spectramax-id5-plate-reader/
-                  - Name: suffix
-                    Value: .xls
             Function: !GetAtt DataHubFunction.Arn
       Tags:
         - Key: project

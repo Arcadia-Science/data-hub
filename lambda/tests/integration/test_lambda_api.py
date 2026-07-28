@@ -56,7 +56,7 @@ class TestQPCRHappyPath:
     ) -> None:
         # Register the real fixture CSV so the patched S3 download can find it.
         run_id = "Experiment_20260101"
-        filename = f"{run_id}_CqValues.csv"
+        filename = f"{run_id}_Cq Values.csv"
         s3_key = f"azure-cielo-qpcr/{run_id}/{filename}"
         s3_fixture_files[s3_key] = _FIXTURES_DIR / "azure_cielo_qpcr_example.csv"
 
@@ -260,7 +260,7 @@ class TestFailurePath:
         bad_csv.write_text("Wrong,Headers,Only\nA,B,C\n")
 
         run_id = "Experiment_20260201"
-        filename = f"{run_id}_CqValues.csv"
+        filename = f"{run_id}_Cq Values.csv"
         s3_key = f"azure-cielo-qpcr/{run_id}/{filename}"
         s3_fixture_files[s3_key] = bad_csv
 
@@ -296,7 +296,7 @@ class TestIdempotentRunCreation:
         mock_context: MagicMock,
     ) -> None:
         run_id = "Experiment_20260301"
-        filename = f"{run_id}_CqValues.csv"
+        filename = f"{run_id}_Cq Values.csv"
         s3_key = f"azure-cielo-qpcr/{run_id}/{filename}"
         s3_fixture_files[s3_key] = _FIXTURES_DIR / "azure_cielo_qpcr_example.csv"
 
@@ -354,7 +354,7 @@ class TestFileReprocessing:
         file via completed → processing → completed.
         """
         run_id = "Experiment_20260301"
-        filename = f"{run_id}_CqValues.csv"
+        filename = f"{run_id}_Cq Values.csv"
         s3_key = f"azure-cielo-qpcr/{run_id}/{filename}"
         s3_fixture_files[s3_key] = _FIXTURES_DIR / "azure_cielo_qpcr_example.csv"
 
@@ -401,7 +401,7 @@ class TestFileReprocessing:
         cleared.
         """
         run_id = "Experiment_20260301"
-        filename = f"{run_id}_CqValues.csv"
+        filename = f"{run_id}_Cq Values.csv"
         s3_key = f"azure-cielo-qpcr/{run_id}/{filename}"
         bad_csv = tmp_path / "bad.csv"
         bad_csv.write_text("Wrong,Headers,Only\nA,B,C\n")
@@ -490,7 +490,7 @@ class TestFunctionUrlInvocation:
         """A Function URL event processes the file identically to a direct
         S3 trigger."""
         run_id = "Experiment_20260401"
-        filename = f"{run_id}_CqValues.csv"
+        filename = f"{run_id}_Cq Values.csv"
         s3_key = f"azure-cielo-qpcr/{run_id}/{filename}"
         s3_fixture_files[s3_key] = _FIXTURES_DIR / "azure_cielo_qpcr_example.csv"
 
@@ -519,9 +519,71 @@ class TestFunctionUrlInvocation:
         event = make_function_url_event(
             "azure-cielo-qpcr",
             "Experiment_20260401",
-            "Experiment_20260401_CqValues.csv",
+            "Experiment_20260401_Cq Values.csv",
             body_override="this is not json",
         )
         result = lambda_handler(event, mock_context)
 
         assert result == {"statusCode": 400, "body": "Invalid JSON body"}
+
+
+# ------------------------------------------------------------------
+# Least-privilege Lambda token (matches the curated Lambda scope preset)
+# ------------------------------------------------------------------
+
+# Keep in sync with the `lambda` entry in `web/lib/api/scope-catalog.ts`.
+_LAMBDA_PRESET_SCOPES = [
+    "instruments:read",
+    "runs:create",
+    "runs:update",
+    "files:create",
+    "files:update",
+    "archive-jobs:write",
+]
+
+
+class TestLeastPrivilegeLambdaScopes:
+    """A token minted with exactly the Lambda preset scopes can process a file.
+
+    Catches scope-preset drift: if a new Lambda → API call needs a scope
+    that isn't on the preset, this test fails instead of only surfacing
+    in production against a freshly minted least-privilege token.
+    """
+
+    def test_preset_scopes_can_process_qpcr_file(
+        self,
+        integration_env: IntegrationEnv,
+        make_s3_event: Callable[..., dict[str, Any]],
+        s3_fixture_files: dict[str, Path],
+        mock_context: MagicMock,
+    ) -> None:
+        import os
+
+        import data_hub_lambda.api_client as api_module
+        from data_hub_shared.testing import seed_auth
+
+        scoped_token = seed_auth(integration_env.db_dsn, scopes=_LAMBDA_PRESET_SCOPES)
+        previous_key = os.environ["DATA_HUB_API_KEY"]
+        os.environ["DATA_HUB_API_KEY"] = scoped_token
+        api_module._client = None
+
+        try:
+            run_id = "Experiment_20260501"
+            filename = f"{run_id}_Cq Values.csv"
+            s3_key = f"azure-cielo-qpcr/{run_id}/{filename}"
+            s3_fixture_files[s3_key] = _FIXTURES_DIR / "azure_cielo_qpcr_example.csv"
+
+            event = make_s3_event("azure-cielo-qpcr", run_id, filename)
+            lambda_handler(event, mock_context)
+
+            run = _api_get(
+                integration_env.base_url,
+                integration_env.api_token,
+                f"/api/v1/instruments/azure-cielo-qpcr/runs/{run_id}",
+            )
+            assert run["run_id"] == run_id
+            assert len(run["files"]) == 1
+            assert run["files"][0]["status"] == "completed"
+        finally:
+            os.environ["DATA_HUB_API_KEY"] = previous_key
+            api_module._client = None

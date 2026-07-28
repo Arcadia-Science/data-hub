@@ -61,6 +61,7 @@ export const instrumentTypeEnum = pgEnum("instrument_type", [
   "hina_microscope",
   "epson_v700_scanner",
   "instant_raman",
+  "fplc",
 ]);
 
 export const VALID_INSTRUMENT_TYPES = instrumentTypeEnum.enumValues;
