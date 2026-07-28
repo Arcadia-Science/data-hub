@@ -136,9 +136,17 @@ def _token_display_prefix(plaintext: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def seed_auth(dsn: str) -> str:
-    """Insert a user and personal access token, returning the plaintext token."""
+def seed_auth(dsn: str, scopes: list[str] | None = None) -> str:
+    """Insert a user and personal access token, returning the plaintext token.
+
+    Args:
+        dsn: Postgres DSN for the test database.
+        scopes: Permission scopes for the minted PAT. Defaults to ``["*"]``
+            (wildcard) so existing suites keep full access. Pass an explicit
+            list (e.g. the Lambda preset) to exercise least-privilege paths.
+    """
     token_plaintext = _generate_token()
+    token_scopes = scopes if scopes is not None else ["*"]
     conn = psycopg2.connect(dsn)
     conn.autocommit = True
     with conn.cursor() as cur:
@@ -149,13 +157,14 @@ def seed_auth(dsn: str) -> str:
         )
         cur.execute(
             """INSERT INTO personal_access_tokens
-                   (user_id, name, token_hash, token_prefix)
-               VALUES (%s, %s, %s, %s)""",
+                   (user_id, name, token_hash, token_prefix, scopes)
+               VALUES (%s, %s, %s, %s, %s)""",
             (
                 user_id,
                 "integration-test-token",
                 _hash_token(token_plaintext),
                 _token_display_prefix(token_plaintext),
+                token_scopes,
             ),
         )
     conn.close()
@@ -194,17 +203,31 @@ def seed_watcher_release(
     conn.close()
 
 
-def seed_instruments(dsn: str, instruments: dict[str, str]) -> None:
-    """Insert instrument rows (ON CONFLICT DO NOTHING)."""
+def seed_instruments(
+    dsn: str,
+    instruments: dict[str, str],
+    *,
+    instrument_types: dict[str, str] | None = None,
+) -> None:
+    """Insert instrument rows (ON CONFLICT DO NOTHING).
+
+    Args:
+        dsn: Postgres DSN for the test database.
+        instruments: Mapping of instrument ID → display name.
+        instrument_types: Optional mapping of instrument ID → ``instrument_type``
+            enum value. Instruments omitted default to ``generic``.
+    """
+    types = instrument_types or {}
     conn = psycopg2.connect(dsn)
     conn.autocommit = True
     with conn.cursor() as cur:
         for inst_id, display_name in instruments.items():
+            instrument_type = types.get(inst_id, "generic")
             cur.execute(
-                """INSERT INTO instruments (id, display_name)
-                   VALUES (%s, %s)
+                """INSERT INTO instruments (id, display_name, instrument_type)
+                   VALUES (%s, %s, %s)
                    ON CONFLICT (id) DO NOTHING""",
-                (inst_id, display_name),
+                (inst_id, display_name, instrument_type),
             )
     conn.close()
 

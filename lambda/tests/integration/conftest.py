@@ -28,14 +28,22 @@ from data_hub_shared.testing import (
 # Constants
 # ---------------------------------------------------------------------------
 
-# Instruments seeded at session scope — must match the kebab-case IDs used
-# by the Python `Instrument` enum and the S3 key prefix convention.
+# Instruments seeded at session scope. Types must match the Lambda
+# processor registry keys in `data_hub_lambda.processors`.
 _INSTRUMENTS: dict[str, str] = {
     "azure-cielo-qpcr": "Azure Cielo qPCR",
     "azure-600-gel-doc": "Azure 600 Gel Doc",
     "hina-microscope": "Hina Microscope",
     "spectramax-id3-plate-reader": "SpectraMax iD3 Plate Reader",
     "spectramax-id5-plate-reader": "SpectraMax iD5 Plate Reader",
+}
+
+_INSTRUMENT_TYPES: dict[str, str] = {
+    "azure-cielo-qpcr": "qpcr",
+    "azure-600-gel-doc": "gel_doc",
+    "hina-microscope": "hina_microscope",
+    "spectramax-id3-plate-reader": "plate_reader",
+    "spectramax-id5-plate-reader": "plate_reader",
 }
 
 
@@ -74,7 +82,7 @@ def integration_env(
     """Start a real Next.js server, push the DB schema, and seed auth + instruments."""
 
     with start_test_server() as env:
-        seed_instruments(env.db_dsn, _INSTRUMENTS)
+        seed_instruments(env.db_dsn, _INSTRUMENTS, instrument_types=_INSTRUMENT_TYPES)
 
         # Set env vars for Lambda modules and reset singletons so
         # DataHubClient / Config pick up the test server URL.

@@ -47,6 +47,7 @@ const INSTRUMENT_TYPE_ICON: Record<InstrumentType, LucideIcon> = {
   hina_microscope: Microscope,
   epson_v700_scanner: ScanLine,
   instant_raman: Radar,
+  fplc: FlaskConical,
 };
 
 // Bucket labels live alongside the buckets themselves so the section

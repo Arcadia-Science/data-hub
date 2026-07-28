@@ -2,7 +2,8 @@
 
 import { createContext, use, useCallback, useMemo, useState } from "react";
 import type { RunFile } from "@/lib/api/instrument-runs";
-import { isProcessableInstrument } from "@/lib/instruments/processable-ids";
+import type { InstrumentType } from "@/lib/db/schema";
+import { isProcessableInstrumentType } from "@/lib/instruments/processable-types";
 import { REPROCESSABLE_STATUSES } from "@/lib/runs/reprocessable-statuses";
 
 // ---------------------------------------------------------------------------
@@ -40,7 +41,7 @@ export interface FileRef {
 // the same as "no checkbox in this row".
 export function buildFileRef(
   file: RunFile,
-  instrumentId: string
+  instrumentType: InstrumentType
 ): FileRef | null {
   if (file.deletedAt !== null) {
     return null;
@@ -48,7 +49,7 @@ export function buildFileRef(
   const isDetected = file.status === "detected";
   const canDownload = DOWNLOADABLE_STATUSES.has(file.status);
   const canReprocess =
-    isProcessableInstrument(instrumentId) &&
+    isProcessableInstrumentType(instrumentType) &&
     REPROCESSABLE_STATUS_SET.has(file.status) &&
     file.s3Key !== null;
   if (!(isDetected || canDownload)) {

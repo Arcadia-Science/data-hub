@@ -5,33 +5,31 @@ from data_hub_lambda.api_client import get_client
 from data_hub_lambda.azure_cielo_qpcr.parse_dye_channels import parse_dye_channels
 from data_hub_shared import s3_utils
 from data_hub_shared.config import config
-from data_hub_shared.enums import Instrument
 
 logger = logging.getLogger(__name__)
 
-INSTRUMENT_ID = Instrument.AZURE_CIELO_QPCR.value
 
-
-def process_file(run_id: str, filename: str) -> None:
+def process_file(instrument_id: str, run_id: str, filename: str) -> None:
     """Process a single Azure Cielo qPCR file through the Data Hub API.
 
     For Cq Values CSV files, the unique dye channel names are extracted from
     the `Fluorescence` column and stored as run-level metadata.
 
     Args:
+        instrument_id: The instrument ID from the S3 key / event.
         run_id: The run ID (`Experiment_YYYYMMDD` prefix).
-        filename: The original filename (e.g. `Experiment_20260101_CqValues.csv`).
+        filename: The original filename (e.g. `Experiment_20260101_Cq Values.csv`).
     """
     logger.info("Processing Azure Cielo qPCR file: %s (run: %s)", filename, run_id)
 
     client = get_client()
     s3_bucket = config.AWS_S3_RAW_DATA_BUCKET
-    s3_key = f"{INSTRUMENT_ID}/{run_id}/{filename}"
+    s3_key = f"{instrument_id}/{run_id}/{filename}"
 
-    client.ensure_run(INSTRUMENT_ID, run_id)
+    client.ensure_run(instrument_id, run_id)
 
     file_record = client.create_file(
-        instrument_id=INSTRUMENT_ID,
+        instrument_id=instrument_id,
         run_id=run_id,
         s3_bucket=s3_bucket or "",
         s3_key=s3_key,
@@ -42,7 +40,7 @@ def process_file(run_id: str, filename: str) -> None:
     try:
         client.update_file(file_id, status="processing")
 
-        raw_data_dir = config.LOCAL_RAW_DATA_DIRPATH / INSTRUMENT_ID / run_id
+        raw_data_dir = config.LOCAL_RAW_DATA_DIRPATH / instrument_id / run_id
         local_file_path = raw_data_dir / filename
         s3_utils.download_file(f"s3://{s3_bucket}/{s3_key}", local_file_path)
         logger.info("Downloaded %s to %s", filename, local_file_path)
@@ -53,7 +51,7 @@ def process_file(run_id: str, filename: str) -> None:
             metadata["dye_channels"] = dye_channels
             logger.info("Parsed dye channels: %s", dye_channels)
 
-        client.update_run(INSTRUMENT_ID, run_id, metadata=metadata)
+        client.update_run(instrument_id, run_id, metadata=metadata)
         client.update_file(file_id, status="completed")
         logger.info("File %s marked as completed.", filename)
 

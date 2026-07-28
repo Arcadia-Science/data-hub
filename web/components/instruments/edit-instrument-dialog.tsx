@@ -22,9 +22,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { VALID_INSTRUMENT_TYPES } from "@/lib/db/schema";
+import { type InstrumentType, VALID_INSTRUMENT_TYPES } from "@/lib/db/schema";
+import { isProcessableInstrumentType } from "@/lib/instruments/processable-types";
 
-const TYPE_LABELS: Record<string, string> = {
+const TYPE_LABELS: Record<InstrumentType, string> = {
   generic: "Generic",
   plate_reader: "Plate Reader",
   gel_doc: "Gel Doc",
@@ -33,12 +34,28 @@ const TYPE_LABELS: Record<string, string> = {
   hina_microscope: "Hina Microscope",
   epson_v700_scanner: "Epson V700 Scanner",
   instant_raman: "InstantRaman",
+  fplc: "FPLC",
 };
 
 const INSTRUMENT_TYPE_OPTIONS = VALID_INSTRUMENT_TYPES.map((value) => ({
   value,
-  label: TYPE_LABELS[value] ?? value,
+  label: TYPE_LABELS[value],
 }));
+
+function processingBoundaryWarning(
+  fromType: InstrumentType,
+  toType: InstrumentType
+): string | null {
+  const wasProcessable = isProcessableInstrumentType(fromType);
+  const willBeProcessable = isProcessableInstrumentType(toType);
+  if (wasProcessable && !willBeProcessable) {
+    return "Files will no longer be processed automatically.";
+  }
+  if (!wasProcessable && willBeProcessable) {
+    return `New uploads will be processed by the ${TYPE_LABELS[toType]} processor.`;
+  }
+  return null;
+}
 
 export function EditInstrumentDialog({
   instrumentId,
@@ -49,13 +66,13 @@ export function EditInstrumentDialog({
 }: {
   instrumentId: string;
   displayName: string;
-  instrumentType: string;
+  instrumentType: InstrumentType;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   const router = useRouter();
   const [name, setName] = useState(displayName);
-  const [type, setType] = useState(instrumentType);
+  const [type, setType] = useState<InstrumentType>(instrumentType);
   const [isPending, startTransition] = useTransition();
 
   // Re-sync form state from props each time the dialog opens so it reflects
@@ -71,6 +88,11 @@ export function EditInstrumentDialog({
   // trimmed name avoids treating whitespace-only edits as a real change.
   const isUnchanged =
     name.trim() === displayName.trim() && type === instrumentType;
+
+  const typeWarning =
+    type === instrumentType
+      ? null
+      : processingBoundaryWarning(instrumentType, type);
 
   function handleSave() {
     startTransition(async () => {
@@ -118,7 +140,10 @@ export function EditInstrumentDialog({
           </div>
           <div className="grid gap-2">
             <Label htmlFor="edit-type">Instrument type</Label>
-            <Select onValueChange={setType} value={type}>
+            <Select
+              onValueChange={(value) => setType(value as InstrumentType)}
+              value={type}
+            >
               <SelectTrigger className="w-full" id="edit-type">
                 <SelectValue />
               </SelectTrigger>
@@ -131,8 +156,17 @@ export function EditInstrumentDialog({
               </SelectContent>
             </Select>
             <p className="text-muted-foreground text-xs">
-              Controls the run detail page layout.
+              Controls the run detail page layout and which Lambda processor
+              handles new uploads.
             </p>
+            {typeWarning ? (
+              <p
+                className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-amber-950 text-xs dark:text-amber-100"
+                role="status"
+              >
+                {typeWarning}
+              </p>
+            ) : null}
           </div>
         </div>
         <DialogFooter>

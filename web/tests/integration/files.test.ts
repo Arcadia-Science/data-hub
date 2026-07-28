@@ -23,8 +23,8 @@ import {
 // Tests drive each through its full lifecycle to verify the state machine.
 describe("Files API", () => {
   let token: string;
-  // Use a known processable instrument ID so reprocess eligibility reaches
-  // the Lambda-config check (see `isProcessableInstrument`).
+  // Use a processable instrument_type so reprocess eligibility reaches
+  // the Lambda-config check (see `isProcessableInstrumentType`).
   const instrumentId = "akta-fplc";
   const runId = "files-test-run";
   let fileId: number;
@@ -41,6 +41,7 @@ describe("Files API", () => {
       id: instrumentId,
       displayName: "Akta FPLC",
       status: "active",
+      instrumentType: "fplc",
     });
 
     // Create a run with detected files (watcher path)
@@ -642,6 +643,7 @@ describe("Files API", () => {
   });
 
   it("REPROCESS returns 409 for instrument without a Lambda processor", async () => {
+    // Defaults to instrument_type=generic, which has no processor.
     const noProcessorId = "files-no-processor-instrument";
     const db = getTestDb();
     await db.insert(instruments).values({
@@ -676,6 +678,48 @@ describe("Files API", () => {
     });
     expect(res.status).toBe(409);
     const data = await res.json();
+    expect(data.error.message).toContain("no Lambda processor");
+  });
+
+  it("REPROCESS returns 409 for a generic-typed instrument even with a known ID", async () => {
+    // Same ID shape as a formerly allowlisted FPLC, but typed generic so
+    // type-based gating must refuse reprocess (mirrors jolene-fplc in seed).
+    const genericFplcId = "files-generic-fplc";
+    const db = getTestDb();
+    await db.insert(instruments).values({
+      id: genericFplcId,
+      displayName: "Generic FPLC",
+      status: "active",
+      instrumentType: "generic",
+    });
+    const genericRunId = "reprocess-generic-fplc-run";
+    await api(`/api/v1/instruments/${genericFplcId}/runs`, {
+      method: "POST",
+      token,
+      body: { run_id: genericRunId, source: "lambda" },
+    });
+    const createFileRes = await api(
+      `/api/v1/instruments/${genericFplcId}/runs/${genericRunId}/files`,
+      {
+        method: "POST",
+        token,
+        body: {
+          s3_bucket: "test-bucket",
+          s3_key: `${genericFplcId}/${genericRunId}/chromatogram.pdf`,
+          filename: "chromatogram.pdf",
+        },
+      }
+    );
+    expect(createFileRes.status).toBe(201);
+    const createdFile = await createFileRes.json();
+
+    const res = await api(`/api/v1/files/${createdFile.id}/reprocess`, {
+      method: "POST",
+      token,
+    });
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.error.message).toContain("generic");
     expect(data.error.message).toContain("no Lambda processor");
   });
 });

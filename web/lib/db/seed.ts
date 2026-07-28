@@ -391,6 +391,8 @@ export const SEED_INSTRUMENTS: readonly SeededInstrument[] = [
   {
     id: "jolene-fplc",
     displayName: "Jolene FPLC",
+    // Stays generic until an operator confirms PDFs match the ÄKTA `fplc`
+    // processor; typing it `fplc` without that check would mis-route files.
     instrumentType: "generic",
     status: "active",
     hostname: "DESKTOP-30488S0",

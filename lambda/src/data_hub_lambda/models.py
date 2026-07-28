@@ -16,6 +16,15 @@ class ApiErrorDetail(BaseModel):
     details: dict | None = None
 
 
+class InstrumentResponse(BaseModel):
+    model_config = _API_MODEL_CONFIG
+
+    id: str
+    display_name: str
+    status: str
+    instrument_type: str
+
+
 class RunResponse(BaseModel):
     model_config = _API_MODEL_CONFIG
 

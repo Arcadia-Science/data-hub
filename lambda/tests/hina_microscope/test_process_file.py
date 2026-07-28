@@ -102,7 +102,11 @@ class TestProcessFileRunMetadataGate:
         ):
             from data_hub_lambda.hina_microscope.process_file import process_file
 
-            process_file(run_id="run-xyz", filename="sample.nd2")
+            process_file(
+                instrument_id="hina-microscope",
+                run_id="run-xyz",
+                filename="sample.nd2",
+            )
 
         # First file → metadata is parsed and persisted.
         parse_mock.assert_called_once_with(patched_processor.image)
@@ -140,7 +144,11 @@ class TestProcessFileRunMetadataGate:
         ):
             from data_hub_lambda.hina_microscope.process_file import process_file
 
-            process_file(run_id="run-xyz", filename="sample-2.nd2")
+            process_file(
+                instrument_id="hina-microscope",
+                run_id="run-xyz",
+                filename="sample-2.nd2",
+            )
 
         # Second file → metadata step is skipped.
         parse_mock.assert_not_called()
@@ -171,7 +179,11 @@ class TestProcessFileFailure:
             from data_hub_lambda.hina_microscope.process_file import process_file
 
             with pytest.raises(RuntimeError, match="boom"):
-                process_file(run_id="run-xyz", filename="broken.nd2")
+                process_file(
+                    instrument_id="hina-microscope",
+                    run_id="run-xyz",
+                    filename="broken.nd2",
+                )
 
         # File should be transitioned through processing → failed with the error message.
         statuses = [
