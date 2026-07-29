@@ -32,7 +32,7 @@ The Python workspace is managed by uv. The root `pyproject.toml` defines three w
 
 ### Web application
 
-The web app requires the following variables. The easiest way to get them is via the Vercel CLI:
+The web app requires the following variables. Pull them from Vercel with the CLI:
 
 ```sh
 cd web
@@ -42,13 +42,15 @@ vercel env pull
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
-| `AUTH_GOOGLE_ID` | Yes | Google OAuth client ID |
-| `AUTH_GOOGLE_SECRET` | Yes | Google OAuth client secret |
-| `AUTH_SECRET` | Yes | NextAuth session encryption key |
+| `AUTH_GOOGLE_ID` | Yes | Google OAuth client ID. See [Create a Google OAuth client](first-time-deployment.md#create-a-google-oauth-client) for where it comes from and who it lets sign in |
+| `AUTH_GOOGLE_SECRET` | Yes | Google OAuth client secret, from the same client |
+| `AUTH_SECRET` | Yes | Auth.js session encryption key (any 32+ character random string) |
+| `ADMIN_EMAILS` | No | Comma-separated emails promoted to workspace admin on sign-in. Bootstraps the first admin, so set it before anyone signs in |
 | `AWS_REGION` | No | AWS region for S3 presigned URLs and Lambda Function URL SigV4 signing (defaults to `us-west-1`) |
 | `AWS_ROLE_ARN` | No | IAM role ARN for Vercel OIDC federation. Used to presign S3 URLs and SigV4-sign Lambda Function URL invocations (only needed on Vercel) |
 | `S3_RAW_DATA_BUCKET` | No | S3 bucket for raw data uploads (defaults to `arcadia-data-hub-raw-staging`) |
 | `LAMBDA_FUNCTION_URL` | No | Lambda Function URL. Required for file reprocessing and run-archive downloads. |
+| `CRON_SECRET` | No | Shared secret for Vercel Cron jobs. The upload-queue sweep (`web/vercel.json`) rejects invocations without it |
 | `SLACK_BOT_TOKEN` | No | Slack bot token (`xoxb-…`) — required for personal Slack DM notifications |
 | `SLACK_CLIENT_ID` | No | Slack app client ID — required for the "Connect to Slack" OAuth flow on Settings > Notifications |
 | `SLACK_CLIENT_SECRET` | No | Slack app client secret — required for the OAuth flow |

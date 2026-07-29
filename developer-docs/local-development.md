@@ -61,7 +61,7 @@ Explicitly **do not** set the following — leaving them unset is what makes the
 
 - `LAMBDA_FUNCTION_URL` — file reprocessing and "Download all" buttons surface a 503 / "Lambda not configured" message instead of trying to invoke a Function URL.
 - `SLACK_BOT_TOKEN`, `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET` — Slack DM/OAuth features are disabled when unset; the Settings > Notifications page renders a "Connect to Slack" button that is inert without these.
-- `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` — Google sign-in is unused locally; the dev Credentials provider handles auth.
+- `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` — Google sign-in is unused locally; the dev Credentials provider handles auth. Deployed environments need a real client, from [Create a Google OAuth client](first-time-deployment.md#create-a-google-oauth-client).
 - `AWS_ROLE_ARN` — Vercel OIDC federation is for production. The local AWS SDK falls back to the static credentials above.
 
 ## Sign in (dev only)
