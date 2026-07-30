@@ -1,6 +1,6 @@
 # Data Hub
 
-Data Hub automatically captures and processes lab instrument data, so scientists spend their time analyzing results instead of managing files. Each instrument PC runs a watcher: a background program that monitors the output folder, uploads new files as they appear, and groups them into runs.
+Data Hub is a platform for automatically capturing, processing, and visualizing data from laboratory instruments. Lab instrument PCs run a watcher service that uploads files to S3, an AWS Lambda function processes them through instrument-specific pipelines, and a Next.js web application provides a dashboard, REST API, and MCP server for scientists to use.
 
 Nobody signs up for Data Hub. Your team deploys it, so raw instrument data and everything derived from it stay on infrastructure you control. The source is MIT licensed.
 
@@ -14,7 +14,7 @@ Nobody signs up for Data Hub. Your team deploys it, so raw instrument data and e
 
 ## Web app, REST API, and MCP
 
-A run shows up in three places at once. The dashboard has no private back door, so a script sees exactly what a person sees:
+A run shows up in three places at once:
 
 - **Web app**: find a run by instrument, date, or who ran it, read plate maps and images in the page, claim your work, and download files. See the [web app guide](https://datahub.arcadiascience.com/docs/browse-runs).
 - **REST API**: served at `/api/v1/`, with an OpenAPI 3.1 document at `/api/v1/openapi.json` so you can generate a client instead of writing one. See the [API reference](https://datahub.arcadiascience.com/docs/api).
