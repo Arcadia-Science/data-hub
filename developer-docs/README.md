@@ -5,7 +5,7 @@ deploying the web app and AWS infrastructure (see
 [First-time deployment](first-time-deployment.md)). User, operator, and admin
 documentation (installing a watcher, adding an instrument, managing tokens)
 lives on the [docs site](https://datahub.arcadiascience.com/docs) instead —
-see the root [README](../README.md#getting-started) for that split.
+see the root [README](../README.md#documentation) for that split.
 
 - [Getting started](getting-started.md) — development setup, environment variables, running locally
 - [Local development](local-development.md) — zero-credential dev workflow for the web app + API + database (no watcher / Lambda needed)

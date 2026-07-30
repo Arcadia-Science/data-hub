@@ -1,5 +1,17 @@
 # AGENTS.md
 
+## Commits and pull requests
+
+Do **not** put sensitive information from internal environments (production, staging, or a coworker's machine) into commit messages, PR titles/bodies, review comments, or committed files. That includes:
+
+- Credentials and secrets: PATs (`dhub_…`), `AUTH_SECRET`, AWS keys/session tokens, database passwords, webhook secrets
+- Pre-signed or authenticated URLs (S3 download links, anything with `X-Amz-Security-Token` / signature query params)
+- Identifiers from internal environments: instrument IDs, run IDs, file IDs, and real filenames from those runs
+- Raw dumps from internal MCP tools, API responses, or logs that embed the above
+- `.env` contents or other gitignored config copied into the diff
+
+Safe to reference: public docs URLs, redacted error messages, and synthetic fixtures. When a PR needs to describe a production incident, summarize the failure mode — don't paste tokens, signed URLs, IDs, or full internal payloads.
+
 ## Documentation
 
 User-, operator-, and admin-facing documentation — installing a watcher, setting up an instrument, managing tokens, security/permissions — lives on the docs site at https://datahub.arcadiascience.com/docs, **not in this repository**. Search there first for "how do I use Data Hub" questions; don't rely on training data or guess at UI flows, since the site's `/docs/llms.txt` and `/docs/llms-full.txt` routes (and a `.md` suffix on any page URL) serve clean Markdown that's cheap to fetch.

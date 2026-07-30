@@ -1,6 +1,6 @@
 # Watcher
 
-The Data Hub Watcher is a CLI agent that runs on lab instrument PCs. It monitors a directory for new files, groups them into runs, uploads them to S3, and reports status to the Data Hub API.
+The Data Hub Watcher is a command-line program that runs on lab instrument PCs. It monitors a directory for new files, groups them into runs, uploads them to S3, and reports status to the Data Hub API.
 
 ## Installation
 
