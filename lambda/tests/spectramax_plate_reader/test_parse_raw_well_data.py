@@ -290,6 +290,62 @@ class TestKineticEdgeWellsSkipped:
         assert first["value"] == pytest.approx(0.1120)
 
 
+class TestIncompleteKinetic:
+    """SoftMax may declare more Kinetic readings than it exports when a run
+    stops early. Emit the groups that are present (including day-prefixed
+    times after 24 h) and stop before the summary / ``~End``.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _load(self, tmp_path: Path) -> None:
+        prefix = "Plate:\tPlate1\t1.3\tPlateFormat"
+        # Header claims 4 readings; file only has 2 (+ summary).
+        middle = "\tRaw\tFALSE\t4\t\t\t\t\t\t1"
+        header = f"{prefix}\tKinetic\tAbsorbance{middle}\t595\t1\t2\t4\t1\t2\n"
+        col_header = "\tTemperature(\xa1C)\t1\t2\t\n"
+        r0 = "00:00:00\t30.0\t0.10\t0.20\t\n"
+        r1 = "\t\t0.30\t0.40\t\n"
+        blank = "\n"
+        # Day-prefixed elapsed time once the run crosses 24 h.
+        r2 = "1.00:05:20\t30.1\t0.11\t0.21\t\n"
+        r3 = "\t\t0.31\t0.41\t\n"
+        summary = "\t\t1\t2\t\n\t\t0.10\t0.20\t\n\t\t0.30\t0.40\t\n"
+        content = f"##BLOCKS= 1\n{header}{col_header}{r0}{r1}{blank}{r2}{r3}{blank}{summary}~End\n"
+        path = tmp_path / "incomplete_kinetic.xls"
+        path.write_text(content, encoding="utf-16")
+        self.df = parse_raw_well_data(path)
+
+    def test_columns(self) -> None:
+        assert list(self.df.columns) == _EXPECTED_COLUMNS
+
+    def test_shape_uses_exported_readings_only(self) -> None:
+        # 2 exported readings × 4 wells — not the declared 4, and not the summary.
+        assert self.df.shape == (8, 8)
+
+    def test_times_include_day_prefix(self) -> None:
+        assert self.df["time"].unique().tolist() == ["00:00:00", "1.00:05:20"]
+
+    def test_values(self) -> None:
+        t0 = self.df[self.df["time"] == "00:00:00"]["value"].tolist()
+        t1 = self.df[self.df["time"] == "1.00:05:20"]["value"].tolist()
+        assert t0 == pytest.approx([0.10, 0.20, 0.30, 0.40])
+        assert t1 == pytest.approx([0.11, 0.21, 0.31, 0.41])
+
+    def test_stops_at_end_without_summary(self, tmp_path: Path) -> None:
+        prefix = "Plate:\tPlate1\t1.3\tPlateFormat"
+        middle = "\tRaw\tFALSE\t3\t\t\t\t\t\t1"
+        header = f"{prefix}\tKinetic\tAbsorbance{middle}\t595\t1\t2\t4\t1\t2\n"
+        col_header = "\tTemperature(\xa1C)\t1\t2\t\n"
+        r0 = "00:00:00\t30.0\t0.10\t0.20\t\n"
+        r1 = "\t\t0.30\t0.40\t\n"
+        content = f"##BLOCKS= 1\n{header}{col_header}{r0}{r1}\n~End\n"
+        path = tmp_path / "incomplete_kinetic_no_summary.xls"
+        path.write_text(content, encoding="utf-16")
+        df = parse_raw_well_data(path)
+        assert df.shape == (4, 8)
+        assert df["time"].unique().tolist() == ["00:00:00"]
+
+
 class TestEndpointFlat:
     """Endpoint / Absorbance / 595 nm — flat layout where all 96 wells appear
     on a single data line with well-position column headers (A1, A2, …, H12).
