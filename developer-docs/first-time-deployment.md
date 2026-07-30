@@ -40,7 +40,7 @@ Beyond the [general prerequisites](getting-started.md#prerequisites), you need:
 - [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html) — used by `make sam-deploy` (`brew install aws-sam-cli` on macOS).
 - **Admin-level AWS credentials** (`aws configure` or environment variables) for the initial deploy. The CI deploy role can update an existing stack but cannot create one from scratch.
 - Access to the Vercel project and permission to set its environment variables.
-- A [Google OAuth](https://console.cloud.google.com/apis/credentials) client (ID and secret) for sign-in.
+- Permission to create a Google OAuth client for sign-in, in a Google Cloud project you control. You create it in [step 2](#create-a-google-oauth-client).
 
 ## 1. Provision a PostgreSQL database
 
@@ -50,6 +50,19 @@ Create a PostgreSQL database for the environment on any host you like — [Rende
 
 The Next.js app (which also serves the REST API and MCP server) deploys on [Vercel](https://vercel.com). Every branch and commit generates a preview deployment; merges to `staging` and `production` deploy to those environments automatically.
 
+### Create a Google OAuth client
+
+Browser sign-in runs on Google OAuth, so the web app needs a client ID and secret before anyone can reach the dashboard. Create the client in [Google Cloud Console](https://console.cloud.google.com/apis/credentials). One client serves every environment as long as you register a redirect URI for each:
+
+1. Configure the OAuth consent screen. **Internal** accepts only accounts in your Google Workspace organization; **External** accepts any Google account, including personal ones.
+2. Create an **OAuth client ID** credential with application type **Web application**.
+3. Add one authorized redirect URI per environment. The path is always `/api/auth/callback/google` on your deployment's host, so a staging URI reads `https://your-staging-deployment.vercel.app/api/auth/callback/google`.
+4. Copy the client ID and secret. They become `AUTH_GOOGLE_ID` and `AUTH_GOOGLE_SECRET` in the next section.
+
+That consent screen choice is the only gate on who can sign in. Data Hub has no email allowlist and no domain check of its own, so every account Google lets through gets a member record on first sign-in. `ADMIN_EMAILS` grants the admin role separately and is not an entry check. Choose **Internal** unless you mean to accept personal Google accounts. [Who can sign in](https://datahub.arcadiascience.com/docs/security#who-can-sign-in) states the same model for operators and admins.
+
+> **Note:** Google matches redirect URIs exactly, and Vercel gives each preview deployment its own URL. Google sign-in therefore fails on previews unless you register a stable preview alias. For laptop work, use the dev-only sign-in, which needs no Google client at all: see [Local development](local-development.md#sign-in-dev-only).
+
 ### Set the initial environment variables
 
 In the Vercel dashboard, scoped to the environment, set at least the following. The AWS-related variables come later in [step 5](#5-finish-wiring-the-web-app); the full list lives in [Environment variables](getting-started.md#environment-variables).
@@ -58,7 +71,7 @@ In the Vercel dashboard, scoped to the environment, set at least the following. 
 | --- | --- |
 | `DATABASE_URL` | Connection string from [step 1](#1-provision-a-postgresql-database). |
 | `AUTH_SECRET` | Session encryption key (generate a 32+ character random string). |
-| `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` | Google OAuth client credentials for sign-in. |
+| `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` | Client ID and secret from the [OAuth client](#create-a-google-oauth-client) above. |
 | `ADMIN_EMAILS` | Comma-separated emails auto-promoted to admin on sign-in. This bootstraps the first admin, so set it before you sign in. |
 | `CRON_SECRET` | Shared secret for Vercel Cron jobs. The upload-queue sweep (`web/vercel.json`) rejects invocations without it. |
 
