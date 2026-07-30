@@ -362,11 +362,13 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
                 for row_idx in range(num_rows):
                     row_fields = lines[i].split("\t")
 
-                    if row_idx == 0:
-                        time_str = row_fields[0].strip()
-                        time_val = time_str if time_str else None
-                        temp_str = row_fields[1].strip()
-                        temp_val = float(temp_str) if temp_str else None
+                    # SoftMax Pro writes elapsed time / temperature on the first
+                    # populated row of each reading group. When leading rows are
+                    # unselected (e.g. edge wells skipped), that is not row A.
+                    if time_val is None and row_fields and row_fields[0].strip():
+                        time_val = row_fields[0].strip()
+                    if temp_val is None and len(row_fields) > 1 and row_fields[1].strip():
+                        temp_val = float(row_fields[1].strip())
 
                     row_label = _ROW_LABELS[row_idx]
 

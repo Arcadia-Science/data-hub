@@ -112,6 +112,16 @@ class TestRealFixtures:
             "wavelengths": ["595"],
         }
 
+    def test_kinetic_edge_wells_skipped(self) -> None:
+        result = parse_metadata(
+            _FIXTURES_DIR / "spectramax_plate_reader_kinetic_edge_wells_skipped.xls"
+        )
+        assert result == {
+            "measurement_mode": "Absorbance",
+            "measurement_type": "Kinetic",
+            "wavelengths": ["595"],
+        }
+
     def test_endpoint_flat(self) -> None:
         result = parse_metadata(_FIXTURES_DIR / "spectramax_plate_reader_endpoint_flat.xls")
         assert result == {

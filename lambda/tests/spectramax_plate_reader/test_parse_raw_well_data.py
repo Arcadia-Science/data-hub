@@ -239,6 +239,57 @@ class TestKinetic:
         assert len(self.df[self.df["plate_name"] == "Plate5"]) == 241 * 96
 
 
+class TestKineticEdgeWellsSkipped:
+    """Kinetic / Absorbance / 595 nm with edge wells unselected.
+
+    SoftMax Pro leaves rows A/H and columns 1/12 empty and writes elapsed
+    time + temperature on the first populated row (B), not row A. The parser
+    must still attach those fields to every well in the reading group.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _load(self) -> None:
+        self.df = parse_raw_well_data(
+            _FIXTURES_DIR / "spectramax_plate_reader_kinetic_edge_wells_skipped.xls"
+        )
+
+    def test_columns(self) -> None:
+        assert list(self.df.columns) == _EXPECTED_COLUMNS
+
+    def test_shape(self) -> None:
+        # 2 time points × 6 rows (B–G) × 9 cols (2–10)
+        assert self.df.shape == (108, 8)
+
+    def test_time_points(self) -> None:
+        times = self.df["time"].unique().tolist()
+        assert times == ["00:00:00", "00:15:01"]
+
+    def test_time_and_temperature_not_null(self) -> None:
+        assert bool(self.df["time"].notna().all())
+        assert bool(self.df["temperature_c"].notna().all())
+
+    def test_wells_exclude_edges(self) -> None:
+        wells = set(self.df["well_position"])
+        assert "A1" not in wells
+        assert "H12" not in wells
+        assert wells == {f"{r}{c}" for r in "BCDEFG" for c in range(2, 11)}
+
+    def test_first_well(self) -> None:
+        first = self.df.iloc[0]
+        assert first["time"] == "00:00:00"
+        assert first["well_position"] == "B2"
+        assert first["temperature_c"] == pytest.approx(30.2)
+        assert first["value"] == pytest.approx(0.1020)
+
+    def test_second_time_point(self) -> None:
+        t1 = self.df[self.df["time"] == "00:15:01"]
+        assert len(t1) == 54
+        first = t1.iloc[0]
+        assert first["well_position"] == "B2"
+        assert first["temperature_c"] == pytest.approx(30.0)
+        assert first["value"] == pytest.approx(0.1120)
+
+
 class TestEndpointFlat:
     """Endpoint / Absorbance / 595 nm — flat layout where all 96 wells appear
     on a single data line with well-position column headers (A1, A2, …, H12).
