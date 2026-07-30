@@ -13,6 +13,10 @@ reading (1 for Endpoint, *N* for Kinetic time-points or Well Scan
 positions).  Each reading group is followed by an empty separator line.
 A summary table (no ``Temperature`` column header) follows the last
 group before ``~End``.
+
+SoftMax may declare more Kinetic readings in the plate header than it
+exports (e.g. a 48 h protocol stopped early).  The parser emits the
+groups that are present and stops at the summary table or ``~End``.
 """
 
 from __future__ import annotations
@@ -53,6 +57,34 @@ _ROW_LABELS = "ABCDEFGHIJKLMNOP"
 # that downstream code can distinguish a "well was attempted but failed"
 # from a "well was never read" (which remains absent from the output).
 _WELL_VALUE_SENTINELS = frozenset({"Path?", "Range?"})
+
+# SoftMax elapsed time: ``HH:MM:SS`` within the first day, then
+# ``D.HH:MM:SS`` once the run crosses 24 h (e.g. ``1.00:05:20``).
+_ELAPSED_TIME_RE = re.compile(r"^(?:\d+\.)?\d{1,2}:\d{2}:\d{2}$")
+
+
+def _at_plate_end(lines: list[str], i: int) -> bool:
+    return i >= len(lines) or lines[i].startswith("~End")
+
+
+def _kinetic_reading_present(lines: list[str], i: int, num_rows: int) -> bool:
+    """Return whether ``lines[i:i+num_rows]`` still holds a Kinetic group.
+
+    After the last exported reading, SoftMax writes a summary table or
+    ``~End``. Neither carries an elapsed-time token, so an overstated
+    ``num_readings`` in the plate header must not consume those lines as
+    well data.
+    """
+    if _at_plate_end(lines, i):
+        return False
+    end = min(i + num_rows, len(lines))
+    for j in range(i, end):
+        if lines[j].startswith("~End"):
+            return False
+        fields = lines[j].split("\t")
+        if fields and _ELAPSED_TIME_RE.match(fields[0].strip()):
+            return True
+    return False
 
 
 def _parse_well_value(val_str: str) -> float:
@@ -317,6 +349,13 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
         if layout.format == "flat":
             wl = wavelengths[0] if wavelengths else None
             for _ in range(header.num_readings):
+                if _at_plate_end(lines, i):
+                    break
+                if header.measurement_type == "Kinetic" and not _kinetic_reading_present(
+                    lines, i, 1
+                ):
+                    break
+
                 row_fields = lines[i].split("\t")
                 time_str = row_fields[0].strip()
                 time_val: str | None = time_str if time_str else None
@@ -356,6 +395,13 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
 
             offsets = layout.group_offsets or (2,)
             for _ in range(header.num_readings):
+                if _at_plate_end(lines, i):
+                    break
+                if header.measurement_type == "Kinetic" and not _kinetic_reading_present(
+                    lines, i, num_rows
+                ):
+                    break
+
                 time_val = None
                 temp_val = None
 
