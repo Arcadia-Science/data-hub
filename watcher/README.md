@@ -1,6 +1,6 @@
 # data-hub-watcher
 
-A file-watcher agent that runs on lab instrument PCs and uploads new files to the [Data Hub](https://github.com/Arcadia-Science/data-hub). It groups files into runs, retries uploads, sends heartbeats, and can optionally run as a Windows service.
+A command-line program that runs on lab instrument PCs, watching a directory and uploading new files to [Data Hub](https://github.com/Arcadia-Science/data-hub). It groups files into runs, retries uploads, sends heartbeats, and can optionally run as a Windows service.
 
 ## Install
 

@@ -26,7 +26,7 @@ flowchart LR
 | --- | --- | --- |
 | `web/` | `data-hub-web` | Next.js web application, REST API, and MCP server. Deployed on Vercel. |
 | `lambda/` | `data-hub-lambda` | AWS Lambda function triggered by S3 uploads. Runs instrument-specific processing pipelines. |
-| `watcher/` | `data-hub-watcher` | CLI agent installed on lab instrument PCs. Detects new files, uploads them to S3, and reports status to the API. |
+| `watcher/` | `data-hub-watcher` | CLI installed on lab instrument PCs. Detects new files, uploads them to S3, and reports status to the API. |
 | `packages/shared/` | `data-hub-shared` | Shared Python library providing S3 utilities, instrument enums, and test infrastructure. |
 
 ## Data flow
