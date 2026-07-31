@@ -1,14 +1,17 @@
+import { redirect } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { signIn } from "@/lib/auth";
+import { authInstance } from "@/lib/auth";
+import { DEV_PASSWORD } from "@/lib/dev-auth";
 
-// Dev-only password-less sign-in. Shared between `/login` (the dedicated
+// Dev-only email/password sign-in. Shared between `/login` (the dedicated
 // sign-in route) and the in-page `SignInRequired` gate so both surfaces
 // render the same affordance and never drift. The component itself does
 // not check `isDevAuthEnabled` — call sites are expected to do that —
-// because rendering this form is meaningless unless the matching
-// Credentials provider is registered in `lib/auth.ts`.
+// because rendering this form is meaningless unless email/password is
+// enabled in `lib/auth.ts`. The password is the shared seed constant;
+// the form never asks for it.
 //
 // `inputId` is parameterized to keep the `<label htmlFor>` association
 // unique if both gates ever render in the same React tree (e.g. while
@@ -32,10 +35,15 @@ export function DevSignInForm({
             throw new Error("Dev sign-in is disabled in production");
           }
           const email = formData.get("email");
-          await signIn("dev", {
-            email: typeof email === "string" ? email : "",
-            redirectTo: callbackUrl,
+          await authInstance.api.signInEmail({
+            body: {
+              email:
+                typeof email === "string" ? email.trim().toLowerCase() : "",
+              password: DEV_PASSWORD,
+              callbackURL: callbackUrl,
+            },
           });
+          redirect(callbackUrl);
         }}
         className="flex w-full flex-col gap-3"
       >

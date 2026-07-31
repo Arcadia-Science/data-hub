@@ -81,7 +81,8 @@ See the table below for a summary of environment variables configured for this a
 | `DATABASE_URL`              | Yes      | PostgreSQL connection string                           |
 | `AUTH_GOOGLE_ID`            | Yes      | Google OAuth client ID                                 |
 | `AUTH_GOOGLE_SECRET`        | Yes      | Google OAuth client secret                             |
-| `AUTH_SECRET`               | Yes      | NextAuth session encryption key                        |
+| `AUTH_SECRET`               | Yes      | Better Auth session encryption key                     |
+| `BETTER_AUTH_URL`           | Yes      | Public origin of this app (e.g. `http://localhost:3000`) |
 | `ADMIN_EMAILS`              | No       | Comma-separated email allowlist for the workspace admin role. Listed users are auto-promoted to admin on every sign-in (one-way). Once at least one admin exists, additional admins can be promoted via **Settings > Members**. |
 
 ## CI

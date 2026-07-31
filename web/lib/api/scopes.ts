@@ -76,7 +76,7 @@ export function hasScope(auth: AuthLike, required: Scope): boolean {
 // Validates the `scopes` field on a `POST /api/v1/tokens` request body.
 // Returns the typed scope array on success, or an error message ready for
 // the 400 response. Extracted from the route handler so the rules can be
-// unit-tested without spinning up the Next.js server, NextAuth, or the DB.
+// unit-tested without spinning up the Next.js server, Better Auth, or the DB.
 //
 // New tokens must enumerate fine scopes: the wildcard `*` and the legacy
 // coarse `:write` scopes are rejected so freshly minted credentials are

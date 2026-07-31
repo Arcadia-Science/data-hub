@@ -12,8 +12,8 @@ export interface AuthResult {
   authMethod: "session" | "token";
   // Permission scopes carried by this request. Token-authenticated requests
   // carry the scopes column from `personal_access_tokens`. Session
-  // (NextAuth) authentication is treated as fully privileged and always
-  // returns `["*"]`, so `hasScope` is a no-op for browser sessions.
+  // (Better Auth session) authentication is treated as fully privileged and
+  // always returns `["*"]`, so `hasScope` is a no-op for browser sessions.
   scopes: string[];
   // PAT row id for token auth; null for sessions. Used to bind watchers to
   // the credential that registered them (see `enforceWatcherBinding`).
@@ -78,8 +78,8 @@ async function validatePat(
 }
 
 /**
- * Resolve a v1 request to either a NextAuth session or a PAT. Sessions are
- * treated as fully privileged; PATs carry their stored `scopes` array.
+ * Resolve a v1 request to either a Better Auth session or a PAT. Sessions
+ * are treated as fully privileged; PATs carry their stored `scopes` array.
  *
  * @internal — route handlers should call {@link authorize} instead, which
  * combines this with the per-route scope check. Exported only because
@@ -104,8 +104,8 @@ export async function authenticateRequest(
 
 /**
  * Authenticate a request using only PAT (Personal Access Token) — skips the
- * NextAuth session check.  Use this for API surfaces (like MCP) where callers
- * will never have a browser session.
+ * session check. Use this for API surfaces (like MCP) where callers will
+ * never have a browser session.
  */
 export async function authenticateWithToken(
   request: Pick<Request, "headers">
@@ -133,8 +133,8 @@ export async function requireSession(): Promise<AuthResult | null> {
  * not admin) that the handler should return.
  *
  * The admin check always reads `users.is_admin` directly so a demotion via
- * `/settings/members` takes effect on the next request — the JWT's cached
- * `session.user.isAdmin` is used only for cheap UI affordance gating.
+ * `/settings/members` takes effect on the next request — the session's
+ * cached `session.user.isAdmin` is used only for cheap UI affordance gating.
  */
 export async function requireAdmin(): Promise<{ userId: string } | Response> {
   const session = await auth();

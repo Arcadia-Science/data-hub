@@ -246,6 +246,13 @@
       "when": 1785189229393,
       "tag": "0034_needy_tomorrow_man",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1785522447997,
+      "tag": "0035_migrate_to_better_auth",
+      "breakpoints": true
     }
   ]
 }

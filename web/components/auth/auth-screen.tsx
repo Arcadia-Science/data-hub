@@ -1,8 +1,10 @@
 import { CloudUpload, FlaskConical, Lock, Terminal } from "lucide-react";
 import Image from "next/image";
+import { redirect } from "next/navigation";
 import { DevSignInForm } from "@/components/auth/dev-sign-in-form";
 import { Button } from "@/components/ui/button";
-import { isDevAuthEnabled, signIn } from "@/lib/auth";
+import { authInstance } from "@/lib/auth";
+import { isDevAuthEnabled } from "@/lib/dev-auth";
 import { DOCS_URL, QUICKSTART_DOCS_URL } from "@/lib/docs";
 
 interface AuthScreenProps {
@@ -91,7 +93,15 @@ export function AuthScreen({
             <form
               action={async () => {
                 "use server";
-                await signIn("google", { redirectTo: callbackUrl });
+                const result = await authInstance.api.signInSocial({
+                  body: {
+                    provider: "google",
+                    callbackURL: callbackUrl,
+                  },
+                });
+                if (result.url) {
+                  redirect(result.url);
+                }
               }}
               className="mt-8 w-full"
             >

@@ -1,11 +1,11 @@
 "use client";
 
-import { useSession } from "next-auth/react";
 import { useEffect, useOptimistic, useState } from "react";
 import { RunCommentForm } from "@/components/runs/run-comment-form";
 import { RunCommentItem } from "@/components/runs/run-comment-item";
 import { Card } from "@/components/ui/card";
 import type { RunCommentDto } from "@/lib/api/run-comments";
+import { useSession } from "@/lib/auth-client";
 import { toInitials } from "@/lib/utils";
 
 const COMMENT_HASH_PREFIX = "#comment-";

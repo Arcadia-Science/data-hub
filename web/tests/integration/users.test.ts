@@ -19,7 +19,7 @@ describe("Users API admin gate", () => {
   beforeAll(async () => {
     await resetDb();
     // Even seeding a user as admin doesn't help here — PATs don't carry a
-    // session, and `requireAdmin()` only consults the NextAuth session.
+    // session, and `requireAdmin()` only consults the Better Auth session.
     // This intentionally makes "PAT tries to manage members" a 401, not a
     // 403, so the failure mode is clearly "session required".
     ({ token } = await seedTestUser({ isAdmin: true }));

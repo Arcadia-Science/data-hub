@@ -27,7 +27,7 @@ describe("Watcher Release API admin gate", () => {
   beforeAll(async () => {
     await resetDb();
     // Seeding an admin user doesn't help here — PATs never carry a
-    // session, and `requireAdmin()` only consults the NextAuth session.
+    // session, and `requireAdmin()` only consults the Better Auth session.
     // This intentionally makes "PAT tries to manage the release" a 401,
     // not a 403, so the failure mode is clearly "session required".
     ({ token } = await seedTestUser({ isAdmin: true }));

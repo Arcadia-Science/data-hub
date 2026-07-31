@@ -9,7 +9,7 @@ const ALLOWED_PATCH_FIELDS = new Set(["is_admin"]);
 
 // Admin-only role toggle invoked by `/settings/members`. Only the
 // `is_admin` boolean is mutable here; user identity fields (name, email,
-// image) come from Google and are owned by the NextAuth adapter.
+// image) come from Google and are owned by the Better Auth adapter.
 //
 // Self-demotion is rejected to keep the "no admins left" failure mode out
 // of the API. The members UI mirrors this by disabling the toggle on the

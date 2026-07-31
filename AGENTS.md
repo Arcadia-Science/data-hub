@@ -36,11 +36,11 @@ Standard commands live in the `Makefile`, `web/package.json`, `developer-docs/ge
 
 - **PostgreSQL must be started on every fresh VM** — the cluster is installed and the data (roles + databases) persist in the snapshot, but the server process is not running at boot: `sudo pg_ctlcluster 16 main start` (or `sudo service postgresql start`).
 - Postgres is reachable at `postgres://postgres:postgres@127.0.0.1:5432`. Databases `data-hub-local` (dev) and `data_hub_test` (integration tests) already exist. The integration harness (`web/tests/integration/global-setup.ts`) hardcodes these same credentials and creates `data_hub_test` itself if missing.
-- **Web dev server:** `make dev` (Next.js + Turbopack on http://localhost:3000). Sign in at `/login` with the "Sign in (dev)" button using email `alice@example.com` (workspace admin; no password).
+- **Web dev server:** `make dev` (Next.js + Turbopack on http://localhost:3000). Sign in at `/login` with the "Sign in (dev)" button using email `alice@example.com` (workspace admin; shared seed password is submitted invisibly).
 
 ### Environment file
 
-`web/.env` is gitignored and required for `make dev` / seeding. If it is missing on a fresh VM, recreate it from the "Minimal `.env`" block in `developer-docs/local-development.md` (the key lines are `DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/data-hub-local`, a 32+ char `AUTH_SECRET`, dummy `AWS_*` values, and `LOCAL_S3_MIRROR=../lambda/.local-s3`).
+`web/.env` is gitignored and required for `make dev` / seeding. If it is missing on a fresh VM, recreate it from the "Minimal `.env`" block in `developer-docs/local-development.md` (the key lines are `DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/data-hub-local`, a 32+ char `AUTH_SECRET`, `BETTER_AUTH_URL=http://localhost:3000`, dummy `AWS_*` values, and `LOCAL_S3_MIRROR=../lambda/.local-s3`).
 
 ### Node / Python toolchain
 

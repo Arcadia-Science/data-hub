@@ -79,12 +79,16 @@ export async function setup() {
 
   const databaseUrl = `${PG_URL}/${TEST_DB}`;
 
-  // The trigram GIN indexes in schema.ts reference `gin_trgm_ops`, which only
-  // exists once the pg_trgm extension is installed. `drizzle-kit push` (below)
-  // does not create extensions, so ensure it exists on the fresh test DB first.
+  // Reset the public schema so `drizzle-kit push` always creates tables from
+  // scratch. A persisted test DB with a prior Auth.js-shaped `user`/`account`
+  // would otherwise force interactive column-rename prompts that `--force`
+  // cannot answer in CI. The trigram GIN indexes in schema.ts also need
+  // `pg_trgm`, which push does not install.
   const trgmClient = new Client({ connectionString: databaseUrl });
   await trgmClient.connect();
   try {
+    await trgmClient.query("DROP SCHEMA public CASCADE");
+    await trgmClient.query("CREATE SCHEMA public");
     await trgmClient.query("CREATE EXTENSION IF NOT EXISTS pg_trgm");
   } finally {
     await trgmClient.end();
@@ -250,9 +254,10 @@ export async function setup() {
   //    - dev mode re-compiles on every request, making tests 5-10x slower
   //    - production mode matches the actual deployment behavior
   //
-  //    AUTH_SECRET is required by NextAuth even though we bypass sessions in
-  //    tests (PAT auth). AUTH_GOOGLE_* stubs prevent startup errors from the
-  //    Google OAuth provider config.
+  //    AUTH_SECRET is required by Better Auth even though we bypass sessions
+  //    in tests (PAT auth). AUTH_GOOGLE_* stubs prevent startup errors from
+  //    the Google OAuth provider config. BETTER_AUTH_URL must match the
+  //    ephemeral test server origin.
   const port = await getFreePort();
   const baseUrl = `http://127.0.0.1:${port}`;
 
@@ -262,6 +267,7 @@ export async function setup() {
     AUTH_SECRET: "test-secret-at-least-32-characters-long!!",
     AUTH_GOOGLE_ID: "stub",
     AUTH_GOOGLE_SECRET: "stub",
+    BETTER_AUTH_URL: baseUrl,
     // Dummy AWS credentials so the S3 presigner can compute signatures
     // without hitting the real credential provider chain. getSignedUrl only
     // needs a key pair for HMAC signing — it never makes a network call.
