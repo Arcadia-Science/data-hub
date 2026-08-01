@@ -157,16 +157,22 @@ export const sessions = pgTable(
   (session) => [index("idx_sessions_user_id").on(session.userId)]
 );
 
-export const verifications = pgTable("verification", {
-  id: text("id")
-    .primaryKey()
-    .$defaultFn(() => crypto.randomUUID()),
-  identifier: text("identifier").notNull(),
-  value: text("value").notNull(),
-  expiresAt: timestamp("expiresAt", { mode: "date" }).notNull(),
-  createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
-  updatedAt: timestamp("updatedAt", { mode: "date" }).notNull().defaultNow(),
-});
+export const verifications = pgTable(
+  "verification",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    identifier: text("identifier").notNull(),
+    value: text("value").notNull(),
+    expiresAt: timestamp("expiresAt", { mode: "date" }).notNull(),
+    createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt", { mode: "date" }).notNull().defaultNow(),
+  },
+  (verification) => [
+    index("idx_verification_identifier").on(verification.identifier),
+  ]
+);
 
 // Singleton row of server-advertised watcher release metadata, served by
 // `GET /api/v1/watchers/:id/update-check` and edited via the admin-only

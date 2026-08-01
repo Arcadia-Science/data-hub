@@ -1,6 +1,10 @@
 import { CloudUpload, FlaskConical, Lock, Terminal } from "lucide-react";
+import { headers } from "next/headers";
 import Image from "next/image";
-import { redirect } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
+import { Suspense } from "react";
+import { AuthErrorBanner } from "@/components/auth/auth-error-banner";
+import { redirectWithAuthError } from "@/components/auth/auth-sign-in-error";
 import { DevSignInForm } from "@/components/auth/dev-sign-in-form";
 import { Button } from "@/components/ui/button";
 import { authInstance } from "@/lib/auth";
@@ -93,15 +97,21 @@ export function AuthScreen({
             <form
               action={async () => {
                 "use server";
-                const result = await authInstance.api.signInSocial({
-                  body: {
-                    provider: "google",
-                    callbackURL: callbackUrl,
-                  },
-                });
-                if (result.url) {
-                  redirect(result.url);
+                try {
+                  const result = await authInstance.api.signInSocial({
+                    body: {
+                      provider: "google",
+                      callbackURL: callbackUrl,
+                    },
+                    headers: await headers(),
+                  });
+                  if (result.url) {
+                    redirect(result.url);
+                  }
+                } catch (error) {
+                  unstable_rethrow(error);
                 }
+                redirectWithAuthError(callbackUrl, "google");
               }}
               className="mt-8 w-full"
             >
@@ -115,6 +125,10 @@ export function AuthScreen({
                 Sign in with Google
               </Button>
             </form>
+
+            <Suspense fallback={null}>
+              <AuthErrorBanner />
+            </Suspense>
 
             <p className="mt-4 flex items-center gap-2 text-muted-foreground text-sm">
               <Lock aria-hidden className="size-3.5 shrink-0" />

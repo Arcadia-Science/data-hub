@@ -26,8 +26,12 @@ function resolveTrustedOrigins(): string[] {
   if (process.env.VERCEL_URL) {
     origins.add(`https://${process.env.VERCEL_URL}`);
   }
-  origins.add("http://localhost:3000");
-  origins.add("http://127.0.0.1:3000");
+  // Loopback only in non-production — never widen the CSRF allowlist in
+  // deployed environments.
+  if (isDevAuthEnabled) {
+    origins.add("http://localhost:3000");
+    origins.add("http://127.0.0.1:3000");
+  }
   return [...origins];
 }
 
@@ -75,6 +79,9 @@ export const authInstance = betterAuth({
     enabled: isDevAuthEnabled,
     // Seeded users only — no open registration on the email path.
     disableSignUp: true,
+    // Google SSO is the production gate; we never require a verified
+    // inbox for the (dev-only) email/password path.
+    requireEmailVerification: false,
   },
   account: {
     accountLinking: {
@@ -102,6 +109,13 @@ export const authInstance = betterAuth({
     },
   },
   trustedOrigins: resolveTrustedOrigins(),
+  // Prefer Vercel's single-value client IP header so rate-limit buckets
+  // don't collapse when `x-forwarded-for` is a multi-hop chain.
+  advanced: {
+    ipAddress: {
+      ipAddressHeaders: ["x-vercel-forwarded-for", "x-forwarded-for"],
+    },
+  },
   rateLimit: {
     enabled: true,
     customRules: {

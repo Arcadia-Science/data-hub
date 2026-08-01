@@ -253,6 +253,13 @@
       "when": 1785522447997,
       "tag": "0035_migrate_to_better_auth",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1785559025688,
+      "tag": "0036_add_verification_identifier_index",
+      "breakpoints": true
     }
   ]
 }

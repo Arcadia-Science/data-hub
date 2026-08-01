@@ -1,4 +1,6 @@
-import { redirect } from "next/navigation";
+import { headers } from "next/headers";
+import { redirect, unstable_rethrow } from "next/navigation";
+import { redirectWithAuthError } from "@/components/auth/auth-sign-in-error";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,14 +37,20 @@ export function DevSignInForm({
             throw new Error("Dev sign-in is disabled in production");
           }
           const email = formData.get("email");
-          await authInstance.api.signInEmail({
-            body: {
-              email:
-                typeof email === "string" ? email.trim().toLowerCase() : "",
-              password: DEV_PASSWORD,
-              callbackURL: callbackUrl,
-            },
-          });
+          try {
+            await authInstance.api.signInEmail({
+              body: {
+                email:
+                  typeof email === "string" ? email.trim().toLowerCase() : "",
+                password: DEV_PASSWORD,
+                callbackURL: callbackUrl,
+              },
+              headers: await headers(),
+            });
+          } catch (error) {
+            unstable_rethrow(error);
+            redirectWithAuthError(callbackUrl, "credentials");
+          }
           redirect(callbackUrl);
         }}
         className="flex w-full flex-col gap-3"
