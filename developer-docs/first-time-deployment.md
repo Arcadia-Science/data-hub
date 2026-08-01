@@ -61,7 +61,7 @@ Browser sign-in runs on Google OAuth, so the web app needs a client ID and secre
 
 That consent screen choice is the only gate on who can sign in. Data Hub has no email allowlist and no domain check of its own, so every account Google lets through gets a member record on first sign-in. `ADMIN_EMAILS` grants the admin role separately and is not an entry check. Choose **Internal** unless you mean to accept personal Google accounts. [Who can sign in](https://datahub.arcadiascience.com/docs/security#who-can-sign-in) states the same model for operators and admins.
 
-> **Note:** Google matches redirect URIs exactly, and Vercel gives each preview deployment its own URL. Google sign-in therefore fails on previews unless you register a stable preview alias. For laptop work, use the dev-only sign-in, which needs no Google client at all: see [Local development](local-development.md#sign-in-dev-only).
+> **Note:** Google matches redirect URIs exactly, and Vercel gives each preview deployment its own URL. To sign in on previews, enable Better Auth's OAuth proxy (below) so Google callbacks to the staging host and the profile is handed back to the preview. For laptop work, use the dev-only sign-in, which needs no Google client at all: see [Local development](local-development.md#sign-in-dev-only).
 
 ### Set the initial environment variables
 
@@ -75,6 +75,10 @@ In the Vercel dashboard, scoped to the environment, set at least the following. 
 | `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` | Client ID and secret from the [OAuth client](#create-a-google-oauth-client) above. |
 | `ADMIN_EMAILS` | Comma-separated emails auto-promoted to admin on sign-in. This bootstraps the first admin, so set it before you sign in. |
 | `CRON_SECRET` | Shared secret for Vercel Cron jobs. The upload-queue sweep (`web/vercel.json`) rejects invocations without it. |
+| `OAUTH_PROXY_URL` | Staging origin that owns the Google redirect URI (e.g. `https://your-staging-deployment.vercel.app`). Set on **Staging** and **Preview** to the same value. |
+| `OAUTH_PROXY_SECRET` | Dedicated shared secret for the preview↔staging OAuth handoff (not `AUTH_SECRET`). Same value on Staging and Preview. |
+
+Production does not need `OAUTH_PROXY_*` — register production's own `/api/auth/callback/google` URI and leave the proxy unset there. When `OAUTH_PROXY_URL` equals this deployment's `BETTER_AUTH_URL` (staging signing itself in), the proxy is a no-op.
 
 You can pull the current values locally with:
 

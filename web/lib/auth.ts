@@ -1,6 +1,7 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
+import { oAuthProxy } from "better-auth/plugins";
 import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
 import { cache } from "react";
@@ -9,22 +10,47 @@ import { db } from "@/lib/db";
 import { accounts, sessions, users, verifications } from "@/lib/db/schema";
 import { isDevAuthEnabled } from "@/lib/dev-auth";
 
+function originFromUrl(value: string | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  try {
+    const url = value.startsWith("http")
+      ? new URL(value)
+      : new URL(`https://${value}`);
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
+// Stable host that owns the Google redirect URI. Preview (and optionally
+// local) deployments proxy Google SSO through this host via `oAuthProxy`.
+// When it matches this deployment's `BETTER_AUTH_URL`, the plugin no-ops.
+const oauthProxyUrl = process.env.OAUTH_PROXY_URL;
+const oauthProxySecret = process.env.OAUTH_PROXY_SECRET;
+const oauthProxyEnabled = Boolean(oauthProxyUrl && oauthProxySecret);
+
 function resolveTrustedOrigins(): string[] {
   const origins = new Set<string>();
-  const baseUrl = process.env.BETTER_AUTH_URL ?? process.env.VERCEL_URL;
-  if (baseUrl) {
-    try {
-      const url = baseUrl.startsWith("http")
-        ? new URL(baseUrl)
-        : new URL(`https://${baseUrl}`);
-      origins.add(url.origin);
-    } catch {
-      // Ignore malformed env values — Better Auth still trusts its own
-      // `baseURL` origin when set via `BETTER_AUTH_URL`.
-    }
+  const baseOrigin = originFromUrl(
+    process.env.BETTER_AUTH_URL ?? process.env.VERCEL_URL
+  );
+  if (baseOrigin) {
+    origins.add(baseOrigin);
   }
   if (process.env.VERCEL_URL) {
     origins.add(`https://${process.env.VERCEL_URL}`);
+  }
+  const proxyOrigin = originFromUrl(oauthProxyUrl);
+  if (proxyOrigin) {
+    origins.add(proxyOrigin);
+  }
+  // Staging receives the Google callback then redirects back to the
+  // preview origin with an encrypted profile — that return hop must
+  // pass CSRF origin checks. Vercel preview hosts are `*.vercel.app`.
+  if (oauthProxyEnabled) {
+    origins.add("https://*.vercel.app");
   }
   // Loopback only in non-production — never widen the CSRF allowlist in
   // deployed environments.
@@ -143,9 +169,24 @@ export const authInstance = betterAuth({
       },
     },
   },
-  // Must be last so Set-Cookie from server actions (sign-in / sign-out)
-  // reaches the browser via Next's `cookies()` helper.
-  plugins: [nextCookies()],
+  plugins: [
+    // Preview deployments can't register a Google redirect URI per URL.
+    // When configured, OAuth starts on the preview, Google callbacks to
+    // `OAUTH_PROXY_URL` (staging), and staging hands the profile back
+    // encrypted — the preview writes the session in its own DB. No-ops
+    // when this deployment's base URL equals `OAUTH_PROXY_URL`.
+    ...(oauthProxyEnabled
+      ? [
+          oAuthProxy({
+            productionURL: oauthProxyUrl,
+            secret: oauthProxySecret,
+          }),
+        ]
+      : []),
+    // Must be last so Set-Cookie from server actions (sign-in / sign-out)
+    // reaches the browser via Next's `cookies()` helper.
+    nextCookies(),
+  ],
 });
 
 export type Session = typeof authInstance.$Infer.Session;

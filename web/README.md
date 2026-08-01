@@ -83,6 +83,8 @@ See the table below for a summary of environment variables configured for this a
 | `AUTH_GOOGLE_SECRET`        | Yes      | Google OAuth client secret                             |
 | `AUTH_SECRET`               | Yes      | Better Auth session encryption key                     |
 | `BETTER_AUTH_URL`           | Yes      | Public origin of this app (e.g. `http://localhost:3000`) |
+| `OAUTH_PROXY_URL`           | No       | Staging origin for Google OAuth callbacks on Vercel previews |
+| `OAUTH_PROXY_SECRET`        | No       | Shared secret for the preview↔staging OAuth proxy handoff |
 | `ADMIN_EMAILS`              | No       | Comma-separated email allowlist for the workspace admin role. Listed users are auto-promoted to admin on every sign-in (one-way). Once at least one admin exists, additional admins can be promoted via **Settings > Members**. |
 
 ## CI
