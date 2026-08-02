@@ -20,7 +20,7 @@ make db-reseed
 make dev
 ```
 
-Sign in at `/login` using the "Sign in (dev)" button with the seeded `alice@example.com` email — no password, no Google Workspace.
+Sign in at `/login` using the "Sign in (dev)" button with the seeded `alice@example.com` email — the form submits a shared seed password invisibly; no Google Workspace needed.
 
 ## Prerequisites
 
@@ -36,8 +36,10 @@ Create `web/.env` with the following. The first two are mandatory; the rest are 
 ```sh
 DATABASE_URL=postgres://localhost:5432/data-hub-local
 
-# Any 32+ character string. NextAuth uses it to sign session JWTs.
+# Any 32+ character string. Better Auth uses it to sign cookies / encrypt
+# session data (also accepted as `BETTER_AUTH_SECRET`).
 AUTH_SECRET=local-dev-secret-at-least-32-characters!!
+BETTER_AUTH_URL=http://localhost:3000
 
 # Dummy AWS credentials. The local-mirror branch in `web/lib/s3.ts`
 # bypasses the AWS SDK entirely when LOCAL_S3_MIRROR is set, but a
@@ -61,16 +63,16 @@ Explicitly **do not** set the following — leaving them unset is what makes the
 
 - `LAMBDA_FUNCTION_URL` — file reprocessing and "Download all" buttons surface a 503 / "Lambda not configured" message instead of trying to invoke a Function URL.
 - `SLACK_BOT_TOKEN`, `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET` — Slack DM/OAuth features are disabled when unset; the Settings > Notifications page renders a "Connect to Slack" button that is inert without these.
-- `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` — Google sign-in is unused locally; the dev Credentials provider handles auth. Deployed environments need a real client, from [Create a Google OAuth client](first-time-deployment.md#create-a-google-oauth-client).
+- `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` — Google sign-in is unused locally; the non-production email/password path handles auth. Deployed environments need a real client, from [Create a Google OAuth client](first-time-deployment.md#create-a-google-oauth-client).
 - `AWS_ROLE_ARN` — Vercel OIDC federation is for production. The local AWS SDK falls back to the static credentials above.
 
 ## Sign in (dev only)
 
-`web/lib/auth.ts` registers a `Credentials` provider with id `"dev"` when `process.env.NODE_ENV !== "production"`. The `/login` page renders a matching "Sign in (dev)" form under the Google button. The form accepts any email present in the `user` table and mints a session via the existing JWT strategy — `users.is_admin` is read on sign-in just like for Google sign-ins, so the seeded `alice@example.com` lands as a workspace admin.
+`web/lib/auth.ts` enables Better Auth's `emailAndPassword` provider when `process.env.NODE_ENV !== "production"` (with sign-up disabled). The `/login` page renders a matching "Sign in (dev)" form under the Google button. The form accepts any seeded email and submits the shared seed password from `web/lib/dev-auth.ts` invisibly — `seedDevUser` / `seedTeammates` write a `credential` account row with that password hashed. `users.is_admin` is promoted from `ADMIN_EMAILS` on session create just like for Google sign-ins, so the seeded `alice@example.com` lands as a workspace admin.
 
-The dev provider is **not** instantiated in production builds. The form is also conditionally rendered server-side, so a production `npm run build` never ships the affordance.
+Email/password is **not** enabled in production builds. The form is also conditionally rendered server-side, so a production `npm run build` never ships the affordance.
 
-To sign in as a non-admin user instead, seed an extra row manually (or edit `web/scripts/seed-database.ts`) and enter their email in the form.
+To sign in as a non-admin user instead, enter a seeded teammate email (Bob–Zoe) in the form.
 
 ## Using the seeded PAT
 

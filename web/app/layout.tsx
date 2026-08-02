@@ -2,8 +2,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 
 import "@/app/globals.css";
 import type { Metadata } from "next";
-import { cookies } from "next/headers";
-import { SessionProvider } from "next-auth/react";
+import { cookies, headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { AppSidebar } from "@/components/app-sidebar";
 import { NotificationBell } from "@/components/notifications/notification-bell";
@@ -23,7 +23,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { countUnread } from "@/lib/api/notifications";
 import { getSidebarInstruments } from "@/lib/api/sidebar";
-import { auth, signOut } from "@/lib/auth";
+import { auth, authInstance } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
@@ -131,49 +131,48 @@ export default async function RootLayout({
       suppressHydrationWarning
     >
       <body suppressHydrationWarning>
-        <SessionProvider session={session}>
-          <ThemeProvider>
-            <TimezoneCookieSync serverTimeZone={serverTimeZone} />
-            <NuqsAdapter>
-              <TooltipProvider>
-                <PreviewDeploymentBanner />
-                {session ? (
-                  <NotificationsProvider
-                    initialUnreadCount={initialUnreadCount}
-                  >
-                    <ArchiveDownloadProvider>
-                      <SidebarProvider defaultOpen={sidebarDefaultOpen}>
-                        <AppSidebar
-                          instruments={instruments}
-                          session={session}
-                          signOutAction={async () => {
-                            "use server";
-                            await signOut({ redirectTo: "/login" });
-                          }}
-                        />
-                        <SidebarInset className="pb-12">
-                          <header className="flex h-14 shrink-0 items-center justify-between gap-2 px-4">
-                            <div className="flex h-8 items-center">
-                              <SidebarTrigger />
-                            </div>
-                            <div className="flex h-8 items-center gap-2">
-                              <SearchTrigger />
-                              <NotificationBell />
-                            </div>
-                          </header>
-                          {children}
-                        </SidebarInset>
-                      </SidebarProvider>
-                    </ArchiveDownloadProvider>
-                  </NotificationsProvider>
-                ) : (
-                  children
-                )}
-                <Toaster />
-              </TooltipProvider>
-            </NuqsAdapter>
-          </ThemeProvider>
-        </SessionProvider>
+        <ThemeProvider>
+          <TimezoneCookieSync serverTimeZone={serverTimeZone} />
+          <NuqsAdapter>
+            <TooltipProvider>
+              <PreviewDeploymentBanner />
+              {session ? (
+                <NotificationsProvider initialUnreadCount={initialUnreadCount}>
+                  <ArchiveDownloadProvider>
+                    <SidebarProvider defaultOpen={sidebarDefaultOpen}>
+                      <AppSidebar
+                        instruments={instruments}
+                        session={session}
+                        signOutAction={async () => {
+                          "use server";
+                          await authInstance.api.signOut({
+                            headers: await headers(),
+                          });
+                          redirect("/login");
+                        }}
+                      />
+                      <SidebarInset className="pb-12">
+                        <header className="flex h-14 shrink-0 items-center justify-between gap-2 px-4">
+                          <div className="flex h-8 items-center">
+                            <SidebarTrigger />
+                          </div>
+                          <div className="flex h-8 items-center gap-2">
+                            <SearchTrigger />
+                            <NotificationBell />
+                          </div>
+                        </header>
+                        {children}
+                      </SidebarInset>
+                    </SidebarProvider>
+                  </ArchiveDownloadProvider>
+                </NotificationsProvider>
+              ) : (
+                children
+              )}
+              <Toaster />
+            </TooltipProvider>
+          </NuqsAdapter>
+        </ThemeProvider>
       </body>
     </html>
   );

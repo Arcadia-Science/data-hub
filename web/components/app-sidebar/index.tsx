@@ -1,6 +1,5 @@
 import Image from "next/image";
 import Link from "next/link";
-import type { Session } from "next-auth";
 import { AppSidebarContent } from "@/components/app-sidebar/app-sidebar-content";
 import { UserMenuFooter } from "@/components/app-sidebar/user-menu-footer";
 import {
@@ -13,6 +12,7 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar";
 import type { SidebarInstrument } from "@/lib/api/sidebar";
+import type { Session } from "@/lib/auth";
 
 interface AppSidebarProps {
   instruments: SidebarInstrument[];

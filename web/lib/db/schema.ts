@@ -1,4 +1,3 @@
-import type { AdapterAccountType } from "@auth/core/adapters";
 import { sql } from "drizzle-orm";
 import {
   bigint,
@@ -86,18 +85,20 @@ export const archiveJobStatusEnum = pgEnum("archive_job_status", [
 ]);
 
 export const users = pgTable("user", {
-  // Auth.js-generated user ID.
+  // Better Auth-generated user ID (preserved across the Auth.js migration).
   id: text("id")
     .primaryKey()
     .$defaultFn(() => crypto.randomUUID()),
-  // Display name from Google profile.
-  name: text("name"),
-  // Google email address.
-  email: text("email").unique(),
-  // When the email was verified.
-  emailVerified: timestamp("emailVerified", { mode: "date" }),
+  // Display name from Google profile (or seed).
+  name: text("name").notNull(),
+  // Google / credential email address.
+  email: text("email").notNull().unique(),
+  // Whether the email has been verified (Google SSO always sets true).
+  emailVerified: boolean("emailVerified").notNull().default(false),
   // Profile image URL from Google.
   image: text("image"),
+  createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
+  updatedAt: timestamp("updatedAt", { mode: "date" }).notNull().defaultNow(),
   // Workspace-wide admin flag. Bootstrapped from the `ADMIN_EMAILS` env var
   // at sign-in (see `web/lib/auth.ts`); subsequent toggles happen via the
   // admin-only `/settings/members` page. Used to gate session-authenticated
@@ -110,46 +111,67 @@ export const users = pgTable("user", {
 export const accounts = pgTable(
   "account",
   {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
     userId: text("userId")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    // Account type (e.g., `oauth`).
-    type: text("type").$type<AdapterAccountType>().notNull(),
-    // OAuth provider (e.g., `google`).
-    provider: text("provider").notNull(),
-    // Provider's user ID.
-    providerAccountId: text("providerAccountId").notNull(),
-    // OAuth refresh token.
-    refresh_token: text("refresh_token"),
-    // OAuth access token.
-    access_token: text("access_token"),
-    // Token expiry (Unix timestamp).
-    expires_at: integer("expires_at"),
-    token_type: text("token_type"),
-    scope: text("scope"),
-    id_token: text("id_token"),
-    session_state: text("session_state"),
-  },
-  (account) => [
-    primaryKey({
-      columns: [account.provider, account.providerAccountId],
+    // Provider's account ID, or the user id for `credential` accounts.
+    accountId: text("accountId").notNull(),
+    // OAuth provider id (e.g. `google`) or `credential` for email/password.
+    providerId: text("providerId").notNull(),
+    accessToken: text("accessToken"),
+    refreshToken: text("refreshToken"),
+    idToken: text("idToken"),
+    accessTokenExpiresAt: timestamp("accessTokenExpiresAt", { mode: "date" }),
+    refreshTokenExpiresAt: timestamp("refreshTokenExpiresAt", {
+      mode: "date",
     }),
-    index("idx_accounts_user_id").on(account.userId),
-  ]
+    scope: text("scope"),
+    // Hashed password for `credential` accounts (dev email/password only).
+    password: text("password"),
+    createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt", { mode: "date" }).notNull().defaultNow(),
+  },
+  (account) => [index("idx_accounts_user_id").on(account.userId)]
 );
 
 export const sessions = pgTable(
   "session",
   {
-    // Opaque session token.
-    sessionToken: text("sessionToken").primaryKey(),
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    // Opaque session token (also the session cookie value).
+    token: text("token").notNull().unique(),
     userId: text("userId")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    // Session expiry.
-    expires: timestamp("expires", { mode: "date" }).notNull(),
+    expiresAt: timestamp("expiresAt", { mode: "date" }).notNull(),
+    ipAddress: text("ipAddress"),
+    userAgent: text("userAgent"),
+    createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt", { mode: "date" }).notNull().defaultNow(),
   },
   (session) => [index("idx_sessions_user_id").on(session.userId)]
+);
+
+export const verifications = pgTable(
+  "verification",
+  {
+    id: text("id")
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    identifier: text("identifier").notNull(),
+    value: text("value").notNull(),
+    expiresAt: timestamp("expiresAt", { mode: "date" }).notNull(),
+    createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
+    updatedAt: timestamp("updatedAt", { mode: "date" }).notNull().defaultNow(),
+  },
+  (verification) => [
+    index("idx_verification_identifier").on(verification.identifier),
+  ]
 );
 
 // Singleton row of server-advertised watcher release metadata, served by

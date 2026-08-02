@@ -13,6 +13,7 @@ import { createHash } from "node:crypto";
 import { copyFile, mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { hashPassword } from "better-auth/crypto";
 import { getTableName, isTable, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import {
@@ -22,6 +23,7 @@ import {
   startOfTodayISO,
   startOfWeekISO,
 } from "@/lib/date";
+import { DEV_PASSWORD } from "@/lib/dev-auth";
 import { generateToken, getTokenPrefix, hashToken } from "@/lib/tokens";
 // biome-ignore lint/performance/noNamespaceImport: seed needs the full schema module for Db typing and table iteration
 import * as schema from "./schema";
@@ -103,6 +105,19 @@ export interface SeedUserResult {
   userId: string;
 }
 
+async function seedCredentialAccount(db: Db, userId: string): Promise<void> {
+  // Better Auth stores passwords on a `credential` account row, not the
+  // user. Shared `DEV_PASSWORD` lets the "Sign in (dev)" form submit an
+  // invisible password for any seeded email.
+  await db.insert(schema.accounts).values({
+    id: crypto.randomUUID(),
+    userId,
+    accountId: userId,
+    providerId: "credential",
+    password: await hashPassword(DEV_PASSWORD),
+  });
+}
+
 export async function seedDevUser(
   db: Db,
   options: SeedUserOptions = {}
@@ -114,8 +129,10 @@ export async function seedDevUser(
     id: userId,
     name: options.name ?? "Test User",
     email,
+    emailVerified: true,
     isAdmin: options.isAdmin ?? false,
   });
+  await seedCredentialAccount(db, userId);
 
   const plaintext = generateToken();
   const [pat] = await db
@@ -1586,9 +1603,13 @@ export async function seedTeammates(
     id: crypto.randomUUID(),
     name: preset.name,
     email: preset.email,
+    emailVerified: true,
     isAdmin: false,
   }));
   await db.insert(schema.users).values(rows);
+  for (const row of rows) {
+    await seedCredentialAccount(db, row.id);
+  }
   return rows.map((r) => ({ id: r.id, name: r.name, email: r.email }));
 }
 

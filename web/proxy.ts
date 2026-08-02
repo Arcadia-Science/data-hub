@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { getSessionCookie } from "better-auth/cookies";
+import { type NextRequest, NextResponse } from "next/server";
 
 // Routes whose page bodies must be reachable without a session so that link
 // unfurlers (Slack, Notion, etc.) and signed-out humans can read the page
@@ -30,8 +30,8 @@ const publicPrefixes = [
 // page surfaces watcher config YAML / hostnames).
 const publicExactPaths = new Set(["/", "/watchers"]);
 
-export const proxy = auth((req) => {
-  const { pathname } = req.nextUrl;
+export function proxy(request: NextRequest) {
+  const { pathname } = request.nextUrl;
 
   const isPublic =
     publicExactPaths.has(pathname) ||
@@ -42,13 +42,16 @@ export const proxy = auth((req) => {
     return NextResponse.next();
   }
 
-  if (!req.auth) {
-    const loginUrl = new URL("/login", req.url);
+  // Cookie presence only — optimistic redirect. Pages still call `auth()`
+  // / `SignInRequired` for the real session check.
+  const sessionCookie = getSessionCookie(request);
+  if (!sessionCookie) {
+    const loginUrl = new URL("/login", request.url);
     return NextResponse.redirect(loginUrl);
   }
 
   return NextResponse.next();
-});
+}
 
 export const config = {
   // Paths excluded from the matcher entirely (middleware never runs):
@@ -66,8 +69,8 @@ export const config = {
   //     `icon\..+` missed `/icon`, which redirected unfurlers/browsers to
   //     `/login` and broke the favicon and OG images on link previews.
   //
-  // Excluding instead of allow-listing also avoids running `auth()` +
-  // a DB lookup on every asset fetch.
+  // Excluding instead of allow-listing also avoids running auth checks on
+  // every asset fetch.
   matcher: [
     "/((?!_next/static|_next/image|favicon.ico|images/|robots.txt|sitemap.xml|icon|apple-icon|opengraph-image|twitter-image).*)",
   ],

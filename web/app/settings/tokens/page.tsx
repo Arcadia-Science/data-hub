@@ -45,7 +45,7 @@ export default async function TokensPage() {
   // short-circuit page rendering — without this check the `db.select` below
   // would still execute (its result is then discarded by the layout, but
   // it's wasted DB work and a 500 from this query would slip past the
-  // layout guard). NextAuth dedupes `auth()` per request, so the duplicate
+  // layout guard). `auth()` is React-cached per request, so the duplicate
   // call is free.
   const session = await auth();
   if (!session?.user) {

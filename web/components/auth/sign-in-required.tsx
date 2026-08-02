@@ -26,7 +26,7 @@ interface SignInRequiredProps {
  * Mirrors the visual shell of `app/login/page.tsx` (including the
  * non-production dev sign-in affordance) so the experience is
  * indistinguishable from hitting `/login` directly. Both gates pull from
- * the same `isDevAuthEnabled` flag in `lib/auth.ts`.
+ * the same `isDevAuthEnabled` flag in `lib/dev-auth.ts`.
  */
 export function SignInRequired({ callbackUrl, children }: SignInRequiredProps) {
   return (
