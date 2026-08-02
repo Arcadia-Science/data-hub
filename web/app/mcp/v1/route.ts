@@ -1,9 +1,11 @@
-import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
-import { authenticateWithToken } from "@/lib/api/auth";
+import { authBaseURL } from "@/lib/auth";
+import { verifyMcpToken } from "@/lib/mcp/auth";
 import { registerPrompts } from "@/lib/mcp/prompts";
 import { registerResources } from "@/lib/mcp/resources";
 import { registerTools } from "@/lib/mcp/tools";
+
+export const maxDuration = 60;
 
 const handler = createMcpHandler(
   (server) => {
@@ -12,50 +14,24 @@ const handler = createMcpHandler(
     registerPrompts(server);
   },
   {
+    serverInfo: { name: "data-hub", version: "1.0.0" },
     capabilities: {
       tools: {},
       resources: {},
       prompts: {},
     },
-  },
-  {
-    // `basePath` can only ever derive `<base>/mcp`, so the versioned
-    // `/mcp/v1` path has to be set through the (deprecated but still
-    // honored) explicit endpoint option — `mcp-handler` matches
-    // `url.pathname` against it exactly.
-    streamableHttpEndpoint: "/mcp/v1",
-    maxDuration: 60,
+    verboseLogs: process.env.NODE_ENV !== "production",
   }
 );
 
-// Pass the PAT's resource scopes through to the MCP layer unchanged. Each
-// tool checks the same `<resource>:<action>` scope its REST counterpart
-// does (see `requireMcpScope` in `lib/mcp/tools.ts`), so there's no
-// MCP-specific scope vocabulary and no connect-time gate beyond a valid
-// token. The `*` wildcard from legacy/backfilled tokens is honored by
-// `hasScope`, so deployed watchers and the Lambda keep working.
-//
-// TODO: Replace admin-minted PATs with an OAuth authorization-code flow so
-// members can authorize their own MCP client. Binding a PAT to a user fixes
-// write attribution (claim_run, etc.), but sharing a long-lived secret is a
-// stopgap until each user can grant access without an admin minting a token.
-const verifyToken = async (
-  req: Request,
-  bearerToken?: string
-): Promise<AuthInfo | undefined> => {
-  const result = await authenticateWithToken(req);
-  if (!result) {
-    return;
-  }
-
-  return {
-    token: bearerToken ?? "",
-    clientId: result.userId,
-    scopes: result.scopes,
-    extra: { userId: result.userId, authMethod: result.authMethod },
-  };
-};
-
-const authHandler = withMcpAuth(handler, verifyToken, { required: true });
+// withMcpAuth treats resourceUrl as an origin and concatenates
+// resourceMetadataPath onto it for the WWW-Authenticate challenge — so pass
+// the app origin, not `mcpResourceAudience` (`…/mcp/v1`).
+const authHandler = withMcpAuth(handler, verifyMcpToken, {
+  required: true,
+  requiredScopes: ["read"],
+  resourceMetadataPath: "/.well-known/oauth-protected-resource/mcp/v1",
+  resourceUrl: authBaseURL,
+});
 
 export { authHandler as GET, authHandler as POST };

@@ -287,6 +287,10 @@ export async function setup() {
     // Shared secret the cron sweep route checks. Tests send the same value
     // as a Bearer token (see upload-queue-sweep.test.ts).
     CRON_SECRET: "test-cron-secret",
+    // MCP HTTP suite authenticates with PATs. Production-like `next start`
+    // disables that fallback unless this flag is set (VERCEL_ENV is unset
+    // locally, so the gate is only MCP_ALLOW_PAT_AUTH).
+    MCP_ALLOW_PAT_AUTH: "true",
   };
   // Strip the Lambda Function URL so "not configured" test cases work
   // regardless of the developer's local .env. Tests that need a stubbed

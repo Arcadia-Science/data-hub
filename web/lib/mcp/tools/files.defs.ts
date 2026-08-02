@@ -7,7 +7,6 @@ export const getFileTool = {
   description:
     "Get detailed metadata for a single file by its numeric ID, including status, S3 location, size, extracted metadata, and any error message.",
   group: "files",
-  scope: "files:read",
   inputSchema: { fileId: z.number().int().describe("Numeric file ID") },
   annotations: { readOnlyHint: true },
 } as const satisfies McpToolDef;
@@ -18,7 +17,6 @@ export const getFileDownloadUrlTool = {
   description:
     "Get a short-lived pre-signed S3 URL to download the raw file contents. URL expires after 15 minutes.",
   group: "files",
-  scope: "files:read",
   inputSchema: { fileId: z.number().int().describe("Numeric file ID") },
   annotations: { readOnlyHint: true },
 } as const satisfies McpToolDef;
@@ -29,7 +27,6 @@ export const getRunArchiveTool = {
   description:
     "Get a downloadable ZIP archive of every active, uploaded file in a run. If the archive is already cached, returns a short-lived (15 min) pre-signed S3 URL the caller can fetch directly without auth — paste it into a browser or share it as a download link. If the archive isn't cached, kicks off an async build and returns `{ status: 'building', jobId, retryAfterSeconds }`; call this tool again after the suggested wait to poll for completion. Most archives finish in a few seconds; large runs may take a minute or two. Mirrors the REST `download-archive` route, including its dedup-by-fingerprint cache, so concurrent callers share a single Lambda invocation.",
   group: "files",
-  scope: "files:read",
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
     runId: z.string().describe("Run identifier within the instrument"),
@@ -43,7 +40,6 @@ export const reprocessFileTool = {
   description:
     "Re-run the Lambda processing workflow for an uploaded, failed, or completed file on an instrument that has a Lambda processor. Transitions the file back to 'processing'. Use this to retry after a parser fix, transient Lambda failure, or a stuck upload that never entered processing.",
   group: "files",
-  scope: "files:reprocess",
   inputSchema: { fileId: z.number().int().describe("Numeric file ID") },
   // destructiveHint is true because the tool resets status/errorMessage/
   // processedAt. The Lambda re-processes the file, but the mutation is
@@ -57,7 +53,6 @@ export const dismissFileTool = {
   description:
     "Soft-delete a detected or upload_requested file (UI 'dismiss'). Uploaded files cannot be dismissed — delete the run instead. Idempotent: dismissing an already-dismissed file succeeds as a no-op.",
   group: "files",
-  scope: "files:delete",
   inputSchema: { fileId: z.number().int().describe("Numeric file ID") },
   annotations: {
     readOnlyHint: false,

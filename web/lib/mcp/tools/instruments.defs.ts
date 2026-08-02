@@ -7,7 +7,6 @@ export const listInstrumentsTool = {
   description:
     "List all registered lab instruments with run counts, watcher status, and file patterns. Optionally filter by status.",
   group: "instruments",
-  scope: "instruments:read",
   inputSchema: {
     status: z
       .enum(["pending", "active", "inactive"])
@@ -23,7 +22,6 @@ export const getInstrumentTool = {
   description:
     "Get detailed information about a specific instrument, including watcher online/offline counts and file patterns.",
   group: "instruments",
-  scope: "instruments:read",
   inputSchema: {
     instrumentId: z
       .string()

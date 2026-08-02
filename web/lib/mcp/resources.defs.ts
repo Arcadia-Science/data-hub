@@ -12,7 +12,7 @@ export const instrumentsResource = {
 export const meResource = {
   name: "me",
   description:
-    "Authenticated PAT owner's identity (id, name, email, image, isAdmin). Same payload as the get_me tool.",
+    "Authenticated user's identity (id, name, email, image, isAdmin). Same payload as the get_me tool.",
   mimeType: "application/json",
   kind: "static",
   uri: "datahub://me",

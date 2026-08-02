@@ -6,7 +6,7 @@ import { Suspense } from "react";
 import { AuthErrorBanner } from "@/components/auth/auth-error-banner";
 import { redirectWithAuthError } from "@/components/auth/auth-sign-in-error";
 import { DevSignInForm } from "@/components/auth/dev-sign-in-form";
-import { Button } from "@/components/ui/button";
+import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
 import { authInstance } from "@/lib/auth";
 import { isDevAuthEnabled } from "@/lib/dev-auth";
 import { DOCS_URL, QUICKSTART_DOCS_URL } from "@/lib/docs";
@@ -36,41 +36,31 @@ const FEATURES = [
   },
 ] as const;
 
-function GoogleIcon() {
-  return (
-    <svg
-      aria-hidden
-      className="size-5"
-      viewBox="0 0 48 48"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <title>Google</title>
-      <path
-        d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"
-        fill="#EA4335"
-      />
-      <path
-        d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"
-        fill="#4285F4"
-      />
-      <path
-        d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"
-        fill="#FBBC05"
-      />
-      <path
-        d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"
-        fill="#34A853"
-      />
-    </svg>
-  );
-}
-
 export function AuthScreen({
   callbackUrl,
   heading,
   devInputId,
   children,
 }: AuthScreenProps) {
+  async function signInWithGoogle() {
+    "use server";
+    try {
+      const result = await authInstance.api.signInSocial({
+        body: {
+          provider: "google",
+          callbackURL: callbackUrl,
+        },
+        headers: await headers(),
+      });
+      if (result.url) {
+        redirect(result.url);
+      }
+    } catch (error) {
+      unstable_rethrow(error);
+    }
+    redirectWithAuthError(callbackUrl, "google");
+  }
+
   return (
     <div className="grid min-h-[calc(100svh_-_var(--banner-height,0px))] w-full lg:grid-cols-2">
       <div className="flex flex-col bg-background">
@@ -94,37 +84,15 @@ export function AuthScreen({
               </p>
             ) : null}
 
-            <form
-              action={async () => {
-                "use server";
-                try {
-                  const result = await authInstance.api.signInSocial({
-                    body: {
-                      provider: "google",
-                      callbackURL: callbackUrl,
-                    },
-                    headers: await headers(),
-                  });
-                  if (result.url) {
-                    redirect(result.url);
-                  }
-                } catch (error) {
-                  unstable_rethrow(error);
+            <div className="mt-8 w-full">
+              <Suspense
+                fallback={
+                  <div className="h-11 w-full animate-pulse rounded-md bg-muted" />
                 }
-                redirectWithAuthError(callbackUrl, "google");
-              }}
-              className="mt-8 w-full"
-            >
-              <Button
-                className="h-11 w-full cursor-pointer gap-3 bg-background text-base shadow-xs"
-                size="lg"
-                type="submit"
-                variant="outline"
               >
-                <GoogleIcon />
-                Sign in with Google
-              </Button>
-            </form>
+                <GoogleSignInButton signInAction={signInWithGoogle} />
+              </Suspense>
+            </div>
 
             <Suspense fallback={null}>
               <AuthErrorBanner />

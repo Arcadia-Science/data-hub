@@ -12,12 +12,17 @@ import { type NextRequest, NextResponse } from "next/server";
 // matching `/api/v1foo` (or `/login` from matching `/loginz`, etc.).
 const publicPrefixes = [
   "/login",
+  // OAuth consent UI — reachable mid-authorize before a session exists
+  // (the page itself redirects to `/login` when unsigned).
+  "/consent",
   "/api/auth",
   "/api/v1",
   // The MCP server authenticates with a personal access token, never a
   // session cookie — a redirect to `/login` would surface as an opaque
   // HTML response to MCP clients instead of a 401.
   "/mcp",
+  // RFC 8414 / 9728 discovery documents for MCP OAuth clients.
+  "/.well-known",
   // Cron jobs (e.g. the upload-queue sweep) are invoked by Vercel Cron with no
   // user session — they authenticate themselves via `CRON_SECRET`. Without
   // this, the middleware redirects them to `/login` and the job never runs.

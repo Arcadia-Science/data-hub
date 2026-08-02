@@ -6,7 +6,6 @@ import { RUN_STATUS_VALUES } from "@/lib/runs/run-status";
 export const searchRunsTool = {
   name: "search_runs",
   group: "runs",
-  scope: "runs:read",
   title: "Search Runs",
   description:
     "Search instrument runs with filtering, pagination, and sorting. Supports run status filters and instrument-metadata filters (plate reader, gel-doc, qPCR, Hina microscope, Epson scanner). Prefer global_search when the query may match filenames, instrument names, or attributor names rather than run IDs. Discover valid metadata filter values via datahub://instruments/{id}/filter-options (or datahub://glossary for routing tips).",
@@ -75,7 +74,6 @@ export const searchRunsTool = {
 export const getRunTool = {
   name: "get_run",
   group: "runs",
-  scope: "runs:read",
   title: "Get Run",
   description:
     "Get details for a specific instrument run by its natural key (instrument ID + run ID). Returns metadata, timestamps, instrument info, and attributions by default. Pass include to attach the first page of files, comments, and/or a failure_summary without extra tool calls. For processed measurement samples prefer get_run_report.",
@@ -95,7 +93,6 @@ export const getRunTool = {
 export const getRunReportTool = {
   name: "get_run_report",
   group: "runs",
-  scope: "files:read",
   title: "Get Run Report",
   description:
     "Return an analysis-ready summary for a run: file counts, failure summary, image/report file refs, and a bounded processed-CSV sample (columns + first rows). Prefer this over downloading full CSVs when comparing or summarizing experimental results.",
@@ -109,7 +106,6 @@ export const getRunReportTool = {
 export const listRunFilesTool = {
   name: "list_run_files",
   group: "runs",
-  scope: "runs:read",
   title: "List Run Files",
   description:
     "List files associated with a run (raw uploads and processed artifacts) with their status, category, and size. Paginated — runs can have thousands of files. Use the page/perPage arguments to walk the full list, and use get_file for full per-file detail including metadata and S3 location.",
@@ -136,7 +132,6 @@ export const listRunFilesTool = {
 export const claimRunTool = {
   name: "claim_run",
   group: "attribution",
-  scope: "runs:attribute",
   title: "Claim Run",
   description:
     "Mark a run as performed by the authenticated user. Idempotent — claiming a run you already claimed is a no-op. Only self-attribution is supported; you cannot claim a run on behalf of another user.",
@@ -154,7 +149,6 @@ export const claimRunTool = {
 export const unclaimRunTool = {
   name: "unclaim_run",
   group: "attribution",
-  scope: "runs:attribute",
   title: "Unclaim Run",
   description:
     "Remove the authenticated user's attribution from a run. Idempotent — unclaiming a run you don't currently claim is a no-op. Only self-attribution is supported; you cannot remove another user's attribution.",
@@ -174,7 +168,6 @@ export const unclaimRunTool = {
 export const listRunAttributorsTool = {
   name: "list_run_attributors",
   group: "attribution",
-  scope: "runs:read",
   title: "List Run Attributors",
   description:
     "List distinct users who have claimed at least one run on a given instrument. Use the returned userId with search_runs ranBy=<userId>.",
@@ -187,7 +180,6 @@ export const listRunAttributorsTool = {
 export const listRunCommentsTool = {
   name: "list_run_comments",
   group: "comments",
-  scope: "runs:read",
   title: "List Run Comments",
   description:
     "List comments on a run (oldest first), including author display info.",
@@ -201,7 +193,6 @@ export const listRunCommentsTool = {
 export const addRunCommentTool = {
   name: "add_run_comment",
   group: "comments",
-  scope: "runs:comment",
   title: "Add Run Comment",
   description:
     "Add a comment on a run as the authenticated user. Author is taken from the token — you cannot comment as another user.",
@@ -216,7 +207,6 @@ export const addRunCommentTool = {
 export const editRunCommentTool = {
   name: "edit_run_comment",
   group: "comments",
-  scope: "runs:comment",
   title: "Edit Run Comment",
   description:
     "Edit one of your own comments. Returns an error if the comment is missing or authored by someone else.",
@@ -230,7 +220,6 @@ export const editRunCommentTool = {
 export const deleteRunCommentTool = {
   name: "delete_run_comment",
   group: "comments",
-  scope: "runs:comment",
   title: "Delete Run Comment",
   description:
     "Soft-delete one of your own comments. Idempotent if already deleted.",
@@ -247,7 +236,6 @@ export const deleteRunCommentTool = {
 export const reprocessRunTool = {
   name: "reprocess_run",
   group: "runs",
-  scope: "runs:reprocess",
   title: "Reprocess Run",
   description:
     "Re-run Lambda processing for every uploaded, completed, or failed file on a run. The instrument must have a Lambda processor. Prefer this over looping reprocess_file for bulk retries after a parser fix or to kick stuck uploads.",
@@ -264,7 +252,6 @@ export const reprocessRunTool = {
 export const deleteRunTool = {
   name: "delete_run",
   group: "runs",
-  scope: "runs:delete",
   title: "Delete Run",
   description:
     "Soft-delete a run (sets deleted_at). Does not remove files or S3 objects. Use restore_run to undo. Idempotent: deleting an already-deleted run succeeds as a no-op.",
@@ -282,7 +269,6 @@ export const deleteRunTool = {
 export const restoreRunTool = {
   name: "restore_run",
   group: "runs",
-  scope: "runs:delete",
   title: "Restore Run",
   description:
     "Restore a soft-deleted run by clearing deleted_at. Idempotent: restoring a run that is not deleted succeeds as a no-op.",
@@ -300,7 +286,6 @@ export const restoreRunTool = {
 export const requestRunUploadTool = {
   name: "request_run_upload",
   group: "runs",
-  scope: "runs:upload",
   title: "Request Run Upload",
   description:
     "Queue specific detected files for watcher upload (max 100). Requires an online watcher. Idempotent for files already in upload_requested.",
@@ -323,7 +308,6 @@ export const requestRunUploadTool = {
 export const requestRunUploadAllTool = {
   name: "request_run_upload_all",
   group: "runs",
-  scope: "runs:upload",
   title: "Request Run Upload All",
   description:
     "Queue every detected file on a run for watcher upload. Requires an online watcher.",

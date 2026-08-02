@@ -1,5 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { type McpServer, ResourceTemplate } from "@modelcontextprotocol/server";
 import { getInstruments, getUserById } from "@/lib/api/dashboard";
 import { getInstrumentFilterOptions } from "@/lib/api/instrument-runs";
 import {
@@ -71,8 +70,8 @@ export function registerResources(server: McpServer) {
       description: meResource.description,
       mimeType: meResource.mimeType,
     },
-    async (_uri, extra) => {
-      const userId = getMcpUserId(extra.authInfo);
+    async (_uri, ctx) => {
+      const userId = getMcpUserId(ctx.http?.authInfo);
       if (!userId) {
         return {
           contents: [
@@ -158,7 +157,7 @@ export function registerResources(server: McpServer) {
       description: instrumentFilterOptionsResource.description,
       mimeType: instrumentFilterOptionsResource.mimeType,
     },
-    async (_uri, variables) => {
+    async (_uri, variables, _ctx) => {
       const instrumentId = Array.isArray(variables.instrumentId)
         ? variables.instrumentId[0]
         : variables.instrumentId;

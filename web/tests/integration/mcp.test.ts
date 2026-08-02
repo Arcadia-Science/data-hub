@@ -4,6 +4,7 @@ import * as schema from "@/lib/db/schema";
 import {
   api,
   closeTestDb,
+  getBaseUrl,
   getTestDb,
   resetDb,
   seedTestUser,
@@ -111,6 +112,11 @@ describe("MCP Server (HTTP)", () => {
       }),
     });
     expect(res.status).toBe(401);
+    const challenge = res.headers.get("WWW-Authenticate") ?? "";
+    expect(challenge).toMatch(/^Bearer\b/i);
+    expect(challenge).toContain(
+      `resource_metadata="${getBaseUrl()}/.well-known/oauth-protected-resource/mcp/v1"`
+    );
   });
 
   // ---- Initialize ----------------------------------------------------------
@@ -525,20 +531,15 @@ describe("MCP Server (HTTP)", () => {
     expect(JSON.parse(afterRestore.content[0].text).deletedAt).toBeNull();
   });
 
-  // ---- PAT scope enforcement -----------------------------------------------
+  // ---- PAT scope enforcement (coarse read / write) -------------------------
   //
-  // Each MCP tool calls `requireMcpScope(authInfo, "<resource>:<action>")`
-  // matching its REST counterpart (see `lib/mcp/tools.ts`). These tests seed
-  // a PAT with a narrow scope set and confirm that:
-  //   - tools whose required scope is granted execute normally;
-  //   - tools whose required scope is missing return `isError: true` with
-  //     a "missing required scope: <scope>" message.
-  //
-  // The scope guard runs before any DB lookup, so we don't need to seed
-  // the file/run referenced by the call — a non-existent id is fine since
-  // the call should be rejected at the guard, not at the lookup.
+  // `verifyMcpToken` flattens fine-grained PAT scopes to the OAuth pair
+  // (`read` always; `write` when any PAT scope is `*` or a non-`read`
+  // action). Transport already requires `read`; mutating tools call
+  // `requireMcpWrite`. The write guard runs before DB lookup, so a
+  // nonexistent id is enough to assert a missing-scope rejection.
 
-  it("['runs:read'] can call search_runs but not claim_run", async () => {
+  it("read-only PAT can call search_runs but not claim_run", async () => {
     const { token: scopedToken } = await seedTestUser({
       scopes: ["runs:read"],
     });
@@ -552,17 +553,15 @@ describe("MCP Server (HTTP)", () => {
       scopedToken
     );
     expect(claim.isError).toBe(true);
-    expect(claim.content[0].text).toMatch(
-      /missing required scope: runs:attribute/
-    );
+    expect(claim.content[0].text).toMatch(/missing required scope: write/);
   });
 
-  it("['files:read'] can call get_file but not reprocess_file", async () => {
+  it("read-only PAT can reach get_file lookup but not reprocess_file", async () => {
     const { token: scopedToken } = await seedTestUser({
       scopes: ["files:read"],
     });
 
-    // get_file with a nonexistent id still passes the scope guard; it
+    // get_file with a nonexistent id still passes the write gate; it
     // surfaces a "not found" error instead of a missing-scope error.
     const getFile = await callTool("get_file", { fileId: 99_999 }, scopedToken);
     expect(getFile.isError).toBe(true);
@@ -575,12 +574,10 @@ describe("MCP Server (HTTP)", () => {
       scopedToken
     );
     expect(reprocess.isError).toBe(true);
-    expect(reprocess.content[0].text).toMatch(
-      /missing required scope: files:reprocess/
-    );
+    expect(reprocess.content[0].text).toMatch(/missing required scope: write/);
   });
 
-  it("['watchers:read'] can call list_watchers but not list_instruments", async () => {
+  it("read-only PAT can call any read tool (scopes no longer resource-gated)", async () => {
     const { token: scopedToken } = await seedTestUser({
       scopes: ["watchers:read"],
     });
@@ -589,33 +586,44 @@ describe("MCP Server (HTTP)", () => {
     expect(watchers.isError).toBeFalsy();
 
     const instruments = await callTool("list_instruments", {}, scopedToken);
-    expect(instruments.isError).toBe(true);
-    expect(instruments.content[0].text).toMatch(
-      /missing required scope: instruments:read/
-    );
+    expect(instruments.isError).toBeFalsy();
   });
 
-  it("[] is denied on every protected tool", async () => {
+  it("write-capable PAT can call mutating tools", async () => {
+    const { token: scopedToken } = await seedTestUser({
+      scopes: ["runs:attribute"],
+    });
+
+    const claim = await callTool(
+      "claim_run",
+      { instrumentId, runId },
+      scopedToken
+    );
+    expect(claim.isError).toBeFalsy();
+
+    // Nonexistent file: write gate passes, then the helper returns not-found.
+    const reprocess = await callTool(
+      "reprocess_file",
+      { fileId: 99_999 },
+      scopedToken
+    );
+    expect(reprocess.isError).toBe(true);
+    expect(reprocess.content[0].text).toMatch(/not found/);
+    expect(reprocess.content[0].text).not.toMatch(/missing required scope/);
+  });
+
+  it("empty PAT scopes still get read (not write)", async () => {
     const { token: scopedToken } = await seedTestUser({ scopes: [] });
 
-    for (const toolName of [
-      "list_instruments",
-      "search_runs",
-      "list_watchers",
+    const instruments = await callTool("list_instruments", {}, scopedToken);
+    expect(instruments.isError).toBeFalsy();
+
+    const claim = await callTool(
       "claim_run",
-      "reprocess_file",
-    ]) {
-      const result = await callTool(
-        toolName,
-        toolName === "claim_run"
-          ? { instrumentId, runId }
-          : toolName === "reprocess_file"
-            ? { fileId: 99_999 }
-            : {},
-        scopedToken
-      );
-      expect(result.isError, `expected ${toolName} to be denied`).toBe(true);
-      expect(result.content[0].text).toMatch(/missing required scope/);
-    }
+      { instrumentId, runId },
+      scopedToken
+    );
+    expect(claim.isError).toBe(true);
+    expect(claim.content[0].text).toMatch(/missing required scope: write/);
   });
 });

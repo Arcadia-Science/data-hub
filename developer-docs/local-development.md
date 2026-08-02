@@ -39,6 +39,7 @@ DATABASE_URL=postgres://localhost:5432/data-hub-local
 # Any 32+ character string. Better Auth uses it to sign cookies / encrypt
 # session data (also accepted as `BETTER_AUTH_SECRET`).
 AUTH_SECRET=local-dev-secret-at-least-32-characters!!
+# Public origin / OAuth issuer base (issuer = ${BETTER_AUTH_URL}/api/auth).
 BETTER_AUTH_URL=http://localhost:3000
 
 # Dummy AWS credentials. The local-mirror branch in `web/lib/s3.ts`
@@ -84,7 +85,13 @@ Or call the API with the seeded PAT:
     http://localhost:3000/api/v1/instruments
 ```
 
-The token carries the `*` (wildcard) scope so every v1 endpoint accepts it. Useful for poking at the REST API, the MCP server (`/mcp/v1`), or wiring up an external tool while you iterate.
+The token carries the `*` (wildcard) scope so every v1 REST endpoint accepts it. Useful for curling the API or wiring up watchers/tools that still use PATs.
+
+## Connecting an MCP client
+
+MCP at `/mcp/v1` uses OAuth (not PATs by default). Point the client at `http://localhost:3000/mcp/v1` with `BETTER_AUTH_URL=http://localhost:3000`. Clients discover the authorization server via `/.well-known/oauth-protected-resource` (resource-specific: `…/mcp/v1`) and `/.well-known/oauth-authorization-server`. Sign in with the local "Sign in (dev)" flow when the consent page appears; grant `read` (and `write` if the client needs mutating tools).
+
+For PAT-based MCP testing only (scripts, integration tests, quick Bearer curls), set `MCP_ALLOW_PAT_AUTH=true` in `web/.env` and restart `make dev`. That flag is ignored when `VERCEL_ENV=production`. Prefer OAuth for interactive clients (Cursor, Claude Desktop, etc.).
 
 ## Resetting
 

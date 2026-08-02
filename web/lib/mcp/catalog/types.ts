@@ -24,8 +24,6 @@ export interface McpToolDef {
   group: McpToolGroup;
   inputSchema?: Record<string, ZodType>;
   name: string;
-  /** PAT scope checked by the tool handler (`resource:action`). */
-  scope?: string;
   title: string;
 }
 
@@ -73,7 +71,6 @@ export interface McpCatalogDocument {
     title: string;
     description: string;
     group: McpToolGroup;
-    scope?: string;
     annotations?: McpToolAnnotations;
     inputSchema: Record<string, unknown>;
   }>;

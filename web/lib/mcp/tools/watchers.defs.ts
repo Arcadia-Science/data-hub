@@ -8,7 +8,6 @@ export const listWatchersTool = {
   description:
     "List watcher agents with effective status, hostname, instrument assignment, and last heartbeat. Optionally include deregistered watchers or filter by effective status.",
   group: "watchers",
-  scope: "watchers:read",
   inputSchema: {
     instrumentId: z
       .string()
@@ -36,7 +35,6 @@ export const getWatcherTool = {
   description:
     "Get watcher detail including config YAML, OS info, effective status, and deregistration actor when applicable.",
   group: "watchers",
-  scope: "watchers:read",
   inputSchema: { watcherId: z.string().describe("Watcher UUID") },
   annotations: { readOnlyHint: true },
 } as const satisfies McpToolDef;
@@ -47,7 +45,6 @@ export const listWatcherEventsTool = {
   description:
     "Paginated watcher event log (uploads, errors, config sync, update lifecycle). Useful after get_watcher_heartbeats when diagnosing failures.",
   group: "watchers",
-  scope: "watchers:read",
   inputSchema: {
     watcherId: z.string().describe("Watcher UUID"),
     hours: z
@@ -84,7 +81,6 @@ export const getWatcherHeartbeatsTool = {
   description:
     "Get recent heartbeat history for a watcher agent, useful for diagnosing connectivity gaps and error trends. Returns up to 100 most recent heartbeats within the lookback window.",
   group: "watchers",
-  scope: "watchers:read",
   inputSchema: {
     watcherId: z.string().describe("Watcher UUID"),
     hours: z

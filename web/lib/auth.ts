@@ -1,13 +1,24 @@
+import { oauthProvider } from "@better-auth/oauth-provider";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
-import { oAuthProxy } from "better-auth/plugins";
+import { jwt, oAuthProxy } from "better-auth/plugins";
 import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
 import { cache } from "react";
 import { isAdminEmail } from "@/lib/admin-emails";
 import { db } from "@/lib/db";
-import { accounts, sessions, users, verifications } from "@/lib/db/schema";
+import {
+  accounts,
+  jwks,
+  oauthAccessTokens,
+  oauthClients,
+  oauthConsents,
+  oauthRefreshTokens,
+  sessions,
+  users,
+  verifications,
+} from "@/lib/db/schema";
 import { isDevAuthEnabled } from "@/lib/dev-auth";
 
 function originFromUrl(value: string | undefined): string | null {
@@ -24,6 +35,48 @@ function originFromUrl(value: string | undefined): string | null {
   }
 }
 
+function resolveBaseURL(): string {
+  if (process.env.BETTER_AUTH_URL) {
+    return process.env.BETTER_AUTH_URL.replace(/\/$/, "");
+  }
+  // Prefer the stable production hostname over the per-deployment VERCEL_URL
+  // (which changes every deploy and would invalidate OAuth issuer/audience).
+  if (process.env.VERCEL_PROJECT_PRODUCTION_URL) {
+    return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL.replace(/\/$/, "")}`;
+  }
+  if (process.env.VERCEL_URL) {
+    return `https://${process.env.VERCEL_URL.replace(/\/$/, "")}`;
+  }
+  return "http://localhost:3000";
+}
+
+const baseURL = resolveBaseURL();
+
+/** App origin used by Better Auth `baseURL` and OAuth client helpers. */
+export const authBaseURL = baseURL;
+
+/** OAuth/OIDC issuer — Better Auth's runtime baseURL includes `/api/auth`. */
+export const authIssuer = `${baseURL}/api/auth`;
+
+/** Audience for this deployment's MCP resource server. */
+export const mcpResourceAudience = `${baseURL}/mcp/v1`;
+
+const productionURL = (
+  process.env.BETTER_AUTH_PRODUCTION_URL ??
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : "https://datahub.arcadiascience.com")
+).replace(/\/$/, "");
+
+const oauthScopes = [
+  "openid",
+  "profile",
+  "email",
+  "offline_access",
+  "read",
+  "write",
+] as const;
+
 // Stable host that owns the Google redirect URI. Preview (and optionally
 // local) deployments proxy Google SSO through this host via `oAuthProxy`.
 // When it matches this deployment's `BETTER_AUTH_URL`, the plugin no-ops.
@@ -33,9 +86,7 @@ const oauthProxyEnabled = Boolean(oauthProxyUrl && oauthProxySecret);
 
 function resolveTrustedOrigins(): string[] {
   const origins = new Set<string>();
-  const baseOrigin = originFromUrl(
-    process.env.BETTER_AUTH_URL ?? process.env.VERCEL_URL
-  );
+  const baseOrigin = originFromUrl(baseURL);
   if (baseOrigin) {
     origins.add(baseOrigin);
   }
@@ -82,6 +133,10 @@ const googleClientId = process.env.AUTH_GOOGLE_ID;
 const googleClientSecret = process.env.AUTH_GOOGLE_SECRET;
 
 export const authInstance = betterAuth({
+  baseURL,
+  // Disable the jwt plugin's `/token` session-exchange endpoint; MCP clients
+  // use `/oauth2/token` from the oauth-provider plugin instead.
+  disabledPaths: ["/token"],
   database: drizzleAdapter(db, {
     provider: "pg",
     schema: {
@@ -89,6 +144,11 @@ export const authInstance = betterAuth({
       session: sessions,
       account: accounts,
       verification: verifications,
+      jwks,
+      oauthClient: oauthClients,
+      oauthRefreshToken: oauthRefreshTokens,
+      oauthAccessToken: oauthAccessTokens,
+      oauthConsent: oauthConsents,
     },
   }),
   ...(googleClientId && googleClientSecret
@@ -147,7 +207,14 @@ export const authInstance = betterAuth({
     customRules: {
       "/sign-in/email": { window: 60, max: 5 },
       "/sign-in/social": { window: 60, max: 10 },
+      "/oauth2/authorize": { window: 60, max: 30 },
+      "/oauth2/token": { window: 60, max: 20 },
+      "/oauth2/consent": { window: 60, max: 20 },
     },
+  },
+  // Auth failures redirect to the login page with `?error=` instead of `/`.
+  onAPIError: {
+    errorURL: "/login",
   },
   databaseHooks: {
     user: {
@@ -183,6 +250,27 @@ export const authInstance = betterAuth({
           }),
         ]
       : []),
+    jwt({
+      jwt: {
+        // Keep JWT `iss` aligned with AS metadata / authIssuer (includes /api/auth).
+        issuer: authIssuer,
+      },
+    }),
+    oauthProvider({
+      loginPage: "/login",
+      consentPage: "/consent",
+      scopes: [...oauthScopes],
+      // Seed production (stable clients) and this deployment's MCP audience
+      // when they differ (preview/local).
+      validAudiences: [
+        ...new Set([mcpResourceAudience, `${productionURL}/mcp/v1`]),
+      ],
+      // Cursor / mcp-remote still require RFC 7591 Dynamic Client Registration.
+      // Open registration only creates OAuth clients — Google Workspace still
+      // gates who can sign in.
+      allowDynamicClientRegistration: true,
+      allowUnauthenticatedClientRegistration: true,
+    }),
     // Must be last so Set-Cookie from server actions (sign-in / sign-out)
     // reaches the browser via Next's `cookies()` helper.
     nextCookies(),

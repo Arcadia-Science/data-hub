@@ -45,9 +45,10 @@ vercel env pull
 | `AUTH_GOOGLE_ID` | Yes | Google OAuth client ID. See [Create a Google OAuth client](first-time-deployment.md#create-a-google-oauth-client) for where it comes from and who it lets sign in |
 | `AUTH_GOOGLE_SECRET` | Yes | Google OAuth client secret, from the same client |
 | `AUTH_SECRET` | Yes | Better Auth session encryption key (any 32+ character random string; also accepted as `BETTER_AUTH_SECRET`) |
-| `BETTER_AUTH_URL` | Yes | Public origin of the web app (e.g. `http://localhost:3000` or `https://your-deployment.vercel.app`) |
+| `BETTER_AUTH_URL` | Yes | Public origin of the web app and OAuth issuer base (issuer is `{origin}/api/auth`; e.g. `http://localhost:3000` or `https://your-deployment.vercel.app`) |
 | `OAUTH_PROXY_URL` | No | Staging origin used as the Google OAuth callback host for Vercel previews. Set on Staging and Preview; see [First-time deployment](first-time-deployment.md#set-the-initial-environment-variables) |
 | `OAUTH_PROXY_SECRET` | No | Shared secret for the preview↔staging OAuth proxy handoff (same value on both; do not reuse `AUTH_SECRET`) |
+| `MCP_ALLOW_PAT_AUTH` | No | Dev/CI only: allow MCP to accept PATs as Bearer tokens. Hard-disabled when `VERCEL_ENV=production`. See [Local development](local-development.md#connecting-an-mcp-client) |
 | `ADMIN_EMAILS` | No | Comma-separated emails promoted to workspace admin on sign-in. Bootstraps the first admin, so set it before anyone signs in |
 | `AWS_REGION` | No | AWS region for S3 presigned URLs and Lambda Function URL SigV4 signing (defaults to `us-west-1`) |
 | `AWS_ROLE_ARN` | No | IAM role ARN for Vercel OIDC federation. Used to presign S3 URLs and SigV4-sign Lambda Function URL invocations (only needed on Vercel) |
