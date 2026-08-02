@@ -87,7 +87,7 @@ describe("MCP Server (HTTP)", () => {
     isError?: boolean;
     content: Array<{ type: string; text: string }>;
   }> {
-    const res = await api("/api/v1/mcp", {
+    const res = await api("/mcp/v1", {
       method: "POST",
       token: bearer,
       headers: MCP_HEADERS,
@@ -101,7 +101,7 @@ describe("MCP Server (HTTP)", () => {
   // ---- Auth ----------------------------------------------------------------
 
   it("rejects unauthenticated requests with 401", async () => {
-    const res = await api("/api/v1/mcp", {
+    const res = await api("/mcp/v1", {
       method: "POST",
       headers: MCP_HEADERS,
       body: jsonRpc("initialize", {
@@ -116,7 +116,7 @@ describe("MCP Server (HTTP)", () => {
   // ---- Initialize ----------------------------------------------------------
 
   it("initializes with valid token", async () => {
-    const res = await api("/api/v1/mcp", {
+    const res = await api("/mcp/v1", {
       method: "POST",
       token,
       headers: MCP_HEADERS,
@@ -136,7 +136,7 @@ describe("MCP Server (HTTP)", () => {
   // ---- tools/list ----------------------------------------------------------
 
   it("lists all registered tools", async () => {
-    const res = await api("/api/v1/mcp", {
+    const res = await api("/mcp/v1", {
       method: "POST",
       token,
       headers: MCP_HEADERS,
@@ -177,7 +177,7 @@ describe("MCP Server (HTTP)", () => {
   // ---- Tool execution (end-to-end) -----------------------------------------
 
   it("executes list_instruments tool against real DB", async () => {
-    const res = await api("/api/v1/mcp", {
+    const res = await api("/mcp/v1", {
       method: "POST",
       token,
       headers: MCP_HEADERS,

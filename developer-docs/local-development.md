@@ -84,7 +84,7 @@ Or call the API with the seeded PAT:
     http://localhost:3000/api/v1/instruments
 ```
 
-The token carries the `*` (wildcard) scope so every v1 endpoint accepts it. Useful for poking at the REST API, the MCP server (`/api/v1/mcp`), or wiring up an external tool while you iterate.
+The token carries the `*` (wildcard) scope so every v1 endpoint accepts it. Useful for poking at the REST API, the MCP server (`/mcp/v1`), or wiring up an external tool while you iterate.
 
 ## Resetting
 
@@ -213,7 +213,7 @@ A few details worth knowing:
 
 - Adding fixtures for more instruments means an `INSTRUMENT_FIXTURES` entry in [web/lib/db/seed.ts](../web/lib/db/seed.ts) keyed by the kebab-case instrument id from `data_hub_shared.enums.Instrument` (`{ files: [{ filename, contentType }, …], runIds }`) pointing at files under `lambda/tests/fixtures/`. List every fixture you want cycled across seeded runs. The handler rejects unknown instrument ids because `parse_s3_event` only accepts values from that enum.
 - The route is gated on `NODE_ENV !== "production"` AND `LOCAL_S3_MIRROR` set; either condition unmet returns 404 unconditionally, so a production build can never expose the filesystem.
-- The MCP tool at `/api/v1/mcp` returns a relative `/api/local-s3/...` URL when the mirror is active — browsers resolve it against the current origin, but non-browser MCP clients on localhost may need to prefix with `http://localhost:3000`.
+- The MCP tool at `/mcp/v1` returns a relative `/api/local-s3/...` URL when the mirror is active — browsers resolve it against the current origin, but non-browser MCP clients on localhost may need to prefix with `http://localhost:3000`.
 
 ## Where the seed lives
 
@@ -229,4 +229,4 @@ The same builders back the integration test harness in [web/tests/integration/he
 - [Getting started](getting-started.md) — full setup with real Google OAuth and AWS credentials.
 - [Architecture](architecture.md) — system overview and data flow.
 - [REST API](https://datahub.arcadiascience.com/docs/api) — on-ramp and generated endpoints for the seeded PAT.
-- [MCP](https://datahub.arcadiascience.com/docs/mcp) — Model Context Protocol tools at `/api/v1/mcp`.
+- [MCP](https://datahub.arcadiascience.com/docs/mcp) — Model Context Protocol tools at `/mcp/v1`.

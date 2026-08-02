@@ -12,7 +12,7 @@ export function buildMcpCatalogDocument(): McpCatalogDocument {
       version: "1.0.0",
       description:
         "Model Context Protocol server for Data Hub. Authenticate with a personal access token (`Authorization: Bearer dhub_…`). Tools enforce the same `<resource>:<action>` scopes as their REST counterparts.",
-      endpoint: "/api/v1/mcp",
+      endpoint: "/mcp/v1",
       transport: "streamable-http",
     },
     tools: MCP_TOOL_DEFS.map((tool) => ({

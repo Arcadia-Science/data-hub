@@ -45,7 +45,7 @@ export type McpResourceDef = {
   | { kind: "template"; uriTemplate: string }
 );
 
-/** Shape served by `GET /api/v1/mcp/schema.json`. */
+/** Shape served by `GET /mcp/v1/schema.json`. */
 export interface McpCatalogDocument {
   info: {
     title: string;
