@@ -14,6 +14,10 @@ const publicPrefixes = [
   "/login",
   "/api/auth",
   "/api/v1",
+  // The MCP server authenticates with a personal access token, never a
+  // session cookie — a redirect to `/login` would surface as an opaque
+  // HTML response to MCP clients instead of a 401.
+  "/mcp",
   // Cron jobs (e.g. the upload-queue sweep) are invoked by Vercel Cron with no
   // user session — they authenticate themselves via `CRON_SECRET`. Without
   // this, the middleware redirects them to `/login` and the job never runs.

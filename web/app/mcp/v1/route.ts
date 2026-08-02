@@ -19,7 +19,11 @@ const handler = createMcpHandler(
     },
   },
   {
-    basePath: "/api/v1",
+    // `basePath` can only ever derive `<base>/mcp`, so the versioned
+    // `/mcp/v1` path has to be set through the (deprecated but still
+    // honored) explicit endpoint option — `mcp-handler` matches
+    // `url.pathname` against it exactly.
+    streamableHttpEndpoint: "/mcp/v1",
     maxDuration: 60,
   }
 );
