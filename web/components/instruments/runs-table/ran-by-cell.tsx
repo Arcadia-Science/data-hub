@@ -3,7 +3,6 @@
 import { UserPlus, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useSession } from "next-auth/react";
 import { type MouseEvent, useOptimistic, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -14,6 +13,7 @@ import {
 } from "@/components/ui/tooltip";
 import { UserAvatar, UserAvatarLink } from "@/components/user-avatar";
 import type { RunAttribution } from "@/lib/api/instrument-runs";
+import { useSession } from "@/lib/auth-client";
 import { toInitials } from "@/lib/avatar-color";
 import { cn } from "@/lib/utils";
 

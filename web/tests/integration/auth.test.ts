@@ -7,7 +7,7 @@ import {
 } from "@/tests/integration/helpers";
 
 // Tests the authenticateRequest middleware's rejection paths. The middleware
-// checks in order: (1) NextAuth session cookie, (2) Bearer scheme,
+// checks in order: (1) Better Auth session cookie, (2) Bearer scheme,
 // (3) dhub_ prefix, (4) token hash in DB, (5) expiry. These tests exercise
 // each rejection point via the PAT path (no session cookies in integration tests).
 describe("Authentication", () => {
