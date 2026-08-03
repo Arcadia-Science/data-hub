@@ -48,7 +48,7 @@ vercel env pull
 | `BETTER_AUTH_URL` | Yes | Public origin of the web app and OAuth issuer base (issuer is `{origin}/api/auth`; e.g. `http://localhost:3000` or `https://your-deployment.vercel.app`) |
 | `OAUTH_PROXY_URL` | No | Staging origin used as the Google OAuth callback host for Vercel previews. Set on Staging and Preview; see [First-time deployment](first-time-deployment.md#set-the-initial-environment-variables) |
 | `OAUTH_PROXY_SECRET` | No | Shared secret for the preview↔staging OAuth proxy handoff (same value on both; do not reuse `AUTH_SECRET`) |
-| `MCP_ALLOW_PAT_AUTH` | No | Dev/CI only: allow MCP to accept PATs as Bearer tokens. Hard-disabled when `VERCEL_ENV=production`. See [Local development](local-development.md#connecting-an-mcp-client) |
+| `MCP_ALLOW_PAT_AUTH` | No | Dev/CI only: allow MCP to accept PATs as Bearer tokens. Hard-disabled on Vercel production and self-hosted production (non-loopback `BETTER_AUTH_URL`). See [Local development](local-development.md#connecting-an-mcp-client) |
 | `ADMIN_EMAILS` | No | Comma-separated emails promoted to workspace admin on sign-in. Bootstraps the first admin, so set it before anyone signs in |
 | `AWS_REGION` | No | AWS region for S3 presigned URLs and Lambda Function URL SigV4 signing (defaults to `us-west-1`) |
 | `AWS_ROLE_ARN` | No | IAM role ARN for Vercel OIDC federation. Used to presign S3 URLs and SigV4-sign Lambda Function URL invocations (only needed on Vercel) |

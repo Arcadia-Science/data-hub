@@ -7,22 +7,17 @@ describe("flattenPatScopes", () => {
     expect(flattenPatScopes(["runs:read"])).toEqual(["read"]);
   });
 
-  it("adds write for wildcard", () => {
+  it("adds write only for wildcard", () => {
     expect(flattenPatScopes(["*"]).sort()).toEqual(["read", "write"]);
   });
 
-  it("adds write for any non-read action", () => {
-    expect(flattenPatScopes(["runs:attribute"]).sort()).toEqual([
+  it("stays read-only for fine-grained mutating scopes", () => {
+    // Mapping runs:comment → write would let that PAT delete runs over MCP.
+    expect(flattenPatScopes(["runs:attribute"])).toEqual(["read"]);
+    expect(flattenPatScopes(["files:reprocess"])).toEqual(["read"]);
+    expect(flattenPatScopes(["instruments:write"])).toEqual(["read"]);
+    expect(flattenPatScopes(["runs:read", "files:reprocess"])).toEqual([
       "read",
-      "write",
-    ]);
-    expect(flattenPatScopes(["files:reprocess"]).sort()).toEqual([
-      "read",
-      "write",
-    ]);
-    expect(flattenPatScopes(["instruments:write"]).sort()).toEqual([
-      "read",
-      "write",
     ]);
   });
 
@@ -30,12 +25,5 @@ describe("flattenPatScopes", () => {
     expect(
       flattenPatScopes(["runs:read", "files:read", "watchers:read"])
     ).toEqual(["read"]);
-  });
-
-  it("grants write when any scope in a mixed list is mutating", () => {
-    expect(flattenPatScopes(["runs:read", "files:reprocess"]).sort()).toEqual([
-      "read",
-      "write",
-    ]);
   });
 });

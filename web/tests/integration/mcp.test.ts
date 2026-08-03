@@ -535,10 +535,10 @@ describe("MCP Server (HTTP)", () => {
   // ---- PAT scope enforcement (coarse read / write) -------------------------
   //
   // Transport requires `read` only. The WWW-Authenticate challenge still
-  // advertises `read write` so Cursor requests both. `verifyMcpToken`
-  // flattens fine-grained PAT scopes to that pair (`read` always; `write`
-  // when any PAT scope is `*` or a non-`read` action). Mutating tools gate
-  // on `write` via `requireMcpWrite`.
+  // advertises `read write` so Cursor requests both. PAT fallback maps to
+  // `read` always and `write` only for `*` (fine-grained mutating PAT scopes
+  // stay read-only over MCP to avoid privilege escalation). Mutating tools
+  // gate on `write` via `requireMcpWrite`.
 
   it("read-only PAT can read but not mutate", async () => {
     const { token: scopedToken } = await seedTestUser({
@@ -557,9 +557,26 @@ describe("MCP Server (HTTP)", () => {
     expect(claim.content[0].text).toMatch(/missing required scope: write/);
   });
 
-  it("write-capable PAT can call mutating tools", async () => {
+  it("fine-grained mutating PAT scopes stay read-only over MCP", async () => {
     const { token: scopedToken } = await seedTestUser({
       scopes: ["runs:attribute"],
+    });
+
+    const search = await callTool("search_runs", { instrumentId }, scopedToken);
+    expect(search.isError).toBeFalsy();
+
+    const claim = await callTool(
+      "claim_run",
+      { instrumentId, runId },
+      scopedToken
+    );
+    expect(claim.isError).toBe(true);
+    expect(claim.content[0].text).toMatch(/missing required scope: write/);
+  });
+
+  it("wildcard PAT can call mutating tools", async () => {
+    const { token: scopedToken } = await seedTestUser({
+      scopes: ["*"],
     });
 
     const claim = await callTool(

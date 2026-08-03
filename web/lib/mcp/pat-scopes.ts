@@ -1,20 +1,17 @@
 /**
  * Map fine-grained PAT scopes onto the coarse OAuth pair used by MCP
- * transport (`read` / `write`). Always grant `read`; add `write` for `*` or
- * any scope whose action is not `read`.
+ * (`read` / `write`).
+ *
+ * Always grant `read` for a valid PAT. Grant `write` only for the `*`
+ * wildcard — mapping any mutating fine-grained scope (e.g. `runs:comment`)
+ * to blanket MCP `write` would let that PAT delete runs / reprocess files
+ * over MCP. Prefer OAuth consent for least-privilege write access; PAT
+ * fallback is a dev/CI convenience.
  */
 export function flattenPatScopes(scopes: string[]): string[] {
   const result = new Set<string>(["read"]);
-  for (const scope of scopes) {
-    if (scope === "*") {
-      result.add("write");
-      continue;
-    }
-    const colon = scope.indexOf(":");
-    const action = colon === -1 ? scope : scope.slice(colon + 1);
-    if (action !== "read") {
-      result.add("write");
-    }
+  if (scopes.includes("*")) {
+    result.add("write");
   }
   return [...result];
 }

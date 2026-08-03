@@ -107,9 +107,12 @@ Three test directories, two Vitest configs:
   every test file shares the one Postgres database and server instance.
   MCP HTTP tests that authenticate with a seeded PAT need
   `MCP_ALLOW_PAT_AUTH=true` on the test server (dev/CI only; hard-disabled
-  when `VERCEL_ENV=production`). `mcp-oauth.test.ts` also exercises the
-  authorization-code flow end-to-end (register → authorize → consent →
-  token → MCP) using a DB-seeded session cookie.
+  on Vercel production and self-hosted production with a non-loopback
+  `BETTER_AUTH_URL` — local/CI `next start` uses loopback and stays allowed).
+  `mcp-oauth.test.ts` also exercises the authorization-code flow end-to-end
+  (register → authorize → consent → token → MCP) using a DB-seeded session
+  cookie; MCP accepts JWT access tokens only (clients pass RFC 8707
+  `resource`).
 
 `global-setup.ts` mirrors what `start_test_server()` does for Python, plus one
 thing the Python side doesn't need: an in-process HTTP server on a free port

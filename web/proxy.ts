@@ -39,14 +39,6 @@ const publicPrefixes = [
 // page surfaces watcher config YAML / hostnames).
 const publicExactPaths = new Set(["/", "/watchers"]);
 
-function nextWithPathname(request: NextRequest) {
-  // Root layout needs the pathname to skip the app shell on bare OAuth
-  // surfaces (`/login`, `/consent`) even when a session cookie is present.
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set("x-pathname", request.nextUrl.pathname);
-  return NextResponse.next({ request: { headers: requestHeaders } });
-}
-
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -56,7 +48,7 @@ export function proxy(request: NextRequest) {
       (route) => pathname === route || pathname.startsWith(`${route}/`)
     );
   if (isPublic) {
-    return nextWithPathname(request);
+    return NextResponse.next();
   }
 
   // Cookie presence only — optimistic redirect. Pages still call `auth()`
@@ -67,7 +59,7 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  return nextWithPathname(request);
+  return NextResponse.next();
 }
 
 export const config = {

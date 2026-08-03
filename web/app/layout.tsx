@@ -2,28 +2,12 @@ import { Geist, Geist_Mono } from "next/font/google";
 
 import "@/app/globals.css";
 import type { Metadata } from "next";
-import { cookies, headers } from "next/headers";
-import { redirect } from "next/navigation";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
-import { AppSidebar } from "@/components/app-sidebar";
-import { NotificationBell } from "@/components/notifications/notification-bell";
-import { NotificationsProvider } from "@/components/notifications/notifications-provider";
 import { PreviewDeploymentBanner } from "@/components/preview-deployment-banner";
-import { ArchiveDownloadProvider } from "@/components/runs/archive-download-provider";
-import { SearchTrigger } from "@/components/search/search-trigger";
 import { ThemeProvider } from "@/components/theme-provider";
 import { TimezoneCookieSync } from "@/components/timezone-cookie-sync";
-import {
-  SIDEBAR_COOKIE_NAME,
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-} from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { countUnread } from "@/lib/api/notifications";
-import { getSidebarInstruments } from "@/lib/api/sidebar";
-import { auth, authInstance } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
@@ -84,44 +68,11 @@ export const metadata: Metadata = {
   },
 };
 
-function isBareAuthSurface(pathname: string): boolean {
-  return (
-    pathname === "/login" ||
-    pathname.startsWith("/login/") ||
-    pathname === "/consent" ||
-    pathname.startsWith("/consent/")
-  );
-}
-
 export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const pathname = (await headers()).get("x-pathname") ?? "";
-  // OAuth login/consent must not render inside the signed-in app shell —
-  // the proxy forwards `x-pathname` so we can detect those routes here.
-  const bareAuthSurface = isBareAuthSurface(pathname);
-  const session = bareAuthSurface ? null : await auth();
-
-  // Fetch the per-request sidebar data alongside the session so the layout
-  // doesn't introduce an additional round-trip. Skipped entirely when the
-  // user isn't signed in — the unauthenticated routes don't render the
-  // sidebar.
-  //
-  // The unread-count query rides alongside the sidebar fetches so the
-  // notification bell renders with an accurate badge on first paint —
-  // the partial `idx_notifications_user_id_unread` index keeps the
-  // count cheap regardless of total notification volume.
-  const [instruments, initialUnreadCount] = session
-    ? await Promise.all([getSidebarInstruments(), countUnread(session.user.id)])
-    : [[], 0];
-
-  // Hydrate the sidebar's open/collapsed state from the cookie that
-  // `SidebarProvider` writes on toggle. Defaulting to `true` keeps the
-  // first-visit experience expanded.
-  const sidebarCookie = (await cookies()).get(SIDEBAR_COOKIE_NAME)?.value;
-  const sidebarDefaultOpen = sidebarCookie !== "false";
   // Deduped with page/stats callers via React.cache(); passed to the client
   // sync so we can skip refresh when the server zone already matches.
   const serverTimeZone = await getViewerTimeZone();
@@ -149,39 +100,7 @@ export default async function RootLayout({
           <NuqsAdapter>
             <TooltipProvider>
               <PreviewDeploymentBanner />
-              {session ? (
-                <NotificationsProvider initialUnreadCount={initialUnreadCount}>
-                  <ArchiveDownloadProvider>
-                    <SidebarProvider defaultOpen={sidebarDefaultOpen}>
-                      <AppSidebar
-                        instruments={instruments}
-                        session={session}
-                        signOutAction={async () => {
-                          "use server";
-                          await authInstance.api.signOut({
-                            headers: await headers(),
-                          });
-                          redirect("/login");
-                        }}
-                      />
-                      <SidebarInset className="pb-12">
-                        <header className="flex h-14 shrink-0 items-center justify-between gap-2 px-4">
-                          <div className="flex h-8 items-center">
-                            <SidebarTrigger />
-                          </div>
-                          <div className="flex h-8 items-center gap-2">
-                            <SearchTrigger />
-                            <NotificationBell />
-                          </div>
-                        </header>
-                        {children}
-                      </SidebarInset>
-                    </SidebarProvider>
-                  </ArchiveDownloadProvider>
-                </NotificationsProvider>
-              ) : (
-                children
-              )}
+              {children}
               <Toaster />
             </TooltipProvider>
           </NuqsAdapter>

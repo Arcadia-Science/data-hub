@@ -18,14 +18,15 @@ const MESSAGES: Record<string, string> = {
     "We couldn't read your Google profile. Please try again.",
 };
 
+const GENERIC_SIGN_IN_FAILED = "Sign-in failed. Please try again.";
+
 function messageForAuthError(code: string | null): string | null {
   if (!code) {
     return null;
   }
-  return (
-    MESSAGES[code] ??
-    `Sign-in failed (${code.replaceAll("_", " ")}). Please try again.`
-  );
+  // Only render known codes. Unknown `?error=` values are attacker-
+  // controlled query text — never echo them into the page.
+  return MESSAGES[code] ?? GENERIC_SIGN_IN_FAILED;
 }
 
 // Reads `?error=` set by Better Auth (`onAPIError.errorURL`) or the sign-in
