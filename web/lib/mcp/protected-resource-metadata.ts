@@ -3,6 +3,7 @@ import {
   metadataCorsOptionsRequestHandler,
 } from "mcp-handler";
 import { authIssuer, mcpResourceAudience } from "@/lib/auth";
+import { MCP_ADVERTISED_SCOPES } from "@/lib/mcp/advertised-scopes";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -21,10 +22,11 @@ export function createProtectedResourceHandlers() {
     const metadata = generateProtectedResourceMetadata({
       authServerUrls: [authIssuer],
       resourceUrl: mcpResourceAudience,
-      // Advertise the MCP scope pair so clients that read PRM (not only the
-      // WWW-Authenticate challenge) still request write as well as read.
+      // Clients that read PRM (not only the WWW-Authenticate challenge) must
+      // see the same list, or they register with narrower scopes than they
+      // later request.
       additionalMetadata: {
-        scopes_supported: ["read", "write"],
+        scopes_supported: [...MCP_ADVERTISED_SCOPES],
       },
     });
     return Response.json(metadata, {

@@ -117,7 +117,7 @@ describe("MCP Server (HTTP)", () => {
     expect(challenge).toContain(
       `resource_metadata="${getBaseUrl()}/.well-known/oauth-protected-resource/mcp/v1"`
     );
-    expect(challenge).toContain('scope="read write"');
+    expect(challenge).toContain('scope="read write offline_access"');
   });
 
   // ---- Initialize ----------------------------------------------------------

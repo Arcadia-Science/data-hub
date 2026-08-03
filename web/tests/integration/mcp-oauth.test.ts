@@ -114,8 +114,9 @@ describe("MCP OAuth discovery", () => {
     expect(challenge).toContain(
       `resource_metadata="${getBaseUrl()}/.well-known/oauth-protected-resource/mcp/v1"`
     );
-    // Challenge advertises both scopes; transport only *requires* read.
-    expect(challenge).toContain('scope="read write"');
+    // Challenge advertises every grantable scope; transport only *requires*
+    // read.
+    expect(challenge).toContain('scope="read write offline_access"');
   });
 
   it("GET /.well-known/oauth-authorization-server advertises issuer and registration", async () => {
@@ -166,7 +167,7 @@ describe("MCP OAuth discovery", () => {
     };
     expect(body.resource).toBe(expectedMcpResource());
     expect(body.authorization_servers).toEqual([expectedIssuer()]);
-    expect(body.scopes_supported).toEqual(["read", "write"]);
+    expect(body.scopes_supported).toEqual(["read", "write", "offline_access"]);
   });
 
   it("GET /.well-known/oauth-protected-resource/mcp/v1 matches path-specific metadata", async () => {
@@ -179,7 +180,7 @@ describe("MCP OAuth discovery", () => {
     };
     expect(body.resource).toBe(expectedMcpResource());
     expect(body.authorization_servers).toEqual([expectedIssuer()]);
-    expect(body.scopes_supported).toEqual(["read", "write"]);
+    expect(body.scopes_supported).toEqual(["read", "write", "offline_access"]);
   });
 });
 
@@ -399,6 +400,64 @@ describe("MCP OAuth authorization-code flow", () => {
     };
     expect(authorizeBody.redirect).toBe(true);
     expect(authorizeBody.url).toBeTruthy();
+    const consentUrl = new URL(authorizeBody.url as string, getBaseUrl());
+    expect(consentUrl.pathname).toBe("/consent");
+    expect(consentUrl.searchParams.get("error")).toBeNull();
+    expect(consentUrl.search).not.toMatch(/invalid_scope/);
+  });
+
+  it("DCR with the advertised scopes allows authorize with offline_access", async () => {
+    // Claude Code registers with the scopes it read from protected-resource
+    // metadata, then appends `offline_access` to the authorize request because
+    // the AS advertises it. Both lists must agree or authorize redirects with
+    // invalid_scope.
+    const issuer = expectedIssuer();
+    const redirectUri = "http://127.0.0.1:8788/callback";
+    const { challenge } = pkcePair();
+
+    const prmRes = await api("/.well-known/oauth-protected-resource/mcp/v1");
+    const { scopes_supported: advertisedScopes } = (await prmRes.json()) as {
+      scopes_supported: string[];
+    };
+    expect(advertisedScopes).toContain("offline_access");
+
+    const registerRes = await api("/api/auth/oauth2/register", {
+      method: "POST",
+      body: {
+        client_name: "Claude-Code-like MCP Client",
+        redirect_uris: [redirectUri],
+        token_endpoint_auth_method: "none",
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+        scope: advertisedScopes.join(" "),
+      },
+    });
+    expect(registerRes.status).toBe(200);
+    const { client_id: clientId } = (await registerRes.json()) as {
+      client_id: string;
+    };
+
+    const sessionCookie = await seedSessionCookie(userId);
+    const authorizeUrl = new URL(`${issuer}/oauth2/authorize`);
+    authorizeUrl.searchParams.set("response_type", "code");
+    authorizeUrl.searchParams.set("client_id", clientId);
+    authorizeUrl.searchParams.set("redirect_uri", redirectUri);
+    authorizeUrl.searchParams.set("scope", "read write offline_access");
+    authorizeUrl.searchParams.set("prompt", "consent");
+    authorizeUrl.searchParams.set("resource", expectedMcpResource());
+    authorizeUrl.searchParams.set("code_challenge", challenge);
+    authorizeUrl.searchParams.set("code_challenge_method", "S256");
+
+    const authorizeRes = await fetch(authorizeUrl, {
+      headers: { Cookie: sessionCookie, Accept: "application/json" },
+      redirect: "manual",
+    });
+    expect(authorizeRes.status).toBe(200);
+    const authorizeBody = (await authorizeRes.json()) as {
+      redirect?: boolean;
+      url?: string;
+    };
+    expect(authorizeBody.redirect).toBe(true);
     const consentUrl = new URL(authorizeBody.url as string, getBaseUrl());
     expect(consentUrl.pathname).toBe("/consent");
     expect(consentUrl.searchParams.get("error")).toBeNull();

@@ -1,5 +1,6 @@
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import { authBaseURL } from "@/lib/auth";
+import { MCP_ADVERTISED_SCOPES } from "@/lib/mcp/advertised-scopes";
 import { verifyMcpToken } from "@/lib/mcp/auth";
 import { registerPrompts } from "@/lib/mcp/prompts";
 import { registerResources } from "@/lib/mcp/resources";
@@ -29,10 +30,10 @@ const handler = createMcpHandler(
 // the app origin, not `mcpResourceAudience` (`…/mcp/v1`).
 //
 // Enforce only `read` at the transport so read-only tokens can connect;
-// mutating tools still gate on `write` via `requireMcpWrite`. Advertise both
-// scopes in the challenge below — clients such as Cursor copy `scope=` when
+// mutating tools still gate on `write` via `requireMcpWrite`. The challenge
+// below advertises the wider set — clients such as Cursor copy `scope=` when
 // requesting an authorization code, and `requiredScopes` alone would make
-// `write` mandatory for every connection.
+// every advertised scope mandatory for every connection.
 const mcpAuthHandler = withMcpAuth(handler, verifyMcpToken, {
   required: true,
   requiredScopes: ["read"],
@@ -40,12 +41,12 @@ const mcpAuthHandler = withMcpAuth(handler, verifyMcpToken, {
   resourceUrl: authBaseURL,
 });
 
-const ADVERTISED_SCOPES = 'scope="read write"';
+const ADVERTISED_SCOPES = `scope="${MCP_ADVERTISED_SCOPES.join(" ")}"`;
 
 async function authHandler(req: Request): Promise<Response> {
   const res = await mcpAuthHandler(req);
   const challenge = res.headers.get("WWW-Authenticate");
-  if (!challenge || challenge.includes("write")) {
+  if (!challenge || challenge.includes(ADVERTISED_SCOPES)) {
     return res;
   }
   const rewritten = challenge.replace(/scope="[^"]*"/, ADVERTISED_SCOPES);
