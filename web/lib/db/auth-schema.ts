@@ -1,3 +1,15 @@
+/**
+ * Better Auth JWT + `@better-auth/oauth-provider` tables.
+ *
+ * DO NOT hand-edit field lists — regenerate:
+ *
+ *   npm run db:generate-auth-schema
+ *
+ * That runs `npx auth@latest generate` (requires `export default` on
+ * `lib/auth.ts` and drizzleAdapter `camelCase: true`) and adapts the
+ * plugin tables for this repo (snake_case SQL table names, plural exports,
+ * FKs into `schema.ts` users/sessions, plus jwks alg/crv).
+ */
 import {
   boolean,
   index,
@@ -8,19 +20,13 @@ import {
 } from "drizzle-orm/pg-core";
 import { sessions, users } from "./schema";
 
-// Better Auth JWT plugin + `@better-auth/oauth-provider` tables.
-// Field names match the 1.6.x plugin schemas (camelCase columns, same as
-// `user` / `session` / `account`). Registered on the drizzle adapter under
-// the exact Better Auth model keys (`jwks`, `oauthClient`, …).
-
 export const jwks = pgTable("jwks", {
   id: text("id").primaryKey(),
   publicKey: text("publicKey").notNull(),
   privateKey: text("privateKey").notNull(),
   createdAt: timestamp("createdAt", { mode: "date" }).notNull(),
   expiresAt: timestamp("expiresAt", { mode: "date" }),
-  // Written by the jwt plugin when minting key pairs; not in the typed
-  // schema but required at verify/sign time.
+  // Runtime columns written by the jwt plugin (not in CLI typed schema).
   alg: text("alg"),
   crv: text("crv"),
 });
@@ -36,7 +42,7 @@ export const oauthClients = pgTable(
     enableEndSession: boolean("enableEndSession"),
     subjectType: text("subjectType"),
     scopes: text("scopes").array(),
-    userId: text("userId").references(() => users.id),
+    userId: text("userId").references(() => users.id, { onDelete: "cascade" }),
     createdAt: timestamp("createdAt", { mode: "date" }),
     updatedAt: timestamp("updatedAt", { mode: "date" }),
     name: text("name"),
@@ -59,7 +65,7 @@ export const oauthClients = pgTable(
     referenceId: text("referenceId"),
     metadata: jsonb("metadata"),
   },
-  (t) => [index("oauthClient_userId_idx").on(t.userId)]
+  (table) => [index("oauthClient_userId_idx").on(table.userId)]
 );
 
 export const oauthRefreshTokens = pgTable(
@@ -69,24 +75,24 @@ export const oauthRefreshTokens = pgTable(
     token: text("token").notNull().unique(),
     clientId: text("clientId")
       .notNull()
-      .references(() => oauthClients.clientId),
+      .references(() => oauthClients.clientId, { onDelete: "cascade" }),
     sessionId: text("sessionId").references(() => sessions.id, {
       onDelete: "set null",
     }),
     userId: text("userId")
       .notNull()
-      .references(() => users.id),
+      .references(() => users.id, { onDelete: "cascade" }),
     referenceId: text("referenceId"),
-    expiresAt: timestamp("expiresAt", { mode: "date" }),
-    createdAt: timestamp("createdAt", { mode: "date" }),
+    expiresAt: timestamp("expiresAt", { mode: "date" }).notNull(),
+    createdAt: timestamp("createdAt", { mode: "date" }).notNull(),
     revoked: timestamp("revoked", { mode: "date" }),
     authTime: timestamp("authTime", { mode: "date" }),
     scopes: text("scopes").array().notNull(),
   },
-  (t) => [
-    index("oauthRefreshToken_clientId_idx").on(t.clientId),
-    index("oauthRefreshToken_sessionId_idx").on(t.sessionId),
-    index("oauthRefreshToken_userId_idx").on(t.userId),
+  (table) => [
+    index("oauthRefreshToken_clientId_idx").on(table.clientId),
+    index("oauthRefreshToken_sessionId_idx").on(table.sessionId),
+    index("oauthRefreshToken_userId_idx").on(table.userId),
   ]
 );
 
@@ -94,25 +100,27 @@ export const oauthAccessTokens = pgTable(
   "oauth_access_token",
   {
     id: text("id").primaryKey(),
-    token: text("token").unique(),
+    token: text("token").notNull().unique(),
     clientId: text("clientId")
       .notNull()
-      .references(() => oauthClients.clientId),
+      .references(() => oauthClients.clientId, { onDelete: "cascade" }),
     sessionId: text("sessionId").references(() => sessions.id, {
       onDelete: "set null",
     }),
-    userId: text("userId").references(() => users.id),
+    userId: text("userId").references(() => users.id, { onDelete: "cascade" }),
     referenceId: text("referenceId"),
-    refreshId: text("refreshId").references(() => oauthRefreshTokens.id),
-    expiresAt: timestamp("expiresAt", { mode: "date" }),
-    createdAt: timestamp("createdAt", { mode: "date" }),
+    refreshId: text("refreshId").references(() => oauthRefreshTokens.id, {
+      onDelete: "cascade",
+    }),
+    expiresAt: timestamp("expiresAt", { mode: "date" }).notNull(),
+    createdAt: timestamp("createdAt", { mode: "date" }).notNull(),
     scopes: text("scopes").array().notNull(),
   },
-  (t) => [
-    index("oauthAccessToken_clientId_idx").on(t.clientId),
-    index("oauthAccessToken_sessionId_idx").on(t.sessionId),
-    index("oauthAccessToken_userId_idx").on(t.userId),
-    index("oauthAccessToken_refreshId_idx").on(t.refreshId),
+  (table) => [
+    index("oauthAccessToken_clientId_idx").on(table.clientId),
+    index("oauthAccessToken_sessionId_idx").on(table.sessionId),
+    index("oauthAccessToken_userId_idx").on(table.userId),
+    index("oauthAccessToken_refreshId_idx").on(table.refreshId),
   ]
 );
 
@@ -122,15 +130,15 @@ export const oauthConsents = pgTable(
     id: text("id").primaryKey(),
     clientId: text("clientId")
       .notNull()
-      .references(() => oauthClients.clientId),
-    userId: text("userId").references(() => users.id),
+      .references(() => oauthClients.clientId, { onDelete: "cascade" }),
+    userId: text("userId").references(() => users.id, { onDelete: "cascade" }),
     referenceId: text("referenceId"),
     scopes: text("scopes").array().notNull(),
-    createdAt: timestamp("createdAt", { mode: "date" }),
-    updatedAt: timestamp("updatedAt", { mode: "date" }),
+    createdAt: timestamp("createdAt", { mode: "date" }).notNull(),
+    updatedAt: timestamp("updatedAt", { mode: "date" }).notNull(),
   },
-  (t) => [
-    index("oauthConsent_clientId_idx").on(t.clientId),
-    index("oauthConsent_userId_idx").on(t.userId),
+  (table) => [
+    index("oauthConsent_clientId_idx").on(table.clientId),
+    index("oauthConsent_userId_idx").on(table.userId),
   ]
 );

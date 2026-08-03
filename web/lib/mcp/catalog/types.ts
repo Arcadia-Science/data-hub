@@ -24,6 +24,13 @@ export interface McpToolDef {
   group: McpToolGroup;
   inputSchema?: Record<string, ZodType>;
   name: string;
+  /**
+   * REST-equivalent capability tag for the public catalog
+   * (`GET /mcp/v1/schema.json`). MCP transport auth uses coarse OAuth
+   * `read` / `write`; this field documents the finer-grained surface for
+   * docs consumers and is not enforced at the tool handler.
+   */
+  scope?: string;
   title: string;
 }
 
@@ -71,6 +78,7 @@ export interface McpCatalogDocument {
     title: string;
     description: string;
     group: McpToolGroup;
+    scope?: string;
     annotations?: McpToolAnnotations;
     inputSchema: Record<string, unknown>;
   }>;

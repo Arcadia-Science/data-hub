@@ -1017,8 +1017,8 @@ export const runAttributions = pgTable(
   ]
 );
 
-// Better Auth JWT + OAuth provider tables (defined separately so auth.ts
-// can register them under the exact Better Auth model keys).
+// Better Auth JWT + OAuth provider tables — regenerate via
+// `npm run db:generate-auth-schema` (see `auth-schema.ts` header).
 // biome-ignore lint/performance/noBarrelFile: drizzle-kit reads this single schema entrypoint
 export {
   jwks,

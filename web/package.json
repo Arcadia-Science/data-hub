@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "precommit": "npm run lint:fix && npm run typecheck",
     "db:generate": "drizzle-kit generate",
+    "db:generate-auth-schema": "tsx scripts/generate-auth-schema.ts",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",

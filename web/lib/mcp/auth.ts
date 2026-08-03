@@ -19,6 +19,10 @@ const resourceClient = createAuthClient({
   plugins: [oauthProviderResourceClient(authInstance)],
 });
 
+function isPatBearer(token: string): boolean {
+  return token.startsWith("dhub_");
+}
+
 async function verifyPatFallback(
   req: Request,
   bearerToken: string
@@ -50,6 +54,20 @@ export async function verifyMcpToken(
     return;
   }
 
+  // PATs are never JWTs — try the fallback first so we don't burn a JWKS
+  // round-trip (and log a verification miss) on every flagged PAT request.
+  if (isPatFallbackEnabled() && isPatBearer(bearerToken)) {
+    try {
+      const pat = await verifyPatFallback(req, bearerToken);
+      if (pat) {
+        return pat;
+      }
+    } catch (patError) {
+      console.error("[mcp] PAT fallback verification error", patError);
+    }
+    return;
+  }
+
   try {
     // better-auth 1.6 exposes `verifyAccessToken(token)`; 1.7's
     // `verifyAccessTokenRequest(req)` (DPoP-aware) is not available yet.
@@ -66,20 +84,9 @@ export async function verifyMcpToken(
     });
     return authInfoFromPayload(payload, bearerToken);
   } catch (error) {
-    // Expected for missing/invalid Bearer and for PATs when fallback is on.
+    // Expected for missing/invalid Bearer tokens.
     if (process.env.NODE_ENV !== "production") {
       console.debug("[mcp] JWT verification failed", error);
-    }
-  }
-
-  if (isPatFallbackEnabled()) {
-    try {
-      const pat = await verifyPatFallback(req, bearerToken);
-      if (pat) {
-        return pat;
-      }
-    } catch (patError) {
-      console.error("[mcp] PAT fallback verification error", patError);
     }
   }
 

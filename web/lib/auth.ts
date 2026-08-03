@@ -132,6 +132,9 @@ async function promoteAdminIfAllowlisted(userId: string): Promise<void> {
 const googleClientId = process.env.AUTH_GOOGLE_ID;
 const googleClientSecret = process.env.AUTH_GOOGLE_SECRET;
 
+// Default export keeps `npx auth generate` able to load this config (it
+// looks for `export default` or a binding named `auth`; our session helper
+// already occupies `auth`).
 export const authInstance = betterAuth({
   baseURL,
   // Disable the jwt plugin's `/token` session-exchange endpoint; MCP clients
@@ -139,6 +142,9 @@ export const authInstance = betterAuth({
   disabledPaths: ["/token"],
   database: drizzleAdapter(db, {
     provider: "pg",
+    // Match existing Auth.js-era camelCase SQL columns (`publicKey`, …).
+    // Required for `npx auth generate` to emit the same casing.
+    camelCase: true,
     schema: {
       user: users,
       session: sessions,
@@ -279,6 +285,11 @@ export const authInstance = betterAuth({
         "read",
       ],
       clientRegistrationAllowedScopes: [...oauthScopes],
+      // Path-aware AS metadata lives at
+      // `/.well-known/oauth-authorization-server/api/auth` (issuer path).
+      silenceWarnings: {
+        oauthAuthServerConfig: true,
+      },
     }),
     // Must be last so Set-Cookie from server actions (sign-in / sign-out)
     // reaches the browser via Next's `cookies()` helper.
@@ -287,6 +298,8 @@ export const authInstance = betterAuth({
 });
 
 export type Session = typeof authInstance.$Infer.Session;
+
+export default authInstance;
 
 // Drop-in replacement for Auth.js's `auth()`. Returns Better Auth's
 // `{ user, session }` shape (or null); callers already only read

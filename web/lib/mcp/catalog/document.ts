@@ -20,6 +20,7 @@ export function buildMcpCatalogDocument(): McpCatalogDocument {
       title: tool.title,
       description: tool.description,
       group: tool.group,
+      ...(tool.scope ? { scope: tool.scope } : {}),
       ...(tool.annotations ? { annotations: tool.annotations } : {}),
       inputSchema: zodRecordToJsonSchema(tool.inputSchema),
     })),

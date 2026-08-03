@@ -134,6 +134,14 @@ describe("MCP OAuth discovery", () => {
     expect(body.token_endpoint).toBe(`${issuer}/oauth2/token`);
   });
 
+  it("GET /.well-known/oauth-authorization-server/api/auth matches path-aware issuer metadata", async () => {
+    // RFC 8414 path-aware discovery for issuer `{origin}/api/auth`.
+    const res = await api("/.well-known/oauth-authorization-server/api/auth");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { issuer?: string };
+    expect(body.issuer).toBe(expectedIssuer());
+  });
+
   it("GET /.well-known/openid-configuration advertises issuer and registration", async () => {
     const res = await api("/.well-known/openid-configuration");
     expect(res.status).toBe(200);
