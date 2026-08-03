@@ -41,6 +41,7 @@
     "@smithy/protocol-http": "^5.4.1",
     "@smithy/signature-v4": "^5.4.1",
     "@tanstack/react-form": "^1.32.0",
+    "@vercel/analytics": "^2.0.1",
     "@vercel/functions": "^3.7.3",
     "@vercel/microfrontends": "^2.4.0",
     "@vercel/oidc-aws-credentials-provider": "^3.0.7",

@@ -1,6 +1,7 @@
 import { Geist, Geist_Mono } from "next/font/google";
 
 import "@/app/globals.css";
+import { Analytics } from "@vercel/analytics/next";
 import type { Metadata } from "next";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
@@ -173,6 +174,7 @@ export default async function RootLayout({
             </TooltipProvider>
           </NuqsAdapter>
         </ThemeProvider>
+        <Analytics />
       </body>
     </html>
   );
