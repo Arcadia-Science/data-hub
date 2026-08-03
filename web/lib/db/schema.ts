@@ -1016,3 +1016,14 @@ export const runAttributions = pgTable(
     index("idx_run_attributions_user_id").on(attribution.userId),
   ]
 );
+
+// Better Auth JWT + OAuth provider tables — regenerate via
+// `npm run db:generate-auth-schema` (see `auth-schema.ts` header).
+// biome-ignore lint/performance/noBarrelFile: drizzle-kit reads this single schema entrypoint
+export {
+  jwks,
+  oauthAccessTokens,
+  oauthClients,
+  oauthConsents,
+  oauthRefreshTokens,
+} from "./auth-schema";

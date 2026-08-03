@@ -39,6 +39,7 @@ DATABASE_URL=postgres://localhost:5432/data-hub-local
 # Any 32+ character string. Better Auth uses it to sign cookies / encrypt
 # session data (also accepted as `BETTER_AUTH_SECRET`).
 AUTH_SECRET=local-dev-secret-at-least-32-characters!!
+# Public origin / OAuth issuer base (issuer = ${BETTER_AUTH_URL}/api/auth).
 BETTER_AUTH_URL=http://localhost:3000
 
 # Dummy AWS credentials. The local-mirror branch in `web/lib/s3.ts`
@@ -84,7 +85,13 @@ Or call the API with the seeded PAT:
     http://localhost:3000/api/v1/instruments
 ```
 
-The token carries the `*` (wildcard) scope so every v1 endpoint accepts it. Useful for poking at the REST API, the MCP server (`/api/v1/mcp`), or wiring up an external tool while you iterate.
+The token carries the `*` (wildcard) scope so every v1 REST endpoint accepts it. Useful for curling the API or wiring up watchers/tools that still use PATs.
+
+## Connecting an MCP client
+
+MCP at `/mcp/v1` uses OAuth (not PATs by default). Point the client at `http://localhost:3000/mcp/v1` with `BETTER_AUTH_URL=http://localhost:3000`. Clients discover the authorization server via `/.well-known/oauth-protected-resource` (resource-specific: `…/mcp/v1`) and `/.well-known/oauth-authorization-server`. Sign in with the local "Sign in (dev)" flow when prompted (it resumes the OAuth authorize request); on the consent screen grant `read`, and `write` if the client needs mutating tools. Transport requires only `read`; mutating tools additionally require `write`.
+
+For PAT-based MCP testing only (scripts, integration tests, quick Bearer curls), set `MCP_ALLOW_PAT_AUTH=true` in `web/.env` and restart `make dev`. That flag is hard-disabled on Vercel production and on self-hosted production (non-loopback `BETTER_AUTH_URL`). PAT fallback grants MCP `write` only for the `*` wildcard — fine-grained mutating PAT scopes stay read-only over MCP. Prefer OAuth for interactive clients (Cursor, Claude Desktop, etc.).
 
 ## Resetting
 
@@ -213,7 +220,7 @@ A few details worth knowing:
 
 - Adding fixtures for more instruments means an `INSTRUMENT_FIXTURES` entry in [web/lib/db/seed.ts](../web/lib/db/seed.ts) keyed by the kebab-case instrument id from `data_hub_shared.enums.Instrument` (`{ files: [{ filename, contentType }, …], runIds }`) pointing at files under `lambda/tests/fixtures/`. List every fixture you want cycled across seeded runs. The handler rejects unknown instrument ids because `parse_s3_event` only accepts values from that enum.
 - The route is gated on `NODE_ENV !== "production"` AND `LOCAL_S3_MIRROR` set; either condition unmet returns 404 unconditionally, so a production build can never expose the filesystem.
-- The MCP tool at `/api/v1/mcp` returns a relative `/api/local-s3/...` URL when the mirror is active — browsers resolve it against the current origin, but non-browser MCP clients on localhost may need to prefix with `http://localhost:3000`.
+- The MCP tool at `/mcp/v1` returns a relative `/api/local-s3/...` URL when the mirror is active — browsers resolve it against the current origin, but non-browser MCP clients on localhost may need to prefix with `http://localhost:3000`.
 
 ## Where the seed lives
 
@@ -229,4 +236,4 @@ The same builders back the integration test harness in [web/tests/integration/he
 - [Getting started](getting-started.md) — full setup with real Google OAuth and AWS credentials.
 - [Architecture](architecture.md) — system overview and data flow.
 - [REST API](https://datahub.arcadiascience.com/docs/api) — on-ramp and generated endpoints for the seeded PAT.
-- [MCP](https://datahub.arcadiascience.com/docs/mcp) — Model Context Protocol tools at `/api/v1/mcp`.
+- [MCP](https://datahub.arcadiascience.com/docs/mcp) — Model Context Protocol tools at `/mcp/v1`.

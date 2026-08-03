@@ -24,7 +24,12 @@ export interface McpToolDef {
   group: McpToolGroup;
   inputSchema?: Record<string, ZodType>;
   name: string;
-  /** PAT scope checked by the tool handler (`resource:action`). */
+  /**
+   * REST-equivalent capability tag for the public catalog
+   * (`GET /mcp/v1/schema.json`). MCP transport auth uses coarse OAuth
+   * `read` / `write`; this field documents the finer-grained surface for
+   * docs consumers and is not enforced at the tool handler.
+   */
   scope?: string;
   title: string;
 }
@@ -45,7 +50,7 @@ export type McpResourceDef = {
   | { kind: "template"; uriTemplate: string }
 );
 
-/** Shape served by `GET /api/v1/mcp/schema.json`. */
+/** Shape served by `GET /mcp/v1/schema.json`. */
 export interface McpCatalogDocument {
   info: {
     title: string;

@@ -99,7 +99,10 @@ export async function authenticateRequest(
     };
   }
 
-  return validatePat(request.headers.get("authorization"));
+  // Await explicitly. Returning the Promise directly was enough for the
+  // runtime, but Next 16.3's minifier then dropped the null check in
+  // `authorize` and called `hasScope(null, …)` → 500 instead of 401.
+  return await validatePat(request.headers.get("authorization"));
 }
 
 /**
@@ -187,17 +190,13 @@ export async function requireAdminForSession(
   return null;
 }
 
-// Authenticates a v1 route request and checks for the given scope. Returns
-// the resolved `AuthResult` on success, or a `Response` (401 if missing
-// auth, 403 if the token lacks the scope) the handler should return. Not
-// for session-only routes like `/api/v1/tokens` — those still use
-// `requireSession()` directly.
-export async function authorize(
-  request: NextRequest,
+// Shared 401/403 gate so both authorize helpers keep an identical, hard-to-
+// minify-away null check (see `authenticateRequest` await note above).
+function enforceScope(
+  authResult: AuthResult | null,
   scope: Scope
-): Promise<AuthResult | Response> {
-  const authResult = await authenticateRequest(request);
-  if (!authResult) {
+): AuthResult | Response {
+  if (authResult === null) {
     return apiError(401, UNAUTHORIZED, "Authentication required");
   }
   if (!hasScope(authResult, scope)) {
@@ -210,6 +209,18 @@ export async function authorize(
   return authResult;
 }
 
+// Authenticates a v1 route request and checks for the given scope. Returns
+// the resolved `AuthResult` on success, or a `Response` (401 if missing
+// auth, 403 if the token lacks the scope) the handler should return. Not
+// for session-only routes like `/api/v1/tokens` — those still use
+// `requireSession()` directly.
+export async function authorize(
+  request: NextRequest,
+  scope: Scope
+): Promise<AuthResult | Response> {
+  return enforceScope(await authenticateRequest(request), scope);
+}
+
 // Same contract as {@link authorize}, but PAT-only — sessions are never
 // consulted. Use for machine-to-machine routes (e.g. Lambda file create)
 // where accepting a browser session would grant `*` scope and open an
@@ -218,16 +229,5 @@ export async function authorizeToken(
   request: NextRequest,
   scope: Scope
 ): Promise<AuthResult | Response> {
-  const authResult = await authenticateWithToken(request);
-  if (!authResult) {
-    return apiError(401, UNAUTHORIZED, "Authentication required");
-  }
-  if (!hasScope(authResult, scope)) {
-    return apiError(
-      403,
-      FORBIDDEN,
-      `Token is missing required scope: ${scope}`
-    );
-  }
-  return authResult;
+  return enforceScope(await authenticateWithToken(request), scope);
 }

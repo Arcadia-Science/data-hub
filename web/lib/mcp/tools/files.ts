@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import { reprocessFile } from "@/lib/api/file-reprocessing";
 import {
   dismissFile,
@@ -9,7 +9,7 @@ import { prepareRunArchive } from "@/lib/api/run-archive";
 import { toolRegistrationConfig } from "@/lib/mcp/catalog/register";
 import {
   errorResult,
-  requireMcpScope,
+  requireMcpWrite,
   textResult,
 } from "@/lib/mcp/tools/helpers";
 import {
@@ -28,11 +28,7 @@ export function registerFileTools(server: McpServer) {
   server.registerTool(
     getFileTool.name,
     toolRegistrationConfig(getFileTool),
-    async ({ fileId }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "files:read");
-      if (scopeError) {
-        return scopeError;
-      }
+    async ({ fileId }) => {
       const file = await getActiveFileById(fileId);
       if (!file) {
         return errorResult(`File '${fileId}' not found.`);
@@ -44,11 +40,7 @@ export function registerFileTools(server: McpServer) {
   server.registerTool(
     getFileDownloadUrlTool.name,
     toolRegistrationConfig(getFileDownloadUrlTool),
-    async ({ fileId }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "files:read");
-      if (scopeError) {
-        return scopeError;
-      }
+    async ({ fileId }) => {
       const lookup = await lookupFileForDownload(fileId);
       if (!lookup.ok) {
         if (lookup.reason === "not_uploaded") {
@@ -77,13 +69,7 @@ export function registerFileTools(server: McpServer) {
   server.registerTool(
     getRunArchiveTool.name,
     toolRegistrationConfig(getRunArchiveTool),
-    async ({ instrumentId, runId }, { authInfo }) => {
-      // Mirror the REST archive route which is gated on `files:read`.
-      const scopeError = requireMcpScope(authInfo, "files:read");
-      if (scopeError) {
-        return scopeError;
-      }
-
+    async ({ instrumentId, runId }) => {
       // Token-authenticated callers (every MCP request) don't have a
       // session user to record against `archive_jobs.created_by`, even
       // though the underlying user id is on `authInfo.extra`. Keep the
@@ -127,10 +113,10 @@ export function registerFileTools(server: McpServer) {
   server.registerTool(
     reprocessFileTool.name,
     toolRegistrationConfig(reprocessFileTool),
-    async ({ fileId }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "files:reprocess");
-      if (scopeError) {
-        return scopeError;
+    async ({ fileId }, ctx) => {
+      const writeError = requireMcpWrite(ctx.http?.authInfo);
+      if (writeError) {
+        return writeError;
       }
       const result = await reprocessFile(fileId);
       if (!result.ok) {
@@ -143,10 +129,10 @@ export function registerFileTools(server: McpServer) {
   server.registerTool(
     dismissFileTool.name,
     toolRegistrationConfig(dismissFileTool),
-    async ({ fileId }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "files:delete");
-      if (scopeError) {
-        return scopeError;
+    async ({ fileId }, ctx) => {
+      const writeError = requireMcpWrite(ctx.http?.authInfo);
+      if (writeError) {
+        return writeError;
       }
       const result = await dismissFile(fileId);
       if (!result.ok) {

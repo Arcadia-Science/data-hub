@@ -122,9 +122,8 @@ export interface ScopePreset {
 
 // Curated starting points offered above the granular grid. Machine presets
 // (Watcher, Lambda) mirror the exact endpoints those agents call so a token
-// minted from them is already least-privilege; MCP mirrors the scopes the
-// MCP tools check, giving a member an MCP-client surface analogous to the
-// web UI. Custom (no preset) leaves the grid untouched for fine-tuning.
+// minted from them is already least-privilege. Custom (no preset) leaves the
+// grid untouched for fine-tuning.
 export const SCOPE_PRESETS: ScopePreset[] = [
   {
     id: "read-only",
@@ -136,25 +135,6 @@ export const SCOPE_PRESETS: ScopePreset[] = [
       "files:read",
       "watchers:read",
       "archive-jobs:read",
-    ],
-  },
-  {
-    id: "mcp",
-    label: "MCP",
-    description:
-      "For an MCP client — browse, download, claim, comment, reprocess, delete/restore runs, request uploads, and dismiss pending files, like the web UI.",
-    scopes: [
-      "instruments:read",
-      "runs:read",
-      "runs:attribute",
-      "runs:comment",
-      "runs:reprocess",
-      "runs:delete",
-      "runs:upload",
-      "files:read",
-      "files:reprocess",
-      "files:delete",
-      "watchers:read",
     ],
   },
   {

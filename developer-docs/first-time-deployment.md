@@ -71,7 +71,7 @@ In the Vercel dashboard, scoped to the environment, set at least the following. 
 | --- | --- |
 | `DATABASE_URL` | Connection string from [step 1](#1-provision-a-postgresql-database). |
 | `AUTH_SECRET` | Session encryption key (generate a 32+ character random string). |
-| `BETTER_AUTH_URL` | Public origin of this deployment (e.g. `https://your-staging-deployment.vercel.app`). |
+| `BETTER_AUTH_URL` | Public origin of this deployment and OAuth issuer base (issuer `{origin}/api/auth`; e.g. `https://your-staging-deployment.vercel.app`). |
 | `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` | Client ID and secret from the [OAuth client](#create-a-google-oauth-client) above. |
 | `ADMIN_EMAILS` | Comma-separated emails auto-promoted to admin on sign-in. This bootstraps the first admin, so set it before you sign in. |
 | `CRON_SECRET` | Shared secret for Vercel Cron jobs. The upload-queue sweep (`web/vercel.json`) rejects invocations without it. |

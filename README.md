@@ -18,7 +18,7 @@ A run shows up in three places at once:
 
 - **Web app**: find a run by instrument, date, or who ran it, read plate maps and images in the page, claim your work, and download files. See the [web app guide](https://datahub.arcadiascience.com/docs/browse-runs).
 - **REST API**: served at `/api/v1/`, with an OpenAPI 3.1 document at `/api/v1/openapi.json` so you can generate a client instead of writing one. See the [API reference](https://datahub.arcadiascience.com/docs/api).
-- **MCP server**: served at `/api/v1/mcp`, so Claude Code, Claude Desktop, or Cursor can search runs and fetch files during a conversation. See the [MCP setup](https://datahub.arcadiascience.com/docs/mcp).
+- **MCP server**: served at `/mcp/v1`, so Claude Code, Claude Desktop, or Cursor can search runs and fetch files during a conversation. See the [MCP setup](https://datahub.arcadiascience.com/docs/mcp).
 
 All three authenticate with tokens you create in the app, scoped and revocable. A read-only token stays read-only whichever route it takes.
 
