@@ -267,9 +267,18 @@ export const authInstance = betterAuth({
       ],
       // Cursor / mcp-remote still require RFC 7591 Dynamic Client Registration.
       // Open registration only creates OAuth clients — Google Workspace still
-      // gates who can sign in.
+      // gates who can sign in. Default to read-only; clients must request
+      // `write` explicitly (and the user must grant it on the consent screen).
       allowDynamicClientRegistration: true,
       allowUnauthenticatedClientRegistration: true,
+      clientRegistrationDefaultScopes: [
+        "openid",
+        "profile",
+        "email",
+        "offline_access",
+        "read",
+      ],
+      clientRegistrationAllowedScopes: [...oauthScopes],
     }),
     // Must be last so Set-Cookie from server actions (sign-in / sign-out)
     // reaches the browser via Next's `cookies()` helper.

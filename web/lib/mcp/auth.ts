@@ -46,10 +46,16 @@ function authInfoFromPayload(
     (typeof payload.azp === "string" && payload.azp) ||
     "unknown";
 
+  const expiresAt =
+    typeof payload.exp === "number" && Number.isFinite(payload.exp)
+      ? payload.exp
+      : undefined;
+
   return {
     token: bearerToken,
     clientId,
     scopes,
+    expiresAt,
     extra: { userId: sub },
   };
 }
@@ -116,6 +122,7 @@ async function verifyOpaqueAccessToken(
     token: bearerToken,
     clientId: accessToken.clientId,
     scopes: accessToken.scopes ?? [],
+    expiresAt: Math.floor(accessToken.expiresAt.getTime() / 1000),
     extra: { userId: accessToken.userId },
   };
 }

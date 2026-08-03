@@ -8,7 +8,7 @@ import { redirectWithAuthError } from "@/components/auth/auth-sign-in-error";
 import { DevSignInForm } from "@/components/auth/dev-sign-in-form";
 import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
 import { authInstance } from "@/lib/auth";
-import { isDevAuthEnabled } from "@/lib/dev-auth";
+import { DEV_PASSWORD, isDevAuthEnabled } from "@/lib/dev-auth";
 import { DOCS_URL, QUICKSTART_DOCS_URL } from "@/lib/docs";
 
 interface AuthScreenProps {
@@ -61,6 +61,28 @@ export function AuthScreen({
     redirectWithAuthError(callbackUrl, "google");
   }
 
+  async function signInWithDev(formData: FormData) {
+    "use server";
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("Dev sign-in is disabled in production");
+    }
+    const email = formData.get("email");
+    try {
+      await authInstance.api.signInEmail({
+        body: {
+          email: typeof email === "string" ? email.trim().toLowerCase() : "",
+          password: DEV_PASSWORD,
+          callbackURL: callbackUrl,
+        },
+        headers: await headers(),
+      });
+    } catch (error) {
+      unstable_rethrow(error);
+      redirectWithAuthError(callbackUrl, "credentials");
+    }
+    redirect(callbackUrl);
+  }
+
   return (
     <div className="grid min-h-[calc(100svh_-_var(--banner-height,0px))] w-full lg:grid-cols-2">
       <div className="flex flex-col bg-background">
@@ -105,7 +127,16 @@ export function AuthScreen({
 
             {isDevAuthEnabled ? (
               <div className="mt-8">
-                <DevSignInForm callbackUrl={callbackUrl} inputId={devInputId} />
+                <Suspense
+                  fallback={
+                    <div className="h-24 w-full animate-pulse rounded-md bg-muted" />
+                  }
+                >
+                  <DevSignInForm
+                    inputId={devInputId}
+                    signInAction={signInWithDev}
+                  />
+                </Suspense>
               </div>
             ) : null}
           </div>

@@ -261,10 +261,11 @@ export async function setup() {
   const port = await getFreePort();
   const baseUrl = `http://127.0.0.1:${port}`;
 
+  const authSecret = "test-secret-at-least-32-characters-long!!";
   const serverEnv: NodeJS.ProcessEnv = {
     ...process.env,
     DATABASE_URL: databaseUrl,
-    AUTH_SECRET: "test-secret-at-least-32-characters-long!!",
+    AUTH_SECRET: authSecret,
     AUTH_GOOGLE_ID: "stub",
     AUTH_GOOGLE_SECRET: "stub",
     BETTER_AUTH_URL: baseUrl,
@@ -330,6 +331,7 @@ export async function setup() {
   // which Vitest propagates to test workers automatically.
   process.env.__TEST_BASE_URL = baseUrl;
   process.env.__TEST_DATABASE_URL = databaseUrl;
+  process.env.__TEST_AUTH_SECRET = authSecret;
   process.env.__TEST_SLACK_CAPTURE_URL = slackCaptureBaseUrl;
   process.env.__TEST_SLACK_DM_CAPTURE_URL = slackCaptureBaseUrl;
   // Propagate the Slack stubs to the Vitest test-worker process so that
