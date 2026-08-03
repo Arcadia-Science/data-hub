@@ -1,6 +1,5 @@
-import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+import type { AuthInfo } from "@modelcontextprotocol/server";
 import { lookupRunByNaturalKey, type RunFile } from "@/lib/api/instrument-runs";
-import { hasScope, type Scope } from "@/lib/api/scopes";
 
 export function textResult(data: unknown) {
   return {
@@ -17,8 +16,8 @@ export function errorResult(message: string) {
 
 export type McpErrorResult = ReturnType<typeof errorResult>;
 
-// Auth middleware puts the PAT owner on `extra.userId`. Narrow with typeof
-// instead of a cast so a malformed extra can't silently become a string.
+// Auth middleware puts the authenticated user on `extra.userId`. Narrow with
+// typeof instead of a cast so a malformed extra can't silently become a string.
 export function getMcpUserId(
   authInfo: AuthInfo | undefined
 ): string | undefined {
@@ -46,28 +45,24 @@ export function toMcpFile(f: RunFile) {
   };
 }
 
-// Per-tool scope guard. Every MCP tool checks the same `<resource>:<action>`
-// scope its REST counterpart enforces — there is no MCP-specific scope
-// vocabulary, so a token with `runs:read` over REST also covers `search_runs`
-// over MCP, and so on.
+// Mutating MCP tools require the coarse OAuth `write` scope. Transport-level
+// auth already enforces `read`; this is the per-tool gate for side effects.
 //
 // When `authInfo` is undefined we skip the check: production traffic always
-// has it (enforced by `withMcpAuth({ required: true })` in the route), and
-// the in-memory test transport intentionally omits it. Letting unauthenticated
-// callers through here keeps scope enforcement aligned with the HTTP
-// boundary; downstream user-identity checks (e.g. `resolveAttributionTarget`)
-// still reject the call when a user id is required.
-export function requireMcpScope(
-  authInfo: AuthInfo | undefined,
-  required: Scope
+// has it (enforced by the MCP auth wrapper in the route), and the in-memory
+// test transport intentionally omits it. Downstream user-identity checks
+// (e.g. `resolveAttributionTarget`) still reject the call when a user id is
+// required.
+export function requireMcpWrite(
+  authInfo: AuthInfo | undefined
 ): McpErrorResult | null {
   if (!authInfo) {
     return null;
   }
-  if (hasScope({ scopes: authInfo.scopes ?? [] }, required)) {
+  if (authInfo.scopes?.includes("write")) {
     return null;
   }
-  return errorResult(`Token is missing required scope: ${required}`);
+  return errorResult("Token is missing required scope: write");
 }
 
 type AttributionResolution =

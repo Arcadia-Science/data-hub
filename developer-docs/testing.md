@@ -99,11 +99,20 @@ Three test directories, two Vitest configs:
   `tests/mcp/` is grouped in here (not with `tests/integration/`) because it
   exercises the MCP server's in-memory transport directly against a mocked
   data layer — it's a fast unit-style test, not an HTTP integration test.
+  These tests do not exercise the OAuth/JWKS path.
 - **`tests/integration/`** runs under `vitest.integration.config.ts`
   (`npm run test:integration` / `make fe-test-integration`) — real HTTP
   requests against a built-and-started Next.js server. `globalSetup` points at
   `tests/integration/global-setup.ts`, and `fileParallelism: false` because
   every test file shares the one Postgres database and server instance.
+  MCP HTTP tests that authenticate with a seeded PAT need
+  `MCP_ALLOW_PAT_AUTH=true` on the test server (dev/CI only; hard-disabled
+  on Vercel production and self-hosted production with a non-loopback
+  `BETTER_AUTH_URL` — local/CI `next start` uses loopback and stays allowed).
+  `mcp-oauth.test.ts` also exercises the authorization-code flow end-to-end
+  (register → authorize → consent → token → MCP) using a DB-seeded session
+  cookie; MCP accepts JWT access tokens only (clients pass RFC 8707
+  `resource`).
 
 `global-setup.ts` mirrors what `start_test_server()` does for Python, plus one
 thing the Python side doesn't need: an in-process HTTP server on a free port

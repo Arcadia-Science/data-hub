@@ -1,44 +1,78 @@
-import type { ZodType } from "zod";
+import { type ZodType, z } from "zod";
 import type { McpToolAnnotations } from "@/lib/mcp/catalog/types";
 
 /** Config object passed to `server.registerTool` (name is separate). */
 export function toolRegistrationConfig<
-  TSchema extends Record<string, ZodType> | undefined,
+  TSchema extends Record<string, ZodType>,
   TAnnotations extends McpToolAnnotations | undefined,
 >(def: {
   title: string;
   description: string;
-  inputSchema?: TSchema;
+  inputSchema: TSchema;
   annotations?: TAnnotations;
 }): {
   title: string;
   description: string;
-  inputSchema: TSchema;
+  inputSchema: z.ZodObject<TSchema>;
   annotations: TAnnotations;
-} {
+};
+export function toolRegistrationConfig<
+  TAnnotations extends McpToolAnnotations | undefined,
+>(def: {
+  title: string;
+  description: string;
+  inputSchema?: undefined;
+  annotations?: TAnnotations;
+}): {
+  title: string;
+  description: string;
+  annotations: TAnnotations;
+};
+export function toolRegistrationConfig(def: {
+  title: string;
+  description: string;
+  inputSchema?: Record<string, ZodType>;
+  annotations?: McpToolAnnotations;
+}) {
   return {
     title: def.title,
     description: def.description,
-    inputSchema: def.inputSchema as TSchema,
-    annotations: def.annotations as TAnnotations,
+    // SDK v2 expects a ZodObject; defs keep a raw shape so the catalog can
+    // still iterate field metadata without unwrapping. Omit the key when
+    // absent so registerTool picks the no-args callback overload.
+    ...(def.inputSchema ? { inputSchema: z.object(def.inputSchema) } : {}),
+    annotations: def.annotations,
   };
 }
 
 /** Config object passed to `server.registerPrompt` (name is separate). */
 export function promptRegistrationConfig<
-  TSchema extends Record<string, ZodType> | undefined,
+  TSchema extends Record<string, ZodType>,
 >(def: {
   title: string;
   description: string;
-  argsSchema?: TSchema;
+  argsSchema: TSchema;
 }): {
   title: string;
   description: string;
-  argsSchema: TSchema;
-} {
+  argsSchema: z.ZodObject<TSchema>;
+};
+export function promptRegistrationConfig(def: {
+  title: string;
+  description: string;
+  argsSchema?: undefined;
+}): {
+  title: string;
+  description: string;
+};
+export function promptRegistrationConfig(def: {
+  title: string;
+  description: string;
+  argsSchema?: Record<string, ZodType>;
+}) {
   return {
     title: def.title,
     description: def.description,
-    argsSchema: def.argsSchema as TSchema,
+    ...(def.argsSchema ? { argsSchema: z.object(def.argsSchema) } : {}),
   };
 }

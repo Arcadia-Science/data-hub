@@ -31,6 +31,16 @@ describe("MCP catalog document", () => {
     }
   });
 
+  it("preserves per-tool scope tags on the public catalog payload", () => {
+    const doc = buildMcpCatalogDocument();
+    const scopedDefs = MCP_TOOL_DEFS.filter((t) => t.scope);
+    expect(scopedDefs.length).toBeGreaterThan(0);
+    for (const def of scopedDefs) {
+      const tool = doc.tools.find((t) => t.name === def.name);
+      expect(tool?.scope).toBe(def.scope);
+    }
+  });
+
   it("documents static URIs and templates distinctly", () => {
     const doc = buildMcpCatalogDocument();
     const staticResources = doc.resources.filter((r) => r.uri);

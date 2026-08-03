@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import {
   type EffectiveStatus,
   getWatcherById,
@@ -7,11 +7,7 @@ import {
   getWatcherList,
 } from "@/lib/api/watchers";
 import { toolRegistrationConfig } from "@/lib/mcp/catalog/register";
-import {
-  errorResult,
-  requireMcpScope,
-  textResult,
-} from "@/lib/mcp/tools/helpers";
+import { errorResult, textResult } from "@/lib/mcp/tools/helpers";
 import {
   getWatcherHeartbeatsTool,
   getWatcherTool,
@@ -23,11 +19,7 @@ export function registerWatcherTools(server: McpServer) {
   server.registerTool(
     listWatchersTool.name,
     toolRegistrationConfig(listWatchersTool),
-    async ({ instrumentId, includeDeleted, status }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "watchers:read");
-      if (scopeError) {
-        return scopeError;
-      }
+    async ({ instrumentId, includeDeleted, status }) => {
       let watchers = await getWatcherList({
         includeDeleted: includeDeleted ?? false,
       });
@@ -46,11 +38,7 @@ export function registerWatcherTools(server: McpServer) {
   server.registerTool(
     getWatcherTool.name,
     toolRegistrationConfig(getWatcherTool),
-    async ({ watcherId }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "watchers:read");
-      if (scopeError) {
-        return scopeError;
-      }
+    async ({ watcherId }) => {
       const watcher = await getWatcherById(watcherId);
       if (!watcher) {
         return errorResult(`Watcher '${watcherId}' not found.`);
@@ -62,11 +50,7 @@ export function registerWatcherTools(server: McpServer) {
   server.registerTool(
     listWatcherEventsTool.name,
     toolRegistrationConfig(listWatcherEventsTool),
-    async ({ watcherId, hours, eventTypes, page, pageSize }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "watchers:read");
-      if (scopeError) {
-        return scopeError;
-      }
+    async ({ watcherId, hours, eventTypes, page, pageSize }) => {
       const lookbackHours = hours ?? 24;
       const since = new Date(Date.now() - lookbackHours * 60 * 60 * 1000);
       const result = await getWatcherEvents(watcherId, {
@@ -87,11 +71,7 @@ export function registerWatcherTools(server: McpServer) {
   server.registerTool(
     getWatcherHeartbeatsTool.name,
     toolRegistrationConfig(getWatcherHeartbeatsTool),
-    async ({ watcherId, hours }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "watchers:read");
-      if (scopeError) {
-        return scopeError;
-      }
+    async ({ watcherId, hours }) => {
       const lookbackHours = hours ?? 24;
       const since = new Date(Date.now() - lookbackHours * 60 * 60 * 1000);
       const { rows, total } = await getWatcherHeartbeats(watcherId, {

@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import { and, eq } from "drizzle-orm";
 import { reprocessRun } from "@/lib/api/file-reprocessing";
 import {
@@ -27,7 +27,7 @@ import { toolRegistrationConfig } from "@/lib/mcp/catalog/register";
 import {
   errorResult,
   getMcpUserId,
-  requireMcpScope,
+  requireMcpWrite,
   resolveAttributionTarget,
   textResult,
   toMcpFile,
@@ -52,18 +52,15 @@ import {
   unclaimRunTool,
 } from "./runs.defs";
 
-// Sentinel for `search_runs.ranBy`: resolve to the authenticated PAT owner.
+// Sentinel for `search_runs.ranBy`: resolve to the authenticated user.
 const RAN_BY_ME_SENTINEL = "me";
 
 export function registerRunTools(server: McpServer) {
   server.registerTool(
     searchRunsTool.name,
     toolRegistrationConfig(searchRunsTool),
-    async (args, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "runs:read");
-      if (scopeError) {
-        return scopeError;
-      }
+    async (args, ctx) => {
+      const authInfo = ctx.http?.authInfo;
 
       let ranBy = args.ranBy;
       if (ranBy === RAN_BY_ME_SENTINEL) {
@@ -111,11 +108,7 @@ export function registerRunTools(server: McpServer) {
   server.registerTool(
     getRunTool.name,
     toolRegistrationConfig(getRunTool),
-    async ({ instrumentId, runId, include }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "runs:read");
-      if (scopeError) {
-        return scopeError;
-      }
+    async ({ instrumentId, runId, include }) => {
       const run = await lookupRunByNaturalKey(instrumentId, runId);
       if (!run) {
         return errorResult(
@@ -162,11 +155,7 @@ export function registerRunTools(server: McpServer) {
   server.registerTool(
     getRunReportTool.name,
     toolRegistrationConfig(getRunReportTool),
-    async ({ instrumentId, runId }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "files:read");
-      if (scopeError) {
-        return scopeError;
-      }
+    async ({ instrumentId, runId }) => {
       const result = await buildRunReport(instrumentId, runId);
       if (!result.ok) {
         return errorResult(result.message);
@@ -178,15 +167,7 @@ export function registerRunTools(server: McpServer) {
   server.registerTool(
     listRunFilesTool.name,
     toolRegistrationConfig(listRunFilesTool),
-    async ({ instrumentId, runId, page, perPage }, { authInfo }) => {
-      // The tool is keyed by run and the result is "what files belong to
-      // this run", which lives under the runs domain in the REST API too
-      // (`GET /instruments/:id/runs/:runId` returns files alongside the
-      // run). One scope (`runs:read`) covers both.
-      const scopeError = requireMcpScope(authInfo, "runs:read");
-      if (scopeError) {
-        return scopeError;
-      }
+    async ({ instrumentId, runId, page, perPage }) => {
       const run = await lookupRunByNaturalKey(instrumentId, runId);
       if (!run) {
         return errorResult(
@@ -204,10 +185,11 @@ export function registerRunTools(server: McpServer) {
   server.registerTool(
     claimRunTool.name,
     toolRegistrationConfig(claimRunTool),
-    async ({ instrumentId, runId }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "runs:attribute");
-      if (scopeError) {
-        return scopeError;
+    async ({ instrumentId, runId }, ctx) => {
+      const authInfo = ctx.http?.authInfo;
+      const writeError = requireMcpWrite(authInfo);
+      if (writeError) {
+        return writeError;
       }
       const resolved = await resolveAttributionTarget(
         authInfo,
@@ -235,10 +217,11 @@ export function registerRunTools(server: McpServer) {
   server.registerTool(
     unclaimRunTool.name,
     toolRegistrationConfig(unclaimRunTool),
-    async ({ instrumentId, runId }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "runs:attribute");
-      if (scopeError) {
-        return scopeError;
+    async ({ instrumentId, runId }, ctx) => {
+      const authInfo = ctx.http?.authInfo;
+      const writeError = requireMcpWrite(authInfo);
+      if (writeError) {
+        return writeError;
       }
       const resolved = await resolveAttributionTarget(
         authInfo,
@@ -270,11 +253,7 @@ export function registerRunTools(server: McpServer) {
   server.registerTool(
     listRunAttributorsTool.name,
     toolRegistrationConfig(listRunAttributorsTool),
-    async ({ instrumentId }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "runs:read");
-      if (scopeError) {
-        return scopeError;
-      }
+    async ({ instrumentId }) => {
       const attributors = await getRanByFilterOptions(instrumentId);
       return textResult(attributors);
     }
@@ -283,11 +262,7 @@ export function registerRunTools(server: McpServer) {
   server.registerTool(
     listRunCommentsTool.name,
     toolRegistrationConfig(listRunCommentsTool),
-    async ({ instrumentId, runId }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "runs:read");
-      if (scopeError) {
-        return scopeError;
-      }
+    async ({ instrumentId, runId }) => {
       const run = await lookupRunByNaturalKey(instrumentId, runId);
       if (!run) {
         return errorResult(
@@ -302,10 +277,11 @@ export function registerRunTools(server: McpServer) {
   server.registerTool(
     addRunCommentTool.name,
     toolRegistrationConfig(addRunCommentTool),
-    async ({ instrumentId, runId, body }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "runs:comment");
-      if (scopeError) {
-        return scopeError;
+    async ({ instrumentId, runId, body }, ctx) => {
+      const authInfo = ctx.http?.authInfo;
+      const writeError = requireMcpWrite(authInfo);
+      if (writeError) {
+        return writeError;
       }
       const userId = getMcpUserId(authInfo);
       if (!userId) {
@@ -348,10 +324,11 @@ export function registerRunTools(server: McpServer) {
   server.registerTool(
     editRunCommentTool.name,
     toolRegistrationConfig(editRunCommentTool),
-    async ({ commentId, body }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "runs:comment");
-      if (scopeError) {
-        return scopeError;
+    async ({ commentId, body }, ctx) => {
+      const authInfo = ctx.http?.authInfo;
+      const writeError = requireMcpWrite(authInfo);
+      if (writeError) {
+        return writeError;
       }
       const userId = getMcpUserId(authInfo);
       if (!userId) {
@@ -385,10 +362,11 @@ export function registerRunTools(server: McpServer) {
   server.registerTool(
     deleteRunCommentTool.name,
     toolRegistrationConfig(deleteRunCommentTool),
-    async ({ commentId }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "runs:comment");
-      if (scopeError) {
-        return scopeError;
+    async ({ commentId }, ctx) => {
+      const authInfo = ctx.http?.authInfo;
+      const writeError = requireMcpWrite(authInfo);
+      if (writeError) {
+        return writeError;
       }
       const userId = getMcpUserId(authInfo);
       if (!userId) {
@@ -414,10 +392,10 @@ export function registerRunTools(server: McpServer) {
   server.registerTool(
     reprocessRunTool.name,
     toolRegistrationConfig(reprocessRunTool),
-    async ({ instrumentId, runId }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "runs:reprocess");
-      if (scopeError) {
-        return scopeError;
+    async ({ instrumentId, runId }, ctx) => {
+      const writeError = requireMcpWrite(ctx.http?.authInfo);
+      if (writeError) {
+        return writeError;
       }
       const result = await reprocessRun(instrumentId, runId);
       if (!result.ok) {
@@ -435,10 +413,11 @@ export function registerRunTools(server: McpServer) {
   server.registerTool(
     deleteRunTool.name,
     toolRegistrationConfig(deleteRunTool),
-    async ({ instrumentId, runId }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "runs:delete");
-      if (scopeError) {
-        return scopeError;
+    async ({ instrumentId, runId }, ctx) => {
+      const authInfo = ctx.http?.authInfo;
+      const writeError = requireMcpWrite(authInfo);
+      if (writeError) {
+        return writeError;
       }
       const userId = getMcpUserId(authInfo) ?? null;
       const result = await softDeleteRun({
@@ -462,10 +441,10 @@ export function registerRunTools(server: McpServer) {
   server.registerTool(
     restoreRunTool.name,
     toolRegistrationConfig(restoreRunTool),
-    async ({ instrumentId, runId }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "runs:delete");
-      if (scopeError) {
-        return scopeError;
+    async ({ instrumentId, runId }, ctx) => {
+      const writeError = requireMcpWrite(ctx.http?.authInfo);
+      if (writeError) {
+        return writeError;
       }
       const result = await restoreRun(instrumentId, runId);
       if (!result.ok) {
@@ -483,10 +462,10 @@ export function registerRunTools(server: McpServer) {
   server.registerTool(
     requestRunUploadTool.name,
     toolRegistrationConfig(requestRunUploadTool),
-    async ({ instrumentId, runId, fileIds }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "runs:upload");
-      if (scopeError) {
-        return scopeError;
+    async ({ instrumentId, runId, fileIds }, ctx) => {
+      const writeError = requireMcpWrite(ctx.http?.authInfo);
+      if (writeError) {
+        return writeError;
       }
       const result = await requestRunUploads({
         instrumentId,
@@ -508,10 +487,10 @@ export function registerRunTools(server: McpServer) {
   server.registerTool(
     requestRunUploadAllTool.name,
     toolRegistrationConfig(requestRunUploadAllTool),
-    async ({ instrumentId, runId }, { authInfo }) => {
-      const scopeError = requireMcpScope(authInfo, "runs:upload");
-      if (scopeError) {
-        return scopeError;
+    async ({ instrumentId, runId }, ctx) => {
+      const writeError = requireMcpWrite(ctx.http?.authInfo);
+      if (writeError) {
+        return writeError;
       }
       const result = await requestAllRunUploads(instrumentId, runId);
       if (!result.ok) {
