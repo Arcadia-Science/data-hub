@@ -273,17 +273,16 @@ export const authInstance = betterAuth({
       ],
       // Cursor / mcp-remote still require RFC 7591 Dynamic Client Registration.
       // Open registration only creates OAuth clients — Google Workspace still
-      // gates who can sign in. Default to read-only; clients must request
-      // `write` explicitly (and the user must grant it on the consent screen).
+      // gates who can sign in.
+      //
+      // Include `write` in the DCR default scope set. Better Auth stores that
+      // list on the client and later rejects authorize scopes outside it.
+      // Cursor registers without a `scope` body, then requests `read write`
+      // from the WWW-Authenticate challenge — omitting `write` here yields
+      // `invalid_scope`. Consent still gates what the user actually grants.
       allowDynamicClientRegistration: true,
       allowUnauthenticatedClientRegistration: true,
-      clientRegistrationDefaultScopes: [
-        "openid",
-        "profile",
-        "email",
-        "offline_access",
-        "read",
-      ],
+      clientRegistrationDefaultScopes: [...oauthScopes],
       clientRegistrationAllowedScopes: [...oauthScopes],
       // Path-aware AS metadata lives at
       // `/.well-known/oauth-authorization-server/api/auth` (issuer path).

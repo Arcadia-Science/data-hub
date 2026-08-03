@@ -355,6 +355,56 @@ describe("MCP OAuth authorization-code flow", () => {
     expect(payload.some((row) => row.id === instrumentId)).toBe(true);
   });
 
+  it("DCR without scope body still allows authorize with read write", async () => {
+    // Cursor registers without `scope`, then requests `read write` from the
+    // WWW-Authenticate challenge. The client's stored scopes must include write
+    // or authorize redirects with invalid_scope.
+    const issuer = expectedIssuer();
+    const redirectUri = "http://127.0.0.1:8787/callback";
+    const { challenge } = pkcePair();
+
+    const registerRes = await api("/api/auth/oauth2/register", {
+      method: "POST",
+      body: {
+        client_name: "Cursor-like MCP Client",
+        redirect_uris: [redirectUri],
+        token_endpoint_auth_method: "none",
+        grant_types: ["authorization_code"],
+        response_types: ["code"],
+      },
+    });
+    expect(registerRes.status).toBe(200);
+    const { client_id: clientId } = (await registerRes.json()) as {
+      client_id: string;
+    };
+
+    const sessionCookie = await seedSessionCookie(userId);
+    const authorizeUrl = new URL(`${issuer}/oauth2/authorize`);
+    authorizeUrl.searchParams.set("response_type", "code");
+    authorizeUrl.searchParams.set("client_id", clientId);
+    authorizeUrl.searchParams.set("redirect_uri", redirectUri);
+    authorizeUrl.searchParams.set("scope", "read write");
+    authorizeUrl.searchParams.set("resource", expectedMcpResource());
+    authorizeUrl.searchParams.set("code_challenge", challenge);
+    authorizeUrl.searchParams.set("code_challenge_method", "S256");
+
+    const authorizeRes = await fetch(authorizeUrl, {
+      headers: { Cookie: sessionCookie, Accept: "application/json" },
+      redirect: "manual",
+    });
+    expect(authorizeRes.status).toBe(200);
+    const authorizeBody = (await authorizeRes.json()) as {
+      redirect?: boolean;
+      url?: string;
+    };
+    expect(authorizeBody.redirect).toBe(true);
+    expect(authorizeBody.url).toBeTruthy();
+    const consentUrl = new URL(authorizeBody.url as string, getBaseUrl());
+    expect(consentUrl.pathname).toBe("/consent");
+    expect(consentUrl.searchParams.get("error")).toBeNull();
+    expect(consentUrl.search).not.toMatch(/invalid_scope/);
+  });
+
   it("read-only OAuth token can read but not mutate via MCP", async () => {
     const issuer = expectedIssuer();
     const resource = expectedMcpResource();
