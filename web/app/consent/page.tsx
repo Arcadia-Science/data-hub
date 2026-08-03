@@ -26,6 +26,22 @@ function clientHost(clientId: string): string | null {
   }
 }
 
+/** Better Auth's public-client endpoint returns RFC 7591 field names. */
+function clientNameFromPublicClient(data: unknown): string | null {
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+  const record = data as Record<string, unknown>;
+  if (typeof record.client_name === "string" && record.client_name) {
+    return record.client_name;
+  }
+  // Defensive: some Better Auth helpers use camelCase in other endpoints.
+  if (typeof record.name === "string" && record.name) {
+    return record.name;
+  }
+  return null;
+}
+
 function ConsentContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -38,9 +54,7 @@ function ConsentContent() {
   );
   const host = useMemo(() => clientHost(clientId), [clientId]);
 
-  const [clientName, setClientName] = useState<string>(
-    clientId || "MCP client"
-  );
+  const [clientName, setClientName] = useState<string>("MCP client");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,22 +75,13 @@ function ConsentContent() {
     void authClient.oauth2
       .publicClient({ query: { client_id: clientId } })
       .then(({ data }) => {
-        const name =
-          data && typeof data === "object" && "name" in data
-            ? (data as { name?: unknown }).name
-            : undefined;
-        const id =
-          data && typeof data === "object" && "clientId" in data
-            ? (data as { clientId?: unknown }).clientId
-            : undefined;
-        if (typeof name === "string" && name) {
+        const name = clientNameFromPublicClient(data);
+        if (name) {
           setClientName(name);
-        } else if (typeof id === "string" && id) {
-          setClientName(id);
         }
       })
       .catch(() => {
-        /* display client_id fallback */
+        /* keep MCP client fallback */
       });
   }, [clientId]);
 
@@ -149,12 +154,7 @@ function ConsentContent() {
           <p className="text-muted-foreground text-xs">
             From <span className="font-mono text-foreground/80">{host}</span>
           </p>
-        ) : (
-          <p className="break-all text-muted-foreground text-xs">
-            Client ID:{" "}
-            <span className="font-mono text-foreground/80">{clientId}</span>
-          </p>
-        )}
+        ) : null}
       </div>
 
       {scopes.length > 0 ? (

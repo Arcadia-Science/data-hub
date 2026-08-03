@@ -84,12 +84,25 @@ export const metadata: Metadata = {
   },
 };
 
+function isBareAuthSurface(pathname: string): boolean {
+  return (
+    pathname === "/login" ||
+    pathname.startsWith("/login/") ||
+    pathname === "/consent" ||
+    pathname.startsWith("/consent/")
+  );
+}
+
 export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const session = await auth();
+  const pathname = (await headers()).get("x-pathname") ?? "";
+  // OAuth login/consent must not render inside the signed-in app shell —
+  // the proxy forwards `x-pathname` so we can detect those routes here.
+  const bareAuthSurface = isBareAuthSurface(pathname);
+  const session = bareAuthSurface ? null : await auth();
 
   // Fetch the per-request sidebar data alongside the session so the layout
   // doesn't introduce an additional round-trip. Skipped entirely when the

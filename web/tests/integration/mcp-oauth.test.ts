@@ -45,6 +45,7 @@ describe("MCP OAuth discovery", () => {
     expect(challenge).toContain(
       `resource_metadata="${getBaseUrl()}/.well-known/oauth-protected-resource/mcp/v1"`
     );
+    expect(challenge).toContain('scope="read write"');
   });
 
   it("GET /.well-known/oauth-authorization-server advertises issuer and registration", async () => {
@@ -83,9 +84,11 @@ describe("MCP OAuth discovery", () => {
     const body = (await res.json()) as {
       resource?: string;
       authorization_servers?: string[];
+      scopes_supported?: string[];
     };
     expect(body.resource).toBe(expectedMcpResource());
     expect(body.authorization_servers).toEqual([expectedIssuer()]);
+    expect(body.scopes_supported).toEqual(["read", "write"]);
   });
 
   it("GET /.well-known/oauth-protected-resource/mcp/v1 matches path-specific metadata", async () => {
@@ -94,8 +97,10 @@ describe("MCP OAuth discovery", () => {
     const body = (await res.json()) as {
       resource?: string;
       authorization_servers?: string[];
+      scopes_supported?: string[];
     };
     expect(body.resource).toBe(expectedMcpResource());
     expect(body.authorization_servers).toEqual([expectedIssuer()]);
+    expect(body.scopes_supported).toEqual(["read", "write"]);
   });
 });

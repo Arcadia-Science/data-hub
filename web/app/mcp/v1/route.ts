@@ -27,9 +27,12 @@ const handler = createMcpHandler(
 // withMcpAuth treats resourceUrl as an origin and concatenates
 // resourceMetadataPath onto it for the WWW-Authenticate challenge — so pass
 // the app origin, not `mcpResourceAudience` (`…/mcp/v1`).
+// Advertise both MCP scopes in the WWW-Authenticate challenge. Clients
+// such as Cursor copy `scope=` from the challenge when requesting an
+// authorization code — listing only `read` made consent appear read-only.
 const authHandler = withMcpAuth(handler, verifyMcpToken, {
   required: true,
-  requiredScopes: ["read"],
+  requiredScopes: ["read", "write"],
   resourceMetadataPath: "/.well-known/oauth-protected-resource/mcp/v1",
   resourceUrl: authBaseURL,
 });

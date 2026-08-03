@@ -17,9 +17,9 @@ const publicPrefixes = [
   "/consent",
   "/api/auth",
   "/api/v1",
-  // The MCP server authenticates with a personal access token, never a
-  // session cookie — a redirect to `/login` would surface as an opaque
-  // HTML response to MCP clients instead of a 401.
+  // MCP authenticates via OAuth (or flagged PAT fallback), never a
+  // session cookie — a redirect to `/login` would surface as opaque HTML
+  // instead of a 401 + WWW-Authenticate challenge.
   "/mcp",
   // RFC 8414 / 9728 discovery documents for MCP OAuth clients.
   "/.well-known",
@@ -39,6 +39,14 @@ const publicPrefixes = [
 // page surfaces watcher config YAML / hostnames).
 const publicExactPaths = new Set(["/", "/watchers"]);
 
+function nextWithPathname(request: NextRequest) {
+  // Root layout needs the pathname to skip the app shell on bare OAuth
+  // surfaces (`/login`, `/consent`) even when a session cookie is present.
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-pathname", request.nextUrl.pathname);
+  return NextResponse.next({ request: { headers: requestHeaders } });
+}
+
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -48,7 +56,7 @@ export function proxy(request: NextRequest) {
       (route) => pathname === route || pathname.startsWith(`${route}/`)
     );
   if (isPublic) {
-    return NextResponse.next();
+    return nextWithPathname(request);
   }
 
   // Cookie presence only — optimistic redirect. Pages still call `auth()`
@@ -59,7 +67,7 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  return NextResponse.next();
+  return nextWithPathname(request);
 }
 
 export const config = {
