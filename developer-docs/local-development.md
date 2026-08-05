@@ -42,6 +42,9 @@ AUTH_SECRET=local-dev-secret-at-least-32-characters!!
 # Public origin / OAuth issuer base (issuer = ${BETTER_AUTH_URL}/api/auth).
 BETTER_AUTH_URL=http://localhost:3000
 
+# Docs origin. Leave unset on Vercel, where Microfrontends serves /docs.
+NEXT_PUBLIC_DOCS_BASE_URL=https://datahub.arcadiascience.com
+
 # Dummy AWS credentials. The local-mirror branch in `web/lib/s3.ts`
 # bypasses the AWS SDK entirely when LOCAL_S3_MIRROR is set, but a
 # few server-side modules instantiate the SDK at import time so any
