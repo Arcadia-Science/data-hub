@@ -36,6 +36,7 @@
     "@asteasolutions/zod-to-openapi": "^8.5.0",
     "@aws-sdk/client-s3": "^3.1021.0",
     "@aws-sdk/s3-request-presigner": "^3.1021.0",
+    "@base-ui/react": "^1.7.0",
     "@better-auth/oauth-provider": "^1.6.25",
     "@modelcontextprotocol/client": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",

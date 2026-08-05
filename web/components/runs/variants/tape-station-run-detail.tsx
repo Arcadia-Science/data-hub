@@ -43,7 +43,11 @@ export function TapeStationRunDetail({
       </RunDetail.Header>
 
       <RunDetail.FilesMetadataLayout>
-        <RunDetail.Metadata attributionsSlot={attributionsSlot} run={run}>
+        <RunDetail.Metadata
+          attributionsSlot={attributionsSlot}
+          fileStats={fileStats}
+          run={run}
+        >
           {hasTapeStationMetadata(run.metadata as Record<string, unknown>) && (
             <TapeStationRunBadges
               metadata={run.metadata as Record<string, unknown>}

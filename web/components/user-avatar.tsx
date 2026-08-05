@@ -1,15 +1,8 @@
 import Link from "next/link";
 import type { ComponentProps, ReactNode } from "react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { avatarColor } from "@/lib/avatar-color";
+import { avatarColor, type UserAvatarUser } from "@/lib/avatar-color";
 import { cn } from "@/lib/utils";
-
-export interface UserAvatarUser {
-  avatarUrl: string | null;
-  displayName: string;
-  initials: string;
-  userId: string;
-}
 
 export function UserAvatar({
   user,

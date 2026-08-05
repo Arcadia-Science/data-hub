@@ -6,7 +6,6 @@ import { NotificationsProvider } from "@/components/notifications/notifications-
 import { ArchiveDownloadProvider } from "@/components/runs/archive-download-provider";
 import { SearchTrigger } from "@/components/search/search-trigger";
 import {
-  SIDEBAR_COOKIE_NAME,
   SidebarInset,
   SidebarProvider,
   SidebarTrigger,
@@ -14,6 +13,7 @@ import {
 import { countUnread } from "@/lib/api/notifications";
 import { getSidebarInstruments } from "@/lib/api/sidebar";
 import { auth, authInstance } from "@/lib/auth";
+import { SIDEBAR_COOKIE_NAME } from "@/lib/sidebar-persistence";
 
 /**
  * Signed-in app chrome (sidebar, header, notifications). Auth surfaces

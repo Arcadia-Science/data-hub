@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/tooltip";
 import { UserAvatar } from "@/components/user-avatar";
 import { auth } from "@/lib/auth";
-import { toInitials } from "@/lib/avatar-color";
+import { toUserAvatarUser } from "@/lib/avatar-color";
 import { db } from "@/lib/db";
 import { personalAccessTokens, users } from "@/lib/db/schema";
 import { formatRelativeTime } from "@/lib/utils";
@@ -147,25 +147,23 @@ async function TokensSection({ isAdmin }: { isAdmin: boolean }) {
             </TableHeader>
             <TableBody>
               {tokens.map((token) => {
-                const displayName =
-                  token.user.name ?? token.user.email ?? "Unknown";
+                const avatarUser = toUserAvatarUser({
+                  userId: token.user.id,
+                  name: token.user.name,
+                  email: token.user.email,
+                  image: token.user.image,
+                });
                 return (
                   <TableRow key={token.id}>
                     <TableCell className="font-medium">{token.name}</TableCell>
                     <TableCell>
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <UserAvatar
-                            size="sm"
-                            user={{
-                              userId: token.user.id,
-                              displayName,
-                              initials: toInitials(displayName),
-                              avatarUrl: token.user.image,
-                            }}
-                          />
+                          <UserAvatar size="sm" user={avatarUser} />
                         </TooltipTrigger>
-                        <TooltipContent>{displayName}</TooltipContent>
+                        <TooltipContent>
+                          {avatarUser.displayName}
+                        </TooltipContent>
                       </Tooltip>
                     </TableCell>
                     <TableCell>

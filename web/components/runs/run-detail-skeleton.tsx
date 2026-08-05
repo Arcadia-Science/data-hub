@@ -32,6 +32,14 @@ function RunMetadataSkeleton() {
     <div className="rounded-lg border bg-background dark:bg-muted">
       <div className="flex flex-wrap gap-x-8 gap-y-4 px-4 py-3">
         <div className="flex flex-col gap-2">
+          <Skeleton className="h-5 w-10" />
+          <Skeleton className="h-5 w-6" />
+        </div>
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-5 w-10" />
+          <Skeleton className="h-5 w-14" />
+        </div>
+        <div className="flex flex-col gap-2">
           <Skeleton className="h-5 w-12" />
           <div className="flex h-5 items-center gap-1.5">
             <Skeleton className="size-5 rounded-full" />

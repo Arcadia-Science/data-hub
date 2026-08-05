@@ -40,7 +40,11 @@ export function GelDocRunDetail({
       </RunDetail.Header>
 
       <RunDetail.FilesMetadataLayout>
-        <RunDetail.Metadata attributionsSlot={attributionsSlot} run={run}>
+        <RunDetail.Metadata
+          attributionsSlot={attributionsSlot}
+          fileStats={fileStats}
+          run={run}
+        >
           {hasGelDocMetadata(run.metadata as Record<string, unknown>) && (
             <GelDocRunBadges
               metadata={run.metadata as Record<string, unknown>}

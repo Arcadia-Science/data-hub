@@ -22,7 +22,6 @@ import type { HinaFilterOptions } from "@/lib/api/instrument-runs";
 import { runRowToRef } from "@/lib/runs/row-actions";
 import { cn, formatBytes } from "@/lib/utils";
 import type { RunRow } from ".";
-import { AcquiredColumnHeader } from "./acquired-column-header";
 import { FilterableColumnHeader } from "./filterable-column-header";
 import { RanByCell } from "./ran-by-cell";
 import { RawFileColumnHeader } from "./raw-file-column-header";
@@ -87,9 +86,7 @@ export function HinaRunsTable({
               paramKey="ran_by"
             />
           </TableHead>
-          <TableHead className="text-right">
-            <AcquiredColumnHeader />
-          </TableHead>
+          <TableHead className="text-right">Acquired</TableHead>
           <TableHead className="w-[108px]">
             <span className="sr-only">Actions</span>
           </TableHead>

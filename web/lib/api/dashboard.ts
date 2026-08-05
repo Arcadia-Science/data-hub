@@ -1,6 +1,6 @@
 import { and, desc, eq, isNull, type SQL, sql } from "drizzle-orm";
 import { cache } from "react";
-import type { UserAvatarUser } from "@/components/user-avatar";
+import type { UserAvatarUser } from "@/lib/avatar-color";
 import { startOfTodayISO, startOfWeekISO } from "@/lib/date";
 import { db } from "@/lib/db";
 import {

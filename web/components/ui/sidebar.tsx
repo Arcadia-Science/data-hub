@@ -21,16 +21,23 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useIsMobile } from "@/hooks/use-mobile";
+import {
+  SIDEBAR_COOKIE_MAX_AGE,
+  SIDEBAR_COOKIE_NAME,
+} from "@/lib/sidebar-persistence";
 import { cn } from "@/lib/utils";
 
-// Exported so the server-side layout can hydrate the initial open state from
-// the same cookie that `SidebarProvider` writes on the client.
-export const SIDEBAR_COOKIE_NAME = "sidebar_state";
-const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 const SIDEBAR_WIDTH = "16rem";
 const SIDEBAR_WIDTH_MOBILE = "18rem";
 const SIDEBAR_WIDTH_ICON = "3rem";
 const SIDEBAR_KEYBOARD_SHORTCUT = "b";
+
+// A cookie rather than `localStorage` so the app layout can seed `defaultOpen`
+// during render, avoiding an open→collapsed flash on first paint.
+function persistSidebarOpen(openState: boolean) {
+  // biome-ignore lint/suspicious/noDocumentCookie: intentional client cookie write for SSR sidebar hydration
+  document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}; samesite=lax`;
+}
 
 type SidebarContextProps = {
   state: "expanded" | "collapsed";
@@ -82,8 +89,7 @@ function SidebarProvider({
         _setOpen(openState);
       }
 
-      // This sets the cookie to keep the sidebar state.
-      document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`;
+      persistSidebarOpen(openState);
     },
     [setOpenProp, open]
   );
