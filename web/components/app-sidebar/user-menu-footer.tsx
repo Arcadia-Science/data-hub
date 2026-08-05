@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useTransition } from "react";
+import { DocsLink } from "@/components/docs-link";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,7 +25,7 @@ import {
 } from "@/components/ui/sidebar";
 import { UserAvatar } from "@/components/user-avatar";
 import { toUserAvatarUser } from "@/lib/avatar-color";
-import { DOCS_IS_EXTERNAL, DOCS_URL } from "@/lib/docs";
+import { DOCS_URL } from "@/lib/docs";
 
 interface UserMenuFooterProps {
   signOutAction: () => Promise<void>;
@@ -76,18 +77,11 @@ export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
             sideOffset={4}
           >
             <DropdownMenuItem asChild>
-              {DOCS_IS_EXTERNAL ? (
-                <a href={DOCS_URL} rel="noopener noreferrer" target="_blank">
-                  <BookOpen data-icon="inline-start" />
-                  Docs
-                  <ExternalLink className="ml-auto size-3.5 text-muted-foreground" />
-                </a>
-              ) : (
-                <Link href={DOCS_URL}>
-                  <BookOpen data-icon="inline-start" />
-                  Docs
-                </Link>
-              )}
+              <DocsLink href={DOCS_URL}>
+                <BookOpen data-icon="inline-start" />
+                Docs
+                <ExternalLink className="ml-auto text-muted-foreground" />
+              </DocsLink>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
               <Link href="/settings/notifications">

@@ -1,6 +1,7 @@
 "use client";
 
 import { ExternalLink, Plus } from "lucide-react";
+import { DocsLink } from "@/components/docs-link";
 import { InstrumentStatusBadge } from "@/components/instruments/instrument-status-badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -77,15 +78,13 @@ export function AddInstrumentDialog({
         </ol>
         <DialogFooter className="sm:justify-between">
           <Button asChild size="sm">
-            <a href={setupGuideUrl} rel="noopener noreferrer" target="_blank">
+            <DocsLink href={setupGuideUrl}>
               Open setup guide
-              <ExternalLink className="size-3" />
-            </a>
+              <ExternalLink data-icon="inline-end" />
+            </DocsLink>
           </Button>
           <Button asChild size="sm" variant="ghost">
-            <a href={getTokenUrl} rel="noopener noreferrer" target="_blank">
-              Get a token
-            </a>
+            <DocsLink href={getTokenUrl}>Get a token</DocsLink>
           </Button>
         </DialogFooter>
       </DialogContent>
