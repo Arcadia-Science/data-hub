@@ -80,7 +80,7 @@ export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
                 <a href={DOCS_URL} rel="noopener noreferrer" target="_blank">
                   <BookOpen data-icon="inline-start" />
                   Docs
-                  <ExternalLink className="ml-auto text-muted-foreground" />
+                  <ExternalLink className="ml-auto size-3.5 text-muted-foreground" />
                 </a>
               ) : (
                 <Link href={DOCS_URL}>
