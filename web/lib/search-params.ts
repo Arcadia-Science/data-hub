@@ -94,10 +94,11 @@ export const watcherDetailParamsCache = createSearchParamsCache(
 // they don't collide with the comments section or future run-detail params.
 // This single object is the source of truth for both the server cache below
 // and the client `useQueryStates` in the files toolbar.
+//
+// Category and lifecycle status are independent multi-selects. Empty array =
+// no filter (show all), matching dashboard/instrument `status` arrays.
+const FILES_CATEGORY_VALUES = ["raw", "processed"] as const;
 const FILES_STATUS_VALUES = [
-  "all",
-  "raw",
-  "processed",
   "pending",
   "uploaded",
   "processing",
@@ -110,7 +111,12 @@ const FILES_SORT_VALUES = ["name", "size", "date", "status"] as const;
 export const runDetailSearchParams = {
   files_page: parseAsInteger.withDefault(1),
   files_search: parseAsString.withDefault(""),
-  files_status: parseAsStringLiteral(FILES_STATUS_VALUES).withDefault("all"),
+  files_category: parseAsArrayOf(parseAsStringLiteral(FILES_CATEGORY_VALUES))
+    .withDefault([])
+    .withOptions({ clearOnDefault: true }),
+  files_status: parseAsArrayOf(parseAsStringLiteral(FILES_STATUS_VALUES))
+    .withDefault([])
+    .withOptions({ clearOnDefault: true }),
   files_sort: parseAsStringLiteral(FILES_SORT_VALUES).withDefault("name"),
   files_dismissed: parseAsBoolean.withDefault(false),
 };

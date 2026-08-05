@@ -649,10 +649,10 @@ export type RunListRow = Awaited<
 // ---------------------------------------------------------------------------
 
 // Mirrors the client-side filter/sort unions the files table exposes.
-export type FilesStatusFilter =
-  | "all"
-  | "raw"
-  | "processed"
+// Category (raw/processed) and lifecycle status are independent multi-selects.
+export type FilesCategoryFilter = "raw" | "processed";
+
+export type FilesLifecycleFilter =
   | "pending"
   | "uploaded"
   | "processing"
@@ -662,11 +662,12 @@ export type FilesStatusFilter =
 export type FilesSortField = "name" | "size" | "date" | "status";
 
 // Filter inputs shared by the paginated query and the archive-download
-// "download what you filtered" resolution.
+// "download what you filtered" resolution. Empty arrays mean "no filter".
 export interface RunFilesFilter {
+  categories?: FilesCategoryFilter[];
   includeDismissed?: boolean;
   search?: string;
-  status?: FilesStatusFilter;
+  statuses?: FilesLifecycleFilter[];
 }
 
 export type RunFilesListFilters = RunFilesFilter & {
@@ -714,23 +715,22 @@ export function runFilesWhere(
     conditions.push(ilike(files.filename, `%${escaped}%`));
   }
 
-  switch (filters.status) {
-    case "raw":
-    case "processed":
-      conditions.push(eq(files.category, filters.status));
-      break;
-    case "pending":
-      conditions.push(inArray(files.status, [...PENDING_FILE_STATUSES]));
-      break;
-    case "uploaded":
-    case "processing":
-    case "completed":
-    case "failed":
-      conditions.push(eq(files.status, filters.status));
-      break;
-    default:
-      // "all" / undefined — no status condition.
-      break;
+  if (filters.categories && filters.categories.length > 0) {
+    conditions.push(inArray(files.category, filters.categories));
+  }
+
+  if (filters.statuses && filters.statuses.length > 0) {
+    // OR within the status multi-select; "pending" expands to the two
+    // pre-upload DB statuses collapsed into one UI option.
+    const statusPredicates = filters.statuses.map((status) =>
+      status === "pending"
+        ? inArray(files.status, [...PENDING_FILE_STATUSES])
+        : eq(files.status, status)
+    );
+    const statusOr = or(...statusPredicates);
+    if (statusOr) {
+      conditions.push(statusOr);
+    }
   }
 
   return conditions;
