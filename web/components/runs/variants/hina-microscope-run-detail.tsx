@@ -40,7 +40,11 @@ export function HinaMicroscopeRunDetail({
       </RunDetail.Header>
 
       <RunDetail.FilesMetadataLayout>
-        <RunDetail.Metadata attributionsSlot={attributionsSlot} run={run}>
+        <RunDetail.Metadata
+          attributionsSlot={attributionsSlot}
+          fileStats={fileStats}
+          run={run}
+        >
           {hasHinaMetadata(run.metadata as Record<string, unknown>) && (
             <HinaRunBadges metadata={run.metadata as Record<string, unknown>} />
           )}

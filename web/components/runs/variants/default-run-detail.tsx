@@ -40,7 +40,11 @@ export function DefaultRunDetail({
       </RunDetail.Header>
 
       <RunDetail.FilesMetadataLayout>
-        <RunDetail.Metadata attributionsSlot={attributionsSlot} run={run}>
+        <RunDetail.Metadata
+          attributionsSlot={attributionsSlot}
+          fileStats={fileStats}
+          run={run}
+        >
           {hasDefaultMetadata(run.metadata as Record<string, unknown>) && (
             <DefaultRunBadges
               metadata={run.metadata as Record<string, unknown>}

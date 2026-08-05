@@ -294,7 +294,11 @@ export function PlateReaderRunDetail({
       </RunDetail.Header>
 
       <RunDetail.FilesMetadataLayout>
-        <RunDetail.Metadata attributionsSlot={attributionsSlot} run={run}>
+        <RunDetail.Metadata
+          attributionsSlot={attributionsSlot}
+          fileStats={fileStats}
+          run={run}
+        >
           {hasPlateReaderMetadata(run.metadata as Record<string, unknown>) && (
             <PlateReaderRunBadges
               metadata={run.metadata as Record<string, unknown>}

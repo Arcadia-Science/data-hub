@@ -822,6 +822,8 @@ export interface RunFileStats {
   processedActive: number;
   processing: number;
   rawActive: number;
+  // Sum of raw-file `size_bytes` only — mirrors the runs-table Size column.
+  rawTotalSizeBytes: number;
   uploaded: number;
   // Files actively uploading to S3 (status = upload_requested). Tracked
   // separately from `pending` so the table only auto-refreshes while work is
@@ -833,11 +835,16 @@ export async function getRunFileStats(
   runInternalId: string
 ): Promise<RunFileStats> {
   const activeNotDeleted = sql`${files.deletedAt} is null`;
+  const rawActiveNotDeleted = sql`${files.category} = 'raw' and ${activeNotDeleted}`;
   const [row] = await db
     .select({
       active: sql<number>`cast(count(*) filter (where ${activeNotDeleted}) as int)`,
       dismissed: sql<number>`cast(count(*) filter (where ${files.deletedAt} is not null) as int)`,
-      rawActive: sql<number>`cast(count(*) filter (where ${files.category} = 'raw' and ${activeNotDeleted}) as int)`,
+      rawActive: sql<number>`cast(count(*) filter (where ${rawActiveNotDeleted}) as int)`,
+      // bigint can arrive as a string from node-pg; Number() at the boundary.
+      rawTotalSizeBytes: sql<
+        number | string
+      >`cast(coalesce(sum(${files.sizeBytes}) filter (where ${rawActiveNotDeleted}), 0) as bigint)`,
       processedActive: sql<number>`cast(count(*) filter (where ${files.category} = 'processed' and ${activeNotDeleted}) as int)`,
       detected: sql<number>`cast(count(*) filter (where ${files.status} = 'detected' and ${activeNotDeleted}) as int)`,
       failed: sql<number>`cast(count(*) filter (where ${files.status} = 'failed' and ${activeNotDeleted}) as int)`,
@@ -849,7 +856,10 @@ export async function getRunFileStats(
     .from(files)
     .where(eq(files.instrumentRunId, runInternalId));
 
-  return row;
+  return {
+    ...row,
+    rawTotalSizeBytes: Number(row.rawTotalSizeBytes),
+  };
 }
 
 // Report-relevant files for a run: processed artifacts, any PDFs, and any

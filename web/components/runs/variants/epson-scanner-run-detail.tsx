@@ -40,7 +40,11 @@ export function EpsonScannerRunDetail({
       </RunDetail.Header>
 
       <RunDetail.FilesMetadataLayout>
-        <RunDetail.Metadata attributionsSlot={attributionsSlot} run={run}>
+        <RunDetail.Metadata
+          attributionsSlot={attributionsSlot}
+          fileStats={fileStats}
+          run={run}
+        >
           {hasEpsonScannerMetadata(run.metadata as Record<string, unknown>) && (
             <EpsonScannerRunBadges
               metadata={run.metadata as Record<string, unknown>}
