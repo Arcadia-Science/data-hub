@@ -1,16 +1,11 @@
 "use client";
 
 import { parse } from "csv-parse/browser/esm/sync";
-import {
-  AlertTriangle,
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  ChevronsUpDown,
-} from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 import type { RamanSpectrumFileRef } from "@/components/runs/raman-report-section";
+import { ReportItemSeeker } from "@/components/runs/report-item-seeker";
 import { Button } from "@/components/ui/button";
 import {
   type ChartConfig,
@@ -18,22 +13,8 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { cn } from "@/lib/utils";
 
 interface SpectrumPoint {
   intensity: number;
@@ -101,71 +82,6 @@ async function fetchSpectrum(fileId: number): Promise<SpectrumPoint[]> {
       intensityDarkSubtracted: Number(r[CSV_HEADER_DARK]),
     }))
     .filter((p) => Number.isFinite(p.wavenumber));
-}
-
-function SpectrumPicker({
-  spectra,
-  selectedId,
-  onSelect,
-}: {
-  spectra: RamanSpectrumFileRef[];
-  selectedId: number | null;
-  onSelect: (fileId: number) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const selected = spectra.find((s) => s.fileId === selectedId);
-
-  return (
-    <Popover onOpenChange={setOpen} open={open}>
-      <PopoverTrigger asChild>
-        <Button
-          aria-expanded={open}
-          className="w-full max-w-md justify-between font-normal"
-          role="combobox"
-          variant="outline"
-        >
-          <span className="truncate">
-            {selected ? selected.filename : "Select a spectrum…"}
-          </span>
-          <ChevronsUpDown className="size-3.5 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        align="start"
-        className="w-[var(--radix-popover-trigger-width)] p-0"
-      >
-        <Command>
-          <CommandInput placeholder="Search spectra..." />
-          <CommandList>
-            <CommandEmpty>No spectra found.</CommandEmpty>
-            <CommandGroup>
-              {spectra.map((s) => {
-                const isSelected = s.fileId === selectedId;
-                return (
-                  <CommandItem
-                    key={s.fileId}
-                    onSelect={() => {
-                      onSelect(s.fileId);
-                      setOpen(false);
-                    }}
-                    value={s.filename}
-                  >
-                    <Check
-                      className={cn(
-                        "mr-2 size-4",
-                        isSelected ? "opacity-100" : "opacity-0"
-                      )}
-                    />
-                    <span className="truncate">{s.filename}</span>
-                  </CommandItem>
-                );
-              })}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
-  );
 }
 
 function SeriesToggle({
@@ -321,28 +237,10 @@ export function RamanSpectrumViewer({
   // during render. This avoids `react-hooks/set-state-in-effect` warnings.
   const [asyncResult, setAsyncResult] = useState<AsyncResult | null>(null);
 
-  const currentIndex = useMemo(
-    () =>
-      selectedId == null
-        ? -1
-        : spectra.findIndex((s) => s.fileId === selectedId),
-    [spectra, selectedId]
+  const seekItems = useMemo(
+    () => spectra.map((s) => ({ id: s.fileId, filename: s.filename })),
+    [spectra]
   );
-  const canGoPrev = currentIndex > 0;
-  const canGoNext = currentIndex >= 0 && currentIndex < spectra.length - 1;
-
-  function goPrev() {
-    if (!canGoPrev) {
-      return;
-    }
-    setSelectedId(spectra[currentIndex - 1].fileId);
-  }
-  function goNext() {
-    if (!canGoNext) {
-      return;
-    }
-    setSelectedId(spectra[currentIndex + 1].fileId);
-  }
 
   // Per-mount cache so toggling between already-loaded spectra is instant
   // and never re-hits S3.
@@ -412,33 +310,16 @@ export function RamanSpectrumViewer({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-2">
-        <SpectrumPicker
-          onSelect={setSelectedId}
-          selectedId={selectedId}
-          spectra={spectra}
-        />
-        <div className="flex items-center gap-1">
-          <Button
-            aria-label="Previous spectrum"
-            disabled={!canGoPrev}
-            onClick={goPrev}
-            size="icon"
-            variant="outline"
-          >
-            <ChevronLeft className="size-4" />
-          </Button>
-          <Button
-            aria-label="Next spectrum"
-            disabled={!canGoNext}
-            onClick={goNext}
-            size="icon"
-            variant="outline"
-          >
-            <ChevronRight className="size-4" />
-          </Button>
-        </div>
-      </div>
+      <ReportItemSeeker
+        emptyMessage="No spectra found."
+        items={seekItems}
+        nextAriaLabel="Next spectrum"
+        onSelect={setSelectedId}
+        previousAriaLabel="Previous spectrum"
+        searchPlaceholder="Search spectra..."
+        selectedId={selectedId}
+        selectPlaceholder="Select a spectrum…"
+      />
       <div className="flex justify-end">
         <SeriesToggle onChange={setVisible} visible={visible} />
       </div>
