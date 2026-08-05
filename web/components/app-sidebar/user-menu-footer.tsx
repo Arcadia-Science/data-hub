@@ -9,7 +9,6 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useTransition } from "react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,37 +22,29 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { UserAvatar } from "@/components/user-avatar";
+import { toUserAvatarUser } from "@/lib/avatar-color";
 import { DOCS_URL } from "@/lib/docs";
 
 interface UserMenuFooterProps {
   signOutAction: () => Promise<void>;
   user: {
+    id: string;
     name?: string | null;
     email?: string | null;
     image?: string | null;
   };
 }
 
-function getInitials(name?: string | null, email?: string | null): string {
-  if (name) {
-    return name
-      .split(" ")
-      .map((part) => part[0])
-      .join("")
-      .toUpperCase()
-      .slice(0, 2);
-  }
-  if (email) {
-    return email[0].toUpperCase();
-  }
-  return "?";
-}
-
 export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
   const { isMobile } = useSidebar();
   const [isPending, startTransition] = useTransition();
-
-  const initials = getInitials(user.name, user.email);
+  const avatarUser = toUserAvatarUser({
+    userId: user.id,
+    name: user.name,
+    email: user.email,
+    image: user.image,
+  });
 
   return (
     <SidebarMenu>
@@ -64,17 +55,10 @@ export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
               className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
               size="lg"
             >
-              <Avatar className="size-8 rounded-lg">
-                {user.image && (
-                  <AvatarImage alt={user.name ?? ""} src={user.image} />
-                )}
-                <AvatarFallback className="rounded-lg text-xs">
-                  {initials}
-                </AvatarFallback>
-              </Avatar>
+              <UserAvatar size="default" user={avatarUser} />
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-medium">
-                  {user.name ?? "User"}
+                  {avatarUser.displayName}
                 </span>
                 {user.email && (
                   <span className="truncate text-muted-foreground text-xs">

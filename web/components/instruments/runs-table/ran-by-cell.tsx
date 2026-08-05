@@ -14,7 +14,7 @@ import {
 import { UserAvatar, UserAvatarLink } from "@/components/user-avatar";
 import type { RunAttribution } from "@/lib/api/instrument-runs";
 import { useSession } from "@/lib/auth-client";
-import { toInitials } from "@/lib/avatar-color";
+import { toUserAvatarUser } from "@/lib/avatar-color";
 import { cn } from "@/lib/utils";
 
 type Action =
@@ -216,13 +216,12 @@ export function RanByCell({
     if (!currentUserId) {
       return;
     }
-    const displayName = session?.user?.name ?? session?.user?.email ?? "You";
-    const me: RunAttribution = {
+    const me: RunAttribution = toUserAvatarUser({
       userId: currentUserId,
-      displayName,
-      initials: toInitials(displayName),
-      avatarUrl: session?.user?.image ?? null,
-    };
+      name: session?.user?.name,
+      email: session?.user?.email,
+      image: session?.user?.image,
+    });
     startMutation(async () => {
       dispatch({ kind: "claim", user: me });
       try {
