@@ -17,7 +17,6 @@ export function RunAttributionsSection({
       attributions={attributions}
       compact
       instrumentId={instrumentId}
-      linkToProfile
       runId={runId}
       showName
     />
