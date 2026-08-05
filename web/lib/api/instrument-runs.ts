@@ -649,10 +649,10 @@ export type RunListRow = Awaited<
 // ---------------------------------------------------------------------------
 
 // Mirrors the client-side filter/sort unions the files table exposes.
-export type FilesStatusFilter =
-  | "all"
-  | "raw"
-  | "processed"
+// Category (raw/processed) and lifecycle status are independent multi-selects.
+export type FilesCategoryFilter = "raw" | "processed";
+
+export type FilesLifecycleFilter =
   | "pending"
   | "uploaded"
   | "processing"
@@ -662,11 +662,12 @@ export type FilesStatusFilter =
 export type FilesSortField = "name" | "size" | "date" | "status";
 
 // Filter inputs shared by the paginated query and the archive-download
-// "download what you filtered" resolution.
+// "download what you filtered" resolution. Empty arrays mean "no filter".
 export interface RunFilesFilter {
+  categories?: FilesCategoryFilter[];
   includeDismissed?: boolean;
   search?: string;
-  status?: FilesStatusFilter;
+  statuses?: FilesLifecycleFilter[];
 }
 
 export type RunFilesListFilters = RunFilesFilter & {
@@ -714,23 +715,22 @@ export function runFilesWhere(
     conditions.push(ilike(files.filename, `%${escaped}%`));
   }
 
-  switch (filters.status) {
-    case "raw":
-    case "processed":
-      conditions.push(eq(files.category, filters.status));
-      break;
-    case "pending":
-      conditions.push(inArray(files.status, [...PENDING_FILE_STATUSES]));
-      break;
-    case "uploaded":
-    case "processing":
-    case "completed":
-    case "failed":
-      conditions.push(eq(files.status, filters.status));
-      break;
-    default:
-      // "all" / undefined — no status condition.
-      break;
+  if (filters.categories && filters.categories.length > 0) {
+    conditions.push(inArray(files.category, filters.categories));
+  }
+
+  if (filters.statuses && filters.statuses.length > 0) {
+    // OR within the status multi-select; "pending" expands to the two
+    // pre-upload DB statuses collapsed into one UI option.
+    const statusPredicates = filters.statuses.map((status) =>
+      status === "pending"
+        ? inArray(files.status, [...PENDING_FILE_STATUSES])
+        : eq(files.status, status)
+    );
+    const statusOr = or(...statusPredicates);
+    if (statusOr) {
+      conditions.push(statusOr);
+    }
   }
 
   return conditions;
@@ -822,6 +822,8 @@ export interface RunFileStats {
   processedActive: number;
   processing: number;
   rawActive: number;
+  // Sum of raw-file `size_bytes` only — mirrors the runs-table Size column.
+  rawTotalSizeBytes: number;
   uploaded: number;
   // Files actively uploading to S3 (status = upload_requested). Tracked
   // separately from `pending` so the table only auto-refreshes while work is
@@ -833,11 +835,16 @@ export async function getRunFileStats(
   runInternalId: string
 ): Promise<RunFileStats> {
   const activeNotDeleted = sql`${files.deletedAt} is null`;
+  const rawActiveNotDeleted = sql`${files.category} = 'raw' and ${activeNotDeleted}`;
   const [row] = await db
     .select({
       active: sql<number>`cast(count(*) filter (where ${activeNotDeleted}) as int)`,
       dismissed: sql<number>`cast(count(*) filter (where ${files.deletedAt} is not null) as int)`,
-      rawActive: sql<number>`cast(count(*) filter (where ${files.category} = 'raw' and ${activeNotDeleted}) as int)`,
+      rawActive: sql<number>`cast(count(*) filter (where ${rawActiveNotDeleted}) as int)`,
+      // bigint can arrive as a string from node-pg; Number() at the boundary.
+      rawTotalSizeBytes: sql<
+        number | string
+      >`cast(coalesce(sum(${files.sizeBytes}) filter (where ${rawActiveNotDeleted}), 0) as bigint)`,
       processedActive: sql<number>`cast(count(*) filter (where ${files.category} = 'processed' and ${activeNotDeleted}) as int)`,
       detected: sql<number>`cast(count(*) filter (where ${files.status} = 'detected' and ${activeNotDeleted}) as int)`,
       failed: sql<number>`cast(count(*) filter (where ${files.status} = 'failed' and ${activeNotDeleted}) as int)`,
@@ -849,7 +856,10 @@ export async function getRunFileStats(
     .from(files)
     .where(eq(files.instrumentRunId, runInternalId));
 
-  return row;
+  return {
+    ...row,
+    rawTotalSizeBytes: Number(row.rawTotalSizeBytes),
+  };
 }
 
 // Report-relevant files for a run: processed artifacts, any PDFs, and any

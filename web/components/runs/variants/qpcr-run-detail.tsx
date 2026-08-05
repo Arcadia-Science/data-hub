@@ -40,7 +40,11 @@ export function QpcrRunDetail({
       </RunDetail.Header>
 
       <RunDetail.FilesMetadataLayout>
-        <RunDetail.Metadata attributionsSlot={attributionsSlot} run={run}>
+        <RunDetail.Metadata
+          attributionsSlot={attributionsSlot}
+          fileStats={fileStats}
+          run={run}
+        >
           {hasQpcrMetadata(run.metadata as Record<string, unknown>) && (
             <QpcrRunBadges metadata={run.metadata as Record<string, unknown>} />
           )}

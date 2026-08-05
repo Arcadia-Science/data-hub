@@ -36,16 +36,16 @@ export function RestoreRunButton({
 
   return (
     <Button
-      className="h-7 gap-1 text-xs"
+      className="gap-1.5 text-sm"
       disabled={isPending}
       onClick={handleRestore}
       size="sm"
       variant="outline"
     >
       {isPending ? (
-        <Loader2 className="size-3 animate-spin" />
+        <Loader2 className="size-4 animate-spin" />
       ) : (
-        <RotateCcw className="size-3" />
+        <RotateCcw className="size-4" />
       )}
       Restore
     </Button>

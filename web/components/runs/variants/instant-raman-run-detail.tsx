@@ -47,7 +47,11 @@ export function InstantRamanRunDetail({
       </RunDetail.Header>
 
       <RunDetail.FilesMetadataLayout>
-        <RunDetail.Metadata attributionsSlot={attributionsSlot} run={run} />
+        <RunDetail.Metadata
+          attributionsSlot={attributionsSlot}
+          fileStats={fileStats}
+          run={run}
+        />
         <RunDetail.Files
           files={files}
           filteredDownloadableCount={filesDownloadableCount}

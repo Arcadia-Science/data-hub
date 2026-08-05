@@ -21,7 +21,8 @@ import type {
   SearchRunResult,
   SearchUserResult,
 } from "@/lib/api/search";
-import { cn, formatBytes, formatRelativeTime, toInitials } from "@/lib/utils";
+import { toUserAvatarUser } from "@/lib/avatar-color";
+import { cn, formatBytes, formatRelativeTime } from "@/lib/utils";
 
 const IMAGE_EXTENSIONS = new Set([
   "png",
@@ -204,23 +205,16 @@ export function SearchUserRow({
   result: SearchUserResult;
   query: string;
 }) {
-  const title = result.name ?? result.email ?? "Unknown";
+  const avatarUser = toUserAvatarUser({
+    userId: result.id,
+    name: result.name,
+    email: result.email,
+    image: result.image,
+  });
   return (
-    <ResultRowShell
-      leading={
-        <UserAvatar
-          size="sm"
-          user={{
-            userId: result.id,
-            displayName: title,
-            initials: toInitials(title),
-            avatarUrl: result.image,
-          }}
-        />
-      }
-    >
+    <ResultRowShell leading={<UserAvatar size="sm" user={avatarUser} />}>
       <span className="block truncate font-medium text-sm">
-        <Highlight query={query} text={title} />
+        <Highlight query={query} text={avatarUser.displayName} />
       </span>
       {result.email && result.name ? (
         <span className="block truncate text-muted-foreground text-xs">

@@ -6,6 +6,10 @@ import { debounce, useQueryStates } from "nuqs";
 import { useEffect, useTransition } from "react";
 import { toast } from "sonner";
 import { PaginationNav } from "@/components/pagination-nav";
+import {
+  FilesFilterCombobox,
+  type FilesFilterOption,
+} from "@/components/runs/files-filter-combobox";
 import { RunSectionHeading } from "@/components/runs/run-section-heading";
 import {
   TablePendingBoundary,
@@ -23,8 +27,9 @@ import {
 } from "@/components/ui/select";
 import { useArchiveDownload } from "@/hooks/use-archive-download";
 import type {
+  FilesCategoryFilter,
+  FilesLifecycleFilter,
   FilesSortField,
-  FilesStatusFilter,
   RunFile,
   RunFileStats,
   RunFilesPage,
@@ -57,25 +62,18 @@ function formatFilesSectionCount(stats: RunFileStats): string | undefined {
   return parts.length > 0 ? parts.join(", ") : undefined;
 }
 
-const FILES_STATUS_LABELS: Record<Exclude<FilesStatusFilter, "all">, string> = {
-  raw: "Raw",
-  processed: "Processed",
-  pending: "Pending",
-  uploaded: "Uploaded",
-  processing: "Processing",
-  completed: "Completed",
-  failed: "Failed",
-};
+const FILES_CATEGORY_OPTIONS: FilesFilterOption<FilesCategoryFilter>[] = [
+  { value: "raw", label: "Raw" },
+  { value: "processed", label: "Processed" },
+];
 
-function filesStatusTriggerLabel(
-  status: FilesStatusFilter,
-  activeCount: number
-): string {
-  if (status === "all") {
-    return `All (${activeCount})`;
-  }
-  return FILES_STATUS_LABELS[status];
-}
+const FILES_STATUS_OPTIONS: FilesFilterOption<FilesLifecycleFilter>[] = [
+  { value: "pending", label: "Pending" },
+  { value: "uploaded", label: "Uploaded" },
+  { value: "processing", label: "Processing" },
+  { value: "completed", label: "Completed" },
+  { value: "failed", label: "Failed" },
+];
 
 interface RunFilesSectionProps {
   // Current page of the server-paginated, filtered, sorted file list.
@@ -170,12 +168,15 @@ function RunFilesSectionContent({
   }, [hasInFlight, router]);
 
   // The archive route resolves the active filters to a downloadable file set
-  // server-side, so "Download all" honors search/status/dismissed across every
-  // page (not just the rows currently on screen). With no filters active we
-  // omit the params so the route's default "all downloadable files" path runs.
+  // server-side, so "Download all" honors search/category/status/dismissed
+  // across every page (not just the rows currently on screen). With no
+  // filters active we omit the params so the route's default "all
+  // downloadable files" path runs. Arrays use comma format to match nuqs
+  // `parseAsArrayOf`.
   const isFilterActive =
     filters.files_search.trim() !== "" ||
-    filters.files_status !== "all" ||
+    filters.files_category.length > 0 ||
+    filters.files_status.length > 0 ||
     filters.files_dismissed;
   const archiveBaseHref = `/api/v1/instruments/${instrumentId}/runs/${encodeURIComponent(runId)}/download-archive`;
   let downloadHref = archiveBaseHref;
@@ -184,8 +185,11 @@ function RunFilesSectionContent({
     if (filters.files_search.trim()) {
       params.set("search", filters.files_search.trim());
     }
-    if (filters.files_status !== "all") {
-      params.set("status", filters.files_status);
+    if (filters.files_category.length > 0) {
+      params.set("category", filters.files_category.join(","));
+    }
+    if (filters.files_status.length > 0) {
+      params.set("status", filters.files_status.join(","));
     }
     if (filters.files_dismissed) {
       params.set("dismissed", "true");
@@ -230,47 +234,24 @@ function RunFilesSectionContent({
               value={filters.files_search}
             />
           </div>
-          <Select
-            onValueChange={(v) =>
-              setFilters({
-                files_status: v as FilesStatusFilter,
-                files_page: 1,
-              })
+          <FilesFilterCombobox
+            aria-label="Filter by file type"
+            items={FILES_CATEGORY_OPTIONS}
+            onValueChange={(next) =>
+              setFilters({ files_category: next, files_page: 1 })
             }
+            placeholder="Type"
+            value={filters.files_category}
+          />
+          <FilesFilterCombobox
+            aria-label="Filter by file status"
+            items={FILES_STATUS_OPTIONS}
+            onValueChange={(next) =>
+              setFilters({ files_status: next, files_page: 1 })
+            }
+            placeholder="Status"
             value={filters.files_status}
-          >
-            <SelectTrigger className="h-8 text-sm" size="sm">
-              <SelectValue>
-                {filesStatusTriggerLabel(filters.files_status, stats.active)}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem className="text-sm" value="all">
-                All ({stats.active})
-              </SelectItem>
-              <SelectItem className="text-sm" value="raw">
-                Raw
-              </SelectItem>
-              <SelectItem className="text-sm" value="processed">
-                Processed
-              </SelectItem>
-              <SelectItem className="text-sm" value="pending">
-                Pending
-              </SelectItem>
-              <SelectItem className="text-sm" value="uploaded">
-                Uploaded
-              </SelectItem>
-              <SelectItem className="text-sm" value="processing">
-                Processing
-              </SelectItem>
-              <SelectItem className="text-sm" value="completed">
-                Completed
-              </SelectItem>
-              <SelectItem className="text-sm" value="failed">
-                Failed
-              </SelectItem>
-            </SelectContent>
-          </Select>
+          />
           <Select
             onValueChange={(v) =>
               setFilters({ files_sort: v as FilesSortField, files_page: 1 })

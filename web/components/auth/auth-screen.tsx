@@ -7,6 +7,7 @@ import { AuthErrorBanner } from "@/components/auth/auth-error-banner";
 import { redirectWithAuthError } from "@/components/auth/auth-sign-in-error";
 import { DevSignInForm } from "@/components/auth/dev-sign-in-form";
 import { GoogleSignInButton } from "@/components/auth/google-sign-in-button";
+import { DocsLink } from "@/components/docs-link";
 import { authInstance } from "@/lib/auth";
 import { DEV_PASSWORD, isDevAuthEnabled } from "@/lib/dev-auth";
 import { DOCS_URL, QUICKSTART_DOCS_URL } from "@/lib/docs";
@@ -144,22 +145,18 @@ export function AuthScreen({
 
         <footer className="px-8 pb-8 sm:px-12 lg:px-16">
           <div className="mx-auto flex w-full max-w-md gap-6 text-muted-foreground text-sm">
-            <a
+            <DocsLink
               className="transition-colors hover:text-foreground"
               href={QUICKSTART_DOCS_URL}
-              rel="noopener noreferrer"
-              target="_blank"
             >
               Quickstart
-            </a>
-            <a
+            </DocsLink>
+            <DocsLink
               className="transition-colors hover:text-foreground"
               href={DOCS_URL}
-              rel="noopener noreferrer"
-              target="_blank"
             >
               Docs
-            </a>
+            </DocsLink>
           </div>
         </footer>
       </div>

@@ -1,7 +1,6 @@
 import { SearchX } from "lucide-react";
 import Link from "next/link";
 import { RelativeTime } from "@/components/dashboard/relative-time";
-import { AcquiredColumnHeader } from "@/components/instruments/runs-table/acquired-column-header";
 import { FilterableColumnHeader } from "@/components/instruments/runs-table/filterable-column-header";
 import type { RanByOption } from "@/components/instruments/runs-table/index";
 import { RanByCell } from "@/components/instruments/runs-table/ran-by-cell";
@@ -100,9 +99,7 @@ export function RunsTable({
                 "Ran By"
               )}
             </TableHead>
-            <TableHead className="text-right">
-              <AcquiredColumnHeader />
-            </TableHead>
+            <TableHead className="text-right">Acquired</TableHead>
             <TableHead className="w-[108px]">
               <span className="sr-only">Actions</span>
             </TableHead>
@@ -211,9 +208,7 @@ export function RunsTableSkeleton() {
               <RawFileColumnHeader label="Size" />
             </TableHead>
             <TableHead>Ran By</TableHead>
-            <TableHead className="text-right">
-              <AcquiredColumnHeader />
-            </TableHead>
+            <TableHead className="text-right">Acquired</TableHead>
             <TableHead className="w-[108px]" />
           </TableRow>
         </TableHeader>

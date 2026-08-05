@@ -6,7 +6,7 @@ import { RunCommentItem } from "@/components/runs/run-comment-item";
 import { Card } from "@/components/ui/card";
 import type { RunCommentDto } from "@/lib/api/run-comments";
 import { useSession } from "@/lib/auth-client";
-import { toInitials } from "@/lib/utils";
+import { toUserAvatarUser } from "@/lib/avatar-color";
 
 const COMMENT_HASH_PREFIX = "#comment-";
 
@@ -87,15 +87,20 @@ export function RunCommentsList({
     if (!session?.user?.id) {
       throw new Error("Not authenticated");
     }
-    const displayName = session.user.name ?? session.user.email ?? "Unknown";
+    const avatarUser = toUserAvatarUser({
+      userId: session.user.id,
+      name: session.user.name,
+      email: session.user.email,
+      image: session.user.image,
+    });
     return {
       id: `temp-${crypto.randomUUID()}`,
       body,
       user: {
-        id: session.user.id,
-        displayName,
-        initials: toInitials(displayName),
-        avatarUrl: session.user.image ?? null,
+        id: avatarUser.userId,
+        displayName: avatarUser.displayName,
+        initials: avatarUser.initials,
+        avatarUrl: avatarUser.avatarUrl,
       },
       created_at: new Date(),
       edited_at: null,

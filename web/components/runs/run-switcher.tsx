@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronsUpDown } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { BreadcrumbItem } from "@/components/ui/breadcrumb";
@@ -239,14 +239,14 @@ export function RunSwitcher({ run }: { run: RunDetail }) {
           <button
             aria-expanded={open}
             aria-label="Switch run"
-            className="inline-flex items-center gap-1 font-mono font-normal text-foreground transition-colors hover:text-foreground/80"
+            className="inline-flex cursor-pointer items-center gap-1 font-mono font-normal text-foreground transition-colors hover:text-foreground/80"
             role="combobox"
             type="button"
           >
             <span aria-current="page" className="font-mono">
               {run.runId}
             </span>
-            <ChevronsUpDown className="size-3.5 shrink-0 opacity-50" />
+            <ChevronDown className="size-3.5 shrink-0 opacity-50" />
           </button>
         </PopoverTrigger>
       </BreadcrumbItem>

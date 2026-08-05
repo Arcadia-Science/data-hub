@@ -1,19 +1,8 @@
-import type { UserAvatarUser } from "@/components/user-avatar";
+import { toUserAvatarUser, type UserAvatarUser } from "@/lib/avatar-color";
 
 // Who performed an audited action (retiring an instrument, deregistering a
 // watcher). Aliases `UserAvatarUser` so it feeds `<UserAvatar>` directly.
 export type ActorUser = UserAvatarUser;
-
-export function toInitials(displayName: string): string {
-  const parts = displayName.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) {
-    return "?";
-  }
-  if (parts.length === 1) {
-    return parts[0].slice(0, 2).toUpperCase();
-  }
-  return (parts[0][0] + (parts.at(-1)?.[0] ?? "")).toUpperCase();
-}
 
 // Returns null when no actor was recorded: a NULL FK, or a row that predates
 // the actor column. Falls back to email, then a placeholder, for the label.
@@ -26,11 +15,10 @@ export function resolveActorUser(input: {
   if (!input.userId) {
     return null;
   }
-  const displayName = input.name ?? input.email ?? "Unknown user";
-  return {
+  return toUserAvatarUser({
     userId: input.userId,
-    displayName,
-    initials: toInitials(displayName),
-    avatarUrl: input.image,
-  };
+    name: input.name,
+    email: input.email,
+    image: input.image,
+  });
 }

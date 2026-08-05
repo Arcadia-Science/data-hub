@@ -2,16 +2,19 @@ import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import { apiError, INTERNAL_ERROR, NOT_FOUND } from "@/lib/api/errors";
 import {
-  type FilesStatusFilter,
+  type FilesCategoryFilter,
+  type FilesLifecycleFilter,
   getFilteredFileIds,
   lookupRunByNaturalKey,
 } from "@/lib/api/instrument-runs";
 import { prepareRunArchive } from "@/lib/api/run-archive";
 
-const FILES_STATUS_VALUES: ReadonlySet<FilesStatusFilter> = new Set([
-  "all",
+const FILES_CATEGORY_VALUES: ReadonlySet<FilesCategoryFilter> = new Set([
   "raw",
   "processed",
+]);
+
+const FILES_STATUS_VALUES: ReadonlySet<FilesLifecycleFilter> = new Set([
   "pending",
   "uploaded",
   "processing",
@@ -19,11 +22,23 @@ const FILES_STATUS_VALUES: ReadonlySet<FilesStatusFilter> = new Set([
   "failed",
 ]);
 
-function parseStatusParam(value: string | null): FilesStatusFilter | undefined {
-  if (value && FILES_STATUS_VALUES.has(value as FilesStatusFilter)) {
-    return value as FilesStatusFilter;
+// Accepts comma-separated (`a,b`) or repeated (`a&key=b`) values; invalid
+// entries are dropped so a partially-bad query still filters on the rest.
+function parseListParam<T extends string>(
+  searchParams: URLSearchParams,
+  key: string,
+  allowed: ReadonlySet<T>
+): T[] {
+  const values = new Set<T>();
+  for (const entry of searchParams.getAll(key)) {
+    for (const part of entry.split(",")) {
+      const trimmed = part.trim();
+      if (allowed.has(trimmed as T)) {
+        values.add(trimmed as T);
+      }
+    }
   }
-  return;
+  return Array.from(values);
 }
 
 interface RouteContext {
@@ -64,11 +79,12 @@ function parseFileIdsParam(searchParams: URLSearchParams): number[] | null {
 }
 
 // Resolve the archive's file-id filter. An explicit `?file_ids=` always wins.
-// Otherwise, the files table's active filters (`search`/`status`/`dismissed`)
-// are resolved to the matching ids server-side so "Download all" honors the
-// filter across every page — non-downloadable ids are dropped downstream by
-// `loadDownloadableFiles`. With neither present we return `null` (the route's
-// default "all downloadable files in the run" path).
+// Otherwise, the files table's active filters
+// (`search`/`category`/`status`/`dismissed`) are resolved to the matching ids
+// server-side so "Download all" honors the filter across every page —
+// non-downloadable ids are dropped downstream by `loadDownloadableFiles`.
+// With neither present we return `null` (the route's default "all
+// downloadable files in the run" path).
 async function resolveFileIdsFilter(
   request: NextRequest,
   instrumentId: string,
@@ -81,12 +97,14 @@ async function resolveFileIdsFilter(
 
   const sp = request.nextUrl.searchParams;
   const search = sp.get("search")?.trim() || undefined;
-  const status = parseStatusParam(sp.get("status"));
+  const categories = parseListParam(sp, "category", FILES_CATEGORY_VALUES);
+  const statuses = parseListParam(sp, "status", FILES_STATUS_VALUES);
   const includeDismissed = sp.get("dismissed") === "true";
 
   const hasFilter =
     search !== undefined ||
-    (status !== undefined && status !== "all") ||
+    categories.length > 0 ||
+    statuses.length > 0 ||
     includeDismissed;
   if (!hasFilter) {
     return null;
@@ -100,7 +118,12 @@ async function resolveFileIdsFilter(
     return null;
   }
 
-  return getFilteredFileIds(run.id, { search, status, includeDismissed });
+  return getFilteredFileIds(run.id, {
+    search,
+    categories,
+    statuses,
+    includeDismissed,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -126,9 +149,9 @@ async function resolveFileIdsFilter(
 // IDs, so a filtered archive caches independently of a full-run archive.
 //
 // Alternatively the UI's "Download all" button forwards the files table's
-// active filters (`?search=`, `?status=`, `?dismissed=true`), which are
-// resolved to the matching file ids server-side so the zip honors the filter
-// across every page (not just the rows currently on screen).
+// active filters (`?search=`, `?category=`, `?status=`, `?dismissed=true`),
+// which are resolved to the matching file ids server-side so the zip honors
+// the filter across every page (not just the rows currently on screen).
 // ---------------------------------------------------------------------------
 export async function GET(request: NextRequest, { params }: RouteContext) {
   const authResult = await authorize(request, "files:read");

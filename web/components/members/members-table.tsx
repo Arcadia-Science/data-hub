@@ -10,7 +10,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { UserAvatarLink } from "@/components/user-avatar";
-import { toInitials } from "@/lib/avatar-color";
+import { toUserAvatarUser } from "@/lib/avatar-color";
 
 export interface MemberRow {
   email: string | null;
@@ -100,7 +100,12 @@ export function MembersTable({ data, currentUserId }: MembersTableProps) {
         </TableHeader>
         <TableBody>
           {data.map((member) => {
-            const displayName = member.name ?? member.email ?? "Unknown member";
+            const avatarUser = toUserAvatarUser({
+              userId: member.id,
+              name: member.name,
+              email: member.email,
+              image: member.image,
+            });
             const isSelf = member.id === currentUserId;
             return (
               <TableRow key={member.id}>
@@ -108,15 +113,10 @@ export function MembersTable({ data, currentUserId }: MembersTableProps) {
                   <UserAvatarLink
                     className="flex w-full min-w-0 gap-3"
                     size="sm"
-                    user={{
-                      userId: member.id,
-                      displayName,
-                      initials: toInitials(displayName),
-                      avatarUrl: member.image,
-                    }}
+                    user={avatarUser}
                   >
                     <span className="truncate font-medium">
-                      {displayName}
+                      {avatarUser.displayName}
                       {isSelf ? (
                         <span className="ml-1.5 text-muted-foreground text-xs">
                           (you)
@@ -140,7 +140,7 @@ export function MembersTable({ data, currentUserId }: MembersTableProps) {
                 <TableCell className="overflow-hidden text-right">
                   <div className="flex justify-end">
                     <AdminToggle
-                      displayName={displayName}
+                      displayName={avatarUser.displayName}
                       isAdmin={member.isAdmin}
                       isSelf={isSelf}
                       userId={member.id}

@@ -1,4 +1,3 @@
-import { AcquiredColumnHeader } from "@/components/instruments/runs-table/acquired-column-header";
 import { RawFileColumnHeader } from "@/components/instruments/runs-table/raw-file-column-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -51,9 +50,7 @@ export function InstrumentRunsTableSkeleton({ rows = 10 }: { rows?: number }) {
               <RawFileColumnHeader label="Size" />
             </TableHead>
             <TableHead>Ran By</TableHead>
-            <TableHead className="text-right">
-              <AcquiredColumnHeader />
-            </TableHead>
+            <TableHead className="text-right">Acquired</TableHead>
             <TableHead className="w-[108px]" />
           </TableRow>
         </TableHeader>
