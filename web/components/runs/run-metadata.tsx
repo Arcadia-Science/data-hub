@@ -16,8 +16,8 @@ export function RunMetadata({
   return (
     <div className="rounded-lg border bg-background dark:bg-muted">
       <div className="flex flex-wrap gap-x-8 gap-y-4 px-4 py-3">
+        <MetadataField label="Ran By">{attributionsSlot}</MetadataField>
         {children}
-        <MetadataField label="Ran by">{attributionsSlot}</MetadataField>
       </div>
       <Separator />
       <RunTimestamps run={run} />
