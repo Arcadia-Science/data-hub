@@ -15,7 +15,7 @@ export function TapeStationRunDetail({
   filesPagination,
   fileStats,
   reportFiles,
-  reportPdfs,
+  reportItems,
   instrumentId,
   runId,
   attributionsSlot,
@@ -25,6 +25,7 @@ export function TapeStationRunDetail({
   const activeFileCount = fileStats.active;
   const hasProcessedFiles = fileStats.processedActive > 0;
   const csvReportFiles = reportFiles.filter((f) => !isPdfFile(f));
+  const pdfCount = reportItems.pagination.total;
 
   return (
     <>
@@ -66,13 +67,17 @@ export function TapeStationRunDetail({
         />
       </RunDetail.FilesMetadataLayout>
 
-      {reportPdfs.length > 0 || csvReportFiles.length === 0 ? (
-        <RunDetail.PdfCarousel files={reportPdfs} />
+      {pdfCount > 0 || csvReportFiles.length === 0 ? (
+        <RunDetail.PdfCarousel
+          initialPage={reportItems}
+          instrumentId={instrumentId}
+          runId={runId}
+        />
       ) : null}
       {csvReportFiles.length > 0 && (
         <RunDetail.Report
           files={csvReportFiles}
-          title={reportPdfs.length > 0 ? "Peak tables" : undefined}
+          title={pdfCount > 0 ? "Peak tables" : undefined}
         />
       )}
     </>

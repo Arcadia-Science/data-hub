@@ -40,6 +40,21 @@ describe("OpenAPI document", () => {
     expect(archive?.description).toContain("`files:read`");
   });
 
+  it("documents report items with the route scope and offset paging", () => {
+    const document = buildOpenApiDocument();
+    const reportItems =
+      document.paths?.["/instruments/{instrumentId}/runs/{runId}/report-items"]
+        ?.get;
+    const queryParams = (reportItems?.parameters ?? []).filter(
+      (param) => "in" in param && param.in === "query"
+    );
+
+    expect(reportItems?.description).toContain("`files:read`");
+    expect(
+      queryParams.map((param) => ("name" in param ? param.name : null))
+    ).toEqual(expect.arrayContaining(["kind", "search", "offset", "limit"]));
+  });
+
   it("marks numeric path params as required integers", () => {
     const document = buildOpenApiDocument();
     const params = document.paths?.["/files/{fileId}"]?.patch?.parameters ?? [];

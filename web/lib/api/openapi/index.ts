@@ -26,6 +26,7 @@ export {
   commentsListResponse,
   createRunBody,
   patchRunBody,
+  reportItemsResponse,
   requestUploadBody,
   requestUploadUrlBody,
   runComment,

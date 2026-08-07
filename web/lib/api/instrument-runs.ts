@@ -14,6 +14,7 @@ import {
 } from "drizzle-orm";
 import { cache } from "react";
 import { formatHinaSizes } from "@/components/runs/run-metadata-badges";
+import { escapeLikePattern } from "@/lib/api/like-pattern";
 import { db } from "@/lib/db";
 import type { InstrumentType } from "@/lib/db/schema";
 import {
@@ -707,12 +708,9 @@ export function runFilesWhere(
   }
 
   if (filters.search) {
-    // Escape LIKE wildcards so user input is treated as literal text.
-    const escaped = filters.search
-      .replace(/\\/g, "\\\\")
-      .replace(/%/g, "\\%")
-      .replace(/_/g, "\\_");
-    conditions.push(ilike(files.filename, `%${escaped}%`));
+    conditions.push(
+      ilike(files.filename, `%${escapeLikePattern(filters.search)}%`)
+    );
   }
 
   if (filters.categories && filters.categories.length > 0) {
@@ -890,12 +888,11 @@ export async function getRunReportFiles(
     .orderBy(files.createdAt);
 }
 
-// The carousel is a previewer, not the Files table — cap the payload.
-const CAROUSEL_IMAGE_LIMIT = 100;
+// An MCP run report is a digest, not a file listing — cap the payload.
+const REPORT_IMAGE_LIMIT = 100;
 
-// Images for the imaging-instrument carousel. Unlike `getRunReportFiles`, this
-// includes raw captures — for gel doc / microscopy the raw images are the
-// report. Processed images sort first so they survive the cap.
+// Images for the MCP run report — raw captures included, processed first so
+// they survive the cap. The web viewer uses `getReportItemsPage` instead.
 export async function getRunImageFiles(
   runInternalId: string
 ): Promise<RunFile[]> {
@@ -907,7 +904,7 @@ export async function getRunImageFiles(
         eq(files.instrumentRunId, runInternalId),
         isNull(files.deletedAt),
         // Only images already in S3 have bytes to render; skip ones still
-        // pending upload so the carousel never shows a broken image.
+        // pending upload so the report never links a broken image.
         sql`${files.s3Bucket} is not null and ${files.s3Key} is not null`,
         sql`(
           ${files.contentType} in ('image/png', 'image/jpeg', 'image/gif', 'image/webp')
@@ -920,30 +917,7 @@ export async function getRunImageFiles(
       )
     )
     .orderBy(sql`(${files.category} = 'processed') desc`, files.filename)
-    .limit(CAROUSEL_IMAGE_LIMIT);
-}
-
-// PDFs for the TapeStation carousel. Like `getRunImageFiles`, only files with
-// S3 bytes are included so the preview never 404s mid-upload.
-export async function getRunPdfFiles(
-  runInternalId: string
-): Promise<RunFile[]> {
-  return await db
-    .select()
-    .from(files)
-    .where(
-      and(
-        eq(files.instrumentRunId, runInternalId),
-        isNull(files.deletedAt),
-        sql`${files.s3Bucket} is not null and ${files.s3Key} is not null`,
-        sql`(
-          ${files.contentType} = 'application/pdf'
-          or lower(${files.filename}) like '%.pdf'
-        )`
-      )
-    )
-    .orderBy(files.filename)
-    .limit(CAROUSEL_IMAGE_LIMIT);
+    .limit(REPORT_IMAGE_LIMIT);
 }
 
 // Resolve the file IDs matching the current table filters, used by the

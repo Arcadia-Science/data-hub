@@ -1,5 +1,4 @@
 import { DeleteRunDialog } from "@/components/runs/delete-run-dialog";
-import { RamanReportSection } from "@/components/runs/raman-report-section";
 import { RestoreRunButton } from "@/components/runs/restore-run-button";
 import type { RunDetailProps } from "@/components/runs/run-detail";
 import { RunDetail } from "@/components/runs/run-detail";
@@ -10,7 +9,7 @@ export function InstantRamanRunDetail({
   filesDownloadableCount,
   filesPagination,
   fileStats,
-  reportFiles,
+  reportItems,
   instrumentId,
   runId,
   attributionsSlot,
@@ -19,16 +18,6 @@ export function InstantRamanRunDetail({
   const isDeleted = run.deletedAt !== null;
   const activeFileCount = fileStats.active;
   const hasProcessedFiles = fileStats.processedActive > 0;
-
-  // Within an InstantRaman run we treat every active CSV as a Raman spectrum.
-  // Non-conforming files surface an inline error in the chart area rather than
-  // being silently filtered out, so users always see what's available. Sourced
-  // from the report-files set (which includes every active CSV) so the full
-  // spectrum list survives server-side pagination of the files table.
-  const spectra = reportFiles
-    .filter((f) => f.deletedAt === null && /\.csv$/i.test(f.filename))
-    .map((f) => ({ fileId: f.id, filename: f.filename }))
-    .sort((a, b) => a.filename.localeCompare(b.filename));
 
   return (
     <>
@@ -64,7 +53,11 @@ export function InstantRamanRunDetail({
         />
       </RunDetail.FilesMetadataLayout>
 
-      <RamanReportSection spectra={spectra} />
+      <RunDetail.RamanReport
+        initialPage={reportItems}
+        instrumentId={instrumentId}
+        runId={runId}
+      />
     </>
   );
 }

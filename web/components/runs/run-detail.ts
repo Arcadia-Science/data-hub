@@ -1,5 +1,6 @@
 import { ImageCarouselReport } from "@/components/runs/image-carousel-report";
 import { PdfCarouselReport } from "@/components/runs/pdf-carousel-report";
+import { RamanReportSection } from "@/components/runs/raman-report-section";
 import { RunFilesMetadataLayout } from "@/components/runs/run-files-metadata-layout";
 import { RunFilesSection } from "@/components/runs/run-files-section";
 import { RunHeader } from "@/components/runs/run-header";
@@ -12,6 +13,7 @@ import type {
   RunFileStats,
   RunFilesPage,
 } from "@/lib/api/instrument-runs";
+import type { ReportItemsPage } from "@/lib/runs/report-items";
 
 export const RunDetail = {
   Header: RunHeader,
@@ -21,6 +23,7 @@ export const RunDetail = {
   Report: RunReportSection,
   ImageCarousel: ImageCarouselReport,
   PdfCarousel: PdfCarouselReport,
+  RamanReport: RamanReportSection,
 };
 
 export interface RunDetailProps {
@@ -36,10 +39,9 @@ export interface RunDetailProps {
   instrumentId: string;
   // Processed + PDF files for the report sections and well-data parsing.
   reportFiles: RunFile[];
-  // Images for the imaging-instrument carousel; empty for other instruments.
-  reportImages: RunFile[];
-  // PDFs for the TapeStation carousel; empty for other instruments.
-  reportPdfs: RunFile[];
+  // First window of the run's seekable report items, for the variant's
+  // viewer. Empty for instruments without one.
+  reportItems: ReportItemsPage;
   run: RunDetailType;
   runId: string;
   // Previous/next run navigation for the header. Parent composes it so the
