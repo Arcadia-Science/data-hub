@@ -1,5 +1,9 @@
 import { z } from "zod";
 import {
+  REPORT_ITEM_KINDS,
+  REPORT_ITEMS_MAX_LIMIT,
+} from "@/lib/runs/report-items";
+import {
   fileCategorySchema,
   fileStatusSchema,
   instrumentTypeSchema,
@@ -294,4 +298,36 @@ export const commentsListResponse = z.object({
 export const commentDeleted = z.object({
   id: z.string(),
   deleted: z.literal(true),
+});
+
+export const reportItemsQuery = z.object({
+  kind: z.enum(REPORT_ITEM_KINDS).openapi({
+    description: "Which renderable artifacts to list.",
+  }),
+  search: z.string().optional().openapi({
+    description: "Case-insensitive filename substring filter.",
+  }),
+  offset: z.coerce.number().int().min(0).optional(),
+  limit: z.coerce.number().int().min(1).max(REPORT_ITEMS_MAX_LIMIT).optional(),
+  anchor: z.coerce.number().int().positive().optional().openapi({
+    description:
+      "File id to centre the window on. Overrides `offset` and returns the item's position as `anchor_index`.",
+  }),
+});
+
+export const reportItem = z
+  .object({
+    id: z.number().int(),
+    filename: z.string(),
+  })
+  .openapi("ReportItem");
+
+export const reportItemsResponse = z.object({
+  data: z.array(reportItem),
+  pagination: z.object({
+    offset: z.number().int(),
+    limit: z.number().int(),
+    total: z.number().int(),
+    anchor_index: z.number().int().nullable().optional(),
+  }),
 });

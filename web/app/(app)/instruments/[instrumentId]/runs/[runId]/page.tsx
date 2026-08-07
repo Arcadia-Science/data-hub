@@ -16,16 +16,20 @@ import {
   getAdjacentRunIds,
   getProcessedCsvData,
   getRunFileStats,
-  getRunImageFiles,
-  getRunPdfFiles,
   getRunReportFiles,
   lookupRunByNaturalKey,
   type RunDetail,
 } from "@/lib/api/instrument-runs";
 import { getInstrumentById } from "@/lib/api/instruments";
+import { getReportItemsPage } from "@/lib/api/report-items";
 import { listCommentsForRun } from "@/lib/api/run-comments";
 import { auth } from "@/lib/auth";
 import { formatDate } from "@/lib/date";
+import {
+  emptyReportItemsPage,
+  REPORT_ITEMS_WINDOW,
+  reportItemKindForInstrument,
+} from "@/lib/runs/report-items";
 import { runDetailParamsCache } from "@/lib/search-params";
 
 const FILES_PER_PAGE = 10;
@@ -147,12 +151,8 @@ async function RunDetailContentBody({
   runId: string;
   filters: RunDetailFilters;
 }) {
-  // Only imaging instruments use the image carousel, and only TapeStation uses
-  // the PDF carousel — gate the extra queries so other variants don't pay.
-  const isImagingInstrument =
-    run.instrumentType === "gel_doc" ||
-    run.instrumentType === "hina_microscope";
-  const isPdfInstrument = run.instrumentType === "tape_station";
+  // Only variants with a seekable report viewer pay for the item query.
+  const reportItemKind = reportItemKindForInstrument(run.instrumentType);
 
   // `wellData` derives from the report files, so it can't run in the same
   // fan-out as its own input. Chaining it off `reportFilesPromise` keeps it in
@@ -163,8 +163,7 @@ async function RunDetailContentBody({
     filesPage,
     fileStats,
     reportFiles,
-    reportImages,
-    reportPdfs,
+    reportItems,
     instrument,
     adjacentRuns,
     wellData,
@@ -180,8 +179,13 @@ async function RunDetailContentBody({
     }),
     getRunFileStats(run.id),
     reportFilesPromise,
-    isImagingInstrument ? getRunImageFiles(run.id) : Promise.resolve([]),
-    isPdfInstrument ? getRunPdfFiles(run.id) : Promise.resolve([]),
+    reportItemKind
+      ? getReportItemsPage(run.id, {
+          kind: reportItemKind,
+          offset: 0,
+          limit: REPORT_ITEMS_WINDOW,
+        })
+      : Promise.resolve(emptyReportItemsPage()),
     getInstrumentById(instrumentId),
     getAdjacentRunIds(run),
     reportFilesPromise.then((rf) => getProcessedCsvData(rf)),
@@ -210,8 +214,7 @@ async function RunDetailContentBody({
         filesPagination={filesPage.pagination}
         instrumentId={instrumentId}
         reportFiles={reportFiles}
-        reportImages={reportImages}
-        reportPdfs={reportPdfs}
+        reportItems={reportItems}
         run={run}
         runId={runId}
         runNavSlot={
