@@ -2,6 +2,7 @@ import "dotenv/config";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
+import { CREATE_NATURAL_FILENAME_COLLATION } from "../lib/db/collations";
 import { assertLocalDatabaseUrl } from "./assert-local-db";
 
 const databaseUrl = assertLocalDatabaseUrl("db:reset");
@@ -17,6 +18,8 @@ await db.execute(sql`CREATE SCHEMA public`);
 // exist before the subsequent `db:push`. Migration 0029 handles this for the
 // `db:migrate` path; push does not run migrations, hence this line.
 await db.execute(sql`CREATE EXTENSION IF NOT EXISTS pg_trgm`);
+// Same reasoning for the report-item ordering collation (migration 0039).
+await db.execute(sql.raw(CREATE_NATURAL_FILENAME_COLLATION));
 console.log("Database reset. Run `npm run db:push` to re-create tables.");
 
 await pool.end();

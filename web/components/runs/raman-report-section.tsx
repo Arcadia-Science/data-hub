@@ -1,40 +1,29 @@
-import { RamanSpectrumViewer } from "@/components/runs/raman-spectrum-viewer";
-import { RunSectionHeading } from "@/components/runs/run-section-heading";
-import { Card, CardContent } from "@/components/ui/card";
+"use client";
 
-export interface RamanSpectrumFileRef {
-  fileId: number;
-  filename: string;
-}
+import { RamanSpectrumViewer } from "@/components/runs/raman-spectrum-viewer";
+import { ReportDataShell } from "@/components/runs/report-data-shell";
+import { ReportItemSeeker } from "@/components/runs/report-item-seeker";
+import {
+  ReportItemsProvider,
+  type ReportViewerProps,
+} from "@/components/runs/report-items-provider";
 
 export function RamanReportSection({
-  spectra,
-}: {
-  spectra: RamanSpectrumFileRef[];
-}) {
-  if (spectra.length === 0) {
-    return (
-      <div className="flex flex-col gap-2">
-        <RunSectionHeading title="Report Data" />
-        <Card size="sm">
-          <CardContent>
-            <p className="text-muted-foreground text-sm">
-              No report data has been generated for this run.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
+  initialPage,
+  instrumentId,
+  runId,
+}: ReportViewerProps) {
   return (
-    <div className="flex flex-col gap-2">
-      <RunSectionHeading countLabel={spectra.length} title="Report Data" />
-      <Card size="sm">
-        <CardContent>
-          <RamanSpectrumViewer spectra={spectra} />
-        </CardContent>
-      </Card>
-    </div>
+    <ReportDataShell total={initialPage.pagination.total}>
+      <ReportItemsProvider
+        initialPage={initialPage}
+        instrumentId={instrumentId}
+        kind="spectrum"
+        runId={runId}
+      >
+        <ReportItemSeeker />
+        <RamanSpectrumViewer />
+      </ReportItemsProvider>
+    </ReportDataShell>
   );
 }

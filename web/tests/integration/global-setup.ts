@@ -3,6 +3,7 @@ import { execSync, spawn } from "node:child_process";
 import http from "node:http";
 import net from "node:net";
 import { Client, Pool } from "pg";
+import { CREATE_NATURAL_FILENAME_COLLATION } from "@/lib/db/collations";
 
 const TEST_DB = "data_hub_test";
 // Matches the credentials expected by the CI Postgres service container
@@ -82,14 +83,15 @@ export async function setup() {
   // Reset the public schema so `drizzle-kit push` always creates tables from
   // scratch. A persisted test DB with a prior Auth.js-shaped `user`/`account`
   // would otherwise force interactive column-rename prompts that `--force`
-  // cannot answer in CI. The trigram GIN indexes in schema.ts also need
-  // `pg_trgm`, which push does not install.
+  // cannot answer in CI. Push also installs neither `pg_trgm` (needed by the
+  // trigram GIN indexes) nor the `natural_filename` collation.
   const trgmClient = new Client({ connectionString: databaseUrl });
   await trgmClient.connect();
   try {
     await trgmClient.query("DROP SCHEMA public CASCADE");
     await trgmClient.query("CREATE SCHEMA public");
     await trgmClient.query("CREATE EXTENSION IF NOT EXISTS pg_trgm");
+    await trgmClient.query(CREATE_NATURAL_FILENAME_COLLATION);
   } finally {
     await trgmClient.end();
   }

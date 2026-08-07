@@ -15,6 +15,8 @@ import {
   commentsListResponse,
   createRunBody,
   patchRunBody,
+  reportItemsQuery,
+  reportItemsResponse,
   requestUploadBody,
   requestUploadUrlBody,
   runComment,
@@ -144,6 +146,17 @@ registry.registerPath({
   security: bearerSecurity,
   request: { params: runParams },
   responses: ok("Reprocessing result.", runReprocessed),
+});
+registry.registerPath({
+  method: "get",
+  path: "/instruments/{instrumentId}/runs/{runId}/report-items",
+  operationId: "listRunReportItems",
+  summary: "List a run's report items",
+  description: `${scoped("files:read")} Returns \`{id, filename}\` for the run's renderable images, PDFs, or spectra, ordered by filename. Paged with \`offset\`/\`limit\` so viewers can seek by item index.`,
+  tags: tag,
+  security: bearerSecurity,
+  request: { params: runParams, query: reportItemsQuery },
+  responses: ok("Report items.", reportItemsResponse),
 });
 registry.registerPath({
   method: "get",

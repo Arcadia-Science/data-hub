@@ -4,8 +4,7 @@ import { parse } from "csv-parse/browser/esm/sync";
 import { AlertTriangle } from "lucide-react";
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
-import type { RamanSpectrumFileRef } from "@/components/runs/raman-report-section";
-import { ReportItemSeeker } from "@/components/runs/report-item-seeker";
+import { useReportItemsContext } from "@/components/runs/report-items-provider";
 import { Button } from "@/components/ui/button";
 import {
   type ChartConfig,
@@ -220,14 +219,9 @@ type AsyncResult =
   | { fileId: number; status: "ready"; points: SpectrumPoint[] }
   | { fileId: number; status: "error"; message: string };
 
-export function RamanSpectrumViewer({
-  spectra,
-}: {
-  spectra: RamanSpectrumFileRef[];
-}) {
-  const [selectedId, setSelectedId] = useState<number | null>(
-    () => spectra[0]?.fileId ?? null
-  );
+export function RamanSpectrumViewer() {
+  const { state: items } = useReportItemsContext();
+  const selectedId = items.selectedItem?.id ?? null;
   const [visible, setVisible] = useState<Series[]>(ALL_SERIES);
   // Bumped on retry to invalidate the cache entry and re-run the load effect
   // even when `selectedId` hasn't changed.
@@ -236,11 +230,6 @@ export function RamanSpectrumViewer({
   // synchronous transitions (idle / loading / cache-hit ready) are derived
   // during render. This avoids `react-hooks/set-state-in-effect` warnings.
   const [asyncResult, setAsyncResult] = useState<AsyncResult | null>(null);
-
-  const seekItems = useMemo(
-    () => spectra.map((s) => ({ id: s.fileId, filename: s.filename })),
-    [spectra]
-  );
 
   // Per-mount cache so toggling between already-loaded spectra is instant
   // and never re-hits S3.
@@ -310,19 +299,15 @@ export function RamanSpectrumViewer({
 
   return (
     <div className="flex flex-col gap-3">
-      <ReportItemSeeker
-        emptyMessage="No spectra found."
-        items={seekItems}
-        nextAriaLabel="Next spectrum"
-        onSelect={setSelectedId}
-        previousAriaLabel="Previous spectrum"
-        searchPlaceholder="Search spectra..."
-        selectedId={selectedId}
-        selectPlaceholder="Select a spectrum…"
-      />
       <div className="flex justify-end">
         <SeriesToggle onChange={setVisible} visible={visible} />
       </div>
+      {state.status === "idle" && (
+        <div className="flex h-80 items-center justify-center rounded-md border border-dashed bg-muted/20 text-center text-muted-foreground text-sm">
+          {items.error ??
+            (items.isLoading ? "Loading\u2026" : "No spectra found.")}
+        </div>
+      )}
       {state.status === "loading" && (
         <Skeleton aria-label="Loading spectrum" className="h-80 w-full" />
       )}
