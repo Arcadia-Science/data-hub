@@ -171,6 +171,30 @@ export const lookupRunByNaturalKey = cache(async function lookupRunByNaturalKey(
   };
 });
 
+/** Natural runId → internal UUID for one instrument. Missing IDs are omitted. */
+export async function lookupRunUuidsByNaturalKeys(
+  instrumentId: string,
+  runIds: string[]
+): Promise<Map<string, string>> {
+  const unique = [...new Set(runIds.map((runId) => decodeURIComponent(runId)))];
+  if (unique.length === 0) {
+    return new Map();
+  }
+  const rows = await db
+    .select({
+      id: instrumentRuns.id,
+      runId: instrumentRuns.runId,
+    })
+    .from(instrumentRuns)
+    .where(
+      and(
+        eq(instrumentRuns.instrumentId, instrumentId),
+        inArray(instrumentRuns.runId, unique)
+      )
+    );
+  return new Map(rows.map((row) => [row.runId, row.id]));
+}
+
 // ---------------------------------------------------------------------------
 // acquired_at parsing for create/update payloads.
 //

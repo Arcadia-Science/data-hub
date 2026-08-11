@@ -7,6 +7,7 @@ import {
   getRanByFilterOptions,
   getRunFilesPage,
   lookupRunByNaturalKey,
+  lookupRunUuidsByNaturalKeys,
   type RunAttribution,
 } from "@/lib/api/instrument-runs";
 import {
@@ -231,34 +232,29 @@ export function registerRunTools(server: McpServer) {
         return errorResult("Authenticated user not available on this session.");
       }
 
+      const uniqueRunIds = [...new Set(runIds)];
+      const found = await lookupRunUuidsByNaturalKeys(
+        instrumentId,
+        uniqueRunIds
+      );
+      const notFound = uniqueRunIds.filter((runId) => !found.has(runId));
+      const resolved = uniqueRunIds.flatMap((runId) => {
+        const runUuid = found.get(runId);
+        return runUuid ? [{ runId, runUuid }] : [];
+      });
+
       const claimed: Array<{ runId: string; attributions: RunAttribution[] }> =
         [];
-      const notFound: string[] = [];
-      const runUuids: string[] = [];
-      const runIdByUuid = new Map<string, string>();
-
-      for (const runId of runIds) {
-        const run = await lookupRunByNaturalKey(instrumentId, runId);
-        if (!run) {
-          notFound.push(runId);
-          continue;
-        }
-        runUuids.push(run.id);
-        runIdByUuid.set(run.id, runId);
-      }
-
-      if (runUuids.length > 0) {
+      if (resolved.length > 0) {
         await db
           .insert(runAttributions)
-          .values(runUuids.map((runUuid) => ({ runId: runUuid, userId })))
+          .values(resolved.map(({ runUuid }) => ({ runId: runUuid, userId })))
           .onConflictDoNothing();
 
-        const byRun = await getAttributionsByRunIds(runUuids);
-        for (const runUuid of runUuids) {
-          const runId = runIdByUuid.get(runUuid);
-          if (!runId) {
-            continue;
-          }
+        const byRun = await getAttributionsByRunIds(
+          resolved.map(({ runUuid }) => runUuid)
+        );
+        for (const { runId, runUuid } of resolved) {
           claimed.push({
             runId,
             attributions: byRun.get(runUuid) ?? [],

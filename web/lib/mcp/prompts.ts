@@ -14,15 +14,33 @@ import {
 
 // Fresh Zod schemas each registration — `completable()` mutates the schema,
 // so reusing defs' instances breaks when the server is rebuilt (e.g. tests).
-function instrumentIdComplete(description: string, optional = false) {
-  const base = z.string().describe(description);
-  return completable(optional ? base.optional() : base, (value) =>
-    completeInstrumentId(typeof value === "string" ? value : "")
-  );
+// Descriptions stay on the defs; these helpers copy them onto the completable
+// clones. Apply completable before optional: the SDK unwraps ZodOptional first
+// and then looks for the completable marker on the inner schema.
+function fieldDescription(
+  schema: z.ZodString | z.ZodOptional<z.ZodString>
+): string {
+  const inner =
+    schema instanceof z.ZodOptional ? (schema.unwrap() as z.ZodString) : schema;
+  return inner.description ?? "";
 }
 
-function runIdComplete(description: string) {
-  return completable(z.string().describe(description), completeRunId);
+function instrumentIdComplete(
+  schema: z.ZodString | z.ZodOptional<z.ZodString>
+) {
+  const optional = schema instanceof z.ZodOptional;
+  const field = completable(
+    z.string().describe(fieldDescription(schema)),
+    (value) => completeInstrumentId(typeof value === "string" ? value : "")
+  );
+  return optional ? field.optional() : field;
+}
+
+function runIdComplete(schema: z.ZodString) {
+  return completable(
+    z.string().describe(fieldDescription(schema)),
+    completeRunId
+  );
 }
 
 export function registerPrompts(server: McpServer) {
@@ -65,7 +83,7 @@ export function registerPrompts(server: McpServer) {
       ...troubleshootInstrumentPrompt,
       argsSchema: {
         instrumentId: instrumentIdComplete(
-          "Instrument identifier to troubleshoot"
+          troubleshootInstrumentPrompt.argsSchema.instrumentId
         ),
       },
     }),
@@ -104,10 +122,10 @@ export function registerPrompts(server: McpServer) {
       ...compareRunsPrompt,
       argsSchema: {
         instrumentId: instrumentIdComplete(
-          "Instrument identifier (both runs must be on the same instrument)"
+          compareRunsPrompt.argsSchema.instrumentId
         ),
-        runId1: runIdComplete("First run identifier"),
-        runId2: runIdComplete("Second run identifier"),
+        runId1: runIdComplete(compareRunsPrompt.argsSchema.runId1),
+        runId2: runIdComplete(compareRunsPrompt.argsSchema.runId2),
       },
     }),
     async ({ instrumentId, runId1, runId2 }) => ({
@@ -142,8 +160,7 @@ export function registerPrompts(server: McpServer) {
       ...findMyRunsPrompt,
       argsSchema: {
         instrumentId: instrumentIdComplete(
-          "Optional instrument to narrow results",
-          true
+          findMyRunsPrompt.argsSchema.instrumentId
         ),
         dateFrom: findMyRunsPrompt.argsSchema.dateFrom,
         dateTo: findMyRunsPrompt.argsSchema.dateTo,
@@ -186,8 +203,10 @@ export function registerPrompts(server: McpServer) {
     promptRegistrationConfig({
       ...explainFailedRunPrompt,
       argsSchema: {
-        instrumentId: instrumentIdComplete("Instrument identifier"),
-        runId: runIdComplete("Run identifier within the instrument"),
+        instrumentId: instrumentIdComplete(
+          explainFailedRunPrompt.argsSchema.instrumentId
+        ),
+        runId: runIdComplete(explainFailedRunPrompt.argsSchema.runId),
       },
     }),
     async ({ instrumentId, runId }) => ({
@@ -217,7 +236,9 @@ export function registerPrompts(server: McpServer) {
     promptRegistrationConfig({
       ...claimUnattributedRunsPrompt,
       argsSchema: {
-        instrumentId: instrumentIdComplete("Instrument identifier"),
+        instrumentId: instrumentIdComplete(
+          claimUnattributedRunsPrompt.argsSchema.instrumentId
+        ),
         dateFrom: claimUnattributedRunsPrompt.argsSchema.dateFrom,
         dateTo: claimUnattributedRunsPrompt.argsSchema.dateTo,
       },
@@ -258,17 +279,19 @@ export function registerPrompts(server: McpServer) {
     promptRegistrationConfig({
       ...summarizeInstrumentWeekPrompt,
       argsSchema: {
-        instrumentId: instrumentIdComplete("Instrument identifier"),
+        instrumentId: instrumentIdComplete(
+          summarizeInstrumentWeekPrompt.argsSchema.instrumentId
+        ),
         dateFrom: summarizeInstrumentWeekPrompt.argsSchema.dateFrom,
         dateTo: summarizeInstrumentWeekPrompt.argsSchema.dateTo,
       },
     }),
     ({ instrumentId, dateFrom, dateTo }) => {
-      const today = new Date();
-      const defaultTo = today.toISOString().slice(0, 10);
-      const weekAgo = new Date(today);
-      weekAgo.setDate(weekAgo.getDate() - 7);
-      const defaultFrom = weekAgo.toISOString().slice(0, 10);
+      // UTC calendar days only — setDate/getDate would shift near local midnight.
+      const defaultTo = new Date().toISOString().slice(0, 10);
+      const fromUtc = new Date(`${defaultTo}T00:00:00.000Z`);
+      fromUtc.setUTCDate(fromUtc.getUTCDate() - 7);
+      const defaultFrom = fromUtc.toISOString().slice(0, 10);
       const from = dateFrom || defaultFrom;
       const to = dateTo || defaultTo;
       return {

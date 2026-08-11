@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 // biome-ignore lint/performance/noNamespaceImport: integration tests need the full schema module for Db typing
 import * as schema from "@/lib/db/schema";
-import { MCP_TOOL_DEFS } from "@/lib/mcp/catalog";
 import {
   api,
   closeTestDb,
@@ -10,6 +9,9 @@ import {
   resetDb,
   seedTestUser,
 } from "@/tests/integration/helpers";
+
+/** Bump when adding/removing an MCP tool so the change shows up in review. */
+const EXPECTED_MCP_TOOL_COUNT = 32;
 
 function jsonRpc(method: string, params: unknown = {}, id = 1) {
   return {
@@ -181,7 +183,7 @@ describe("MCP Server (HTTP)", () => {
     expect(toolNames).toContain("list_watcher_events");
     expect(toolNames).toContain("claim_runs");
     expect(toolNames).toContain("get_instrument_filter_options");
-    expect(toolNames).toHaveLength(MCP_TOOL_DEFS.length);
+    expect(toolNames).toHaveLength(EXPECTED_MCP_TOOL_COUNT);
   });
 
   // ---- Tool execution (end-to-end) -----------------------------------------

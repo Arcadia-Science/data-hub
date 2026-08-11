@@ -1,12 +1,13 @@
+import { getInstruments } from "@/lib/api/dashboard";
 import { buildRunListQuery } from "@/lib/api/instrument-runs";
-import { getInstrumentListWithCounts } from "@/lib/api/instruments";
 
 interface CompletionContext {
   arguments?: Record<string, string>;
 }
 
 export async function completeInstrumentId(value: string): Promise<string[]> {
-  const instruments = await getInstrumentListWithCounts();
+  // IDs only — avoid the run/watcher count join used by the instruments list.
+  const instruments = await getInstruments();
   const needle = value.toLowerCase();
   return instruments
     .map((i) => i.id)
@@ -21,16 +22,16 @@ export async function completeRunId(
   if (!instrumentId) {
     return [];
   }
+  // Push the typed prefix into the DB filter so we aren't limited to the
+  // 50 most recent runs. The SDK caps completion values at 100.
   const result = await buildRunListQuery({
     instrumentId,
+    search: value,
     page: 1,
-    perPage: 50,
+    perPage: 100,
     includeDeleted: false,
     sort: "acquired_at",
     order: "desc",
   });
-  const needle = value.toLowerCase();
-  return result.data
-    .map((row) => row.run_id)
-    .filter((id) => id.toLowerCase().startsWith(needle));
+  return result.data.map((row) => row.run_id);
 }

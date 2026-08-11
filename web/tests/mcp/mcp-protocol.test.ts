@@ -103,6 +103,20 @@ vi.mock("@/lib/api/instrument-runs", () => ({
       }
       return null;
     }),
+  lookupRunUuidsByNaturalKeys: vi
+    .fn()
+    .mockImplementation((_instId: string, runIds: string[]) => {
+      const map = new Map<string, string>();
+      for (const runId of runIds) {
+        if (runId === "run-1") {
+          map.set(runId, "internal-1");
+        }
+        if (runId === "run-2") {
+          map.set(runId, "internal-2");
+        }
+      }
+      return map;
+    }),
   getRunFilesPage: vi.fn().mockResolvedValue({
     data: [],
     pagination: { page: 1, per_page: 50, total: 0, total_pages: 0 },
@@ -168,7 +182,12 @@ vi.mock("@/lib/api/dashboard", () => ({
     {
       id: "test-plate-reader",
       displayName: "Test Plate Reader",
-      instrumentType: "plate_reader",
+      status: "active",
+    },
+    {
+      id: "test-gel-doc",
+      displayName: "Test Gel Doc",
+      status: "active",
     },
   ]),
   getUserById: vi.fn().mockImplementation(async (id: string) =>
@@ -1339,12 +1358,28 @@ describe("MCP Protocol (in-memory)", () => {
     expect(result.completion.values).toContain("test-plate-reader");
   });
 
+  it("completes optional instrumentId on find_my_runs", async () => {
+    const result = await client.complete({
+      ref: { type: "ref/prompt", name: "find_my_runs" },
+      argument: { name: "instrumentId", value: "test-" },
+    });
+    expect(result.completion.values).toContain("test-plate-reader");
+  });
+
   it("completes runId on compare_runs using instrument context", async () => {
+    const { buildRunListQuery } = await import("@/lib/api/instrument-runs");
     const result = await client.complete({
       ref: { type: "ref/prompt", name: "compare_runs" },
       argument: { name: "runId1", value: "run-" },
       context: { arguments: { instrumentId: "test-plate-reader" } },
     });
+    expect(buildRunListQuery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instrumentId: "test-plate-reader",
+        search: "run-",
+        perPage: 100,
+      })
+    );
     expect(result.completion.values).toEqual(
       expect.arrayContaining(["run-1", "run-2"])
     );
