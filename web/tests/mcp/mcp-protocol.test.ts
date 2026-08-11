@@ -88,16 +88,35 @@ vi.mock("@/lib/api/instruments", () => ({
 }));
 
 vi.mock("@/lib/api/instrument-runs", () => ({
-  buildRunListQuery: vi
-    .fn()
-    .mockResolvedValue({ runs: [], total: 0, page: 1, perPage: 20 }),
+  buildRunListQuery: vi.fn().mockResolvedValue({
+    data: [{ run_id: "run-1" }, { run_id: "run-2" }],
+    pagination: { page: 1, per_page: 50, total: 2, total_pages: 1 },
+  }),
   lookupRunByNaturalKey: vi
     .fn()
-    .mockImplementation(async (_instId: string, runId: string) =>
-      runId === "run-1"
-        ? { id: "internal-1", instrumentId: _instId, runId }
-        : null
-    ),
+    .mockImplementation((_instId: string, runId: string) => {
+      if (runId === "run-1") {
+        return { id: "internal-1", instrumentId: _instId, runId };
+      }
+      if (runId === "run-2") {
+        return { id: "internal-2", instrumentId: _instId, runId };
+      }
+      return null;
+    }),
+  lookupRunUuidsByNaturalKeys: vi
+    .fn()
+    .mockImplementation((_instId: string, runIds: string[]) => {
+      const map = new Map<string, string>();
+      for (const runId of runIds) {
+        if (runId === "run-1") {
+          map.set(runId, "internal-1");
+        }
+        if (runId === "run-2") {
+          map.set(runId, "internal-2");
+        }
+      }
+      return map;
+    }),
   getRunFilesPage: vi.fn().mockResolvedValue({
     data: [],
     pagination: { page: 1, per_page: 50, total: 0, total_pages: 0 },
@@ -163,7 +182,12 @@ vi.mock("@/lib/api/dashboard", () => ({
     {
       id: "test-plate-reader",
       displayName: "Test Plate Reader",
-      instrumentType: "plate_reader",
+      status: "active",
+    },
+    {
+      id: "test-gel-doc",
+      displayName: "Test Gel Doc",
+      status: "active",
     },
   ]),
   getUserById: vi.fn().mockImplementation(async (id: string) =>
@@ -403,6 +427,7 @@ import {
   MCP_RESOURCE_DEFS,
   MCP_TOOL_DEFS,
 } from "@/lib/mcp/catalog";
+import { MCP_SERVER_INSTRUCTIONS } from "@/lib/mcp/instructions";
 import { registerPrompts } from "@/lib/mcp/prompts";
 import { registerResources } from "@/lib/mcp/resources";
 import { registerTools } from "@/lib/mcp/tools";
@@ -418,7 +443,10 @@ describe("MCP Protocol (in-memory)", () => {
   beforeEach(async () => {
     mcpServer = new McpServer(
       { name: "data-hub-test", version: "1.0.0" },
-      { capabilities: { tools: {}, resources: {}, prompts: {} } }
+      {
+        capabilities: { tools: {}, resources: {}, prompts: {} },
+        instructions: MCP_SERVER_INSTRUCTIONS,
+      }
     );
     registerTools(mcpServer);
     registerResources(mcpServer);
@@ -445,6 +473,7 @@ describe("MCP Protocol (in-memory)", () => {
   const WRITE_TOOLS = new Set([
     "reprocess_file",
     "claim_run",
+    "claim_runs",
     "unclaim_run",
     "add_run_comment",
     "edit_run_comment",
@@ -603,6 +632,14 @@ describe("MCP Protocol (in-memory)", () => {
     expect(tool?.annotations?.idempotentHint).toBe(true);
   });
 
+  it("claim_runs is annotated as write / non-destructive / idempotent", async () => {
+    const { tools } = await client.listTools();
+    const tool = tools.find((t) => t.name === "claim_runs");
+    expect(tool?.annotations?.readOnlyHint).toBe(false);
+    expect(tool?.annotations?.destructiveHint).toBe(false);
+    expect(tool?.annotations?.idempotentHint).toBe(true);
+  });
+
   it("unclaim_run is annotated as write / destructive / idempotent", async () => {
     const { tools } = await client.listTools();
     const tool = tools.find((t) => t.name === "unclaim_run");
@@ -678,8 +715,8 @@ describe("MCP Protocol (in-memory)", () => {
     });
     expect(result.isError).toBeFalsy();
     const parsed = parseText(result.content);
-    expect(parsed).toHaveProperty("runs");
-    expect(parsed).toHaveProperty("total");
+    expect(parsed).toHaveProperty("data");
+    expect(parsed).toHaveProperty("pagination");
   });
 
   it("search_runs rejects invalid metadata filters with allowed values", async () => {
@@ -998,6 +1035,7 @@ describe("MCP Protocol (in-memory)", () => {
         runId: "run-1",
         page: 2,
         perPage: 10,
+        status: ["detected", "upload_requested"],
       },
     });
 
@@ -1005,6 +1043,7 @@ describe("MCP Protocol (in-memory)", () => {
     expect(getRunFilesPage).toHaveBeenCalledWith("internal-1", {
       page: 2,
       perPage: 10,
+      statuses: ["detected", "upload_requested"],
     });
     const payload = parseText(result.content) as {
       data: Record<string, unknown>[];
@@ -1089,6 +1128,20 @@ describe("MCP Protocol (in-memory)", () => {
     expect(text).toContain("Authenticated user not available");
   });
 
+  it("claim_runs without authInfo reports an authenticated-user error", async () => {
+    const result = await client.callTool({
+      name: "claim_runs",
+      arguments: {
+        instrumentId: "test-plate-reader",
+        runIds: ["run-1", "missing"],
+      },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ type: string; text: string }>)[0]
+      .text;
+    expect(text).toContain("Authenticated user not available");
+  });
+
   it("unclaim_run without authInfo reports an authenticated-user error", async () => {
     const result = await client.callTool({
       name: "unclaim_run",
@@ -1098,6 +1151,31 @@ describe("MCP Protocol (in-memory)", () => {
     const text = (result.content as Array<{ type: string; text: string }>)[0]
       .text;
     expect(text).toContain("Authenticated user not available");
+  });
+
+  it("get_instrument_filter_options returns plate-reader options", async () => {
+    const result = await client.callTool({
+      name: "get_instrument_filter_options",
+      arguments: { instrumentId: "test-plate-reader" },
+    });
+    expect(result.isError).toBeFalsy();
+    const payload = parseText(result.content) as {
+      instrumentId: string;
+      options: { wavelengths: string[] };
+    };
+    expect(payload.instrumentId).toBe("test-plate-reader");
+    expect(payload.options.wavelengths).toContain("450");
+  });
+
+  it("get_instrument_filter_options errors for unknown instruments", async () => {
+    const result = await client.callTool({
+      name: "get_instrument_filter_options",
+      arguments: { instrumentId: "does-not-exist" },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ type: string; text: string }>)[0]
+      .text;
+    expect(text).toContain("not found");
   });
 
   // ---- Resources -----------------------------------------------------------
@@ -1118,7 +1196,12 @@ describe("MCP Protocol (in-memory)", () => {
       (contents[0] as { uri: string; text: string }).text
     );
     expect(parsed).toHaveProperty("runStatus");
-    expect(parsed).toHaveProperty("toolRouting");
+    expect(parsed).toHaveProperty("dates");
+    expect(parsed).not.toHaveProperty("toolRouting");
+  });
+
+  it("exposes server instructions after initialize", () => {
+    expect(client.getInstructions()).toBe(MCP_SERVER_INSTRUCTIONS);
   });
 
   it("reads the instruments resource", async () => {
@@ -1233,9 +1316,8 @@ describe("MCP Protocol (in-memory)", () => {
     });
     expect(result.messages).toHaveLength(1);
     expect(result.messages[0].role).toBe("user");
-    expect((result.messages[0].content as { text: string }).text).toContain(
-      "2025-06-01"
-    );
+    const text = (result.messages[0].content as { text: string }).text;
+    expect(text).toContain("2025-06-01 (UTC)");
   });
 
   it("troubleshoot_instrument prompt references heartbeat tool", async () => {
@@ -1257,5 +1339,60 @@ describe("MCP Protocol (in-memory)", () => {
     const text = (result.messages[0].content as { text: string }).text;
     expect(text).toContain("run-1");
     expect(text).toContain("run-2");
+  });
+
+  it("claim_unattributed_runs prompt uses claim_runs", async () => {
+    const result = await client.getPrompt({
+      name: "claim_unattributed_runs",
+      arguments: { instrumentId: "my-inst" },
+    });
+    const text = (result.messages[0].content as { text: string }).text;
+    expect(text).toContain("claim_runs");
+  });
+
+  it("completes instrumentId on troubleshoot_instrument", async () => {
+    const result = await client.complete({
+      ref: { type: "ref/prompt", name: "troubleshoot_instrument" },
+      argument: { name: "instrumentId", value: "test-" },
+    });
+    expect(result.completion.values).toContain("test-plate-reader");
+  });
+
+  it("completes optional instrumentId on find_my_runs", async () => {
+    const result = await client.complete({
+      ref: { type: "ref/prompt", name: "find_my_runs" },
+      argument: { name: "instrumentId", value: "test-" },
+    });
+    expect(result.completion.values).toContain("test-plate-reader");
+  });
+
+  it("completes runId on compare_runs using instrument context", async () => {
+    const { buildRunListQuery } = await import("@/lib/api/instrument-runs");
+    const result = await client.complete({
+      ref: { type: "ref/prompt", name: "compare_runs" },
+      argument: { name: "runId1", value: "run-" },
+      context: { arguments: { instrumentId: "test-plate-reader" } },
+    });
+    expect(buildRunListQuery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instrumentId: "test-plate-reader",
+        search: "run-",
+        perPage: 100,
+      })
+    );
+    expect(result.completion.values).toEqual(
+      expect.arrayContaining(["run-1", "run-2"])
+    );
+  });
+
+  it("completes instrumentId on the filter-options resource template", async () => {
+    const result = await client.complete({
+      ref: {
+        type: "ref/resource",
+        uri: "datahub://instruments/{instrumentId}/filter-options",
+      },
+      argument: { name: "instrumentId", value: "test-" },
+    });
+    expect(result.completion.values).toContain("test-plate-reader");
   });
 });

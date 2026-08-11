@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { mcpMetadataFilterInputSchema } from "@/lib/api/run-metadata-filters";
+import { fileStatusEnum } from "@/lib/db/schema";
 import type { McpToolDef } from "@/lib/mcp/catalog/types";
 import { RUN_STATUS_VALUES } from "@/lib/runs/run-status";
 
@@ -9,7 +10,7 @@ export const searchRunsTool = {
   scope: "runs:read",
   title: "Search Runs",
   description:
-    "Search instrument runs with filtering, pagination, and sorting. Supports run status filters and instrument-metadata filters (plate reader, gel-doc, qPCR, Hina microscope, Epson scanner). Prefer global_search when the query may match filenames, instrument names, or attributor names rather than run IDs. Discover valid metadata filter values via datahub://instruments/{id}/filter-options (or datahub://glossary for routing tips).",
+    "Search instrument runs with filtering, pagination, and sorting. Supports run status filters and instrument-metadata filters (plate reader, gel-doc, qPCR, Hina microscope, Epson scanner). Prefer global_search when the query may match filenames, instrument names, or attributor names rather than run IDs. Discover valid metadata filter values via get_instrument_filter_options or datahub://instruments/{id}/filter-options.",
   inputSchema: {
     instrumentId: z
       .union([z.string(), z.array(z.string())])
@@ -26,8 +27,15 @@ export const searchRunsTool = {
     dateFrom: z
       .string()
       .optional()
-      .describe("Start date (inclusive, YYYY-MM-DD)"),
-    dateTo: z.string().optional().describe("End date (inclusive, YYYY-MM-DD)"),
+      .describe(
+        "Start date (inclusive, YYYY-MM-DD). Day boundary is UTC, not the viewer's timezone."
+      ),
+    dateTo: z
+      .string()
+      .optional()
+      .describe(
+        "End date (inclusive, YYYY-MM-DD). Day boundary is UTC, not the viewer's timezone."
+      ),
     sort: z
       .enum(["acquired_at", "created_at", "updated_at"])
       .optional()
@@ -112,10 +120,16 @@ export const listRunFilesTool = {
   scope: "runs:read",
   title: "List Run Files",
   description:
-    "List files associated with a run (raw uploads and processed artifacts) with their status, category, and size. Paginated — runs can have thousands of files. Use the page/perPage arguments to walk the full list, and use get_file for full per-file detail including metadata and S3 location.",
+    "List files associated with a run (raw uploads and processed artifacts) with their status, category, and size. Paginated — runs can have thousands of files. Filter by status to gather fileIds for request_run_upload (e.g. status=['detected']). Use get_file for full per-file detail including metadata and S3 location.",
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
     runId: z.string().describe("Run identifier within the instrument"),
+    status: z
+      .array(z.enum(fileStatusEnum.enumValues))
+      .optional()
+      .describe(
+        "Filter to one or more file statuses (OR'd). Omit to return all statuses."
+      ),
     page: z
       .number()
       .int()
@@ -139,10 +153,32 @@ export const claimRunTool = {
   scope: "runs:attribute",
   title: "Claim Run",
   description:
-    "Mark a run as performed by the authenticated user. Idempotent — claiming a run you already claimed is a no-op. Only self-attribution is supported; you cannot claim a run on behalf of another user.",
+    "Mark a run as performed by the authenticated user. Idempotent — claiming a run you already claimed is a no-op. Only self-attribution is supported; you cannot claim a run on behalf of another user. Prefer claim_runs when attributing multiple runs.",
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
     runId: z.string().describe("Run identifier within the instrument"),
+  },
+  annotations: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+  },
+} as const satisfies McpToolDef;
+
+export const claimRunsTool = {
+  name: "claim_runs",
+  group: "attribution",
+  scope: "runs:attribute",
+  title: "Claim Runs",
+  description:
+    "Mark multiple runs on one instrument as performed by the authenticated user (max 100). Idempotent per run. Returns claimed runs and any runIds that were not found; a missing ID does not fail the whole batch. Only self-attribution is supported.",
+  inputSchema: {
+    instrumentId: z.string().describe("Instrument identifier"),
+    runIds: z
+      .array(z.string())
+      .min(1)
+      .max(100)
+      .describe("Run identifiers within the instrument (1–100)"),
   },
   annotations: {
     readOnlyHint: false,
@@ -344,6 +380,7 @@ export const RUN_TOOL_DEFS = [
   getRunReportTool,
   listRunFilesTool,
   claimRunTool,
+  claimRunsTool,
   unclaimRunTool,
   listRunAttributorsTool,
   listRunCommentsTool,

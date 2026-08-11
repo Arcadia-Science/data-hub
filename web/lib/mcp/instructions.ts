@@ -1,0 +1,22 @@
+/** Delivered to every MCP client at initialize — reachable without resources. */
+export const MCP_SERVER_INSTRUCTIONS = [
+  "Data Hub MCP stores lab instrument runs, files, watchers, and attributions.",
+  "",
+  "Dates: dateFrom/dateTo and prompt date defaults are UTC calendar days",
+  "(inclusive), matched against coalesce(acquired_at, created_at). The web",
+  "dashboard uses the viewer's timezone for “today”, so counts can differ.",
+  "",
+  "Run status is derived from raw file states, priority-exclusive:",
+  "failed > pending (detected/upload_requested) > uploaded > processing >",
+  "completed > empty.",
+  "",
+  "Tool routing:",
+  "- Prefer global_search for filenames, instrument names, users, or comments.",
+  "- Prefer search_runs for date/status/metadata filters.",
+  '- My runs: search_runs with ranBy="me" (or get_me then ranBy=<id>).',
+  "- Prefer get_run_report for bounded CSV samples over downloading full files.",
+  "- Metadata filter enums: get_instrument_filter_options or",
+  "  datahub://instruments/{id}/filter-options.",
+  "- Watcher diagnosis: list_watchers → get_watcher_heartbeats →",
+  "  list_watcher_events (unhealthy agents only).",
+].join("\n");

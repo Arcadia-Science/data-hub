@@ -7,6 +7,8 @@ import {
   getRanByFilterOptions,
   getRunFilesPage,
   lookupRunByNaturalKey,
+  lookupRunUuidsByNaturalKeys,
+  type RunAttribution,
 } from "@/lib/api/instrument-runs";
 import {
   createCommentAndNotify,
@@ -35,6 +37,7 @@ import {
 import { validateSearchRunsMetadataFilters } from "@/lib/mcp/validate-run-filters";
 import {
   addRunCommentTool,
+  claimRunsTool,
   claimRunTool,
   deleteRunCommentTool,
   deleteRunTool,
@@ -167,7 +170,7 @@ export function registerRunTools(server: McpServer) {
   server.registerTool(
     listRunFilesTool.name,
     toolRegistrationConfig(listRunFilesTool),
-    async ({ instrumentId, runId, page, perPage }) => {
+    async ({ instrumentId, runId, status, page, perPage }) => {
       const run = await lookupRunByNaturalKey(instrumentId, runId);
       if (!run) {
         return errorResult(
@@ -177,6 +180,7 @@ export function registerRunTools(server: McpServer) {
       const { data, pagination } = await getRunFilesPage(run.id, {
         page: page ?? 1,
         perPage: perPage ?? 50,
+        ...(status ? { statuses: status } : {}),
       });
       return textResult({ data: data.map(toMcpFile), pagination });
     }
@@ -211,6 +215,54 @@ export function registerRunTools(server: McpServer) {
         runId,
         attributions: byRun.get(resolved.runUuid) ?? [],
       });
+    }
+  );
+
+  server.registerTool(
+    claimRunsTool.name,
+    toolRegistrationConfig(claimRunsTool),
+    async ({ instrumentId, runIds }, ctx) => {
+      const authInfo = ctx.http?.authInfo;
+      const writeError = requireMcpWrite(authInfo);
+      if (writeError) {
+        return writeError;
+      }
+      const userId = getMcpUserId(authInfo);
+      if (!userId) {
+        return errorResult("Authenticated user not available on this session.");
+      }
+
+      const uniqueRunIds = [...new Set(runIds)];
+      const found = await lookupRunUuidsByNaturalKeys(
+        instrumentId,
+        uniqueRunIds
+      );
+      const notFound = uniqueRunIds.filter((runId) => !found.has(runId));
+      const resolved = uniqueRunIds.flatMap((runId) => {
+        const runUuid = found.get(runId);
+        return runUuid ? [{ runId, runUuid }] : [];
+      });
+
+      const claimed: Array<{ runId: string; attributions: RunAttribution[] }> =
+        [];
+      if (resolved.length > 0) {
+        await db
+          .insert(runAttributions)
+          .values(resolved.map(({ runUuid }) => ({ runId: runUuid, userId })))
+          .onConflictDoNothing();
+
+        const byRun = await getAttributionsByRunIds(
+          resolved.map(({ runUuid }) => runUuid)
+        );
+        for (const { runId, runUuid } of resolved) {
+          claimed.push({
+            runId,
+            attributions: byRun.get(runUuid) ?? [],
+          });
+        }
+      }
+
+      return textResult({ instrumentId, claimed, notFound });
     }
   );
 
