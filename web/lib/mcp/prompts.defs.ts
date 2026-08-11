@@ -10,7 +10,9 @@ export const dailySummaryPrompt = {
     date: z
       .string()
       .optional()
-      .describe("Date to summarize (YYYY-MM-DD). Defaults to today."),
+      .describe(
+        "Date to summarize (YYYY-MM-DD, UTC calendar day). Defaults to the current UTC day."
+      ),
   },
 } as const satisfies McpPromptDef;
 
@@ -53,8 +55,11 @@ export const findMyRunsPrompt = {
     dateFrom: z
       .string()
       .optional()
-      .describe("Start date (YYYY-MM-DD), inclusive"),
-    dateTo: z.string().optional().describe("End date (YYYY-MM-DD), inclusive"),
+      .describe("Start date (YYYY-MM-DD, UTC), inclusive"),
+    dateTo: z
+      .string()
+      .optional()
+      .describe("End date (YYYY-MM-DD, UTC), inclusive"),
   },
 } as const satisfies McpPromptDef;
 
@@ -79,8 +84,11 @@ export const claimUnattributedRunsPrompt = {
     dateFrom: z
       .string()
       .optional()
-      .describe("Optional start date (YYYY-MM-DD)"),
-    dateTo: z.string().optional().describe("Optional end date (YYYY-MM-DD)"),
+      .describe("Optional start date (YYYY-MM-DD, UTC)"),
+    dateTo: z
+      .string()
+      .optional()
+      .describe("Optional end date (YYYY-MM-DD, UTC)"),
   },
 } as const satisfies McpPromptDef;
 
@@ -94,11 +102,11 @@ export const summarizeInstrumentWeekPrompt = {
     dateFrom: z
       .string()
       .optional()
-      .describe("Start date (YYYY-MM-DD). Defaults to 7 days ago."),
+      .describe("Start date (YYYY-MM-DD, UTC). Defaults to 7 days ago (UTC)."),
     dateTo: z
       .string()
       .optional()
-      .describe("End date (YYYY-MM-DD). Defaults to today."),
+      .describe("End date (YYYY-MM-DD, UTC). Defaults to today (UTC)."),
   },
 } as const satisfies McpPromptDef;
 

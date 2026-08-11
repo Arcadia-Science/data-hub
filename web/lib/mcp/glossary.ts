@@ -1,7 +1,7 @@
 import { VALID_INSTRUMENT_TYPES } from "@/lib/db/schema";
 import { RUN_STATUS_META, RUN_STATUS_VALUES } from "@/lib/runs/run-status";
 
-// Static reference for MCP clients — attach via `datahub://glossary` without a tool call.
+// Static reference for MCP clients — attach via `datahub://glossary`.
 export const DATAHUB_GLOSSARY = {
   runStatus: {
     derivation:
@@ -18,17 +18,8 @@ export const DATAHUB_GLOSSARY = {
     unattributed: "Runs with no claim attributions.",
     userId: "Concrete user UUID from list_run_attributors or get_me.",
   },
+  dates:
+    "dateFrom/dateTo are inclusive UTC calendar days matched against coalesce(acquired_at, created_at). The web dashboard computes “today” in the viewer's timezone, so daily counts can differ.",
   archivePolling:
     "get_run_archive may return { status: 'building', retryAfterSeconds }. Call again after the wait until status is 'ready'.",
-  toolRouting: {
-    vagueDiscovery:
-      "Prefer global_search when the query may match filenames, instrument names, user names/emails, or comment bodies (users scope is workspace-wide). Prefer search_runs for structured filters (date, status, metadata).",
-    myRuns: 'search_runs with ranBy="me", or get_me then ranBy=<id>.',
-    experimentalResults:
-      "Prefer get_run_report for bounded CSV samples and failure summaries over downloading full files.",
-    filterEnums:
-      "Read datahub://instruments/{instrumentId}/filter-options before setting metadata filters on search_runs.",
-    watcherDiagnosis:
-      "list_watchers → get_watcher_heartbeats → list_watcher_events for unhealthy agents.",
-  },
 } as const;

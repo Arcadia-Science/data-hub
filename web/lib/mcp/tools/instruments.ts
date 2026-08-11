@@ -4,8 +4,13 @@ import {
   getInstrumentListWithCounts,
 } from "@/lib/api/instruments";
 import { toolRegistrationConfig } from "@/lib/mcp/catalog/register";
+import { resolveInstrumentFilterOptions } from "@/lib/mcp/instrument-filter-options";
 import { errorResult, textResult } from "@/lib/mcp/tools/helpers";
-import { getInstrumentTool, listInstrumentsTool } from "./instruments.defs";
+import {
+  getInstrumentFilterOptionsTool,
+  getInstrumentTool,
+  listInstrumentsTool,
+} from "./instruments.defs";
 
 export function registerInstrumentTools(server: McpServer) {
   server.registerTool(
@@ -29,6 +34,18 @@ export function registerInstrumentTools(server: McpServer) {
         return errorResult(`Instrument '${instrumentId}' not found.`);
       }
       return textResult(instrument);
+    }
+  );
+
+  server.registerTool(
+    getInstrumentFilterOptionsTool.name,
+    toolRegistrationConfig(getInstrumentFilterOptionsTool),
+    async ({ instrumentId }) => {
+      const result = await resolveInstrumentFilterOptions(instrumentId);
+      if (!result.ok) {
+        return errorResult(result.error);
+      }
+      return textResult({ instrumentId, options: result.options });
     }
   );
 }

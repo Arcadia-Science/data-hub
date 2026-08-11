@@ -943,7 +943,15 @@ export async function getFilteredFileIds(
 
 export async function getRunFilesPage(
   runInternalId: string,
-  { page, perPage }: { page: number; perPage: number }
+  {
+    page,
+    perPage,
+    statuses,
+  }: {
+    page: number;
+    perPage: number;
+    statuses?: RunFile["status"][];
+  }
 ): Promise<{
   data: RunFile[];
   pagination: {
@@ -957,15 +965,23 @@ export async function getRunFilesPage(
   const safePage = Math.max(page, 1);
   const offset = (safePage - 1) * safePerPage;
 
+  const where =
+    statuses && statuses.length > 0
+      ? and(
+          eq(files.instrumentRunId, runInternalId),
+          inArray(files.status, statuses)
+        )
+      : eq(files.instrumentRunId, runInternalId);
+
   const [{ total }] = await db
     .select({ total: sql<number>`count(*)::int` })
     .from(files)
-    .where(eq(files.instrumentRunId, runInternalId));
+    .where(where);
 
   const data = await db
     .select()
     .from(files)
-    .where(eq(files.instrumentRunId, runInternalId))
+    .where(where)
     .orderBy(files.createdAt)
     .limit(safePerPage)
     .offset(offset);

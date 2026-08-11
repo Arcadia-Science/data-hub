@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 // biome-ignore lint/performance/noNamespaceImport: integration tests need the full schema module for Db typing
 import * as schema from "@/lib/db/schema";
+import { MCP_TOOL_DEFS } from "@/lib/mcp/catalog";
 import {
   api,
   closeTestDb,
@@ -178,7 +179,9 @@ describe("MCP Server (HTTP)", () => {
     expect(toolNames).toContain("get_run_report");
     expect(toolNames).toContain("get_watcher");
     expect(toolNames).toContain("list_watcher_events");
-    expect(toolNames).toHaveLength(30);
+    expect(toolNames).toContain("claim_runs");
+    expect(toolNames).toContain("get_instrument_filter_options");
+    expect(toolNames).toHaveLength(MCP_TOOL_DEFS.length);
   });
 
   // ---- Tool execution (end-to-end) -----------------------------------------

@@ -1,5 +1,7 @@
-import type { McpServer } from "@modelcontextprotocol/server";
+import { completable, type McpServer } from "@modelcontextprotocol/server";
+import { z } from "zod";
 import { promptRegistrationConfig } from "@/lib/mcp/catalog/register";
+import { completeInstrumentId, completeRunId } from "@/lib/mcp/completions";
 import {
   claimUnattributedRunsPrompt,
   compareRunsPrompt,
@@ -9,6 +11,19 @@ import {
   summarizeInstrumentWeekPrompt,
   troubleshootInstrumentPrompt,
 } from "./prompts.defs";
+
+// Fresh Zod schemas each registration — `completable()` mutates the schema,
+// so reusing defs' instances breaks when the server is rebuilt (e.g. tests).
+function instrumentIdComplete(description: string, optional = false) {
+  const base = z.string().describe(description);
+  return completable(optional ? base.optional() : base, (value) =>
+    completeInstrumentId(typeof value === "string" ? value : "")
+  );
+}
+
+function runIdComplete(description: string) {
+  return completable(z.string().describe(description), completeRunId);
+}
 
 export function registerPrompts(server: McpServer) {
   server.registerPrompt(
@@ -23,7 +38,9 @@ export function registerPrompts(server: McpServer) {
             content: {
               type: "text" as const,
               text: [
-                `Give me a summary of all lab instrument activity for ${targetDate}.`,
+                `Give me a summary of all lab instrument activity for ${targetDate} (UTC).`,
+                "",
+                "The default date is the current UTC calendar day; an explicit date overrides it. Day boundaries are UTC.",
                 "",
                 "Steps:",
                 "1. Call get_system_status to get an overview of all instruments and their watcher health.",
@@ -44,7 +61,14 @@ export function registerPrompts(server: McpServer) {
 
   server.registerPrompt(
     troubleshootInstrumentPrompt.name,
-    promptRegistrationConfig(troubleshootInstrumentPrompt),
+    promptRegistrationConfig({
+      ...troubleshootInstrumentPrompt,
+      argsSchema: {
+        instrumentId: instrumentIdComplete(
+          "Instrument identifier to troubleshoot"
+        ),
+      },
+    }),
     async ({ instrumentId }) => ({
       messages: [
         {
@@ -76,7 +100,16 @@ export function registerPrompts(server: McpServer) {
 
   server.registerPrompt(
     compareRunsPrompt.name,
-    promptRegistrationConfig(compareRunsPrompt),
+    promptRegistrationConfig({
+      ...compareRunsPrompt,
+      argsSchema: {
+        instrumentId: instrumentIdComplete(
+          "Instrument identifier (both runs must be on the same instrument)"
+        ),
+        runId1: runIdComplete("First run identifier"),
+        runId2: runIdComplete("Second run identifier"),
+      },
+    }),
     async ({ instrumentId, runId1, runId2 }) => ({
       messages: [
         {
@@ -105,7 +138,17 @@ export function registerPrompts(server: McpServer) {
 
   server.registerPrompt(
     findMyRunsPrompt.name,
-    promptRegistrationConfig(findMyRunsPrompt),
+    promptRegistrationConfig({
+      ...findMyRunsPrompt,
+      argsSchema: {
+        instrumentId: instrumentIdComplete(
+          "Optional instrument to narrow results",
+          true
+        ),
+        dateFrom: findMyRunsPrompt.argsSchema.dateFrom,
+        dateTo: findMyRunsPrompt.argsSchema.dateTo,
+      },
+    }),
     ({ instrumentId, dateFrom, dateTo }) => {
       const filters = [
         'ranBy="me"',
@@ -124,6 +167,8 @@ export function registerPrompts(server: McpServer) {
               text: [
                 "Find runs I have claimed.",
                 "",
+                "Date filters use UTC calendar days when provided.",
+                "",
                 "Steps:",
                 "1. Optionally call get_me to confirm the authenticated identity.",
                 `2. Call search_runs with ${filters}.`,
@@ -138,7 +183,13 @@ export function registerPrompts(server: McpServer) {
 
   server.registerPrompt(
     explainFailedRunPrompt.name,
-    promptRegistrationConfig(explainFailedRunPrompt),
+    promptRegistrationConfig({
+      ...explainFailedRunPrompt,
+      argsSchema: {
+        instrumentId: instrumentIdComplete("Instrument identifier"),
+        runId: runIdComplete("Run identifier within the instrument"),
+      },
+    }),
     async ({ instrumentId, runId }) => ({
       messages: [
         {
@@ -163,7 +214,14 @@ export function registerPrompts(server: McpServer) {
 
   server.registerPrompt(
     claimUnattributedRunsPrompt.name,
-    promptRegistrationConfig(claimUnattributedRunsPrompt),
+    promptRegistrationConfig({
+      ...claimUnattributedRunsPrompt,
+      argsSchema: {
+        instrumentId: instrumentIdComplete("Instrument identifier"),
+        dateFrom: claimUnattributedRunsPrompt.argsSchema.dateFrom,
+        dateTo: claimUnattributedRunsPrompt.argsSchema.dateTo,
+      },
+    }),
     ({ instrumentId, dateFrom, dateTo }) => {
       const dateBits = [
         dateFrom ? `dateFrom="${dateFrom}"` : null,
@@ -180,10 +238,12 @@ export function registerPrompts(server: McpServer) {
               text: [
                 `Find unattributed runs on instrument "${instrumentId}" that I should claim.`,
                 "",
+                "Date filters use UTC calendar days when provided.",
+                "",
                 "Steps:",
                 `1. Call search_runs with instrumentId="${instrumentId}", ranBy="unattributed"${dateBits ? `, ${dateBits}` : ""}.`,
                 "2. Present the candidate run IDs and ask me to confirm which ones to claim (do not claim automatically).",
-                "3. After confirmation, call claim_run for each approved run.",
+                "3. After confirmation, call claim_runs once with the approved runIds.",
                 "4. Summarize what was claimed.",
               ].join("\n"),
             },
@@ -195,7 +255,14 @@ export function registerPrompts(server: McpServer) {
 
   server.registerPrompt(
     summarizeInstrumentWeekPrompt.name,
-    promptRegistrationConfig(summarizeInstrumentWeekPrompt),
+    promptRegistrationConfig({
+      ...summarizeInstrumentWeekPrompt,
+      argsSchema: {
+        instrumentId: instrumentIdComplete("Instrument identifier"),
+        dateFrom: summarizeInstrumentWeekPrompt.argsSchema.dateFrom,
+        dateTo: summarizeInstrumentWeekPrompt.argsSchema.dateTo,
+      },
+    }),
     ({ instrumentId, dateFrom, dateTo }) => {
       const today = new Date();
       const defaultTo = today.toISOString().slice(0, 10);
@@ -211,7 +278,9 @@ export function registerPrompts(server: McpServer) {
             content: {
               type: "text" as const,
               text: [
-                `Summarize activity for instrument "${instrumentId}" from ${from} to ${to}.`,
+                `Summarize activity for instrument "${instrumentId}" from ${from} (UTC) to ${to} (UTC).`,
+                "",
+                "Defaults are the last seven UTC calendar days; explicit dates override them. Day boundaries are UTC.",
                 "",
                 "Steps:",
                 `1. Call get_instrument with instrumentId="${instrumentId}".`,

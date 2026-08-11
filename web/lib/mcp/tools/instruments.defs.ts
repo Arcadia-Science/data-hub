@@ -34,7 +34,25 @@ export const getInstrumentTool = {
   annotations: { readOnlyHint: true },
 } as const satisfies McpToolDef;
 
+export const getInstrumentFilterOptionsTool = {
+  name: "get_instrument_filter_options",
+  title: "Get Instrument Filter Options",
+  description:
+    "Return the valid search_runs metadata filter values for one instrument (wavelengths, dye channels, etc.). Prefer the datahub://instruments/{id}/filter-options resource when the client supports resources.",
+  group: "instruments",
+  scope: "instruments:read",
+  inputSchema: {
+    instrumentId: z
+      .string()
+      .describe(
+        "Kebab-case instrument identifier (e.g. 'spectramax-id3-plate-reader')"
+      ),
+  },
+  annotations: { readOnlyHint: true },
+} as const satisfies McpToolDef;
+
 export const INSTRUMENT_TOOL_DEFS = [
   listInstrumentsTool,
   getInstrumentTool,
+  getInstrumentFilterOptionsTool,
 ] as const;
