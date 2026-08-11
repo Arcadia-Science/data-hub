@@ -1,5 +1,10 @@
 import { z } from "zod";
 import type { McpToolDef } from "@/lib/mcp/catalog/types";
+import {
+  getInstrumentFilterOptionsOutputSchema,
+  getInstrumentOutputSchema,
+  listInstrumentsOutputSchema,
+} from "./instruments.output";
 
 export const listInstrumentsTool = {
   name: "list_instruments",
@@ -14,6 +19,7 @@ export const listInstrumentsTool = {
       .optional()
       .describe("Filter instruments by status"),
   },
+  outputSchema: listInstrumentsOutputSchema,
   annotations: { readOnlyHint: true },
 } as const satisfies McpToolDef;
 
@@ -31,6 +37,7 @@ export const getInstrumentTool = {
         "Kebab-case instrument identifier (e.g. 'spectramax-id3-plate-reader')"
       ),
   },
+  outputSchema: getInstrumentOutputSchema,
   annotations: { readOnlyHint: true },
 } as const satisfies McpToolDef;
 
@@ -48,6 +55,7 @@ export const getInstrumentFilterOptionsTool = {
         "Kebab-case instrument identifier (e.g. 'spectramax-id3-plate-reader')"
       ),
   },
+  outputSchema: getInstrumentFilterOptionsOutputSchema,
   annotations: { readOnlyHint: true },
 } as const satisfies McpToolDef;
 

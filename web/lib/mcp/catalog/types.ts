@@ -25,6 +25,13 @@ export interface McpToolDef {
   inputSchema?: Record<string, ZodType>;
   name: string;
   /**
+   * Full Zod schema for the tool's success payload (object or discriminated
+   * union). Unlike `inputSchema`, this is not a field map. Prefer object
+   * roots for list tools — bare arrays are re-wrapped as `{ result }` on
+   * 2025-era MCP wire shapes.
+   */
+  outputSchema: ZodType;
+  /**
    * REST-equivalent capability tag for the public catalog
    * (`GET /mcp/v1/schema.json`). MCP transport auth uses coarse OAuth
    * `read` / `write`; this field documents the finer-grained surface for
@@ -81,5 +88,6 @@ export interface McpCatalogDocument {
     scope?: string;
     annotations?: McpToolAnnotations;
     inputSchema: Record<string, unknown>;
+    outputSchema?: Record<string, unknown>;
   }>;
 }

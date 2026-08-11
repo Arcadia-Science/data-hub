@@ -7,7 +7,7 @@ import {
   getWatcherList,
 } from "@/lib/api/watchers";
 import { toolRegistrationConfig } from "@/lib/mcp/catalog/register";
-import { errorResult, textResult } from "@/lib/mcp/tools/helpers";
+import { errorResult, structuredResult } from "@/lib/mcp/tools/helpers";
 import {
   getWatcherHeartbeatsTool,
   getWatcherTool,
@@ -31,7 +31,7 @@ export function registerWatcherTools(server: McpServer) {
           (w) => w.effectiveStatus === (status as EffectiveStatus)
         );
       }
-      return textResult(watchers);
+      return structuredResult({ watchers });
     }
   );
 
@@ -43,7 +43,7 @@ export function registerWatcherTools(server: McpServer) {
       if (!watcher) {
         return errorResult(`Watcher '${watcherId}' not found.`);
       }
-      return textResult(watcher);
+      return structuredResult(watcher);
     }
   );
 
@@ -53,17 +53,18 @@ export function registerWatcherTools(server: McpServer) {
     async ({ watcherId, hours, eventTypes, page, pageSize }) => {
       const lookbackHours = hours ?? 24;
       const since = new Date(Date.now() - lookbackHours * 60 * 60 * 1000);
-      const result = await getWatcherEvents(watcherId, {
+      const { rows, total } = await getWatcherEvents(watcherId, {
         since,
         eventTypes,
         page: page ?? 1,
         pageSize: pageSize ?? 50,
       });
-      return textResult({
+      return structuredResult({
         watcherId,
         sinceIso: since.toISOString(),
         lookbackHours,
-        ...result,
+        rows,
+        total,
       });
     }
   );
@@ -79,7 +80,7 @@ export function registerWatcherTools(server: McpServer) {
         page: 1,
         pageSize: 100,
       });
-      return textResult({
+      return structuredResult({
         watcherId,
         sinceIso: since.toISOString(),
         lookbackHours,

@@ -31,7 +31,7 @@ import {
   getMcpUserId,
   requireMcpWrite,
   resolveAttributionTarget,
-  textResult,
+  structuredResult,
   toMcpFile,
 } from "@/lib/mcp/tools/helpers";
 import { validateSearchRunsMetadataFilters } from "@/lib/mcp/validate-run-filters";
@@ -104,7 +104,7 @@ export function registerRunTools(server: McpServer) {
         ranBy,
         statuses: args.status,
       });
-      return textResult(result);
+      return structuredResult(result);
     }
   );
 
@@ -151,7 +151,7 @@ export function registerRunTools(server: McpServer) {
         await Promise.all(tasks);
       }
 
-      return textResult(payload);
+      return structuredResult(payload);
     }
   );
 
@@ -163,7 +163,7 @@ export function registerRunTools(server: McpServer) {
       if (!result.ok) {
         return errorResult(result.message);
       }
-      return textResult(result);
+      return structuredResult(result);
     }
   );
 
@@ -182,7 +182,7 @@ export function registerRunTools(server: McpServer) {
         perPage: perPage ?? 50,
         ...(status ? { statuses: status } : {}),
       });
-      return textResult({ data: data.map(toMcpFile), pagination });
+      return structuredResult({ data: data.map(toMcpFile), pagination });
     }
   );
 
@@ -210,7 +210,7 @@ export function registerRunTools(server: McpServer) {
         .onConflictDoNothing();
 
       const byRun = await getAttributionsByRunIds([resolved.runUuid]);
-      return textResult({
+      return structuredResult({
         instrumentId,
         runId,
         attributions: byRun.get(resolved.runUuid) ?? [],
@@ -262,7 +262,7 @@ export function registerRunTools(server: McpServer) {
         }
       }
 
-      return textResult({ instrumentId, claimed, notFound });
+      return structuredResult({ instrumentId, claimed, notFound });
     }
   );
 
@@ -294,7 +294,7 @@ export function registerRunTools(server: McpServer) {
         );
 
       const byRun = await getAttributionsByRunIds([resolved.runUuid]);
-      return textResult({
+      return structuredResult({
         instrumentId,
         runId,
         attributions: byRun.get(resolved.runUuid) ?? [],
@@ -307,7 +307,7 @@ export function registerRunTools(server: McpServer) {
     toolRegistrationConfig(listRunAttributorsTool),
     async ({ instrumentId }) => {
       const attributors = await getRanByFilterOptions(instrumentId);
-      return textResult(attributors);
+      return structuredResult({ attributors });
     }
   );
 
@@ -322,7 +322,7 @@ export function registerRunTools(server: McpServer) {
         );
       }
       const comments = await listCommentsForRun(run.id);
-      return textResult({ comments });
+      return structuredResult({ comments });
     }
   );
 
@@ -369,7 +369,7 @@ export function registerRunTools(server: McpServer) {
         origin,
       });
 
-      return textResult(comment);
+      return structuredResult(comment);
     }
   );
 
@@ -407,7 +407,7 @@ export function registerRunTools(server: McpServer) {
       if (!updated) {
         return errorResult(`Comment '${commentId}' not found.`);
       }
-      return textResult(updated);
+      return structuredResult(updated);
     }
   );
 
@@ -437,7 +437,7 @@ export function registerRunTools(server: McpServer) {
       }
 
       await softDeleteComment({ commentId, userId });
-      return textResult({ id: commentId, deleted: true });
+      return structuredResult({ id: commentId, deleted: true });
     }
   );
 
@@ -453,7 +453,7 @@ export function registerRunTools(server: McpServer) {
       if (!result.ok) {
         return errorResult(result.message);
       }
-      return textResult({
+      return structuredResult({
         instrumentId: result.instrumentId,
         runId: result.runId,
         filesQueued: result.filesQueued,
@@ -480,11 +480,11 @@ export function registerRunTools(server: McpServer) {
       if (!result.ok) {
         return errorResult(result.message);
       }
-      return textResult({
+      return structuredResult({
         instrumentId: result.instrumentId,
         runId: result.runId,
         deletedAt: result.deletedAt,
-        deletedBy: result.deletedBy,
+        deletedBy: result.deletedBy ?? null,
         alreadyApplied: result.alreadyApplied,
       });
     }
@@ -502,7 +502,7 @@ export function registerRunTools(server: McpServer) {
       if (!result.ok) {
         return errorResult(result.message);
       }
-      return textResult({
+      return structuredResult({
         instrumentId: result.instrumentId,
         runId: result.runId,
         deletedAt: result.deletedAt,
@@ -527,7 +527,7 @@ export function registerRunTools(server: McpServer) {
       if (!result.ok) {
         return errorResult(result.message);
       }
-      return textResult({
+      return structuredResult({
         instrumentId: result.instrumentId,
         runId: result.runId,
         filesQueued: result.filesQueued,
@@ -548,7 +548,7 @@ export function registerRunTools(server: McpServer) {
       if (!result.ok) {
         return errorResult(result.message);
       }
-      return textResult({
+      return structuredResult({
         instrumentId: result.instrumentId,
         runId: result.runId,
         filesQueued: result.filesQueued,

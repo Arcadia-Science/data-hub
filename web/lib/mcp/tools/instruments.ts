@@ -5,7 +5,7 @@ import {
 } from "@/lib/api/instruments";
 import { toolRegistrationConfig } from "@/lib/mcp/catalog/register";
 import { resolveInstrumentFilterOptions } from "@/lib/mcp/instrument-filter-options";
-import { errorResult, textResult } from "@/lib/mcp/tools/helpers";
+import { errorResult, structuredResult } from "@/lib/mcp/tools/helpers";
 import {
   getInstrumentFilterOptionsTool,
   getInstrumentTool,
@@ -21,7 +21,7 @@ export function registerInstrumentTools(server: McpServer) {
       const filtered = status
         ? instruments.filter((i) => i.status === status)
         : instruments;
-      return textResult(filtered);
+      return structuredResult({ instruments: filtered });
     }
   );
 
@@ -33,7 +33,7 @@ export function registerInstrumentTools(server: McpServer) {
       if (!instrument) {
         return errorResult(`Instrument '${instrumentId}' not found.`);
       }
-      return textResult(instrument);
+      return structuredResult(instrument);
     }
   );
 
@@ -45,7 +45,7 @@ export function registerInstrumentTools(server: McpServer) {
       if (!result.ok) {
         return errorResult(result.error);
       }
-      return textResult({ instrumentId, options: result.options });
+      return structuredResult({ instrumentId, options: result.options });
     }
   );
 }

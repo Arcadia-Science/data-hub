@@ -31,6 +31,22 @@ describe("MCP catalog document", () => {
     }
   });
 
+  it("publishes outputSchema for every tool", () => {
+    const doc = buildMcpCatalogDocument();
+    expect(MCP_TOOL_DEFS).toHaveLength(32);
+    for (const def of MCP_TOOL_DEFS) {
+      expect(def.outputSchema, `${def.name} missing outputSchema`).toBeTruthy();
+      const tool = doc.tools.find((t) => t.name === def.name);
+      // Object roots expose `type`; discriminated unions may be `oneOf`/`anyOf`.
+      expect(
+        tool?.outputSchema?.type != null ||
+          tool?.outputSchema?.oneOf != null ||
+          tool?.outputSchema?.anyOf != null,
+        `${def.name} catalog outputSchema missing type/oneOf/anyOf`
+      ).toBe(true);
+    }
+  });
+
   it("preserves per-tool scope tags on the public catalog payload", () => {
     const doc = buildMcpCatalogDocument();
     const scopedDefs = MCP_TOOL_DEFS.filter((t) => t.scope);

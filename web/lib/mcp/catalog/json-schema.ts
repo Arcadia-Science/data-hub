@@ -7,3 +7,8 @@ export function zodRecordToJsonSchema(
 ): Record<string, unknown> {
   return z.toJSONSchema(z.object(fields ?? {})) as Record<string, unknown>;
 }
+
+/** Convert a whole Zod schema (tool `outputSchema`) to JSON Schema. */
+export function zodTypeToJsonSchema(schema: ZodType): Record<string, unknown> {
+  return z.toJSONSchema(schema) as Record<string, unknown>;
+}

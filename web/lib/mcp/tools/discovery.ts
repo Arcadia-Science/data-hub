@@ -2,7 +2,11 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { getInstrumentSummaries, getUserById } from "@/lib/api/dashboard";
 import { globalSearch } from "@/lib/api/search";
 import { toolRegistrationConfig } from "@/lib/mcp/catalog/register";
-import { errorResult, getMcpUserId, textResult } from "@/lib/mcp/tools/helpers";
+import {
+  errorResult,
+  getMcpUserId,
+  structuredResult,
+} from "@/lib/mcp/tools/helpers";
 import { MIN_QUERY_LENGTH } from "@/lib/search-constants";
 import {
   getMeTool,
@@ -24,7 +28,7 @@ export function registerDiscoveryTools(server: McpServer) {
         query,
         scope: scope ?? "all",
       });
-      return textResult(result);
+      return structuredResult(result);
     }
   );
 
@@ -41,7 +45,7 @@ export function registerDiscoveryTools(server: McpServer) {
       if (!user) {
         return errorResult(`User '${userId}' not found.`);
       }
-      return textResult(user);
+      return structuredResult(user);
     }
   );
 
@@ -51,7 +55,7 @@ export function registerDiscoveryTools(server: McpServer) {
     // No inputSchema → v2 passes ServerContext as the only argument.
     async () => {
       const summaries = await getInstrumentSummaries();
-      return textResult(summaries);
+      return structuredResult({ instruments: summaries });
     }
   );
 }
