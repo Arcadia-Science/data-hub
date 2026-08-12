@@ -31,6 +31,37 @@ describe("MCP catalog document", () => {
     }
   });
 
+  it("publishes outputSchema for every tool", () => {
+    const doc = buildMcpCatalogDocument();
+    expect(MCP_TOOL_DEFS).toHaveLength(32);
+    for (const def of MCP_TOOL_DEFS) {
+      expect(def.outputSchema, `${def.name} missing outputSchema`).toBeTruthy();
+      const tool = doc.tools.find((t) => t.name === def.name);
+      if (!tool) {
+        throw new Error(`${def.name} missing from catalog`);
+      }
+      // Object roots expose `type`; discriminated unions may be `oneOf`/`anyOf`.
+      expect(
+        tool.outputSchema.type != null ||
+          tool.outputSchema.oneOf != null ||
+          tool.outputSchema.anyOf != null,
+        `${def.name} catalog outputSchema missing type/oneOf/anyOf`
+      ).toBe(true);
+    }
+  });
+
+  it("stamps type:object on discriminated-union output schemas", () => {
+    const doc = buildMcpCatalogDocument();
+    const archive = doc.tools.find((t) => t.name === "get_run_archive");
+    if (!archive) {
+      throw new Error("get_run_archive missing from catalog");
+    }
+    expect(archive.outputSchema.type).toBe("object");
+    expect(
+      archive.outputSchema.oneOf != null || archive.outputSchema.anyOf != null
+    ).toBe(true);
+  });
+
   it("preserves per-tool scope tags on the public catalog payload", () => {
     const doc = buildMcpCatalogDocument();
     const scopedDefs = MCP_TOOL_DEFS.filter((t) => t.scope);

@@ -61,13 +61,6 @@ export const authIssuer = `${baseURL}/api/auth`;
 /** Audience for this deployment's MCP resource server. */
 export const mcpResourceAudience = `${baseURL}/mcp/v1`;
 
-const productionURL = (
-  process.env.BETTER_AUTH_PRODUCTION_URL ??
-  (process.env.VERCEL_PROJECT_PRODUCTION_URL
-    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
-    : "https://datahub.arcadiascience.com")
-).replace(/\/$/, "");
-
 const oauthScopes = [
   "openid",
   "profile",
@@ -266,11 +259,9 @@ export const authInstance = betterAuth({
       loginPage: "/login",
       consentPage: "/consent",
       scopes: [...oauthScopes],
-      // Seed production (stable clients) and this deployment's MCP audience
-      // when they differ (preview/local).
-      validAudiences: [
-        ...new Set([mcpResourceAudience, `${productionURL}/mcp/v1`]),
-      ],
+      // One audience per deployment: GHSA-p2fr-6hmx-4528 lets a client pick any
+      // allow-listed `resource` at the token endpoint until 1.7 ships stable.
+      validAudiences: [mcpResourceAudience],
       // Cursor / mcp-remote still require RFC 7591 Dynamic Client Registration.
       // Open registration only creates OAuth clients — Google Workspace still
       // gates who can sign in.

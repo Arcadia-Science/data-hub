@@ -1,12 +1,10 @@
 import { type McpServer, ResourceTemplate } from "@modelcontextprotocol/server";
 import { getInstruments, getUserById } from "@/lib/api/dashboard";
-import { getInstrumentFilterOptions } from "@/lib/api/instrument-runs";
-import {
-  getInstrumentById,
-  getInstrumentListWithCounts,
-} from "@/lib/api/instruments";
+import { getInstrumentListWithCounts } from "@/lib/api/instruments";
 import type { InstrumentType } from "@/lib/db/schema";
+import { completeInstrumentId } from "@/lib/mcp/completions";
 import { DATAHUB_GLOSSARY } from "@/lib/mcp/glossary";
+import { resolveInstrumentFilterOptions } from "@/lib/mcp/instrument-filter-options";
 import { getMcpUserId } from "@/lib/mcp/tools/helpers";
 import {
   glossaryResource,
@@ -152,6 +150,9 @@ export function registerResources(server: McpServer) {
           })),
         };
       },
+      complete: {
+        instrumentId: completeInstrumentId,
+      },
     }),
     {
       description: instrumentFilterOptionsResource.description,
@@ -177,34 +178,8 @@ export function registerResources(server: McpServer) {
         };
       }
 
-      const instrument = await getInstrumentById(instrumentId);
-      if (!instrument) {
-        return {
-          contents: [
-            {
-              uri: _uri.href,
-              mimeType: "application/json",
-              text: JSON.stringify(
-                { error: `Instrument '${instrumentId}' not found` },
-                null,
-                2
-              ),
-            },
-          ],
-        };
-      }
-
-      const result = await getInstrumentFilterOptions(
-        instrument.instrumentType,
-        instrumentId
-      );
-
-      const payload =
-        result.kind === "default"
-          ? {
-              error: `Instrument type '${instrument.instrumentType}' has no structured filter options`,
-            }
-          : result.options;
+      const result = await resolveInstrumentFilterOptions(instrumentId);
+      const payload = result.ok ? result.options : { error: result.error };
 
       return {
         contents: [

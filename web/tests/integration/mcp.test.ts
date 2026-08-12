@@ -10,6 +10,9 @@ import {
   seedTestUser,
 } from "@/tests/integration/helpers";
 
+/** Bump when adding/removing an MCP tool so the change shows up in review. */
+const EXPECTED_MCP_TOOL_COUNT = 32;
+
 function jsonRpc(method: string, params: unknown = {}, id = 1) {
   return {
     jsonrpc: "2.0" as const,
@@ -178,7 +181,9 @@ describe("MCP Server (HTTP)", () => {
     expect(toolNames).toContain("get_run_report");
     expect(toolNames).toContain("get_watcher");
     expect(toolNames).toContain("list_watcher_events");
-    expect(toolNames).toHaveLength(30);
+    expect(toolNames).toContain("claim_runs");
+    expect(toolNames).toContain("get_instrument_filter_options");
+    expect(toolNames).toHaveLength(EXPECTED_MCP_TOOL_COUNT);
   });
 
   // ---- Tool execution (end-to-end) -----------------------------------------
@@ -197,8 +202,8 @@ describe("MCP Server (HTTP)", () => {
     const data = await parseSseResponse(res);
     expect(data.result.isError).toBeFalsy();
     const text = data.result.content[0].text;
-    const instruments = JSON.parse(text);
-    expect(instruments).toEqual(
+    const payload = JSON.parse(text) as { instruments: unknown[] };
+    expect(payload.instruments).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: instrumentId })])
     );
   });
@@ -331,11 +336,10 @@ describe("MCP Server (HTTP)", () => {
 
     const result = await callTool("list_run_attributors", { instrumentId });
     expect(result.isError).toBeFalsy();
-    const parsed = JSON.parse(result.content[0].text) as Array<{
-      userId: string;
-      displayName: string;
-    }>;
-    expect(parsed.map((p) => p.userId)).toContain(userId);
+    const parsed = JSON.parse(result.content[0].text) as {
+      attributors: Array<{ userId: string; displayName: string }>;
+    };
+    expect(parsed.attributors.map((p) => p.userId)).toContain(userId);
   });
 
   it("get_run response includes the attributions array", async () => {

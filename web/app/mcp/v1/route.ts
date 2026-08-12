@@ -2,6 +2,7 @@ import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import { authBaseURL } from "@/lib/auth";
 import { MCP_ADVERTISED_SCOPES } from "@/lib/mcp/advertised-scopes";
 import { verifyMcpToken } from "@/lib/mcp/auth";
+import { MCP_SERVER_INSTRUCTIONS } from "@/lib/mcp/instructions";
 import { registerPrompts } from "@/lib/mcp/prompts";
 import { registerResources } from "@/lib/mcp/resources";
 import { registerTools } from "@/lib/mcp/tools";
@@ -16,6 +17,7 @@ const handler = createMcpHandler(
   },
   {
     serverInfo: { name: "data-hub", version: "1.0.0" },
+    instructions: MCP_SERVER_INSTRUCTIONS,
     capabilities: {
       tools: {},
       resources: {},

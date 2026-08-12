@@ -21,7 +21,7 @@ export const meResource = {
 export const glossaryResource = {
   name: "glossary",
   description:
-    "Static reference: run status derivation, instrument types, ranBy literals, archive polling, and tool-routing tips.",
+    "Static reference: run status derivation, instrument types, ranBy literals, UTC date semantics, and archive polling.",
   mimeType: "application/json",
   kind: "static",
   uri: "datahub://glossary",

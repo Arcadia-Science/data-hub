@@ -94,7 +94,9 @@ export const getInstrumentSummaries = cache(
         displayName: row.displayName,
         status: row.status,
         runCount: row.runCount,
-        lastRunAt: row.lastRunAt,
+        // SQL `max(...)` can land as a Postgres timestamp string; normalize
+        // like `hydrateInstrumentRow` so callers get a real Date.
+        lastRunAt: row.lastRunAt ? new Date(row.lastRunAt) : null,
         filesPendingUpload: row.filesPendingUpload,
         watcherStatus,
       };

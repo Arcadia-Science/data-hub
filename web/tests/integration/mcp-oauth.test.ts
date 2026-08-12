@@ -350,10 +350,12 @@ describe("MCP OAuth authorization-code flow", () => {
     expect(mcpRes.status).toBe(200);
     const mcpData = await parseSseResponse(mcpRes);
     expect(mcpData.result?.isError).toBeFalsy();
-    const payload = JSON.parse(mcpData.result.content[0].text) as Array<{
-      id: string;
-    }>;
-    expect(payload.some((row) => row.id === instrumentId)).toBe(true);
+    const payload = JSON.parse(mcpData.result.content[0].text) as {
+      instruments: Array<{ id: string }>;
+    };
+    expect(payload.instruments.some((row) => row.id === instrumentId)).toBe(
+      true
+    );
   });
 
   it("DCR without scope body still allows authorize with read write", async () => {

@@ -1,5 +1,10 @@
 import { z } from "zod";
 import type { McpToolDef } from "@/lib/mcp/catalog/types";
+import {
+  getMeOutputSchema,
+  getSystemStatusOutputSchema,
+  globalSearchOutputSchema,
+} from "./discovery.output";
 
 export const globalSearchTool = {
   name: "global_search",
@@ -15,6 +20,7 @@ export const globalSearchTool = {
       .optional()
       .describe("Limit results to one entity type (default: all)"),
   },
+  outputSchema: globalSearchOutputSchema,
   annotations: { readOnlyHint: true },
 } as const satisfies McpToolDef;
 
@@ -24,6 +30,7 @@ export const getMeTool = {
   description:
     'Return the authenticated user\'s identity (id, name, email, image, isAdmin). Use the returned id with search_runs ranBy=, or pass ranBy="me" instead.',
   group: "discovery",
+  outputSchema: getMeOutputSchema,
   annotations: { readOnlyHint: true },
 } as const satisfies McpToolDef;
 
@@ -34,6 +41,7 @@ export const getSystemStatusTool = {
     "Get a dashboard-level overview: per-instrument run counts, watcher health (online/offline/no_watcher), and pending upload counts.",
   group: "discovery",
   scope: "instruments:read",
+  outputSchema: getSystemStatusOutputSchema,
   annotations: { readOnlyHint: true },
 } as const satisfies McpToolDef;
 

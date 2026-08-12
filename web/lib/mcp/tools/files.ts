@@ -10,7 +10,7 @@ import { toolRegistrationConfig } from "@/lib/mcp/catalog/register";
 import {
   errorResult,
   requireMcpWrite,
-  textResult,
+  structuredResult,
 } from "@/lib/mcp/tools/helpers";
 import {
   getPresignedDownloadUrl,
@@ -33,7 +33,7 @@ export function registerFileTools(server: McpServer) {
       if (!file) {
         return errorResult(`File '${fileId}' not found.`);
       }
-      return textResult(file);
+      return structuredResult(file);
     }
   );
 
@@ -57,7 +57,7 @@ export function registerFileTools(server: McpServer) {
         PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS
       );
 
-      return textResult({
+      return structuredResult({
         fileId,
         filename: lookup.filename,
         downloadUrl,
@@ -87,7 +87,7 @@ export function registerFileTools(server: McpServer) {
       }
 
       if (result.status === "ready") {
-        return textResult({
+        return structuredResult({
           status: "ready",
           instrumentId,
           runId,
@@ -99,7 +99,7 @@ export function registerFileTools(server: McpServer) {
         });
       }
 
-      return textResult({
+      return structuredResult({
         status: "building",
         instrumentId,
         runId,
@@ -122,7 +122,7 @@ export function registerFileTools(server: McpServer) {
       if (!result.ok) {
         return errorResult(`[${result.code}] ${result.message}`);
       }
-      return textResult({ status: "processing", fileId: result.fileId });
+      return structuredResult({ status: "processing", fileId: result.fileId });
     }
   );
 
@@ -138,7 +138,7 @@ export function registerFileTools(server: McpServer) {
       if (!result.ok) {
         return errorResult(result.message);
       }
-      return textResult({
+      return structuredResult({
         id: result.id,
         filename: result.filename,
         deletedAt: result.deletedAt,

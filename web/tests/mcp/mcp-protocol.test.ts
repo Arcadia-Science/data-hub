@@ -11,13 +11,88 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const {
   MOCK_INSTRUMENT,
   MOCK_GEL_DOC_INSTRUMENT,
-  MOCK_GENERIC_INSTRUMENT,
+  MOCK_INSTRUMENT_DETAIL,
+  MOCK_GEL_DOC_INSTRUMENT_DETAIL,
+  MOCK_GENERIC_INSTRUMENT_DETAIL,
   MOCK_FILE,
-} = vi.hoisted(() => ({
-  MOCK_INSTRUMENT: {
+  MOCK_RUN_LIST_ROW,
+  mockRunDetail,
+  MOCK_RUN_UUID_1,
+  MOCK_RUN_UUID_2,
+} = vi.hoisted(() => {
+  // Zod's uuid() checks RFC variant bits — all-ones / sequential hex fails.
+  const MOCK_RUN_UUID_1 = "11111111-1111-4111-a111-111111111111";
+  const MOCK_RUN_UUID_2 = "22222222-2222-4222-b222-222222222222";
+  const MOCK_RUN_LIST_ROW = {
+    id: MOCK_RUN_UUID_1,
+    instrument_id: "test-plate-reader",
+    instrument_display_name: "Test Plate Reader",
+    instrument_type: "plate_reader" as const,
+    run_id: "run-1",
+    source: "watcher" as const,
+    metadata: {},
+    created_at: new Date("2025-01-01T00:00:00.000Z"),
+    acquired_at: new Date("2025-01-01T00:00:00.000Z"),
+    updated_at: new Date("2025-01-01T00:00:00.000Z"),
+    deleted_at: null,
+    file_count: 1,
+    files_completed: 1,
+    files_failed: 0,
+    files_pending_upload: 0,
+    files_uploaded: 0,
+    files_processing: 0,
+    total_size_bytes: 1234,
+    error_messages: [] as string[],
+    attributions: [] as Array<{
+      userId: string;
+      displayName: string;
+      initials: string;
+      avatarUrl: string | null;
+    }>,
+  };
+  function mockRunDetail(instrumentId: string, runId: string, id: string) {
+    return {
+      id,
+      instrumentId,
+      runId,
+      source: "watcher" as const,
+      watcherId: null,
+      metadata: {},
+      createdAt: new Date("2025-01-01T00:00:00.000Z"),
+      acquiredAt: new Date("2025-01-01T00:00:00.000Z"),
+      updatedAt: new Date("2025-01-01T00:00:00.000Z"),
+      deletedAt: null,
+      deletedBy: null,
+      instrumentDisplayName: "Test Plate Reader",
+      instrumentType: "plate_reader" as const,
+      deletedByUser: null,
+      attributions: [] as Array<{
+        userId: string;
+        displayName: string;
+        initials: string;
+        avatarUrl: string | null;
+      }>,
+    };
+  }
+  const listBase = {
+    hasDeregisteredWatcher: false,
+    runsThisWeek: 0,
+    lastWatcherHeartbeatAt: new Date("2025-01-01"),
+  };
+  const detailBase = {
+    watchersOffline: 0,
+    activeWatcherId: "watcher-1",
+    activeWatcherHostname: "lab-pc",
+    activeWatcherDeregistered: false,
+    retiredAt: null,
+    retiredByUser: null,
+    updatedAt: new Date("2024-06-01"),
+    lastWatcherHeartbeatAt: new Date("2025-01-01"),
+  };
+  const MOCK_INSTRUMENT = {
     id: "test-plate-reader",
     displayName: "Test Plate Reader",
-    status: "active",
+    status: "active" as const,
     instrumentType: "plate_reader",
     filePatterns: ["*.txt"],
     runCount: 3,
@@ -25,11 +100,13 @@ const {
     watcherCount: 1,
     watchersOnline: 1,
     createdAt: new Date("2024-01-01"),
-  },
-  MOCK_GEL_DOC_INSTRUMENT: {
+    ...listBase,
+    runsThisWeek: 1,
+  };
+  const MOCK_GEL_DOC_INSTRUMENT = {
     id: "test-gel-doc",
     displayName: "Test Gel Doc",
-    status: "active",
+    status: "active" as const,
     instrumentType: "gel_doc",
     filePatterns: ["*.tif"],
     runCount: 1,
@@ -37,11 +114,12 @@ const {
     watcherCount: 1,
     watchersOnline: 1,
     createdAt: new Date("2024-01-01"),
-  },
-  MOCK_GENERIC_INSTRUMENT: {
+    ...listBase,
+  };
+  const MOCK_GENERIC_INSTRUMENT = {
     id: "test-generic",
     displayName: "Test Generic",
-    status: "active",
+    status: "active" as const,
     instrumentType: "generic",
     filePatterns: ["*.dat"],
     runCount: 0,
@@ -49,22 +127,78 @@ const {
     watcherCount: 0,
     watchersOnline: 0,
     createdAt: new Date("2024-01-01"),
-  },
-  MOCK_FILE: {
-    id: 42,
-    instrumentRunId: "internal-1",
-    filename: "data.csv",
-    status: "completed",
-    s3Bucket: "test-bucket",
-    s3Key: "path/to/data.csv",
-    contentType: "text/csv",
-    sizeBytes: 1234,
-    category: "raw",
-    metadata: {},
-    errorMessage: null,
-    deletedAt: null,
-  },
-}));
+    ...listBase,
+    lastWatcherHeartbeatAt: null,
+  };
+  return {
+    MOCK_INSTRUMENT,
+    MOCK_GEL_DOC_INSTRUMENT,
+    MOCK_INSTRUMENT_DETAIL: {
+      id: MOCK_INSTRUMENT.id,
+      displayName: MOCK_INSTRUMENT.displayName,
+      status: MOCK_INSTRUMENT.status,
+      instrumentType: MOCK_INSTRUMENT.instrumentType,
+      filePatterns: MOCK_INSTRUMENT.filePatterns,
+      runCount: MOCK_INSTRUMENT.runCount,
+      watcherCount: MOCK_INSTRUMENT.watcherCount,
+      watchersOnline: MOCK_INSTRUMENT.watchersOnline,
+      createdAt: MOCK_INSTRUMENT.createdAt,
+      ...detailBase,
+    },
+    MOCK_GEL_DOC_INSTRUMENT_DETAIL: {
+      id: MOCK_GEL_DOC_INSTRUMENT.id,
+      displayName: MOCK_GEL_DOC_INSTRUMENT.displayName,
+      status: MOCK_GEL_DOC_INSTRUMENT.status,
+      instrumentType: MOCK_GEL_DOC_INSTRUMENT.instrumentType,
+      filePatterns: MOCK_GEL_DOC_INSTRUMENT.filePatterns,
+      runCount: MOCK_GEL_DOC_INSTRUMENT.runCount,
+      watcherCount: MOCK_GEL_DOC_INSTRUMENT.watcherCount,
+      watchersOnline: MOCK_GEL_DOC_INSTRUMENT.watchersOnline,
+      createdAt: MOCK_GEL_DOC_INSTRUMENT.createdAt,
+      ...detailBase,
+    },
+    MOCK_GENERIC_INSTRUMENT_DETAIL: {
+      id: MOCK_GENERIC_INSTRUMENT.id,
+      displayName: MOCK_GENERIC_INSTRUMENT.displayName,
+      status: MOCK_GENERIC_INSTRUMENT.status,
+      instrumentType: MOCK_GENERIC_INSTRUMENT.instrumentType,
+      filePatterns: MOCK_GENERIC_INSTRUMENT.filePatterns,
+      runCount: MOCK_GENERIC_INSTRUMENT.runCount,
+      watcherCount: MOCK_GENERIC_INSTRUMENT.watcherCount,
+      watchersOnline: MOCK_GENERIC_INSTRUMENT.watchersOnline,
+      createdAt: MOCK_GENERIC_INSTRUMENT.createdAt,
+      ...detailBase,
+      activeWatcherId: null,
+      activeWatcherHostname: null,
+      lastWatcherHeartbeatAt: null,
+    },
+    MOCK_FILE: {
+      id: 42,
+      instrumentRunId: MOCK_RUN_UUID_1,
+      filename: "data.csv",
+      relativePath: "data.csv",
+      status: "completed",
+      s3Bucket: "test-bucket",
+      s3Key: "path/to/data.csv",
+      contentType: "text/csv",
+      sizeBytes: 1234,
+      category: "raw",
+      metadata: {},
+      errorMessage: null,
+      detectedAt: null,
+      uploadRequestedAt: null,
+      uploadedAt: new Date("2025-01-01T00:00:00Z"),
+      processedAt: new Date("2025-01-01T00:00:00Z"),
+      fileCreatedAt: null,
+      createdAt: new Date("2025-01-01T00:00:00Z"),
+      deletedAt: null,
+    },
+    MOCK_RUN_LIST_ROW,
+    mockRunDetail,
+    MOCK_RUN_UUID_1,
+    MOCK_RUN_UUID_2,
+  };
+});
 
 vi.mock("@/lib/api/instruments", () => ({
   // The generic instrument is intentionally omitted from the list so we can
@@ -75,29 +209,51 @@ vi.mock("@/lib/api/instruments", () => ({
     .mockResolvedValue([MOCK_INSTRUMENT, MOCK_GEL_DOC_INSTRUMENT]),
   getInstrumentById: vi.fn().mockImplementation((id: string) => {
     if (id === "test-plate-reader") {
-      return MOCK_INSTRUMENT;
+      return MOCK_INSTRUMENT_DETAIL;
     }
     if (id === "test-gel-doc") {
-      return MOCK_GEL_DOC_INSTRUMENT;
+      return MOCK_GEL_DOC_INSTRUMENT_DETAIL;
     }
     if (id === "test-generic") {
-      return MOCK_GENERIC_INSTRUMENT;
+      return MOCK_GENERIC_INSTRUMENT_DETAIL;
     }
     return null;
   }),
 }));
 
 vi.mock("@/lib/api/instrument-runs", () => ({
-  buildRunListQuery: vi
-    .fn()
-    .mockResolvedValue({ runs: [], total: 0, page: 1, perPage: 20 }),
+  buildRunListQuery: vi.fn().mockResolvedValue({
+    data: [
+      MOCK_RUN_LIST_ROW,
+      { ...MOCK_RUN_LIST_ROW, id: MOCK_RUN_UUID_2, run_id: "run-2" },
+    ],
+    pagination: { page: 1, per_page: 50, total: 2, total_pages: 1 },
+  }),
   lookupRunByNaturalKey: vi
     .fn()
-    .mockImplementation(async (_instId: string, runId: string) =>
-      runId === "run-1"
-        ? { id: "internal-1", instrumentId: _instId, runId }
-        : null
-    ),
+    .mockImplementation((_instId: string, runId: string) => {
+      if (runId === "run-1") {
+        return mockRunDetail(_instId, runId, MOCK_RUN_UUID_1);
+      }
+      if (runId === "run-2") {
+        return mockRunDetail(_instId, runId, MOCK_RUN_UUID_2);
+      }
+      return null;
+    }),
+  lookupRunUuidsByNaturalKeys: vi
+    .fn()
+    .mockImplementation((_instId: string, runIds: string[]) => {
+      const map = new Map<string, string>();
+      for (const runId of runIds) {
+        if (runId === "run-1") {
+          map.set(runId, MOCK_RUN_UUID_1);
+        }
+        if (runId === "run-2") {
+          map.set(runId, MOCK_RUN_UUID_2);
+        }
+      }
+      return map;
+    }),
   getRunFilesPage: vi.fn().mockResolvedValue({
     data: [],
     pagination: { page: 1, per_page: 50, total: 0, total_pages: 0 },
@@ -163,7 +319,12 @@ vi.mock("@/lib/api/dashboard", () => ({
     {
       id: "test-plate-reader",
       displayName: "Test Plate Reader",
-      instrumentType: "plate_reader",
+      status: "active",
+    },
+    {
+      id: "test-gel-doc",
+      displayName: "Test Gel Doc",
+      status: "active",
     },
   ]),
   getUserById: vi.fn().mockImplementation(async (id: string) =>
@@ -198,13 +359,51 @@ vi.mock("@/lib/api/search", () => ({
 }));
 
 vi.mock("@/lib/api/watchers", () => ({
-  getWatcherList: vi.fn().mockResolvedValue([]),
-  getWatcherById: vi.fn().mockResolvedValue(null),
+  getWatcherList: vi.fn().mockResolvedValue([
+    {
+      id: "watcher-1",
+      instrumentId: "test-plate-reader",
+      instrumentDisplayName: "Test Plate Reader",
+      hostname: "bench-pc",
+      watcherVersion: "1.0.0",
+      effectiveStatus: "watching",
+      lastHeartbeatAt: new Date("2025-01-01T12:00:00Z"),
+      createdAt: new Date("2024-01-01T00:00:00Z"),
+      deletedAt: null,
+    },
+  ]),
+  getWatcherById: vi.fn().mockImplementation((id: string) => {
+    if (id !== "watcher-1") {
+      return null;
+    }
+    return {
+      id: "watcher-1",
+      instrumentId: "test-plate-reader",
+      instrumentDisplayName: "Test Plate Reader",
+      hostname: "bench-pc",
+      watcherVersion: "1.0.0",
+      effectiveStatus: "watching",
+      lastHeartbeatAt: new Date("2025-01-01T12:00:00Z"),
+      createdAt: new Date("2024-01-01T00:00:00Z"),
+      deletedAt: null,
+      osInfo: "linux",
+      configYaml: "watch: true\n",
+      configChecksum: "abc123",
+      updatedAt: new Date("2025-01-01T00:00:00Z"),
+      deregisteredByUser: null,
+    };
+  }),
   getWatcherEvents: vi.fn().mockResolvedValue({
-    rows: [],
-    total: 0,
-    page: 1,
-    pageSize: 50,
+    rows: [
+      {
+        id: 1,
+        eventType: "file_uploaded",
+        message: "uploaded data.csv",
+        details: { filename: "data.csv" },
+        timestamp: new Date("2025-01-01T12:00:00Z"),
+      },
+    ],
+    total: 1,
   }),
   getWatcherHeartbeats: vi.fn().mockResolvedValue({
     rows: [
@@ -403,6 +602,7 @@ import {
   MCP_RESOURCE_DEFS,
   MCP_TOOL_DEFS,
 } from "@/lib/mcp/catalog";
+import { MCP_SERVER_INSTRUCTIONS } from "@/lib/mcp/instructions";
 import { registerPrompts } from "@/lib/mcp/prompts";
 import { registerResources } from "@/lib/mcp/resources";
 import { registerTools } from "@/lib/mcp/tools";
@@ -418,7 +618,10 @@ describe("MCP Protocol (in-memory)", () => {
   beforeEach(async () => {
     mcpServer = new McpServer(
       { name: "data-hub-test", version: "1.0.0" },
-      { capabilities: { tools: {}, resources: {}, prompts: {} } }
+      {
+        capabilities: { tools: {}, resources: {}, prompts: {} },
+        instructions: MCP_SERVER_INSTRUCTIONS,
+      }
     );
     registerTools(mcpServer);
     registerResources(mcpServer);
@@ -445,6 +648,7 @@ describe("MCP Protocol (in-memory)", () => {
   const WRITE_TOOLS = new Set([
     "reprocess_file",
     "claim_run",
+    "claim_runs",
     "unclaim_run",
     "add_run_comment",
     "edit_run_comment",
@@ -595,9 +799,42 @@ describe("MCP Protocol (in-memory)", () => {
     expect(globalSearch?.inputSchema.properties).toHaveProperty("query");
   });
 
+  it("every registered tool advertises outputSchema", async () => {
+    const { tools } = await client.listTools();
+    expect(tools).toHaveLength(32);
+    for (const tool of tools) {
+      const schema = tool.outputSchema as
+        | { type?: string; oneOf?: unknown; anyOf?: unknown }
+        | undefined;
+      expect(
+        schema?.type != null || schema?.oneOf != null || schema?.anyOf != null,
+        `${tool.name} missing outputSchema`
+      ).toBe(true);
+    }
+  });
+
+  it("catalog outputSchema matches tools/list", async () => {
+    const doc = buildMcpCatalogDocument();
+    const { tools } = await client.listTools();
+    for (const tool of tools) {
+      const catalog = doc.tools.find((t) => t.name === tool.name);
+      expect(catalog?.outputSchema, `${tool.name} catalog mismatch`).toEqual(
+        tool.outputSchema
+      );
+    }
+  });
+
   it("claim_run is annotated as write / non-destructive / idempotent", async () => {
     const { tools } = await client.listTools();
     const tool = tools.find((t) => t.name === "claim_run");
+    expect(tool?.annotations?.readOnlyHint).toBe(false);
+    expect(tool?.annotations?.destructiveHint).toBe(false);
+    expect(tool?.annotations?.idempotentHint).toBe(true);
+  });
+
+  it("claim_runs is annotated as write / non-destructive / idempotent", async () => {
+    const { tools } = await client.listTools();
+    const tool = tools.find((t) => t.name === "claim_runs");
     expect(tool?.annotations?.readOnlyHint).toBe(false);
     expect(tool?.annotations?.destructiveHint).toBe(false);
     expect(tool?.annotations?.idempotentHint).toBe(true);
@@ -648,17 +885,29 @@ describe("MCP Protocol (in-memory)", () => {
     return JSON.parse(text ?? "");
   }
 
+  function expectStructuredMatchesText(result: {
+    content: unknown;
+    structuredContent?: unknown;
+  }) {
+    // All tools return object roots so content text and structuredContent match.
+    expect(result.structuredContent).toEqual(parseText(result.content));
+  }
+
   it("list_instruments returns JSON text content", async () => {
     const result = await client.callTool({
       name: "list_instruments",
       arguments: {},
     });
     expect(result.isError).toBeFalsy();
-    expect(parseText(result.content)).toEqual(
+    const parsed = parseText(result.content) as {
+      instruments: unknown[];
+    };
+    expect(parsed.instruments).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: "test-plate-reader" }),
       ])
     );
+    expect(result.structuredContent).toEqual(parsed);
   });
 
   it("get_instrument returns instrument detail", async () => {
@@ -669,6 +918,7 @@ describe("MCP Protocol (in-memory)", () => {
     expect(result.isError).toBeFalsy();
     const parsed = parseText(result.content) as { id: string };
     expect(parsed.id).toBe("test-plate-reader");
+    expect(result.structuredContent).toEqual(parsed);
   });
 
   it("search_runs returns paginated results", async () => {
@@ -678,8 +928,9 @@ describe("MCP Protocol (in-memory)", () => {
     });
     expect(result.isError).toBeFalsy();
     const parsed = parseText(result.content);
-    expect(parsed).toHaveProperty("runs");
-    expect(parsed).toHaveProperty("total");
+    expect(parsed).toHaveProperty("data");
+    expect(parsed).toHaveProperty("pagination");
+    expectStructuredMatchesText(result);
   });
 
   it("search_runs rejects invalid metadata filters with allowed values", async () => {
@@ -743,6 +994,7 @@ describe("MCP Protocol (in-memory)", () => {
     expect(parsed).toHaveProperty("users");
     expect(parsed).toHaveProperty("comments");
     expect(parsed.counts).toHaveProperty("total");
+    expect(result.structuredContent).toEqual(parsed);
   });
 
   it("global_search rejects short queries", async () => {
@@ -767,6 +1019,11 @@ describe("MCP Protocol (in-memory)", () => {
       arguments: {},
     });
     expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as {
+      instruments: unknown[];
+    };
+    expect(Array.isArray(parsed.instruments)).toBe(true);
+    expect(result.structuredContent).toEqual(parsed);
   });
 
   it("list_watchers returns data", async () => {
@@ -775,6 +1032,47 @@ describe("MCP Protocol (in-memory)", () => {
       arguments: {},
     });
     expect(result.isError).toBeFalsy();
+    expectStructuredMatchesText(result);
+    const parsed = parseText(result.content) as {
+      watchers: Array<{ id: string }>;
+    };
+    expect(parsed.watchers).toEqual([
+      expect.objectContaining({ id: "watcher-1", effectiveStatus: "watching" }),
+    ]);
+  });
+
+  it("get_watcher returns watcher detail", async () => {
+    const result = await client.callTool({
+      name: "get_watcher",
+      arguments: { watcherId: "watcher-1" },
+    });
+    expect(result.isError).toBeFalsy();
+    expectStructuredMatchesText(result);
+    const parsed = parseText(result.content) as {
+      id: string;
+      configYaml: string | null;
+    };
+    expect(parsed.id).toBe("watcher-1");
+    expect(parsed.configYaml).toContain("watch:");
+  });
+
+  it("list_watcher_events returns paginated events", async () => {
+    const result = await client.callTool({
+      name: "list_watcher_events",
+      arguments: { watcherId: "watcher-1", hours: 6 },
+    });
+    expect(result.isError).toBeFalsy();
+    expectStructuredMatchesText(result);
+    const parsed = parseText(result.content) as {
+      watcherId: string;
+      lookbackHours: number;
+      total: number;
+      rows: unknown[];
+    };
+    expect(parsed.watcherId).toBe("watcher-1");
+    expect(parsed.lookbackHours).toBe(6);
+    expect(parsed.total).toBe(1);
+    expect(parsed.rows).toHaveLength(1);
   });
 
   it("get_file returns the file record", async () => {
@@ -783,6 +1081,7 @@ describe("MCP Protocol (in-memory)", () => {
       arguments: { fileId: 42 },
     });
     expect(result.isError).toBeFalsy();
+    expectStructuredMatchesText(result);
     const parsed = parseText(result.content) as { id: number };
     expect(parsed.id).toBe(42);
   });
@@ -793,6 +1092,7 @@ describe("MCP Protocol (in-memory)", () => {
       arguments: { fileId: 42 },
     });
     expect(result.isError).toBeFalsy();
+    expectStructuredMatchesText(result);
     const parsed = parseText(result.content) as {
       fileId: number;
       filename: string;
@@ -810,6 +1110,7 @@ describe("MCP Protocol (in-memory)", () => {
       arguments: { instrumentId: "test-plate-reader", runId: "run-1" },
     });
     expect(result.isError).toBeFalsy();
+    expectStructuredMatchesText(result);
     const parsed = parseText(result.content) as {
       status: string;
       downloadUrl?: string;
@@ -840,6 +1141,7 @@ describe("MCP Protocol (in-memory)", () => {
       arguments: { instrumentId: "test-plate-reader", runId: "run-1" },
     });
     expect(result.isError).toBeFalsy();
+    expectStructuredMatchesText(result);
     const parsed = parseText(result.content) as {
       status: string;
       jobId?: string;
@@ -868,6 +1170,7 @@ describe("MCP Protocol (in-memory)", () => {
     expect(result.content).toEqual([
       { type: "text", text: "No downloadable files for this run" },
     ]);
+    expect(result.structuredContent).toBeUndefined();
   });
 
   it("reprocess_file succeeds for a reprocessable file", async () => {
@@ -876,6 +1179,7 @@ describe("MCP Protocol (in-memory)", () => {
       arguments: { fileId: 42 },
     });
     expect(result.isError).toBeFalsy();
+    expectStructuredMatchesText(result);
     const parsed = parseText(result.content) as {
       status: string;
       fileId: number;
@@ -884,12 +1188,30 @@ describe("MCP Protocol (in-memory)", () => {
     expect(parsed.fileId).toBe(42);
   });
 
+  it("dismiss_file returns the soft-deleted file", async () => {
+    const result = await client.callTool({
+      name: "dismiss_file",
+      arguments: { fileId: 1 },
+    });
+    expect(result.isError).toBeFalsy();
+    expectStructuredMatchesText(result);
+    const parsed = parseText(result.content) as {
+      id: number;
+      filename: string;
+      alreadyApplied: boolean;
+    };
+    expect(parsed.id).toBe(1);
+    expect(parsed.filename).toBe("a.txt");
+    expect(parsed.alreadyApplied).toBe(false);
+  });
+
   it("get_watcher_heartbeats returns heartbeat history", async () => {
     const result = await client.callTool({
       name: "get_watcher_heartbeats",
-      arguments: { watcherId: "abc", hours: 12 },
+      arguments: { watcherId: "watcher-1", hours: 12 },
     });
     expect(result.isError).toBeFalsy();
+    expectStructuredMatchesText(result);
     const parsed = parseText(result.content) as {
       watcherId: string;
       sinceIso: string;
@@ -897,7 +1219,7 @@ describe("MCP Protocol (in-memory)", () => {
       total: number;
       heartbeats: unknown[];
     };
-    expect(parsed.watcherId).toBe("abc");
+    expect(parsed.watcherId).toBe("watcher-1");
     expect(parsed.lookbackHours).toBe(12);
     expect(parsed.total).toBe(1);
     expect(parsed.heartbeats).toHaveLength(1);
@@ -944,6 +1266,7 @@ describe("MCP Protocol (in-memory)", () => {
       failureSummary: { totalFiles: number };
     };
     expect(parsed.failureSummary).toHaveProperty("totalFiles");
+    expectStructuredMatchesText(result);
   });
 
   it("get_run_report returns bounded processed CSV sample", async () => {
@@ -956,6 +1279,8 @@ describe("MCP Protocol (in-memory)", () => {
       processedCsv: { sampleRowLimit: number };
     };
     expect(parsed.processedCsv.sampleRowLimit).toBe(20);
+    expect(parsed).not.toHaveProperty("ok");
+    expectStructuredMatchesText(result);
   });
 
   it("list_run_files returns error for nonexistent run", async () => {
@@ -998,13 +1323,15 @@ describe("MCP Protocol (in-memory)", () => {
         runId: "run-1",
         page: 2,
         perPage: 10,
+        status: ["detected", "upload_requested"],
       },
     });
 
     expect(result.isError).toBeFalsy();
-    expect(getRunFilesPage).toHaveBeenCalledWith("internal-1", {
+    expect(getRunFilesPage).toHaveBeenCalledWith(MOCK_RUN_UUID_1, {
       page: 2,
       perPage: 10,
+      statuses: ["detected", "upload_requested"],
     });
     const payload = parseText(result.content) as {
       data: Record<string, unknown>[];
@@ -1020,6 +1347,7 @@ describe("MCP Protocol (in-memory)", () => {
     expect(payload.data[0]).not.toHaveProperty("s3Key");
     expect(payload.data[0]).not.toHaveProperty("metadata");
     expect(payload.data[0].filename).toBe("data.csv");
+    expectStructuredMatchesText(result);
   });
 
   it("get_file returns error for nonexistent file", async () => {
@@ -1068,11 +1396,127 @@ describe("MCP Protocol (in-memory)", () => {
       arguments: { instrumentId: "test-plate-reader" },
     });
     expect(result.isError).toBeFalsy();
-    const parsed = parseText(result.content) as Array<{
-      userId: string;
-      displayName: string;
-    }>;
-    expect(parsed).toEqual([{ userId: "u-1", displayName: "Alice" }]);
+    const parsed = parseText(result.content) as {
+      attributors: Array<{ userId: string; displayName: string }>;
+    };
+    expect(parsed).toEqual({
+      attributors: [{ userId: "u-1", displayName: "Alice" }],
+    });
+    expectStructuredMatchesText(result);
+  });
+
+  it("list_run_comments returns structured comments payload", async () => {
+    const result = await client.callTool({
+      name: "list_run_comments",
+      arguments: { instrumentId: "test-plate-reader", runId: "run-1" },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as { comments: unknown[] };
+    expect(parsed).toEqual({ comments: [] });
+    expectStructuredMatchesText(result);
+  });
+
+  it("reprocess_run returns structured queue counts", async () => {
+    const result = await client.callTool({
+      name: "reprocess_run",
+      arguments: { instrumentId: "test-plate-reader", runId: "run-1" },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as {
+      instrumentId: string;
+      filesQueued: number;
+      filesFailed: number;
+    };
+    expect(parsed.instrumentId).toBe("test-plate-reader");
+    expect(parsed.filesQueued).toBe(1);
+    expect(parsed.filesFailed).toBe(0);
+    expectStructuredMatchesText(result);
+  });
+
+  it("delete_run and restore_run return structured lifecycle payloads", async () => {
+    const deleted = await client.callTool({
+      name: "delete_run",
+      arguments: { instrumentId: "test-plate-reader", runId: "run-1" },
+    });
+    expect(deleted.isError).toBeFalsy();
+    const deletedPayload = parseText(deleted.content) as {
+      alreadyApplied: boolean;
+      deletedAt: string;
+    };
+    expect(deletedPayload.alreadyApplied).toBe(false);
+    expect(deletedPayload.deletedAt).toBeTruthy();
+    expectStructuredMatchesText(deleted);
+
+    const restored = await client.callTool({
+      name: "restore_run",
+      arguments: { instrumentId: "test-plate-reader", runId: "run-1" },
+    });
+    expect(restored.isError).toBeFalsy();
+    const restoredPayload = parseText(restored.content) as {
+      deletedAt: null;
+      alreadyApplied: boolean;
+    };
+    expect(restoredPayload.deletedAt).toBeNull();
+    expect(restoredPayload.alreadyApplied).toBe(false);
+    expectStructuredMatchesText(restored);
+  });
+
+  it("request_run_upload tools return structured queue payloads", async () => {
+    const one = await client.callTool({
+      name: "request_run_upload",
+      arguments: {
+        instrumentId: "test-plate-reader",
+        runId: "run-1",
+        fileIds: [1],
+      },
+    });
+    expect(one.isError).toBeFalsy();
+    const onePayload = parseText(one.content) as {
+      filesQueued: number;
+      files: Array<{ id: number; filename: string }>;
+    };
+    expect(onePayload.filesQueued).toBe(1);
+    expect(onePayload.files).toEqual([
+      expect.objectContaining({ id: 1, filename: "a.txt" }),
+    ]);
+    expectStructuredMatchesText(one);
+
+    const all = await client.callTool({
+      name: "request_run_upload_all",
+      arguments: { instrumentId: "test-plate-reader", runId: "run-1" },
+    });
+    expect(all.isError).toBeFalsy();
+    const allPayload = parseText(all.content) as { filesQueued: number };
+    expect(allPayload.filesQueued).toBe(2);
+    expectStructuredMatchesText(all);
+  });
+
+  it("comment mutation tools require authInfo on the in-memory transport", async () => {
+    for (const call of [
+      {
+        name: "add_run_comment",
+        arguments: {
+          instrumentId: "test-plate-reader",
+          runId: "run-1",
+          body: "hi",
+        },
+      },
+      {
+        name: "edit_run_comment",
+        arguments: { commentId: "c-1", body: "edited" },
+      },
+      {
+        name: "delete_run_comment",
+        arguments: { commentId: "c-1" },
+      },
+    ] as const) {
+      const result = await client.callTool(call);
+      expect(result.isError).toBe(true);
+      const text = (result.content as Array<{ type: string; text: string }>)[0]
+        .text;
+      expect(text).toContain("Authenticated user not available");
+      expect(result.structuredContent).toBeUndefined();
+    }
   });
 
   // The in-memory transport does not supply `authInfo`, so the tool must
@@ -1089,6 +1533,20 @@ describe("MCP Protocol (in-memory)", () => {
     expect(text).toContain("Authenticated user not available");
   });
 
+  it("claim_runs without authInfo reports an authenticated-user error", async () => {
+    const result = await client.callTool({
+      name: "claim_runs",
+      arguments: {
+        instrumentId: "test-plate-reader",
+        runIds: ["run-1", "missing"],
+      },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ type: string; text: string }>)[0]
+      .text;
+    expect(text).toContain("Authenticated user not available");
+  });
+
   it("unclaim_run without authInfo reports an authenticated-user error", async () => {
     const result = await client.callTool({
       name: "unclaim_run",
@@ -1098,6 +1556,32 @@ describe("MCP Protocol (in-memory)", () => {
     const text = (result.content as Array<{ type: string; text: string }>)[0]
       .text;
     expect(text).toContain("Authenticated user not available");
+  });
+
+  it("get_instrument_filter_options returns plate-reader options", async () => {
+    const result = await client.callTool({
+      name: "get_instrument_filter_options",
+      arguments: { instrumentId: "test-plate-reader" },
+    });
+    expect(result.isError).toBeFalsy();
+    const payload = parseText(result.content) as {
+      instrumentId: string;
+      options: { wavelengths: string[] };
+    };
+    expect(payload.instrumentId).toBe("test-plate-reader");
+    expect(payload.options.wavelengths).toContain("450");
+    expect(result.structuredContent).toEqual(payload);
+  });
+
+  it("get_instrument_filter_options errors for unknown instruments", async () => {
+    const result = await client.callTool({
+      name: "get_instrument_filter_options",
+      arguments: { instrumentId: "does-not-exist" },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ type: string; text: string }>)[0]
+      .text;
+    expect(text).toContain("not found");
   });
 
   // ---- Resources -----------------------------------------------------------
@@ -1118,7 +1602,12 @@ describe("MCP Protocol (in-memory)", () => {
       (contents[0] as { uri: string; text: string }).text
     );
     expect(parsed).toHaveProperty("runStatus");
-    expect(parsed).toHaveProperty("toolRouting");
+    expect(parsed).toHaveProperty("dates");
+    expect(parsed).not.toHaveProperty("toolRouting");
+  });
+
+  it("exposes server instructions after initialize", () => {
+    expect(client.getInstructions()).toBe(MCP_SERVER_INSTRUCTIONS);
   });
 
   it("reads the instruments resource", async () => {
@@ -1233,9 +1722,8 @@ describe("MCP Protocol (in-memory)", () => {
     });
     expect(result.messages).toHaveLength(1);
     expect(result.messages[0].role).toBe("user");
-    expect((result.messages[0].content as { text: string }).text).toContain(
-      "2025-06-01"
-    );
+    const text = (result.messages[0].content as { text: string }).text;
+    expect(text).toContain("2025-06-01 (UTC)");
   });
 
   it("troubleshoot_instrument prompt references heartbeat tool", async () => {
@@ -1257,5 +1745,60 @@ describe("MCP Protocol (in-memory)", () => {
     const text = (result.messages[0].content as { text: string }).text;
     expect(text).toContain("run-1");
     expect(text).toContain("run-2");
+  });
+
+  it("claim_unattributed_runs prompt uses claim_runs", async () => {
+    const result = await client.getPrompt({
+      name: "claim_unattributed_runs",
+      arguments: { instrumentId: "my-inst" },
+    });
+    const text = (result.messages[0].content as { text: string }).text;
+    expect(text).toContain("claim_runs");
+  });
+
+  it("completes instrumentId on troubleshoot_instrument", async () => {
+    const result = await client.complete({
+      ref: { type: "ref/prompt", name: "troubleshoot_instrument" },
+      argument: { name: "instrumentId", value: "test-" },
+    });
+    expect(result.completion.values).toContain("test-plate-reader");
+  });
+
+  it("completes optional instrumentId on find_my_runs", async () => {
+    const result = await client.complete({
+      ref: { type: "ref/prompt", name: "find_my_runs" },
+      argument: { name: "instrumentId", value: "test-" },
+    });
+    expect(result.completion.values).toContain("test-plate-reader");
+  });
+
+  it("completes runId on compare_runs using instrument context", async () => {
+    const { buildRunListQuery } = await import("@/lib/api/instrument-runs");
+    const result = await client.complete({
+      ref: { type: "ref/prompt", name: "compare_runs" },
+      argument: { name: "runId1", value: "run-" },
+      context: { arguments: { instrumentId: "test-plate-reader" } },
+    });
+    expect(buildRunListQuery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instrumentId: "test-plate-reader",
+        search: "run-",
+        perPage: 100,
+      })
+    );
+    expect(result.completion.values).toEqual(
+      expect.arrayContaining(["run-1", "run-2"])
+    );
+  });
+
+  it("completes instrumentId on the filter-options resource template", async () => {
+    const result = await client.complete({
+      ref: {
+        type: "ref/resource",
+        uri: "datahub://instruments/{instrumentId}/filter-options",
+      },
+      argument: { name: "instrumentId", value: "test-" },
+    });
+    expect(result.completion.values).toContain("test-plate-reader");
   });
 });
