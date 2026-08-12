@@ -1,9 +1,16 @@
 import type { AuthInfo } from "@modelcontextprotocol/server";
 import { lookupRunByNaturalKey, type RunFile } from "@/lib/api/instrument-runs";
 
-export function textResult(data: unknown) {
+/**
+ * Success payload for MCP tools that declare `outputSchema`. Round-trips
+ * through JSON so `content` text and `structuredContent` stay identical
+ * (Dates become ISO strings) and SDK output validation can't diverge.
+ */
+export function structuredResult(data: unknown) {
+  const json = JSON.stringify(data, null, 2);
   return {
-    content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
+    content: [{ type: "text" as const, text: json }],
+    structuredContent: JSON.parse(json) as unknown,
   };
 }
 

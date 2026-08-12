@@ -202,8 +202,8 @@ describe("MCP Server (HTTP)", () => {
     const data = await parseSseResponse(res);
     expect(data.result.isError).toBeFalsy();
     const text = data.result.content[0].text;
-    const instruments = JSON.parse(text);
-    expect(instruments).toEqual(
+    const payload = JSON.parse(text) as { instruments: unknown[] };
+    expect(payload.instruments).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: instrumentId })])
     );
   });
@@ -336,11 +336,10 @@ describe("MCP Server (HTTP)", () => {
 
     const result = await callTool("list_run_attributors", { instrumentId });
     expect(result.isError).toBeFalsy();
-    const parsed = JSON.parse(result.content[0].text) as Array<{
-      userId: string;
-      displayName: string;
-    }>;
-    expect(parsed.map((p) => p.userId)).toContain(userId);
+    const parsed = JSON.parse(result.content[0].text) as {
+      attributors: Array<{ userId: string; displayName: string }>;
+    };
+    expect(parsed.attributors.map((p) => p.userId)).toContain(userId);
   });
 
   it("get_run response includes the attributions array", async () => {

@@ -1,4 +1,7 @@
-import { zodRecordToJsonSchema } from "@/lib/mcp/catalog/json-schema";
+import {
+  zodRecordToJsonSchema,
+  zodTypeToJsonSchema,
+} from "@/lib/mcp/catalog/json-schema";
 import { MCP_TOOL_DEFS } from "@/lib/mcp/catalog/tools";
 import type { McpCatalogDocument } from "@/lib/mcp/catalog/types";
 import { MCP_PROMPT_DEFS } from "@/lib/mcp/prompts.defs";
@@ -23,6 +26,7 @@ export function buildMcpCatalogDocument(): McpCatalogDocument {
       ...(tool.scope ? { scope: tool.scope } : {}),
       ...(tool.annotations ? { annotations: tool.annotations } : {}),
       inputSchema: zodRecordToJsonSchema(tool.inputSchema),
+      outputSchema: zodTypeToJsonSchema(tool.outputSchema),
     })),
     resources: MCP_RESOURCE_DEFS.map((resource) => ({
       name: resource.name,

@@ -3,6 +3,25 @@ import { mcpMetadataFilterInputSchema } from "@/lib/api/run-metadata-filters";
 import { fileStatusEnum } from "@/lib/db/schema";
 import type { McpToolDef } from "@/lib/mcp/catalog/types";
 import { RUN_STATUS_VALUES } from "@/lib/runs/run-status";
+import {
+  addRunCommentOutputSchema,
+  claimRunOutputSchema,
+  claimRunsOutputSchema,
+  deleteRunCommentOutputSchema,
+  deleteRunOutputSchema,
+  editRunCommentOutputSchema,
+  getRunOutputSchema,
+  getRunReportOutputSchema,
+  listRunAttributorsOutputSchema,
+  listRunCommentsOutputSchema,
+  listRunFilesOutputSchema,
+  reprocessRunOutputSchema,
+  requestRunUploadAllOutputSchema,
+  requestRunUploadOutputSchema,
+  restoreRunOutputSchema,
+  searchRunsOutputSchema,
+  unclaimRunOutputSchema,
+} from "./runs.output";
 
 export const searchRunsTool = {
   name: "search_runs",
@@ -11,6 +30,7 @@ export const searchRunsTool = {
   title: "Search Runs",
   description:
     "Search instrument runs with filtering, pagination, and sorting. Supports run status filters and instrument-metadata filters (plate reader, gel-doc, qPCR, Hina microscope, Epson scanner). Prefer global_search when the query may match filenames, instrument names, or attributor names rather than run IDs. Discover valid metadata filter values via get_instrument_filter_options or datahub://instruments/{id}/filter-options.",
+  outputSchema: searchRunsOutputSchema,
   inputSchema: {
     instrumentId: z
       .union([z.string(), z.array(z.string())])
@@ -87,6 +107,7 @@ export const getRunTool = {
   title: "Get Run",
   description:
     "Get details for a specific instrument run by its natural key (instrument ID + run ID). Returns metadata, timestamps, instrument info, and attributions by default. Pass include to attach the first page of files, comments, and/or a failure_summary without extra tool calls. For processed measurement samples prefer get_run_report.",
+  outputSchema: getRunOutputSchema,
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
     runId: z.string().describe("Run identifier within the instrument"),
@@ -107,6 +128,7 @@ export const getRunReportTool = {
   title: "Get Run Report",
   description:
     "Return an analysis-ready summary for a run: file counts, failure summary, image/report file refs, and a bounded processed-CSV sample (columns + first rows). Prefer this over downloading full CSVs when comparing or summarizing experimental results.",
+  outputSchema: getRunReportOutputSchema,
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
     runId: z.string().describe("Run identifier within the instrument"),
@@ -121,6 +143,7 @@ export const listRunFilesTool = {
   title: "List Run Files",
   description:
     "List files associated with a run (raw uploads and processed artifacts) with their status, category, and size. Paginated — runs can have thousands of files. Filter by status to gather fileIds for request_run_upload (e.g. status=['detected']). Use get_file for full per-file detail including metadata and S3 location.",
+  outputSchema: listRunFilesOutputSchema,
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
     runId: z.string().describe("Run identifier within the instrument"),
@@ -154,6 +177,7 @@ export const claimRunTool = {
   title: "Claim Run",
   description:
     "Mark a run as performed by the authenticated user. Idempotent — claiming a run you already claimed is a no-op. Only self-attribution is supported; you cannot claim a run on behalf of another user. Prefer claim_runs when attributing multiple runs.",
+  outputSchema: claimRunOutputSchema,
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
     runId: z.string().describe("Run identifier within the instrument"),
@@ -172,6 +196,7 @@ export const claimRunsTool = {
   title: "Claim Runs",
   description:
     "Mark multiple runs on one instrument as performed by the authenticated user (max 100). Idempotent per run. Returns claimed runs and any runIds that were not found; a missing ID does not fail the whole batch. Only self-attribution is supported.",
+  outputSchema: claimRunsOutputSchema,
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
     runIds: z
@@ -194,6 +219,7 @@ export const unclaimRunTool = {
   title: "Unclaim Run",
   description:
     "Remove the authenticated user's attribution from a run. Idempotent — unclaiming a run you don't currently claim is a no-op. Only self-attribution is supported; you cannot remove another user's attribution.",
+  outputSchema: unclaimRunOutputSchema,
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
     runId: z.string().describe("Run identifier within the instrument"),
@@ -214,6 +240,7 @@ export const listRunAttributorsTool = {
   title: "List Run Attributors",
   description:
     "List distinct users who have claimed at least one run on a given instrument. Use the returned userId with search_runs ranBy=<userId>.",
+  outputSchema: listRunAttributorsOutputSchema,
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
   },
@@ -231,6 +258,7 @@ export const listRunCommentsTool = {
     instrumentId: z.string().describe("Instrument identifier"),
     runId: z.string().describe("Run identifier within the instrument"),
   },
+  outputSchema: listRunCommentsOutputSchema,
   annotations: { readOnlyHint: true },
 } as const satisfies McpToolDef;
 
@@ -246,6 +274,7 @@ export const addRunCommentTool = {
     runId: z.string().describe("Run identifier within the instrument"),
     body: z.string().describe("Markdown comment body"),
   },
+  outputSchema: addRunCommentOutputSchema,
   annotations: { readOnlyHint: false, destructiveHint: false },
 } as const satisfies McpToolDef;
 
@@ -260,6 +289,7 @@ export const editRunCommentTool = {
     commentId: z.string().describe("Comment UUID"),
     body: z.string().describe("Updated markdown body"),
   },
+  outputSchema: editRunCommentOutputSchema,
   annotations: { readOnlyHint: false, destructiveHint: false },
 } as const satisfies McpToolDef;
 
@@ -273,6 +303,7 @@ export const deleteRunCommentTool = {
   inputSchema: {
     commentId: z.string().describe("Comment UUID"),
   },
+  outputSchema: deleteRunCommentOutputSchema,
   annotations: {
     readOnlyHint: false,
     destructiveHint: true,
@@ -291,6 +322,7 @@ export const reprocessRunTool = {
     instrumentId: z.string().describe("Instrument identifier"),
     runId: z.string().describe("Run identifier within the instrument"),
   },
+  outputSchema: reprocessRunOutputSchema,
   // destructiveHint mirrors reprocess_file: this overwrites processed
   // artifacts and resets per-file status in bulk, so clients should
   // confirm even though no data is deleted.
@@ -308,6 +340,7 @@ export const deleteRunTool = {
     instrumentId: z.string().describe("Instrument identifier"),
     runId: z.string().describe("Run identifier within the instrument"),
   },
+  outputSchema: deleteRunOutputSchema,
   annotations: {
     readOnlyHint: false,
     destructiveHint: true,
@@ -326,6 +359,7 @@ export const restoreRunTool = {
     instrumentId: z.string().describe("Instrument identifier"),
     runId: z.string().describe("Run identifier within the instrument"),
   },
+  outputSchema: restoreRunOutputSchema,
   annotations: {
     readOnlyHint: false,
     destructiveHint: false,
@@ -349,6 +383,7 @@ export const requestRunUploadTool = {
       .max(100)
       .describe("Numeric file IDs to queue"),
   },
+  outputSchema: requestRunUploadOutputSchema,
   annotations: {
     readOnlyHint: false,
     destructiveHint: false,
@@ -367,6 +402,7 @@ export const requestRunUploadAllTool = {
     instrumentId: z.string().describe("Instrument identifier"),
     runId: z.string().describe("Run identifier within the instrument"),
   },
+  outputSchema: requestRunUploadAllOutputSchema,
   annotations: {
     readOnlyHint: false,
     destructiveHint: false,

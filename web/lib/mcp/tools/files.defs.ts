@@ -1,5 +1,12 @@
 import { z } from "zod";
 import type { McpToolDef } from "@/lib/mcp/catalog/types";
+import {
+  dismissFileOutputSchema,
+  getFileDownloadUrlOutputSchema,
+  getFileOutputSchema,
+  getRunArchiveOutputSchema,
+  reprocessFileOutputSchema,
+} from "./files.output";
 
 export const getFileTool = {
   name: "get_file",
@@ -9,6 +16,7 @@ export const getFileTool = {
   group: "files",
   scope: "files:read",
   inputSchema: { fileId: z.number().int().describe("Numeric file ID") },
+  outputSchema: getFileOutputSchema,
   annotations: { readOnlyHint: true },
 } as const satisfies McpToolDef;
 
@@ -20,6 +28,7 @@ export const getFileDownloadUrlTool = {
   group: "files",
   scope: "files:read",
   inputSchema: { fileId: z.number().int().describe("Numeric file ID") },
+  outputSchema: getFileDownloadUrlOutputSchema,
   annotations: { readOnlyHint: true },
 } as const satisfies McpToolDef;
 
@@ -34,6 +43,7 @@ export const getRunArchiveTool = {
     instrumentId: z.string().describe("Instrument identifier"),
     runId: z.string().describe("Run identifier within the instrument"),
   },
+  outputSchema: getRunArchiveOutputSchema,
   annotations: { readOnlyHint: true },
 } as const satisfies McpToolDef;
 
@@ -45,6 +55,7 @@ export const reprocessFileTool = {
   group: "files",
   scope: "files:reprocess",
   inputSchema: { fileId: z.number().int().describe("Numeric file ID") },
+  outputSchema: reprocessFileOutputSchema,
   // destructiveHint is true because the tool resets status/errorMessage/
   // processedAt. The Lambda re-processes the file, but the mutation is
   // irreversible from the tool's perspective and clients should confirm.
@@ -59,6 +70,7 @@ export const dismissFileTool = {
   group: "files",
   scope: "files:delete",
   inputSchema: { fileId: z.number().int().describe("Numeric file ID") },
+  outputSchema: dismissFileOutputSchema,
   annotations: {
     readOnlyHint: false,
     destructiveHint: true,

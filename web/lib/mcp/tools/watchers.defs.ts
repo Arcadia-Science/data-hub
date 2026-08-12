@@ -1,6 +1,12 @@
 import { z } from "zod";
 import { watcherEventTypeEnum } from "@/lib/db/schema";
 import type { McpToolDef } from "@/lib/mcp/catalog/types";
+import {
+  getWatcherHeartbeatsOutputSchema,
+  getWatcherOutputSchema,
+  listWatcherEventsOutputSchema,
+  listWatchersOutputSchema,
+} from "./watchers.output";
 
 export const listWatchersTool = {
   name: "list_watchers",
@@ -27,6 +33,7 @@ export const listWatchersTool = {
         "Filter by effective status (stale is computed from heartbeat age)"
       ),
   },
+  outputSchema: listWatchersOutputSchema,
   annotations: { readOnlyHint: true },
 } as const satisfies McpToolDef;
 
@@ -38,6 +45,7 @@ export const getWatcherTool = {
   group: "watchers",
   scope: "watchers:read",
   inputSchema: { watcherId: z.string().describe("Watcher UUID") },
+  outputSchema: getWatcherOutputSchema,
   annotations: { readOnlyHint: true },
 } as const satisfies McpToolDef;
 
@@ -75,6 +83,7 @@ export const listWatcherEventsTool = {
       .optional()
       .describe("Results per page (default: 50, max: 100)"),
   },
+  outputSchema: listWatcherEventsOutputSchema,
   annotations: { readOnlyHint: true },
 } as const satisfies McpToolDef;
 
@@ -95,6 +104,7 @@ export const getWatcherHeartbeatsTool = {
       .optional()
       .describe("Lookback window in hours (default: 24, max: 168)"),
   },
+  outputSchema: getWatcherHeartbeatsOutputSchema,
   annotations: { readOnlyHint: true },
 } as const satisfies McpToolDef;
 
