@@ -163,7 +163,8 @@ export function registerRunTools(server: McpServer) {
       if (!result.ok) {
         return errorResult(result.message);
       }
-      return structuredResult(result);
+      const { ok: _, ...payload } = result;
+      return structuredResult(payload);
     }
   );
 
@@ -531,7 +532,7 @@ export function registerRunTools(server: McpServer) {
         instrumentId: result.instrumentId,
         runId: result.runId,
         filesQueued: result.filesQueued,
-        files: result.files,
+        files: result.files ?? [],
       });
     }
   );

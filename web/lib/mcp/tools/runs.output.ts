@@ -7,17 +7,10 @@ import {
   paginationSchema,
   runSourceSchema,
 } from "@/lib/api/openapi/schemas/common";
+import { mcpActorUserSchema } from "./common.output";
 
 // Plain Zod only — do not import from openapi/schemas/runs (those use
 // `.openapi()` and require registry side effects that unit tests skip).
-
-/** Attribution row shared by claim/unclaim/list/search/get_run. */
-export const mcpAttributionSchema = z.object({
-  userId: z.string(),
-  displayName: z.string(),
-  initials: z.string(),
-  avatarUrl: z.string().nullable(),
-});
 
 /** Trimmed file row from `toMcpFile` after JSON round-trip. */
 export const mcpRunFileSchema = z.object({
@@ -47,7 +40,6 @@ export const mcpFailureSummarySchema = z.object({
   totalFiles: z.number().int(),
 });
 
-/** Comment DTO after JSON round-trip (shared with group B comment tools). */
 export const mcpRunCommentSchema = z.object({
   id: z.string(),
   body: z.string(),
@@ -59,13 +51,6 @@ export const mcpRunCommentSchema = z.object({
   }),
   created_at: isoDateTime,
   edited_at: isoDateTime.nullable(),
-});
-
-const actorUserSchema = z.object({
-  userId: z.string(),
-  displayName: z.string(),
-  initials: z.string(),
-  avatarUrl: z.string().nullable(),
 });
 
 /**
@@ -93,7 +78,7 @@ export const searchRunsListItemSchema = z.object({
   // Aggregated with a bigint cast; drivers may surface large totals as strings.
   total_size_bytes: z.union([z.number(), z.string()]),
   error_messages: z.array(z.string()),
-  attributions: z.array(mcpAttributionSchema),
+  attributions: z.array(mcpActorUserSchema),
 });
 
 export const searchRunsOutputSchema = z.object({
@@ -115,8 +100,8 @@ export const getRunOutputSchema = z.object({
   deletedBy: z.string().nullable(),
   instrumentDisplayName: z.string(),
   instrumentType: instrumentTypeSchema,
-  deletedByUser: actorUserSchema.nullable(),
-  attributions: z.array(mcpAttributionSchema),
+  deletedByUser: mcpActorUserSchema.nullable(),
+  attributions: z.array(mcpActorUserSchema),
   files: z.array(mcpRunFileSchema).optional(),
   filesPagination: paginationSchema.optional(),
   comments: z.array(mcpRunCommentSchema).optional(),
@@ -133,7 +118,6 @@ const reportFileRefSchema = z.object({
 });
 
 export const getRunReportOutputSchema = z.object({
-  ok: z.literal(true),
   instrumentId: z.string(),
   runId: z.string(),
   instrumentType: z.string(),
@@ -161,7 +145,7 @@ export const listRunFilesOutputSchema = z.object({
 export const claimRunOutputSchema = z.object({
   instrumentId: z.string(),
   runId: z.string(),
-  attributions: z.array(mcpAttributionSchema),
+  attributions: z.array(mcpActorUserSchema),
 });
 
 export const claimRunsOutputSchema = z.object({
@@ -169,7 +153,7 @@ export const claimRunsOutputSchema = z.object({
   claimed: z.array(
     z.object({
       runId: z.string(),
-      attributions: z.array(mcpAttributionSchema),
+      attributions: z.array(mcpActorUserSchema),
     })
   ),
   notFound: z.array(z.string()),
@@ -186,8 +170,6 @@ export const listRunAttributorsOutputSchema = z.object({
     })
   ),
 });
-
-// Group B: comments / reprocess / lifecycle / upload
 
 export const listRunCommentsOutputSchema = z.object({
   comments: z.array(mcpRunCommentSchema),
@@ -227,15 +209,13 @@ export const requestRunUploadOutputSchema = z.object({
   instrumentId: z.string(),
   runId: z.string(),
   filesQueued: z.number().int(),
-  files: z
-    .array(
-      z.object({
-        id: z.number().int(),
-        filename: z.string(),
-        uploadRequestedAt: isoDateTime.nullable(),
-      })
-    )
-    .optional(),
+  files: z.array(
+    z.object({
+      id: z.number().int(),
+      filename: z.string(),
+      uploadRequestedAt: isoDateTime.nullable(),
+    })
+  ),
 });
 
 export const requestRunUploadAllOutputSchema = z.object({

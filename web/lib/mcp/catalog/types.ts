@@ -88,6 +88,6 @@ export interface McpCatalogDocument {
     scope?: string;
     annotations?: McpToolAnnotations;
     inputSchema: Record<string, unknown>;
-    outputSchema?: Record<string, unknown>;
+    outputSchema: Record<string, unknown>;
   }>;
 }

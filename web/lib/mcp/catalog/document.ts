@@ -26,9 +26,7 @@ export function buildMcpCatalogDocument(): McpCatalogDocument {
       ...(tool.scope ? { scope: tool.scope } : {}),
       ...(tool.annotations ? { annotations: tool.annotations } : {}),
       inputSchema: zodRecordToJsonSchema(tool.inputSchema),
-      ...(tool.outputSchema
-        ? { outputSchema: zodTypeToJsonSchema(tool.outputSchema) }
-        : {}),
+      outputSchema: zodTypeToJsonSchema(tool.outputSchema),
     })),
     resources: MCP_RESOURCE_DEFS.map((resource) => ({
       name: resource.name,

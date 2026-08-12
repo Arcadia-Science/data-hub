@@ -4,13 +4,7 @@ import {
   instrumentTypeSchema,
   isoDateTime,
 } from "@/lib/api/openapi/schemas/common";
-
-const actorUserSchema = z.object({
-  userId: z.string(),
-  displayName: z.string(),
-  initials: z.string(),
-  avatarUrl: z.string().nullable(),
-});
+import { mcpActorUserSchema } from "./common.output";
 
 /** List-row shape from `getInstrumentListWithCounts` after JSON round-trip. */
 export const instrumentListItemSchema = z.object({
@@ -51,7 +45,7 @@ export const getInstrumentOutputSchema = z.object({
   activeWatcherHostname: z.string().nullable(),
   activeWatcherDeregistered: z.boolean(),
   retiredAt: isoDateTime.nullable(),
-  retiredByUser: actorUserSchema.nullable(),
+  retiredByUser: mcpActorUserSchema.nullable(),
   createdAt: isoDateTime,
   updatedAt: isoDateTime,
 });

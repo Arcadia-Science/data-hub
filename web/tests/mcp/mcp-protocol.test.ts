@@ -813,6 +813,17 @@ describe("MCP Protocol (in-memory)", () => {
     }
   });
 
+  it("catalog outputSchema matches tools/list", async () => {
+    const doc = buildMcpCatalogDocument();
+    const { tools } = await client.listTools();
+    for (const tool of tools) {
+      const catalog = doc.tools.find((t) => t.name === tool.name);
+      expect(catalog?.outputSchema, `${tool.name} catalog mismatch`).toEqual(
+        tool.outputSchema
+      );
+    }
+  });
+
   it("claim_run is annotated as write / non-destructive / idempotent", async () => {
     const { tools } = await client.listTools();
     const tool = tools.find((t) => t.name === "claim_run");
@@ -1268,6 +1279,7 @@ describe("MCP Protocol (in-memory)", () => {
       processedCsv: { sampleRowLimit: number };
     };
     expect(parsed.processedCsv.sampleRowLimit).toBe(20);
+    expect(parsed).not.toHaveProperty("ok");
     expectStructuredMatchesText(result);
   });
 

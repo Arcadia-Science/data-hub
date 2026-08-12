@@ -5,13 +5,7 @@ import {
   watcherEventTypeSchema,
   watcherStatusSchema,
 } from "@/lib/api/openapi/schemas/common";
-
-const actorUserSchema = z.object({
-  userId: z.string(),
-  displayName: z.string(),
-  initials: z.string(),
-  avatarUrl: z.string().nullable(),
-});
+import { mcpActorUserSchema } from "./common.output";
 
 /** List-row shape from `getWatcherList` after JSON round-trip. */
 export const watcherListItemSchema = z.object({
@@ -37,7 +31,7 @@ export const getWatcherOutputSchema = watcherListItemSchema.extend({
   configYaml: z.string().nullable(),
   configChecksum: z.string().nullable(),
   updatedAt: isoDateTime,
-  deregisteredByUser: actorUserSchema.nullable(),
+  deregisteredByUser: mcpActorUserSchema.nullable(),
 });
 
 const watcherEventRowSchema = z.object({
