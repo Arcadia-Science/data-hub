@@ -18,13 +18,16 @@ Spectrum scans leave the usual wavelength field empty and store the
 window at fixed offsets from ``Raw`` (start, end, step).  Column 0 of
 each reading group is the wavelength in nm, not elapsed time.
 
-SoftMax may declare more Kinetic readings in the plate header than it
-exports (e.g. a 48 h protocol stopped early).  The parser emits the
-groups that are present and stops at the summary table or ``~End``.
+SoftMax may declare more Kinetic or Spectrum readings in the plate
+header than it exports (e.g. a 48 h protocol stopped early).  The
+parser emits the groups that are present and stops at the summary
+table or ``~End``.
 """
 
 from __future__ import annotations
+import math
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -74,6 +77,25 @@ def _at_plate_end(lines: list[str], i: int) -> bool:
     return i >= len(lines) or lines[i].startswith("~End")
 
 
+def _group_col0_present(
+    lines: list[str],
+    i: int,
+    num_rows: int,
+    predicate: Callable[[str], bool],
+) -> bool:
+    """Return whether the next grid still looks like a reading group."""
+    if _at_plate_end(lines, i):
+        return False
+    end = min(i + num_rows, len(lines))
+    for j in range(i, end):
+        if lines[j].startswith("~End"):
+            return False
+        fields = lines[j].split("\t")
+        if fields and predicate(fields[0].strip()):
+            return True
+    return False
+
+
 def _kinetic_reading_present(lines: list[str], i: int, num_rows: int) -> bool:
     """Return whether ``lines[i:i+num_rows]`` still holds a Kinetic group.
 
@@ -82,16 +104,33 @@ def _kinetic_reading_present(lines: list[str], i: int, num_rows: int) -> bool:
     ``num_readings`` in the plate header must not consume those lines as
     well data.
     """
+    return _group_col0_present(lines, i, num_rows, lambda col0: bool(_ELAPSED_TIME_RE.match(col0)))
+
+
+def _spectrum_reading_present(lines: list[str], i: int, num_rows: int) -> bool:
+    """Return whether ``lines[i:i+num_rows]`` still holds a Spectrum group.
+
+    Spectrum groups put the wavelength in column 0. The summary table
+    does not, so an overstated ``num_readings`` must stop there rather
+    than raise ``IndexError`` walking into ``~End``.
+    """
+    return _group_col0_present(lines, i, num_rows, lambda col0: _parse_nm(col0) is not None)
+
+
+def _stop_before_missing_reading(
+    header: _PlateHeader,
+    lines: list[str],
+    i: int,
+    num_rows: int,
+) -> bool:
+    """Return whether the next declared reading is absent from the export."""
     if _at_plate_end(lines, i):
-        return False
-    end = min(i + num_rows, len(lines))
-    for j in range(i, end):
-        if lines[j].startswith("~End"):
-            return False
-        fields = lines[j].split("\t")
-        if fields and _ELAPSED_TIME_RE.match(fields[0].strip()):
-            return True
-    return False
+        return True
+    if header.measurement_type == "Kinetic" and not _kinetic_reading_present(lines, i, num_rows):
+        return True
+    return header.measurement_type == "Spectrum" and not _spectrum_reading_present(
+        lines, i, num_rows
+    )
 
 
 def _parse_well_value(val_str: str) -> float:
@@ -107,12 +146,27 @@ def _parse_well_value(val_str: str) -> float:
     return float(val_str)
 
 
+def _parse_nm(token: str) -> int | None:
+    """Parse a nanometre token, including SoftMax ``440.0`` floats."""
+    stripped = token.strip()
+    if not stripped:
+        return None
+    try:
+        value = float(stripped)
+    except ValueError:
+        return None
+    if not math.isfinite(value):
+        return None
+    return int(value) if value.is_integer() else int(round(value))
+
+
 def _parse_wavelengths(raw: str) -> tuple[int, ...]:
     """Parse a space-separated wavelength string like ``'750'`` or ``'750 600'``."""
     tokens = raw.split()
-    if not tokens or not all(t.isdigit() for t in tokens):
+    parsed = [_parse_nm(t) for t in tokens]
+    if not tokens or any(w is None for w in parsed):
         raise ValueError(f"Expected space-separated numeric wavelengths, got '{raw}'")
-    return tuple(int(t) for t in tokens)
+    return tuple(w for w in parsed if w is not None)
 
 
 def _spectrum_wavelengths(start: int, end: int, step: int) -> tuple[int, ...]:
@@ -179,13 +233,9 @@ def _parse_plate_header(line: str) -> _PlateHeader:
     spectrum_end: int | None = None
     spectrum_step: int | None = None
     if measurement_type == "Spectrum":
-        start_s = fields[raw_idx + _OFF_SPECTRUM_START].strip()
-        end_s = fields[raw_idx + _OFF_SPECTRUM_END].strip()
-        step_s = fields[raw_idx + _OFF_SPECTRUM_STEP].strip()
-        if start_s.isdigit() and end_s.isdigit() and step_s.isdigit():
-            spectrum_start = int(start_s)
-            spectrum_end = int(end_s)
-            spectrum_step = int(step_s)
+        spectrum_start = _parse_nm(fields[raw_idx + _OFF_SPECTRUM_START])
+        spectrum_end = _parse_nm(fields[raw_idx + _OFF_SPECTRUM_END])
+        spectrum_step = _parse_nm(fields[raw_idx + _OFF_SPECTRUM_STEP])
 
     return _PlateHeader(
         plate_name=fields[_COL_PLATE_NAME],
@@ -209,16 +259,63 @@ def _header_wavelengths(header: _PlateHeader) -> tuple[int, ...]:
     """
     if header.wavelength_raw:
         return _parse_wavelengths(header.wavelength_raw)
-    if (
-        header.measurement_type == "Spectrum"
-        and header.spectrum_start is not None
-        and header.spectrum_end is not None
-        and header.spectrum_step is not None
-    ):
+    if header.measurement_type == "Spectrum":
+        if (
+            header.spectrum_start is None
+            or header.spectrum_end is None
+            or header.spectrum_step is None
+        ):
+            raise ValueError(
+                "Spectrum plate is missing start/end/step wavelengths "
+                f"(start={header.spectrum_start!r}, end={header.spectrum_end!r}, "
+                f"step={header.spectrum_step!r})"
+            )
         return _spectrum_wavelengths(
             header.spectrum_start, header.spectrum_end, header.spectrum_step
         )
     raise ValueError(f"Expected space-separated numeric wavelengths, got '{header.wavelength_raw}'")
+
+
+def _spectrum_window_label(header: _PlateHeader) -> str | None:
+    if header.spectrum_start is None or header.spectrum_end is None:
+        return None
+    return f"{header.spectrum_start}–{header.spectrum_end}"
+
+
+def _metadata_wavelength_tokens(header: _PlateHeader) -> tuple[str, ...]:
+    """Compact tokens stored on the run for filters and badges.
+
+    Spectrum windows are kept as ``start–end`` rather than every nm so a
+    300–800 scan does not inject hundreds of values into the instrument
+    filter and the run-detail sidebar.
+    """
+    window = _spectrum_window_label(header)
+    if header.measurement_type == "Spectrum" and window is not None:
+        return (window,)
+    return tuple(str(w) for w in _header_wavelengths(header))
+
+
+def _allocate_unique_name(preferred: str, seen_names: set[str]) -> str:
+    """Return ``preferred``, or ``preferred (2)``, ``preferred (3)``, …"""
+    if preferred not in seen_names:
+        seen_names.add(preferred)
+        return preferred
+    n = 2
+    while True:
+        candidate = f"{preferred} ({n})"
+        if candidate not in seen_names:
+            seen_names.add(candidate)
+            return candidate
+        n += 1
+
+
+def _plate_name_suffix(header: _PlateHeader) -> str | None:
+    window = _spectrum_window_label(header)
+    if window is not None:
+        return window
+    if header.wavelength_raw:
+        return header.wavelength_raw
+    return None
 
 
 def _disambiguate_plate_name(header: _PlateHeader, seen_names: set[str]) -> str:
@@ -226,17 +323,16 @@ def _disambiguate_plate_name(header: _PlateHeader, seen_names: set[str]) -> str:
 
     One export can reuse ``Plate1`` for emission vs excitation sweeps (or
     a trailing Endpoint block). Downstream grouping keys on ``plate_name``,
-    so duplicates would merge unrelated scans.
+    so duplicates would merge unrelated scans. The resolved name is always
+    recorded so a third block cannot reuse the same suffix.
     """
     name = header.plate_name
     if name not in seen_names:
         seen_names.add(name)
         return name
-    if header.spectrum_start is not None and header.spectrum_end is not None:
-        return f"{name} ({header.spectrum_start}–{header.spectrum_end})"
-    if header.wavelength_raw:
-        return f"{name} ({header.wavelength_raw.split()[0]})"
-    return f"{name} ({len(seen_names) + 1})"
+    suffix = _plate_name_suffix(header)
+    preferred = f"{name} ({suffix})" if suffix else name
+    return _allocate_unique_name(preferred, seen_names)
 
 
 _WELL_DATA_COLUMNS = [
@@ -321,46 +417,65 @@ def parse_metadata(file_path: Path) -> dict[str, object]:
     Returns:
         A dict with keys `measurement_mode`, `measurement_type`, and
         `wavelengths`.  Type and mode come from the first plate;
-        wavelengths are the sorted union across every plate so a file
-        that mixes Spectrum windows (or a trailing Endpoint) is not
-        truncated to the first block.  Wavelengths are numeric strings
-        (without the ``nm`` suffix) to mirror other multi-wavelength
-        instruments (e.g. Azure 600 Gel Doc).  Example::
+        wavelengths are the first-seen union across recognised plates so
+        a file that mixes Spectrum windows (or a trailing Endpoint) is
+        not truncated to the first block.  Later plates with an unknown
+        type or mode are skipped so a trailing oddity does not fail
+        ingestion.  Endpoint wavelengths stay as numeric strings (header
+        order, no ``nm`` suffix). Spectrum windows are stored as
+        ``start–end`` range tokens.  Example::
 
             {
                 "measurement_mode": "Absorbance",
                 "measurement_type": "Endpoint",
-                "wavelengths": ["600", "650", "700", "750"],
+                "wavelengths": ["750", "700", "650", "600"],
             }
 
     Raises:
-        ValueError: If the file contains no `Plate:` header or the header
-            contains unexpected values.
+        ValueError: If the file contains no `Plate:` header or the first
+            header contains unexpected values.
     """
     text = file_path.read_text(encoding="utf-16")
 
     first_header: _PlateHeader | None = None
-    wavelength_set: set[int] = set()
+    wavelengths: list[str] = []
+    seen_wavelengths: set[str] = set()
 
     for line in text.splitlines():
         if not line.startswith("Plate:"):
             continue
 
         header = _parse_plate_header(line)
+        recognised = (
+            header.measurement_mode in MEASUREMENT_MODES
+            and header.measurement_type in MEASUREMENT_TYPES
+        )
 
-        if header.measurement_mode not in MEASUREMENT_MODES:
-            raise ValueError(
-                f"Unexpected measurement mode '{header.measurement_mode}'; "
-                f"expected one of {sorted(MEASUREMENT_MODES)}"
-            )
-        if header.measurement_type not in MEASUREMENT_TYPES:
-            raise ValueError(
-                f"Unexpected measurement type '{header.measurement_type}'; "
-                f"expected one of {sorted(MEASUREMENT_TYPES)}"
-            )
-        wavelength_set.update(_header_wavelengths(header))
         if first_header is None:
+            if header.measurement_mode not in MEASUREMENT_MODES:
+                raise ValueError(
+                    f"Unexpected measurement mode '{header.measurement_mode}'; "
+                    f"expected one of {sorted(MEASUREMENT_MODES)}"
+                )
+            if header.measurement_type not in MEASUREMENT_TYPES:
+                raise ValueError(
+                    f"Unexpected measurement type '{header.measurement_type}'; "
+                    f"expected one of {sorted(MEASUREMENT_TYPES)}"
+                )
             first_header = header
+        elif not recognised:
+            continue
+
+        try:
+            tokens = _metadata_wavelength_tokens(header)
+        except ValueError:
+            if first_header is header:
+                raise
+            continue
+        for token in tokens:
+            if token not in seen_wavelengths:
+                seen_wavelengths.add(token)
+                wavelengths.append(token)
 
     if first_header is None:
         raise ValueError(f"No 'Plate:' header line found in {file_path}")
@@ -368,7 +483,7 @@ def parse_metadata(file_path: Path) -> dict[str, object]:
     return {
         "measurement_mode": first_header.measurement_mode,
         "measurement_type": first_header.measurement_type,
-        "wavelengths": [str(w) for w in sorted(wavelength_set)],
+        "wavelengths": wavelengths,
     }
 
 
@@ -437,11 +552,7 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
         if layout.format == "flat":
             header_wl = wavelengths[0] if wavelengths else None
             for _ in range(header.num_readings):
-                if _at_plate_end(lines, i):
-                    break
-                if header.measurement_type == "Kinetic" and not _kinetic_reading_present(
-                    lines, i, 1
-                ):
+                if _stop_before_missing_reading(header, lines, i, 1):
                     break
 
                 row_fields = lines[i].split("\t")
@@ -450,7 +561,8 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
                 temp_val: float | None = float(temp_str) if temp_str else None
                 if is_spectrum:
                     time_val = None
-                    wl = int(col0) if col0.isdigit() else header_wl
+                    parsed_wl = _parse_nm(col0)
+                    wl = parsed_wl if parsed_wl is not None else header_wl
                 else:
                     time_val = col0 if col0 else None
                     wl = header_wl
@@ -488,11 +600,7 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
 
             offsets = layout.group_offsets or (2,)
             for _ in range(header.num_readings):
-                if _at_plate_end(lines, i):
-                    break
-                if header.measurement_type == "Kinetic" and not _kinetic_reading_present(
-                    lines, i, num_rows
-                ):
+                if _stop_before_missing_reading(header, lines, i, num_rows):
                     break
 
                 time_val = None
@@ -508,8 +616,9 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
                     # Spectrum stores wavelength in the same column-0 slot.
                     col0 = row_fields[0].strip() if row_fields else ""
                     if is_spectrum:
-                        if group_wavelength is None and col0.isdigit():
-                            group_wavelength = int(col0)
+                        parsed_wl = _parse_nm(col0)
+                        if group_wavelength is None and parsed_wl is not None:
+                            group_wavelength = parsed_wl
                     elif time_val is None and col0:
                         time_val = col0
                     if temp_val is None and len(row_fields) > 1 and row_fields[1].strip():

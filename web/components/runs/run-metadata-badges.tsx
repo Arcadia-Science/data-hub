@@ -4,6 +4,7 @@ import {
   getMetadataObjectArray,
   getMetadataRecord,
   sortWavelengths,
+  TruncatedBadges,
 } from "@/components/runs/metadata-badges";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -109,9 +110,11 @@ export function PlateReaderRunBadges({
         <MetadataRow
           label={wavelengths.length === 1 ? "Wavelength" : "Wavelengths"}
         >
-          {wavelengths.map((w) => (
-            <ColorBadge colorClass={wavelengthColors[w]} key={w} value={w} />
-          ))}
+          <TruncatedBadges
+            colorMap={wavelengthColors}
+            maxVisible={8}
+            values={wavelengths}
+          />
         </MetadataRow>
       )}
     </>

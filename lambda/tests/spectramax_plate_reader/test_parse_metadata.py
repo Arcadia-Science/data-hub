@@ -135,7 +135,7 @@ class TestRealFixtures:
         assert result == {
             "measurement_mode": "Fluorescence",
             "measurement_type": "Spectrum",
-            "wavelengths": ["430", "435", "440", "445", "450", "480", "490", "500"],
+            "wavelengths": ["440–450", "430–440", "480–500"],
         }
 
     def test_spectrum_384_unions_windows_and_endpoint(self) -> None:
@@ -143,18 +143,7 @@ class TestRealFixtures:
         assert result == {
             "measurement_mode": "Fluorescence",
             "measurement_type": "Spectrum",
-            "wavelengths": [
-                "430",
-                "440",
-                "450",
-                "500",
-                "510",
-                "520",
-                "540",
-                "550",
-                "560",
-                "595",
-            ],
+            "wavelengths": ["540–560", "430–450", "500–520", "595"],
         }
 
 
@@ -235,7 +224,7 @@ class TestParseMetadataValidation:
         assert result == {
             "measurement_mode": "Absorbance",
             "measurement_type": "Endpoint",
-            "wavelengths": ["600", "750"],
+            "wavelengths": ["750", "600"],
         }
 
     def test_four_wavelengths(self, tmp_path: Path) -> None:
@@ -244,7 +233,7 @@ class TestParseMetadataValidation:
         assert result == {
             "measurement_mode": "Absorbance",
             "measurement_type": "Endpoint",
-            "wavelengths": ["600", "650", "700", "750"],
+            "wavelengths": ["750", "700", "650", "600"],
         }
 
     def test_missing_plate_header(self, tmp_path: Path) -> None:
@@ -265,3 +254,54 @@ class TestParseMetadataValidation:
         """Column header row lacking numeric or well-position labels raises ValueError."""
         with pytest.raises(ValueError, match="Could not determine column layout"):
             _parse_column_layout("\tTemperature\tA\tB")
+
+    def test_trailing_unrecognised_type_does_not_fail_file(self, tmp_path: Path) -> None:
+        """A later Area Scan block must not fail ingestion of a valid first plate."""
+        first = (
+            f"{_BOILERPLATE_PREFIX}\tEndpoint\tAbsorbance"
+            f"{_BOILERPLATE_MIDDLE_RAW}\t595\t1\t12\t96\t1\t4\n{_DATA_ROWS}"
+        )
+        second = (
+            f"{_BOILERPLATE_PREFIX}\tArea Scan\tAbsorbance"
+            f"{_BOILERPLATE_MIDDLE_RAW}\t450\t1\t12\t96\t1\t4\n{_DATA_ROWS}"
+        )
+        path = tmp_path / "mixed.xls"
+        path.write_text(f"##BLOCKS= 2\n{first}{second}", encoding="utf-16")
+        assert parse_metadata(path) == {
+            "measurement_mode": "Absorbance",
+            "measurement_type": "Endpoint",
+            "wavelengths": ["595"],
+        }
+
+    def test_endpoint_then_spectrum_keeps_first_plate_type(self, tmp_path: Path) -> None:
+        endpoint = (
+            f"{_BOILERPLATE_PREFIX}\tEndpoint\tAbsorbance"
+            f"{_BOILERPLATE_MIDDLE_RAW}\t595\t1\t12\t96\t1\t4\n{_DATA_ROWS}"
+        )
+        spectrum = (
+            "Plate:\tPlate1\t1.3\tPlateFormat\tSpectrum\tFluorescence\tFALSE"
+            "\tRaw\tFALSE\t3\t\t\t440\t450\t5\t\t\t1\t12\t96\n"
+            f"{_DATA_ROWS}"
+        )
+        path = tmp_path / "endpoint_then_spectrum.xls"
+        path.write_text(f"##BLOCKS= 2\n{endpoint}{spectrum}", encoding="utf-16")
+        assert parse_metadata(path) == {
+            "measurement_mode": "Absorbance",
+            "measurement_type": "Endpoint",
+            "wavelengths": ["595", "440–450"],
+        }
+
+    def test_spectrum_missing_window_raises(self, tmp_path: Path) -> None:
+        header = (
+            "Plate:\tPlate1\t1.3\tPlateFormat\tSpectrum\tAbsorbance"
+            "\tRaw\tFALSE\t1\t\t\t\t\t\t\t\t1\t12\t96\t1\t4\n"
+        )
+        path = tmp_path / "spectrum_no_window.xls"
+        path.write_text(f"##BLOCKS= 1\n{header}{_DATA_ROWS}", encoding="utf-16")
+        with pytest.raises(ValueError, match="missing start/end/step"):
+            parse_metadata(path)
+
+    def test_float_wavelengths(self, tmp_path: Path) -> None:
+        path = _build_xls(tmp_path, wavelength="750.0 600.0")
+        result = parse_metadata(path)
+        assert result["wavelengths"] == ["750", "600"]

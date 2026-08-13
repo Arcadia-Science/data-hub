@@ -353,12 +353,12 @@ function computeGlobalHeatmapRange(
   return { min, max };
 }
 
-interface KineticPlateMapWithTimeSliderProps {
+interface PlateMapWithIndexSliderProps {
+  frameLabels: string[];
   frames: PlateWellData[][];
   heatmap: boolean;
   plateName?: string;
   sliderAxis?: "time" | "wavelength";
-  timeLabels: string[];
   wavelength?: string;
 }
 
@@ -367,14 +367,14 @@ interface KineticPlateMapWithTimeSliderProps {
  * wavelengths). Heatmap scale is global across all frames so colors stay
  * comparable while scrubbing.
  */
-export function KineticPlateMapWithTimeSlider({
-  timeLabels,
+export function PlateMapWithIndexSlider({
+  frameLabels,
   frames,
   heatmap,
   plateName,
   wavelength,
   sliderAxis = "time",
-}: KineticPlateMapWithTimeSliderProps) {
+}: PlateMapWithIndexSliderProps) {
   const [index, setIndex] = useState(0);
   const maxIdx = Math.max(0, frames.length - 1);
   const selectedIndex = Math.min(Math.max(0, index), maxIdx);
@@ -392,7 +392,7 @@ export function KineticPlateMapWithTimeSlider({
   const thumbPercent = maxIdx === 0 ? 0 : (selectedIndex / maxIdx) * 100;
   const displayWavelength =
     sliderAxis === "wavelength"
-      ? (timeLabels[selectedIndex] ?? wavelength)
+      ? (frameLabels[selectedIndex] ?? wavelength)
       : wavelength;
 
   const wide = plateColumnCount(frames[0] ?? []) > COMPACT_PLATE_MAX_COLS;
@@ -412,7 +412,7 @@ export function KineticPlateMapWithTimeSlider({
       {frames.length > 1 && (
         <div className="mt-3 flex items-center gap-2">
           <span className="shrink-0 font-mono text-muted-foreground text-xs tabular-nums">
-            {timeLabels[0]}
+            {frameLabels[0]}
           </span>
           <div className="relative min-w-0 flex-1">
             <div
@@ -420,7 +420,7 @@ export function KineticPlateMapWithTimeSlider({
               className="pointer-events-none absolute bottom-full z-10 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-foreground px-1.5 py-0.5 font-mono text-background text-xs tabular-nums"
               style={{ left: `${thumbPercent}%` }}
             >
-              {timeLabels[selectedIndex] ?? "—"}
+              {frameLabels[selectedIndex] ?? "—"}
             </div>
             <Slider
               aria-label={
@@ -437,7 +437,7 @@ export function KineticPlateMapWithTimeSlider({
             />
           </div>
           <span className="shrink-0 font-mono text-muted-foreground text-xs tabular-nums">
-            {timeLabels[maxIdx]}
+            {frameLabels[maxIdx]}
           </span>
         </div>
       )}
