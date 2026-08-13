@@ -217,11 +217,11 @@ function PlateMapSection({
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex min-w-0 flex-col gap-2">
       <RunSectionHeading countLabel={groups.length} title="Plate Maps" />
       <Card size="sm">
-        <CardContent className="flex flex-col gap-6">
-          <div className="flex flex-col gap-10">
+        <CardContent className="flex min-w-0 flex-col gap-6">
+          <div className="flex min-w-0 flex-col gap-10">
             {groups.map((g, i) =>
               g.mode === "kinetic" ? (
                 <KineticPlateMapWithTimeSlider
