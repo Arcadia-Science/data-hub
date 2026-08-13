@@ -199,7 +199,7 @@ What this gets you out of the box after `make db-reseed`:
 | --- | --- | --- |
 | qPCR | `azure_cielo_qpcr_example.csv` | `lambda/tests/fixtures/` |
 | Gel doc | `azure_600_gel_doc_{example,fluorescence,true_color}.tif` | `lambda/tests/fixtures/` |
-| Plate reader (iD3 + iD5) | `spectramax_plate_reader_{endpoint,endpoint_flat,endpoint_sparse,fluorescence,kinetic,well_scan}.xls` | `lambda/tests/fixtures/` |
+| Plate reader (iD3 + iD5) | `spectramax_plate_reader_{endpoint,endpoint_flat,endpoint_sparse,fluorescence,kinetic,well_scan}.xls`; Spectrum is `spectrum.xls` (96-well, iD5) and `spectrum_384.xls` (384-well + Endpoint, iD3) | `lambda/tests/fixtures/` |
 | Other instruments | none — files 404 in the mirror | Stage real bytes via `data-hub-process handler` |
 
 The seed cycles every available fixture for an instrument across its seeded runs (so gel-doc screenshots include Chemiluminescence, Fluorescence, and True Color Imaging, not eight copies of the same chemi TIFF). Each run gets one fixture copied to `<LOCAL_S3_MIRROR>/test-raw-data-bucket/<instrument-id>/<run-id>/<filename>`, so navigating to `/instruments/azure-cielo-qpcr/runs/Experiment_20260129` shows a real CSV in the file browser, the colony / plate-reader viewers fetch real bytes via `/api/v1/files/<id>/download`, and PNG / TIFF / PDF previews on `RunReportSection` render without 404s. Fixture-bearing runs only have the real fixture file — the synthetic CSV siblings other instruments still get are dropped so the UI only shows files that actually exist on disk.

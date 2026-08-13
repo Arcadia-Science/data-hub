@@ -63,27 +63,40 @@ export function getMetadataObjectArray(
 }
 
 /**
- * Sort a list of wavelength strings (e.g. `"750"`) in ascending numerical
- * order. Non-numeric entries are pushed to the end, preserving their
- * relative order, so mixed inputs still render predictably.
+ * Sort a list of wavelength strings (e.g. `"750"` or `"440–450"`) in
+ * ascending numerical order. Range tokens sort by their start. Other
+ * non-numeric entries are pushed to the end, preserving their relative
+ * order, so mixed inputs still render predictably.
  */
 export function sortWavelengths(wavelengths: string[]): string[] {
   return [...wavelengths].sort((a, b) => {
-    const na = Number(a);
-    const nb = Number(b);
-    const aNum = Number.isFinite(na);
-    const bNum = Number.isFinite(nb);
-    if (aNum && bNum) {
-      return na - nb;
+    const ka = wavelengthSortKey(a);
+    const kb = wavelengthSortKey(b);
+    if (ka !== null && kb !== null) {
+      return ka - kb;
     }
-    if (aNum) {
+    if (ka !== null) {
       return -1;
     }
-    if (bNum) {
+    if (kb !== null) {
       return 1;
     }
     return a.localeCompare(b);
   });
+}
+
+const WAVELENGTH_RANGE_RE = /^(\d+(?:\.\d+)?)[–-](\d+(?:\.\d+)?)$/;
+
+function wavelengthSortKey(value: string): number | null {
+  const n = Number(value);
+  if (Number.isFinite(n)) {
+    return n;
+  }
+  const range = WAVELENGTH_RANGE_RE.exec(value);
+  if (range) {
+    return Number(range[1]);
+  }
+  return null;
 }
 
 export function MetadataFieldBadge({

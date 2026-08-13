@@ -69,6 +69,7 @@ export function formatColorMode(value: string): string {
 export const MEASUREMENT_TYPE_COLORS: Record<string, string> = {
   Kinetic: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
   Endpoint: "bg-teal-100 text-teal-600 dark:bg-teal-900 dark:text-teal-400",
+  Spectrum: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
   "Well Scan":
     "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300",
 };
