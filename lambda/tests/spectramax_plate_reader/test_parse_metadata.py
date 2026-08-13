@@ -130,6 +130,22 @@ class TestRealFixtures:
             "wavelengths": ["595"],
         }
 
+    def test_spectrum_unions_windows_across_plates(self) -> None:
+        result = parse_metadata(_FIXTURES_DIR / "spectramax_plate_reader_spectrum.xls")
+        assert result == {
+            "measurement_mode": "Fluorescence",
+            "measurement_type": "Spectrum",
+            "wavelengths": ["440–450", "430–440", "480–500"],
+        }
+
+    def test_spectrum_384_unions_windows_and_endpoint(self) -> None:
+        result = parse_metadata(_FIXTURES_DIR / "spectramax_plate_reader_spectrum_384.xls")
+        assert result == {
+            "measurement_mode": "Fluorescence",
+            "measurement_type": "Spectrum",
+            "wavelengths": ["540–560", "430–450", "500–520", "595"],
+        }
+
 
 # ---------------------------------------------------------------------------
 # Synthetic happy-path tests
@@ -193,8 +209,8 @@ class TestParseMetadataValidation:
             parse_metadata(path)
 
     def test_invalid_measurement_type(self, tmp_path: Path) -> None:
-        path = _build_xls(tmp_path, measurement_type="Spectrum")
-        with pytest.raises(ValueError, match="Unexpected measurement type 'Spectrum'"):
+        path = _build_xls(tmp_path, measurement_type="Area Scan")
+        with pytest.raises(ValueError, match="Unexpected measurement type 'Area Scan'"):
             parse_metadata(path)
 
     def test_non_numeric_wavelength(self, tmp_path: Path) -> None:
@@ -238,3 +254,54 @@ class TestParseMetadataValidation:
         """Column header row lacking numeric or well-position labels raises ValueError."""
         with pytest.raises(ValueError, match="Could not determine column layout"):
             _parse_column_layout("\tTemperature\tA\tB")
+
+    def test_trailing_unrecognised_type_does_not_fail_file(self, tmp_path: Path) -> None:
+        """A later Area Scan block must not fail ingestion of a valid first plate."""
+        first = (
+            f"{_BOILERPLATE_PREFIX}\tEndpoint\tAbsorbance"
+            f"{_BOILERPLATE_MIDDLE_RAW}\t595\t1\t12\t96\t1\t4\n{_DATA_ROWS}"
+        )
+        second = (
+            f"{_BOILERPLATE_PREFIX}\tArea Scan\tAbsorbance"
+            f"{_BOILERPLATE_MIDDLE_RAW}\t450\t1\t12\t96\t1\t4\n{_DATA_ROWS}"
+        )
+        path = tmp_path / "mixed.xls"
+        path.write_text(f"##BLOCKS= 2\n{first}{second}", encoding="utf-16")
+        assert parse_metadata(path) == {
+            "measurement_mode": "Absorbance",
+            "measurement_type": "Endpoint",
+            "wavelengths": ["595"],
+        }
+
+    def test_endpoint_then_spectrum_keeps_first_plate_type(self, tmp_path: Path) -> None:
+        endpoint = (
+            f"{_BOILERPLATE_PREFIX}\tEndpoint\tAbsorbance"
+            f"{_BOILERPLATE_MIDDLE_RAW}\t595\t1\t12\t96\t1\t4\n{_DATA_ROWS}"
+        )
+        spectrum = (
+            "Plate:\tPlate1\t1.3\tPlateFormat\tSpectrum\tFluorescence\tFALSE"
+            "\tRaw\tFALSE\t3\t\t\t440\t450\t5\t\t\t1\t12\t96\n"
+            f"{_DATA_ROWS}"
+        )
+        path = tmp_path / "endpoint_then_spectrum.xls"
+        path.write_text(f"##BLOCKS= 2\n{endpoint}{spectrum}", encoding="utf-16")
+        assert parse_metadata(path) == {
+            "measurement_mode": "Absorbance",
+            "measurement_type": "Endpoint",
+            "wavelengths": ["595", "440–450"],
+        }
+
+    def test_spectrum_missing_window_raises(self, tmp_path: Path) -> None:
+        header = (
+            "Plate:\tPlate1\t1.3\tPlateFormat\tSpectrum\tAbsorbance"
+            "\tRaw\tFALSE\t1\t\t\t\t\t\t\t\t1\t12\t96\t1\t4\n"
+        )
+        path = tmp_path / "spectrum_no_window.xls"
+        path.write_text(f"##BLOCKS= 1\n{header}{_DATA_ROWS}", encoding="utf-16")
+        with pytest.raises(ValueError, match="missing start/end/step"):
+            parse_metadata(path)
+
+    def test_float_wavelengths(self, tmp_path: Path) -> None:
+        path = _build_xls(tmp_path, wavelength="750.0 600.0")
+        result = parse_metadata(path)
+        assert result["wavelengths"] == ["750", "600"]

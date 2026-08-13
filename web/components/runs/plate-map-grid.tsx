@@ -25,6 +25,23 @@ function parseWell(well: string): { row: number; col: number } | null {
   };
 }
 
+/** 96-well is 8×12. Denser formats (384-well) use a full-width scrollport. */
+const COMPACT_PLATE_MAX_COLS = 12;
+
+/** Floor so 24-column plates stay readable instead of shrinking to fit. */
+const WIDE_PLATE_WELL_TRACK = "4rem";
+
+function plateColumnCount(wells: PlateWellData[]): number {
+  let maxCol = 0;
+  for (const w of wells) {
+    const pos = parseWell(w.well);
+    if (pos && pos.col > maxCol) {
+      maxCol = pos.col;
+    }
+  }
+  return maxCol + 1;
+}
+
 function formatCellValue(value: unknown): string {
   if (value === null || value === undefined) {
     return "";
@@ -157,30 +174,50 @@ export function PlateMapGrid({
     String.fromCharCode(65 + i)
   );
   const colLabels = Array.from({ length: cols }, (_, i) => String(i + 1));
+  const wide = cols > COMPACT_PLATE_MAX_COLS;
+  const wellTrack = wide ? WIDE_PLATE_WELL_TRACK : "minmax(0, 1fr)";
 
   return (
-    <div className={cn("flex w-3/4 flex-col gap-3", className)}>
+    <div
+      className={cn(
+        "flex min-w-0 flex-col gap-3",
+        wide ? "w-full" : "w-3/4",
+        className
+      )}
+    >
       {(plateName || wavelength) && (
-        <div className="flex items-baseline justify-between gap-4">
-          <h4 className="font-medium font-mono text-foreground text-sm leading-snug">
+        <div className="flex min-w-0 items-baseline justify-between gap-4">
+          <h4 className="min-w-0 text-pretty font-medium font-mono text-foreground text-sm leading-snug">
             {plateName}
           </h4>
           {wavelength && (
-            <span className="font-mono text-muted-foreground text-sm">
+            <span className="shrink-0 font-mono text-muted-foreground text-sm">
               {wavelength} nm
             </span>
           )}
         </div>
       )}
-      <div className="overflow-x-auto">
+      <div
+        aria-label={plateName ? `${plateName} plate map` : "Plate map"}
+        className={cn(
+          "min-w-0 overflow-x-auto overscroll-x-contain",
+          wide &&
+            "rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        )}
+        role="region"
+        tabIndex={wide ? 0 : undefined}
+      >
         <div
-          className="grid w-full gap-0.5 text-center"
+          className={cn(
+            "grid gap-0.5 text-center",
+            wide ? "w-max min-w-full" : "w-full"
+          )}
           style={{
             // Extra column for the vertical color bar, sized to its labels.
             gridTemplateColumns:
               heatmap && hasRange
-                ? `2rem repeat(${cols}, minmax(0, 1fr)) auto`
-                : `2rem repeat(${cols}, minmax(0, 1fr))`,
+                ? `2rem repeat(${cols}, ${wellTrack}) auto`
+                : `2rem repeat(${cols}, ${wellTrack})`,
           }}
         >
           {/* Column headers */}
@@ -222,8 +259,8 @@ export function PlateMapGrid({
                       <div
                         className={
                           useHeatmap
-                            ? "flex aspect-square items-center justify-center rounded font-mono text-xs transition-colors"
-                            : `flex aspect-square items-center justify-center rounded border font-mono text-sm ${
+                            ? "flex aspect-square items-center justify-center overflow-hidden rounded font-mono text-xs tabular-nums transition-colors"
+                            : `flex aspect-square items-center justify-center overflow-hidden rounded border font-mono text-sm tabular-nums ${
                                 hasValue
                                   ? "border-border bg-muted/50"
                                   : "border-transparent"
@@ -316,25 +353,28 @@ function computeGlobalHeatmapRange(
   return { min, max };
 }
 
-interface KineticPlateMapWithTimeSliderProps {
+interface PlateMapWithIndexSliderProps {
+  frameLabels: string[];
   frames: PlateWellData[][];
   heatmap: boolean;
   plateName?: string;
-  timeLabels: string[];
+  sliderAxis?: "time" | "wavelength";
   wavelength?: string;
 }
 
 /**
- * Plate map with a time index slider (for kinetic absorbance series).
- * Heatmap scale is global across all frames so colors stay comparable while scrubbing.
+ * Plate map with an index slider (kinetic time-points or Spectrum
+ * wavelengths). Heatmap scale is global across all frames so colors stay
+ * comparable while scrubbing.
  */
-export function KineticPlateMapWithTimeSlider({
-  timeLabels,
+export function PlateMapWithIndexSlider({
+  frameLabels,
   frames,
   heatmap,
   plateName,
   wavelength,
-}: KineticPlateMapWithTimeSliderProps) {
+  sliderAxis = "time",
+}: PlateMapWithIndexSliderProps) {
   const [index, setIndex] = useState(0);
   const maxIdx = Math.max(0, frames.length - 1);
   const selectedIndex = Math.min(Math.max(0, index), maxIdx);
@@ -350,21 +390,29 @@ export function KineticPlateMapWithTimeSlider({
 
   // Thumb centers track from 0–100%; avoid div-by-zero on a single frame.
   const thumbPercent = maxIdx === 0 ? 0 : (selectedIndex / maxIdx) * 100;
+  const displayWavelength =
+    sliderAxis === "wavelength"
+      ? (frameLabels[selectedIndex] ?? wavelength)
+      : wavelength;
+
+  const wide = plateColumnCount(frames[0] ?? []) > COMPACT_PLATE_MAX_COLS;
 
   return (
-    <div className="flex w-3/4 flex-col gap-3">
+    <div
+      className={cn("flex min-w-0 flex-col gap-3", wide ? "w-full" : "w-3/4")}
+    >
       <PlateMapGrid
         className="w-full"
         data={frames[selectedIndex]}
         heatmap={heatmap}
         heatmapRange={heatmapRange}
         plateName={plateName}
-        wavelength={wavelength}
+        wavelength={displayWavelength}
       />
       {frames.length > 1 && (
         <div className="mt-3 flex items-center gap-2">
           <span className="shrink-0 font-mono text-muted-foreground text-xs tabular-nums">
-            {timeLabels[0]}
+            {frameLabels[0]}
           </span>
           <div className="relative min-w-0 flex-1">
             <div
@@ -372,10 +420,14 @@ export function KineticPlateMapWithTimeSlider({
               className="pointer-events-none absolute bottom-full z-10 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-foreground px-1.5 py-0.5 font-mono text-background text-xs tabular-nums"
               style={{ left: `${thumbPercent}%` }}
             >
-              {timeLabels[selectedIndex] ?? "—"}
+              {frameLabels[selectedIndex] ?? "—"}
             </div>
             <Slider
-              aria-label="Select measurement time"
+              aria-label={
+                sliderAxis === "wavelength"
+                  ? "Select wavelength"
+                  : "Select measurement time"
+              }
               className="w-full py-1"
               max={maxIdx}
               min={0}
@@ -385,7 +437,7 @@ export function KineticPlateMapWithTimeSlider({
             />
           </div>
           <span className="shrink-0 font-mono text-muted-foreground text-xs tabular-nums">
-            {timeLabels[maxIdx]}
+            {frameLabels[maxIdx]}
           </span>
         </div>
       )}

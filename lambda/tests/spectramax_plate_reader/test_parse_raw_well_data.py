@@ -391,7 +391,282 @@ class TestEndpointFlat:
         assert set(self.df["row_label"].unique()) == set("ABCDEFGH")
 
 
-class TestDualWavelength:
+class TestSpectrum:
+    """96-well Spectrum matching iD5 production well occupancy.
+
+    Populated wells are A1–A5 and B1–B10 on a 12-column grid (15 unique
+    wells). SoftMax reuses ``Plate1``; the later absorbance scan is
+    suffixed with its window. Values are synthetic; the header layout
+    matches SoftMax Spectrum (window at Raw+5/6/7, empty wavelength
+    field, col0 = nm).
+    """
+
+    @pytest.fixture(autouse=True)
+    def _load(self) -> None:
+        self.df = parse_raw_well_data(_FIXTURES_DIR / "spectramax_plate_reader_spectrum.xls")
+
+    def test_columns(self) -> None:
+        assert list(self.df.columns) == _EXPECTED_COLUMNS
+
+    def test_shape(self) -> None:
+        # 4 wells × 3 wl + 5 wells × 3 wl + 10 wells × 3 wl
+        assert self.df.shape == (57, 8)
+
+    def test_time_is_null(self) -> None:
+        assert bool(self.df["time"].isna().all())
+
+    def test_unique_wells_match_id5(self) -> None:
+        wells = set(self.df["well_position"].unique().tolist())
+        expected = {f"A{c}" for c in range(1, 6)} | {f"B{c}" for c in range(1, 11)}
+        assert wells == expected
+
+    def test_grid_extent_matches_id5(self) -> None:
+        assert max(self.df["column_label"].unique().tolist()) == 10
+        assert set(self.df["row_label"].unique().tolist()) == {"A", "B"}
+
+    def test_plate_names_disambiguated(self) -> None:
+        assert self.df["plate_name"].unique().tolist() == [
+            "Plate1",
+            "Plate2",
+            "Plate1 (480–500)",
+        ]
+
+    def test_first_block_wavelengths(self) -> None:
+        first = self.df.loc[self.df["plate_name"] == "Plate1"]
+        assert sorted(first["wavelength"].unique().tolist()) == [440, 445, 450]
+        assert len(first) == 12
+
+    def test_second_block_wavelengths(self) -> None:
+        second = self.df.loc[self.df["plate_name"] == "Plate2"]
+        assert sorted(second["wavelength"].unique().tolist()) == [430, 435, 440]
+        assert len(second) == 15
+
+    def test_duplicate_plate_wells(self) -> None:
+        third = self.df.loc[self.df["plate_name"] == "Plate1 (480–500)"]
+        assert set(third["well_position"].unique().tolist()) == {f"B{c}" for c in range(1, 11)}
+        assert len(third) == 30
+
+    def test_spectrum_values_from_col0_wavelength(self) -> None:
+        row = self.df.loc[
+            (self.df["plate_name"] == "Plate1")
+            & (self.df["wavelength"] == 440)
+            & (self.df["well_position"] == "A1")
+        ].iloc[0]
+        assert row["temperature_c"] == pytest.approx(22.7)
+        assert row["value"] == pytest.approx(1.014)
+
+    def test_wells(self) -> None:
+        first = self.df.loc[self.df["plate_name"] == "Plate1"]
+        assert set(first["well_position"].unique().tolist()) == {"A1", "A2", "A3", "A4"}
+
+
+class TestSpectrum384:
+    """384-well Spectrum + trailing 96-well Endpoint.
+
+    The first Spectrum block fills B1–B24 so the 24-column grid is
+    actually occupied (wide plate-map layout). Later Spectrum blocks keep
+    the sparser A1–A5 / B8–B11 occupancy; the Endpoint block is 96-well.
+    Values are synthetic; the header layout matches SoftMax Spectrum
+    (window at Raw+5/6/7, empty wavelength field, col0 = nm).
+    """
+
+    @pytest.fixture(autouse=True)
+    def _load(self) -> None:
+        self.df = parse_raw_well_data(_FIXTURES_DIR / "spectramax_plate_reader_spectrum_384.xls")
+
+    def test_columns(self) -> None:
+        assert list(self.df.columns) == _EXPECTED_COLUMNS
+
+    def test_shape(self) -> None:
+        # 24×3 + 5×3 + 4×3 + 24 endpoint
+        assert self.df.shape == (123, 8)
+
+    def test_time_is_null(self) -> None:
+        assert bool(self.df["time"].isna().all())
+
+    def test_unique_wells(self) -> None:
+        wells = set(self.df["well_position"].unique().tolist())
+        expected = {f"A{c}" for c in range(1, 13)} | {f"B{c}" for c in range(1, 25)}
+        assert wells == expected
+
+    def test_spectrum_extent_is_384_wide(self) -> None:
+        spectrum = self.df.loc[self.df["plate_name"] != "Plate1 (595)"]
+        assert max(spectrum["column_label"].unique().tolist()) == 24
+        assert set(spectrum["row_label"].unique().tolist()) == {"A", "B"}
+
+    def test_plate_names_disambiguated(self) -> None:
+        assert self.df["plate_name"].unique().tolist() == [
+            "Plate5",
+            "Plate1",
+            "Plate1 (500–520)",
+            "Plate1 (595)",
+        ]
+
+    def test_first_block_wells(self) -> None:
+        first = self.df.loc[self.df["plate_name"] == "Plate5"]
+        assert set(first["well_position"].unique().tolist()) == {f"B{c}" for c in range(1, 25)}
+        assert len(first) == 72
+
+    def test_trailing_endpoint(self) -> None:
+        endpoint = self.df.loc[self.df["plate_name"] == "Plate1 (595)"]
+        assert len(endpoint) == 24
+        assert (endpoint["wavelength"] == 595).all()
+        assert max(endpoint["column_label"].unique().tolist()) == 12
+        assert set(endpoint["well_position"].unique().tolist()) == {
+            f"{r}{c}" for r in "AB" for c in range(1, 13)
+        }
+
+
+class TestIncompleteSpectrum:
+    """SoftMax may declare more Spectrum readings than it exports.
+
+    Emit the groups that are present and stop before the summary / ``~End``
+    instead of raising IndexError.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _load(self, tmp_path: Path) -> None:
+        prefix = "Plate:\tPlate1\t1.3\tPlateFormat"
+        # Header window is 440–455 / 5 (4 points) and claims 4 readings;
+        # file only has 2 groups (+ summary).
+        middle = "\tRaw\tFALSE\t4\t\t\t440\t455\t5\t\t\t1\t2\t4"
+        header = f"{prefix}\tSpectrum\tAbsorbance{middle}\n"
+        col_header = "\tTemperature(\xa1C)\t1\t2\t\n"
+        r0 = "440\t30.0\t0.10\t0.20\t\n"
+        r1 = "\t\t0.30\t0.40\t\n"
+        blank = "\n"
+        r2 = "445\t30.1\t0.11\t0.21\t\n"
+        r3 = "\t\t0.31\t0.41\t\n"
+        summary = "\t\t1\t2\t\n\t\t0.10\t0.20\t\n\t\t0.30\t0.40\t\n"
+        content = f"##BLOCKS= 1\n{header}{col_header}{r0}{r1}{blank}{r2}{r3}{blank}{summary}~End\n"
+        path = tmp_path / "incomplete_spectrum.xls"
+        path.write_text(content, encoding="utf-16")
+        self.df = parse_raw_well_data(path)
+
+    def test_shape_uses_exported_readings_only(self) -> None:
+        assert self.df.shape == (8, 8)
+
+    def test_wavelengths(self) -> None:
+        assert self.df["wavelength"].unique().tolist() == [440, 445]
+
+    def test_time_is_null(self) -> None:
+        assert bool(self.df["time"].isna().all())
+
+    def test_stops_at_end_without_summary(self, tmp_path: Path) -> None:
+        prefix = "Plate:\tPlate1\t1.3\tPlateFormat"
+        middle = "\tRaw\tFALSE\t3\t\t\t440\t450\t5\t\t\t1\t2\t4"
+        header = f"{prefix}\tSpectrum\tAbsorbance{middle}\n"
+        col_header = "\tTemperature(\xa1C)\t1\t2\t\n"
+        r0 = "440\t30.0\t0.10\t0.20\t\n"
+        r1 = "\t\t0.30\t0.40\t\n"
+        content = f"##BLOCKS= 1\n{header}{col_header}{r0}{r1}\n~End\n"
+        path = tmp_path / "incomplete_spectrum_no_summary.xls"
+        path.write_text(content, encoding="utf-16")
+        df = parse_raw_well_data(path)
+        assert df.shape == (4, 8)
+        assert df["wavelength"].unique().tolist() == [440]
+
+
+class TestDuplicatePlateNames:
+    """Three blocks sharing a SoftMax plate name must not merge."""
+
+    def test_third_endpoint_keeps_full_wavelength_suffix(self, tmp_path: Path) -> None:
+        def block(wavelength: str, value: str) -> str:
+            prefix = "Plate:\tPlate1\t1.3\tPlateFormat"
+            middle = "\tRaw\tFALSE\t1\t\t\t\t\t\t1"
+            header = f"{prefix}\tEndpoint\tAbsorbance{middle}\t{wavelength}\t1\t2\t2\t1\t2\n"
+            col_header = "\tTemperature(\xa1C)\t1\t2\t\n"
+            row = f"\t25.0\t{value}\t{value}\t\n"
+            return f"{header}{col_header}{row}\n~End\n"
+
+        content = (
+            "##BLOCKS= 3\n"
+            + block("595 750", "1.0")
+            + block("595 800", "2.0")
+            + block("595 900", "3.0")
+        )
+        path = tmp_path / "dup_endpoint.xls"
+        path.write_text(content, encoding="utf-16")
+        df = parse_raw_well_data(path)
+        assert df["plate_name"].unique().tolist() == [
+            "Plate1",
+            "Plate1 (595 800)",
+            "Plate1 (595 900)",
+        ]
+        assert df.loc[df["plate_name"] == "Plate1", "value"].tolist() == pytest.approx([1.0, 1.0])
+        assert df.loc[df["plate_name"] == "Plate1 (595 900)", "value"].tolist() == pytest.approx(
+            [3.0, 3.0]
+        )
+
+    def test_third_identical_spectrum_window_gets_counter(self, tmp_path: Path) -> None:
+        def block(value: str) -> str:
+            header = (
+                "Plate:\tPlate1\t1.3\tPlateFormat\tSpectrum\tAbsorbance"
+                "\tRaw\tFALSE\t1\t\t\t440\t440\t1\t\t\t1\t1\t1\n"
+            )
+            col_header = "\tTemperature(\xa1C)\t1\t\n"
+            row = f"440\t25.0\t{value}\t\n"
+            return f"{header}{col_header}{row}\n~End\n"
+
+        content = "##BLOCKS= 3\n" + block("1.0") + block("2.0") + block("3.0")
+        path = tmp_path / "dup_spectrum.xls"
+        path.write_text(content, encoding="utf-16")
+        df = parse_raw_well_data(path)
+        assert df["plate_name"].unique().tolist() == [
+            "Plate1",
+            "Plate1 (440–440)",
+            "Plate1 (440–440) (2)",
+        ]
+        assert df["value"].tolist() == pytest.approx([1.0, 2.0, 3.0])
+
+    def test_counter_fallback_without_wavelength(self, tmp_path: Path) -> None:
+        def block(value: str) -> str:
+            prefix = "Plate:\tP\t1.3\tPlateFormat"
+            middle = "\tRaw\tFALSE\t1\t\t\t\t\t\t1"
+            header = f"{prefix}\tEndpoint\tAbsorbance{middle}\t\t1\t1\t1\t1\t1\n"
+            col_header = "\tTemperature(\xa1C)\t1\t\n"
+            row = f"\t25.0\t{value}\t\n"
+            return f"{header}{col_header}{row}\n~End\n"
+
+        content = "##BLOCKS= 3\n" + block("1.0") + block("2.0") + block("3.0")
+        path = tmp_path / "dup_counter.xls"
+        path.write_text(content, encoding="utf-16")
+        df = parse_raw_well_data(path)
+        assert df["plate_name"].unique().tolist() == ["P", "P (2)", "P (3)"]
+
+
+class TestSpectrumFloatWavelengths:
+    def test_float_header_and_col0(self, tmp_path: Path) -> None:
+        header = (
+            "Plate:\tPlate1\t1.3\tPlateFormat\tSpectrum\tAbsorbance"
+            "\tRaw\tFALSE\t1\t\t\t440.0\t440.0\t1.0\t\t\t1\t1\t1\n"
+        )
+        col_header = "\tTemperature(\xa1C)\t1\t\n"
+        row = "440.0\t25.0\t1.5\t\n"
+        path = tmp_path / "float_nm.xls"
+        path.write_text(f"##BLOCKS= 1\n{header}{col_header}{row}\n~End\n", encoding="utf-16")
+        df = parse_raw_well_data(path)
+        assert df["wavelength"].tolist() == [440]
+        assert df["value"].tolist() == pytest.approx([1.5])
+
+
+class TestSpectrumFlat:
+    def test_flat_layout_reads_col0_wavelength(self, tmp_path: Path) -> None:
+        header = (
+            "Plate:\tPlate1\t1.3\tPlateFormat\tSpectrum\tAbsorbance"
+            "\tRaw\tFALSE\t2\t\t\t440\t445\t5\t\t\t1\t2\t2\n"
+        )
+        col_header = "\tTemperature(\xa1C)\tA1\tA2\t\n"
+        r0 = "440\t25.0\t0.10\t0.20\t\n"
+        r1 = "445.0\t25.1\t0.11\t0.21\t\n"
+        path = tmp_path / "spectrum_flat.xls"
+        path.write_text(f"##BLOCKS= 1\n{header}{col_header}{r0}\n{r1}\n~End\n", encoding="utf-16")
+        df = parse_raw_well_data(path)
+        assert df.shape == (4, 8)
+        assert sorted(df["wavelength"].unique().tolist()) == [440, 445]
+        assert bool(df["time"].isna().all())
+        assert df["well_position"].tolist() == ["A1", "A2", "A1", "A2"]
+
     """Endpoint / Absorbance / dual wavelength (750 + 600), synthetic 2×2 plate."""
 
     @pytest.fixture(autouse=True)
