@@ -17,7 +17,12 @@ import type { RawWellRow } from "@/lib/api/instrument-runs";
 import { sortTimeKeys } from "@/lib/runs/sort-kinetic-time-keys";
 
 /** Measurement types whose well values are numeric and benefit from color-coded heatmaps. */
-const HEATMAP_MEASUREMENT_TYPES = new Set(["Endpoint", "Well Scan", "Kinetic"]);
+const HEATMAP_MEASUREMENT_TYPES = new Set([
+  "Endpoint",
+  "Well Scan",
+  "Kinetic",
+  "Spectrum",
+]);
 
 /**
  * CSV parsing (csv-parse) returns all cell values as strings. The heatmap grid
@@ -49,6 +54,7 @@ type PlateMapGroup =
       wavelength: string;
       timeLabels: string[];
       frames: PlateWellData[][];
+      sliderAxis?: "time" | "wavelength";
     };
 
 /**
@@ -117,10 +123,71 @@ function extractKineticPlateMapGroups(
 }
 
 /**
+ * Groups Spectrum CSV rows into wavelength-indexed plate map frames, one
+ * group per plate. A trailing Endpoint block in the same file becomes a
+ * single-frame (static) map.
+ */
+function extractSpectrumPlateMapGroups(
+  rows: RawWellRow[],
+  wellKey: "well_position" | "well"
+): PlateMapGroup[] {
+  const byPlate = new Map<string, RawWellRow[]>();
+  for (const row of rows) {
+    const plate = String(row.plate_name ?? "");
+    const arr = byPlate.get(plate) ?? [];
+    arr.push(row);
+    byPlate.set(plate, arr);
+  }
+
+  const results: PlateMapGroup[] = [];
+  for (const [plateName, subset] of byPlate) {
+    const byWavelength = new Map<string, RawWellRow[]>();
+    for (const row of subset) {
+      const wk = String(row.wavelength ?? "");
+      const g = byWavelength.get(wk) ?? [];
+      g.push(row);
+      byWavelength.set(wk, g);
+    }
+
+    if (byWavelength.size < 2) {
+      const flat = [...byWavelength.values()].flat();
+      results.push({
+        mode: "static",
+        plateName,
+        wavelength: [...byWavelength.keys()][0] ?? "",
+        wells: flat.map((r) => ({
+          well: String(r[wellKey]),
+          value: coerceNumeric(r.value),
+        })),
+      });
+      continue;
+    }
+
+    const wavelengthKeys = sortTimeKeys([...byWavelength.keys()]);
+    const frames = wavelengthKeys.map((wk) =>
+      (byWavelength.get(wk) ?? []).map((r) => ({
+        well: String(r[wellKey]),
+        value: coerceNumeric(r.value),
+      }))
+    );
+    results.push({
+      mode: "kinetic",
+      plateName,
+      wavelength: "",
+      timeLabels: wavelengthKeys,
+      frames,
+      sliderAxis: "wavelength",
+    });
+  }
+  return results;
+}
+
+/**
  * Main entry point: converts flat CSV rows into renderable plate map groups.
  *
  * Strategy depends on measurement type:
  *  - Kinetic with multiple time-points → time-slider groups (one per plate+wavelength)
+ *  - Spectrum → wavelength-slider groups (one per plate)
  *  - Single combination of (plate, wavelength, time) → one unlabelled static map
  *  - Multiple combinations → separate labelled static maps (e.g. multi-wavelength endpoint)
  *
@@ -129,7 +196,7 @@ function extractKineticPlateMapGroups(
  */
 function extractPlateMaps(
   rows: RawWellRow[],
-  options: { kinetic: boolean }
+  options: { kinetic: boolean; spectrum: boolean }
 ): PlateMapGroup[] {
   if (rows.length === 0) {
     return [];
@@ -140,6 +207,13 @@ function extractPlateMaps(
     rows[0].well_position === undefined ? "well" : "well_position";
   if (rows[0][wellKey] === undefined) {
     return [];
+  }
+
+  if (options.spectrum) {
+    return extractSpectrumPlateMapGroups(
+      rows,
+      wellKey as "well_position" | "well"
+    );
   }
 
   const uniqueTimes = new Set(rows.map((r) => String(r.time ?? "")));
@@ -205,12 +279,17 @@ function PlateMapSection({
   rows,
   heatmap,
   kineticLayout,
+  spectrumLayout,
 }: {
   rows: RawWellRow[];
   heatmap: boolean;
   kineticLayout: boolean;
+  spectrumLayout: boolean;
 }) {
-  const groups = extractPlateMaps(rows, { kinetic: kineticLayout });
+  const groups = extractPlateMaps(rows, {
+    kinetic: kineticLayout,
+    spectrum: spectrumLayout,
+  });
 
   if (groups.length === 0) {
     return null;
@@ -229,6 +308,7 @@ function PlateMapSection({
                   heatmap={heatmap}
                   key={i}
                   plateName={g.plateName}
+                  sliderAxis={g.sliderAxis}
                   timeLabels={g.timeLabels}
                   wavelength={g.wavelength}
                 />
@@ -321,6 +401,7 @@ export function PlateReaderRunDetail({
         heatmap={heatmap}
         kineticLayout={measurementType === "Kinetic"}
         rows={wellData}
+        spectrumLayout={measurementType === "Spectrum"}
       />
     </>
   );

@@ -787,6 +787,16 @@ const SPECTRAMAX_FIXTURE_FILES: readonly FixtureFileSpec[] = [
   },
 ];
 
+const SPECTRAMAX_SPECTRUM_96: FixtureFileSpec = {
+  filename: "spectramax_plate_reader_spectrum.xls",
+  contentType: "application/vnd.ms-excel",
+};
+
+const SPECTRAMAX_SPECTRUM_384: FixtureFileSpec = {
+  filename: "spectramax_plate_reader_spectrum_384.xls",
+  contentType: "application/vnd.ms-excel",
+};
+
 const GEL_DOC_FIXTURE_FILES: readonly FixtureFileSpec[] = [
   {
     filename: "azure_600_gel_doc_example.tif",
@@ -837,9 +847,9 @@ export const INSTRUMENT_FIXTURES: Record<string, InstrumentFixture> = {
     ],
   },
   "spectramax-id3-plate-reader": {
-    files: SPECTRAMAX_FIXTURE_FILES,
+    files: [...SPECTRAMAX_FIXTURE_FILES, SPECTRAMAX_SPECTRUM_384],
     // Names track the cycled fixture order (endpoint → flat → sparse →
-    // fluorescence → kinetic → well-scan → endpoint → flat).
+    // fluorescence → kinetic → well-scan → spectrum → endpoint).
     runIds: [
       "012926_AR_OD750",
       "012226_DK_OD595_flat",
@@ -847,12 +857,12 @@ export const INSTRUMENT_FIXTURES: Record<string, InstrumentFixture> = {
       "010826_DK_GFP_fluo",
       "010126_AR_OD595_kinetic",
       "122525_DK_OD595_wellscan",
-      "121825_AR_OD750",
-      "121125_DK_OD595_flat",
+      "121825_AR_FP_spectrum",
+      "121125_DK_OD750",
     ],
   },
   "spectramax-id5-plate-reader": {
-    files: SPECTRAMAX_FIXTURE_FILES,
+    files: [...SPECTRAMAX_FIXTURE_FILES, SPECTRAMAX_SPECTRUM_96],
     // Same fixture cycle as iD3; stems stay distinct per reader.
     runIds: [
       "260721_OD750_AAA",
@@ -861,8 +871,8 @@ export const INSTRUMENT_FIXTURES: Record<string, InstrumentFixture> = {
       "260714_GFP_fluo_DDD",
       "260710_OD595_kinetic_EEE",
       "260705_OD595_wellscan_FFF",
-      "260628_OD750_GGG",
-      "260620_OD595_flat_HHH",
+      "260628_FP_spectrum_GGG",
+      "260620_OD750_HHH",
     ],
   },
 };

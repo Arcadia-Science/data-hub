@@ -357,13 +357,15 @@ interface KineticPlateMapWithTimeSliderProps {
   frames: PlateWellData[][];
   heatmap: boolean;
   plateName?: string;
+  sliderAxis?: "time" | "wavelength";
   timeLabels: string[];
   wavelength?: string;
 }
 
 /**
- * Plate map with a time index slider (for kinetic absorbance series).
- * Heatmap scale is global across all frames so colors stay comparable while scrubbing.
+ * Plate map with an index slider (kinetic time-points or Spectrum
+ * wavelengths). Heatmap scale is global across all frames so colors stay
+ * comparable while scrubbing.
  */
 export function KineticPlateMapWithTimeSlider({
   timeLabels,
@@ -371,6 +373,7 @@ export function KineticPlateMapWithTimeSlider({
   heatmap,
   plateName,
   wavelength,
+  sliderAxis = "time",
 }: KineticPlateMapWithTimeSliderProps) {
   const [index, setIndex] = useState(0);
   const maxIdx = Math.max(0, frames.length - 1);
@@ -387,6 +390,10 @@ export function KineticPlateMapWithTimeSlider({
 
   // Thumb centers track from 0–100%; avoid div-by-zero on a single frame.
   const thumbPercent = maxIdx === 0 ? 0 : (selectedIndex / maxIdx) * 100;
+  const displayWavelength =
+    sliderAxis === "wavelength"
+      ? (timeLabels[selectedIndex] ?? wavelength)
+      : wavelength;
 
   const wide = plateColumnCount(frames[0] ?? []) > COMPACT_PLATE_MAX_COLS;
 
@@ -400,7 +407,7 @@ export function KineticPlateMapWithTimeSlider({
         heatmap={heatmap}
         heatmapRange={heatmapRange}
         plateName={plateName}
-        wavelength={wavelength}
+        wavelength={displayWavelength}
       />
       {frames.length > 1 && (
         <div className="mt-3 flex items-center gap-2">
@@ -416,7 +423,11 @@ export function KineticPlateMapWithTimeSlider({
               {timeLabels[selectedIndex] ?? "—"}
             </div>
             <Slider
-              aria-label="Select measurement time"
+              aria-label={
+                sliderAxis === "wavelength"
+                  ? "Select wavelength"
+                  : "Select measurement time"
+              }
               className="w-full py-1"
               max={maxIdx}
               min={0}

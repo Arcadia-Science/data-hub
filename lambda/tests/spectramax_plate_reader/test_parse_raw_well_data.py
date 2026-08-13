@@ -391,6 +391,127 @@ class TestEndpointFlat:
         assert set(self.df["row_label"].unique()) == set("ABCDEFGH")
 
 
+class TestSpectrum:
+    """96-well Spectrum matching iD5 production well occupancy.
+
+    Populated wells are A1–A5 and B1–B10 on a 12-column grid (15 unique
+    wells). SoftMax reuses ``Plate1``; the later absorbance scan is
+    suffixed with its window.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _load(self) -> None:
+        self.df = parse_raw_well_data(_FIXTURES_DIR / "spectramax_plate_reader_spectrum.xls")
+
+    def test_columns(self) -> None:
+        assert list(self.df.columns) == _EXPECTED_COLUMNS
+
+    def test_shape(self) -> None:
+        # 4 wells × 3 wl + 5 wells × 3 wl + 10 wells × 3 wl
+        assert self.df.shape == (57, 8)
+
+    def test_time_is_null(self) -> None:
+        assert bool(self.df["time"].isna().all())
+
+    def test_unique_wells_match_id5(self) -> None:
+        wells = set(self.df["well_position"].unique().tolist())
+        expected = {f"A{c}" for c in range(1, 6)} | {f"B{c}" for c in range(1, 11)}
+        assert wells == expected
+
+    def test_grid_extent_matches_id5(self) -> None:
+        assert max(self.df["column_label"].unique().tolist()) == 10
+        assert set(self.df["row_label"].unique().tolist()) == {"A", "B"}
+
+    def test_plate_names_disambiguated(self) -> None:
+        assert self.df["plate_name"].unique().tolist() == [
+            "Plate1",
+            "Plate2",
+            "Plate1 (480–500)",
+        ]
+
+    def test_first_block_wavelengths(self) -> None:
+        first = self.df.loc[self.df["plate_name"] == "Plate1"]
+        assert sorted(first["wavelength"].unique().tolist()) == [440, 445, 450]
+        assert len(first) == 12
+
+    def test_second_block_wavelengths(self) -> None:
+        second = self.df.loc[self.df["plate_name"] == "Plate2"]
+        assert sorted(second["wavelength"].unique().tolist()) == [430, 435, 440]
+        assert len(second) == 15
+
+    def test_duplicate_plate_wells(self) -> None:
+        third = self.df.loc[self.df["plate_name"] == "Plate1 (480–500)"]
+        assert set(third["well_position"].unique().tolist()) == {f"B{c}" for c in range(1, 11)}
+        assert len(third) == 30
+
+    def test_spectrum_values_from_col0_wavelength(self) -> None:
+        row = self.df.loc[
+            (self.df["plate_name"] == "Plate1")
+            & (self.df["wavelength"] == 440)
+            & (self.df["well_position"] == "A1")
+        ].iloc[0]
+        assert row["temperature_c"] == pytest.approx(22.7)
+        assert row["value"] == pytest.approx(1.014)
+
+    def test_wells(self) -> None:
+        first = self.df.loc[self.df["plate_name"] == "Plate1"]
+        assert set(first["well_position"].unique().tolist()) == {"A1", "A2", "A3", "A4"}
+
+
+class TestSpectrum384:
+    """384-well Spectrum + trailing 96-well Endpoint, matching iD3 occupancy.
+
+    Spectrum blocks use a 24-column grid with B1–B11 / A1–A5 / B8–B11;
+    the Endpoint block fills A1–A12 and B1–B12 (24 unique wells overall).
+    """
+
+    @pytest.fixture(autouse=True)
+    def _load(self) -> None:
+        self.df = parse_raw_well_data(_FIXTURES_DIR / "spectramax_plate_reader_spectrum_384.xls")
+
+    def test_columns(self) -> None:
+        assert list(self.df.columns) == _EXPECTED_COLUMNS
+
+    def test_shape(self) -> None:
+        # 11×3 + 5×3 + 4×3 + 24 endpoint
+        assert self.df.shape == (84, 8)
+
+    def test_time_is_null(self) -> None:
+        assert bool(self.df["time"].isna().all())
+
+    def test_unique_wells_match_id3(self) -> None:
+        wells = set(self.df["well_position"].unique().tolist())
+        expected = {f"{r}{c}" for r in "AB" for c in range(1, 13)}
+        assert wells == expected
+
+    def test_spectrum_extent_matches_id3(self) -> None:
+        spectrum = self.df.loc[self.df["plate_name"] != "Plate1 (595)"]
+        assert max(spectrum["column_label"].unique().tolist()) == 11
+        assert set(spectrum["row_label"].unique().tolist()) == {"A", "B"}
+
+    def test_plate_names_disambiguated(self) -> None:
+        assert self.df["plate_name"].unique().tolist() == [
+            "Plate5",
+            "Plate1",
+            "Plate1 (500–520)",
+            "Plate1 (595)",
+        ]
+
+    def test_first_block_wells(self) -> None:
+        first = self.df.loc[self.df["plate_name"] == "Plate5"]
+        assert set(first["well_position"].unique().tolist()) == {f"B{c}" for c in range(1, 12)}
+        assert len(first) == 33
+
+    def test_trailing_endpoint(self) -> None:
+        endpoint = self.df.loc[self.df["plate_name"] == "Plate1 (595)"]
+        assert len(endpoint) == 24
+        assert (endpoint["wavelength"] == 595).all()
+        assert max(endpoint["column_label"].unique().tolist()) == 12
+        assert set(endpoint["well_position"].unique().tolist()) == {
+            f"{r}{c}" for r in "AB" for c in range(1, 13)
+        }
+
+
 class TestDualWavelength:
     """Endpoint / Absorbance / dual wavelength (750 + 600), synthetic 2×2 plate."""
 

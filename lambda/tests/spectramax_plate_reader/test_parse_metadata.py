@@ -130,6 +130,33 @@ class TestRealFixtures:
             "wavelengths": ["595"],
         }
 
+    def test_spectrum_unions_windows_across_plates(self) -> None:
+        result = parse_metadata(_FIXTURES_DIR / "spectramax_plate_reader_spectrum.xls")
+        assert result == {
+            "measurement_mode": "Fluorescence",
+            "measurement_type": "Spectrum",
+            "wavelengths": ["430", "435", "440", "445", "450", "480", "490", "500"],
+        }
+
+    def test_spectrum_384_unions_windows_and_endpoint(self) -> None:
+        result = parse_metadata(_FIXTURES_DIR / "spectramax_plate_reader_spectrum_384.xls")
+        assert result == {
+            "measurement_mode": "Fluorescence",
+            "measurement_type": "Spectrum",
+            "wavelengths": [
+                "430",
+                "440",
+                "450",
+                "500",
+                "510",
+                "520",
+                "540",
+                "550",
+                "560",
+                "595",
+            ],
+        }
+
 
 # ---------------------------------------------------------------------------
 # Synthetic happy-path tests
@@ -193,8 +220,8 @@ class TestParseMetadataValidation:
             parse_metadata(path)
 
     def test_invalid_measurement_type(self, tmp_path: Path) -> None:
-        path = _build_xls(tmp_path, measurement_type="Spectrum")
-        with pytest.raises(ValueError, match="Unexpected measurement type 'Spectrum'"):
+        path = _build_xls(tmp_path, measurement_type="Area Scan")
+        with pytest.raises(ValueError, match="Unexpected measurement type 'Area Scan'"):
             parse_metadata(path)
 
     def test_non_numeric_wavelength(self, tmp_path: Path) -> None:
@@ -208,7 +235,7 @@ class TestParseMetadataValidation:
         assert result == {
             "measurement_mode": "Absorbance",
             "measurement_type": "Endpoint",
-            "wavelengths": ["750", "600"],
+            "wavelengths": ["600", "750"],
         }
 
     def test_four_wavelengths(self, tmp_path: Path) -> None:
@@ -217,7 +244,7 @@ class TestParseMetadataValidation:
         assert result == {
             "measurement_mode": "Absorbance",
             "measurement_type": "Endpoint",
-            "wavelengths": ["750", "700", "650", "600"],
+            "wavelengths": ["600", "650", "700", "750"],
         }
 
     def test_missing_plate_header(self, tmp_path: Path) -> None:
