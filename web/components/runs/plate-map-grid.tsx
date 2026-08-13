@@ -25,6 +25,23 @@ function parseWell(well: string): { row: number; col: number } | null {
   };
 }
 
+/** 96-well is 8×12. Denser formats (384-well) use a full-width scrollport. */
+const COMPACT_PLATE_MAX_COLS = 12;
+
+/** Floor so 24-column plates stay readable instead of shrinking to fit. */
+const WIDE_PLATE_WELL_TRACK = "4rem";
+
+function plateColumnCount(wells: PlateWellData[]): number {
+  let maxCol = 0;
+  for (const w of wells) {
+    const pos = parseWell(w.well);
+    if (pos && pos.col > maxCol) {
+      maxCol = pos.col;
+    }
+  }
+  return maxCol + 1;
+}
+
 function formatCellValue(value: unknown): string {
   if (value === null || value === undefined) {
     return "";
@@ -157,30 +174,50 @@ export function PlateMapGrid({
     String.fromCharCode(65 + i)
   );
   const colLabels = Array.from({ length: cols }, (_, i) => String(i + 1));
+  const wide = cols > COMPACT_PLATE_MAX_COLS;
+  const wellTrack = wide ? WIDE_PLATE_WELL_TRACK : "minmax(0, 1fr)";
 
   return (
-    <div className={cn("flex w-3/4 flex-col gap-3", className)}>
+    <div
+      className={cn(
+        "flex min-w-0 flex-col gap-3",
+        wide ? "w-full" : "w-3/4",
+        className
+      )}
+    >
       {(plateName || wavelength) && (
-        <div className="flex items-baseline justify-between gap-4">
-          <h4 className="font-medium font-mono text-foreground text-sm leading-snug">
+        <div className="flex min-w-0 items-baseline justify-between gap-4">
+          <h4 className="min-w-0 text-pretty font-medium font-mono text-foreground text-sm leading-snug">
             {plateName}
           </h4>
           {wavelength && (
-            <span className="font-mono text-muted-foreground text-sm">
+            <span className="shrink-0 font-mono text-muted-foreground text-sm">
               {wavelength} nm
             </span>
           )}
         </div>
       )}
-      <div className="overflow-x-auto">
+      <div
+        aria-label={plateName ? `${plateName} plate map` : "Plate map"}
+        className={cn(
+          "min-w-0 overflow-x-auto overscroll-x-contain",
+          wide &&
+            "rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        )}
+        role="region"
+        tabIndex={wide ? 0 : undefined}
+      >
         <div
-          className="grid w-full gap-0.5 text-center"
+          className={cn(
+            "grid gap-0.5 text-center",
+            wide ? "w-max min-w-full" : "w-full"
+          )}
           style={{
             // Extra column for the vertical color bar, sized to its labels.
             gridTemplateColumns:
               heatmap && hasRange
-                ? `2rem repeat(${cols}, minmax(0, 1fr)) auto`
-                : `2rem repeat(${cols}, minmax(0, 1fr))`,
+                ? `2rem repeat(${cols}, ${wellTrack}) auto`
+                : `2rem repeat(${cols}, ${wellTrack})`,
           }}
         >
           {/* Column headers */}
@@ -222,8 +259,8 @@ export function PlateMapGrid({
                       <div
                         className={
                           useHeatmap
-                            ? "flex aspect-square items-center justify-center rounded font-mono text-xs transition-colors"
-                            : `flex aspect-square items-center justify-center rounded border font-mono text-sm ${
+                            ? "flex aspect-square items-center justify-center overflow-hidden rounded font-mono text-xs tabular-nums transition-colors"
+                            : `flex aspect-square items-center justify-center overflow-hidden rounded border font-mono text-sm tabular-nums ${
                                 hasValue
                                   ? "border-border bg-muted/50"
                                   : "border-transparent"
@@ -351,8 +388,12 @@ export function KineticPlateMapWithTimeSlider({
   // Thumb centers track from 0–100%; avoid div-by-zero on a single frame.
   const thumbPercent = maxIdx === 0 ? 0 : (selectedIndex / maxIdx) * 100;
 
+  const wide = plateColumnCount(frames[0] ?? []) > COMPACT_PLATE_MAX_COLS;
+
   return (
-    <div className="flex w-3/4 flex-col gap-3">
+    <div
+      className={cn("flex min-w-0 flex-col gap-3", wide ? "w-full" : "w-3/4")}
+    >
       <PlateMapGrid
         className="w-full"
         data={frames[selectedIndex]}
