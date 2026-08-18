@@ -29,7 +29,10 @@ const nextConfig = {
   async headers() {
     return [
       {
-        source: "/:path*",
+        // Icon metadata routes (`app/favicon.ico`, `app/icon.svg`,
+        // `app/apple-icon.png`) must not carry `noindex`: Googlebot-Image
+        // uses those bytes as the hostname favicon in search results.
+        source: "/((?!favicon.ico|icon|apple-icon).*)",
         headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
       },
     ];
