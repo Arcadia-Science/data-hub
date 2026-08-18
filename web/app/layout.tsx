@@ -49,11 +49,8 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary",
   },
-  // Data Hub is an internal tool; we never want it indexed. The same
-  // intent is reinforced by `app/robots.ts` (robots.txt) and an
-  // `X-Robots-Tag` response header in `next.config.mjs`, so this stays
-  // true even for non-HTML responses and for bots that only consult one
-  // of the three signals.
+  // Data Hub is internal and should never be indexed; `app/robots.ts` and a
+  // header in `next.config.mjs` repeat it. No image rules — they hide favicons.
   robots: {
     index: false,
     follow: false,
@@ -61,9 +58,7 @@ export const metadata: Metadata = {
     googleBot: {
       index: false,
       follow: false,
-      noimageindex: true,
       "max-snippet": -1,
-      "max-image-preview": "none",
       "max-video-preview": -1,
     },
   },
