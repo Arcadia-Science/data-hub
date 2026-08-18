@@ -2,11 +2,6 @@ import { withMicrofrontends } from "@vercel/microfrontends/next/config";
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Belt-and-braces against search indexing: the `robots` field in the root
-  // layout's metadata already injects a `<meta name="robots">` tag into HTML
-  // responses, but that tag is invisible on non-HTML responses (API JSON,
-  // 3xx redirects from the proxy, error pages). The `X-Robots-Tag` header
-  // covers those too. `app/robots.ts` is the third layer (robots.txt).
   // The MCP server moved from `/api/v1/mcp` to `/mcp/v1`. MCP client configs
   // (Claude Desktop, Cursor, …) live on end users' machines and can't be
   // migrated for them, so the old paths keep working. 308 preserves the POST
@@ -29,10 +24,9 @@ const nextConfig = {
   async headers() {
     return [
       {
-        // Icon metadata routes (`app/favicon.ico`, `app/icon.svg`,
-        // `app/apple-icon.png`) must not carry `noindex`: Googlebot-Image
-        // uses those bytes as the hostname favicon in search results.
-        source: "/((?!favicon.ico|icon|apple-icon).*)",
+        // Says "don't index me" where a `<meta>` tag can't: JSON, redirects,
+        // errors. The three icon files opt out — they become our favicon.
+        source: "/((?!favicon\\.ico|icon\\.|apple-icon\\.).*)",
         headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
       },
     ];

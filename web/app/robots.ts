@@ -1,9 +1,7 @@
 import type { MetadataRoute } from "next";
 
-// Product HTML stays disallowed. `/docs` is the public docs microfrontend.
-// `/$` and the icon files are the Google exception: one favicon per hostname,
-// discovered from a crawlable homepage and fetched by Googlebot-Image.
-// LinkedInBot is an unfurl bot — it treats `Disallow: /` as "skip this host".
+// Bots that check robots.txt before showing a link preview. LinkedIn skips a
+// site if anything blocks it, so these get everything. Notion never asks.
 const UNFURL_BOT_USER_AGENTS = [
   "Slackbot",
   "Slackbot-LinkExpanding",
@@ -11,7 +9,8 @@ const UNFURL_BOT_USER_AGENTS = [
   "LinkedInBot",
 ];
 
-// `$` is the robots.txt end-of-URL anchor, so `/$` is the homepage only.
+// The app stays hidden; the docs, home page, and icons don't. Google reads our
+// favicon off the home page. `/$` is the home page and nothing below it.
 const GENERIC_CRAWLER_ALLOWS = [
   "/$",
   "/favicon.ico",
