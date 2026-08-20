@@ -28,17 +28,23 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
     sidecar is already in S3.
 
     Reprocess already marks the trigger `processing`, so a missing sibling
-    fails that file instead of leaving it stuck. Successful encodes also
-    complete `run.json`: it has no stack of its own, and leaving it in
-    `processing` stranded the run after the MP4 was already uploaded.
+    fails that file instead of leaving it stuck. A parsed sidecar is
+    completed even if a stack failed: it has no stack of its own, and
+    leaving it in `processing` stranded the run. Stack status, not the
+    sidecar, decides whether the run looks failed.
 
     TIFF and `run.json` are separate S3 events, so two invocations can
     encode the same stack. The `run.json` batch skips stacks that are
     already completed or processing: `completed → processing` is a legal
     transition, and a later disk-full failure would otherwise reopen a
-    sibling's success and mark it failed. A TIFF-triggered invoke still
-    encodes that stack (S3 event or reprocess). completed/failed updates
-    swallow 409 so the loser does not fail a successful run.
+    sibling's success and mark it failed. A stack left in `processing`
+    after a timeout is retried by reprocessing that TIFF, not another
+    `run.json` batch. A TIFF-triggered invoke always encodes that stack.
+    completed/failed updates swallow 409 so the loser does not fail a
+    successful run.
+
+    Run metadata is written from the parsed sidecar even when every stack
+    is skipped, so a corrected `run.json` still updates the run.
 
     High-quality stacks are a few GB and Lambda `/tmp` is capped, so each
     encode deletes its local TIFF/MP4/JPEG before the next stack.
@@ -90,23 +96,22 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
                 s3_key=tiff_key,
                 filename=tiff_filename,
             )
-            _update_file_status(client, record.id, "failed", error_message=str(exc))
-        _fail_if_processing(instrument_id, run_id, RUN_JSON_NAME, str(exc))
+            _fail_file(client, record, str(exc))
+        _fail_file(client, _sidecar_file(client, instrument_id, run_id), str(exc))
         raise
 
-    sidecar = _sidecar_record(client, instrument_id, run_id)
+    sidecar = _sidecar_file(client, instrument_id, run_id)
     # Only bump uploaded/failed → processing. A completed sidecar from a
     # sibling invocation must stay completed so the run does not flicker
     # back to processing during a duplicate encode.
-    if sidecar is not None and sidecar.status in {"uploaded", "failed"}:
+    if sidecar.status in {"uploaded", "failed"}:
         _update_file_status(client, sidecar.id, "processing")
 
     last_error: Exception | None = None
-    encoded_any = False
     owned = is_tiff(filename)
     for tiff_filename in tiff_filenames:
         try:
-            if _encode_tiff(
+            _encode_tiff(
                 client,
                 instrument_id,
                 run_id,
@@ -115,19 +120,21 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
                 tiff_filename,
                 fps,
                 owned=owned,
-            ):
-                encoded_any = True
+            )
         except Exception as exc:
             logger.error("Error processing DishCam file %s: %s", tiff_filename, exc)
             last_error = exc
 
-    if encoded_any:
-        client.update_run(instrument_id, run_id, metadata=metadata)
-    # `_encode_tiff` completes stacks only. Reprocess already flipped the
-    # sidecar to processing, so leaving it there stranded the run after a
-    # successful encode.
-    if sidecar is not None and sidecar.status != "completed":
-        _update_file_status(client, sidecar.id, "completed")
+    client.update_run(instrument_id, run_id, metadata=metadata)
+    # The sidecar parsed; complete it even if a stack failed. Do not let a
+    # status PATCH hide the encode error the caller should see.
+    if sidecar.status != "completed":
+        try:
+            _update_file_status(client, sidecar.id, "completed")
+        except Exception:
+            logger.exception("Failed to complete DishCam run.json for %s.", run_id)
+            if last_error is None:
+                raise
     if last_error is not None:
         raise last_error
 
@@ -168,7 +175,9 @@ def _encode_tiff(
 
     `owned` is True when the S3/reprocess trigger is this TIFF, so a
     duplicate event or an intentional retry still runs. The `run.json`
-    batch passes False and leaves in-flight and finished stacks alone.
+    batch passes False and leaves in-flight and finished stacks alone. A
+    stack stuck in `processing` after a timeout is retried by
+    reprocessing that TIFF, not another `run.json` batch.
     """
     tiff_key = f"{instrument_id}/{run_id}/{tiff_filename}"
     tiff_uri = f"s3://{raw_bucket}/{tiff_key}"
@@ -193,8 +202,7 @@ def _encode_tiff(
         return False
 
     try:
-        if tiff_record.status != "processing":
-            client.update_file(tiff_id, status="processing")
+        client.update_file(tiff_id, status="processing")
 
         s3_utils.download_file(tiff_uri, local_tiff)
         encode_tiff_stack(local_tiff, mp4_path, poster_path, fps)
@@ -239,22 +247,23 @@ def _remove_local(*paths: Path) -> None:
         path.unlink(missing_ok=True)
 
 
-def _sidecar_record(client: DataHubClient, instrument_id: str, run_id: str) -> FileResponse | None:
-    """Return the `run.json` row, or None when the run is not in the API yet."""
+def _sidecar_file(client: DataHubClient, instrument_id: str, run_id: str) -> FileResponse:
+    """Return the `run.json` row. The run already exists via `ensure_run`."""
     raw_bucket = config.AWS_S3_RAW_DATA_BUCKET or ""
-    s3_key = f"{instrument_id}/{run_id}/{RUN_JSON_NAME}"
-    try:
-        return client.create_file(
-            instrument_id=instrument_id,
-            run_id=run_id,
-            s3_bucket=raw_bucket,
-            s3_key=s3_key,
-            filename=RUN_JSON_NAME,
-        )
-    except ApiError as exc:
-        if exc.status_code == 404:
-            return None
-        raise
+    return client.create_file(
+        instrument_id=instrument_id,
+        run_id=run_id,
+        s3_bucket=raw_bucket,
+        s3_key=f"{instrument_id}/{run_id}/{RUN_JSON_NAME}",
+        filename=RUN_JSON_NAME,
+    )
+
+
+def _fail_file(client: DataHubClient, record: FileResponse, error_message: str) -> None:
+    """Mark failed. Terminal and `uploaded` states must go through `processing` first."""
+    if record.status != "processing":
+        _update_file_status(client, record.id, "processing")
+    _update_file_status(client, record.id, "failed", error_message=error_message)
 
 
 def _upload_processed(

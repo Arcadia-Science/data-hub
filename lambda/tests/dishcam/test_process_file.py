@@ -1,6 +1,8 @@
 """Unit tests for DishCam `process_file` orchestration."""
 
 from __future__ import annotations
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -91,6 +93,56 @@ def _status_updates(client: MagicMock, file_id: int) -> list[str]:
         for call in client.update_file.call_args_list
         if call.args[0] == file_id and call.kwargs.get("status") is not None
     ]
+
+
+@contextmanager
+def _patched_process(
+    tmp_path: Path,
+    client: MagicMock,
+    *,
+    list_objects: list[str] | None = None,
+    encode: Any = None,
+    download: Any = _write_download,
+) -> Iterator[Any]:
+    encode_mock = encode if encode is not None else MagicMock(side_effect=_write_encode)
+    with (
+        patch(
+            "data_hub_lambda.dishcam.process_file.get_client",
+            return_value=client,
+        ),
+        patch(
+            "data_hub_lambda.dishcam.process_file.s3_utils.object_exists",
+            return_value=True,
+        ),
+        patch(
+            "data_hub_lambda.dishcam.process_file.s3_utils.list_objects",
+            return_value=list_objects or [],
+        ),
+        patch(
+            "data_hub_lambda.dishcam.process_file.s3_utils.download_file",
+            side_effect=download,
+        ),
+        patch("data_hub_lambda.dishcam.process_file.s3_utils.upload_file"),
+        patch(
+            "data_hub_lambda.dishcam.process_file.encode_tiff_stack",
+            encode_mock,
+        ),
+        patch(
+            "data_hub_shared.config.config.AWS_S3_RAW_DATA_BUCKET",
+            "raw",
+        ),
+        patch(
+            "data_hub_shared.config.config.AWS_S3_PROCESSED_DATA_BUCKET",
+            "processed",
+        ),
+        patch(
+            "data_hub_shared.config.config.LOCAL_RAW_DATA_DIRPATH",
+            tmp_path,
+        ),
+    ):
+        from data_hub_lambda.dishcam.process_file import process_file
+
+        yield process_file, encode_mock
 
 
 class TestProcessFileSkipUntilBothPresent:
@@ -749,7 +801,8 @@ class TestProcessFileEncodesWhenBothPresent:
             process_file("dishcam", "run-xyz", "run.json")
 
         encode.assert_not_called()
-        client.update_run.assert_not_called()
+        client.update_run.assert_called_once()
+        assert client.update_run.call_args.kwargs["metadata"] == {"fps": 1.0}
         assert _completed_file_ids(client) == [SIDECAR_ID]
 
     def test_tiff_trigger_encodes_even_if_already_completed(self, tmp_path: Path) -> None:
@@ -933,3 +986,96 @@ class TestProcessFileEncodesWhenBothPresent:
                 process_file("dishcam", "run-xyz", "run.json")
 
         assert tiffs_on_disk == [["empty.tif"], ["ruler.tif"]]
+
+    @pytest.mark.parametrize(
+        ("tiff_status", "sidecar_status", "tiff_expected", "sidecar_expected"),
+        [
+            ("uploaded", "uploaded", ["processing", "failed"], ["processing", "failed"]),
+            ("processing", "processing", ["failed"], ["failed"]),
+        ],
+    )
+    def test_unreadable_run_json_fails_sidecar_and_stacks(
+        self,
+        tmp_path: Path,
+        tiff_status: str,
+        sidecar_status: str,
+        tiff_expected: list[str],
+        sidecar_expected: list[str],
+    ) -> None:
+        client = MagicMock()
+        client.ensure_run.return_value = _run_response()
+        client.create_file.side_effect = [
+            _file_response(10, "stack.tif", status=tiff_status),
+            _file_response(SIDECAR_ID, "run.json", status=sidecar_status),
+        ]
+
+        def _download(s3_uri: str, local_path: Path, **_: Any) -> None:
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            local_path.write_text("not json")
+
+        with _patched_process(
+            tmp_path,
+            client,
+            list_objects=["s3://raw/dishcam/run-xyz/stack.tif"],
+            download=_download,
+        ) as (process_file, encode):
+            with pytest.raises(ValueError, match="Invalid run.json"):
+                process_file("dishcam", "run-xyz", "run.json")
+
+        encode.assert_not_called()
+        assert _status_updates(client, 10) == tiff_expected
+        assert _status_updates(client, SIDECAR_ID) == sidecar_expected
+
+    def test_sidecar_complete_error_does_not_hide_encode_error(self, tmp_path: Path) -> None:
+        client = MagicMock()
+        client.ensure_run.return_value = _run_response()
+        client.create_file.side_effect = [
+            _file_response(SIDECAR_ID, "run.json"),
+            _file_response(10, "empty.tif"),
+        ]
+
+        def _update(file_id: int, **kwargs: Any) -> FileResponse:
+            if file_id == SIDECAR_ID and kwargs.get("status") == "completed":
+                raise ApiError("sidecar complete failed", status_code=500)
+            return _file_response(file_id, "x", status=kwargs.get("status", "uploaded"))
+
+        client.update_file.side_effect = _update
+
+        def _encode(tiff_path: Path, mp4_path: Path, poster_path: Path, fps: float) -> None:
+            raise RuntimeError("empty stack is corrupt")
+
+        with _patched_process(
+            tmp_path,
+            client,
+            list_objects=["s3://raw/dishcam/run-xyz/empty.tif"],
+            encode=MagicMock(side_effect=_encode),
+        ) as (process_file, _encode_mock):
+            with pytest.raises(RuntimeError, match="corrupt"):
+                process_file("dishcam", "run-xyz", "run.json")
+
+        client.update_run.assert_called_once()
+
+    def test_sidecar_complete_error_is_raised_when_encode_succeeds(self, tmp_path: Path) -> None:
+        client = MagicMock()
+        client.ensure_run.return_value = _run_response()
+        client.create_file.side_effect = [
+            _file_response(SIDECAR_ID, "run.json"),
+            _file_response(10, "stack.tif"),
+            _file_response(11, "stack.mp4", category="processed"),
+            _file_response(12, "stack.jpg", category="processed"),
+        ]
+
+        def _update(file_id: int, **kwargs: Any) -> FileResponse:
+            if file_id == SIDECAR_ID and kwargs.get("status") == "completed":
+                raise ApiError("sidecar complete failed", status_code=500)
+            return _file_response(file_id, "x", status=kwargs.get("status", "uploaded"))
+
+        client.update_file.side_effect = _update
+
+        with _patched_process(
+            tmp_path,
+            client,
+            list_objects=["s3://raw/dishcam/run-xyz/stack.tif"],
+        ) as (process_file, _encode):
+            with pytest.raises(ApiError, match="sidecar complete failed"):
+                process_file("dishcam", "run-xyz", "run.json")
