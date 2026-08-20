@@ -2,6 +2,7 @@ import { DeleteRunDialog } from "@/components/runs/delete-run-dialog";
 import { RestoreRunButton } from "@/components/runs/restore-run-button";
 import type { RunDetailProps } from "@/components/runs/run-detail";
 import { RunDetail } from "@/components/runs/run-detail";
+import { posterFileIdsByVideoFilename } from "@/lib/runs/run-file-types";
 
 export function DishcamRunDetail({
   run,
@@ -55,9 +56,9 @@ export function DishcamRunDetail({
       </RunDetail.FilesMetadataLayout>
 
       <RunDetail.VideoCarousel
-        files={reportFiles}
         initialPage={reportItems}
         instrumentId={instrumentId}
+        posterFileIds={posterFileIdsByVideoFilename(reportFiles)}
         runId={runId}
       />
     </>

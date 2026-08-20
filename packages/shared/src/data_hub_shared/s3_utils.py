@@ -69,14 +69,29 @@ def object_exists(
     *,
     s3_client: S3Client | None = None,
 ) -> bool:
-    """Return True if *s3_uri* exists (HEAD), False on 404."""
+    """Return True if *s3_uri* exists (HEAD), False when it does not.
+
+    Missing keys normally 404. Without `s3:ListBucket`, S3 returns 403
+    instead — treat that as missing too, matching `headS3Object` in
+    `web/lib/s3.ts`.
+    """
     client = s3_client or get_s3_client()
     bucket, key = parse_s3_uri(s3_uri)
     try:
         client.head_object(Bucket=bucket, Key=key)
     except ClientError as exc:
-        code = str(exc.response.get("Error", {}).get("Code", ""))
-        if code in {"404", "NoSuchKey", "NotFound"}:
+        error = exc.response.get("Error", {})
+        code = str(error.get("Code", ""))
+        status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+        if code in {"404", "NoSuchKey", "NotFound"} or status == 404:
+            return False
+        if code in {"403", "AccessDenied", "Forbidden"} or status == 403:
+            logger.warning(
+                "HEAD s3://%s/%s returned 403; treating as missing. "
+                "If this is steady-state, grant s3:ListBucket on the bucket ARN.",
+                bucket,
+                key,
+            )
             return False
         raise
     return True

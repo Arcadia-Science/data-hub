@@ -1,6 +1,7 @@
 import { ExternalLink } from "lucide-react";
 import { ColonyDataTable } from "@/components/runs/colony-data-table";
 import { RunSectionHeading } from "@/components/runs/run-section-heading";
+import { RunVideoPlayer } from "@/components/runs/run-video-player";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { RunFile } from "@/lib/api/instrument-runs";
@@ -10,6 +11,7 @@ import {
   isImageFile,
   isPdfFile,
   isVideoFile,
+  posterFileIdsByVideoFilename,
 } from "@/lib/runs/run-file-types";
 
 function ProcessedImagePreview({ file }: { file: RunFile }) {
@@ -34,40 +36,6 @@ function ProcessedImagePreview({ file }: { file: RunFile }) {
           height={600}
           src={downloadUrl}
           width={800}
-        />
-      </div>
-    </div>
-  );
-}
-
-function ProcessedVideoPreview({
-  file,
-  posterUrl,
-}: {
-  file: RunFile;
-  posterUrl?: string;
-}) {
-  const downloadUrl = `/api/v1/files/${file.id}/download`;
-
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <h3 className="font-medium text-sm">{file.filename}</h3>
-        <Button asChild className="h-7 gap-1 text-xs" size="sm" variant="ghost">
-          <a href={downloadUrl} rel="noopener noreferrer" target="_blank">
-            <ExternalLink className="size-3" />
-            Open in new tab
-          </a>
-        </Button>
-      </div>
-      <div className="overflow-hidden rounded-md border bg-muted/30">
-        {/* biome-ignore lint/a11y/useMediaCaption: instrument preview has no captions */}
-        <video
-          className="h-auto max-h-[70vh] w-full"
-          controls
-          playsInline
-          poster={posterUrl}
-          src={downloadUrl}
         />
       </div>
     </div>
@@ -113,6 +81,7 @@ export function RunReportSection({
   const processedVideos = files.filter(
     (f) => f.category === "processed" && f.deletedAt === null && isVideoFile(f)
   );
+  const posterFileIds = posterFileIdsByVideoFilename(files);
   const videoStems = new Set(processedVideos.map((f) => fileStem(f.filename)));
 
   const processedImages = files.filter(
@@ -151,24 +120,14 @@ export function RunReportSection({
       <RunSectionHeading countLabel={totalCount} title={title} />
       <Card size="sm">
         <CardContent className="flex flex-col gap-6">
-          {processedVideos.map((file) => {
-            const poster = files.find(
-              (candidate) =>
-                candidate.category === "processed" &&
-                candidate.deletedAt === null &&
-                isImageFile(candidate) &&
-                fileStem(candidate.filename) === fileStem(file.filename)
-            );
-            return (
-              <ProcessedVideoPreview
-                file={file}
-                key={file.id}
-                posterUrl={
-                  poster ? `/api/v1/files/${poster.id}/download` : undefined
-                }
-              />
-            );
-          })}
+          {processedVideos.map((file) => (
+            <RunVideoPlayer
+              fileId={file.id}
+              filename={file.filename}
+              key={file.id}
+              posterFileId={posterFileIds[file.filename]}
+            />
+          ))}
           {processedImages.map((file) => (
             <ProcessedImagePreview file={file} key={file.id} />
           ))}
