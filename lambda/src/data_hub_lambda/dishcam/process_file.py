@@ -33,10 +33,15 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
     `processing` stranded the run after the MP4 was already uploaded.
 
     TIFF and `run.json` are separate S3 events, so two invocations can
-    encode the same stack. `create_file` is idempotent; completed/failed
-    updates swallow 409 so the loser does not fail a successful run.
-    Duplicate compute is accepted — a lock would need run-level state
-    we do not have.
+    encode the same stack. The `run.json` batch skips stacks that are
+    already completed or processing: `completed → processing` is a legal
+    transition, and a later disk-full failure would otherwise reopen a
+    sibling's success and mark it failed. A TIFF-triggered invoke still
+    encodes that stack (S3 event or reprocess). completed/failed updates
+    swallow 409 so the loser does not fail a successful run.
+
+    High-quality stacks are a few GB and Lambda `/tmp` is capped, so each
+    encode deletes its local TIFF/MP4/JPEG before the next stack.
     """
     if not matches_filename(filename):
         logger.info("Ignoring DishCam file %s; not a TIFF or run.json.", filename)
@@ -98,9 +103,10 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
 
     last_error: Exception | None = None
     encoded_any = False
+    owned = is_tiff(filename)
     for tiff_filename in tiff_filenames:
         try:
-            _encode_tiff(
+            if _encode_tiff(
                 client,
                 instrument_id,
                 run_id,
@@ -108,8 +114,9 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
                 raw_dir,
                 tiff_filename,
                 fps,
-            )
-            encoded_any = True
+                owned=owned,
+            ):
+                encoded_any = True
         except Exception as exc:
             logger.error("Error processing DishCam file %s: %s", tiff_filename, exc)
             last_error = exc
@@ -154,7 +161,15 @@ def _encode_tiff(
     raw_dir: Path,
     tiff_filename: str,
     fps: float,
-) -> None:
+    *,
+    owned: bool,
+) -> bool:
+    """Encode one stack. Return True if this invoke produced an MP4.
+
+    `owned` is True when the S3/reprocess trigger is this TIFF, so a
+    duplicate event or an intentional retry still runs. The `run.json`
+    batch passes False and leaves in-flight and finished stacks alone.
+    """
     tiff_key = f"{instrument_id}/{run_id}/{tiff_filename}"
     tiff_uri = f"s3://{raw_bucket}/{tiff_key}"
     tiff_record = client.create_file(
@@ -165,15 +180,23 @@ def _encode_tiff(
         filename=tiff_filename,
     )
     tiff_id = tiff_record.id
+    local_tiff = raw_dir / tiff_filename
+    mp4_path = raw_dir / f"{Path(tiff_filename).stem}.mp4"
+    poster_path = raw_dir / f"{Path(tiff_filename).stem}.jpg"
+
+    if not owned and tiff_record.status in {"completed", "processing"}:
+        logger.info(
+            "Skipping DishCam file %s; already %s.",
+            tiff_filename,
+            tiff_record.status,
+        )
+        return False
 
     try:
-        client.update_file(tiff_id, status="processing")
+        if tiff_record.status != "processing":
+            client.update_file(tiff_id, status="processing")
 
-        local_tiff = raw_dir / tiff_filename
         s3_utils.download_file(tiff_uri, local_tiff)
-
-        mp4_path = raw_dir / f"{Path(tiff_filename).stem}.mp4"
-        poster_path = raw_dir / f"{Path(tiff_filename).stem}.jpg"
         encode_tiff_stack(local_tiff, mp4_path, poster_path, fps)
 
         processed_bucket = config.AWS_S3_PROCESSED_DATA_BUCKET or ""
@@ -199,11 +222,21 @@ def _encode_tiff(
                 "DishCam file %s already finished by a sibling invocation.",
                 tiff_filename,
             )
-            return
+            return True
         logger.info("DishCam file %s marked as completed.", tiff_filename)
+        return True
     except Exception as exc:
         _update_file_status(client, tiff_id, "failed", error_message=str(exc))
         raise
+    finally:
+        # One high-quality stack can be several GB; leaving it on disk
+        # fills the Lambda `/tmp` cap before the next stack in the batch.
+        _remove_local(local_tiff, mp4_path, poster_path)
+
+
+def _remove_local(*paths: Path) -> None:
+    for path in paths:
+        path.unlink(missing_ok=True)
 
 
 def _sidecar_record(client: DataHubClient, instrument_id: str, run_id: str) -> FileResponse | None:
