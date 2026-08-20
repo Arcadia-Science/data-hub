@@ -249,10 +249,14 @@ def tapestation(filename: str) -> None:
 def dishcam_cmd(tiff: Path, run_json: Path, output_dir: Path | None) -> None:
     """Convert a DishCam TIFF stack to an MP4 preview and JPEG poster."""
     from data_hub_lambda.dishcam.encode_video import encode_tiff_stack
-    from data_hub_lambda.dishcam.parse_metadata import encode_fps, parse_run_json
+    from data_hub_lambda.dishcam.parse_metadata import (
+        encode_fps,
+        parse_run_json,
+        playback_fps,
+    )
 
     metadata = parse_run_json(run_json)
-    fps = encode_fps(metadata)
+    fps = playback_fps(encode_fps(metadata))
     dest_dir = output_dir or tiff.parent
     dest_dir.mkdir(parents=True, exist_ok=True)
     mp4_path = dest_dir / f"{tiff.stem}.mp4"

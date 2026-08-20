@@ -7,7 +7,7 @@ from pathlib import Path
 from data_hub_lambda.api_client import ApiError, DataHubClient, get_client
 from data_hub_lambda.dishcam.encode_video import encode_tiff_stack
 from data_hub_lambda.dishcam.filenames import RUN_JSON_NAME, is_tiff, matches_filename
-from data_hub_lambda.dishcam.parse_metadata import encode_fps, parse_run_json
+from data_hub_lambda.dishcam.parse_metadata import encode_fps, parse_run_json, playback_fps
 from data_hub_shared import s3_utils
 from data_hub_shared.config import config
 
@@ -21,6 +21,12 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
     without creating a run or flipping status — the later event encodes.
     Reprocess already marks the trigger `processing`, so a missing sibling
     fails that file instead of leaving it stuck.
+
+    TIFF and `run.json` are separate S3 events, so two invocations can
+    encode the same run. `create_file` is idempotent; completed/failed
+    updates swallow 409 so the loser does not fail a successful run.
+    Duplicate compute is accepted — a lock would need run-level state
+    we do not have.
     """
     if not matches_filename(filename):
         logger.info("Ignoring DishCam file %s; not a TIFF or run.json.", filename)
@@ -45,15 +51,6 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
 
     tiff_key = f"{instrument_id}/{run_id}/{tiff_filename}"
     tiff_uri = f"s3://{raw_bucket}/{tiff_key}"
-    if not s3_utils.object_exists(tiff_uri):
-        logger.info("DishCam run %s is missing TIFF stack; skipping.", run_id)
-        _fail_if_processing(
-            instrument_id,
-            run_id,
-            filename,
-            "Cannot process: TIFF stack not found in S3",
-        )
-        return
 
     logger.info("Processing DishCam TIFF %s (run: %s)", tiff_filename, run_id)
     client = get_client()
@@ -78,7 +75,7 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
         s3_utils.download_file(json_uri, local_json)
 
         metadata = parse_run_json(local_json)
-        fps = encode_fps(metadata)
+        fps = playback_fps(encode_fps(metadata))
 
         mp4_path = raw_dir / f"{Path(tiff_filename).stem}.mp4"
         poster_path = raw_dir / f"{Path(tiff_filename).stem}.jpg"
@@ -103,11 +100,16 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
         )
 
         client.update_run(instrument_id, run_id, metadata=metadata)
-        client.update_file(tiff_id, status="completed")
+        if not _update_file_status(client, tiff_id, "completed"):
+            logger.info(
+                "DishCam file %s already finished by a sibling invocation.",
+                tiff_filename,
+            )
+            return
         logger.info("DishCam file %s marked as completed.", tiff_filename)
     except Exception as exc:
         logger.error("Error processing DishCam file: %s", exc)
-        client.update_file(tiff_id, status="failed", error_message=str(exc))
+        _update_file_status(client, tiff_id, "failed", error_message=str(exc))
         raise
 
 
@@ -151,6 +153,28 @@ def _upload_processed(
         size_bytes=local_path.stat().st_size,
         content_type=content_type,
     )
+
+
+def _update_file_status(
+    client: DataHubClient,
+    file_id: int,
+    status: str,
+    *,
+    error_message: str | None = None,
+) -> bool:
+    """Set status. Return False if another invocation already moved the file."""
+    try:
+        client.update_file(file_id, status=status, error_message=error_message)
+    except ApiError as exc:
+        if exc.status_code == 409:
+            logger.info(
+                "File %s status conflict when setting %s (sibling encode likely won).",
+                file_id,
+                status,
+            )
+            return False
+        raise
+    return True
 
 
 def _fail_if_processing(

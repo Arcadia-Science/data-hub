@@ -122,7 +122,7 @@ make docker-build-lambda
 
 The Dockerfile is a multi-stage build:
 
-1. **ffmpeg stage**: Downloads a checksum-pinned BtbN linux64-gpl static binary (libx264) to `/usr/local/bin/ffmpeg`.
+1. **ffmpeg stage**: Copies a static linux/amd64 `ffmpeg` (libx264) from the version-tagged `mwader/static-ffmpeg` image.
 2. **Builder stage**: Uses `uv` to export and install third-party dependencies into the Lambda task root.
 3. **Final stage**: Copies ffmpeg, the installed dependencies, and the `data_hub_shared` and `data_hub_lambda` source packages.
 
@@ -137,7 +137,7 @@ The Lambda function depends on a scientific Python stack:
 - `matplotlib` — plotting
 - `scikit-image` — image processing
 - `tifffile` — TIFF file reading
-- `ffmpeg` — static linux/amd64 binary baked into the image for DishCam H.264 encode
+- `ffmpeg` — static linux/amd64 binary from `mwader/static-ffmpeg` for DishCam H.264 encode
 - `arcadia-microscopy-tools` — ND2 reading, channel handling, and multi-channel compositing for the Hina microscope
 - `pydantic` — data validation
 - `requests` — HTTP client for the Data Hub API

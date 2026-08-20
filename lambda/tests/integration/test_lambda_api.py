@@ -6,6 +6,7 @@ queries.
 """
 
 from __future__ import annotations
+import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -246,6 +247,7 @@ class TestAzure600GelDocHappyPath:
 
 
 class TestDishCamHappyPath:
+    @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg is not on PATH")
     def test_run_json_encodes_sibling_tiff(
         self,
         integration_env: IntegrationEnv,

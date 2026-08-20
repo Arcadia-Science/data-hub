@@ -29,7 +29,9 @@ def parse_run_json(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("run.json must be a JSON object")
 
-    metadata = {key: payload.get(key) for key in _METADATA_KEYS}
+    metadata = {
+        key: payload[key] for key in _METADATA_KEYS if key in payload and payload[key] is not None
+    }
     encode_fps(metadata)
     return metadata
 
@@ -48,3 +50,13 @@ def encode_fps(metadata: dict[str, Any]) -> float:
     if fps <= 0:
         raise ValueError(f"run.json fps must be positive, got {fps}")
     return fps
+
+
+# Multi-day captures can land well below 1 fps. The in-app player is a
+# preview, so floor the encode rate rather than playing in real time.
+MIN_PLAYBACK_FPS = 10.0
+
+
+def playback_fps(capture_fps: float) -> float:
+    """Return the fps used for the MP4 preview, not the stored metadata."""
+    return max(capture_fps, MIN_PLAYBACK_FPS)

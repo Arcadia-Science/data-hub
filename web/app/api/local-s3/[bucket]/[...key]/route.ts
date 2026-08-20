@@ -23,6 +23,7 @@ import type { NextRequest } from "next/server";
 import {
   getLocalMirrorRoot,
   mimeFor,
+  parseByteRange,
   resolveMirrorPath,
 } from "@/lib/s3-local-mirror";
 
@@ -61,20 +62,39 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
   }
 
   const disposition = new URL(request.url).searchParams.get("disposition");
+  const range = parseByteRange(request.headers.get("range"), fileSize);
+  const start = range.kind === "partial" ? range.start : 0;
+  const end = range.kind === "partial" ? range.end : Math.max(fileSize - 1, 0);
+  const length = range.kind === "unsatisfiable" ? 0 : end - start + 1;
+
+  if (range.kind === "unsatisfiable") {
+    return new Response("Range Not Satisfiable", {
+      status: 416,
+      headers: {
+        "Content-Range": `bytes */${fileSize}`,
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "no-store",
+      },
+    });
+  }
 
   // `Readable.toWeb` returns the `node:stream/web` `ReadableStream` type,
   // which is structurally compatible with the global `ReadableStream`
   // that `Response` expects. Cast through `unknown` to bridge the two
   // declarations without pulling DOM lib types into the Node side.
   const body = Readable.toWeb(
-    createReadStream(filePath)
+    createReadStream(filePath, range.kind === "partial" ? { start, end } : {})
   ) as unknown as ReadableStream;
 
   return new Response(body, {
-    status: 200,
+    status: range.kind === "partial" ? 206 : 200,
     headers: {
       "Content-Type": mimeFor(filePath),
-      "Content-Length": String(fileSize),
+      "Content-Length": String(range.kind === "partial" ? length : fileSize),
+      "Accept-Ranges": "bytes",
+      ...(range.kind === "partial" && {
+        "Content-Range": `bytes ${start}-${end}/${fileSize}`,
+      }),
       ...(disposition && { "Content-Disposition": disposition }),
       "Cache-Control": "no-store",
     },

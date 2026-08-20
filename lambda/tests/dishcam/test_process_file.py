@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from data_hub_lambda.api_client import ApiError
+from data_hub_lambda.dishcam.parse_metadata import MIN_PLAYBACK_FPS
 from data_hub_lambda.models import FileResponse, RunResponse
 
 
@@ -184,7 +185,7 @@ class TestProcessFileEncodesWhenBothPresent:
                 local_path.write_bytes(b"tiff")
 
         def _encode(tiff_path: Path, mp4_path: Path, poster_path: Path, fps: float) -> None:
-            assert fps == 0.9
+            assert fps == MIN_PLAYBACK_FPS
             mp4_path.write_bytes(b"mp4")
             poster_path.write_bytes(b"jpg")
 
@@ -239,3 +240,75 @@ class TestProcessFileEncodesWhenBothPresent:
         ]
         assert completed
         assert completed[-1].args[0] == 10
+
+    def test_completed_conflict_is_not_a_failure(self, tmp_path: Path) -> None:
+        client = MagicMock()
+        client.ensure_run.return_value = _run_response()
+        client.create_file.side_effect = [
+            _file_response(10, "stack.tif"),
+            _file_response(11, "stack.mp4", category="processed"),
+            _file_response(12, "stack.jpg", category="processed"),
+        ]
+        client.update_file.side_effect = [
+            _file_response(10, "stack.tif", status="processing"),
+            _file_response(11, "stack.mp4", category="processed"),
+            _file_response(12, "stack.jpg", category="processed"),
+            ApiError("conflict", status_code=409),
+        ]
+
+        def _download(s3_uri: str, local_path: Path, **_: Any) -> None:
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            if s3_uri.endswith("run.json"):
+                local_path.write_text('{"fps": 1.0}')
+            else:
+                local_path.write_bytes(b"tiff")
+
+        def _encode(tiff_path: Path, mp4_path: Path, poster_path: Path, fps: float) -> None:
+            mp4_path.write_bytes(b"mp4")
+            poster_path.write_bytes(b"jpg")
+
+        with (
+            patch(
+                "data_hub_lambda.dishcam.process_file.get_client",
+                return_value=client,
+            ),
+            patch(
+                "data_hub_lambda.dishcam.process_file.s3_utils.object_exists",
+                return_value=True,
+            ),
+            patch(
+                "data_hub_lambda.dishcam.process_file.s3_utils.list_objects",
+                return_value=["s3://raw/dishcam/run-xyz/stack.tif"],
+            ),
+            patch(
+                "data_hub_lambda.dishcam.process_file.s3_utils.download_file",
+                side_effect=_download,
+            ),
+            patch("data_hub_lambda.dishcam.process_file.s3_utils.upload_file"),
+            patch(
+                "data_hub_lambda.dishcam.process_file.encode_tiff_stack",
+                side_effect=_encode,
+            ),
+            patch(
+                "data_hub_shared.config.config.AWS_S3_RAW_DATA_BUCKET",
+                "raw",
+            ),
+            patch(
+                "data_hub_shared.config.config.AWS_S3_PROCESSED_DATA_BUCKET",
+                "processed",
+            ),
+            patch(
+                "data_hub_shared.config.config.LOCAL_RAW_DATA_DIRPATH",
+                tmp_path,
+            ),
+        ):
+            from data_hub_lambda.dishcam.process_file import process_file
+
+            process_file("dishcam", "run-xyz", "stack.tif")
+
+        failed = [
+            call
+            for call in client.update_file.call_args_list
+            if call.kwargs.get("status") == "failed"
+        ]
+        assert failed == []
