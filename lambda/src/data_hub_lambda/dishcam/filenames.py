@@ -15,7 +15,7 @@ def is_tiff(filename: str) -> bool:
 
 
 def matches_filename(filename: str) -> bool:
-    """S3 events for either the stack or the sidecar can start encode.
+    """S3 events for a stack or the sidecar can start encode.
 
     `run.json` therefore also passes the handler's union gate for every
     instrument type. The extra instrument lookup is cheap; the per-type

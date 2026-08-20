@@ -312,3 +312,225 @@ class TestProcessFileEncodesWhenBothPresent:
             if call.kwargs.get("status") == "failed"
         ]
         assert failed == []
+
+    def test_run_json_trigger_encodes_every_tiff(self, tmp_path: Path) -> None:
+        client = MagicMock()
+        client.ensure_run.return_value = _run_response()
+        client.create_file.side_effect = [
+            _file_response(10, "empty.tif"),
+            _file_response(11, "empty.mp4", category="processed"),
+            _file_response(12, "empty.jpg", category="processed"),
+            _file_response(20, "ruler.tif"),
+            _file_response(21, "ruler.mp4", category="processed"),
+            _file_response(22, "ruler.jpg", category="processed"),
+        ]
+
+        def _download(s3_uri: str, local_path: Path, **_: Any) -> None:
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            if s3_uri.endswith("run.json"):
+                local_path.write_text('{"fps": 1.0}')
+            else:
+                local_path.write_bytes(b"tiff")
+
+        def _encode(tiff_path: Path, mp4_path: Path, poster_path: Path, fps: float) -> None:
+            mp4_path.write_bytes(b"mp4")
+            poster_path.write_bytes(b"jpg")
+
+        encode = MagicMock(side_effect=_encode)
+
+        with (
+            patch(
+                "data_hub_lambda.dishcam.process_file.get_client",
+                return_value=client,
+            ),
+            patch(
+                "data_hub_lambda.dishcam.process_file.s3_utils.object_exists",
+                return_value=True,
+            ),
+            patch(
+                "data_hub_lambda.dishcam.process_file.s3_utils.list_objects",
+                return_value=[
+                    "s3://raw/dishcam/run-xyz/empty.tif",
+                    "s3://raw/dishcam/run-xyz/ruler.tif",
+                    "s3://raw/dishcam/run-xyz/run.json",
+                ],
+            ),
+            patch(
+                "data_hub_lambda.dishcam.process_file.s3_utils.download_file",
+                side_effect=_download,
+            ),
+            patch("data_hub_lambda.dishcam.process_file.s3_utils.upload_file"),
+            patch(
+                "data_hub_lambda.dishcam.process_file.encode_tiff_stack",
+                encode,
+            ),
+            patch(
+                "data_hub_shared.config.config.AWS_S3_RAW_DATA_BUCKET",
+                "raw",
+            ),
+            patch(
+                "data_hub_shared.config.config.AWS_S3_PROCESSED_DATA_BUCKET",
+                "processed",
+            ),
+            patch(
+                "data_hub_shared.config.config.LOCAL_RAW_DATA_DIRPATH",
+                tmp_path,
+            ),
+        ):
+            from data_hub_lambda.dishcam.process_file import process_file
+
+            process_file("dishcam", "run-xyz", "run.json")
+
+        encoded = [call.args[0].name for call in encode.call_args_list]
+        assert encoded == ["empty.tif", "ruler.tif"]
+        completed = [
+            call.args[0]
+            for call in client.update_file.call_args_list
+            if call.kwargs.get("status") == "completed"
+        ]
+        assert completed == [10, 20]
+
+    def test_tiff_trigger_encodes_only_that_stack(self, tmp_path: Path) -> None:
+        client = MagicMock()
+        client.ensure_run.return_value = _run_response()
+        client.create_file.side_effect = [
+            _file_response(20, "ruler.tif"),
+            _file_response(21, "ruler.mp4", category="processed"),
+            _file_response(22, "ruler.jpg", category="processed"),
+        ]
+
+        def _download(s3_uri: str, local_path: Path, **_: Any) -> None:
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            if s3_uri.endswith("run.json"):
+                local_path.write_text('{"fps": 1.0}')
+            else:
+                local_path.write_bytes(b"tiff")
+
+        def _encode(tiff_path: Path, mp4_path: Path, poster_path: Path, fps: float) -> None:
+            mp4_path.write_bytes(b"mp4")
+            poster_path.write_bytes(b"jpg")
+
+        encode = MagicMock(side_effect=_encode)
+        list_objects = MagicMock(
+            return_value=[
+                "s3://raw/dishcam/run-xyz/empty.tif",
+                "s3://raw/dishcam/run-xyz/ruler.tif",
+            ]
+        )
+
+        with (
+            patch(
+                "data_hub_lambda.dishcam.process_file.get_client",
+                return_value=client,
+            ),
+            patch(
+                "data_hub_lambda.dishcam.process_file.s3_utils.object_exists",
+                return_value=True,
+            ),
+            patch(
+                "data_hub_lambda.dishcam.process_file.s3_utils.list_objects",
+                list_objects,
+            ),
+            patch(
+                "data_hub_lambda.dishcam.process_file.s3_utils.download_file",
+                side_effect=_download,
+            ),
+            patch("data_hub_lambda.dishcam.process_file.s3_utils.upload_file"),
+            patch(
+                "data_hub_lambda.dishcam.process_file.encode_tiff_stack",
+                encode,
+            ),
+            patch(
+                "data_hub_shared.config.config.AWS_S3_RAW_DATA_BUCKET",
+                "raw",
+            ),
+            patch(
+                "data_hub_shared.config.config.AWS_S3_PROCESSED_DATA_BUCKET",
+                "processed",
+            ),
+            patch(
+                "data_hub_shared.config.config.LOCAL_RAW_DATA_DIRPATH",
+                tmp_path,
+            ),
+        ):
+            from data_hub_lambda.dishcam.process_file import process_file
+
+            process_file("dishcam", "run-xyz", "ruler.tif")
+
+        list_objects.assert_not_called()
+        assert [call.args[0].name for call in encode.call_args_list] == ["ruler.tif"]
+
+    def test_one_failed_stack_does_not_block_the_others(self, tmp_path: Path) -> None:
+        client = MagicMock()
+        client.ensure_run.return_value = _run_response()
+        client.create_file.side_effect = [
+            _file_response(10, "empty.tif"),
+            _file_response(20, "ruler.tif"),
+            _file_response(21, "ruler.mp4", category="processed"),
+            _file_response(22, "ruler.jpg", category="processed"),
+        ]
+
+        def _download(s3_uri: str, local_path: Path, **_: Any) -> None:
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            if s3_uri.endswith("run.json"):
+                local_path.write_text('{"fps": 1.0}')
+            else:
+                local_path.write_bytes(b"tiff")
+
+        def _encode(tiff_path: Path, mp4_path: Path, poster_path: Path, fps: float) -> None:
+            if tiff_path.name == "empty.tif":
+                raise RuntimeError("empty stack is corrupt")
+            mp4_path.write_bytes(b"mp4")
+            poster_path.write_bytes(b"jpg")
+
+        with (
+            patch(
+                "data_hub_lambda.dishcam.process_file.get_client",
+                return_value=client,
+            ),
+            patch(
+                "data_hub_lambda.dishcam.process_file.s3_utils.object_exists",
+                return_value=True,
+            ),
+            patch(
+                "data_hub_lambda.dishcam.process_file.s3_utils.list_objects",
+                return_value=[
+                    "s3://raw/dishcam/run-xyz/empty.tif",
+                    "s3://raw/dishcam/run-xyz/ruler.tif",
+                ],
+            ),
+            patch(
+                "data_hub_lambda.dishcam.process_file.s3_utils.download_file",
+                side_effect=_download,
+            ),
+            patch("data_hub_lambda.dishcam.process_file.s3_utils.upload_file"),
+            patch(
+                "data_hub_lambda.dishcam.process_file.encode_tiff_stack",
+                side_effect=_encode,
+            ),
+            patch(
+                "data_hub_shared.config.config.AWS_S3_RAW_DATA_BUCKET",
+                "raw",
+            ),
+            patch(
+                "data_hub_shared.config.config.AWS_S3_PROCESSED_DATA_BUCKET",
+                "processed",
+            ),
+            patch(
+                "data_hub_shared.config.config.LOCAL_RAW_DATA_DIRPATH",
+                tmp_path,
+            ),
+        ):
+            from data_hub_lambda.dishcam.process_file import process_file
+
+            with pytest.raises(RuntimeError, match="corrupt"):
+                process_file("dishcam", "run-xyz", "run.json")
+
+        statuses = {
+            call.args[0]: call.kwargs.get("status")
+            for call in client.update_file.call_args_list
+            if call.kwargs.get("status") in {"completed", "failed"}
+        }
+        assert statuses[10] == "failed"
+        assert statuses[20] == "completed"
+        client.update_run.assert_called_once()

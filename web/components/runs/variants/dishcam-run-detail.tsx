@@ -2,18 +2,15 @@ import { DeleteRunDialog } from "@/components/runs/delete-run-dialog";
 import { RestoreRunButton } from "@/components/runs/restore-run-button";
 import type { RunDetailProps } from "@/components/runs/run-detail";
 import { RunDetail } from "@/components/runs/run-detail";
-import {
-  DefaultRunBadges,
-  hasDefaultMetadata,
-} from "@/components/runs/run-metadata-badges";
 
-export function DefaultRunDetail({
+export function DishcamRunDetail({
   run,
   files,
   filesDownloadableCount,
   filesPagination,
   fileStats,
   reportFiles,
+  reportItems,
   instrumentId,
   runId,
   attributionsSlot,
@@ -44,13 +41,7 @@ export function DefaultRunDetail({
           attributionsSlot={attributionsSlot}
           fileStats={fileStats}
           run={run}
-        >
-          {hasDefaultMetadata(run.metadata as Record<string, unknown>) && (
-            <DefaultRunBadges
-              metadata={run.metadata as Record<string, unknown>}
-            />
-          )}
-        </RunDetail.Metadata>
+        />
         <RunDetail.Files
           files={files}
           filteredDownloadableCount={filesDownloadableCount}
@@ -63,7 +54,12 @@ export function DefaultRunDetail({
         />
       </RunDetail.FilesMetadataLayout>
 
-      <RunDetail.Report files={reportFiles} />
+      <RunDetail.VideoCarousel
+        files={reportFiles}
+        initialPage={reportItems}
+        instrumentId={instrumentId}
+        runId={runId}
+      />
     </>
   );
 }

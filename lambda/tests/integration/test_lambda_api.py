@@ -286,6 +286,41 @@ class TestDishCamHappyPath:
         assert f"s3://test-processed-bucket/dishcam/{run_id}/dishcam-test.mp4" in uploaded
         assert f"s3://test-processed-bucket/dishcam/{run_id}/dishcam-test.jpg" in uploaded
 
+    @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg is not on PATH")
+    def test_run_json_encodes_every_tiff(
+        self,
+        integration_env: IntegrationEnv,
+        make_s3_event: Callable[..., dict[str, Any]],
+        s3_fixture_files: dict[str, Path],
+        mock_context: MagicMock,
+        mock_s3_upload: MagicMock,
+    ) -> None:
+        run_id = "dishcam-multi-tiff"
+        s3_fixture_files[f"dishcam/{run_id}/empty.tif"] = _FIXTURES_DIR / "dishcam_example.tif"
+        s3_fixture_files[f"dishcam/{run_id}/ruler.tif"] = _FIXTURES_DIR / "dishcam_example.tif"
+        s3_fixture_files[f"dishcam/{run_id}/run.json"] = _FIXTURES_DIR / "dishcam_run.json"
+
+        event = make_s3_event("dishcam", run_id, "run.json")
+        lambda_handler(event, mock_context)
+
+        run = _api_get(
+            integration_env.base_url,
+            integration_env.api_token,
+            f"/api/v1/instruments/dishcam/runs/{run_id}",
+        )
+
+        raw = {f["filename"]: f for f in run["files"] if f["category"] == "raw"}
+        assert raw["empty.tif"]["status"] == "completed"
+        assert raw["ruler.tif"]["status"] == "completed"
+
+        processed = {f["filename"] for f in run["files"] if f["category"] == "processed"}
+        assert processed == {
+            "empty.mp4",
+            "empty.jpg",
+            "ruler.mp4",
+            "ruler.jpg",
+        }
+
     def test_tiff_alone_does_not_create_a_run(
         self,
         integration_env: IntegrationEnv,

@@ -1,6 +1,7 @@
 import type { RunDetailProps } from "@/components/runs/run-detail";
 
 import { DefaultRunDetail } from "./default-run-detail";
+import { DishcamRunDetail } from "./dishcam-run-detail";
 import { EpsonScannerRunDetail } from "./epson-scanner-run-detail";
 import { GelDocRunDetail } from "./gel-doc-run-detail";
 import { HinaMicroscopeRunDetail } from "./hina-microscope-run-detail";
@@ -34,8 +35,7 @@ function renderRunDetailVariant(props: RunDetailVariantProps) {
     case "instant_raman":
       return <InstantRamanRunDetail {...props} />;
     case "dishcam":
-      // Sidecar fps / quality / timestamps are not useful as summary tags.
-      return <DefaultRunDetail {...props} showDefaultBadges={false} />;
+      return <DishcamRunDetail {...props} />;
     default:
       return <DefaultRunDetail {...props} />;
   }

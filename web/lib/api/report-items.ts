@@ -37,6 +37,10 @@ const KIND_PREDICATES: Record<ReportItemKind, SQL> = {
     ${files.contentType} = 'text/csv'
     or lower(${files.filename}) like '%.csv'
   )`,
+  video: sql`(
+    ${files.contentType} like 'video/%'
+    or lower(${files.filename}) like '%.mp4'
+  )`,
 };
 
 function reportItemsWhere(
