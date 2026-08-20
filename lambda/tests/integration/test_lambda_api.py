@@ -277,6 +277,8 @@ class TestDishCamHappyPath:
 
         raw_tiff = next(f for f in run["files"] if f["filename"] == tiff_name)
         assert raw_tiff["status"] == "completed"
+        sidecar = next(f for f in run["files"] if f["filename"] == "run.json")
+        assert sidecar["status"] == "completed"
 
         processed = [f for f in run["files"] if f["category"] == "processed"]
         names = {f["filename"] for f in processed}
@@ -312,6 +314,7 @@ class TestDishCamHappyPath:
         raw = {f["filename"]: f for f in run["files"] if f["category"] == "raw"}
         assert raw["empty.tif"]["status"] == "completed"
         assert raw["ruler.tif"]["status"] == "completed"
+        assert raw["run.json"]["status"] == "completed"
 
         processed = {f["filename"] for f in run["files"] if f["category"] == "processed"}
         assert processed == {

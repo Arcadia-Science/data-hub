@@ -8,6 +8,7 @@ from data_hub_lambda.api_client import ApiError, DataHubClient, get_client
 from data_hub_lambda.dishcam.encode_video import encode_tiff_stack
 from data_hub_lambda.dishcam.filenames import RUN_JSON_NAME, is_tiff, matches_filename
 from data_hub_lambda.dishcam.parse_metadata import encode_fps, parse_run_json, playback_fps
+from data_hub_lambda.models import FileResponse
 from data_hub_shared import s3_utils
 from data_hub_shared.config import config
 
@@ -27,13 +28,26 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
     sidecar is already in S3.
 
     Reprocess already marks the trigger `processing`, so a missing sibling
-    fails that file instead of leaving it stuck.
+    fails that file instead of leaving it stuck. A parsed sidecar is
+    completed even if a stack failed: it has no stack of its own, and
+    leaving it in `processing` stranded the run. Stack status, not the
+    sidecar, decides whether the run looks failed.
 
     TIFF and `run.json` are separate S3 events, so two invocations can
-    encode the same stack. `create_file` is idempotent; completed/failed
-    updates swallow 409 so the loser does not fail a successful run.
-    Duplicate compute is accepted — a lock would need run-level state
-    we do not have.
+    encode the same stack. The `run.json` batch skips stacks that are
+    already completed or processing: `completed → processing` is a legal
+    transition, and a later disk-full failure would otherwise reopen a
+    sibling's success and mark it failed. A stack left in `processing`
+    after a timeout is retried by reprocessing that TIFF, not another
+    `run.json` batch. A TIFF-triggered invoke always encodes that stack.
+    completed/failed updates swallow 409 so the loser does not fail a
+    successful run.
+
+    Run metadata is written from the parsed sidecar even when every stack
+    is skipped, so a corrected `run.json` still updates the run.
+
+    High-quality stacks are a few GB and Lambda `/tmp` is capped, so each
+    encode deletes its local TIFF/MP4/JPEG before the next stack.
     """
     if not matches_filename(filename):
         logger.info("Ignoring DishCam file %s; not a TIFF or run.json.", filename)
@@ -82,11 +96,19 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
                 s3_key=tiff_key,
                 filename=tiff_filename,
             )
-            _update_file_status(client, record.id, "failed", error_message=str(exc))
+            _fail_file(client, record, str(exc))
+        _fail_file(client, _sidecar_file(client, instrument_id, run_id), str(exc))
         raise
 
+    sidecar = _sidecar_file(client, instrument_id, run_id)
+    # Only bump uploaded/failed → processing. A completed sidecar from a
+    # sibling invocation must stay completed so the run does not flicker
+    # back to processing during a duplicate encode.
+    if sidecar.status in {"uploaded", "failed"}:
+        _update_file_status(client, sidecar.id, "processing")
+
     last_error: Exception | None = None
-    encoded_any = False
+    owned = is_tiff(filename)
     for tiff_filename in tiff_filenames:
         try:
             _encode_tiff(
@@ -97,14 +119,22 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
                 raw_dir,
                 tiff_filename,
                 fps,
+                owned=owned,
             )
-            encoded_any = True
         except Exception as exc:
             logger.error("Error processing DishCam file %s: %s", tiff_filename, exc)
             last_error = exc
 
-    if encoded_any:
-        client.update_run(instrument_id, run_id, metadata=metadata)
+    client.update_run(instrument_id, run_id, metadata=metadata)
+    # The sidecar parsed; complete it even if a stack failed. Do not let a
+    # status PATCH hide the encode error the caller should see.
+    if sidecar.status != "completed":
+        try:
+            _update_file_status(client, sidecar.id, "completed")
+        except Exception:
+            logger.exception("Failed to complete DishCam run.json for %s.", run_id)
+            if last_error is None:
+                raise
     if last_error is not None:
         raise last_error
 
@@ -138,7 +168,17 @@ def _encode_tiff(
     raw_dir: Path,
     tiff_filename: str,
     fps: float,
-) -> None:
+    *,
+    owned: bool,
+) -> bool:
+    """Encode one stack. Return True if this invoke produced an MP4.
+
+    `owned` is True when the S3/reprocess trigger is this TIFF, so a
+    duplicate event or an intentional retry still runs. The `run.json`
+    batch passes False and leaves in-flight and finished stacks alone. A
+    stack stuck in `processing` after a timeout is retried by
+    reprocessing that TIFF, not another `run.json` batch.
+    """
     tiff_key = f"{instrument_id}/{run_id}/{tiff_filename}"
     tiff_uri = f"s3://{raw_bucket}/{tiff_key}"
     tiff_record = client.create_file(
@@ -149,15 +189,22 @@ def _encode_tiff(
         filename=tiff_filename,
     )
     tiff_id = tiff_record.id
+    local_tiff = raw_dir / tiff_filename
+    mp4_path = raw_dir / f"{Path(tiff_filename).stem}.mp4"
+    poster_path = raw_dir / f"{Path(tiff_filename).stem}.jpg"
+
+    if not owned and tiff_record.status in {"completed", "processing"}:
+        logger.info(
+            "Skipping DishCam file %s; already %s.",
+            tiff_filename,
+            tiff_record.status,
+        )
+        return False
 
     try:
         client.update_file(tiff_id, status="processing")
 
-        local_tiff = raw_dir / tiff_filename
         s3_utils.download_file(tiff_uri, local_tiff)
-
-        mp4_path = raw_dir / f"{Path(tiff_filename).stem}.mp4"
-        poster_path = raw_dir / f"{Path(tiff_filename).stem}.jpg"
         encode_tiff_stack(local_tiff, mp4_path, poster_path, fps)
 
         processed_bucket = config.AWS_S3_PROCESSED_DATA_BUCKET or ""
@@ -183,11 +230,40 @@ def _encode_tiff(
                 "DishCam file %s already finished by a sibling invocation.",
                 tiff_filename,
             )
-            return
+            return True
         logger.info("DishCam file %s marked as completed.", tiff_filename)
+        return True
     except Exception as exc:
         _update_file_status(client, tiff_id, "failed", error_message=str(exc))
         raise
+    finally:
+        # One high-quality stack can be several GB; leaving it on disk
+        # fills the Lambda `/tmp` cap before the next stack in the batch.
+        _remove_local(local_tiff, mp4_path, poster_path)
+
+
+def _remove_local(*paths: Path) -> None:
+    for path in paths:
+        path.unlink(missing_ok=True)
+
+
+def _sidecar_file(client: DataHubClient, instrument_id: str, run_id: str) -> FileResponse:
+    """Return the `run.json` row. The run already exists via `ensure_run`."""
+    raw_bucket = config.AWS_S3_RAW_DATA_BUCKET or ""
+    return client.create_file(
+        instrument_id=instrument_id,
+        run_id=run_id,
+        s3_bucket=raw_bucket,
+        s3_key=f"{instrument_id}/{run_id}/{RUN_JSON_NAME}",
+        filename=RUN_JSON_NAME,
+    )
+
+
+def _fail_file(client: DataHubClient, record: FileResponse, error_message: str) -> None:
+    """Mark failed. Terminal and `uploaded` states must go through `processing` first."""
+    if record.status != "processing":
+        _update_file_status(client, record.id, "processing")
+    _update_file_status(client, record.id, "failed", error_message=error_message)
 
 
 def _upload_processed(
