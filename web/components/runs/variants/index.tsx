@@ -33,6 +33,9 @@ function renderRunDetailVariant(props: RunDetailVariantProps) {
       return <EpsonScannerRunDetail {...props} />;
     case "instant_raman":
       return <InstantRamanRunDetail {...props} />;
+    case "dishcam":
+      // Sidecar fps / quality / timestamps are not useful as summary tags.
+      return <DefaultRunDetail {...props} showDefaultBadges={false} />;
     default:
       return <DefaultRunDetail {...props} />;
   }

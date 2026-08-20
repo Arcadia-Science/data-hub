@@ -18,7 +18,8 @@ export function DefaultRunDetail({
   runId,
   attributionsSlot,
   runNavSlot,
-}: RunDetailProps) {
+  showDefaultBadges = true,
+}: RunDetailProps & { showDefaultBadges?: boolean }) {
   const isDeleted = run.deletedAt !== null;
   const activeFileCount = fileStats.active;
   const hasProcessedFiles = fileStats.processedActive > 0;
@@ -45,11 +46,12 @@ export function DefaultRunDetail({
           fileStats={fileStats}
           run={run}
         >
-          {hasDefaultMetadata(run.metadata as Record<string, unknown>) && (
-            <DefaultRunBadges
-              metadata={run.metadata as Record<string, unknown>}
-            />
-          )}
+          {showDefaultBadges &&
+            hasDefaultMetadata(run.metadata as Record<string, unknown>) && (
+              <DefaultRunBadges
+                metadata={run.metadata as Record<string, unknown>}
+              />
+            )}
         </RunDetail.Metadata>
         <RunDetail.Files
           files={files}
