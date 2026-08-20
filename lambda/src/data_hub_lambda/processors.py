@@ -15,10 +15,12 @@ from data_hub_lambda import (
     akta_fplc,
     azure_600_gel_doc,
     azure_cielo_qpcr,
+    dishcam,
     epson_v700_scanner,
     hina_microscope,
     spectramax_plate_reader,
 )
+from data_hub_lambda.dishcam.filenames import matches_filename as _is_dishcam_input
 
 ProcessFileFn = Callable[[str, str, str], None]
 
@@ -69,6 +71,10 @@ PROCESSORS: dict[str, ProcessorEntry] = {
     "fplc": ProcessorEntry(
         process_file=akta_fplc.process_file,
         matches_filename=_ends_with_any(".pdf"),
+    ),
+    "dishcam": ProcessorEntry(
+        process_file=dishcam.process_file,
+        matches_filename=_is_dishcam_input,
     ),
 }
 

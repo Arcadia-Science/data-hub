@@ -241,6 +241,71 @@ class TestAzure600GelDocHappyPath:
 
 
 # ------------------------------------------------------------------
+# Test 4b'': DishCam — both files present, encode MP4 + poster
+# ------------------------------------------------------------------
+
+
+class TestDishCamHappyPath:
+    def test_run_json_encodes_sibling_tiff(
+        self,
+        integration_env: IntegrationEnv,
+        make_s3_event: Callable[..., dict[str, Any]],
+        s3_fixture_files: dict[str, Path],
+        mock_context: MagicMock,
+        mock_s3_upload: MagicMock,
+    ) -> None:
+        run_id = "dishcam-test_20260819_155803"
+        tiff_name = "dishcam-test.tif"
+        s3_fixture_files[f"dishcam/{run_id}/{tiff_name}"] = _FIXTURES_DIR / "dishcam_example.tif"
+        s3_fixture_files[f"dishcam/{run_id}/run.json"] = _FIXTURES_DIR / "dishcam_run.json"
+
+        event = make_s3_event("dishcam", run_id, "run.json")
+        lambda_handler(event, mock_context)
+
+        run = _api_get(
+            integration_env.base_url,
+            integration_env.api_token,
+            f"/api/v1/instruments/dishcam/runs/{run_id}",
+        )
+
+        assert run["source"] == "lambda"
+        assert run["metadata"]["frames"] == 4
+        assert run["metadata"]["measured_fps"] == 0.95
+        assert run["metadata"]["quality"] == "High"
+
+        raw_tiff = next(f for f in run["files"] if f["filename"] == tiff_name)
+        assert raw_tiff["status"] == "completed"
+
+        processed = [f for f in run["files"] if f["category"] == "processed"]
+        names = {f["filename"] for f in processed}
+        assert names == {"dishcam-test.mp4", "dishcam-test.jpg"}
+
+        uploaded = {call.args[1] for call in mock_s3_upload.call_args_list}
+        assert f"s3://test-processed-bucket/dishcam/{run_id}/dishcam-test.mp4" in uploaded
+        assert f"s3://test-processed-bucket/dishcam/{run_id}/dishcam-test.jpg" in uploaded
+
+    def test_tiff_alone_does_not_create_a_run(
+        self,
+        integration_env: IntegrationEnv,
+        make_s3_event: Callable[..., dict[str, Any]],
+        s3_fixture_files: dict[str, Path],
+        mock_context: MagicMock,
+    ) -> None:
+        run_id = "dishcam-tiff-only"
+        s3_fixture_files[f"dishcam/{run_id}/stack.tif"] = _FIXTURES_DIR / "dishcam_example.tif"
+
+        event = make_s3_event("dishcam", run_id, "stack.tif")
+        lambda_handler(event, mock_context)
+
+        resp = requests.get(
+            f"{integration_env.base_url}/api/v1/instruments/dishcam/runs/{run_id}",
+            headers={"Authorization": f"Bearer {integration_env.api_token}"},
+            timeout=10,
+        )
+        assert resp.status_code == 404
+
+
+# ------------------------------------------------------------------
 # Test 4c: Malformed file — failure path
 # ------------------------------------------------------------------
 

@@ -281,6 +281,13 @@
       "when": 1786128237567,
       "tag": "0039_add_natural_filename_collation",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1787187000000,
+      "tag": "0040_dishcam_type",
+      "breakpoints": true
     }
   ]
 }

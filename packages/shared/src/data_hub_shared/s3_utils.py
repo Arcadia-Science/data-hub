@@ -13,6 +13,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import boto3
+from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +43,9 @@ def _extra_args(file_path: Path) -> dict[str, str]:
     content_type, _ = mimetypes.guess_type(str(file_path))
     if content_type:
         args["ContentType"] = content_type
-        # Images get "inline" disposition so browsers render them directly
+        # Images and video get "inline" so browsers render / play them
         # instead of prompting a download when accessed via pre-signed URL.
-        if content_type.startswith("image/"):
+        if content_type.startswith("image/") or content_type.startswith("video/"):
             args["ContentDisposition"] = "inline"
     return args
 
@@ -61,6 +62,24 @@ def upload_file(
     extra = _extra_args(local_path)
     logger.debug("Uploading %s → s3://%s/%s", local_path, bucket, key)
     client.upload_file(str(local_path), bucket, key, ExtraArgs=extra)
+
+
+def object_exists(
+    s3_uri: str,
+    *,
+    s3_client: S3Client | None = None,
+) -> bool:
+    """Return True if *s3_uri* exists (HEAD), False on 404."""
+    client = s3_client or get_s3_client()
+    bucket, key = parse_s3_uri(s3_uri)
+    try:
+        client.head_object(Bucket=bucket, Key=key)
+    except ClientError as exc:
+        code = str(exc.response.get("Error", {}).get("Code", ""))
+        if code in {"404", "NoSuchKey", "NotFound"}:
+            return False
+        raise
+    return True
 
 
 def download_file(

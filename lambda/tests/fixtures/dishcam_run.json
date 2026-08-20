@@ -1,0 +1,13 @@
+{
+  "prefix": "dishcam-test",
+  "quality": "High",
+  "fps": 1.0,
+  "duration_seconds": 4,
+  "planned_frames": 4,
+  "started": "2026-08-19T15:58:03",
+  "folder": "dishcam-test_20260819_155803",
+  "format": "tiff",
+  "frames": 4,
+  "measured_fps": 0.95,
+  "finished": "2026-08-19T15:58:07"
+}
