@@ -44,6 +44,13 @@ class TestFilenameGates:
             ("epson_v700_scanner", "scan.jpg", False),
             ("fplc", "chromatogram.pdf", True),
             ("fplc", "notes.txt", False),
+            ("dishcam", "stack.tif", True),
+            ("dishcam", "stack.tiff", True),
+            ("dishcam", "stack.TIF", True),
+            ("dishcam", "run.json", True),
+            ("dishcam", "RUN.JSON", True),
+            ("dishcam", "notes.json", False),
+            ("dishcam", "stack.png", False),
         ],
     )
     def test_per_type_gate(self, instrument_type: str, filename: str, expected: bool) -> None:
@@ -54,6 +61,7 @@ class TestFilenameGates:
         assert matches_any_processor_gate("Experiment_Cq Values.csv")
         assert matches_any_processor_gate("scan.TIFF")
         assert matches_any_processor_gate("well.nd2")
+        assert matches_any_processor_gate("run.json")
         assert not matches_any_processor_gate("readme.txt")
         assert not matches_any_processor_gate("notes.md")
 

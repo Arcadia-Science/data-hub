@@ -1,6 +1,6 @@
 import type { InstrumentType } from "@/lib/db/schema";
 
-export const REPORT_ITEM_KINDS = ["image", "pdf", "spectrum"] as const;
+export const REPORT_ITEM_KINDS = ["image", "pdf", "spectrum", "video"] as const;
 
 export type ReportItemKind = (typeof REPORT_ITEM_KINDS)[number];
 
@@ -33,6 +33,7 @@ const KIND_BY_INSTRUMENT: Partial<Record<InstrumentType, ReportItemKind>> = {
   hina_microscope: "image",
   tape_station: "pdf",
   instant_raman: "spectrum",
+  dishcam: "video",
 };
 
 export function reportItemKindForInstrument(

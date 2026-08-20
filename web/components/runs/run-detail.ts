@@ -6,6 +6,7 @@ import { RunFilesSection } from "@/components/runs/run-files-section";
 import { RunHeader } from "@/components/runs/run-header";
 import { RunMetadata } from "@/components/runs/run-metadata";
 import { RunReportSection } from "@/components/runs/run-report-section";
+import { VideoCarouselReport } from "@/components/runs/video-carousel-report";
 import type {
   RawWellRow,
   RunDetail as RunDetailType,
@@ -24,6 +25,7 @@ export const RunDetail = {
   ImageCarousel: ImageCarouselReport,
   PdfCarousel: PdfCarouselReport,
   RamanReport: RamanReportSection,
+  VideoCarousel: VideoCarouselReport,
 };
 
 export interface RunDetailProps {

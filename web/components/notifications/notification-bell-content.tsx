@@ -12,6 +12,7 @@ import {
   ScanLine,
   Settings,
   TestTube,
+  Video,
 } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -48,6 +49,7 @@ const INSTRUMENT_TYPE_ICON: Record<InstrumentType, LucideIcon> = {
   epson_v700_scanner: ScanLine,
   instant_raman: Radar,
   fplc: FlaskConical,
+  dishcam: Video,
 };
 
 // Bucket labels live alongside the buckets themselves so the section

@@ -50,6 +50,7 @@ Dispatch is by `instrument_type` (Postgres/TS enum), not instrument ID. The regi
 | `epson_v700_scanner` | `epson_v700_scanner` | `.tif` / `.tiff` |
 | `hina_microscope` | `hina_microscope` | `.nd2` |
 | `plate_reader` | `spectramax_plate_reader` | `.xls` |
+| `dishcam` | `dishcam` | `.tif` / `.tiff` / `run.json` |
 | `generic`, `instant_raman` | — | — |
 
 **One type = one vendor's output format.** Names like `qpcr` and `fplc` sound generic, but the parsers behind them are vendor-specific (Azure Cielo, ÄKTA, …). Adding a second vendor under an existing type requires splitting the type, not reusing it.
@@ -98,9 +99,10 @@ Available commands:
 | `qpcr` | Parse dye channels from an Azure Cielo qPCR Cq Values CSV |
 | `spectramax` | Parse metadata and raw well data from a SpectraMax `.xls` export |
 | `tapestation` | Extract the tape type from a TapeStation CSV filename |
+| `dishcam` | Convert a DishCam TIFF stack plus `run.json` into an MP4 preview and JPEG poster |
 | `handler` | Stage a file into a local S3 mirror and invoke `lambda_handler` against the local dev API. See [Testing the Lambda end-to-end](local-development.md#testing-the-lambda-end-to-end) for the workflow. |
 
-The first six subcommands need no S3 or API access — they call into the same parsing/processing utilities the lambda uses, but stop short of the network. `handler` is different: it expects a running dev API and a `LOCAL_S3_MIRROR` directory, and uses the same dispatch path production uses.
+The instrument-specific subcommands need no S3 or API access — they call into the same parsing/processing utilities the lambda uses, but stop short of the network. `handler` is different: it expects a running dev API and a `LOCAL_S3_MIRROR` directory, and uses the same dispatch path production uses.
 
 Examples:
 
@@ -120,8 +122,9 @@ make docker-build-lambda
 
 The Dockerfile is a multi-stage build:
 
-1. **Builder stage**: Uses `uv` to export and install third-party dependencies into the Lambda task root.
-2. **Final stage**: Copies the installed dependencies plus the `data_hub_shared` and `data_hub_lambda` source packages.
+1. **ffmpeg stage**: Copies a static linux/amd64 `ffmpeg` (libx264) from the version-tagged `mwader/static-ffmpeg` image.
+2. **Builder stage**: Uses `uv` to export and install third-party dependencies into the Lambda task root.
+3. **Final stage**: Copies ffmpeg, the installed dependencies, and the `data_hub_shared` and `data_hub_lambda` source packages.
 
 The entry point is `data_hub_lambda.handler.lambda_handler`.
 
@@ -134,6 +137,7 @@ The Lambda function depends on a scientific Python stack:
 - `matplotlib` — plotting
 - `scikit-image` — image processing
 - `tifffile` — TIFF file reading
+- `ffmpeg` — static linux/amd64 binary from `mwader/static-ffmpeg` for DishCam H.264 encode
 - `arcadia-microscopy-tools` — ND2 reading, channel handling, and multi-channel compositing for the Hina microscope
 - `pydantic` — data validation
 - `requests` — HTTP client for the Data Hub API

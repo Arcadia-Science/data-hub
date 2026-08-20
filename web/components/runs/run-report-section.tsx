@@ -1,10 +1,18 @@
 import { ExternalLink } from "lucide-react";
 import { ColonyDataTable } from "@/components/runs/colony-data-table";
 import { RunSectionHeading } from "@/components/runs/run-section-heading";
+import { RunVideoPlayer } from "@/components/runs/run-video-player";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import type { RunFile } from "@/lib/api/instrument-runs";
-import { isCsvFile, isImageFile, isPdfFile } from "@/lib/runs/run-file-types";
+import {
+  fileStem,
+  isCsvFile,
+  isImageFile,
+  isPdfFile,
+  isVideoFile,
+  posterFileIdsByVideoFilename,
+} from "@/lib/runs/run-file-types";
 
 function ProcessedImagePreview({ file }: { file: RunFile }) {
   const downloadUrl = `/api/v1/files/${file.id}/download`;
@@ -70,14 +78,27 @@ export function RunReportSection({
     (f) => f.category === "processed" && f.deletedAt === null && isCsvFile(f)
   );
 
+  const processedVideos = files.filter(
+    (f) => f.category === "processed" && f.deletedAt === null && isVideoFile(f)
+  );
+  const posterFileIds = posterFileIdsByVideoFilename(files);
+  const videoStems = new Set(processedVideos.map((f) => fileStem(f.filename)));
+
   const processedImages = files.filter(
-    (f) => f.category === "processed" && f.deletedAt === null && isImageFile(f)
+    (f) =>
+      f.category === "processed" &&
+      f.deletedAt === null &&
+      isImageFile(f) &&
+      !videoStems.has(fileStem(f.filename))
   );
 
   const pdfFiles = files.filter((f) => f.deletedAt === null && isPdfFile(f));
 
   const totalCount =
-    processedCsvs.length + processedImages.length + pdfFiles.length;
+    processedCsvs.length +
+    processedImages.length +
+    processedVideos.length +
+    pdfFiles.length;
 
   if (totalCount === 0) {
     return (
@@ -99,6 +120,14 @@ export function RunReportSection({
       <RunSectionHeading countLabel={totalCount} title={title} />
       <Card size="sm">
         <CardContent className="flex flex-col gap-6">
+          {processedVideos.map((file) => (
+            <RunVideoPlayer
+              fileId={file.id}
+              filename={file.filename}
+              key={file.id}
+              posterFileId={posterFileIds[file.filename]}
+            />
+          ))}
           {processedImages.map((file) => (
             <ProcessedImagePreview file={file} key={file.id} />
           ))}
