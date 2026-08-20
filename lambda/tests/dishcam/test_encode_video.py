@@ -1,4 +1,4 @@
-"""Unit tests for DishCam ffmpeg encode and frame scaling."""
+"""Unit tests for DishCam ffmpeg encode."""
 
 from __future__ import annotations
 import shutil
@@ -9,9 +9,7 @@ import pytest
 import tifffile
 
 from data_hub_lambda.dishcam.encode_video import (
-    _as_rgb24,
     _ffmpeg_rate,
-    _rgb_scale,
     encode_tiff_stack,
     resolve_ffmpeg,
 )
@@ -63,26 +61,6 @@ def test_encode_odd_width_stack(tmp_path: Path) -> None:
 @requires_ffmpeg
 def test_resolve_ffmpeg_finds_binary() -> None:
     assert Path(resolve_ffmpeg()).name.startswith("ffmpeg")
-
-
-def test_rgb_scale_uses_power_of_two_for_12bit_uint16() -> None:
-    frame = np.full((2, 2, 3), 4095, dtype=np.uint16)
-    assert _rgb_scale(frame) == 4096
-
-
-def test_as_rgb24_12bit_reaches_near_white() -> None:
-    frame = np.full((1, 1, 3), 4095, dtype=np.uint16)
-    out = _as_rgb24(frame, scale=_rgb_scale(frame))
-    assert out.dtype == np.uint8
-    assert out[0, 0, 0] >= 254
-
-
-def test_as_rgb24_reuses_first_frame_scale() -> None:
-    bright = np.full((1, 1, 3), 4095, dtype=np.uint16)
-    dim = np.full((1, 1, 3), 2048, dtype=np.uint16)
-    scale = _rgb_scale(bright)
-    out = _as_rgb24(dim, scale=scale)
-    assert out[0, 0, 0] == pytest.approx(2048 * 255 / 4096, abs=1)
 
 
 def test_ffmpeg_rate_avoids_scientific_notation() -> None:

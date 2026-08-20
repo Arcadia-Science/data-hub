@@ -36,27 +36,12 @@ def _ffmpeg_rate(fps: float) -> str:
     return f"{fps:.6f}".rstrip("0").rstrip(".")
 
 
-def _rgb_scale(frame: NDArray) -> float:  # type: ignore[type-arg]
-    """Value that maps to 255, reused for every page in the stack.
+def _as_rgb24(frame: NDArray) -> NDArray:  # type: ignore[type-arg]
+    """Return a C-contiguous uint8 RGB frame for rawvideo stdin.
 
-    12-bit cameras often write into uint16; scaling by the dtype max
-    crushes the preview. Float frames use the first-page max so later
-    pages do not flicker.
+    DishCam writes uint8. A later camera with a wider type needs an
+    explicit converter — do not guess 12-bit from a uint16 peak.
     """
-    if frame.dtype == np.uint8:
-        return 255.0
-    if np.issubdtype(frame.dtype, np.integer):
-        peak = int(np.max(frame)) if frame.size else 0
-        type_max = int(np.iinfo(frame.dtype).max)
-        if peak <= 0:
-            return float(type_max)
-        return float(min(type_max, 1 << peak.bit_length()))
-    peak = float(np.max(frame)) if frame.size else 0.0
-    return peak if peak > 0 else 1.0
-
-
-def _as_rgb24(frame: NDArray, scale: float | None = None) -> NDArray:  # type: ignore[type-arg]
-    """Return a C-contiguous uint8 RGB frame for rawvideo stdin."""
     if frame.ndim == 2:
         frame = np.stack([frame, frame, frame], axis=-1)
     elif frame.ndim == 3 and frame.shape[-1] == 4:
@@ -64,8 +49,7 @@ def _as_rgb24(frame: NDArray, scale: float | None = None) -> NDArray:  # type: i
     elif frame.ndim != 3 or frame.shape[-1] != 3:
         raise ValueError(f"Unsupported TIFF page shape: {frame.shape}")
     if frame.dtype != np.uint8:
-        max_val = scale if scale is not None else _rgb_scale(frame)
-        frame = np.clip(frame.astype(np.float32) * (255.0 / max_val), 0, 255).astype(np.uint8)
+        raise ValueError(f"Expected uint8 RGB pages, got {frame.dtype}")
     return np.ascontiguousarray(frame)
 
 
@@ -145,9 +129,7 @@ def encode_tiff_stack(
         if not tif.pages:
             raise ValueError(f"{tiff_path.name} has no TIFF pages")
 
-        raw_first = tif.pages[0].asarray()
-        scale = _rgb_scale(raw_first)
-        first = _as_rgb24(raw_first, scale)
+        first = _as_rgb24(tif.pages[0].asarray())
         height, width = first.shape[:2]
         _write_jpeg(ffmpeg, first, poster_path)
 
@@ -196,6 +178,6 @@ def encode_tiff_stack(
         def _chunks() -> Iterator[bytes]:
             yield first.tobytes()
             for page in tif.pages[1:]:
-                yield _as_rgb24(page.asarray(), scale).tobytes()
+                yield _as_rgb24(page.asarray()).tobytes()
 
         _pipe_ffmpeg(cmd, _chunks())
