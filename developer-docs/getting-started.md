@@ -11,6 +11,7 @@ This guide walks through setting up the full Data Hub development environment.
 | Node.js | >= 22 | Web application |
 | PostgreSQL | >= 15 | Database (local development) |
 | Docker | latest | Lambda container builds |
+| ffmpeg | latest | DishCam TIFF → MP4 encode (`brew install ffmpeg` / `apt install ffmpeg`). Encode tests skip if it is missing. |
 | [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html) | latest | Infrastructure deployment (optional — only needed for deploying to AWS) |
 
 ## Clone and install

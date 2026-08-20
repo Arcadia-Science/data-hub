@@ -34,6 +34,7 @@ const MIME_MAP: Record<string, string> = {
   ".pdf": "application/pdf",
   ".zip": "application/zip",
   ".nd2": "application/octet-stream",
+  ".mp4": "video/mp4",
 };
 
 export function getLocalMirrorRoot(): string | null {
@@ -65,6 +66,57 @@ export function resolveMirrorPath(
 export function mimeFor(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
   return MIME_MAP[ext] ?? "application/octet-stream";
+}
+
+export type ByteRange =
+  | { kind: "full" }
+  | { kind: "partial"; start: number; end: number }
+  | { kind: "unsatisfiable" };
+
+// Safari (and Chrome when scrubbing) send `Range` against the local
+// mirror the same way they do against S3. A 200 of the whole file
+// without `Accept-Ranges` leaves seeking broken in local dev.
+export function parseByteRange(
+  header: string | null,
+  fileSize: number
+): ByteRange {
+  if (!header) {
+    return { kind: "full" };
+  }
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(header.trim());
+  if (!match) {
+    return { kind: "full" };
+  }
+  const startToken = match[1];
+  const endToken = match[2];
+  if (startToken === "" && endToken === "") {
+    return { kind: "full" };
+  }
+  if (fileSize === 0) {
+    return { kind: "unsatisfiable" };
+  }
+  if (startToken === "") {
+    const suffix = Number(endToken);
+    if (!Number.isFinite(suffix) || suffix <= 0) {
+      return { kind: "unsatisfiable" };
+    }
+    return {
+      kind: "partial",
+      start: Math.max(0, fileSize - suffix),
+      end: fileSize - 1,
+    };
+  }
+  const start = Number(startToken);
+  const end =
+    endToken === "" ? fileSize - 1 : Math.min(Number(endToken), fileSize - 1);
+  if (
+    !(Number.isFinite(start) && Number.isFinite(end)) ||
+    start >= fileSize ||
+    start > end
+  ) {
+    return { kind: "unsatisfiable" };
+  }
+  return { kind: "partial", start, end };
 }
 
 // Sanitize a filename for use inside a `Content-Disposition` header.

@@ -13,6 +13,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import boto3
+from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +43,9 @@ def _extra_args(file_path: Path) -> dict[str, str]:
     content_type, _ = mimetypes.guess_type(str(file_path))
     if content_type:
         args["ContentType"] = content_type
-        # Images get "inline" disposition so browsers render them directly
+        # Images and video get "inline" so browsers render / play them
         # instead of prompting a download when accessed via pre-signed URL.
-        if content_type.startswith("image/"):
+        if content_type.startswith("image/") or content_type.startswith("video/"):
             args["ContentDisposition"] = "inline"
     return args
 
@@ -61,6 +62,39 @@ def upload_file(
     extra = _extra_args(local_path)
     logger.debug("Uploading %s → s3://%s/%s", local_path, bucket, key)
     client.upload_file(str(local_path), bucket, key, ExtraArgs=extra)
+
+
+def object_exists(
+    s3_uri: str,
+    *,
+    s3_client: S3Client | None = None,
+) -> bool:
+    """Return True if *s3_uri* exists (HEAD), False when it does not.
+
+    Missing keys normally 404. Without `s3:ListBucket`, S3 returns 403
+    instead — treat that as missing too, matching `headS3Object` in
+    `web/lib/s3.ts`.
+    """
+    client = s3_client or get_s3_client()
+    bucket, key = parse_s3_uri(s3_uri)
+    try:
+        client.head_object(Bucket=bucket, Key=key)
+    except ClientError as exc:
+        error = exc.response.get("Error", {})
+        code = str(error.get("Code", ""))
+        status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+        if code in {"404", "NoSuchKey", "NotFound"} or status == 404:
+            return False
+        if code in {"403", "AccessDenied", "Forbidden"} or status == 403:
+            logger.warning(
+                "HEAD s3://%s/%s returned 403; treating as missing. "
+                "If this is steady-state, grant s3:ListBucket on the bucket ARN.",
+                bucket,
+                key,
+            )
+            return False
+        raise
+    return True
 
 
 def download_file(

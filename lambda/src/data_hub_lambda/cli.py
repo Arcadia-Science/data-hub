@@ -228,6 +228,46 @@ def tapestation(filename: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# DishCam
+# ---------------------------------------------------------------------------
+
+
+@cli.command("dishcam")
+@click.argument("tiff", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option(
+    "--run-json",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    required=True,
+    help="Sidecar run.json (fps / frame count).",
+)
+@click.option(
+    "--output-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=None,
+    help="Directory for the MP4 and JPEG poster (default: same directory as TIFF).",
+)
+def dishcam_cmd(tiff: Path, run_json: Path, output_dir: Path | None) -> None:
+    """Convert a DishCam TIFF stack to an MP4 preview and JPEG poster."""
+    from data_hub_lambda.dishcam.encode_video import encode_tiff_stack
+    from data_hub_lambda.dishcam.parse_metadata import (
+        encode_fps,
+        parse_run_json,
+        playback_fps,
+    )
+
+    metadata = parse_run_json(run_json)
+    fps = playback_fps(encode_fps(metadata))
+    dest_dir = output_dir or tiff.parent
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    mp4_path = dest_dir / f"{tiff.stem}.mp4"
+    poster_path = dest_dir / f"{tiff.stem}.jpg"
+    encode_tiff_stack(tiff, mp4_path, poster_path, fps)
+    click.echo(f"Exported MP4: {mp4_path}")
+    click.echo(f"Exported JPEG: {poster_path}")
+    click.echo(json.dumps(metadata, indent=2))
+
+
+# ---------------------------------------------------------------------------
 # End-to-end handler invocation against a local S3 mirror
 # ---------------------------------------------------------------------------
 

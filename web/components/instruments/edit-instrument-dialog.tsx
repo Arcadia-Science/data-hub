@@ -35,6 +35,7 @@ const TYPE_LABELS: Record<InstrumentType, string> = {
   epson_v700_scanner: "Epson V700 Scanner",
   instant_raman: "InstantRaman",
   fplc: "FPLC",
+  dishcam: "DishCam",
 };
 
 const INSTRUMENT_TYPE_OPTIONS = VALID_INSTRUMENT_TYPES.map((value) => ({

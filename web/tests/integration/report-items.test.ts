@@ -67,9 +67,20 @@ describe("Report Items API", () => {
       s3Key: `${instrumentId}/${runId}/Site_${n}.csv`,
     }));
 
+    const videoRows = ["empty", "gk134_high", "ruler"].map((stem) => ({
+      instrumentRunId: runInternalId,
+      relativePath: `${stem}.mp4`,
+      filename: `${stem}.mp4`,
+      contentType: "video/mp4",
+      status: "completed" as const,
+      s3Bucket: "test-bucket",
+      s3Key: `${instrumentId}/${runId}/${stem}.mp4`,
+    }));
+
     await db.insert(files).values([
       ...imageRows,
       ...spectrumRows,
+      ...videoRows,
       {
         instrumentRunId: runInternalId,
         relativePath: "peaks.csv",
@@ -172,6 +183,17 @@ describe("Report Items API", () => {
         item.filename.endsWith(".csv")
       )
     ).toBe(true);
+  });
+
+  it("lists videos without mixing in other kinds", async () => {
+    const res = await api(path("kind=video"), { token });
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.pagination.total).toBe(3);
+    expect(
+      body.data.map((item: { filename: string }) => item.filename)
+    ).toEqual(["empty.mp4", "gk134_high.mp4", "ruler.mp4"]);
   });
 
   it("orders unpadded numeric filenames naturally", async () => {

@@ -50,6 +50,13 @@ const LABELS: Record<ReportItemKind, SeekerLabels> = {
     search: "Search spectra...",
     select: "Select a spectrum\u2026",
   },
+  video: {
+    empty: "No videos found.",
+    next: "Next video",
+    previous: "Previous video",
+    search: "Search videos...",
+    select: "Select a video\u2026",
+  },
 };
 
 function LoadSentinel({

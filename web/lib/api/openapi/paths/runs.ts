@@ -152,7 +152,7 @@ registry.registerPath({
   path: "/instruments/{instrumentId}/runs/{runId}/report-items",
   operationId: "listRunReportItems",
   summary: "List a run's report items",
-  description: `${scoped("files:read")} Returns \`{id, filename}\` for the run's renderable images, PDFs, or spectra, ordered by filename. Paged with \`offset\`/\`limit\` so viewers can seek by item index.`,
+  description: `${scoped("files:read")} Returns \`{id, filename}\` for the run's renderable images, PDFs, spectra, or videos, ordered by filename. Paged with \`offset\`/\`limit\` so viewers can seek by item index.`,
   tags: tag,
   security: bearerSecurity,
   request: { params: runParams, query: reportItemsQuery },

@@ -36,6 +36,7 @@ _INSTRUMENTS: dict[str, str] = {
     "hina-microscope": "Hina Microscope",
     "spectramax-id3-plate-reader": "SpectraMax iD3 Plate Reader",
     "spectramax-id5-plate-reader": "SpectraMax iD5 Plate Reader",
+    "dishcam": "DishCam",
 }
 
 _INSTRUMENT_TYPES: dict[str, str] = {
@@ -44,6 +45,7 @@ _INSTRUMENT_TYPES: dict[str, str] = {
     "hina-microscope": "hina_microscope",
     "spectramax-id3-plate-reader": "plate_reader",
     "spectramax-id5-plate-reader": "plate_reader",
+    "dishcam": "dishcam",
 }
 
 
@@ -272,6 +274,39 @@ def mock_s3_upload() -> Generator[MagicMock, None, None]:
     """Patch `s3_utils.upload_file` as a no-op so processors that write to the
     processed bucket (e.g. Azure 600 Gel Doc) don't hit real S3."""
     with patch("data_hub_shared.s3_utils.upload_file") as mock:
+        yield mock
+
+
+@pytest.fixture(autouse=True)
+def mock_s3_object_exists(
+    s3_fixture_files: dict[str, Path],
+) -> Generator[MagicMock, None, None]:
+    """HEAD exists when the key was registered on `s3_fixture_files`."""
+
+    def _exists(s3_uri: str, **_: Any) -> bool:
+        key = s3_uri.split("//", 1)[1].split("/", 1)[1]
+        return key in s3_fixture_files
+
+    with patch("data_hub_shared.s3_utils.object_exists", side_effect=_exists) as mock:
+        yield mock
+
+
+@pytest.fixture(autouse=True)
+def mock_s3_list_objects(
+    s3_fixture_files: dict[str, Path],
+) -> Generator[MagicMock, None, None]:
+    """List registered fixture keys under the requested prefix."""
+
+    def _list(s3_uri_prefix: str, suffix: str = "", **_: Any) -> list[str]:
+        rest = s3_uri_prefix.split("//", 1)[1]
+        bucket, prefix = rest.split("/", 1)
+        uris: list[str] = []
+        for key in s3_fixture_files:
+            if key.startswith(prefix) and (not suffix or key.endswith(suffix)):
+                uris.append(f"s3://{bucket}/{key}")
+        return uris
+
+    with patch("data_hub_shared.s3_utils.list_objects", side_effect=_list) as mock:
         yield mock
 
 

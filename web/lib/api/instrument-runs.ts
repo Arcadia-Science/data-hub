@@ -1413,6 +1413,7 @@ export async function getInstrumentFilterOptions(
     case "generic":
     case "tape_station":
     case "instant_raman":
+    case "dishcam":
       return { kind: "default" };
     default:
       return { kind: "default" };

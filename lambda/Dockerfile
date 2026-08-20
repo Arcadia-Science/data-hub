@@ -1,5 +1,9 @@
 FROM ghcr.io/astral-sh/uv:0.8.12 AS uv
 
+# Version-tagged static build with libx264. BtbN autobuild URLs are
+# deleted; this Hub tag stays pullable. linux/amd64 matches Lambda.
+FROM --platform=linux/amd64 mwader/static-ffmpeg:8.1.2 AS ffmpeg
+
 FROM public.ecr.aws/lambda/python:3.12 AS builder
 
 ENV UV_COMPILE_BYTECODE=1
@@ -21,6 +25,7 @@ RUN --mount=from=uv,source=/uv,target=/bin/uv \
 
 FROM public.ecr.aws/lambda/python:3.12
 
+COPY --from=ffmpeg /ffmpeg /usr/local/bin/ffmpeg
 COPY --from=builder ${LAMBDA_TASK_ROOT} ${LAMBDA_TASK_ROOT}
 # Workspace packages are copied as source (not pip-installed) so they land
 # directly on the Python path alongside the third-party deps.
