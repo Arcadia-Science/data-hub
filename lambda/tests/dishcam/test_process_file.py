@@ -51,6 +51,9 @@ def _run_response() -> RunResponse:
     )
 
 
+SIDECAR_ID = 99
+
+
 def _exists_for(*keys: str):
     present = set(keys)
 
@@ -59,6 +62,14 @@ def _exists_for(*keys: str):
         return key in present
 
     return _exists
+
+
+def _completed_file_ids(client: MagicMock) -> list[int]:
+    return [
+        call.args[0]
+        for call in client.update_file.call_args_list
+        if call.kwargs.get("status") == "completed"
+    ]
 
 
 class TestProcessFileSkipUntilBothPresent:
@@ -161,6 +172,7 @@ class TestProcessFileEncodesWhenBothPresent:
         client = MagicMock()
         client.ensure_run.return_value = _run_response()
         client.create_file.side_effect = [
+            _file_response(SIDECAR_ID, "run.json"),
             _file_response(10, "stack.tif"),
             _file_response(11, "stack.mp4", category="processed"),
             _file_response(12, "stack.jpg", category="processed"),
@@ -233,27 +245,92 @@ class TestProcessFileEncodesWhenBothPresent:
         metadata = client.update_run.call_args.kwargs["metadata"]
         assert metadata["measured_fps"] == 0.9
         assert metadata["frames"] == 4
-        completed = [
-            call
-            for call in client.update_file.call_args_list
-            if call.kwargs.get("status") == "completed"
+        assert _completed_file_ids(client) == [10, SIDECAR_ID]
+
+    def test_processing_sidecar_is_completed_after_encode(self, tmp_path: Path) -> None:
+        client = MagicMock()
+        client.ensure_run.return_value = _run_response()
+        client.create_file.side_effect = [
+            _file_response(SIDECAR_ID, "run.json", status="processing"),
+            _file_response(10, "stack.tif"),
+            _file_response(11, "stack.mp4", category="processed"),
+            _file_response(12, "stack.jpg", category="processed"),
         ]
-        assert completed
-        assert completed[-1].args[0] == 10
+
+        def _download(s3_uri: str, local_path: Path, **_: Any) -> None:
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            if s3_uri.endswith("run.json"):
+                local_path.write_text('{"fps": 1.0}')
+            else:
+                local_path.write_bytes(b"tiff")
+
+        def _encode(tiff_path: Path, mp4_path: Path, poster_path: Path, fps: float) -> None:
+            mp4_path.write_bytes(b"mp4")
+            poster_path.write_bytes(b"jpg")
+
+        with (
+            patch(
+                "data_hub_lambda.dishcam.process_file.get_client",
+                return_value=client,
+            ),
+            patch(
+                "data_hub_lambda.dishcam.process_file.s3_utils.object_exists",
+                return_value=True,
+            ),
+            patch(
+                "data_hub_lambda.dishcam.process_file.s3_utils.list_objects",
+                return_value=["s3://raw/dishcam/run-xyz/stack.tif"],
+            ),
+            patch(
+                "data_hub_lambda.dishcam.process_file.s3_utils.download_file",
+                side_effect=_download,
+            ),
+            patch("data_hub_lambda.dishcam.process_file.s3_utils.upload_file"),
+            patch(
+                "data_hub_lambda.dishcam.process_file.encode_tiff_stack",
+                side_effect=_encode,
+            ),
+            patch(
+                "data_hub_shared.config.config.AWS_S3_RAW_DATA_BUCKET",
+                "raw",
+            ),
+            patch(
+                "data_hub_shared.config.config.AWS_S3_PROCESSED_DATA_BUCKET",
+                "processed",
+            ),
+            patch(
+                "data_hub_shared.config.config.LOCAL_RAW_DATA_DIRPATH",
+                tmp_path,
+            ),
+        ):
+            from data_hub_lambda.dishcam.process_file import process_file
+
+            process_file("dishcam", "run-xyz", "run.json")
+
+        sidecar_statuses = [
+            call.kwargs.get("status")
+            for call in client.update_file.call_args_list
+            if call.args[0] == SIDECAR_ID and call.kwargs.get("status") is not None
+        ]
+        assert sidecar_statuses == ["completed"]
+        assert _completed_file_ids(client) == [10, SIDECAR_ID]
 
     def test_completed_conflict_is_not_a_failure(self, tmp_path: Path) -> None:
         client = MagicMock()
         client.ensure_run.return_value = _run_response()
         client.create_file.side_effect = [
+            _file_response(SIDECAR_ID, "run.json"),
             _file_response(10, "stack.tif"),
             _file_response(11, "stack.mp4", category="processed"),
             _file_response(12, "stack.jpg", category="processed"),
         ]
         client.update_file.side_effect = [
+            _file_response(SIDECAR_ID, "run.json", status="processing"),
             _file_response(10, "stack.tif", status="processing"),
             _file_response(11, "stack.mp4", category="processed"),
             _file_response(12, "stack.jpg", category="processed"),
             ApiError("conflict", status_code=409),
+            _file_response(SIDECAR_ID, "run.json", status="completed"),
         ]
 
         def _download(s3_uri: str, local_path: Path, **_: Any) -> None:
@@ -317,6 +394,7 @@ class TestProcessFileEncodesWhenBothPresent:
         client = MagicMock()
         client.ensure_run.return_value = _run_response()
         client.create_file.side_effect = [
+            _file_response(SIDECAR_ID, "run.json"),
             _file_response(10, "empty.tif"),
             _file_response(11, "empty.mp4", category="processed"),
             _file_response(12, "empty.jpg", category="processed"),
@@ -383,17 +461,13 @@ class TestProcessFileEncodesWhenBothPresent:
 
         encoded = [call.args[0].name for call in encode.call_args_list]
         assert encoded == ["empty.tif", "ruler.tif"]
-        completed = [
-            call.args[0]
-            for call in client.update_file.call_args_list
-            if call.kwargs.get("status") == "completed"
-        ]
-        assert completed == [10, 20]
+        assert _completed_file_ids(client) == [10, 20, SIDECAR_ID]
 
     def test_tiff_trigger_encodes_only_that_stack(self, tmp_path: Path) -> None:
         client = MagicMock()
         client.ensure_run.return_value = _run_response()
         client.create_file.side_effect = [
+            _file_response(SIDECAR_ID, "run.json"),
             _file_response(20, "ruler.tif"),
             _file_response(21, "ruler.mp4", category="processed"),
             _file_response(22, "ruler.jpg", category="processed"),
@@ -459,11 +533,13 @@ class TestProcessFileEncodesWhenBothPresent:
 
         list_objects.assert_not_called()
         assert [call.args[0].name for call in encode.call_args_list] == ["ruler.tif"]
+        assert _completed_file_ids(client) == [20, SIDECAR_ID]
 
     def test_one_failed_stack_does_not_block_the_others(self, tmp_path: Path) -> None:
         client = MagicMock()
         client.ensure_run.return_value = _run_response()
         client.create_file.side_effect = [
+            _file_response(SIDECAR_ID, "run.json"),
             _file_response(10, "empty.tif"),
             _file_response(20, "ruler.tif"),
             _file_response(21, "ruler.mp4", category="processed"),
@@ -533,4 +609,5 @@ class TestProcessFileEncodesWhenBothPresent:
         }
         assert statuses[10] == "failed"
         assert statuses[20] == "completed"
+        assert statuses[SIDECAR_ID] == "completed"
         client.update_run.assert_called_once()

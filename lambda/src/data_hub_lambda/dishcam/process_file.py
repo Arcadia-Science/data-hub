@@ -8,6 +8,7 @@ from data_hub_lambda.api_client import ApiError, DataHubClient, get_client
 from data_hub_lambda.dishcam.encode_video import encode_tiff_stack
 from data_hub_lambda.dishcam.filenames import RUN_JSON_NAME, is_tiff, matches_filename
 from data_hub_lambda.dishcam.parse_metadata import encode_fps, parse_run_json, playback_fps
+from data_hub_lambda.models import FileResponse
 from data_hub_shared import s3_utils
 from data_hub_shared.config import config
 
@@ -27,7 +28,9 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
     sidecar is already in S3.
 
     Reprocess already marks the trigger `processing`, so a missing sibling
-    fails that file instead of leaving it stuck.
+    fails that file instead of leaving it stuck. Successful encodes also
+    complete `run.json`: it has no stack of its own, and leaving it in
+    `processing` stranded the run after the MP4 was already uploaded.
 
     TIFF and `run.json` are separate S3 events, so two invocations can
     encode the same stack. `create_file` is idempotent; completed/failed
@@ -83,7 +86,15 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
                 filename=tiff_filename,
             )
             _update_file_status(client, record.id, "failed", error_message=str(exc))
+        _fail_if_processing(instrument_id, run_id, RUN_JSON_NAME, str(exc))
         raise
+
+    sidecar = _sidecar_record(client, instrument_id, run_id)
+    # Only bump uploaded/failed → processing. A completed sidecar from a
+    # sibling invocation must stay completed so the run does not flicker
+    # back to processing during a duplicate encode.
+    if sidecar is not None and sidecar.status in {"uploaded", "failed"}:
+        _update_file_status(client, sidecar.id, "processing")
 
     last_error: Exception | None = None
     encoded_any = False
@@ -105,6 +116,11 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
 
     if encoded_any:
         client.update_run(instrument_id, run_id, metadata=metadata)
+    # `_encode_tiff` completes stacks only. Reprocess already flipped the
+    # sidecar to processing, so leaving it there stranded the run after a
+    # successful encode.
+    if sidecar is not None and sidecar.status != "completed":
+        _update_file_status(client, sidecar.id, "completed")
     if last_error is not None:
         raise last_error
 
@@ -187,6 +203,24 @@ def _encode_tiff(
         logger.info("DishCam file %s marked as completed.", tiff_filename)
     except Exception as exc:
         _update_file_status(client, tiff_id, "failed", error_message=str(exc))
+        raise
+
+
+def _sidecar_record(client: DataHubClient, instrument_id: str, run_id: str) -> FileResponse | None:
+    """Return the `run.json` row, or None when the run is not in the API yet."""
+    raw_bucket = config.AWS_S3_RAW_DATA_BUCKET or ""
+    s3_key = f"{instrument_id}/{run_id}/{RUN_JSON_NAME}"
+    try:
+        return client.create_file(
+            instrument_id=instrument_id,
+            run_id=run_id,
+            s3_bucket=raw_bucket,
+            s3_key=s3_key,
+            filename=RUN_JSON_NAME,
+        )
+    except ApiError as exc:
+        if exc.status_code == 404:
+            return None
         raise
 
 
