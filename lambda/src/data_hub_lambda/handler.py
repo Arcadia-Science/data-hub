@@ -309,15 +309,16 @@ def lambda_handler(event: dict[str, Any], context: Context) -> dict[str, Any] | 
     """Top-level Lambda handler dispatching to instrument workflows.
 
     Dispatch is by ``instrument_type`` (fetched from the API), not instrument
-    ID. Filename gates filter the S3 firehose; explicit reprocess via the
-    Function URL bypasses those gates so user-initiated work can't strand
-    a file in ``processing``.
+    ID. Filename gates filter the S3 firehose, which delivers every upload.
+    A reprocess via the Function URL skips the cheap union gate so it always
+    reaches the instrument lookup, then fails the file if the processor's own
+    gate rejects it — the web app already moved the row to ``processing``, so
+    a silent return would strand it.
     """
     logger.info("Received event: %s", pformat(event))
 
-    # Capture before unwrapping so reprocess (Function URL) can skip gates.
+    # Capture before unwrapping: the payload loses the Function URL envelope.
     is_function_url = _is_function_url_event(event)
-    apply_filename_gates = not is_function_url
 
     # Function URL invocations carry a requestContext with an http key.
     # AWS_IAM auth is enforced by Lambda before the handler runs, so we
@@ -354,7 +355,8 @@ def lambda_handler(event: dict[str, Any], context: Context) -> dict[str, Any] | 
 
     try:
         # Skip the API call when no processor could possibly want this filename.
-        if apply_filename_gates and not matches_any_processor_gate(filename):
+        # Reprocess skips this so it can name the instrument type in the error.
+        if not is_function_url and not matches_any_processor_gate(filename):
             logger.info(
                 "No processor filename gate matches %s; skipping.",
                 filename,
@@ -410,12 +412,17 @@ def lambda_handler(event: dict[str, Any], context: Context) -> dict[str, Any] | 
                 _fail_reprocess_file(instrument_id, run_id, filename, message)
             return None
 
-        if apply_filename_gates and not processor.matches_filename(filename):
+        if not processor.matches_filename(filename):
+            message = f"The {instrument.instrument_type} processor does not handle '{filename}'"
             logger.info(
                 "Filename %s does not match gate for instrument_type=%s; skipping.",
                 filename,
                 instrument.instrument_type,
             )
+            # Processors return without touching the file row when the name
+            # isn't theirs, so a reprocess has to report the mismatch itself.
+            if is_function_url:
+                _fail_reprocess_file(instrument_id, run_id, filename, message)
             return None
 
         logger.info(

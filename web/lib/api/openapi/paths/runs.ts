@@ -141,7 +141,7 @@ registry.registerPath({
   path: "/instruments/{instrumentId}/runs/{runId}/reprocess",
   operationId: "reprocessInstrumentRun",
   summary: "Reprocess a run",
-  description: `${scoped("runs:reprocess")} Reprocesses every \`uploaded\`, \`failed\`, or \`completed\` file on the run. The instrument must have a Lambda processor.`,
+  description: `${scoped("runs:reprocess")} Reprocesses every \`uploaded\`, \`failed\`, or \`completed\` raw file on the run. Processed artifacts are skipped. The instrument must have a Lambda processor.`,
   tags: tag,
   security: bearerSecurity,
   request: { params: runParams },
