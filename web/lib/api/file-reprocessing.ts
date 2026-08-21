@@ -56,6 +56,19 @@ export async function reprocessFile(fileId: number): Promise<ReprocessResult> {
     };
   }
 
+  // Processed artifacts often share watcher extensions. Lambda only
+  // ingests raw inputs; queuing them marks them processing then strands
+  // them when the processor ignores the filename.
+  if (file.category !== "raw") {
+    return {
+      ok: false,
+      status: 409,
+      code: "CONFLICT",
+      message:
+        "Cannot reprocess a processed artifact — only raw files can be reprocessed",
+    };
+  }
+
   if (!(REPROCESSABLE_STATUSES as readonly string[]).includes(file.status)) {
     return {
       ok: false,
@@ -226,6 +239,7 @@ export async function reprocessRun(
     .where(
       and(
         eq(files.instrumentRunId, run.id),
+        eq(files.category, "raw"),
         inArray(files.status, [...REPROCESSABLE_STATUSES]),
         isNull(files.deletedAt)
       )

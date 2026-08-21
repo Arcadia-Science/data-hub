@@ -14,8 +14,8 @@ import { isProcessableInstrumentType } from "@/lib/instruments/processable-types
 // - Upload:    at least one file still waiting to be uploaded.
 // - Download:  at least one file has made it to S3 (i.e. is not `detected`
 //              or `upload_requested`).
-// - Reprocess: instrument_type has a Lambda processor and at least one file
-//              is in `uploaded`, `completed`, or `failed`.
+// - Reprocess: instrument_type has a Lambda processor and at least one raw
+//              file is in `uploaded`, `completed`, or `failed`.
 // - Delete:    the run isn't already soft-deleted.
 // ---------------------------------------------------------------------------
 

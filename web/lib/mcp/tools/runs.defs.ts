@@ -317,7 +317,7 @@ export const reprocessRunTool = {
   scope: "runs:reprocess",
   title: "Reprocess Run",
   description:
-    "Re-run Lambda processing for every uploaded, completed, or failed file on a run. The instrument must have a Lambda processor. Prefer this over looping reprocess_file for bulk retries after a parser fix or to kick stuck uploads.",
+    "Re-run Lambda processing for every uploaded, completed, or failed raw file on a run. Processed artifacts are skipped. The instrument must have a Lambda processor. Prefer this over looping reprocess_file for bulk retries after a parser fix or to kick stuck uploads.",
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
     runId: z.string().describe("Run identifier within the instrument"),

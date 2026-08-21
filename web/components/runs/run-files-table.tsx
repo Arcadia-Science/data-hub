@@ -25,8 +25,7 @@ import {
 import type { RunFile } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
 import type { InstrumentType } from "@/lib/db/schema";
-import { isProcessableInstrumentType } from "@/lib/instruments/processable-types";
-import { REPROCESSABLE_STATUSES } from "@/lib/runs/reprocessable-statuses";
+import { canReprocessFile } from "@/lib/runs/reprocessable-statuses";
 import { cn, formatBytes } from "@/lib/utils";
 import {
   FileSelectAllCheckbox,
@@ -43,8 +42,6 @@ const DOWNLOADABLE_STATUSES = new Set([
   "completed",
   "failed",
 ]);
-
-const REPROCESSABLE_STATUS_SET = new Set<string>(REPROCESSABLE_STATUSES);
 
 const CATEGORY_BADGE_CLASSES: Record<string, string> = {
   raw: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
@@ -215,19 +212,10 @@ function UploadDismissActions({
   );
 }
 
-function canReprocess(file: RunFile, instrumentType: InstrumentType): boolean {
-  return (
-    file.deletedAt === null &&
-    isProcessableInstrumentType(instrumentType) &&
-    REPROCESSABLE_STATUS_SET.has(file.status) &&
-    file.s3Key !== null
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Read-only variant: no selection column, no upload/dismiss. Reprocessing is
-// still allowed for uploaded/completed/failed files so operators can recover
-// report data or kick stuck uploads without restoring the run.
+// still allowed for uploaded/completed/failed raw files so operators can
+// recover report data or kick stuck uploads without restoring the run.
 // ---------------------------------------------------------------------------
 
 export interface ReadOnlyRunFilesTableProps {
@@ -261,7 +249,7 @@ export function ReadOnlyRunFilesTable({
             >
               <FileInfoCells file={file} />
               <TableCell className="py-2 pr-3">
-                {canReprocess(file, instrumentType) ? (
+                {canReprocessFile(file, instrumentType) ? (
                   <div className="flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
                     <ReprocessAction
                       file={file}
@@ -342,7 +330,7 @@ export function EditableRunFilesTable({
           const ref = refsByFileId.get(file.id) ?? null;
           const isSelected = ref ? meta.isSelected(ref.id) : false;
           const canDoUploadDismiss = !isDismissed && file.status === "detected";
-          const canDoReprocess = canReprocess(file, instrumentType);
+          const canDoReprocess = canReprocessFile(file, instrumentType);
 
           // Reveal classes: hide per-row actions while a bulk selection is
           // active (the bar is the single entry point) but keep the JSX

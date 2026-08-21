@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { fileDetail, fileDismissed } from "@/lib/api/openapi";
+import { fileDetail, fileDismissed, runReprocessed } from "@/lib/api/openapi";
 import { instruments, files as schemaFiles } from "@/lib/db/schema";
 import {
   api,
@@ -489,7 +489,7 @@ describe("Files API", () => {
   //   fileId (sample.csv)             → completed, has S3 info
   //   secondFileId (sample2.csv)      → detected, soft-deleted
   //   thirdFileId (sample3.csv)       → detected, not deleted
-  //   lambdaFileId (processed_output) → failed, has S3 info
+  //   lambdaFileId (processed_output) → failed processed artifact, has S3 info
   // Uploaded eligibility is covered by a dedicated run/file created below.
   // -------------------------------------------------------------------------
 
@@ -587,11 +587,52 @@ describe("Files API", () => {
     expect(data.error.message).toContain("parent run");
   });
 
+  it("REPROCESS returns 409 for a processed artifact", async () => {
+    const res = await api(`/api/v1/files/${lambdaFileId}/reprocess`, {
+      method: "POST",
+      token,
+    });
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.error.message).toContain("processed");
+  });
+
   // These tests verify that reprocessable statuses (uploaded, failed, and
   // completed) pass all validation guards. They return 503 because the
   // test server has no LAMBDA_FUNCTION_URL configured.
   it("REPROCESS returns 503 for failed file when Lambda is not configured", async () => {
-    const res = await api(`/api/v1/files/${lambdaFileId}/reprocess`, {
+    const failedRunId = "reprocess-failed-raw-run";
+    await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: { run_id: failedRunId, source: "lambda" },
+    });
+    const createFileRes = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${failedRunId}/files`,
+      {
+        method: "POST",
+        token,
+        body: {
+          s3_bucket: "test-bucket",
+          s3_key: `${instrumentId}/${failedRunId}/raw.csv`,
+          filename: "raw.csv",
+        },
+      }
+    );
+    expect(createFileRes.status).toBe(201);
+    const createdFile = await createFileRes.json();
+    await api(`/api/v1/files/${createdFile.id}`, {
+      method: "PATCH",
+      token,
+      body: { status: "processing" },
+    });
+    await api(`/api/v1/files/${createdFile.id}`, {
+      method: "PATCH",
+      token,
+      body: { status: "failed", error_message: "parser error" },
+    });
+
+    const res = await api(`/api/v1/files/${createdFile.id}/reprocess`, {
       method: "POST",
       token,
     });
@@ -721,5 +762,65 @@ describe("Files API", () => {
     const data = await res.json();
     expect(data.error.message).toContain("generic");
     expect(data.error.message).toContain("no Lambda processor");
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /api/v1/instruments/:instrumentId/runs/:runId/reprocess
+  // -------------------------------------------------------------------------
+
+  it("RUN REPROCESS queues only raw files", async () => {
+    const skipRunId = "reprocess-skip-processed-run";
+    await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: { run_id: skipRunId, source: "lambda" },
+    });
+    const rawRes = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${skipRunId}/files`,
+      {
+        method: "POST",
+        token,
+        body: {
+          s3_bucket: "test-bucket",
+          s3_key: `${instrumentId}/${skipRunId}/stack.tif`,
+          filename: "stack.tif",
+        },
+      }
+    );
+    const processedRes = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${skipRunId}/files`,
+      {
+        method: "POST",
+        token,
+        body: {
+          s3_bucket: "processed-bucket",
+          s3_key: `${instrumentId}/${skipRunId}/stack.jpg`,
+          filename: "stack.jpg",
+          category: "processed",
+        },
+      }
+    );
+    expect(rawRes.status).toBe(201);
+    expect(processedRes.status).toBe(201);
+    const processedFile = await processedRes.json();
+
+    const res = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${skipRunId}/reprocess`,
+      { method: "POST", token }
+    );
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    runReprocessed.parse(data);
+    // Lambda is not configured, so the raw file is attempted and fails.
+    // The processed poster must not be in that set.
+    expect(data.files_queued).toBe(0);
+    expect(data.files_failed).toBe(1);
+
+    const db = getTestDb();
+    const [processed] = await db
+      .select({ status: schemaFiles.status })
+      .from(schemaFiles)
+      .where(eq(schemaFiles.id, processedFile.id));
+    expect(processed?.status).toBe("uploaded");
   });
 });

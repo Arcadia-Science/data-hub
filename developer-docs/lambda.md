@@ -18,13 +18,14 @@ Slack notifications are sent by the **web app**, not the Lambda — see [Slack n
 
 ### Function URL (manual reprocessing)
 
-When a file fails processing (or needs to be re-run), users can trigger reprocessing from the run detail page in the web app. This invokes the Lambda's Function URL instead of going through S3:
+When a raw file fails processing (or needs to be re-run), users can trigger reprocessing from the run detail page in the web app. Processed artifacts (preview CSVs, posters, MP4s) are not eligible — they often share extensions with the watcher's raw patterns, and Lambda only ingests the original instrument files. This invokes the Lambda's Function URL instead of going through S3:
 
-1. The user clicks **Reprocess** on an uploaded, failed, or completed file in the web dashboard.
+1. The user clicks **Reprocess** on an uploaded, failed, or completed raw file in the web dashboard, or **Reprocess** on the run (which queues every eligible raw file).
 2. The web app's `POST /api/v1/files/:fileId/reprocess` endpoint transitions the file to `processing` status, clears any previous error, and sends a POST request to the Lambda Function URL.
 3. The Function URL is configured with `AuthType: AWS_IAM`, so the web app SigV4-signs the request using credentials it gets via Vercel OIDC federation (the `WebAppS3Role` IAM role, which has `lambda:InvokeFunctionUrl` on this function's ARN). The body is a JSON payload containing a synthetic S3 event.
 4. The Lambda handler detects the Function URL invocation (via `requestContext` in the event) and parses the S3 event from the request body. Inbound auth is enforced by AWS itself in front of the function — the handler never sees an unauthenticated request.
-5. From here, processing follows the same type-based dispatch as the S3 trigger path, except **filename gates are skipped** — a user clicking Reprocess has stated intent, so the handler must not leave the file stranded in `processing`.
+5. From here, processing follows the same type-based dispatch as the S3 trigger path, except the cheap **union gate is skipped** so the handler always reaches the instrument lookup.
+6. If the matched processor's own filename gate rejects the file, the handler PATCHes it to `failed` with `The {instrument_type} processor does not handle '{filename}'` instead of returning quietly. The web app moved the row to `processing` before invoking, and processors return without touching the row when the name isn't theirs — so a silent no-op would strand it there forever. The same recovery covers a missing instrument and an unmapped `instrument_type`.
 
 ### Function URL (archive build)
 
@@ -41,7 +42,7 @@ See [Run archives](run-archives.md) for the full flow, S3 bucket layout, cache s
 
 Dispatch is by `instrument_type` (Postgres/TS enum), not instrument ID. The registry lives in `lambda/src/data_hub_lambda/processors.py`; the web reprocess gate mirrors the same keys in `web/lib/instruments/processable-types.ts`.
 
-| `instrument_type` | Module | Filename gate (S3 events only) |
+| `instrument_type` | Module | Filename gate |
 | --- | --- | --- |
 | `tape_station` | `agilent_4150_tapestation` | `.pdf` |
 | `fplc` | `akta_fplc` | `.pdf` |
