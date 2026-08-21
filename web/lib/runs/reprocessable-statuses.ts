@@ -1,4 +1,4 @@
-import type { InstrumentType } from "@/lib/db/schema";
+import type { files, InstrumentType } from "@/lib/db/schema";
 import { isProcessableInstrumentType } from "@/lib/instruments/processable-types";
 
 // Statuses eligible for POST /files/:id/reprocess (and run-level reprocess).
@@ -12,12 +12,12 @@ export const REPROCESSABLE_STATUSES = [
 
 const REPROCESSABLE_STATUS_SET = new Set<string>(REPROCESSABLE_STATUSES);
 
-interface ReprocessableFile {
-  category: string;
-  deletedAt: Date | string | null;
-  s3Key: string | null;
-  status: string;
-}
+// Only the columns the predicate reads, taken from the `files` row so a typo
+// in a category or status literal fails to compile.
+export type ReprocessableFile = Pick<
+  typeof files.$inferSelect,
+  "category" | "deletedAt" | "s3Key" | "status"
+>;
 
 export function canReprocessFile(
   file: ReprocessableFile,

@@ -340,7 +340,8 @@ class TestHandlerDispatch:
 
         assert exc_info.value.status_code == 403
 
-    def test_reprocess_bypasses_filename_gate(self) -> None:
+    def test_reprocess_marks_failed_when_filename_unsupported(self) -> None:
+        """A reprocess the processor would ignore must not stay in `processing`."""
         client = MagicMock()
         client.get_instrument.return_value = InstrumentResponse(
             id="azure-cielo-qpcr",
@@ -348,6 +349,7 @@ class TestHandlerDispatch:
             status="active",
             instrument_type="qpcr",
         )
+        client.create_file.return_value = self._file_response(11)
         process_file = MagicMock()
         entry = MagicMock()
         entry.matches_filename.return_value = False
@@ -360,10 +362,15 @@ class TestHandlerDispatch:
                 "data_hub_lambda.handler.get_processor",
                 return_value=entry,
             ),
-            # Union gate would also block S3 events; reprocess must skip it.
+            # Union gate would short-circuit an S3 event before the API call;
+            # reprocess must skip it so the error can name the type.
             patch(
                 "data_hub_lambda.handler.matches_any_processor_gate",
                 return_value=False,
+            ),
+            patch(
+                "data_hub_shared.config.config.AWS_S3_RAW_DATA_BUCKET",
+                "test-bucket",
             ),
         ):
             result = lambda_handler(
@@ -376,11 +383,50 @@ class TestHandlerDispatch:
             )
 
         assert result is None
+        client.get_instrument.assert_called_once_with("azure-cielo-qpcr")
+        process_file.assert_not_called()
+        client.update_file.assert_called_once_with(
+            11,
+            status="failed",
+            error_message=(
+                "The qpcr processor does not handle 'Experiment_Amplification Results.csv'"
+            ),
+        )
+
+    def test_reprocess_runs_when_filename_matches(self) -> None:
+        client = MagicMock()
+        client.get_instrument.return_value = InstrumentResponse(
+            id="azure-cielo-qpcr",
+            display_name="Azure Cielo qPCR",
+            status="active",
+            instrument_type="qpcr",
+        )
+        process_file = MagicMock()
+        entry = MagicMock()
+        entry.matches_filename.return_value = True
+        entry.process_file = process_file
+
+        with (
+            patch("data_hub_lambda.handler.get_client", return_value=client),
+            patch("data_hub_lambda.handler._cleanup_tmp"),
+            patch("data_hub_lambda.handler.get_processor", return_value=entry),
+        ):
+            result = lambda_handler(
+                self._function_url_event(
+                    "azure-cielo-qpcr",
+                    "run-1",
+                    "Experiment_Cq Values.csv",
+                ),
+                MagicMock(),
+            )
+
+        assert result is None
         process_file.assert_called_once_with(
             "azure-cielo-qpcr",
             "run-1",
-            "Experiment_Amplification Results.csv",
+            "Experiment_Cq Values.csv",
         )
+        client.update_file.assert_not_called()
 
     def test_s3_event_applies_per_type_gate(self) -> None:
         client = MagicMock()

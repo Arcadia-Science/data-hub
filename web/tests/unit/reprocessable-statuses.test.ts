@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { canReprocessFile } from "@/lib/runs/reprocessable-statuses";
+import {
+  canReprocessFile,
+  type ReprocessableFile,
+} from "@/lib/runs/reprocessable-statuses";
 
-const rawCompleted = {
+const rawCompleted: ReprocessableFile = {
   category: "raw",
   deletedAt: null,
   s3Key: "dishcam/run/stack.tif",
