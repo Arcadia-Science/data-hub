@@ -9,13 +9,16 @@ export type WatcherBindingVerdict = "allow" | "deny" | "tofu";
  * Pure binding decision used by `enforceWatcherBinding` in `watchers.ts`.
  * Session/match/mismatch branches are unit-tested here; the TOFU claim path
  * and HTTP 403/200 behaviour live in the integration suite.
+ *
+ * Sessions deny so a future slip back to `authorize` cannot impersonate a
+ * watcher. Agent routes themselves already use `authorizeToken`.
  */
 export function decideWatcherBinding(
   authResult: AuthResult,
   registeredByToken: string | null
 ): WatcherBindingVerdict {
   if (authResult.authMethod === "session") {
-    return "allow";
+    return "deny";
   }
   if (!authResult.tokenId) {
     return "deny";
