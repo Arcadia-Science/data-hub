@@ -13,7 +13,8 @@ registry.registerPath({
   path: "/archive-jobs/{id}",
   operationId: "updateArchiveJob",
   summary: "Update an archive job",
-  description: "Requires scope `archive-jobs:write`.",
+  description:
+    "Requires scope `archive-jobs:write`. PAT only; browser sessions are rejected.",
   tags: ["Archive"],
   security: bearerSecurity,
   request: {

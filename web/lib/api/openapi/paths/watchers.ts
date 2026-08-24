@@ -32,6 +32,8 @@ const responses = (description: string, schema: z.ZodType = z.unknown()) => ({
   200: jsonResponse(description, schema),
   ...errorResponses(),
 });
+const PAT_ONLY = " PAT only; browser sessions are rejected.";
+
 const operation = (
   method: "get" | "post" | "put" | "delete",
   path: string,
@@ -39,14 +41,15 @@ const operation = (
   summary: string,
   scope: string,
   responseSchema: z.ZodType,
-  request?: object
+  request?: object,
+  patOnly = false
 ) =>
   registry.registerPath({
     method,
     path,
     operationId,
     summary,
-    description: `Requires scope \`${scope}\`.`,
+    description: `Requires scope \`${scope}\`.${patOnly ? PAT_ONLY : ""}`,
     tags: ["Watchers"],
     security: bearerSecurity,
     ...(request ? { request } : {}),
@@ -73,7 +76,8 @@ registry.registerPath({
   path: "/watchers/register",
   operationId: "registerWatcher",
   summary: "Register a watcher",
-  description: "Requires scope `watchers:report`.",
+  description:
+    "Requires scope `watchers:report`. PAT only; browser sessions are rejected.",
   tags: ["Watchers"],
   security: bearerSecurity,
   request: { body: body(registerWatcherBody) },
@@ -107,7 +111,8 @@ operation(
   "Update watcher configuration",
   "watchers:report",
   watcherChecksumResponse,
-  { params: watcherParams, body: body(watcherConfigBody) }
+  { params: watcherParams, body: body(watcherConfigBody) },
+  true
 );
 operation(
   "get",
@@ -116,14 +121,16 @@ operation(
   "Get watcher configuration checksum",
   "watchers:read",
   watcherChecksumResponse,
-  { params: watcherParams }
+  { params: watcherParams },
+  true
 );
 registry.registerPath({
   method: "post",
   path: "/watchers/{watcherId}/events",
   operationId: "createWatcherEvent",
   summary: "Report a watcher event",
-  description: "Requires scope `watchers:report`.",
+  description:
+    "Requires scope `watchers:report`. PAT only; browser sessions are rejected.",
   tags: ["Watchers"],
   security: bearerSecurity,
   request: { params: watcherParams, body: body(watcherEventBody) },
@@ -148,7 +155,8 @@ operation(
   "Record a watcher heartbeat",
   "watchers:report",
   watcherHeartbeatAck,
-  { params: watcherParams, body: body(heartbeatBody) }
+  { params: watcherParams, body: body(heartbeatBody) },
+  true
 );
 operation(
   "get",
@@ -166,7 +174,8 @@ operation(
   "Get watcher upload queue",
   "watchers:read",
   watcherUploadQueueResponse,
-  { params: watcherParams }
+  { params: watcherParams },
+  true
 );
 operation(
   "get",
@@ -175,5 +184,6 @@ operation(
   "Check watcher update availability",
   "watchers:read",
   watcherUpdateCheckResponse,
-  { params: watcherParams }
+  { params: watcherParams },
+  true
 );

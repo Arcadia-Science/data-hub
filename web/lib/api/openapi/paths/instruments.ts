@@ -33,7 +33,8 @@ registry.registerPath({
   path: "/instruments",
   operationId: "createInstrument",
   summary: "Create an instrument",
-  description: "Requires scope `instruments:write`.",
+  description:
+    "Requires scope `instruments:write`. PAT only; browser sessions are rejected.",
   tags: ["Instruments"],
   security: bearerSecurity,
   request: {

@@ -34,7 +34,8 @@ registry.registerPath({
   path: "/instruments/{instrumentId}/runs/{runId}/files",
   operationId: "createRunFile",
   summary: "Create a run file record",
-  description: "Requires scope `files:create`.",
+  description:
+    "Requires scope `files:create`. PAT only; browser sessions are rejected.",
   tags: ["Files"],
   security: bearerSecurity,
   request: { params: runParams, body: body(createFileBody) },
@@ -49,7 +50,8 @@ registry.registerPath({
   path: "/files/{fileId}",
   operationId: "updateFile",
   summary: "Update a file",
-  description: "Requires scope `files:update`.",
+  description:
+    "Requires scope `files:update`. PAT only; browser sessions are rejected.",
   tags: ["Files"],
   security: bearerSecurity,
   request: { params: fileParams, body: body(patchFileBody) },
