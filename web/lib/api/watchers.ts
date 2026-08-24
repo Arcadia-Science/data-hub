@@ -32,9 +32,10 @@ export async function findActiveWatcher(watcherId: string) {
 
 /**
  * Returns null when the caller may act on this watcher, or a Response the
- * handler should return. Sessions are fully privileged (browser admins).
- * Token callers must match the watcher's registered PAT. A null binding is
- * claimed trust-on-first-use (atomic), then enforced thereafter.
+ * handler should return. Sessions are denied — watcher agent routes are
+ * PAT-only via `authorizeToken`. Token callers must match the watcher's
+ * registered PAT. A null binding is claimed trust-on-first-use (atomic),
+ * then enforced thereafter.
  */
 export async function enforceWatcherBinding(
   authResult: AuthResult,

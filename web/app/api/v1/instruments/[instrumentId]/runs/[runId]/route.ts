@@ -1,6 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import type { NextRequest } from "next/server";
-import { authorize } from "@/lib/api/auth";
+import { authorize, authorizeToken } from "@/lib/api/auth";
 import {
   apiError,
   apiErrorFromResult,
@@ -103,10 +103,13 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
 //   - { metadata: {...} } — full replacement of run-level metadata
 //   - { detected_files: [...] } — upsert new detected files (watcher path)
 // Rejects updates to soft-deleted runs with 409.
+//
+// PAT-only: session `*` would let any member overwrite Lambda metadata or
+// inject detected files. GET/DELETE stay session-reachable for the UI.
 // ---------------------------------------------------------------------------
 
 export async function PATCH(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authorize(request, "runs:update");
+  const authResult = await authorizeToken(request, "runs:update");
   if (authResult instanceof Response) {
     return authResult;
   }

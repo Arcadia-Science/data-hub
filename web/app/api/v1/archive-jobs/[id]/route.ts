@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
-import { authorize } from "@/lib/api/auth";
+import { authorizeToken } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { patchArchiveJobBody, readJsonBody } from "@/lib/api/openapi";
 import { isValidUUID } from "@/lib/api/validators";
@@ -15,25 +15,22 @@ interface RouteContext {
 // PATCH /api/v1/archive-jobs/:id
 //
 // Lambda callback used to flip an async build to its terminal state.
-// Authenticates with the standard `Authorization: Bearer <PAT>` (or
-// session) — same as every other API route. The Lambda calls this with
-// its `DATA_HUB_API_KEY` PAT, the same credential it uses for every
-// other Lambda → API call.
+// PAT-only: the Lambda calls this with its `DATA_HUB_API_KEY` PAT.
+// Browser sessions carry `*` and must not flip job status or rewrite
+// `archive_bucket` / `archive_key`.
 //
-// Note: any authenticated caller can update an archive job (including
-// writing arbitrary `archive_bucket`/`archive_key`). The UI does not
-// trust this row's `status` for download readiness — it polls
-// `/download-archive` which short-circuits on an S3 HEAD against the
-// canonical archive key — so worst case a tampered row breaks its own
-// download. We can tighten by validating `archive_bucket` /
-// `archive_key` against the canonical shape if abuse becomes a real
-// concern.
+// Note: any PAT with `archive-jobs:write` can still update a job
+// (including writing arbitrary `archive_bucket`/`archive_key`). The UI
+// does not trust this row's `status` for download readiness — it polls
+// `/download-archive`, which short-circuits on an S3 HEAD against the
+// canonical archive key. We can tighten by validating those fields
+// against the canonical shape if abuse becomes a real concern.
 // ---------------------------------------------------------------------------
 
 const TERMINAL_STATUSES = new Set(["ready", "failed"]);
 
 export async function PATCH(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authorize(request, "archive-jobs:write");
+  const authResult = await authorizeToken(request, "archive-jobs:write");
   if (authResult instanceof Response) {
     return authResult;
   }

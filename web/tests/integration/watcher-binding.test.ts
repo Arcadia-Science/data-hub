@@ -11,8 +11,8 @@ import {
 
 // Cross-control IDOR guard: a watchers:report (or :read) PAT may only
 // operate on the watcher it registered. Bound endpoints are exercised
-// parametrically so none regress. Session exemption is covered by the
-// unit suite (`decideWatcherBinding`) — this harness has no cookies.
+// parametrically so none regress. Session denial is covered by the
+// unit suite (`decideWatcherBinding`) and machine-routes-reject-session.
 
 const WATCHER_SCOPES = [
   "watchers:report",
