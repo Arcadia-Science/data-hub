@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
-import { authorize } from "@/lib/api/auth";
+import { authorize, authorizeToken } from "@/lib/api/auth";
 import {
   apiError,
   apiErrorFromResult,
@@ -44,10 +44,14 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
 //
 // Enforces the file status state machine and rejects mutations on
 // soft-deleted files or files whose parent run is soft-deleted.
+//
+// PAT-only (no browser sessions): session auth carries `*` scope, and
+// accepting it let any signed-in user mark files uploaded or overwrite
+// Lambda-owned metadata. DELETE below stays session-reachable for dismiss.
 // ---------------------------------------------------------------------------
 
 export async function PATCH(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authorize(request, "files:update");
+  const authResult = await authorizeToken(request, "files:update");
   if (authResult instanceof Response) {
     return authResult;
   }

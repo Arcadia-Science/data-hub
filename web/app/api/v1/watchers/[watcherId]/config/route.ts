@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
-import { authorize } from "@/lib/api/auth";
+import { authorizeToken } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { readJsonBody, watcherConfigBody } from "@/lib/api/openapi";
 import { isValidUUID } from "@/lib/api/validators";
@@ -17,7 +17,9 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ watcherId: string }> }
 ) {
-  const authResult = await authorize(request, "watchers:report");
+  // PAT-only: sessions carry `*` and would let any member overwrite
+  // stored watcher config (dashboard never PUTs this).
+  const authResult = await authorizeToken(request, "watchers:report");
   if (authResult instanceof Response) {
     return authResult;
   }

@@ -1,6 +1,6 @@
 import { and, desc, eq, gte, inArray } from "drizzle-orm";
 import type { NextRequest } from "next/server";
-import { authorize } from "@/lib/api/auth";
+import { authorize, authorizeToken } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { readJsonBody, watcherEventBody } from "@/lib/api/openapi";
 import {
@@ -22,7 +22,9 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ watcherId: string }> }
 ) {
-  const authResult = await authorize(request, "watchers:report");
+  // PAT-only: sessions carry `*` and would let any member inject fake
+  // watcher events. GET below stays session-reachable for the dashboard.
+  const authResult = await authorizeToken(request, "watchers:report");
   if (authResult instanceof Response) {
     return authResult;
   }

@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
-import { authorize } from "@/lib/api/auth";
+import { authorizeToken } from "@/lib/api/auth";
 import {
   apiError,
   NOT_FOUND,
@@ -26,7 +26,9 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ watcherId: string }> }
 ) {
-  const authResult = await authorize(request, "watchers:report");
+  // PAT-only: sessions carry `*` and previously could stop any watcher
+  // (heartbeat is never called from the dashboard).
+  const authResult = await authorizeToken(request, "watchers:report");
   if (authResult instanceof Response) {
     return authResult;
   }

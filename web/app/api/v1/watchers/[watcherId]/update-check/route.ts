@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { authorize } from "@/lib/api/auth";
+import { authorizeToken } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { isValidUUID } from "@/lib/api/validators";
 import { enforceWatcherBinding, findActiveWatcher } from "@/lib/api/watchers";
@@ -48,7 +48,9 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ watcherId: string }> }
 ) {
-  const authResult = await authorize(request, "watchers:read");
+  // PAT-only: watcher self-update poll. Sessions previously skipped
+  // PAT↔watcher binding.
+  const authResult = await authorizeToken(request, "watchers:read");
   if (authResult instanceof Response) {
     return authResult;
   }

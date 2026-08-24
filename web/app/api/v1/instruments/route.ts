@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
-import { authorize } from "@/lib/api/auth";
+import { authorize, authorizeToken } from "@/lib/api/auth";
 import { apiError, CONFLICT } from "@/lib/api/errors";
 import { createInstrumentBody, readJsonBody } from "@/lib/api/openapi";
 import { db } from "@/lib/db";
@@ -24,8 +24,10 @@ export async function GET(request: NextRequest) {
   return Response.json(rows);
 }
 
+// PAT-only: the watcher CLI creates instruments. Session `*` would let
+// any member insert rows; edit/retire already requires admin in-browser.
 export async function POST(request: NextRequest) {
-  const authResult = await authorize(request, "instruments:write");
+  const authResult = await authorizeToken(request, "instruments:write");
   if (authResult instanceof Response) {
     return authResult;
   }

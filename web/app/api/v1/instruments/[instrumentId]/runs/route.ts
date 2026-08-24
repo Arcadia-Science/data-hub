@@ -1,6 +1,6 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { after, type NextRequest } from "next/server";
-import { authorize } from "@/lib/api/auth";
+import { authorize, authorizeToken } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { buildRunListQuery, parseAcquiredAt } from "@/lib/api/instrument-runs";
 import { notifyRunCreated } from "@/lib/api/notifications";
@@ -24,10 +24,13 @@ interface RouteContext {
 // If the run already exists (same instrument_id + run_id), returns 200 with
 // the existing record instead of 201. This handles the race where a Lambda
 // auto-creates a run that was already reported by the watcher.
+//
+// PAT-only: the dashboard never creates runs. Session `*` would let any
+// member insert fake runs (and fire Slack / in-app notifications).
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authorize(request, "runs:create");
+  const authResult = await authorizeToken(request, "runs:create");
   if (authResult instanceof Response) {
     return authResult;
   }
