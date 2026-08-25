@@ -1,6 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
 import type { NextRequest } from "next/server";
-import { authorize } from "@/lib/api/auth";
+import { authorizeToken } from "@/lib/api/auth";
 import {
   apiError,
   CONFLICT,
@@ -33,10 +33,13 @@ const UPLOADED_OR_LATER_STATUSES = new Set([
 // needing AWS credentials. Creates a file record if one doesn't already exist.
 // Short-circuits with `already_uploaded: true` when the file has already
 // reached S3.
+//
+// PAT-only: session `*` would let any member mint a presigned PUT for the
+// canonical raw-data key. The dashboard queues uploads via `request-upload`.
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authorize(request, "runs:upload");
+  const authResult = await authorizeToken(request, "runs:upload");
   if (authResult instanceof Response) {
     return authResult;
   }

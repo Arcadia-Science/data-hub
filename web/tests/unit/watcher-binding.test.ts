@@ -26,9 +26,9 @@ function tokenAuth(tokenId: string): AuthResult {
 }
 
 describe("decideWatcherBinding", () => {
-  it("allows browser sessions regardless of binding", () => {
-    expect(decideWatcherBinding(sessionAuth(), null)).toBe("allow");
-    expect(decideWatcherBinding(sessionAuth(), "some-pat-id")).toBe("allow");
+  it("denies browser sessions regardless of binding", () => {
+    expect(decideWatcherBinding(sessionAuth(), null)).toBe("deny");
+    expect(decideWatcherBinding(sessionAuth(), "some-pat-id")).toBe("deny");
   });
 
   it("allows a token that matches the registered PAT", () => {

@@ -1,6 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
 import type { NextRequest } from "next/server";
-import { authorize } from "@/lib/api/auth";
+import { authorizeToken } from "@/lib/api/auth";
 import {
   apiError,
   CONFLICT,
@@ -11,8 +11,10 @@ import { readJsonBody, registerWatcherBody } from "@/lib/api/openapi";
 import { db } from "@/lib/db";
 import { instruments, watchers } from "@/lib/db/schema";
 
+// PAT-only: browser sessions carry `*` and would let any signed-in
+// member register a watcher and occupy the one-per-instrument slot.
 export async function POST(request: NextRequest) {
-  const authResult = await authorize(request, "watchers:report");
+  const authResult = await authorizeToken(request, "watchers:report");
   if (authResult instanceof Response) {
     return authResult;
   }

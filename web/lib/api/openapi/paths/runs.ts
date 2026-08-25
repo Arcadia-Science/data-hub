@@ -41,6 +41,8 @@ const runParams = z.object({
 const commentParams = runParams.extend({ commentId: commentIdParam });
 const tag = ["Runs"];
 const scoped = (scope: string) => `Requires scope \`${scope}\`.`;
+const scopedPat = (scope: string) =>
+  `Requires scope \`${scope}\`. PAT only; browser sessions are rejected.`;
 const body = (schema: z.ZodType) => ({
   content: { "application/json": { schema } },
 });
@@ -79,7 +81,7 @@ registry.registerPath({
   path: "/instruments/{instrumentId}/runs",
   operationId: "createInstrumentRun",
   summary: "Create an instrument run",
-  description: scoped("runs:create"),
+  description: scopedPat("runs:create"),
   tags: tag,
   security: bearerSecurity,
   request: {
@@ -108,7 +110,7 @@ registry.registerPath({
   path: "/instruments/{instrumentId}/runs/{runId}",
   operationId: "updateInstrumentRun",
   summary: "Update a run",
-  description: scoped("runs:update"),
+  description: scopedPat("runs:update"),
   tags: tag,
   security: bearerSecurity,
   request: { params: runParams, body: body(patchRunBody) },
@@ -196,7 +198,7 @@ registry.registerPath({
   path: "/instruments/{instrumentId}/runs/{runId}/request-upload-url",
   operationId: "requestRunUploadUrl",
   summary: "Request a presigned upload URL",
-  description: scoped("runs:upload"),
+  description: scopedPat("runs:upload"),
   tags: tag,
   security: bearerSecurity,
   request: { params: runParams, body: body(requestUploadUrlBody) },

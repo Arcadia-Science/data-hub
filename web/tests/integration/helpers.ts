@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+import { makeSignature } from "better-auth/crypto";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 // biome-ignore lint/performance/noNamespaceImport: tests need the full schema module for Db typing
@@ -90,6 +92,37 @@ export async function seedTestUser(
     ...options,
   });
   return { userId, token, tokenId };
+}
+
+function getAuthSecret(): string {
+  const secret = process.env.__TEST_AUTH_SECRET;
+  if (!secret) {
+    throw new Error("__TEST_AUTH_SECRET not set — global setup failed?");
+  }
+  return secret;
+}
+
+/**
+ * Seed a live session row and return a Cookie header Better Auth accepts.
+ * Cookie name is `better-auth.session_token` (not `__Secure-…`) because the
+ * test server's `BETTER_AUTH_URL` is `http://…` — Better Auth only prefixes
+ * `__Secure-` when the base URL is HTTPS.
+ */
+export async function seedSessionCookie(userId: string): Promise<string> {
+  const token = randomBytes(32).toString("base64url");
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  await getTestDb().insert(schema.sessions).values({
+    id: crypto.randomUUID(),
+    token,
+    userId,
+    expiresAt,
+    createdAt: now,
+    updatedAt: now,
+  });
+  const signature = await makeSignature(token, getAuthSecret());
+  const signed = encodeURIComponent(`${token}.${signature}`);
+  return `better-auth.session_token=${signed}`;
 }
 
 // ---------------------------------------------------------------------------
