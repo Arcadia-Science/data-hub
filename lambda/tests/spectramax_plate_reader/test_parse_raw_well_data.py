@@ -716,11 +716,11 @@ class TestSpectrumFlat:
 
 
 class TestNonNumericSentinels:
-    """SoftMax Pro emits ``Path?`` (PathCheck pathlength correction failed)
-    and ``Range?`` (out of dynamic range) in place of a numeric value when
-    the instrument couldn't produce a usable reading. Those wells should
-    be preserved with ``value=NaN``, while truly empty cells continue to
-    be omitted entirely.
+    """SoftMax Pro emits ``Path?`` (PathCheck pathlength correction failed),
+    ``Range?`` (out of dynamic range), ``#SAT`` (detector saturated), and
+    ``#Low`` (missed flash) in place of a numeric value when the instrument
+    couldn't produce a usable reading. Those wells should be preserved with
+    ``value=NaN``, while truly empty cells continue to be omitted entirely.
     """
 
     @pytest.fixture(autouse=True)
@@ -730,20 +730,29 @@ class TestNonNumericSentinels:
         # exports (where 'Path?' originates) — the parser treats Raw/Reduced
         # interchangeably, but this keeps the fixture faithful.
         middle = "\tReduced\tFALSE\t1\t\t\t\t\t\t1"
-        header = f"{prefix}\tEndpoint\tAbsorbance{middle}\t750\t1\t3\t6\t1\t2\n"
-        col_header = "\t\t1\t2\t3\t\n"
-        # A1=numeric, A2=Path?, A3=empty (omitted)
-        # B1=Range?, B2=numeric, B3=Path?
-        row_a = "\t25.0\t0.10\tPath?\t\t\n"
-        row_b = "\t\tRange?\t0.40\tPath?\t\n"
+        header = f"{prefix}\tEndpoint\tAbsorbance{middle}\t750\t1\t4\t8\t1\t2\n"
+        col_header = "\t\t1\t2\t3\t4\t\n"
+        # A1=numeric, A2=Path?, A3=empty (omitted), A4=#SAT
+        # B1=Range?, B2=numeric, B3=Path?, B4=#Low
+        row_a = "\t25.0\t0.10\tPath?\t\t#SAT\t\n"
+        row_b = "\t\tRange?\t0.40\tPath?\t#Low\t\n"
         content = f"##BLOCKS= 1\n{header}{col_header}{row_a}{row_b}\n~End\n"
         path = tmp_path / "sentinels.xls"
         path.write_text(content, encoding="utf-16")
         self.df = parse_raw_well_data(path)
 
     def test_empty_cells_omitted_but_sentinels_kept(self) -> None:
-        # 5 wells: A1, A2 (Path?), B1 (Range?), B2, B3 (Path?). A3 is empty.
-        assert self.df["well_position"].tolist() == ["A1", "A2", "B1", "B2", "B3"]
+        # 7 wells: A1, A2 (Path?), A4 (#SAT), B1 (Range?), B2, B3 (Path?),
+        # B4 (#Low). A3 is empty.
+        assert self.df["well_position"].tolist() == [
+            "A1",
+            "A2",
+            "A4",
+            "B1",
+            "B2",
+            "B3",
+            "B4",
+        ]
 
     def test_numeric_values_unaffected(self) -> None:
         a1 = self.df[self.df["well_position"] == "A1"].iloc[0]
@@ -760,6 +769,29 @@ class TestNonNumericSentinels:
         value = self.df[self.df["well_position"] == "B1"].iloc[0]["value"]
         assert math.isnan(value)
 
+    def test_sat_sentinel_becomes_nan(self) -> None:
+        value = self.df[self.df["well_position"] == "A4"].iloc[0]["value"]
+        assert math.isnan(value)
+
+    def test_low_sentinel_becomes_nan(self) -> None:
+        value = self.df[self.df["well_position"] == "B4"].iloc[0]["value"]
+        assert math.isnan(value)
+
+
+@pytest.mark.parametrize("token", ["#SAT", "#Sat", "#sat", "#LOW", "#Low"])
+def test_hash_sentinel_casing_becomes_nan(tmp_path: Path, token: str) -> None:
+    prefix = "Plate:\tPlate1\t1.3\tPlateFormat"
+    middle = "\tRaw\tFALSE\t1\t\t\t\t\t\t1"
+    header = f"{prefix}\tEndpoint\tAbsorbance{middle}\t750\t1\t1\t1\t1\t1\n"
+    col_header = "\t\t1\t\n"
+    row_a = f"\t25.0\t{token}\t\n"
+    content = f"##BLOCKS= 1\n{header}{col_header}{row_a}\n~End\n"
+    path = tmp_path / "hash_sentinel.xls"
+    path.write_text(content, encoding="utf-16")
+    df = parse_raw_well_data(path)
+    assert len(df) == 1
+    assert math.isnan(df.iloc[0]["value"])
+
 
 # ---------------------------------------------------------------------------
 # Error handling
@@ -775,8 +807,8 @@ class TestParseRawWellDataValidation:
 
     def test_unknown_non_numeric_token_still_raises(self, tmp_path: Path) -> None:
         # Anything that isn't a documented SoftMax Pro sentinel (Path?,
-        # Range?) should still surface as a ValueError — silently swallowing
-        # arbitrary garbage would hide real parser bugs.
+        # Range?, #SAT, #Low) should still surface as a ValueError —
+        # silently swallowing arbitrary garbage would hide real parser bugs.
         prefix = "Plate:\tPlate1\t1.3\tPlateFormat"
         middle = "\tRaw\tFALSE\t1\t\t\t\t\t\t1"
         header = f"{prefix}\tEndpoint\tAbsorbance{middle}\t750\t1\t1\t1\t1\t1\n"
