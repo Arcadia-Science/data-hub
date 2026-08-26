@@ -52,6 +52,7 @@ Dispatch is by `instrument_type` (Postgres/TS enum), not instrument ID. The regi
 | `hina_microscope` | `hina_microscope` | `.nd2` |
 | `plate_reader` | `spectramax_plate_reader` | `.xls` |
 | `dishcam` | `dishcam` | `.tif` / `.tiff` / `run.json` |
+| `aunty` | `unchained_labs_aunty` | `.xlsx` |
 | `generic`, `instant_raman` | — | — |
 
 **One type = one vendor's output format.** Names like `qpcr` and `fplc` sound generic, but the parsers behind them are vendor-specific (Azure Cielo, ÄKTA, …). Adding a second vendor under an existing type requires splitting the type, not reusing it.
@@ -101,6 +102,7 @@ Available commands:
 | `spectramax` | Parse metadata and raw well data from a SpectraMax `.xls` export |
 | `tapestation` | Extract the tape type from a TapeStation CSV filename |
 | `dishcam` | Convert a DishCam TIFF stack plus `run.json` into an MP4 preview and JPEG poster |
+| `aunty` | Parse an Unchained Labs Aunty `.xlsx` export into a curves CSV and plate JSON |
 | `handler` | Stage a file into a local S3 mirror and invoke `lambda_handler` against the local dev API. See [Testing the Lambda end-to-end](local-development.md#testing-the-lambda-end-to-end) for the workflow. |
 
 The instrument-specific subcommands need no S3 or API access — they call into the same parsing/processing utilities the lambda uses, but stop short of the network. `handler` is different: it expects a running dev API and a `LOCAL_S3_MIRROR` directory, and uses the same dispatch path production uses.
@@ -138,6 +140,7 @@ The Lambda function depends on a scientific Python stack:
 - `matplotlib` — plotting
 - `scikit-image` — image processing
 - `tifffile` — TIFF file reading
+- `openpyxl` — Excel reading for Unchained Labs Aunty `.xlsx` exports
 - `ffmpeg` — static linux/amd64 binary from `mwader/static-ffmpeg` for DishCam H.264 encode
 - `arcadia-microscopy-tools` — ND2 reading, channel handling, and multi-channel compositing for the Hina microscope
 - `pydantic` — data validation

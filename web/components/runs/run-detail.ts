@@ -14,6 +14,7 @@ import type {
   RunFileStats,
   RunFilesPage,
 } from "@/lib/api/instrument-runs";
+import type { AuntyPlateData } from "@/lib/runs/aunty";
 import type { ReportItemsPage } from "@/lib/runs/report-items";
 
 export const RunDetail = {
@@ -32,6 +33,8 @@ export interface RunDetailProps {
   // Rendered in the summary card's "Ran By" field. Parent composes the
   // attribution UI so server-only user/session wiring stays at the page.
   attributionsSlot: React.ReactNode;
+  // Parsed Aunty plate JSON plus the curves CSV file id for the modal.
+  auntyPlate: AuntyPlateData | null;
   // Aggregate per-run file counts (footer summary, variant counts).
   fileStats: RunFileStats;
   // Current page of the server-paginated files table.

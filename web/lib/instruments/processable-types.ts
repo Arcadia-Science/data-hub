@@ -12,6 +12,7 @@ export const PROCESSABLE_INSTRUMENT_TYPES = [
   "epson_v700_scanner",
   "fplc",
   "dishcam",
+  "aunty",
 ] as const satisfies readonly InstrumentType[];
 
 const PROCESSABLE_SET = new Set<string>(PROCESSABLE_INSTRUMENT_TYPES);

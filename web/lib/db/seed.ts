@@ -273,7 +273,7 @@ export const SEED_INSTRUMENTS: readonly SeededInstrument[] = [
   {
     id: "unchained-labs-aunty",
     displayName: "Aunty",
-    instrumentType: "generic",
+    instrumentType: "aunty",
     status: "active",
     hostname: "Aunty-1075",
     osInfo: "Windows 11",
@@ -875,6 +875,31 @@ export const INSTRUMENT_FIXTURES: Record<string, InstrumentFixture> = {
       "260620_OD750_HHH",
     ],
   },
+  "unchained-labs-aunty": {
+    files: [
+      {
+        filename: "aunty_thermal_ramp.xlsx",
+        contentType:
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      },
+      {
+        filename: "aunty_sizing.xlsx",
+        contentType:
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      },
+    ],
+    // Prod-shaped ISO-ish stems; timestamps chosen to avoid real runs.
+    runIds: [
+      "2026-03-15T09-22-11",
+      "2026-03-15T09-18-44",
+      "2026-03-14T14-05-33",
+      "2026-03-13T16-41-09",
+      "2026-03-12T11-27-52",
+      "2026-03-11T10-13-28",
+      "2026-03-10T15-56-07",
+      "2026-03-09T08-34-19",
+    ],
+  },
 };
 
 // Filename / run-id patterns snapped from production shapes, with synthetic
@@ -917,27 +942,6 @@ const SYNTHETIC_RUN_SHAPES: Record<string, SyntheticRunShape> = {
         },
       ];
     },
-  },
-  "unchained-labs-aunty": {
-    // Prod-shaped ISO-ish stems; timestamps chosen to avoid real runs.
-    runIds: [
-      "2026-03-15T09-22-11",
-      "2026-03-15T09-18-44",
-      "2026-03-14T14-05-33",
-      "2026-03-13T16-41-09",
-      "2026-03-12T11-27-52",
-      "2026-03-11T10-13-28",
-      "2026-03-10T15-56-07",
-      "2026-03-09T08-34-19",
-    ],
-    filesForRun: (runId) => [
-      {
-        filename: `Aunty_export_${runId}.xlsx`,
-        contentType:
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        category: "raw",
-      },
-    ],
   },
   "jolene-fplc": {
     runIds: [

@@ -24,6 +24,7 @@ import {
   runAttributions,
   users,
 } from "@/lib/db/schema";
+import { type AuntyPlateData, parseAuntyPlateJson } from "@/lib/runs/aunty";
 import type { RunStatus } from "@/lib/runs/run-status";
 import { getS3ObjectStream } from "@/lib/s3";
 
@@ -1077,6 +1078,39 @@ export async function getProcessedCsvData(
   return results.flat();
 }
 
+export async function getAuntyPlateData(
+  runFiles: RunFile[]
+): Promise<AuntyPlateData | null> {
+  const plateFile = runFiles.find(
+    (f) =>
+      f.category === "processed" &&
+      f.deletedAt === null &&
+      f.filename.endsWith("_aunty_plate.json") &&
+      f.s3Bucket &&
+      f.s3Key
+  );
+  if (!(plateFile?.s3Bucket && plateFile.s3Key)) {
+    return null;
+  }
+
+  const curvesFile = runFiles.find(
+    (f) =>
+      f.category === "processed" &&
+      f.deletedAt === null &&
+      f.filename.endsWith("_aunty_curves.csv")
+  );
+
+  try {
+    const stream = await getS3ObjectStream(plateFile.s3Bucket, plateFile.s3Key);
+    const buf = await streamToBuffer(stream);
+    const plate = parseAuntyPlateJson(JSON.parse(buf.toString("utf8")));
+    return { plate, curvesFileId: curvesFile?.id ?? null };
+  } catch (err) {
+    console.error(`Failed to fetch Aunty plate JSON ${plateFile.s3Key}:`, err);
+    return null;
+  }
+}
+
 export interface ProcessedCsvSummary {
   columns: string[];
   rowCount: number;
@@ -1414,6 +1448,7 @@ export async function getInstrumentFilterOptions(
     case "tape_station":
     case "instant_raman":
     case "dishcam":
+    case "aunty":
       return { kind: "default" };
     default:
       return { kind: "default" };

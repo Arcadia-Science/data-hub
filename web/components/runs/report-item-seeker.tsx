@@ -17,10 +17,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import type { UseReportItemsResult } from "@/hooks/use-report-items";
 import type { ReportItemKind } from "@/lib/runs/report-items";
 import { cn } from "@/lib/utils";
 
-interface SeekerLabels {
+export interface SeekerLabels {
   empty: string;
   next: string;
   previous: string;
@@ -92,8 +93,15 @@ function LoadSentinel({
   );
 }
 
-function ItemPicker({ labels }: { labels: SeekerLabels }) {
-  const { state, actions } = useReportItemsContext();
+function ItemPicker({
+  actions,
+  labels,
+  state,
+}: {
+  actions: UseReportItemsResult["actions"];
+  labels: SeekerLabels;
+  state: UseReportItemsResult["state"];
+}) {
   const [open, setOpen] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -184,15 +192,21 @@ function ItemPicker({ labels }: { labels: SeekerLabels }) {
 
 // Shared report-data toolbar: filename combobox on the left, position and
 // prev/next seek on the right — same layout for every report viewer.
-export function ReportItemSeeker() {
-  const { state, actions, meta } = useReportItemsContext();
-  const labels = LABELS[meta.kind];
+export function SeekerToolbar({
+  actions,
+  labels,
+  state,
+}: {
+  actions: UseReportItemsResult["actions"];
+  labels: SeekerLabels;
+  state: UseReportItemsResult["state"];
+}) {
   const canGoPrev = state.selectedIndex > 0;
   const canGoNext = state.selectedIndex + 1 < state.total;
 
   return (
     <div className="flex items-center justify-between gap-2">
-      <ItemPicker labels={labels} />
+      <ItemPicker actions={actions} labels={labels} state={state} />
       <div className="flex items-center gap-2">
         {state.total > 0 && (
           <span className="whitespace-nowrap font-mono text-muted-foreground text-xs">
@@ -221,5 +235,12 @@ export function ReportItemSeeker() {
         </div>
       </div>
     </div>
+  );
+}
+
+export function ReportItemSeeker() {
+  const { state, actions, meta } = useReportItemsContext();
+  return (
+    <SeekerToolbar actions={actions} labels={LABELS[meta.kind]} state={state} />
   );
 }

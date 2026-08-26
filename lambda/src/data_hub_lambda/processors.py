@@ -19,6 +19,7 @@ from data_hub_lambda import (
     epson_v700_scanner,
     hina_microscope,
     spectramax_plate_reader,
+    unchained_labs_aunty,
 )
 from data_hub_lambda.dishcam.filenames import matches_filename as _is_dishcam_input
 
@@ -75,6 +76,10 @@ PROCESSORS: dict[str, ProcessorEntry] = {
     "dishcam": ProcessorEntry(
         process_file=dishcam.process_file,
         matches_filename=_is_dishcam_input,
+    ),
+    "aunty": ProcessorEntry(
+        process_file=unchained_labs_aunty.process_file,
+        matches_filename=_ends_with_any(".xlsx"),
     ),
 }
 

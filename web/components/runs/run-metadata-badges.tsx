@@ -13,6 +13,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
+  AUNTY_EXPERIMENT_TYPE_COLORS,
+  AUNTY_EXPERIMENT_TYPE_LABELS,
   buildWavelengthColorMap,
   CAPTURE_TYPE_COLORS,
   CHANNEL_COLOR_STYLES,
@@ -570,6 +572,70 @@ export function HinaRunBadges({
       {sizesLabel && (
         <MetadataRow label="Sizes">
           <ColorBadge value={sizesLabel} />
+        </MetadataRow>
+      )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Aunty
+// ---------------------------------------------------------------------------
+
+export function hasAuntyMetadata(metadata: Record<string, unknown>) {
+  return Boolean(
+    getMetadataField(metadata, "experiment_type") ||
+      getMetadataField(metadata, "analysis_mode") ||
+      getMetadataField(metadata, "start_temp_c") ||
+      getMetadataField(metadata, "end_temp_c") ||
+      getMetadataField(metadata, "rate_c_per_min")
+  );
+}
+
+function formatAuntyExperimentType(value: string): string {
+  return AUNTY_EXPERIMENT_TYPE_LABELS[value] ?? value.replace(/_/g, " ");
+}
+
+export function AuntyRunBadges({
+  metadata,
+}: {
+  metadata: Record<string, unknown>;
+}) {
+  const experimentType = getMetadataField(metadata, "experiment_type");
+  const analysisMode = getMetadataField(metadata, "analysis_mode");
+  const startTemp = getMetadataField(metadata, "start_temp_c");
+  const endTemp = getMetadataField(metadata, "end_temp_c");
+  const rate = getMetadataField(metadata, "rate_c_per_min");
+  const tempRange =
+    startTemp && endTemp ? `${startTemp}\u2013${endTemp} \u00b0C` : null;
+
+  if (!(experimentType || analysisMode || tempRange || rate)) {
+    return null;
+  }
+
+  return (
+    <>
+      {experimentType && (
+        <MetadataRow label="Experiment">
+          <ColorBadge
+            colorClass={AUNTY_EXPERIMENT_TYPE_COLORS[experimentType]}
+            value={formatAuntyExperimentType(experimentType)}
+          />
+        </MetadataRow>
+      )}
+      {analysisMode && (
+        <MetadataRow label="Analysis mode">
+          <ColorBadge value={analysisMode} />
+        </MetadataRow>
+      )}
+      {tempRange && (
+        <MetadataRow label="Temperature">
+          <ColorBadge value={tempRange} />
+        </MetadataRow>
+      )}
+      {rate && (
+        <MetadataRow label="Ramp rate">
+          <ColorBadge value={`${rate} \u00b0C/min`} />
         </MetadataRow>
       )}
     </>
