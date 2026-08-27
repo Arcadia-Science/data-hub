@@ -615,11 +615,14 @@ export function AuntyRunBadges({
   const analysisMode = getMetadataField(metadata, "analysis_mode");
   const startTemp = getMetadataField(metadata, "start_temp_c");
   const endTemp = getMetadataField(metadata, "end_temp_c");
+  const holdTemp = getMetadataField(metadata, "temperature_c");
   const rate = getMetadataField(metadata, "rate_c_per_min");
   const tempRange =
     startTemp && endTemp
       ? formatAuntyTemperatureRange(startTemp, endTemp)
-      : null;
+      : holdTemp
+        ? `${holdTemp} \u00b0C`
+        : null;
 
   if (!(experimentTypes.length || analysisMode || tempRange || rate)) {
     return null;

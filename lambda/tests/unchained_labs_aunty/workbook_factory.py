@@ -25,7 +25,12 @@ class SyntheticExperiment:
     wells: list[SyntheticWell] = field(default_factory=list)
 
 
-def write_aunty_workbook(path: Path, experiments: list[SyntheticExperiment]) -> None:
+def write_aunty_workbook(
+    path: Path,
+    experiments: list[SyntheticExperiment],
+    *,
+    include_graph: bool = True,
+) -> None:
     """Write an Aunty-shaped `.xlsx` covering the graph, table, and info sheets."""
     if not experiments:
         raise ValueError("Need at least one experiment")
@@ -34,16 +39,19 @@ def write_aunty_workbook(path: Path, experiments: list[SyntheticExperiment]) -> 
         raise ValueError("A workbook must use one flavor so column blocks line up")
 
     wb = Workbook()
-    graph = wb.active
-    assert graph is not None
-    graph.title = "Analysis_graph"
-    _write_graph(graph, experiments, flavor)
+    first = wb.active
+    assert first is not None
+    if include_graph:
+        first.title = "Analysis_graph"
+        _write_graph(first, experiments, flavor)
+        results = wb.create_sheet("Results")
+    else:
+        first.title = "Results"
+        results = first
+    _write_results(results, experiments, flavor)
 
     table = wb.create_sheet("Analysis_table")
     _write_table(table, experiments, flavor)
-
-    results = wb.create_sheet("Results")
-    _write_results(results, experiments, flavor)
 
     info = wb.create_sheet("Experiment info")
     _write_info(info, experiments, flavor)
@@ -61,6 +69,7 @@ def thermal_experiment(
     *,
     n_points: int = 8,
     tm1: float = 64.6,
+    include_series: set[str] | None = None,
 ) -> SyntheticExperiment:
     """A small BCM thermal-ramp experiment with a fluorescence peak near Tm1."""
     experiment = SyntheticExperiment(
@@ -82,6 +91,14 @@ def thermal_experiment(
         differential = [(t, _deriv(t, well_tm, 8.0)) for t in temps[:-1]]
         diameter = [(t, 80.0 + (t - 25.0) * 2.0) for t in temps]
         sls = [(t, 1.0e6 + (t - 25.0) * 1.0e5) for t in temps]
+        series = {
+            "fluorescence": fluorescence,
+            "differential": differential,
+            "z_average_diameter": diameter,
+            "sls": sls,
+        }
+        if include_series is not None:
+            series = {key: points for key, points in series.items() if key in include_series}
         experiment.wells.append(
             SyntheticWell(
                 well=well,
@@ -93,12 +110,7 @@ def thermal_experiment(
                     "Tonset (°C)": well_tm - 8.0,
                     "Tsize (°C)": 39.0 + i,
                 },
-                series={
-                    "fluorescence": fluorescence,
-                    "differential": differential,
-                    "z_average_diameter": diameter,
-                    "sls": sls,
-                },
+                series=series,
             )
         )
     return experiment
@@ -148,6 +160,45 @@ def sizing_experiment(
     return experiment
 
 
+def isothermal_experiment(
+    file_name: str,
+    wells: list[str],
+    *,
+    n_points: int = 8,
+    with_sls: bool = False,
+    k1: float = 0.0034,
+) -> SyntheticExperiment:
+    """An isothermal hold with time-series fluorescence, optionally SLS."""
+    experiment = SyntheticExperiment(
+        file_name=file_name,
+        flavor="isothermal",
+        analysis_mode="Peak height",
+        info={
+            "Temperature (°C)": 25,
+            "Analysis version": "v2.0.1",
+            "Experiment name": file_name,
+        },
+    )
+    times = [float(i * 60) for i in range(n_points)]
+    for i, well in enumerate(wells):
+        well_k1 = k1 + i * 0.0002
+        series: dict[str, list[tuple[float, float]]] = {
+            "fluorescence": [(t, 22_000.0 - t * (0.4 + i * 0.05)) for t in times],
+        }
+        values: dict[str, float | None] = {
+            "fluorescence k₁ (s⁻¹)": well_k1,
+            "fluorescence k₂ (s⁻¹)": None,
+            "fluorescence R²": 0.95,
+        }
+        if with_sls:
+            series["sls"] = [(t, 3.5e6 + t * 200.0) for t in times]
+            values["SLS k₁ (s⁻¹)"] = well_k1 * 0.4
+        experiment.wells.append(
+            SyntheticWell(well=well, sample=well, values=values, series=series)
+        )
+    return experiment
+
+
 def _peak(x: float, center: float, width: float) -> float:
     return math.exp(-((x - center) ** 2) / (2 * width * width))
 
@@ -156,38 +207,34 @@ def _deriv(x: float, center: float, width: float) -> float:
     return -((x - center) / (width * width)) * _peak(x, center, width)
 
 
+_GRAPH_SERIES: dict[str, list[tuple[str, tuple[str, str]]]] = {
+    "thermal_ramp": [
+        ("fluorescence", ("temperature_fluorescence", "fluorescence")),
+        ("differential", ("temperature_differential", "differential")),
+        ("z_average_diameter", ("temperature_DLS", "Z-average diameter")),
+        ("sls", ("temperature_DLS", "SLS")),
+    ],
+    "sizing": [
+        ("correlation", ("time", "amplitude")),
+        ("intensity", ("hydrodynamic_diameter", "amplitude")),
+        ("mass", ("hydrodynamic_diameter", "amplitude")),
+    ],
+    "isothermal": [
+        ("fluorescence", ("time_fluorescence", "fluorescence")),
+        ("sls", ("time_DLS", "SLS")),
+    ],
+}
+
+
 def _write_graph(ws, experiments: list[SyntheticExperiment], flavor: str) -> None:
-    if flavor == "thermal_ramp":
-        header_labels = [
-            "temperature_fluorescence",
-            "fluorescence",
-            "temperature_differential",
-            "differential",
-            "temperature_DLS",
-            "Z-average diameter",
-            "temperature_DLS",
-            "SLS",
-        ]
-        series_keys = [
-            "fluorescence",
-            "differential",
-            "z_average_diameter",
-            "sls",
-        ]
-        width = 8
-        has_mode = True
-    else:
-        header_labels = [
-            "time",
-            "amplitude",
-            "hydrodynamic_diameter",
-            "amplitude",
-            "hydrodynamic_diameter",
-            "amplitude",
-        ]
-        series_keys = ["correlation", "intensity", "mass"]
-        width = 6
-        has_mode = False
+    present = set(experiments[0].wells[0].series)
+    spec = [(key, headers) for key, headers in _GRAPH_SERIES[flavor] if key in present]
+    if not spec:
+        raise ValueError(f"No graph series to write for flavor {flavor}")
+    series_keys = [key for key, _headers in spec]
+    header_labels = [label for _key, headers in spec for label in headers]
+    width = len(header_labels)
+    has_mode = flavor in {"thermal_ramp", "isothermal"}
 
     # Flatten to (experiment, well) in the same column-major caller order.
     pairs: list[tuple[SyntheticExperiment, SyntheticWell]] = []
@@ -261,7 +308,7 @@ def _write_table(ws, experiments: list[SyntheticExperiment], flavor: str) -> Non
             "Tonset (°C)",
             "Tsize (°C)",
         ]
-    else:
+    elif flavor == "sizing":
         headers = [
             "Index",
             "File name",
@@ -280,6 +327,24 @@ def _write_table(ws, experiments: list[SyntheticExperiment], flavor: str) -> Non
             "Pk 1 intensity (%)",
             "Pk 1 mass (%)",
         ]
+    else:
+        headers = [
+            "Index",
+            "File name",
+            "Analysis mode",
+            "Well",
+            "Sample",
+            "fluorescence k₁ (s⁻¹)",
+            "fluorescence k₂ (s⁻¹)",
+            "fluorescence R²",
+            "SLS k₁ (s⁻¹)",
+        ]
+        value_keys = [
+            "fluorescence k₁ (s⁻¹)",
+            "fluorescence k₂ (s⁻¹)",
+            "fluorescence R²",
+            "SLS k₁ (s⁻¹)",
+        ]
 
     for col, header in enumerate(headers, start=1):
         ws.cell(1, col, header)
@@ -291,7 +356,7 @@ def _write_table(ws, experiments: list[SyntheticExperiment], flavor: str) -> Non
             ws.cell(row_i, 1, index)
             ws.cell(row_i, 2, exp.file_name)
             col = 3
-            if flavor == "thermal_ramp":
+            if flavor in {"thermal_ramp", "isothermal"}:
                 ws.cell(row_i, col, exp.analysis_mode)
                 col += 1
             ws.cell(row_i, col, well.well)
@@ -313,6 +378,16 @@ def _write_results(ws, experiments: list[SyntheticExperiment], flavor: str) -> N
             "ID",
             "Tm1 (°C)",
         ]
+    elif flavor == "isothermal":
+        headers = [
+            "File name",
+            "Analysis mode",
+            "Selected",
+            "Well",
+            "Sample",
+            "ID",
+            "k₁ (s⁻¹) fluorescence",
+        ]
     else:
         headers = ["File name", "Selected", "Well", "Sample", "ID", "Z-avg diameter (nm)"]
     for col, header in enumerate(headers, start=1):
@@ -323,7 +398,7 @@ def _write_results(ws, experiments: list[SyntheticExperiment], flavor: str) -> N
         for well in exp.wells:
             ws.cell(row_i, 1, exp.file_name)
             col = 2
-            if flavor == "thermal_ramp":
+            if flavor in {"thermal_ramp", "isothermal"}:
                 ws.cell(row_i, col, exp.analysis_mode)
                 col += 1
             ws.cell(row_i, col, "x")
@@ -332,6 +407,8 @@ def _write_results(ws, experiments: list[SyntheticExperiment], flavor: str) -> N
             ws.cell(row_i, col + 3, index)
             if flavor == "thermal_ramp":
                 ws.cell(row_i, col + 4, well.values.get("Tm1 (°C)"))
+            elif flavor == "isothermal":
+                ws.cell(row_i, col + 4, well.values.get("fluorescence k₁ (s⁻¹)"))
             else:
                 ws.cell(row_i, col + 4, well.values.get("Z-avg diameter (nm)"))
             row_i += 1
@@ -344,7 +421,7 @@ def _write_info(ws, experiments: list[SyntheticExperiment], flavor: str) -> None
         ws.cell(1, start, "Experiment settings")
         ws.cell(3, start, "File name")
         ws.cell(3, start + 1, exp.file_name)
-        if flavor == "thermal_ramp":
+        if flavor in {"thermal_ramp", "isothermal"}:
             ws.cell(4, start, "Analysis mode")
             ws.cell(4, start + 1, exp.analysis_mode)
         row = 5
@@ -369,4 +446,19 @@ if __name__ == "__main__":
     write_aunty_workbook(
         fixtures / "aunty_sizing.xlsx",
         [sizing_experiment("Sizing seed T1000", wells, n_points=16)],
+    )
+    write_aunty_workbook(
+        fixtures / "aunty_isothermal.xlsx",
+        [
+            isothermal_experiment(
+                "Blue Isothermal seed T1016",
+                wells[:12],
+                with_sls=True,
+            )
+        ],
+    )
+    write_aunty_workbook(
+        fixtures / "aunty_table_only.xlsx",
+        [thermal_experiment("Thermal ramp seed T1627", wells[:24])],
+        include_graph=False,
     )

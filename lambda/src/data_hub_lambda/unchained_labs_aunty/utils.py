@@ -1,7 +1,10 @@
 """Parse Unchained Labs Aunty Excel exports into long-form curves and a plate JSON.
 
 `Analysis_graph` holds repeating per-well column blocks keyed on
-`(file name, well)`, in one of two flavors: thermal ramp or sizing.
+`(file name, well)`. The block width depends on which series the export
+included: a full thermal ramp is eight columns, a Tm/Tagg ramp without
+Z-average is six, and isothermal runs are two or four. Exports that omit
+the graph sheet still have `Analysis_table`, which is enough for a plate.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ logger = logging.getLogger(__name__)
 
 FLAVOR_THERMAL = "thermal_ramp"
 FLAVOR_SIZING = "sizing"
+FLAVOR_ISOTHERMAL = "isothermal"
 
 SHEET_GRAPH = "Analysis_graph"
 SHEET_TABLE = "Analysis_table"
@@ -44,29 +48,6 @@ CURVE_CSV_COLUMNS = [
     "y",
 ]
 
-# Thermal-ramp series names as they appear in the graph header row.
-_THERMAL_HEADERS = (
-    "temperature_fluorescence",
-    "fluorescence",
-    "temperature_differential",
-    "differential",
-    "temperature_DLS",
-    "Z-average diameter",
-    "temperature_DLS",
-    "SLS",
-)
-
-# Sizing series names. The two diameter/amplitude pairs are intensity then
-# mass — peak positions line up with `Pk 1 intensity (%)` / `Pk 1 mass (%)`.
-_SIZING_HEADERS = (
-    "time",
-    "amplitude",
-    "hydrodynamic_diameter",
-    "amplitude",
-    "hydrodynamic_diameter",
-    "amplitude",
-)
-
 # Internal series ids written to CSV / JSON. Keep these stable; the web
 # viewer keys display metadata off them.
 SERIES_FLUORESCENCE = "fluorescence"
@@ -77,22 +58,36 @@ SERIES_CORRELATION = "correlation"
 SERIES_INTENSITY = "intensity"
 SERIES_MASS = "mass"
 
-_THERMAL_SERIES = (
-    (SERIES_FLUORESCENCE, 0, 1),
-    (SERIES_DIFFERENTIAL, 2, 3),
-    (SERIES_Z_AVG, 4, 5),
-    (SERIES_SLS, 6, 7),
+# (x header, y header) → (flavor, series id). Sizing has two identical
+# hydrodynamic_diameter/amplitude pairs; the first is intensity, the second
+# mass — handled in `_series_pairs_from_headers`.
+_SERIES_PAIR_KEYS: tuple[tuple[str, str, str, str], ...] = (
+    ("temperature_fluorescence", "fluorescence", FLAVOR_THERMAL, SERIES_FLUORESCENCE),
+    ("temperature_differential", "differential", FLAVOR_THERMAL, SERIES_DIFFERENTIAL),
+    ("temperature_DLS", "Z-average diameter", FLAVOR_THERMAL, SERIES_Z_AVG),
+    ("temperature_DLS", "SLS", FLAVOR_THERMAL, SERIES_SLS),
+    ("time", "amplitude", FLAVOR_SIZING, SERIES_CORRELATION),
+    ("time_fluorescence", "fluorescence", FLAVOR_ISOTHERMAL, SERIES_FLUORESCENCE),
+    ("time_DLS", "SLS", FLAVOR_ISOTHERMAL, SERIES_SLS),
 )
 
-_SIZING_SERIES = (
-    (SERIES_CORRELATION, 0, 1),
-    (SERIES_INTENSITY, 2, 3),
-    (SERIES_MASS, 4, 5),
+_SERIES_ROW_FIRST_CELLS = frozenset(
+    {
+        "temperature_fluorescence",
+        "temperature_differential",
+        "temperature_DLS",
+        "time",
+        "time_fluorescence",
+        "time_DLS",
+        "fluorescence",
+        "hydrodynamic_diameter",
+    }
 )
 
 _PRIMARY_SERIES = {
     FLAVOR_THERMAL: SERIES_FLUORESCENCE,
     FLAVOR_SIZING: SERIES_CORRELATION,
+    FLAVOR_ISOTHERMAL: SERIES_FLUORESCENCE,
 }
 
 # Analysis_table columns → compact JSON keys. Tm of 0 means "no transition".
@@ -108,6 +103,14 @@ _TABLE_VALUE_KEYS: dict[str, str] = {
     "Pk 1 diameter (nm)": "pk1_diameter",
     "Pk 1 intensity (%)": "pk1_intensity",
     "Pk 1 mass (%)": "pk1_mass",
+    "fluorescence k₁ (s⁻¹)": "fluor_k1",
+    "fluorescence k₂ (s⁻¹)": "fluor_k2",
+    "fluorescence k₃ (s⁻¹)": "fluor_k3",
+    "fluorescence R²": "fluor_r2",
+    "SLS k₁ (s⁻¹)": "sls_k1",
+    "SLS k₂ (s⁻¹)": "sls_k2",
+    "SLS k₃ (s⁻¹)": "sls_k3",
+    "SLS R²": "sls_r2",
 }
 
 _TM_VALUE_KEYS = frozenset({"tm1", "tm2", "tm3"})
@@ -146,6 +149,15 @@ class WellBlock:
 
 
 @dataclass
+class TableWell:
+    file_name: str
+    well: str
+    sample: str | None
+    analysis_mode: str | None
+    values: dict[str, float | None]
+
+
+@dataclass
 class ParsedAunty:
     metadata: dict[str, Any]
     experiments: list[dict[str, Any]]
@@ -160,22 +172,30 @@ def parse_aunty_workbook(path: Path) -> ParsedAunty:
     """Read an Aunty `.xlsx` export into curve rows and a plate JSON payload."""
     wb = load_workbook(path, read_only=True, data_only=True)
     try:
-        if SHEET_GRAPH not in wb.sheetnames:
-            raise AuntyParseError(f"Workbook is missing the '{SHEET_GRAPH}' sheet")
-        graph_rows = _sheet_rows(wb[SHEET_GRAPH])
+        graph_rows = _sheet_rows(wb[SHEET_GRAPH]) if SHEET_GRAPH in wb.sheetnames else []
         table_rows = _sheet_rows(wb[SHEET_TABLE]) if SHEET_TABLE in wb.sheetnames else []
         info_rows = _sheet_rows(wb[SHEET_INFO]) if SHEET_INFO in wb.sheetnames else []
+        has_graph = SHEET_GRAPH in wb.sheetnames
     finally:
         wb.close()
 
-    blocks = _parse_graph_blocks(graph_rows)
-    if not blocks:
+    blocks = _parse_graph_blocks(graph_rows) if graph_rows else []
+    table_wells = _parse_analysis_table(table_rows)
+    summaries = {(row.file_name, row.well): row.values for row in table_wells}
+
+    if blocks:
+        experiments = _build_experiments(blocks, summaries)
+        curve_rows = _curve_rows_from_blocks(blocks)
+    elif table_wells:
+        # Some exports skip Analysis_graph and only write the summary table.
+        experiments = _build_experiments_from_table(table_wells)
+        curve_rows = []
+    elif not has_graph:
+        raise AuntyParseError(f"Workbook is missing the '{SHEET_GRAPH}' sheet")
+    else:
         raise AuntyParseError("No well blocks found in Analysis_graph")
 
-    summaries = _parse_analysis_table(table_rows)
-    experiments = _build_experiments(blocks, summaries)
     metadata = _parse_experiment_info(info_rows, experiments)
-    curve_rows = _curve_rows_from_blocks(blocks)
     return ParsedAunty(metadata=metadata, experiments=experiments, curve_rows=curve_rows)
 
 
@@ -265,10 +285,11 @@ def _parse_graph_blocks(rows: list[tuple[Any, ...]]) -> list[WellBlock]:
     blocks: list[WellBlock] = []
     for start in starts:
         headers = _row_slice(rows[series_row_i], start, width)
-        flavor = _detect_flavor(headers)
-        if flavor is None:
+        detected = _series_pairs_from_headers(headers)
+        if detected is None:
             logger.warning("Skipping Analysis_graph block with unknown series %s", headers)
             continue
+        flavor, pairs = detected
         file_name = _cell_str(_row_slice(rows[file_row_i], start, width)[1])
         well = _cell_str(_row_slice(rows[well_row_i], start, width)[1])
         if not (file_name and well):
@@ -280,7 +301,6 @@ def _parse_graph_blocks(rows: list[tuple[Any, ...]]) -> list[WellBlock]:
         if sample_row_i is not None:
             sample = _cell_str(_row_slice(rows[sample_row_i], start, width)[1])
 
-        pairs = _THERMAL_SERIES if flavor == FLAVOR_THERMAL else _SIZING_SERIES
         series: dict[str, list[list[float]]] = {}
         for series_id, x_offset, y_offset in pairs:
             points: list[list[float]] = []
@@ -305,21 +325,21 @@ def _parse_graph_blocks(rows: list[tuple[Any, ...]]) -> list[WellBlock]:
     return blocks
 
 
-def _parse_analysis_table(
-    rows: list[tuple[Any, ...]],
-) -> dict[tuple[str, str], dict[str, float | None]]:
+def _parse_analysis_table(rows: list[tuple[Any, ...]]) -> list[TableWell]:
     if not rows:
-        return {}
+        return []
     header = [_cell_str(v) or "" for v in rows[0]]
     try:
         file_i = header.index("File name")
         well_i = header.index("Well")
     except ValueError:
         logger.warning("Analysis_table is missing File name / Well columns")
-        return {}
+        return []
 
+    sample_i = header.index("Sample") if "Sample" in header else None
+    mode_i = header.index("Analysis mode") if "Analysis mode" in header else None
     index_by_key = {name: header.index(name) for name in _TABLE_VALUE_KEYS if name in header}
-    out: dict[tuple[str, str], dict[str, float | None]] = {}
+    out: list[TableWell] = []
     for row in rows[1:]:
         file_name = _cell_str(_cell_at(row, file_i))
         well = _cell_str(_cell_at(row, well_i))
@@ -331,7 +351,15 @@ def _parse_analysis_table(
             if col is None:
                 continue
             values[key] = _table_value(key, _num(_cell_at(row, col)))
-        out[(file_name, well)] = values
+        out.append(
+            TableWell(
+                file_name=file_name,
+                well=well,
+                sample=_cell_str(_cell_at(row, sample_i)) if sample_i is not None else None,
+                analysis_mode=_cell_str(_cell_at(row, mode_i)) if mode_i is not None else None,
+                values=values,
+            )
+        )
     return out
 
 
@@ -376,6 +404,56 @@ def _build_experiments(
             }
         )
     return experiments
+
+
+def _build_experiments_from_table(table_wells: list[TableWell]) -> list[dict[str, Any]]:
+    flavor = _flavor_from_table_wells(table_wells)
+    if flavor is None:
+        raise AuntyParseError("Could not determine experiment type from Analysis_table")
+
+    grouped: dict[str, list[TableWell]] = defaultdict(list)
+    order: list[str] = []
+    for row in table_wells:
+        if row.file_name not in grouped:
+            order.append(row.file_name)
+        grouped[row.file_name].append(row)
+
+    experiments: list[dict[str, Any]] = []
+    for file_name in order:
+        wells_in_file = grouped[file_name]
+        analysis_mode = next((w.analysis_mode for w in wells_in_file if w.analysis_mode), None)
+        experiments.append(
+            {
+                "fileName": file_name,
+                "analysisMode": analysis_mode,
+                "flavor": flavor,
+                "primarySeries": _PRIMARY_SERIES[flavor],
+                "wells": [
+                    {
+                        "well": row.well,
+                        "sample": row.sample,
+                        "values": row.values,
+                        "series": {},
+                    }
+                    for row in wells_in_file
+                ],
+            }
+        )
+    return experiments
+
+
+def _flavor_from_table_wells(table_wells: list[TableWell]) -> str | None:
+    keys: set[str] = set()
+    for row in table_wells:
+        keys.update(k for k, value in row.values.items() if value is not None)
+        keys.update(row.values)
+    if keys & {"fluor_k1", "fluor_k2", "fluor_k3", "sls_k1", "sls_k2", "sls_k3"}:
+        return FLAVOR_ISOTHERMAL
+    if keys & {"tm1", "tm2", "tm3", "tagg", "tonset", "tsize"}:
+        return FLAVOR_THERMAL
+    if keys & {"z_avg_diameter", "pdi", "pk1_diameter", "pk1_intensity", "pk1_mass"}:
+        return FLAVOR_SIZING
+    return None
 
 
 def _curve_rows_from_blocks(blocks: list[WellBlock]) -> list[CurveRow]:
@@ -438,19 +516,43 @@ def _info_blocks(rows: list[tuple[Any, ...]]) -> list[dict[str, Any]]:
     return blocks
 
 
-def _detect_flavor(headers: tuple[Any, ...]) -> str | None:
-    normalized = tuple(_cell_str(h) for h in headers)
-    if _headers_match(normalized, _THERMAL_HEADERS):
-        return FLAVOR_THERMAL
-    if _headers_match(normalized, _SIZING_HEADERS):
-        return FLAVOR_SIZING
+def _series_pairs_from_headers(
+    headers: tuple[Any, ...],
+) -> tuple[str, list[tuple[str, int, int]]] | None:
+    """Walk (x, y) column pairs and keep the ones we know how to plot."""
+    names = [_cell_str(h) for h in headers]
+    pairs: list[tuple[str, int, int]] = []
+    flavor: str | None = None
+    hydro_seen = 0
+    i = 0
+    while i + 1 < len(names):
+        matched = _match_header_pair(names[i], names[i + 1], hydro_seen)
+        if matched is None:
+            i += 1
+            continue
+        series_id, pair_flavor = matched
+        if pair_flavor == FLAVOR_SIZING and names[i] == "hydrodynamic_diameter":
+            hydro_seen += 1
+        if flavor is None:
+            flavor = pair_flavor
+        if pair_flavor == flavor:
+            pairs.append((series_id, i, i + 1))
+        i += 2
+    if flavor is None or not pairs:
+        return None
+    return flavor, pairs
+
+
+def _match_header_pair(
+    x_name: str | None, y_name: str | None, hydro_seen: int
+) -> tuple[str, str] | None:
+    if x_name == "hydrodynamic_diameter" and y_name == "amplitude":
+        series_id = SERIES_INTENSITY if hydro_seen == 0 else SERIES_MASS
+        return series_id, FLAVOR_SIZING
+    for x_header, y_header, pair_flavor, series_id in _SERIES_PAIR_KEYS:
+        if x_name == x_header and y_name == y_header:
+            return series_id, pair_flavor
     return None
-
-
-def _headers_match(actual: tuple[str | None, ...], expected: tuple[str, ...]) -> bool:
-    if len(actual) < len(expected):
-        return False
-    return actual[: len(expected)] == expected
 
 
 def _find_row(rows: list[tuple[Any, ...]], label: str) -> int | None:
@@ -466,12 +568,7 @@ def _find_series_row(rows: list[tuple[Any, ...]], after: int) -> int | None:
         if not row:
             continue
         first = _cell_str(row[0])
-        if first in {
-            "temperature_fluorescence",
-            "time",
-            "fluorescence",
-            "hydrodynamic_diameter",
-        }:
+        if first in _SERIES_ROW_FIRST_CELLS:
             return i
     return None
 

@@ -19,6 +19,7 @@ import {
   type SparklineGeometry,
   sparklineGeometry,
   tmMarkerValue,
+  wellTileValue,
 } from "@/lib/runs/aunty";
 import { cn } from "@/lib/utils";
 
@@ -30,6 +31,7 @@ function WellButton({
   meta,
   onSelect,
   style,
+  summary,
   well,
 }: {
   className?: string;
@@ -37,6 +39,7 @@ function WellButton({
   meta: AuntySeriesMeta;
   onSelect: (well: string) => void;
   style?: CSSProperties;
+  summary: string | null;
   well: AuntyWell;
 }) {
   return (
@@ -54,7 +57,15 @@ function WellButton({
         {well.well}
       </span>
       <div className="min-h-0 flex-1 px-0.5 pb-0.5">
-        <AuntySparkline geometry={geometry} meta={meta} />
+        {geometry?.d ? (
+          <AuntySparkline geometry={geometry} meta={meta} />
+        ) : summary ? (
+          <span className="flex h-full items-center justify-center font-mono text-[10px] tabular-nums leading-none">
+            {summary}
+          </span>
+        ) : (
+          <div className="h-full min-h-12 w-full" />
+        )}
       </div>
     </button>
   );
@@ -184,6 +195,7 @@ export const AuntyPlateGrid = memo(function AuntyPlateGrid({
                       meta={meta}
                       onSelect={openWell}
                       style={style}
+                      summary={wellTileValue(experiment.flavor, well.values)}
                       well={well}
                     />
                   );
@@ -206,6 +218,7 @@ export const AuntyPlateGrid = memo(function AuntyPlateGrid({
                 key={well.well}
                 meta={meta}
                 onSelect={openWell}
+                summary={wellTileValue(experiment.flavor, well.values)}
                 well={well}
               />
             ))}

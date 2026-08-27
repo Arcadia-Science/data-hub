@@ -1,4 +1,4 @@
-export const AUNTY_FLAVORS = ["thermal_ramp", "sizing"] as const;
+export const AUNTY_FLAVORS = ["thermal_ramp", "sizing", "isothermal"] as const;
 export type AuntyFlavor = (typeof AUNTY_FLAVORS)[number];
 
 export const AUNTY_SERIES_IDS = [
@@ -18,10 +18,18 @@ export interface AuntyPoint {
 }
 
 export interface AuntyWellValues {
+  fluor_k1?: number | null;
+  fluor_k2?: number | null;
+  fluor_k3?: number | null;
+  fluor_r2?: number | null;
   pdi?: number | null;
   pk1_diameter?: number | null;
   pk1_intensity?: number | null;
   pk1_mass?: number | null;
+  sls_k1?: number | null;
+  sls_k2?: number | null;
+  sls_k3?: number | null;
+  sls_r2?: number | null;
   tagg?: number | null;
   tm1?: number | null;
   tm2?: number | null;
@@ -129,7 +137,93 @@ export const AUNTY_SERIES_META: Record<AuntySeriesId, AuntySeriesMeta> = {
 export const SERIES_BY_FLAVOR: Record<AuntyFlavor, AuntySeriesId[]> = {
   thermal_ramp: ["fluorescence", "differential", "z_average_diameter", "sls"],
   sizing: ["correlation", "intensity", "mass"],
+  isothermal: ["fluorescence", "sls"],
 };
+
+export function seriesMetaFor(
+  flavor: AuntyFlavor,
+  seriesId: AuntySeriesId
+): AuntySeriesMeta {
+  const base = AUNTY_SERIES_META[seriesId];
+  if (
+    flavor === "isothermal" &&
+    (seriesId === "fluorescence" || seriesId === "sls")
+  ) {
+    return { ...base, markerKey: undefined, xLabel: "Time (s)" };
+  }
+  return base;
+}
+
+export const AUNTY_WELL_VALUE_FIELDS = [
+  { key: "tm1", label: "Tm1 (°C)" },
+  { key: "tm2", label: "Tm2 (°C)" },
+  { key: "tm3", label: "Tm3 (°C)" },
+  { key: "tagg", label: "Tagg (°C)" },
+  { key: "tonset", label: "Tonset (°C)" },
+  { key: "tsize", label: "Tsize (°C)" },
+  { key: "z_avg_diameter", label: "Z-avg (nm)" },
+  { key: "pdi", label: "PDI" },
+  { key: "pk1_diameter", label: "Pk 1 diameter (nm)" },
+  { key: "pk1_intensity", label: "Pk 1 intensity (%)" },
+  { key: "pk1_mass", label: "Pk 1 mass (%)" },
+  { key: "fluor_k1", label: "Fluorescence k\u2081 (s\u207b\u00b9)" },
+  { key: "fluor_k2", label: "Fluorescence k\u2082 (s\u207b\u00b9)" },
+  { key: "fluor_k3", label: "Fluorescence k\u2083 (s\u207b\u00b9)" },
+  { key: "fluor_r2", label: "Fluorescence R\u00b2" },
+  { key: "sls_k1", label: "SLS k\u2081 (s\u207b\u00b9)" },
+  { key: "sls_k2", label: "SLS k\u2082 (s\u207b\u00b9)" },
+  { key: "sls_k3", label: "SLS k\u2083 (s\u207b\u00b9)" },
+  { key: "sls_r2", label: "SLS R\u00b2" },
+] as const satisfies readonly {
+  key: keyof AuntyWellValues;
+  label: string;
+}[];
+
+export function formatAuntyNumber(value: number): string {
+  const abs = Math.abs(value);
+  if (abs !== 0 && (abs < 0.01 || abs >= 10_000)) {
+    return value.toExponential(2);
+  }
+  if (Number.isInteger(value)) {
+    return String(value);
+  }
+  if (abs >= 10) {
+    return value.toFixed(1);
+  }
+  return value.toFixed(2);
+}
+
+export function wellTileValue(
+  flavor: AuntyFlavor,
+  values: AuntyWellValues
+): string | null {
+  const keys =
+    flavor === "thermal_ramp"
+      ? (["tm1", "tagg"] as const)
+      : flavor === "sizing"
+        ? (["z_avg_diameter"] as const)
+        : (["fluor_k1", "sls_k1"] as const);
+  for (const key of keys) {
+    const value = values[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return formatAuntyNumber(value);
+    }
+  }
+  return null;
+}
+
+export function presentWellValues(
+  values: AuntyWellValues
+): { label: string; text: string }[] {
+  const out: { label: string; text: string }[] = [];
+  for (const field of AUNTY_WELL_VALUE_FIELDS) {
+    const value = values[field.key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      out.push({ label: field.label, text: formatAuntyNumber(value) });
+    }
+  }
+  return out;
+}
 
 export function isAuntyFlavor(value: unknown): value is AuntyFlavor {
   return (
@@ -268,6 +362,14 @@ function parseValues(raw: unknown): AuntyWellValues {
     "pk1_diameter",
     "pk1_intensity",
     "pk1_mass",
+    "fluor_k1",
+    "fluor_k2",
+    "fluor_k3",
+    "fluor_r2",
+    "sls_k1",
+    "sls_k2",
+    "sls_k3",
+    "sls_r2",
   ] as const) {
     out[key] = optionalNumber(src[key]);
   }

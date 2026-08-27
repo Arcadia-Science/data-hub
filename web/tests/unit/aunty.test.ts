@@ -7,12 +7,16 @@ import {
 import {
   compareWells,
   curveKey,
+  formatAuntyNumber,
   indexAuntyCurves,
   parseAuntyCurvesCsv,
   parseAuntyPlateJson,
+  presentWellValues,
   seriesForFlavor,
+  seriesMetaFor,
   sparklineGeometry,
   tmMarkerValue,
+  wellTileValue,
 } from "@/lib/runs/aunty";
 
 describe("parseAuntyCurvesCsv", () => {
@@ -125,6 +129,9 @@ describe("seriesForFlavor", () => {
       "correlation",
       "intensity",
     ]);
+    expect(
+      seriesForFlavor("isothermal", ["fluorescence", "sls", "correlation"])
+    ).toEqual(["fluorescence", "sls"]);
   });
 });
 
@@ -196,10 +203,43 @@ describe("sparklineGeometry", () => {
   });
 });
 
+describe("seriesMetaFor", () => {
+  it("uses time on the x-axis for isothermal fluorescence", () => {
+    expect(seriesMetaFor("isothermal", "fluorescence").xLabel).toBe("Time (s)");
+    expect(seriesMetaFor("thermal_ramp", "fluorescence").xLabel).toBe(
+      "Temperature"
+    );
+  });
+});
+
+describe("well summaries", () => {
+  it("picks a tile value by flavor and skips empty Tm", () => {
+    expect(wellTileValue("thermal_ramp", { tm1: 64.6 })).toBe("64.6");
+    expect(wellTileValue("thermal_ramp", { tagg: 60.1 })).toBe("60.1");
+    expect(wellTileValue("sizing", { z_avg_diameter: 16.72 })).toBe("16.7");
+    expect(wellTileValue("isothermal", { fluor_k1: 0.0034 })).toBe("3.40e-3");
+  });
+
+  it("lists finite well values in display order", () => {
+    expect(
+      presentWellValues({ tm1: 64.6, tm2: null, fluor_k1: 0.0034 })
+    ).toEqual([
+      { label: "Tm1 (°C)", text: "64.6" },
+      { label: "Fluorescence k₁ (s⁻¹)", text: "3.40e-3" },
+    ]);
+  });
+
+  it("formats large and tiny numbers compactly", () => {
+    expect(formatAuntyNumber(18951.2)).toBe("1.90e+4");
+    expect(formatAuntyNumber(0)).toBe("0");
+  });
+});
+
 describe("Aunty metadata labels", () => {
   it("maps known experiment types and formats temperature and ramp rate", () => {
     expect(formatAuntyExperimentType("thermal_ramp")).toBe("Thermal ramp");
     expect(formatAuntyExperimentType("sizing")).toBe("Sizing");
+    expect(formatAuntyExperimentType("isothermal")).toBe("Isothermal");
     expect(formatAuntyExperimentType("custom_run")).toBe("custom run");
     expect(formatAuntyTemperatureRange("25", "95")).toBe("25–95 °C");
     expect(formatAuntyRampRate("1")).toBe("1 °C/min");
