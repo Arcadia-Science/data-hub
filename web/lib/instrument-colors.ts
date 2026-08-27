@@ -81,6 +81,19 @@ export const MEASUREMENT_MODE_COLORS: Record<string, string> = {
     "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300",
 };
 
+// ---------- Aunty ----------
+
+export const AUNTY_EXPERIMENT_TYPE_COLORS: Record<string, string> = {
+  thermal_ramp: "bg-teal-100 text-teal-700 dark:bg-teal-950 dark:text-teal-300",
+  sizing:
+    "bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300",
+};
+
+export const AUNTY_EXPERIMENT_TYPE_LABELS: Record<string, string> = {
+  thermal_ramp: "Thermal ramp",
+  sizing: "Sizing",
+};
+
 // ---------- qPCR ----------
 
 // Known qPCR dye channels. Unknown values fall through to the hash-based cycle

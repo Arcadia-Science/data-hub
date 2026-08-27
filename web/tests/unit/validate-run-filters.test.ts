@@ -65,6 +65,55 @@ describe("validateSearchRunsMetadataFilters", () => {
     expect(result).toContain("plate_reader");
   });
 
+  it("accepts Aunty filter values from filter-options, including temperature pairs", async () => {
+    getInstrumentById.mockResolvedValue({
+      id: "aunty-1",
+      instrumentType: "aunty",
+    });
+    getInstrumentFilterOptions.mockResolvedValue({
+      kind: "aunty",
+      options: {
+        experimentTypes: [
+          { value: "thermal_ramp", label: "Thermal ramp" },
+          { value: "sizing", label: "Sizing" },
+        ],
+        analysisModes: ["BCM"],
+        temperatures: [{ value: "25|95", label: "25–95 °C" }],
+        rampRates: [{ value: "1", label: "1 °C/min" }],
+      },
+    });
+
+    const result = await validateSearchRunsMetadataFilters("aunty-1", {
+      auntyExperimentType: "thermal_ramp",
+      auntyAnalysisMode: "BCM",
+      auntyTemperature: "25|95",
+      auntyRampRate: "1",
+    });
+    expect(result).toBeNull();
+  });
+
+  it("rejects an out-of-enum Aunty temperature pair", async () => {
+    getInstrumentById.mockResolvedValue({
+      id: "aunty-1",
+      instrumentType: "aunty",
+    });
+    getInstrumentFilterOptions.mockResolvedValue({
+      kind: "aunty",
+      options: {
+        experimentTypes: [{ value: "thermal_ramp", label: "Thermal ramp" }],
+        analysisModes: ["BCM"],
+        temperatures: [{ value: "25|95", label: "25–95 °C" }],
+        rampRates: [{ value: "1", label: "1 °C/min" }],
+      },
+    });
+
+    const result = await validateSearchRunsMetadataFilters("aunty-1", {
+      auntyTemperature: "0|100",
+    });
+    expect(result).toContain("Invalid auntyTemperature");
+    expect(result).toContain("25|95");
+  });
+
   it("skips validation for instruments with no filter enum (default kind)", async () => {
     getInstrumentById.mockResolvedValue({
       id: "generic-1",

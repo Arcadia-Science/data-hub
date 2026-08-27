@@ -13,6 +13,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
+  AUNTY_EXPERIMENT_TYPE_COLORS,
+  AUNTY_EXPERIMENT_TYPE_LABELS,
   buildWavelengthColorMap,
   CAPTURE_TYPE_COLORS,
   CHANNEL_COLOR_STYLES,
@@ -570,6 +572,85 @@ export function HinaRunBadges({
       {sizesLabel && (
         <MetadataRow label="Sizes">
           <ColorBadge value={sizesLabel} />
+        </MetadataRow>
+      )}
+    </>
+  );
+}
+
+// ---------- Aunty ----------
+
+export function hasAuntyMetadata(metadata: Record<string, unknown>) {
+  return Boolean(
+    getMetadataField(metadata, "experiment_type") ||
+      getMetadataField(metadata, "analysis_mode") ||
+      getMetadataField(metadata, "start_temp_c") ||
+      getMetadataField(metadata, "end_temp_c") ||
+      getMetadataField(metadata, "rate_c_per_min")
+  );
+}
+
+export function formatAuntyExperimentType(value: string): string {
+  return AUNTY_EXPERIMENT_TYPE_LABELS[value] ?? value.replace(/_/g, " ");
+}
+
+export function formatAuntyTemperatureRange(
+  start: string,
+  end: string
+): string {
+  return `${start}\u2013${end} \u00b0C`;
+}
+
+export function formatAuntyRampRate(rate: string): string {
+  return `${rate} \u00b0C/min`;
+}
+
+export function AuntyRunBadges({
+  metadata,
+}: {
+  metadata: Record<string, unknown>;
+}) {
+  // A workbook holding both a thermal ramp and a sizing run stores a list here.
+  const experimentTypes = getMetadataArray(metadata, "experiment_type");
+  const analysisMode = getMetadataField(metadata, "analysis_mode");
+  const startTemp = getMetadataField(metadata, "start_temp_c");
+  const endTemp = getMetadataField(metadata, "end_temp_c");
+  const rate = getMetadataField(metadata, "rate_c_per_min");
+  const tempRange =
+    startTemp && endTemp
+      ? formatAuntyTemperatureRange(startTemp, endTemp)
+      : null;
+
+  if (!(experimentTypes.length || analysisMode || tempRange || rate)) {
+    return null;
+  }
+
+  return (
+    <>
+      {experimentTypes.length > 0 && (
+        <MetadataRow label="Experiment">
+          {experimentTypes.map((type) => (
+            <ColorBadge
+              colorClass={AUNTY_EXPERIMENT_TYPE_COLORS[type]}
+              key={type}
+              value={formatAuntyExperimentType(type)}
+            />
+          ))}
+        </MetadataRow>
+      )}
+      {analysisMode && (
+        <MetadataRow label="Analysis mode">
+          <ColorBadge value={analysisMode} />
+        </MetadataRow>
+      )}
+      {tempRange && (
+        <MetadataRow label="Temperature">
+          <ColorBadge value={tempRange} />
+        </MetadataRow>
+      )}
+      {rate && (
+        <MetadataRow label="Ramp rate">
+          <ColorBadge value={formatAuntyRampRate(rate)} />
         </MetadataRow>
       )}
     </>

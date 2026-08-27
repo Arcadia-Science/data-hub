@@ -794,6 +794,9 @@ describe("MCP Protocol (in-memory)", () => {
     expect(searchRuns?.inputSchema.properties).toHaveProperty("dyeChannel");
     expect(searchRuns?.inputSchema.properties).toHaveProperty("hinaChannel");
     expect(searchRuns?.inputSchema.properties).toHaveProperty("dpi");
+    expect(searchRuns?.inputSchema.properties).toHaveProperty(
+      "auntyExperimentType"
+    );
 
     const globalSearch = tools.find((t) => t.name === "global_search");
     expect(globalSearch?.inputSchema.properties).toHaveProperty("query");
@@ -964,6 +967,27 @@ describe("MCP Protocol (in-memory)", () => {
         captureType: "Chemi",
         gelWavelength: "520",
         dyeChannel: "SYBR",
+      })
+    );
+  });
+
+  it("search_runs forwards Aunty metadata filters", async () => {
+    const { buildRunListQuery } = await import("@/lib/api/instrument-runs");
+    await client.callTool({
+      name: "search_runs",
+      arguments: {
+        auntyExperimentType: "thermal_ramp",
+        auntyAnalysisMode: "BCM",
+        auntyTemperature: "25|95",
+        auntyRampRate: "1",
+      },
+    });
+    expect(buildRunListQuery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        auntyExperimentType: "thermal_ramp",
+        auntyAnalysisMode: "BCM",
+        auntyTemperature: "25|95",
+        auntyRampRate: "1",
       })
     );
   });

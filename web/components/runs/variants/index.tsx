@@ -1,5 +1,6 @@
 import type { RunDetailProps } from "@/components/runs/run-detail";
 
+import { AuntyRunDetail } from "./aunty-run-detail";
 import { DefaultRunDetail } from "./default-run-detail";
 import { DishcamRunDetail } from "./dishcam-run-detail";
 import { EpsonScannerRunDetail } from "./epson-scanner-run-detail";
@@ -36,6 +37,8 @@ function renderRunDetailVariant(props: RunDetailVariantProps) {
       return <InstantRamanRunDetail {...props} />;
     case "dishcam":
       return <DishcamRunDetail {...props} />;
+    case "aunty":
+      return <AuntyRunDetail {...props} />;
     default:
       return <DefaultRunDetail {...props} />;
   }

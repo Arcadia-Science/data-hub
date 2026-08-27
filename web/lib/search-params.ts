@@ -62,6 +62,12 @@ export const instrumentDetailSearchParams = {
   // ("300", "600"); `color_mode` is "rgb" or "bw".
   dpi: parseAsString,
   color_mode: parseAsString,
+  // Aunty metadata column filters. Temperature is a `start|end` pair of the
+  // stored °C values (e.g. "25|95") so the URL stays a single token.
+  aunty_experiment_type: parseAsString,
+  aunty_analysis_mode: parseAsString,
+  aunty_temperature: parseAsString,
+  aunty_ramp_rate: parseAsString,
   // Attribution filter: either a userId or the reserved sentinel "unattributed".
   ran_by: parseAsString,
   // Derived run status, multi-select. Empty array = no filter (show all).

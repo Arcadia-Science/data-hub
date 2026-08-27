@@ -118,6 +118,39 @@ export const RUN_METADATA_FILTER_DEFS = [
     allowedValues: (o) =>
       o.kind === "epson_v700_scanner" ? o.options.colorModes : [],
   },
+  {
+    key: "auntyExperimentType",
+    queryParam: "aunty_experiment_type",
+    kind: "aunty",
+    description:
+      "Aunty: filter by experiment type (thermal_ramp, sizing). Mixed workbooks match if they include the type.",
+    allowedValues: (o) =>
+      o.kind === "aunty" ? o.options.experimentTypes.map((t) => t.value) : [],
+  },
+  {
+    key: "auntyAnalysisMode",
+    queryParam: "aunty_analysis_mode",
+    kind: "aunty",
+    description: "Aunty: filter by analysis mode (e.g. 'BCM')",
+    allowedValues: (o) => (o.kind === "aunty" ? o.options.analysisModes : []),
+  },
+  {
+    key: "auntyTemperature",
+    queryParam: "aunty_temperature",
+    kind: "aunty",
+    description:
+      "Aunty: filter by start/end temperature pair (value from filter-options, e.g. '25|95')",
+    allowedValues: (o) =>
+      o.kind === "aunty" ? o.options.temperatures.map((t) => t.value) : [],
+  },
+  {
+    key: "auntyRampRate",
+    queryParam: "aunty_ramp_rate",
+    kind: "aunty",
+    description: "Aunty: filter by ramp rate in °C/min (e.g. '1')",
+    allowedValues: (o) =>
+      o.kind === "aunty" ? o.options.rampRates.map((r) => r.value) : [],
+  },
 ] as const satisfies readonly RunMetadataFilterDef[];
 
 export type RunMetadataFilterKey =

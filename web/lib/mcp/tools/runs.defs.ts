@@ -29,7 +29,7 @@ export const searchRunsTool = {
   scope: "runs:read",
   title: "Search Runs",
   description:
-    "Search instrument runs with filtering, pagination, and sorting. Supports run status filters and instrument-metadata filters (plate reader, gel-doc, qPCR, Hina microscope, Epson scanner). Prefer global_search when the query may match filenames, instrument names, or attributor names rather than run IDs. Discover valid metadata filter values via get_instrument_filter_options or datahub://instruments/{id}/filter-options.",
+    "Search instrument runs with filtering, pagination, and sorting. Supports run status filters and instrument-metadata filters (plate reader, gel-doc, qPCR, Hina microscope, Epson scanner, Aunty). Prefer global_search when the query may match filenames, instrument names, or attributor names rather than run IDs. Discover valid metadata filter values via get_instrument_filter_options or datahub://instruments/{id}/filter-options.",
   outputSchema: searchRunsOutputSchema,
   inputSchema: {
     instrumentId: z

@@ -13,6 +13,7 @@ describe("reportItemKindForInstrument", () => {
   it("leaves unmapped types without a seeker", () => {
     expect(reportItemKindForInstrument("generic")).toBeNull();
     expect(reportItemKindForInstrument("plate_reader")).toBeNull();
+    expect(reportItemKindForInstrument("aunty")).toBeNull();
   });
 });
 

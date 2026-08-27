@@ -7,6 +7,7 @@ import {
   type ReportItemKind,
   type ReportItemsPage,
   reportItemsUrl,
+  type SeekerSource,
 } from "@/lib/runs/report-items";
 
 const SEARCH_DEBOUNCE_MS = 300;
@@ -33,28 +34,7 @@ export interface UseReportItemsOptions {
   runId: string;
 }
 
-export interface UseReportItemsResult {
-  actions: {
-    clearSearch: (anchorId?: number) => void;
-    loadMore: () => void;
-    loadPrevious: () => void;
-    next: () => void;
-    previous: () => void;
-    selectId: (id: number) => void;
-    setSearch: (value: string) => void;
-  };
-  state: {
-    error: string | null;
-    hasMore: boolean;
-    hasPrevious: boolean;
-    isLoading: boolean;
-    items: ReportItem[];
-    search: string;
-    selectedIndex: number;
-    selectedItem: ReportItem | null;
-    total: number;
-  };
-}
+export type UseReportItemsResult = SeekerSource;
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : "Failed to load report items";

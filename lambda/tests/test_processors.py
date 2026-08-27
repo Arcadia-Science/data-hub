@@ -51,6 +51,9 @@ class TestFilenameGates:
             ("dishcam", "RUN.JSON", True),
             ("dishcam", "notes.json", False),
             ("dishcam", "stack.png", False),
+            ("aunty", "Aunty_export_2026-03-15T09-22-11.xlsx", True),
+            ("aunty", "Aunty_export_2026-03-15T09-22-11.XLSX", True),
+            ("aunty", "Aunty_export_2026-03-15T09-22-11.xls", False),
         ],
     )
     def test_per_type_gate(self, instrument_type: str, filename: str, expected: bool) -> None:
@@ -62,6 +65,7 @@ class TestFilenameGates:
         assert matches_any_processor_gate("scan.TIFF")
         assert matches_any_processor_gate("well.nd2")
         assert matches_any_processor_gate("run.json")
+        assert matches_any_processor_gate("Aunty_export_seed.xlsx")
         assert not matches_any_processor_gate("readme.txt")
         assert not matches_any_processor_gate("notes.md")
 

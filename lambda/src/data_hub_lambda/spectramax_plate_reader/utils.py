@@ -62,11 +62,16 @@ _ROW_LABELS = "ABCDEFGHIJKLMNOP"
 #   - ``Path?``  PathCheck pathlength correction failed (typically an empty
 #                or low-volume well that breaks the NIR-ratio measurement).
 #   - ``Range?`` Reading was outside the detector's dynamic range.
+#   - ``#Sat``   Detector saturated (too much signal). SoftMax docs use
+#                ``#Sat``; current iD5 exports write ``#SAT``.
+#   - ``#Low``   Flash lamp missed the well; SoftMax advises rereading
+#                the affected strip. Casing may vary like ``#Sat``.
 #
 # These wells are preserved in the parsed DataFrame with ``value=NaN`` so
 # that downstream code can distinguish a "well was attempted but failed"
 # from a "well was never read" (which remains absent from the output).
-_WELL_VALUE_SENTINELS = frozenset({"Path?", "Range?"})
+# Hash-prefixed tokens are matched case-insensitively.
+_WELL_VALUE_SENTINELS = frozenset({"Path?", "Range?", "#sat", "#low"})
 
 # SoftMax elapsed time: ``HH:MM:SS`` within the first day, then
 # ``D.HH:MM:SS`` once the run crosses 24 h (e.g. ``1.00:05:20``).
@@ -137,11 +142,13 @@ def _parse_well_value(val_str: str) -> float:
     """Convert a SpectraMax well-cell string to a float.
 
     Returns ``NaN`` for documented non-numeric sentinels emitted by
-    SoftMax Pro (see :data:`_WELL_VALUE_SENTINELS`). Any other
-    non-numeric token is treated as a parser bug and re-raises
+    SoftMax Pro (see :data:`_WELL_VALUE_SENTINELS`). Hash-prefixed
+    tokens (``#Sat`` / ``#Low``) are matched case-insensitively. Any
+    other non-numeric token is treated as a parser bug and re-raises
     :class:`ValueError`.
     """
-    if val_str in _WELL_VALUE_SENTINELS:
+    key = val_str.casefold() if val_str.startswith("#") else val_str
+    if key in _WELL_VALUE_SENTINELS:
         return float("nan")
     return float(val_str)
 
@@ -493,9 +500,9 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
     Each row in the returned DataFrame represents a single well reading.
     Wells with no data (empty cells) are omitted. Wells where SoftMax Pro
     emitted a non-numeric sentinel (e.g. ``Path?`` for a PathCheck
-    pathlength failure, ``Range?`` for out-of-range) are kept with
-    ``value=NaN`` so the failed well is still visible to downstream
-    consumers.
+    pathlength failure, ``Range?`` for out-of-range, ``#SAT`` for
+    detector saturation) are kept with ``value=NaN`` so the failed well
+    is still visible to downstream consumers.
 
     Returns:
         A :class:`~pandas.DataFrame` with columns:
@@ -510,7 +517,7 @@ def parse_raw_well_data(file_path: Path) -> pd.DataFrame:
                                reading group
         value          float   Raw instrument reading; ``NaN`` for wells
                                whose value was a SoftMax Pro sentinel
-                               such as ``Path?`` or ``Range?``.
+                               such as ``Path?``, ``Range?``, or ``#SAT``.
         row_label      str     e.g. "A"
         column_label   int     e.g. 1
         wavelength     int?    Nanometres; `None` when not reported.
