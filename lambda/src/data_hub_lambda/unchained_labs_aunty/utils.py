@@ -1,14 +1,7 @@
 """Parse Unchained Labs Aunty Excel exports into long-form curves and a plate JSON.
 
-Aunty writes one workbook with an `Analysis_graph` sheet of repeating
-per-well column blocks. Two experiment flavors share that layout:
-
-- Thermal ramp: fluorescence / derivative / DLS diameter / SLS vs temperature.
-- Sizing and polydispersity: correlation vs time, plus intensity and mass
-  size distributions.
-
-One workbook can hold several experiments side by side. Blocks are keyed
-on `(file name, well)`.
+`Analysis_graph` holds repeating per-well column blocks keyed on
+`(file name, well)`, in one of two flavors: thermal ramp or sizing.
 """
 
 from __future__ import annotations
@@ -33,7 +26,13 @@ SHEET_GRAPH = "Analysis_graph"
 SHEET_TABLE = "Analysis_table"
 SHEET_INFO = "Experiment info"
 
-MAX_THUMBNAIL_POINTS = 64
+# A sparkline cell is at most 64 screen pixels wide, so this is already about
+# one point per two pixels. More would only inflate the plate JSON.
+MAX_THUMBNAIL_POINTS = 32
+
+# Excel hands back floats like 330.1234567890123. The viewer rounds every
+# coordinate to 2 decimals when it draws, so the extra digits are dead weight.
+THUMBNAIL_SIGNIFICANT_DIGITS = 6
 
 CURVE_CSV_COLUMNS = [
     "file_name",
@@ -224,6 +223,17 @@ def downsample_points(
     return [points[i] for i in indices]
 
 
+def round_points(points: list[list[float]]) -> list[list[float]]:
+    """Drop float noise from thumbnail points, keeping significant digits."""
+    return [[_significant(x), _significant(y)] for x, y in points]
+
+
+def _significant(value: float) -> float:
+    # Significant digits, not decimal places: sizing correlation x values are
+    # around 4e-07 and would round to zero.
+    return float(f"{value:.{THUMBNAIL_SIGNIFICANT_DIGITS}g}")
+
+
 def _sheet_rows(ws: Any) -> list[tuple[Any, ...]]:
     return [tuple(row) for row in ws.iter_rows(values_only=True)]
 
@@ -239,7 +249,8 @@ def _parse_graph_blocks(rows: list[tuple[Any, ...]]) -> list[WellBlock]:
         raise AuntyParseError("Analysis_graph is missing File name / Well header rows")
 
     mode_row_i = _find_row(rows, "Analysis mode")
-    series_row_i = _find_series_row(rows, after=max(well_row_i, sample_row_i or well_row_i))
+    last_header_i = well_row_i if sample_row_i is None else max(well_row_i, sample_row_i)
+    series_row_i = _find_series_row(rows, after=last_header_i)
     if series_row_i is None:
         raise AuntyParseError("Analysis_graph is missing a series-name row")
 
@@ -343,7 +354,7 @@ def _build_experiments(
         wells: list[dict[str, Any]] = []
         for block in well_blocks:
             thumbs = {
-                series_id: downsample_points(points)
+                series_id: round_points(downsample_points(points))
                 for series_id, points in block.series.items()
                 if points
             }

@@ -117,9 +117,7 @@ function RunFilesSectionSkeleton({ rows = 3 }: { rows?: number }) {
 
 function showsReportSection(instrumentType: RunDetail["instrumentType"]) {
   return (
-    instrumentType !== "plate_reader" &&
-    instrumentType !== "instant_raman" &&
-    instrumentType !== "aunty"
+    instrumentType !== "plate_reader" && instrumentType !== "instant_raman"
   );
 }
 

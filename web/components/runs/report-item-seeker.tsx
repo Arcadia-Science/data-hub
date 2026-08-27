@@ -17,8 +17,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import type { UseReportItemsResult } from "@/hooks/use-report-items";
-import type { ReportItemKind } from "@/lib/runs/report-items";
+import type {
+  ReportItemKind,
+  SeekerActions,
+  SeekerState,
+} from "@/lib/runs/report-items";
 import { cn } from "@/lib/utils";
 
 export interface SeekerLabels {
@@ -98,9 +101,9 @@ function ItemPicker({
   labels,
   state,
 }: {
-  actions: UseReportItemsResult["actions"];
+  actions: SeekerActions;
   labels: SeekerLabels;
-  state: UseReportItemsResult["state"];
+  state: SeekerState;
 }) {
   const [open, setOpen] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
@@ -197,9 +200,9 @@ export function SeekerToolbar({
   labels,
   state,
 }: {
-  actions: UseReportItemsResult["actions"];
+  actions: SeekerActions;
   labels: SeekerLabels;
-  state: UseReportItemsResult["state"];
+  state: SeekerState;
 }) {
   const canGoPrev = state.selectedIndex > 0;
   const canGoNext = state.selectedIndex + 1 < state.total;

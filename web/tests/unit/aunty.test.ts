@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { sparklineGeometry } from "@/components/runs/aunty/aunty-sparkline";
 import {
   compareWells,
   curveKey,
@@ -7,6 +6,7 @@ import {
   parseAuntyCurvesCsv,
   parseAuntyPlateJson,
   seriesForFlavor,
+  sparklineGeometry,
   tmMarkerValue,
 } from "@/lib/runs/aunty";
 

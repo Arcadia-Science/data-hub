@@ -9,6 +9,7 @@ from data_hub_lambda.unchained_labs_aunty.utils import (
     AuntyParseError,
     downsample_points,
     parse_aunty_workbook,
+    round_points,
     write_curves_csv,
     write_plate_json,
 )
@@ -134,6 +135,23 @@ def test_downsample_keeps_endpoints() -> None:
     assert out[0] == [0.0, 0.0]
     assert out[-1] == [99.0, 99.0]
     assert len(out) == 10
+
+
+def test_round_points_trims_digits_and_keeps_tiny_values() -> None:
+    out = round_points([[4.0e-07, 330.1234567890123], [0.0, -1.5e-09]])
+    assert out[0] == [4.0e-07, 330.123]
+    assert out[1] == [0.0, -1.5e-09]
+
+
+def test_thumbnails_are_smaller_than_full_precision(tmp_path: Path) -> None:
+    path = tmp_path / "sizing.xlsx"
+    write_aunty_workbook(path, [sizing_experiment("Sizing seed T1000", ["A1"])])
+    parsed = parse_aunty_workbook(path)
+
+    thumbs = parsed.experiments[0]["wells"][0]["series"]["correlation"]
+    # Rounding must not collapse the sub-microsecond correlation x values.
+    assert all(x > 0 for x, _y in thumbs)
+    assert all(len(repr(y)) <= 12 for _x, y in thumbs)
 
 
 def test_artifact_writers(tmp_path: Path) -> None:

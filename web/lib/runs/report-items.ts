@@ -23,6 +23,35 @@ export interface ReportItemsPage {
   };
 }
 
+export interface SeekerActions {
+  clearSearch: (anchorId?: number) => void;
+  loadMore: () => void;
+  loadPrevious: () => void;
+  next: () => void;
+  previous: () => void;
+  selectId: (id: number) => void;
+  setSearch: (value: string) => void;
+}
+
+export interface SeekerState {
+  error: string | null;
+  hasMore: boolean;
+  hasPrevious: boolean;
+  isLoading: boolean;
+  items: ReportItem[];
+  search: string;
+  selectedIndex: number;
+  selectedItem: ReportItem | null;
+  total: number;
+}
+
+// What `SeekerToolbar` needs from whoever owns the list. `useReportItems`
+// fetches pages; `AuntyWellsProvider` serves a list it already has in memory.
+export interface SeekerSource {
+  actions: SeekerActions;
+  state: SeekerState;
+}
+
 // Items per window, both for the server render and each subsequent fetch.
 export const REPORT_ITEMS_WINDOW = 50;
 

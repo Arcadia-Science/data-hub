@@ -2,10 +2,13 @@
 
 import { parse } from "csv-parse/browser/esm/sync";
 import { AlertTriangle } from "lucide-react";
-import { startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AuntySeriesToggle } from "@/components/runs/aunty/aunty-series-toggle";
 import { AuntyWellChart } from "@/components/runs/aunty/aunty-well-chart";
-import { useAuntyWells } from "@/components/runs/aunty/aunty-wells-provider";
+import {
+  useAuntyWellsActions,
+  useAuntyWellsState,
+} from "@/components/runs/aunty/aunty-wells-provider";
 import { SeekerToolbar } from "@/components/runs/report-item-seeker";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,19 +36,21 @@ const WELL_SEEKER_LABELS = {
   select: "Select a well\u2026",
 };
 
-type LoadState =
+type CurvesState =
   | { status: "idle" }
   | { status: "loading" }
   | { status: "ready"; index: Map<string, AuntyPoint[]> }
   | { status: "error"; message: string };
 
-type AsyncResult =
-  | { fileId: number; status: "ready"; index: Map<string, AuntyPoint[]> }
-  | { fileId: number; status: "error"; message: string };
+// Module scope, so a run with several experiments downloads each curves file
+// once instead of once per dialog. Failures evict themselves for Retry.
+const curvesCache = new Map<number, Promise<Map<string, AuntyPoint[]>>>();
 
-async function fetchCurves(fileId: number): Promise<Map<string, AuntyPoint[]>> {
-  // The download endpoint 302-redirects to a short-lived presigned S3 URL.
-  // The browser follows the redirect, so the bytes come from S3 directly.
+async function downloadCurves(
+  fileId: number
+): Promise<Map<string, AuntyPoint[]>> {
+  // The download endpoint 302-redirects to a short-lived presigned S3 URL, so
+  // the browser follows the redirect and reads the bytes straight from S3.
   const res = await fetch(`/api/v1/files/${fileId}/download`);
   if (!res.ok) {
     throw new Error(`Failed to load curves (HTTP ${res.status})`);
@@ -57,6 +62,19 @@ async function fetchCurves(fileId: number): Promise<Map<string, AuntyPoint[]>> {
     trim: true,
   }) as Record<string, string>[];
   return indexAuntyCurves(parseAuntyCurvesCsv(rows));
+}
+
+function loadCurves(fileId: number): Promise<Map<string, AuntyPoint[]>> {
+  const cached = curvesCache.get(fileId);
+  if (cached) {
+    return cached;
+  }
+  const pending = downloadCurves(fileId).catch((err: unknown) => {
+    curvesCache.delete(fileId);
+    throw err;
+  });
+  curvesCache.set(fileId, pending);
+  return pending;
 }
 
 export function AuntyWellDialog({
@@ -76,73 +94,45 @@ export function AuntyWellDialog({
   seriesId: AuntySeriesId;
   seriesOptions: AuntySeriesId[];
 }) {
-  const { state, actions } = useAuntyWells();
+  const state = useAuntyWellsState();
+  const actions = useAuntyWellsActions();
   const selectedWellLabel = state.selectedItem?.filename ?? null;
   const well = experiment.wells.find((w) => w.well === selectedWellLabel);
-  const [retryNonce, setRetryNonce] = useState(0);
-  const [asyncResult, setAsyncResult] = useState<AsyncResult | null>(null);
-  const cacheRef = useRef<Map<number, Map<string, AuntyPoint[]>>>(new Map());
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: retryNonce retriggers loading state after cache clear on retry
-  const loadState: LoadState = useMemo(() => {
-    if (!open) {
-      return { status: "idle" };
-    }
-    if (curvesFileId == null) {
-      return { status: "ready", index: new Map() };
-    }
-    const cached = cacheRef.current.get(curvesFileId);
-    if (cached) {
-      return { status: "ready", index: cached };
-    }
-    if (asyncResult && asyncResult.fileId === curvesFileId) {
-      return asyncResult.status === "ready"
-        ? { status: "ready", index: asyncResult.index }
-        : { status: "error", message: asyncResult.message };
-    }
-    return { status: "loading" };
-  }, [asyncResult, curvesFileId, open, retryNonce]);
+  const [curves, setCurves] = useState<CurvesState>({ status: "idle" });
+  const requestId = useRef(0);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: retryNonce retriggers fetch when the user retries after an error
-  useEffect(() => {
-    if (!open || curvesFileId == null) {
-      return;
-    }
-    if (cacheRef.current.has(curvesFileId)) {
-      return;
-    }
-    let cancelled = false;
-    fetchCurves(curvesFileId)
+  const startLoad = useCallback((fileId: number) => {
+    const id = requestId.current + 1;
+    requestId.current = id;
+    setCurves({ status: "loading" });
+    loadCurves(fileId)
       .then((index) => {
-        cacheRef.current.set(curvesFileId, index);
-        if (cancelled) {
-          return;
+        if (requestId.current === id) {
+          setCurves({ status: "ready", index });
         }
-        startTransition(() => {
-          setAsyncResult({ fileId: curvesFileId, status: "ready", index });
-        });
       })
       .catch((err: unknown) => {
-        if (cancelled) {
-          return;
+        if (requestId.current === id) {
+          setCurves({
+            status: "error",
+            message:
+              err instanceof Error ? err.message : "Failed to load curves",
+          });
         }
-        const message =
-          err instanceof Error ? err.message : "Failed to load curves";
-        setAsyncResult({
-          fileId: curvesFileId,
-          status: "error",
-          message,
-        });
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [curvesFileId, open, retryNonce]);
+  }, []);
+
+  useEffect(() => {
+    if (open && curvesFileId != null) {
+      startLoad(curvesFileId);
+    }
+  }, [curvesFileId, open, startLoad]);
 
   const thumbnailPoints = well?.series[seriesId] ?? [];
   const fullPoints =
-    loadState.status === "ready" && selectedWellLabel
-      ? (loadState.index.get(
+    curves.status === "ready" && selectedWellLabel
+      ? (curves.index.get(
           curveKey(experiment.fileName, selectedWellLabel, seriesId)
         ) ?? thumbnailPoints)
       : thumbnailPoints;
@@ -172,20 +162,18 @@ export function AuntyWellDialog({
             value={seriesId}
           />
         </div>
-        {loadState.status === "error" && (
+        {curves.status === "error" && (
           <div className="flex h-80 flex-col items-center justify-center gap-3 rounded-md border border-dashed bg-muted/20 p-6 text-center">
             <AlertTriangle
               aria-hidden
               className="size-6 text-muted-foreground"
             />
-            <p className="text-muted-foreground text-sm">{loadState.message}</p>
+            <p className="text-muted-foreground text-sm">{curves.message}</p>
             <Button
               onClick={() => {
                 if (curvesFileId != null) {
-                  cacheRef.current.delete(curvesFileId);
+                  startLoad(curvesFileId);
                 }
-                setAsyncResult(null);
-                setRetryNonce((n) => n + 1);
               }}
               size="sm"
               variant="outline"
@@ -194,10 +182,10 @@ export function AuntyWellDialog({
             </Button>
           </div>
         )}
-        {loadState.status === "loading" && fullPoints.length === 0 && (
+        {curves.status === "loading" && fullPoints.length === 0 && (
           <Skeleton aria-label="Loading curve" className="h-80 w-full" />
         )}
-        {well && loadState.status !== "error" && fullPoints.length > 0 && (
+        {well && curves.status !== "error" && fullPoints.length > 0 && (
           <AuntyWellChart
             fileName={experiment.fileName}
             points={fullPoints}

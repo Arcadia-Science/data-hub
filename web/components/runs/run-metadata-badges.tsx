@@ -578,9 +578,7 @@ export function HinaRunBadges({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Aunty
-// ---------------------------------------------------------------------------
+// ---------- Aunty ----------
 
 export function hasAuntyMetadata(metadata: Record<string, unknown>) {
   return Boolean(
@@ -601,7 +599,8 @@ export function AuntyRunBadges({
 }: {
   metadata: Record<string, unknown>;
 }) {
-  const experimentType = getMetadataField(metadata, "experiment_type");
+  // A workbook holding both a thermal ramp and a sizing run stores a list here.
+  const experimentTypes = getMetadataArray(metadata, "experiment_type");
   const analysisMode = getMetadataField(metadata, "analysis_mode");
   const startTemp = getMetadataField(metadata, "start_temp_c");
   const endTemp = getMetadataField(metadata, "end_temp_c");
@@ -609,18 +608,21 @@ export function AuntyRunBadges({
   const tempRange =
     startTemp && endTemp ? `${startTemp}\u2013${endTemp} \u00b0C` : null;
 
-  if (!(experimentType || analysisMode || tempRange || rate)) {
+  if (!(experimentTypes.length || analysisMode || tempRange || rate)) {
     return null;
   }
 
   return (
     <>
-      {experimentType && (
+      {experimentTypes.length > 0 && (
         <MetadataRow label="Experiment">
-          <ColorBadge
-            colorClass={AUNTY_EXPERIMENT_TYPE_COLORS[experimentType]}
-            value={formatAuntyExperimentType(experimentType)}
-          />
+          {experimentTypes.map((type) => (
+            <ColorBadge
+              colorClass={AUNTY_EXPERIMENT_TYPE_COLORS[type]}
+              key={type}
+              value={formatAuntyExperimentType(type)}
+            />
+          ))}
         </MetadataRow>
       )}
       {analysisMode && (
