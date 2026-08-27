@@ -1,9 +1,8 @@
 import { ExternalLink } from "lucide-react";
 import { ColonyDataTable } from "@/components/runs/colony-data-table";
-import { RunSectionHeading } from "@/components/runs/run-section-heading";
+import { ReportDataShell } from "@/components/runs/report-data-shell";
 import { RunVideoPlayer } from "@/components/runs/run-video-player";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import type { RunFile } from "@/lib/api/instrument-runs";
 import {
   fileStem,
@@ -100,45 +99,25 @@ export function RunReportSection({
     processedVideos.length +
     pdfFiles.length;
 
-  if (totalCount === 0) {
-    return (
-      <div className="flex flex-col gap-2">
-        <RunSectionHeading title={title} />
-        <Card size="sm">
-          <CardContent>
-            <p className="text-muted-foreground text-sm">
-              No report data has been generated for this run.
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-col gap-2">
-      <RunSectionHeading countLabel={totalCount} title={title} />
-      <Card size="sm">
-        <CardContent className="flex flex-col gap-6">
-          {processedVideos.map((file) => (
-            <RunVideoPlayer
-              fileId={file.id}
-              filename={file.filename}
-              key={file.id}
-              posterFileId={posterFileIds[file.filename]}
-            />
-          ))}
-          {processedImages.map((file) => (
-            <ProcessedImagePreview file={file} key={file.id} />
-          ))}
-          {processedCsvs.map((file) => (
-            <ColonyDataTable file={file} key={file.id} />
-          ))}
-          {pdfFiles.map((file) => (
-            <PdfPreview file={file} key={file.id} />
-          ))}
-        </CardContent>
-      </Card>
-    </div>
+    <ReportDataShell contentClassName="gap-6" title={title} total={totalCount}>
+      {processedVideos.map((file) => (
+        <RunVideoPlayer
+          fileId={file.id}
+          filename={file.filename}
+          key={file.id}
+          posterFileId={posterFileIds[file.filename]}
+        />
+      ))}
+      {processedImages.map((file) => (
+        <ProcessedImagePreview file={file} key={file.id} />
+      ))}
+      {processedCsvs.map((file) => (
+        <ColonyDataTable file={file} key={file.id} />
+      ))}
+      {pdfFiles.map((file) => (
+        <PdfPreview file={file} key={file.id} />
+      ))}
+    </ReportDataShell>
   );
 }

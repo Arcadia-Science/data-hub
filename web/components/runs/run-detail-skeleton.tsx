@@ -10,6 +10,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { RunDetail } from "@/lib/api/instrument-runs";
+import { showsReportDataSection } from "@/lib/runs/report-items";
 
 export function RunHeaderSkeleton() {
   return (
@@ -115,12 +116,6 @@ function RunFilesSectionSkeleton({ rows = 3 }: { rows?: number }) {
   );
 }
 
-function showsReportSection(instrumentType: RunDetail["instrumentType"]) {
-  return (
-    instrumentType !== "plate_reader" && instrumentType !== "instant_raman"
-  );
-}
-
 function RunReportSectionSkeleton() {
   return (
     <div className="flex flex-col gap-2">
@@ -151,7 +146,9 @@ export function RunContentSkeleton({
         <RunMetadataSkeleton />
         <RunFilesSectionSkeleton />
       </div>
-      {showsReportSection(instrumentType) ? <RunReportSectionSkeleton /> : null}
+      {showsReportDataSection(instrumentType) ? (
+        <RunReportSectionSkeleton />
+      ) : null}
     </div>
   );
 }

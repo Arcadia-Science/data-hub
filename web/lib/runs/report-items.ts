@@ -57,6 +57,12 @@ export const REPORT_ITEMS_WINDOW = 50;
 
 export const REPORT_ITEMS_MAX_LIMIT = 200;
 
+// Every run-detail variant renders a "Report Data" section except the plate
+// reader, which shows "Plate Maps". The loading skeleton has to match.
+export function showsReportDataSection(instrumentType: InstrumentType) {
+  return instrumentType !== "plate_reader";
+}
+
 const KIND_BY_INSTRUMENT: Partial<Record<InstrumentType, ReportItemKind>> = {
   gel_doc: "image",
   hina_microscope: "image",
