@@ -30,7 +30,7 @@ import type {
   FilesCategoryFilter,
   FilesLifecycleFilter,
   FilesSortField,
-  RunFile,
+  RunFileRow,
   RunFileStats,
   RunFilesPage,
 } from "@/lib/api/instrument-runs";
@@ -67,17 +67,20 @@ const FILES_CATEGORY_OPTIONS: FilesFilterOption<FilesCategoryFilter>[] = [
   { value: "processed", label: "Processed" },
 ];
 
+// "Processing" is in-flight work only; files past the stall cutoff answer to
+// "Stalled" instead, matching what the status column labels them.
 const FILES_STATUS_OPTIONS: FilesFilterOption<FilesLifecycleFilter>[] = [
   { value: "pending", label: "Pending" },
   { value: "uploaded", label: "Uploaded" },
   { value: "processing", label: "Processing" },
+  { value: "stalled", label: "Stalled" },
   { value: "completed", label: "Completed" },
   { value: "failed", label: "Failed" },
 ];
 
 interface RunFilesSectionProps {
   // Current page of the server-paginated, filtered, sorted file list.
-  files: RunFile[];
+  files: RunFileRow[];
   // Downloadable files matching the active table filters (S3-backed).
   filteredDownloadableCount: number;
   instrumentId: string;
@@ -158,7 +161,7 @@ function RunFilesSectionContent({
   // Auto-refresh while work is genuinely in flight (uploading or processing)
   // so the UI picks up status transitions without a manual reload. Files that
   // are merely "detected" (awaiting a manual upload) don't trigger polling.
-  const hasInFlight = stats.processing > 0 || stats.uploadRequested > 0;
+  const hasInFlight = stats.processingInFlight > 0 || stats.uploadRequested > 0;
   useEffect(() => {
     if (!hasInFlight) {
       return;

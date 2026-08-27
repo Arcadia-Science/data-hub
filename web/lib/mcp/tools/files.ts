@@ -12,6 +12,7 @@ import {
   requireMcpWrite,
   structuredResult,
 } from "@/lib/mcp/tools/helpers";
+import { isStalledProcessing } from "@/lib/runs/stalled-processing";
 import {
   getPresignedDownloadUrl,
   PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS,
@@ -33,7 +34,10 @@ export function registerFileTools(server: McpServer) {
       if (!file) {
         return errorResult(`File '${fileId}' not found.`);
       }
-      return structuredResult(file);
+      return structuredResult({
+        ...file,
+        stalled: isStalledProcessing(file),
+      });
     }
   );
 

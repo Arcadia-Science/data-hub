@@ -51,7 +51,7 @@ export const reprocessFileTool = {
   name: "reprocess_file",
   title: "Reprocess File",
   description:
-    "Re-run the Lambda processing workflow for an uploaded, failed, or completed raw file on an instrument that has a Lambda processor. Processed artifacts are rejected. Transitions the file back to 'processing'. Use this to retry after a parser fix, transient Lambda failure, or a stuck upload that never entered processing.",
+    "Re-run the Lambda processing workflow for an uploaded, failed, completed, or stalled raw file on an instrument that has a Lambda processor. A file is stalled when it has been in 'processing' longer than the configured stall window (20 minutes by default, past the Lambda's 15-minute limit) or has no processing-started timestamp. Processed artifacts are rejected. Transitions the file back to 'processing'. Use this to retry after a parser fix, transient Lambda failure, a stuck upload that never entered processing, or a file that never reported back from processing.",
   group: "files",
   scope: "files:reprocess",
   inputSchema: { fileId: z.number().int().describe("Numeric file ID") },

@@ -88,7 +88,7 @@ registry.registerPath({
   operationId: "reprocessFile",
   summary: "Reprocess a file",
   description:
-    "Requires scope `files:reprocess`. Raw files only. Eligible statuses: `uploaded`, `failed`, or `completed` (file must have an S3 location). The file's instrument must have a Lambda processor.",
+    "Requires scope `files:reprocess`. Raw files only. Eligible statuses: `uploaded`, `failed`, `completed`, or stalled `processing` (file must have an S3 location). The file's instrument must have a Lambda processor.",
   tags: ["Files"],
   security: bearerSecurity,
   request: { params: fileParams },

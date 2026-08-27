@@ -6,6 +6,7 @@ import {
   parseAsString,
   parseAsStringLiteral,
 } from "nuqs/server";
+import { FILES_LIFECYCLE_FILTER_VALUES } from "@/lib/runs/file-lifecycle-filter";
 import { RUN_STATUS_VALUES, type RunStatus } from "@/lib/runs/run-status";
 
 // All dashboard filter/pagination state lives in the URL via nuqs. This makes
@@ -104,13 +105,6 @@ export const watcherDetailParamsCache = createSearchParamsCache(
 // Category and lifecycle status are independent multi-selects. Empty array =
 // no filter (show all), matching dashboard/instrument `status` arrays.
 const FILES_CATEGORY_VALUES = ["raw", "processed"] as const;
-const FILES_STATUS_VALUES = [
-  "pending",
-  "uploaded",
-  "processing",
-  "completed",
-  "failed",
-] as const;
 
 const FILES_SORT_VALUES = ["name", "size", "date", "status"] as const;
 
@@ -120,7 +114,9 @@ export const runDetailSearchParams = {
   files_category: parseAsArrayOf(parseAsStringLiteral(FILES_CATEGORY_VALUES))
     .withDefault([])
     .withOptions({ clearOnDefault: true }),
-  files_status: parseAsArrayOf(parseAsStringLiteral(FILES_STATUS_VALUES))
+  files_status: parseAsArrayOf(
+    parseAsStringLiteral(FILES_LIFECYCLE_FILTER_VALUES)
+  )
     .withDefault([])
     .withOptions({ clearOnDefault: true }),
   files_sort: parseAsStringLiteral(FILES_SORT_VALUES).withDefault("name"),

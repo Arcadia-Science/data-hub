@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { files, instrumentRuns, instruments } from "@/lib/db/schema";
+import { RUN_STATUS_VALUES } from "@/lib/runs/run-status";
 import {
   api,
   closeTestDb,
@@ -22,11 +23,20 @@ type FileStatus =
   | "completed"
   | "failed";
 
+// Files enter `processing` with a start timestamp. Backdating one past the
+// stall window is what turns a run from "processing" into "stalled".
+const INSIDE_STALL_WINDOW = new Date(Date.now() - 60 * 1000);
+const PAST_STALL_WINDOW = new Date(Date.now() - 21 * 60 * 1000);
+
 describe("Run status filter", () => {
   let token: string;
   const instrumentId = "run-status-filter-instrument";
 
-  async function seedRun(runId: string, fileStatuses: FileStatus[]) {
+  async function seedRun(
+    runId: string,
+    fileStatuses: FileStatus[],
+    processingStartedAt: Date | null = INSIDE_STALL_WINDOW
+  ) {
     const db = getTestDb();
     const [run] = await db
       .insert(instrumentRuns)
@@ -39,6 +49,8 @@ describe("Run status filter", () => {
           filename: `${runId}-${i}.csv`,
           category: "raw" as const,
           status,
+          processingStartedAt:
+            status === "processing" ? processingStartedAt : null,
         }))
       );
     }
@@ -77,6 +89,10 @@ describe("Run status filter", () => {
     await seedRun("rs-pending", ["detected", "completed"]);
     await seedRun("rs-uploaded", ["uploaded", "completed"]);
     await seedRun("rs-processing", ["processing", "completed"]);
+    // Same file states as rs-processing, only the start timestamp differs.
+    await seedRun("rs-stalled", ["processing", "completed"], PAST_STALL_WINDOW);
+    // Predates the `processing_started_at` column, so it is stalled too.
+    await seedRun("rs-stalled-null-start", ["processing"], null);
   });
 
   afterAll(async () => {
@@ -103,6 +119,22 @@ describe("Run status filter", () => {
     expect(total).toBe(1);
   });
 
+  // The whole point of the run-level bucket: a run whose processing died is
+  // findable, and does not keep spinning under "processing" forever.
+  it("'stalled' matches runs past the stall window, including null start times", async () => {
+    const { ids, total } = await fetchRuns("status=stalled");
+    expect(new Set(ids)).toEqual(
+      new Set(["rs-stalled", "rs-stalled-null-start"])
+    );
+    expect(total).toBe(2);
+  });
+
+  it("'processing' matches only in-flight runs, not stalled ones", async () => {
+    const { ids, total } = await fetchRuns("status=processing");
+    expect(ids).toEqual(["rs-processing"]);
+    expect(total).toBe(1);
+  });
+
   it("OR's repeated status params together", async () => {
     const { ids, total } = await fetchRuns("status=failed&status=empty");
     expect(new Set(ids)).toEqual(new Set(["rs-failed", "rs-empty"]));
@@ -117,7 +149,19 @@ describe("Run status filter", () => {
 
   it("ignores unknown status values instead of erroring or over-filtering", async () => {
     const { total } = await fetchRuns("status=bogus");
-    expect(total).toBe(6);
+    expect(total).toBe(8);
+  });
+
+  // Every seeded run must land in exactly one bucket, or the priority chain
+  // has a gap and some run is unreachable from the filter.
+  it("partitions every run across the status buckets", async () => {
+    const buckets = await Promise.all(
+      RUN_STATUS_VALUES.map((status) => fetchRuns(`status=${status}`))
+    );
+    const matched = buckets.flatMap((bucket) => bucket.ids);
+    expect(matched).toHaveLength(new Set(matched).size);
+    const { total } = await fetchRuns("");
+    expect(matched).toHaveLength(total);
   });
 
   it("applies the same filter on the instrument-scoped endpoint", async () => {

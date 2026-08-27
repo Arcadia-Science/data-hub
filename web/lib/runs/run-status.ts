@@ -6,12 +6,18 @@ import {
   Clock,
   LoaderCircle,
   type LucideIcon,
+  TriangleAlert,
 } from "lucide-react";
 
 // Order is the single source of truth for status priority, shared by the icon
 // and the exclusive SQL predicates in `buildRunListQuery`. Highest first.
+//
+// `stalled` sits directly under `failed` because both need an operator to act.
+// A run that also has files waiting to upload would otherwise read as
+// "pending" and hide the stall, and the pending files resolve on their own.
 export const RUN_STATUS_VALUES = [
   "failed",
+  "stalled",
   "pending",
   "uploaded",
   "processing",
@@ -35,6 +41,12 @@ export const RUN_STATUS_META: Record<RunStatus, RunStatusMeta> = {
     description: "One or more files failed processing",
     Icon: CircleX,
     colorClassName: "text-destructive",
+  },
+  stalled: {
+    label: "Stalled",
+    description: "Processing never finished — the files can be reprocessed",
+    Icon: TriangleAlert,
+    colorClassName: "text-amber-600 dark:text-amber-500",
   },
   pending: {
     label: "Pending upload",
@@ -78,7 +90,10 @@ export interface RunStatusCounts {
   filesCompleted: number;
   filesFailed: number;
   filesPendingUpload: number;
+  // Only files still inside the stall window. `processing` rows past it are
+  // counted in `filesStalled` instead, so the two buckets stay exclusive.
   filesProcessing: number;
+  filesStalled: number;
   filesUploaded: number;
 }
 
@@ -88,6 +103,9 @@ export interface RunStatusCounts {
 export function deriveRunStatus(counts: RunStatusCounts): RunStatus {
   if (counts.filesFailed > 0) {
     return "failed";
+  }
+  if (counts.filesStalled > 0) {
+    return "stalled";
   }
   if (counts.filesPendingUpload > 0) {
     return "pending";

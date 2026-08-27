@@ -3,24 +3,23 @@ import { authorize } from "@/lib/api/auth";
 import { apiError, INTERNAL_ERROR, NOT_FOUND } from "@/lib/api/errors";
 import {
   type FilesCategoryFilter,
-  type FilesLifecycleFilter,
   getFilteredFileIds,
   lookupRunByNaturalKey,
 } from "@/lib/api/instrument-runs";
 import { prepareRunArchive } from "@/lib/api/run-archive";
+import {
+  FILES_LIFECYCLE_FILTER_VALUES,
+  type FilesLifecycleFilter,
+} from "@/lib/runs/file-lifecycle-filter";
 
 const FILES_CATEGORY_VALUES: ReadonlySet<FilesCategoryFilter> = new Set([
   "raw",
   "processed",
 ]);
 
-const FILES_STATUS_VALUES: ReadonlySet<FilesLifecycleFilter> = new Set([
-  "pending",
-  "uploaded",
-  "processing",
-  "completed",
-  "failed",
-]);
+const FILES_STATUS_VALUES: ReadonlySet<FilesLifecycleFilter> = new Set(
+  FILES_LIFECYCLE_FILTER_VALUES
+);
 
 // Accepts comma-separated (`a,b`) or repeated (`a&key=b`) values; invalid
 // entries are dropped so a partially-bad query still filters on the rest.

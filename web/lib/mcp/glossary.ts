@@ -5,7 +5,7 @@ import { RUN_STATUS_META, RUN_STATUS_VALUES } from "@/lib/runs/run-status";
 export const DATAHUB_GLOSSARY = {
   runStatus: {
     derivation:
-      "Derived from a run's raw file states, priority-exclusive: failed (any file failed) > pending (detected/upload_requested) > uploaded > processing > completed (all done) > empty (no files).",
+      "Derived from a run's raw file states, priority-exclusive: failed (any file failed) > stalled (a file has been in processing past the stall window, so it can be reprocessed) > pending (detected/upload_requested) > uploaded > processing (in flight, inside the stall window) > completed (all done) > empty (no files).",
     values: RUN_STATUS_VALUES.map((value) => ({
       value,
       label: RUN_STATUS_META[value].label,

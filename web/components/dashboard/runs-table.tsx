@@ -127,15 +127,7 @@ export function RunsTable({
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-2.5">
-                    <RunStatusIcon
-                      errorMessages={row.error_messages}
-                      fileCount={row.file_count}
-                      filesCompleted={row.files_completed}
-                      filesFailed={row.files_failed}
-                      filesPendingUpload={row.files_pending_upload}
-                      filesProcessing={row.files_processing}
-                      filesUploaded={row.files_uploaded}
-                    />
+                    <RunStatusIcon run={row} />
                     <RunIdLabel
                       className="text-sm"
                       href={href}

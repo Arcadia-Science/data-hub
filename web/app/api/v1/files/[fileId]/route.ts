@@ -22,7 +22,7 @@ interface RouteContext {
 // Enforced state machine for file status transitions:
 //   Watcher flow:   detected → [upload_requested →] uploaded → processing → completed|failed
 //   Lambda flow:    (created as "uploaded" via POST .../files) → processing → completed|failed
-//   Reprocessing:   uploaded|completed|failed → processing → completed|failed
+//   Reprocessing:   uploaded|completed|failed|stalled-processing → processing → completed|failed
 //   Cancel request: upload_requested → detected (watcher gave up locating
 //                   the local file after repeated polls; clears the queue
 //                   entry)
@@ -149,12 +149,12 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     if (body.status === "completed" || body.status === "failed") {
       updates.processedAt = now;
     }
-    if (
-      body.status === "processing" &&
-      (file.status === "completed" || file.status === "failed")
-    ) {
-      updates.processedAt = null;
-      updates.errorMessage = null;
+    if (body.status === "processing") {
+      updates.processingStartedAt = now;
+      if (file.status === "completed" || file.status === "failed") {
+        updates.processedAt = null;
+        updates.errorMessage = null;
+      }
     }
   }
 
@@ -203,6 +203,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     upload_requested_at: updated.uploadRequestedAt,
     uploaded_at: updated.uploadedAt,
     processed_at: updated.processedAt,
+    processing_started_at: updated.processingStartedAt,
     created_at: updated.createdAt,
     file_created_at: updated.fileCreatedAt,
   });

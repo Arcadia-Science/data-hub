@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, use, useCallback, useMemo, useState } from "react";
-import type { RunFile } from "@/lib/api/instrument-runs";
+import type { RunFileRow } from "@/lib/api/instrument-runs";
 import type { InstrumentType } from "@/lib/db/schema";
 import { canReprocessFile } from "@/lib/runs/reprocessable-statuses";
 
@@ -37,7 +37,7 @@ export interface FileRef {
 // (dismissed files, transient `upload_requested` rows). Caller treats null
 // the same as "no checkbox in this row".
 export function buildFileRef(
-  file: RunFile,
+  file: RunFileRow,
   instrumentType: InstrumentType
 ): FileRef | null {
   if (file.deletedAt !== null) {

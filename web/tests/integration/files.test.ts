@@ -350,7 +350,10 @@ describe("Files API", () => {
       body: { status: "processing" },
     });
     expect(res.status).toBe(200);
-    expect((await res.json()).status).toBe("processing");
+    const data = await res.json();
+    expect(data.status).toBe("processing");
+    expect(data.processing_started_at).toBeTruthy();
+    fileDetail.parse(data);
   });
 
   it("PATCH transitions processing → completed with metadata", async () => {
@@ -764,6 +767,128 @@ describe("Files API", () => {
     expect(data.error.message).toContain("no Lambda processor");
   });
 
+  it("REPROCESS returns 409 for a file that is still processing", async () => {
+    const inflightRunId = "reprocess-inflight-run";
+    await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: { run_id: inflightRunId, source: "lambda" },
+    });
+    const createFileRes = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${inflightRunId}/files`,
+      {
+        method: "POST",
+        token,
+        body: {
+          s3_bucket: "test-bucket",
+          s3_key: `${instrumentId}/${inflightRunId}/inflight.csv`,
+          filename: "inflight.csv",
+        },
+      }
+    );
+    expect(createFileRes.status).toBe(201);
+    const createdFile = await createFileRes.json();
+    await api(`/api/v1/files/${createdFile.id}`, {
+      method: "PATCH",
+      token,
+      body: { status: "processing" },
+    });
+
+    const res = await api(`/api/v1/files/${createdFile.id}/reprocess`, {
+      method: "POST",
+      token,
+    });
+    expect(res.status).toBe(409);
+    const data = await res.json();
+    expect(data.error.message).toContain("still processing");
+  });
+
+  it("REPROCESS returns 503 for a stalled processing file when Lambda is not configured", async () => {
+    const stalledRunId = "reprocess-stalled-run";
+    await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: { run_id: stalledRunId, source: "lambda" },
+    });
+    const createFileRes = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${stalledRunId}/files`,
+      {
+        method: "POST",
+        token,
+        body: {
+          s3_bucket: "test-bucket",
+          s3_key: `${instrumentId}/${stalledRunId}/stalled.csv`,
+          filename: "stalled.csv",
+        },
+      }
+    );
+    expect(createFileRes.status).toBe(201);
+    const createdFile = await createFileRes.json();
+    await api(`/api/v1/files/${createdFile.id}`, {
+      method: "PATCH",
+      token,
+      body: { status: "processing" },
+    });
+
+    const db = getTestDb();
+    await db
+      .update(schemaFiles)
+      .set({
+        processingStartedAt: new Date(Date.now() - 21 * 60 * 1000),
+      })
+      .where(eq(schemaFiles.id, createdFile.id));
+
+    const res = await api(`/api/v1/files/${createdFile.id}/reprocess`, {
+      method: "POST",
+      token,
+    });
+    expect(res.status).toBe(503);
+    const data = await res.json();
+    expect(data.error.message).toContain("not configured");
+  });
+
+  it("REPROCESS returns 503 for a processing file with no start timestamp", async () => {
+    const legacyRunId = "reprocess-legacy-processing-run";
+    await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: { run_id: legacyRunId, source: "lambda" },
+    });
+    const createFileRes = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${legacyRunId}/files`,
+      {
+        method: "POST",
+        token,
+        body: {
+          s3_bucket: "test-bucket",
+          s3_key: `${instrumentId}/${legacyRunId}/legacy.csv`,
+          filename: "legacy.csv",
+        },
+      }
+    );
+    expect(createFileRes.status).toBe(201);
+    const createdFile = await createFileRes.json();
+    await api(`/api/v1/files/${createdFile.id}`, {
+      method: "PATCH",
+      token,
+      body: { status: "processing" },
+    });
+
+    const db = getTestDb();
+    await db
+      .update(schemaFiles)
+      .set({ processingStartedAt: null })
+      .where(eq(schemaFiles.id, createdFile.id));
+
+    const res = await api(`/api/v1/files/${createdFile.id}/reprocess`, {
+      method: "POST",
+      token,
+    });
+    expect(res.status).toBe(503);
+    const data = await res.json();
+    expect(data.error.message).toContain("not configured");
+  });
+
   // -------------------------------------------------------------------------
   // POST /api/v1/instruments/:instrumentId/runs/:runId/reprocess
   // -------------------------------------------------------------------------
@@ -822,5 +947,73 @@ describe("Files API", () => {
       .from(schemaFiles)
       .where(eq(schemaFiles.id, processedFile.id));
     expect(processed?.status).toBe("uploaded");
+  });
+
+  // `reprocessRun` selects eligible files in SQL rather than reusing
+  // `isStalledProcessing`, so this is the only cover for that predicate.
+  it("RUN REPROCESS picks up stalled files and leaves in-flight ones alone", async () => {
+    const mixedRunId = "reprocess-mixed-processing-run";
+    await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: { run_id: mixedRunId, source: "lambda" },
+    });
+
+    async function addProcessingFile(filename: string) {
+      const createRes = await api(
+        `/api/v1/instruments/${instrumentId}/runs/${mixedRunId}/files`,
+        {
+          method: "POST",
+          token,
+          body: {
+            s3_bucket: "test-bucket",
+            s3_key: `${instrumentId}/${mixedRunId}/${filename}`,
+            filename,
+          },
+        }
+      );
+      expect(createRes.status).toBe(201);
+      const created = await createRes.json();
+      await api(`/api/v1/files/${created.id}`, {
+        method: "PATCH",
+        token,
+        body: { status: "processing" },
+      });
+      return created.id as number;
+    }
+
+    const stalledId = await addProcessingFile("stalled.csv");
+    const inFlightId = await addProcessingFile("in-flight.csv");
+
+    const db = getTestDb();
+    const stalledStartedAt = new Date(Date.now() - 21 * 60 * 1000);
+    await db
+      .update(schemaFiles)
+      .set({ processingStartedAt: stalledStartedAt })
+      .where(eq(schemaFiles.id, stalledId));
+
+    const res = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${mixedRunId}/reprocess`,
+      { method: "POST", token }
+    );
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    runReprocessed.parse(data);
+    // Lambda is not configured locally, so every eligible file reaches the
+    // 503 path. Only the stalled file should have been eligible at all.
+    expect(data.files_queued).toBe(0);
+    expect(data.files_failed).toBe(1);
+
+    const [inFlight] = await db
+      .select({
+        status: schemaFiles.status,
+        processingStartedAt: schemaFiles.processingStartedAt,
+      })
+      .from(schemaFiles)
+      .where(eq(schemaFiles.id, inFlightId));
+    expect(inFlight?.status).toBe("processing");
+    expect(inFlight?.processingStartedAt?.getTime()).toBeGreaterThan(
+      stalledStartedAt.getTime()
+    );
   });
 });

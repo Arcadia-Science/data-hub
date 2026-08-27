@@ -69,6 +69,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       upload_requested_at: f.uploadRequestedAt,
       uploaded_at: f.uploadedAt,
       processed_at: f.processedAt,
+      processing_started_at: f.processingStartedAt,
       download_url:
         f.s3Bucket && f.s3Key
           ? await getPresignedDownloadUrl(f.s3Bucket, f.s3Key)
