@@ -13,7 +13,12 @@ import {
   sql,
 } from "drizzle-orm";
 import { cache } from "react";
-import { formatHinaSizes } from "@/components/runs/run-metadata-badges";
+import {
+  formatAuntyExperimentType,
+  formatAuntyRampRate,
+  formatAuntyTemperatureRange,
+  formatHinaSizes,
+} from "@/components/runs/run-metadata-badges";
 import { escapeLikePattern } from "@/lib/api/like-pattern";
 import { db } from "@/lib/db";
 import type { InstrumentType } from "@/lib/db/schema";
@@ -504,6 +509,45 @@ export async function buildRunListQuery(filters: RunListFilters) {
   if (filters.colorMode) {
     conditions.push(
       sql`${instrumentRuns.metadata}->>'color_mode' = ${filters.colorMode}`
+    );
+  }
+
+  // Aunty metadata column filters. Experiment type is stored as a JSON
+  // string for a single-flavor workbook and as a JSON array when one
+  // workbook mixes flavors — match either shape. Temperature is a
+  // `start|end` pair of the stored °C scalars.
+  if (filters.auntyExperimentType) {
+    conditions.push(
+      sql`(
+        (
+          jsonb_typeof(${instrumentRuns.metadata}->'experiment_type') = 'array'
+          and ${instrumentRuns.metadata}->'experiment_type' @> ${JSON.stringify([filters.auntyExperimentType])}::jsonb
+        )
+        or ${instrumentRuns.metadata}->>'experiment_type' = ${filters.auntyExperimentType}
+      )`
+    );
+  }
+  if (filters.auntyAnalysisMode) {
+    conditions.push(
+      sql`${instrumentRuns.metadata}->>'analysis_mode' = ${filters.auntyAnalysisMode}`
+    );
+  }
+  if (filters.auntyTemperature) {
+    const range = decodeAuntyTemperatureFilter(filters.auntyTemperature);
+    if (range) {
+      conditions.push(
+        sql`${instrumentRuns.metadata}->>'start_temp_c' = ${range.start}`
+      );
+      conditions.push(
+        sql`${instrumentRuns.metadata}->>'end_temp_c' = ${range.end}`
+      );
+    } else {
+      conditions.push(sql`false`);
+    }
+  }
+  if (filters.auntyRampRate) {
+    conditions.push(
+      sql`${instrumentRuns.metadata}->>'rate_c_per_min' = ${filters.auntyRampRate}`
     );
   }
 
@@ -1202,6 +1246,8 @@ const ALLOWED_METADATA_KEYS = new Set([
   "imaging_mode",
   "dpi",
   "color_mode",
+  "analysis_mode",
+  "rate_c_per_min",
 ]);
 
 async function distinctMetadataValues(
@@ -1399,6 +1445,142 @@ export async function getEpsonScannerFilterOptions(
 }
 
 // ---------------------------------------------------------------------------
+// Distinct metadata values for Aunty column filters.
+// ---------------------------------------------------------------------------
+
+// Temperature filter values are `start|end` so the URL stays a single token.
+// `|` cannot appear in the jsonb `->>` numeric strings we store.
+const AUNTY_TEMPERATURE_SEPARATOR = "|";
+
+function encodeAuntyTemperatureFilter(start: string, end: string): string {
+  return `${start}${AUNTY_TEMPERATURE_SEPARATOR}${end}`;
+}
+
+function decodeAuntyTemperatureFilter(
+  value: string
+): { end: string; start: string } | null {
+  const separator = value.indexOf(AUNTY_TEMPERATURE_SEPARATOR);
+  if (
+    separator <= 0 ||
+    separator !== value.lastIndexOf(AUNTY_TEMPERATURE_SEPARATOR)
+  ) {
+    return null;
+  }
+  const start = value.slice(0, separator);
+  const end = value.slice(separator + 1);
+  if (!(start && end)) {
+    return null;
+  }
+  return { start, end };
+}
+
+export interface AuntyLabeledOption {
+  label: string;
+  value: string;
+}
+
+export interface AuntyFilterOptions {
+  analysisModes: string[];
+  experimentTypes: AuntyLabeledOption[];
+  rampRates: AuntyLabeledOption[];
+  temperatures: AuntyLabeledOption[];
+}
+
+async function distinctAuntyExperimentTypes(
+  instrumentId: string
+): Promise<string[]> {
+  const result = await db.execute<{ value: string }>(
+    sql`select distinct value from (
+          select ${instrumentRuns.metadata}->>'experiment_type' as value
+            from ${instrumentRuns}
+           where ${instrumentRuns.instrumentId} = ${instrumentId}
+             and ${instrumentRuns.deletedAt} is null
+             and jsonb_typeof(${instrumentRuns.metadata}->'experiment_type') = 'string'
+          union
+          select val as value
+            from ${instrumentRuns},
+                 lateral jsonb_array_elements_text(
+                   ${instrumentRuns.metadata}->'experiment_type'
+                 ) as val
+           where ${instrumentRuns.instrumentId} = ${instrumentId}
+             and ${instrumentRuns.deletedAt} is null
+             and jsonb_typeof(${instrumentRuns.metadata}->'experiment_type') = 'array'
+        ) as experiment_types
+        where value is not null and value <> ''
+        order by value`
+  );
+  return Array.from(result.rows, (r) => r.value).filter(Boolean);
+}
+
+async function distinctAuntyTemperaturePairs(
+  instrumentId: string
+): Promise<{ end: string; start: string }[]> {
+  const result = await db.execute<{ end_temp: string; start_temp: string }>(
+    sql`select distinct
+          ${instrumentRuns.metadata}->>'start_temp_c' as start_temp,
+          ${instrumentRuns.metadata}->>'end_temp_c' as end_temp
+        from ${instrumentRuns}
+        where ${instrumentRuns.instrumentId} = ${instrumentId}
+          and ${instrumentRuns.deletedAt} is null
+          and ${instrumentRuns.metadata}->>'start_temp_c' is not null
+          and ${instrumentRuns.metadata}->>'end_temp_c' is not null`
+  );
+  return Array.from(result.rows, (r) => ({
+    start: r.start_temp,
+    end: r.end_temp,
+  })).filter((r) => r.start && r.end);
+}
+
+function compareNumericStrings(a: string, b: string): number {
+  return Number(a) - Number(b);
+}
+
+export async function getAuntyFilterOptions(
+  instrumentId: string
+): Promise<AuntyFilterOptions> {
+  const [
+    experimentTypeValues,
+    analysisModes,
+    temperaturePairs,
+    rampRateValues,
+  ] = await Promise.all([
+    distinctAuntyExperimentTypes(instrumentId),
+    distinctMetadataValues(instrumentId, "analysis_mode"),
+    distinctAuntyTemperaturePairs(instrumentId),
+    distinctMetadataValues(instrumentId, "rate_c_per_min"),
+  ]);
+
+  const experimentTypes = experimentTypeValues
+    .map((value) => ({
+      value,
+      label: formatAuntyExperimentType(value),
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+  const temperatures = [...temperaturePairs]
+    .sort((a, b) => {
+      const byStart = compareNumericStrings(a.start, b.start);
+      if (byStart !== 0) {
+        return byStart;
+      }
+      return compareNumericStrings(a.end, b.end);
+    })
+    .map((pair) => ({
+      value: encodeAuntyTemperatureFilter(pair.start, pair.end),
+      label: formatAuntyTemperatureRange(pair.start, pair.end),
+    }));
+
+  const rampRates = [...rampRateValues]
+    .sort(compareNumericStrings)
+    .map((value) => ({
+      value,
+      label: formatAuntyRampRate(value),
+    }));
+
+  return { analysisModes, experimentTypes, rampRates, temperatures };
+}
+
+// ---------------------------------------------------------------------------
 // Dispatcher: fetch whichever per-instrument filter options apply to this
 // instrument type. The discriminated return shape lets the caller narrow to
 // the correct variant component without non-null assertions, and TS
@@ -1412,6 +1594,7 @@ export type InstrumentFilterOptionsByType =
   | { kind: "qpcr"; options: QpcrFilterOptions }
   | { kind: "hina_microscope"; options: HinaFilterOptions }
   | { kind: "epson_v700_scanner"; options: EpsonScannerFilterOptions }
+  | { kind: "aunty"; options: AuntyFilterOptions }
   | { kind: "default" };
 
 export async function getInstrumentFilterOptions(
@@ -1444,11 +1627,15 @@ export async function getInstrumentFilterOptions(
         kind: "epson_v700_scanner",
         options: await getEpsonScannerFilterOptions(instrumentId),
       };
+    case "aunty":
+      return {
+        kind: "aunty",
+        options: await getAuntyFilterOptions(instrumentId),
+      };
     case "generic":
     case "tape_station":
     case "instant_raman":
     case "dishcam":
-    case "aunty":
       return { kind: "default" };
     default:
       return { kind: "default" };

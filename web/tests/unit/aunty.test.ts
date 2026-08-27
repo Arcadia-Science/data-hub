@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatAuntyExperimentType,
+  formatAuntyRampRate,
+  formatAuntyTemperatureRange,
+} from "@/components/runs/run-metadata-badges";
+import {
   compareWells,
   curveKey,
   indexAuntyCurves,
@@ -188,5 +193,15 @@ describe("sparklineGeometry", () => {
     );
     expect(geometry.markerX).toBeGreaterThan(6);
     expect(geometry.markerX).toBeLessThan(114);
+  });
+});
+
+describe("Aunty metadata labels", () => {
+  it("maps known experiment types and formats temperature and ramp rate", () => {
+    expect(formatAuntyExperimentType("thermal_ramp")).toBe("Thermal ramp");
+    expect(formatAuntyExperimentType("sizing")).toBe("Sizing");
+    expect(formatAuntyExperimentType("custom_run")).toBe("custom run");
+    expect(formatAuntyTemperatureRange("25", "95")).toBe("25–95 °C");
+    expect(formatAuntyRampRate("1")).toBe("1 °C/min");
   });
 });

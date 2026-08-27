@@ -590,8 +590,19 @@ export function hasAuntyMetadata(metadata: Record<string, unknown>) {
   );
 }
 
-function formatAuntyExperimentType(value: string): string {
+export function formatAuntyExperimentType(value: string): string {
   return AUNTY_EXPERIMENT_TYPE_LABELS[value] ?? value.replace(/_/g, " ");
+}
+
+export function formatAuntyTemperatureRange(
+  start: string,
+  end: string
+): string {
+  return `${start}\u2013${end} \u00b0C`;
+}
+
+export function formatAuntyRampRate(rate: string): string {
+  return `${rate} \u00b0C/min`;
 }
 
 export function AuntyRunBadges({
@@ -606,7 +617,9 @@ export function AuntyRunBadges({
   const endTemp = getMetadataField(metadata, "end_temp_c");
   const rate = getMetadataField(metadata, "rate_c_per_min");
   const tempRange =
-    startTemp && endTemp ? `${startTemp}\u2013${endTemp} \u00b0C` : null;
+    startTemp && endTemp
+      ? formatAuntyTemperatureRange(startTemp, endTemp)
+      : null;
 
   if (!(experimentTypes.length || analysisMode || tempRange || rate)) {
     return null;
@@ -637,7 +650,7 @@ export function AuntyRunBadges({
       )}
       {rate && (
         <MetadataRow label="Ramp rate">
-          <ColorBadge value={`${rate} \u00b0C/min`} />
+          <ColorBadge value={formatAuntyRampRate(rate)} />
         </MetadataRow>
       )}
     </>
