@@ -8,7 +8,7 @@ import {
 import {
   formatAuntyExperimentType,
   formatAuntyRampRate,
-  formatAuntyTemperatureRange,
+  formatAuntyTemperatureDisplay,
 } from "@/components/runs/run-metadata-badges";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -116,13 +116,10 @@ export function AuntyRunsTable({
             "experiment_type"
           );
           const analysisMode = getMetadataField(row.metadata, "analysis_mode");
-          const startTemp = getMetadataField(row.metadata, "start_temp_c");
-          const endTemp = getMetadataField(row.metadata, "end_temp_c");
           const rate = getMetadataField(row.metadata, "rate_c_per_min");
-          const tempRange =
-            startTemp && endTemp
-              ? formatAuntyTemperatureRange(startTemp, endTemp)
-              : null;
+          const tempRange = formatAuntyTemperatureDisplay(
+            (row.metadata ?? {}) as Record<string, unknown>
+          );
           return (
             <TableRow
               className={cn("group", isDeleted && "opacity-50")}

@@ -445,8 +445,9 @@ def _build_experiments_from_table(table_wells: list[TableWell]) -> list[dict[str
 def _flavor_from_table_wells(table_wells: list[TableWell]) -> str | None:
     keys: set[str] = set()
     for row in table_wells:
+        # A column can exist with every cell empty. Only populated values
+        # should pick the flavor, so a blank k-rate header cannot outrank Tm.
         keys.update(k for k, value in row.values.items() if value is not None)
-        keys.update(row.values)
     if keys & {"fluor_k1", "fluor_k2", "fluor_k3", "sls_k1", "sls_k2", "sls_k3"}:
         return FLAVOR_ISOTHERMAL
     if keys & {"tm1", "tm2", "tm3", "tagg", "tonset", "tsize"}:

@@ -586,6 +586,7 @@ export function hasAuntyMetadata(metadata: Record<string, unknown>) {
       getMetadataField(metadata, "analysis_mode") ||
       getMetadataField(metadata, "start_temp_c") ||
       getMetadataField(metadata, "end_temp_c") ||
+      getMetadataField(metadata, "temperature_c") ||
       getMetadataField(metadata, "rate_c_per_min")
   );
 }
@@ -601,6 +602,25 @@ export function formatAuntyTemperatureRange(
   return `${start}\u2013${end} \u00b0C`;
 }
 
+export function formatAuntyHoldTemperature(value: string): string {
+  return `${value} \u00b0C`;
+}
+
+export function formatAuntyTemperatureDisplay(
+  metadata: Record<string, unknown>
+): string | null {
+  const startTemp = getMetadataField(metadata, "start_temp_c");
+  const endTemp = getMetadataField(metadata, "end_temp_c");
+  const holdTemp = getMetadataField(metadata, "temperature_c");
+  if (startTemp && endTemp) {
+    return formatAuntyTemperatureRange(startTemp, endTemp);
+  }
+  if (holdTemp) {
+    return formatAuntyHoldTemperature(holdTemp);
+  }
+  return null;
+}
+
 export function formatAuntyRampRate(rate: string): string {
   return `${rate} \u00b0C/min`;
 }
@@ -613,16 +633,8 @@ export function AuntyRunBadges({
   // A workbook holding both a thermal ramp and a sizing run stores a list here.
   const experimentTypes = getMetadataArray(metadata, "experiment_type");
   const analysisMode = getMetadataField(metadata, "analysis_mode");
-  const startTemp = getMetadataField(metadata, "start_temp_c");
-  const endTemp = getMetadataField(metadata, "end_temp_c");
-  const holdTemp = getMetadataField(metadata, "temperature_c");
   const rate = getMetadataField(metadata, "rate_c_per_min");
-  const tempRange =
-    startTemp && endTemp
-      ? formatAuntyTemperatureRange(startTemp, endTemp)
-      : holdTemp
-        ? `${holdTemp} \u00b0C`
-        : null;
+  const tempRange = formatAuntyTemperatureDisplay(metadata);
 
   if (!(experimentTypes.length || analysisMode || tempRange || rate)) {
     return null;

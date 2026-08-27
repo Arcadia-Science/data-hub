@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   formatAuntyExperimentType,
+  formatAuntyHoldTemperature,
   formatAuntyRampRate,
+  formatAuntyTemperatureDisplay,
   formatAuntyTemperatureRange,
 } from "@/components/runs/run-metadata-badges";
 import {
@@ -230,7 +232,7 @@ describe("well summaries", () => {
   });
 
   it("formats large and tiny numbers compactly", () => {
-    expect(formatAuntyNumber(18951.2)).toBe("1.90e+4");
+    expect(formatAuntyNumber(18_951.2)).toBe("1.90e+4");
     expect(formatAuntyNumber(0)).toBe("0");
   });
 });
@@ -242,6 +244,17 @@ describe("Aunty metadata labels", () => {
     expect(formatAuntyExperimentType("isothermal")).toBe("Isothermal");
     expect(formatAuntyExperimentType("custom_run")).toBe("custom run");
     expect(formatAuntyTemperatureRange("25", "95")).toBe("25–95 °C");
+    expect(formatAuntyHoldTemperature("25")).toBe("25 °C");
+    expect(
+      formatAuntyTemperatureDisplay({
+        start_temp_c: "25",
+        end_temp_c: "95",
+        temperature_c: "37",
+      })
+    ).toBe("25–95 °C");
+    expect(formatAuntyTemperatureDisplay({ temperature_c: "25" })).toBe(
+      "25 °C"
+    );
     expect(formatAuntyRampRate("1")).toBe("1 °C/min");
   });
 });

@@ -193,9 +193,7 @@ def isothermal_experiment(
         if with_sls:
             series["sls"] = [(t, 3.5e6 + t * 200.0) for t in times]
             values["SLS k₁ (s⁻¹)"] = well_k1 * 0.4
-        experiment.wells.append(
-            SyntheticWell(well=well, sample=well, values=values, series=series)
-        )
+        experiment.wells.append(SyntheticWell(well=well, sample=well, values=values, series=series))
     return experiment
 
 
