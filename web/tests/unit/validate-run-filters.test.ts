@@ -92,6 +92,27 @@ describe("validateSearchRunsMetadataFilters", () => {
     expect(result).toBeNull();
   });
 
+  it("accepts an Aunty hold temperature from filter-options", async () => {
+    getInstrumentById.mockResolvedValue({
+      id: "aunty-1",
+      instrumentType: "aunty",
+    });
+    getInstrumentFilterOptions.mockResolvedValue({
+      kind: "aunty",
+      options: {
+        experimentTypes: [{ value: "isothermal", label: "Isothermal" }],
+        analysisModes: ["Peak height"],
+        temperatures: [{ value: "25", label: "25 °C" }],
+        rampRates: [],
+      },
+    });
+
+    const result = await validateSearchRunsMetadataFilters("aunty-1", {
+      auntyTemperature: "25",
+    });
+    expect(result).toBeNull();
+  });
+
   it("rejects an out-of-enum Aunty temperature pair", async () => {
     getInstrumentById.mockResolvedValue({
       id: "aunty-1",

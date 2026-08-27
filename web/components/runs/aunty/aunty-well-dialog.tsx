@@ -26,6 +26,7 @@ import {
   curveKey,
   indexAuntyCurves,
   parseAuntyCurvesCsv,
+  presentWellValues,
 } from "@/lib/runs/aunty";
 
 const WELL_SEEKER_LABELS = {
@@ -188,12 +189,49 @@ export function AuntyWellDialog({
         {well && curves.status !== "error" && fullPoints.length > 0 && (
           <AuntyWellChart
             fileName={experiment.fileName}
+            flavor={experiment.flavor}
             points={fullPoints}
             seriesId={seriesId}
             well={well}
           />
         )}
+        {well && (
+          <AuntyWellValuesList
+            showEmpty={fullPoints.length === 0 && curves.status !== "loading"}
+            well={well}
+          />
+        )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+function AuntyWellValuesList({
+  showEmpty,
+  well,
+}: {
+  showEmpty: boolean;
+  well: NonNullable<AuntyExperiment["wells"][number]>;
+}) {
+  const items = presentWellValues(well.values);
+  if (items.length === 0) {
+    if (!showEmpty) {
+      return null;
+    }
+    return (
+      <p className="text-muted-foreground text-sm">
+        No summary values for this well.
+      </p>
+    );
+  }
+  return (
+    <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+      {items.map((item) => (
+        <div className="contents" key={item.label}>
+          <dt className="text-muted-foreground">{item.label}</dt>
+          <dd className="font-mono tabular-nums">{item.text}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }

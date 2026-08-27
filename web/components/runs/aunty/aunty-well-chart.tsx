@@ -15,10 +15,11 @@ import {
   ChartTooltipContent,
 } from "@/components/ui/chart";
 import {
-  AUNTY_SERIES_META,
+  type AuntyFlavor,
   type AuntyPoint,
   type AuntySeriesId,
   type AuntyWell,
+  seriesMetaFor,
   TM_MARKER_COLOR,
   tmMarkerValue,
 } from "@/lib/runs/aunty";
@@ -39,16 +40,18 @@ function formatTick(value: number): string {
 
 export function AuntyWellChart({
   fileName,
+  flavor,
   points,
   seriesId,
   well,
 }: {
   fileName: string;
+  flavor: AuntyFlavor;
   points: AuntyPoint[];
   seriesId: AuntySeriesId;
   well: AuntyWell;
 }) {
-  const meta = AUNTY_SERIES_META[seriesId];
+  const meta = seriesMetaFor(flavor, seriesId);
   const marker = meta.markerKey === "tm1" ? tmMarkerValue(well.values) : null;
   const last = points.at(-1);
   const chartConfig = {
@@ -81,12 +84,15 @@ export function AuntyWellChart({
             tickMargin={8}
             type="number"
           />
+          {/* Fit to the series; Recharts otherwise pins the floor at 0. */}
           <YAxis
             axisLine={false}
             dataKey="y"
+            domain={["dataMin", "dataMax"]}
             tickFormatter={formatTick}
             tickLine={false}
             tickMargin={8}
+            type="number"
             width={64}
           />
           <ChartTooltip

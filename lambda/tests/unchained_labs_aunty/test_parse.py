@@ -15,6 +15,7 @@ from data_hub_lambda.unchained_labs_aunty.utils import (
 )
 
 from .workbook_factory import (
+    isothermal_experiment,
     sizing_experiment,
     thermal_experiment,
     write_aunty_workbook,
@@ -115,6 +116,105 @@ def test_two_experiment_workbook(tmp_path: Path) -> None:
     assert first_rows and second_rows
 
 
+def test_thermal_without_z_average(tmp_path: Path) -> None:
+    path = tmp_path / "tm_tagg.xlsx"
+    write_aunty_workbook(
+        path,
+        [
+            thermal_experiment(
+                "Tm Tagg Thermal ramp seed T1049",
+                ["A1", "B1"],
+                include_series={"fluorescence", "differential", "sls"},
+            )
+        ],
+    )
+
+    parsed = parse_aunty_workbook(path)
+    experiment = parsed.experiments[0]
+    assert experiment["flavor"] == "thermal_ramp"
+    assert set(experiment["wells"][0]["series"]) == {
+        "fluorescence",
+        "differential",
+        "sls",
+    }
+    assert "z_average_diameter" not in experiment["wells"][0]["series"]
+
+
+def test_isothermal_fluorescence_only(tmp_path: Path) -> None:
+    path = tmp_path / "isothermal.xlsx"
+    write_aunty_workbook(
+        path,
+        [isothermal_experiment("Blue Isothermal seed T1016", ["G2", "H2"])],
+    )
+
+    parsed = parse_aunty_workbook(path)
+    assert parsed.metadata["experiment_type"] == "isothermal"
+    experiment = parsed.experiments[0]
+    assert experiment["flavor"] == "isothermal"
+    assert experiment["primarySeries"] == "fluorescence"
+    assert experiment["analysisMode"] == "Peak height"
+    assert [w["well"] for w in experiment["wells"]] == ["G2", "H2"]
+    assert set(experiment["wells"][0]["series"]) == {"fluorescence"}
+    assert experiment["wells"][0]["values"]["fluor_k1"] == pytest.approx(0.0034)
+    xs = [row.x for row in parsed.curve_rows if row.well == "G2"]
+    assert xs[0] == pytest.approx(0.0)
+    assert xs[-1] == pytest.approx(420.0)
+
+
+def test_isothermal_with_sls(tmp_path: Path) -> None:
+    path = tmp_path / "isothermal_sls.xlsx"
+    write_aunty_workbook(
+        path,
+        [
+            isothermal_experiment(
+                "UV Scatter Isothermal seed T1042",
+                ["A1"],
+                with_sls=True,
+            )
+        ],
+    )
+
+    parsed = parse_aunty_workbook(path)
+    well = parsed.experiments[0]["wells"][0]
+    assert set(well["series"]) == {"fluorescence", "sls"}
+    assert well["values"]["sls_k1"] == pytest.approx(0.00136)
+    series_ids = {row.series for row in parsed.curve_rows}
+    assert series_ids == {"fluorescence", "sls"}
+
+
+def test_table_only_thermal(tmp_path: Path) -> None:
+    path = tmp_path / "table_only_thermal.xlsx"
+    write_aunty_workbook(
+        path,
+        [thermal_experiment("Thermal ramp seed T1627", ["A1", "C1"])],
+        include_graph=False,
+    )
+
+    parsed = parse_aunty_workbook(path)
+    assert parsed.metadata["experiment_type"] == "thermal_ramp"
+    assert parsed.curve_rows == []
+    experiment = parsed.experiments[0]
+    assert experiment["flavor"] == "thermal_ramp"
+    assert [w["well"] for w in experiment["wells"]] == ["A1", "C1"]
+    assert experiment["wells"][0]["series"] == {}
+    assert experiment["wells"][0]["values"]["tm1"] == pytest.approx(64.6)
+
+
+def test_table_only_sizing(tmp_path: Path) -> None:
+    path = tmp_path / "table_only_sizing.xlsx"
+    write_aunty_workbook(
+        path,
+        [sizing_experiment("Sizing seed T1556", ["A1", "B1"], z_avg=80.0)],
+        include_graph=False,
+    )
+
+    parsed = parse_aunty_workbook(path)
+    assert parsed.metadata["experiment_type"] == "sizing"
+    well = parsed.experiments[0]["wells"][0]
+    assert well["series"] == {}
+    assert well["values"]["z_avg_diameter"] == pytest.approx(80.0)
+
+
 def test_missing_graph_sheet(tmp_path: Path) -> None:
     from openpyxl import Workbook
 
@@ -186,3 +286,12 @@ def test_seed_fixtures_parse() -> None:
     mass_peak_x = max(a1["series"]["mass"], key=lambda p: p[1])[0]
     intensity_peak_x = max(a1["series"]["intensity"], key=lambda p: p[1])[0]
     assert mass_peak_x < intensity_peak_x
+
+    isothermal = parse_aunty_workbook(fixtures / "aunty_isothermal.xlsx")
+    assert isothermal.metadata["experiment_type"] == "isothermal"
+    assert len(isothermal.experiments[0]["wells"]) == 12
+
+    table_only = parse_aunty_workbook(fixtures / "aunty_table_only.xlsx")
+    assert table_only.metadata["experiment_type"] == "thermal_ramp"
+    assert table_only.curve_rows == []
+    assert len(table_only.experiments[0]["wells"]) == 24

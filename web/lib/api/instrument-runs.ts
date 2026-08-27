@@ -15,6 +15,7 @@ import {
 import { cache } from "react";
 import {
   formatAuntyExperimentType,
+  formatAuntyHoldTemperature,
   formatAuntyRampRate,
   formatAuntyTemperatureRange,
   formatHinaSizes,
@@ -532,7 +533,7 @@ export async function buildRunListQuery(filters: RunListFilters) {
   // Aunty metadata column filters. Experiment type is stored as a JSON
   // string for a single-flavor workbook and as a JSON array when one
   // workbook mixes flavors — match either shape. Temperature is a
-  // `start|end` pair of the stored °C scalars.
+  // `start|end` pair for ramps, or a single hold °C for isothermal.
   if (filters.auntyExperimentType) {
     conditions.push(
       sql`(
@@ -550,13 +551,17 @@ export async function buildRunListQuery(filters: RunListFilters) {
     );
   }
   if (filters.auntyTemperature) {
-    const range = decodeAuntyTemperatureFilter(filters.auntyTemperature);
-    if (range) {
+    const decoded = decodeAuntyTemperatureFilter(filters.auntyTemperature);
+    if (decoded?.kind === "range") {
       conditions.push(
-        sql`${instrumentRuns.metadata}->>'start_temp_c' = ${range.start}`
+        sql`${instrumentRuns.metadata}->>'start_temp_c' = ${decoded.start}`
       );
       conditions.push(
-        sql`${instrumentRuns.metadata}->>'end_temp_c' = ${range.end}`
+        sql`${instrumentRuns.metadata}->>'end_temp_c' = ${decoded.end}`
+      );
+    } else if (decoded?.kind === "hold") {
+      conditions.push(
+        sql`${instrumentRuns.metadata}->>'temperature_c' = ${decoded.value}`
       );
     } else {
       conditions.push(sql`false`);
@@ -1305,6 +1310,7 @@ const ALLOWED_METADATA_KEYS = new Set([
   "color_mode",
   "analysis_mode",
   "rate_c_per_min",
+  "temperature_c",
 ]);
 
 async function distinctMetadataValues(
@@ -1515,7 +1521,13 @@ function encodeAuntyTemperatureFilter(start: string, end: string): string {
 
 function decodeAuntyTemperatureFilter(
   value: string
-): { end: string; start: string } | null {
+):
+  | { end: string; kind: "range"; start: string }
+  | { kind: "hold"; value: string }
+  | null {
+  if (!value.includes(AUNTY_TEMPERATURE_SEPARATOR)) {
+    return value ? { kind: "hold", value } : null;
+  }
   const separator = value.indexOf(AUNTY_TEMPERATURE_SEPARATOR);
   if (
     separator <= 0 ||
@@ -1528,7 +1540,7 @@ function decodeAuntyTemperatureFilter(
   if (!(start && end)) {
     return null;
   }
-  return { start, end };
+  return { kind: "range", start, end };
 }
 
 export interface AuntyLabeledOption {
@@ -1599,11 +1611,13 @@ export async function getAuntyFilterOptions(
     experimentTypeValues,
     analysisModes,
     temperaturePairs,
+    holdTemperatures,
     rampRateValues,
   ] = await Promise.all([
     distinctAuntyExperimentTypes(instrumentId),
     distinctMetadataValues(instrumentId, "analysis_mode"),
     distinctAuntyTemperaturePairs(instrumentId),
+    distinctMetadataValues(instrumentId, "temperature_c"),
     distinctMetadataValues(instrumentId, "rate_c_per_min"),
   ]);
 
@@ -1614,7 +1628,7 @@ export async function getAuntyFilterOptions(
     }))
     .sort((a, b) => a.label.localeCompare(b.label));
 
-  const temperatures = [...temperaturePairs]
+  const rangeOptions = [...temperaturePairs]
     .sort((a, b) => {
       const byStart = compareNumericStrings(a.start, b.start);
       if (byStart !== 0) {
@@ -1626,6 +1640,13 @@ export async function getAuntyFilterOptions(
       value: encodeAuntyTemperatureFilter(pair.start, pair.end),
       label: formatAuntyTemperatureRange(pair.start, pair.end),
     }));
+  const holdOptions = [...holdTemperatures]
+    .sort(compareNumericStrings)
+    .map((value) => ({
+      value,
+      label: formatAuntyHoldTemperature(value),
+    }));
+  const temperatures = [...rangeOptions, ...holdOptions];
 
   const rampRates = [...rampRateValues]
     .sort(compareNumericStrings)

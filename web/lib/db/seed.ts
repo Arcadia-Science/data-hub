@@ -887,6 +887,16 @@ export const INSTRUMENT_FIXTURES: Record<string, InstrumentFixture> = {
         contentType:
           "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       },
+      {
+        filename: "aunty_isothermal.xlsx",
+        contentType:
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      },
+      {
+        filename: "aunty_table_only.xlsx",
+        contentType:
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      },
     ],
     // Prod-shaped ISO-ish stems; timestamps chosen to avoid real runs.
     runIds: [
