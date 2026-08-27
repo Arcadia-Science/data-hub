@@ -31,7 +31,10 @@ import {
 } from "@/lib/db/schema";
 import { type AuntyPlateData, parseAuntyPlateJson } from "@/lib/runs/aunty";
 import type { RunStatus } from "@/lib/runs/run-status";
-import { isStalledProcessing } from "@/lib/runs/stalled-processing";
+import {
+  isStalledProcessing,
+  stalledProcessingCutoff,
+} from "@/lib/runs/stalled-processing";
 import { getS3ObjectStream } from "@/lib/s3";
 
 // ---------------------------------------------------------------------------
@@ -896,6 +899,9 @@ export interface RunFileStats {
   pending: number;
   processedActive: number;
   processing: number;
+  // Processing files still inside the stall window. Auto-refresh uses this
+  // so a stalled file does not poll forever.
+  processingInFlight: number;
   rawActive: number;
   // Sum of raw-file `size_bytes` only — mirrors the runs-table Size column.
   rawTotalSizeBytes: number;
@@ -926,6 +932,7 @@ export async function getRunFileStats(
       pending: sql<number>`cast(count(*) filter (where ${files.status} in ('detected', 'upload_requested') and ${activeNotDeleted}) as int)`,
       uploaded: sql<number>`cast(count(*) filter (where ${files.status} not in ('detected', 'upload_requested', 'processing') and ${activeNotDeleted}) as int)`,
       processing: sql<number>`cast(count(*) filter (where ${files.status} = 'processing' and ${activeNotDeleted}) as int)`,
+      processingInFlight: sql<number>`cast(count(*) filter (where ${files.status} = 'processing' and ${activeNotDeleted} and ${files.processingStartedAt} is not null and ${files.processingStartedAt} > ${stalledProcessingCutoff()}) as int)`,
       uploadRequested: sql<number>`cast(count(*) filter (where ${files.status} = 'upload_requested' and ${activeNotDeleted}) as int)`,
     })
     .from(files)

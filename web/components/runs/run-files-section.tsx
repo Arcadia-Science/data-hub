@@ -158,7 +158,7 @@ function RunFilesSectionContent({
   // Auto-refresh while work is genuinely in flight (uploading or processing)
   // so the UI picks up status transitions without a manual reload. Files that
   // are merely "detected" (awaiting a manual upload) don't trigger polling.
-  const hasInFlight = stats.processing > 0 || stats.uploadRequested > 0;
+  const hasInFlight = stats.processingInFlight > 0 || stats.uploadRequested > 0;
   useEffect(() => {
     if (!hasInFlight) {
       return;
