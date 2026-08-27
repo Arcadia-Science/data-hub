@@ -30,7 +30,7 @@ import type {
   FilesCategoryFilter,
   FilesLifecycleFilter,
   FilesSortField,
-  RunFile,
+  RunFileRow,
   RunFileStats,
   RunFilesPage,
 } from "@/lib/api/instrument-runs";
@@ -77,7 +77,7 @@ const FILES_STATUS_OPTIONS: FilesFilterOption<FilesLifecycleFilter>[] = [
 
 interface RunFilesSectionProps {
   // Current page of the server-paginated, filtered, sorted file list.
-  files: RunFile[];
+  files: RunFileRow[];
   // Downloadable files matching the active table filters (S3-backed).
   filteredDownloadableCount: number;
   instrumentId: string;

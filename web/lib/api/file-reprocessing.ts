@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, or } from "drizzle-orm";
 import { after } from "next/server";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { db } from "@/lib/db";
@@ -6,6 +6,11 @@ import { files, instrumentRuns, instruments } from "@/lib/db/schema";
 import { isProcessableInstrumentType } from "@/lib/instruments/processable-types";
 import { hasInvokeCredentials, signLambdaInvoke } from "@/lib/lambda";
 import { REPROCESSABLE_STATUSES } from "@/lib/runs/reprocessable-statuses";
+import {
+  isStalledProcessing,
+  minutesUntilProcessingIsStalled,
+  stalledProcessingCutoff,
+} from "@/lib/runs/stalled-processing";
 
 function getLambdaUrl(): string | null {
   const url = process.env.LAMBDA_FUNCTION_URL;
@@ -27,10 +32,8 @@ export type ReprocessResult =
 
 // Shared core for file reprocessing, used by both the REST route
 // (/api/v1/files/:fileId/reprocess) and the MCP `reprocess_file` tool.
-//
-// Validates the file state machine, transitions status to "processing",
-// and schedules a Lambda invocation via `after()` so it runs after the
-// response is sent but while the runtime stays warm.
+// Transitions status to "processing" and schedules a Lambda invoke via
+// `after()`. Stalled processing files are eligible; in-flight ones are not.
 export async function reprocessFile(fileId: number): Promise<ReprocessResult> {
   const [file] = await db
     .select()
@@ -69,12 +72,24 @@ export async function reprocessFile(fileId: number): Promise<ReprocessResult> {
     };
   }
 
-  if (!(REPROCESSABLE_STATUSES as readonly string[]).includes(file.status)) {
+  const canReprocessStatus =
+    (REPROCESSABLE_STATUSES as readonly string[]).includes(file.status) ||
+    isStalledProcessing(file);
+  if (!canReprocessStatus) {
+    if (file.status === "processing") {
+      const remaining = minutesUntilProcessingIsStalled(file);
+      return {
+        ok: false,
+        status: 409,
+        code: "CONFLICT",
+        message: `Cannot reprocess a file that is still processing — try again in ${remaining} minute${remaining === 1 ? "" : "s"}`,
+      };
+    }
     return {
       ok: false,
       status: 409,
       code: "CONFLICT",
-      message: `Cannot reprocess a file in '${file.status}' status — only 'uploaded', 'failed', or 'completed' files can be reprocessed`,
+      message: `Cannot reprocess a file in '${file.status}' status — only 'uploaded', 'failed', 'completed', or stalled 'processing' files can be reprocessed`,
     };
   }
 
@@ -134,6 +149,7 @@ export async function reprocessFile(fileId: number): Promise<ReprocessResult> {
       status: "processing",
       processedAt: null,
       errorMessage: null,
+      processingStartedAt: new Date(),
     })
     .where(eq(files.id, fileId));
 
@@ -240,8 +256,17 @@ export async function reprocessRun(
       and(
         eq(files.instrumentRunId, run.id),
         eq(files.category, "raw"),
-        inArray(files.status, [...REPROCESSABLE_STATUSES]),
-        isNull(files.deletedAt)
+        isNull(files.deletedAt),
+        or(
+          inArray(files.status, [...REPROCESSABLE_STATUSES]),
+          and(
+            eq(files.status, "processing"),
+            or(
+              isNull(files.processingStartedAt),
+              lt(files.processingStartedAt, stalledProcessingCutoff())
+            )
+          )
+        )
       )
     );
 

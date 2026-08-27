@@ -11,6 +11,7 @@ import type {
   RawWellRow,
   RunDetail as RunDetailType,
   RunFile,
+  RunFileRow,
   RunFileStats,
   RunFilesPage,
 } from "@/lib/api/instrument-runs";
@@ -38,7 +39,7 @@ export interface RunDetailProps {
   // Aggregate per-run file counts (footer summary, variant counts).
   fileStats: RunFileStats;
   // Current page of the server-paginated files table.
-  files: RunFile[];
+  files: RunFileRow[];
   filesDownloadableCount: RunFilesPage["downloadableCount"];
   filesPagination: RunFilesPage["pagination"];
   instrumentId: string;

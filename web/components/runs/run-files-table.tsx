@@ -22,7 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { RunFile } from "@/lib/api/instrument-runs";
+import type { RunFileRow } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
 import type { InstrumentType } from "@/lib/db/schema";
 import { canReprocessFile } from "@/lib/runs/reprocessable-statuses";
@@ -67,7 +67,7 @@ function FileColumnHeaders() {
   );
 }
 
-function FileInfoCells({ file }: { file: RunFile }) {
+function FileInfoCells({ file }: { file: RunFileRow }) {
   return (
     <>
       <TableCell className="py-2 font-mono text-sm">
@@ -116,7 +116,7 @@ function ReprocessAction({
   isPending,
   onReprocess,
 }: {
-  file: RunFile;
+  file: RunFileRow;
   isPending: boolean;
   onReprocess: (id: number) => void;
 }) {
@@ -141,9 +141,20 @@ function ReprocessAction({
         <AlertDialogHeader>
           <AlertDialogTitle>Reprocess file?</AlertDialogTitle>
           <AlertDialogDescription>
-            <strong className="font-mono">{file.filename}</strong> will be sent
-            to the Lambda function for reprocessing. Any existing report data
-            for this file will be cleared.
+            {file.stalledProcessing ? (
+              <>
+                Processing never finished for{" "}
+                <strong className="font-mono">{file.filename}</strong>.
+                Reprocessing will try again. Any existing report data for this
+                file will be cleared.
+              </>
+            ) : (
+              <>
+                <strong className="font-mono">{file.filename}</strong> will be
+                sent to the Lambda function for reprocessing. Any existing
+                report data for this file will be cleared.
+              </>
+            )}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -163,7 +174,7 @@ function UploadDismissActions({
   onUpload,
   onDismiss,
 }: {
-  file: RunFile;
+  file: RunFileRow;
   isPending: boolean;
   onUpload: (id: number) => void;
   onDismiss: (id: number) => void;
@@ -214,12 +225,12 @@ function UploadDismissActions({
 
 // ---------------------------------------------------------------------------
 // Read-only variant: no selection column, no upload/dismiss. Reprocessing is
-// still allowed for uploaded/completed/failed raw files so operators can
-// recover report data or kick stuck uploads without restoring the run.
+// still allowed for uploaded/completed/failed/stalled raw files so operators
+// can recover report data or kick stuck uploads without restoring the run.
 // ---------------------------------------------------------------------------
 
 export interface ReadOnlyRunFilesTableProps {
-  files: RunFile[];
+  files: RunFileRow[];
   instrumentType: InstrumentType;
   isPending: boolean;
   onReprocess: (id: number) => void;
@@ -276,7 +287,7 @@ export function ReadOnlyRunFilesTable({
 // ---------------------------------------------------------------------------
 
 export interface EditableRunFilesTableProps {
-  files: RunFile[];
+  files: RunFileRow[];
   instrumentType: InstrumentType;
   isPending: boolean;
   onDismiss: (id: number) => void;

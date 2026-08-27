@@ -31,6 +31,7 @@ import {
 } from "@/lib/db/schema";
 import { type AuntyPlateData, parseAuntyPlateJson } from "@/lib/runs/aunty";
 import type { RunStatus } from "@/lib/runs/run-status";
+import { isStalledProcessing } from "@/lib/runs/stalled-processing";
 import { getS3ObjectStream } from "@/lib/s3";
 
 // ---------------------------------------------------------------------------
@@ -703,6 +704,10 @@ export type RunDetail = NonNullable<
 
 export type RunFile = typeof files.$inferSelect;
 
+// Run-page file row with stall decided on the server so the files table
+// does not re-read the clock during hydration.
+export type RunFileRow = RunFile & { stalledProcessing: boolean };
+
 // Server-truth row shape for the paginated runs list. Derived from
 // buildRunListQuery's return type so any column added to the Drizzle
 // select (counts, metadata, etc.) automatically flows through to every
@@ -825,7 +830,7 @@ function runFilesOrderBy(sort: FilesSortField): SQL[] {
 }
 
 export interface RunFilesPage {
-  data: RunFile[];
+  data: RunFileRow[];
   // Files in the current filter that have S3 keys and can be zipped by the
   // archive route (matches `loadDownloadableFiles` after id resolution).
   downloadableCount: number;
@@ -864,7 +869,10 @@ export async function buildRunFilesQuery(
     .offset(offset);
 
   return {
-    data,
+    data: data.map((file) => ({
+      ...file,
+      stalledProcessing: isStalledProcessing(file),
+    })),
     downloadableCount,
     pagination: {
       page: safePage,

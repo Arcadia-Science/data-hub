@@ -23,9 +23,11 @@ export const getFileOutputSchema = z.object({
   uploadRequestedAt: isoDateTime.nullable(),
   uploadedAt: isoDateTime.nullable(),
   processedAt: isoDateTime.nullable(),
+  processingStartedAt: isoDateTime.nullable(),
   fileCreatedAt: isoDateTime.nullable(),
   createdAt: isoDateTime,
   deletedAt: isoDateTime.nullable(),
+  stalled: z.boolean(),
 });
 
 export const getFileDownloadUrlOutputSchema = z.object({

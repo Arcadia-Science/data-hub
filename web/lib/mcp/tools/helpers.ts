@@ -1,5 +1,6 @@
 import type { AuthInfo } from "@modelcontextprotocol/server";
 import { lookupRunByNaturalKey, type RunFile } from "@/lib/api/instrument-runs";
+import { isStalledProcessing } from "@/lib/runs/stalled-processing";
 
 /**
  * Success payload for MCP tools that declare `outputSchema`. Round-trips
@@ -49,6 +50,7 @@ export function toMcpFile(f: RunFile) {
     createdAt: f.createdAt,
     uploadedAt: f.uploadedAt,
     processedAt: f.processedAt,
+    stalled: isStalledProcessing(f),
   };
 }
 

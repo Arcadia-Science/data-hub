@@ -3,10 +3,12 @@ import {
   canReprocessFile,
   type ReprocessableFile,
 } from "@/lib/runs/reprocessable-statuses";
+import { STALLED_PROCESSING_AFTER_MS } from "@/lib/runs/stalled-processing";
 
 const rawCompleted: ReprocessableFile = {
   category: "raw",
   deletedAt: null,
+  processingStartedAt: null,
   s3Key: "dishcam/run/stack.tif",
   status: "completed",
 };
@@ -38,5 +40,71 @@ describe("canReprocessFile", () => {
       false
     );
     expect(canReprocessFile(rawCompleted, "generic")).toBe(false);
+  });
+
+  it("rejects a fresh processing file", () => {
+    expect(
+      canReprocessFile(
+        {
+          ...rawCompleted,
+          status: "processing",
+          processingStartedAt: new Date(),
+        },
+        "dishcam"
+      )
+    ).toBe(false);
+  });
+
+  it("allows a processing file past the stall window", () => {
+    expect(
+      canReprocessFile(
+        {
+          ...rawCompleted,
+          status: "processing",
+          processingStartedAt: new Date(
+            Date.now() - STALLED_PROCESSING_AFTER_MS - 1000
+          ),
+        },
+        "dishcam"
+      )
+    ).toBe(true);
+  });
+
+  it("allows a processing file with no processingStartedAt", () => {
+    expect(
+      canReprocessFile(
+        {
+          ...rawCompleted,
+          status: "processing",
+          processingStartedAt: null,
+        },
+        "dishcam"
+      )
+    ).toBe(true);
+  });
+
+  it("uses the server-stamped stalledProcessing flag when present", () => {
+    expect(
+      canReprocessFile(
+        {
+          ...rawCompleted,
+          status: "processing",
+          processingStartedAt: new Date(),
+          stalledProcessing: true,
+        },
+        "dishcam"
+      )
+    ).toBe(true);
+    expect(
+      canReprocessFile(
+        {
+          ...rawCompleted,
+          status: "processing",
+          processingStartedAt: null,
+          stalledProcessing: false,
+        },
+        "dishcam"
+      )
+    ).toBe(false);
   });
 });

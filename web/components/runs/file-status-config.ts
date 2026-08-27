@@ -7,14 +7,16 @@ import {
   CloudUpload,
   LoaderCircle,
   Trash2,
+  TriangleAlert,
 } from "lucide-react";
-import type { RunFile } from "@/lib/api/instrument-runs";
+import type { RunFile, RunFileRow } from "@/lib/api/instrument-runs";
 
 export type FileStatusDisplayKey =
   | "pending"
   | "uploading"
   | "uploaded"
   | "processing"
+  | "stalled"
   | "completed"
   | "failed"
   | "dismissed";
@@ -33,13 +35,18 @@ interface FileStatusConfigEntry {
   spin?: boolean;
 }
 
-export function statusLabel(file: RunFile): string {
+export function statusLabel(file: RunFile | RunFileRow): string {
   return FILE_STATUS_CONFIG[getFileStatusKey(file)].label;
 }
 
-export function getFileStatusKey(file: RunFile): FileStatusDisplayKey {
+export function getFileStatusKey(
+  file: Pick<RunFile, "deletedAt" | "status"> & { stalledProcessing?: boolean }
+): FileStatusDisplayKey {
   if (file.deletedAt !== null) {
     return "dismissed";
+  }
+  if (file.stalledProcessing) {
+    return "stalled";
   }
   switch (file.status) {
     case "detected":
@@ -88,6 +95,12 @@ export const FILE_STATUS_CONFIG: Record<
     className: "text-blue-700 dark:text-blue-400",
     spin: true,
   },
+  stalled: {
+    label: "Stalled",
+    description: "processing never finished, can retry",
+    Icon: TriangleAlert,
+    className: "text-amber-700 dark:text-amber-400",
+  },
   completed: {
     label: "Completed",
     description: "processed OK",
@@ -121,7 +134,7 @@ export const FILE_STATUS_LEGEND_SECTIONS: {
   {
     key: "in_motion",
     title: "In motion",
-    statuses: ["uploading", "processing"],
+    statuses: ["uploading", "processing", "stalled"],
   },
   {
     key: "done",

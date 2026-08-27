@@ -136,6 +136,7 @@ export const runDetailFile = z
     upload_requested_at: isoDateTime.nullable(),
     uploaded_at: isoDateTime.nullable(),
     processed_at: isoDateTime.nullable(),
+    processing_started_at: isoDateTime.nullable(),
     download_url: z.string().url().nullable(),
     created_at: isoDateTime,
     file_created_at: isoDateTime.nullable(),

@@ -25,6 +25,7 @@ export const mcpRunFileSchema = z.object({
   createdAt: isoDateTime,
   uploadedAt: isoDateTime.nullable(),
   processedAt: isoDateTime.nullable(),
+  stalled: z.boolean(),
 });
 
 /** Failure summary attached via `get_run` include=failure_summary / report. */

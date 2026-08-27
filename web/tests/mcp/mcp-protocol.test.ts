@@ -189,6 +189,7 @@ const {
       uploadRequestedAt: null,
       uploadedAt: new Date("2025-01-01T00:00:00Z"),
       processedAt: new Date("2025-01-01T00:00:00Z"),
+      processingStartedAt: null,
       fileCreatedAt: null,
       createdAt: new Date("2025-01-01T00:00:00Z"),
       deletedAt: null,

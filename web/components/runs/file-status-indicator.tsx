@@ -5,14 +5,21 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import type { RunFile } from "@/lib/api/instrument-runs";
-import { cn } from "@/lib/utils";
+import type { RunFileRow } from "@/lib/api/instrument-runs";
+import { cn, formatRelativeTime } from "@/lib/utils";
 import { FILE_STATUS_CONFIG, getFileStatusKey } from "./file-status-config";
 
-export function FileStatusIndicator({ file }: { file: RunFile }) {
+export function FileStatusIndicator({ file }: { file: RunFileRow }) {
   const key = getFileStatusKey(file);
   const { label, Icon, className, spin } = FILE_STATUS_CONFIG[key];
   const showErrorTooltip = key === "failed" && !!file.errorMessage;
+  let stalledTooltip: string | null = null;
+  if (key === "stalled") {
+    stalledTooltip = file.processingStartedAt
+      ? `Started ${formatRelativeTime(file.processingStartedAt)}. You can reprocess this file.`
+      : "Processing never finished. You can reprocess this file.";
+  }
+  const tooltip = showErrorTooltip ? file.errorMessage : stalledTooltip;
 
   const indicator = (
     <span
@@ -20,14 +27,14 @@ export function FileStatusIndicator({ file }: { file: RunFile }) {
         "inline-flex h-6 items-center gap-1.5 text-sm leading-none",
         className
       )}
-      tabIndex={showErrorTooltip ? 0 : undefined}
+      tabIndex={tooltip ? 0 : undefined}
     >
       <Icon className={cn("size-4 shrink-0", spin && "animate-spin")} />
       {label}
     </span>
   );
 
-  if (!showErrorTooltip) {
+  if (!tooltip) {
     return indicator;
   }
 
@@ -35,7 +42,7 @@ export function FileStatusIndicator({ file }: { file: RunFile }) {
     <Tooltip>
       <TooltipTrigger asChild>{indicator}</TooltipTrigger>
       <TooltipContent align="center" className="max-w-sm" side="top">
-        {file.errorMessage}
+        {tooltip}
       </TooltipContent>
     </Tooltip>
   );

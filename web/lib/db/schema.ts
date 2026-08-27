@@ -646,6 +646,13 @@ export const files = pgTable(
       withTimezone: true,
       mode: "date",
     }),
+    // Set every time the file enters `processing`. Together with the Lambda's
+    // 900s hard limit this tells in-flight work from a processor that died
+    // without reporting back. NULL predates the column and counts as stalled.
+    processingStartedAt: timestamp("processing_started_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
     // On-disk creation time of the file, reported by the watcher
     // (st_birthtime where available, else st_mtime). NULL for
     // Lambda-created files and rows predating this column.
