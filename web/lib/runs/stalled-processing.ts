@@ -41,17 +41,20 @@ export function isStalledProcessing(
   );
 }
 
+// A file is stalled once it started before this instant. The SQL fragments in
+// `stalled-processing.sql.ts` compare against the same boundary.
 export function stalledProcessingCutoff(now: Date = new Date()): Date {
   return new Date(now.getTime() - stalledProcessingAfterMs());
 }
 
-// Remaining wait before a still-in-flight file becomes reprocessable.
+// Remaining wait before a still-in-flight file becomes reprocessable. Takes
+// the timestamp rather than the row because a null start is already stalled.
 export function minutesUntilProcessingIsStalled(
-  file: Pick<typeof files.$inferSelect, "processingStartedAt">,
+  processingStartedAt: Date,
   now: Date = new Date()
 ): number {
-  const started = file.processingStartedAt ?? now;
   const remainingMs =
-    stalledProcessingAfterMs() - (now.getTime() - started.getTime());
+    stalledProcessingAfterMs() -
+    (now.getTime() - processingStartedAt.getTime());
   return Math.max(1, Math.ceil(remainingMs / 60_000));
 }

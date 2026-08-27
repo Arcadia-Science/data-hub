@@ -9,7 +9,7 @@ import {
   Trash2,
   TriangleAlert,
 } from "lucide-react";
-import type { RunFile, RunFileRow } from "@/lib/api/instrument-runs";
+import type { RunFileRow } from "@/lib/api/instrument-runs";
 
 export type FileStatusDisplayKey =
   | "pending"
@@ -35,12 +35,10 @@ interface FileStatusConfigEntry {
   spin?: boolean;
 }
 
-export function statusLabel(file: RunFile | RunFileRow): string {
-  return FILE_STATUS_CONFIG[getFileStatusKey(file)].label;
-}
-
+// `stalledProcessing` is required, not optional: a plain `files` row would
+// otherwise compile here and silently label a stalled file "Processing".
 export function getFileStatusKey(
-  file: Pick<RunFile, "deletedAt" | "status"> & { stalledProcessing?: boolean }
+  file: Pick<RunFileRow, "deletedAt" | "stalledProcessing" | "status">
 ): FileStatusDisplayKey {
   if (file.deletedAt !== null) {
     return "dismissed";

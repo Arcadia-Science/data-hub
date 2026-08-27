@@ -67,10 +67,13 @@ const FILES_CATEGORY_OPTIONS: FilesFilterOption<FilesCategoryFilter>[] = [
   { value: "processed", label: "Processed" },
 ];
 
+// "Processing" is in-flight work only; files past the stall cutoff answer to
+// "Stalled" instead, matching what the status column labels them.
 const FILES_STATUS_OPTIONS: FilesFilterOption<FilesLifecycleFilter>[] = [
   { value: "pending", label: "Pending" },
   { value: "uploaded", label: "Uploaded" },
   { value: "processing", label: "Processing" },
+  { value: "stalled", label: "Stalled" },
   { value: "completed", label: "Completed" },
   { value: "failed", label: "Failed" },
 ];

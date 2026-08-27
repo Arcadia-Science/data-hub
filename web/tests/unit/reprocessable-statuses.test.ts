@@ -3,13 +3,16 @@ import {
   canReprocessFile,
   type ReprocessableFile,
 } from "@/lib/runs/reprocessable-statuses";
-import { stalledProcessingAfterMs } from "@/lib/runs/stalled-processing";
+
+// `canReprocessFile` is the render-time gate for the Reprocess button. It
+// never reads the clock: whether a `processing` file counts as stalled is
+// decided on the server and arrives as `stalledProcessing`.
 
 const rawCompleted: ReprocessableFile = {
   category: "raw",
   deletedAt: null,
-  processingStartedAt: null,
   s3Key: "dishcam/run/stack.tif",
+  stalledProcessing: false,
   status: "completed",
 };
 
@@ -42,66 +45,51 @@ describe("canReprocessFile", () => {
     expect(canReprocessFile(rawCompleted, "generic")).toBe(false);
   });
 
-  it("rejects a fresh processing file", () => {
+  it("rejects an in-flight processing file", () => {
     expect(
       canReprocessFile(
         {
           ...rawCompleted,
           status: "processing",
-          processingStartedAt: new Date(),
+          stalledProcessing: false,
         },
         "dishcam"
       )
     ).toBe(false);
   });
 
-  it("allows a processing file past the stall window", () => {
+  it("allows a processing file the server marked stalled", () => {
     expect(
       canReprocessFile(
         {
           ...rawCompleted,
           status: "processing",
-          processingStartedAt: new Date(
-            Date.now() - stalledProcessingAfterMs() - 1000
-          ),
-        },
-        "dishcam"
-      )
-    ).toBe(true);
-  });
-
-  it("allows a processing file with no processingStartedAt", () => {
-    expect(
-      canReprocessFile(
-        {
-          ...rawCompleted,
-          status: "processing",
-          processingStartedAt: null,
-        },
-        "dishcam"
-      )
-    ).toBe(true);
-  });
-
-  it("uses the server-stamped stalledProcessing flag when present", () => {
-    expect(
-      canReprocessFile(
-        {
-          ...rawCompleted,
-          status: "processing",
-          processingStartedAt: new Date(),
           stalledProcessing: true,
         },
         "dishcam"
       )
     ).toBe(true);
+  });
+
+  it("still rejects a stalled file that fails the other gates", () => {
     expect(
       canReprocessFile(
         {
           ...rawCompleted,
           status: "processing",
-          processingStartedAt: null,
-          stalledProcessing: false,
+          stalledProcessing: true,
+          s3Key: null,
+        },
+        "dishcam"
+      )
+    ).toBe(false);
+    expect(
+      canReprocessFile(
+        {
+          ...rawCompleted,
+          status: "processing",
+          stalledProcessing: true,
+          deletedAt: new Date(),
         },
         "dishcam"
       )

@@ -180,7 +180,10 @@ export const runListItem = z
     files_failed: z.number().int(),
     files_pending_upload: z.number().int(),
     files_uploaded: z.number().int(),
+    // `files_processing` counts only files still inside the stall window;
+    // ones past it are in `files_stalled`.
     files_processing: z.number().int(),
+    files_stalled: z.number().int(),
     // Aggregated with a `bigint` cast, which the driver may surface as a
     // string on large totals.
     total_size_bytes: z.union([z.number(), z.string()]),

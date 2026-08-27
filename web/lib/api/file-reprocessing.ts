@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, lt, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { after } from "next/server";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { db } from "@/lib/db";
@@ -9,8 +9,8 @@ import { REPROCESSABLE_STATUSES } from "@/lib/runs/reprocessable-statuses";
 import {
   isStalledProcessing,
   minutesUntilProcessingIsStalled,
-  stalledProcessingCutoff,
 } from "@/lib/runs/stalled-processing";
+import { stalledProcessingSql } from "@/lib/runs/stalled-processing.sql";
 
 function getLambdaUrl(): string | null {
   const url = process.env.LAMBDA_FUNCTION_URL;
@@ -76,8 +76,13 @@ export async function reprocessFile(fileId: number): Promise<ReprocessResult> {
     (REPROCESSABLE_STATUSES as readonly string[]).includes(file.status) ||
     isStalledProcessing(file);
   if (!canReprocessStatus) {
-    if (file.status === "processing") {
-      const remaining = minutesUntilProcessingIsStalled(file);
+    // Reaching here with `processing` means the file is inside the stall
+    // window, which in turn means it has a start timestamp (a null one is
+    // always stalled), so there is a real wait to quote.
+    if (file.status === "processing" && file.processingStartedAt !== null) {
+      const remaining = minutesUntilProcessingIsStalled(
+        file.processingStartedAt
+      );
       return {
         ok: false,
         status: 409,
@@ -259,13 +264,7 @@ export async function reprocessRun(
         isNull(files.deletedAt),
         or(
           inArray(files.status, [...REPROCESSABLE_STATUSES]),
-          and(
-            eq(files.status, "processing"),
-            or(
-              isNull(files.processingStartedAt),
-              lt(files.processingStartedAt, stalledProcessingCutoff())
-            )
-          )
+          stalledProcessingSql()
         )
       )
     );

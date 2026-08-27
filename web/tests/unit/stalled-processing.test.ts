@@ -131,21 +131,14 @@ describe("stalledProcessingCutoff", () => {
 describe("minutesUntilProcessingIsStalled", () => {
   it("rounds remaining time up to whole minutes", () => {
     expect(
-      minutesUntilProcessingIsStalled(
-        { processingStartedAt: new Date(now.getTime() - 30 * 1000) },
-        now
-      )
+      minutesUntilProcessingIsStalled(new Date(now.getTime() - 30 * 1000), now)
     ).toBe(Math.ceil(stalledProcessingAfterMs() / 60_000));
   });
 
   it("never returns less than 1", () => {
     expect(
       minutesUntilProcessingIsStalled(
-        {
-          processingStartedAt: new Date(
-            now.getTime() - stalledProcessingAfterMs() + 100
-          ),
-        },
+        new Date(now.getTime() - stalledProcessingAfterMs() + 100),
         now
       )
     ).toBe(1);

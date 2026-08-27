@@ -41,6 +41,7 @@ const {
     files_pending_upload: 0,
     files_uploaded: 0,
     files_processing: 0,
+    files_stalled: 0,
     total_size_bytes: 1234,
     error_messages: [] as string[],
     attributions: [] as Array<{

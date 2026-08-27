@@ -6,7 +6,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import type { RunFileRow } from "@/lib/api/instrument-runs";
-import { cn, formatRelativeTime } from "@/lib/utils";
+import { formatDateTime } from "@/lib/date";
+import { cn } from "@/lib/utils";
 import { FILE_STATUS_CONFIG, getFileStatusKey } from "./file-status-config";
 
 export function FileStatusIndicator({ file }: { file: RunFileRow }) {
@@ -15,8 +16,10 @@ export function FileStatusIndicator({ file }: { file: RunFileRow }) {
   const showErrorTooltip = key === "failed" && !!file.errorMessage;
   let stalledTooltip: string | null = null;
   if (key === "stalled") {
+    // Absolute, not relative: polling stops for stalled rows, so an "N minutes
+    // ago" rendered here would sit frozen for as long as the tab stays open.
     stalledTooltip = file.processingStartedAt
-      ? `Started ${formatRelativeTime(file.processingStartedAt)}. You can reprocess this file.`
+      ? `Processing started ${formatDateTime(file.processingStartedAt)} and never finished. You can reprocess this file.`
       : "Processing never finished. You can reprocess this file.";
   }
   const tooltip = showErrorTooltip ? file.errorMessage : stalledTooltip;
