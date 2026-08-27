@@ -3,7 +3,7 @@ import {
   canReprocessFile,
   type ReprocessableFile,
 } from "@/lib/runs/reprocessable-statuses";
-import { STALLED_PROCESSING_AFTER_MS } from "@/lib/runs/stalled-processing";
+import { stalledProcessingAfterMs } from "@/lib/runs/stalled-processing";
 
 const rawCompleted: ReprocessableFile = {
   category: "raw",
@@ -62,7 +62,7 @@ describe("canReprocessFile", () => {
           ...rawCompleted,
           status: "processing",
           processingStartedAt: new Date(
-            Date.now() - STALLED_PROCESSING_AFTER_MS - 1000
+            Date.now() - stalledProcessingAfterMs() - 1000
           ),
         },
         "dishcam"
