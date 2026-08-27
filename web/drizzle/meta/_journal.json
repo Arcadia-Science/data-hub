@@ -288,6 +288,13 @@
       "when": 1787187000000,
       "tag": "0040_dishcam_type",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1787770000000,
+      "tag": "0041_aunty_type",
+      "breakpoints": true
     }
   ]
 }

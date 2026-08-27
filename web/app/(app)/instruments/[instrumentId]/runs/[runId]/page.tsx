@@ -14,6 +14,7 @@ import { WatcherStatusProvider } from "@/components/runs/watcher-status-provider
 import {
   buildRunFilesQuery,
   getAdjacentRunIds,
+  getAuntyPlateData,
   getProcessedCsvData,
   getRunFileStats,
   getRunReportFiles,
@@ -159,6 +160,7 @@ async function RunDetailContentBody({
   // the single `Promise.all` batch instead of a sequential await afterward, so
   // CSV processing overlaps the other queries rather than tacking latency on.
   const reportFilesPromise = getRunReportFiles(run.id);
+  const isAunty = run.instrumentType === "aunty";
   const [
     filesPage,
     fileStats,
@@ -167,6 +169,7 @@ async function RunDetailContentBody({
     instrument,
     adjacentRuns,
     wellData,
+    auntyPlate,
   ] = await Promise.all([
     buildRunFilesQuery(run.id, {
       page: filters.files_page,
@@ -188,7 +191,12 @@ async function RunDetailContentBody({
       : Promise.resolve(emptyReportItemsPage()),
     getInstrumentById(instrumentId),
     getAdjacentRunIds(run),
-    reportFilesPromise.then((rf) => getProcessedCsvData(rf)),
+    reportFilesPromise.then((rf) =>
+      isAunty ? Promise.resolve([]) : getProcessedCsvData(rf)
+    ),
+    reportFilesPromise.then((rf) =>
+      isAunty ? getAuntyPlateData(rf) : Promise.resolve(null)
+    ),
   ]);
 
   // Gate client-side upload actions on watcher availability — a queued
@@ -208,6 +216,7 @@ async function RunDetailContentBody({
             runId={run.runId}
           />
         }
+        auntyPlate={auntyPlate}
         fileStats={fileStats}
         files={filesPage.data}
         filesDownloadableCount={filesPage.downloadableCount}

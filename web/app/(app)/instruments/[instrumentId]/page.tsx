@@ -12,6 +12,7 @@ import {
   type RanByOption,
   type RunRow,
 } from "@/components/instruments/runs-table";
+import { AuntyRunsTable } from "@/components/instruments/runs-table/aunty-runs-table";
 import { DefaultRunsTable } from "@/components/instruments/runs-table/default-runs-table";
 import { EpsonScannerRunsTable } from "@/components/instruments/runs-table/epson-scanner-runs-table";
 import { GelDocRunsTable } from "@/components/instruments/runs-table/gel-doc-runs-table";
@@ -118,6 +119,15 @@ function renderRunsTableVariant(
     case "epson_v700_scanner":
       return (
         <EpsonScannerRunsTable
+          data={data}
+          filterOptions={filterOptions.options}
+          instrumentId={instrumentId}
+          ranByOptions={ranByOptions}
+        />
+      );
+    case "aunty":
+      return (
+        <AuntyRunsTable
           data={data}
           filterOptions={filterOptions.options}
           instrumentId={instrumentId}
@@ -263,6 +273,10 @@ async function InstrumentRunsSection({
       hinaSize: filters.hina_size ?? undefined,
       dpi: filters.dpi ?? undefined,
       colorMode: filters.color_mode ?? undefined,
+      auntyExperimentType: filters.aunty_experiment_type ?? undefined,
+      auntyAnalysisMode: filters.aunty_analysis_mode ?? undefined,
+      auntyTemperature: filters.aunty_temperature ?? undefined,
+      auntyRampRate: filters.aunty_ramp_rate ?? undefined,
       ranBy: filters.ran_by ?? undefined,
       statuses: filters.status.length > 0 ? filters.status : undefined,
     }),
@@ -288,6 +302,10 @@ async function InstrumentRunsSection({
     filters.hina_size !== null ||
     filters.dpi !== null ||
     filters.color_mode !== null ||
+    filters.aunty_experiment_type !== null ||
+    filters.aunty_analysis_mode !== null ||
+    filters.aunty_temperature !== null ||
+    filters.aunty_ramp_rate !== null ||
     filters.ran_by !== null ||
     filters.status.length > 0;
 

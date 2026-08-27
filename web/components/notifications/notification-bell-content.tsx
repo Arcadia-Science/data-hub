@@ -12,6 +12,7 @@ import {
   ScanLine,
   Settings,
   TestTube,
+  Thermometer,
   Video,
 } from "lucide-react";
 import Link from "next/link";
@@ -50,6 +51,7 @@ const INSTRUMENT_TYPE_ICON: Record<InstrumentType, LucideIcon> = {
   instant_raman: Radar,
   fplc: FlaskConical,
   dishcam: Video,
+  aunty: Thermometer,
 };
 
 // Bucket labels live alongside the buckets themselves so the section

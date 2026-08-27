@@ -20,6 +20,7 @@ const FILTERABLE_INSTRUMENT_TYPES = new Set<InstrumentType>([
   "qpcr",
   "hina_microscope",
   "epson_v700_scanner",
+  "aunty",
 ]);
 
 function filterOptionsDescription(instrumentType: InstrumentType): string {
@@ -34,6 +35,8 @@ function filterOptionsDescription(instrumentType: InstrumentType): string {
       return "Available channel, dimension, and size values";
     case "epson_v700_scanner":
       return "Available DPI and color mode values";
+    case "aunty":
+      return "Available experiment type, analysis mode, temperature, and ramp rate values";
     default:
       return "Available filter values";
   }

@@ -36,6 +36,7 @@ const TYPE_LABELS: Record<InstrumentType, string> = {
   instant_raman: "InstantRaman",
   fplc: "FPLC",
   dishcam: "DishCam",
+  aunty: "Aunty",
 };
 
 const INSTRUMENT_TYPE_OPTIONS = VALID_INSTRUMENT_TYPES.map((value) => ({

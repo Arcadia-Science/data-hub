@@ -268,6 +268,42 @@ def dishcam_cmd(tiff: Path, run_json: Path, output_dir: Path | None) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Unchained Labs Aunty
+# ---------------------------------------------------------------------------
+
+
+@cli.command("aunty")
+@click.argument("file", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option(
+    "--output-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=None,
+    help="Directory for the curves CSV and plate JSON (default: same directory as FILE).",
+)
+def aunty(file: Path, output_dir: Path | None) -> None:
+    """Parse an Aunty .xlsx export into a curves CSV and a plate JSON."""
+    from data_hub_lambda.unchained_labs_aunty.utils import (
+        parse_aunty_workbook,
+        write_curves_csv,
+        write_plate_json,
+    )
+
+    parsed = parse_aunty_workbook(file)
+    dest_dir = output_dir or file.parent
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = dest_dir / f"{file.stem}_aunty_curves.csv"
+    json_path = dest_dir / f"{file.stem}_aunty_plate.json"
+    write_curves_csv(csv_path, parsed.curve_rows)
+    write_plate_json(json_path, parsed.experiments)
+
+    click.echo(f"Experiments: {len(parsed.experiments)}")
+    click.echo(f"Curve rows: {len(parsed.curve_rows)}")
+    click.echo(f"Curves CSV: {csv_path}")
+    click.echo(f"Plate JSON: {json_path}")
+    click.echo(json.dumps(parsed.metadata, indent=2))
+
+
+# ---------------------------------------------------------------------------
 # End-to-end handler invocation against a local S3 mirror
 # ---------------------------------------------------------------------------
 

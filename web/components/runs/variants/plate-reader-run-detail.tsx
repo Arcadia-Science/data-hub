@@ -10,8 +10,7 @@ import {
   hasPlateReaderMetadata,
   PlateReaderRunBadges,
 } from "@/components/runs/run-metadata-badges";
-import { RunSectionHeading } from "@/components/runs/run-section-heading";
-import { Card, CardContent } from "@/components/ui/card";
+import { RunSectionCard } from "@/components/runs/run-section-card";
 import type { RawWellRow } from "@/lib/api/instrument-runs";
 import { extractPlateMaps } from "@/lib/runs/extract-plate-maps";
 
@@ -44,36 +43,36 @@ function PlateMapSection({
   }
 
   return (
-    <div className="flex min-w-0 flex-col gap-2">
-      <RunSectionHeading countLabel={groups.length} title="Plate Maps" />
-      <Card size="sm">
-        <CardContent className="flex min-w-0 flex-col gap-6">
-          <div className="flex min-w-0 flex-col gap-10">
-            {groups.map((g, i) =>
-              g.mode === "kinetic" ? (
-                <PlateMapWithIndexSlider
-                  frameLabels={g.frameLabels}
-                  frames={g.frames}
-                  heatmap={heatmap}
-                  key={i}
-                  plateName={g.plateName}
-                  sliderAxis={g.sliderAxis}
-                  wavelength={g.wavelength}
-                />
-              ) : (
-                <PlateMapGrid
-                  data={g.wells}
-                  heatmap={heatmap}
-                  key={i}
-                  plateName={g.plateName}
-                  wavelength={g.wavelength}
-                />
-              )
-            )}
-          </div>
-        </CardContent>
-      </Card>
-    </div>
+    <RunSectionCard
+      className="min-w-0"
+      contentClassName="min-w-0"
+      count={groups.length}
+      title="Plate Maps"
+    >
+      <div className="flex min-w-0 flex-col gap-10">
+        {groups.map((g, i) =>
+          g.mode === "kinetic" ? (
+            <PlateMapWithIndexSlider
+              frameLabels={g.frameLabels}
+              frames={g.frames}
+              heatmap={heatmap}
+              key={i}
+              plateName={g.plateName}
+              sliderAxis={g.sliderAxis}
+              wavelength={g.wavelength}
+            />
+          ) : (
+            <PlateMapGrid
+              data={g.wells}
+              heatmap={heatmap}
+              key={i}
+              plateName={g.plateName}
+              wavelength={g.wavelength}
+            />
+          )
+        )}
+      </div>
+    </RunSectionCard>
   );
 }
 

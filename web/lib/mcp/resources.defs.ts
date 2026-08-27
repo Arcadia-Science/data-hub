@@ -30,7 +30,7 @@ export const glossaryResource = {
 export const instrumentFilterOptionsResource = {
   name: "instrument-filter-options",
   description:
-    "Available filter values for an instrument. Values map directly to search_runs metadata filter arguments (wavelength/measurementMode/measurementType for plate readers; captureType/imagingMode/gelWavelength/gelColor for gel-doc; dyeChannel for qPCR; hinaChannel/hinaDimension/hinaSize for Hina; dpi/colorMode for Epson).",
+    "Available filter values for an instrument. Values map directly to search_runs metadata filter arguments (wavelength/measurementMode/measurementType for plate readers; captureType/imagingMode/gelWavelength/gelColor for gel-doc; dyeChannel for qPCR; hinaChannel/hinaDimension/hinaSize for Hina; dpi/colorMode for Epson; auntyExperimentType/auntyAnalysisMode/auntyTemperature/auntyRampRate for Aunty).",
   mimeType: "application/json",
   kind: "template",
   uriTemplate: "datahub://instruments/{instrumentId}/filter-options",
