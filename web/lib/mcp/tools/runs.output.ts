@@ -25,6 +25,7 @@ export const mcpRunFileSchema = z.object({
   createdAt: isoDateTime,
   uploadedAt: isoDateTime.nullable(),
   processedAt: isoDateTime.nullable(),
+  stalled: z.boolean(),
 });
 
 /** Failure summary attached via `get_run` include=failure_summary / report. */
@@ -74,7 +75,10 @@ export const searchRunsListItemSchema = z.object({
   files_failed: z.number().int(),
   files_pending_upload: z.number().int(),
   files_uploaded: z.number().int(),
+  // `files_processing` counts only files still inside the stall window; ones
+  // past it are in `files_stalled`.
   files_processing: z.number().int(),
+  files_stalled: z.number().int(),
   // Aggregated with a bigint cast; drivers may surface large totals as strings.
   total_size_bytes: z.union([z.number(), z.string()]),
   error_messages: z.array(z.string()),

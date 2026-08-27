@@ -15,6 +15,7 @@ import {
 import { cache } from "react";
 import {
   formatAuntyExperimentType,
+  formatAuntyHoldTemperature,
   formatAuntyRampRate,
   formatAuntyTemperatureRange,
   formatHinaSizes,
@@ -30,7 +31,13 @@ import {
   users,
 } from "@/lib/db/schema";
 import { type AuntyPlateData, parseAuntyPlateJson } from "@/lib/runs/aunty";
+import type { FilesLifecycleFilter } from "@/lib/runs/file-lifecycle-filter";
 import type { RunStatus } from "@/lib/runs/run-status";
+import { isStalledProcessing } from "@/lib/runs/stalled-processing";
+import {
+  inFlightProcessingSql,
+  stalledProcessingSql,
+} from "@/lib/runs/stalled-processing.sql";
 import { getS3ObjectStream } from "@/lib/s3";
 
 // ---------------------------------------------------------------------------
@@ -292,30 +299,37 @@ function existsRawFileWithStatus(statusSql: SQL): SQL {
 // Priority-exclusive (NOT) EXISTS predicate per derived status, mirroring
 // `deriveRunStatus`. Correlated subqueries (not a HAVING over the aggregate)
 // keep the pagination COUNT off a `files` join and on the status/run indexes.
-function runStatusCondition(status: RunStatus): SQL {
+function runStatusCondition(status: RunStatus, now: Date): SQL {
   const failed = existsRawFileWithStatus(sql`${files.status} = 'failed'`);
+  const stalled = existsRawFileWithStatus(stalledProcessingSql(now));
   const pending = existsRawFileWithStatus(
     sql`${files.status} in ('detected', 'upload_requested')`
   );
   const uploaded = existsRawFileWithStatus(sql`${files.status} = 'uploaded'`);
-  const processing = existsRawFileWithStatus(
-    sql`${files.status} = 'processing'`
-  );
+  const processing = existsRawFileWithStatus(inFlightProcessingSql(now));
   const completed = existsRawFileWithStatus(sql`${files.status} = 'completed'`);
 
   switch (status) {
     case "failed":
       return failed;
+    case "stalled":
+      return sql`(not ${failed} and ${stalled})`;
     case "pending":
-      return sql`(not ${failed} and ${pending})`;
+      return sql`(not ${failed} and not ${stalled} and ${pending})`;
     case "uploaded":
-      return sql`(not ${failed} and not ${pending} and ${uploaded})`;
+      return sql`(not ${failed} and not ${stalled} and not ${pending} and ${uploaded})`;
     case "processing":
-      return sql`(not ${failed} and not ${pending} and not ${uploaded} and ${processing})`;
+      return sql`(not ${failed} and not ${stalled} and not ${pending} and not ${uploaded} and ${processing})`;
     case "completed":
-      return sql`(not ${failed} and not ${pending} and not ${uploaded} and not ${processing} and ${completed})`;
-    default:
+      return sql`(not ${failed} and not ${stalled} and not ${pending} and not ${uploaded} and not ${processing} and ${completed})`;
+    case "empty":
       return sql`not exists (select 1 from ${files} where ${rawFileScopeSql})`;
+    default: {
+      // A new RunStatus without a case here would otherwise fall through to
+      // the "empty" predicate and silently filter to the wrong runs.
+      const unhandled: never = status;
+      return unhandled;
+    }
   }
 }
 
@@ -379,6 +393,10 @@ export const getAdjacentRunIds = cache(
 
 export async function buildRunListQuery(filters: RunListFilters) {
   const perPage = Math.min(Math.max(filters.perPage, 1), MAX_PER_PAGE);
+  // One clock reading for the whole query: the status filter and the
+  // processing/stalled counts have to agree on where the cutoff falls, or a
+  // file starting within microseconds of it lands in both buckets or neither.
+  const now = new Date();
   const conditions: SQL[] = [];
 
   if (filters.instrumentId) {
@@ -515,7 +533,7 @@ export async function buildRunListQuery(filters: RunListFilters) {
   // Aunty metadata column filters. Experiment type is stored as a JSON
   // string for a single-flavor workbook and as a JSON array when one
   // workbook mixes flavors — match either shape. Temperature is a
-  // `start|end` pair of the stored °C scalars.
+  // `start|end` pair for ramps, or a single hold °C for isothermal.
   if (filters.auntyExperimentType) {
     conditions.push(
       sql`(
@@ -533,13 +551,17 @@ export async function buildRunListQuery(filters: RunListFilters) {
     );
   }
   if (filters.auntyTemperature) {
-    const range = decodeAuntyTemperatureFilter(filters.auntyTemperature);
-    if (range) {
+    const decoded = decodeAuntyTemperatureFilter(filters.auntyTemperature);
+    if (decoded?.kind === "range") {
       conditions.push(
-        sql`${instrumentRuns.metadata}->>'start_temp_c' = ${range.start}`
+        sql`${instrumentRuns.metadata}->>'start_temp_c' = ${decoded.start}`
       );
       conditions.push(
-        sql`${instrumentRuns.metadata}->>'end_temp_c' = ${range.end}`
+        sql`${instrumentRuns.metadata}->>'end_temp_c' = ${decoded.end}`
+      );
+    } else if (decoded?.kind === "hold") {
+      conditions.push(
+        sql`${instrumentRuns.metadata}->>'temperature_c' = ${decoded.value}`
       );
     } else {
       conditions.push(sql`false`);
@@ -563,7 +585,9 @@ export async function buildRunListQuery(filters: RunListFilters) {
   }
 
   if (filters.statuses && filters.statuses.length > 0) {
-    const statusOr = or(...filters.statuses.map(runStatusCondition));
+    const statusOr = or(
+      ...filters.statuses.map((status) => runStatusCondition(status, now))
+    );
     if (statusOr) {
       conditions.push(statusOr);
     }
@@ -588,8 +612,12 @@ export async function buildRunListQuery(filters: RunListFilters) {
   // up). Distinct from "Processing" so the UI can show a different state.
   const filesUploaded = sql<number>`cast(count(${files.id}) filter (where ${files.status} = 'uploaded' and ${files.deletedAt} is null) as int)`;
 
-  // "Processing" = files actively being processed server-side.
-  const filesProcessing = sql<number>`cast(count(${files.id}) filter (where ${files.status} = 'processing' and ${files.deletedAt} is null) as int)`;
+  // "Processing" = files actively being processed server-side, still inside
+  // the stall window. Past it the processor is gone and the file is counted
+  // as stalled instead, so the run stops claiming work is under way.
+  const filesProcessing = sql<number>`cast(count(${files.id}) filter (where ${inFlightProcessingSql(now)} and ${files.deletedAt} is null) as int)`;
+
+  const filesStalled = sql<number>`cast(count(${files.id}) filter (where ${stalledProcessingSql(now)} and ${files.deletedAt} is null) as int)`;
 
   const totalSizeBytes = sql<number>`cast(coalesce(sum(${files.sizeBytes}) filter (where ${files.deletedAt} is null), 0) as bigint)`;
 
@@ -650,6 +678,7 @@ export async function buildRunListQuery(filters: RunListFilters) {
       files_pending_upload: filesPendingUpload,
       files_uploaded: filesUploaded,
       files_processing: filesProcessing,
+      files_stalled: filesStalled,
       total_size_bytes: totalSizeBytes,
       error_messages: errorMessages,
     })
@@ -703,6 +732,10 @@ export type RunDetail = NonNullable<
 
 export type RunFile = typeof files.$inferSelect;
 
+// Run-page file row with stall decided on the server so the files table
+// does not re-read the clock during hydration.
+export type RunFileRow = RunFile & { stalledProcessing: boolean };
+
 // Server-truth row shape for the paginated runs list. Derived from
 // buildRunListQuery's return type so any column added to the Drizzle
 // select (counts, metadata, etc.) automatically flows through to every
@@ -722,12 +755,7 @@ export type RunListRow = Awaited<
 // Category (raw/processed) and lifecycle status are independent multi-selects.
 export type FilesCategoryFilter = "raw" | "processed";
 
-export type FilesLifecycleFilter =
-  | "pending"
-  | "uploaded"
-  | "processing"
-  | "completed"
-  | "failed";
+export type { FilesLifecycleFilter } from "@/lib/runs/file-lifecycle-filter";
 
 export type FilesSortField = "name" | "size" | "date" | "status";
 
@@ -749,26 +777,32 @@ export type RunFilesListFilters = RunFilesFilter & {
 // "Pending" in the UI collapses the two pre-upload statuses.
 const PENDING_FILE_STATUSES = ["detected", "upload_requested"] as const;
 
-// Status-label sort order. Mirrors the alphabetical ordering produced by the
-// client's `statusLabel` localeCompare (Completed, Dismissed, Failed, Pending,
-// Processing, Uploaded, Uploading) so server-side sort matches what the table
-// rendered before. Dismissed (soft-deleted) rows rank by their label too.
-const statusSortRank = sql`case
-  when ${files.deletedAt} is not null then 2
-  when ${files.status} = 'completed' then 1
-  when ${files.status} = 'failed' then 3
-  when ${files.status} = 'detected' then 4
-  when ${files.status} = 'processing' then 5
-  when ${files.status} = 'uploaded' then 6
-  when ${files.status} = 'upload_requested' then 7
-  else 8
-end`;
+// Ranks rows by the label the status column shows, alphabetically: Completed,
+// Dismissed, Failed, Pending, Processing, Stalled, Uploaded, Uploading. The
+// labels live in `FILE_STATUS_CONFIG`; keep the two in step when either
+// changes. Dismissed (soft-deleted) rows rank by their label too, so the
+// deleted check has to come first. Built per call because the Processing /
+// Stalled split reads the clock.
+function statusSortRank(now: Date): SQL {
+  return sql`case
+    when ${files.deletedAt} is not null then 2
+    when ${files.status} = 'completed' then 1
+    when ${files.status} = 'failed' then 3
+    when ${files.status} = 'detected' then 4
+    when ${inFlightProcessingSql(now)} then 5
+    when ${files.status} = 'processing' then 6
+    when ${files.status} = 'uploaded' then 7
+    when ${files.status} = 'upload_requested' then 8
+    else 9
+  end`;
+}
 
 // Build the WHERE conditions for a run's file list. Exported so the archive
 // route can resolve the same filtered set the table is showing.
 export function runFilesWhere(
   runInternalId: string,
-  filters: RunFilesFilter
+  filters: RunFilesFilter,
+  now: Date = new Date()
 ): SQL[] {
   const conditions: SQL[] = [eq(files.instrumentRunId, runInternalId)];
 
@@ -787,14 +821,9 @@ export function runFilesWhere(
   }
 
   if (filters.statuses && filters.statuses.length > 0) {
-    // OR within the status multi-select; "pending" expands to the two
-    // pre-upload DB statuses collapsed into one UI option.
-    const statusPredicates = filters.statuses.map((status) =>
-      status === "pending"
-        ? inArray(files.status, [...PENDING_FILE_STATUSES])
-        : eq(files.status, status)
+    const statusOr = or(
+      ...filters.statuses.map((status) => fileStatusCondition(status, now))
     );
-    const statusOr = or(...statusPredicates);
     if (statusOr) {
       conditions.push(statusOr);
     }
@@ -803,11 +832,29 @@ export function runFilesWhere(
   return conditions;
 }
 
+// The UI's status options are not one-to-one with the DB enum: "Pending"
+// collapses the two pre-upload statuses, and the single `processing` status
+// splits into Processing and Stalled on the stall cutoff. Keeping Processing
+// to in-flight rows means the two options never return the same file, so the
+// filter agrees with the label in the status column.
+function fileStatusCondition(status: FilesLifecycleFilter, now: Date): SQL {
+  switch (status) {
+    case "pending":
+      return inArray(files.status, [...PENDING_FILE_STATUSES]);
+    case "processing":
+      return inFlightProcessingSql(now);
+    case "stalled":
+      return stalledProcessingSql(now);
+    default:
+      return eq(files.status, status);
+  }
+}
+
 // Category-first ordering (raw before processed, matching the old
 // `compareByCategory`) then the chosen field. Date sorts on
 // coalesce(file_created_at, created_at) to match the displayed "Created"
 // column; size coalesces NULL to 0 like the old numeric comparator.
-function runFilesOrderBy(sort: FilesSortField): SQL[] {
+function runFilesOrderBy(sort: FilesSortField, now: Date): SQL[] {
   const categoryFirst = sql`(${files.category} = 'raw') desc`;
   switch (sort) {
     case "size":
@@ -818,14 +865,14 @@ function runFilesOrderBy(sort: FilesSortField): SQL[] {
         sql`coalesce(${files.fileCreatedAt}, ${files.createdAt}) asc`,
       ];
     case "status":
-      return [categoryFirst, sql`${statusSortRank} asc`];
+      return [categoryFirst, sql`${statusSortRank(now)} asc`];
     default:
       return [categoryFirst, sql`${files.filename} asc`];
   }
 }
 
 export interface RunFilesPage {
-  data: RunFile[];
+  data: RunFileRow[];
   // Files in the current filter that have S3 keys and can be zipped by the
   // archive route (matches `loadDownloadableFiles` after id resolution).
   downloadableCount: number;
@@ -844,8 +891,11 @@ export async function buildRunFilesQuery(
   const safePerPage = Math.min(Math.max(filters.perPage, 1), MAX_PER_PAGE);
   const safePage = Math.max(filters.page, 1);
   const offset = (safePage - 1) * safePerPage;
+  // Shared by the filter, the sort, and the per-row `stalledProcessing` stamp
+  // below so a row cannot be selected as in-flight and then labelled stalled.
+  const now = new Date();
 
-  const where = and(...runFilesWhere(runInternalId, filters));
+  const where = and(...runFilesWhere(runInternalId, filters, now));
 
   const [{ total, downloadableCount }] = await db
     .select({
@@ -859,12 +909,15 @@ export async function buildRunFilesQuery(
     .select()
     .from(files)
     .where(where)
-    .orderBy(...runFilesOrderBy(filters.sort ?? "name"))
+    .orderBy(...runFilesOrderBy(filters.sort ?? "name", now))
     .limit(safePerPage)
     .offset(offset);
 
   return {
-    data,
+    data: data.map((file) => ({
+      ...file,
+      stalledProcessing: isStalledProcessing(file, now),
+    })),
     downloadableCount,
     pagination: {
       page: safePage,
@@ -887,10 +940,15 @@ export interface RunFileStats {
   failed: number;
   pending: number;
   processedActive: number;
+  // Every `processing` row, split below into the two the UI cares about:
+  // `processingInFlight` drives the auto-refresh (so a stalled file does not
+  // poll forever) and `stalled` drives the Stalled filter.
   processing: number;
+  processingInFlight: number;
   rawActive: number;
   // Sum of raw-file `size_bytes` only — mirrors the runs-table Size column.
   rawTotalSizeBytes: number;
+  stalled: number;
   uploaded: number;
   // Files actively uploading to S3 (status = upload_requested). Tracked
   // separately from `pending` so the table only auto-refreshes while work is
@@ -903,6 +961,8 @@ export async function getRunFileStats(
 ): Promise<RunFileStats> {
   const activeNotDeleted = sql`${files.deletedAt} is null`;
   const rawActiveNotDeleted = sql`${files.category} = 'raw' and ${activeNotDeleted}`;
+  // One reading so `processingInFlight` + `stalled` always sum to `processing`.
+  const now = new Date();
   const [row] = await db
     .select({
       active: sql<number>`cast(count(*) filter (where ${activeNotDeleted}) as int)`,
@@ -918,6 +978,8 @@ export async function getRunFileStats(
       pending: sql<number>`cast(count(*) filter (where ${files.status} in ('detected', 'upload_requested') and ${activeNotDeleted}) as int)`,
       uploaded: sql<number>`cast(count(*) filter (where ${files.status} not in ('detected', 'upload_requested', 'processing') and ${activeNotDeleted}) as int)`,
       processing: sql<number>`cast(count(*) filter (where ${files.status} = 'processing' and ${activeNotDeleted}) as int)`,
+      processingInFlight: sql<number>`cast(count(*) filter (where ${inFlightProcessingSql(now)} and ${activeNotDeleted}) as int)`,
+      stalled: sql<number>`cast(count(*) filter (where ${stalledProcessingSql(now)} and ${activeNotDeleted}) as int)`,
       uploadRequested: sql<number>`cast(count(*) filter (where ${files.status} = 'upload_requested' and ${activeNotDeleted}) as int)`,
     })
     .from(files)
@@ -1248,6 +1310,7 @@ const ALLOWED_METADATA_KEYS = new Set([
   "color_mode",
   "analysis_mode",
   "rate_c_per_min",
+  "temperature_c",
 ]);
 
 async function distinctMetadataValues(
@@ -1458,7 +1521,13 @@ function encodeAuntyTemperatureFilter(start: string, end: string): string {
 
 function decodeAuntyTemperatureFilter(
   value: string
-): { end: string; start: string } | null {
+):
+  | { end: string; kind: "range"; start: string }
+  | { kind: "hold"; value: string }
+  | null {
+  if (!value.includes(AUNTY_TEMPERATURE_SEPARATOR)) {
+    return value ? { kind: "hold", value } : null;
+  }
   const separator = value.indexOf(AUNTY_TEMPERATURE_SEPARATOR);
   if (
     separator <= 0 ||
@@ -1471,7 +1540,7 @@ function decodeAuntyTemperatureFilter(
   if (!(start && end)) {
     return null;
   }
-  return { start, end };
+  return { kind: "range", start, end };
 }
 
 export interface AuntyLabeledOption {
@@ -1542,11 +1611,13 @@ export async function getAuntyFilterOptions(
     experimentTypeValues,
     analysisModes,
     temperaturePairs,
+    holdTemperatures,
     rampRateValues,
   ] = await Promise.all([
     distinctAuntyExperimentTypes(instrumentId),
     distinctMetadataValues(instrumentId, "analysis_mode"),
     distinctAuntyTemperaturePairs(instrumentId),
+    distinctMetadataValues(instrumentId, "temperature_c"),
     distinctMetadataValues(instrumentId, "rate_c_per_min"),
   ]);
 
@@ -1557,7 +1628,7 @@ export async function getAuntyFilterOptions(
     }))
     .sort((a, b) => a.label.localeCompare(b.label));
 
-  const temperatures = [...temperaturePairs]
+  const rangeOptions = [...temperaturePairs]
     .sort((a, b) => {
       const byStart = compareNumericStrings(a.start, b.start);
       if (byStart !== 0) {
@@ -1569,6 +1640,13 @@ export async function getAuntyFilterOptions(
       value: encodeAuntyTemperatureFilter(pair.start, pair.end),
       label: formatAuntyTemperatureRange(pair.start, pair.end),
     }));
+  const holdOptions = [...holdTemperatures]
+    .sort(compareNumericStrings)
+    .map((value) => ({
+      value,
+      label: formatAuntyHoldTemperature(value),
+    }));
+  const temperatures = [...rangeOptions, ...holdOptions];
 
   const rampRates = [...rampRateValues]
     .sort(compareNumericStrings)

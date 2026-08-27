@@ -94,7 +94,7 @@ export const searchRunsTool = {
       .array(z.enum(RUN_STATUS_VALUES))
       .optional()
       .describe(
-        "Filter by derived run status (OR'd together). Status is derived from a run's raw file states, priority-exclusive: failed (any file failed), pending (files awaiting upload), uploaded, processing, completed (all done), empty (no files)."
+        "Filter by derived run status (OR'd together). Status is derived from a run's raw file states, priority-exclusive: failed (any file failed), stalled (a file has been in processing past the stall window and can be reprocessed), pending (files awaiting upload), uploaded, processing (in flight), completed (all done), empty (no files)."
       ),
   },
   annotations: { readOnlyHint: true },
@@ -317,7 +317,7 @@ export const reprocessRunTool = {
   scope: "runs:reprocess",
   title: "Reprocess Run",
   description:
-    "Re-run Lambda processing for every uploaded, completed, or failed raw file on a run. Processed artifacts are skipped. The instrument must have a Lambda processor. Prefer this over looping reprocess_file for bulk retries after a parser fix or to kick stuck uploads.",
+    "Re-run Lambda processing for every uploaded, completed, failed, or stalled raw file on a run. Processed artifacts are skipped. The instrument must have a Lambda processor. Prefer this over looping reprocess_file for bulk retries after a parser fix, to kick stuck uploads, or to recover files that never reported back from processing.",
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
     runId: z.string().describe("Run identifier within the instrument"),

@@ -123,7 +123,7 @@ export const RUN_METADATA_FILTER_DEFS = [
     queryParam: "aunty_experiment_type",
     kind: "aunty",
     description:
-      "Aunty: filter by experiment type (thermal_ramp, sizing). Mixed workbooks match if they include the type.",
+      "Aunty: filter by experiment type (thermal_ramp, sizing, isothermal). Mixed workbooks match if they include the type.",
     allowedValues: (o) =>
       o.kind === "aunty" ? o.options.experimentTypes.map((t) => t.value) : [],
   },
@@ -139,7 +139,7 @@ export const RUN_METADATA_FILTER_DEFS = [
     queryParam: "aunty_temperature",
     kind: "aunty",
     description:
-      "Aunty: filter by start/end temperature pair (value from filter-options, e.g. '25|95')",
+      "Aunty: filter by a start/end pair (e.g. '25|95') or a hold temperature (e.g. '25').",
     allowedValues: (o) =>
       o.kind === "aunty" ? o.options.temperatures.map((t) => t.value) : [],
   },

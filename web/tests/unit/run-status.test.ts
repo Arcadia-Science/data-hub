@@ -17,6 +17,7 @@ const ZERO: RunStatusCounts = {
   filesFailed: 0,
   filesPendingUpload: 0,
   filesProcessing: 0,
+  filesStalled: 0,
   filesUploaded: 0,
 };
 
@@ -31,6 +32,7 @@ describe("deriveRunStatus", () => {
 
   it("maps each bucket to its status in isolation", () => {
     expect(deriveRunStatus(counts({ filesFailed: 1 }))).toBe("failed");
+    expect(deriveRunStatus(counts({ filesStalled: 1 }))).toBe("stalled");
     expect(deriveRunStatus(counts({ filesPendingUpload: 1 }))).toBe("pending");
     expect(deriveRunStatus(counts({ filesUploaded: 1 }))).toBe("uploaded");
     expect(deriveRunStatus(counts({ filesProcessing: 1 }))).toBe("processing");
@@ -42,6 +44,7 @@ describe("deriveRunStatus", () => {
       deriveRunStatus(
         counts({
           filesFailed: 1,
+          filesStalled: 1,
           filesPendingUpload: 1,
           filesUploaded: 1,
           filesProcessing: 1,
@@ -49,6 +52,30 @@ describe("deriveRunStatus", () => {
         })
       )
     ).toBe("failed");
+  });
+
+  // Stalled outranks everything but failed: the run needs someone to press
+  // Reprocess, and a file merely waiting to upload would otherwise mask that.
+  it("prefers 'stalled' over every bucket except 'failed'", () => {
+    expect(
+      deriveRunStatus(
+        counts({
+          filesStalled: 1,
+          filesPendingUpload: 1,
+          filesUploaded: 1,
+          filesProcessing: 1,
+          filesCompleted: 1,
+        })
+      )
+    ).toBe("stalled");
+  });
+
+  // A run whose only unfinished file has stalled must stop claiming work is
+  // under way — that was the bug this bucket exists to fix.
+  it("reads a run with one stalled file and the rest complete as 'stalled'", () => {
+    expect(
+      deriveRunStatus(counts({ filesStalled: 1, filesCompleted: 5 }))
+    ).toBe("stalled");
   });
 
   // The intentional behavior change: pending outranks completed, so a run with

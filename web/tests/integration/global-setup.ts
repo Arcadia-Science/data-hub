@@ -299,6 +299,9 @@ export async function setup() {
   // regardless of the developer's local .env. Tests that need a stubbed
   // Lambda HTTP call should mock fetch rather than set this URL.
   serverEnv.LAMBDA_FUNCTION_URL = undefined;
+  // Pin the stall window to the default so a local override cannot make
+  // the 21-minute backdate in files.test.ts look still in-flight.
+  serverEnv.STALLED_PROCESSING_AFTER_MINUTES = undefined;
   // Strip AWS_ROLE_ARN as well so the SigV4 path in `lib/lambda.ts`
   // doesn't try to assume a Vercel OIDC role inside tests. The test
   // server still gets static AWS_ACCESS_KEY_ID/SECRET via the dummy

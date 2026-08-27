@@ -183,6 +183,7 @@ function formatFileResponse(f: typeof files.$inferSelect) {
     error_message: f.errorMessage,
     uploaded_at: f.uploadedAt,
     processed_at: f.processedAt,
+    processing_started_at: f.processingStartedAt,
     created_at: f.createdAt,
     file_created_at: f.fileCreatedAt,
   };
