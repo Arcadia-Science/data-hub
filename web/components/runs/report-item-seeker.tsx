@@ -1,7 +1,13 @@
 "use client";
 
 import { Check, ChevronLeft, ChevronRight, ChevronsUpDown } from "lucide-react";
-import { type RefObject, useEffect, useRef, useState } from "react";
+import {
+  type RefObject,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { useReportItemsContext } from "@/components/runs/report-items-provider";
 import { Button } from "@/components/ui/button";
 import {
@@ -106,6 +112,7 @@ function ItemPicker({
   state: SeekerState;
 }) {
   const [open, setOpen] = useState(false);
+  const [highlight, setHighlight] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
 
   // The search box lives inside the popover, so a filter left applied on close
@@ -117,14 +124,30 @@ function ItemPicker({
 
   function handleOpenChange(nextOpen: boolean) {
     if (nextOpen) {
+      setHighlight(state.selectedItem?.filename ?? "");
       setOpen(true);
       return;
     }
     close();
   }
 
+  // cmdk highlights the first row unless we pass `value`. A 96-well plate
+  // then looks like A1–A9 with no scrollbar, even though the rest are below.
+  useLayoutEffect(() => {
+    if (!(open && highlight)) {
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      const selected = listRef.current?.querySelector(
+        `[data-slot="command-item"][data-value="${CSS.escape(highlight)}"]`
+      );
+      selected?.scrollIntoView({ block: "nearest" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [highlight, open]);
+
   return (
-    <Popover onOpenChange={handleOpenChange} open={open}>
+    <Popover modal onOpenChange={handleOpenChange} open={open}>
       <PopoverTrigger asChild>
         <Button
           aria-expanded={open}
@@ -141,16 +164,25 @@ function ItemPicker({
       <PopoverContent
         align="start"
         className="w-[var(--radix-popover-trigger-width)] p-0"
+        onWheel={(event) => event.stopPropagation()}
       >
         {/* Matching happens in Postgres against the whole run, so cmdk must
             not re-filter the window it is handed. */}
-        <Command shouldFilter={false}>
+        <Command
+          onValueChange={setHighlight}
+          shouldFilter={false}
+          value={highlight}
+        >
           <CommandInput
             onValueChange={actions.setSearch}
             placeholder={labels.search}
             value={state.search}
           />
-          <CommandList ref={listRef}>
+          <CommandList
+            className="overscroll-contain"
+            onWheel={(event) => event.stopPropagation()}
+            ref={listRef}
+          >
             <CommandEmpty>
               {state.error ??
                 (state.isLoading ? "Loading\u2026" : labels.empty)}
