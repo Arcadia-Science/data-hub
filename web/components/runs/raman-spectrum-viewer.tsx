@@ -1,9 +1,9 @@
 "use client";
 
-import { parse } from "csv-parse/browser/esm/sync";
 import { AlertTriangle } from "lucide-react";
 import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
+import { useReportDataSource } from "@/components/runs/report-data-source-provider";
 import { useReportItemsContext } from "@/components/runs/report-items-provider";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,6 +14,8 @@ import {
 } from "@/components/ui/chart";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { fetchAllTableRows } from "@/lib/runs/report-table";
+import type { ReportDataSource } from "@/lib/runs/view-data-source";
 
 interface SpectrumPoint {
   intensity: number;
@@ -43,21 +45,11 @@ const CSV_HEADER_INTENSITY = "Intensity";
 const CSV_HEADER_DARK = "Intensity (dark-subtracted)";
 const CSV_HEADER_WAVENUMBER = "Wavenumber";
 
-async function fetchSpectrum(fileId: number): Promise<SpectrumPoint[]> {
-  // The download endpoint 302-redirects to a short-lived presigned S3 URL.
-  // The browser follows the redirect transparently, so the bytes flow
-  // directly from S3 to the user with zero Vercel Fast Origin Transfer.
-  const res = await fetch(`/api/v1/files/${fileId}/download`);
-  if (!res.ok) {
-    throw new Error(`Failed to load spectrum (HTTP ${res.status})`);
-  }
-  const text = await res.text();
-
-  const rows = parse(text, {
-    columns: true,
-    skip_empty_lines: true,
-    trim: true,
-  }) as Record<string, string>[];
+async function fetchSpectrum(
+  dataSource: ReportDataSource,
+  fileId: number
+): Promise<SpectrumPoint[]> {
+  const { rows } = await fetchAllTableRows(dataSource, fileId);
 
   if (rows.length === 0) {
     throw new Error("Spectrum CSV is empty");
@@ -220,6 +212,7 @@ type AsyncResult =
   | { fileId: number; status: "error"; message: string };
 
 export function RamanSpectrumViewer() {
+  const dataSource = useReportDataSource();
   const { state: items } = useReportItemsContext();
   const selectedId = items.selectedItem?.id ?? null;
   const [visible, setVisible] = useState<Series[]>(ALL_SERIES);
@@ -262,7 +255,7 @@ export function RamanSpectrumViewer() {
     }
 
     let cancelled = false;
-    fetchSpectrum(selectedId)
+    fetchSpectrum(dataSource, selectedId)
       .then((points) => {
         cacheRef.current.set(selectedId, points);
         if (cancelled) {
@@ -286,7 +279,7 @@ export function RamanSpectrumViewer() {
     return () => {
       cancelled = true;
     };
-  }, [selectedId, retryNonce]);
+  }, [dataSource, selectedId, retryNonce]);
 
   function handleRetry() {
     if (selectedId == null) {

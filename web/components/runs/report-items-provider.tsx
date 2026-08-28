@@ -1,6 +1,7 @@
 "use client";
 
-import { createContext, type ReactNode, use } from "react";
+import { createContext, type ReactNode, use, useEffect } from "react";
+import { useReportDataSource } from "@/components/runs/report-data-source-provider";
 import {
   type UseReportItemsResult,
   useReportItems,
@@ -18,31 +19,44 @@ export interface ReportItemsContextValue extends UseReportItemsResult {
 // Props every report-data viewer receives from its run-detail variant.
 export interface ReportViewerProps {
   initialPage: ReportItemsPage;
-  instrumentId: string;
-  runId: string;
 }
 
 const ReportItemsContext = createContext<ReportItemsContextValue | null>(null);
 
+// Optional. The MCP View wraps carousels so the seeker can restore position
+// without threading a persist key through every shared renderer.
+export const ReportPersistKeyContext = createContext<string | undefined>(
+  undefined
+);
+
 export function ReportItemsProvider({
   children,
   initialPage,
-  instrumentId,
   kind,
-  runId,
 }: {
   children: ReactNode;
   initialPage: ReportItemsPage;
-  instrumentId: string;
   kind: ReportItemKind;
-  runId: string;
 }) {
+  const dataSource = useReportDataSource();
+  const persistKey = use(ReportPersistKeyContext);
   const { state, actions } = useReportItems({
+    fetchReportItems: dataSource.fetchReportItems,
     initialPage,
-    instrumentId,
     kind,
-    runId,
   });
+
+  useEffect(() => {
+    const fileId = state.selectedItem?.id;
+    if (!persistKey || fileId == null) {
+      return;
+    }
+    try {
+      window.localStorage.setItem(persistKey, JSON.stringify({ fileId }));
+    } catch {
+      // Private mode and quota failures are fine; restore is optional.
+    }
+  }, [persistKey, state.selectedItem?.id]);
 
   return (
     <ReportItemsContext.Provider value={{ state, actions, meta: { kind } }}>

@@ -68,11 +68,7 @@ export function TapeStationRunDetail({
       </RunDetail.FilesMetadataLayout>
 
       {pdfCount > 0 || csvReportFiles.length === 0 ? (
-        <RunDetail.PdfCarousel
-          initialPage={reportItems}
-          instrumentId={instrumentId}
-          runId={runId}
-        />
+        <RunDetail.PdfCarousel initialPage={reportItems} />
       ) : null}
       {csvReportFiles.length > 0 && (
         <RunDetail.Report

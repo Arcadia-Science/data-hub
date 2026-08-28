@@ -39,18 +39,11 @@ function SelectedVideo({
 // filename → file-id map so full `RunFile` rows never reach the client.
 export function VideoCarouselReport({
   initialPage,
-  instrumentId,
   posterFileIds,
-  runId,
 }: ReportViewerProps & { posterFileIds: Record<string, number> }) {
   return (
     <ReportDataShell total={initialPage.pagination.total}>
-      <ReportItemsProvider
-        initialPage={initialPage}
-        instrumentId={instrumentId}
-        kind="video"
-        runId={runId}
-      >
+      <ReportItemsProvider initialPage={initialPage} kind="video">
         <ReportItemSeeker />
         <SelectedVideo posterFileIds={posterFileIds} />
       </ReportItemsProvider>

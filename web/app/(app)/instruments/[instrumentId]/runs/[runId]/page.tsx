@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next/types";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
+import { RestReportDataSourceProvider } from "@/components/runs/report-data-source-provider";
 import { RunAttributionsSection } from "@/components/runs/run-attributions-section";
 import { RunCommentsSection } from "@/components/runs/run-comments-section";
 import {
@@ -207,48 +208,50 @@ async function RunDetailContentBody({
     `/instruments/${instrumentId}/runs/${encodeURIComponent(rid)}`;
 
   return (
-    <WatcherStatusProvider isWatcherOnline={isWatcherOnline}>
-      <RunDetailVariant
-        attributionsSlot={
-          <RunAttributionsSection
-            attributions={run.attributions}
-            instrumentId={run.instrumentId}
-            runId={run.runId}
-          />
-        }
-        auntyPlate={auntyPlate}
-        fileStats={fileStats}
-        files={filesPage.data}
-        filesDownloadableCount={filesPage.downloadableCount}
-        filesPagination={filesPage.pagination}
-        instrumentId={instrumentId}
-        reportFiles={reportFiles}
-        reportItems={reportItems}
-        run={run}
-        runId={runId}
-        runNavSlot={
-          <RunNav
-            next={
-              adjacentRuns.nextRunId
-                ? {
-                    href: toRunHref(adjacentRuns.nextRunId),
-                    runId: adjacentRuns.nextRunId,
-                  }
-                : null
-            }
-            previous={
-              adjacentRuns.previousRunId
-                ? {
-                    href: toRunHref(adjacentRuns.previousRunId),
-                    runId: adjacentRuns.previousRunId,
-                  }
-                : null
-            }
-          />
-        }
-        wellData={wellData}
-      />
-    </WatcherStatusProvider>
+    <RestReportDataSourceProvider instrumentId={instrumentId} runId={runId}>
+      <WatcherStatusProvider isWatcherOnline={isWatcherOnline}>
+        <RunDetailVariant
+          attributionsSlot={
+            <RunAttributionsSection
+              attributions={run.attributions}
+              instrumentId={run.instrumentId}
+              runId={run.runId}
+            />
+          }
+          auntyPlate={auntyPlate}
+          fileStats={fileStats}
+          files={filesPage.data}
+          filesDownloadableCount={filesPage.downloadableCount}
+          filesPagination={filesPage.pagination}
+          instrumentId={instrumentId}
+          reportFiles={reportFiles}
+          reportItems={reportItems}
+          run={run}
+          runId={runId}
+          runNavSlot={
+            <RunNav
+              next={
+                adjacentRuns.nextRunId
+                  ? {
+                      href: toRunHref(adjacentRuns.nextRunId),
+                      runId: adjacentRuns.nextRunId,
+                    }
+                  : null
+              }
+              previous={
+                adjacentRuns.previousRunId
+                  ? {
+                      href: toRunHref(adjacentRuns.previousRunId),
+                      runId: adjacentRuns.previousRunId,
+                    }
+                  : null
+              }
+            />
+          }
+          wellData={wellData}
+        />
+      </WatcherStatusProvider>
+    </RestReportDataSourceProvider>
   );
 }
 

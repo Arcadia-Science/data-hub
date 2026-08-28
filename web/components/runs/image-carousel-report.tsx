@@ -7,15 +7,25 @@ import {
   type ReportViewerProps,
   useReportItemsContext,
 } from "@/components/runs/report-items-provider";
+import { useResolvedFileUrl } from "@/hooks/use-resolved-file-url";
 
 function SelectedImage() {
   const { state } = useReportItemsContext();
+  const src = useResolvedFileUrl(state.selectedItem?.id);
 
   if (!state.selectedItem) {
     return (
       <div className="flex h-64 items-center justify-center rounded-md border bg-muted/30 text-muted-foreground text-sm">
         {state.error ??
           (state.isLoading ? "Loading\u2026" : "No images found.")}
+      </div>
+    );
+  }
+
+  if (!src) {
+    return (
+      <div className="flex h-64 items-center justify-center rounded-md border bg-muted/30 text-muted-foreground text-sm">
+        Loading{"\u2026"}
       </div>
     );
   }
@@ -27,7 +37,7 @@ function SelectedImage() {
         alt={state.selectedItem.filename}
         className="mx-auto block max-h-[70vh] w-auto object-contain"
         height={600}
-        src={`/api/v1/files/${state.selectedItem.id}/download`}
+        src={src}
         width={800}
       />
     </div>
@@ -36,19 +46,10 @@ function SelectedImage() {
 
 // For instruments whose report data is purely imagery (Hina microscope, gel
 // doc): one image at a time, seeked against the run's full image set.
-export function ImageCarouselReport({
-  initialPage,
-  instrumentId,
-  runId,
-}: ReportViewerProps) {
+export function ImageCarouselReport({ initialPage }: ReportViewerProps) {
   return (
     <ReportDataShell total={initialPage.pagination.total}>
-      <ReportItemsProvider
-        initialPage={initialPage}
-        instrumentId={instrumentId}
-        kind="image"
-        runId={runId}
-      >
+      <ReportItemsProvider initialPage={initialPage} kind="image">
         <ReportItemSeeker />
         <SelectedImage />
       </ReportItemsProvider>

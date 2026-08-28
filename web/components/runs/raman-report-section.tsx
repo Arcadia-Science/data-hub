@@ -8,19 +8,10 @@ import {
   type ReportViewerProps,
 } from "@/components/runs/report-items-provider";
 
-export function RamanReportSection({
-  initialPage,
-  instrumentId,
-  runId,
-}: ReportViewerProps) {
+export function RamanReportSection({ initialPage }: ReportViewerProps) {
   return (
     <ReportDataShell total={initialPage.pagination.total}>
-      <ReportItemsProvider
-        initialPage={initialPage}
-        instrumentId={instrumentId}
-        kind="spectrum"
-        runId={runId}
-      >
+      <ReportItemsProvider initialPage={initialPage} kind="spectrum">
         <ReportItemSeeker />
         <RamanSpectrumViewer />
       </ReportItemsProvider>

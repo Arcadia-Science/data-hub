@@ -9,9 +9,11 @@ import {
   useReportItemsContext,
 } from "@/components/runs/report-items-provider";
 import { Button } from "@/components/ui/button";
+import { useResolvedFileUrl } from "@/hooks/use-resolved-file-url";
 
 function SelectedPdf() {
   const { state } = useReportItemsContext();
+  const downloadUrl = useResolvedFileUrl(state.selectedItem?.id);
 
   if (!state.selectedItem) {
     return (
@@ -21,7 +23,13 @@ function SelectedPdf() {
     );
   }
 
-  const downloadUrl = `/api/v1/files/${state.selectedItem.id}/download`;
+  if (!downloadUrl) {
+    return (
+      <div className="flex h-[70vh] items-center justify-center rounded-md border bg-muted/30 text-muted-foreground text-sm">
+        Loading{"\u2026"}
+      </div>
+    );
+  }
 
   return (
     <>
@@ -49,19 +57,10 @@ function SelectedPdf() {
 
 // TapeStation and other PDF-primary instruments: one PDF at a time, seeked
 // against the run's full PDF set.
-export function PdfCarouselReport({
-  initialPage,
-  instrumentId,
-  runId,
-}: ReportViewerProps) {
+export function PdfCarouselReport({ initialPage }: ReportViewerProps) {
   return (
     <ReportDataShell total={initialPage.pagination.total}>
-      <ReportItemsProvider
-        initialPage={initialPage}
-        instrumentId={instrumentId}
-        kind="pdf"
-        runId={runId}
-      >
+      <ReportItemsProvider initialPage={initialPage} kind="pdf">
         <ReportItemSeeker />
         <SelectedPdf />
       </ReportItemsProvider>

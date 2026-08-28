@@ -61,11 +61,7 @@ export function HinaMicroscopeRunDetail({
         />
       </RunDetail.FilesMetadataLayout>
 
-      <RunDetail.ImageCarousel
-        initialPage={reportItems}
-        instrumentId={instrumentId}
-        runId={runId}
-      />
+      <RunDetail.ImageCarousel initialPage={reportItems} />
     </>
   );
 }
