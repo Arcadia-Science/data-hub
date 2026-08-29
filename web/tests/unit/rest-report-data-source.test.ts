@@ -34,6 +34,7 @@ describe("createRestReportDataSource", () => {
       "/api/v1/instruments/inst-1/runs/run-1/report-items?kind=image&offset=0&limit=50&search=gel"
     );
     expect(source.resolveFileUrl(42)).toBe("/api/v1/files/42/download");
+    expect(source.peekFileUrl?.(42)).toBe("/api/v1/files/42/download");
   });
 
   it("parses a CSV once, then serves paginated slices from cache", async () => {
@@ -103,6 +104,29 @@ describe("fetchAllTableRows", () => {
     );
 
     expect(result.rows.map((r) => r.n)).toEqual(["1", "2", "3"]);
+    expect(result.truncated).toBe(false);
     expect(dataSource.fetchTable).toHaveBeenCalledTimes(2);
+  });
+
+  it("marks the table truncated when paging stops short of total", async () => {
+    const dataSource: Pick<ReportDataSource, "fetchTable"> = {
+      fetchTable: vi.fn(({ offset }) =>
+        Promise.resolve({
+          columns: ["n"],
+          rows: offset === 0 ? [{ n: "1" }] : [],
+          total: 5,
+          truncated: true,
+        })
+      ),
+    };
+
+    const result = await fetchAllTableRows(
+      dataSource as ReportDataSource,
+      7,
+      1
+    );
+
+    expect(result.rows).toEqual([{ n: "1" }]);
+    expect(result.truncated).toBe(true);
   });
 });

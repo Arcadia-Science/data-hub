@@ -5,19 +5,25 @@ const DEFAULT_TABLE_PAGE = 200;
 
 // Raman, Aunty curves, and the colony table all need every row. `fetchTable`
 // is paginated for the View's MCP envelope, so callers that chart or index
-// the full file walk pages here.
+// the full file walk pages here. The MCP source answers the first page
+// with the whole file (one S3 GET) and slices later pages from memory.
 export async function fetchAllTableRows(
   dataSource: ReportDataSource,
   fileId: number,
   pageSize = DEFAULT_TABLE_PAGE
-): Promise<{ columns: string[]; rows: Record<string, string>[] }> {
+): Promise<{
+  columns: string[];
+  rows: Record<string, string>[];
+  truncated: boolean;
+}> {
   const first = await dataSource.fetchTable({
     fileId,
     offset: 0,
     limit: pageSize,
   });
+  let truncated = first.truncated === true;
   if (first.rows.length >= first.total) {
-    return { columns: first.columns, rows: first.rows };
+    return { columns: first.columns, rows: first.rows, truncated };
   }
   const rows = first.rows.slice();
   while (rows.length < first.total) {
@@ -26,10 +32,16 @@ export async function fetchAllTableRows(
       offset: rows.length,
       limit: pageSize,
     });
+    if (page.truncated) {
+      truncated = true;
+    }
     if (page.rows.length === 0) {
       break;
     }
     rows.push(...page.rows);
   }
-  return { columns: first.columns, rows };
+  if (rows.length < first.total) {
+    truncated = true;
+  }
+  return { columns: first.columns, rows, truncated };
 }

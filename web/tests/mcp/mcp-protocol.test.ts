@@ -1336,6 +1336,7 @@ describe("MCP Protocol (in-memory)", () => {
         resourceUri: "ui://data-hub/run-report",
         visibility: ["model", "app"],
       },
+      "ui/resourceUri": "ui://data-hub/run-report",
     });
   });
 
@@ -1352,6 +1353,7 @@ describe("MCP Protocol (in-memory)", () => {
           resourceUri: "ui://data-hub/run-report",
           visibility: ["app"],
         },
+        "ui/resourceUri": "ui://data-hub/run-report",
       });
       const result = await client.callTool({
         name,
@@ -1719,11 +1721,16 @@ describe("MCP Protocol (in-memory)", () => {
     expect(contents[0].mimeType).toBe("text/html;profile=mcp-app");
     expect((contents[0] as { text: string }).text).toMatch(/<!DOCTYPE html/i);
     const readMeta = contents[0]._meta as
-      | { ui?: { csp?: { frameDomains?: string[] } } }
+      | {
+          ui?: {
+            csp?: { connectDomains?: string[]; frameDomains?: string[] };
+          };
+        }
       | undefined;
     expect(readMeta?.ui?.csp?.frameDomains).toEqual(
       expect.arrayContaining(["http://localhost:3000"])
     );
+    expect(readMeta?.ui?.csp?.connectDomains).toEqual([]);
   });
 
   it("reads the glossary resource", async () => {

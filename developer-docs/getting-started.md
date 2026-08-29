@@ -110,6 +110,8 @@ Other database commands:
 
 ## Running locally
 
+A production `npm run build` in `web/` runs `mcp-apps:build` first so the MCP Apps run-report View is in the serverless bundle. See [MCP Apps](mcp-apps.md). `make dev` does not rebuild that View; re-run `npm run mcp-apps:build` after changing `web/mcp-apps/`.
+
 ```sh
 # Start the web app dev server (Turbopack).
 make dev

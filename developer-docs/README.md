@@ -10,6 +10,7 @@ see the root [README](../README.md#documentation) for that split.
 - [Getting started](getting-started.md) — development setup, environment variables, running locally
 - [Local development](local-development.md) — zero-credential dev workflow for the web app + API + database (no watcher / Lambda needed)
 - [Architecture](architecture.md) — system overview, data flow, and design decisions
+- [MCP Apps](mcp-apps.md) — run-report View bundle, `mcp-apps:build`, and the gitignored HTML artifact
 - [Testing](testing.md) — per-package test frameworks, the shared test-server fixture, S3 mocking
 - [Watcher](watcher.md) — CLI commands, configuration, run detection, upload modes
 - [Lambda](lambda.md) — processing pipeline, supported instruments, adding new instruments

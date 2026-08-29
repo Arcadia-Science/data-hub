@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { AuntyPlateReport } from "@/components/runs/aunty/aunty-plate-report";
 import { ImageCarouselReport } from "@/components/runs/image-carousel-report";
 import { PdfCarouselReport } from "@/components/runs/pdf-carousel-report";
@@ -8,7 +8,10 @@ import {
 } from "@/components/runs/plate-map-grid";
 import { RamanReportSection } from "@/components/runs/raman-report-section";
 import { useReportDataSource } from "@/components/runs/report-data-source-provider";
-import { ReportPersistKeyContext } from "@/components/runs/report-items-provider";
+import {
+  ReportPersistKeyProvider,
+  ReportViewerPageProvider,
+} from "@/components/runs/report-items-provider";
 import type { ReportSectionFile } from "@/components/runs/run-report-section";
 import { RunReportSection } from "@/components/runs/run-report-section";
 import { RunSectionCard } from "@/components/runs/run-section-card";
@@ -19,6 +22,7 @@ import type { AuntyPlateData } from "@/lib/runs/aunty";
 import { extractPlateMaps } from "@/lib/runs/extract-plate-maps";
 import {
   emptyReportItemsPage,
+  REPORT_ITEMS_WINDOW,
   type ReportItemKind,
   type ReportItemsPage,
   reportItemKindForInstrument,
@@ -89,47 +93,37 @@ export function InstrumentReport({
     (instrumentType === "gel_doc" || instrumentType === "hina_microscope")
   ) {
     return (
-      <CarouselKindReport
-        kind={kind}
-        persistKey={persistKey}
-        render={(page) => <ImageCarouselReport initialPage={page} />}
-      />
+      <CarouselKindReport kind={kind} persistKey={persistKey}>
+        <ImageCarouselReport />
+      </CarouselKindReport>
     );
   }
   if (kind === "pdf" && instrumentType === "tape_station") {
     return (
-      <CarouselKindReport
-        kind={kind}
-        persistKey={persistKey}
-        render={(page) => <PdfCarouselReport initialPage={page} />}
-      />
+      <CarouselKindReport kind={kind} persistKey={persistKey}>
+        <PdfCarouselReport />
+      </CarouselKindReport>
     );
   }
   if (kind === "video" && instrumentType === "dishcam") {
     return (
-      <CarouselKindReport
-        kind={kind}
-        persistKey={persistKey}
-        render={(page) => (
-          <VideoCarouselReport initialPage={page} posterFileIds={{}} />
-        )}
-      />
+      <CarouselKindReport kind={kind} persistKey={persistKey}>
+        <VideoCarouselReport />
+      </CarouselKindReport>
     );
   }
   if (kind === "spectrum" && instrumentType === "instant_raman") {
     return (
-      <CarouselKindReport
-        kind={kind}
-        persistKey={persistKey}
-        render={(page) => <RamanReportSection initialPage={page} />}
-      />
+      <CarouselKindReport kind={kind} persistKey={persistKey}>
+        <RamanReportSection />
+      </CarouselKindReport>
     );
   }
   if (instrumentType === "aunty") {
     return <AuntyReport />;
   }
   if (instrumentType === "plate_reader") {
-    return <PlateReaderReport files={result.reportFiles} result={result} />;
+    return <PlateReaderReport result={result} />;
   }
 
   return <RunReportSection files={toSectionFiles(result.reportFiles)} />;
@@ -138,11 +132,11 @@ export function InstrumentReport({
 function CarouselKindReport({
   kind,
   persistKey,
-  render,
+  children,
 }: {
+  children: ReactNode;
   kind: ReportItemKind;
   persistKey: string;
-  render: (page: ReportItemsPage) => ReactNode;
 }) {
   const dataSource = useReportDataSource();
   const [page, setPage] = useState<ReportItemsPage | null>(null);
@@ -154,7 +148,7 @@ function CarouselKindReport({
       .fetchReportItems({
         kind,
         offset: 0,
-        limit: 50,
+        limit: REPORT_ITEMS_WINDOW,
         anchor,
       })
       .then(setPage)
@@ -171,9 +165,11 @@ function CarouselKindReport({
     return <p className="text-muted-foreground text-sm">Loading…</p>;
   }
   return (
-    <ReportPersistKeyContext.Provider value={persistKey}>
-      {render(page)}
-    </ReportPersistKeyContext.Provider>
+    <ReportPersistKeyProvider persistKey={persistKey}>
+      <ReportViewerPageProvider page={page}>
+        {children}
+      </ReportViewerPageProvider>
+    </ReportPersistKeyProvider>
   );
 }
 
@@ -208,17 +204,12 @@ function AuntyReport() {
   );
 }
 
-function PlateReaderReport({
-  files,
-  result,
-}: {
-  files: ReportFileRef[];
-  result: RunReportToolResult;
-}) {
+function PlateReaderReport({ result }: { result: RunReportToolResult }) {
   const dataSource = useReportDataSource();
   const [rows, setRows] = useState<RawWellRow[] | null>(null);
+  const [truncated, setTruncated] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const csv = firstProcessedCsv(files);
+  const csv = firstProcessedCsv(result.reportFiles);
 
   useEffect(() => {
     if (!csv) {
@@ -226,28 +217,15 @@ function PlateReaderReport({
       return;
     }
     void fetchAllTableRows(dataSource, csv.id)
-      .then((table) => setRows(table.rows ?? []))
+      .then((table) => {
+        setRows(table.rows ?? []);
+        setTruncated(table.truncated);
+      })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : "Failed to load wells");
         setRows([]);
       });
   }, [csv, dataSource]);
-
-  if (error) {
-    return <p className="text-destructive text-sm">{error}</p>;
-  }
-  if (rows === null) {
-    return <p className="text-muted-foreground text-sm">Loading…</p>;
-  }
-  if (rows.length === 0) {
-    return (
-      <RunSectionCard title="Plate Maps">
-        <p className="text-muted-foreground text-sm">
-          No report data has been generated for this run.
-        </p>
-      </RunSectionCard>
-    );
-  }
 
   const metadata =
     result.metadata && typeof result.metadata === "object"
@@ -257,15 +235,29 @@ function PlateReaderReport({
     typeof metadata.measurement_type === "string"
       ? metadata.measurement_type
       : "";
-  const heatmap =
-    HEATMAP_MEASUREMENT_TYPES.has(measurementType) ||
-    rows.some((row) => Number.isFinite(Number(row.value)));
-  const groups = extractPlateMaps(rows, {
-    kinetic: measurementType === "Kinetic",
-    spectrum: measurementType === "Spectrum",
-  });
 
-  if (groups.length === 0) {
+  const heatmap = useMemo(
+    () =>
+      HEATMAP_MEASUREMENT_TYPES.has(measurementType) ||
+      (rows ?? []).some((row) => Number.isFinite(Number(row.value))),
+    [measurementType, rows]
+  );
+  const groups = useMemo(
+    () =>
+      extractPlateMaps(rows ?? [], {
+        kinetic: measurementType === "Kinetic",
+        spectrum: measurementType === "Spectrum",
+      }),
+    [measurementType, rows]
+  );
+
+  if (error) {
+    return <p className="text-destructive text-sm">{error}</p>;
+  }
+  if (rows === null) {
+    return <p className="text-muted-foreground text-sm">Loading…</p>;
+  }
+  if (rows.length === 0 || groups.length === 0) {
     return (
       <RunSectionCard title="Plate Maps">
         <p className="text-muted-foreground text-sm">
@@ -282,6 +274,12 @@ function PlateReaderReport({
       count={groups.length}
       title="Plate Maps"
     >
+      {truncated ? (
+        <p className="text-muted-foreground text-xs">
+          This file is larger than the report can load. The maps use the first
+          rows only.
+        </p>
+      ) : null}
       <div className="flex min-w-0 flex-col gap-10">
         {groups.map((group, index) =>
           group.mode === "kinetic" ? (

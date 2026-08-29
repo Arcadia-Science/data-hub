@@ -1,6 +1,7 @@
 "use client";
 
 import { ExternalLink } from "lucide-react";
+import { useMemo } from "react";
 import { ColonyDataTable } from "@/components/runs/colony-data-table";
 import { ReportDataShell } from "@/components/runs/report-data-shell";
 import { RunVideoPlayer } from "@/components/runs/run-video-player";
@@ -109,25 +110,54 @@ export function RunReportSection({
   files: ReportSectionFile[];
   title?: string;
 }) {
-  const processedCsvs = files.filter(
-    (f) => f.category === "processed" && f.deletedAt === null && isCsvFile(f)
-  );
+  const {
+    pdfFiles,
+    posterFileIds,
+    processedCsvs,
+    processedImages,
+    processedVideos,
+  } = useMemo(() => {
+    const processedCsvs: ReportSectionFile[] = [];
+    const processedVideos: ReportSectionFile[] = [];
+    const processedImages: ReportSectionFile[] = [];
+    const pdfFiles: ReportSectionFile[] = [];
+    const videoStems = new Set<string>();
 
-  const processedVideos = files.filter(
-    (f) => f.category === "processed" && f.deletedAt === null && isVideoFile(f)
-  );
-  const posterFileIds = posterFileIdsByVideoFilename(files);
-  const videoStems = new Set(processedVideos.map((f) => fileStem(f.filename)));
+    for (const file of files) {
+      if (file.deletedAt !== null) {
+        continue;
+      }
+      if (file.category === "processed" && isVideoFile(file)) {
+        processedVideos.push(file);
+        videoStems.add(fileStem(file.filename));
+      }
+    }
+    for (const file of files) {
+      if (file.deletedAt !== null) {
+        continue;
+      }
+      if (file.category === "processed" && isCsvFile(file)) {
+        processedCsvs.push(file);
+      } else if (
+        file.category === "processed" &&
+        isImageFile(file) &&
+        !videoStems.has(fileStem(file.filename))
+      ) {
+        processedImages.push(file);
+      }
+      if (isPdfFile(file)) {
+        pdfFiles.push(file);
+      }
+    }
 
-  const processedImages = files.filter(
-    (f) =>
-      f.category === "processed" &&
-      f.deletedAt === null &&
-      isImageFile(f) &&
-      !videoStems.has(fileStem(f.filename))
-  );
-
-  const pdfFiles = files.filter((f) => f.deletedAt === null && isPdfFile(f));
+    return {
+      pdfFiles,
+      posterFileIds: posterFileIdsByVideoFilename(files),
+      processedCsvs,
+      processedImages,
+      processedVideos,
+    };
+  }, [files]);
 
   const totalCount =
     processedCsvs.length +

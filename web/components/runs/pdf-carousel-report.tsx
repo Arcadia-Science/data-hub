@@ -7,6 +7,7 @@ import {
   ReportItemsProvider,
   type ReportViewerProps,
   useReportItemsContext,
+  useReportViewerPage,
 } from "@/components/runs/report-items-provider";
 import { Button } from "@/components/ui/button";
 import { useResolvedFileUrl } from "@/hooks/use-resolved-file-url";
@@ -58,9 +59,10 @@ function SelectedPdf() {
 // TapeStation and other PDF-primary instruments: one PDF at a time, seeked
 // against the run's full PDF set.
 export function PdfCarouselReport({ initialPage }: ReportViewerProps) {
+  const page = useReportViewerPage(initialPage);
   return (
-    <ReportDataShell total={initialPage.pagination.total}>
-      <ReportItemsProvider initialPage={initialPage} kind="pdf">
+    <ReportDataShell total={page.pagination.total}>
+      <ReportItemsProvider initialPage={page} kind="pdf">
         <ReportItemSeeker />
         <SelectedPdf />
       </ReportItemsProvider>

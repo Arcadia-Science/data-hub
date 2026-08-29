@@ -6,6 +6,7 @@ import {
   ReportItemsProvider,
   type ReportViewerProps,
   useReportItemsContext,
+  useReportViewerPage,
 } from "@/components/runs/report-items-provider";
 import { RunVideoPlayer } from "@/components/runs/run-video-player";
 
@@ -37,13 +38,16 @@ function SelectedVideo({
 // DishCam and other video-primary instruments: one MP4 at a time, seeked
 // against the run's full processed-video set. `posterFileIds` is a slim
 // filename → file-id map so full `RunFile` rows never reach the client.
+const EMPTY_POSTER_FILE_IDS: Record<string, number> = {};
+
 export function VideoCarouselReport({
   initialPage,
-  posterFileIds,
-}: ReportViewerProps & { posterFileIds: Record<string, number> }) {
+  posterFileIds = EMPTY_POSTER_FILE_IDS,
+}: ReportViewerProps & { posterFileIds?: Record<string, number> }) {
+  const page = useReportViewerPage(initialPage);
   return (
-    <ReportDataShell total={initialPage.pagination.total}>
-      <ReportItemsProvider initialPage={initialPage} kind="video">
+    <ReportDataShell total={page.pagination.total}>
+      <ReportItemsProvider initialPage={page} kind="video">
         <ReportItemSeeker />
         <SelectedVideo posterFileIds={posterFileIds} />
       </ReportItemsProvider>

@@ -19,6 +19,21 @@ export interface McpUiToolMeta {
 
 export interface McpToolUiMeta {
   ui?: McpUiToolMeta;
+  // Deprecated flat key. Hosts that still read `ui/resourceUri` need
+  // this alongside the nested `ui.resourceUri` the spec prefers.
+  "ui/resourceUri"?: string;
   // registerTool types `_meta` as a string index signature.
   [key: string]: unknown;
+}
+
+export function runReportToolUiMeta(
+  visibility: readonly McpUiToolVisibility[]
+): McpToolUiMeta {
+  return {
+    ui: {
+      resourceUri: RUN_REPORT_UI_RESOURCE_URI,
+      visibility,
+    },
+    "ui/resourceUri": RUN_REPORT_UI_RESOURCE_URI,
+  };
 }

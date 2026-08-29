@@ -3,7 +3,7 @@ import type { McpToolDef } from "@/lib/mcp/catalog/types";
 import {
   REPORT_VIEW_TABLE_DEFAULT_LIMIT,
   REPORT_VIEW_TABLE_MAX_LIMIT,
-  RUN_REPORT_UI_RESOURCE_URI,
+  runReportToolUiMeta,
 } from "@/lib/mcp/ui-apps";
 import {
   REPORT_ITEMS_MAX_LIMIT,
@@ -16,22 +16,15 @@ import {
   reportViewTableOutputSchema,
 } from "./report-views.output";
 
-const APP_ONLY_META = {
-  ui: {
-    resourceUri: RUN_REPORT_UI_RESOURCE_URI,
-    visibility: ["app"] as const,
-  },
-};
-
-const INTERNAL_STEER =
-  "Internal. Used by the Data Hub run report view. Call `get_run_report` instead.";
+const APP_ONLY_META = runReportToolUiMeta(["app"]);
 
 export const reportViewItemsTool = {
   name: "report_view_items",
   group: "runs",
   scope: "files:read",
   title: "Report View Items",
-  description: INTERNAL_STEER,
+  description:
+    "Return a paginated window of run report items (images, PDFs, spectra, or videos) with download URLs. Used by the Data Hub run report view. Call `get_run_report` instead.",
   outputSchema: reportViewItemsOutputSchema,
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
@@ -71,7 +64,8 @@ export const reportViewTableTool = {
   group: "runs",
   scope: "files:read",
   title: "Report View Table",
-  description: INTERNAL_STEER,
+  description:
+    "Return parsed CSV columns and rows for a run file. Pass `full` to load the whole file up to the scan cap in one call. Used by the Data Hub run report view. Call `get_run_report` instead.",
   outputSchema: reportViewTableOutputSchema,
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
@@ -92,6 +86,12 @@ export const reportViewTableTool = {
       .describe(
         `Rows to return (default: ${REPORT_VIEW_TABLE_DEFAULT_LIMIT}, max: ${REPORT_VIEW_TABLE_MAX_LIMIT})`
       ),
+    full: z
+      .boolean()
+      .optional()
+      .describe(
+        "When true, ignore offset/limit and return the whole file up to the scan cap"
+      ),
   },
   annotations: { readOnlyHint: true },
   _meta: APP_ONLY_META,
@@ -102,7 +102,8 @@ export const reportViewArtifactTool = {
   group: "runs",
   scope: "files:read",
   title: "Report View Artifact",
-  description: INTERNAL_STEER,
+  description:
+    "Return a JSON artifact from a run by filename suffix. Aunty plate data is assembled from the plate file plus curves file id. Used by the Data Hub run report view. Call `get_run_report` instead.",
   outputSchema: reportViewArtifactOutputSchema,
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),

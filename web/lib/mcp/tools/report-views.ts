@@ -1,5 +1,4 @@
 import type { McpServer } from "@modelcontextprotocol/server";
-import { parse } from "csv-parse";
 import {
   findActiveFileBySuffix,
   getActiveFileById,
@@ -24,6 +23,7 @@ import {
   REPORT_VIEW_TABLE_MAX_LIMIT,
   REPORT_VIEW_TABLE_SCAN_CAP,
 } from "@/lib/mcp/ui-apps";
+import { parseCsvPage } from "@/lib/runs/parse-csv-page";
 import { REPORT_ITEMS_WINDOW } from "@/lib/runs/report-items";
 import { getPresignedDownloadUrl, getS3ObjectStream } from "@/lib/s3";
 import {
@@ -51,47 +51,6 @@ async function streamToBuffer(
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
   return Buffer.concat(chunks);
-}
-
-async function parseCsvPage(
-  bucket: string,
-  key: string,
-  offset: number,
-  limit: number
-): Promise<{
-  columns: string[];
-  rows: Record<string, string>[];
-  total: number;
-}> {
-  const stream = await getS3ObjectStream(bucket, key);
-  const parser = stream.pipe(
-    parse({ columns: true, skip_empty_lines: true, trim: true })
-  );
-
-  let index = 0;
-  const rows: Record<string, string>[] = [];
-  let columns: string[] = [];
-
-  try {
-    for await (const record of parser) {
-      const row = record as Record<string, string>;
-      if (index === 0) {
-        columns = Object.keys(row);
-      }
-      if (index >= offset && rows.length < limit) {
-        rows.push(row);
-      }
-      index += 1;
-      if (index >= REPORT_VIEW_TABLE_SCAN_CAP) {
-        break;
-      }
-    }
-  } finally {
-    parser.destroy();
-    stream.destroy();
-  }
-
-  return { columns, rows, total: index };
 }
 
 export function registerReportViewTools(server: McpServer) {
@@ -172,11 +131,14 @@ export function registerReportViewTools(server: McpServer) {
         );
       }
 
-      const limit = Math.min(
-        args.limit ?? REPORT_VIEW_TABLE_DEFAULT_LIMIT,
-        REPORT_VIEW_TABLE_MAX_LIMIT
-      );
-      const offset = Math.max(args.offset ?? 0, 0);
+      const full = args.full === true;
+      const limit = full
+        ? REPORT_VIEW_TABLE_SCAN_CAP
+        : Math.min(
+            args.limit ?? REPORT_VIEW_TABLE_DEFAULT_LIMIT,
+            REPORT_VIEW_TABLE_MAX_LIMIT
+          );
+      const offset = full ? 0 : Math.max(args.offset ?? 0, 0);
 
       try {
         const table = await parseCsvPage(

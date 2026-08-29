@@ -140,7 +140,10 @@ export function useDarkClass(): void {
 
 // Shared report components use `<a target="_blank">`. The sandbox blocks
 // popups, so intercept those clicks and ask the host to open the URL.
-export function useOpenLinkInterceptor(app: App | null): void {
+export function useOpenLinkInterceptor(
+  app: App | null,
+  onFallback: (url: string) => void
+): void {
   useEffect(() => {
     if (!app) {
       return;
@@ -172,19 +175,24 @@ export function useOpenLinkInterceptor(app: App | null): void {
         : new URL(href, window.location.href).href;
 
       if (app.getHostCapabilities()?.openLinks) {
-        void app.openLink({ url });
+        void app
+          .openLink({ url })
+          .then((response) => {
+            if (response.isError) {
+              onFallback(url);
+            }
+          })
+          .catch(() => {
+            onFallback(url);
+          });
         return;
       }
-      const fallback = document.getElementById("open-link-fallback");
-      if (fallback) {
-        fallback.textContent = url;
-        fallback.hidden = false;
-      }
+      onFallback(url);
     };
 
     document.addEventListener("click", onClick, true);
     return () => document.removeEventListener("click", onClick, true);
-  }, [app]);
+  }, [app, onFallback]);
 }
 
 export function persistKey(instrumentId: string, runId: string): string {

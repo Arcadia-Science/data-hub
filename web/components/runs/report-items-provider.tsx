@@ -18,16 +18,55 @@ export interface ReportItemsContextValue extends UseReportItemsResult {
 
 // Props every report-data viewer receives from its run-detail variant.
 export interface ReportViewerProps {
-  initialPage: ReportItemsPage;
+  initialPage?: ReportItemsPage;
 }
 
 const ReportItemsContext = createContext<ReportItemsContextValue | null>(null);
 
-// Optional. The MCP View wraps carousels so the seeker can restore position
-// without threading a persist key through every shared renderer.
-export const ReportPersistKeyContext = createContext<string | undefined>(
-  undefined
-);
+const ReportPersistKeyContext = createContext<string | undefined>(undefined);
+
+const ReportViewerPageContext = createContext<ReportItemsPage | null>(null);
+
+export function ReportPersistKeyProvider({
+  children,
+  persistKey,
+}: {
+  children: ReactNode;
+  persistKey: string;
+}) {
+  return (
+    <ReportPersistKeyContext.Provider value={persistKey}>
+      {children}
+    </ReportPersistKeyContext.Provider>
+  );
+}
+
+export function ReportViewerPageProvider({
+  children,
+  page,
+}: {
+  children: ReactNode;
+  page: ReportItemsPage;
+}) {
+  return (
+    <ReportViewerPageContext.Provider value={page}>
+      {children}
+    </ReportViewerPageContext.Provider>
+  );
+}
+
+export function useReportViewerPage(
+  initialPage?: ReportItemsPage
+): ReportItemsPage {
+  const fromContext = use(ReportViewerPageContext);
+  const page = initialPage ?? fromContext;
+  if (!page) {
+    throw new Error(
+      "Report viewer is missing a page. Render it inside ReportViewerPageProvider or pass initialPage."
+    );
+  }
+  return page;
+}
 
 export function ReportItemsProvider({
   children,

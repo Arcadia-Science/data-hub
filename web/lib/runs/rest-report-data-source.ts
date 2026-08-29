@@ -70,6 +70,7 @@ export function createRestReportDataSource(args: {
       );
     },
 
+    peekFileUrl: restFileUrl,
     resolveFileUrl: restFileUrl,
   };
 }

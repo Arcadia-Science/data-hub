@@ -6,6 +6,7 @@ import {
   ReportItemsProvider,
   type ReportViewerProps,
   useReportItemsContext,
+  useReportViewerPage,
 } from "@/components/runs/report-items-provider";
 import { useResolvedFileUrl } from "@/hooks/use-resolved-file-url";
 
@@ -47,9 +48,10 @@ function SelectedImage() {
 // For instruments whose report data is purely imagery (Hina microscope, gel
 // doc): one image at a time, seeked against the run's full image set.
 export function ImageCarouselReport({ initialPage }: ReportViewerProps) {
+  const page = useReportViewerPage(initialPage);
   return (
-    <ReportDataShell total={initialPage.pagination.total}>
-      <ReportItemsProvider initialPage={initialPage} kind="image">
+    <ReportDataShell total={page.pagination.total}>
+      <ReportItemsProvider initialPage={page} kind="image">
         <ReportItemSeeker />
         <SelectedImage />
       </ReportItemsProvider>

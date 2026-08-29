@@ -1,7 +1,7 @@
 import type { App } from "@modelcontextprotocol/ext-apps";
 import { useApp, useHostStyles } from "@modelcontextprotocol/ext-apps/react";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ReportDataSourceProvider } from "@/components/runs/report-data-source-provider";
 import { runDetailUrl } from "./data-hub-origin";
 import {
@@ -15,36 +15,7 @@ import {
   type RunReportToolResult,
 } from "./instrument-report";
 import { createMcpReportDataSource } from "./mcp-data-source";
-
-function structuredToolResult(
-  result: CallToolResult
-): RunReportToolResult | null {
-  const payload = result.structuredContent;
-  if (payload && typeof payload === "object") {
-    const record = payload as Partial<RunReportToolResult>;
-    if (record.instrumentId && record.runId && record.instrumentType) {
-      return {
-        instrumentId: record.instrumentId,
-        runId: record.runId,
-        instrumentType: record.instrumentType,
-        metadata: record.metadata,
-        reportFiles: record.reportFiles ?? [],
-      };
-    }
-  }
-  const text = result.content?.find((block) => block.type === "text");
-  if (text && "text" in text) {
-    try {
-      return structuredToolResult({
-        ...result,
-        structuredContent: JSON.parse(text.text),
-      });
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
+import { parseRunReportToolResult } from "./parse-tool-result";
 
 export function RunReportApp() {
   const [toolResult, setToolResult] = useState<CallToolResult | null>(null);
@@ -70,7 +41,6 @@ export function RunReportApp() {
   useHostStyles(app, app?.getHostContext());
   useContainerDimensions(app);
   useDarkClass();
-  useOpenLinkInterceptor(app);
 
   if (error) {
     return (
@@ -95,7 +65,7 @@ export function RunReportApp() {
     );
   }
 
-  const parsed = structuredToolResult(toolResult);
+  const parsed = parseRunReportToolResult(toolResult);
   if (!parsed) {
     return (
       <p className="p-4 text-destructive text-sm">
@@ -129,11 +99,31 @@ function ConnectedReport({
   );
   const [linkFallback, setLinkFallback] = useState<string | null>(null);
 
+  useOpenLinkInterceptor(app, setLinkFallback);
+
+  useEffect(() => {
+    const apply = () => {
+      const mode = app.getHostContext()?.displayMode;
+      if (mode === "inline" || mode === "fullscreen") {
+        setDisplayMode(mode);
+      }
+    };
+    apply();
+    app.addEventListener("hostcontextchanged", apply);
+    return () => {
+      app.removeEventListener("hostcontextchanged", apply);
+    };
+  }, [app]);
+
   const openRun = useCallback(async () => {
     const url = runDetailUrl(result.instrumentId, result.runId);
     if (app.getHostCapabilities()?.openLinks) {
-      const response = await app.openLink({ url });
-      if (response.isError) {
+      try {
+        const response = await app.openLink({ url });
+        if (response.isError) {
+          setLinkFallback(url);
+        }
+      } catch {
         setLinkFallback(url);
       }
       return;
@@ -147,8 +137,12 @@ function ConnectedReport({
     if (!hostModes.includes(next)) {
       return;
     }
-    const response = await app.requestDisplayMode({ mode: next });
-    setDisplayMode(response.mode);
+    try {
+      const response = await app.requestDisplayMode({ mode: next });
+      setDisplayMode(response.mode);
+    } catch {
+      // Host refused or timed out; keep the last known mode.
+    }
   }, [app, displayMode]);
 
   const canToggle = (
@@ -160,7 +154,11 @@ function ConnectedReport({
       <div className="flex flex-wrap items-center gap-2">
         <button
           className="rounded-md border px-2 py-1 text-sm"
-          onClick={() => void openRun()}
+          onClick={() => {
+            void openRun().catch(() => {
+              setLinkFallback(runDetailUrl(result.instrumentId, result.runId));
+            });
+          }}
           type="button"
         >
           Open in Data Hub
@@ -168,7 +166,11 @@ function ConnectedReport({
         {canToggle ? (
           <button
             className="rounded-md border px-2 py-1 text-sm"
-            onClick={() => void toggleFullscreen()}
+            onClick={() => {
+              void toggleFullscreen().catch(() => {
+                // Host refused or timed out; keep the last known mode.
+              });
+            }}
             type="button"
           >
             {displayMode === "fullscreen" ? "Exit fullscreen" : "Fullscreen"}
@@ -176,15 +178,10 @@ function ConnectedReport({
         ) : null}
       </div>
       {linkFallback ? (
-        <p
-          className="break-all text-muted-foreground text-xs"
-          id="open-link-fallback"
-        >
+        <p className="break-all text-muted-foreground text-xs">
           {linkFallback}
         </p>
-      ) : (
-        <p hidden id="open-link-fallback" />
-      )}
+      ) : null}
       <ReportDataSourceProvider dataSource={dataSource}>
         <InstrumentReport persistKey={storageKey} result={result} />
       </ReportDataSourceProvider>

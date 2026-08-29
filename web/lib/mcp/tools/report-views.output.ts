@@ -21,6 +21,7 @@ export const reportViewTableOutputSchema = z.object({
   columns: z.array(z.string()),
   rows: z.array(z.record(z.string(), z.string())),
   total: z.number().int(),
+  truncated: z.boolean().optional(),
 });
 
 export const reportViewArtifactOutputSchema = z.object({

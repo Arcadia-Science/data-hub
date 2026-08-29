@@ -63,12 +63,40 @@ export const HELLO_WORLD_RUN_REPORT_HTML = `<!DOCTYPE html>
 </html>
 `;
 
+interface HtmlCache {
+  origin: string;
+  rendered: string;
+}
+
+let cached: HtmlCache | null = null;
+
+function withOrigin(html: string, origin: string): string {
+  return html.replaceAll(DATA_HUB_ORIGIN_PLACEHOLDER, origin);
+}
+
+export function resetRunReportHtmlCache(): void {
+  cached = null;
+}
+
 export function loadRunReportHtml(): string {
-  const html = existsSync(BUILT_HTML_PATH)
-    ? readFileSync(BUILT_HTML_PATH, "utf8")
-    : HELLO_WORLD_RUN_REPORT_HTML;
-  return html.replaceAll(
-    DATA_HUB_ORIGIN_PLACEHOLDER,
-    authBaseURL.replace(/\/$/, "")
-  );
+  const origin = authBaseURL.replace(/\/$/, "");
+  if (cached && cached.origin === origin) {
+    return cached.rendered;
+  }
+
+  if (!existsSync(BUILT_HTML_PATH)) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "Run report View HTML is missing. Run `npm run mcp-apps:build` before `next build`."
+      );
+    }
+    console.warn(
+      "mcp-apps/dist/run-report.html is missing; serving the placeholder page."
+    );
+    return withOrigin(HELLO_WORLD_RUN_REPORT_HTML, origin);
+  }
+
+  const rendered = withOrigin(readFileSync(BUILT_HTML_PATH, "utf8"), origin);
+  cached = { origin, rendered };
+  return rendered;
 }

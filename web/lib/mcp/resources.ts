@@ -11,7 +11,7 @@ import {
   MCP_APP_MIME_TYPE,
   RUN_REPORT_UI_RESOURCE_URI,
 } from "@/lib/mcp/ui-apps";
-import { runReportUiMeta } from "@/lib/mcp/ui-csp";
+import { runReportUiMeta, runReportUiMetaSnapshot } from "@/lib/mcp/ui-csp";
 import {
   glossaryResource,
   instrumentFilterOptionsResource,
@@ -203,14 +203,14 @@ export function registerResources(server: McpServer) {
     }
   );
 
-  const uiMeta = runReportUiMeta();
+  void runReportUiMeta();
   server.registerResource(
     runReportUiResource.name,
     runReportUiResource.uri,
     {
       description: runReportUiResource.description,
       mimeType: runReportUiResource.mimeType,
-      _meta: uiMeta,
+      _meta: runReportUiMetaSnapshot(),
     },
     async () => ({
       contents: [
@@ -218,7 +218,7 @@ export function registerResources(server: McpServer) {
           uri: RUN_REPORT_UI_RESOURCE_URI,
           mimeType: MCP_APP_MIME_TYPE,
           text: loadRunReportHtml(),
-          _meta: uiMeta,
+          _meta: await runReportUiMeta(),
         },
       ],
     })
