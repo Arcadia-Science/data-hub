@@ -107,7 +107,7 @@ export const getRunTool = {
   scope: "runs:read",
   title: "Get Run",
   description:
-    "Get details for a specific instrument run by its natural key (instrument ID + run ID). Returns metadata, timestamps, instrument info, and attributions by default. Pass include to attach the first page of files, comments, and/or a failure_summary without extra tool calls. For processed measurement samples prefer get_run_report.",
+    "Get details for a specific instrument run by its natural key (instrument ID + run ID). Returns metadata, timestamps, instrument info, and attributions by default. Pass include to attach the first page of files, comments, and/or a failure_summary without extra tool calls. To show the interactive report (plate maps, spectra, images) or a bounded processed-CSV sample, call get_run_report for the same run.",
   outputSchema: getRunOutputSchema,
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
@@ -128,7 +128,7 @@ export const getRunReportTool = {
   scope: "files:read",
   title: "Get Run Report",
   description:
-    "Return an analysis-ready summary for a run: file counts, failure summary, image/report file refs, and a bounded processed-CSV sample (columns + first rows). Prefer this over downloading full CSVs when comparing or summarizing experimental results.",
+    "Return an analysis-ready summary for a run: file counts, failure summary, image/report file refs, and a bounded processed-CSV sample (columns + first rows). Prefer this over downloading full CSVs when comparing or summarizing experimental results. Hosts that support MCP Apps render the interactive report View when this tool is called.",
   outputSchema: getRunReportOutputSchema,
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
