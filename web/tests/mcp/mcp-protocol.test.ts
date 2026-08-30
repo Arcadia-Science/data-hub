@@ -611,6 +611,8 @@ vi.mock("@/lib/s3", () => ({
   // `undefined`. Tests that read `expiresInSeconds` off a tool result
   // assert `> 0`, so any positive number works here.
   PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS: 15 * 60,
+  s3BucketOrigin: (bucket: string) =>
+    `https://${bucket}.s3.us-west-1.amazonaws.com`,
 }));
 
 // ---------------------------------------------------------------------------
