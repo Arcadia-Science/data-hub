@@ -17,6 +17,9 @@ const publicPrefixes = [
   "/consent",
   "/api/auth",
   "/api/v1",
+  // Local S3 mirror. Neither caller has a session (the View fetches from a
+  // sandbox, the watcher PUTs), and the route 404s in production anyway.
+  "/api/local-s3",
   // MCP authenticates via OAuth (or flagged PAT fallback), never a
   // session cookie — a redirect to `/login` would surface as opaque HTML
   // instead of a 401 + WWW-Authenticate challenge.

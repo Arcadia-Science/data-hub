@@ -2,6 +2,7 @@ import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import { authBaseURL } from "@/lib/auth";
 import { MCP_ADVERTISED_SCOPES } from "@/lib/mcp/advertised-scopes";
 import { verifyMcpToken } from "@/lib/mcp/auth";
+import { mcpCorsPreflight, withMcpCors } from "@/lib/mcp/cors";
 import { MCP_SERVER_INSTRUCTIONS } from "@/lib/mcp/instructions";
 import { registerPrompts } from "@/lib/mcp/prompts";
 import { registerResources } from "@/lib/mcp/resources";
@@ -49,19 +50,25 @@ async function authHandler(req: Request): Promise<Response> {
   const res = await mcpAuthHandler(req);
   const challenge = res.headers.get("WWW-Authenticate");
   if (!challenge || challenge.includes(ADVERTISED_SCOPES)) {
-    return res;
+    return withMcpCors(res);
   }
   const rewritten = challenge.replace(/scope="[^"]*"/, ADVERTISED_SCOPES);
   if (rewritten === challenge) {
-    return res;
+    return withMcpCors(res);
   }
   const headers = new Headers(res.headers);
   headers.set("WWW-Authenticate", rewritten);
-  return new Response(res.body, {
-    status: res.status,
-    statusText: res.statusText,
-    headers,
-  });
+  return withMcpCors(
+    new Response(res.body, {
+      status: res.status,
+      statusText: res.statusText,
+      headers,
+    })
+  );
+}
+
+export function OPTIONS(): Response {
+  return mcpCorsPreflight();
 }
 
 export { authHandler as GET, authHandler as POST };

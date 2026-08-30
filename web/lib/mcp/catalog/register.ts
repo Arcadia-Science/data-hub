@@ -1,5 +1,6 @@
 import { type ZodType, z } from "zod";
 import type { McpToolAnnotations } from "@/lib/mcp/catalog/types";
+import type { McpToolUiMeta } from "@/lib/mcp/ui-apps";
 
 /** Config object passed to `server.registerTool` (name is separate). */
 export function toolRegistrationConfig<
@@ -12,12 +13,14 @@ export function toolRegistrationConfig<
   inputSchema: TSchema;
   outputSchema?: TOutput;
   annotations?: TAnnotations;
+  _meta?: McpToolUiMeta;
 }): {
   title: string;
   description: string;
   inputSchema: z.ZodObject<TSchema>;
   outputSchema?: TOutput;
   annotations: TAnnotations;
+  _meta?: McpToolUiMeta;
 };
 export function toolRegistrationConfig<
   TAnnotations extends McpToolAnnotations | undefined,
@@ -28,11 +31,13 @@ export function toolRegistrationConfig<
   inputSchema?: undefined;
   outputSchema?: TOutput;
   annotations?: TAnnotations;
+  _meta?: McpToolUiMeta;
 }): {
   title: string;
   description: string;
   outputSchema?: TOutput;
   annotations: TAnnotations;
+  _meta?: McpToolUiMeta;
 };
 export function toolRegistrationConfig(def: {
   title: string;
@@ -40,6 +45,7 @@ export function toolRegistrationConfig(def: {
   inputSchema?: Record<string, ZodType>;
   outputSchema?: ZodType;
   annotations?: McpToolAnnotations;
+  _meta?: McpToolUiMeta;
 }) {
   return {
     title: def.title,
@@ -52,6 +58,7 @@ export function toolRegistrationConfig(def: {
     // Discriminated unions (e.g. get_run_archive) must stay intact.
     ...(def.outputSchema ? { outputSchema: def.outputSchema } : {}),
     annotations: def.annotations,
+    ...(def._meta ? { _meta: def._meta } : {}),
   };
 }
 

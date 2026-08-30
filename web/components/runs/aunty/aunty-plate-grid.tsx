@@ -140,12 +140,12 @@ export const AuntyPlateGrid = memo(function AuntyPlateGrid({
   const wellTrack = wide ? "4rem" : "minmax(0, 1fr)";
 
   return (
-    <div className="flex min-w-0 flex-col gap-3">
+    <div className="flex w-full min-w-0 flex-col gap-3">
       {layout.byPos.size > 0 && (
         <div
           aria-label={`${experiment.fileName} plate`}
           className={cn(
-            "min-w-0 overflow-x-auto overscroll-x-contain",
+            "w-full min-w-0 overflow-x-auto overscroll-x-contain",
             wide &&
               "rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
           )}

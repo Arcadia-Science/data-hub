@@ -57,9 +57,7 @@ export function DishcamRunDetail({
 
       <RunDetail.VideoCarousel
         initialPage={reportItems}
-        instrumentId={instrumentId}
         posterFileIds={posterFileIdsByVideoFilename(reportFiles)}
-        runId={runId}
       />
     </>
   );

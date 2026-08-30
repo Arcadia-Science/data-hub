@@ -1,6 +1,7 @@
 "use client";
 
-import { createContext, type ReactNode, use } from "react";
+import { createContext, type ReactNode, use, useEffect } from "react";
+import { useReportDataSource } from "@/components/runs/report-data-source-provider";
 import {
   type UseReportItemsResult,
   useReportItems,
@@ -17,32 +18,84 @@ export interface ReportItemsContextValue extends UseReportItemsResult {
 
 // Props every report-data viewer receives from its run-detail variant.
 export interface ReportViewerProps {
-  initialPage: ReportItemsPage;
-  instrumentId: string;
-  runId: string;
+  initialPage?: ReportItemsPage;
 }
 
 const ReportItemsContext = createContext<ReportItemsContextValue | null>(null);
 
+const ReportPersistKeyContext = createContext<string | undefined>(undefined);
+
+const ReportViewerPageContext = createContext<ReportItemsPage | null>(null);
+
+export function ReportPersistKeyProvider({
+  children,
+  persistKey,
+}: {
+  children: ReactNode;
+  persistKey: string;
+}) {
+  return (
+    <ReportPersistKeyContext.Provider value={persistKey}>
+      {children}
+    </ReportPersistKeyContext.Provider>
+  );
+}
+
+export function ReportViewerPageProvider({
+  children,
+  page,
+}: {
+  children: ReactNode;
+  page: ReportItemsPage;
+}) {
+  return (
+    <ReportViewerPageContext.Provider value={page}>
+      {children}
+    </ReportViewerPageContext.Provider>
+  );
+}
+
+export function useReportViewerPage(
+  initialPage?: ReportItemsPage
+): ReportItemsPage {
+  const fromContext = use(ReportViewerPageContext);
+  const page = initialPage ?? fromContext;
+  if (!page) {
+    throw new Error(
+      "Report viewer is missing a page. Render it inside ReportViewerPageProvider or pass initialPage."
+    );
+  }
+  return page;
+}
+
 export function ReportItemsProvider({
   children,
   initialPage,
-  instrumentId,
   kind,
-  runId,
 }: {
   children: ReactNode;
   initialPage: ReportItemsPage;
-  instrumentId: string;
   kind: ReportItemKind;
-  runId: string;
 }) {
+  const dataSource = useReportDataSource();
+  const persistKey = use(ReportPersistKeyContext);
   const { state, actions } = useReportItems({
+    fetchReportItems: dataSource.fetchReportItems,
     initialPage,
-    instrumentId,
     kind,
-    runId,
   });
+
+  useEffect(() => {
+    const fileId = state.selectedItem?.id;
+    if (!persistKey || fileId == null) {
+      return;
+    }
+    try {
+      window.localStorage.setItem(persistKey, JSON.stringify({ fileId }));
+    } catch {
+      // Private mode and quota failures are fine; restore is optional.
+    }
+  }, [persistKey, state.selectedItem?.id]);
 
   return (
     <ReportItemsContext.Provider value={{ state, actions, meta: { kind } }}>

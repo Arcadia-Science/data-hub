@@ -6,21 +6,14 @@ import { ReportItemSeeker } from "@/components/runs/report-item-seeker";
 import {
   ReportItemsProvider,
   type ReportViewerProps,
+  useReportViewerPage,
 } from "@/components/runs/report-items-provider";
 
-export function RamanReportSection({
-  initialPage,
-  instrumentId,
-  runId,
-}: ReportViewerProps) {
+export function RamanReportSection({ initialPage }: ReportViewerProps) {
+  const page = useReportViewerPage(initialPage);
   return (
-    <ReportDataShell total={initialPage.pagination.total}>
-      <ReportItemsProvider
-        initialPage={initialPage}
-        instrumentId={instrumentId}
-        kind="spectrum"
-        runId={runId}
-      >
+    <ReportDataShell total={page.pagination.total}>
+      <ReportItemsProvider initialPage={page} kind="spectrum">
         <ReportItemSeeker />
         <RamanSpectrumViewer />
       </ReportItemsProvider>

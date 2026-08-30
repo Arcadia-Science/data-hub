@@ -1,4 +1,8 @@
 import type { McpResourceDef } from "@/lib/mcp/catalog/types";
+import {
+  MCP_APP_MIME_TYPE,
+  RUN_REPORT_UI_RESOURCE_URI,
+} from "@/lib/mcp/ui-apps";
 
 export const instrumentsResource = {
   name: "instruments",
@@ -36,9 +40,19 @@ export const instrumentFilterOptionsResource = {
   uriTemplate: "datahub://instruments/{instrumentId}/filter-options",
 } as const satisfies McpResourceDef;
 
+export const runReportUiResource = {
+  name: "run-report",
+  description:
+    "MCP Apps view for a Data Hub instrument run report. Linked from get_run_report.",
+  mimeType: MCP_APP_MIME_TYPE,
+  kind: "static",
+  uri: RUN_REPORT_UI_RESOURCE_URI,
+} as const satisfies McpResourceDef;
+
 export const MCP_RESOURCE_DEFS = [
   instrumentsResource,
   meResource,
   glossaryResource,
   instrumentFilterOptionsResource,
+  runReportUiResource,
 ] as const;

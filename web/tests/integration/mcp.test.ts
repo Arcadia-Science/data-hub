@@ -11,7 +11,7 @@ import {
 } from "@/tests/integration/helpers";
 
 /** Bump when adding/removing an MCP tool so the change shows up in review. */
-const EXPECTED_MCP_TOOL_COUNT = 32;
+const EXPECTED_MCP_TOOL_COUNT = 34;
 
 function jsonRpc(method: string, params: unknown = {}, id = 1) {
   return {

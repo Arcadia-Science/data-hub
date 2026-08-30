@@ -1,0 +1,48 @@
+@import "../app/globals.css";
+
+@source "../components";
+@source "../hooks";
+@source "../lib";
+@source ".";
+
+/* Host style variables win when present; Data Hub tokens stay as fallbacks. */
+:root {
+  --background: var(--color-background-primary, oklch(1 0 0));
+  --foreground: var(--color-text-primary, oklch(0.145 0 0));
+  --card: var(--color-background-secondary, oklch(1 0 0));
+  --card-foreground: var(--color-text-primary, oklch(0.145 0 0));
+  --primary: var(--color-text-primary, oklch(0.205 0 0));
+  --primary-foreground: var(--color-text-inverse, oklch(0.985 0 0));
+  --muted: var(--color-background-secondary, #f7f7f7);
+  --muted-foreground: var(--color-text-secondary, oklch(0.556 0 0));
+  --border: var(--color-border-primary, oklch(0.922 0 0));
+  --ring: var(--color-ring-primary, oklch(0.708 0 0));
+  --radius: var(--border-radius-md, 0.625rem);
+}
+
+[data-theme="dark"] {
+  --background: var(--color-background-primary, oklch(0.145 0 0));
+  --foreground: var(--color-text-primary, oklch(0.985 0 0));
+  --card: var(--color-background-secondary, oklch(0.21 0 0));
+  --card-foreground: var(--color-text-primary, oklch(0.985 0 0));
+  --primary: var(--color-text-primary, oklch(0.922 0 0));
+  --primary-foreground: var(--color-text-inverse, oklch(0.205 0 0));
+  --muted: var(--color-background-secondary, oklch(0.269 0 0));
+  --muted-foreground: var(--color-text-secondary, oklch(0.708 0 0));
+  --border: var(--color-border-primary, oklch(1 0 0 / 10%));
+  --ring: var(--color-ring-primary, oklch(0.556 0 0));
+}
+
+/* Do not set min-height: 100% here. The SDK measures html with
+   height: max-content; stretching to the host-set iframe height made
+   that measurement follow the iframe and loop on size-changed. Width
+   is safe: size-changed reports `window.innerWidth`, not content width. */
+html,
+body,
+#root {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  color: var(--foreground);
+  background: var(--background);
+}
