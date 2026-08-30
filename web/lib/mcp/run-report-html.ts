@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { authBaseURL } from "@/lib/auth";
 
@@ -64,6 +64,7 @@ export const HELLO_WORLD_RUN_REPORT_HTML = `<!DOCTYPE html>
 `;
 
 interface HtmlCache {
+  mtimeMs: number;
   origin: string;
   rendered: string;
 }
@@ -74,13 +75,18 @@ function withOrigin(html: string, origin: string): string {
   return html.replaceAll(DATA_HUB_ORIGIN_PLACEHOLDER, origin);
 }
 
+function artifactMtimeMs(): number {
+  return existsSync(BUILT_HTML_PATH) ? statSync(BUILT_HTML_PATH).mtimeMs : 0;
+}
+
 export function resetRunReportHtmlCache(): void {
   cached = null;
 }
 
 export function loadRunReportHtml(): string {
   const origin = authBaseURL.replace(/\/$/, "");
-  if (cached && cached.origin === origin) {
+  const mtimeMs = artifactMtimeMs();
+  if (cached && cached.origin === origin && cached.mtimeMs === mtimeMs) {
     return cached.rendered;
   }
 
@@ -97,6 +103,6 @@ export function loadRunReportHtml(): string {
   }
 
   const rendered = withOrigin(readFileSync(BUILT_HTML_PATH, "utf8"), origin);
-  cached = { origin, rendered };
+  cached = { origin, mtimeMs, rendered };
   return rendered;
 }

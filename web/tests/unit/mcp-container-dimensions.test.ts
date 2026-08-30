@@ -41,4 +41,13 @@ describe("documentStylesForContainerDimensions", () => {
       overflow: "",
     });
   });
+
+  it("fills the iframe when the host only sends maxWidth", () => {
+    expect(
+      documentStylesForContainerDimensions({ maxWidth: 800 })
+    ).toMatchObject({
+      width: "100%",
+      maxWidth: "",
+    });
+  });
 });

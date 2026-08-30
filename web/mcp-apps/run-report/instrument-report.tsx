@@ -15,6 +15,7 @@ import {
 import type { ReportSectionFile } from "@/components/runs/run-report-section";
 import { RunReportSection } from "@/components/runs/run-report-section";
 import { RunSectionCard } from "@/components/runs/run-section-card";
+import { RunSectionHeading } from "@/components/runs/run-section-heading";
 import { VideoCarouselReport } from "@/components/runs/video-carousel-report";
 import type { RawWellRow } from "@/lib/api/instrument-runs";
 import type { InstrumentType } from "@/lib/db/schema";
@@ -175,10 +176,18 @@ function CarouselKindReport({
   }, [dataSource, kind, persistKey]);
 
   if (error) {
-    return <p className="text-destructive text-sm">{error}</p>;
+    return (
+      <ReportHeadingStatus>
+        <p className="text-destructive text-sm">{error}</p>
+      </ReportHeadingStatus>
+    );
   }
   if (!page) {
-    return <p className="text-muted-foreground text-sm">Loading…</p>;
+    return (
+      <ReportHeadingStatus>
+        <p className="text-muted-foreground text-sm">Loading…</p>
+      </ReportHeadingStatus>
+    );
   }
   return (
     <ReportPersistKeyProvider persistKey={persistKey}>
@@ -203,10 +212,18 @@ function AuntyReport() {
   }, [dataSource]);
 
   if (error) {
-    return <p className="text-destructive text-sm">{error}</p>;
+    return (
+      <ReportHeadingStatus>
+        <p className="text-destructive text-sm">{error}</p>
+      </ReportHeadingStatus>
+    );
   }
   if (!plate) {
-    return <p className="text-muted-foreground text-sm">Loading…</p>;
+    return (
+      <ReportHeadingStatus>
+        <p className="text-muted-foreground text-sm">Loading…</p>
+      </ReportHeadingStatus>
+    );
   }
   return (
     <AuntyPlateReport curvesFileId={plate.curvesFileId} plate={plate.plate} />
@@ -258,10 +275,18 @@ function PlateReaderReport({ result }: { result: RunReportToolResult }) {
   );
 
   if (error) {
-    return <p className="text-destructive text-sm">{error}</p>;
+    return (
+      <ReportHeadingStatus title="Plate Maps">
+        <p className="text-destructive text-sm">{error}</p>
+      </ReportHeadingStatus>
+    );
   }
   if (rows === null) {
-    return <p className="text-muted-foreground text-sm">Loading…</p>;
+    return (
+      <ReportHeadingStatus title="Plate Maps">
+        <p className="text-muted-foreground text-sm">Loading…</p>
+      </ReportHeadingStatus>
+    );
   }
   if (rows.length === 0 || groups.length === 0) {
     return (
@@ -280,7 +305,7 @@ function PlateReaderReport({ result }: { result: RunReportToolResult }) {
       count={groups.length}
       title="Plate Maps"
     >
-      <div className="flex min-w-0 flex-col gap-10">
+      <div className="flex w-full min-w-0 flex-col gap-10">
         {groups.map((group, index) =>
           group.mode === "kinetic" ? (
             <PlateMapWithIndexSlider
@@ -304,5 +329,20 @@ function PlateReaderReport({ result }: { result: RunReportToolResult }) {
         )}
       </div>
     </RunSectionCard>
+  );
+}
+
+function ReportHeadingStatus({
+  children,
+  title = "Report Data",
+}: {
+  children: ReactNode;
+  title?: string;
+}) {
+  return (
+    <div className="flex w-full min-w-0 flex-col gap-2">
+      <RunSectionHeading title={title} />
+      {children}
+    </div>
   );
 }

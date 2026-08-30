@@ -48,16 +48,18 @@ export function documentStylesForContainerDimensions(
     styles.overflow = "auto";
   }
 
-  if ("width" in dimensions && typeof dimensions.width === "number") {
-    // Fill the host-controlled iframe. `100vw` includes the scrollbar gutter
-    // and can start a horizontal overflow loop with `overflow: auto`.
-    styles.width = "100%";
-  } else if (
-    "maxWidth" in dimensions &&
-    typeof dimensions.maxWidth === "number" &&
-    dimensions.maxWidth > 0
+  // The host already sized the iframe. `maxWidth` is a hint about that
+  // container, not a box we should paint inside a wider frame — applying it
+  // left a gap around plate maps in Cursor's inline View.
+  if (
+    ("width" in dimensions && typeof dimensions.width === "number") ||
+    ("maxWidth" in dimensions &&
+      typeof dimensions.maxWidth === "number" &&
+      dimensions.maxWidth > 0)
   ) {
-    styles.maxWidth = `${dimensions.maxWidth}px`;
+    // `100vw` includes the scrollbar gutter and can start a horizontal
+    // overflow loop with `overflow: auto`.
+    styles.width = "100%";
   }
 
   return styles;

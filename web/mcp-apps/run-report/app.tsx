@@ -1,8 +1,10 @@
 import type { App } from "@modelcontextprotocol/ext-apps";
 import { useApp, useHostStyles } from "@modelcontextprotocol/ext-apps/react";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { ExternalLink } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ReportDataSourceProvider } from "@/components/runs/report-data-source-provider";
+import { RunSectionActionsProvider } from "@/components/runs/run-section-heading";
 import { runDetailUrl } from "./data-hub-origin";
 import {
   persistKey,
@@ -115,22 +117,6 @@ function ConnectedReport({
     };
   }, [app]);
 
-  const openRun = useCallback(async () => {
-    const url = runDetailUrl(result.instrumentId, result.runId);
-    if (app.getHostCapabilities()?.openLinks) {
-      try {
-        const response = await app.openLink({ url });
-        if (response.isError) {
-          setLinkFallback(url);
-        }
-      } catch {
-        setLinkFallback(url);
-      }
-      return;
-    }
-    setLinkFallback(url);
-  }, [app, result.instrumentId, result.runId]);
-
   const toggleFullscreen = useCallback(async () => {
     const hostModes = app.getHostContext()?.availableDisplayModes ?? [];
     const next = displayMode === "inline" ? "fullscreen" : "inline";
@@ -149,21 +135,22 @@ function ConnectedReport({
     app.getHostContext()?.availableDisplayModes ?? []
   ).includes(displayMode === "inline" ? "fullscreen" : "inline");
 
+  const openInDataHub = (
+    <a
+      className="inline-flex items-center gap-1.5 font-semibold text-sm hover:underline"
+      href={runDetailUrl(result.instrumentId, result.runId)}
+      rel="noopener noreferrer"
+      target="_blank"
+    >
+      Open in Data Hub
+      <ExternalLink aria-hidden="true" className="size-3.5" />
+    </a>
+  );
+
   return (
-    <div className="flex flex-col gap-3 p-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          className="rounded-md border px-2 py-1 text-sm"
-          onClick={() => {
-            void openRun().catch(() => {
-              setLinkFallback(runDetailUrl(result.instrumentId, result.runId));
-            });
-          }}
-          type="button"
-        >
-          Open in Data Hub
-        </button>
-        {canToggle ? (
+    <div className="flex w-full min-w-0 flex-col gap-3 p-3">
+      {canToggle ? (
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <button
             className="rounded-md border px-2 py-1 text-sm"
             onClick={() => {
@@ -175,16 +162,18 @@ function ConnectedReport({
           >
             {displayMode === "fullscreen" ? "Exit fullscreen" : "Fullscreen"}
           </button>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
       {linkFallback ? (
         <p className="break-all text-muted-foreground text-xs">
           {linkFallback}
         </p>
       ) : null}
-      <ReportDataSourceProvider dataSource={dataSource}>
-        <InstrumentReport persistKey={storageKey} result={result} />
-      </ReportDataSourceProvider>
+      <RunSectionActionsProvider actions={openInDataHub}>
+        <ReportDataSourceProvider dataSource={dataSource}>
+          <InstrumentReport persistKey={storageKey} result={result} />
+        </ReportDataSourceProvider>
+      </RunSectionActionsProvider>
     </div>
   );
 }

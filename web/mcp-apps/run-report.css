@@ -35,10 +35,13 @@
 
 /* Do not set min-height: 100% here. The SDK measures html with
    height: max-content; stretching to the host-set iframe height made
-   that measurement follow the iframe and loop on size-changed. */
+   that measurement follow the iframe and loop on size-changed. Width
+   is safe: size-changed reports `window.innerWidth`, not content width. */
 html,
 body,
 #root {
+  width: 100%;
+  max-width: 100%;
   margin: 0;
   color: var(--foreground);
   background: var(--background);

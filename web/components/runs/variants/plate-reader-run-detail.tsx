@@ -49,7 +49,7 @@ function PlateMapSection({
       count={groups.length}
       title="Plate Maps"
     >
-      <div className="flex min-w-0 flex-col gap-10">
+      <div className="flex w-full min-w-0 flex-col gap-10">
         {groups.map((g, i) =>
           g.mode === "kinetic" ? (
             <PlateMapWithIndexSlider

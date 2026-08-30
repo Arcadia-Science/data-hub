@@ -3,6 +3,9 @@
 // bytes there on PUT. The matching dispatch lives in `web/lib/s3-local-mirror.ts`,
 // which `web/lib/s3.ts` calls into when the env var is set.
 //
+// GET/HEAD (and 404s) carry `*` CORS so the MCP Apps sandbox can `fetch`
+// CSV/JSON the same way it reads the real buckets. PUT stays same-origin.
+//
 // Gating: `getLocalMirrorRoot()` returns `null` whenever
 // `NODE_ENV === "production"` OR `LOCAL_S3_MIRROR` is unset. All
 // handlers short-circuit to a 404 in that case, so a production
@@ -26,12 +29,21 @@ import {
   parseByteRange,
   resolveMirrorPath,
 } from "@/lib/s3-local-mirror";
+import {
+  localS3CorsPreflight,
+  withLocalS3Cors,
+} from "@/lib/s3-local-mirror-cors";
 
 interface RouteContext {
   params: Promise<{ bucket: string; key: string[] }>;
 }
 
-const NOT_FOUND_RESPONSE = () => new Response("Not Found", { status: 404 });
+const NOT_FOUND_RESPONSE = () =>
+  withLocalS3Cors(new Response("Not Found", { status: 404 }));
+
+export function OPTIONS() {
+  return localS3CorsPreflight();
+}
 
 async function locateMirrorFile(
   params: RouteContext["params"],
@@ -80,14 +92,16 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
   const length = range.kind === "unsatisfiable" ? 0 : end - start + 1;
 
   if (range.kind === "unsatisfiable") {
-    return new Response("Range Not Satisfiable", {
-      status: 416,
-      headers: {
-        "Content-Range": `bytes */${fileSize}`,
-        "Accept-Ranges": "bytes",
-        "Cache-Control": "no-store",
-      },
-    });
+    return withLocalS3Cors(
+      new Response("Range Not Satisfiable", {
+        status: 416,
+        headers: {
+          "Content-Range": `bytes */${fileSize}`,
+          "Accept-Ranges": "bytes",
+          "Cache-Control": "no-store",
+        },
+      })
+    );
   }
 
   // `Readable.toWeb` returns the `node:stream/web` `ReadableStream` type,
@@ -98,19 +112,21 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     createReadStream(filePath, range.kind === "partial" ? { start, end } : {})
   ) as unknown as ReadableStream;
 
-  return new Response(body, {
-    status: range.kind === "partial" ? 206 : 200,
-    headers: {
-      "Content-Type": mimeFor(filePath),
-      "Content-Length": String(range.kind === "partial" ? length : fileSize),
-      "Accept-Ranges": "bytes",
-      ...(range.kind === "partial" && {
-        "Content-Range": `bytes ${start}-${end}/${fileSize}`,
-      }),
-      ...(disposition && { "Content-Disposition": disposition }),
-      "Cache-Control": "no-store",
-    },
-  });
+  return withLocalS3Cors(
+    new Response(body, {
+      status: range.kind === "partial" ? 206 : 200,
+      headers: {
+        "Content-Type": mimeFor(filePath),
+        "Content-Length": String(range.kind === "partial" ? length : fileSize),
+        "Accept-Ranges": "bytes",
+        ...(range.kind === "partial" && {
+          "Content-Range": `bytes ${start}-${end}/${fileSize}`,
+        }),
+        ...(disposition && { "Content-Disposition": disposition }),
+        "Cache-Control": "no-store",
+      },
+    })
+  );
 }
 
 // Safari (and some Chrome probes) send HEAD before Range GET. Mirror S3:
@@ -123,16 +139,18 @@ export async function HEAD(request: NextRequest, { params }: RouteContext) {
   const { filePath, fileSize } = located;
   const disposition = new URL(request.url).searchParams.get("disposition");
 
-  return new Response(null, {
-    status: 200,
-    headers: {
-      "Content-Type": mimeFor(filePath),
-      "Content-Length": String(fileSize),
-      "Accept-Ranges": "bytes",
-      ...(disposition && { "Content-Disposition": disposition }),
-      "Cache-Control": "no-store",
-    },
-  });
+  return withLocalS3Cors(
+    new Response(null, {
+      status: 200,
+      headers: {
+        "Content-Type": mimeFor(filePath),
+        "Content-Length": String(fileSize),
+        "Accept-Ranges": "bytes",
+        ...(disposition && { "Content-Disposition": disposition }),
+        "Cache-Control": "no-store",
+      },
+    })
+  );
 }
 
 export async function PUT(request: NextRequest, { params }: RouteContext) {
