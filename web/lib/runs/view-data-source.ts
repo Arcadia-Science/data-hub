@@ -11,27 +11,26 @@ export interface ReportFileRef {
   url: string;
 }
 
-// Contract shared by the Next.js run page (REST) and the MCP Apps View.
-// Both fetch file bytes straight from S3 and parse them in the browser, so
-// neither one streams a CSV or a JSON artifact through the server.
+// Shared by the Next.js run page (REST) and the MCP Apps View. Both read file
+// bytes straight from S3 and parse them in the browser, never via the server.
 // biome-ignore assist/source/useSortedInterfaceMembers: keep the published method order
 export interface ReportDataSource {
+  // `signal` is optional so an implementation may ignore it; callers must
+  // still discard a resolved page they no longer want.
   fetchReportItems(args: {
     kind: ReportItemKind;
     offset: number;
     limit: number;
     search?: string;
     anchor?: number;
+    signal?: AbortSignal;
   }): Promise<ReportItemsPage>;
-  // Whole file, parsed. Callers chart or index every row, and both sources
-  // cache per file id, so there is nothing to gain from paging here.
+  // Whole file, parsed. Callers read every row and both sources cache per
+  // file id, so paging would buy nothing.
   fetchTableRows(fileId: number): Promise<ReportTableRows>;
   resolveFileUrl(fileId: number): Promise<string> | string;
-  // Synchronous cache/path lookup for render. The MCP source is async, so
-  // calling `resolveFileUrl` during render would allocate a Promise every
-  // time. REST implements this as the download path.
+  // Safe to call during render, unlike the async `resolveFileUrl`.
   peekFileUrl?(fileId: number): string | null;
-  // Find one file on the run by filename suffix. Only the View implements
-  // this; the web app resolves artifacts on the server and passes them in.
+  // View only. The web app resolves artifacts on the server instead.
   resolveFileBySuffix?(suffix: string): Promise<ReportFileRef>;
 }

@@ -1,20 +1,6 @@
-// Local-only S3 mirror endpoint. Serves bytes from
-// `<LOCAL_S3_MIRROR>/<bucket>/<key>` on GET, metadata on HEAD, and writes
-// bytes there on PUT. The matching dispatch lives in `web/lib/s3-local-mirror.ts`,
-// which `web/lib/s3.ts` calls into when the env var is set.
-//
-// GET/HEAD (and 404s) carry `*` CORS so the MCP Apps sandbox can `fetch`
-// CSV/JSON the same way it reads the real buckets. PUT stays same-origin.
-//
-// Gating: `getLocalMirrorRoot()` returns `null` whenever
-// `NODE_ENV === "production"` OR `LOCAL_S3_MIRROR` is unset. All
-// handlers short-circuit to a 404 in that case, so a production
-// build can never expose the filesystem even if the file is somehow
-// included in the bundle.
-//
-// Runtime: stays on the default Node.js runtime — `fs` is unavailable
-// on the Edge runtime and there's no production deployment story for
-// this route anyway.
+// Local-only S3 mirror: reads and writes `<LOCAL_S3_MIRROR>/<bucket>/<key>`,
+// with `*` CORS on GET/HEAD so the MCP Apps sandbox can fetch the files. Every
+// handler 404s in production, so a real build can never read the filesystem.
 
 import { createReadStream, createWriteStream } from "node:fs";
 import { mkdir, stat } from "node:fs/promises";

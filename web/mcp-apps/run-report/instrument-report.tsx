@@ -72,9 +72,8 @@ function firstProcessedCsv(files: ReportFileRef[]): ReportFileRef | undefined {
   return files.find((file) => file.category === "processed" && isCsvFile(file));
 }
 
-// Mirrors `getAuntyPlateData`, which the web app runs on the server. Here the
-// plate JSON and the curves file are two `report_view_file_url` lookups and
-// the body is read straight from S3, so the bytes skip the server entirely.
+// Browser-side twin of `getAuntyPlateData`, which the web app runs on the
+// server. Here the file bodies are read from S3 and skip the server entirely.
 async function loadAuntyPlate(
   dataSource: ReportDataSource
 ): Promise<AuntyPlateData> {
@@ -89,8 +88,7 @@ async function loadAuntyPlate(
   }
   const plate = parseAuntyPlateJson(await response.json());
 
-  // Optional: an isothermal export has no curves file, and the dialog just
-  // renders without a chart in that case.
+  // An isothermal export has no curves file; the dialog then omits the chart.
   const curves = await resolveBySuffix("_aunty_curves.csv").catch(() => null);
   return { plate, curvesFileId: curves?.id ?? null };
 }

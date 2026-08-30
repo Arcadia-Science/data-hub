@@ -76,17 +76,21 @@ export function useReportItems({
   const selectedItem = items[selectedIndex - offset] ?? null;
 
   const fetchWindow = useCallback(
-    (params: {
-      anchor?: number;
-      offset: number;
-      search: string;
-    }): Promise<ReportItemsPage> =>
+    (
+      params: {
+        anchor?: number;
+        offset: number;
+        search: string;
+      },
+      signal: AbortSignal
+    ): Promise<ReportItemsPage> =>
       fetchReportItems({
         kind,
         offset: params.offset,
         limit: REPORT_ITEMS_WINDOW,
         search: params.search || undefined,
         anchor: params.anchor,
+        signal,
       }),
     [fetchReportItems, kind]
   );
@@ -105,7 +109,7 @@ export function useReportItems({
       return;
     }
     const controller = new AbortController();
-    fetchWindow({ offset: 0, search: query })
+    fetchWindow({ offset: 0, search: query }, controller.signal)
       .then((page) => {
         if (controller.signal.aborted) {
           return;
@@ -148,10 +152,10 @@ export function useReportItems({
         const nextOffset = isForward
           ? offset + items.length
           : Math.max(0, offset - REPORT_ITEMS_WINDOW);
-        const page = await fetchWindow({
-          offset: nextOffset,
-          search: query,
-        });
+        const page = await fetchWindow(
+          { offset: nextOffset, search: query },
+          controller.signal
+        );
         if (controller.signal.aborted) {
           return entry;
         }
@@ -247,8 +251,13 @@ export function useReportItems({
         return;
       }
 
+      // Shares the extend controller: both load one window for the current
+      // query, so the later action should cancel the earlier one, and unmount
+      // cancels whichever is outstanding.
+      busyControllerRef.current?.abort();
       const controller = new AbortController();
-      void fetchWindow({ anchor, offset: 0, search: "" })
+      busyControllerRef.current = controller;
+      void fetchWindow({ anchor, offset: 0, search: "" }, controller.signal)
         .then((page) => {
           if (controller.signal.aborted) {
             return;

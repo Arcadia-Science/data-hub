@@ -56,6 +56,29 @@ describe("createMcpReportDataSource", () => {
     expect(source.peekFileUrl?.(7)).toBeNull();
   });
 
+  // The host can drop a superseded `tools/call` only if the signal reaches it.
+  it("passes the caller's abort signal to the tool call", async () => {
+    const callServerTool = vi.fn().mockResolvedValue(
+      okResult({
+        data: [],
+        pagination: { limit: 50, offset: 0, total: 0 },
+      })
+    );
+    const source = makeSource(callServerTool);
+    const controller = new AbortController();
+
+    await source.fetchReportItems({
+      kind: "image",
+      offset: 0,
+      limit: 50,
+      signal: controller.signal,
+    });
+
+    expect(callServerTool.mock.calls[0][1]).toEqual({
+      signal: controller.signal,
+    });
+  });
+
   // One call, not one per item kind: the tool takes a file id directly.
   it("resolves an uncached file id with a single tool call", async () => {
     const callServerTool = vi

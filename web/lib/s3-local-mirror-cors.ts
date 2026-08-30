@@ -1,6 +1,5 @@
-// Same `*` GET CORS the real buckets declare in `infra/template.yaml`.
-// The MCP Apps View `fetch`es CSV and JSON from `/api/local-s3` inside a
-// host-chosen sandbox origin, so the origin cannot be allowlisted.
+// Same `*` GET CORS the real buckets declare in `infra/template.yaml`. The
+// View's sandbox origin is picked by the host, so it cannot be allowlisted.
 
 export const LOCAL_S3_CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",

@@ -20,8 +20,8 @@ export function ReportDataSourceProvider({
   );
 }
 
-// Created here rather than on the server page because the source is a bag of
-// functions and cannot cross the server/client boundary as a prop.
+// Built here, not on the server page, because the source is made of functions
+// and functions cannot be passed from a server component as a prop.
 export function RestReportDataSourceProvider({
   children,
   instrumentId,

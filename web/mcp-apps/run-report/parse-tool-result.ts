@@ -18,9 +18,8 @@ function asRunReport(payload: unknown): RunReportToolResult | null {
   };
 }
 
-// Single pass over structured content, then one JSON parse of the text
-// block. A recursive fallback would stack-overflow when the text parses
-// but still lacks identifiers.
+// Deliberately not recursive: a self-call would never stop when the text
+// block parses cleanly but still has no run identifiers in it.
 export function parseRunReportToolResult(
   result: CallToolResult
 ): RunReportToolResult | null {

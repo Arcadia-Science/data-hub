@@ -13,9 +13,8 @@ interface CachedUrl {
   url: string;
 }
 
-// Keep in lockstep with `PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS` in
-// `lib/s3.ts`. Do not import that module — it pulls the AWS SDK into
-// the View bundle. Refresh at 80% of the 15-minute lifetime.
+// 80% of `PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS` in `lib/s3.ts`, copied rather
+// than imported because that module pulls the AWS SDK into the View bundle.
 export const URL_CACHE_TTL_MS = 15 * 60 * 1000 * 0.8;
 
 function structuredPayload<T>(result: CallToolResult): T {
@@ -59,9 +58,8 @@ function writeCachedUrl(
 }
 
 async function fetchText(url: string, what: string): Promise<string> {
-  // Reaches S3 directly. The resource's `connectDomains` names those origins
-  // and the buckets carry a `*` CORS rule, so the body is readable here and
-  // the bytes never pass through the server.
+  // Reaches S3 directly, so the bytes never pass through the server. The
+  // resource's `connectDomains` and the buckets' `*` CORS rule allow it.
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to load ${what} (HTTP ${response.status})`);
@@ -94,19 +92,24 @@ export function createMcpReportDataSource(args: {
   }
 
   const source: ReportDataSource = {
-    async fetchReportItems({ kind, offset, limit, search, anchor }) {
-      const result = await args.app.callServerTool({
-        name: "report_view_items",
-        arguments: {
-          instrumentId: args.instrumentId,
-          runId: args.runId,
-          kind,
-          offset,
-          limit,
-          search,
-          anchor,
+    async fetchReportItems({ kind, offset, limit, search, anchor, signal }) {
+      // Aborting makes the SDK notify the host so it can drop the in-flight
+      // `tools/call` instead of waiting on a window nobody will read.
+      const result = await args.app.callServerTool(
+        {
+          name: "report_view_items",
+          arguments: {
+            instrumentId: args.instrumentId,
+            runId: args.runId,
+            kind,
+            offset,
+            limit,
+            search,
+            anchor,
+          },
         },
-      });
+        { signal }
+      );
       const payload = structuredPayload<ReportItemsPage>(result);
       for (const item of payload.data) {
         const withUrl = item as { id: number; downloadUrl?: string };

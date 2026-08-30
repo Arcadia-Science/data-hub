@@ -62,8 +62,8 @@ Resources:
       # Block Public Access follows the S3 account default: the CI deploy role
       # can't call `s3:PutBucketPublicAccessBlock`, so pinning it breaks deploys.
 
-      # Browsers `fetch()` CSVs here, and the MCP Apps sandbox origin is chosen
-      # by the host, so `*`. Objects stay private behind presigned URLs.
+      # Browsers fetch CSVs here from a sandbox origin the MCP host picks, so
+      # it has to be `*`. Objects stay private behind presigned URLs.
       CorsConfiguration:
         CorsRules:
           - AllowedMethods:
@@ -115,7 +115,7 @@ Resources:
           Value: arcadia-data-hub
 
   # Cache for run-archive zips built by the Lambda. Objects expire after a week
-  # and rebuild on demand; browsers are 302'd to S3, never served through Vercel.
+  # and rebuild on demand; browsers are redirected to S3, never through Vercel.
   ArchivesBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
@@ -242,7 +242,8 @@ Resources:
           DATA_HUB_API_KEY: !Ref DataHubApiKey
 
   # ---- S3 → Lambda event wiring ----
-  # Explicit resources, not SAM Events: a same-template bucket and function cycle.
+  # Wired explicitly rather than with SAM Events, which would make the bucket
+  # and the function in this template depend on each other in a loop.
 
   S3InvokeLambdaPermission:
     Type: AWS::Lambda::Permission

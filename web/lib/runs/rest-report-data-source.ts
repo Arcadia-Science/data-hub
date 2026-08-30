@@ -9,9 +9,8 @@ function restFileUrl(fileId: number): string {
   return `/api/v1/files/${fileId}/download`;
 }
 
-// Browser-side source for the Next.js run page. Closures hold the natural-key
-// route ids; `resolveFileBySuffix` is unimplemented here because artifacts are
-// loaded on the server and passed into the page as props.
+// Browser-side source for the Next.js run page. `resolveFileBySuffix` is left
+// out because the server resolves artifacts and passes them in as props.
 export function createRestReportDataSource(args: {
   instrumentId: string;
   runId: string;
@@ -19,7 +18,7 @@ export function createRestReportDataSource(args: {
   const tableCache = new Map<number, ReportTableRows>();
 
   return {
-    async fetchReportItems({ kind, offset, limit, search, anchor }) {
+    async fetchReportItems({ kind, offset, limit, search, anchor, signal }) {
       const response = await fetch(
         reportItemsUrl(args.instrumentId, args.runId, {
           kind,
@@ -27,7 +26,8 @@ export function createRestReportDataSource(args: {
           limit,
           search: search ?? "",
           anchor,
-        })
+        }),
+        { signal }
       );
       if (!response.ok) {
         throw new Error(`Failed to load report items (${response.status})`);
@@ -40,9 +40,8 @@ export function createRestReportDataSource(args: {
       if (cached) {
         return cached;
       }
-      // The download endpoint 302-redirects to a short-lived presigned S3
-      // URL, so the CSV bytes flow straight from S3 to the browser with zero
-      // Vercel Fast Origin Transfer.
+      // This endpoint redirects to a presigned S3 URL, so the CSV bytes go
+      // straight from S3 to the browser and skip Vercel's transfer bill.
       const res = await fetch(restFileUrl(fileId));
       if (!res.ok) {
         throw new Error(`Failed to load table (HTTP ${res.status})`);

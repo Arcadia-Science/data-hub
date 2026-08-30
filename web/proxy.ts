@@ -17,11 +17,8 @@ const publicPrefixes = [
   "/consent",
   "/api/auth",
   "/api/v1",
-  // Local S3 mirror. GET/HEAD must stay public: the MCP Apps View loads
-  // bytes from a cross-origin sandbox with no session cookie. PUT is
-  // public too because local presigned uploads (watcher, fixture
-  // processing) have no session. The route 404s when the mirror is
-  // unset or `NODE_ENV` is production, so this never writes in prod.
+  // Local S3 mirror. Neither caller has a session (the View fetches from a
+  // sandbox, the watcher PUTs), and the route 404s in production anyway.
   "/api/local-s3",
   // MCP authenticates via OAuth (or flagged PAT fallback), never a
   // session cookie — a redirect to `/login` would surface as opaque HTML

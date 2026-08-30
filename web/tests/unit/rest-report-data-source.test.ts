@@ -29,10 +29,39 @@ describe("createRestReportDataSource", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/instruments/inst-1/runs/run-1/report-items?kind=image&offset=0&limit=50&search=gel"
+      "/api/v1/instruments/inst-1/runs/run-1/report-items?kind=image&offset=0&limit=50&search=gel",
+      { signal: undefined }
     );
     expect(source.resolveFileUrl(42)).toBe("/api/v1/files/42/download");
     expect(source.peekFileUrl?.(42)).toBe("/api/v1/files/42/download");
+  });
+
+  // Without this the seeker's debounced search leaves one full request per
+  // keystroke running to completion.
+  it("passes the caller's abort signal to fetch", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: [],
+        pagination: { limit: 50, offset: 0, total: 0 },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const source = createRestReportDataSource({
+      instrumentId: "inst-1",
+      runId: "run-1",
+    });
+    const controller = new AbortController();
+
+    await source.fetchReportItems({
+      kind: "image",
+      offset: 0,
+      limit: 50,
+      signal: controller.signal,
+    });
+
+    expect(fetchMock.mock.calls[0][1]).toEqual({ signal: controller.signal });
   });
 
   it("parses a CSV once and caches every row", async () => {

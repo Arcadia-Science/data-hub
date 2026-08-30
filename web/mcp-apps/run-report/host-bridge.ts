@@ -24,9 +24,8 @@ const EMPTY_SIZE_STYLES: DocumentSizeStyles = {
   maxWidth: "",
 };
 
-// The spec's View Behavior snippet sets height/maxHeight/width/maxWidth on
-// `document.documentElement`. Overflow is not in that snippet, but without it
-// a capped View paints past the box and the host iframe clips the rest.
+// The spec's View Behavior snippet omits `overflow`, but without it a capped
+// View paints past the box and the host iframe clips the rest.
 export function documentStylesForContainerDimensions(
   dimensions: HostContainerDimensions | undefined
 ): DocumentSizeStyles {
@@ -48,9 +47,8 @@ export function documentStylesForContainerDimensions(
     styles.overflow = "auto";
   }
 
-  // The host already sized the iframe. `maxWidth` is a hint about that
-  // container, not a box we should paint inside a wider frame — applying it
-  // left a gap around plate maps in Cursor's inline View.
+  // `maxWidth` describes the host's container, not a box to paint inside.
+  // Applying it left a gap around plate maps in Cursor's inline View.
   if (
     ("width" in dimensions && typeof dimensions.width === "number") ||
     ("maxWidth" in dimensions &&

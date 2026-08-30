@@ -31,9 +31,8 @@ const COMPACT_PLATE_MAX_COLS = 12;
 /** Floor so 24-column plates stay readable instead of shrinking to fit. */
 const WIDE_PLATE_WELL_TRACK = "4rem";
 
-// `cqw` follows the plate box, not the viewport — the same map sits in a
-// wide run page and a narrow MCP iframe. Well text uses the plate, not the
-// cell: a cell container makes `cqw` cyclic with `aspect-square` tracks.
+// Sized against the plate box, not the viewport, because the same map renders
+// in a wide run page and a narrow MCP iframe. Per-cell sizing would be cyclic.
 const PLATE_META_TEXT = "text-[length:clamp(0.75rem,2.2cqw,0.875rem)]";
 const PLATE_AXIS_TEXT = "text-[length:clamp(0.5rem,1.8cqw,0.875rem)]";
 const PLATE_SCALE_TEXT = "text-[length:clamp(0.4375rem,1.6cqw,0.75rem)]";

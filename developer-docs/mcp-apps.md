@@ -83,7 +83,7 @@ The seven instrument renderers used to call `fetch("/api/v1/…")` directly, whi
 
 | Method | What it does |
 | --- | --- |
-| `fetchReportItems` | Returns one window of report items for a kind. |
+| `fetchReportItems` | Returns one window of report items for a kind. Takes an optional `AbortSignal`. |
 | `fetchTableRows` | Returns every parsed row of a CSV, cached per file ID. |
 | `resolveFileUrl` | Returns a URL for a file's bytes, possibly asynchronously. |
 | `peekFileUrl` | Returns a URL synchronously if one is already known, so a component can paint during render. |
@@ -95,6 +95,8 @@ Two implementations exist:
 - `web/mcp-apps/run-report/mcp-data-source.ts` backs the View. It calls tools to locate files and `fetch`es the bytes itself, keeping the same URL and row caches.
 
 `fetchTableRows` returns the whole file rather than a page because every caller charts or indexes all of it, and both sources cache per file ID, so paging would only add round trips.
+
+`fetchReportItems` takes an `AbortSignal` because the seeker's search box refires on a 300 ms debounce and its paging buttons can be held down. The REST source hands the signal to `fetch`; the View hands it to `callServerTool`, which tells the host to drop the in-flight `tools/call`. The signal is optional, so `useReportItems` still checks `signal.aborted` after a page resolves rather than trusting that a cancelled request never lands.
 
 `peekFileUrl` exists because the MCP source is asynchronous. Calling `resolveFileUrl` during render would allocate a new Promise on every render, and using that Promise as an effect dependency caused a render loop during development. Only the effect in `useResolvedFileUrl`, keyed on the file ID, is allowed to call `resolveFileUrl`.
 
@@ -152,7 +154,7 @@ The host builds the sandbox iframe's policy out of what the server declares on t
 
 `runReportUiMeta` in `web/lib/mcp/ui-csp.ts` puts the same origin list in all three fields: `resourceDomains` for images and video, `frameDomains` for the nested PDF preview, and `connectDomains` for the `fetch` calls that read CSV and JSON bodies. The list is the raw-data and processed bucket origins, plus `authBaseURL`, `http://localhost:3000`, and `http://127.0.0.1:3000` outside production. It drops the S3 hosts entirely when `LOCAL_S3_MIRROR` is set, because the mirror serves bytes from the app's own origin.
 
-Both buckets matter: a run's files live in the raw bucket or the processed one depending on the row's `s3_bucket`, and processed artifacts are most of what the report renders. That is why the deploy needs `S3_PROCESSED_BUCKET` set even though download URLs never read it. Archives are zips the View never renders, so they stay out. The `fetch` calls also need bucket-side CORS, which `infra/template.yaml` grants with a `*` GET rule — the sandbox origin is chosen by the host and cannot be allowlisted ahead of time.
+Both buckets matter: a run's files live in the raw bucket or the processed one depending on the row's `s3_bucket`, and processed artifacts are most of what the report renders. That is why the deploy needs `S3_PROCESSED_BUCKET` set even though download URLs never read it. An unset bucket logs a warning naming the variable, once per process, because the only other symptom is blank images in someone else's chat client. It does not throw: `mcp-handler` rebuilds the server on every request, so throwing here would take down every tool rather than just the View. Archives are zips the View never renders, so they stay out. The `fetch` calls also need bucket-side CORS, which `infra/template.yaml` grants with a `*` GET rule — the sandbox origin is chosen by the host and cannot be allowlisted ahead of time.
 
 The bucket origin comes from `s3BucketOrigin` in `web/lib/s3.ts`, which sits beside the `S3Client` so that setting `endpoint` or `forcePathStyle` on the client forces an update in the same file. Composing it as a string keeps `runReportUiMeta` synchronous, and that matters: `registerResource` attaches the policy to the `resources/list` entry and the `resources/read` body from the same call, and it cannot await anything before the listing.
 

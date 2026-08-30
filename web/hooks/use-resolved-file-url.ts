@@ -11,11 +11,8 @@ export function peekSyncFileUrl(
   return dataSource.peekFileUrl?.(fileId) ?? undefined;
 }
 
-// REST exposes `peekFileUrl` so the carousel can paint the path during
-// render. The View's MCP source is async — calling it during render
-// would allocate a new Promise every time and loop if that Promise
-// were an effect dependency. Only the effect, keyed on `fileId`,
-// may call `resolveFileUrl`.
+// Only the effect may call `resolveFileUrl`: the View's MCP source is async,
+// so calling it during render allocates a new Promise every pass and loops.
 export function useResolvedFileUrl(
   fileId: number | null | undefined
 ): string | null {

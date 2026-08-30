@@ -41,11 +41,8 @@ const s3 = new S3Client({
     : undefined,
 });
 
-// Origin `getPresignedDownloadUrl` signs against, for callers that must name
-// it up front — the MCP Apps content security policy has to list every origin
-// the View loads bytes from. Kept beside the client so adding `endpoint` or
-// `forcePathStyle` above forces an update here. A bucket name containing dots
-// would get path style from the SDK instead; Data Hub's are dash-separated.
+// Origin `getPresignedDownloadUrl` signs against, named up front for the MCP
+// Apps policy. Adding `endpoint` or `forcePathStyle` above means changing this.
 export function s3BucketOrigin(bucket: string): string {
   return `https://${bucket}.s3.${s3Region()}.amazonaws.com`;
 }

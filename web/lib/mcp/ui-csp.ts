@@ -9,21 +9,42 @@ function localDevOrigins(): string[] {
   return [authBaseURL, "http://localhost:3000", "http://127.0.0.1:3000"];
 }
 
+// A run's files split across these two, so leaving either one out breaks half
+// the report. Archives are never rendered.
+const BUCKET_ENV_VARS = ["S3_RAW_DATA_BUCKET", "S3_PROCESSED_BUCKET"] as const;
+
+const warnedEnvVars = new Set<string>();
+
+// An unset bucket produces a policy that blocks its files, and the only
+// symptom is blank images in someone else's chat client. This cannot throw:
+// `mcp-handler` rebuilds the server per request, so a throw here would take
+// down every tool, not just the View. Warn instead, once per process rather
+// than once per request.
+function warnMissingBucket(envVar: string): void {
+  if (warnedEnvVars.has(envVar)) {
+    return;
+  }
+  warnedEnvVars.add(envVar);
+  console.warn(
+    `${envVar} is not set, so the MCP run report View is not allowed to load files from that bucket. See developer-docs/mcp-apps.md#content-security-policy.`
+  );
+}
+
+export function resetRunReportUiCspWarnings(): void {
+  warnedEnvVars.clear();
+}
+
 function runReportUiCspDomains(): string[] {
   const origins = new Set<string>();
-  // The local mirror serves file bytes from the app's own origin, which
-  // `localDevOrigins` already covers, so the S3 hosts are dead weight there.
+  // The local mirror serves bytes from the app's own origin, already in
+  // `localDevOrigins`, so the S3 hosts are dead weight there.
   if (!getLocalMirrorRoot()) {
-    // A run's files sit in the raw bucket (instrument output) or the
-    // processed bucket (Lambda artifacts) — `files.s3_bucket` decides per
-    // row, so both origins have to be listed or half the report fails to
-    // load. Archives are zips the View never renders, so they stay out.
-    for (const bucket of [
-      process.env.S3_RAW_DATA_BUCKET,
-      process.env.S3_PROCESSED_BUCKET,
-    ]) {
+    for (const envVar of BUCKET_ENV_VARS) {
+      const bucket = process.env[envVar];
       if (bucket) {
         origins.add(s3BucketOrigin(bucket));
+      } else {
+        warnMissingBucket(envVar);
       }
     }
   }
@@ -33,9 +54,8 @@ function runReportUiCspDomains(): string[] {
   return [...origins];
 }
 
-// Synchronous on purpose. `registerResource` needs this for `resources/list`
-// before it can await anything, so an async source would advertise an empty
-// policy on the first request to a cold instance and the real one afterwards.
+// Synchronous on purpose: `registerResource` needs this before it can await
+// anything, so an async version would list an empty policy on a cold start.
 export function runReportUiMeta() {
   const domains = runReportUiCspDomains();
   return {
@@ -43,10 +63,8 @@ export function runReportUiMeta() {
       csp: {
         resourceDomains: domains,
         frameDomains: domains,
-        // The View reads CSV and JSON bodies straight from S3 rather than
-        // having the server parse them and return rows, so it needs the same
-        // origins for `fetch`. The buckets allow this with a `*` CORS rule;
-        // see `RawDataBucket` in `infra/template.yaml`.
+        // The View reads CSV and JSON straight from S3, so `fetch` needs the
+        // same origins. See `RawDataBucket` CORS in `infra/template.yaml`.
         connectDomains: domains,
       },
       prefersBorder: true,

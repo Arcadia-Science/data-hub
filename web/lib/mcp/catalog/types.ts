@@ -20,10 +20,7 @@ export interface McpToolAnnotations {
 }
 
 export interface McpToolDef {
-  /**
-   * MCP Apps (SEP-1865) tool metadata. Passed through to `registerTool`.
-   * Hosts that do not implement Apps ignore the key.
-   */
+  /** MCP Apps (SEP-1865) metadata. Hosts without Apps support ignore it. */
   _meta?: McpToolUiMeta;
   annotations?: McpToolAnnotations;
   description: string;
