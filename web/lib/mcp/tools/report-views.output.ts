@@ -17,17 +17,10 @@ export const reportViewItemsOutputSchema = z.object({
   }),
 });
 
-export const reportViewTableOutputSchema = z.object({
-  columns: z.array(z.string()),
-  rows: z.array(z.record(z.string(), z.string())),
-  total: z.number().int(),
-  truncated: z.boolean().optional(),
-});
-
-export const reportViewArtifactOutputSchema = z.object({
-  suffix: z.string(),
+export const reportViewFileUrlOutputSchema = z.object({
+  id: z.number().int(),
   filename: z.string(),
-  artifact: z.unknown(),
+  url: z.string(),
 });
 
 export const reportViewItemKindSchema = z.enum(REPORT_ITEM_KINDS);

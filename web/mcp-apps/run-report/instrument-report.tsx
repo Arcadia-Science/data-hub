@@ -18,7 +18,7 @@ import { RunSectionCard } from "@/components/runs/run-section-card";
 import { VideoCarouselReport } from "@/components/runs/video-carousel-report";
 import type { RawWellRow } from "@/lib/api/instrument-runs";
 import type { InstrumentType } from "@/lib/db/schema";
-import type { AuntyPlateData } from "@/lib/runs/aunty";
+import { type AuntyPlateData, parseAuntyPlateJson } from "@/lib/runs/aunty";
 import { extractPlateMaps } from "@/lib/runs/extract-plate-maps";
 import {
   emptyReportItemsPage,
@@ -27,8 +27,8 @@ import {
   type ReportItemsPage,
   reportItemKindForInstrument,
 } from "@/lib/runs/report-items";
-import { fetchAllTableRows } from "@/lib/runs/report-table";
 import { isCsvFile } from "@/lib/runs/run-file-types";
+import type { ReportDataSource } from "@/lib/runs/view-data-source";
 import { readPersistedFileId } from "./host-bridge";
 
 interface ReportFileRef {
@@ -71,11 +71,27 @@ function firstProcessedCsv(files: ReportFileRef[]): ReportFileRef | undefined {
   return files.find((file) => file.category === "processed" && isCsvFile(file));
 }
 
-function isAuntyPlateData(value: unknown): value is AuntyPlateData {
-  if (typeof value !== "object" || value === null) {
-    return false;
+// Mirrors `getAuntyPlateData`, which the web app runs on the server. Here the
+// plate JSON and the curves file are two `report_view_file_url` lookups and
+// the body is read straight from S3, so the bytes skip the server entirely.
+async function loadAuntyPlate(
+  dataSource: ReportDataSource
+): Promise<AuntyPlateData> {
+  const resolveBySuffix = dataSource.resolveFileBySuffix;
+  if (!resolveBySuffix) {
+    throw new Error("This data source cannot resolve files by suffix.");
   }
-  return "plate" in value;
+  const plateRef = await resolveBySuffix("_aunty_plate.json");
+  const response = await fetch(plateRef.url);
+  if (!response.ok) {
+    throw new Error(`Failed to load plate JSON (HTTP ${response.status})`);
+  }
+  const plate = parseAuntyPlateJson(await response.json());
+
+  // Optional: an isothermal export has no curves file, and the dialog just
+  // renders without a chart in that case.
+  const curves = await resolveBySuffix("_aunty_curves.csv").catch(() => null);
+  return { plate, curvesFileId: curves?.id ?? null };
 }
 
 export function InstrumentReport({
@@ -179,15 +195,8 @@ function AuntyReport() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    void dataSource
-      .fetchArtifact({ suffix: "_aunty_plate.json" })
-      .then((artifact) => {
-        if (isAuntyPlateData(artifact)) {
-          setPlate(artifact);
-          return;
-        }
-        setError("Aunty plate artifact had an unexpected shape.");
-      })
+    void loadAuntyPlate(dataSource)
+      .then(setPlate)
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : "Failed to load plate");
       });
@@ -207,7 +216,6 @@ function AuntyReport() {
 function PlateReaderReport({ result }: { result: RunReportToolResult }) {
   const dataSource = useReportDataSource();
   const [rows, setRows] = useState<RawWellRow[] | null>(null);
-  const [truncated, setTruncated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const csv = firstProcessedCsv(result.reportFiles);
 
@@ -216,11 +224,9 @@ function PlateReaderReport({ result }: { result: RunReportToolResult }) {
       setRows([]);
       return;
     }
-    void fetchAllTableRows(dataSource, csv.id)
-      .then((table) => {
-        setRows(table.rows ?? []);
-        setTruncated(table.truncated);
-      })
+    void dataSource
+      .fetchTableRows(csv.id)
+      .then((table) => setRows(table.rows))
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : "Failed to load wells");
         setRows([]);
@@ -274,12 +280,6 @@ function PlateReaderReport({ result }: { result: RunReportToolResult }) {
       count={groups.length}
       title="Plate Maps"
     >
-      {truncated ? (
-        <p className="text-muted-foreground text-xs">
-          This file is larger than the report can load. The maps use the first
-          rows only.
-        </p>
-      ) : null}
       <div className="flex min-w-0 flex-col gap-10">
         {groups.map((group, index) =>
           group.mode === "kinetic" ? (

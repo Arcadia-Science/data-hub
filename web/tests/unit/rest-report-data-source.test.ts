@@ -1,7 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchAllTableRows } from "@/lib/runs/report-table";
 import { createRestReportDataSource } from "@/lib/runs/rest-report-data-source";
-import type { ReportDataSource } from "@/lib/runs/view-data-source";
 
 describe("createRestReportDataSource", () => {
   afterEach(() => {
@@ -37,7 +35,7 @@ describe("createRestReportDataSource", () => {
     expect(source.peekFileUrl?.(42)).toBe("/api/v1/files/42/download");
   });
 
-  it("parses a CSV once, then serves paginated slices from cache", async () => {
+  it("parses a CSV once and caches every row", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       text: async () => "col_a,col_b\n1,2\n3,4\n5,6\n",
@@ -49,9 +47,10 @@ describe("createRestReportDataSource", () => {
       runId: "run-1",
     });
 
-    const first = await source.fetchTable({ fileId: 9, offset: 0, limit: 2 });
-    const second = await source.fetchTable({ fileId: 9, offset: 2, limit: 2 });
+    const first = await source.fetchTableRows(9);
+    const second = await source.fetchTableRows(9);
 
+    // Bytes come straight from S3 via the 302, and only once per file.
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/files/9/download");
     expect(first).toEqual({
@@ -59,74 +58,33 @@ describe("createRestReportDataSource", () => {
       rows: [
         { col_a: "1", col_b: "2" },
         { col_a: "3", col_b: "4" },
+        { col_a: "5", col_b: "6" },
       ],
-      total: 3,
     });
-    expect(second.rows).toEqual([{ col_a: "5", col_b: "6" }]);
-    expect(second.total).toBe(3);
+    expect(second).toBe(first);
   });
 
-  it("rejects fetchArtifact because no browser REST route exists", async () => {
+  it("reports an empty CSV as no columns and no rows", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, text: async () => "" })
+    );
+
     const source = createRestReportDataSource({
       instrumentId: "inst-1",
       runId: "run-1",
     });
-    await expect(
-      source.fetchArtifact({ suffix: "_aunty_plate.json" })
-    ).rejects.toThrow(/not available over REST/);
-  });
-});
 
-describe("fetchAllTableRows", () => {
-  it("walks paginated fetchTable until every row is collected", async () => {
-    const pages = [
-      {
-        columns: ["n"],
-        rows: [{ n: "1" }, { n: "2" }],
-        total: 3,
-      },
-      {
-        columns: ["n"],
-        rows: [{ n: "3" }],
-        total: 3,
-      },
-    ];
-    const dataSource: Pick<ReportDataSource, "fetchTable"> = {
-      fetchTable: vi.fn(({ offset }) =>
-        Promise.resolve(pages[offset === 0 ? 0 : 1])
-      ),
-    };
-
-    const result = await fetchAllTableRows(
-      dataSource as ReportDataSource,
-      7,
-      2
-    );
-
-    expect(result.rows.map((r) => r.n)).toEqual(["1", "2", "3"]);
-    expect(result.truncated).toBe(false);
-    expect(dataSource.fetchTable).toHaveBeenCalledTimes(2);
+    expect(await source.fetchTableRows(9)).toEqual({ columns: [], rows: [] });
   });
 
-  it("marks the table truncated when paging stops short of total", async () => {
-    const dataSource: Pick<ReportDataSource, "fetchTable"> = {
-      fetchTable: vi.fn(({ offset }) =>
-        Promise.resolve({
-          columns: ["n"],
-          rows: offset === 0 ? [{ n: "1" }] : [],
-          total: 5,
-          truncated: true,
-        })
-      ),
-    };
-
-    const result = await fetchAllTableRows(
-      dataSource as ReportDataSource,
-      7,
-      1
-    );
-
-    expect(result.rows).toEqual([{ n: "1" }]);
-    expect(result.truncated).toBe(true);
+  // The web app resolves artifacts on the server and passes them into the
+  // page, so only the View implements the suffix lookup.
+  it("does not implement resolveFileBySuffix", () => {
+    const source = createRestReportDataSource({
+      instrumentId: "inst-1",
+      runId: "run-1",
+    });
+    expect(source.resolveFileBySuffix).toBeUndefined();
   });
 });

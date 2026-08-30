@@ -54,6 +54,7 @@ vercel env pull
 | `AWS_REGION` | No | AWS region for S3 presigned URLs and Lambda Function URL SigV4 signing (defaults to `us-west-1`) |
 | `AWS_ROLE_ARN` | No | IAM role ARN for Vercel OIDC federation. Used to presign S3 URLs and SigV4-sign Lambda Function URL invocations (only needed on Vercel) |
 | `S3_RAW_DATA_BUCKET` | No | S3 bucket for raw data uploads (defaults to `arcadia-data-hub-raw-staging`) |
+| `S3_PROCESSED_BUCKET` | No | S3 bucket the Lambda writes processed artifacts to. Only read to build the MCP Apps content security policy — download URLs come from `files.s3_bucket`. Leave it unset and the run report View cannot load processed images, video, or CSVs. See [MCP Apps](mcp-apps.md#content-security-policy) |
 | `LAMBDA_FUNCTION_URL` | No | Lambda Function URL. Required for file reprocessing and run-archive downloads. |
 | `STALLED_PROCESSING_AFTER_MINUTES` | No | Minutes a file may stay in `processing` before it is treated as stalled and becomes reprocessable (defaults to 20). Empty, zero, negative, or non-numeric values keep the default. |
 | `CRON_SECRET` | No | Shared secret for Vercel Cron jobs. The upload-queue sweep (`web/vercel.json`) rejects invocations without it |

@@ -19,7 +19,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useResolvedFileUrl } from "@/hooks/use-resolved-file-url";
-import { fetchAllTableRows } from "@/lib/runs/report-table";
 import type { ReportDataSource } from "@/lib/runs/view-data-source";
 import { cn } from "@/lib/utils";
 
@@ -36,7 +35,7 @@ async function fetchCsvRows(
   dataSource: ReportDataSource,
   fileId: number
 ): Promise<CsvRow[]> {
-  const { rows } = await fetchAllTableRows(dataSource, fileId);
+  const { rows } = await dataSource.fetchTableRows(fileId);
   return rows;
 }
 

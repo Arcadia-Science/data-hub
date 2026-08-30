@@ -11,21 +11,35 @@ describe("runReportUiMeta", () => {
     vi.unstubAllEnvs();
   });
 
-  it("names both bucket origins and leaves connectDomains empty", () => {
+  // A run's files split across both buckets, so leaving either one out breaks
+  // half the report.
+  it("names the raw and processed bucket origins", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("LOCAL_S3_MIRROR", "");
     vi.stubEnv("AWS_REGION", "us-west-1");
     vi.stubEnv("S3_RAW_DATA_BUCKET", "raw-bucket");
+    vi.stubEnv("S3_PROCESSED_BUCKET", "processed-bucket");
+
+    const csp = runReportUiMeta().ui.csp;
+    expect(csp.resourceDomains).toEqual([
+      "https://raw-bucket.s3.us-west-1.amazonaws.com",
+      "https://processed-bucket.s3.us-west-1.amazonaws.com",
+    ]);
+    expect(csp.frameDomains).toEqual(csp.resourceDomains);
+    // The View reads CSV and JSON bodies from S3 itself.
+    expect(csp.connectDomains).toEqual(csp.resourceDomains);
+    expect(runReportUiMeta().ui.prefersBorder).toBe(true);
+  });
+
+  it("leaves the archives bucket out", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("LOCAL_S3_MIRROR", "");
+    vi.stubEnv("S3_RAW_DATA_BUCKET", "raw-bucket");
     vi.stubEnv("S3_ARCHIVES_BUCKET", "archives-bucket");
 
-    const meta = runReportUiMeta();
-    expect(meta.ui.csp.resourceDomains).toEqual([
-      "https://raw-bucket.s3.us-west-1.amazonaws.com",
-      "https://archives-bucket.s3.us-west-1.amazonaws.com",
-    ]);
-    expect(meta.ui.csp.frameDomains).toEqual(meta.ui.csp.resourceDomains);
-    expect(meta.ui.csp.connectDomains).toEqual([]);
-    expect(meta.ui.prefersBorder).toBe(true);
+    expect(runReportUiMeta().ui.csp.resourceDomains).not.toContain(
+      "https://archives-bucket.s3.us-west-1.amazonaws.com"
+    );
   });
 
   it("adds local origins outside production", () => {

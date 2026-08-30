@@ -14,9 +14,13 @@ function runReportUiCspDomains(): string[] {
   // The local mirror serves file bytes from the app's own origin, which
   // `localDevOrigins` already covers, so the S3 hosts are dead weight there.
   if (!getLocalMirrorRoot()) {
+    // A run's files sit in the raw bucket (instrument output) or the
+    // processed bucket (Lambda artifacts) — `files.s3_bucket` decides per
+    // row, so both origins have to be listed or half the report fails to
+    // load. Archives are zips the View never renders, so they stay out.
     for (const bucket of [
       process.env.S3_RAW_DATA_BUCKET,
-      process.env.S3_ARCHIVES_BUCKET,
+      process.env.S3_PROCESSED_BUCKET,
     ]) {
       if (bucket) {
         origins.add(s3BucketOrigin(bucket));
@@ -39,10 +43,11 @@ export function runReportUiMeta() {
       csp: {
         resourceDomains: domains,
         frameDomains: domains,
-        // Tool calls travel through the host, so the View never issues a
-        // cross-origin `fetch`. Declared and empty so that having a `csp`
-        // object at all cannot grant one.
-        connectDomains: [] as string[],
+        // The View reads CSV and JSON bodies straight from S3 rather than
+        // having the server parse them and return rows, so it needs the same
+        // origins for `fetch`. The buckets allow this with a `*` CORS rule;
+        // see `RawDataBucket` in `infra/template.yaml`.
+        connectDomains: domains,
       },
       prefersBorder: true,
     },

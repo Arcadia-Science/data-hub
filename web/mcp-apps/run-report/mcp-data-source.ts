@@ -1,34 +1,16 @@
 import type { App } from "@modelcontextprotocol/ext-apps";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { REPORT_VIEW_TABLE_MAX_LIMIT } from "@/lib/mcp/ui-apps";
-import {
-  REPORT_ITEM_KINDS,
-  type ReportItemsPage,
-} from "@/lib/runs/report-items";
-import type { ReportDataSource } from "@/lib/runs/view-data-source";
-
-interface ToolEnvelope<T> {
-  artifact?: unknown;
-  columns?: string[];
-  data?: T;
-  filename?: string;
-  pagination?: ReportItemsPage["pagination"];
-  rows?: Record<string, string>[];
-  suffix?: string;
-  total?: number;
-  truncated?: boolean;
-}
+import { parse } from "csv-parse/browser/esm/sync";
+import type { ReportItemsPage } from "@/lib/runs/report-items";
+import type {
+  ReportDataSource,
+  ReportFileRef,
+  ReportTableRows,
+} from "@/lib/runs/view-data-source";
 
 interface CachedUrl {
   expiresAt: number;
   url: string;
-}
-
-interface CachedTable {
-  columns: string[];
-  rows: Record<string, string>[];
-  total: number;
-  truncated: boolean;
 }
 
 // Keep in lockstep with `PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS` in
@@ -76,13 +58,40 @@ function writeCachedUrl(
   cache.set(fileId, { url, expiresAt: Date.now() + URL_CACHE_TTL_MS });
 }
 
+async function fetchText(url: string, what: string): Promise<string> {
+  // Reaches S3 directly. The resource's `connectDomains` names those origins
+  // and the buckets carry a `*` CORS rule, so the body is readable here and
+  // the bytes never pass through the server.
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to load ${what} (HTTP ${response.status})`);
+  }
+  return await response.text();
+}
+
 export function createMcpReportDataSource(args: {
   app: App;
   instrumentId: string;
   runId: string;
 }): ReportDataSource {
   const urlCache = new Map<number, CachedUrl>();
-  const tableCache = new Map<number, CachedTable>();
+  const tableCache = new Map<number, ReportTableRows>();
+
+  async function callFileUrl(
+    params: { fileId: number } | { suffix: string }
+  ): Promise<ReportFileRef> {
+    const result = await args.app.callServerTool({
+      name: "report_view_file_url",
+      arguments: {
+        instrumentId: args.instrumentId,
+        runId: args.runId,
+        ...params,
+      },
+    });
+    const ref = structuredPayload<ReportFileRef>(result);
+    writeCachedUrl(urlCache, ref.id, ref.url);
+    return ref;
+  }
 
   const source: ReportDataSource = {
     async fetchReportItems({ kind, offset, limit, search, anchor }) {
@@ -108,56 +117,23 @@ export function createMcpReportDataSource(args: {
       return payload;
     },
 
-    async fetchTable({ fileId, offset, limit }) {
-      let parsed = tableCache.get(fileId);
-      if (!parsed) {
-        // One tool call returns the whole file up to the scan cap. Paging
-        // after that is in-memory so a 20k-row CSV is not 100 S3 GETs.
-        const result = await args.app.callServerTool({
-          name: "report_view_table",
-          arguments: {
-            instrumentId: args.instrumentId,
-            runId: args.runId,
-            fileId,
-            full: true,
-          },
-        });
-        const payload = structuredPayload<{
-          columns: string[];
-          rows: Record<string, string>[];
-          total: number;
-          truncated?: boolean;
-        }>(result);
-        parsed = {
-          columns: payload.columns,
-          rows: payload.rows,
-          total: payload.total,
-          truncated: payload.truncated === true,
-        };
-        tableCache.set(fileId, parsed);
+    async fetchTableRows(fileId) {
+      const cached = tableCache.get(fileId);
+      if (cached) {
+        return cached;
       }
-      return {
-        columns: parsed.columns,
-        rows: parsed.rows.slice(
-          offset,
-          offset + Math.min(limit, REPORT_VIEW_TABLE_MAX_LIMIT)
-        ),
-        total: parsed.total,
-        truncated: parsed.truncated,
+      const url = await source.resolveFileUrl(fileId);
+      const rows = parse(await fetchText(url, `file ${fileId}`), {
+        columns: true,
+        skip_empty_lines: true,
+        trim: true,
+      }) as Record<string, string>[];
+      const parsed: ReportTableRows = {
+        columns: rows.length === 0 ? [] : Object.keys(rows[0]),
+        rows,
       };
-    },
-
-    async fetchArtifact({ suffix }) {
-      const result = await args.app.callServerTool({
-        name: "report_view_artifact",
-        arguments: {
-          instrumentId: args.instrumentId,
-          runId: args.runId,
-          suffix,
-        },
-      });
-      const payload = structuredPayload<ToolEnvelope<unknown>>(result);
-      return payload.artifact ?? payload;
+      tableCache.set(fileId, parsed);
+      return parsed;
     },
 
     peekFileUrl(fileId: number) {
@@ -169,23 +145,11 @@ export function createMcpReportDataSource(args: {
       if (cached) {
         return cached;
       }
-      // Kind is required and filters the window, so try every kind. A hit
-      // also warms the cache for neighbouring files of that kind.
-      await Promise.allSettled(
-        REPORT_ITEM_KINDS.map((kind) =>
-          source.fetchReportItems({
-            kind,
-            offset: 0,
-            limit: 1,
-            anchor: fileId,
-          })
-        )
-      );
-      const resolved = readCachedUrl(urlCache, fileId);
-      if (resolved) {
-        return resolved;
-      }
-      throw new Error(`No download URL for file ${fileId}`);
+      return (await callFileUrl({ fileId })).url;
+    },
+
+    resolveFileBySuffix(suffix: string) {
+      return callFileUrl({ suffix });
     },
   };
 

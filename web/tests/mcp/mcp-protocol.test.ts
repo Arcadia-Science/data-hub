@@ -827,7 +827,7 @@ describe("MCP Protocol (in-memory)", () => {
 
   it("every registered tool advertises outputSchema", async () => {
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(35);
+    expect(tools).toHaveLength(34);
     for (const tool of tools) {
       const schema = tool.outputSchema as
         | { type?: string; oneOf?: unknown; anyOf?: unknown }
@@ -1344,11 +1344,7 @@ describe("MCP Protocol (in-memory)", () => {
 
   it("report_view tools are app-visible and require an authenticated user", async () => {
     const { tools } = await client.listTools();
-    for (const name of [
-      "report_view_items",
-      "report_view_table",
-      "report_view_artifact",
-    ] as const) {
+    for (const name of ["report_view_items", "report_view_file_url"] as const) {
       const tool = tools.find((t) => t.name === name);
       expect(tool?._meta).toEqual({
         ui: {
@@ -1360,23 +1356,17 @@ describe("MCP Protocol (in-memory)", () => {
       const result = await client.callTool({
         name,
         arguments:
-          name === "report_view_artifact"
+          name === "report_view_file_url"
             ? {
                 instrumentId: "test-plate-reader",
                 runId: "run-1",
-                suffix: "_aunty_plate.json",
+                fileId: 42,
               }
-            : name === "report_view_table"
-              ? {
-                  instrumentId: "test-plate-reader",
-                  runId: "run-1",
-                  fileId: 42,
-                }
-              : {
-                  instrumentId: "test-plate-reader",
-                  runId: "run-1",
-                  kind: "image",
-                },
+            : {
+                instrumentId: "test-plate-reader",
+                runId: "run-1",
+                kind: "image",
+              },
       });
       expect(result.isError).toBe(true);
       const text = (result.content as Array<{ type: string; text: string }>)[0]
@@ -1732,7 +1722,11 @@ describe("MCP Protocol (in-memory)", () => {
     expect(readMeta?.ui?.csp?.frameDomains).toEqual(
       expect.arrayContaining(["http://localhost:3000"])
     );
-    expect(readMeta?.ui?.csp?.connectDomains).toEqual([]);
+    // The View reads CSV and JSON bodies straight from S3, so `connect-src`
+    // carries the same origins rather than being empty.
+    expect(readMeta?.ui?.csp?.connectDomains).toEqual(
+      readMeta?.ui?.csp?.frameDomains
+    );
   });
 
   it("reads the glossary resource", async () => {

@@ -33,7 +33,7 @@ describe("MCP catalog document", () => {
 
   it("publishes outputSchema for every tool", () => {
     const doc = buildMcpCatalogDocument();
-    expect(MCP_TOOL_DEFS).toHaveLength(35);
+    expect(MCP_TOOL_DEFS).toHaveLength(34);
     for (const def of MCP_TOOL_DEFS) {
       expect(def.outputSchema, `${def.name} missing outputSchema`).toBeTruthy();
       const tool = doc.tools.find((t) => t.name === def.name);

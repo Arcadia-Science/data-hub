@@ -1,22 +1,22 @@
 import { parse } from "csv-parse/browser/esm/sync";
 import { type ReportItemsPage, reportItemsUrl } from "@/lib/runs/report-items";
-import type { ReportDataSource } from "@/lib/runs/view-data-source";
+import type {
+  ReportDataSource,
+  ReportTableRows,
+} from "@/lib/runs/view-data-source";
 
 function restFileUrl(fileId: number): string {
   return `/api/v1/files/${fileId}/download`;
 }
 
 // Browser-side source for the Next.js run page. Closures hold the natural-key
-// route ids; `fetchArtifact` is unused here because plate JSON is loaded on
-// the server and passed in as props.
+// route ids; `resolveFileBySuffix` is unimplemented here because artifacts are
+// loaded on the server and passed into the page as props.
 export function createRestReportDataSource(args: {
   instrumentId: string;
   runId: string;
 }): ReportDataSource {
-  const tableCache = new Map<
-    number,
-    { columns: string[]; rows: Record<string, string>[] }
-  >();
+  const tableCache = new Map<number, ReportTableRows>();
 
   return {
     async fetchReportItems({ kind, offset, limit, search, anchor }) {
@@ -35,39 +35,29 @@ export function createRestReportDataSource(args: {
       return (await response.json()) as ReportItemsPage;
     },
 
-    async fetchTable({ fileId, offset, limit }) {
-      let parsed = tableCache.get(fileId);
-      if (!parsed) {
-        // Same 302-to-S3 download the viewers used to issue themselves, so
-        // the web app still makes one GET per file and then slices in memory.
-        const res = await fetch(restFileUrl(fileId));
-        if (!res.ok) {
-          throw new Error(`Failed to load table (HTTP ${res.status})`);
-        }
-        const rows = parse(await res.text(), {
-          columns: true,
-          skip_empty_lines: true,
-          trim: true,
-        }) as Record<string, string>[];
-        parsed = {
-          columns: rows.length === 0 ? [] : Object.keys(rows[0]),
-          rows,
-        };
-        tableCache.set(fileId, parsed);
+    async fetchTableRows(fileId) {
+      const cached = tableCache.get(fileId);
+      if (cached) {
+        return cached;
       }
-      return {
-        columns: parsed.columns,
-        rows: parsed.rows.slice(offset, offset + limit),
-        total: parsed.rows.length,
+      // The download endpoint 302-redirects to a short-lived presigned S3
+      // URL, so the CSV bytes flow straight from S3 to the browser with zero
+      // Vercel Fast Origin Transfer.
+      const res = await fetch(restFileUrl(fileId));
+      if (!res.ok) {
+        throw new Error(`Failed to load table (HTTP ${res.status})`);
+      }
+      const rows = parse(await res.text(), {
+        columns: true,
+        skip_empty_lines: true,
+        trim: true,
+      }) as Record<string, string>[];
+      const parsed: ReportTableRows = {
+        columns: rows.length === 0 ? [] : Object.keys(rows[0]),
+        rows,
       };
-    },
-
-    fetchArtifact() {
-      return Promise.reject(
-        new Error(
-          "fetchArtifact is not available over REST; the web app loads artifacts on the server"
-        )
-      );
+      tableCache.set(fileId, parsed);
+      return parsed;
     },
 
     peekFileUrl: restFileUrl,

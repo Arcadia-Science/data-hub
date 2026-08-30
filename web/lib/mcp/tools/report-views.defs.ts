@@ -1,19 +1,14 @@
 import { z } from "zod";
 import type { McpToolDef } from "@/lib/mcp/catalog/types";
-import {
-  REPORT_VIEW_TABLE_DEFAULT_LIMIT,
-  REPORT_VIEW_TABLE_MAX_LIMIT,
-  runReportToolUiMeta,
-} from "@/lib/mcp/ui-apps";
+import { runReportToolUiMeta } from "@/lib/mcp/ui-apps";
 import {
   REPORT_ITEMS_MAX_LIMIT,
   REPORT_ITEMS_WINDOW,
 } from "@/lib/runs/report-items";
 import {
-  reportViewArtifactOutputSchema,
+  reportViewFileUrlOutputSchema,
   reportViewItemKindSchema,
   reportViewItemsOutputSchema,
-  reportViewTableOutputSchema,
 } from "./report-views.output";
 
 const APP_ONLY_META = runReportToolUiMeta(["app"]);
@@ -59,59 +54,29 @@ export const reportViewItemsTool = {
   _meta: APP_ONLY_META,
 } as const satisfies McpToolDef;
 
-export const reportViewTableTool = {
-  name: "report_view_table",
+export const reportViewFileUrlTool = {
+  name: "report_view_file_url",
   group: "runs",
   scope: "files:read",
-  title: "Report View Table",
+  title: "Report View File URL",
   description:
-    "Return parsed CSV columns and rows for a run file. Pass `full` to load the whole file up to the scan cap in one call. Used by the Data Hub run report view. Call `get_run_report` instead.",
-  outputSchema: reportViewTableOutputSchema,
+    "Return a short-lived download URL for one file on a run, found by numeric id or by filename suffix. The view reads CSV and JSON bodies from that URL itself. Used by the Data Hub run report view. Call `get_run_report` instead.",
+  outputSchema: reportViewFileUrlOutputSchema,
   inputSchema: {
     instrumentId: z.string().describe("Instrument identifier"),
     runId: z.string().describe("Run identifier within the instrument"),
-    fileId: z.number().int().describe("Numeric file ID of the CSV"),
-    offset: z
+    fileId: z
       .number()
       .int()
-      .min(0)
       .optional()
-      .describe("Row offset (default: 0)"),
-    limit: z
-      .number()
-      .int()
-      .min(1)
-      .max(REPORT_VIEW_TABLE_MAX_LIMIT)
-      .optional()
-      .describe(
-        `Rows to return (default: ${REPORT_VIEW_TABLE_DEFAULT_LIMIT}, max: ${REPORT_VIEW_TABLE_MAX_LIMIT})`
-      ),
-    full: z
-      .boolean()
-      .optional()
-      .describe(
-        "When true, ignore offset/limit and return the whole file up to the scan cap"
-      ),
-  },
-  annotations: { readOnlyHint: true },
-  _meta: APP_ONLY_META,
-} as const satisfies McpToolDef;
-
-export const reportViewArtifactTool = {
-  name: "report_view_artifact",
-  group: "runs",
-  scope: "files:read",
-  title: "Report View Artifact",
-  description:
-    "Return a JSON artifact from a run by filename suffix. Aunty plate data is assembled from the plate file plus curves file id. Used by the Data Hub run report view. Call `get_run_report` instead.",
-  outputSchema: reportViewArtifactOutputSchema,
-  inputSchema: {
-    instrumentId: z.string().describe("Instrument identifier"),
-    runId: z.string().describe("Run identifier within the instrument"),
+      .describe("Numeric file ID. Takes precedence over `suffix`"),
     suffix: z
       .string()
       .min(1)
-      .describe("Filename suffix of the JSON artifact, e.g. _aunty_plate.json"),
+      .optional()
+      .describe(
+        "Filename suffix to match instead of an id, e.g. _aunty_plate.json"
+      ),
   },
   annotations: { readOnlyHint: true },
   _meta: APP_ONLY_META,
@@ -119,6 +84,5 @@ export const reportViewArtifactTool = {
 
 export const REPORT_VIEW_TOOL_DEFS = [
   reportViewItemsTool,
-  reportViewTableTool,
-  reportViewArtifactTool,
+  reportViewFileUrlTool,
 ] as const;
