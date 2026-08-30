@@ -296,6 +296,8 @@ vi.mock("@/lib/api/instrument-runs", () => ({
   getRanByFilterOptions: vi
     .fn()
     .mockResolvedValue([{ userId: "u-1", displayName: "Alice" }]),
+  getRunReportFiles: vi.fn().mockResolvedValue([]),
+  getAuntyPlateData: vi.fn().mockResolvedValue(null),
 }));
 
 // The write-tool happy path goes through the raw Drizzle client. Stub out
@@ -450,10 +452,23 @@ vi.mock("@/lib/api/run-reports", () => ({
   }),
 }));
 
+vi.mock("@/lib/api/report-items", () => ({
+  getReportItemsPage: vi.fn().mockResolvedValue({
+    data: [{ id: 42, filename: "data.csv" }],
+    pagination: { limit: 50, offset: 0, total: 1 },
+  }),
+}));
+
 vi.mock("@/lib/api/files", () => ({
   getActiveFileById: vi
     .fn()
     .mockImplementation(async (id: number) => (id === 42 ? MOCK_FILE : null)),
+  getActiveFilesByIds: vi
+    .fn()
+    .mockImplementation(async (ids: number[]) =>
+      ids.includes(42) ? [MOCK_FILE] : []
+    ),
+  findActiveFileBySuffix: vi.fn().mockResolvedValue(null),
   lookupFileForDownload: vi.fn().mockImplementation((id: number) => {
     if (id === 42) {
       return {
@@ -587,11 +602,17 @@ vi.mock("@/lib/s3", () => ({
   getPresignedDownloadUrl: vi
     .fn()
     .mockResolvedValue("https://s3.example.com/signed-url"),
+  getS3ObjectStream: vi.fn().mockImplementation(async () => {
+    const { Readable } = await import("node:stream");
+    return Readable.from([Buffer.from("Well,Value\nA1,0.1\n")]);
+  }),
   // Mirror the real export so consumers (e.g. `tools.ts`) that import
   // it for the response payload see a numeric value instead of
   // `undefined`. Tests that read `expiresInSeconds` off a tool result
   // assert `> 0`, so any positive number works here.
   PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS: 15 * 60,
+  s3BucketOrigin: (bucket: string) =>
+    `https://${bucket}.s3.us-west-1.amazonaws.com`,
 }));
 
 // ---------------------------------------------------------------------------
@@ -806,7 +827,7 @@ describe("MCP Protocol (in-memory)", () => {
 
   it("every registered tool advertises outputSchema", async () => {
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(32);
+    expect(tools).toHaveLength(34);
     for (const tool of tools) {
       const schema = tool.outputSchema as
         | { type?: string; oneOf?: unknown; anyOf?: unknown }
@@ -1309,6 +1330,51 @@ describe("MCP Protocol (in-memory)", () => {
     expectStructuredMatchesText(result);
   });
 
+  it("get_run_report advertises the run-report UI resource", async () => {
+    const { tools } = await client.listTools();
+    const report = tools.find((t) => t.name === "get_run_report");
+    expect(report?._meta).toEqual({
+      ui: {
+        resourceUri: "ui://data-hub/run-report",
+        visibility: ["model", "app"],
+      },
+      "ui/resourceUri": "ui://data-hub/run-report",
+    });
+  });
+
+  it("report_view tools are app-visible and require an authenticated user", async () => {
+    const { tools } = await client.listTools();
+    for (const name of ["report_view_items", "report_view_file_url"] as const) {
+      const tool = tools.find((t) => t.name === name);
+      expect(tool?._meta).toEqual({
+        ui: {
+          resourceUri: "ui://data-hub/run-report",
+          visibility: ["app"],
+        },
+        "ui/resourceUri": "ui://data-hub/run-report",
+      });
+      const result = await client.callTool({
+        name,
+        arguments:
+          name === "report_view_file_url"
+            ? {
+                instrumentId: "test-plate-reader",
+                runId: "run-1",
+                fileId: 42,
+              }
+            : {
+                instrumentId: "test-plate-reader",
+                runId: "run-1",
+                kind: "image",
+              },
+      });
+      expect(result.isError).toBe(true);
+      const text = (result.content as Array<{ type: string; text: string }>)[0]
+        .text;
+      expect(text).toBe("Authenticated user not available on this session.");
+    }
+  });
+
   it("list_run_files returns error for nonexistent run", async () => {
     const result = await client.callTool({
       name: "list_run_files",
@@ -1618,6 +1684,49 @@ describe("MCP Protocol (in-memory)", () => {
     expect(uris).toContain("datahub://instruments");
     expect(uris).toContain("datahub://me");
     expect(uris).toContain("datahub://glossary");
+    expect(uris).toContain("ui://data-hub/run-report");
+  });
+
+  it("run-report UI resource advertises the MCP Apps MIME type and CSP", async () => {
+    const { resources } = await client.listResources();
+    const runReport = resources.find(
+      (r) => r.uri === "ui://data-hub/run-report"
+    );
+    expect(runReport?.mimeType).toBe("text/html;profile=mcp-app");
+    const listMeta = runReport?._meta as
+      | {
+          ui?: {
+            csp?: { resourceDomains?: string[] };
+            prefersBorder?: boolean;
+          };
+        }
+      | undefined;
+    expect(listMeta?.ui?.prefersBorder).toBe(true);
+    expect(listMeta?.ui?.csp?.resourceDomains).toEqual(
+      expect.arrayContaining(["http://localhost:3000"])
+    );
+
+    const { contents } = await client.readResource({
+      uri: "ui://data-hub/run-report",
+    });
+    expect(contents).toHaveLength(1);
+    expect(contents[0].mimeType).toBe("text/html;profile=mcp-app");
+    expect((contents[0] as { text: string }).text).toMatch(/<!DOCTYPE html/i);
+    const readMeta = contents[0]._meta as
+      | {
+          ui?: {
+            csp?: { connectDomains?: string[]; frameDomains?: string[] };
+          };
+        }
+      | undefined;
+    expect(readMeta?.ui?.csp?.frameDomains).toEqual(
+      expect.arrayContaining(["http://localhost:3000"])
+    );
+    // The View reads CSV and JSON bodies straight from S3, so `connect-src`
+    // carries the same origins rather than being empty.
+    expect(readMeta?.ui?.csp?.connectDomains).toEqual(
+      readMeta?.ui?.csp?.frameDomains
+    );
   });
 
   it("reads the glossary resource", async () => {

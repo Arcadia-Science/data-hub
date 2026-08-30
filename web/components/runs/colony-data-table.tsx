@@ -1,6 +1,5 @@
 "use client";
 
-import { parse } from "csv-parse/browser/esm/sync";
 import {
   AlertTriangle,
   ChevronLeft,
@@ -8,6 +7,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useReportDataSource } from "@/components/runs/report-data-source-provider";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -18,27 +18,25 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { RunFile } from "@/lib/api/instrument-runs";
+import { useResolvedFileUrl } from "@/hooks/use-resolved-file-url";
+import type { ReportDataSource } from "@/lib/runs/view-data-source";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 10;
 
 type CsvRow = Record<string, string>;
 
-async function fetchCsvRows(fileId: number): Promise<CsvRow[]> {
-  // The download endpoint 302-redirects to a short-lived presigned S3 URL;
-  // the browser follows transparently, so CSV bytes flow directly from S3
-  // with zero Vercel Fast Origin Transfer.
-  const res = await fetch(`/api/v1/files/${fileId}/download`);
-  if (!res.ok) {
-    throw new Error(`Failed to load CSV (HTTP ${res.status})`);
-  }
-  const text = await res.text();
-  return parse(text, {
-    columns: true,
-    skip_empty_lines: true,
-    trim: true,
-  }) as CsvRow[];
+export interface ColonyTableFile {
+  filename: string;
+  id: number;
+}
+
+async function fetchCsvRows(
+  dataSource: ReportDataSource,
+  fileId: number
+): Promise<CsvRow[]> {
+  const { rows } = await dataSource.fetchTableRows(fileId);
+  return rows;
 }
 
 type AsyncResult =
@@ -50,8 +48,9 @@ type LoadState =
   | { status: "ready"; rows: CsvRow[] }
   | { status: "error"; message: string };
 
-export function ColonyDataTable({ file }: { file: RunFile }) {
-  const downloadUrl = `/api/v1/files/${file.id}/download`;
+export function ColonyDataTable({ file }: { file: ColonyTableFile }) {
+  const dataSource = useReportDataSource();
+  const downloadUrl = useResolvedFileUrl(file.id);
   const fileId = file.id;
 
   const [asyncResult, setAsyncResult] = useState<AsyncResult | null>(null);
@@ -82,7 +81,7 @@ export function ColonyDataTable({ file }: { file: RunFile }) {
       return;
     }
     let cancelled = false;
-    fetchCsvRows(fileId)
+    fetchCsvRows(dataSource, fileId)
       .then((rows) => {
         cacheRef.current.set(fileId, rows);
         if (cancelled) {
@@ -101,7 +100,7 @@ export function ColonyDataTable({ file }: { file: RunFile }) {
     return () => {
       cancelled = true;
     };
-  }, [fileId, retryNonce]);
+  }, [dataSource, fileId, retryNonce]);
 
   function handleRetry() {
     cacheRef.current.delete(fileId);
@@ -113,12 +112,19 @@ export function ColonyDataTable({ file }: { file: RunFile }) {
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
         <h3 className="font-medium text-sm">{file.filename}</h3>
-        <Button asChild className="h-7 gap-1 text-xs" size="sm" variant="ghost">
-          <a href={downloadUrl} rel="noopener noreferrer" target="_blank">
-            <ExternalLink className="size-3" />
-            Open as CSV
-          </a>
-        </Button>
+        {downloadUrl && (
+          <Button
+            asChild
+            className="h-7 gap-1 text-xs"
+            size="sm"
+            variant="ghost"
+          >
+            <a href={downloadUrl} rel="noopener noreferrer" target="_blank">
+              <ExternalLink className="size-3" />
+              Open as CSV
+            </a>
+          </Button>
+        )}
       </div>
       {state.status === "loading" && (
         <Skeleton aria-label="Loading CSV" className="h-72 w-full" />

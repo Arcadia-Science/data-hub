@@ -5,12 +5,19 @@ import type { InstrumentType } from "@/lib/db/schema";
 import { completeInstrumentId } from "@/lib/mcp/completions";
 import { DATAHUB_GLOSSARY } from "@/lib/mcp/glossary";
 import { resolveInstrumentFilterOptions } from "@/lib/mcp/instrument-filter-options";
+import { loadRunReportHtml } from "@/lib/mcp/run-report-html";
 import { getMcpUserId } from "@/lib/mcp/tools/helpers";
+import {
+  MCP_APP_MIME_TYPE,
+  RUN_REPORT_UI_RESOURCE_URI,
+} from "@/lib/mcp/ui-apps";
+import { runReportUiMeta } from "@/lib/mcp/ui-csp";
 import {
   glossaryResource,
   instrumentFilterOptionsResource,
   instrumentsResource,
   meResource,
+  runReportUiResource,
 } from "./resources.defs";
 
 // Instrument types with structured filter-options. Must match `search_runs` args.
@@ -194,5 +201,25 @@ export function registerResources(server: McpServer) {
         ],
       };
     }
+  );
+
+  server.registerResource(
+    runReportUiResource.name,
+    runReportUiResource.uri,
+    {
+      description: runReportUiResource.description,
+      mimeType: runReportUiResource.mimeType,
+      _meta: runReportUiMeta(),
+    },
+    async () => ({
+      contents: [
+        {
+          uri: RUN_REPORT_UI_RESOURCE_URI,
+          mimeType: MCP_APP_MIME_TYPE,
+          text: loadRunReportHtml(),
+          _meta: runReportUiMeta(),
+        },
+      ],
+    })
   );
 }

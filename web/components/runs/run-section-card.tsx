@@ -19,10 +19,12 @@ export function RunSectionCard({
   title: string;
 }) {
   return (
-    <div className={cn("flex flex-col gap-2", className)}>
+    <div className={cn("flex w-full min-w-0 flex-col gap-2", className)}>
       <RunSectionHeading countLabel={count} title={title} />
-      <Card size="sm">
-        <CardContent className={cn("flex flex-col gap-6", contentClassName)}>
+      <Card className="w-full min-w-0" size="sm">
+        <CardContent
+          className={cn("flex w-full min-w-0 flex-col gap-6", contentClassName)}
+        >
           {children}
         </CardContent>
       </Card>

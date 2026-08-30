@@ -1,4 +1,5 @@
 import type { ZodType } from "zod";
+import type { McpToolUiMeta } from "@/lib/mcp/ui-apps";
 
 export const MCP_TOOL_GROUPS = {
   instruments: "Instruments",
@@ -19,6 +20,8 @@ export interface McpToolAnnotations {
 }
 
 export interface McpToolDef {
+  /** MCP Apps (SEP-1865) metadata. Hosts without Apps support ignore it. */
+  _meta?: McpToolUiMeta;
   annotations?: McpToolAnnotations;
   description: string;
   group: McpToolGroup;

@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 
@@ -12,6 +12,50 @@ export async function getActiveFileById(
     .select()
     .from(files)
     .where(and(eq(files.id, fileId), isNull(files.deletedAt)))
+    .limit(1);
+  return file ?? null;
+}
+
+export async function getActiveFilesByIds(ids: number[]): Promise<
+  Array<{
+    filename: string;
+    id: number;
+    s3Bucket: string | null;
+    s3Key: string | null;
+  }>
+> {
+  if (ids.length === 0) {
+    return [];
+  }
+  return await db
+    .select({
+      id: files.id,
+      filename: files.filename,
+      s3Bucket: files.s3Bucket,
+      s3Key: files.s3Key,
+    })
+    .from(files)
+    .where(and(inArray(files.id, ids), isNull(files.deletedAt)));
+}
+
+// Filename suffix match for JSON artifacts (e.g. `_aunty_plate.json`).
+export async function findActiveFileBySuffix(
+  runInternalId: string,
+  suffix: string
+): Promise<FileRow | null> {
+  if (suffix.length === 0) {
+    return null;
+  }
+  const [file] = await db
+    .select()
+    .from(files)
+    .where(
+      and(
+        eq(files.instrumentRunId, runInternalId),
+        isNull(files.deletedAt),
+        sql`right(${files.filename}, ${suffix.length}) = ${suffix}`
+      )
+    )
     .limit(1);
   return file ?? null;
 }

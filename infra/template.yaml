@@ -42,10 +42,8 @@ Parameters:
 
 Globals:
   Function:
-    # Large files (e.g. 3-4 GB Hina microscope ND2s) force us near Lambda's
-    # hard limits: 10 GB RAM to hold the decoded image array, 900 s to
-    # download + process, and 10 GB of /tmp (set per-function below) to
-    # land the raw file plus the generated JPG.
+    # Sized for 3-4 GB Hina microscope ND2s: RAM holds the decoded image and
+    # 900 s covers download plus processing. /tmp is set per function below.
     Timeout: 900
     MemorySize: 10240
 
@@ -61,26 +59,18 @@ Resources:
       BucketName: !Sub "arcadia-data-hub-raw-${Environment}"
       VersioningConfiguration:
         Status: Enabled
-      # Block Public Access is left to the S3 account default (all on) rather
-      # than pinned here: the CI deploy role can't call
-      # `s3:PutBucketPublicAccessBlock`, so managing it in-stack breaks
-      # automated deploys. Nothing here is ever public — access is via
-      # presigned URLs.
-      # Allow the web app to fetch raw files from the browser via the
-      # `/api/v1/files/:id/download` 302-redirect to a presigned S3 URL.
-      # Image/PDF previews bypass CORS via `<img>`/`<iframe>`, but client-side
-      # `fetch()` (used e.g. for InstantRaman spectrum CSVs) requires the
-      # origin to be allowlisted so the browser exposes the response body.
+      # Block Public Access follows the S3 account default: the CI deploy role
+      # can't call `s3:PutBucketPublicAccessBlock`, so pinning it breaks deploys.
+
+      # Browsers fetch CSVs here from a sandbox origin the MCP host picks, so
+      # it has to be `*`. Objects stay private behind presigned URLs.
       CorsConfiguration:
         CorsRules:
           - AllowedMethods:
               - GET
               - HEAD
-            # Modify this to include your web app domain.
             AllowedOrigins:
-              - "https://datahub.arcadiascience.com"
-              - "https://*.vercel.app"
-              - "http://localhost:3000"
+              - "*"
             AllowedHeaders:
               - "*"
             ExposedHeaders:
@@ -88,10 +78,8 @@ Resources:
               - Content-Length
             MaxAge: 3600
       NotificationConfiguration:
-        # Catch-all: the Lambda handler resolves instrument_type via the API
-        # and applies per-processor filename gates. Deploy the type-dispatch
-        # handler before (or with) this notification change — an older
-        # ID-dispatched handler would process every ObjectCreated event.
+        # Catch-all: the handler resolves instrument_type itself. Deploy the
+        # type-dispatch handler first or an older one processes every event.
         LambdaConfigurations:
           - Event: s3:ObjectCreated:*
             Function: !GetAtt DataHubFunction.Arn
@@ -107,19 +95,15 @@ Resources:
       BucketName: !Sub "arcadia-data-hub-processed-${Environment}"
       VersioningConfiguration:
         Status: Enabled
-      # See RawDataBucket — BPA left to the S3 account default so CI can deploy.
-      # See RawDataBucket for the CORS rationale — both buckets back the same
-      # `/api/v1/files/:id/download` endpoint so they need parity.
+      # See RawDataBucket for the Block Public Access and CORS rationale. This
+      # bucket holds processed artifacts, most of what the run report renders.
       CorsConfiguration:
         CorsRules:
           - AllowedMethods:
               - GET
               - HEAD
-            # Modify this to include your web app domain.
             AllowedOrigins:
-              - "https://datahub.arcadiascience.com"
-              - "https://*.vercel.app"
-              - "http://localhost:3000"
+              - "*"
             AllowedHeaders:
               - "*"
             ExposedHeaders:
@@ -130,11 +114,8 @@ Resources:
         - Key: project
           Value: arcadia-data-hub
 
-  # Cache bucket for run-archive zips built by the Lambda. Objects expire
-  # automatically so the bucket stays cheap; users (or the web app) can always
-  # rebuild on demand. Public access is blocked — the web app issues short-lived
-  # presigned URLs and 302-redirects browsers directly to S3, bypassing Vercel's
-  # Fast Origin Transfer entirely.
+  # Cache for run-archive zips built by the Lambda. Objects expire after a week
+  # and rebuild on demand; browsers are redirected to S3, never through Vercel.
   ArchivesBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
@@ -160,10 +141,8 @@ Resources:
           Value: arcadia-data-hub
 
   # ---- S3 bucket policies: deny object writes from unapproved principals ----
-  # The account grants all users full S3 access, so the identity policies above
-  # can't actually stop writes — only an explicit Deny (which beats every Allow)
-  # can. Each bucket exempts just its legitimate writer, plus root as break-glass.
-  # `s3:PutBucketPolicy` is intentionally not denied, to avoid self-lockout.
+  # The account grants everyone full S3 access, so only an explicit Deny stops
+  # writes. Each bucket exempts its writer; PutBucketPolicy stays allowed.
 
   RawDataBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -251,9 +230,8 @@ Resources:
         Size: 10240
       Role: !GetAtt LambdaExecutionRole.Arn
       FunctionUrlConfig:
-        # IAM auth: callers (the Vercel web app) must SigV4-sign requests
-        # with credentials that hold lambda:InvokeFunctionUrl on this
-        # function ARN. Replaces the previous shared-bearer-token scheme.
+        # Callers must SigV4-sign with credentials holding
+        # lambda:InvokeFunctionUrl on this function ARN.
         AuthType: AWS_IAM
       Environment:
         Variables:
@@ -264,8 +242,8 @@ Resources:
           DATA_HUB_API_KEY: !Ref DataHubApiKey
 
   # ---- S3 → Lambda event wiring ----
-  # Defined as explicit resources rather than SAM Events to avoid the circular
-  # dependency that occurs when the bucket and function are in the same template.
+  # Wired explicitly rather than with SAM Events, which would make the bucket
+  # and the function in this template depend on each other in a loop.
 
   S3InvokeLambdaPermission:
     Type: AWS::Lambda::Permission
@@ -311,10 +289,8 @@ Resources:
                 Resource:
                   - !Sub "arn:aws:s3:::arcadia-data-hub-processed-${Environment}"
                   - !Sub "arn:aws:s3:::arcadia-data-hub-processed-${Environment}/*"
-              # Lambda is the only writer for the archives bucket: it builds
-              # run zips via S3 multipart uploads streamed directly out of the
-              # raw bucket. AbortMultipartUpload is required so failed builds
-              # don't leak storage.
+              # Lambda is the only archives writer. AbortMultipartUpload keeps
+              # failed builds from leaking storage.
               - Effect: Allow
                 Action:
                   - s3:PutObject
@@ -326,11 +302,8 @@ Resources:
                   - !Sub "arn:aws:s3:::arcadia-data-hub-archives-${Environment}/*"
 
   # ---- IAM: GitHub Actions deploy role ----
-  # Scoped for routine image-update deploys plus in-place updates to the
-  # existing data buckets' S3 event notifications (so new instrument triggers
-  # roll out via CI). Initial stack creation and structural changes — adding
-  # new buckets or Lambda functions — still require broader permissions and
-  # must be run from an admin session.
+  # Routine image updates and in-place bucket config only. New buckets or
+  # Lambda functions still need an admin session.
 
   GitHubActionsDeployRole:
     Type: AWS::IAM::Role
@@ -405,10 +378,8 @@ Resources:
                 Resource:
                   - !Sub "arn:aws:s3:::aws-sam-cli-managed-default-samclisourcebucket-*"
                   - !Sub "arn:aws:s3:::aws-sam-cli-managed-default-samclisourcebucket-*/*"
-              # Updating S3 event notifications (e.g., adding a new instrument
-              # trigger to RawDataBucket) requires Get/PutBucketNotification on
-              # the bucket itself. Scoped to the three data buckets this stack
-              # owns so CI can roll out new triggers without an admin deploy.
+              # Adding an instrument trigger needs these on the bucket itself,
+              # so CI can roll one out without an admin deploy.
               - Effect: Allow
                 Action:
                   - s3:GetBucketNotification
@@ -443,8 +414,7 @@ Resources:
                   - !Sub "arn:aws:iam::${AWS::AccountId}:role/data-hub-*-${Environment}"
 
   # ---- IAM: Vercel web app role (OIDC federation) ----
-  # Allows the Vercel-hosted Next.js app to generate presigned S3 URLs for
-  # watcher file uploads/downloads without long-lived AWS credentials.
+  # Lets the Next.js app presign S3 URLs without long-lived AWS credentials.
 
   WebAppS3Role:
     Type: AWS::IAM::Role
@@ -480,15 +450,8 @@ Resources:
                   - s3:GetObject
                 Resource:
                   - !Sub "arn:aws:s3:::arcadia-data-hub-processed-${Environment}/*"
-              # Read-only access to the archives bucket so the web app can
-              # HeadObject (cache-hit check) and presign GETs. Lambda is the
-              # only writer.
-              #
-              # `s3:ListBucket` is required on the bucket-level ARN: without
-              # it, HeadObject on a missing key returns 403 instead of 404
-              # (S3 won't reveal key existence to a caller that can't list).
-              # That breaks the cache-miss path, since the route relies on
-              # 404 to fall through to a fresh Lambda build.
+              # Read-only for the cache check and presigned GETs. ListBucket is
+              # required or a missing key 403s instead of the 404 the cache needs.
               - Effect: Allow
                 Action:
                   - s3:GetObject
@@ -496,10 +459,8 @@ Resources:
                 Resource:
                   - !Sub "arn:aws:s3:::arcadia-data-hub-archives-${Environment}"
                   - !Sub "arn:aws:s3:::arcadia-data-hub-archives-${Environment}/*"
-        # Permission for the web app to invoke the Lambda Function URL via
-        # SigV4. Scoped to the single function ARN this stack owns and
-        # gated on AuthType=AWS_IAM so it can't accidentally apply if the
-        # function URL is later flipped back to AuthType=NONE.
+        # Scoped to this stack's function ARN and gated on AuthType=AWS_IAM so
+        # it cannot apply if the URL is flipped back to AuthType=NONE.
         - PolicyName: LambdaFunctionUrlInvoke
           PolicyDocument:
             Version: "2012-10-17"

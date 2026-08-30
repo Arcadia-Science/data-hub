@@ -1,7 +1,6 @@
 "use client";
 
-import dynamic from "next/dynamic";
-import { useCallback, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useMemo, useState } from "react";
 import { AuntyPlateGrid } from "@/components/runs/aunty/aunty-plate-grid";
 import { AuntySeriesToggle } from "@/components/runs/aunty/aunty-series-toggle";
 import { AuntyWellsProvider } from "@/components/runs/aunty/aunty-wells-provider";
@@ -15,10 +14,10 @@ import {
 
 // The dialog pulls in Recharts and the CSV parser, which nothing on the page
 // needs until a well is opened, so they load as a separate chunk.
-const AuntyWellDialog = dynamic(() =>
-  import("@/components/runs/aunty/aunty-well-dialog").then(
-    (mod) => mod.AuntyWellDialog
-  )
+const AuntyWellDialog = lazy(() =>
+  import("@/components/runs/aunty/aunty-well-dialog").then((mod) => ({
+    default: mod.AuntyWellDialog,
+  }))
 );
 
 export function AuntyPlateReport({ curvesFileId, plate }: AuntyPlateData) {
@@ -87,15 +86,17 @@ function AuntyExperimentSection({
           onWellClick={openDialog}
           seriesId={seriesId}
         />
-        <AuntyWellDialog
-          curvesFileId={curvesFileId}
-          experiment={experiment}
-          onOpenChange={setOpen}
-          onSeriesChange={setSeriesId}
-          open={open}
-          seriesId={seriesId}
-          seriesOptions={available}
-        />
+        <Suspense fallback={null}>
+          <AuntyWellDialog
+            curvesFileId={curvesFileId}
+            experiment={experiment}
+            onOpenChange={setOpen}
+            onSeriesChange={setSeriesId}
+            open={open}
+            seriesId={seriesId}
+            seriesOptions={available}
+          />
+        </Suspense>
       </div>
     </AuntyWellsProvider>
   );

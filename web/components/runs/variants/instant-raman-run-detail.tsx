@@ -53,11 +53,7 @@ export function InstantRamanRunDetail({
         />
       </RunDetail.FilesMetadataLayout>
 
-      <RunDetail.RamanReport
-        initialPage={reportItems}
-        instrumentId={instrumentId}
-        runId={runId}
-      />
+      <RunDetail.RamanReport initialPage={reportItems} />
     </>
   );
 }

@@ -1,6 +1,5 @@
 "use client";
 
-import { parse } from "csv-parse/browser/esm/sync";
 import { AlertTriangle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AuntySeriesToggle } from "@/components/runs/aunty/aunty-series-toggle";
@@ -9,6 +8,7 @@ import {
   useAuntyWellsActions,
   useAuntyWellsState,
 } from "@/components/runs/aunty/aunty-wells-provider";
+import { useReportDataSource } from "@/components/runs/report-data-source-provider";
 import { SeekerToolbar } from "@/components/runs/report-item-seeker";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,6 +28,7 @@ import {
   parseAuntyCurvesCsv,
   presentWellValues,
 } from "@/lib/runs/aunty";
+import type { ReportDataSource } from "@/lib/runs/view-data-source";
 
 const WELL_SEEKER_LABELS = {
   empty: "No wells found.",
@@ -48,29 +49,22 @@ type CurvesState =
 const curvesCache = new Map<number, Promise<Map<string, AuntyPoint[]>>>();
 
 async function downloadCurves(
+  dataSource: ReportDataSource,
   fileId: number
 ): Promise<Map<string, AuntyPoint[]>> {
-  // The download endpoint 302-redirects to a short-lived presigned S3 URL, so
-  // the browser follows the redirect and reads the bytes straight from S3.
-  const res = await fetch(`/api/v1/files/${fileId}/download`);
-  if (!res.ok) {
-    throw new Error(`Failed to load curves (HTTP ${res.status})`);
-  }
-  const text = await res.text();
-  const rows = parse(text, {
-    columns: true,
-    skip_empty_lines: true,
-    trim: true,
-  }) as Record<string, string>[];
+  const { rows } = await dataSource.fetchTableRows(fileId);
   return indexAuntyCurves(parseAuntyCurvesCsv(rows));
 }
 
-function loadCurves(fileId: number): Promise<Map<string, AuntyPoint[]>> {
+function loadCurves(
+  dataSource: ReportDataSource,
+  fileId: number
+): Promise<Map<string, AuntyPoint[]>> {
   const cached = curvesCache.get(fileId);
   if (cached) {
     return cached;
   }
-  const pending = downloadCurves(fileId).catch((err: unknown) => {
+  const pending = downloadCurves(dataSource, fileId).catch((err: unknown) => {
     curvesCache.delete(fileId);
     throw err;
   });
@@ -95,6 +89,7 @@ export function AuntyWellDialog({
   seriesId: AuntySeriesId;
   seriesOptions: AuntySeriesId[];
 }) {
+  const dataSource = useReportDataSource();
   const state = useAuntyWellsState();
   const actions = useAuntyWellsActions();
   const selectedWellLabel = state.selectedItem?.filename ?? null;
@@ -103,26 +98,29 @@ export function AuntyWellDialog({
   const [curves, setCurves] = useState<CurvesState>({ status: "idle" });
   const requestId = useRef(0);
 
-  const startLoad = useCallback((fileId: number) => {
-    const id = requestId.current + 1;
-    requestId.current = id;
-    setCurves({ status: "loading" });
-    loadCurves(fileId)
-      .then((index) => {
-        if (requestId.current === id) {
-          setCurves({ status: "ready", index });
-        }
-      })
-      .catch((err: unknown) => {
-        if (requestId.current === id) {
-          setCurves({
-            status: "error",
-            message:
-              err instanceof Error ? err.message : "Failed to load curves",
-          });
-        }
-      });
-  }, []);
+  const startLoad = useCallback(
+    (fileId: number) => {
+      const id = requestId.current + 1;
+      requestId.current = id;
+      setCurves({ status: "loading" });
+      loadCurves(dataSource, fileId)
+        .then((index) => {
+          if (requestId.current === id) {
+            setCurves({ status: "ready", index });
+          }
+        })
+        .catch((err: unknown) => {
+          if (requestId.current === id) {
+            setCurves({
+              status: "error",
+              message:
+                err instanceof Error ? err.message : "Failed to load curves",
+            });
+          }
+        });
+    },
+    [dataSource]
+  );
 
   useEffect(() => {
     if (open && curvesFileId != null) {

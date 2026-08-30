@@ -6,9 +6,9 @@ import {
   type ReportItem,
   type ReportItemKind,
   type ReportItemsPage,
-  reportItemsUrl,
   type SeekerSource,
 } from "@/lib/runs/report-items";
+import type { ReportDataSource } from "@/lib/runs/view-data-source";
 
 const SEARCH_DEBOUNCE_MS = 300;
 
@@ -28,10 +28,9 @@ interface Selection {
 }
 
 export interface UseReportItemsOptions {
+  fetchReportItems: ReportDataSource["fetchReportItems"];
   initialPage: ReportItemsPage;
-  instrumentId: string;
   kind: ReportItemKind;
-  runId: string;
 }
 
 export type UseReportItemsResult = SeekerSource;
@@ -41,10 +40,9 @@ function errorMessage(err: unknown): string {
 }
 
 export function useReportItems({
+  fetchReportItems,
   initialPage,
-  instrumentId,
   kind,
-  runId,
 }: UseReportItemsOptions): UseReportItemsResult {
   const [cache, setCache] = useState<Record<string, CacheEntry>>(() => ({
     "": {
@@ -78,24 +76,23 @@ export function useReportItems({
   const selectedItem = items[selectedIndex - offset] ?? null;
 
   const fetchWindow = useCallback(
-    async (
-      params: { anchor?: number; offset: number; search: string },
+    (
+      params: {
+        anchor?: number;
+        offset: number;
+        search: string;
+      },
       signal: AbortSignal
-    ): Promise<ReportItemsPage> => {
-      const response = await fetch(
-        reportItemsUrl(instrumentId, runId, {
-          ...params,
-          kind,
-          limit: REPORT_ITEMS_WINDOW,
-        }),
-        { signal }
-      );
-      if (!response.ok) {
-        throw new Error(`Failed to load report items (${response.status})`);
-      }
-      return (await response.json()) as ReportItemsPage;
-    },
-    [instrumentId, kind, runId]
+    ): Promise<ReportItemsPage> =>
+      fetchReportItems({
+        kind,
+        offset: params.offset,
+        limit: REPORT_ITEMS_WINDOW,
+        search: params.search || undefined,
+        anchor: params.anchor,
+        signal,
+      }),
+    [fetchReportItems, kind]
   );
 
   useEffect(() => {
@@ -114,6 +111,9 @@ export function useReportItems({
     const controller = new AbortController();
     fetchWindow({ offset: 0, search: query }, controller.signal)
       .then((page) => {
+        if (controller.signal.aborted) {
+          return;
+        }
         setCache((prev) => ({
           ...prev,
           [query]: {
@@ -156,6 +156,9 @@ export function useReportItems({
           { offset: nextOffset, search: query },
           controller.signal
         );
+        if (controller.signal.aborted) {
+          return entry;
+        }
         // A backward window clamped at 0 can overlap what is already loaded,
         // so drop the rows it duplicates before joining the two runs.
         const overlap = Math.max(0, nextOffset + page.data.length - offset);
@@ -184,7 +187,9 @@ export function useReportItems({
         }
         return entry;
       } finally {
-        setIsBusy(false);
+        if (!controller.signal.aborted) {
+          setIsBusy(false);
+        }
       }
     },
     [entry, fetchWindow, hasMore, hasPrevious, isBusy, items, offset, query]
@@ -246,9 +251,17 @@ export function useReportItems({
         return;
       }
 
+      // Shares the extend controller: both load one window for the current
+      // query, so the later action should cancel the earlier one, and unmount
+      // cancels whichever is outstanding.
+      busyControllerRef.current?.abort();
       const controller = new AbortController();
+      busyControllerRef.current = controller;
       void fetchWindow({ anchor, offset: 0, search: "" }, controller.signal)
         .then((page) => {
+          if (controller.signal.aborted) {
+            return;
+          }
           setCache((prev) => ({
             ...prev,
             "": {
@@ -264,7 +277,11 @@ export function useReportItems({
           setSearchInput("");
           setQuery("");
         })
-        .catch((err: unknown) => setError(errorMessage(err)));
+        .catch((err: unknown) => {
+          if (!controller.signal.aborted) {
+            setError(errorMessage(err));
+          }
+        });
     },
     [fetchWindow, query, selectedItem]
   );

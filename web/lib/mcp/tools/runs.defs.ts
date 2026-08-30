@@ -2,6 +2,7 @@ import { z } from "zod";
 import { mcpMetadataFilterInputSchema } from "@/lib/api/run-metadata-filters";
 import { fileStatusEnum } from "@/lib/db/schema";
 import type { McpToolDef } from "@/lib/mcp/catalog/types";
+import { runReportToolUiMeta } from "@/lib/mcp/ui-apps";
 import { RUN_STATUS_VALUES } from "@/lib/runs/run-status";
 import {
   addRunCommentOutputSchema,
@@ -134,6 +135,7 @@ export const getRunReportTool = {
     runId: z.string().describe("Run identifier within the instrument"),
   },
   annotations: { readOnlyHint: true },
+  _meta: runReportToolUiMeta(["model", "app"]),
 } as const satisfies McpToolDef;
 
 export const listRunFilesTool = {

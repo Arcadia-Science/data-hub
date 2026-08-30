@@ -27,15 +27,25 @@ import {
 export const PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS = 15 * 60;
 const DEFAULT_UPLOAD_EXPIRY_SECONDS = 60 * 60; // 1 hour — generous for large lab files over slow networks
 
+function s3Region(): string {
+  return process.env.AWS_REGION ?? "us-west-1";
+}
+
 // Singleton client — reused across requests within the same function instance.
 // On Vercel, AWS_ROLE_ARN triggers OIDC federation for short-lived credentials.
 // Locally / in tests, the SDK falls back to the default credential chain.
 const s3 = new S3Client({
-  region: process.env.AWS_REGION ?? "us-west-1",
+  region: s3Region(),
   credentials: process.env.AWS_ROLE_ARN
     ? awsCredentialsProvider({ roleArn: process.env.AWS_ROLE_ARN })
     : undefined,
 });
+
+// Origin `getPresignedDownloadUrl` signs against, named up front for the MCP
+// Apps policy. Adding `endpoint` or `forcePathStyle` above means changing this.
+export function s3BucketOrigin(bucket: string): string {
+  return `https://${bucket}.s3.${s3Region()}.amazonaws.com`;
+}
 
 export function getS3RawDataBucket(): string {
   const bucket = process.env.S3_RAW_DATA_BUCKET;

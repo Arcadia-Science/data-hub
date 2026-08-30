@@ -31,16 +31,14 @@ const COMPACT_PLATE_MAX_COLS = 12;
 /** Floor so 24-column plates stay readable instead of shrinking to fit. */
 const WIDE_PLATE_WELL_TRACK = "4rem";
 
-function plateColumnCount(wells: PlateWellData[]): number {
-  let maxCol = 0;
-  for (const w of wells) {
-    const pos = parseWell(w.well);
-    if (pos && pos.col > maxCol) {
-      maxCol = pos.col;
-    }
-  }
-  return maxCol + 1;
-}
+// Sized against the plate box, not the viewport, because the same map renders
+// in a wide run page and a narrow MCP iframe. Per-cell sizing would be cyclic.
+const PLATE_META_TEXT = "text-[length:clamp(0.75rem,2.2cqw,0.875rem)]";
+const PLATE_AXIS_TEXT = "text-[length:clamp(0.5rem,1.8cqw,0.875rem)]";
+const PLATE_SCALE_TEXT = "text-[length:clamp(0.4375rem,1.6cqw,0.75rem)]";
+const PLATE_SLIDER_TEXT = "text-[length:clamp(0.625rem,1.8cqw,0.75rem)]";
+const WELL_VALUE_TEXT =
+  "text-[length:clamp(0.5rem,1.6cqw,0.75rem)] leading-none";
 
 function formatCellValue(value: unknown): string {
   if (value === null || value === undefined) {
@@ -179,19 +177,25 @@ export function PlateMapGrid({
 
   return (
     <div
-      className={cn(
-        "flex min-w-0 flex-col gap-3",
-        wide ? "w-full" : "w-3/4",
-        className
-      )}
+      className={cn("@container flex w-full min-w-0 flex-col gap-3", className)}
     >
       {(plateName || wavelength) && (
         <div className="flex min-w-0 items-baseline justify-between gap-4">
-          <h4 className="min-w-0 text-pretty font-medium font-mono text-foreground text-sm leading-snug">
+          <h4
+            className={cn(
+              "min-w-0 text-pretty font-medium font-mono text-foreground leading-snug",
+              PLATE_META_TEXT
+            )}
+          >
             {plateName}
           </h4>
           {wavelength && (
-            <span className="shrink-0 font-mono text-muted-foreground text-sm">
+            <span
+              className={cn(
+                "shrink-0 font-mono text-muted-foreground",
+                PLATE_META_TEXT
+              )}
+            >
               {wavelength} nm
             </span>
           )}
@@ -200,7 +204,7 @@ export function PlateMapGrid({
       <div
         aria-label={plateName ? `${plateName} plate map` : "Plate map"}
         className={cn(
-          "min-w-0 overflow-x-auto overscroll-x-contain",
+          "w-full min-w-0 overflow-x-auto overscroll-x-contain",
           wide &&
             "rounded-md outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
         )}
@@ -223,7 +227,10 @@ export function PlateMapGrid({
           {/* Column headers */}
           {colLabels.map((c, ci) => (
             <div
-              className="py-1 font-medium text-muted-foreground text-sm"
+              className={cn(
+                "py-1 font-medium text-muted-foreground",
+                PLATE_AXIS_TEXT
+              )}
               key={c}
               style={{ gridRow: 1, gridColumn: ci + 2 }}
             >
@@ -235,7 +242,10 @@ export function PlateMapGrid({
           {rowLabels.map((rowLabel, ri) => (
             <Fragment key={rowLabel}>
               <div
-                className="flex items-center justify-center font-medium text-muted-foreground text-sm"
+                className={cn(
+                  "flex items-center justify-center font-medium text-muted-foreground",
+                  PLATE_AXIS_TEXT
+                )}
                 style={{ gridRow: ri + 2, gridColumn: 1 }}
               >
                 {rowLabel}
@@ -257,15 +267,15 @@ export function PlateMapGrid({
                   <Tooltip key={`${ri}-${ci}`}>
                     <TooltipTrigger asChild>
                       <div
-                        className={
+                        className={cn(
+                          "flex aspect-square w-full min-w-0 items-center justify-center overflow-hidden rounded font-mono tabular-nums",
+                          WELL_VALUE_TEXT,
                           useHeatmap
-                            ? "flex aspect-square items-center justify-center overflow-hidden rounded font-mono text-xs tabular-nums transition-colors"
-                            : `flex aspect-square items-center justify-center overflow-hidden rounded border font-mono text-sm tabular-nums ${
-                                hasValue
-                                  ? "border-border bg-muted/50"
-                                  : "border-transparent"
-                              }`
-                        }
+                            ? "transition-colors"
+                            : hasValue
+                              ? "border border-border bg-muted/50"
+                              : "border border-transparent"
+                        )}
                         style={{
                           gridRow: ri + 2,
                           gridColumn: ci + 2,
@@ -298,7 +308,10 @@ export function PlateMapGrid({
           {heatmap && hasRange && (
             <>
               <div
-                className="ml-4 flex items-end justify-center pb-0.5 text-muted-foreground text-xs"
+                className={cn(
+                  "ml-4 flex items-end justify-center pb-0.5 text-muted-foreground",
+                  PLATE_SCALE_TEXT
+                )}
                 style={{ gridRow: 1, gridColumn: cols + 3 }}
               >
                 <span className="font-mono tabular-nums">
@@ -315,7 +328,10 @@ export function PlateMapGrid({
                 }}
               />
               <div
-                className="ml-4 flex items-start justify-center pt-0.5 text-muted-foreground text-xs"
+                className={cn(
+                  "ml-4 flex items-start justify-center pt-0.5 text-muted-foreground",
+                  PLATE_SCALE_TEXT
+                )}
                 style={{ gridRow: rows + 2, gridColumn: cols + 3 }}
               >
                 <span className="font-mono tabular-nums">
@@ -395,12 +411,8 @@ export function PlateMapWithIndexSlider({
       ? (frameLabels[selectedIndex] ?? wavelength)
       : wavelength;
 
-  const wide = plateColumnCount(frames[0] ?? []) > COMPACT_PLATE_MAX_COLS;
-
   return (
-    <div
-      className={cn("flex min-w-0 flex-col gap-3", wide ? "w-full" : "w-3/4")}
-    >
+    <div className="@container flex w-full min-w-0 flex-col gap-3">
       <PlateMapGrid
         className="w-full"
         data={frames[selectedIndex]}
@@ -411,13 +423,21 @@ export function PlateMapWithIndexSlider({
       />
       {frames.length > 1 && (
         <div className="mt-3 flex items-center gap-2">
-          <span className="shrink-0 font-mono text-muted-foreground text-xs tabular-nums">
+          <span
+            className={cn(
+              "shrink-0 font-mono text-muted-foreground tabular-nums",
+              PLATE_SLIDER_TEXT
+            )}
+          >
             {frameLabels[0]}
           </span>
           <div className="relative min-w-0 flex-1">
             <div
               aria-hidden
-              className="pointer-events-none absolute bottom-full z-10 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-foreground px-1.5 py-0.5 font-mono text-background text-xs tabular-nums"
+              className={cn(
+                "pointer-events-none absolute bottom-full z-10 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-foreground px-1.5 py-0.5 font-mono text-background tabular-nums",
+                PLATE_SLIDER_TEXT
+              )}
               style={{ left: `${thumbPercent}%` }}
             >
               {frameLabels[selectedIndex] ?? "—"}
@@ -436,7 +456,12 @@ export function PlateMapWithIndexSlider({
               value={[selectedIndex]}
             />
           </div>
-          <span className="shrink-0 font-mono text-muted-foreground text-xs tabular-nums">
+          <span
+            className={cn(
+              "shrink-0 font-mono text-muted-foreground tabular-nums",
+              PLATE_SLIDER_TEXT
+            )}
+          >
             {frameLabels[maxIdx]}
           </span>
         </div>
