@@ -68,6 +68,26 @@ export function mimeFor(filePath: string): string {
   return MIME_MAP[ext] ?? "application/octet-stream";
 }
 
+const GENERIC_BINARY_TYPES = new Set([
+  "application/octet-stream",
+  "binary/octet-stream",
+]);
+
+// Watcher PUTs of uppercase extensions (`.PDF`) often land in S3 as
+// `binary/octet-stream` even when `files.content_type` is correct. Prefer
+// the stored type unless it is a generic binary type, then fall back to
+// the extension so an iframe can render the file.
+export function contentTypeForDownload(
+  stored: string | null | undefined,
+  filename: string
+): string | undefined {
+  if (stored && !GENERIC_BINARY_TYPES.has(stored.toLowerCase())) {
+    return stored;
+  }
+  const inferred = mimeFor(filename);
+  return inferred === "application/octet-stream" ? undefined : inferred;
+}
+
 export type ByteRange =
   | { kind: "full" }
   | { kind: "partial"; start: number; end: number }
@@ -120,15 +140,29 @@ export function parseByteRange(
 }
 
 // Sanitize a filename for use inside a `Content-Disposition` header.
-// Mirrors the same logic in `web/lib/s3.ts` so the local route's
-// response headers match what the AWS path would have produced via
-// `ResponseContentDisposition` on a presigned URL.
+// Shared with the AWS presign path so local and S3 responses match.
 function sanitizeContentDispositionFilename(name: string): string {
   const cleaned = name
     .replaceAll(/[\r\n"\\]/g, "")
     .replaceAll(/[\x00-\x1f\x7f]/g, "")
     .trim();
   return cleaned.slice(0, 200) || "download";
+}
+
+// `filename` without `disposition` stays `attachment` so archive downloads
+// keep their previous signed header. Report embeds pass `inline`.
+export function contentDispositionHeader(
+  disposition?: "attachment" | "inline",
+  filename?: string
+): string | undefined {
+  if (!(disposition || filename)) {
+    return;
+  }
+  const kind = disposition ?? "attachment";
+  if (!filename) {
+    return kind;
+  }
+  return `${kind}; filename="${sanitizeContentDispositionFilename(filename)}"`;
 }
 
 // Build the same-origin URL that points at the local-mirror route.
@@ -150,14 +184,17 @@ function sanitizeContentDispositionFilename(name: string): string {
 export function localMirrorDownloadUrl(
   bucket: string,
   key: string,
-  filename?: string
+  options: {
+    disposition?: "attachment" | "inline";
+    filename?: string;
+  } = {}
 ): string {
   const segments = key.split("/").map(encodeURIComponent).join("/");
-  const search = filename
-    ? `?disposition=${encodeURIComponent(
-        `attachment; filename="${sanitizeContentDispositionFilename(filename)}"`
-      )}`
-    : "";
+  const header = contentDispositionHeader(
+    options.disposition,
+    options.filename
+  );
+  const search = header ? `?disposition=${encodeURIComponent(header)}` : "";
   return `/api/local-s3/${encodeURIComponent(bucket)}/${segments}${search}`;
 }
 

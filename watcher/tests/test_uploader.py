@@ -21,7 +21,7 @@ from data_hub_watcher.models import (
     UploadQueueResponse,
 )
 from data_hub_watcher.state import StateDB
-from data_hub_watcher.uploader import Uploader, UploadQueueWorker
+from data_hub_watcher.uploader import Uploader, UploadQueueWorker, _guess_content_type
 
 
 @pytest.fixture()
@@ -959,3 +959,7 @@ class TestUploadQueueWorker:
         finally:
             # Let the blocked poll finish so the daemon thread exits cleanly.
             release.set()
+
+
+def test_guess_content_type_handles_uppercase_pdf() -> None:
+    assert _guess_content_type(Path("Experiment_Report.PDF")) == "application/pdf"

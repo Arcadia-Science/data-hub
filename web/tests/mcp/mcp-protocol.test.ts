@@ -473,6 +473,7 @@ vi.mock("@/lib/api/files", () => ({
     if (id === 42) {
       return {
         ok: true,
+        contentType: MOCK_FILE.contentType,
         filename: MOCK_FILE.filename,
         s3Bucket: MOCK_FILE.s3Bucket,
         s3Key: MOCK_FILE.s3Key,

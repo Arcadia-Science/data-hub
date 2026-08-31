@@ -32,8 +32,12 @@ describe("createRestReportDataSource", () => {
       "/api/v1/instruments/inst-1/runs/run-1/report-items?kind=image&offset=0&limit=50&search=gel",
       { signal: undefined }
     );
-    expect(source.resolveFileUrl(42)).toBe("/api/v1/files/42/download");
-    expect(source.peekFileUrl?.(42)).toBe("/api/v1/files/42/download");
+    expect(source.resolveFileUrl(42)).toBe(
+      "/api/v1/files/42/download?disposition=inline"
+    );
+    expect(source.peekFileUrl?.(42)).toBe(
+      "/api/v1/files/42/download?disposition=inline"
+    );
   });
 
   // Without this the seeker's debounced search leaves one full request per
@@ -81,7 +85,9 @@ describe("createRestReportDataSource", () => {
 
     // Bytes come straight from S3 via the 302, and only once per file.
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith("/api/v1/files/9/download");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/files/9/download?disposition=inline"
+    );
     expect(first).toEqual({
       columns: ["col_a", "col_b"],
       rows: [
