@@ -1,12 +1,13 @@
 """Unit tests for shared S3 helpers."""
 
 from __future__ import annotations
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 from botocore.exceptions import ClientError
 
-from data_hub_shared.s3_utils import object_exists
+from data_hub_shared.s3_utils import _extra_args, get_content_type, object_exists
 
 
 def _client_error(code: str, status: int) -> ClientError:
@@ -58,3 +59,14 @@ def test_object_exists_other_errors_raise() -> None:
     client.head_object.side_effect = _client_error("500", 500)
     with pytest.raises(ClientError):
         object_exists("s3://bucket/key", s3_client=client)
+
+
+def test_get_content_type_is_case_insensitive() -> None:
+    assert get_content_type(Path("Experiment_Report.PDF")) == "application/pdf"
+
+
+def test_extra_args_marks_pdfs_inline() -> None:
+    assert _extra_args(Path("Experiment_Report.PDF")) == {
+        "ContentType": "application/pdf",
+        "ContentDisposition": "inline",
+    }

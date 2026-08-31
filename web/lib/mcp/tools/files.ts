@@ -17,6 +17,7 @@ import {
   getPresignedDownloadUrl,
   PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS,
 } from "@/lib/s3";
+import { contentTypeForDownload } from "@/lib/s3-local-mirror";
 import {
   dismissFileTool,
   getFileDownloadUrlTool,
@@ -58,7 +59,13 @@ export function registerFileTools(server: McpServer) {
       const downloadUrl = await getPresignedDownloadUrl(
         lookup.s3Bucket,
         lookup.s3Key,
-        PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS
+        {
+          contentType: contentTypeForDownload(
+            lookup.contentType,
+            lookup.filename
+          ),
+          expiresIn: PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS,
+        }
       );
 
       return structuredResult({

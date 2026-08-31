@@ -40,12 +40,16 @@ def parse_s3_uri(s3_uri: str) -> tuple[str, str]:
 def _extra_args(file_path: Path) -> dict[str, str]:
     """Build `ExtraArgs` for an S3 upload (content-type, disposition)."""
     args: dict[str, str] = {}
-    content_type, _ = mimetypes.guess_type(str(file_path))
+    content_type = get_content_type(file_path)
     if content_type:
         args["ContentType"] = content_type
-        # Images and video get "inline" so browsers render / play them
+        # Images, video, and PDFs get "inline" so browsers render them
         # instead of prompting a download when accessed via pre-signed URL.
-        if content_type.startswith("image/") or content_type.startswith("video/"):
+        if (
+            content_type.startswith("image/")
+            or content_type.startswith("video/")
+            or content_type == "application/pdf"
+        ):
             args["ContentDisposition"] = "inline"
     return args
 
@@ -148,6 +152,11 @@ def upload_folder(
 
 
 def get_content_type(file_path: Path) -> str | None:
-    """Return the guessed MIME type for *file_path*, or `None`."""
-    content_type, _ = mimetypes.guess_type(str(file_path))
+    """Return the guessed MIME type for *file_path*, or `None`.
+
+    `mimetypes.guess_type` is case-sensitive on some platforms, so the
+    suffix is lowercased first. Azure Cielo writes reports as `.PDF`.
+    """
+    lowered = file_path.with_suffix(file_path.suffix.lower())
+    content_type, _ = mimetypes.guess_type(str(lowered))
     return content_type

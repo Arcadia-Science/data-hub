@@ -14,7 +14,7 @@ import {
   structuredResult,
 } from "@/lib/mcp/tools/helpers";
 import { REPORT_ITEMS_WINDOW } from "@/lib/runs/report-items";
-import { getPresignedDownloadUrl } from "@/lib/s3";
+import { embedDownloadOptions, getPresignedDownloadUrl } from "@/lib/s3";
 import {
   reportViewFileUrlTool,
   reportViewItemsTool,
@@ -67,9 +67,11 @@ export function registerReportViewTools(server: McpServer) {
           if (!(file?.s3Bucket && file.s3Key)) {
             return { ...item, downloadUrl: "" };
           }
-          // Omit filename so the URL is not forced to Content-Disposition:
-          // attachment — nested PDF iframes need inline rendering.
-          const url = await getPresignedDownloadUrl(file.s3Bucket, file.s3Key);
+          const url = await getPresignedDownloadUrl(
+            file.s3Bucket,
+            file.s3Key,
+            embedDownloadOptions(file.filename, file.contentType)
+          );
           return { ...item, downloadUrl: toAbsoluteDownloadUrl(url) };
         })
       );
@@ -118,7 +120,11 @@ export function registerReportViewTools(server: McpServer) {
         );
       }
 
-      const url = await getPresignedDownloadUrl(file.s3Bucket, file.s3Key);
+      const url = await getPresignedDownloadUrl(
+        file.s3Bucket,
+        file.s3Key,
+        embedDownloadOptions(file.filename, file.contentType)
+      );
       return structuredResult({
         id: file.id,
         filename: file.filename,

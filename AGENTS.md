@@ -18,6 +18,10 @@ User-, operator-, and admin-facing documentation — installing a watcher, setti
 
 This repo's `developer-docs/` covers contributing to and self-hosting Data Hub itself: architecture internals, local dev setup (`getting-started.md`, `local-development.md`), conventions, the step-by-step self-hosting guide for the web app and AWS infrastructure (`first-time-deployment.md`) plus CI/ongoing-deploy reference (`ci-and-deployment.md`), and per-package references (`lambda.md`, `watcher.md`, `shared-library.md`). See `developer-docs/README.md` for the full index.
 
+### Watcher version
+
+Shipped watcher changes (`watcher/src/`) need a version bump in the same branch. Follow `watcher/AGENTS.md`: bump `[project].version` in `watcher/pyproject.toml` once if it still matches the merge-base, then run `uv lock`. Do not tag the release from the feature branch.
+
 ### Watcher CLI catalog (docs site)
 
 The public [Watcher CLI](https://datahub.arcadiascience.com/docs/cli-reference) page renders from a JSON catalog generated from Click in `watcher/src/data_hub_watcher/cli_catalog.py`.

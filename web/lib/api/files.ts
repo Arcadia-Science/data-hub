@@ -18,6 +18,7 @@ export async function getActiveFileById(
 
 export async function getActiveFilesByIds(ids: number[]): Promise<
   Array<{
+    contentType: string | null;
     filename: string;
     id: number;
     s3Bucket: string | null;
@@ -30,6 +31,7 @@ export async function getActiveFilesByIds(ids: number[]): Promise<
   return await db
     .select({
       id: files.id,
+      contentType: files.contentType,
       filename: files.filename,
       s3Bucket: files.s3Bucket,
       s3Key: files.s3Key,
@@ -61,7 +63,13 @@ export async function findActiveFileBySuffix(
 }
 
 export type FileDownloadLookup =
-  | { ok: true; filename: string; s3Bucket: string; s3Key: string }
+  | {
+      contentType: string | null;
+      filename: string;
+      ok: true;
+      s3Bucket: string;
+      s3Key: string;
+    }
   | { ok: false; reason: "not_found" | "not_uploaded" };
 
 // Resolves a file ID into the S3 coordinates needed to produce a pre-signed
@@ -72,6 +80,7 @@ export async function lookupFileForDownload(
 ): Promise<FileDownloadLookup> {
   const [file] = await db
     .select({
+      contentType: files.contentType,
       filename: files.filename,
       s3Bucket: files.s3Bucket,
       s3Key: files.s3Key,
@@ -102,6 +111,7 @@ export async function lookupFileForDownload(
 
   return {
     ok: true,
+    contentType: file.contentType,
     filename: file.filename,
     s3Bucket: file.s3Bucket,
     s3Key: file.s3Key,
