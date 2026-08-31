@@ -5,9 +5,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AuntySeriesToggle } from "@/components/runs/aunty/aunty-series-toggle";
 import { AuntyWellChart } from "@/components/runs/aunty/aunty-well-chart";
 import {
-  useAuntyWellsActions,
-  useAuntyWellsState,
-} from "@/components/runs/aunty/aunty-wells-provider";
+  usePlateWellsActions,
+  usePlateWellsState,
+} from "@/components/runs/plate-wells-provider";
 import { useReportDataSource } from "@/components/runs/report-data-source-provider";
 import { SeekerToolbar } from "@/components/runs/report-item-seeker";
 import { Button } from "@/components/ui/button";
@@ -90,8 +90,8 @@ export function AuntyWellDialog({
   seriesOptions: AuntySeriesId[];
 }) {
   const dataSource = useReportDataSource();
-  const state = useAuntyWellsState();
-  const actions = useAuntyWellsActions();
+  const state = usePlateWellsState();
+  const actions = usePlateWellsActions();
   const selectedWellLabel = state.selectedItem?.filename ?? null;
   const well = experiment.wells.find((w) => w.well === selectedWellLabel);
 

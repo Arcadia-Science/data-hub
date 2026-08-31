@@ -90,7 +90,7 @@ def test_tidy_rows_and_zero_channel(tmp_path: Path) -> None:
     assert dark[0]["neg_dF_dT"] == 0.0
 
 
-def test_plate_json_thins_long_series() -> None:
+def test_plate_json_thins_both_series() -> None:
     temps = [20.0 + 0.5 * i for i in range(50)]
     fluor = [10.0 - 0.1 * i for i in range(50)]
     from data_hub_lambda.azure_cielo_qpcr.melting_curve import ChannelBlock
@@ -98,9 +98,13 @@ def test_plate_json_thins_long_series() -> None:
     block = ChannelBlock(channel="Channel2", wells={"A1": list(zip(temps, fluor, strict=True))})
     plate = build_plate_json([block])
     channels: list[dict[str, Any]] = plate["channels"]  # type: ignore[assignment]
-    points: list[dict[str, float]] = channels[0]["wells"][0]["points"]
-    assert len(points) == MAX_POINTS_PER_WELL
-    assert points[0]["x"] == 20.0
+    series: dict[str, list[list[float]]] = channels[0]["wells"][0]["series"]
+    assert sorted(series) == ["derivative", "fluorescence"]
+    for points in series.values():
+        assert len(points) == MAX_POINTS_PER_WELL
+        assert points[0][0] == 20.0
+    # Fluorescence is a percentage of the well's own maximum, so it starts at 100.
+    assert series["fluorescence"][0][1] == 100.0
 
 
 def test_build_tidy_rows_skips_empty_wells() -> None:

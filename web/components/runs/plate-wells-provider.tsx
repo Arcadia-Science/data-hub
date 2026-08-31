@@ -1,14 +1,14 @@
 "use client";
 
 import { createContext, type ReactNode, use, useMemo, useState } from "react";
-import { type AuntyWell, compareWells } from "@/lib/runs/aunty";
+import { compareWells } from "@/lib/runs/plate-wells";
 import type {
   ReportItem,
   SeekerActions,
   SeekerState,
 } from "@/lib/runs/report-items";
 
-export interface AuntyWellsActions extends SeekerActions {
+export interface PlateWellsActions extends SeekerActions {
   selectWell: (well: string) => void;
 }
 
@@ -17,10 +17,10 @@ interface Selection {
   selectedId: number;
 }
 
-// Actions and state are separate so the plate grid, which only ever calls
+// Actions and state are separate so a plate grid, which only ever calls
 // `selectWell`, does not re-render every time the selection moves.
-const AuntyWellsActionsContext = createContext<AuntyWellsActions | null>(null);
-const AuntyWellsStateContext = createContext<SeekerState | null>(null);
+const PlateWellsActionsContext = createContext<PlateWellsActions | null>(null);
+const PlateWellsStateContext = createContext<SeekerState | null>(null);
 
 function filterWells(ordered: ReportItem[], search: string): ReportItem[] {
   const query = search.trim().toLowerCase();
@@ -30,15 +30,18 @@ function filterWells(ordered: ReportItem[], search: string): ReportItem[] {
   return ordered.filter((item) => item.filename.toLowerCase().includes(query));
 }
 
-export function AuntyWellsProvider({
+// Owns "which well is selected" for one plate. `wells` is a list of labels, so
+// any instrument's well shape works as long as the caller keeps the array
+// identity stable.
+export function PlateWellsProvider({
   children,
   wells,
 }: {
   children: ReactNode;
-  wells: AuntyWell[];
+  wells: readonly string[];
 }) {
   const ordered = useMemo<ReportItem[]>(() => {
-    const unique = [...new Set(wells.map((well) => well.well))];
+    const unique = [...new Set(wells)];
     unique.sort(compareWells);
     return unique.map((well, index) => ({ id: index + 1, filename: well }));
   }, [wells]);
@@ -58,7 +61,7 @@ export function AuntyWellsProvider({
 
   // Every action updates through the setter callback, so this object only
   // changes when the well list itself changes.
-  const actions = useMemo<AuntyWellsActions>(() => {
+  const actions = useMemo<PlateWellsActions>(() => {
     function seek(current: Selection, delta: number): Selection {
       const visible = filterWells(ordered, current.search);
       const from = visible.findIndex((item) => item.id === current.selectedId);
@@ -109,29 +112,29 @@ export function AuntyWellsProvider({
   }, [ordered, selection]);
 
   return (
-    <AuntyWellsActionsContext.Provider value={actions}>
-      <AuntyWellsStateContext.Provider value={state}>
+    <PlateWellsActionsContext.Provider value={actions}>
+      <PlateWellsStateContext.Provider value={state}>
         {children}
-      </AuntyWellsStateContext.Provider>
-    </AuntyWellsActionsContext.Provider>
+      </PlateWellsStateContext.Provider>
+    </PlateWellsActionsContext.Provider>
   );
 }
 
-export function useAuntyWellsActions(): AuntyWellsActions {
-  const context = use(AuntyWellsActionsContext);
+export function usePlateWellsActions(): PlateWellsActions {
+  const context = use(PlateWellsActionsContext);
   if (!context) {
     throw new Error(
-      "useAuntyWellsActions must be used within an <AuntyWellsProvider>"
+      "usePlateWellsActions must be used within a <PlateWellsProvider>"
     );
   }
   return context;
 }
 
-export function useAuntyWellsState(): SeekerState {
-  const context = use(AuntyWellsStateContext);
+export function usePlateWellsState(): SeekerState {
+  const context = use(PlateWellsStateContext);
   if (!context) {
     throw new Error(
-      "useAuntyWellsState must be used within an <AuntyWellsProvider>"
+      "usePlateWellsState must be used within a <PlateWellsProvider>"
     );
   }
   return context;

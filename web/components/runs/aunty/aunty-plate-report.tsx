@@ -3,7 +3,7 @@
 import { lazy, Suspense, useCallback, useMemo, useState } from "react";
 import { AuntyPlateGrid } from "@/components/runs/aunty/aunty-plate-grid";
 import { AuntySeriesToggle } from "@/components/runs/aunty/aunty-series-toggle";
-import { AuntyWellsProvider } from "@/components/runs/aunty/aunty-wells-provider";
+import { PlateWellsProvider } from "@/components/runs/plate-wells-provider";
 import { ReportDataShell } from "@/components/runs/report-data-shell";
 import {
   type AuntyExperiment,
@@ -67,9 +67,13 @@ function AuntyExperimentSection({
   );
   const [open, setOpen] = useState(false);
   const openDialog = useCallback(() => setOpen(true), []);
+  const wellLabels = useMemo(
+    () => experiment.wells.map((well) => well.well),
+    [experiment.wells]
+  );
 
   return (
-    <AuntyWellsProvider wells={experiment.wells}>
+    <PlateWellsProvider wells={wellLabels}>
       <div className="flex min-w-0 flex-col gap-3">
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
           <h3 className="min-w-0 text-pretty font-medium font-mono text-foreground text-sm leading-snug">
@@ -98,6 +102,6 @@ function AuntyExperimentSection({
           />
         </Suspense>
       </div>
-    </AuntyWellsProvider>
+    </PlateWellsProvider>
   );
 }

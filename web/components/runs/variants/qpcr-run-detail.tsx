@@ -7,6 +7,8 @@ import {
   hasQpcrMetadata,
   QpcrRunBadges,
 } from "@/components/runs/run-metadata-badges";
+import { isQpcrMeltingArtifact } from "@/lib/runs/qpcr-melting";
+import { isPdfFile } from "@/lib/runs/run-file-types";
 
 export function QpcrRunDetail({
   run,
@@ -15,6 +17,7 @@ export function QpcrRunDetail({
   filesPagination,
   fileStats,
   reportFiles,
+  reportItems,
   qpcrMeltingPlate,
   instrumentId,
   runId,
@@ -24,6 +27,12 @@ export function QpcrRunDetail({
   const isDeleted = run.deletedAt !== null;
   const activeFileCount = fileStats.active;
   const hasProcessedFiles = fileStats.processedActive > 0;
+  const pdfCount = reportItems.pagination.total;
+  // The plate grids own the melt artifacts, so the fallback list would
+  // otherwise repeat them under a second heading.
+  const otherReportFiles = reportFiles.filter(
+    (file) => !(isPdfFile(file) || isQpcrMeltingArtifact(file.filename))
+  );
 
   return (
     <>
@@ -63,9 +72,14 @@ export function QpcrRunDetail({
         />
       </RunDetail.FilesMetadataLayout>
 
-      {qpcrMeltingPlate == null ? (
-        <RunDetail.Report files={reportFiles} />
+      {/* The instrument's own PDF export is the run's headline result, so it
+          keeps the "Report Data" slot every other variant uses. */}
+      {pdfCount > 0 ? (
+        <RunDetail.PdfCarousel initialPage={reportItems} />
       ) : (
+        <RunDetail.Report files={otherReportFiles} />
+      )}
+      {qpcrMeltingPlate != null && (
         <QpcrMeltingReport
           derivativesCsvFileId={qpcrMeltingPlate.derivativesCsvFileId}
           plate={qpcrMeltingPlate.plate}

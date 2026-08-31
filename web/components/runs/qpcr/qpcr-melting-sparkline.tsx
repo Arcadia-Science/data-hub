@@ -3,16 +3,17 @@ import {
   SPARKLINE_HEIGHT,
   SPARKLINE_WIDTH,
   type SparklineGeometry,
-} from "@/lib/runs/aunty";
+} from "@/lib/runs/plate-wells";
+import type { QpcrMeltingSeriesMeta } from "@/lib/runs/qpcr-melting";
 
-const LINE_COLOR = "#0d9488";
-
+// Memoized because one channel renders up to 384 of these and the grid above
+// re-renders whenever the series toggle changes or the well dialog opens.
 export const QpcrMeltingSparkline = memo(function QpcrMeltingSparkline({
   geometry,
-  label,
+  meta,
 }: {
   geometry?: SparklineGeometry;
-  label: string;
+  meta: QpcrMeltingSeriesMeta;
 }) {
   if (!geometry?.d) {
     return <div className="h-full min-h-12 w-full" />;
@@ -25,11 +26,11 @@ export const QpcrMeltingSparkline = memo(function QpcrMeltingSparkline({
       preserveAspectRatio="none"
       viewBox={`0 0 ${SPARKLINE_WIDTH} ${SPARKLINE_HEIGHT}`}
     >
-      <title>{label}</title>
+      <title>{meta.label}</title>
       <path
         d={geometry.d}
         fill="none"
-        stroke={LINE_COLOR}
+        stroke={meta.color}
         strokeLinecap="round"
         strokeLinejoin="round"
         strokeWidth="1.75"

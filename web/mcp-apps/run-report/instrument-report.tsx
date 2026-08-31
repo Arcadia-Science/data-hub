@@ -24,6 +24,8 @@ import { type AuntyPlateData, parseAuntyPlateJson } from "@/lib/runs/aunty";
 import { extractPlateMaps } from "@/lib/runs/extract-plate-maps";
 import {
   parseQpcrMeltingPlateJson,
+  QPCR_MELTING_DERIVATIVES_SUFFIX,
+  QPCR_MELTING_PLATE_SUFFIX,
   type QpcrMeltingPlateData,
 } from "@/lib/runs/qpcr-melting";
 import {
@@ -33,7 +35,7 @@ import {
   type ReportItemsPage,
   reportItemKindForInstrument,
 } from "@/lib/runs/report-items";
-import { isCsvFile } from "@/lib/runs/run-file-types";
+import { isCsvFile, isPdfFile } from "@/lib/runs/run-file-types";
 import type { ReportDataSource } from "@/lib/runs/view-data-source";
 import { readPersistedFileId } from "./host-bridge";
 
@@ -106,14 +108,14 @@ async function loadQpcrMeltingPlate(
     throw new Error("This data source cannot resolve files by suffix.");
   }
   try {
-    const plateRef = await resolveBySuffix("_melting_curve_plate.json");
+    const plateRef = await resolveBySuffix(QPCR_MELTING_PLATE_SUFFIX);
     const response = await fetch(plateRef.url);
     if (!response.ok) {
       throw new Error(`Failed to load plate JSON (HTTP ${response.status})`);
     }
     const plate = parseQpcrMeltingPlateJson(await response.json());
     const derivatives = await resolveBySuffix(
-      "_melting_curve_derivatives.csv"
+      QPCR_MELTING_DERIVATIVES_SUFFIX
     ).catch(() => null);
     return { plate, derivativesCsvFileId: derivatives?.id ?? null };
   } catch {
@@ -148,6 +150,9 @@ export function InstrumentReport({
       </CarouselKindReport>
     );
   }
+  if (instrumentType === "qpcr") {
+    return <QpcrReport persistKey={persistKey} result={result} />;
+  }
   if (kind === "video" && instrumentType === "dishcam") {
     return (
       <CarouselKindReport kind={kind} persistKey={persistKey}>
@@ -164,9 +169,6 @@ export function InstrumentReport({
   }
   if (instrumentType === "aunty") {
     return <AuntyReport />;
-  }
-  if (instrumentType === "qpcr") {
-    return <QpcrReport result={result} />;
   }
   if (instrumentType === "plate_reader") {
     return <PlateReaderReport result={result} />;
@@ -259,7 +261,31 @@ function AuntyReport() {
   );
 }
 
-function QpcrReport({ result }: { result: RunReportToolResult }) {
+// The instrument's PDF export takes the "Report Data" slot; the melt plate
+// grids get their own section underneath, matching the run page.
+function QpcrReport({
+  persistKey,
+  result,
+}: {
+  persistKey: string;
+  result: RunReportToolResult;
+}) {
+  const hasPdf = result.reportFiles.some(isPdfFile);
+  return (
+    <div className="flex w-full min-w-0 flex-col gap-8">
+      {hasPdf ? (
+        <CarouselKindReport kind="pdf" persistKey={persistKey}>
+          <PdfCarouselReport />
+        </CarouselKindReport>
+      ) : (
+        <RunReportSection files={toSectionFiles(result.reportFiles)} />
+      )}
+      <QpcrMeltingSection />
+    </div>
+  );
+}
+
+function QpcrMeltingSection() {
   const dataSource = useReportDataSource();
   const [plate, setPlate] = useState<QpcrMeltingPlateData | null | undefined>(
     undefined
@@ -271,18 +297,15 @@ function QpcrReport({ result }: { result: RunReportToolResult }) {
       .catch(() => setPlate(null));
   }, [dataSource]);
 
-  if (plate) {
-    return (
-      <QpcrMeltingReport
-        derivativesCsvFileId={plate.derivativesCsvFileId}
-        plate={plate.plate}
-      />
-    );
-  }
-  if (plate === undefined) {
+  if (!plate) {
     return null;
   }
-  return <RunReportSection files={toSectionFiles(result.reportFiles)} />;
+  return (
+    <QpcrMeltingReport
+      derivativesCsvFileId={plate.derivativesCsvFileId}
+      plate={plate.plate}
+    />
+  );
 }
 
 function PlateReaderReport({ result }: { result: RunReportToolResult }) {

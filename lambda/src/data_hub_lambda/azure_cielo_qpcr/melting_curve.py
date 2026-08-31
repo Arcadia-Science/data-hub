@@ -10,7 +10,8 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# Four channels × 96 wells at this cap lands near Aunty's ~270 KB plate JSON.
+# Points per well per series in the plate JSON. Four channels × 96 wells × two
+# series at this cap lands near Aunty's ~270 KB plate JSON.
 MAX_POINTS_PER_WELL = 24
 
 _TIDY_FIELDNAMES = [
@@ -145,8 +146,18 @@ def _thin(points: list[tuple[float, float]], cap: int) -> list[tuple[float, floa
     return [points[i] for i in idx]
 
 
+def _thinned_points(xs: list[float], ys: list[float]) -> list[list[float]]:
+    series = list(zip(xs, ys, strict=True))
+    return [[round(x, 3), round(y, 4)] for x, y in _thin(series, MAX_POINTS_PER_WELL)]
+
+
 def build_plate_json(blocks: list[ChannelBlock]) -> dict[str, object]:
-    """Thinned per-channel, per-well `-dF%/dT` points for the plate sparklines."""
+    """Thinned per-channel, per-well series for the plate sparklines.
+
+    Carries both series the plate view can draw so switching between them costs
+    no download. Points are `[x, y]` pairs rather than `{"x": …, "y": …}`
+    objects, which roughly halves what a 384-well run page has to ship.
+    """
     channels_out: list[dict[str, object]] = []
     for block in blocks:
         wells_out: list[dict[str, object]] = []
@@ -155,13 +166,14 @@ def build_plate_json(blocks: list[ChannelBlock]) -> dict[str, object]:
                 continue
             temps = [t for t, _ in pts]
             fluor = [f for _, f in pts]
-            _pct, _neg_df_dt, neg_dfpct_dt = _derivatives(temps, fluor)
-            series = list(zip(temps, neg_dfpct_dt, strict=True))
-            thinned = _thin(series, MAX_POINTS_PER_WELL)
+            pct, _neg_df_dt, neg_dfpct_dt = _derivatives(temps, fluor)
             wells_out.append(
                 {
                     "well": well,
-                    "points": [{"x": round(x, 3), "y": round(y, 4)} for x, y in thinned],
+                    "series": {
+                        "derivative": _thinned_points(temps, neg_dfpct_dt),
+                        "fluorescence": _thinned_points(temps, pct),
+                    },
                 }
             )
         channels_out.append({"channel": block.channel, "wells": wells_out})

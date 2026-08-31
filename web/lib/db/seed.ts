@@ -830,6 +830,13 @@ export const INSTRUMENT_FIXTURES: Record<string, InstrumentFixture> = {
         filename: "azure_cielo_qpcr_MeltingCurve.csv",
         contentType: "text/csv",
       },
+      // Every production run exports one of these alongside the CSVs. No
+      // processor claims it; the run page serves the bytes straight to the
+      // PDF viewer.
+      {
+        filename: "azure_cielo_qpcr_Report.pdf",
+        contentType: "application/pdf",
+      },
     ],
     runIds: [
       "Experiment_20260129",

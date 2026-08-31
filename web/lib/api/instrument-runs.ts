@@ -34,6 +34,8 @@ import { type AuntyPlateData, parseAuntyPlateJson } from "@/lib/runs/aunty";
 import type { FilesLifecycleFilter } from "@/lib/runs/file-lifecycle-filter";
 import {
   parseQpcrMeltingPlateJson,
+  QPCR_MELTING_DERIVATIVES_SUFFIX,
+  QPCR_MELTING_PLATE_SUFFIX,
   type QpcrMeltingPlateData,
 } from "@/lib/runs/qpcr-melting";
 import type { RunStatus } from "@/lib/runs/run-status";
@@ -1228,7 +1230,7 @@ export async function getQpcrMeltingPlateData(
     (f) =>
       f.category === "processed" &&
       f.deletedAt === null &&
-      f.filename.endsWith("_melting_curve_plate.json") &&
+      f.filename.endsWith(QPCR_MELTING_PLATE_SUFFIX) &&
       f.s3Bucket &&
       f.s3Key
   );
@@ -1240,7 +1242,7 @@ export async function getQpcrMeltingPlateData(
     (f) =>
       f.category === "processed" &&
       f.deletedAt === null &&
-      f.filename.endsWith("_melting_curve_derivatives.csv")
+      f.filename.endsWith(QPCR_MELTING_DERIVATIVES_SUFFIX)
   );
 
   try {
