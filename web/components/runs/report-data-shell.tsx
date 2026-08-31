@@ -6,11 +6,13 @@ import { RunSectionCard } from "@/components/runs/run-section-card";
 export function ReportDataShell({
   children,
   contentClassName = "gap-3",
+  showCount = true,
   title = "Report Data",
   total,
 }: {
   children: ReactNode;
   contentClassName?: string;
+  showCount?: boolean;
   title?: string;
   total: number;
 }) {
@@ -27,7 +29,7 @@ export function ReportDataShell({
   return (
     <RunSectionCard
       contentClassName={contentClassName}
-      count={total}
+      count={showCount ? total : undefined}
       title={title}
     >
       {children}

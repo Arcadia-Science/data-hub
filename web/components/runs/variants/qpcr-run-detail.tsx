@@ -1,4 +1,5 @@
 import { DeleteRunDialog } from "@/components/runs/delete-run-dialog";
+import { QpcrMeltingReport } from "@/components/runs/qpcr/qpcr-melting-report";
 import { RestoreRunButton } from "@/components/runs/restore-run-button";
 import type { RunDetailProps } from "@/components/runs/run-detail";
 import { RunDetail } from "@/components/runs/run-detail";
@@ -14,6 +15,7 @@ export function QpcrRunDetail({
   filesPagination,
   fileStats,
   reportFiles,
+  qpcrMeltingPlate,
   instrumentId,
   runId,
   attributionsSlot,
@@ -61,7 +63,14 @@ export function QpcrRunDetail({
         />
       </RunDetail.FilesMetadataLayout>
 
-      <RunDetail.Report files={reportFiles} />
+      {qpcrMeltingPlate == null ? (
+        <RunDetail.Report files={reportFiles} />
+      ) : (
+        <QpcrMeltingReport
+          derivativesCsvFileId={qpcrMeltingPlate.derivativesCsvFileId}
+          plate={qpcrMeltingPlate.plate}
+        />
+      )}
     </>
   );
 }

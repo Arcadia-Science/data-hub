@@ -17,6 +17,7 @@ import {
   getAdjacentRunIds,
   getAuntyPlateData,
   getProcessedCsvData,
+  getQpcrMeltingPlateData,
   getRunFileStats,
   getRunReportFiles,
   lookupRunByNaturalKey,
@@ -162,6 +163,7 @@ async function RunDetailContentBody({
   // CSV processing overlaps the other queries rather than tacking latency on.
   const reportFilesPromise = getRunReportFiles(run.id);
   const isAunty = run.instrumentType === "aunty";
+  const isQpcr = run.instrumentType === "qpcr";
   const [
     filesPage,
     fileStats,
@@ -171,6 +173,7 @@ async function RunDetailContentBody({
     adjacentRuns,
     wellData,
     auntyPlate,
+    qpcrMeltingPlate,
   ] = await Promise.all([
     buildRunFilesQuery(run.id, {
       page: filters.files_page,
@@ -198,6 +201,9 @@ async function RunDetailContentBody({
     reportFilesPromise.then((rf) =>
       isAunty ? getAuntyPlateData(rf) : Promise.resolve(null)
     ),
+    reportFilesPromise.then((rf) =>
+      isQpcr ? getQpcrMeltingPlateData(rf) : Promise.resolve(null)
+    ),
   ]);
 
   // Gate client-side upload actions on watcher availability — a queued
@@ -224,6 +230,7 @@ async function RunDetailContentBody({
           filesDownloadableCount={filesPage.downloadableCount}
           filesPagination={filesPage.pagination}
           instrumentId={instrumentId}
+          qpcrMeltingPlate={qpcrMeltingPlate}
           reportFiles={reportFiles}
           reportItems={reportItems}
           run={run}
