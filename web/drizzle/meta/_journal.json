@@ -316,6 +316,13 @@
       "when": 1788296305606,
       "tag": "0044_better_auth_17_oauth_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1788299470872,
+      "tag": "0045_relax_account_issuer",
+      "breakpoints": true
     }
   ]
 }

@@ -69,11 +69,12 @@ export async function verifyMcpToken(
   }
 
   try {
-    // 1.7 renamed `verifyAccessToken` → `verifyBearerToken`. MCP already
-    // extracted the Bearer token; DPoP-bound tokens are rejected here.
-    // Opaque tokens (no `resource` at token exchange) fail JWKS verification,
-    // and we do not hand-roll DB lookups that skip audience checks.
-    const payload = await resourceClient.verifyBearerToken(bearerToken, {
+    // better-auth 1.6 exposes `verifyAccessToken(token)`; 1.7's
+    // `verifyAccessTokenRequest(req)` (DPoP-aware) is not available yet.
+    // Opaque tokens (no `resource` at token exchange) are rejected — JWKS
+    // verification requires a JWT, and we intentionally do not hand-roll
+    // DB lookups that skip audience checks.
+    const payload = await resourceClient.verifyAccessToken(bearerToken, {
       verifyOptions: {
         audience: mcpResourceAudience,
         // Must match JWT `iss` / AS metadata issuer (`{origin}/api/auth`).
