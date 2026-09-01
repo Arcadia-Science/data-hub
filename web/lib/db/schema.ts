@@ -1041,7 +1041,10 @@ export const runAttributions = pgTable(
 export {
   jwks,
   oauthAccessTokens,
+  oauthClientAssertions,
+  oauthClientResources,
   oauthClients,
   oauthConsents,
   oauthRefreshTokens,
+  oauthResources,
 } from "./auth-schema";

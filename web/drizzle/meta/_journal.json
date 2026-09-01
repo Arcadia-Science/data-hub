@@ -309,6 +309,13 @@
       "when": 1788291558281,
       "tag": "0043_add_account_issuer",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1788296305606,
+      "tag": "0044_better_auth_17_oauth_tables",
+      "breakpoints": true
     }
   ]
 }
