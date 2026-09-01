@@ -21,6 +21,7 @@ import {
   formatHinaSizes,
 } from "@/components/runs/run-metadata-badges";
 import { escapeLikePattern } from "@/lib/api/like-pattern";
+import { getCommentCountsByRunIds } from "@/lib/api/run-comments";
 import { db } from "@/lib/db";
 import type { InstrumentType } from "@/lib/db/schema";
 import {
@@ -707,14 +708,17 @@ export async function buildRunListQuery(filters: RunListFilters) {
     .limit(perPage)
     .offset(offset);
 
-  // Fetch attributions in a separate query so the join doesn't cross-multiply
-  // with the files left-join and break the aggregate counts above.
-  const attributionsByRun = await getAttributionsByRunIds(
-    rows.map((r) => r.id)
-  );
+  // Attributions and comment counts stay off the files left-join so extra
+  // rows cannot multiply the file aggregates above.
+  const runIds = rows.map((r) => r.id);
+  const [attributionsByRun, commentCountsByRun] = await Promise.all([
+    getAttributionsByRunIds(runIds),
+    getCommentCountsByRunIds(runIds),
+  ]);
   const data = rows.map((row) => ({
     ...row,
     attributions: attributionsByRun.get(row.id) ?? [],
+    comment_count: commentCountsByRun.get(row.id) ?? 0,
   }));
 
   return {

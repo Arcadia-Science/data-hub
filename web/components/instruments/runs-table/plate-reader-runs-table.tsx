@@ -27,11 +27,10 @@ import type { RunRow } from ".";
 import { FilterableColumnHeader } from "./filterable-column-header";
 import { RanByCell } from "./ran-by-cell";
 import { RawFileColumnHeader } from "./raw-file-column-header";
-import { RunIdLabel } from "./run-id-label";
+import { RunIdCell } from "./run-id-cell";
 import { RunRowActions } from "./run-row-actions";
 import { RunSelectAllCheckbox, RunSelectCheckbox } from "./run-select-checkbox";
 import type { RunRef } from "./run-selection-provider";
-import { RunStatusIcon } from "./run-status-icon";
 
 export function PlateReaderRunsTable({
   data,
@@ -113,19 +112,16 @@ export function PlateReaderRunsTable({
                 <RunSelectCheckbox runRef={runRowToRef(row)} />
               </TableCell>
               <TableCell>
-                <div className="flex items-center gap-2.5">
-                  <RunStatusIcon run={row} />
-                  <RunIdLabel
-                    href={`/instruments/${instrumentId}/runs/${encodeURIComponent(row.run_id)}`}
-                    isDeleted={isDeleted}
-                    runId={row.run_id}
-                  />
-                  {isDeleted && (
+                <RunIdCell
+                  href={`/instruments/${instrumentId}/runs/${encodeURIComponent(row.run_id)}`}
+                  run={row}
+                >
+                  {isDeleted ? (
                     <Badge className="ml-1.5 font-normal" variant="outline">
                       deleted
                     </Badge>
-                  )}
-                </div>
+                  ) : null}
+                </RunIdCell>
               </TableCell>
               <TableCell className="text-sm tabular-nums">
                 {row.file_count}

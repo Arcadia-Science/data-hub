@@ -44,6 +44,7 @@ const {
     files_stalled: 0,
     total_size_bytes: 1234,
     error_messages: [] as string[],
+    comment_count: 0,
     attributions: [] as Array<{
       userId: string;
       displayName: string;

@@ -83,6 +83,7 @@ export const searchRunsListItemSchema = z.object({
   total_size_bytes: z.union([z.number(), z.string()]),
   error_messages: z.array(z.string()),
   attributions: z.array(mcpActorUserSchema),
+  comment_count: z.number().int(),
 });
 
 export const searchRunsOutputSchema = z.object({
