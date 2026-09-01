@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 function Table({ className, ...props }: React.ComponentProps<"table">) {
   return (
     <div
-      className="relative w-full overflow-x-auto"
+      className="relative w-full min-w-0 overflow-x-auto overscroll-x-contain"
       data-slot="table-container"
     >
       <table
