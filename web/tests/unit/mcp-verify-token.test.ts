@@ -5,18 +5,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // `authInfoFromPayload`, and the `dhub_` PAT short-circuit.
 
 const {
-  mockVerifyAccessToken,
+  mockVerifyBearerToken,
   mockAuthenticateWithToken,
   mockIsPatFallbackEnabled,
 } = vi.hoisted(() => ({
-  mockVerifyAccessToken: vi.fn(),
+  mockVerifyBearerToken: vi.fn(),
   mockAuthenticateWithToken: vi.fn(),
   mockIsPatFallbackEnabled: vi.fn(),
 }));
 
 vi.mock("better-auth/client", () => ({
   createAuthClient: () => ({
-    verifyAccessToken: mockVerifyAccessToken,
+    verifyBearerToken: mockVerifyBearerToken,
   }),
 }));
 
@@ -48,7 +48,7 @@ import { verifyMcpToken } from "@/lib/mcp/auth";
 
 describe("verifyMcpToken", () => {
   beforeEach(() => {
-    mockVerifyAccessToken.mockReset();
+    mockVerifyBearerToken.mockReset();
     mockAuthenticateWithToken.mockReset();
     mockIsPatFallbackEnabled.mockReset();
     mockIsPatFallbackEnabled.mockReturnValue(false);
@@ -58,11 +58,11 @@ describe("verifyMcpToken", () => {
     await expect(
       verifyMcpToken(new Request("http://localhost/mcp/v1"))
     ).resolves.toBeUndefined();
-    expect(mockVerifyAccessToken).not.toHaveBeenCalled();
+    expect(mockVerifyBearerToken).not.toHaveBeenCalled();
   });
 
   it("maps a verified JWT payload onto AuthInfo", async () => {
-    mockVerifyAccessToken.mockResolvedValue({
+    mockVerifyBearerToken.mockResolvedValue({
       sub: "user-1",
       client_id: "client-1",
       scope: "read write",
@@ -85,7 +85,7 @@ describe("verifyMcpToken", () => {
   });
 
   it("rejects verified JWTs that look like client_credentials", async () => {
-    mockVerifyAccessToken.mockResolvedValue({
+    mockVerifyBearerToken.mockResolvedValue({
       sub: "client-1",
       client_id: "client-1",
       scope: "read",
@@ -97,7 +97,7 @@ describe("verifyMcpToken", () => {
   });
 
   it("returns undefined when JWT verification fails", async () => {
-    mockVerifyAccessToken.mockRejectedValue(new Error("invalid access token"));
+    mockVerifyBearerToken.mockRejectedValue(new Error("invalid access token"));
 
     await expect(
       verifyMcpToken(new Request("http://localhost/mcp/v1"), "not-a-jwt")
@@ -123,7 +123,7 @@ describe("verifyMcpToken", () => {
       scopes: ["read", "write"],
       extra: { userId: "pat-user" },
     });
-    expect(mockVerifyAccessToken).not.toHaveBeenCalled();
+    expect(mockVerifyBearerToken).not.toHaveBeenCalled();
   });
 
   it("keeps fine-grained PAT scopes read-only over MCP", async () => {
@@ -139,12 +139,12 @@ describe("verifyMcpToken", () => {
     );
 
     expect(info?.scopes).toEqual(["read"]);
-    expect(mockVerifyAccessToken).not.toHaveBeenCalled();
+    expect(mockVerifyBearerToken).not.toHaveBeenCalled();
   });
 
   it("does not treat non-dhub tokens as PATs even when fallback is on", async () => {
     mockIsPatFallbackEnabled.mockReturnValue(true);
-    mockVerifyAccessToken.mockRejectedValue(new Error("JWSInvalid"));
+    mockVerifyBearerToken.mockRejectedValue(new Error("JWSInvalid"));
 
     await expect(
       verifyMcpToken(new Request("http://localhost/mcp/v1"), "opaque-or-junk")
@@ -159,6 +159,6 @@ describe("verifyMcpToken", () => {
     await expect(
       verifyMcpToken(new Request("http://localhost/mcp/v1"), "dhub_missing")
     ).resolves.toBeUndefined();
-    expect(mockVerifyAccessToken).not.toHaveBeenCalled();
+    expect(mockVerifyBearerToken).not.toHaveBeenCalled();
   });
 });
