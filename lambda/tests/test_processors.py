@@ -12,6 +12,7 @@ from data_hub_lambda.handler import lambda_handler
 from data_hub_lambda.models import FileResponse, InstrumentResponse
 from data_hub_lambda.processors import (
     PROCESSORS,
+    ProcessorEntry,
     get_processor,
     matches_any_processor_gate,
 )
@@ -28,9 +29,12 @@ class TestFilenameGates:
             ("qpcr", "Experiment_20260101_cq values.CSV", True),
             ("qpcr", "Experiment_20260101_MeltingCurve.csv", True),
             ("qpcr", "Experiment_20260101_meltingcurve.CSV", True),
-            ("qpcr", "Experiment_20260101_CqValues.csv", False),
-            ("qpcr", "Experiment_20260101_Melting Curve.csv", False),
-            ("qpcr", "Experiment_20260101_Amplification Results.csv", False),
+            ("qpcr", "Experiment_20260101_Amplification Values.csv", True),
+            ("qpcr", "Experiment_20260101_Dye calibration.csv", True),
+            ("qpcr", "Experiment_20260101_Post Processed Amp Values.csv", True),
+            ("qpcr", "Experiment_20260101_JBEM_rep1_Report.PDF", True),
+            ("qpcr", "Experiment_20260101_Report.pdf", True),
+            ("qpcr", "Experiment_20260101_notes.txt", False),
             ("plate_reader", "plate.xls", True),
             ("plate_reader", "PLATE.XLS", True),
             ("plate_reader", "plate.xlsx", False),
@@ -66,6 +70,8 @@ class TestFilenameGates:
     def test_union_gate_matches_any_processor(self) -> None:
         assert matches_any_processor_gate("Experiment_Cq Values.csv")
         assert matches_any_processor_gate("Experiment_MeltingCurve.csv")
+        assert matches_any_processor_gate("Experiment_Amplification Values.csv")
+        assert matches_any_processor_gate("Experiment_Report.PDF")
         assert matches_any_processor_gate("scan.TIFF")
         assert matches_any_processor_gate("well.nd2")
         assert matches_any_processor_gate("run.json")
@@ -434,6 +440,45 @@ class TestHandlerDispatch:
             "run-1",
             "Experiment_Cq Values.csv",
         )
+        client.update_file.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "filename",
+        [
+            "Experiment_Amplification Values.csv",
+            "Experiment_Dye calibration.csv",
+            "Experiment_Post Processed Amp Values.csv",
+            "Experiment_Report.PDF",
+            "Experiment_JBEM_rep1_Report.pdf",
+        ],
+    )
+    def test_reprocess_invokes_qpcr_processor_for_sidecars(self, filename: str) -> None:
+        client = MagicMock()
+        client.get_instrument.return_value = InstrumentResponse(
+            id="azure-cielo-qpcr",
+            display_name="Azure Cielo qPCR",
+            status="active",
+            instrument_type="qpcr",
+        )
+        process_file = MagicMock()
+        real = PROCESSORS["qpcr"]
+        entry = ProcessorEntry(
+            process_file=process_file,
+            matches_filename=real.matches_filename,
+        )
+
+        with (
+            patch("data_hub_lambda.handler.get_client", return_value=client),
+            patch("data_hub_lambda.handler._cleanup_tmp"),
+            patch("data_hub_lambda.handler.get_processor", return_value=entry),
+        ):
+            result = lambda_handler(
+                self._function_url_event("azure-cielo-qpcr", "run-1", filename),
+                MagicMock(),
+            )
+
+        assert result is None
+        process_file.assert_called_once_with("azure-cielo-qpcr", "run-1", filename)
         client.update_file.assert_not_called()
 
     def test_s3_event_applies_per_type_gate(self) -> None:

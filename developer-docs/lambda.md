@@ -47,7 +47,7 @@ Dispatch is by `instrument_type` (Postgres/TS enum), not instrument ID. The regi
 | `tape_station` | `agilent_4150_tapestation` | `.pdf` |
 | `fplc` | `akta_fplc` | `.pdf` |
 | `gel_doc` | `azure_600_gel_doc` | `.tif` / `.tiff` |
-| `qpcr` | `azure_cielo_qpcr` | ends with `_cq values.csv` |
+| `qpcr` | `azure_cielo_qpcr` | `.csv` / `.pdf` |
 | `epson_v700_scanner` | `epson_v700_scanner` | `.tif` / `.tiff` |
 | `hina_microscope` | `hina_microscope` | `.nd2` |
 | `plate_reader` | `spectramax_plate_reader` | `.xls` |
