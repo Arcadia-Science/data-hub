@@ -14,6 +14,10 @@
 # next.js
 /.next/
 /out/
+# Next 16 used to write Turbopack assets into a nested copy of this
+# directory when `turbopack.root` walked up to the git repo. Keep any
+# leftover folder out of git status.
+/web/
 
 # production
 /build
