@@ -46,7 +46,9 @@ def parse_melting_curve_csv(path: Path) -> list[ChannelBlock]:
     """Parse stacked `ChannelN MeltingCurveData` blocks into per-well series."""
     blocks: list[ChannelBlock] = []
     current: ChannelBlock | None = None
-    well_cols: list[str] = []
+    # (well, column index). The index comes from the unfiltered header so a
+    # blank cell mid-row cannot shift later wells onto a neighbour's column.
+    well_cols: list[tuple[str, int]] = []
 
     with open(path, newline="", encoding="utf-8-sig") as fh:
         reader = csv.reader(fh)
@@ -56,9 +58,9 @@ def parse_melting_curve_csv(path: Path) -> list[ChannelBlock]:
             first = row[0].strip()
             if first.endswith("MeltingCurveData"):
                 channel = first.split()[0]
-                well_cols = [c for c in row[1:] if c]
+                well_cols = [(c, i) for i, c in enumerate(row) if i > 0 and c]
                 current = ChannelBlock(channel=channel)
-                for well in well_cols:
+                for well, _ in well_cols:
                     current.wells[well] = []
                 blocks.append(current)
                 continue
@@ -68,8 +70,8 @@ def parse_melting_curve_csv(path: Path) -> list[ChannelBlock]:
                 temp_c = float(first) / 100.0
             except ValueError:
                 continue
-            for i, well in enumerate(well_cols):
-                cell = row[1 + i] if 1 + i < len(row) else ""
+            for well, col in well_cols:
+                cell = row[col] if col < len(row) else ""
                 if cell == "":
                     continue
                 current.wells[well].append((temp_c, float(cell)))
@@ -180,8 +182,8 @@ def build_plate_json(blocks: list[ChannelBlock]) -> dict[str, object]:
     return {"channels": channels_out}
 
 
-def write_plate_json(path: Path, blocks: list[ChannelBlock]) -> None:
-    path.write_text(json.dumps(build_plate_json(blocks), allow_nan=False), encoding="utf-8")
+def write_plate_json(path: Path, plate: dict[str, object]) -> None:
+    path.write_text(json.dumps(plate, allow_nan=False), encoding="utf-8")
 
 
 def parse_melting_curve_file(path: Path) -> ParsedMeltingCurve:

@@ -6,11 +6,17 @@ import type { PlatePoint } from "@/lib/runs/plate-wells";
 export const QPCR_MELTING_PLATE_SUFFIX = "_melting_curve_plate.json";
 export const QPCR_MELTING_DERIVATIVES_SUFFIX = "_melting_curve_derivatives.csv";
 
+export function isQpcrMeltingPlateFile(filename: string): boolean {
+  return filename.toLowerCase().endsWith(QPCR_MELTING_PLATE_SUFFIX);
+}
+
+export function isQpcrMeltingDerivativesFile(filename: string): boolean {
+  return filename.toLowerCase().endsWith(QPCR_MELTING_DERIVATIVES_SUFFIX);
+}
+
 export function isQpcrMeltingArtifact(filename: string): boolean {
-  const name = filename.toLowerCase();
   return (
-    name.endsWith(QPCR_MELTING_PLATE_SUFFIX) ||
-    name.endsWith(QPCR_MELTING_DERIVATIVES_SUFFIX)
+    isQpcrMeltingPlateFile(filename) || isQpcrMeltingDerivativesFile(filename)
   );
 }
 

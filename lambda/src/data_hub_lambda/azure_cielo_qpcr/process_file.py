@@ -74,7 +74,7 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
             csv_path = processed_root / csv_filename
             json_path = processed_root / json_filename
             write_tidy_csv(csv_path, parsed.tidy_rows)
-            write_plate_json(json_path, parsed.blocks)
+            write_plate_json(json_path, parsed.plate)
 
             _upload_processed(
                 instrument_id=instrument_id,

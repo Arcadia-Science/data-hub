@@ -66,6 +66,16 @@ def test_parse_channel_blocks(tmp_path: Path) -> None:
     assert blocks[1].wells["A1"] == [(20.0, 10.0), (20.5, 8.0), (21.0, 6.0)]
 
 
+def test_parse_keeps_columns_aligned_past_a_blank_header_cell(tmp_path: Path) -> None:
+    path = tmp_path / "gap.csv"
+    path.write_text(
+        "Channel1 MeltingCurveData,A1,,B1,\n2000,1,999,2,\n",
+        encoding="utf-8",
+    )
+    blocks = parse_melting_curve_csv(path)
+    assert blocks[0].wells == {"A1": [(20.0, 1.0)], "B1": [(20.0, 2.0)]}
+
+
 def test_parse_rejects_empty_file(tmp_path: Path) -> None:
     path = tmp_path / "empty.csv"
     path.write_text("not a melting curve\n", encoding="utf-8")

@@ -46,7 +46,7 @@ export function VideoCarouselReport({
 }: ReportViewerProps & { posterFileIds?: Record<string, number> }) {
   const page = useReportViewerPage(initialPage);
   return (
-    <ReportDataShell total={page.pagination.total}>
+    <ReportDataShell count={page.pagination.total}>
       <ReportItemsProvider initialPage={page} kind="video">
         <ReportItemSeeker />
         <SelectedVideo posterFileIds={posterFileIds} />

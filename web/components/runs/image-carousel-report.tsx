@@ -50,7 +50,7 @@ function SelectedImage() {
 export function ImageCarouselReport({ initialPage }: ReportViewerProps) {
   const page = useReportViewerPage(initialPage);
   return (
-    <ReportDataShell total={page.pagination.total}>
+    <ReportDataShell count={page.pagination.total}>
       <ReportItemsProvider initialPage={page} kind="image">
         <ReportItemSeeker />
         <SelectedImage />

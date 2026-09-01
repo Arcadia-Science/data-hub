@@ -31,7 +31,7 @@ export function AuntyPlateReport({ curvesFileId, plate }: AuntyPlateData) {
   );
 
   return (
-    <ReportDataShell total={wellCount}>
+    <ReportDataShell count={wellCount}>
       <div className="flex flex-col gap-10">
         {experiments.map((experiment) => (
           <AuntyExperimentSection

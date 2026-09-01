@@ -4,7 +4,10 @@ import { lazy, Suspense, useCallback, useMemo, useState } from "react";
 import { PlateWellsProvider } from "@/components/runs/plate-wells-provider";
 import { QpcrMeltingPlateGrid } from "@/components/runs/qpcr/qpcr-melting-plate-grid";
 import { QpcrMeltingSeriesToggle } from "@/components/runs/qpcr/qpcr-melting-series-toggle";
-import { ReportDataShell } from "@/components/runs/report-data-shell";
+import {
+  ReportDataEmpty,
+  ReportDataShell,
+} from "@/components/runs/report-data-shell";
 import {
   Select,
   SelectContent,
@@ -36,19 +39,18 @@ export function QpcrMeltingReport({
     () => plate.channels.filter((channel) => channel.wells.length > 0),
     [plate.channels]
   );
-  const wellCount = channels.reduce(
-    (sum, channel) => sum + channel.wells.length,
-    0
-  );
+  if (channels.length === 0) {
+    return <ReportDataEmpty title="Melting Curves" />;
+  }
 
+  // No count in the heading: the card shows one channel at a time, so a total
+  // across all four would not describe what is on screen.
   return (
-    <ReportDataShell showCount={false} title="Melting Curves" total={wellCount}>
-      {channels.length > 0 && (
-        <QpcrMeltingPlateView
-          channels={channels}
-          derivativesCsvFileId={derivativesCsvFileId}
-        />
-      )}
+    <ReportDataShell title="Melting Curves">
+      <QpcrMeltingPlateView
+        channels={channels}
+        derivativesCsvFileId={derivativesCsvFileId}
+      />
     </ReportDataShell>
   );
 }

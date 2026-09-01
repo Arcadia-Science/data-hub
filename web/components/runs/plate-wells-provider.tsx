@@ -12,9 +12,11 @@ export interface PlateWellsActions extends SeekerActions {
   selectWell: (well: string) => void;
 }
 
+// Held as a label rather than a positional id so a caller that swaps the well
+// list (a qPCR channel change) keeps the same well selected.
 interface Selection {
   search: string;
-  selectedId: number;
+  selectedWell: string;
 }
 
 // Actions and state are separate so a plate grid, which only ever calls
@@ -46,17 +48,17 @@ export function PlateWellsProvider({
     return unique.map((well, index) => ({ id: index + 1, filename: well }));
   }, [wells]);
 
-  const idByWell = useMemo(() => {
-    const map = new Map<string, number>();
+  const wellById = useMemo(() => {
+    const map = new Map<number, string>();
     for (const item of ordered) {
-      map.set(item.filename, item.id);
+      map.set(item.id, item.filename);
     }
     return map;
   }, [ordered]);
 
   const [selection, setSelection] = useState<Selection>(() => ({
     search: "",
-    selectedId: ordered[0]?.id ?? 0,
+    selectedWell: ordered[0]?.filename ?? "",
   }));
 
   // Every action updates through the setter callback, so this object only
@@ -64,40 +66,53 @@ export function PlateWellsProvider({
   const actions = useMemo<PlateWellsActions>(() => {
     function seek(current: Selection, delta: number): Selection {
       const visible = filterWells(ordered, current.search);
-      const from = visible.findIndex((item) => item.id === current.selectedId);
+      const from = visible.findIndex(
+        (item) => item.filename === current.selectedWell
+      );
       const next = (from < 0 ? 0 : from) + delta;
       if (next < 0 || next >= visible.length) {
         return current;
       }
-      return { ...current, selectedId: visible[next].id };
+      return { ...current, selectedWell: visible[next].filename };
+    }
+
+    function selectWell(well: string) {
+      setSelection((current) =>
+        current.selectedWell === well
+          ? current
+          : { ...current, selectedWell: well }
+      );
     }
 
     return {
       clearSearch: (anchorId?: number) =>
         setSelection((current) => ({
           search: "",
-          selectedId: anchorId ?? current.selectedId,
+          selectedWell:
+            (anchorId === undefined ? undefined : wellById.get(anchorId)) ??
+            current.selectedWell,
         })),
       loadMore: () => undefined,
       loadPrevious: () => undefined,
       next: () => setSelection((current) => seek(current, 1)),
       previous: () => setSelection((current) => seek(current, -1)),
-      selectId: (id: number) =>
-        setSelection((current) => ({ ...current, selectedId: id })),
-      selectWell: (well: string) => {
-        const id = idByWell.get(well);
-        if (id !== undefined) {
-          setSelection((current) => ({ ...current, selectedId: id }));
+      selectId: (id: number) => {
+        const well = wellById.get(id);
+        if (well !== undefined) {
+          selectWell(well);
         }
       },
+      selectWell,
       setSearch: (search: string) =>
         setSelection((current) => ({ ...current, search })),
     };
-  }, [idByWell, ordered]);
+  }, [ordered, wellById]);
 
   const state = useMemo<SeekerState>(() => {
     const items = filterWells(ordered, selection.search);
-    const index = items.findIndex((item) => item.id === selection.selectedId);
+    const index = items.findIndex(
+      (item) => item.filename === selection.selectedWell
+    );
     return {
       error: null,
       hasMore: false,
