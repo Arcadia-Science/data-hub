@@ -21,6 +21,7 @@ import {
   formatHinaSizes,
 } from "@/components/runs/run-metadata-badges";
 import { escapeLikePattern } from "@/lib/api/like-pattern";
+import { getCommentCountsByRunIds } from "@/lib/api/run-comments";
 import { db } from "@/lib/db";
 import type { InstrumentType } from "@/lib/db/schema";
 import {
@@ -32,6 +33,12 @@ import {
 } from "@/lib/db/schema";
 import { type AuntyPlateData, parseAuntyPlateJson } from "@/lib/runs/aunty";
 import type { FilesLifecycleFilter } from "@/lib/runs/file-lifecycle-filter";
+import {
+  isQpcrMeltingDerivativesFile,
+  isQpcrMeltingPlateFile,
+  parseQpcrMeltingPlateJson,
+  type QpcrMeltingPlateData,
+} from "@/lib/runs/qpcr-melting";
 import type { RunStatus } from "@/lib/runs/run-status";
 import { isStalledProcessing } from "@/lib/runs/stalled-processing";
 import {
@@ -701,14 +708,17 @@ export async function buildRunListQuery(filters: RunListFilters) {
     .limit(perPage)
     .offset(offset);
 
-  // Fetch attributions in a separate query so the join doesn't cross-multiply
-  // with the files left-join and break the aggregate counts above.
-  const attributionsByRun = await getAttributionsByRunIds(
-    rows.map((r) => r.id)
-  );
+  // Attributions and comment counts stay off the files left-join so extra
+  // rows cannot multiply the file aggregates above.
+  const runIds = rows.map((r) => r.id);
+  const [attributionsByRun, commentCountsByRun] = await Promise.all([
+    getAttributionsByRunIds(runIds),
+    getCommentCountsByRunIds(runIds),
+  ]);
   const data = rows.map((row) => ({
     ...row,
     attributions: attributionsByRun.get(row.id) ?? [],
+    comment_count: commentCountsByRun.get(row.id) ?? 0,
   }));
 
   return {
@@ -1213,6 +1223,42 @@ export async function getAuntyPlateData(
     return { plate, curvesFileId: curvesFile?.id ?? null };
   } catch (err) {
     console.error(`Failed to fetch Aunty plate JSON ${plateFile.s3Key}:`, err);
+    return null;
+  }
+}
+
+export async function getQpcrMeltingPlateData(
+  runFiles: RunFile[]
+): Promise<QpcrMeltingPlateData | null> {
+  const plateFile = runFiles.find(
+    (f) =>
+      f.category === "processed" &&
+      f.deletedAt === null &&
+      isQpcrMeltingPlateFile(f.filename) &&
+      f.s3Bucket &&
+      f.s3Key
+  );
+  if (!(plateFile?.s3Bucket && plateFile.s3Key)) {
+    return null;
+  }
+
+  const derivativesFile = runFiles.find(
+    (f) =>
+      f.category === "processed" &&
+      f.deletedAt === null &&
+      isQpcrMeltingDerivativesFile(f.filename)
+  );
+
+  try {
+    const stream = await getS3ObjectStream(plateFile.s3Bucket, plateFile.s3Key);
+    const buf = await streamToBuffer(stream);
+    const plate = parseQpcrMeltingPlateJson(JSON.parse(buf.toString("utf8")));
+    return { plate, derivativesCsvFileId: derivativesFile?.id ?? null };
+  } catch (err) {
+    console.error(
+      `Failed to fetch qPCR melting plate JSON ${plateFile.s3Key}:`,
+      err
+    );
     return null;
   }
 }

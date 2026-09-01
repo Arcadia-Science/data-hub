@@ -23,21 +23,33 @@ const webRoot = path.resolve(
   ".."
 );
 const cliOut = path.join(webRoot, "lib/db/auth-schema.cli.ts");
+const cliConfigName = "auth-schema.cli-config.ts";
+const cliConfig = path.join(webRoot, cliConfigName);
 const target = path.join(webRoot, "lib/db/auth-schema.ts");
 
-execFileSync(
-  "npx",
-  [
-    "auth@latest",
-    "generate",
-    "--config",
-    "lib/auth.ts",
-    "--output",
-    "lib/db/auth-schema.cli.ts",
-    "--yes",
-  ],
-  { cwd: webRoot, stdio: "inherit" }
+// The CLI calls every export it finds, and `lib/auth.ts`'s `auth()` helper
+// throws outside a request scope, so point it at an instance-only shim.
+writeFileSync(
+  cliConfig,
+  'export { authInstance as auth } from "@/lib/auth";\n'
 );
+try {
+  execFileSync(
+    "npx",
+    [
+      "auth@latest",
+      "generate",
+      "--config",
+      cliConfigName,
+      "--output",
+      "lib/db/auth-schema.cli.ts",
+      "--yes",
+    ],
+    { cwd: webRoot, stdio: "inherit" }
+  );
+} finally {
+  unlinkSync(cliConfig);
+}
 
 const cli = readFileSync(cliOut, "utf8");
 
@@ -92,6 +104,16 @@ const tableMap: Array<{
     sqlName: "oauth_client",
   },
   {
+    cliName: "oauthResource",
+    exportName: "oauthResources",
+    sqlName: "oauth_resource",
+  },
+  {
+    cliName: "oauthClientResource",
+    exportName: "oauthClientResources",
+    sqlName: "oauth_client_resource",
+  },
+  {
     cliName: "oauthRefreshToken",
     exportName: "oauthRefreshTokens",
     sqlName: "oauth_refresh_token",
@@ -105,6 +127,11 @@ const tableMap: Array<{
     cliName: "oauthConsent",
     exportName: "oauthConsents",
     sqlName: "oauth_consent",
+  },
+  {
+    cliName: "oauthClientAssertion",
+    exportName: "oauthClientAssertions",
+    sqlName: "oauth_client_assertion",
   },
 ];
 
@@ -124,6 +151,7 @@ for (const { cliName, exportName, sqlName } of tableMap) {
   block = block.replaceAll("() => user.id", "() => users.id");
   block = block.replaceAll("() => session.id", "() => sessions.id");
   block = block.replaceAll("() => oauthClient.", "() => oauthClients.");
+  block = block.replaceAll("() => oauthResource.", "() => oauthResources.");
   block = block.replaceAll(
     "() => oauthRefreshToken.",
     "() => oauthRefreshTokens."
@@ -134,6 +162,14 @@ for (const { cliName, exportName, sqlName } of tableMap) {
     /timestamp\("([^"]+)"\)/g,
     'timestamp("$1", { mode: "date" })'
   );
+
+  if (exportName === "oauthClients") {
+    // Dead 1.6 columns kept so regeneration stays additive; 1.7 ignores them.
+    block = block.replace(
+      '    referenceId: text("referenceId"),',
+      '    public: boolean("public"),\n    type: text("type"),\n    referenceId: text("referenceId"),'
+    );
+  }
 
   if (exportName === "jwks") {
     // JWT plugin persists alg/crv on create; CLI typed schema omits them.
@@ -158,18 +194,20 @@ const header = `/**
  *
  *   npm run db:generate-auth-schema
  *
- * That runs \`npx auth@latest generate\` (requires \`export default\` on
- * \`lib/auth.ts\` and drizzleAdapter \`camelCase: true\`) and adapts the
+ * That runs \`npx auth@latest generate\` (requires drizzleAdapter
+ * \`camelCase: true\` on \`lib/auth.ts\`) and adapts the
  * plugin tables for this repo (snake_case SQL table names, plural exports,
  * FKs into \`schema.ts\` users/sessions, plus jwks alg/crv).
  */
 import {
   boolean,
   index,
+  integer,
   jsonb,
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { sessions, users } from "./schema";
 

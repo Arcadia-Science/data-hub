@@ -26,7 +26,10 @@ class TestFilenameGates:
         [
             ("qpcr", "Experiment_20260101_Cq Values.csv", True),
             ("qpcr", "Experiment_20260101_cq values.CSV", True),
+            ("qpcr", "Experiment_20260101_MeltingCurve.csv", True),
+            ("qpcr", "Experiment_20260101_meltingcurve.CSV", True),
             ("qpcr", "Experiment_20260101_CqValues.csv", False),
+            ("qpcr", "Experiment_20260101_Melting Curve.csv", False),
             ("qpcr", "Experiment_20260101_Amplification Results.csv", False),
             ("plate_reader", "plate.xls", True),
             ("plate_reader", "PLATE.XLS", True),
@@ -62,6 +65,7 @@ class TestFilenameGates:
 
     def test_union_gate_matches_any_processor(self) -> None:
         assert matches_any_processor_gate("Experiment_Cq Values.csv")
+        assert matches_any_processor_gate("Experiment_MeltingCurve.csv")
         assert matches_any_processor_gate("scan.TIFF")
         assert matches_any_processor_gate("well.nd2")
         assert matches_any_processor_gate("run.json")

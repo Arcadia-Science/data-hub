@@ -121,6 +121,9 @@ export const accounts = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     // Provider's account ID, or the user id for `credential` accounts.
     accountId: text("accountId").notNull(),
+    // Written by Better Auth 1.7 only. Left nullable so the 1.6 runtime,
+    // which does not know this column, can still insert account rows.
+    issuer: text("issuer"),
     // OAuth provider id (e.g. `google`) or `credential` for email/password.
     providerId: text("providerId").notNull(),
     accessToken: text("accessToken"),
@@ -1032,7 +1035,10 @@ export const runAttributions = pgTable(
 export {
   jwks,
   oauthAccessTokens,
+  oauthClientAssertions,
+  oauthClientResources,
   oauthClients,
   oauthConsents,
   oauthRefreshTokens,
+  oauthResources,
 } from "./auth-schema";

@@ -83,7 +83,7 @@ export function TablePendingBoundary({
   return (
     <div
       aria-busy={isPending}
-      className={cn("relative", isPending && "cursor-wait", className)}
+      className={cn("relative min-w-0", isPending && "cursor-wait", className)}
     >
       {isPendingVisible && (
         <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 overflow-hidden rounded-t-lg">

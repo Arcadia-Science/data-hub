@@ -30,15 +30,14 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:integration:watch": "vitest --config vitest.integration.config.ts",
     "test": "npm run test:unit && npm run test:integration",
-    "check": "npm run lint:check && npm run typecheck",
-    "check-all": "npm run check && npm run test-all && npm run build"
+    "check": "npm run lint:check && npm run typecheck"
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^8.5.0",
     "@aws-sdk/client-s3": "^3.1021.0",
     "@aws-sdk/s3-request-presigner": "^3.1021.0",
     "@base-ui/react": "^1.7.0",
-    "@better-auth/oauth-provider": "^1.6.25",
+    "@better-auth/oauth-provider": "1.6.27",
     "@modelcontextprotocol/client": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
     "@slack/web-api": "^7.17.0",
@@ -50,7 +49,7 @@
     "@vercel/functions": "^3.7.3",
     "@vercel/microfrontends": "^2.4.0",
     "@vercel/oidc-aws-credentials-provider": "^3.0.7",
-    "better-auth": "^1.6.25",
+    "better-auth": "1.6.27",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",

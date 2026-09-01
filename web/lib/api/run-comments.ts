@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { after } from "next/server";
 import { notifyComment } from "@/lib/api/notifications";
 import { db } from "@/lib/db";
@@ -101,6 +101,33 @@ export async function listCommentsForRun(
     .orderBy(asc(runComments.createdAt));
 
   return rows.map(toDto);
+}
+
+// Batch counts for the runs list. Kept off the files left-join in
+// `buildRunListQuery` so comment rows cannot multiply file aggregates.
+export async function getCommentCountsByRunIds(
+  runIds: string[]
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  if (runIds.length === 0) {
+    return counts;
+  }
+
+  const rows = await db
+    .select({
+      runId: runComments.runId,
+      count: sql<number>`cast(count(*) as int)`,
+    })
+    .from(runComments)
+    .where(
+      and(inArray(runComments.runId, runIds), isNull(runComments.deletedAt))
+    )
+    .groupBy(runComments.runId);
+
+  for (const row of rows) {
+    counts.set(row.runId, row.count);
+  }
+  return counts;
 }
 
 // ---------------------------------------------------------------------------

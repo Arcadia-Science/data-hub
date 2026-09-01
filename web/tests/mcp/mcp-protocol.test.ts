@@ -44,6 +44,7 @@ const {
     files_stalled: 0,
     total_size_bytes: 1234,
     error_messages: [] as string[],
+    comment_count: 0,
     attributions: [] as Array<{
       userId: string;
       displayName: string;
@@ -473,6 +474,7 @@ vi.mock("@/lib/api/files", () => ({
     if (id === 42) {
       return {
         ok: true,
+        contentType: MOCK_FILE.contentType,
         filename: MOCK_FILE.filename,
         s3Bucket: MOCK_FILE.s3Bucket,
         s3Key: MOCK_FILE.s3Key,

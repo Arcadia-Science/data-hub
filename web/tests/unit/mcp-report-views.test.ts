@@ -36,11 +36,15 @@ vi.mock("@/lib/api/files", () => ({
   findActiveFileBySuffix: vi.fn(),
 }));
 
-vi.mock("@/lib/s3", () => ({
-  getPresignedDownloadUrl: vi
-    .fn()
-    .mockResolvedValue("https://s3.example.com/signed"),
-}));
+vi.mock("@/lib/s3", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/s3")>();
+  return {
+    ...actual,
+    getPresignedDownloadUrl: vi
+      .fn()
+      .mockResolvedValue("https://s3.example.com/signed"),
+  };
+});
 
 import {
   findActiveFileBySuffix,
@@ -107,7 +111,13 @@ describe("report_view tools (authenticated)", () => {
       pagination: { limit: 50, offset: 0, total: 1 },
     });
     vi.mocked(getActiveFilesByIds).mockResolvedValue([
-      { id: 42, s3Bucket: "raw", s3Key: "gel.png" } as never,
+      {
+        id: 42,
+        contentType: "image/png",
+        filename: "gel.png",
+        s3Bucket: "raw",
+        s3Key: "gel.png",
+      },
     ]);
 
     const result = await client.callTool({
@@ -123,6 +133,11 @@ describe("report_view tools (authenticated)", () => {
         downloadUrl: "https://s3.example.com/signed",
       },
     ]);
+    expect(getPresignedDownloadUrl).toHaveBeenCalledWith("raw", "gel.png", {
+      contentType: "image/png",
+      disposition: "inline",
+      filename: "gel.png",
+    });
   });
 
   it("report_view_file_url signs a file looked up by id", async () => {
@@ -147,7 +162,12 @@ describe("report_view tools (authenticated)", () => {
     });
     expect(getPresignedDownloadUrl).toHaveBeenCalledWith(
       "processed",
-      "wells.csv"
+      "wells.csv",
+      {
+        contentType: "text/csv",
+        disposition: "inline",
+        filename: "wells.csv",
+      }
     );
   });
 

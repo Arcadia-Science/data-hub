@@ -50,7 +50,11 @@ class _QueueAttempt:
 
 
 def _guess_content_type(path: Path) -> str | None:
-    content_type, _ = mimetypes.guess_type(str(path))
+    # `mimetypes.guess_type` is case-sensitive on some platforms. Azure
+    # Cielo writes reports as `.PDF`; without the lowercase, the PUT
+    # stores `binary/octet-stream` and browsers download the file.
+    lowered = path.with_suffix(path.suffix.lower())
+    content_type, _ = mimetypes.guess_type(str(lowered))
     return content_type
 
 

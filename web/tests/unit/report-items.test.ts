@@ -10,6 +10,11 @@ describe("reportItemKindForInstrument", () => {
     expect(reportItemKindForInstrument("dishcam")).toBe("video");
   });
 
+  it("maps both PDF-exporting instruments to the PDF seeker", () => {
+    expect(reportItemKindForInstrument("tape_station")).toBe("pdf");
+    expect(reportItemKindForInstrument("qpcr")).toBe("pdf");
+  });
+
   it("leaves unmapped types without a seeker", () => {
     expect(reportItemKindForInstrument("generic")).toBeNull();
     expect(reportItemKindForInstrument("plate_reader")).toBeNull();

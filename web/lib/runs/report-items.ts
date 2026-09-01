@@ -67,6 +67,7 @@ const KIND_BY_INSTRUMENT: Partial<Record<InstrumentType, ReportItemKind>> = {
   gel_doc: "image",
   hina_microscope: "image",
   tape_station: "pdf",
+  qpcr: "pdf",
   instant_raman: "spectrum",
   dishcam: "video",
 };

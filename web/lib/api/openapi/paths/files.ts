@@ -73,10 +73,16 @@ registry.registerPath({
   path: "/files/{fileId}/download",
   operationId: "downloadFile",
   summary: "Redirect to file download",
-  description: "Requires scope `files:read`.",
+  description:
+    "Requires scope `files:read`. Pass `disposition=inline` to override a stored `binary/octet-stream` type so browsers can render PDFs in an iframe.",
   tags: ["Files"],
   security: bearerSecurity,
-  request: { params: fileParams },
+  request: {
+    params: fileParams,
+    query: z.object({
+      disposition: z.enum(["inline"]).optional(),
+    }),
+  },
   responses: {
     302: { description: "Redirect to a presigned download URL." },
     ...errorResponses(),

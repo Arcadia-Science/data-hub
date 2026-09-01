@@ -128,7 +128,7 @@ The app runs at [http://localhost:3000](http://localhost:3000).
 Before pushing, run the full formatting, lint, and type-check suite:
 
 ```sh
-make check-all
+make check
 ```
 
 This runs both Python and web app checks:

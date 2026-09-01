@@ -16,6 +16,7 @@ import type {
   RunFilesPage,
 } from "@/lib/api/instrument-runs";
 import type { AuntyPlateData } from "@/lib/runs/aunty";
+import type { QpcrMeltingPlateData } from "@/lib/runs/qpcr-melting";
 import type { ReportItemsPage } from "@/lib/runs/report-items";
 
 export const RunDetail = {
@@ -43,6 +44,8 @@ export interface RunDetailProps {
   filesDownloadableCount: RunFilesPage["downloadableCount"];
   filesPagination: RunFilesPage["pagination"];
   instrumentId: string;
+  // Parsed qPCR melting-curve plate JSON plus the tidy CSV file id.
+  qpcrMeltingPlate: QpcrMeltingPlateData | null;
   // Processed + PDF files for the report sections and well-data parsing.
   reportFiles: RunFile[];
   // First window of the run's seekable report items, for the variant's

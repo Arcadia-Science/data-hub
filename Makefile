@@ -118,8 +118,8 @@ fe-check:
 	make fe-lint
 	make fe-typecheck
 
-.PHONY: check-all
-check-all:
+.PHONY: check
+check:
 	make py-check
 	make fe-check
 
@@ -151,7 +151,7 @@ endif
 # SAM infrastructure.
 # Lint both CloudFormation templates with cfn-lint (via `sam validate --lint`).
 # Offline and credential-free, so it's safe to run anywhere; kept out of
-# `check-all` because it needs the SAM CLI, which only deployers install.
+# `check` because it needs the SAM CLI, which only deployers install.
 .PHONY: sam-validate
 sam-validate:
 	cd infra && sam validate --lint --region us-west-1 --template template.yaml

@@ -58,7 +58,7 @@ Environment-specific configuration is managed through environment variables, nev
 
 ### Pre-commit
 
-Run `make check-all` before pushing. CI enforces the same checks.
+Run `make check` before pushing. CI enforces the same checks.
 
 ## Testing
 

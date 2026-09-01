@@ -6,7 +6,7 @@ import type {
 } from "@/lib/runs/view-data-source";
 
 function restFileUrl(fileId: number): string {
-  return `/api/v1/files/${fileId}/download`;
+  return `/api/v1/files/${fileId}/download?disposition=inline`;
 }
 
 // Browser-side source for the Next.js run page. `resolveFileBySuffix` is left

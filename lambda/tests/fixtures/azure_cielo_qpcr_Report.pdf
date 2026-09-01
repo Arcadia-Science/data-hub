@@ -1,0 +1,60 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [5 0 R 7 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+4 0 obj
+<< /Length 545 >>
+stream
+BT
+/F1 20 Tf 1 0 0 1 72 720 Tm (Azure Cielo qPCR) Tj
+/F1 13 Tf 1 0 0 1 72 692 Tm (Synthetic run report - fixture data, not a real experiment.) Tj
+/F1 14 Tf 1 0 0 1 72 650 Tm (Amplification summary) Tj
+/F1 11 Tf 1 0 0 1 72 624 Tm (Wells analysed              384) Tj
+/F1 11 Tf 1 0 0 1 72 606 Tm (Dye channels                Channel1, Channel2, Channel3, Channel4) Tj
+/F1 11 Tf 1 0 0 1 72 588 Tm (Passing wells               372) Tj
+/F1 11 Tf 1 0 0 1 72 570 Tm (No-template controls        clean) Tj
+/F1 11 Tf 1 0 0 1 72 528 Tm (Page 1 of 2) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 4 0 R >>
+endobj
+6 0 obj
+<< /Length 514 >>
+stream
+BT
+/F1 20 Tf 1 0 0 1 72 720 Tm (Melt peak summary) Tj
+/F1 13 Tf 1 0 0 1 72 692 Tm (Synthetic run report - fixture data, not a real experiment.) Tj
+/F1 11 Tf 1 0 0 1 72 650 Tm (Channel1                    no signal) Tj
+/F1 11 Tf 1 0 0 1 72 632 Tm (Channel2                    single peak near 73 C) Tj
+/F1 11 Tf 1 0 0 1 72 614 Tm (Channel3                    single peak near 73 C) Tj
+/F1 11 Tf 1 0 0 1 72 596 Tm (Channel4                    single peak near 73 C) Tj
+/F1 11 Tf 1 0 0 1 72 554 Tm (Page 2 of 2) Tj
+ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 6 0 R >>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000121 00000 n 
+0000000191 00000 n 
+0000000787 00000 n 
+0000000913 00000 n 
+0000001478 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R >>
+startxref
+1604
+%%EOF

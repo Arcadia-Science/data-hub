@@ -11,6 +11,8 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { awsCredentialsProvider } from "@vercel/oidc-aws-credentials-provider";
 import {
+  contentDispositionHeader,
+  contentTypeForDownload,
   getLocalMirrorRoot,
   localMirrorDownloadUrl,
   localMirrorHead,
@@ -131,6 +133,12 @@ export async function headS3Object(
 }
 
 export interface PresignedDownloadOptions {
+  // Override the object's stored Content-Type. Watcher uploads of
+  // uppercase extensions (`.PDF`) often land as `binary/octet-stream`.
+  contentType?: string;
+  // `inline` so browsers render PDFs in an iframe instead of downloading.
+  // `filename` without this stays `attachment` (archive downloads).
+  disposition?: "attachment" | "inline";
   expiresIn?: number;
   // Override the filename the browser saves the response under. Browsers
   // ignore the `<a download="…">` attribute on cross-origin URLs unless the
@@ -141,15 +149,15 @@ export interface PresignedDownloadOptions {
   filename?: string;
 }
 
-// Sanitize a filename for use inside a `Content-Disposition` header. Strips
-// CR/LF (header injection) and quotes (which would terminate the filename
-// param early), then trims to a length S3 will accept.
-function sanitizeContentDispositionFilename(name: string): string {
-  const cleaned = name
-    .replaceAll(/[\r\n"\\]/g, "")
-    .replaceAll(/[\x00-\x1f\x7f]/g, "")
-    .trim();
-  return cleaned.slice(0, 200) || "download";
+export function embedDownloadOptions(
+  filename: string,
+  storedContentType: string | null | undefined
+): Pick<PresignedDownloadOptions, "contentType" | "disposition" | "filename"> {
+  return {
+    contentType: contentTypeForDownload(storedContentType, filename),
+    disposition: "inline",
+    filename,
+  };
 }
 
 export async function getPresignedDownloadUrl(
@@ -161,6 +169,7 @@ export async function getPresignedDownloadUrl(
   const opts: PresignedDownloadOptions =
     typeof options === "number" ? { expiresIn: options } : options;
   const expiresIn = opts.expiresIn ?? PRESIGNED_DOWNLOAD_URL_EXPIRY_SECONDS;
+  const disposition = contentDispositionHeader(opts.disposition, opts.filename);
 
   // Local-mirror branch: return a same-origin URL that points at
   // `/api/local-s3/...`. The 302 in `/api/v1/files/[fileId]/download`
@@ -168,15 +177,17 @@ export async function getPresignedDownloadUrl(
   // `download_url` field both resolve relative URLs against the
   // current origin, so no consumer needs to know we swapped backends.
   if (getLocalMirrorRoot()) {
-    return localMirrorDownloadUrl(bucket, key, opts.filename);
+    return localMirrorDownloadUrl(bucket, key, {
+      disposition: opts.disposition,
+      filename: opts.filename,
+    });
   }
 
   const command = new GetObjectCommand({
     Bucket: bucket,
     Key: key,
-    ...(opts.filename && {
-      ResponseContentDisposition: `attachment; filename="${sanitizeContentDispositionFilename(opts.filename)}"`,
-    }),
+    ...(disposition && { ResponseContentDisposition: disposition }),
+    ...(opts.contentType && { ResponseContentType: opts.contentType }),
   });
   return await getSignedUrl(s3, command, { expiresIn });
 }

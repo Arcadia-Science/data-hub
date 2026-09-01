@@ -14,6 +14,8 @@
 # next.js
 /.next/
 /out/
+# Leftover nested output from an earlier Turbopack workspace root.
+/web/
 
 # production
 /build
