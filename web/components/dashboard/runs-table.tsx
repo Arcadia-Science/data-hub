@@ -5,16 +5,14 @@ import { FilterableColumnHeader } from "@/components/instruments/runs-table/filt
 import type { RanByOption } from "@/components/instruments/runs-table/index";
 import { RanByCell } from "@/components/instruments/runs-table/ran-by-cell";
 import { RawFileColumnHeader } from "@/components/instruments/runs-table/raw-file-column-header";
-import { RunIdLabel } from "@/components/instruments/runs-table/run-id-label";
+import { RunIdCell } from "@/components/instruments/runs-table/run-id-cell";
 import { RunRowActions } from "@/components/instruments/runs-table/run-row-actions";
 import {
   RunSelectAllCheckbox,
   RunSelectCheckbox,
 } from "@/components/instruments/runs-table/run-select-checkbox";
 import type { RunRef } from "@/components/instruments/runs-table/run-selection-provider";
-import { RunStatusIcon } from "@/components/instruments/runs-table/run-status-icon";
 import { RunsTableFooter } from "@/components/instruments/runs-table/runs-table-footer";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -126,23 +124,7 @@ export function RunsTable({
                   </Link>
                 </TableCell>
                 <TableCell>
-                  <div className="flex items-center gap-2.5">
-                    <RunStatusIcon run={row} />
-                    <RunIdLabel
-                      className="text-sm"
-                      href={href}
-                      isDeleted={isDeleted}
-                      runId={row.run_id}
-                    />
-                    {isDeleted ? (
-                      <Badge
-                        className="ml-1.5 font-normal text-[10px]"
-                        variant="outline"
-                      >
-                        deleted
-                      </Badge>
-                    ) : null}
-                  </div>
+                  <RunIdCell href={href} run={row} />
                 </TableCell>
                 <TableCell className="text-sm tabular-nums">
                   {row.file_count}

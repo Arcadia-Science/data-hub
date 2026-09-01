@@ -68,7 +68,7 @@ export function InstrumentRunsTableShell({
   return (
     // `isolate` contains the rows' internal `z-10` so they don't paint over
     // the fixed sidebar, which shares `z-10` in the root stacking context.
-    <div className="isolate rounded-lg border bg-background dark:bg-muted">
+    <div className="isolate min-w-0 rounded-lg border bg-background dark:bg-muted">
       {children}
       <RunsTableFooter
         pendingUploadCount={pendingUploadCount}

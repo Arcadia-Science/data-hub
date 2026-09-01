@@ -68,7 +68,9 @@ export default async function AppLayout({
               redirect("/login");
             }}
           />
-          <SidebarInset className="pb-12">
+          {/* `min-w-0` lets the main pane shrink beside the sidebar so wide
+              tables scroll inside their container instead of stretching the page. */}
+          <SidebarInset className="min-w-0 pb-12">
             <header className="flex h-14 shrink-0 items-center justify-between gap-2 px-4">
               <div className="flex h-8 items-center">
                 <SidebarTrigger />

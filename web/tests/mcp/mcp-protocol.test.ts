@@ -44,6 +44,7 @@ const {
     files_stalled: 0,
     total_size_bytes: 1234,
     error_messages: [] as string[],
+    comment_count: 0,
     attributions: [] as Array<{
       userId: string;
       displayName: string;
@@ -306,6 +307,13 @@ vi.mock("@/lib/api/instrument-runs", () => ({
 // lives in the HTTP integration suite.
 vi.mock("@/lib/db", () => ({
   db: {
+    // The oauth-provider seeds `oauth_resource` at plugin init; returning a row
+    // keeps that boot-time lookup from inserting without a real database.
+    select: () => ({
+      from: () => ({
+        where: () => Promise.resolve([{ identifier: "seeded" }]),
+      }),
+    }),
     insert: () => ({
       values: () => ({
         onConflictDoNothing: () => Promise.resolve(),

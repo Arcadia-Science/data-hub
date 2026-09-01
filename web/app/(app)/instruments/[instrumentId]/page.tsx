@@ -334,7 +334,7 @@ async function InstrumentRunsSection({
   return (
     <RunSelectionProvider>
       <TablePendingProvider>
-        <div className="flex flex-col gap-3">
+        <div className="flex min-w-0 flex-col gap-3">
           <InstrumentRunsToolbar />
           <RunBulkActionBar />
           <TablePendingBoundary>

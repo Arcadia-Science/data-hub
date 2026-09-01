@@ -121,6 +121,9 @@ export const accounts = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     // Provider's account ID, or the user id for `credential` accounts.
     accountId: text("accountId").notNull(),
+    // Better Auth 1.7 keys accounts on `(issuer, accountId)`. Credential
+    // rows use `local:credential`; Google uses `https://accounts.google.com`.
+    issuer: text("issuer").notNull(),
     // OAuth provider id (e.g. `google`) or `credential` for email/password.
     providerId: text("providerId").notNull(),
     accessToken: text("accessToken"),
@@ -136,7 +139,13 @@ export const accounts = pgTable(
     createdAt: timestamp("createdAt", { mode: "date" }).notNull().defaultNow(),
     updatedAt: timestamp("updatedAt", { mode: "date" }).notNull().defaultNow(),
   },
-  (account) => [index("idx_accounts_user_id").on(account.userId)]
+  (account) => [
+    index("idx_accounts_user_id").on(account.userId),
+    unique("uq_account_issuer_account_id").on(
+      account.issuer,
+      account.accountId
+    ),
+  ]
 );
 
 export const sessions = pgTable(
@@ -1032,7 +1041,10 @@ export const runAttributions = pgTable(
 export {
   jwks,
   oauthAccessTokens,
+  oauthClientAssertions,
+  oauthClientResources,
   oauthClients,
   oauthConsents,
   oauthRefreshTokens,
+  oauthResources,
 } from "./auth-schema";

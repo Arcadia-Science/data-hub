@@ -120,6 +120,36 @@ describe("Run Comments API", () => {
     commentsListResponse.parse(body);
   });
 
+  it("run list comment_count includes active comments only", async () => {
+    const runId = "run-list-comment-count";
+    await createRun(runId);
+    await postComment(runId, "first", tokenA);
+    const second = await postComment(runId, "second", tokenA);
+
+    const listed = await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      token: tokenA,
+    });
+    expect(listed.status).toBe(200);
+    const body = await listed.json();
+    const row = body.data.find((r: { run_id: string }) => r.run_id === runId);
+    expect(row?.comment_count).toBe(2);
+
+    const del = await api(commentPath(runId, second.id), {
+      method: "DELETE",
+      token: tokenA,
+    });
+    expect(del.status).toBe(200);
+
+    const listedAfter = await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      token: tokenA,
+    });
+    const afterBody = await listedAfter.json();
+    const afterRow = afterBody.data.find(
+      (r: { run_id: string }) => r.run_id === runId
+    );
+    expect(afterRow?.comment_count).toBe(1);
+  });
+
   it("POST returns 400 for missing body field", async () => {
     const runId = "run-validate-missing";
     await createRun(runId);

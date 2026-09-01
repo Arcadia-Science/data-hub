@@ -97,7 +97,7 @@ A deployment is a PostgreSQL database, the web app on Vercel, three S3 buckets, 
 Run both before opening a pull request:
 
 ```sh
-make check-all  # Format, lint, and type-check Python and TypeScript.
+make check  # Format, lint, and type-check Python and TypeScript.
 make test       # Python and web tests, unit and integration.
 ```
 

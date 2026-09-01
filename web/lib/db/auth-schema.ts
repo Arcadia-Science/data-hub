@@ -5,18 +5,20 @@
  *
  *   npm run db:generate-auth-schema
  *
- * That runs `npx auth@latest generate` (requires `export default` on
- * `lib/auth.ts` and drizzleAdapter `camelCase: true`) and adapts the
+ * That runs `npx auth@latest generate` (requires drizzleAdapter
+ * `camelCase: true` on `lib/auth.ts`) and adapts the
  * plugin tables for this repo (snake_case SQL table names, plural exports,
  * FKs into `schema.ts` users/sessions, plus jwks alg/crv).
  */
 import {
   boolean,
   index,
+  integer,
   jsonb,
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { sessions, users } from "./schema";
 
@@ -26,7 +28,6 @@ export const jwks = pgTable("jwks", {
   privateKey: text("privateKey").notNull(),
   createdAt: timestamp("createdAt", { mode: "date" }).notNull(),
   expiresAt: timestamp("expiresAt", { mode: "date" }),
-  // Runtime columns written by the jwt plugin (not in CLI typed schema).
   alg: text("alg"),
   crv: text("crv"),
 });
@@ -37,11 +38,15 @@ export const oauthClients = pgTable(
     id: text("id").primaryKey(),
     clientId: text("clientId").notNull().unique(),
     clientSecret: text("clientSecret"),
+    clientDiscoveryId: text("clientDiscoveryId"),
     disabled: boolean("disabled").default(false),
     skipConsent: boolean("skipConsent"),
     enableEndSession: boolean("enableEndSession"),
     subjectType: text("subjectType"),
     scopes: text("scopes").array(),
+    clientCredentialsScopes: text("clientCredentialsScopes")
+      .array()
+      .default([]),
     userId: text("userId").references(() => users.id, { onDelete: "cascade" }),
     createdAt: timestamp("createdAt", { mode: "date" }),
     updatedAt: timestamp("updatedAt", { mode: "date" }),
@@ -56,16 +61,67 @@ export const oauthClients = pgTable(
     softwareStatement: text("softwareStatement"),
     redirectUris: text("redirectUris").array().notNull(),
     postLogoutRedirectUris: text("postLogoutRedirectUris").array(),
+    backchannelLogoutUri: text("backchannelLogoutUri"),
+    backchannelLogoutSessionRequired: boolean(
+      "backchannelLogoutSessionRequired"
+    ),
     tokenEndpointAuthMethod: text("tokenEndpointAuthMethod"),
+    applicationType: text("applicationType"),
+    jwks: text("jwks"),
+    jwksUri: text("jwksUri"),
     grantTypes: text("grantTypes").array(),
     responseTypes: text("responseTypes").array(),
+    requirePKCE: boolean("requirePKCE"),
+    dpopBoundAccessTokens: boolean("dpopBoundAccessTokens").default(false),
     public: boolean("public"),
     type: text("type"),
-    requirePKCE: boolean("requirePKCE"),
     referenceId: text("referenceId"),
     metadata: jsonb("metadata"),
   },
   (table) => [index("oauthClient_userId_idx").on(table.userId)]
+);
+
+export const oauthResources = pgTable("oauth_resource", {
+  id: text("id").primaryKey(),
+  identifier: text("identifier").notNull().unique(),
+  name: text("name").notNull(),
+  accessTokenTtl: integer("accessTokenTtl"),
+  refreshTokenTtl: integer("refreshTokenTtl"),
+  signingAlgorithm: text("signingAlgorithm"),
+  signingKeyId: text("signingKeyId"),
+  allowedScopes: text("allowedScopes").array(),
+  customClaims: jsonb("customClaims"),
+  dpopBoundAccessTokensRequired: boolean(
+    "dpopBoundAccessTokensRequired"
+  ).default(false),
+  disabled: boolean("disabled").default(false),
+  createdAt: timestamp("createdAt", { mode: "date" }),
+  updatedAt: timestamp("updatedAt", { mode: "date" }),
+  policyVersion: integer("policyVersion").default(1),
+  metadata: jsonb("metadata"),
+});
+
+export const oauthClientResources = pgTable(
+  "oauth_client_resource",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("clientId")
+      .notNull()
+      .references(() => oauthClients.clientId, { onDelete: "cascade" }),
+    resourceId: text("resourceId")
+      .notNull()
+      .references(() => oauthResources.identifier, { onDelete: "cascade" }),
+    metadata: jsonb("metadata"),
+    createdAt: timestamp("createdAt", { mode: "date" }),
+  },
+  (table) => [
+    uniqueIndex("oauthClientResource_clientId_resourceId_uidx").on(
+      table.clientId,
+      table.resourceId
+    ),
+    index("oauthClientResource_clientId_idx").on(table.clientId),
+    index("oauthClientResource_resourceId_idx").on(table.resourceId),
+  ]
 );
 
 export const oauthRefreshTokens = pgTable(
@@ -83,16 +139,28 @@ export const oauthRefreshTokens = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     referenceId: text("referenceId"),
+    authorizationCodeId: text("authorizationCodeId"),
+    resources: text("resources").array(),
+    requestedUserInfoClaims: text("requestedUserInfoClaims").array(),
     expiresAt: timestamp("expiresAt", { mode: "date" }).notNull(),
     createdAt: timestamp("createdAt", { mode: "date" }).notNull(),
     revoked: timestamp("revoked", { mode: "date" }),
+    rotatedAt: timestamp("rotatedAt", { mode: "date" }),
+    rotationReplayResponse: text("rotationReplayResponse"),
+    rotationReplayExpiresAt: timestamp("rotationReplayExpiresAt", {
+      mode: "date",
+    }),
     authTime: timestamp("authTime", { mode: "date" }),
+    confirmation: jsonb("confirmation"),
     scopes: text("scopes").array().notNull(),
   },
   (table) => [
     index("oauthRefreshToken_clientId_idx").on(table.clientId),
     index("oauthRefreshToken_sessionId_idx").on(table.sessionId),
     index("oauthRefreshToken_userId_idx").on(table.userId),
+    index("oauthRefreshToken_authorizationCodeId_idx").on(
+      table.authorizationCodeId
+    ),
   ]
 );
 
@@ -109,17 +177,25 @@ export const oauthAccessTokens = pgTable(
     }),
     userId: text("userId").references(() => users.id, { onDelete: "cascade" }),
     referenceId: text("referenceId"),
+    authorizationCodeId: text("authorizationCodeId"),
+    resources: text("resources").array(),
+    requestedUserInfoClaims: text("requestedUserInfoClaims").array(),
     refreshId: text("refreshId").references(() => oauthRefreshTokens.id, {
       onDelete: "cascade",
     }),
     expiresAt: timestamp("expiresAt", { mode: "date" }).notNull(),
     createdAt: timestamp("createdAt", { mode: "date" }).notNull(),
+    revoked: timestamp("revoked", { mode: "date" }),
+    confirmation: jsonb("confirmation"),
     scopes: text("scopes").array().notNull(),
   },
   (table) => [
     index("oauthAccessToken_clientId_idx").on(table.clientId),
     index("oauthAccessToken_sessionId_idx").on(table.sessionId),
     index("oauthAccessToken_userId_idx").on(table.userId),
+    index("oauthAccessToken_authorizationCodeId_idx").on(
+      table.authorizationCodeId
+    ),
     index("oauthAccessToken_refreshId_idx").on(table.refreshId),
   ]
 );
@@ -133,6 +209,8 @@ export const oauthConsents = pgTable(
       .references(() => oauthClients.clientId, { onDelete: "cascade" }),
     userId: text("userId").references(() => users.id, { onDelete: "cascade" }),
     referenceId: text("referenceId"),
+    resources: text("resources").array(),
+    requestedUserInfoClaims: text("requestedUserInfoClaims").array(),
     scopes: text("scopes").array().notNull(),
     createdAt: timestamp("createdAt", { mode: "date" }).notNull(),
     updatedAt: timestamp("updatedAt", { mode: "date" }).notNull(),
@@ -142,3 +220,8 @@ export const oauthConsents = pgTable(
     index("oauthConsent_userId_idx").on(table.userId),
   ]
 );
+
+export const oauthClientAssertions = pgTable("oauth_client_assertion", {
+  id: text("id").primaryKey(),
+  expiresAt: timestamp("expiresAt", { mode: "date" }).notNull(),
+});

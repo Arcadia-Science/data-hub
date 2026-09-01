@@ -95,7 +95,7 @@ export function InstrumentRunsSkeleton() {
     <div
       aria-busy="true"
       aria-label="Loading runs"
-      className="flex flex-col gap-3"
+      className="flex min-w-0 flex-col gap-3"
       role="status"
     >
       <InstrumentRunsToolbarSkeleton />
