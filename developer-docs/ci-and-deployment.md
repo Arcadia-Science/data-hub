@@ -159,7 +159,7 @@ Trusted publishing is configured under **Project → Publishing** on PyPI for `A
 Always run the full check suite before pushing:
 
 ```sh
-make check-all
+make check
 ```
 
 This is equivalent to:
