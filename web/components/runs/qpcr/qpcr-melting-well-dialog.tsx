@@ -141,9 +141,17 @@ export function QpcrMeltingWellDialog({
       <DialogContent className="sm:max-w-3xl" showCloseButton>
         <DialogHeader>
           <DialogTitle className="font-mono text-2xl">
-            {selectedWellLabel ?? "Well"}
+            {selectedWellLabel
+              ? `${channel.channel} – ${selectedWellLabel}`
+              : channel.channel}
           </DialogTitle>
-          <DialogDescription>{channel.channel} melting curve</DialogDescription>
+          {/* Radix wants a description for the dialog's accessible name, and
+              the heading no longer says what is being plotted. */}
+          <DialogDescription className="sr-only">
+            {selectedWellLabel
+              ? `Melting curve for well ${selectedWellLabel} in ${channel.channel}`
+              : `Melting curves for ${channel.channel}`}
+          </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-3">
           <SeekerToolbar
