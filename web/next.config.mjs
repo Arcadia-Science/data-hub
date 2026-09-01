@@ -1,4 +1,8 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { withMicrofrontends } from "@vercel/microfrontends/next/config";
+
+const appDir = path.dirname(fileURLToPath(import.meta.url));
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -33,4 +37,13 @@ const nextConfig = {
   },
 };
 
-export default withMicrofrontends(nextConfig);
+const withMfe = withMicrofrontends(nextConfig);
+
+// Pin after `withMicrofrontends` so Turbopack writes into `web/.next`.
+// An older disk cache stored assets under a `web/` prefix and restored
+// them into `web/web/.next` on every `make dev`.
+export default {
+  ...withMfe,
+  outputFileTracingRoot: appDir,
+  turbopack: { ...withMfe.turbopack, root: appDir },
+};

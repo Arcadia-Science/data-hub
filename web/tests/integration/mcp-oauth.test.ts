@@ -175,21 +175,19 @@ describe("MCP OAuth authorization-code flow", () => {
     const { verifier, challenge } = pkcePair();
     const state = randomBytes(16).toString("hex");
 
-    // 1. Dynamic client registration (public / PKCE). Loopback redirect URIs
-    // need `application_type: "native"`; 1.7 defaults to `web` (HTTPS only).
+    // 1. Dynamic client registration (public / PKCE).
     const registerRes = await api("/api/auth/oauth2/register", {
       method: "POST",
       body: {
         client_name: "E2E MCP Test Client",
         redirect_uris: [redirectUri],
-        application_type: "native",
         token_endpoint_auth_method: "none",
         grant_types: ["authorization_code", "refresh_token"],
         response_types: ["code"],
         scope: "openid profile email offline_access read write",
       },
     });
-    expect(registerRes.status).toBe(201);
+    expect(registerRes.status).toBe(200);
     const registered = (await registerRes.json()) as {
       client_id?: string;
     };
@@ -337,13 +335,12 @@ describe("MCP OAuth authorization-code flow", () => {
       body: {
         client_name: "Cursor-like MCP Client",
         redirect_uris: [redirectUri],
-        application_type: "native",
         token_endpoint_auth_method: "none",
         grant_types: ["authorization_code"],
         response_types: ["code"],
       },
     });
-    expect(registerRes.status).toBe(201);
+    expect(registerRes.status).toBe(200);
     const { client_id: clientId } = (await registerRes.json()) as {
       client_id: string;
     };
@@ -395,14 +392,13 @@ describe("MCP OAuth authorization-code flow", () => {
       body: {
         client_name: "Claude-Code-like MCP Client",
         redirect_uris: [redirectUri],
-        application_type: "native",
         token_endpoint_auth_method: "none",
         grant_types: ["authorization_code", "refresh_token"],
         response_types: ["code"],
         scope: advertisedScopes.join(" "),
       },
     });
-    expect(registerRes.status).toBe(201);
+    expect(registerRes.status).toBe(200);
     const { client_id: clientId } = (await registerRes.json()) as {
       client_id: string;
     };
@@ -434,24 +430,6 @@ describe("MCP OAuth authorization-code flow", () => {
     expect(consentUrl.search).not.toMatch(/invalid_scope/);
   });
 
-  it("DCR rejects a loopback redirect URI without application_type native", async () => {
-    // Omitting `application_type` defaults to `web`, which rejects loopback,
-    // so MCP clients listening on a loopback port must register as `native`.
-    const registerRes = await api("/api/auth/oauth2/register", {
-      method: "POST",
-      body: {
-        client_name: "Web-Type Loopback Client",
-        redirect_uris: ["http://127.0.0.1:8789/callback"],
-        token_endpoint_auth_method: "none",
-        grant_types: ["authorization_code"],
-        response_types: ["code"],
-      },
-    });
-    expect(registerRes.status).toBe(400);
-    const body = (await registerRes.json()) as { error?: string };
-    expect(body.error).toBe("invalid_redirect_uri");
-  });
-
   it("read-only OAuth token can read but not mutate via MCP", async () => {
     const issuer = expectedIssuer();
     const resource = expectedMcpResource();
@@ -463,14 +441,13 @@ describe("MCP OAuth authorization-code flow", () => {
       body: {
         client_name: "E2E Read-Only Client",
         redirect_uris: [redirectUri],
-        application_type: "native",
         token_endpoint_auth_method: "none",
         grant_types: ["authorization_code"],
         response_types: ["code"],
         scope: "openid read",
       },
     });
-    expect(registerRes.status).toBe(201);
+    expect(registerRes.status).toBe(200);
     const { client_id: clientId } = (await registerRes.json()) as {
       client_id: string;
     };

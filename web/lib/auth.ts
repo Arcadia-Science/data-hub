@@ -12,12 +12,9 @@ import {
   accounts,
   jwks,
   oauthAccessTokens,
-  oauthClientAssertions,
-  oauthClientResources,
   oauthClients,
   oauthConsents,
   oauthRefreshTokens,
-  oauthResources,
   sessions,
   users,
   verifications,
@@ -151,9 +148,6 @@ export const authInstance = betterAuth({
       oauthRefreshToken: oauthRefreshTokens,
       oauthAccessToken: oauthAccessTokens,
       oauthConsent: oauthConsents,
-      oauthResource: oauthResources,
-      oauthClientResource: oauthClientResources,
-      oauthClientAssertion: oauthClientAssertions,
     },
   }),
   ...(googleClientId && googleClientSecret
@@ -265,10 +259,9 @@ export const authInstance = betterAuth({
       loginPage: "/login",
       consentPage: "/consent",
       scopes: [...oauthScopes],
-      // One audience per deployment. 1.7 seeds it into `oauth_resource` and
-      // links each newly registered client to it (`enforcePerClientResources`).
-      resources: [mcpResourceAudience],
-      clientRegistrationDefaultResources: [mcpResourceAudience],
+      // One audience per deployment: GHSA-p2fr-6hmx-4528 lets a client pick any
+      // allow-listed `resource` at the token endpoint until 1.7 ships stable.
+      validAudiences: [mcpResourceAudience],
       // Cursor / mcp-remote still require RFC 7591 Dynamic Client Registration.
       // Open registration only creates OAuth clients — Google Workspace still
       // gates who can sign in.
