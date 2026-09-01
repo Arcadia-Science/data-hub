@@ -8,28 +8,26 @@ import {
   useMemo,
 } from "react";
 import { usePlateWellsActions } from "@/components/runs/plate-wells-provider";
-import { QpcrMeltingSparkline } from "@/components/runs/qpcr/qpcr-melting-sparkline";
 import {
-  parseWellPosition,
-  type SparklineGeometry,
-  sparklineGeometry,
-} from "@/lib/runs/plate-wells";
+  QpcrMeltingSparkline,
+  type QpcrMeltingSparklineLine,
+} from "@/components/runs/qpcr/qpcr-melting-sparkline";
+import { parseWellPosition, sparklineGeometry } from "@/lib/runs/plate-wells";
 import {
   QPCR_MELTING_SERIES_META,
   type QpcrMeltingChannel,
   type QpcrMeltingSeriesId,
-  type QpcrMeltingSeriesMeta,
 } from "@/lib/runs/qpcr-melting";
 
+const NO_LINES: readonly QpcrMeltingSparklineLine[] = [];
+
 function WellButton({
-  geometry,
-  meta,
+  lines,
   onSelect,
   style,
   well,
 }: {
-  geometry?: SparklineGeometry;
-  meta: QpcrMeltingSeriesMeta;
+  lines: readonly QpcrMeltingSparklineLine[];
   onSelect: (well: string) => void;
   style?: CSSProperties;
   well: string;
@@ -46,7 +44,7 @@ function WellButton({
         {well}
       </span>
       <div className="min-h-0 flex-1 px-0.5 pb-0.5">
-        <QpcrMeltingSparkline geometry={geometry} meta={meta} />
+        <QpcrMeltingSparkline lines={lines} />
       </div>
     </button>
   );
@@ -57,14 +55,13 @@ function WellButton({
 export const QpcrMeltingPlateGrid = memo(function QpcrMeltingPlateGrid({
   channel,
   onWellClick,
-  seriesId,
+  seriesIds,
 }: {
   channel: QpcrMeltingChannel;
   onWellClick: (well: string) => void;
-  seriesId: QpcrMeltingSeriesId;
+  seriesIds: readonly QpcrMeltingSeriesId[];
 }) {
   const { selectWell } = usePlateWellsActions();
-  const meta = QPCR_MELTING_SERIES_META[seriesId];
 
   const openWell = useCallback(
     (well: string) => {
@@ -94,13 +91,21 @@ export const QpcrMeltingPlateGrid = memo(function QpcrMeltingPlateGrid({
     return { rows: maxRow + 1, cols: maxCol + 1, byPos };
   }, [channel.wells]);
 
-  const geometries = useMemo(() => {
-    const map = new Map<string, SparklineGeometry>();
+  // Built per well rather than per render so `WellButton`'s memo holds across
+  // a dialog open/close; only a series or channel change rebuilds them.
+  const linesByWell = useMemo(() => {
+    const map = new Map<string, QpcrMeltingSparklineLine[]>();
     for (const well of channel.wells) {
-      map.set(well.well, sparklineGeometry(well.series[seriesId] ?? []));
+      map.set(
+        well.well,
+        seriesIds.map((id) => ({
+          meta: QPCR_MELTING_SERIES_META[id],
+          geometry: sparklineGeometry(well.series[id] ?? []),
+        }))
+      );
     }
     return map;
-  }, [channel.wells, seriesId]);
+  }, [channel.wells, seriesIds]);
 
   if (layout.byPos.size === 0) {
     return null;
@@ -153,9 +158,8 @@ export const QpcrMeltingPlateGrid = memo(function QpcrMeltingPlateGrid({
               }
               return (
                 <WellButton
-                  geometry={geometries.get(well.well)}
                   key={label}
-                  meta={meta}
+                  lines={linesByWell.get(well.well) ?? NO_LINES}
                   onSelect={openWell}
                   style={style}
                   well={well.well}

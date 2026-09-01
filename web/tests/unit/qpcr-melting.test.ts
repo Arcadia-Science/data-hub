@@ -2,8 +2,41 @@ import { describe, expect, it } from "vitest";
 import {
   indexQpcrMeltingCurves,
   meltingCurveKey,
+  meltPeakTemperature,
   parseQpcrMeltingPlateJson,
 } from "@/lib/runs/qpcr-melting";
+
+describe("meltPeakTemperature", () => {
+  it("returns the temperature of the tallest point", () => {
+    expect(
+      meltPeakTemperature([
+        { x: 60, y: 0.2 },
+        { x: 73, y: 5.9 },
+        { x: 80, y: 1.1 },
+      ])
+    ).toBe(73);
+  });
+
+  it("has no peak for a flat or empty trace", () => {
+    expect(meltPeakTemperature(undefined)).toBeNull();
+    expect(meltPeakTemperature([])).toBeNull();
+    expect(
+      meltPeakTemperature([
+        { x: 60, y: 0 },
+        { x: 73, y: 0 },
+      ])
+    ).toBeNull();
+  });
+
+  it("finds a peak below zero as long as the trace varies", () => {
+    expect(
+      meltPeakTemperature([
+        { x: 60, y: -4 },
+        { x: 73, y: -1 },
+      ])
+    ).toBe(73);
+  });
+});
 
 describe("parseQpcrMeltingPlateJson", () => {
   it("accepts array and object points and drops invalid ones", () => {

@@ -22,11 +22,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   indexQpcrMeltingCurves,
   meltingCurveKey,
-  QPCR_MELTING_SERIES_META,
   type QpcrMeltingChannel,
   type QpcrMeltingCurveIndex,
-  type QpcrMeltingPoint,
   type QpcrMeltingSeriesId,
+  type QpcrMeltingWellCurves,
 } from "@/lib/runs/qpcr-melting";
 import type { ReportDataSource } from "@/lib/runs/view-data-source";
 
@@ -78,14 +77,14 @@ export function QpcrMeltingWellDialog({
   onOpenChange,
   onSeriesChange,
   open,
-  seriesId,
+  seriesIds,
 }: {
   channel: QpcrMeltingChannel;
   derivativesCsvFileId: number | null;
   onOpenChange: (open: boolean) => void;
-  onSeriesChange: (next: QpcrMeltingSeriesId) => void;
+  onSeriesChange: (next: QpcrMeltingSeriesId[]) => void;
   open: boolean;
-  seriesId: QpcrMeltingSeriesId;
+  seriesIds: readonly QpcrMeltingSeriesId[];
 }) {
   const dataSource = useReportDataSource();
   const state = usePlateWellsState();
@@ -131,10 +130,9 @@ export function QpcrMeltingWellDialog({
     }
   }, [derivativesCsvFileId, startLoad]);
 
-  const points = wellPoints({
+  const wellCurves = curvesForWell({
     channel,
     curves,
-    seriesId,
     well: selectedWellLabel,
   });
 
@@ -153,13 +151,16 @@ export function QpcrMeltingWellDialog({
             labels={WELL_SEEKER_LABELS}
             state={state}
           />
-          <QpcrMeltingSeriesToggle onChange={onSeriesChange} value={seriesId} />
+          <QpcrMeltingSeriesToggle
+            onChange={onSeriesChange}
+            value={seriesIds}
+          />
         </div>
         <WellCurveBody
           curves={curves}
           onRetry={retry}
-          points={points}
-          seriesId={seriesId}
+          seriesIds={seriesIds}
+          wellCurves={wellCurves}
         />
       </DialogContent>
     </Dialog>
@@ -169,13 +170,13 @@ export function QpcrMeltingWellDialog({
 function WellCurveBody({
   curves,
   onRetry,
-  points,
-  seriesId,
+  seriesIds,
+  wellCurves,
 }: {
   curves: CurvesState;
   onRetry: () => void;
-  points: QpcrMeltingPoint[];
-  seriesId: QpcrMeltingSeriesId;
+  seriesIds: readonly QpcrMeltingSeriesId[];
+  wellCurves: Partial<QpcrMeltingWellCurves>;
 }) {
   if (curves.status === "error") {
     return (
@@ -188,44 +189,44 @@ function WellCurveBody({
       </div>
     );
   }
-  // The thinned plate points stand in until the CSV lands, so the derivative
-  // is on screen straight away and only sharpens when the download finishes.
-  if (points.length > 0) {
-    return <QpcrMeltingWellChart points={points} seriesId={seriesId} />;
+  if (seriesIds.length === 0) {
+    return (
+      <p className="text-muted-foreground text-sm">
+        Turn on a series above to plot this well.
+      </p>
+    );
+  }
+  // The thinned plate points stand in until the CSV lands, so a curve is on
+  // screen straight away and only sharpens when the download finishes.
+  if (seriesIds.some((id) => (wellCurves[id]?.length ?? 0) > 0)) {
+    return <QpcrMeltingWellChart curves={wellCurves} seriesIds={seriesIds} />;
   }
   if (curves.status === "loading") {
     return <Skeleton aria-label="Loading curve" className="h-80 w-full" />;
   }
   return (
-    <p className="text-muted-foreground text-sm">
-      No {QPCR_MELTING_SERIES_META[seriesId].label.toLowerCase()} data for this
-      well.
-    </p>
+    <p className="text-muted-foreground text-sm">No data for this well.</p>
   );
 }
 
-// Prefers the full-resolution CSV curve and falls back to the thinned points
+// Prefers the full-resolution CSV curves and falls back to the thinned points
 // the plate grid is already drawing, so the chart is never blank while the
 // download is in flight.
-function wellPoints({
+function curvesForWell({
   channel,
   curves,
-  seriesId,
   well,
 }: {
   channel: QpcrMeltingChannel;
   curves: CurvesState;
-  seriesId: QpcrMeltingSeriesId;
   well: string | null;
-}): QpcrMeltingPoint[] {
+}): Partial<QpcrMeltingWellCurves> {
   if (!well) {
-    return [];
+    return {};
   }
-  const thinned =
-    channel.wells.find((w) => w.well === well)?.series[seriesId] ?? [];
+  const thinned = channel.wells.find((w) => w.well === well)?.series ?? {};
   if (curves.status !== "ready") {
     return thinned;
   }
-  const full = curves.index.get(meltingCurveKey(channel.channel, well));
-  return full?.[seriesId] ?? thinned;
+  return curves.index.get(meltingCurveKey(channel.channel, well)) ?? thinned;
 }

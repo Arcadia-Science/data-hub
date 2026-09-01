@@ -47,7 +47,42 @@ export const QPCR_MELTING_SERIES_META: Record<
   },
 };
 
-export const QPCR_MELTING_PRIMARY_SERIES: QpcrMeltingSeriesId = "derivative";
+// The plate opens on the derivative alone. Ninety-six tiles of two overlaid
+// curves is a lot to scan, and the derivative peak is what a plate is read
+// for; the melt curve is one click away.
+export const QPCR_MELTING_PLATE_SERIES: readonly QpcrMeltingSeriesId[] = [
+  "derivative",
+];
+
+// A single well at full size has room for both, and the peak is easier to
+// trust next to the transition it came from.
+export const QPCR_MELTING_WELL_SERIES: readonly QpcrMeltingSeriesId[] =
+  QPCR_MELTING_SERIES_IDS;
+
+// Orange so the Tm marker reads as an annotation rather than a third series.
+export const QPCR_MELTING_PEAK_COLOR = "#f97316";
+
+// Temperature of the tallest derivative point, which is the well's melting
+// temperature. Returns null for a flat trace so an empty channel does not get
+// a marker pinned to whichever reading happened to come first.
+export function meltPeakTemperature(
+  points: readonly QpcrMeltingPoint[] | undefined
+): number | null {
+  if (!points || points.length === 0) {
+    return null;
+  }
+  let peak = points[0];
+  let lowest = points[0].y;
+  for (const point of points) {
+    if (point.y > peak.y) {
+      peak = point;
+    }
+    if (point.y < lowest) {
+      lowest = point.y;
+    }
+  }
+  return peak.y > lowest ? peak.x : null;
+}
 
 export function isQpcrMeltingSeriesId(
   value: unknown

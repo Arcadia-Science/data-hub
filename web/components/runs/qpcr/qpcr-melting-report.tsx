@@ -6,7 +6,15 @@ import { QpcrMeltingPlateGrid } from "@/components/runs/qpcr/qpcr-melting-plate-
 import { QpcrMeltingSeriesToggle } from "@/components/runs/qpcr/qpcr-melting-series-toggle";
 import { ReportDataShell } from "@/components/runs/report-data-shell";
 import {
-  QPCR_MELTING_PRIMARY_SERIES,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  QPCR_MELTING_PLATE_SERIES,
+  QPCR_MELTING_WELL_SERIES,
   type QpcrMeltingChannel,
   type QpcrMeltingPlateData,
   type QpcrMeltingSeriesId,
@@ -35,31 +43,43 @@ export function QpcrMeltingReport({
 
   return (
     <ReportDataShell showCount={false} title="Melting Curves" total={wellCount}>
-      <div className="flex flex-col gap-10">
-        {channels.map((channel) => (
-          <QpcrMeltingChannelSection
-            channel={channel}
-            derivativesCsvFileId={derivativesCsvFileId}
-            key={channel.channel}
-          />
-        ))}
-      </div>
+      {channels.length > 0 && (
+        <QpcrMeltingPlateView
+          channels={channels}
+          derivativesCsvFileId={derivativesCsvFileId}
+        />
+      )}
     </ReportDataShell>
   );
 }
 
-function QpcrMeltingChannelSection({
-  channel,
+// One channel on screen at a time. Four stacked 96-well grids made the card
+// several screens tall, and the channels are the same plate read through
+// different dyes, so they are compared one at a time rather than side by side.
+function QpcrMeltingPlateView({
+  channels,
   derivativesCsvFileId,
 }: {
-  channel: QpcrMeltingChannel;
+  channels: QpcrMeltingChannel[];
   derivativesCsvFileId: number | null;
 }) {
-  const [seriesId, setSeriesId] = useState<QpcrMeltingSeriesId>(
-    QPCR_MELTING_PRIMARY_SERIES
-  );
+  const [channelName, setChannelName] = useState(channels[0].channel);
+  // The plate and the single-well chart keep separate selections. They start
+  // from different defaults, and what makes a 96-tile plate readable is not
+  // what makes one well informative.
+  const [plateSeriesIds, setPlateSeriesIds] = useState<
+    readonly QpcrMeltingSeriesId[]
+  >(QPCR_MELTING_PLATE_SERIES);
+  const [wellSeriesIds, setWellSeriesIds] = useState<
+    readonly QpcrMeltingSeriesId[]
+  >(QPCR_MELTING_WELL_SERIES);
   const [open, setOpen] = useState(false);
   const openDialog = useCallback(() => setOpen(true), []);
+
+  const channel =
+    channels.find((c) => c.channel === channelName) ?? channels[0];
+  // Wells are keyed by label, so holding the selection across a channel
+  // change keeps the seeker and the dialog on the same well.
   const wellLabels = useMemo(
     () => channel.wells.map((well) => well.well),
     [channel.wells]
@@ -69,27 +89,71 @@ function QpcrMeltingChannelSection({
     <PlateWellsProvider wells={wellLabels}>
       <div className="flex min-w-0 flex-col gap-3">
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
-          <h3 className="min-w-0 text-pretty font-medium font-mono text-foreground text-sm leading-snug">
-            {channel.channel}
-          </h3>
-          <QpcrMeltingSeriesToggle onChange={setSeriesId} value={seriesId} />
+          <ChannelPicker
+            channels={channels}
+            onChange={setChannelName}
+            value={channel.channel}
+          />
+          <QpcrMeltingSeriesToggle
+            onChange={setPlateSeriesIds}
+            value={plateSeriesIds}
+          />
         </div>
         <QpcrMeltingPlateGrid
           channel={channel}
           onWellClick={openDialog}
-          seriesId={seriesId}
+          seriesIds={plateSeriesIds}
         />
         <Suspense fallback={null}>
           <QpcrMeltingWellDialog
             channel={channel}
             derivativesCsvFileId={derivativesCsvFileId}
             onOpenChange={setOpen}
-            onSeriesChange={setSeriesId}
+            onSeriesChange={setWellSeriesIds}
             open={open}
-            seriesId={seriesId}
+            seriesIds={wellSeriesIds}
           />
         </Suspense>
       </div>
     </PlateWellsProvider>
+  );
+}
+
+function ChannelPicker({
+  channels,
+  onChange,
+  value,
+}: {
+  channels: QpcrMeltingChannel[];
+  onChange: (next: string) => void;
+  value: string;
+}) {
+  // A single-channel run still needs its name on screen, and a one-option
+  // dropdown would be a control that does nothing.
+  if (channels.length <= 1) {
+    return (
+      <h3 className="min-w-0 text-pretty font-medium font-mono text-foreground text-sm leading-snug">
+        {value}
+      </h3>
+    );
+  }
+
+  return (
+    <Select onValueChange={onChange} value={value}>
+      <SelectTrigger aria-label="Channel" className="font-mono" size="sm">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {channels.map((channel) => (
+          <SelectItem
+            className="font-mono"
+            key={channel.channel}
+            value={channel.channel}
+          >
+            {channel.channel}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }

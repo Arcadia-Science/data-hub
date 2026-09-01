@@ -1,6 +1,14 @@
 "use client";
 
-import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
+import { useMemo } from "react";
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ReferenceLine,
+  XAxis,
+  YAxis,
+} from "recharts";
 import {
   type ChartConfig,
   ChartContainer,
@@ -8,11 +16,24 @@ import {
   ChartTooltipContent,
 } from "@/components/ui/chart";
 import {
+  meltPeakTemperature,
+  QPCR_MELTING_PEAK_COLOR,
   QPCR_MELTING_SERIES_META,
   QPCR_MELTING_X_LABEL,
-  type QpcrMeltingPoint,
   type QpcrMeltingSeriesId,
+  type QpcrMeltingWellCurves,
 } from "@/lib/runs/qpcr-melting";
+
+const CHART_CONFIG = {
+  derivative: {
+    label: QPCR_MELTING_SERIES_META.derivative.label,
+    color: QPCR_MELTING_SERIES_META.derivative.color,
+  },
+  fluorescence: {
+    label: QPCR_MELTING_SERIES_META.fluorescence.label,
+    color: QPCR_MELTING_SERIES_META.fluorescence.color,
+  },
+} satisfies ChartConfig;
 
 function formatTick(value: number): string {
   const abs = Math.abs(value);
@@ -28,25 +49,55 @@ function formatTick(value: number): string {
   return value.toFixed(2);
 }
 
+// Both series are read off the same temperature rows, so they collapse into
+// one row per temperature — the shape Recharts wants for a multi-line chart.
+function mergeRows(
+  curves: Partial<QpcrMeltingWellCurves>,
+  seriesIds: readonly QpcrMeltingSeriesId[]
+): Record<string, number>[] {
+  const byX = new Map<number, Record<string, number>>();
+  for (const id of seriesIds) {
+    for (const point of curves[id] ?? []) {
+      const row = byX.get(point.x);
+      if (row) {
+        row[id] = point.y;
+      } else {
+        byX.set(point.x, { x: point.x, [id]: point.y });
+      }
+    }
+  }
+  return [...byX.values()].sort((a, b) => a.x - b.x);
+}
+
 export function QpcrMeltingWellChart({
-  points,
-  seriesId,
+  curves,
+  seriesIds,
 }: {
-  points: QpcrMeltingPoint[];
-  seriesId: QpcrMeltingSeriesId;
+  curves: Partial<QpcrMeltingWellCurves>;
+  seriesIds: readonly QpcrMeltingSeriesId[];
 }) {
-  const meta = QPCR_MELTING_SERIES_META[seriesId];
-  const chartConfig = {
-    y: { label: meta.label, color: meta.color },
-  } satisfies ChartConfig;
+  const rows = useMemo(() => mergeRows(curves, seriesIds), [curves, seriesIds]);
+  // Tied to the derivative being on screen, so hiding it hides everything
+  // derived from it rather than leaving an unexplained line behind.
+  const peakX = useMemo(
+    () =>
+      seriesIds.includes("derivative")
+        ? meltPeakTemperature(curves.derivative)
+        : null,
+    [curves.derivative, seriesIds]
+  );
 
   return (
-    <ChartContainer className="aspect-auto h-80 w-full" config={chartConfig}>
+    <ChartContainer className="aspect-auto h-80 w-full" config={CHART_CONFIG}>
       <LineChart
-        data={points}
-        margin={{ top: 20, right: 16, bottom: 28, left: 8 }}
+        data={rows}
+        margin={{ top: 20, right: 8, bottom: 28, left: 8 }}
       >
-        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+        <CartesianGrid
+          strokeDasharray="3 3"
+          vertical={false}
+          yAxisId={seriesIds[0]}
+        />
         <XAxis
           axisLine={false}
           dataKey="x"
@@ -62,28 +113,35 @@ export function QpcrMeltingWellChart({
           tickMargin={8}
           type="number"
         />
-        {/* Fit to the series; Recharts otherwise pins the floor at 0, which
-            hides the baseline wobble either side of a melt peak. */}
-        <YAxis
-          axisLine={false}
-          dataKey="y"
-          domain={["dataMin", "dataMax"]}
-          label={{
-            value: meta.yLabel,
-            angle: -90,
-            position: "insideLeft",
-            style: {
-              fontSize: 11,
-              fill: "var(--color-muted-foreground)",
-              textAnchor: "middle",
-            },
-          }}
-          tickFormatter={formatTick}
-          tickLine={false}
-          tickMargin={8}
-          type="number"
-          width={72}
-        />
+        {/* One axis per visible series. They share no units — a derivative in
+            %/°C against a percentage of peak fluorescence — so each is fitted
+            to its own data and tinted to match its line. */}
+        {seriesIds.map((id, index) => {
+          const meta = QPCR_MELTING_SERIES_META[id];
+          const onLeft = index === 0;
+          return (
+            <YAxis
+              axisLine={false}
+              dataKey={id}
+              domain={["dataMin", "dataMax"]}
+              key={id}
+              label={{
+                value: meta.yLabel,
+                angle: onLeft ? -90 : 90,
+                position: onLeft ? "insideLeft" : "insideRight",
+                style: { fontSize: 11, fill: meta.color, textAnchor: "middle" },
+              }}
+              orientation={onLeft ? "left" : "right"}
+              tick={{ fill: meta.color, fontSize: 12 }}
+              tickFormatter={formatTick}
+              tickLine={false}
+              tickMargin={8}
+              type="number"
+              width={76}
+              yAxisId={id}
+            />
+          );
+        })}
         <ChartTooltip
           content={
             <ChartTooltipContent
@@ -95,14 +153,34 @@ export function QpcrMeltingWellChart({
             />
           }
         />
-        <Line
-          dataKey="y"
-          dot={false}
-          isAnimationActive={false}
-          name={meta.label}
-          stroke={meta.color}
-          strokeWidth={1.75}
-        />
+        {peakX !== null && (
+          <ReferenceLine
+            ifOverflow="extendDomain"
+            label={{
+              value: `Tm ${peakX.toFixed(1)} \u00b0C`,
+              fill: QPCR_MELTING_PEAK_COLOR,
+              fontSize: 11,
+              position: "top",
+            }}
+            stroke={QPCR_MELTING_PEAK_COLOR}
+            strokeDasharray="4 4"
+            x={peakX}
+            yAxisId={seriesIds[0]}
+          />
+        )}
+        {seriesIds.map((id) => (
+          <Line
+            connectNulls
+            dataKey={id}
+            dot={false}
+            isAnimationActive={false}
+            key={id}
+            name={QPCR_MELTING_SERIES_META[id].label}
+            stroke={QPCR_MELTING_SERIES_META[id].color}
+            strokeWidth={1.75}
+            yAxisId={id}
+          />
+        ))}
       </LineChart>
     </ChartContainer>
   );
