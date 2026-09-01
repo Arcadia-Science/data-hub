@@ -261,8 +261,8 @@ function AuntyReport() {
   );
 }
 
-// The instrument's PDF export takes the "Report Data" slot; the melt plate
-// grids get their own section underneath, matching the run page.
+// Plate grids first, then the instrument's PDF export under the "Report Data"
+// title, matching the run page.
 function QpcrReport({
   persistKey,
   result,
@@ -273,6 +273,7 @@ function QpcrReport({
   const hasPdf = result.reportFiles.some(isPdfFile);
   return (
     <div className="flex w-full min-w-0 flex-col gap-8">
+      <QpcrMeltingSection />
       {hasPdf ? (
         <CarouselKindReport kind="pdf" persistKey={persistKey}>
           <PdfCarouselReport />
@@ -280,7 +281,6 @@ function QpcrReport({
       ) : (
         <RunReportSection files={toSectionFiles(result.reportFiles)} />
       )}
-      <QpcrMeltingSection />
     </div>
   );
 }

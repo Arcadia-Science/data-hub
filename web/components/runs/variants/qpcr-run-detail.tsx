@@ -72,18 +72,18 @@ export function QpcrRunDetail({
         />
       </RunDetail.FilesMetadataLayout>
 
-      {/* The instrument's own PDF export is the run's headline result, so it
-          keeps the "Report Data" slot every other variant uses. */}
-      {pdfCount > 0 ? (
-        <RunDetail.PdfCarousel initialPage={reportItems} />
-      ) : (
-        <RunDetail.Report files={otherReportFiles} />
-      )}
       {qpcrMeltingPlate != null && (
         <QpcrMeltingReport
           derivativesCsvFileId={qpcrMeltingPlate.derivativesCsvFileId}
           plate={qpcrMeltingPlate.plate}
         />
+      )}
+      {/* The plate grids lead, but the instrument's PDF export still holds the
+          "Report Data" title every other variant uses. */}
+      {pdfCount > 0 ? (
+        <RunDetail.PdfCarousel initialPage={reportItems} />
+      ) : (
+        <RunDetail.Report files={otherReportFiles} />
       )}
     </>
   );
