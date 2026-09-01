@@ -166,7 +166,7 @@ export function RunReportSection({
     pdfFiles.length;
 
   return (
-    <ReportDataShell contentClassName="gap-6" title={title} total={totalCount}>
+    <ReportDataShell contentClassName="gap-6" count={totalCount} title={title}>
       {processedVideos.map((file) => (
         <RunVideoPlayer
           fileId={file.id}

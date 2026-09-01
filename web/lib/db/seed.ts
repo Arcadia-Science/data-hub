@@ -753,6 +753,10 @@ export interface FixtureFileSpec {
 }
 
 export interface InstrumentFixture {
+  // When true, every run gets every file. Use for complementary
+  // exports that belong on the same experiment (Cq Values + melt).
+  // Default is to cycle `files` across runs, one fixture each.
+  attachAll?: boolean;
   // Every available lambda fixture for this instrument; `seedRuns`
   // cycles them across the instrument's seeded runs so docs screenshots
   // cover each measurement / imaging mode, not just one example file.
@@ -816,10 +820,22 @@ const GEL_DOC_FIXTURE_FILES: readonly FixtureFileSpec[] = [
 // the same fixture set under distinct ids / run-id lists.
 export const INSTRUMENT_FIXTURES: Record<string, InstrumentFixture> = {
   "azure-cielo-qpcr": {
+    attachAll: true,
     files: [
       {
         filename: "azure_cielo_qpcr_example.csv",
         contentType: "text/csv",
+      },
+      {
+        filename: "azure_cielo_qpcr_MeltingCurve.csv",
+        contentType: "text/csv",
+      },
+      // Every production run exports one of these alongside the CSVs. No
+      // processor claims it; the run page serves the bytes straight to the
+      // PDF viewer.
+      {
+        filename: "azure_cielo_qpcr_Report.pdf",
+        contentType: "application/pdf",
       },
     ],
     runIds: [
@@ -1150,11 +1166,14 @@ export async function seedRuns(
       runId: schema.instrumentRuns.runId,
     });
 
-  const fixtureForRun = (runIdx: number): FixtureFileSpec | undefined => {
+  const fixtureForRun = (runIdx: number): FixtureFileSpec[] => {
     if (!fixture || fixture.files.length === 0) {
-      return;
+      return [];
     }
-    return fixture.files[runIdx % fixture.files.length];
+    if (fixture.attachAll) {
+      return [...fixture.files];
+    }
+    return [fixture.files[runIdx % fixture.files.length]];
   };
 
   // Cache fixture sizes once so multi-run seeds don't re-stat the same file.
@@ -1169,30 +1188,32 @@ export async function seedRuns(
   }
 
   const fileRows = fixture
-    ? runs.map((run, runIdx) => {
-        const file = fixtureForRun(runIdx);
-        if (!file) {
+    ? runs.flatMap((run, runIdx) => {
+        const files = fixtureForRun(runIdx);
+        if (files.length === 0) {
           throw new Error(
             `INSTRUMENT_FIXTURES[${instrumentId}] has no fixture files`
           );
         }
-        const status = seedFileStatus(runIdx, 0);
-        return {
-          instrumentRunId: run.id,
-          relativePath: file.filename,
-          s3Bucket: RAW_BUCKET,
-          s3Key: `${run.instrumentId}/${run.runId}/${file.filename}`,
-          filename: file.filename,
-          contentType: file.contentType,
-          sizeBytes: fixtureSizeByName.get(file.filename) ?? 1024,
-          category: "raw" as const,
-          status,
-          metadata: { seeded: true },
-          errorMessage:
-            status === "failed" ? "Seeded failure for UI exercise" : null,
-          uploadedAt: status === "failed" ? null : new Date(),
-          processedAt: status === "completed" ? new Date() : null,
-        };
+        return files.map((file, fileIdx) => {
+          const status = seedFileStatus(runIdx, fileIdx);
+          return {
+            instrumentRunId: run.id,
+            relativePath: file.filename,
+            s3Bucket: RAW_BUCKET,
+            s3Key: `${run.instrumentId}/${run.runId}/${file.filename}`,
+            filename: file.filename,
+            contentType: file.contentType,
+            sizeBytes: fixtureSizeByName.get(file.filename) ?? 1024,
+            category: "raw" as const,
+            status,
+            metadata: { seeded: true },
+            errorMessage:
+              status === "failed" ? "Seeded failure for UI exercise" : null,
+            uploadedAt: status === "failed" ? null : new Date(),
+            processedAt: status === "completed" ? new Date() : null,
+          };
+        });
       })
     : runs.flatMap((run, runIdx) => {
         const specs =
@@ -1240,22 +1261,20 @@ export async function seedRuns(
   const mirrorRoot = process.env.LOCAL_S3_MIRROR;
   if (mirrorRoot && fixture) {
     await Promise.all(
-      runs.map(async (run, runIdx) => {
-        const file = fixtureForRun(runIdx);
-        if (!file) {
-          return;
-        }
-        const src = path.resolve(FIXTURES_DIR, file.filename);
-        const dest = path.resolve(
-          mirrorRoot,
-          RAW_BUCKET,
-          run.instrumentId,
-          run.runId,
-          file.filename
-        );
-        await mkdir(path.dirname(dest), { recursive: true });
-        await copyFile(src, dest);
-      })
+      runs.flatMap((run, runIdx) =>
+        fixtureForRun(runIdx).map(async (file) => {
+          const src = path.resolve(FIXTURES_DIR, file.filename);
+          const dest = path.resolve(
+            mirrorRoot,
+            RAW_BUCKET,
+            run.instrumentId,
+            run.runId,
+            file.filename
+          );
+          await mkdir(path.dirname(dest), { recursive: true });
+          await copyFile(src, dest);
+        })
+      )
     );
   }
 

@@ -7,7 +7,6 @@ import {
   formatAuntyTemperatureRange,
 } from "@/components/runs/run-metadata-badges";
 import {
-  compareWells,
   curveKey,
   formatAuntyNumber,
   indexAuntyCurves,
@@ -16,7 +15,6 @@ import {
   presentWellValues,
   seriesForFlavor,
   seriesMetaFor,
-  sparklineGeometry,
   tmMarkerValue,
   wellTileValue,
 } from "@/lib/runs/aunty";
@@ -106,14 +104,6 @@ describe("indexAuntyCurves", () => {
   });
 });
 
-describe("compareWells", () => {
-  it("sorts row-major so A12 comes before B1", () => {
-    const wells = ["B1", "A12", "A1", "H12"];
-    wells.sort(compareWells);
-    expect(wells).toEqual(["A1", "A12", "B1", "H12"]);
-  });
-});
-
 describe("tmMarkerValue", () => {
   it("treats 0 as no transition", () => {
     expect(tmMarkerValue({ tm1: 64.6 })).toBe(64.6);
@@ -175,33 +165,6 @@ describe("parseAuntyPlateJson", () => {
         experiments: [{ fileName: "x", flavor: "unknown", wells: [] }],
       })
     ).toThrow(/unknown flavor/);
-  });
-});
-
-describe("sparklineGeometry", () => {
-  it("keeps endpoints and skips a Tm marker outside the x range", () => {
-    const geometry = sparklineGeometry(
-      [
-        { x: 25, y: 10 },
-        { x: 95, y: 20 },
-      ],
-      10
-    );
-    expect(geometry.d.startsWith("M")).toBe(true);
-    expect(geometry.d.includes(" L")).toBe(true);
-    expect(geometry.markerX).toBeNull();
-  });
-
-  it("places a Tm marker inside the x range", () => {
-    const geometry = sparklineGeometry(
-      [
-        { x: 25, y: 10 },
-        { x: 95, y: 20 },
-      ],
-      60
-    );
-    expect(geometry.markerX).toBeGreaterThan(6);
-    expect(geometry.markerX).toBeLessThan(114);
   });
 });
 

@@ -61,7 +61,7 @@ function SelectedPdf() {
 export function PdfCarouselReport({ initialPage }: ReportViewerProps) {
   const page = useReportViewerPage(initialPage);
   return (
-    <ReportDataShell total={page.pagination.total}>
+    <ReportDataShell count={page.pagination.total}>
       <ReportItemsProvider initialPage={page} kind="pdf">
         <ReportItemSeeker />
         <SelectedPdf />

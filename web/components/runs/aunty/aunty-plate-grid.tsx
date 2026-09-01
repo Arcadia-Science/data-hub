@@ -8,19 +8,21 @@ import {
   useMemo,
 } from "react";
 import { AuntySparkline } from "@/components/runs/aunty/aunty-sparkline";
-import { useAuntyWellsActions } from "@/components/runs/aunty/aunty-wells-provider";
+import { usePlateWellsActions } from "@/components/runs/plate-wells-provider";
 import {
   AUNTY_SERIES_META,
   type AuntyExperiment,
   type AuntySeriesId,
   type AuntySeriesMeta,
   type AuntyWell,
-  parseWellPosition,
-  type SparklineGeometry,
-  sparklineGeometry,
   tmMarkerValue,
   wellTileValue,
 } from "@/lib/runs/aunty";
+import {
+  parseWellPosition,
+  type SparklineGeometry,
+  sparklineGeometry,
+} from "@/lib/runs/plate-wells";
 import { cn } from "@/lib/utils";
 
 const COMPACT_PLATE_MAX_COLS = 12;
@@ -82,7 +84,7 @@ export const AuntyPlateGrid = memo(function AuntyPlateGrid({
   onWellClick: (well: string) => void;
   seriesId: AuntySeriesId;
 }) {
-  const { selectWell } = useAuntyWellsActions();
+  const { selectWell } = usePlateWellsActions();
   const meta = AUNTY_SERIES_META[seriesId];
 
   const openWell = useCallback(

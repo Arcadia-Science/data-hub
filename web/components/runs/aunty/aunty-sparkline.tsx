@@ -1,12 +1,11 @@
 import { memo } from "react";
+import { type AuntySeriesMeta, TM_MARKER_COLOR } from "@/lib/runs/aunty";
 import {
-  type AuntySeriesMeta,
   SPARKLINE_HEIGHT,
   SPARKLINE_PAD,
   SPARKLINE_WIDTH,
   type SparklineGeometry,
-  TM_MARKER_COLOR,
-} from "@/lib/runs/aunty";
+} from "@/lib/runs/plate-wells";
 
 // Memoized because one plate renders up to 384 of these and the grid above it
 // re-renders whenever the series toggle changes.

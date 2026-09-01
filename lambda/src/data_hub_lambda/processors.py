@@ -47,7 +47,7 @@ def _ends_with_any(*suffixes: str) -> Callable[[str], bool]:
 PROCESSORS: dict[str, ProcessorEntry] = {
     "qpcr": ProcessorEntry(
         process_file=azure_cielo_qpcr.process_file,
-        matches_filename=_ends_with_any("_cq values.csv"),
+        matches_filename=_ends_with_any("_cq values.csv", "_meltingcurve.csv"),
     ),
     "plate_reader": ProcessorEntry(
         process_file=spectramax_plate_reader.process_file,
