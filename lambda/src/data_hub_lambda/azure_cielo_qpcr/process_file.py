@@ -9,7 +9,10 @@ from data_hub_lambda.azure_cielo_qpcr.melting_curve import (
     write_plate_json,
     write_tidy_csv,
 )
-from data_hub_lambda.azure_cielo_qpcr.parse_dye_channels import parse_dye_channels
+from data_hub_lambda.azure_cielo_qpcr.parse_dye_channels import (
+    is_cq_values_filename,
+    parse_dye_channels,
+)
 from data_hub_shared import s3_utils
 from data_hub_shared.config import config
 
@@ -19,19 +22,8 @@ logger = logging.getLogger(__name__)
 def process_file(instrument_id: str, run_id: str, filename: str) -> None:
     """Process a single Azure Cielo qPCR file through the Data Hub API.
 
-    For Cq Values CSV files, the unique dye channel names are extracted from
-    the `Fluorescence` column and stored as run-level metadata.
-
-    For MeltingCurve CSV files, per-well melt traces become a tidy derivatives
-    CSV and a thinned plate-view JSON, both uploaded as processed artifacts.
-    Run metadata is left untouched so a later melt file cannot wipe dye
-    channels from the Cq Values pass (`update_run` replaces the whole object).
-
-    Args:
-        instrument_id: The instrument ID from the S3 key / event.
-        run_id: The run ID (`Experiment_YYYYMMDD` prefix).
-        filename: The original filename (e.g. `Experiment_20260101_Cq Values.csv`
-            or `Experiment_20260101_MeltingCurve.csv`).
+    Melting curves and Cq Values are parsed; other CSVs and PDFs complete as a no-op.
+    Melt-curve passes skip `update_run` so they cannot wipe dye channels.
     """
     logger.info("Processing Azure Cielo qPCR file: %s (run: %s)", filename, run_id)
 
@@ -53,12 +45,8 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
     try:
         client.update_file(file_id, status="processing")
 
-        raw_data_dir = config.LOCAL_RAW_DATA_DIRPATH / instrument_id / run_id
-        local_file_path = raw_data_dir / filename
-        s3_utils.download_file(f"s3://{s3_bucket}/{s3_key}", local_file_path)
-        logger.info("Downloaded %s to %s", filename, local_file_path)
-
         if is_melting_curve_filename(filename):
+            local_file_path = _download_raw(s3_bucket, s3_key, instrument_id, run_id, filename)
             parsed = parse_melting_curve_file(local_file_path)
             logger.info(
                 "Parsed melting curve: %d channels, %d tidy rows.",
@@ -90,10 +78,21 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
                 filename=json_filename,
                 content_type="application/json",
             )
-        elif filename.endswith(".csv"):
-            dye_channels = parse_dye_channels(local_file_path)
-            client.update_run(instrument_id, run_id, metadata={"dye_channels": dye_channels})
-            logger.info("Parsed dye channels: %s", dye_channels)
+        elif filename.lower().endswith(".pdf"):
+            logger.info("qPCR report %s has no preprocessing.", filename)
+        elif filename.lower().endswith(".csv"):
+            local_file_path = _download_raw(s3_bucket, s3_key, instrument_id, run_id, filename)
+            try:
+                dye_channels = parse_dye_channels(local_file_path)
+            except Exception as exc:
+                if is_cq_values_filename(filename):
+                    raise
+                logger.info("Skipping qPCR CSV %s: %s", filename, exc)
+            else:
+                client.update_run(instrument_id, run_id, metadata={"dye_channels": dye_channels})
+                logger.info("Parsed dye channels: %s", dye_channels)
+        else:
+            logger.info("Skipping qPCR file %s; not a PDF or melting curve.", filename)
 
         client.update_file(file_id, status="completed")
         logger.info("File %s marked as completed.", filename)
@@ -102,6 +101,20 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
         logger.error("Error processing file: %s", e)
         client.update_file(file_id, status="failed", error_message=str(e))
         raise
+
+
+def _download_raw(
+    s3_bucket: str | None,
+    s3_key: str,
+    instrument_id: str,
+    run_id: str,
+    filename: str,
+) -> Path:
+    raw_data_dir = config.LOCAL_RAW_DATA_DIRPATH / instrument_id / run_id
+    local_file_path = raw_data_dir / filename
+    s3_utils.download_file(f"s3://{s3_bucket}/{s3_key}", local_file_path)
+    logger.info("Downloaded %s to %s", filename, local_file_path)
+    return local_file_path
 
 
 def _upload_processed(

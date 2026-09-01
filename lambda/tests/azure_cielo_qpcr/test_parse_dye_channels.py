@@ -3,7 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from data_hub_lambda.azure_cielo_qpcr.parse_dye_channels import parse_dye_channels
+from data_hub_lambda.azure_cielo_qpcr.parse_dye_channels import (
+    is_cq_values_filename,
+    parse_dye_channels,
+)
 
 _FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures"
 
@@ -71,6 +74,13 @@ class TestParseDyeChannels:
 # ---------------------------------------------------------------------------
 # Validation / error tests
 # ---------------------------------------------------------------------------
+
+
+def test_cq_values_filename_gate() -> None:
+    assert is_cq_values_filename("Experiment_20260101_Cq Values.csv")
+    assert is_cq_values_filename("run_cq values.CSV")
+    assert not is_cq_values_filename("Experiment_20260101_Amplification Values.csv")
+    assert not is_cq_values_filename("azure_cielo_qpcr_example.csv")
 
 
 class TestParseDyeChannelsValidation:
