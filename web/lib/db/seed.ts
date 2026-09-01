@@ -13,6 +13,7 @@ import { createHash } from "node:crypto";
 import { copyFile, mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createLocalAccountIssuer } from "@better-auth/core/db";
 import { hashPassword } from "better-auth/crypto";
 import { getTableName, isTable, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
@@ -114,6 +115,7 @@ async function seedCredentialAccount(db: Db, userId: string): Promise<void> {
     userId,
     accountId: userId,
     providerId: "credential",
+    issuer: createLocalAccountIssuer("credential"),
     password: await hashPassword(DEV_PASSWORD),
   });
 }
