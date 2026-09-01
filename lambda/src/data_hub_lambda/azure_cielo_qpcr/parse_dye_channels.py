@@ -5,6 +5,10 @@ from pathlib import Path
 _FLUORESCENCE_COLUMN = "Fluorescence"
 
 
+def is_cq_values_filename(filename: str) -> bool:
+    return filename.lower().endswith("_cq values.csv")
+
+
 def parse_dye_channels(file_path: Path) -> list[str]:
     """Extract the unique dye channel names from a Cq Values CSV file.
 
