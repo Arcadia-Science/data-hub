@@ -13,7 +13,6 @@ import {
 } from "@/components/instruments/runs-table/run-select-checkbox";
 import type { RunRef } from "@/components/instruments/runs-table/run-selection-provider";
 import { RunsTableFooter } from "@/components/instruments/runs-table/runs-table-footer";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -125,16 +124,7 @@ export function RunsTable({
                   </Link>
                 </TableCell>
                 <TableCell>
-                  <RunIdCell href={href} labelClassName="text-sm" run={row}>
-                    {isDeleted ? (
-                      <Badge
-                        className="ml-1.5 font-normal text-[10px]"
-                        variant="outline"
-                      >
-                        deleted
-                      </Badge>
-                    ) : null}
-                  </RunIdCell>
+                  <RunIdCell href={href} run={row} />
                 </TableCell>
                 <TableCell className="text-sm tabular-nums">
                   {row.file_count}

@@ -10,7 +10,6 @@ import {
   formatAuntyRampRate,
   formatAuntyTemperatureDisplay,
 } from "@/components/runs/run-metadata-badges";
-import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -131,13 +130,7 @@ export function AuntyRunsTable({
                 <RunIdCell
                   href={`/instruments/${instrumentId}/runs/${encodeURIComponent(row.run_id)}`}
                   run={row}
-                >
-                  {isDeleted ? (
-                    <Badge className="ml-1.5 font-normal" variant="outline">
-                      deleted
-                    </Badge>
-                  ) : null}
-                </RunIdCell>
+                />
               </TableCell>
               <TableCell className="text-sm tabular-nums">
                 {row.file_count}
