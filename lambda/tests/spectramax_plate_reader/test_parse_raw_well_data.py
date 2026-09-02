@@ -391,6 +391,58 @@ class TestEndpointFlat:
         assert set(self.df["row_label"].unique()) == set("ABCDEFGH")
 
 
+class TestLuminescence:
+    """Endpoint / Luminescence — three repeated reads of one 96-well plate.
+
+    Each read is its own ``Plate:`` block named by the operator, the flat
+    well-position layout is used, and rows A–D are populated. SoftMax
+    reports wavelength 0, which must not surface as a reading.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _load(self) -> None:
+        self.df = parse_raw_well_data(_FIXTURES_DIR / "spectramax_plate_reader_luminescence.xls")
+
+    def test_columns(self) -> None:
+        assert list(self.df.columns) == _EXPECTED_COLUMNS
+
+    def test_shape(self) -> None:
+        assert self.df.shape == (144, 8)  # 3 reads × 48 wells
+
+    def test_each_read_is_its_own_plate(self) -> None:
+        assert self.df["plate_name"].unique().tolist() == ["Read 1", "Read 2", "Read 3"]
+
+    def test_time_is_null(self) -> None:
+        assert bool(self.df["time"].isna().all())
+
+    def test_zero_wavelength_is_not_recorded(self) -> None:
+        assert bool(self.df["wavelength"].isna().all())
+
+    def test_temperature_per_read(self) -> None:
+        temps = self.df.groupby("plate_name")["temperature_c"].unique()
+        assert temps["Read 1"] == pytest.approx([22.8])
+        assert temps["Read 3"] == pytest.approx([23.0])
+
+    def test_first_well(self) -> None:
+        first = self.df.iloc[0]
+        assert first["plate_name"] == "Read 1"
+        assert first["well_position"] == "A1"
+        assert first["value"] == pytest.approx(5_000_000)
+
+    def test_last_well(self) -> None:
+        last = self.df.iloc[-1]
+        assert last["plate_name"] == "Read 3"
+        assert last["well_position"] == "D12"
+        assert last["value"] == pytest.approx(30_463)
+
+    def test_signal_decays_across_reads(self) -> None:
+        a1 = self.df[self.df["well_position"] == "A1"]["value"].tolist()
+        assert a1 == sorted(a1, reverse=True)
+
+    def test_empty_rows_excluded(self) -> None:
+        assert set(self.df["row_label"].unique()) == {"A", "B", "C", "D"}
+
+
 class TestSpectrum:
     """96-well Spectrum matching iD5 production well occupancy.
 

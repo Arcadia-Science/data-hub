@@ -22,6 +22,11 @@ SoftMax may declare more Kinetic or Spectrum readings in the plate
 header than it exports (e.g. a 48 h protocol stopped early).  The
 parser emits the groups that are present and stops at the summary
 table or ``~End``.
+
+Luminescence has no excitation or emission wavelength, so SoftMax
+writes ``0`` in the wavelength field.  Zero is dropped rather than
+recorded, which keeps the run metadata and the plate maps free of a
+meaningless ``0 nm`` label.
 """
 
 from __future__ import annotations
@@ -34,7 +39,7 @@ from typing import Literal
 
 import pandas as pd
 
-MEASUREMENT_MODES = {"Absorbance", "Fluorescence"}
+MEASUREMENT_MODES = {"Absorbance", "Fluorescence", "Luminescence"}
 MEASUREMENT_TYPES = {"Endpoint", "Kinetic", "Spectrum", "Well Scan"}
 
 _COL_PLATE_NAME = 1
@@ -168,12 +173,17 @@ def _parse_nm(token: str) -> int | None:
 
 
 def _parse_wavelengths(raw: str) -> tuple[int, ...]:
-    """Parse a space-separated wavelength string like ``'750'`` or ``'750 600'``."""
+    """Parse a space-separated wavelength string like ``'750'`` or ``'750 600'``.
+
+    Zero is a SoftMax placeholder for "this mode has no wavelength"
+    (Luminescence) and is dropped, so such a plate reports no
+    wavelengths at all rather than 0 nm.
+    """
     tokens = raw.split()
     parsed = [_parse_nm(t) for t in tokens]
     if not tokens or any(w is None for w in parsed):
         raise ValueError(f"Expected space-separated numeric wavelengths, got '{raw}'")
-    return tuple(w for w in parsed if w is not None)
+    return tuple(w for w in parsed if w is not None and w != 0)
 
 
 def _spectrum_wavelengths(start: int, end: int, step: int) -> tuple[int, ...]:
@@ -320,8 +330,12 @@ def _plate_name_suffix(header: _PlateHeader) -> str | None:
     window = _spectrum_window_label(header)
     if window is not None:
         return window
-    if header.wavelength_raw:
-        return header.wavelength_raw
+    try:
+        wavelengths = _header_wavelengths(header)
+    except ValueError:
+        return None
+    if wavelengths:
+        return " ".join(str(w) for w in wavelengths)
     return None
 
 
