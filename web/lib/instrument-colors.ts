@@ -79,6 +79,9 @@ export const MEASUREMENT_MODE_COLORS: Record<string, string> = {
     "bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300",
   Fluorescence:
     "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300",
+  // Violet matches the gel doc's Chemiluminescence badge.
+  Luminescence:
+    "bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300",
 };
 
 // ---------- Aunty ----------

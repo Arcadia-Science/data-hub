@@ -96,6 +96,15 @@ class TestRealFixtures:
             "wavelengths": ["512"],
         }
 
+    def test_endpoint_luminescence(self) -> None:
+        """Three repeated endpoint reads; SoftMax reports wavelength 0."""
+        result = parse_metadata(_FIXTURES_DIR / "spectramax_plate_reader_luminescence.xls")
+        assert result == {
+            "measurement_mode": "Luminescence",
+            "measurement_type": "Endpoint",
+            "wavelengths": [],
+        }
+
     def test_endpoint_sparse_absorbance(self) -> None:
         result = parse_metadata(_FIXTURES_DIR / "spectramax_plate_reader_endpoint_sparse.xls")
         assert result == {
@@ -181,6 +190,20 @@ class TestParseMetadataHappyPath:
             "wavelengths": ["488"],
         }
 
+    def test_luminescence_endpoint_drops_zero_wavelength(self, tmp_path: Path) -> None:
+        path = _build_xls(
+            tmp_path,
+            measurement_mode="Luminescence",
+            measurement_type="Endpoint",
+            wavelength="0",
+        )
+        result = parse_metadata(path)
+        assert result == {
+            "measurement_mode": "Luminescence",
+            "measurement_type": "Endpoint",
+            "wavelengths": [],
+        }
+
     def test_reduced_anchor(self, tmp_path: Path) -> None:
         path = _build_xls(
             tmp_path,
@@ -204,8 +227,8 @@ class TestParseMetadataHappyPath:
 
 class TestParseMetadataValidation:
     def test_invalid_measurement_mode(self, tmp_path: Path) -> None:
-        path = _build_xls(tmp_path, measurement_mode="Luminescence")
-        with pytest.raises(ValueError, match="Unexpected measurement mode 'Luminescence'"):
+        path = _build_xls(tmp_path, measurement_mode="Bogus Mode")
+        with pytest.raises(ValueError, match="Unexpected measurement mode 'Bogus Mode'"):
             parse_metadata(path)
 
     def test_invalid_measurement_type(self, tmp_path: Path) -> None:
