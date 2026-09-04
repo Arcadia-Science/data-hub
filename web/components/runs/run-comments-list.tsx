@@ -3,6 +3,7 @@
 import { useEffect, useOptimistic, useState } from "react";
 import { RunCommentForm } from "@/components/runs/run-comment-form";
 import { RunCommentItem } from "@/components/runs/run-comment-item";
+import { RunSectionHeading } from "@/components/runs/run-section-heading";
 import { Card } from "@/components/ui/card";
 import type { RunCommentDto } from "@/lib/api/run-comments";
 import { useSession } from "@/lib/auth-client";
@@ -164,40 +165,45 @@ export function RunCommentsList({
     setCommitted((prev) => prev.filter((c) => c.id !== commentId));
   }
 
-  // Empty + form-only: when there are no comments and no logged-in user,
-  // the empty-state message stands alone outside the card stack.
-  if (optimistic.length === 0 && !currentUserId) {
-    return <p className="text-muted-foreground text-sm">No comments yet.</p>;
-  }
-
+  // Count comes from `optimistic`, not the server-rendered initial
+  // length, so the "Comments (N)" heading tracks post/delete without a
+  // separate count state (per `rerender-derived-state-no-effect`).
+  const commentCount = optimistic.length;
   const rowClass = "px-4 py-4 first:pt-1 last:pb-1";
 
   return (
-    <Card className="gap-0 py-0" size="sm">
-      <div className="flex flex-col divide-y divide-border">
-        {optimistic.length === 0 ? (
-          <p className={`${rowClass} text-muted-foreground text-sm`}>
-            No comments yet.
-          </p>
-        ) : (
-          optimistic.map((comment) => (
-            <div className={rowClass} key={comment.id}>
-              <RunCommentItem
-                comment={comment}
-                currentUserId={currentUserId}
-                onDelete={deleteCommentAction}
-                onUpdate={updateCommentAction}
-              />
-            </div>
-          ))
-        )}
+    <div className="flex flex-col gap-2">
+      <RunSectionHeading countLabel={commentCount} title="Comments" />
+      {commentCount === 0 && !currentUserId ? (
+        <p className="text-muted-foreground text-sm">No comments yet.</p>
+      ) : (
+        <Card className="gap-0 py-0" size="sm">
+          <div className="flex flex-col divide-y divide-border">
+            {commentCount === 0 ? (
+              <p className={`${rowClass} text-muted-foreground text-sm`}>
+                No comments yet.
+              </p>
+            ) : (
+              optimistic.map((comment) => (
+                <div className={rowClass} key={comment.id}>
+                  <RunCommentItem
+                    comment={comment}
+                    currentUserId={currentUserId}
+                    onDelete={deleteCommentAction}
+                    onUpdate={updateCommentAction}
+                  />
+                </div>
+              ))
+            )}
 
-        {currentUserId && (
-          <div className={rowClass}>
-            <RunCommentForm onSubmit={createCommentAction} />
+            {currentUserId ? (
+              <div className={rowClass}>
+                <RunCommentForm onSubmit={createCommentAction} />
+              </div>
+            ) : null}
           </div>
-        )}
-      </div>
-    </Card>
+        </Card>
+      )}
+    </div>
   );
 }
