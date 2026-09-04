@@ -15,7 +15,7 @@ import { isProcessableInstrumentType } from "@/lib/instruments/processable-types
 // - Download:  at least one file has made it to S3 (i.e. is not `detected`
 //              or `upload_requested`).
 // - Reprocess: instrument_type has a Lambda processor and at least one raw
-//              file is in `uploaded`, `completed`, or `failed`.
+//              file is in `uploaded`, `completed`, `failed`, or stalled.
 // - Delete:    the run isn't already soft-deleted.
 // ---------------------------------------------------------------------------
 
@@ -31,11 +31,24 @@ export function canDownloadRun(row: RunRow): boolean {
   );
 }
 
+// Mirrors the server-side file filter in `reprocessRun`, which queues raw
+// files in REPROCESSABLE_STATUSES plus any whose `processing` has passed the
+// stall window. Keeping the buckets in one place stops the row menu from
+// disagreeing with what the endpoint would actually do.
+export function reprocessableFileCount(row: RunRow): number {
+  return (
+    row.files_uploaded +
+    row.files_failed +
+    row.files_completed +
+    row.files_stalled
+  );
+}
+
 export function canReprocessRun(row: RunRow): boolean {
   return (
     row.deleted_at === null &&
     isProcessableInstrumentType(row.instrument_type) &&
-    row.files_completed + row.files_failed + row.files_uploaded > 0
+    reprocessableFileCount(row) > 0
   );
 }
 
@@ -57,7 +70,7 @@ export function computeRunStats(row: RunRow): RunStats {
     fileCount: row.file_count,
     filesCompleted: row.files_completed,
     filesFailed: row.files_failed,
-    filesUploaded: row.files_uploaded,
+    reprocessableFileCount: reprocessableFileCount(row),
   };
 }
 
