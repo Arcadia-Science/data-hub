@@ -180,9 +180,7 @@ export function RunBulkActionBar() {
   const reprocessTargets = refs.map((r) => ({
     instrumentId: r.instrumentId,
     runId: r.runId,
-    filesCompleted: r.stats.filesCompleted,
-    filesFailed: r.stats.filesFailed,
-    filesUploaded: r.stats.filesUploaded,
+    eligibleFileCount: r.stats.reprocessableFileCount,
   }));
 
   // On desktop the expanded sidebar reserves space on the left, so anchor the

@@ -16,9 +16,9 @@ import {
 } from "@/components/ui/alert-dialog";
 
 export interface ReprocessRunTarget {
-  filesCompleted: number;
-  filesFailed: number;
-  filesUploaded: number;
+  // Pre-summed by the caller via `reprocessableFileCount` so the dialog never
+  // has to know which file states the endpoint will pick up.
+  eligibleFileCount: number;
   instrumentId: string;
   runId: string;
 }
@@ -76,10 +76,7 @@ export function ReprocessRunsDialog({
   const [isPending, startTransition] = useTransition();
 
   const runCount = runs.length;
-  const eligibleFiles = runs.reduce(
-    (sum, r) => sum + r.filesCompleted + r.filesFailed + r.filesUploaded,
-    0
-  );
+  const eligibleFiles = runs.reduce((sum, r) => sum + r.eligibleFileCount, 0);
 
   function handleConfirm(e: React.MouseEvent) {
     e.preventDefault();
@@ -116,8 +113,9 @@ export function ReprocessRunsDialog({
             This will re-run the processing pipeline on{" "}
             <strong>{eligibleFiles}</strong>{" "}
             {eligibleFiles === 1 ? "file" : "files"} currently in the{" "}
-            <em>uploaded</em>, <em>completed</em>, or <em>failed</em> state.
-            Results will overwrite any existing processed artifacts.
+            <em>uploaded</em>, <em>completed</em>, or <em>failed</em> state, or
+            stuck in <em>processing</em>. Results will overwrite any existing
+            processed artifacts.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

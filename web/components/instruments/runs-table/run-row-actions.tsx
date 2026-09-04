@@ -27,7 +27,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useArchiveDownload } from "@/hooks/use-archive-download";
-import { computeRunCaps } from "@/lib/runs/row-actions";
+import { computeRunCaps, reprocessableFileCount } from "@/lib/runs/row-actions";
 import { cn } from "@/lib/utils";
 import type { RunRow } from ".";
 
@@ -197,9 +197,7 @@ export function RunRowActions({ row }: { row: RunRow }) {
           {
             instrumentId: row.instrument_id,
             runId: row.run_id,
-            filesCompleted: row.files_completed,
-            filesFailed: row.files_failed,
-            filesUploaded: row.files_uploaded,
+            eligibleFileCount: reprocessableFileCount(row),
           },
         ]}
       />
