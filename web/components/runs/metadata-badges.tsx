@@ -1,3 +1,4 @@
+import type { ComponentProps } from "react";
 import { Badge } from "@/components/ui/badge";
 import {
   Tooltip,
@@ -5,6 +6,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+
+type BadgeVariant = ComponentProps<typeof Badge>["variant"];
 
 export function getMetadataField(
   metadata: unknown,
@@ -116,15 +119,23 @@ function BadgeRow({
   values,
   colorMap,
   className,
+  badgeClassName,
+  variant,
 }: {
   values: string[];
   colorMap?: Record<string, string>;
   className?: string;
+  badgeClassName?: string;
+  variant?: BadgeVariant;
 }) {
   return (
     <div className={cn("flex flex-wrap gap-1", className)}>
       {values.map((v) => (
-        <Badge className={cn("font-mono", colorMap?.[v])} key={v}>
+        <Badge
+          className={cn("font-mono", badgeClassName, colorMap?.[v])}
+          key={v}
+          variant={variant}
+        >
           {v}
         </Badge>
       ))}
@@ -155,17 +166,28 @@ export function TruncatedBadges({
   values,
   colorMap,
   maxVisible = 2,
+  badgeClassName,
+  variant,
 }: {
   values: string[];
   colorMap?: Record<string, string>;
   maxVisible?: number;
+  badgeClassName?: string;
+  variant?: BadgeVariant;
 }) {
   if (values.length === 0) {
     return <span className="text-muted-foreground">&mdash;</span>;
   }
 
   if (values.length <= maxVisible) {
-    return <BadgeRow colorMap={colorMap} values={values} />;
+    return (
+      <BadgeRow
+        badgeClassName={badgeClassName}
+        colorMap={colorMap}
+        values={values}
+        variant={variant}
+      />
+    );
   }
 
   const visible = values.slice(0, maxVisible);
@@ -176,7 +198,11 @@ export function TruncatedBadges({
       <TooltipTrigger asChild>
         <div className="flex flex-wrap gap-1">
           {visible.map((v) => (
-            <Badge className={cn("font-mono", colorMap?.[v])} key={v}>
+            <Badge
+              className={cn("font-mono", badgeClassName, colorMap?.[v])}
+              key={v}
+              variant={variant}
+            >
               {v}
             </Badge>
           ))}
@@ -190,7 +216,13 @@ export function TruncatedBadges({
         </div>
       </TooltipTrigger>
       <TooltipContent className="max-w-none">
-        <BadgeRow className="flex-nowrap" colorMap={colorMap} values={values} />
+        <BadgeRow
+          badgeClassName={badgeClassName}
+          className="flex-nowrap"
+          colorMap={colorMap}
+          values={values}
+          variant={variant}
+        />
       </TooltipContent>
     </Tooltip>
   );

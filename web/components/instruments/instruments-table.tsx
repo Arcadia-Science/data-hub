@@ -5,7 +5,7 @@ import { InstrumentStatusBadge } from "@/components/instruments/instrument-statu
 import { RowActionsCell } from "@/components/instruments/row-actions-cell";
 import { ClickableRow } from "@/components/instruments/runs-table/clickable-row";
 import { InstrumentNotificationsCell } from "@/components/notifications/instrument-notifications-cell";
-import { Badge } from "@/components/ui/badge";
+import { TruncatedBadges } from "@/components/runs/metadata-badges";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -193,21 +193,11 @@ export function InstrumentsTable({
                   )}
                 </TableCell>
                 <TableCell>
-                  {row.filePatterns.length > 0 ? (
-                    <div className="flex flex-wrap gap-1">
-                      {row.filePatterns.map((p) => (
-                        <Badge
-                          className="font-mono font-normal text-xs"
-                          key={p}
-                          variant="outline"
-                        >
-                          {p}
-                        </Badge>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
+                  <TruncatedBadges
+                    badgeClassName="font-normal text-xs"
+                    values={row.filePatterns}
+                    variant="outline"
+                  />
                 </TableCell>
                 <TableCell className="font-mono">{row.runsThisWeek}</TableCell>
                 <TableCell>
