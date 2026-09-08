@@ -20,6 +20,10 @@ export {
   patchInstrumentBody,
 } from "./schemas/instruments";
 export {
+  dispatchNotificationsBody,
+  dispatchNotificationsResult,
+} from "./schemas/notifications";
+export {
   attributionsResponse,
   commentBody,
   commentDeleted,

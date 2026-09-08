@@ -831,11 +831,14 @@ export const archiveJobs = pgTable(
 // `comment_attributed` and `comment_participated` fire on a new comment for
 // run attributees and prior commenters respectively. The `attributed`
 // variant takes precedence when a single recipient qualifies under both
-// rules so the popover doesn't show the same comment twice.
+// rules so the popover doesn't show the same comment twice. `generic` rows
+// are free-text messages posted by integrations via the dispatch endpoint;
+// they alone may be anchor-less (`runId` NULL).
 export const notificationTypeEnum = pgEnum("notification_type", [
   "run_created",
   "comment_attributed",
   "comment_participated",
+  "generic",
 ]);
 
 // One row per user holding the global notification toggles. Created on
@@ -862,6 +865,11 @@ export const notificationPreferences = pgTable("notification_preferences", {
   commentsParticipatedEnabled: boolean("comments_participated_enabled")
     .notNull()
     .default(true),
+  // Receive in-app `generic` notifications posted by integrations via the
+  // dispatch endpoint. Defaults on: unlike the run/comment triggers these
+  // are always addressed to the recipient, so they're expected to be
+  // low-volume.
+  genericEnabled: boolean("generic_enabled").notNull().default(true),
   // Slack delivery toggles — independent of the in-app toggles above so a
   // user can receive a notification type via Slack only, in-app only, both,
   // or neither. All default false; connecting Slack (via OAuth) flips them to
@@ -873,6 +881,9 @@ export const notificationPreferences = pgTable("notification_preferences", {
   slackCommentsParticipatedEnabled: boolean(
     "slack_comments_participated_enabled"
   )
+    .notNull()
+    .default(false),
+  slackGenericEnabled: boolean("slack_generic_enabled")
     .notNull()
     .default(false),
   updatedAt: timestamp("updated_at", {
@@ -938,14 +949,19 @@ export const notifications = pgTable(
     // The run the notification refers to; cascade on delete so soft- or
     // hard-deleted runs don't leave orphan rows in the popover. (Runs are
     // soft-deleted in practice, but the FK protects against accidental
-    // hard delete in tests / future cleanups.)
-    runId: uuid("run_id")
-      .notNull()
-      .references(() => instrumentRuns.id, { onDelete: "cascade" }),
-    // NULL for `run_created`. Set for both comment trigger types.
+    // hard delete in tests / future cleanups.) NULL only for anchor-less
+    // `generic` rows — every other type is always run-anchored.
+    runId: uuid("run_id").references(() => instrumentRuns.id, {
+      onDelete: "cascade",
+    }),
+    // NULL for `run_created` and `generic`. Set for both comment trigger
+    // types.
     commentId: uuid("comment_id").references(() => runComments.id, {
       onDelete: "cascade",
     }),
+    // Caller-supplied message text for `generic` rows; NULL for every
+    // other type, whose copy is derived from type + actor at render time.
+    body: text("body"),
     // The user whose action produced the notification. `set null` so a
     // deleted user doesn't take the recipient's history with them.
     actorUserId: text("actor_user_id").references(() => users.id, {

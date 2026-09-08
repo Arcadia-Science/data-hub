@@ -109,9 +109,11 @@ describe("Notifications", () => {
         runsAllMuted: false,
         commentsAttributedEnabled: true,
         commentsParticipatedEnabled: true,
+        genericEnabled: true,
         slackRunsEnabled: false,
         slackCommentsAttributedEnabled: false,
         slackCommentsParticipatedEnabled: false,
+        slackGenericEnabled: false,
       });
 
       // Defaults are lazy-upserted so subsequent reads hit the row, not
@@ -129,9 +131,11 @@ describe("Notifications", () => {
         runsAllMuted: true,
         commentsAttributedEnabled: true,
         commentsParticipatedEnabled: true,
+        genericEnabled: true,
         slackRunsEnabled: false,
         slackCommentsAttributedEnabled: false,
         slackCommentsParticipatedEnabled: false,
+        slackGenericEnabled: false,
       });
 
       // A partial patch on the other axis leaves the first one intact.
@@ -141,9 +145,11 @@ describe("Notifications", () => {
         runsAllMuted: true,
         commentsAttributedEnabled: true,
         commentsParticipatedEnabled: false,
+        genericEnabled: true,
         slackRunsEnabled: false,
         slackCommentsAttributedEnabled: false,
         slackCommentsParticipatedEnabled: false,
+        slackGenericEnabled: false,
       });
     });
 

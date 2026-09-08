@@ -23,15 +23,17 @@ import {
 } from "@/lib/db/schema";
 import {
   buildCommentBlocks,
+  buildGenericBlocks,
   buildRunCreatedBlocks,
   deliverSlackDms,
+  type SlackDmJob,
 } from "@/lib/slack/dm";
 import { toInitials } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
 // Notifications — in-app event delivery for instrument runs and run comments.
 //
-// Three trigger types live in `notification_type`:
+// Four trigger types live in `notification_type`:
 //   - `run_created`           : a new run was created on a subscribed
 //                                instrument; emitted to every user with a
 //                                `instrument_notification_subscriptions`
@@ -40,18 +42,25 @@ import { toInitials } from "@/lib/utils";
 //                                is false.
 //   - `comment_attributed`    : a run-attributee received a new comment.
 //   - `comment_participated`  : a prior commenter received a new comment.
+//   - `generic`               : an integration posted a free-text message
+//                                via `POST /api/v1/notifications/dispatch`
+//                                (gated by the `notifications:create` scope).
 //
-// All preference-mutating routes are session-only — these endpoints are
-// personal-UX, never invoked by PATs, so we don't add a scope.
+// Preference-mutating routes remain session-only — they're personal-UX
+// surfaces, never invoked by PATs.
 // ---------------------------------------------------------------------------
 
 export interface NotificationPreferencesDto {
   commentsAttributedEnabled: boolean;
   commentsParticipatedEnabled: boolean;
+  // In-app `generic` delivery defaults on — dispatch messages are always
+  // addressed to the recipient, so they're expected to be low-volume.
+  genericEnabled: boolean;
   // In-app delivery
   runsAllMuted: boolean;
   slackCommentsAttributedEnabled: boolean;
   slackCommentsParticipatedEnabled: boolean;
+  slackGenericEnabled: boolean;
   // Slack delivery — independent of in-app; all default false until the user
   // connects Slack (at which point the OAuth callback flips these to true).
   slackRunsEnabled: boolean;
@@ -61,9 +70,11 @@ const DEFAULT_PREFERENCES: NotificationPreferencesDto = {
   runsAllMuted: false,
   commentsAttributedEnabled: true,
   commentsParticipatedEnabled: true,
+  genericEnabled: true,
   slackRunsEnabled: false,
   slackCommentsAttributedEnabled: false,
   slackCommentsParticipatedEnabled: false,
+  slackGenericEnabled: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -83,11 +94,13 @@ export async function getPreferences(
         notificationPreferences.commentsAttributedEnabled,
       commentsParticipatedEnabled:
         notificationPreferences.commentsParticipatedEnabled,
+      genericEnabled: notificationPreferences.genericEnabled,
       slackRunsEnabled: notificationPreferences.slackRunsEnabled,
       slackCommentsAttributedEnabled:
         notificationPreferences.slackCommentsAttributedEnabled,
       slackCommentsParticipatedEnabled:
         notificationPreferences.slackCommentsParticipatedEnabled,
+      slackGenericEnabled: notificationPreferences.slackGenericEnabled,
     })
     .from(notificationPreferences)
     .where(eq(notificationPreferences.userId, userId))
@@ -188,8 +201,15 @@ export async function setInstrumentSubscription(
 
 // Hard cap on the comment-body snippet returned in the popover payload —
 // the full body is never needed for the bell list and we don't want
-// kilobyte-sized markdown blobs piggy-backing on every poll.
+// kilobyte-sized markdown blobs piggy-backing on every poll. Also applied
+// to `generic` messages (route-capped at 500, so the cap rarely bites).
 const COMMENT_BODY_PREVIEW_LENGTH = 240;
+
+function toPreview(text: string | null): string | null {
+  return text && text.length > COMMENT_BODY_PREVIEW_LENGTH
+    ? `${text.slice(0, COMMENT_BODY_PREVIEW_LENGTH).trimEnd()}…`
+    : text;
+}
 
 export interface NotificationDto {
   actor: {
@@ -198,6 +218,9 @@ export interface NotificationDto {
     initials: string;
     avatarUrl: string | null;
   } | null;
+  // Caller-supplied message for `generic` rows, preview-truncated like
+  // `commentBody`. NULL for every other type.
+  body: string | null;
   // Truncated markdown body of the originating comment — only populated
   // when `commentId` is set. NULL for `run_created` rows and for comment
   // rows whose comment has been soft-deleted.
@@ -205,17 +228,22 @@ export interface NotificationDto {
   commentId: string | null;
   createdAt: Date;
   id: string;
-  instrumentDisplayName: string;
+  // Run + instrument fields are NULL on anchor-less `generic` rows.
+  instrumentDisplayName: string | null;
   // Natural keys for linking — `/instruments/:instrumentId/runs/:runId` is
   // what the row navigates to.
-  instrumentId: string;
+  instrumentId: string | null;
   // Surfaced so the bell can render a type-specific icon for grouped
   // `run_created` rows (microscope / gel doc / plate reader).
-  instrumentType: InstrumentType;
+  instrumentType: InstrumentType | null;
   readAt: Date | null;
-  runDisplayId: string;
-  runId: string;
-  type: "run_created" | "comment_attributed" | "comment_participated";
+  runDisplayId: string | null;
+  runId: string | null;
+  type:
+    | "run_created"
+    | "comment_attributed"
+    | "comment_participated"
+    | "generic";
 }
 
 export async function listNotifications(
@@ -241,14 +269,16 @@ export async function listNotifications(
       // filter below; the row still exists so the user can navigate to
       // the run, the popover just renders without a preview.
       commentBody: runComments.body,
+      body: notifications.body,
       actorId: actor.id,
       actorName: actor.name,
       actorEmail: actor.email,
       actorImage: actor.image,
     })
     .from(notifications)
-    .innerJoin(instrumentRuns, eq(instrumentRuns.id, notifications.runId))
-    .innerJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
+    // Left joins: anchor-less `generic` rows have no run to join through.
+    .leftJoin(instrumentRuns, eq(instrumentRuns.id, notifications.runId))
+    .leftJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
     .leftJoin(actor, eq(actor.id, notifications.actorUserId))
     .leftJoin(
       runComments,
@@ -269,10 +299,6 @@ export async function listNotifications(
     const actorDisplayName = row.actorId
       ? (row.actorName ?? row.actorEmail ?? "Unknown")
       : null;
-    const previewBody =
-      row.commentBody && row.commentBody.length > COMMENT_BODY_PREVIEW_LENGTH
-        ? `${row.commentBody.slice(0, COMMENT_BODY_PREVIEW_LENGTH).trimEnd()}…`
-        : row.commentBody;
     return {
       id: row.id,
       type: row.type,
@@ -284,7 +310,8 @@ export async function listNotifications(
       instrumentDisplayName: row.instrumentDisplayName,
       instrumentType: row.instrumentType,
       commentId: row.commentId,
-      commentBody: previewBody,
+      commentBody: toPreview(row.commentBody),
+      body: toPreview(row.body),
       actor:
         row.actorId && actorDisplayName
           ? {
@@ -629,4 +656,155 @@ export async function notifyComment(input: {
   } catch (err) {
     console.error("notifyComment failed", err);
   }
+}
+
+// ---------------------------------------------------------------------------
+// `generic` fan-out — free-text messages posted by integrations via
+// `POST /api/v1/notifications/dispatch`. Unlike the after()-deferred
+// fan-outs above, dispatch reports delivery in its response, so failures
+// here must surface (the route returns 500) rather than being swallowed —
+// a lying 201 would tell the caller everyone was skipped.
+// ---------------------------------------------------------------------------
+
+export interface NotifyGenericResult {
+  // Received the message on at least one channel (in-app row or Slack DM).
+  notifiedUserIds: string[];
+  // Received nothing: the actor, exact-repeat deliveries, or both channels
+  // muted / disconnected. (The route additionally folds in unknown user IDs.)
+  skippedUserIds: string[];
+  // Ready-to-send DM jobs — the route fires these in `after()` so Slack
+  // latency never delays the response.
+  slackJobs: SlackDmJob[];
+}
+
+export async function notifyGeneric(input: {
+  actorUserId: string;
+  actorDisplayName: string;
+  recipientUserIds: string[];
+  message: string;
+  // Run anchor for the notification. Omit for an anchor-less message.
+  run?: {
+    internalId: string;
+    instrumentId: string;
+    instrumentDisplayName: string;
+    runDisplayId: string;
+  };
+  // Needed to build the run link in Slack DMs; without it (library-level
+  // tests) the DM goes out without a link.
+  origin?: string;
+}): Promise<NotifyGenericResult> {
+  // Dedupe and drop the actor — no self-notification.
+  const actorSkipped = input.recipientUserIds.includes(input.actorUserId)
+    ? [input.actorUserId]
+    : [];
+  const recipients = [...new Set(input.recipientUserIds)].filter(
+    (id) => id !== input.actorUserId
+  );
+
+  if (recipients.length === 0) {
+    return { notifiedUserIds: [], skippedUserIds: actorSkipped, slackJobs: [] };
+  }
+
+  // Exact-repeat guard: skip recipients already holding an *unread* generic
+  // row with the same message and the same anchor. Retrying a dispatch is
+  // safe; a different message (or a read row) delivers again.
+  const repeats = await db
+    .select({ userId: notifications.userId })
+    .from(notifications)
+    .where(
+      and(
+        eq(notifications.type, "generic"),
+        inArray(notifications.userId, recipients),
+        isNull(notifications.readAt),
+        eq(notifications.body, input.message),
+        input.run
+          ? eq(notifications.runId, input.run.internalId)
+          : isNull(notifications.runId)
+      )
+    );
+  const repeatSet = new Set(repeats.map((r) => r.userId));
+  const fresh = recipients.filter((id) => !repeatSet.has(id));
+
+  if (fresh.length === 0) {
+    return {
+      notifiedUserIds: [],
+      skippedUserIds: [
+        ...actorSkipped,
+        ...recipients.filter((id) => repeatSet.has(id)),
+      ],
+      slackJobs: [],
+    };
+  }
+
+  // One query pulls both channel-routing columns per candidate, same shape
+  // as the run/comment fan-outs. Unknown user IDs simply don't join and
+  // land in `skippedUserIds` below.
+  const candidates = await db
+    .select({
+      userId: users.id,
+      // In-app: `!== false` so a missing pref row means on (the default).
+      genericEnabled: notificationPreferences.genericEnabled,
+      // Slack: live connection (non-revoked) AND the toggle on.
+      slackUserId: slackConnections.slackUserId,
+      slackGenericEnabled: notificationPreferences.slackGenericEnabled,
+      slackRevokedAt: slackConnections.revokedAt,
+    })
+    .from(users)
+    .leftJoin(
+      notificationPreferences,
+      eq(notificationPreferences.userId, users.id)
+    )
+    .leftJoin(slackConnections, eq(slackConnections.userId, users.id))
+    .where(inArray(users.id, fresh));
+
+  const inAppIds = new Set(
+    candidates.filter((c) => c.genericEnabled !== false).map((c) => c.userId)
+  );
+
+  const runUrl =
+    input.run && input.origin
+      ? `${input.origin}/instruments/${input.run.instrumentId}/runs/${encodeURIComponent(input.run.runDisplayId)}`
+      : undefined;
+
+  const slackJobs: SlackDmJob[] = candidates
+    .filter(
+      (c) =>
+        c.slackUserId && !c.slackRevokedAt && (c.slackGenericEnabled ?? false)
+    )
+    .map((c) => ({
+      userId: c.userId,
+      slackUserId: c.slackUserId ?? "",
+      payload: {
+        text: `${input.actorDisplayName} sent you a notification: ${input.message}`,
+        blocks: buildGenericBlocks({
+          actorDisplayName: input.actorDisplayName,
+          message: input.message,
+          runUrl,
+        }),
+      },
+    }));
+  const slackIds = new Set(slackJobs.map((j) => j.userId));
+
+  const inAppRows = candidates
+    .filter((c) => inAppIds.has(c.userId))
+    .map((c) => ({
+      userId: c.userId,
+      type: "generic" as const,
+      runId: input.run?.internalId ?? null,
+      actorUserId: input.actorUserId,
+      body: input.message,
+    }));
+  if (inAppRows.length > 0) {
+    await db.insert(notifications).values(inAppRows);
+  }
+
+  return {
+    notifiedUserIds: fresh.filter((id) => inAppIds.has(id) || slackIds.has(id)),
+    skippedUserIds: [
+      ...actorSkipped,
+      ...recipients.filter((id) => repeatSet.has(id)),
+      ...fresh.filter((id) => !(inAppIds.has(id) || slackIds.has(id))),
+    ],
+    slackJobs,
+  };
 }

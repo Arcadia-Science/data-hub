@@ -110,6 +110,7 @@ const slackPreferencesSchema = z.object({
   slackRunsEnabled: z.boolean(),
   slackCommentsAttributedEnabled: z.boolean(),
   slackCommentsParticipatedEnabled: z.boolean(),
+  slackGenericEnabled: z.boolean(),
 });
 
 export type SlackPreferences = z.infer<typeof slackPreferencesSchema>;
@@ -144,6 +145,7 @@ function Connected({
             value.slackCommentsAttributedEnabled,
           slack_comments_participated_enabled:
             value.slackCommentsParticipatedEnabled,
+          slack_generic_enabled: value.slackGenericEnabled,
         }),
       });
 
@@ -257,6 +259,29 @@ function Connected({
                     </FieldContent>
                     <Switch
                       aria-label="Send participated comment notifications via Slack DM"
+                      checked={field.state.value}
+                      id={field.name}
+                      name={field.name}
+                      onCheckedChange={field.handleChange}
+                    />
+                  </Field>
+                )}
+              </form.Field>
+
+              <form.Field name="slackGenericEnabled">
+                {(field) => (
+                  <Field orientation="horizontal">
+                    <FieldContent>
+                      <FieldLabel htmlFor={field.name}>
+                        Service notifications
+                      </FieldLabel>
+                      <FieldDescription>
+                        DM me when an integration sends me a notification via
+                        the API.
+                      </FieldDescription>
+                    </FieldContent>
+                    <Switch
+                      aria-label="Send service notifications via Slack DM"
                       checked={field.state.value}
                       id={field.name}
                       name={field.name}
