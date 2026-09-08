@@ -47,6 +47,12 @@ Globals:
     Timeout: 900
     MemorySize: 10240
 
+Conditions:
+  # Preview deployments may only ever touch staging. A preview is just a
+  # branch push, so trusting preview subjects on the production role would
+  # bypass production branch protection.
+  AllowPreviewSubject: !Equals [!Ref Environment, staging]
+
 Resources:
   # ---- S3 buckets ----
 
@@ -415,6 +421,7 @@ Resources:
 
   # ---- IAM: Vercel web app role (OIDC federation) ----
   # Lets the Next.js app presign S3 URLs without long-lived AWS credentials.
+  # Preview deployments are trusted on staging only — see AllowPreviewSubject.
 
   WebAppS3Role:
     Type: AWS::IAM::Role
@@ -433,7 +440,10 @@ Resources:
               StringLike:
                 "oidc.vercel.com/arcadia-science:sub":
                   - !Sub "owner:arcadia-science:project:data-hub:environment:${Environment}"
-                  - "owner:arcadia-science:project:data-hub:environment:preview"
+                  - !If
+                    - AllowPreviewSubject
+                    - "owner:arcadia-science:project:data-hub:environment:preview"
+                    - !Ref "AWS::NoValue"
       Policies:
         - PolicyName: S3PresignedUrlAccess
           PolicyDocument:

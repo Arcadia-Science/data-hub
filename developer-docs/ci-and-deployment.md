@@ -61,6 +61,8 @@ Data Hub is self-hosted, running across three backend pieces per environment: a 
 
 The Next.js app is deployed on [Vercel](https://vercel.com). Every branch and commit generates a preview deployment. Merges to `staging` and `production` deploy to their respective environments automatically.
 
+Preview deployments assume the staging web-app IAM role only. The production role must never trust `environment:preview` OIDC subjects — a preview is just a branch push, so that trust would bypass production branch protection. `infra/template.yaml` enforces this with the `AllowPreviewSubject` condition.
+
 Environment variables are managed in the Vercel dashboard and can be pulled locally with:
 
 ```sh
