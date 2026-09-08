@@ -196,3 +196,22 @@ export function buildCommentBlocks(opts: {
     },
   ];
 }
+
+export function buildGenericBlocks(opts: {
+  actorDisplayName: string;
+  message: string;
+  // Present only when the notification is run-anchored and the caller
+  // supplied an origin to build the link from.
+  runUrl?: string;
+}): (Block | KnownBlock)[] {
+  const link = opts.runUrl ? `\n<${opts.runUrl}|View in Data Hub>` : "";
+  return [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*${opts.actorDisplayName}* sent you a notification:\n${opts.message}${link}`,
+      },
+    },
+  ];
+}
