@@ -8,9 +8,10 @@ import {
   markRead,
 } from "@/lib/api/notifications";
 
-// Notification reads/writes are session-only — these are personal-UX
-// surfaces, never invoked by the watcher / Lambda PATs, so they don't
-// participate in the `Scope` vocabulary.
+// Notification reads/writes here are session-only — these are personal-UX
+// surfaces, never invoked by the watcher / Lambda PATs. The machine-facing
+// surface is `POST /api/v1/notifications/dispatch`, gated by the
+// `notifications:create` scope.
 
 const PostBodySchema = z.object({
   ids: z.array(z.string().uuid()).optional(),
@@ -50,6 +51,7 @@ export async function GET(request: NextRequest) {
       instrument_type: n.instrumentType,
       comment_id: n.commentId,
       comment_body: n.commentBody,
+      body: n.body,
       actor: n.actor,
     })),
   });

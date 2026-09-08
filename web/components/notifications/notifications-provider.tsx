@@ -29,17 +29,24 @@ export interface NotificationActor {
 
 export interface NotificationItem {
   actor: NotificationActor | null;
+  // Caller-supplied message for `generic` rows; null for every other type.
+  body: string | null;
   commentBody: string | null;
   commentId: string | null;
   createdAt: string;
   id: string;
-  instrumentDisplayName: string;
-  instrumentId: string;
-  instrumentType: InstrumentType;
+  // Run + instrument fields are null on anchor-less `generic` rows.
+  instrumentDisplayName: string | null;
+  instrumentId: string | null;
+  instrumentType: InstrumentType | null;
   readAt: string | null;
-  runDisplayId: string;
-  runId: string;
-  type: "run_created" | "comment_attributed" | "comment_participated";
+  runDisplayId: string | null;
+  runId: string | null;
+  type:
+    | "run_created"
+    | "comment_attributed"
+    | "comment_participated"
+    | "generic";
 }
 
 interface NotificationsValue {
@@ -67,16 +74,17 @@ const POLL_INTERVAL_MS = 60_000;
 
 interface ApiNotification {
   actor: NotificationActor | null;
+  body: string | null;
   comment_body: string | null;
   comment_id: string | null;
   created_at: string;
   id: string;
-  instrument_display_name: string;
-  instrument_id: string;
-  instrument_type: InstrumentType;
+  instrument_display_name: string | null;
+  instrument_id: string | null;
+  instrument_type: InstrumentType | null;
   read_at: string | null;
-  run_display_id: string;
-  run_id: string;
+  run_display_id: string | null;
+  run_id: string | null;
   type: NotificationItem["type"];
 }
 
@@ -93,6 +101,7 @@ function fromApi(n: ApiNotification): NotificationItem {
     instrumentType: n.instrument_type,
     commentId: n.comment_id,
     commentBody: n.comment_body,
+    body: n.body,
     actor: n.actor,
   };
 }

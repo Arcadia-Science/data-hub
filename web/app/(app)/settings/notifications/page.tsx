@@ -92,10 +92,12 @@ async function NotificationsFormSection({
         runsAllMuted: prefs.runsAllMuted,
         commentsAttributedEnabled: prefs.commentsAttributedEnabled,
         commentsParticipatedEnabled: prefs.commentsParticipatedEnabled,
+        genericEnabled: prefs.genericEnabled,
         slackRunsEnabled: prefs.slackRunsEnabled,
         slackCommentsAttributedEnabled: prefs.slackCommentsAttributedEnabled,
         slackCommentsParticipatedEnabled:
           prefs.slackCommentsParticipatedEnabled,
+        slackGenericEnabled: prefs.slackGenericEnabled,
       }}
       slackChannelConfig={
         slackChannelConfig

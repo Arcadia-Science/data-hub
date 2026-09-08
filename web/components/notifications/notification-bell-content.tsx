@@ -65,9 +65,37 @@ const BUCKET_LABEL: Record<Bucket, string> = {
   earlier: "Earlier",
 };
 
+// Every type except `generic` is run-anchored at write time; the wire
+// fields are nullable only because anchor-less `generic` rows exist. This
+// guard narrows once in `buildEntries` so the row renderers stay
+// stringly-typed.
+type AnchoredNotificationItem = NotificationItem & {
+  runId: string;
+  runDisplayId: string;
+  instrumentId: string;
+  instrumentDisplayName: string;
+  instrumentType: InstrumentType;
+};
+
+function isAnchored(n: NotificationItem): n is AnchoredNotificationItem {
+  return (
+    n.runId !== null &&
+    n.runDisplayId !== null &&
+    n.instrumentId !== null &&
+    n.instrumentDisplayName !== null &&
+    n.instrumentType !== null
+  );
+}
+
 interface CommentEntry {
   id: string;
   kind: "comment";
+  notification: AnchoredNotificationItem;
+}
+
+interface GenericEntry {
+  id: string;
+  kind: "generic";
   notification: NotificationItem;
 }
 
@@ -78,13 +106,13 @@ interface RunGroupEntry {
   instrumentType: InstrumentType;
   kind: "run_group";
   latestCreatedAt: string;
-  runs: NotificationItem[];
+  runs: AnchoredNotificationItem[];
 }
 
-type Entry = CommentEntry | RunGroupEntry;
+type Entry = CommentEntry | GenericEntry | RunGroupEntry;
 type BucketedEntries = Record<Bucket, Entry[]>;
 
-function notificationHref(n: NotificationItem): string {
+function notificationHref(n: AnchoredNotificationItem): string {
   // Anchor to the comment id when present so the destination page can
   // scroll the comment into view.
   const base = `/instruments/${encodeURIComponent(
@@ -107,6 +135,9 @@ function commentActionLabel(n: NotificationItem): string {
       // Unreachable — `run_created` never flows into the comment row
       // renderer — but exhaustive switches keep TS honest.
       return `${actor} created`;
+    case "generic":
+      // Also unreachable — `generic` rows render in their own variant.
+      return `${actor} sent a notification`;
     default:
       return `${actor} commented on`;
   }
@@ -143,6 +174,17 @@ function buildEntries(items: NotificationItem[], now: Date): BucketedEntries {
 
   for (const n of items) {
     const bucket = bucketOf(n.createdAt, now);
+    // `generic` rows render individually and may be anchor-less — they
+    // never join the comment rows or the run_created grouping.
+    if (n.type === "generic") {
+      buckets[bucket].push({ kind: "generic", id: n.id, notification: n });
+      continue;
+    }
+    // Every remaining type is run-anchored at write time; skip a row that
+    // somehow isn't rather than crashing the popover.
+    if (!isAnchored(n)) {
+      continue;
+    }
     if (n.type === "run_created") {
       const key = `${bucket}:${n.instrumentId}`;
       const existing = groupIndex.get(key);
@@ -221,29 +263,42 @@ export function NotificationBellContent({
             }
             return (
               <NotificationSection key={bucket} label={BUCKET_LABEL[bucket]}>
-                {entries.map((entry) =>
-                  entry.kind === "comment" ? (
+                {entries.map((entry) => {
+                  // Single-row entries share one activation behavior: mark
+                  // read (when unread) and close the popover. Run groups
+                  // manage their own per-run activation.
+                  if (entry.kind === "run_group") {
+                    return (
+                      <RunGroupNotificationRow
+                        group={entry}
+                        key={entry.id}
+                        onActivate={(notificationId) => {
+                          void markOneRead(notificationId);
+                        }}
+                        onNavigate={onNavigate}
+                      />
+                    );
+                  }
+                  const activate = () => {
+                    if (entry.notification.readAt === null) {
+                      void markOneRead(entry.notification.id);
+                    }
+                    onNavigate?.();
+                  };
+                  return entry.kind === "comment" ? (
                     <CommentNotificationRow
                       key={entry.id}
                       notification={entry.notification}
-                      onActivate={() => {
-                        if (entry.notification.readAt === null) {
-                          void markOneRead(entry.notification.id);
-                        }
-                        onNavigate?.();
-                      }}
+                      onActivate={activate}
                     />
                   ) : (
-                    <RunGroupNotificationRow
-                      group={entry}
+                    <GenericNotificationRow
                       key={entry.id}
-                      onActivate={(notificationId) => {
-                        void markOneRead(notificationId);
-                      }}
-                      onNavigate={onNavigate}
+                      notification={entry.notification}
+                      onActivate={activate}
                     />
-                  )
-                )}
+                  );
+                })}
               </NotificationSection>
             );
           })}
@@ -368,7 +423,7 @@ function CommentNotificationRow({
   notification: n,
   onActivate,
 }: {
-  notification: NotificationItem;
+  notification: AnchoredNotificationItem;
   onActivate: () => void;
 }) {
   const isUnread = n.readAt === null;
@@ -412,6 +467,84 @@ function CommentNotificationRow({
           </p>
         </div>
       </Link>
+    </NotificationRowShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Generic notification — free-text message from an integration. The message
+// is the main line (the sender controls the wording); when the row is
+// run-anchored the whole row is a Link to the run, otherwise it's a button
+// whose only action is marking the row read.
+// ---------------------------------------------------------------------------
+
+function GenericNotificationRow({
+  notification: n,
+  onActivate,
+}: {
+  notification: NotificationItem;
+  onActivate: () => void;
+}) {
+  const isUnread = n.readAt === null;
+  const anchored = isAnchored(n);
+
+  // Shared inner layout — identical between the Link and button wrappers so
+  // the visual position doesn't shift with the row's navigability.
+  const content = (
+    <>
+      {n.actor ? (
+        <UserAvatar
+          size="sm"
+          user={{
+            userId: n.actor.id,
+            displayName: n.actor.displayName,
+            initials: n.actor.initials,
+            avatarUrl: n.actor.avatarUrl,
+          }}
+        />
+      ) : (
+        <UnknownUserAvatar size="sm" />
+      )}
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <p className="text-sm leading-snug">{n.body}</p>
+        {anchored ? (
+          <p className="line-clamp-2 font-mono text-muted-foreground text-xs">
+            {n.instrumentDisplayName} · {n.runDisplayId}
+          </p>
+        ) : null}
+        <p
+          className="text-muted-foreground/80 text-xs"
+          suppressHydrationWarning
+        >
+          {formatRelativeTime(n.createdAt)}
+        </p>
+      </div>
+    </>
+  );
+
+  if (anchored) {
+    return (
+      <NotificationRowShell isUnread={isUnread}>
+        <Link
+          className="flex items-start gap-3 px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          href={notificationHref(n)}
+          onClick={onActivate}
+        >
+          {content}
+        </Link>
+      </NotificationRowShell>
+    );
+  }
+
+  return (
+    <NotificationRowShell isUnread={isUnread}>
+      <button
+        className="flex w-full cursor-pointer items-start gap-3 px-4 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        onClick={onActivate}
+        type="button"
+      >
+        {content}
+      </button>
     </NotificationRowShell>
   );
 }

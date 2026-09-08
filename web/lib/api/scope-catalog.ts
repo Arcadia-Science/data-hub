@@ -111,6 +111,11 @@ export const SCOPE_METADATA: Record<Scope, ScopeMeta> = {
     description: "Update run-archive job status (Lambda callback).",
     destructive: false,
   },
+  "notifications:create": {
+    label: "Send notifications",
+    description: "Send notifications to users, optionally about a run.",
+    destructive: false,
+  },
 };
 
 export interface ScopePreset {
