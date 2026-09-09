@@ -37,8 +37,16 @@ def _build_aze(
     temper: list[int] | None = None,
     empty_data_segment: bool = False,
     plate: dict[str, Any] | None = None,
+    segment_count: int = 7,
+    bare_data: bool = False,
 ) -> bytes:
-    """Assemble a minimal .AZE in memory, mirroring the vendor segment order."""
+    """Assemble a minimal .AZE in memory, mirroring the vendor segment order.
+
+    `segment_count` keeps the first N segments; pre-run saves observed in the
+    wild end after the plate layout (4) or the analysis settings (5).
+    `bare_data` returns the data segment alone, matching the instrument
+    software's standalone data exports.
+    """
     metadata = json.dumps({"Experiment Version": 1, "Experiment Data Name": "test-run"}).encode()
     plate_json = json.dumps(
         plate if plate is not None else {"NumberOfWells": 96, "WellInfos": _well_infos()}
@@ -68,17 +76,18 @@ def _build_aze(
             + json.dumps(data_json, indent=1).encode()
             + bytes(64)
         )
-    return b"".join(
-        [
-            _segment(b"Azure qPCR Project"),
-            _segment(metadata),
-            _segment(bytes(2048)),
-            _segment(plate_json),
-            _segment(analysis),
-            _segment(data_payload),
-            _segment(b"[]"),
-        ]
-    )
+        if bare_data:
+            return data_payload
+    segments = [
+        _segment(b"Azure qPCR Project"),
+        _segment(metadata),
+        _segment(bytes(2048)),
+        _segment(plate_json),
+        _segment(analysis),
+        _segment(data_payload),
+        _segment(b"[]"),
+    ]
+    return b"".join(segments[:segment_count])
 
 
 def _write_aze(path: Path, **kwargs: Any) -> Path:
@@ -131,6 +140,37 @@ class TestParseAzeFile:
         assert parsed.blocks == []
         assert parsed.instrument == {}
         assert parsed.metadata["Experiment Data Name"] == "test-run"
+
+    def test_pre_run_save_ending_after_analysis_parses(self, tmp_path: Path) -> None:
+        path = _write_aze(tmp_path / "run.AZE", segment_count=5)
+        parsed = parse_aze_file(path)
+        assert parsed.blocks == []
+        assert parsed.metadata["Experiment Data Name"] == "test-run"
+
+    def test_pre_run_save_ending_after_plate_layout_parses(self, tmp_path: Path) -> None:
+        path = _write_aze(tmp_path / "run.AZE", segment_count=4)
+        assert parse_aze_file(path).blocks == []
+
+    def test_non_project_binary_raises(self, tmp_path: Path) -> None:
+        path = tmp_path / "run.AZE"
+        path.write_bytes(bytes(2048))
+        with pytest.raises(ValueError, match="Not an Azure Cielo"):
+            parse_aze_file(path)
+
+    def test_bare_data_segment_export_parses(self, tmp_path: Path) -> None:
+        path = _write_aze(
+            tmp_path / "run.AZE",
+            melt_channels={2: [float(i) for i in range(96 * 3)]},
+            temper=[2000, 2050, 2100],
+            bare_data=True,
+        )
+        parsed = parse_aze_file(path)
+        assert parsed.metadata == {}
+        assert parsed.instrument["device_id"] == "TEST-01"
+        block = parsed.blocks[0]
+        assert block.channel == "Channel2"
+        assert block.wells["A1"] == [(20.0, 0.0), (20.5, 1.0), (21.0, 2.0)]
+        assert block.wells["H12"][-1] == (21.0, 287.0)
 
     def test_data_segment_without_melt_channels_has_no_blocks(self, tmp_path: Path) -> None:
         path = _write_aze(tmp_path / "run.AZE")

@@ -24,6 +24,11 @@ _METADATA_INDEX = 1
 _PLATE_INDEX = 3
 _DATA_INDEX = 5
 
+# The instrument software also exports the data segment on its own, without
+# the project wrapper; such files open with the nested segment's magic.
+_DATA_MAGIC = b"Azure Data\x00"
+_BARE_DATA_PREFIX = struct.pack(">I", len(_DATA_MAGIC)) + _DATA_MAGIC
+
 _MELT_CHANNEL_RE = re.compile(r"^MeltCurveChannel(\d+)$")
 _MELT_TEMPER_KEY = "MeltCurveTemper"
 _EXPOSURE_RE = re.compile(r"^Channel (\d)expose time$")
@@ -59,16 +64,31 @@ def is_aze_filename(filename: str) -> bool:
 
 
 def parse_aze_file(path: Path) -> ParsedAze:
-    segments = _iter_segments(path.read_bytes())
-    if not segments or segments[0] != _MAGIC or len(segments) <= _DATA_INDEX:
+    data = path.read_bytes()
+    if data.startswith(_BARE_DATA_PREFIX):
+        # Bare data-segment export: no metadata or plate layout travels with
+        # it, so wells get row-major labels from the standard grid.
+        data_obj = _parse_data_segment(data)
+        return ParsedAze(
+            metadata={},
+            instrument=_instrument_info(data_obj),
+            blocks=_channel_blocks(data_obj, {}),
+        )
+    if not data.startswith(struct.pack(">I", len(_MAGIC)) + _MAGIC):
+        raise ValueError(f"Not an Azure Cielo .AZE project file: {path}")
+    segments = _iter_segments(data)
+    if len(segments) <= _METADATA_INDEX:
         raise ValueError(f"Not an Azure Cielo .AZE project file: {path}")
     metadata = json.loads(segments[_METADATA_INDEX])
-    plate = json.loads(segments[_PLATE_INDEX])
-    data_obj = _parse_data_segment(segments[_DATA_INDEX])
+    # Pre-run saves stop after the plate layout or analysis segment, so the
+    # data segment is absent rather than empty. Both mean "no melt data".
+    plate_raw = segments[_PLATE_INDEX] if len(segments) > _PLATE_INDEX else b"{}"
+    data_raw = segments[_DATA_INDEX] if len(segments) > _DATA_INDEX else b""
+    data_obj = _parse_data_segment(data_raw)
     return ParsedAze(
         metadata=metadata,
         instrument=_instrument_info(data_obj),
-        blocks=_channel_blocks(data_obj, plate),
+        blocks=_channel_blocks(data_obj, json.loads(plate_raw)),
     )
 
 
