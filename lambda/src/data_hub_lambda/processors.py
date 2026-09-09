@@ -48,7 +48,7 @@ PROCESSORS: dict[str, ProcessorEntry] = {
     "qpcr": ProcessorEntry(
         process_file=azure_cielo_qpcr.process_file,
         # Sidecars must reach `process_file` so reprocess can no-op them.
-        matches_filename=_ends_with_any(".csv", ".pdf"),
+        matches_filename=_ends_with_any(".csv", ".pdf", ".aze"),
     ),
     "plate_reader": ProcessorEntry(
         process_file=spectramax_plate_reader.process_file,
