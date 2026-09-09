@@ -1,9 +1,16 @@
 from __future__ import annotations
+import json
 import logging
 from pathlib import Path
 
 from data_hub_lambda.api_client import get_client
+from data_hub_lambda.azure_cielo_qpcr.aze import (
+    is_aze_filename,
+    parse_aze_file,
+)
 from data_hub_lambda.azure_cielo_qpcr.melting_curve import (
+    build_plate_json,
+    build_tidy_rows,
     is_melting_curve_filename,
     parse_melting_curve_file,
     write_plate_json,
@@ -22,8 +29,9 @@ logger = logging.getLogger(__name__)
 def process_file(instrument_id: str, run_id: str, filename: str) -> None:
     """Process a single Azure Cielo qPCR file through the Data Hub API.
 
-    Melting curves and Cq Values are parsed; other CSVs and PDFs complete as a no-op.
-    Melt-curve passes skip `update_run` so they cannot wipe dye channels.
+    Melting curves, Cq Values, and native .AZE projects are parsed; other CSVs
+    and PDFs complete as a no-op. Melt-curve passes skip `update_run` so they
+    cannot wipe dye channels.
     """
     logger.info("Processing Azure Cielo qPCR file: %s (run: %s)", filename, run_id)
 
@@ -78,6 +86,55 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
                 filename=json_filename,
                 content_type="application/json",
             )
+        elif is_aze_filename(filename):
+            local_file_path = _download_raw(s3_bucket, s3_key, instrument_id, run_id, filename)
+            parsed_aze = parse_aze_file(local_file_path)
+            if not parsed_aze.blocks:
+                # Setup-only project: the run never reached the melt step, so
+                # there is nothing to extract. Completes like a sidecar.
+                logger.info("AZE project %s has no melt data; no artifacts.", filename)
+            else:
+                tidy_rows = build_tidy_rows(parsed_aze.blocks)
+                plate = build_plate_json(parsed_aze.blocks)
+                logger.info(
+                    "Parsed AZE project: %d channels, %d tidy rows.",
+                    len(parsed_aze.blocks),
+                    len(tidy_rows),
+                )
+
+                processed_root = config.LOCAL_PROCESSED_DATA_DIRPATH / instrument_id / run_id
+                processed_root.mkdir(parents=True, exist_ok=True)
+
+                csv_filename = f"{run_id}_aze_melting_curve_derivatives.csv"
+                plate_filename = f"{run_id}_aze_melting_curve_plate.json"
+                experiment_filename = f"{run_id}_aze_experiment.json"
+                csv_path = processed_root / csv_filename
+                plate_path = processed_root / plate_filename
+                experiment_path = processed_root / experiment_filename
+                write_tidy_csv(csv_path, tidy_rows)
+                write_plate_json(plate_path, plate)
+                # The experiment sidecar keeps metadata and instrument info
+                # that the vendor CSV exports do not carry.
+                experiment_path.write_text(
+                    json.dumps(
+                        {"metadata": parsed_aze.metadata, "instrument": parsed_aze.instrument},
+                        allow_nan=False,
+                    ),
+                    encoding="utf-8",
+                )
+
+                for artifact_filename, artifact_path, content_type in (
+                    (csv_filename, csv_path, "text/csv"),
+                    (plate_filename, plate_path, "application/json"),
+                    (experiment_filename, experiment_path, "application/json"),
+                ):
+                    _upload_processed(
+                        instrument_id=instrument_id,
+                        run_id=run_id,
+                        local_path=artifact_path,
+                        filename=artifact_filename,
+                        content_type=content_type,
+                    )
         elif filename.lower().endswith(".pdf"):
             logger.info("qPCR report %s has no preprocessing.", filename)
         elif filename.lower().endswith(".csv"):

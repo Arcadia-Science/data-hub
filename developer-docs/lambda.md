@@ -47,7 +47,7 @@ Dispatch is by `instrument_type` (Postgres/TS enum), not instrument ID. The regi
 | `tape_station` | `agilent_4150_tapestation` | `.pdf` |
 | `fplc` | `akta_fplc` | `.pdf` |
 | `gel_doc` | `azure_600_gel_doc` | `.tif` / `.tiff` |
-| `qpcr` | `azure_cielo_qpcr` | `.csv` / `.pdf` |
+| `qpcr` | `azure_cielo_qpcr` | `.csv` / `.pdf` / `.aze` |
 | `epson_v700_scanner` | `epson_v700_scanner` | `.tif` / `.tiff` |
 | `hina_microscope` | `hina_microscope` | `.nd2` |
 | `plate_reader` | `spectramax_plate_reader` | `.xls` |
@@ -60,6 +60,8 @@ Dispatch is by `instrument_type` (Postgres/TS enum), not instrument ID. The regi
 Seeded `jolene-fplc` stays `generic` until an operator confirms its PDFs match the ÄKTA processor and edits the type to `fplc`. Typing an unknown FPLC as `fplc` would feed non-ÄKTA files into that parser.
 
 Each processor module exposes `process_file(instrument_id, run_id, filename)` and reports progress through the Data Hub API.
+
+The `qpcr` processor also reads the Azure Cielo's native `.AZE` project files (`azure_cielo_qpcr/aze.py`, reverse-engineered — no vendor spec exists). An `.AZE` is a sequence of big-endian u32 length-prefixed segments: metadata JSON, plate-layout JSON, analysis settings, and a data segment whose pretty-printed JSON carries the melt curves as flat well-major `MeltCurveChannelN` arrays over a shared centidegree `MeltCurveTemper` axis. A run with melt data produces `{run_id}_aze_melting_curve_derivatives.csv`, `{run_id}_aze_melting_curve_plate.json`, and a `{run_id}_aze_experiment.json` sidecar with instrument metadata (device id, software versions, run times); setup-only projects complete with no artifacts. The CSV export path is untouched when both exist. One caveat: `.AZE` melt arrays are raw fluorescence, while the vendor's `_MeltingCurve.csv` export may be baseline-processed — derivative peak positions (Tm) agree, absolute values can differ.
 
 ## Slack notifications
 
