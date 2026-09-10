@@ -158,7 +158,10 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     }
   }
 
-  if (body.content_type !== undefined) {
+  // Treat an explicit null as "no value": the watcher sends null for
+  // extensions without a MIME mapping, and storing it would clear a type
+  // the create/adopt paths may already have set.
+  if (body.content_type != null) {
     updates.contentType = body.content_type;
   }
   if (body.size_bytes !== undefined) {

@@ -963,3 +963,7 @@ class TestUploadQueueWorker:
 
 def test_guess_content_type_handles_uppercase_pdf() -> None:
     assert _guess_content_type(Path("Experiment_Report.PDF")) == "application/pdf"
+
+
+def test_guess_content_type_falls_back_for_unknown_extension() -> None:
+    assert _guess_content_type(Path("Experiment_20000101000000.AZE")) == "application/octet-stream"

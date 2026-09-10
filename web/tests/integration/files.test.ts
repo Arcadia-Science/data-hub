@@ -240,6 +240,79 @@ describe("Files API", () => {
     expect(data.status).toBe("uploaded");
   });
 
+  // The Lambda omits content_type/size_bytes when registering a raw upload.
+  // Adoption must keep what the watcher's detected_files report recorded —
+  // overwriting with null is how the .AZE backlog lost its sizes.
+  it("POST adoption preserves existing size_bytes and content_type when omitted", async () => {
+    const adoptRunId = "files-adopt-preserve-run";
+    const sizedFile = "preserve_size.aze";
+    const typedFile = "preserve_type.aze";
+
+    await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: {
+        run_id: adoptRunId,
+        source: "watcher",
+        detected_files: [
+          {
+            relative_path: sizedFile,
+            filename: sizedFile,
+            size_bytes: 7_340_032,
+          },
+          {
+            relative_path: typedFile,
+            filename: typedFile,
+            size_bytes: 1024,
+          },
+        ],
+      },
+    });
+
+    const detail = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${adoptRunId}`,
+      { token }
+    );
+    const detailData = await detail.json();
+    const typed = detailData.files.find(
+      (f: { filename: string }) => f.filename === typedFile
+    );
+
+    // Give one detected row a content type while it is still pre-upload.
+    const patchRes = await api(`/api/v1/files/${typed.id}`, {
+      method: "PATCH",
+      token,
+      body: { content_type: "application/octet-stream" },
+    });
+    expect(patchRes.status).toBe(200);
+
+    // Lambda path adopts both rows, omitting size_bytes and content_type.
+    for (const filename of [sizedFile, typedFile]) {
+      const res = await api(
+        `/api/v1/instruments/${instrumentId}/runs/${adoptRunId}/files`,
+        {
+          method: "POST",
+          token,
+          body: {
+            s3_bucket: "test-bucket",
+            s3_key: `${instrumentId}/${adoptRunId}/${filename}`,
+            filename,
+          },
+        }
+      );
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.status).toBe("uploaded");
+      if (filename === sizedFile) {
+        expect(data.size_bytes).toBe(7_340_032);
+        expect(data.content_type).toBeNull();
+      } else {
+        expect(data.size_bytes).toBe(1024);
+        expect(data.content_type).toBe("application/octet-stream");
+      }
+    }
+  });
+
   // Idempotent on s3_key via a partial unique index. This prevents duplicate
   // file records when the Lambda retries after a timeout.
   it("POST is idempotent on s3_key — returns 200 for duplicate", async () => {
@@ -340,6 +413,47 @@ describe("Files API", () => {
     expect(data.s3_bucket).toBe("test-raw-data-bucket");
     expect(data.s3_key).toBe(`${instrumentId}/${runId}/sample.csv`);
     expect(data.uploaded_at).toBeTruthy();
+    fileDetail.parse(data);
+  });
+
+  // Watchers send an explicit null content_type for extensions the OS has no
+  // MIME mapping for (e.g. `.AZE`). The PATCH must accept it and leave the
+  // column untouched rather than reject the mark-uploaded call.
+  it("PATCH accepts an explicit null content_type", async () => {
+    const nullCtRunId = "files-null-content-type-run";
+    const filename = "Experiment_20000101000000.AZE";
+
+    await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: {
+        run_id: nullCtRunId,
+        source: "watcher",
+        detected_files: [
+          { relative_path: filename, filename, size_bytes: 2048 },
+        ],
+      },
+    });
+
+    const detail = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${nullCtRunId}`,
+      { token }
+    );
+    const detailData = await detail.json();
+    const detected = detailData.files.find(
+      (f: { filename: string }) => f.filename === filename
+    );
+
+    const res = await api(`/api/v1/files/${detected.id}`, {
+      method: "PATCH",
+      token,
+      body: { status: "uploaded", content_type: null },
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe("uploaded");
+    expect(data.content_type).toBeNull();
+    expect(data.size_bytes).toBe(2048);
     fileDetail.parse(data);
   });
 

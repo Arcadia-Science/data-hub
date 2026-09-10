@@ -49,13 +49,15 @@ class _QueueAttempt:
     reason: str
 
 
-def _guess_content_type(path: Path) -> str | None:
+def _guess_content_type(path: Path) -> str:
     # `mimetypes.guess_type` is case-sensitive on some platforms. Azure
     # Cielo writes reports as `.PDF`; without the lowercase, the PUT
     # stores `binary/octet-stream` and browsers download the file.
     lowered = path.with_suffix(path.suffix.lower())
     content_type, _ = mimetypes.guess_type(str(lowered))
-    return content_type
+    # Extensions with no MIME mapping (e.g. `.AZE`) still need a concrete
+    # type so the S3 object and the file record don't end up with null.
+    return content_type or "application/octet-stream"
 
 
 def _resolve_within(watch_dir: Path, relative: str) -> Path | None:
