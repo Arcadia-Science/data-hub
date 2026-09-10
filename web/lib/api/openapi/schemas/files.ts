@@ -15,7 +15,9 @@ export const createFileBody = z.object({
 // caller repoint a file at an arbitrary object.
 export const patchFileBody = z.object({
   status: fileStatusSchema.optional(),
-  content_type: z.string().optional(),
+  // Nullable, not just optional: watchers send an explicit null when the OS
+  // has no MIME mapping for the extension (e.g. `.AZE` project files).
+  content_type: z.string().nullish(),
   size_bytes: z.number().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
   error_message: z.string().optional(),

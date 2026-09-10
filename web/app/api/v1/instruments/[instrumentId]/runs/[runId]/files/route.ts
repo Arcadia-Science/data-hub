@@ -91,8 +91,11 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
         .set({
           s3Bucket,
           s3Key,
-          contentType,
-          sizeBytes,
+          // The Lambda omits content_type/size_bytes for raw uploads; keep
+          // what the watcher's detected_files report recorded rather than
+          // wiping the columns to null.
+          contentType: contentType ?? existing.contentType,
+          sizeBytes: sizeBytes ?? existing.sizeBytes,
           // Honour the Lambda-supplied category when adopting a row. The
           // watcher always inserts with the default ("raw"), so without
           // this the insert vs. reconcile branches would diverge for
