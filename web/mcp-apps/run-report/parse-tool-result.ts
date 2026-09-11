@@ -1,4 +1,4 @@
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult } from "@modelcontextprotocol/client";
 import type { RunReportToolResult } from "./instrument-report";
 
 function asRunReport(payload: unknown): RunReportToolResult | null {

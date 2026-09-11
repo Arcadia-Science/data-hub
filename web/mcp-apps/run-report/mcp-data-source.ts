@@ -1,5 +1,5 @@
+import type { CallToolResult } from "@modelcontextprotocol/client";
 import type { App } from "@modelcontextprotocol/ext-apps";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { parse } from "csv-parse/browser/esm/sync";
 import type { ReportItemsPage } from "@/lib/runs/report-items";
 import type {
