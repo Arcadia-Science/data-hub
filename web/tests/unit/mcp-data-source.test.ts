@@ -1,5 +1,5 @@
+import type { CallToolResult } from "@modelcontextprotocol/client";
 import type { App } from "@modelcontextprotocol/ext-apps";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createMcpReportDataSource,
