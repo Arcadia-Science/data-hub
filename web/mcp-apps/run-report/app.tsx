@@ -1,6 +1,6 @@
+import type { CallToolResult } from "@modelcontextprotocol/client";
 import type { App } from "@modelcontextprotocol/ext-apps";
 import { useApp, useHostStyles } from "@modelcontextprotocol/ext-apps/react";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { ExternalLink } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ReportDataSourceProvider } from "@/components/runs/report-data-source-provider";

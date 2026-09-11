@@ -125,7 +125,7 @@ cd web
 npm run mcp-apps:build
 ```
 
-`vite-plugin-singlefile` inlines all JavaScript and CSS into the HTML, so the output is one file with no external requests. It currently measures 1,307,852 bytes, or 352,722 bytes gzipped. Recharts and the shadcn component tree account for most of that.
+`vite-plugin-singlefile` inlines all JavaScript and CSS into the HTML, so the output is one file with no external requests. It currently measures 1,216,813 bytes, or 335,709 bytes gzipped. Recharts and the shadcn component tree account for most of that.
 
 Tailwind cannot see the shared components from the Vite root on its own, so `web/mcp-apps/run-report.css` names them explicitly:
 
