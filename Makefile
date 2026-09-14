@@ -144,9 +144,9 @@ endif
 	$(eval IMAGE_TAG := $(ENV)-$(shell git rev-parse --short HEAD))
 	aws ecr get-login-password --region us-west-1 \
 		| docker login --username AWS --password-stdin $(ECR_REGISTRY)
-	docker tag data-hub-lambda:latest $(ECR_REGISTRY)/data-hub:$(IMAGE_TAG)
-	docker push $(ECR_REGISTRY)/data-hub:$(IMAGE_TAG)
-	@echo "Pushed $(ECR_REGISTRY)/data-hub:$(IMAGE_TAG)"
+	docker tag data-hub-lambda:latest $(ECR_REGISTRY)/data-hub-$(ENV):$(IMAGE_TAG)
+	docker push $(ECR_REGISTRY)/data-hub-$(ENV):$(IMAGE_TAG)
+	@echo "Pushed $(ECR_REGISTRY)/data-hub-$(ENV):$(IMAGE_TAG)"
 
 # SAM infrastructure.
 # Lint both CloudFormation templates with cfn-lint (via `sam validate --lint`).

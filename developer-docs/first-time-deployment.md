@@ -108,7 +108,7 @@ If you previously minted a Lambda token from an older preset that omitted `instr
 
 ## 3. Bootstrap AWS (once per account)
 
-A separate bootstrap stack (`infra/bootstrap.yaml`) creates shared, per-account resources: the ECR repository, the GitHub OIDC identity provider, and the Vercel OIDC identity provider. Deploy it once per AWS account:
+A separate bootstrap stack (`infra/bootstrap.yaml`) creates shared, per-account resources: the per-environment ECR repositories, the GitHub OIDC identity provider, and the Vercel OIDC identity provider. Deploy it once per AWS account:
 
 ```sh
 make sam-bootstrap
@@ -129,7 +129,7 @@ aws cloudformation describe-stacks \
   --query "Stacks[0].Outputs"
 ```
 
-Note `GitHubOidcProviderArn`, `VercelOidcProviderArn`, and `EcrRepositoryUri` for the steps below.
+Note `GitHubOidcProviderArn` and `VercelOidcProviderArn` for the steps below. The push step derives the ECR registry and per-environment repository name from your AWS account ID, so no ECR output is needed.
 
 **2. Build and push the Docker image to ECR.**
 
