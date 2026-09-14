@@ -181,7 +181,8 @@ endif
 		"DataHubApiUrl=$(DATA_HUB_API_URL)" \
 		"DataHubApiKey=$(DATA_HUB_API_KEY)" \
 		"GitHubOidcProviderArn=$(GITHUB_OIDC_PROVIDER_ARN)" \
-		"VercelOidcProviderArn=$(VERCEL_OIDC_PROVIDER_ARN)"
+		"VercelOidcProviderArn=$(VERCEL_OIDC_PROVIDER_ARN)" \
+		"AdminDeployPrincipalArn=$(ADMIN_DEPLOY_PRINCIPAL_ARN)"
 
 # Usage: make sam-status ENV=staging
 .PHONY: sam-status

@@ -116,7 +116,9 @@ Secrets (`DATA_HUB_API_KEY`, etc.) are stored in GitHub environment secrets scop
 >
 > The deploy that first grants `s3:PutBucketCORS` must be run by an admin via `make sam-deploy` (CI can't grant itself a permission and use it in the same changeset). CORS edits after that roll out through CI.
 >
-> The bucket policies that deny object writes from unapproved principals (`RawDataBucketPolicy`, `ProcessedDataBucketPolicy`, `ArchivesBucketPolicy`) are managed the same way: adding or changing them requires `s3:PutBucketPolicy`, which the CI role does **not** hold (by design — a routine CI role that could rewrite these policies could also disable the write protection). Apply changes to the deny lists via an admin `make sam-deploy`, not CI.
+> The bucket policies that deny object writes from unapproved principals (`RawDataBucketPolicy`, `ProcessedDataBucketPolicy`, `ArchivesBucketPolicy`) are managed the same way: adding or changing them requires `s3:PutBucketPolicy`, which the CI role does **not** hold (by design — a routine CI role that could rewrite these policies could also disable the write protection). Apply changes to the deny lists via an admin `make sam-deploy`, not CI. The same policies also deny bucket-configuration actions (`s3:PutBucketPolicy`, `s3:DeleteBucketPolicy`, `s3:PutBucketAcl`, `s3:PutBucketPublicAccessBlock`, `s3:PutBucketVersioning`) to everyone except the account root and the admin principal named by the `AdminDeployPrincipalArn` stack parameter, so no other principal in the account can disable the write protection either.
+>
+> Staging roles carry a permissions boundary (`data-hub-boundary-staging`) that caps their permissions at the actions they already use and explicitly denies access to production buckets, production roles, the production Lambda function, and the production ECR repository. Managed-policy attachment, role creation, and trust-policy changes are admin-only in both environments — with them, a CI role could escalate itself to `AdministratorAccess`. Widening the boundary or changing those grants takes an admin `make sam-deploy`.
 
 #### Local deployment
 
