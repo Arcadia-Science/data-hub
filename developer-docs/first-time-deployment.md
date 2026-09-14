@@ -154,7 +154,10 @@ DATA_HUB_API_URL=https://your-staging-deployment.vercel.app/api/v1
 DATA_HUB_API_KEY=<api-key-from-step-2>
 GITHUB_OIDC_PROVIDER_ARN=<github-oidc-arn-from-step-1>
 VERCEL_OIDC_PROVIDER_ARN=<vercel-oidc-arn-from-step-1>
+ADMIN_DEPLOY_PRINCIPAL_ARN=<admin-role-arn-pattern>
 ```
+
+`ADMIN_DEPLOY_PRINCIPAL_ARN` is the IAM role ARN pattern (wildcards allowed) of the principal that runs admin deploys; the bucket policies exempt it from the bucket-configuration deny. Use the role ARN form, not the `sts::assumed-role` session form — for SSO admin roles, find it with `aws iam list-roles --path-prefix /aws-reserved/sso.amazonaws.com/`.
 
 Then deploy. The Makefile loads `infra/.env.staging` automatically when `ENV=staging` is set:
 
@@ -186,6 +189,8 @@ In the GitHub repo, go to **Settings → Environments**, create a `staging` envi
 | `SAM_S3_BUCKET` | SAM CLI managed S3 bucket (see `sam deploy` output). |
 | `DATA_HUB_API_URL` | Base API URL for the environment. |
 | `DATA_HUB_API_KEY` | API key for Lambda → Data Hub auth (also used by the archive-job callback). |
+
+Also add one environment **variable** (not a secret): `ADMIN_DEPLOY_PRINCIPAL_ARN`, the same admin role ARN pattern used in `infra/.env.staging`. The deploy workflow passes it to the stack on every run.
 
 ## 5. Finish wiring the web app
 

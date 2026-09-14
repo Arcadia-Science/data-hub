@@ -40,6 +40,14 @@ Parameters:
     Type: String
     Description: ARN of the Vercel OIDC provider (from bootstrap stack)
 
+  AdminDeployPrincipalArn:
+    Type: String
+    Description: >-
+      IAM role ARN pattern (wildcards allowed) of the principal that runs admin
+      deploys, exempted from the bucket-configuration deny. Use the role ARN
+      form (arn:aws:iam::<acct>:role/...), not the sts::assumed-role session
+      form — aws:PrincipalArn never returns the session form.
+
 Globals:
   Function:
     # Sized for 3-4 GB Hina microscope ND2s: RAM holds the decoded image and
@@ -52,6 +60,7 @@ Conditions:
   # branch push, so trusting preview subjects on the production role would
   # bypass production branch protection.
   AllowPreviewSubject: !Equals [!Ref Environment, staging]
+  IsStaging: !Equals [!Ref Environment, staging]
 
 Resources:
   # ---- S3 buckets ----
@@ -148,7 +157,8 @@ Resources:
 
   # ---- S3 bucket policies: deny object writes from unapproved principals ----
   # The account grants everyone full S3 access, so only an explicit Deny stops
-  # writes. Each bucket exempts its writer; PutBucketPolicy stays allowed.
+  # writes. Each bucket exempts its writer. Bucket-configuration changes are
+  # denied to everyone except the admin deploy principal and root.
 
   RawDataBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -173,6 +183,23 @@ Resources:
                 aws:PrincipalArn:
                   - !GetAtt WebAppS3Role.Arn
                   - !Sub "arn:aws:iam::${AWS::AccountId}:root"
+          # Config changes stay admin-only so CI can never disable the write
+          # protection above. Root can always repair the policy (S3 guarantee).
+          - Sid: DenyBucketConfigExceptAdmin
+            Effect: Deny
+            Principal: "*"
+            Action:
+              - s3:PutBucketPolicy
+              - s3:DeleteBucketPolicy
+              - s3:PutBucketAcl
+              - s3:PutBucketPublicAccessBlock
+              - s3:PutBucketVersioning
+            Resource: !Sub "arn:aws:s3:::arcadia-data-hub-raw-${Environment}"
+            Condition:
+              ArnNotLike:
+                aws:PrincipalArn:
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:root"
+                  - !Ref AdminDeployPrincipalArn
 
   ProcessedDataBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -197,6 +224,21 @@ Resources:
                 aws:PrincipalArn:
                   - !GetAtt LambdaExecutionRole.Arn
                   - !Sub "arn:aws:iam::${AWS::AccountId}:root"
+          - Sid: DenyBucketConfigExceptAdmin
+            Effect: Deny
+            Principal: "*"
+            Action:
+              - s3:PutBucketPolicy
+              - s3:DeleteBucketPolicy
+              - s3:PutBucketAcl
+              - s3:PutBucketPublicAccessBlock
+              - s3:PutBucketVersioning
+            Resource: !Sub "arn:aws:s3:::arcadia-data-hub-processed-${Environment}"
+            Condition:
+              ArnNotLike:
+                aws:PrincipalArn:
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:root"
+                  - !Ref AdminDeployPrincipalArn
 
   ArchivesBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -221,6 +263,21 @@ Resources:
                 aws:PrincipalArn:
                   - !GetAtt LambdaExecutionRole.Arn
                   - !Sub "arn:aws:iam::${AWS::AccountId}:root"
+          - Sid: DenyBucketConfigExceptAdmin
+            Effect: Deny
+            Principal: "*"
+            Action:
+              - s3:PutBucketPolicy
+              - s3:DeleteBucketPolicy
+              - s3:PutBucketAcl
+              - s3:PutBucketPublicAccessBlock
+              - s3:PutBucketVersioning
+            Resource: !Sub "arn:aws:s3:::arcadia-data-hub-archives-${Environment}"
+            Condition:
+              ArnNotLike:
+                aws:PrincipalArn:
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:root"
+                  - !Ref AdminDeployPrincipalArn
 
   # ---- Lambda function ----
 
@@ -260,12 +317,92 @@ Resources:
       SourceArn: !Sub "arn:aws:s3:::arcadia-data-hub-raw-${Environment}"
       SourceAccount: !Ref AWS::AccountId
 
+  # ---- IAM: staging permissions boundary ----
+  # Caps what any staging role can ever do, even if its own policies are
+  # escalated. The ceiling mirrors the roles' identity policies; anything
+  # absent is implicitly denied, so widening the ceiling needs an admin deploy.
+
+  StagingBoundary:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: IsStaging
+    Properties:
+      ManagedPolicyName: data-hub-boundary-staging
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: Ceiling
+            Effect: Allow
+            Action:
+              - s3:*
+              - logs:*
+              - lambda:GetFunction
+              - lambda:GetFunctionUrlConfig
+              - lambda:UpdateFunctionCode
+              - lambda:UpdateFunctionConfiguration
+              - lambda:InvokeFunctionUrl
+              - ecr:GetAuthorizationToken
+              - ecr:BatchCheckLayerAvailability
+              - ecr:BatchGetImage
+              - ecr:GetDownloadUrlForLayer
+              - ecr:PutImage
+              - ecr:InitiateLayerUpload
+              - ecr:UploadLayerPart
+              - ecr:CompleteLayerUpload
+              - cloudformation:CreateChangeSet
+              - cloudformation:DeleteChangeSet
+              - cloudformation:DescribeChangeSet
+              - cloudformation:DescribeStackEvents
+              - cloudformation:DescribeStacks
+              - cloudformation:ExecuteChangeSet
+              - cloudformation:GetTemplateSummary
+              - iam:GetRole
+              - iam:GetRolePolicy
+              - iam:ListRolePolicies
+              - iam:ListAttachedRolePolicies
+              - iam:PassRole
+              - iam:PutRolePolicy
+              - iam:DeleteRolePolicy
+              - iam:TagRole
+              - iam:UntagRole
+              # Constrained by DenyBoundaryRemovalOrSwap below.
+              - iam:PutRolePermissionsBoundary
+              - sts:GetCallerIdentity
+            Resource: "*"
+          # Explicit because an implicit boundary deny does not restrict access
+          # granted by a resource-based policy such as a bucket policy.
+          - Sid: DenyProductionResources
+            Effect: Deny
+            Action: "*"
+            Resource:
+              - "arn:aws:s3:::arcadia-data-hub-*-production"
+              - "arn:aws:s3:::arcadia-data-hub-*-production/*"
+              - !Sub "arn:aws:iam::${AWS::AccountId}:role/data-hub-*-production"
+              # Also blocks lambda:GetFunction on production; its response
+              # exposes the function's environment variables (the API key).
+              - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:data-hub-production"
+              # Created by the per-environment ECR split; denying a
+              # nonexistent ARN is harmless.
+              - !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/data-hub-production"
+          # StringNotEquals is true when the request carries no
+          # iam:PermissionsBoundary key, so this one statement also denies
+          # DeleteRolePermissionsBoundary, which never has one.
+          - Sid: DenyBoundaryRemovalOrSwap
+            Effect: Deny
+            Action:
+              - iam:PutRolePermissionsBoundary
+              - iam:DeleteRolePermissionsBoundary
+            Resource: "*"
+            Condition:
+              StringNotEquals:
+                iam:PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/data-hub-boundary-staging"
+
   # ---- IAM: Lambda execution role ----
 
   LambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub "data-hub-lambda-${Environment}"
+      PermissionsBoundary: !If [IsStaging, !Sub "arn:aws:iam::${AWS::AccountId}:policy/data-hub-boundary-staging", !Ref "AWS::NoValue"]
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -315,6 +452,7 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub "data-hub-deploy-${Environment}"
+      PermissionsBoundary: !If [IsStaging, !Sub "arn:aws:iam::${AWS::AccountId}:policy/data-hub-boundary-staging", !Ref "AWS::NoValue"]
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -327,7 +465,9 @@ Resources:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
               StringLike:
                 token.actions.githubusercontent.com:sub:
-                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/${Environment}"
+                  # Environment subject only: a ref-based subject would let any
+                  # workflow on the branch assume this role while skipping the
+                  # GitHub environment's protection rules.
                   - !Sub "repo:${GitHubOrg}/${GitHubRepo}:environment:${Environment}"
       Policies:
         - PolicyName: EcrPush
@@ -408,16 +548,25 @@ Resources:
                 Action:
                   - iam:GetRole
                   - iam:PassRole
-                  - iam:CreateRole
-                  - iam:AttachRolePolicy
                   - iam:PutRolePolicy
                   - iam:DeleteRolePolicy
-                  - iam:DetachRolePolicy
                   - iam:TagRole
-                  # iam:DeleteRole is intentionally omitted — role replacement
-                  # requires an admin deploy (see developer-docs/ci-and-deployment.md).
+                  # CreateRole, AttachRolePolicy, DetachRolePolicy, and DeleteRole
+                  # are admin-only: with them, a staging merge could escalate this
+                  # role to AdministratorAccess (developer-docs/ci-and-deployment.md).
                 Resource:
                   - !Sub "arn:aws:iam::${AWS::AccountId}:role/data-hub-*-${Environment}"
+              # Lets CloudFormation re-assert the boundary when it updates a role.
+              # The condition — and the boundary itself — only ever allow setting
+              # this one boundary, never removing or swapping it.
+              - Effect: Allow
+                Action:
+                  - iam:PutRolePermissionsBoundary
+                Resource:
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/data-hub-*-${Environment}"
+                Condition:
+                  StringEquals:
+                    iam:PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/data-hub-boundary-${Environment}"
 
   # ---- IAM: Vercel web app role (OIDC federation) ----
   # Lets the Next.js app presign S3 URLs without long-lived AWS credentials.
@@ -427,6 +576,7 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       RoleName: !Sub "data-hub-webapp-${Environment}"
+      PermissionsBoundary: !If [IsStaging, !Sub "arn:aws:iam::${AWS::AccountId}:policy/data-hub-boundary-staging", !Ref "AWS::NoValue"]
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
