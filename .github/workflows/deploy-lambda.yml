@@ -36,9 +36,10 @@ jobs:
       - name: Build and push Docker image
         env:
           ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
-          IMAGE_TAG: ${{ github.ref_name }}-${{ github.sha }}
         run: |
-          IMAGE_URI="${ECR_REGISTRY}/data-hub:${IMAGE_TAG}"
+          # Short SHA matches the tag format used by `make docker-push-lambda`.
+          IMAGE_TAG="${GITHUB_REF_NAME}-$(git rev-parse --short "$GITHUB_SHA")"
+          IMAGE_URI="${ECR_REGISTRY}/data-hub-${{ github.ref_name }}:${IMAGE_TAG}"
           docker build \
             --provenance=false \
             --platform linux/amd64 \
@@ -60,7 +61,7 @@ jobs:
             --s3-bucket "${{ secrets.SAM_S3_BUCKET }}" \
             --s3-prefix "data-hub-${{ github.ref_name }}" \
             --no-resolve-s3 \
-            --image-repository "${{ steps.ecr-login.outputs.registry }}/data-hub" \
+            --image-repository "${{ steps.ecr-login.outputs.registry }}/data-hub-${{ github.ref_name }}" \
             --parameter-overrides \
               "EcrImageUri=${IMAGE_URI}" \
               "DataHubApiUrl=${{ secrets.DATA_HUB_API_URL }}" \

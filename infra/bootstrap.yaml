@@ -1,10 +1,13 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  One-time shared resources for Data Hub: ECR repository, GitHub Actions OIDC
-  identity provider, and Vercel OIDC identity provider. Deploy once, not per
-  environment.
+  One-time shared resources for Data Hub: per-environment ECR repositories,
+  the GitHub Actions OIDC identity provider, and the Vercel OIDC identity
+  provider. Deploy once, not per environment.
 
 Resources:
+  # Legacy shared repository. New deploys push to the per-environment
+  # repositories below; delete this once both Lambda functions run images from
+  # them (Lambda re-fetches the referenced image, so the cutover comes first).
   EcrRepository:
     Type: AWS::ECR::Repository
     Properties:
@@ -59,6 +62,118 @@ Resources:
         - Key: project
           Value: arcadia-data-hub
 
+  # Per-environment repositories. The repo name is the trust boundary: ECR IAM
+  # cannot scope pushes by image tag, so each deploy role pushes only to its
+  # own environment's repo (see the EcrPush policy in infra/template.yaml).
+
+  EcrRepositoryStaging:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: data-hub-staging
+      ImageTagMutability: MUTABLE
+      RepositoryPolicyText:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowLambdaImagePull
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - ecr:BatchGetImage
+              - ecr:GetDownloadUrlForLayer
+            Condition:
+              StringLike:
+                "aws:sourceArn": !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:*"
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Expire untagged images after 7 days",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "sinceImagePushed",
+                  "countUnit": "days",
+                  "countNumber": 7
+                },
+                "action": {
+                  "type": "expire"
+                }
+              },
+              {
+                "rulePriority": 2,
+                "description": "Keep only the 50 most recent tagged images",
+                "selection": {
+                  "tagStatus": "tagged",
+                  "tagPrefixList": ["staging-"],
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 50
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+      Tags:
+        - Key: project
+          Value: arcadia-data-hub
+
+  EcrRepositoryProduction:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: data-hub-production
+      ImageTagMutability: MUTABLE
+      RepositoryPolicyText:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowLambdaImagePull
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - ecr:BatchGetImage
+              - ecr:GetDownloadUrlForLayer
+            Condition:
+              StringLike:
+                "aws:sourceArn": !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:*"
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Expire untagged images after 7 days",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "sinceImagePushed",
+                  "countUnit": "days",
+                  "countNumber": 7
+                },
+                "action": {
+                  "type": "expire"
+                }
+              },
+              {
+                "rulePriority": 2,
+                "description": "Keep only the 50 most recent tagged images",
+                "selection": {
+                  "tagStatus": "tagged",
+                  "tagPrefixList": ["production-"],
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 50
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+      Tags:
+        - Key: project
+          Value: arcadia-data-hub
+
   GitHubOidcProvider:
     Type: AWS::IAM::OIDCProvider
     Properties:
@@ -81,10 +196,22 @@ Resources:
 
 Outputs:
   EcrRepositoryUri:
-    Description: ECR repository URI for container images
+    Description: Legacy shared ECR repository URI (superseded by the per-environment exports below)
     Value: !GetAtt EcrRepository.RepositoryUri
     Export:
       Name: !Sub "${AWS::StackName}-EcrRepositoryUri"
+
+  EcrRepositoryUriStaging:
+    Description: Staging ECR repository URI for container images
+    Value: !GetAtt EcrRepositoryStaging.RepositoryUri
+    Export:
+      Name: !Sub "${AWS::StackName}-EcrRepositoryUriStaging"
+
+  EcrRepositoryUriProduction:
+    Description: Production ECR repository URI for container images
+    Value: !GetAtt EcrRepositoryProduction.RepositoryUri
+    Export:
+      Name: !Sub "${AWS::StackName}-EcrRepositoryUriProduction"
 
   GitHubOidcProviderArn:
     Description: ARN of the GitHub Actions OIDC identity provider
