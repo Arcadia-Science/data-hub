@@ -13,7 +13,7 @@ Parameters:
 
   EcrImageUri:
     Type: String
-    Description: Full ECR image URI including tag (e.g., 123456789.dkr.ecr.us-west-1.amazonaws.com/arcadia-data-hub:staging-abc123)
+    Description: Full ECR image URI including tag (e.g., 123456789.dkr.ecr.us-west-1.amazonaws.com/data-hub-staging:staging-abc123)
 
   GitHubOrg:
     Type: String

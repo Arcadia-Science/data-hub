@@ -106,6 +106,7 @@ Resources:
                 "description": "Keep only the 50 most recent tagged images",
                 "selection": {
                   "tagStatus": "tagged",
+                  "tagPrefixList": ["staging-"],
                   "countType": "imageCountMoreThan",
                   "countNumber": 50
                 },
@@ -159,6 +160,7 @@ Resources:
                 "description": "Keep only the 50 most recent tagged images",
                 "selection": {
                   "tagStatus": "tagged",
+                  "tagPrefixList": ["production-"],
                   "countType": "imageCountMoreThan",
                   "countNumber": 50
                 },
