@@ -98,7 +98,7 @@ The Lambda function is deployed as a Docker container image via [AWS SAM](https:
 - S3 event triggers for each supported instrument
 - IAM roles for Lambda execution, GitHub Actions deployment (OIDC), and Vercel web app S3 access (OIDC)
 
-A separate bootstrap stack (`infra/bootstrap.yaml`) creates shared per-account resources — the ECR repository, the GitHub OIDC identity provider, and the Vercel OIDC identity provider — and only needs to be deployed once (`make sam-bootstrap`).
+A separate bootstrap stack (`infra/bootstrap.yaml`) creates shared per-account resources — the per-environment ECR repositories, the GitHub OIDC identity provider, and the Vercel OIDC identity provider — and only needs to be deployed once (`make sam-bootstrap`).
 
 Standing up the stack for the first time — the one-time bootstrap, building and pushing the image, the initial `make sam-deploy`, and wiring the GitHub environment secrets and Vercel outputs — is covered step by step in [First-time deployment](first-time-deployment.md). The rest of this section is the reference for deploys after the stack exists.
 
