@@ -39,7 +39,7 @@ export default async function InstrumentsPage() {
   // Header renders immediately; the tabs stream so a slow catalogue query
   // doesn't hold up the "Add instrument" affordance.
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6 2xl:w-6xl">
       <div className="flex items-center justify-between">
         <h1 className="font-semibold text-2xl tracking-tight">Instruments</h1>
         <AddInstrumentDialog

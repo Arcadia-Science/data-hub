@@ -95,7 +95,7 @@ export default async function UserRunsPage({ params, searchParams }: Props) {
   // Each section fetches its own data behind a Suspense boundary so the static
   // shell paints immediately and the stats + runs stream in independently.
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 p-6 2xl:w-7xl">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 p-6 2xl:w-6xl">
       <section className="flex flex-col gap-6">
         <div className="flex items-center gap-3">
           <UserAvatar size="lg" user={profile} />

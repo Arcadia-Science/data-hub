@@ -67,7 +67,7 @@ export default async function WatcherDetailPage({
   // `getWatcherById` lookup is `cache()`-deduped so both sections resolve
   // against a single query while their heavier data fetches run in parallel.
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6 2xl:w-6xl">
       <Suspense fallback={<WatcherHeaderSkeleton />}>
         <WatcherHeaderSection isAdmin={isAdmin} watcherId={watcherId} />
       </Suspense>

@@ -172,7 +172,7 @@ export default async function InstrumentDetailPage({
   const isAdmin = session.user.isAdmin === true;
 
   return (
-    <div className="mx-auto flex w-full min-w-0 max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
+    <div className="mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-6 p-6 2xl:w-6xl">
       <Suspense fallback={<InstrumentHeaderSkeleton />}>
         <InstrumentHeaderSection
           instrumentId={instrumentId}

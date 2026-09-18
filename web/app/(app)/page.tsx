@@ -76,7 +76,7 @@ export default async function DashboardPage({
   // shell (headings) paints immediately and the three data blocks stream in
   // independently — a slow runs query no longer holds up the stats cards.
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 p-6 2xl:w-7xl">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 p-6 2xl:w-6xl">
       <Suspense fallback={<StatCardsSkeleton />}>
         <DashboardStatsSection />
       </Suspense>

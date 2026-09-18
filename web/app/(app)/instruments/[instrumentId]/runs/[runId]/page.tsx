@@ -98,7 +98,7 @@ export default async function RunDetailPage({ params, searchParams }: Props) {
   // paint immediately on navigation. `lookupRunByNaturalKey` is `cache()`-deduped
   // across the content and comments loaders on the same request.
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6 2xl:w-6xl">
       <Suspense fallback={<RunContentSkeleton instrumentType="generic" />}>
         <RunDetailContent
           filters={filters}
