@@ -25,7 +25,7 @@ export default async function SettingsLayout({
   // page-level `metadata` exports merging into the head — Next resolves
   // metadata independently of whether the layout actually renders its
   // children — so unfurlers still see "Settings | Data Hub" / "Access
-  // Tokens" titles.
+  // tokens" titles.
   if (!session?.user) {
     return (
       <SignInRequired callbackUrl="/settings">
@@ -38,7 +38,7 @@ export default async function SettingsLayout({
   // labels this section, so rendering an H1 here was duplicative chrome
   // on every settings page. Pages render their own H2 instead.
   return (
-    <div className="mx-auto w-full max-w-7xl px-4 pt-4 pb-10 sm:px-6 lg:px-8 2xl:w-7xl">
+    <div className="mx-auto w-full max-w-6xl px-4 pt-4 pb-10 sm:px-6 lg:px-8 2xl:w-6xl">
       {children}
     </div>
   );

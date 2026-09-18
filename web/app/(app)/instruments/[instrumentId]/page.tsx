@@ -57,9 +57,15 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   // Description is intentionally minimal — it surfaces in Slack/Notion link
   // previews. Anything in the URL slug is already visible to the sharer;
   // we don't include sensitive bits (run counts, watcher status, etc.).
-  const description = instrument
-    ? `${instrument.displayName} runs on Data Hub.`
-    : "Data Hub instrument.";
+  // Unknown instruments inherit the root description rather than inventing one.
+  if (!instrument) {
+    return {
+      title,
+      openGraph: { title, type: "article" },
+      twitter: { card: "summary", title },
+    };
+  }
+  const description = `Runs and data files from ${instrument.displayName}.`;
   return {
     title,
     description,
@@ -172,7 +178,7 @@ export default async function InstrumentDetailPage({
   const isAdmin = session.user.isAdmin === true;
 
   return (
-    <div className="mx-auto flex w-full min-w-0 max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
+    <div className="mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-6 p-6 2xl:w-6xl">
       <Suspense fallback={<InstrumentHeaderSkeleton />}>
         <InstrumentHeaderSection
           instrumentId={instrumentId}

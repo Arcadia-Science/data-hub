@@ -1,8 +1,8 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
+import type { ReactNode } from "react";
+import { SignIn, useClientSignIn, useSignIn } from "@/components/auth/sign-in";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { signIn } from "@/lib/auth-client";
@@ -29,107 +29,105 @@ interface DevSignInFormProps {
   signInAction: (formData: FormData) => Promise<void>;
 }
 
+function DevChrome({ children }: { children: ReactNode }) {
+  return (
+    <div className="w-full border-border border-t pt-6">
+      <p className="mb-3 text-center text-muted-foreground text-xs uppercase tracking-wider">
+        Local development
+      </p>
+      {children}
+    </div>
+  );
+}
+
+function DevEmailField({ inputId }: { inputId: string }) {
+  const {
+    state: { pending },
+  } = useSignIn();
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Label htmlFor={inputId}>Email</Label>
+      <Input
+        defaultValue="alice@example.com"
+        disabled={pending}
+        id={inputId}
+        name="email"
+        placeholder="alice@example.com"
+        required
+        type="email"
+      />
+    </div>
+  );
+}
+
+function DevSubmit() {
+  return (
+    <SignIn.Submit className="w-full cursor-pointer">
+      Sign in (dev)
+    </SignIn.Submit>
+  );
+}
+
+function DevOAuthProvider({ children }: { children: ReactNode }) {
+  const value = useClientSignIn(async (formData) => {
+    const emailRaw = formData?.get("email");
+    const email =
+      typeof emailRaw === "string" ? emailRaw.trim().toLowerCase() : "";
+    // Omit callbackURL so the OAuth resume path (oauth_query) wins.
+    const result = await signIn.email({ email, password: DEV_PASSWORD });
+    return result.error
+      ? (result.error.message ?? "Couldn't sign in with that email.")
+      : null;
+  }, "Couldn't sign in with that email.");
+
+  return <SignIn.Provider {...value}>{children}</SignIn.Provider>;
+}
+
+function DevOAuthSignIn({ inputId }: { inputId: string }) {
+  return (
+    <DevOAuthProvider>
+      <DevChrome>
+        <SignIn.ClientFrame className="flex w-full flex-col gap-3">
+          <DevEmailField inputId={inputId} />
+          <DevSubmit />
+          <SignIn.Error />
+        </SignIn.ClientFrame>
+      </DevChrome>
+    </DevOAuthProvider>
+  );
+}
+
+function DevServerSignIn({
+  inputId,
+  signInAction,
+}: {
+  inputId: string;
+  signInAction: (formData: FormData) => Promise<void>;
+}) {
+  return (
+    <DevChrome>
+      <SignIn.Frame
+        action={signInAction}
+        className="flex w-full flex-col gap-3"
+      >
+        <DevEmailField inputId={inputId} />
+        <DevSubmit />
+      </SignIn.Frame>
+    </DevChrome>
+  );
+}
+
 export function DevSignInForm({
   signInAction,
   inputId = "dev-sign-in-email",
 }: DevSignInFormProps) {
   const searchParams = useSearchParams();
   const isOAuthAuthorize = Boolean(searchParams.get("client_id"));
-  const [clientError, setClientError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
 
-  if (isOAuthAuthorize) {
-    return (
-      <div className="w-full border-border border-t pt-6">
-        <p className="mb-3 text-center text-muted-foreground text-xs uppercase tracking-wider">
-          Local development
-        </p>
-        <form
-          className="flex w-full flex-col gap-3"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const formData = new FormData(event.currentTarget);
-            const emailRaw = formData.get("email");
-            const email =
-              typeof emailRaw === "string" ? emailRaw.trim().toLowerCase() : "";
-            setClientError(null);
-            setPending(true);
-            // Omit callbackURL so the OAuth resume path (oauth_query) wins.
-            void signIn
-              .email({ email, password: DEV_PASSWORD })
-              .then((result) => {
-                if (result.error) {
-                  setClientError(
-                    result.error.message ?? "Couldn't sign in with that email."
-                  );
-                  setPending(false);
-                }
-              })
-              .catch((err: unknown) => {
-                setClientError(
-                  err instanceof Error
-                    ? err.message
-                    : "Couldn't sign in with that email."
-                );
-                setPending(false);
-              });
-          }}
-        >
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor={inputId}>Email</Label>
-            <Input
-              defaultValue="alice@example.com"
-              disabled={pending}
-              id={inputId}
-              name="email"
-              placeholder="alice@example.com"
-              required
-              type="email"
-            />
-          </div>
-          <Button
-            className="w-full cursor-pointer"
-            disabled={pending}
-            type="submit"
-            variant="outline"
-          >
-            {pending ? "Signing in…" : "Sign in (dev)"}
-          </Button>
-          {clientError ? (
-            <p className="text-destructive text-sm" role="alert">
-              {clientError}
-            </p>
-          ) : null}
-        </form>
-      </div>
-    );
-  }
-
-  return (
-    <div className="w-full border-border border-t pt-6">
-      <p className="mb-3 text-center text-muted-foreground text-xs uppercase tracking-wider">
-        Local development
-      </p>
-      <form action={signInAction} className="flex w-full flex-col gap-3">
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor={inputId}>Email</Label>
-          <Input
-            defaultValue="alice@example.com"
-            id={inputId}
-            name="email"
-            placeholder="alice@example.com"
-            required
-            type="email"
-          />
-        </div>
-        <Button
-          className="w-full cursor-pointer"
-          type="submit"
-          variant="outline"
-        >
-          Sign in (dev)
-        </Button>
-      </form>
-    </div>
+  return isOAuthAuthorize ? (
+    <DevOAuthSignIn inputId={inputId} />
+  ) : (
+    <DevServerSignIn inputId={inputId} signInAction={signInAction} />
   );
 }

@@ -1,6 +1,13 @@
 "use client";
 
-import { Archive, EllipsisVertical, Pencil, RotateCcw } from "lucide-react";
+import {
+  Archive,
+  EllipsisVertical,
+  Pencil,
+  Radio,
+  RotateCcw,
+} from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import { EditInstrumentDialog } from "@/components/instruments/edit-instrument-dialog";
 import { ReactivateInstrumentDialog } from "@/components/instruments/reactivate-instrument-dialog";
@@ -17,7 +24,8 @@ import {
 import type { InstrumentListItem } from "@/lib/api/instruments";
 
 // Both `InstrumentListItem` (table) and `InstrumentDetail` (header) satisfy
-// this, so one component drives both surfaces.
+// this, so one component drives both surfaces. `activeWatcherId` is only on
+// the detail payload, so the watcher link appears in the header menu.
 export type InstrumentActionTarget = Pick<
   InstrumentListItem,
   | "displayName"
@@ -26,10 +34,12 @@ export type InstrumentActionTarget = Pick<
   | "runCount"
   | "status"
   | "watcherCount"
->;
+> & {
+  activeWatcherId?: string | null;
+};
 
-// `variant` picks the layout: `menu` folds Edit into the three-dot menu (dense
-// table); `expanded` pulls Edit out as its own button beside the menu (header).
+// `variant` only changes the trigger: `expanded` is the outline icon used
+// in the header; `menu` is the denser ghost icon used in the table.
 export function InstrumentActions({
   instrument,
   variant = "menu",
@@ -57,18 +67,6 @@ export function InstrumentActions({
         <StatusActions instrumentId={instrument.id} />
       ) : null}
 
-      {expanded ? (
-        <Button
-          onClick={() => setEditOpen(true)}
-          size="sm"
-          type="button"
-          variant="outline"
-        >
-          <Pencil className="size-3.5" />
-          Edit
-        </Button>
-      ) : null}
-
       <DropdownMenu onOpenChange={setMenuOpen} open={menuOpen}>
         <DropdownMenuTrigger asChild>
           {expanded ? (
@@ -93,21 +91,25 @@ export function InstrumentActions({
           )}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-44">
-          {expanded ? null : (
-            <>
-              <DropdownMenuItem
-                onSelect={(e) => {
-                  e.preventDefault();
-                  setMenuOpen(false);
-                  setEditOpen(true);
-                }}
-              >
-                <Pencil className="size-3.5" />
-                Edit
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-            </>
-          )}
+          <DropdownMenuItem
+            onSelect={(e) => {
+              e.preventDefault();
+              setMenuOpen(false);
+              setEditOpen(true);
+            }}
+          >
+            <Pencil className="size-3.5" />
+            Edit
+          </DropdownMenuItem>
+          {instrument.activeWatcherId ? (
+            <DropdownMenuItem asChild>
+              <Link href={`/watchers/${instrument.activeWatcherId}`}>
+                <Radio className="size-3.5" />
+                View watcher
+              </Link>
+            </DropdownMenuItem>
+          ) : null}
+          <DropdownMenuSeparator />
           {isRetired ? (
             <DropdownMenuItem
               onSelect={(e) => {

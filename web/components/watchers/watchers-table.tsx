@@ -1,4 +1,7 @@
 import { SearchX } from "lucide-react";
+import type { ReactNode } from "react";
+import { RelativeTime } from "@/components/dashboard/relative-time";
+import { RowActionsCell } from "@/components/instruments/row-actions-cell";
 import { ClickableRow } from "@/components/instruments/runs-table/clickable-row";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -9,23 +12,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { DeregisterDialog } from "@/components/watchers/deregister-dialog";
 import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type { WatcherListItem } from "@/lib/api/watchers";
-import { cn, formatRelativeTime } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 /**
- * Placeholder mirroring `WatchersTable` columns and row height (mono ID,
- * badge-sized status, deregister action) so streamed content swaps in
- * without layout shift.
+ * Placeholder mirroring `WatchersTable` columns and row height so streamed
+ * content swaps in without layout shift.
  */
 export function WatchersTableSkeleton({
   rows = 7,
-  withActions = true,
   ariaLabel = "Loading watchers",
 }: {
   rows?: number;
-  withActions?: boolean;
   ariaLabel?: string;
 }) {
   return (
@@ -38,21 +37,16 @@ export function WatchersTableSkeleton({
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Watcher ID</TableHead>
             <TableHead>Instrument</TableHead>
             <TableHead>Hostname</TableHead>
             <TableHead>Version</TableHead>
             <TableHead>Status</TableHead>
             <TableHead>Last Heartbeat</TableHead>
-            {withActions ? <TableHead className="w-[80px]" /> : null}
           </TableRow>
         </TableHeader>
         <TableBody>
           {Array.from({ length: rows }).map((_, i) => (
-            <TableRow key={i}>
-              <TableCell>
-                <Skeleton className="h-4 w-16" />
-              </TableCell>
+            <TableRow className="text-sm" key={i}>
               <TableCell>
                 <Skeleton className="h-4 w-40" />
               </TableCell>
@@ -68,11 +62,6 @@ export function WatchersTableSkeleton({
               <TableCell>
                 <Skeleton className="h-4 w-20" />
               </TableCell>
-              {withActions ? (
-                <TableCell>
-                  <Skeleton className="h-7 w-24" />
-                </TableCell>
-              ) : null}
             </TableRow>
           ))}
         </TableBody>
@@ -83,25 +72,23 @@ export function WatchersTableSkeleton({
 
 export function WatchersTable({
   data,
-  isDeregisteredView = false,
-  isAdmin = false,
+  emptyMessage = "No active watchers.",
+  renderRowActions,
 }: {
   data: WatcherListItem[];
-  isDeregisteredView?: boolean;
-  /** Admins get the inline Deregister action on active rows. */
-  isAdmin?: boolean;
+  /** Message shown in the empty state; per-tab callers override the default. */
+  emptyMessage?: string;
+  /**
+   * Optional per-row action cell. When omitted, the trailing actions column
+   * is hidden entirely — used for the deregistered tab and for non-admins.
+   */
+  renderRowActions?: (row: WatcherListItem) => ReactNode;
 }) {
-  const showActions = !isDeregisteredView && isAdmin;
-
   if (data.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-background py-16 dark:bg-muted">
         <SearchX className="size-8 text-muted-foreground" />
-        <p className="text-muted-foreground text-sm">
-          {isDeregisteredView
-            ? "No deregistered watchers."
-            : "No active watchers."}
-        </p>
+        <p className="text-muted-foreground text-sm">{emptyMessage}</p>
       </div>
     );
   }
@@ -111,69 +98,57 @@ export function WatchersTable({
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Watcher ID</TableHead>
             <TableHead>Instrument</TableHead>
             <TableHead>Hostname</TableHead>
             <TableHead>Version</TableHead>
             <TableHead>Status</TableHead>
             <TableHead>Last Heartbeat</TableHead>
-            {showActions ? <TableHead className="w-[80px]" /> : null}
+            {renderRowActions ? <TableHead className="w-[100px]" /> : null}
           </TableRow>
         </TableHeader>
         <TableBody>
           {data.map((row) => (
             <ClickableRow
-              className={cn(isDeregisteredView && "opacity-60")}
+              className={cn("text-sm", row.deletedAt && "opacity-60")}
               href={`/watchers/${row.id}`}
               key={row.id}
             >
               <TableCell>
-                <span className="font-mono text-xs">{row.id.slice(0, 8)}…</span>
-              </TableCell>
-              <TableCell>
                 {row.instrumentDisplayName ? (
-                  <span className="text-sm">{row.instrumentDisplayName}</span>
+                  row.instrumentDisplayName
                 ) : (
-                  <span className="font-mono text-muted-foreground text-xs">
+                  <span className="font-mono text-muted-foreground">
                     {row.instrumentId}
                   </span>
                 )}
               </TableCell>
               <TableCell>
-                <span className="text-sm">
-                  {row.hostname ?? (
-                    <span className="text-muted-foreground">—</span>
-                  )}
-                </span>
+                {row.hostname ?? (
+                  <span className="text-muted-foreground">—</span>
+                )}
               </TableCell>
               <TableCell>
                 {row.watcherVersion ? (
-                  <span className="font-mono text-xs">
-                    {row.watcherVersion}
-                  </span>
+                  <span className="font-mono">{row.watcherVersion}</span>
                 ) : (
                   <span className="text-muted-foreground">—</span>
                 )}
               </TableCell>
               <TableCell>
-                <WatcherStatusBadge status={row.effectiveStatus} />
+                <WatcherStatusBadge
+                  className="text-sm"
+                  status={row.effectiveStatus}
+                />
               </TableCell>
               <TableCell>
-                <span className="text-muted-foreground text-xs">
-                  {row.lastHeartbeatAt
-                    ? formatRelativeTime(row.lastHeartbeatAt)
-                    : "—"}
-                </span>
+                {row.lastHeartbeatAt ? (
+                  <RelativeTime date={row.lastHeartbeatAt.toISOString()} />
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
               </TableCell>
-              {showActions ? (
-                <TableCell onClick={(e) => e.stopPropagation()}>
-                  {!row.deletedAt && (
-                    <DeregisterDialog
-                      hostname={row.hostname}
-                      watcherId={row.id}
-                    />
-                  )}
-                </TableCell>
+              {renderRowActions ? (
+                <RowActionsCell>{renderRowActions(row)}</RowActionsCell>
               ) : null}
             </ClickableRow>
           ))}

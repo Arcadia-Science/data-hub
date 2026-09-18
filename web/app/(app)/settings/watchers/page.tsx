@@ -11,10 +11,14 @@ import { db } from "@/lib/db";
 import { users, watcherReleaseConfig } from "@/lib/db/schema";
 import { fetchWatcherVersions } from "@/lib/pypi";
 
+const description =
+  "Set the watcher version that installed watchers update themselves to.";
+
 export const metadata: Metadata = {
-  title: "Watchers",
-  description:
-    "Configure the watcher release advertised by the auto-update endpoint.",
+  title: "Watcher updates",
+  description,
+  openGraph: { title: "Watcher updates", description },
+  twitter: { title: "Watcher updates", description },
 };
 
 export default async function WatchersSettingsPage() {

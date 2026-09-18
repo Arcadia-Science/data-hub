@@ -14,13 +14,10 @@ import {
 import { auth } from "@/lib/auth";
 import { ADD_INSTRUMENT_DOCS_URL, MANAGING_TOKENS_DOCS_URL } from "@/lib/docs";
 
-const description = "Instruments connected to Data Hub.";
-
 export const metadata: Metadata = {
   title: "Instruments",
-  description,
-  openGraph: { title: "Instruments", description },
-  twitter: { title: "Instruments", description },
+  openGraph: { title: "Instruments" },
+  twitter: { title: "Instruments" },
 };
 
 export default async function InstrumentsPage() {
@@ -39,7 +36,7 @@ export default async function InstrumentsPage() {
   // Header renders immediately; the tabs stream so a slow catalogue query
   // doesn't hold up the "Add instrument" affordance.
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6 2xl:w-6xl">
       <div className="flex items-center justify-between">
         <h1 className="font-semibold text-2xl tracking-tight">Instruments</h1>
         <AddInstrumentDialog

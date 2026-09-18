@@ -44,8 +44,13 @@ function toTzSafeSince(dateString: string): Date {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { watcherId } = await params;
   const watcher = await getWatcherById(watcherId);
+  const title = watcher?.hostname || `Watcher ${watcherId.slice(0, 8)}`;
+  const description = `Connection status, recent uploads, and config for ${title}.`;
   return {
-    title: watcher?.hostname ?? watcherId.slice(0, 8),
+    title,
+    description,
+    openGraph: { title, description },
+    twitter: { title, description },
   };
 }
 
@@ -67,7 +72,7 @@ export default async function WatcherDetailPage({
   // `getWatcherById` lookup is `cache()`-deduped so both sections resolve
   // against a single query while their heavier data fetches run in parallel.
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6 2xl:w-6xl">
       <Suspense fallback={<WatcherHeaderSkeleton />}>
         <WatcherHeaderSection isAdmin={isAdmin} watcherId={watcherId} />
       </Suspense>

@@ -32,6 +32,8 @@ import type {
   SearchScope,
   SearchUserResult,
 } from "@/lib/api/search";
+import { runCommentHref } from "@/lib/comment-hash";
+import { applySamePageCommentHash } from "@/lib/comment-hash-nav";
 import { MIN_QUERY_LENGTH } from "@/lib/search-constants";
 import { cn } from "@/lib/utils";
 
@@ -83,9 +85,7 @@ function userHref(user: SearchUserResult): string {
 }
 
 function commentHref(comment: SearchCommentResult): string {
-  return `/instruments/${comment.instrumentId}/runs/${encodeURIComponent(
-    comment.runId
-  )}#comment-${comment.id}`;
+  return runCommentHref(comment.instrumentId, comment.runId, comment.id);
 }
 
 function Kbd({ children }: { children: React.ReactNode }) {
@@ -170,26 +170,7 @@ export function GlobalSearch({
       addRecent(trimmed);
       onOpenChange(false);
 
-      // Same-pathname `#comment-{id}` links must not go through App Router
-      // `push` alone — it uses pushState and does not fire `hashchange`, so
-      // the comments list would never scroll when already on the run page.
-      const url = new URL(href, window.location.origin);
-      if (
-        url.hash.startsWith("#comment-") &&
-        url.pathname === window.location.pathname
-      ) {
-        if (url.hash === window.location.hash) {
-          document
-            .getElementById(url.hash.slice(1))
-            ?.scrollIntoView({ block: "center" });
-        } else {
-          window.history.pushState(
-            null,
-            "",
-            `${url.pathname}${url.search}${url.hash}`
-          );
-          window.dispatchEvent(new HashChangeEvent("hashchange"));
-        }
+      if (applySamePageCommentHash(href)) {
         return;
       }
 

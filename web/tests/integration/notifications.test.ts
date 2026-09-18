@@ -12,6 +12,7 @@ import {
   updatePreferences,
 } from "@/lib/api/notifications";
 import {
+  files,
   instrumentNotificationSubscriptions,
   instrumentRuns,
   instruments,
@@ -807,6 +808,54 @@ describe("Notifications", () => {
       expect(commentRow?.actor?.id).toBe(actor);
       expect(commentRow?.actor?.initials).toBeTruthy();
       expect(commentRow?.commentId).toBeTruthy();
+    });
+
+    it("listNotifications attaches raw-file counts and acquiredAt for run-anchored rows", async () => {
+      const acquiredAt = new Date("2026-09-16T18:31:00.000Z");
+      const { runInternalId } = await seedNotificationFixture("run-file-stats");
+      const db = getTestDb();
+      await db
+        .update(instrumentRuns)
+        .set({ acquiredAt })
+        .where(eq(instrumentRuns.id, runInternalId));
+      await db.insert(files).values([
+        {
+          instrumentRunId: runInternalId,
+          filename: "a.csv",
+          category: "raw",
+          status: "completed",
+        },
+        {
+          instrumentRunId: runInternalId,
+          filename: "b.csv",
+          category: "raw",
+          status: "completed",
+        },
+        {
+          instrumentRunId: runInternalId,
+          filename: "c.csv",
+          category: "raw",
+          status: "failed",
+        },
+        {
+          instrumentRunId: runInternalId,
+          filename: "derived.png",
+          category: "processed",
+          status: "completed",
+        },
+      ]);
+
+      const rows = await listNotifications(userA);
+      const runRow = rows.find((r) => r.type === "run_created");
+      expect(runRow).toBeDefined();
+      expect(runRow?.fileCount).toBe(3);
+      expect(runRow?.filesFailed).toBe(1);
+      expect(runRow?.runAcquiredAt?.toISOString()).toBe(
+        acquiredAt.toISOString()
+      );
+
+      const commentRow = rows.find((r) => r.type === "comment_attributed");
+      expect(commentRow?.fileCount).toBe(3);
     });
 
     it("listNotifications respects the limit option", async () => {

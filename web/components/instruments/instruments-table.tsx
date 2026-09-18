@@ -194,7 +194,7 @@ export function InstrumentsTable({
                 </TableCell>
                 <TableCell>
                   <TruncatedBadges
-                    badgeClassName="font-normal text-xs"
+                    badgeClassName="bg-slate-200 font-normal text-slate-800 text-xs dark:bg-slate-800 dark:text-slate-200"
                     values={row.filePatterns}
                     variant="outline"
                   />
