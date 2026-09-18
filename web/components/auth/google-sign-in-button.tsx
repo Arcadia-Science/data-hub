@@ -1,8 +1,8 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
+import type { ReactNode } from "react";
+import { SignIn, useClientSignIn } from "@/components/auth/sign-in";
 import { signIn } from "@/lib/auth-client";
 
 function GoogleIcon() {
@@ -34,6 +34,9 @@ function GoogleIcon() {
   );
 }
 
+const GOOGLE_SUBMIT_CLASS =
+  "h-11 w-full cursor-pointer gap-3 bg-background text-base shadow-xs";
+
 interface GoogleSignInButtonProps {
   /**
    * Server action used for normal (non-MCP-OAuth) Google sign-in so Set-Cookie
@@ -42,74 +45,58 @@ interface GoogleSignInButtonProps {
   signInAction: () => Promise<void>;
 }
 
-/**
- * During MCP OAuth (`client_id` in the URL), sign in from the client so
- * `oauthProviderClient` can attach signed `oauth_query` and Better Auth can
- * resume authorize after Google. Otherwise submit the server action.
- */
+function GoogleSubmit() {
+  return (
+    <SignIn.Submit className={GOOGLE_SUBMIT_CLASS} size="lg">
+      <GoogleIcon />
+      Sign in with Google
+    </SignIn.Submit>
+  );
+}
+
+function GoogleOAuthProvider({ children }: { children: ReactNode }) {
+  const value = useClientSignIn(async () => {
+    // `oauthProviderClient` reads authorize params from the URL and
+    // forwards them; omit callbackURL so the OAuth resume path wins.
+    const result = await signIn.social({ provider: "google" });
+    return result.error
+      ? (result.error.message ?? "Couldn't start Google sign-in.")
+      : null;
+  }, "Couldn't start Google sign-in.");
+
+  return <SignIn.Provider {...value}>{children}</SignIn.Provider>;
+}
+
+function GoogleOAuthSignIn() {
+  return (
+    <GoogleOAuthProvider>
+      <SignIn.ClientFrame className="w-full">
+        <GoogleSubmit />
+        <SignIn.Error className="mt-4" />
+      </SignIn.ClientFrame>
+    </GoogleOAuthProvider>
+  );
+}
+
+function GoogleServerSignIn({
+  signInAction,
+}: {
+  signInAction: () => Promise<void>;
+}) {
+  return (
+    <SignIn.Frame action={signInAction} className="w-full">
+      <GoogleSubmit />
+    </SignIn.Frame>
+  );
+}
+
 export function GoogleSignInButton({ signInAction }: GoogleSignInButtonProps) {
   const searchParams = useSearchParams();
   const isOAuthAuthorize = Boolean(searchParams.get("client_id"));
-  const [clientError, setClientError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
 
-  if (isOAuthAuthorize) {
-    return (
-      <div className="w-full">
-        <Button
-          className="h-11 w-full cursor-pointer gap-3 bg-background text-base shadow-xs"
-          disabled={pending}
-          onClick={() => {
-            setClientError(null);
-            setPending(true);
-            // `oauthProviderClient` reads authorize params from the URL and
-            // forwards them; omit callbackURL so the OAuth resume path wins.
-            void signIn
-              .social({ provider: "google" })
-              .then((result) => {
-                if (result.error) {
-                  setClientError(
-                    result.error.message ?? "Couldn't start Google sign-in."
-                  );
-                  setPending(false);
-                }
-              })
-              .catch((err: unknown) => {
-                setClientError(
-                  err instanceof Error
-                    ? err.message
-                    : "Couldn't start Google sign-in."
-                );
-                setPending(false);
-              });
-          }}
-          size="lg"
-          type="button"
-          variant="outline"
-        >
-          <GoogleIcon />
-          {pending ? "Redirecting…" : "Sign in with Google"}
-        </Button>
-        {clientError ? (
-          <p className="mt-4 text-destructive text-sm" role="alert">
-            {clientError}
-          </p>
-        ) : null}
-      </div>
-    );
-  }
-
-  return (
-    <form action={signInAction} className="w-full">
-      <Button
-        className="h-11 w-full cursor-pointer gap-3 bg-background text-base shadow-xs"
-        size="lg"
-        type="submit"
-        variant="outline"
-      >
-        <GoogleIcon />
-        Sign in with Google
-      </Button>
-    </form>
+  return isOAuthAuthorize ? (
+    <GoogleOAuthSignIn />
+  ) : (
+    <GoogleServerSignIn signInAction={signInAction} />
   );
 }
