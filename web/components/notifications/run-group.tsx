@@ -150,7 +150,7 @@ function RunGroupHeader() {
           ? `Collapse ${summary} on ${group.instrumentDisplayName}`
           : `Expand ${summary} on ${group.instrumentDisplayName}`
       }
-      className="flex w-full cursor-pointer items-start gap-3 px-4 py-3 text-left outline-none hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring/50"
+      className="flex w-full cursor-pointer items-start gap-3 px-4 py-3 text-left outline-none hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-ring/50"
     >
       <span
         aria-hidden
@@ -224,7 +224,7 @@ function RunGroupShowMore() {
   return (
     <li>
       <button
-        className="flex w-full cursor-pointer items-center justify-center rounded-lg py-1.5 text-muted-foreground text-xs hover:bg-muted/60 hover:text-foreground"
+        className="flex w-full cursor-pointer items-center justify-center rounded-lg py-1.5 text-muted-foreground text-xs hover:bg-foreground/10 hover:text-foreground"
         onClick={revealAll}
         type="button"
       >
@@ -247,12 +247,7 @@ function GroupedRunLink({
   return (
     <li>
       <Link
-        className={cn(
-          "flex min-h-[59px] items-start rounded-lg py-[11px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50",
-          unread
-            ? "bg-blue-50/90 hover:bg-blue-50 dark:bg-blue-950/40 dark:hover:bg-blue-950/60"
-            : "bg-muted/50 hover:bg-muted"
-        )}
+        className="flex min-h-[59px] items-start rounded-lg py-[11px] outline-none transition-colors hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-ring/50"
         href={notificationHref(run)}
         onClick={() => {
           if (unread) {
@@ -286,7 +281,7 @@ function UnreadDot() {
 
 function UnreadRunName({ children }: { children: ReactNode }) {
   return (
-    <span className="wrap-break-word block font-mono text-[13.5px] text-foreground leading-snug">
+    <span className="wrap-break-word block font-medium font-mono text-[13.5px] text-foreground leading-snug">
       {children}
     </span>
   );
@@ -294,7 +289,7 @@ function UnreadRunName({ children }: { children: ReactNode }) {
 
 function ReadRunName({ children }: { children: ReactNode }) {
   return (
-    <span className="wrap-break-word block font-mono text-[13.5px] text-muted-foreground leading-snug">
+    <span className="wrap-break-word block font-mono text-[13.5px] text-foreground leading-snug">
       {children}
     </span>
   );
