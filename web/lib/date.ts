@@ -118,6 +118,35 @@ export function startOfMonthISO(
   return fromZonedTime(startOfMonth(zoned), timeZone).toISOString();
 }
 
+/** Calendar day of `date` in `timeZone` as `"yyyy-MM-dd"`. */
+export function calendarDayKey(date: Date, timeZone: string): string {
+  return formatInTimeZone(date, timeZone, "yyyy-MM-dd");
+}
+
+/**
+ * Section heading for a notification day bucket. Today and yesterday stay
+ * relative so the newest sections scan quickly; older days use the weekday
+ * form from the bell mock (`Tuesday · Sep 16`, uppercased in CSS).
+ */
+export function formatNotificationDayHeading(
+  dayKey: string,
+  timeZone: string,
+  now: Date = new Date()
+): string {
+  if (dayKey === calendarDayKey(now, timeZone)) {
+    return "Today";
+  }
+  if (
+    dayKey ===
+    calendarDayKey(new Date(startOfYesterdayISO(timeZone, now)), timeZone)
+  ) {
+    return "Yesterday";
+  }
+  // Noon on that local day avoids DST start/end edges that midnight can hit.
+  const midday = fromZonedTime(`${dayKey}T12:00:00.000`, timeZone);
+  return formatInTimeZone(midday, timeZone, "EEEE · MMM d");
+}
+
 /** Formats a date as a 12-hour time string, e.g. `"2:30 PM"`. */
 export function formatTime(date: Date): string {
   return formatInTimeZone(date, getTimeZone(), "h:mm a");
@@ -126,6 +155,11 @@ export function formatTime(date: Date): string {
 /** Formats a date as `"MMM d, yyyy"`, e.g. `"Jan 5, 2025"`. */
 export function formatDate(date: Date): string {
   return formatInTimeZone(date, getTimeZone(), "MMM d, yyyy");
+}
+
+/** Formats a date as `"d MMMM yyyy"`, e.g. `"12 March 2026"`. */
+export function formatDateLong(date: Date): string {
+  return formatInTimeZone(date, getTimeZone(), "d MMMM yyyy");
 }
 
 /** Formats a date as `"MMM d, yyyy h:mm a"`, e.g. `"Jan 5, 2025 2:30 PM"`. */

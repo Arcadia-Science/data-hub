@@ -8,8 +8,10 @@ import {
   isNull,
   sql,
 } from "drizzle-orm";
+import { runCommentHref } from "@/lib/comment-hash";
 import { db } from "@/lib/db";
 import {
+  files,
   type InstrumentType,
   instrumentNotificationSubscriptions,
   instrumentRuns,
@@ -227,6 +229,9 @@ export interface NotificationDto {
   commentBody: string | null;
   commentId: string | null;
   createdAt: Date;
+  // Raw-file counts for run-anchored rows. Null on anchor-less `generic`.
+  fileCount: number | null;
+  filesFailed: number | null;
   id: string;
   // Run + instrument fields are NULL on anchor-less `generic` rows.
   instrumentDisplayName: string | null;
@@ -237,6 +242,7 @@ export interface NotificationDto {
   // `run_created` rows (microscope / gel doc / plate reader).
   instrumentType: InstrumentType | null;
   readAt: Date | null;
+  runAcquiredAt: Date | null;
   runDisplayId: string | null;
   runId: string | null;
   type:
@@ -250,7 +256,9 @@ export async function listNotifications(
   userId: string,
   opts: { limit?: number; unreadOnly?: boolean } = {}
 ): Promise<NotificationDto[]> {
-  const limit = opts.limit ?? 20;
+  // Higher than a typical page so a busy instrument-day still arrives as
+  // one grouped row instead of being clipped by the old flat-feed cap.
+  const limit = opts.limit ?? 50;
   const actor = aliasedTable(users, "actor");
 
   const rows = await db
@@ -261,6 +269,7 @@ export async function listNotifications(
       readAt: notifications.readAt,
       runId: instrumentRuns.id,
       runDisplayId: instrumentRuns.runId,
+      runAcquiredAt: instrumentRuns.acquiredAt,
       instrumentId: instrumentRuns.instrumentId,
       instrumentDisplayName: instruments.displayName,
       instrumentType: instruments.instrumentType,
@@ -295,10 +304,42 @@ export async function listNotifications(
     .orderBy(desc(notifications.createdAt))
     .limit(limit);
 
+  const runIds = [
+    ...new Set(
+      rows.map((r) => r.runId).filter((id): id is string => id !== null)
+    ),
+  ];
+  const statsByRunId = new Map<
+    string,
+    { fileCount: number; filesFailed: number }
+  >();
+  if (runIds.length > 0) {
+    // Second query stays bounded by the feed cap — aggregating every file
+    // in the database just to decorate 50 rows would be a sequential scan.
+    const statsRows = await db
+      .select({
+        runId: files.instrumentRunId,
+        fileCount: sql<number>`cast(count(*) filter (where ${files.deletedAt} is null) as int)`,
+        filesFailed: sql<number>`cast(count(*) filter (where ${files.status} = 'failed' and ${files.deletedAt} is null) as int)`,
+      })
+      .from(files)
+      .where(
+        and(inArray(files.instrumentRunId, runIds), eq(files.category, "raw"))
+      )
+      .groupBy(files.instrumentRunId);
+    for (const s of statsRows) {
+      statsByRunId.set(s.runId, {
+        fileCount: s.fileCount,
+        filesFailed: s.filesFailed,
+      });
+    }
+  }
+
   return rows.map((row) => {
     const actorDisplayName = row.actorId
       ? (row.actorName ?? row.actorEmail ?? "Unknown")
       : null;
+    const stats = row.runId ? statsByRunId.get(row.runId) : undefined;
     return {
       id: row.id,
       type: row.type,
@@ -306,12 +347,15 @@ export async function listNotifications(
       readAt: row.readAt,
       runId: row.runId,
       runDisplayId: row.runDisplayId,
+      runAcquiredAt: row.runAcquiredAt,
       instrumentId: row.instrumentId,
       instrumentDisplayName: row.instrumentDisplayName,
       instrumentType: row.instrumentType,
       commentId: row.commentId,
       commentBody: toPreview(row.commentBody),
       body: toPreview(row.body),
+      fileCount: row.runId ? (stats?.fileCount ?? 0) : null,
+      filesFailed: row.runId ? (stats?.filesFailed ?? 0) : null,
       actor:
         row.actorId && actorDisplayName
           ? {
@@ -595,7 +639,7 @@ export async function notifyComment(input: {
       dmAuthorDisplayName &&
       dmCommentBody !== undefined
     ) {
-      const runUrl = `${dmOrigin}/instruments/${dmInstrumentId}/runs/${encodeURIComponent(dmRunDisplayId)}#comment-${input.commentId}`;
+      const runUrl = `${dmOrigin}${runCommentHref(dmInstrumentId, dmRunDisplayId, input.commentId)}`;
       const commentPreview =
         dmCommentBody.length > 240
           ? `${dmCommentBody.slice(0, 240).trimEnd()}…`

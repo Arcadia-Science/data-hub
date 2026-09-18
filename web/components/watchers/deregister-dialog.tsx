@@ -1,8 +1,8 @@
 "use client";
 
-import { Loader2, Trash2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useTransition } from "react";
+import { type MouseEvent, useTransition } from "react";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -13,16 +13,18 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
 
 export function DeregisterDialog({
   watcherId,
   hostname,
+  open,
+  onOpenChange,
 }: {
   watcherId: string;
   hostname: string | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -30,7 +32,10 @@ export function DeregisterDialog({
   // Soft-deletes the watcher via the existing API (sets deleted_at). The
   // watcher CLI will receive a 404 on its next heartbeat and shut down.
   // useTransition keeps the dialog responsive during the network round-trip.
-  function handleDeregister() {
+  function handleDeregister(e: MouseEvent) {
+    // Keep the dialog open until the request finishes so the spinner stays
+    // visible; we close it ourselves on success.
+    e.preventDefault();
     startTransition(async () => {
       const res = await fetch(`/api/v1/watchers/${watcherId}`, {
         method: "DELETE",
@@ -43,6 +48,7 @@ export function DeregisterDialog({
       }
 
       toast.success("Watcher deregistered");
+      onOpenChange(false);
       // Invalidate the server component tree so the watcher disappears from
       // the active list (or shifts to the deregistered partition).
       router.refresh();
@@ -50,17 +56,7 @@ export function DeregisterDialog({
   }
 
   return (
-    <AlertDialog>
-      <AlertDialogTrigger asChild>
-        <Button
-          className="h-7 gap-1 text-destructive text-xs hover:text-destructive"
-          size="sm"
-          variant="ghost"
-        >
-          <Trash2 className="size-3" />
-          Deregister
-        </Button>
-      </AlertDialogTrigger>
+    <AlertDialog onOpenChange={onOpenChange} open={open}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Deregister watcher?</AlertDialogTitle>

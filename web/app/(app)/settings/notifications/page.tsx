@@ -12,7 +12,7 @@ import { auth } from "@/lib/auth";
 import { getSlackChannelConfigForAdmin } from "@/lib/slack/channel-config";
 import { getSlackConnection } from "@/lib/slack/connections";
 
-const description = "Choose which Data Hub events to be notified about.";
+const description = "Choose which events send a notification.";
 
 export const metadata: Metadata = {
   title: "Notifications",

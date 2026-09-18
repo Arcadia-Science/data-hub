@@ -30,7 +30,7 @@ import {
 import { useRecentInstruments } from "@/hooks/use-recent-instruments";
 import type { SidebarInstrument } from "@/lib/api/sidebar";
 
-const SIDEBAR_RECENT_INSTRUMENTS_LIMIT = 10;
+const SIDEBAR_INSTRUMENTS_LIMIT = 5;
 
 interface MainNavProps {
   currentUserId: string;
@@ -43,7 +43,7 @@ export function MainNav({ currentUserId, instruments }: MainNavProps) {
   const { recent: recentInstruments } = useRecentInstruments();
 
   const recentlyViewedInstruments = useMemo(
-    () => recentInstruments.slice(0, SIDEBAR_RECENT_INSTRUMENTS_LIMIT),
+    () => recentInstruments.slice(0, SIDEBAR_INSTRUMENTS_LIMIT),
     [recentInstruments]
   );
 
@@ -52,17 +52,18 @@ export function MainNav({ currentUserId, instruments }: MainNavProps) {
     [recentlyViewedInstruments]
   );
 
-  const sidebarInstruments = useMemo(
-    () =>
-      instruments
-        .filter((instrument) => !recentlyViewedIds.has(instrument.id))
-        .map((instrument) => ({
-          key: instrument.id,
-          href: `/instruments/${instrument.id}`,
-          label: instrument.displayName,
-        })),
-    [instruments, recentlyViewedIds]
-  );
+  const sidebarInstruments = useMemo(() => {
+    const remainingSlots =
+      SIDEBAR_INSTRUMENTS_LIMIT - recentlyViewedInstruments.length;
+    return instruments
+      .filter((instrument) => !recentlyViewedIds.has(instrument.id))
+      .slice(0, remainingSlots)
+      .map((instrument) => ({
+        key: instrument.id,
+        href: `/instruments/${instrument.id}`,
+        label: instrument.displayName,
+      }));
+  }, [instruments, recentlyViewedIds, recentlyViewedInstruments.length]);
 
   const isWatchersActive =
     pathname === "/watchers" || pathname.startsWith("/watchers/");

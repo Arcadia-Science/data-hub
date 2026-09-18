@@ -9,7 +9,12 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
-import type { InstrumentType } from "@/lib/db/schema";
+import type { NotificationItem } from "@/lib/notifications/types";
+
+export type {
+  NotificationActor,
+  NotificationItem,
+} from "@/lib/notifications/types";
 
 // ---------------------------------------------------------------------------
 // Notifications provider — single source of truth for the bell badge and
@@ -19,35 +24,6 @@ import type { InstrumentType } from "@/lib/db/schema";
 // re-render only when other state slices change because the popover
 // content is mounted lazily.
 // ---------------------------------------------------------------------------
-
-export interface NotificationActor {
-  avatarUrl: string | null;
-  displayName: string;
-  id: string;
-  initials: string;
-}
-
-export interface NotificationItem {
-  actor: NotificationActor | null;
-  // Caller-supplied message for `generic` rows; null for every other type.
-  body: string | null;
-  commentBody: string | null;
-  commentId: string | null;
-  createdAt: string;
-  id: string;
-  // Run + instrument fields are null on anchor-less `generic` rows.
-  instrumentDisplayName: string | null;
-  instrumentId: string | null;
-  instrumentType: InstrumentType | null;
-  readAt: string | null;
-  runDisplayId: string | null;
-  runId: string | null;
-  type:
-    | "run_created"
-    | "comment_attributed"
-    | "comment_participated"
-    | "generic";
-}
 
 interface NotificationsValue {
   markAllRead: () => Promise<void>;
@@ -73,16 +49,19 @@ const POLL_INTERVAL_MS = 60_000;
 // ---------------------------------------------------------------------------
 
 interface ApiNotification {
-  actor: NotificationActor | null;
+  actor: NotificationItem["actor"];
   body: string | null;
   comment_body: string | null;
   comment_id: string | null;
   created_at: string;
+  file_count: number | null;
+  files_failed: number | null;
   id: string;
   instrument_display_name: string | null;
   instrument_id: string | null;
-  instrument_type: InstrumentType | null;
+  instrument_type: NotificationItem["instrumentType"];
   read_at: string | null;
+  run_acquired_at: string | null;
   run_display_id: string | null;
   run_id: string | null;
   type: NotificationItem["type"];
@@ -96,6 +75,9 @@ function fromApi(n: ApiNotification): NotificationItem {
     readAt: n.read_at,
     runId: n.run_id,
     runDisplayId: n.run_display_id,
+    runAcquiredAt: n.run_acquired_at,
+    fileCount: n.file_count,
+    filesFailed: n.files_failed,
     instrumentId: n.instrument_id,
     instrumentDisplayName: n.instrument_display_name,
     instrumentType: n.instrument_type,

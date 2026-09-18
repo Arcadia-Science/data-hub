@@ -1,18 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { WatcherActions } from "@/components/watchers/watcher-actions";
 import {
   WatchersTable,
   WatchersTableSkeleton,
 } from "@/components/watchers/watchers-table";
 import type { WatcherListItem } from "@/lib/api/watchers";
 
-export function WatchersViewSkeleton({
-  isAdmin = false,
-}: {
-  isAdmin?: boolean;
-}) {
+export function WatchersViewSkeleton() {
   return (
     <div aria-busy="true" aria-label="Loading watchers" role="status">
       <Tabs defaultValue="active">
@@ -21,10 +18,9 @@ export function WatchersViewSkeleton({
           <TabsTrigger value="deregistered">Deregistered</TabsTrigger>
         </TabsList>
         <TabsContent className="mt-2" value="active">
-          <WatchersTableSkeleton withActions={isAdmin} />
-        </TabsContent>
-        <TabsContent className="mt-2" value="deregistered">
-          <WatchersTableSkeleton withActions={false} />
+          {/* Actions column omitted: it's admin-only and renders instantly,
+              so a placeholder just adds flicker. */}
+          <WatchersTableSkeleton />
         </TabsContent>
       </Tabs>
     </div>
@@ -43,10 +39,17 @@ export function WatchersView({
 }: {
   activeData: WatcherListItem[];
   deregisteredData: WatcherListItem[];
-  /** Admins get the inline Deregister action on active rows. */
+  /** Admins get the row-actions menu on active watchers. */
   isAdmin?: boolean;
 }) {
   const [tab, setTab] = useState<Tab>("active");
+
+  // `WatcherActions` uses hooks, so render it as JSX, not a function call.
+  const renderRow = useCallback(
+    (row: WatcherListItem) => <WatcherActions watcher={row} />,
+    []
+  );
+  const renderRowActions = isAdmin ? renderRow : undefined;
 
   return (
     <Tabs onValueChange={(v) => setTab(v as Tab)} value={tab}>
@@ -57,10 +60,17 @@ export function WatchersView({
         </TabsTrigger>
       </TabsList>
       <TabsContent className="mt-2" value="active">
-        <WatchersTable data={activeData} isAdmin={isAdmin} />
+        <WatchersTable
+          data={activeData}
+          emptyMessage="No active watchers."
+          renderRowActions={renderRowActions}
+        />
       </TabsContent>
       <TabsContent className="mt-2" value="deregistered">
-        <WatchersTable data={deregisteredData} isDeregisteredView />
+        <WatchersTable
+          data={deregisteredData}
+          emptyMessage="No deregistered watchers."
+        />
       </TabsContent>
     </Tabs>
   );

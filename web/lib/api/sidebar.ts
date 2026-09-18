@@ -10,7 +10,7 @@ export interface SidebarInstrument {
 
 // Cap the sidebar list so the nav stays scannable even on workspaces with
 // many instruments. The "View all" sub-item links to the full page.
-const SIDEBAR_LIST_LIMIT = 4;
+const SIDEBAR_LIST_LIMIT = 5;
 
 // Trimmed query for the navigation sidebar: the most recently active
 // instruments only. "Activity" = the timestamp of the latest run, with a

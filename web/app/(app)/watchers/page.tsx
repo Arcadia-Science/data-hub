@@ -8,7 +8,8 @@ import {
 import { getWatcherList } from "@/lib/api/watchers";
 import { auth } from "@/lib/auth";
 
-const description = "Watcher agents reporting into Data Hub.";
+const description =
+  "The software running alongside each instrument that uploads new files as they appear.";
 
 export const metadata: Metadata = {
   title: "Watchers",
@@ -31,11 +32,11 @@ export default async function WatchersPage() {
   const isAdmin = session.user.isAdmin === true;
 
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6 2xl:w-6xl">
       <div className="flex items-center justify-between">
         <h1 className="font-semibold text-2xl tracking-tight">Watchers</h1>
       </div>
-      <Suspense fallback={<WatchersViewSkeleton isAdmin={isAdmin} />}>
+      <Suspense fallback={<WatchersViewSkeleton />}>
         <WatchersListSection isAdmin={isAdmin} />
       </Suspense>
     </div>

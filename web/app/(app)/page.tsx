@@ -1,6 +1,5 @@
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
-import type { Metadata } from "next/types";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import {
@@ -40,15 +39,6 @@ import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
 type DashboardParams = Awaited<ReturnType<typeof dashboardParamsCache.parse>>;
 
-const description =
-  "A central hub for your lab's instruments, runs, and files.";
-
-export const metadata: Metadata = {
-  description,
-  openGraph: { title: "Data Hub", description },
-  twitter: { title: "Data Hub", description },
-};
-
 const RECENT_INSTRUMENTS_LIMIT = 3;
 
 export default async function DashboardPage({
@@ -76,7 +66,7 @@ export default async function DashboardPage({
   // shell (headings) paints immediately and the three data blocks stream in
   // independently — a slow runs query no longer holds up the stats cards.
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 p-6 2xl:w-7xl">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 p-6 2xl:w-6xl">
       <Suspense fallback={<StatCardsSkeleton />}>
         <DashboardStatsSection />
       </Suspense>

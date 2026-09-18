@@ -49,17 +49,13 @@ function possessive(displayName: string): string {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { userId } = await params;
-  const session = await auth();
   const profile = await getUserProfile(userId);
   if (!profile) {
     return { title: "User not found" };
   }
 
-  const isSelf = session?.user.id === userId;
-  const title = isSelf ? "My runs" : `${possessive(profile.displayName)} runs`;
-  const description = isSelf
-    ? "Runs you're attributed to across the lab's instruments."
-    : `Runs ${profile.displayName} is attributed to across the lab's instruments.`;
+  const title = `${possessive(profile.displayName)} instrument runs`;
+  const description = `Runs attributed to ${profile.displayName} across the lab's instruments.`;
 
   return {
     title,
@@ -89,13 +85,13 @@ export default async function UserRunsPage({ params, searchParams }: Props) {
   const dashboardParams = dashboardParamsCache.parse(await searchParams);
   const isSelf = session.user.id === userId;
   const heading = isSelf
-    ? "My runs"
-    : `${possessive(profile.displayName)} runs`;
+    ? "My instrument runs"
+    : `${possessive(profile.displayName)} instrument runs`;
 
   // Each section fetches its own data behind a Suspense boundary so the static
   // shell paints immediately and the stats + runs stream in independently.
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 p-6 2xl:w-7xl">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 p-6 2xl:w-6xl">
       <section className="flex flex-col gap-6">
         <div className="flex items-center gap-3">
           <UserAvatar size="lg" user={profile} />

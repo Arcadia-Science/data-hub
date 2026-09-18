@@ -80,7 +80,7 @@ export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
               <DocsLink href={DOCS_URL}>
                 <BookOpen data-icon="inline-start" />
                 Docs
-                <ExternalLink className="ml-auto text-muted-foreground" />
+                <ExternalLink className="ml-auto size-3.5 text-muted-foreground" />
               </DocsLink>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>

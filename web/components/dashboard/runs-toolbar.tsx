@@ -104,7 +104,7 @@ export function RunsToolbar({
                 Instruments
                 {filters.instrument_id.length > 0 && (
                   <Badge
-                    className="ml-1 px-1.5 text-[10px]"
+                    className="ml-1 bg-slate-200 px-1.5 text-[10px] text-slate-800 dark:bg-slate-800 dark:text-slate-200"
                     variant="secondary"
                   >
                     {filters.instrument_id.length}

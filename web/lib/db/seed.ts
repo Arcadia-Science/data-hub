@@ -1696,15 +1696,14 @@ export async function seedInstrumentSubscriptions(
 
 // ---------------------------------------------------------------------------
 // Notifications — a believable steady state for the bell popover:
-//   - Today bucket: two comment notifications from the same teammate so the
-//     comment-on-your-run + follow-up pattern lands under the TODAY header.
-//   - Yesterday bucket: three groups of `run_created` notifications (3 + 3
-//     + 2 rows across three different instruments) so the grouped-row
-//     variant of the popover renders with a comma-separated run-id list
-//     under each instrument heading.
-//   - Earlier bucket: one already-read `comment_participated` row so the
-//     read-vs-unread visual contrast and the "Earlier" section both show
-//     up after the first popover open.
+//   - Today: two comment notifications from the same teammate so the
+//     comment-on-your-run + follow-up pattern lands under Today.
+//   - Yesterday: grouped `run_created` rows — 8 on the iD5 (enough to
+//     exercise the 5-row cutoff + show-more), plus smaller groups on the
+//     iD3 and Aunty. A few of the iD5 rows are already read so the unread
+//     dot contrast shows up inside one group.
+//   - Older: one already-read `comment_participated` row so a weekday
+//     heading (not Today/Yesterday) appears below.
 //
 // All notifications target a single recipient (the admin user). Comments
 // authored by the teammates are inserted here as well so the popover can
@@ -1801,50 +1800,53 @@ export async function seedNotifications(
   }
 
   // -------------------------------------------------------------------------
-  // Yesterday: grouped `run_created` rows across three instruments. The
-  // popover collapses notifications sharing (bucket, instrumentId) into a
-  // single row, so emitting 3 / 3 / 2 here yields three grouped rows.
+  // Yesterday: grouped `run_created` rows. Prefer named instruments so the
+  // local bell matches the redesign mock (iD5 is the large expandable
+  // group). Fall back to whatever the seed actually produced.
   // -------------------------------------------------------------------------
 
-  // Within "yesterday" the bell sorts the group by latest createdAt; we
-  // stamp these between 6PM and 6AM yesterday so the bucket assignment is
-  // unambiguous regardless of `now`.
+  // 6 PM yesterday, local. Stamps stay inside yesterday regardless of
+  // when a developer runs `db:seed`.
   const yesterdayBaseline = new Date(startOfToday.getTime() - 6 * HOUR);
 
-  const groupBatches: Array<{ instrumentIdx: number; count: number }> = [
-    { instrumentIdx: 0, count: 3 },
-    { instrumentIdx: 1, count: 3 },
-    { instrumentIdx: 2, count: 2 },
+  const groupBatches: Array<{ instrumentId: string; count: number }> = [
+    { instrumentId: "spectramax-id5-plate-reader", count: 8 },
+    { instrumentId: "spectramax-id3-plate-reader", count: 3 },
+    { instrumentId: "unchained-labs-aunty", count: 2 },
   ];
 
   groupBatches.forEach((batch, batchIdx) => {
-    const instrumentId = instrumentIds[batch.instrumentIdx];
-    if (!instrumentId) {
-      return;
-    }
-    const pool = runsByInstrument.get(instrumentId) ?? [];
+    const named = runsByInstrument.get(batch.instrumentId);
+    const fallbackId = instrumentIds[batchIdx];
+    const pool =
+      named ??
+      (fallbackId ? runsByInstrument.get(fallbackId) : undefined) ??
+      [];
     const picks = pool.slice(0, batch.count);
     picks.forEach((run, i) => {
+      // Newest two iD5 rows stay unread so the visible slice mixes dotted
+      // and undotted run rows; the rest are already read.
+      const markRead =
+        batch.instrumentId === "spectramax-id5-plate-reader" && i >= 2;
       notifRows.push({
         userId: recipientUserId,
         type: "run_created",
         runId: run.id,
-        // Stagger each group's stamps within a separate ~1h window so the
-        // grouped row's "latest" anchor differs between batches and the
-        // ordering inside the popover stays deterministic.
         createdAt: new Date(
-          yesterdayBaseline.getTime() - (batchIdx * HOUR + i * 5 * 60_000)
+          yesterdayBaseline.getTime() - (batchIdx * HOUR + i * 40 * 60_000)
         ),
-        readAt: null,
+        readAt: markRead
+          ? new Date(yesterdayBaseline.getTime() - 30 * 60_000)
+          : null,
       });
     });
   });
 
   // -------------------------------------------------------------------------
-  // Earlier: one already-read `comment_participated` row to exercise both
-  // the "Earlier" bucket and the read-row treatment (dimmed background, no
-  // left rail). The admin has seeded comments on many runs via
-  // `seedRunComments`, so any run qualifies for the participated trigger.
+  // Older than yesterday: one already-read `comment_participated` row so
+  // the weekday heading and the read-row treatment both show. The admin
+  // has seeded comments on many runs via `seedRunComments`, so any run
+  // qualifies for the participated trigger.
   // -------------------------------------------------------------------------
 
   const earlierTarget = runs[Math.min(4, runs.length - 1)];

@@ -58,10 +58,7 @@ function StatusSectionSkeleton() {
   return (
     <>
       <div className="flex items-center justify-between">
-        <div>
-          <h3 className="font-medium text-sm">Watcher Status</h3>
-          <Skeleton className="mt-1 h-3 w-56" />
-        </div>
+        <h3 className="font-medium text-sm">Status</h3>
         <Skeleton className="h-8 w-36" />
       </div>
       <HeartbeatChartSkeleton />
@@ -101,7 +98,6 @@ export function WatcherDetailTabs({
   const [{ since }] = useQueryStates(watcherDetailSearchParams);
 
   const effectiveSince = since ?? todayDateString();
-  const statusSubtitle = `Activity and connectivity for ${new Date(`${effectiveSince}T00:00:00`).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}`;
 
   return (
     <Tabs onValueChange={setTab} value={tab}>
@@ -135,10 +131,7 @@ export function WatcherDetailTabs({
       <TabsContent className="flex flex-col gap-4" value="status">
         <TablePendingProvider>
           <div className="flex items-center justify-between">
-            <div>
-              <h3 className="font-medium text-sm">Watcher Status</h3>
-              <p className="text-muted-foreground text-xs">{statusSubtitle}</p>
-            </div>
+            <h3 className="font-medium text-sm">Status</h3>
             <StatusToolbar />
           </div>
           <HeartbeatChart heartbeats={heartbeats} since={effectiveSince} />

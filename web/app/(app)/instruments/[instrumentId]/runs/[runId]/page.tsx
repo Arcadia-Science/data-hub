@@ -27,7 +27,7 @@ import { getInstrumentById } from "@/lib/api/instruments";
 import { getReportItemsPage } from "@/lib/api/report-items";
 import { listCommentsForRun } from "@/lib/api/run-comments";
 import { auth } from "@/lib/auth";
-import { formatDate } from "@/lib/date";
+import { formatDateLong } from "@/lib/date";
 import {
   emptyReportItemsPage,
   REPORT_ITEMS_WINDOW,
@@ -48,7 +48,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { instrumentId, runId } = await params;
   const run = await lookupRunByNaturalKey(instrumentId, runId);
   if (!run) {
-    return { title: "Run Not Found" };
+    return { title: "Run not found" };
   }
 
   const title = `${run.runId} | ${run.instrumentDisplayName}`;
@@ -65,9 +65,13 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   // full file list just to count.
   const { rawActive: rawFileCount } = await getRunFileStats(run.id);
   const fileLabel =
-    rawFileCount === 1 ? "1 raw data file" : `${rawFileCount} raw data files`;
+    rawFileCount === 0
+      ? "No raw data files yet."
+      : rawFileCount === 1
+        ? "1 raw data file."
+        : `${rawFileCount} raw data files.`;
 
-  const description = `${dateLabel} ${formatDate(effectiveDate)} \u00b7 ${fileLabel}`;
+  const description = `${dateLabel} ${formatDateLong(effectiveDate)}. ${fileLabel}`;
   return {
     title,
     description,
@@ -98,7 +102,7 @@ export default async function RunDetailPage({ params, searchParams }: Props) {
   // paint immediately on navigation. `lookupRunByNaturalKey` is `cache()`-deduped
   // across the content and comments loaders on the same request.
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6 2xl:w-7xl">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6 2xl:w-6xl">
       <Suspense fallback={<RunContentSkeleton instrumentType="generic" />}>
         <RunDetailContent
           filters={filters}

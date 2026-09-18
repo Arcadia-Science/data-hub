@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, Filter, X } from "lucide-react";
+import { Filter, X } from "lucide-react";
 import { useQueryStates } from "nuqs";
 import { useTablePending } from "@/components/table-pending";
 import { Button } from "@/components/ui/button";
@@ -107,21 +107,18 @@ export function EventLogToolbar() {
         </PopoverContent>
       </Popover>
 
-      <div className="flex items-center gap-2">
-        <CalendarDays className="size-3.5 text-muted-foreground" />
-        <Input
-          aria-label="Events since"
-          className="h-8 w-36 text-xs"
-          onChange={(e) =>
-            setFilters({
-              events_since: e.target.value || null,
-              logs_page: null,
-            })
-          }
-          type="date"
-          value={filters.events_since ?? today}
-        />
-      </div>
+      <Input
+        aria-label="Events since"
+        className="h-8 w-36 text-xs"
+        onChange={(e) =>
+          setFilters({
+            events_since: e.target.value || null,
+            logs_page: null,
+          })
+        }
+        type="date"
+        value={filters.events_since ?? today}
+      />
     </div>
   );
 }
