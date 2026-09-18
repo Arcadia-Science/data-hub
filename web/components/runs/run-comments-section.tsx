@@ -18,6 +18,7 @@ export function RunCommentsSection({
     <RunCommentsList
       initialComments={comments}
       instrumentId={instrumentId}
+      key={`${instrumentId}:${runId}`}
       runId={runId}
     />
   );

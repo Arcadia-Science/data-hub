@@ -2,12 +2,14 @@
 
 import { BellOff, Settings } from "lucide-react";
 import Link from "next/link";
-import { useMemo } from "react";
+import { type MouseEvent, useMemo } from "react";
 import { useNotifications } from "@/components/notifications/notifications-provider";
 import { RunGroup } from "@/components/notifications/run-group";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { UnknownUserAvatar, UserAvatar } from "@/components/user-avatar";
+import { runCommentHref } from "@/lib/comment-hash";
+import { applySamePageCommentHash } from "@/lib/comment-hash-nav";
 import { getBrowserTimeZone } from "@/lib/date";
 import {
   buildNotificationFeed,
@@ -28,10 +30,18 @@ function notificationHref(n: {
   runDisplayId: string;
   commentId: string | null;
 }): string {
-  const base = `/instruments/${encodeURIComponent(
-    n.instrumentId
-  )}/runs/${encodeURIComponent(n.runDisplayId)}`;
-  return n.commentId ? `${base}#comment-${n.commentId}` : base;
+  return runCommentHref(n.instrumentId, n.runDisplayId, n.commentId);
+}
+
+function handleNotificationNavigate(
+  event: MouseEvent<HTMLAnchorElement>,
+  href: string,
+  onActivate: () => void
+) {
+  onActivate();
+  if (applySamePageCommentHash(href)) {
+    event.preventDefault();
+  }
 }
 
 function commentActionLabel(n: NotificationItem): string {
@@ -247,7 +257,8 @@ function CommentNotificationRow({
       <Link
         className="flex items-start gap-3 px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         href={href}
-        onClick={onActivate}
+        onClick={(event) => handleNotificationNavigate(event, href, onActivate)}
+        scroll={!n.commentId}
       >
         {n.actor ? (
           <UserAvatar
@@ -327,12 +338,16 @@ function GenericNotificationRow({
   );
 
   if (anchored) {
+    const href = notificationHref(n);
     return (
       <NotificationRowShell isUnread={isUnread}>
         <Link
           className="flex items-start gap-3 px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-          href={notificationHref(n)}
-          onClick={onActivate}
+          href={href}
+          onClick={(event) =>
+            handleNotificationNavigate(event, href, onActivate)
+          }
+          scroll={!n.commentId}
         >
           {content}
         </Link>

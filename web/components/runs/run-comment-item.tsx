@@ -26,6 +26,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { UserAvatarLink } from "@/components/user-avatar";
 import type { RunCommentDto } from "@/lib/api/run-comments";
+import { commentAnchorId } from "@/lib/comment-hash";
 
 // Comment timestamps may arrive as Date objects (server-rendered initial
 // payload) or ISO strings (JSON responses to mutations). Normalize to a
@@ -70,7 +71,7 @@ export function RunCommentItem({
   // Deep-link target for notifications / global search (`#comment-{id}`).
   // Scroll-into-view lives on `RunCommentsList` so one listener covers the
   // whole list (including same-page hash changes).
-  const anchorId = `comment-${comment.id}`;
+  const anchorId = commentAnchorId(comment.id);
 
   const trimmed = draft.trim();
   const tooLong = draft.length > MAX_BODY_LENGTH;
@@ -113,7 +114,10 @@ export function RunCommentItem({
 
   return (
     <>
-      <article className="flex flex-col gap-1.5" id={anchorId}>
+      <article
+        className="flex scroll-mt-6 flex-col gap-1.5 rounded-md target:bg-primary/10"
+        id={anchorId}
+      >
         <div className="flex items-start justify-between gap-2">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground text-sm">
             <UserAvatarLink

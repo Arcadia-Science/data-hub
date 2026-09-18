@@ -1,7 +1,7 @@
 "use client";
 
 import { Bell } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { NotificationBellContent } from "@/components/notifications/notification-bell-content";
 import { useNotifications } from "@/components/notifications/notifications-provider";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,10 @@ import {
 export function NotificationBell() {
   const { unreadCount, refresh } = useNotifications();
   const [open, setOpen] = useState(false);
+  // Closing via a row click restores focus to the bell and scrolls the
+  // header back into view — that cancels the `#comment-{id}` jump. Skip
+  // autofocus only for that navigate path (per `rerender-use-ref-transient-values`).
+  const skipCloseFocusRef = useRef(false);
 
   return (
     <Popover
@@ -26,6 +30,7 @@ export function NotificationBell() {
         // latest list even between polling ticks. Failures are silent —
         // the polling loop will retry.
         if (next) {
+          skipCloseFocusRef.current = false;
           void refresh();
         }
       }}
@@ -59,9 +64,20 @@ export function NotificationBell() {
       <PopoverContent
         align="end"
         className="w-104 gap-0 overflow-hidden p-0"
+        onCloseAutoFocus={(event) => {
+          if (skipCloseFocusRef.current) {
+            event.preventDefault();
+            skipCloseFocusRef.current = false;
+          }
+        }}
         sideOffset={8}
       >
-        <NotificationBellContent onNavigate={() => setOpen(false)} />
+        <NotificationBellContent
+          onNavigate={() => {
+            skipCloseFocusRef.current = true;
+            setOpen(false);
+          }}
+        />
       </PopoverContent>
     </Popover>
   );

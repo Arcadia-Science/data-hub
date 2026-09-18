@@ -8,6 +8,7 @@ import {
   isNull,
   sql,
 } from "drizzle-orm";
+import { runCommentHref } from "@/lib/comment-hash";
 import { db } from "@/lib/db";
 import {
   files,
@@ -638,7 +639,7 @@ export async function notifyComment(input: {
       dmAuthorDisplayName &&
       dmCommentBody !== undefined
     ) {
-      const runUrl = `${dmOrigin}/instruments/${dmInstrumentId}/runs/${encodeURIComponent(dmRunDisplayId)}#comment-${input.commentId}`;
+      const runUrl = `${dmOrigin}${runCommentHref(dmInstrumentId, dmRunDisplayId, input.commentId)}`;
       const commentPreview =
         dmCommentBody.length > 240
           ? `${dmCommentBody.slice(0, 240).trimEnd()}…`
