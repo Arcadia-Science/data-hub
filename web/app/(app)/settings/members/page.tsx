@@ -12,7 +12,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 
-const description = "Manage workspace members and admin access.";
+const description = "Manage who can use Data Hub and who has admin access.";
 
 export const metadata: Metadata = {
   title: "Members",

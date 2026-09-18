@@ -1,6 +1,5 @@
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
-import type { Metadata } from "next/types";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import {
@@ -39,15 +38,6 @@ import { dashboardParamsCache, hasActiveFilters } from "@/lib/search-params";
 import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
 type DashboardParams = Awaited<ReturnType<typeof dashboardParamsCache.parse>>;
-
-const description =
-  "A central hub for your lab's instruments, runs, and files.";
-
-export const metadata: Metadata = {
-  description,
-  openGraph: { title: "Data Hub", description },
-  twitter: { title: "Data Hub", description },
-};
 
 const RECENT_INSTRUMENTS_LIMIT = 3;
 

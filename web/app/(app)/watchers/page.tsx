@@ -8,7 +8,8 @@ import {
 import { getWatcherList } from "@/lib/api/watchers";
 import { auth } from "@/lib/auth";
 
-const description = "Watcher agents reporting into Data Hub.";
+const description =
+  "The software running alongside each instrument that uploads new files as they appear.";
 
 export const metadata: Metadata = {
   title: "Watchers",

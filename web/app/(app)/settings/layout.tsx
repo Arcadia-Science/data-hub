@@ -25,7 +25,7 @@ export default async function SettingsLayout({
   // page-level `metadata` exports merging into the head — Next resolves
   // metadata independently of whether the layout actually renders its
   // children — so unfurlers still see "Settings | Data Hub" / "Access
-  // Tokens" titles.
+  // tokens" titles.
   if (!session?.user) {
     return (
       <SignInRequired callbackUrl="/settings">

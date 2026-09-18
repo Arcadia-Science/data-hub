@@ -49,17 +49,13 @@ function possessive(displayName: string): string {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { userId } = await params;
-  const session = await auth();
   const profile = await getUserProfile(userId);
   if (!profile) {
     return { title: "User not found" };
   }
 
-  const isSelf = session?.user.id === userId;
-  const title = isSelf ? "My runs" : `${possessive(profile.displayName)} runs`;
-  const description = isSelf
-    ? "Runs you're attributed to across the lab's instruments."
-    : `Runs ${profile.displayName} is attributed to across the lab's instruments.`;
+  const title = `${possessive(profile.displayName)} runs`;
+  const description = `Runs attributed to ${profile.displayName} across the lab's instruments.`;
 
   return {
     title,

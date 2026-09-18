@@ -57,9 +57,15 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   // Description is intentionally minimal — it surfaces in Slack/Notion link
   // previews. Anything in the URL slug is already visible to the sharer;
   // we don't include sensitive bits (run counts, watcher status, etc.).
-  const description = instrument
-    ? `${instrument.displayName} runs on Data Hub.`
-    : "Data Hub instrument.";
+  // Unknown instruments inherit the root description rather than inventing one.
+  if (!instrument) {
+    return {
+      title,
+      openGraph: { title, type: "article" },
+      twitter: { card: "summary", title },
+    };
+  }
+  const description = `Runs and data files from ${instrument.displayName}.`;
   return {
     title,
     description,

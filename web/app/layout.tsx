@@ -27,12 +27,16 @@ const metadataBaseUrl = process.env.VERCEL_URL
   ? new URL(`https://${process.env.VERCEL_URL}`)
   : new URL("http://localhost:3000");
 
+const description =
+  "Runs and data files from every instrument in the lab, in one place.";
+
 export const metadata: Metadata = {
   metadataBase: metadataBaseUrl,
   title: {
     template: "%s | Data Hub",
     default: "Data Hub",
   },
+  description,
   // OG defaults inherited by every page. We intentionally don't set
   // `openGraph.title` here because per-page `openGraph.title` strings
   // (set on instrument + run detail pages) should appear verbatim in
@@ -42,12 +46,14 @@ export const metadata: Metadata = {
   // enough branding for the card header.
   openGraph: {
     siteName: "Data Hub",
+    description,
     type: "website",
     locale: "en_US",
     images: [{ url: "/images/data-hub-logo.svg", alt: "Data Hub" }],
   },
   twitter: {
     card: "summary",
+    description,
   },
   // Data Hub is internal and should never be indexed; `app/robots.ts` and a
   // header in `next.config.mjs` repeat it. No image rules — they hide favicons.

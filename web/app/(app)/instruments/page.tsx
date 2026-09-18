@@ -14,13 +14,10 @@ import {
 import { auth } from "@/lib/auth";
 import { ADD_INSTRUMENT_DOCS_URL, MANAGING_TOKENS_DOCS_URL } from "@/lib/docs";
 
-const description = "Instruments connected to Data Hub.";
-
 export const metadata: Metadata = {
   title: "Instruments",
-  description,
-  openGraph: { title: "Instruments", description },
-  twitter: { title: "Instruments", description },
+  openGraph: { title: "Instruments" },
+  twitter: { title: "Instruments" },
 };
 
 export default async function InstrumentsPage() {

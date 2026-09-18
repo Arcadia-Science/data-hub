@@ -128,6 +128,11 @@ export function formatDate(date: Date): string {
   return formatInTimeZone(date, getTimeZone(), "MMM d, yyyy");
 }
 
+/** Formats a date as `"d MMMM yyyy"`, e.g. `"12 March 2026"`. */
+export function formatDateLong(date: Date): string {
+  return formatInTimeZone(date, getTimeZone(), "d MMMM yyyy");
+}
+
 /** Formats a date as `"MMM d, yyyy h:mm a"`, e.g. `"Jan 5, 2025 2:30 PM"`. */
 export function formatDateTime(date: Date): string {
   return formatInTimeZone(date, getTimeZone(), "MMM d, yyyy h:mm a");

@@ -29,13 +29,14 @@ import { db } from "@/lib/db";
 import { personalAccessTokens, users } from "@/lib/db/schema";
 import { formatRelativeTime } from "@/lib/utils";
 
-const description = "Personal access tokens for the Data Hub API.";
+const description =
+  "Create and revoke tokens for scripts and tools that call the Data Hub API.";
 
 export const metadata: Metadata = {
-  title: "Access Tokens",
+  title: "Access tokens",
   description,
-  openGraph: { title: "Access Tokens", description },
-  twitter: { title: "Access Tokens", description },
+  openGraph: { title: "Access tokens", description },
+  twitter: { title: "Access tokens", description },
 };
 
 export default async function TokensPage() {

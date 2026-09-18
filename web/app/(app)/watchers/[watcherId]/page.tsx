@@ -44,8 +44,13 @@ function toTzSafeSince(dateString: string): Date {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { watcherId } = await params;
   const watcher = await getWatcherById(watcherId);
+  const title = watcher?.hostname || `Watcher ${watcherId.slice(0, 8)}`;
+  const description = `Connection status, recent uploads, and config for ${title}.`;
   return {
-    title: watcher?.hostname ?? watcherId.slice(0, 8),
+    title,
+    description,
+    openGraph: { title, description },
+    twitter: { title, description },
   };
 }
 
