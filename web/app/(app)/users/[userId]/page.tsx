@@ -54,7 +54,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     return { title: "User not found" };
   }
 
-  const title = `${possessive(profile.displayName)} runs`;
+  const title = `${possessive(profile.displayName)} instrument runs`;
   const description = `Runs attributed to ${profile.displayName} across the lab's instruments.`;
 
   return {
@@ -85,8 +85,8 @@ export default async function UserRunsPage({ params, searchParams }: Props) {
   const dashboardParams = dashboardParamsCache.parse(await searchParams);
   const isSelf = session.user.id === userId;
   const heading = isSelf
-    ? "My runs"
-    : `${possessive(profile.displayName)} runs`;
+    ? "My instrument runs"
+    : `${possessive(profile.displayName)} instrument runs`;
 
   // Each section fetches its own data behind a Suspense boundary so the static
   // shell paints immediately and the stats + runs stream in independently.
