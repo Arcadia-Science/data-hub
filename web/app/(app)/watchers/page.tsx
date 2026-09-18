@@ -35,7 +35,7 @@ export default async function WatchersPage() {
       <div className="flex items-center justify-between">
         <h1 className="font-semibold text-2xl tracking-tight">Watchers</h1>
       </div>
-      <Suspense fallback={<WatchersViewSkeleton isAdmin={isAdmin} />}>
+      <Suspense fallback={<WatchersViewSkeleton />}>
         <WatchersListSection isAdmin={isAdmin} />
       </Suspense>
     </div>

@@ -1,6 +1,8 @@
 "use client";
 
+import { Trash2 } from "lucide-react";
 import Link from "next/link";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import {
   Breadcrumb,
@@ -10,6 +12,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UserAvatar } from "@/components/user-avatar";
 import { DeregisterDialog } from "@/components/watchers/deregister-dialog";
@@ -53,6 +56,7 @@ export function WatcherHeader({
   /** Admins get the Deregister action when the watcher is still active. */
   isAdmin?: boolean;
 }) {
+  const [deregisterOpen, setDeregisterOpen] = useState(false);
   const isDeregistered = !!watcher.deletedAt;
 
   return (
@@ -92,7 +96,10 @@ export function WatcherHeader({
               status={watcher.effectiveStatus}
             />
             {watcher.watcherVersion && (
-              <Badge className="font-mono text-xs" variant="outline">
+              <Badge
+                className="bg-slate-200 font-mono text-slate-800 text-xs dark:bg-slate-800 dark:text-slate-200"
+                variant="outline"
+              >
                 v{watcher.watcherVersion}
               </Badge>
             )}
@@ -100,10 +107,23 @@ export function WatcherHeader({
           </div>
 
           {isAdmin && !isDeregistered ? (
-            <DeregisterDialog
-              hostname={watcher.hostname}
-              watcherId={watcher.id}
-            />
+            <>
+              <Button
+                onClick={() => setDeregisterOpen(true)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                <Trash2 className="size-3.5" />
+                Deregister
+              </Button>
+              <DeregisterDialog
+                hostname={watcher.hostname}
+                onOpenChange={setDeregisterOpen}
+                open={deregisterOpen}
+                watcherId={watcher.id}
+              />
+            </>
           ) : null}
         </div>
 

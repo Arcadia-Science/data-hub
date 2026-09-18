@@ -41,7 +41,6 @@ export function InstrumentHeaderSkeleton() {
           <Skeleton className="h-5 w-72" />
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <Skeleton className="h-8 w-36 rounded-md" />
           <Skeleton className="h-8 w-8 rounded-md" />
         </div>
       </div>
@@ -76,7 +75,7 @@ export function InstrumentHeader({
   isAdmin = false,
 }: {
   instrument: InstrumentDetail;
-  /** Admins get the inline Edit / Retire / Reactivate actions. */
+  /** Admins get the actions menu (edit, watcher, retire / reactivate). */
   isAdmin?: boolean;
   /**
    * Per-viewer notification state for this instrument. When omitted
