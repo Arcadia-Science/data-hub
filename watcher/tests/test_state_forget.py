@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from pathlib import Path
+from typing import Any, Literal
 
 import pytest
 from click.testing import CliRunner
@@ -90,54 +91,32 @@ def test_forget_prefix_rejects_a_path_that_escapes(tmp_path: Path) -> None:
         db.close()
 
 
-def test_state_forget_command_clears_the_configured_environment(tmp_path: Path) -> None:
-    watch_dir = tmp_path / "data"
-    watch_dir.mkdir()
-    config_path = tmp_path / "config.yaml"
+@pytest.fixture(autouse=True)
+def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Stand in for `~/.data-hub`, where `watch` keeps state, and hide any service."""
+    import data_hub_watcher.cli as cli_module
+    import data_hub_watcher.constants as constants_module
+
+    home = tmp_path / "home" / ".data-hub"
+    home.mkdir(parents=True)
+    monkeypatch.setattr(constants_module, "DEFAULT_CONFIG_DIR", home)
+    monkeypatch.setattr(cli_module, "_installed_service_config", lambda: None)
+    return home
+
+
+def _write_config(
+    config_dir: Path,
+    environment: Literal["staging", "production", "preview"] = "production",
+) -> Path:
+    watch_dir = config_dir / "data"
+    watch_dir.mkdir(parents=True)
+    config_path = config_dir / "config.yaml"
     save_config(
         WatcherConfig(
             version=1,
-            environment="production",
-            api_base_urls={"production": "https://example.test/api/v1"},
-            watcher_ids={"production": "00000000-0000-4000-8000-000000000001"},
-            instrument=InstrumentConfig(
-                id="dishcam",
-                watch_directory=watch_dir,
-                file_patterns=["*.tif"],
-                run_detection=RunDetectionConfig(pattern=r"^([^/]+)/", recursive=True),
-            ),
-        ),
-        config_path,
-    )
-    db_path = tmp_path / "watcher-production.db"
-    db = StateDB(db_path)
-    _seed(db)
-    db.close()
-
-    result = CliRunner().invoke(
-        cli,
-        ["--config", str(config_path), "state", "forget", "--prefix", "alice/", "--yes"],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert "uploaded_files: 1" in result.output
-    reopened = StateDB(db_path)
-    remaining = _paths(reopened)
-    reopened.close()
-    assert "alice/day-1/capture/sample.tif" not in remaining
-    assert "alice_notes/sample.tif" in remaining
-
-
-def _write_config(tmp_path: Path) -> Path:
-    watch_dir = tmp_path / "data"
-    watch_dir.mkdir()
-    config_path = tmp_path / "config.yaml"
-    save_config(
-        WatcherConfig(
-            version=1,
-            environment="production",
-            api_base_urls={"production": "https://example.test/api/v1"},
-            watcher_ids={"production": "00000000-0000-4000-8000-000000000001"},
+            environment=environment,
+            api_base_urls={environment: "https://example.test/api/v1"},
+            watcher_ids={environment: "00000000-0000-4000-8000-000000000001"},
             instrument=InstrumentConfig(
                 id="dishcam",
                 watch_directory=watch_dir,
@@ -150,24 +129,125 @@ def _write_config(tmp_path: Path) -> Path:
     return config_path
 
 
-def test_state_forget_refuses_a_missing_database(tmp_path: Path) -> None:
-    config_path = _write_config(tmp_path)
-    db_path = tmp_path / "watcher-production.db"
+def _seeded_db(db_path: Path) -> Path:
+    db = StateDB(db_path)
+    _seed(db)
+    db.close()
+    return db_path
+
+
+def _remaining(db_path: Path) -> set[str]:
+    db = StateDB(db_path)
+    try:
+        return _paths(db)
+    finally:
+        db.close()
+
+
+def _forget(config_path: Path, *extra: str) -> Any:
+    return CliRunner().invoke(
+        cli,
+        ["--config", str(config_path), "state", "forget", "--prefix", "alice/", *extra],
+    )
+
+
+def test_state_forget_clears_the_service_db_beside_the_config(tmp_path: Path) -> None:
+    config_path = _write_config(tmp_path / "service")
+    db_path = _seeded_db(tmp_path / "service" / "watcher-production.db")
+
+    result = _forget(config_path, "--yes")
+
+    assert result.exit_code == 0, result.output
+    assert str(db_path) in result.output
+    assert "uploaded_files: 1" in result.output
+    remaining = _remaining(db_path)
+    assert "alice/day-1/capture/sample.tif" not in remaining
+    assert "alice_notes/sample.tif" in remaining
+
+
+def test_state_forget_clears_the_db_watch_uses_with_a_custom_config(
+    tmp_path: Path, fake_home: Path
+) -> None:
+    # `watch --config elsewhere/config.yaml` still keeps state in ~/.data-hub.
+    config_path = _write_config(tmp_path / "elsewhere")
+    db_path = _seeded_db(fake_home / "watcher-production.db")
+
+    result = _forget(config_path, "--yes")
+
+    assert result.exit_code == 0, result.output
+    assert str(db_path) in result.output
+    assert "alice/day-1/capture/sample.tif" not in _remaining(db_path)
+
+
+def test_state_forget_clears_the_installed_service_db_too(
+    tmp_path: Path, fake_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import data_hub_watcher.cli as cli_module
+
+    # An operator's old interactive run left a DB in ~/.data-hub. The
+    # service runs from its own config, possibly in another environment.
+    operator_config = _write_config(fake_home, environment="staging")
+    operator_db = _seeded_db(fake_home / "watcher-staging.db")
+    service_config = _write_config(tmp_path / "service")
+    service_db = _seeded_db(tmp_path / "service" / "watcher-production.db")
+    monkeypatch.setattr(cli_module, "_installed_service_config", lambda: service_config)
+
+    result = _forget(operator_config, "--yes")
+
+    assert result.exit_code == 0, result.output
+    assert str(operator_db) in result.output
+    assert str(service_db) in result.output
+    assert "alice/day-1/capture/sample.tif" not in _remaining(operator_db)
+    assert "alice/day-1/capture/sample.tif" not in _remaining(service_db)
+
+
+def test_state_forget_lists_every_db_before_asking(tmp_path: Path) -> None:
+    config_path = _write_config(tmp_path / "service")
+    db_path = _seeded_db(tmp_path / "service" / "watcher-production.db")
 
     result = CliRunner().invoke(
         cli,
-        ["--config", str(config_path), "state", "forget", "--prefix", "alice/", "--yes"],
+        ["--config", str(config_path), "state", "forget", "--prefix", "alice/"],
+        input="n\n",
     )
 
+    assert result.exit_code != 0
+    assert result.output.index(str(db_path)) < result.output.index("Continue?")
+    assert "alice/day-1/capture/sample.tif" in _remaining(db_path)
+
+
+def test_state_forget_rejects_an_unsafe_prefix_before_asking(tmp_path: Path) -> None:
+    config_path = _write_config(tmp_path / "service")
+    _seeded_db(tmp_path / "service" / "watcher-production.db")
+
+    result = CliRunner().invoke(
+        cli,
+        ["--config", str(config_path), "state", "forget", "--prefix", "../alice"],
+    )
+
+    assert result.exit_code != 0
+    assert "unsafe prefix" in result.output
+    assert "Continue?" not in result.output
+
+
+def test_state_forget_refuses_a_missing_database(tmp_path: Path, fake_home: Path) -> None:
+    config_path = _write_config(tmp_path / "service")
+    service_db = tmp_path / "service" / "watcher-production.db"
+    watch_db = fake_home / "watcher-production.db"
+
+    result = _forget(config_path, "--yes")
+
     assert result.exit_code != 0, result.output
-    assert str(db_path) in result.output
+    assert str(service_db) in result.output
+    assert str(watch_db) in result.output
     assert "--config" in result.output
-    assert not db_path.exists()
+    assert not service_db.exists()
+    assert not watch_db.exists()
 
 
 def test_state_forget_warns_when_nothing_matches(tmp_path: Path) -> None:
-    config_path = _write_config(tmp_path)
-    db = StateDB(tmp_path / "watcher-production.db")
+    config_path = _write_config(tmp_path / "service")
+    db = StateDB(tmp_path / "service" / "watcher-production.db")
     db.record_upload(
         "other.tif",
         "ghi",
@@ -178,10 +258,7 @@ def test_state_forget_warns_when_nothing_matches(tmp_path: Path) -> None:
     )
     db.close()
 
-    result = CliRunner().invoke(
-        cli,
-        ["--config", str(config_path), "state", "forget", "--prefix", "alice/", "--yes"],
-    )
+    result = _forget(config_path, "--yes")
 
     assert result.exit_code == 0, result.output
     assert "nothing matched" in result.output

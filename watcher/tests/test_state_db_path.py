@@ -3,10 +3,14 @@
 from __future__ import annotations
 from pathlib import Path
 
+import pytest
+
+import data_hub_watcher.constants as constants_module
 from data_hub_watcher.constants import (
     STATE_DB_FILENAME,
     reset_state_db,
     resolve_state_db_path,
+    state_db_dir,
     state_db_path,
 )
 
@@ -14,6 +18,17 @@ from data_hub_watcher.constants import (
 def test_path_is_environment_scoped(tmp_path: Path) -> None:
     assert state_db_path(tmp_path, "production") == tmp_path / "watcher-production.db"
     assert state_db_path(tmp_path, "staging") == tmp_path / "watcher-staging.db"
+
+
+def test_service_keeps_state_beside_its_config_and_watch_does_not(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setattr(constants_module, "DEFAULT_CONFIG_DIR", home)
+    config_path = tmp_path / "service" / "config.yaml"
+
+    assert state_db_dir(config_path, service=True) == tmp_path / "service"
+    assert state_db_dir(config_path, service=False) == home
 
 
 def test_resolve_creates_no_file_when_nothing_exists(tmp_path: Path) -> None:

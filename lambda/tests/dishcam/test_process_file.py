@@ -1225,7 +1225,7 @@ class TestCaptureFolderPairing:
             for call in client.update_file.call_args_list
             if call.args[0] == 2 and call.kwargs.get("metadata") is not None
         ]
-        assert tiff_metadata == [{"fps": 8, "frames": 10}]
+        assert tiff_metadata == [{"fps": 8, "frames": 10, "sidecar": tagged_sidecar}]
 
     def test_tagged_sidecar_encodes_only_its_folder(self, tmp_path: Path) -> None:
         own_folder = "alice/day-2/capture-b"
@@ -1359,3 +1359,176 @@ class TestPlainRunJsonFallback:
         encode.assert_called_once()
         assert downloaded[0].endswith("/run.json")
         assert "dismissed.json" not in downloaded[0]
+
+
+TAGGED_SIDECAR = "run~3f9a1c2b.json"
+
+
+class _FileStore:
+    """Keeps each file's status and metadata across create/update calls."""
+
+    def __init__(
+        self,
+        ids: dict[str, int],
+        *,
+        statuses: dict[str, str] | None = None,
+        metadata: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
+        self._ids = ids
+        self._names = {file_id: name for name, file_id in ids.items()}
+        self.status = {name: (statuses or {}).get(name, "uploaded") for name in ids}
+        self.metadata = {name: (metadata or {}).get(name, {}) for name in ids}
+
+    def create_file(self, **kwargs: Any) -> FileResponse:
+        name = kwargs["filename"]
+        return FileResponse(
+            id=self._ids[name],
+            instrument_run_id="run-uuid",
+            filename=name,
+            s3_bucket="raw",
+            s3_key=f"dishcam/run-xyz/{name}",
+            category=kwargs.get("category", "raw"),
+            status=self.status[name],
+            metadata=self.metadata[name],
+        )
+
+    def update_file(self, file_id: int, **kwargs: Any) -> FileResponse:
+        name = self._names[file_id]
+        if kwargs.get("status") is not None:
+            self.status[name] = kwargs["status"]
+        if kwargs.get("metadata") is not None:
+            self.metadata[name] = kwargs["metadata"]
+        return self.create_file(filename=name)
+
+
+def _late_sidecar_download(s3_uri: str, local_path: Path, **_: Any) -> None:
+    """Folder B's own sidecar asks for a different frame rate than run.json."""
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    name = s3_uri.rsplit("/", 1)[-1]
+    if name == TAGGED_SIDECAR:
+        local_path.write_text('{"fps": 24}')
+    elif name == "run.json":
+        local_path.write_text('{"fps": 1}')
+    else:
+        local_path.write_bytes(b"tiff")
+
+
+def _store_client(store: _FileStore) -> MagicMock:
+    client = MagicMock()
+    client.ensure_run.return_value = _run_response()
+    client.create_file.side_effect = store.create_file
+    client.update_file.side_effect = store.update_file
+    return client
+
+
+_LATE_SIDECAR_IDS = {
+    "run.json": 1,
+    "stack.tif": 2,
+    TAGGED_SIDECAR: 3,
+    "stack.mp4": 4,
+    "stack.jpg": 5,
+}
+
+
+class TestLateOwnSidecar:
+    @pytest.mark.parametrize(
+        "recorded",
+        [{"fps": 1, "sidecar": "run.json"}, {}],
+        ids=["recorded-run-json", "legacy-no-record"],
+    )
+    def test_sidecar_reencodes_a_stack_encoded_with_another_folders_run_json(
+        self, tmp_path: Path, recorded: dict[str, Any]
+    ) -> None:
+        store = _FileStore(
+            _LATE_SIDECAR_IDS,
+            statuses={"stack.tif": "completed"},
+            metadata={"stack.tif": recorded},
+        )
+        client = _store_client(store)
+        client.get_run.return_value = _detail(
+            _run_file(1, "run.json", relative_path="day-1/run.json"),
+            _run_file(2, "stack.tif", "completed", relative_path="day-2/stack.tif"),
+            _run_file(3, TAGGED_SIDECAR, relative_path=f"day-2/{TAGGED_SIDECAR}"),
+        )
+
+        with _patched_process(tmp_path, client, download=_late_sidecar_download) as (
+            process_file,
+            encode,
+        ):
+            process_file("dishcam", "run-xyz", TAGGED_SIDECAR)
+
+        assert [call.args[3] for call in encode.call_args_list] == [24.0]
+        assert store.metadata["stack.tif"] == {"fps": 24, "sidecar": TAGGED_SIDECAR}
+        assert store.status["stack.tif"] == "completed"
+        client.update_run.assert_not_called()
+
+    def test_sidecar_leaves_a_stack_already_encoded_with_it(self, tmp_path: Path) -> None:
+        store = _FileStore(
+            _LATE_SIDECAR_IDS,
+            statuses={"stack.tif": "completed"},
+            metadata={"stack.tif": {"fps": 24, "sidecar": TAGGED_SIDECAR}},
+        )
+        client = _store_client(store)
+        client.get_run.return_value = _detail(
+            _run_file(1, "run.json", relative_path="day-1/run.json"),
+            _run_file(2, "stack.tif", "completed", relative_path="day-2/stack.tif"),
+            _run_file(3, TAGGED_SIDECAR, relative_path=f"day-2/{TAGGED_SIDECAR}"),
+        )
+
+        with _patched_process(tmp_path, client, download=_late_sidecar_download) as (
+            process_file,
+            encode,
+        ):
+            process_file("dishcam", "run-xyz", TAGGED_SIDECAR)
+
+        encode.assert_not_called()
+        assert _status_updates(client, 2) == []
+
+    def test_fallback_encode_reencodes_when_own_sidecar_lands_mid_encode(
+        self, tmp_path: Path
+    ) -> None:
+        store = _FileStore(_LATE_SIDECAR_IDS)
+        client = _store_client(store)
+        before = _detail(
+            _run_file(1, "run.json", relative_path="day-1/run.json"),
+            _run_file(2, "stack.tif", relative_path="day-2/stack.tif"),
+        )
+        after = _detail(
+            *before.files,
+            _run_file(3, TAGGED_SIDECAR, relative_path=f"day-2/{TAGGED_SIDECAR}"),
+        )
+        client.get_run.side_effect = [before, after]
+
+        with _patched_process(tmp_path, client, download=_late_sidecar_download) as (
+            process_file,
+            encode,
+        ):
+            process_file("dishcam", "run-xyz", "stack.tif")
+
+        assert [call.args[3] for call in encode.call_args_list] == [MIN_PLAYBACK_FPS, 24.0]
+        assert store.metadata["stack.tif"] == {"fps": 24, "sidecar": TAGGED_SIDECAR}
+        assert store.status[TAGGED_SIDECAR] == "completed"
+        client.update_run.assert_called_once()
+
+    def test_fallback_encode_waits_for_a_sidecar_still_on_the_pc(self, tmp_path: Path) -> None:
+        store = _FileStore(_LATE_SIDECAR_IDS)
+        client = _store_client(store)
+        before = _detail(
+            _run_file(1, "run.json", relative_path="day-1/run.json"),
+            _run_file(2, "stack.tif", relative_path="day-2/stack.tif"),
+        )
+        after = _detail(
+            *before.files,
+            _run_file(3, TAGGED_SIDECAR, "detected", relative_path=f"day-2/{TAGGED_SIDECAR}"),
+        )
+        client.get_run.side_effect = [before, after]
+
+        with _patched_process(tmp_path, client, download=_late_sidecar_download) as (
+            process_file,
+            encode,
+        ):
+            process_file("dishcam", "run-xyz", "stack.tif")
+
+        encode.assert_called_once()
+        assert client.get_run.call_count == 2
+        assert store.metadata["stack.tif"] == {"fps": 1, "sidecar": "run.json"}

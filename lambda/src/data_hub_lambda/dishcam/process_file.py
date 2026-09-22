@@ -19,6 +19,10 @@ logger = logging.getLogger(__name__)
 # file counts as present anyway: the S3 event is the proof it landed.
 _IN_S3_STATUSES = {"uploaded", "processing", "completed", "failed"}
 
+# Stack metadata key naming the sidecar that set the MP4's frame rate. A
+# stack without it was encoded by older code, which always used `run.json`.
+_SIDECAR_KEY = "sidecar"
+
 
 def process_file(instrument_id: str, run_id: str, filename: str) -> None:
     """Encode each TIFF after both the stack(s) and sidecar exist.
@@ -38,6 +42,13 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
     watchers stored for every capture. A plain `run.json` event also encodes
     stacks in those folders. Only that plain sidecar writes run metadata.
 
+    A folder's own sidecar can be reported after its stacks, so a fallback
+    encode is not final. Each stack records the sidecar it used, and a
+    sidecar event re-encodes a completed stack that used a different one.
+    That event skips a stack still `processing`, so a fallback encode
+    re-reads the file list when it finishes and re-encodes if the folder's
+    own sidecar has landed in the meantime.
+
     Reprocess already marks the trigger `processing`, so a missing sibling
     fails that file instead of leaving it stuck. A parsed sidecar is
     completed even if a stack failed: it has no stack of its own, and
@@ -46,13 +57,13 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
 
     TIFF and `run.json` are separate S3 events, so two invocations can
     encode the same stack. The `run.json` batch skips stacks that are
-    already completed or processing: `completed → processing` is a legal
-    transition, and a later disk-full failure would otherwise reopen a
-    sibling's success and mark it failed. A stack left in `processing`
-    after a timeout is retried by reprocessing that TIFF, not another
-    `run.json` batch. A TIFF-triggered invoke always encodes that stack.
-    completed/failed updates swallow 409 so the loser does not fail a
-    successful run.
+    processing, or completed with this same sidecar: `completed →
+    processing` is a legal transition, and a later disk-full failure would
+    otherwise reopen a sibling's success and mark it failed. A stack left
+    in `processing` after a timeout is retried by reprocessing that TIFF,
+    not another `run.json` batch. A TIFF-triggered invoke always encodes
+    that stack. completed/failed updates swallow 409 so the loser does not
+    fail a successful run.
 
     Run metadata is written from the plain `run.json` even when every stack
     is skipped, so a corrected sidecar still updates the run. A renamed
@@ -89,15 +100,49 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
         )
         return
     sidecar_row, tiff_filenames = group
-    json_uri = _object_uri(raw_bucket, sidecar_row, instrument_id, run_id)
 
+    client.ensure_run(instrument_id, run_id)
+    encoded, last_error = _encode_group(
+        client,
+        instrument_id,
+        run_id,
+        sidecar_row,
+        tiff_filenames,
+        owned=is_tiff(filename),
+    )
+    if run_files is not None:
+        borrowed = _stacks_outside_sidecar_folder(run_files, sidecar_row, encoded)
+        if borrowed:
+            recheck_error = _reencode_with_own_sidecar(
+                client, instrument_id, run_id, sidecar_row, borrowed
+            )
+            last_error = last_error or recheck_error
+    if last_error is not None:
+        raise last_error
+
+
+def _encode_group(
+    client: DataHubClient,
+    instrument_id: str,
+    run_id: str,
+    sidecar_row: RunDetailFile,
+    tiff_filenames: list[str],
+    *,
+    owned: bool,
+) -> tuple[list[str], Exception | None]:
+    """Encode stacks with one sidecar. Return the stacks encoded and the last error.
+
+    A sidecar that fails to download or parse fails every stack and raises.
+    """
+    raw_bucket = config.AWS_S3_RAW_DATA_BUCKET or ""
+    json_uri = _object_uri(raw_bucket, sidecar_row, instrument_id, run_id)
     logger.info(
-        "Processing DishCam TIFF%s %s (run: %s)",
+        "Processing DishCam TIFF%s %s with %s (run: %s)",
         "" if len(tiff_filenames) == 1 else "s",
         ", ".join(tiff_filenames),
+        sidecar_row.filename,
         run_id,
     )
-    client.ensure_run(instrument_id, run_id)
 
     raw_dir = config.LOCAL_RAW_DATA_DIRPATH / instrument_id / run_id
     local_json = raw_dir / sidecar_row.filename
@@ -127,11 +172,11 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
     if sidecar.status in {"uploaded", "failed"}:
         _update_file_status(client, sidecar.id, "processing")
 
+    encoded: list[str] = []
     last_error: Exception | None = None
-    owned = is_tiff(filename)
     for tiff_filename in tiff_filenames:
         try:
-            _encode_tiff(
+            if _encode_tiff(
                 client,
                 instrument_id,
                 run_id,
@@ -140,8 +185,10 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
                 tiff_filename,
                 fps,
                 metadata,
+                sidecar_row.filename,
                 owned=owned,
-            )
+            ):
+                encoded.append(tiff_filename)
         except Exception as exc:
             logger.error("Error processing DishCam file %s: %s", tiff_filename, exc)
             last_error = exc
@@ -155,12 +202,52 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
     if sidecar.status != "completed":
         try:
             _update_file_status(client, sidecar.id, "completed")
-        except Exception:
+        except Exception as exc:
             logger.exception("Failed to complete DishCam run.json for %s.", run_id)
             if last_error is None:
-                raise
-    if last_error is not None:
-        raise last_error
+                last_error = exc
+    return encoded, last_error
+
+
+def _stacks_outside_sidecar_folder(
+    run_files: list[RunDetailFile],
+    sidecar: RunDetailFile,
+    stacks: list[str],
+) -> list[str]:
+    """Stacks encoded with a sidecar borrowed from another folder."""
+    folders = {row.filename: _folder(row) for row in run_files}
+    home = _folder(sidecar)
+    return [name for name in stacks if folders.get(name, "") != home]
+
+
+def _reencode_with_own_sidecar(
+    client: DataHubClient,
+    instrument_id: str,
+    run_id: str,
+    used: RunDetailFile,
+    stacks: list[str],
+) -> Exception | None:
+    """Re-encode stacks whose own folder's sidecar landed while they encoded.
+
+    A sidecar that is still on the instrument PC re-encodes these stacks
+    from its own S3 event instead. Returns the last error.
+    """
+    refreshed = _load_run_files(client, instrument_id, run_id) or []
+    groups: dict[str, tuple[RunDetailFile, list[str]]] = {}
+    for name in stacks:
+        group = _capture_group(refreshed, name)
+        if group is None or group[0].filename.lower() == used.filename.lower():
+            continue
+        groups.setdefault(group[0].filename, (group[0], []))[1].append(name)
+
+    last_error: Exception | None = None
+    for sidecar, names in groups.values():
+        try:
+            _, error = _encode_group(client, instrument_id, run_id, sidecar, names, owned=False)
+        except Exception as exc:
+            error = exc
+        last_error = error or last_error
+    return last_error
 
 
 def _load_run_files(
@@ -316,6 +403,7 @@ def _encode_tiff(
     tiff_filename: str,
     fps: float,
     metadata: dict[str, Any],
+    sidecar_name: str,
     *,
     owned: bool,
 ) -> bool:
@@ -323,7 +411,8 @@ def _encode_tiff(
 
     `owned` is True when the S3/reprocess trigger is this TIFF, so a
     duplicate event or an intentional retry still runs. The `run.json`
-    batch passes False and leaves in-flight and finished stacks alone. A
+    batch passes False and leaves in-flight stacks alone, and finished
+    stacks too unless they were encoded with a different sidecar. A
     stack stuck in `processing` after a timeout is retried by
     reprocessing that TIFF, not another `run.json` batch.
     """
@@ -340,19 +429,28 @@ def _encode_tiff(
     local_tiff = raw_dir / tiff_filename
     mp4_path = raw_dir / f"{Path(tiff_filename).stem}.mp4"
     poster_path = raw_dir / f"{Path(tiff_filename).stem}.jpg"
+    stack_metadata = {**metadata, _SIDECAR_KEY: sidecar_name}
 
     if not owned and tiff_record.status in {"completed", "processing"}:
-        # A corrected sidecar should still land on a stack this batch
-        # does not re-encode. In-flight encodes keep the metadata they
-        # already parsed.
-        if tiff_record.status == "completed":
-            client.update_file(tiff_id, metadata=metadata)
+        encoded_with = str(tiff_record.metadata.get(_SIDECAR_KEY) or RUN_JSON_NAME)
+        if tiff_record.status == "processing" or encoded_with.lower() == sidecar_name.lower():
+            # A corrected sidecar should still land on a stack this batch
+            # does not re-encode. In-flight encodes keep the metadata they
+            # already parsed.
+            if tiff_record.status == "completed":
+                client.update_file(tiff_id, metadata=stack_metadata)
+            logger.info(
+                "Skipping DishCam file %s; already %s.",
+                tiff_filename,
+                tiff_record.status,
+            )
+            return False
         logger.info(
-            "Skipping DishCam file %s; already %s.",
+            "Re-encoding DishCam file %s with %s; it was encoded with %s.",
             tiff_filename,
-            tiff_record.status,
+            sidecar_name,
+            encoded_with,
         )
-        return False
 
     try:
         client.update_file(tiff_id, status="processing")
@@ -378,7 +476,7 @@ def _encode_tiff(
             "image/jpeg",
         )
 
-        if not _update_file_status(client, tiff_id, "completed", metadata=metadata):
+        if not _update_file_status(client, tiff_id, "completed", metadata=stack_metadata):
             logger.info(
                 "DishCam file %s already finished by a sibling invocation.",
                 tiff_filename,

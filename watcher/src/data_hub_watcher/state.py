@@ -79,6 +79,17 @@ class DetectedFileRecord:
     file_created_at: float | None = None
 
 
+def clean_forget_prefix(prefix: str) -> str:
+    """Normalize a folder prefix for `StateDB.forget_prefix`.
+
+    Raises `ValueError` for an empty prefix or one with `.`/`..` segments.
+    """
+    cleaned = prefix.replace("\\", "/").strip("/")
+    if not cleaned or any(part in {"", ".", ".."} for part in cleaned.split("/")):
+        raise ValueError(f"Refusing unsafe prefix: {prefix!r}")
+    return cleaned
+
+
 class StateDB:
     """Thin wrapper around a SQLite database, one file per environment.
 
@@ -304,9 +315,7 @@ class StateDB:
 
         Returns the number of rows removed from each table.
         """
-        cleaned = prefix.replace("\\", "/").strip("/")
-        if not cleaned or any(part in {"", ".", ".."} for part in cleaned.split("/")):
-            raise ValueError(f"Refusing unsafe prefix: {prefix!r}")
+        cleaned = clean_forget_prefix(prefix)
         boundary = f"{cleaned}/"
         width = len(boundary)
         counts: dict[str, int] = {}

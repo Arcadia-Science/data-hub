@@ -217,6 +217,16 @@ def state_db_path(config_dir: Path, environment: str) -> Path:
     return config_dir / f"watcher-{environment}.db"
 
 
+def state_db_dir(config_path: Path, *, service: bool) -> Path:
+    """Directory of the state DB a running watcher opens for *config_path*.
+
+    The Windows service keeps it beside its registry-stored config. `watch`
+    and `upload` use `DEFAULT_CONFIG_DIR` even with `--config`, so a command
+    that edits state has to check both.
+    """
+    return config_path.parent if service else DEFAULT_CONFIG_DIR
+
+
 def resolve_state_db_path(config_dir: Path, environment: str) -> Path:
     """Return the per-environment state DB path, migrating the legacy file once.
 

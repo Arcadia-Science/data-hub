@@ -234,7 +234,7 @@ Queued files are resolved against the current `watch_directory` (each queue entr
 
 ## Local state
 
-The watcher maintains one SQLite database per environment at `~/.data-hub/watcher-<environment>.db` (e.g. `watcher-production.db`). Isolating state per environment is what lets a PC switch back and forth without one environment's uploads being recorded against another. A pre-multi-environment `~/.data-hub/watcher.db` is renamed to the active environment's file on first start. Each database has the following tables:
+The watcher maintains one SQLite database per environment at `~/.data-hub/watcher-<environment>.db` (e.g. `watcher-production.db`). `watch` and `upload` use that folder even when started with `--config`. The Windows service keeps the database beside the config file stored in its registry key instead; `state_db_dir` in `constants.py` holds both rules. Isolating state per environment is what lets a PC switch back and forth without one environment's uploads being recorded against another. A pre-multi-environment `~/.data-hub/watcher.db` is renamed to the active environment's file on first start. Each database has the following tables:
 
 - `uploaded_files` — one row per successful S3 upload, keyed on `(filename, sha256, s3_key)`. Used by the uploader to skip re-uploads on retry and by the initial scan to skip files that have already been sent. Records older than 90 days are pruned automatically.
 - `runs` — tracks which run IDs have been reported and (in auto mode) when their files finished uploading. The most recent `reported_at` timestamp is what the auto-updater consults to gate restarts on a quiet-instrument window.
@@ -263,7 +263,7 @@ In a `new-only` environment (staging/preview by default — see [Switching envir
 
 `data-hub-watcher state forget --prefix alice/` deletes the `uploaded_files`, `detected_files`, and `baseline_files` rows whose path is that folder or sits inside it. The next start reports those files again. Stop the watcher first: a running process does not rescan until it starts. Names that merely begin with the same letters (`alice_notes/`) are left alone; the match is not a `LIKE` pattern, because `_` would otherwise match any character.
 
-The command refuses to run when that environment's state database does not exist, and it prints the path it looked for. Pass `--config` if the watcher was started from a different config file. When the prefix matches nothing, it warns: paths are case-sensitive and relative to the watch directory.
+Because `watch` and the Windows service keep state in different folders, the command clears every state database a watcher on the PC can open: the one in `~/.data-hub`, the one beside the `--config` file, and on Windows the one beside the installed service's config. It lists the databases it found before asking to continue, then prints the rows removed from each. It refuses to run when none exists, and it prints the paths it looked for. When the prefix matches nothing, it warns: paths are case-sensitive and relative to the watch directory.
 
 This is how a file the watcher already marked as uploaded gets a second chance after the server learns to keep same-named files from different folders.
 
