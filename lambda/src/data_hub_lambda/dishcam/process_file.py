@@ -68,7 +68,15 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
 
     raw_bucket = config.AWS_S3_RAW_DATA_BUCKET or ""
     client = get_client()
-    group = _capture_group(_load_run_files(client, instrument_id, run_id), filename)
+    # A watcher-reported run has file rows, and those rows say which
+    # sidecar belongs to which folder. An S3 event can also be the first
+    # sign of a run: get_run is 404, and the objects are still flat under
+    # the run prefix. Falling back to that listing is what creates the run.
+    run_files = _load_run_files(client, instrument_id, run_id)
+    if run_files is None:
+        group = _s3_flat_group(raw_bucket, instrument_id, run_id, filename)
+    else:
+        group = _capture_group(run_files, filename)
     if group is None:
         missing = "run.json" if is_tiff(filename) else "TIFF stack"
         logger.info("DishCam run %s is missing %s; skipping.", run_id, missing)
@@ -155,14 +163,57 @@ def _load_run_files(
     client: DataHubClient,
     instrument_id: str,
     run_id: str,
-) -> list[FileResponse]:
+) -> list[FileResponse] | None:
+    """Return the run's files, or None when the run does not exist yet."""
     try:
         detail: RunDetailResponse = client.get_run(instrument_id, run_id)
     except ApiError as exc:
         if exc.status_code == 404:
-            return []
+            return None
         raise
     return detail.files
+
+
+def _s3_flat_group(
+    raw_bucket: str,
+    instrument_id: str,
+    run_id: str,
+    filename: str,
+) -> tuple[FileResponse, list[str]] | None:
+    """Pair a flat S3 prefix the way DishCam did before folder records existed.
+
+    The sidecar is `{instrument}/{run}/run.json` unless the event itself is
+    a renamed sidecar. TIFF names are the basenames directly under the prefix.
+    """
+    sidecar_name = filename if is_run_json(filename) else "run.json"
+    json_key = f"{instrument_id}/{run_id}/{sidecar_name}"
+    if not s3_utils.object_exists(f"s3://{raw_bucket}/{json_key}"):
+        return None
+    tiff_filenames = (
+        [filename] if is_tiff(filename) else _list_tiff_filenames(raw_bucket, instrument_id, run_id)
+    )
+    if not tiff_filenames:
+        return None
+    sidecar = FileResponse(
+        id=0,
+        instrument_run_id="",
+        filename=sidecar_name,
+        s3_bucket=raw_bucket,
+        s3_key=json_key,
+        category="raw",
+        status="uploaded",
+    )
+    return sidecar, tiff_filenames
+
+
+def _list_tiff_filenames(raw_bucket: str, instrument_id: str, run_id: str) -> list[str]:
+    prefix = f"s3://{raw_bucket}/{instrument_id}/{run_id}/"
+    names: list[str] = []
+    for uri in sorted(s3_utils.list_objects(prefix)):
+        name = uri.rsplit("/", 1)[-1]
+        if is_tiff(name):
+            names.append(name)
+    return names
 
 
 def _folder(file: FileResponse) -> str:

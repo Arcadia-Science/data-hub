@@ -269,6 +269,27 @@ class TestProcessFileSkipUntilBothPresent:
 
         client.update_file.assert_not_called()
 
+    def test_missing_run_uses_the_s3_prefix(self, tmp_path: Path) -> None:
+        client = MagicMock()
+        client.get_run.side_effect = ApiError("not found", status_code=404)
+        client.ensure_run.return_value = _run_response()
+        client.create_file.side_effect = [
+            _file_response(SIDECAR_ID, "run.json"),
+            _file_response(10, "stack.tif"),
+            _file_response(11, "stack.mp4", category="processed"),
+            _file_response(12, "stack.jpg", category="processed"),
+        ]
+
+        with _patched_process(
+            tmp_path,
+            client,
+            list_objects=["s3://raw/dishcam/run-xyz/stack.tif"],
+        ) as (process_file, encode):
+            process_file("dishcam", "run-xyz", "run.json")
+
+        client.ensure_run.assert_called_once_with("dishcam", "run-xyz")
+        assert [call.args[0].name for call in encode.call_args_list] == ["stack.tif"]
+
 
 class TestProcessFileEncodesWhenBothPresent:
     def test_run_json_trigger_encodes_sibling_tiff(self, tmp_path: Path) -> None:
