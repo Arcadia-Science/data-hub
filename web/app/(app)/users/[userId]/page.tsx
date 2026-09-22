@@ -156,6 +156,8 @@ async function UserRunsSection({
       perPage: params.per_page,
       includeDeleted: params.include_deleted,
       statuses: params.status.length > 0 ? params.status : undefined,
+      sort: params.sort,
+      order: params.order,
     }),
   ]);
 

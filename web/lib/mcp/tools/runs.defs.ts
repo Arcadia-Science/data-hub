@@ -61,7 +61,7 @@ export const searchRunsTool = {
       .enum(["acquired_at", "created_at", "updated_at"])
       .optional()
       .describe(
-        "Sort field (default: acquired_at — when the run actually happened on the instrument PC, falling back to created_at)"
+        "Sort field (default: acquired_at — when the run started on the instrument PC, falling back to created_at). updated_at is the last change to the run or any of its files."
       ),
     order: z
       .enum(["asc", "desc"])

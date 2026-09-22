@@ -6,6 +6,7 @@ import {
   asc,
   desc,
   eq,
+  gt,
   ilike,
   inArray,
   isNull,
@@ -255,6 +256,27 @@ export function parseAcquiredAt(body: Record<string, unknown>): Date | null {
   return floor === null ? null : new Date(floor);
 }
 
+// Writes only when `incoming` is earlier than the stored time, or the stored
+// time is null. Skipping the row otherwise keeps `$onUpdate` from moving
+// `updated_at` on a repeat report of files the run already has.
+export async function foldEarlierAcquiredAt(
+  runId: string,
+  incoming: Date
+): Promise<void> {
+  await db
+    .update(instrumentRuns)
+    .set({ acquiredAt: incoming })
+    .where(
+      and(
+        eq(instrumentRuns.id, runId),
+        or(
+          isNull(instrumentRuns.acquiredAt),
+          gt(instrumentRuns.acquiredAt, incoming)
+        )
+      )
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Paginated run list with per-run file count aggregation.
 // Used by both per-instrument and cross-instrument list endpoints.
@@ -346,11 +368,11 @@ function runStatusCondition(status: RunStatus, now: Date): SQL {
 
 // Resolves the runs immediately newer (`previousRunId`) and older
 // (`nextRunId`) than `current` within the same instrument, matching the runs
-// table's `coalesce(acquired_at, created_at) DESC` ordering. The `id` tiebreak
-// keeps neighbors deterministic when two runs share a timestamp; the list
-// query has no tiebreak, so equal-timestamp ordering is otherwise arbitrary.
-// Deleted runs are excluded to mirror the table's default. Wrapped in `cache()`
-// like `lookupRunByNaturalKey` so a single request reuses the result.
+// table's default `coalesce(acquired_at, created_at) DESC` ordering. The `id`
+// tiebreak matches `buildRunListQuery`. This navigation stays on acquisition
+// order even when the table is sorted by last updated. Deleted runs are
+// excluded to mirror the table's default. Wrapped in `cache()` like
+// `lookupRunByNaturalKey` so a single request reuses the result.
 export const getAdjacentRunIds = cache(
   async function getAdjacentRunIds(current: {
     acquiredAt: Date | null;
@@ -704,7 +726,9 @@ export async function buildRunListQuery(filters: RunListFilters) {
       instruments.displayName,
       instruments.instrumentType
     )
-    .orderBy(orderFn(sortCol))
+    // `id` keeps a page stable when a bulk file change stamps many runs with
+    // the same `updated_at`.
+    .orderBy(orderFn(sortCol), orderFn(instrumentRuns.id))
     .limit(perPage)
     .offset(offset);
 

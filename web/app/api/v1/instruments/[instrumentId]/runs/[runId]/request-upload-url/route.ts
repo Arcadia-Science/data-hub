@@ -13,6 +13,7 @@ import {
   type IncomingRunFile,
   resolveRunFiles,
 } from "@/lib/api/run-file-identity";
+import { touchRuns } from "@/lib/api/touch-runs";
 import { watcherClientFrom } from "@/lib/api/watcher-compat";
 import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
@@ -154,6 +155,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       .returning({ id: files.id });
 
     fileId = inserted.id;
+    await touchRuns([run.id]);
   }
 
   const uploadUrl = await getPresignedUploadUrl(
@@ -219,7 +221,11 @@ async function findOrCreateByPath(
       })
       .onConflictDoNothing()
       .returning({ id: files.id });
-    return inserted ? loadActiveFile(inserted.id) : null;
+    if (!inserted) {
+      return null;
+    }
+    await touchRuns([instrumentRunId]);
+    return loadActiveFile(inserted.id);
   };
 
   let [decision] = await resolveRunFiles(db, instrumentRunId, [incoming]);

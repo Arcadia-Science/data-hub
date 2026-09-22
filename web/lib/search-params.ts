@@ -9,6 +9,21 @@ import {
 import { FILES_LIFECYCLE_FILTER_VALUES } from "@/lib/runs/file-lifecycle-filter";
 import { RUN_STATUS_VALUES, type RunStatus } from "@/lib/runs/run-status";
 
+// Shared by the dashboard, a member's runs page, and every instrument page.
+// Defaults stay out of the URL so an unsorted link matches the table's
+// built-in order: acquisition time, newest first.
+export const RUN_SORT_FIELDS = ["acquired_at", "updated_at"] as const;
+const RUN_SORT_ORDERS = ["asc", "desc"] as const;
+
+export const runSortSearchParams = {
+  sort: parseAsStringLiteral(RUN_SORT_FIELDS)
+    .withDefault("acquired_at")
+    .withOptions({ clearOnDefault: true }),
+  order: parseAsStringLiteral(RUN_SORT_ORDERS)
+    .withDefault("desc")
+    .withOptions({ clearOnDefault: true }),
+};
+
 // All dashboard filter/pagination state lives in the URL via nuqs. This makes
 // filter combinations shareable via link and keeps the server component in
 // page.tsx the single source of truth for data fetching.
@@ -27,6 +42,7 @@ export const dashboardSearchParams = {
   ran_by: parseAsString,
   page: parseAsInteger.withDefault(1),
   per_page: parseAsInteger.withDefault(10),
+  ...runSortSearchParams,
 };
 
 export const dashboardParamsCache = createSearchParamsCache(
@@ -34,7 +50,7 @@ export const dashboardParamsCache = createSearchParamsCache(
 );
 
 // Mirrors dashboardSearchParams but omits `instrument_id` (implicit from the
-// route segment) and sort/order (defaults to created_at desc).
+// route segment). Sort defaults to acquisition time, newest first.
 export const instrumentDetailSearchParams = {
   search: parseAsString.withDefault(""),
   date_from: parseAsString.withOptions({ clearOnDefault: true }),
@@ -75,6 +91,7 @@ export const instrumentDetailSearchParams = {
   status: parseAsArrayOf(parseAsStringLiteral(RUN_STATUS_VALUES))
     .withDefault([])
     .withOptions({ clearOnDefault: true }),
+  ...runSortSearchParams,
 };
 
 export const instrumentDetailParamsCache = createSearchParamsCache(

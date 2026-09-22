@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { authorize, authorizeToken } from "@/lib/api/auth";
 import {
@@ -8,6 +8,7 @@ import {
   NOT_FOUND,
 } from "@/lib/api/errors";
 import {
+  foldEarlierAcquiredAt,
   lookupRunByNaturalKey,
   parseAcquiredAt,
 } from "@/lib/api/instrument-runs";
@@ -148,23 +149,9 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
       .where(eq(instrumentRuns.id, run.id));
   }
 
-  // Fold an incoming acquired_at into the row using LEAST so the run's
-  // acquisition time can only ever move earlier (e.g. a later-stabilising
-  // file with an older birthtime). Recomputed from detected_files when not
-  // supplied explicitly — see parseAcquiredAt.
-  //
-  // Bind the ISO string + ::timestamptz cast: drizzle's sql tag has no
-  // PgColumn context here to type a JS Date interpolated into a raw
-  // fragment, so we cast explicitly. See instrument-runs.ts dateFrom/dateTo.
   const incomingAcquiredAt = parseAcquiredAt(body);
   if (incomingAcquiredAt) {
-    const iso = incomingAcquiredAt.toISOString();
-    await db
-      .update(instrumentRuns)
-      .set({
-        acquiredAt: sql`least(coalesce(${instrumentRuns.acquiredAt}, ${iso}::timestamptz), ${iso}::timestamptz)`,
-      })
-      .where(eq(instrumentRuns.id, run.id));
+    await foldEarlierAcquiredAt(run.id, incomingAcquiredAt);
   }
 
   // 1.1.0 watchers get a second row when the same name arrives from

@@ -1,4 +1,3 @@
-import { RelativeTime } from "@/components/dashboard/relative-time";
 import {
   getMetadataArray,
   MetadataArrayBadges,
@@ -23,6 +22,7 @@ import { RunIdCell } from "./run-id-cell";
 import { RunRowActions } from "./run-row-actions";
 import { RunSelectAllCheckbox, RunSelectCheckbox } from "./run-select-checkbox";
 import type { RunRef } from "./run-selection-provider";
+import { RunTimeCells, RunTimeHeads } from "./run-time-columns";
 
 export function QpcrRunsTable({
   data,
@@ -65,7 +65,7 @@ export function QpcrRunsTable({
               paramKey="ran_by"
             />
           </TableHead>
-          <TableHead className="text-right">Acquired</TableHead>
+          <RunTimeHeads />
           <TableHead className="w-[108px]">
             <span className="sr-only">Actions</span>
           </TableHead>
@@ -111,11 +111,7 @@ export function QpcrRunsTable({
                   runId={row.run_id}
                 />
               </TableCell>
-              <TableCell className="text-right">
-                <RelativeTime
-                  date={(row.acquired_at ?? row.created_at).toISOString()}
-                />
-              </TableCell>
+              <RunTimeCells row={row} />
               <TableCell className="py-1">
                 <RunRowActions row={row} />
               </TableCell>

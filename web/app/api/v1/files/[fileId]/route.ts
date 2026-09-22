@@ -11,6 +11,7 @@ import {
 } from "@/lib/api/errors";
 import { dismissFile } from "@/lib/api/files";
 import { patchFileBody, readJsonBody } from "@/lib/api/openapi";
+import { touchRuns } from "@/lib/api/touch-runs";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 import { getS3RawDataBucket } from "@/lib/s3";
@@ -180,6 +181,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 
   if (Object.keys(updates).length > 0) {
     await db.update(files).set(updates).where(eq(files.id, numericId));
+    await touchRuns([file.instrumentRunId]);
   }
 
   // Re-fetch the updated file to return current state.
