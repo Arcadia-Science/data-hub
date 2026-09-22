@@ -1,7 +1,8 @@
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { taggedFilename } from "@/lib/api/run-file-identity";
 import { WATCHER_VERSION_HEADER } from "@/lib/api/watcher-compat";
-import { instruments } from "@/lib/db/schema";
+import { files, instruments } from "@/lib/db/schema";
 import {
   api,
   closeTestDb,
@@ -105,9 +106,11 @@ describe("same-named files from different folders", () => {
     ]);
   });
 
-  it("does not add a row when the later file matches name, size, and creation time", async () => {
+  it("stores both files when name, size, and creation time match", async () => {
     const runId = "same-bytes";
     const createdAt = "2026-09-04T00:00:00.000Z";
+    const backup = "backup/sample.tif";
+    const tagged = taggedFilename("sample.tif", backup);
     await api(`/api/v1/instruments/${instrumentId}/runs`, {
       method: "POST",
       token,
@@ -132,7 +135,7 @@ describe("same-named files from different folders", () => {
       body: {
         detected_files: [
           {
-            relative_path: "backup/sample.tif",
+            relative_path: backup,
             filename: "sample.tif",
             size_bytes: 42,
             file_created_at: createdAt,
@@ -140,7 +143,7 @@ describe("same-named files from different folders", () => {
         ],
       },
     });
-    expect(await filenames(runId)).toEqual(["sample.tif"]);
+    expect(await filenames(runId)).toEqual(["sample.tif", tagged]);
 
     const first = await api(
       `/api/v1/instruments/${instrumentId}/runs/${runId}/request-upload-url`,
@@ -174,7 +177,7 @@ describe("same-named files from different folders", () => {
         headers: watcherHeaders,
         body: {
           filename: "sample.tif",
-          relative_path: "backup/sample.tif",
+          relative_path: backup,
           size_bytes: 42,
           file_created_at: createdAt,
         },
@@ -182,9 +185,10 @@ describe("same-named files from different folders", () => {
     );
     expect(upload.status).toBe(200);
     const body = await upload.json();
-    expect(body.already_uploaded).toBe(true);
-    expect(body.file_id).toBe(firstBody.file_id);
-    expect(await filenames(runId)).toEqual(["sample.tif"]);
+    expect(body.already_uploaded).toBe(false);
+    expect(body.file_id).not.toBe(firstBody.file_id);
+    expect(body.s3_key).toBe(`${instrumentId}/${runId}/${tagged}`);
+    expect(await filenames(runId)).toEqual(["sample.tif", tagged]);
   });
 
   it("leaves a re-report unchanged", async () => {
@@ -313,6 +317,54 @@ describe("same-named files from different folders", () => {
     );
     const body = await upload.json();
     expect(body.s3_key).toBe(`${instrumentId}/${runId}/sample.tif`);
+    expect(await filenames(runId)).toEqual(["sample.tif"]);
+  });
+
+  it("returns 409 when a dismissed file already uses the path", async () => {
+    const runId = "dismissed-path";
+    const relativePath = "capture/sample.tif";
+    const created = await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      headers: watcherHeaders,
+      body: {
+        run_id: runId,
+        source: "watcher",
+        detected_files: [
+          {
+            relative_path: relativePath,
+            filename: "sample.tif",
+            size_bytes: 1,
+          },
+        ],
+      },
+    });
+    expect(created.status).toBe(201);
+
+    const detail = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${runId}`,
+      { token }
+    );
+    const before = await detail.json();
+    await getTestDb()
+      .update(files)
+      .set({ deletedAt: new Date() })
+      .where(eq(files.id, before.files[0].id));
+
+    const upload = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${runId}/request-upload-url`,
+      {
+        method: "POST",
+        token,
+        headers: watcherHeaders,
+        body: {
+          filename: "sample.tif",
+          relative_path: relativePath,
+          size_bytes: 1,
+        },
+      }
+    );
+    expect(upload.status).toBe(409);
     expect(await filenames(runId)).toEqual(["sample.tif"]);
   });
 

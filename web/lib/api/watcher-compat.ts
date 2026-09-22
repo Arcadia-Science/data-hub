@@ -1,19 +1,8 @@
 // Gates server behavior on the watcher version sent with each request.
-//
-// Older watchers never send `X-Data-Hub-Watcher-Version`, so a missing
-// header means "keep the previous behavior". A route checks
-// `watcherClientFrom(request).supports("…")` and keeps that older branch
-// next to the new one. The header only chooses between two safe
-// behaviors; the token still controls access.
-//
-// The version is read from the request rather than the heartbeat column.
-// Upload requests carry no watcher id, one token can belong to several
-// watchers, and the stored version lags right after an upgrade.
-//
-// Delete a feature entry and its older branch once
-// `watcher_release_config.min_supported_version` reaches that feature's
-// version. Heartbeats already turn away every older watcher then, so the
-// branch is dead.
+// A missing or unreadable `X-Data-Hub-Watcher-Version` keeps the previous
+// behavior. The header is not the heartbeat version: upload requests carry
+// no watcher id, and the stored version lags right after an upgrade.
+// Delete a feature once `min_supported_version` reaches it.
 
 import { isAtLeast } from "@/lib/api/watcher-versions";
 

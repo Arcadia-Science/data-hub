@@ -1,25 +1,12 @@
 // Decides the stored name for a file a watcher reports into a run.
-//
-// A run can only hold one active row per filename, and the upload lands at
-// `instrument/run/<filename>`. Two captures that reuse a name (a DishCam
-// stack under different date folders) used to collapse onto one row.
-// Watchers that send `X-Data-Hub-Watcher-Version: 1.1.0` or newer get a
-// second row whose name carries a short hash of the folder. Older watchers
-// still upload by the bare name, so renaming for them would leave a row
-// nobody uploads; callers keep the old insert for those.
-//
-// A later file with the same name, size, and creation time is treated as a
-// copy of the stored file and is not uploaded again. Size or creation time
-// missing on either side never counts: when unsure, keep both.
+// A run holds one active row per filename. Watchers at 1.1.0 or newer
+// store a later copy from another folder as `<stem>~<hash>.<ext>`.
+// Older watchers still upload by the bare name, so callers keep the old insert.
 
 import { createHash } from "node:crypto";
 import { and, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
 import type { DbExecutor } from "@/lib/db";
 import { files } from "@/lib/db/schema";
-
-// Matches `StateDB.has_stat_match` in the watcher, which treats two stats
-// as the same file when their mtimes are within one second.
-const SAME_FILE_WINDOW_MS = 1000;
 
 const TAG_HEX_LENGTH = 8;
 
@@ -31,11 +18,9 @@ export interface IncomingRunFile {
 }
 
 export interface StoredRunFile {
-  fileCreatedAt: Date | null;
   filename: string;
   id: number;
   relativePath: string | null;
-  sizeBytes: number | null;
 }
 
 export interface ReportedFile {
@@ -50,11 +35,9 @@ export type RunFileResolution =
   | { action: "insert"; filename: string };
 
 interface NameClaim {
-  fileCreatedAt: Date | null;
   fileId: number | null;
   filename: string;
   relativePath: string;
-  sizeBytes: number | null;
 }
 
 export function folderOf(relativePath: string): string {
@@ -87,25 +70,6 @@ export function taggedFilename(
   return `${filename.slice(0, dot)}~${hash}${filename.slice(dot)}`;
 }
 
-function isSameStoredFile(
-  incoming: IncomingRunFile,
-  claim: NameClaim
-): boolean {
-  if (incoming.sizeBytes == null || claim.sizeBytes == null) {
-    return false;
-  }
-  if (!(incoming.fileCreatedAt && claim.fileCreatedAt)) {
-    return false;
-  }
-  if (incoming.sizeBytes !== claim.sizeBytes) {
-    return false;
-  }
-  return (
-    Math.abs(incoming.fileCreatedAt.getTime() - claim.fileCreatedAt.getTime()) <
-    SAME_FILE_WINDOW_MS
-  );
-}
-
 function chooseFilename(
   incoming: IncomingRunFile,
   byName: Map<string, NameClaim>
@@ -114,16 +78,9 @@ function chooseFilename(
   if (!plain || plain.relativePath === incoming.relativePath) {
     return plain?.filename ?? incoming.filename;
   }
-  if (isSameStoredFile(incoming, plain)) {
-    return plain.filename;
-  }
   const tagged = taggedFilename(incoming.filename, incoming.relativePath);
   const taggedOwner = byName.get(tagged);
-  if (
-    !taggedOwner ||
-    taggedOwner.relativePath === incoming.relativePath ||
-    isSameStoredFile(incoming, taggedOwner)
-  ) {
+  if (!taggedOwner || taggedOwner.relativePath === incoming.relativePath) {
     return tagged;
   }
   // Eight hex digits collided with a file from another folder. A longer
@@ -149,8 +106,6 @@ export function decideStoredNames(
       fileId: row.id,
       relativePath: row.relativePath ?? row.filename,
       filename: row.filename,
-      sizeBytes: row.sizeBytes,
-      fileCreatedAt: row.fileCreatedAt,
     };
     if (row.relativePath) {
       byPath.set(row.relativePath, claim);
@@ -172,11 +127,7 @@ export function decideStoredNames(
 
     const filename = chooseFilename(file, byName);
     const owner = byName.get(filename);
-    if (
-      owner &&
-      (owner.relativePath === file.relativePath ||
-        isSameStoredFile(file, owner))
-    ) {
+    if (owner && owner.relativePath === file.relativePath) {
       byPath.set(file.relativePath, owner);
       return {
         action: "existing" as const,
@@ -189,8 +140,6 @@ export function decideStoredNames(
       fileId: null,
       relativePath: file.relativePath,
       filename,
-      sizeBytes: file.sizeBytes,
-      fileCreatedAt: file.fileCreatedAt,
     };
     byName.set(filename, claim);
     byPath.set(file.relativePath, claim);
@@ -228,8 +177,6 @@ async function loadMatchingFiles(
       id: files.id,
       relativePath: files.relativePath,
       filename: files.filename,
-      sizeBytes: files.sizeBytes,
-      fileCreatedAt: files.fileCreatedAt,
     })
     .from(files)
     .where(

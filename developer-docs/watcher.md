@@ -263,6 +263,8 @@ In a `new-only` environment (staging/preview by default — see [Switching envir
 
 `data-hub-watcher state forget --prefix alice/` deletes the `uploaded_files`, `detected_files`, and `baseline_files` rows whose path is that folder or sits inside it. The next start reports those files again. Stop the watcher first: a running process does not rescan until it starts. Names that merely begin with the same letters (`alice_notes/`) are left alone; the match is not a `LIKE` pattern, because `_` would otherwise match any character.
 
+The command refuses to run when that environment's state database does not exist, and it prints the path it looked for. Pass `--config` if the watcher was started from a different config file. When the prefix matches nothing, it warns: paths are case-sensitive and relative to the watch directory.
+
 This is how a file the watcher already marked as uploaded gets a second chance after the server learns to keep same-named files from different folders.
 
 ### Adding a server behavior that needs a newer watcher

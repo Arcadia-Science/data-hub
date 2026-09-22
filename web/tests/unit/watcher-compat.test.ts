@@ -45,6 +45,11 @@ describe("isBelowFloor", () => {
     expect(isBelowFloor("2.0.0", "1.0.0")).toBe(false);
   });
 
+  it("treats a pre-release as older than the release of the same numbers", () => {
+    expect(isBelowFloor("1.1.0rc1", "1.1.0")).toBe(true);
+    expect(isAtLeast("1.1.0.post1", "1.1.0")).toBe(false);
+  });
+
   it("treats a missing or unreadable version as not below the floor", () => {
     expect(isBelowFloor(null, "1.0.0")).toBe(false);
     expect(isBelowFloor(undefined, "1.0.0")).toBe(false);

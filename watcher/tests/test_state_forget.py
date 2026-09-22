@@ -3,6 +3,7 @@
 from __future__ import annotations
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from data_hub_watcher.cli import cli
@@ -83,12 +84,10 @@ def test_forget_prefix_removes_only_that_folder(tmp_path: Path) -> None:
 def test_forget_prefix_rejects_a_path_that_escapes(tmp_path: Path) -> None:
     db = StateDB(tmp_path / "state.db")
     try:
-        db.forget_prefix("../alice")
-        raised = False
-    except ValueError:
-        raised = True
-    assert raised
-    db.close()
+        with pytest.raises(ValueError):
+            db.forget_prefix("../alice")
+    finally:
+        db.close()
 
 
 def test_state_forget_command_clears_the_configured_environment(tmp_path: Path) -> None:
@@ -127,3 +126,63 @@ def test_state_forget_command_clears_the_configured_environment(tmp_path: Path) 
     reopened.close()
     assert "alice/day-1/capture/sample.tif" not in remaining
     assert "alice_notes/sample.tif" in remaining
+
+
+def _write_config(tmp_path: Path) -> Path:
+    watch_dir = tmp_path / "data"
+    watch_dir.mkdir()
+    config_path = tmp_path / "config.yaml"
+    save_config(
+        WatcherConfig(
+            version=1,
+            environment="production",
+            api_base_urls={"production": "https://example.test/api/v1"},
+            watcher_ids={"production": "00000000-0000-4000-8000-000000000001"},
+            instrument=InstrumentConfig(
+                id="dishcam",
+                watch_directory=watch_dir,
+                file_patterns=["*.tif"],
+                run_detection=RunDetectionConfig(pattern=r"^([^/]+)/", recursive=True),
+            ),
+        ),
+        config_path,
+    )
+    return config_path
+
+
+def test_state_forget_refuses_a_missing_database(tmp_path: Path) -> None:
+    config_path = _write_config(tmp_path)
+    db_path = tmp_path / "watcher-production.db"
+
+    result = CliRunner().invoke(
+        cli,
+        ["--config", str(config_path), "state", "forget", "--prefix", "alice/", "--yes"],
+    )
+
+    assert result.exit_code != 0, result.output
+    assert str(db_path) in result.output
+    assert "--config" in result.output
+    assert not db_path.exists()
+
+
+def test_state_forget_warns_when_nothing_matches(tmp_path: Path) -> None:
+    config_path = _write_config(tmp_path)
+    db = StateDB(tmp_path / "watcher-production.db")
+    db.record_upload(
+        "other.tif",
+        "ghi",
+        "dishcam/other.tif",
+        relative_path="other/other.tif",
+        size_bytes=10,
+        mtime=1.0,
+    )
+    db.close()
+
+    result = CliRunner().invoke(
+        cli,
+        ["--config", str(config_path), "state", "forget", "--prefix", "alice/", "--yes"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "nothing matched" in result.output
+    assert "case-sensitive" in result.output

@@ -78,6 +78,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
           : null,
       created_at: f.createdAt,
       file_created_at: f.fileCreatedAt,
+      deleted_at: f.deletedAt,
     }))
   );
 
@@ -166,11 +167,8 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
       .where(eq(instrumentRuns.id, run.id));
   }
 
-  // Watchers that can upload a renamed file get a second row when the
-  // same name arrives from another folder. Older watchers keep the
-  // insert that skips a name the run already has: the unique index on
-  // (instrument_run_id, filename) is what actually drops the duplicate,
-  // not the relative-path index.
+  // 1.1.0 watchers get a second row when the same name arrives from
+  // another folder. Older watchers skip a name the run already has.
   await recordDetectedFiles(
     db,
     run.id,

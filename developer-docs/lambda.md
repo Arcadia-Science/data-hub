@@ -61,7 +61,7 @@ Seeded `jolene-fplc` stays `generic` until an operator confirms its PDFs match t
 
 Each processor module exposes `process_file(instrument_id, run_id, filename)` and reports progress through the Data Hub API.
 
-DishCam reads the run's file list (`GET /instruments/:id/runs/:runId`, which needs `runs:read` on the Lambda token) and pairs each TIFF with the sidecar from the same folder. A run can hold several captures that reuse `run.json`. The later copy is stored as `run~<8 hex>.json`, where the hex is a hash of the folder. The parsed sidecar is written onto that TIFF's file record as well as onto the run. Files with no folder still pair with the top-level `run.json`.
+DishCam reads the run's file list (`GET /instruments/:id/runs/:runId`, which needs `runs:read` on the Lambda token) and pairs each TIFF with the sidecar from the same folder. A run can hold several captures that reuse `run.json`. The later copy is stored as `run~<8 hex>.json`, where the hex is a hash of the folder. A folder with no sidecar of its own uses the plain `run.json`, which is what older watchers stored for every capture. The parsed sidecar is written onto that TIFF's file record. Run-level metadata is written only from the plain `run.json`, so a later capture does not replace it.
 
 The Lambda scope preset is `instruments:read`, `runs:read`, `runs:create`, `runs:update`, `files:create`, `files:update`, and `archive-jobs:write`. `runs:read` is what lets DishCam load the file list. Mint a new token from the preset and update `DATA_HUB_API_KEY` before deploying a Lambda that calls `get_run`; the previous token returns 403. Confirm another instrument still processes, then revoke the old token. Every processor shares this token.
 

@@ -75,19 +75,19 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   const fileCreatedAt = body.file_created_at
     ? new Date(body.file_created_at)
     : null;
-  const renameDuplicates =
-    watcherClientFrom(request).supports("renameDuplicateFilenames") &&
-    body.relative_path !== undefined;
+  const relativePath = watcherClientFrom(request).supports(
+    "renameDuplicateFilenames"
+  )
+    ? body.relative_path
+    : undefined;
 
-  // Older watchers ask by bare filename, so the row is the one already
-  // stored under that name. A watcher that sends the folder path can be
-  // pointed at a renamed row when this folder isn't the one that took
-  // the plain name.
-  const existingFile = renameDuplicates
+  // Older watchers match the row stored under the bare name. A folder
+  // path can point at a renamed row when another folder took that name.
+  const existingFile = relativePath
     ? await findOrCreateByPath(
         run.id,
         {
-          relativePath: body.relative_path ?? filename,
+          relativePath,
           filename,
           sizeBytes: sizeBytes ?? null,
           fileCreatedAt,
@@ -95,6 +95,14 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
         contentType ?? null
       )
     : await findByFilename(run.id, filename);
+
+  if (relativePath && !existingFile) {
+    return apiError(
+      409,
+      CONFLICT,
+      `Cannot store a file for '${relativePath}'. A dismissed file may already use that path.`
+    );
+  }
 
   if (existingFile && UPLOADED_OR_LATER_STATUSES.has(existingFile.status)) {
     return Response.json({
@@ -189,10 +197,8 @@ async function loadActiveFile(id: number) {
   return row ?? null;
 }
 
-// Creates the row when this folder doesn't already have one, using the
-// name `resolveRunFiles` picked. A conflict means another request stored
-// it first; deciding again either reuses that row or takes the folder-hash
-// name.
+// A conflict means another request stored this path first. Deciding
+// again reuses that row, or takes the folder-hash name.
 async function findOrCreateByPath(
   instrumentRunId: string,
   incoming: IncomingRunFile,

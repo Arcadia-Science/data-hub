@@ -3,6 +3,7 @@
 from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -11,7 +12,7 @@ import pytest
 
 from data_hub_lambda.api_client import ApiError
 from data_hub_lambda.dishcam.parse_metadata import MIN_PLAYBACK_FPS
-from data_hub_lambda.models import FileResponse, RunDetailResponse, RunResponse
+from data_hub_lambda.models import FileResponse, RunDetailFile, RunDetailResponse, RunResponse
 
 
 @pytest.fixture(autouse=True)
@@ -45,6 +46,29 @@ def _file_response(
     )
 
 
+def _run_file(
+    file_id: int,
+    filename: str,
+    status: str = "uploaded",
+    category: str = "raw",
+    relative_path: str | None = None,
+    *,
+    s3_key: str | None = None,
+    deleted_at: datetime | None = None,
+) -> RunDetailFile:
+    if s3_key is None and status != "detected":
+        s3_key = f"dishcam/run-xyz/{filename}"
+    return RunDetailFile(
+        id=file_id,
+        filename=filename,
+        relative_path=relative_path,
+        s3_key=s3_key,
+        category=category,
+        status=status,
+        deleted_at=deleted_at,
+    )
+
+
 def _stub_run(client: MagicMock, *filenames: str) -> None:
     """Flat capture: every name sits in the run root and is already in S3."""
     client.get_run.return_value = RunDetailResponse(
@@ -52,7 +76,7 @@ def _stub_run(client: MagicMock, *filenames: str) -> None:
         instrument_id="dishcam",
         run_id="run-xyz",
         source="watcher",
-        files=[_file_response(index, name) for index, name in enumerate(filenames, start=1)],
+        files=[_run_file(index, name) for index, name in enumerate(filenames, start=1)],
     )
 
 
@@ -245,7 +269,7 @@ class TestProcessFileSkipUntilBothPresent:
         client.update_file.assert_called_once_with(
             3,
             status="failed",
-            error_message="Cannot process: run.json not found in S3",
+            error_message="Cannot process: no uploaded run.json for this stack's folder",
         )
 
     def test_missing_run_on_skip_is_not_an_error(self) -> None:
@@ -1144,7 +1168,7 @@ class TestProcessFileEncodesWhenBothPresent:
                 process_file("dishcam", "run-xyz", "run.json")
 
 
-def _detail(*rows: FileResponse) -> RunDetailResponse:
+def _detail(*rows: RunDetailFile) -> RunDetailResponse:
     return RunDetailResponse(
         id="run-uuid",
         instrument_id="dishcam",
@@ -1170,21 +1194,9 @@ class TestCaptureFolderPairing:
         client = MagicMock()
         client.ensure_run.return_value = _run_response()
         client.get_run.return_value = _detail(
-            _file_response(
-                1,
-                "run.json",
-                relative_path=f"{other_folder}/run.json",
-            ),
-            _file_response(
-                2,
-                "sample.tif",
-                relative_path=f"{own_folder}/sample.tif",
-            ),
-            _file_response(
-                3,
-                tagged_sidecar,
-                relative_path=f"{own_folder}/{tagged_sidecar}",
-            ),
+            _run_file(1, "run.json", relative_path=f"{other_folder}/run.json"),
+            _run_file(2, "sample.tif", relative_path=f"{own_folder}/sample.tif"),
+            _run_file(3, tagged_sidecar, relative_path=f"{own_folder}/{tagged_sidecar}"),
         )
         client.create_file.side_effect = [
             _file_response(3, tagged_sidecar),
@@ -1207,7 +1219,7 @@ class TestCaptureFolderPairing:
             process_file("dishcam", "run-xyz", "sample.tif")
 
         encode.assert_called_once()
-        assert client.update_run.call_args.kwargs["metadata"]["frames"] == 10
+        client.update_run.assert_not_called()
         tiff_metadata = [
             call.kwargs.get("metadata")
             for call in client.update_file.call_args_list
@@ -1222,10 +1234,10 @@ class TestCaptureFolderPairing:
         client = MagicMock()
         client.ensure_run.return_value = _run_response()
         client.get_run.return_value = _detail(
-            _file_response(1, "run.json", relative_path=f"{other_folder}/run.json"),
-            _file_response(2, "other.tif", relative_path=f"{other_folder}/other.tif"),
-            _file_response(3, tagged_sidecar, relative_path=f"{own_folder}/{tagged_sidecar}"),
-            _file_response(4, "sample.tif", relative_path=f"{own_folder}/sample.tif"),
+            _run_file(1, "run.json", relative_path=f"{other_folder}/run.json"),
+            _run_file(2, "other.tif", relative_path=f"{other_folder}/other.tif"),
+            _run_file(3, tagged_sidecar, relative_path=f"{own_folder}/{tagged_sidecar}"),
+            _run_file(4, "sample.tif", relative_path=f"{own_folder}/sample.tif"),
         )
         client.create_file.side_effect = lambda **kwargs: _file_response(
             {"run~3f9a1c2b.json": 3, "sample.tif": 4, "sample.mp4": 5, "sample.jpg": 6}[
@@ -1239,13 +1251,14 @@ class TestCaptureFolderPairing:
             process_file("dishcam", "run-xyz", tagged_sidecar)
 
         assert [call.args[0].name for call in encode.call_args_list] == ["sample.tif"]
+        client.update_run.assert_not_called()
 
     def test_root_files_still_share_the_plain_sidecar(self, tmp_path: Path) -> None:
         client = MagicMock()
         client.ensure_run.return_value = _run_response()
         client.get_run.return_value = _detail(
-            _file_response(SIDECAR_ID, "run.json", relative_path="run.json"),
-            _file_response(10, "stack.tif", relative_path="stack.tif"),
+            _run_file(SIDECAR_ID, "run.json", relative_path="run.json"),
+            _run_file(10, "stack.tif", relative_path="stack.tif"),
         )
         client.create_file.side_effect = [
             _file_response(SIDECAR_ID, "run.json"),
@@ -1259,3 +1272,90 @@ class TestCaptureFolderPairing:
 
         encode.assert_called_once()
         assert encode.call_args.args[0].name == "stack.tif"
+
+
+class TestPlainRunJsonFallback:
+    def test_stack_without_its_own_sidecar_uses_the_plain_run_json(self, tmp_path: Path) -> None:
+        client = MagicMock()
+        client.ensure_run.return_value = _run_response()
+        client.get_run.return_value = _detail(
+            _run_file(1, "run.json", relative_path="day-1/run.json"),
+            _run_file(2, "day-1.tif", relative_path="day-1/day-1.tif"),
+            _run_file(3, "day-2.tif", relative_path="day-2/day-2.tif"),
+        )
+        client.create_file.side_effect = lambda **kwargs: _file_response(
+            {"run.json": 1, "day-2.tif": 3, "day-2.mp4": 4, "day-2.jpg": 5}[kwargs["filename"]],
+            kwargs["filename"],
+            category=kwargs.get("category", "raw"),
+        )
+
+        with _patched_process(tmp_path, client) as (process_file, encode):
+            process_file("dishcam", "run-xyz", "day-2.tif")
+
+        assert [call.args[0].name for call in encode.call_args_list] == ["day-2.tif"]
+        assert client.update_run.call_args.kwargs["metadata"]["fps"] == 1.0
+
+    def test_plain_run_json_encodes_folders_without_a_sidecar(self, tmp_path: Path) -> None:
+        tagged = "run~3f9a1c2b.json"
+        client = MagicMock()
+        client.ensure_run.return_value = _run_response()
+        client.get_run.return_value = _detail(
+            _run_file(1, "run.json", relative_path="day-1/run.json"),
+            _run_file(2, "own.tif", relative_path="day-1/own.tif"),
+            _run_file(3, "orphan.tif", relative_path="day-2/orphan.tif"),
+            _run_file(4, tagged, relative_path=f"day-3/{tagged}"),
+            _run_file(5, "owned.tif", relative_path="day-3/owned.tif"),
+        )
+        client.create_file.side_effect = lambda **kwargs: _file_response(
+            {
+                "run.json": 1,
+                "own.tif": 2,
+                "orphan.tif": 3,
+                "own.mp4": 6,
+                "own.jpg": 7,
+                "orphan.mp4": 8,
+                "orphan.jpg": 9,
+            }[kwargs["filename"]],
+            kwargs["filename"],
+            category=kwargs.get("category", "raw"),
+        )
+
+        with _patched_process(tmp_path, client) as (process_file, encode):
+            process_file("dishcam", "run-xyz", "run.json")
+
+        assert [call.args[0].name for call in encode.call_args_list] == ["orphan.tif", "own.tif"]
+        client.update_run.assert_called_once()
+
+    def test_dismissed_sidecar_does_not_hide_the_plain_run_json(self, tmp_path: Path) -> None:
+        client = MagicMock()
+        client.ensure_run.return_value = _run_response()
+        client.get_run.return_value = _detail(
+            _run_file(1, "run.json", relative_path="day-1/run.json"),
+            _run_file(
+                2,
+                "run.json",
+                relative_path="day-2/run.json",
+                s3_key="dishcam/run-xyz/dismissed.json",
+                deleted_at=datetime(2026, 9, 1, tzinfo=UTC),
+            ),
+            _run_file(3, "day-2.tif", relative_path="day-2/day-2.tif"),
+            _run_file(4, "day-2.mp4", category="processed", relative_path="day-2/day-2.mp4"),
+        )
+        downloaded: list[str] = []
+
+        def _download(s3_uri: str, local_path: Path, **_: Any) -> None:
+            downloaded.append(s3_uri)
+            _write_download(s3_uri, local_path)
+
+        client.create_file.side_effect = lambda **kwargs: _file_response(
+            {"run.json": 1, "day-2.tif": 3, "day-2.mp4": 4, "day-2.jpg": 5}[kwargs["filename"]],
+            kwargs["filename"],
+            category=kwargs.get("category", "raw"),
+        )
+
+        with _patched_process(tmp_path, client, download=_download) as (process_file, encode):
+            process_file("dishcam", "run-xyz", "day-2.tif")
+
+        encode.assert_called_once()
+        assert downloaded[0].endswith("/run.json")
+        assert "dismissed.json" not in downloaded[0]

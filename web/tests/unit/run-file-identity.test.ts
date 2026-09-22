@@ -30,8 +30,6 @@ function stored(
     id,
     relativePath,
     filename,
-    sizeBytes: 100,
-    fileCreatedAt: new Date("2026-09-21T17:00:00.000Z"),
     ...overrides,
   };
 }
@@ -68,15 +66,14 @@ describe("decideStoredNames", () => {
     const second = incoming("alice/day-2/capture-b/sample.tif", {
       fileCreatedAt: new Date("2026-09-03T18:00:00.000Z"),
     });
-    const [kept, renamed] = decideStoredNames(
+    const [decision] = decideStoredNames(
       [second],
       [stored(1, first.relativePath, "sample.tif")]
     );
-    expect(kept).toEqual({
+    expect(decision).toEqual({
       action: "insert",
       filename: taggedFilename("sample.tif", second.relativePath),
     });
-    expect(renamed).toBeUndefined();
   });
 
   it("renames only the later file when both arrive in one batch", () => {
@@ -92,47 +89,16 @@ describe("decideStoredNames", () => {
     });
   });
 
-  it("reuses the stored row when name, size, and creation time match", () => {
+  it("keeps both files when name, size, and creation time match", () => {
     const copy = incoming("backup/sample.tif");
     const [decision] = decideStoredNames(
       [copy],
       [stored(7, "alice/day-1/capture-a/sample.tif", "sample.tif")]
     );
     expect(decision).toEqual({
-      action: "existing",
-      fileId: 7,
-      filename: "sample.tif",
-    });
-  });
-
-  it("keeps both files when size or creation time is missing", () => {
-    const existing = stored(1, "a/sample.tif", "sample.tif");
-    const noSize = incoming("b/sample.tif", { sizeBytes: null });
-    const noTime = incoming("c/sample.tif", { fileCreatedAt: null });
-    const [sized, timed] = decideStoredNames([noSize, noTime], [existing]);
-    expect(sized).toEqual({
       action: "insert",
-      filename: taggedFilename("sample.tif", noSize.relativePath),
+      filename: taggedFilename("sample.tif", copy.relativePath),
     });
-    expect(timed).toEqual({
-      action: "insert",
-      filename: taggedFilename("sample.tif", noTime.relativePath),
-    });
-  });
-
-  it("treats creation times within a second as the same file", () => {
-    const existing = stored(1, "a/sample.tif", "sample.tif", {
-      fileCreatedAt: new Date("2026-09-21T17:00:00.000Z"),
-    });
-    const close = incoming("b/sample.tif", {
-      fileCreatedAt: new Date("2026-09-21T17:00:00.999Z"),
-    });
-    const apart = incoming("c/sample.tif", {
-      fileCreatedAt: new Date("2026-09-21T17:00:01.000Z"),
-    });
-    const [same, different] = decideStoredNames([close, apart], [existing]);
-    expect(same).toMatchObject({ action: "existing", fileId: 1 });
-    expect(different).toMatchObject({ action: "insert" });
   });
 
   it("returns the stored name on a re-report, including a tagged one", () => {
@@ -140,7 +106,7 @@ describe("decideStoredNames", () => {
     const tagged = taggedFilename("sample.tif", path);
     const [decision] = decideStoredNames(
       [incoming(path, { fileCreatedAt: new Date("2026-09-03T18:00:00.000Z") })],
-      [stored(4, path, tagged, { sizeBytes: 50 })]
+      [stored(4, path, tagged)]
     );
     expect(decision).toEqual({
       action: "existing",

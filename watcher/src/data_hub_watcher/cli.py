@@ -797,6 +797,11 @@ def state_forget(ctx: click.Context, prefix: str, yes: bool) -> None:
     path = _resolve_path(ctx)
     cfg = load_config(path)
     db_path = resolve_state_db_path(path.parent, cfg.environment)
+    if not db_path.is_file():
+        raise click.ClickException(
+            f"No upload history at {db_path}. "
+            "Pass --config if the watcher was not started from this config file."
+        )
     if not yes and not click.confirm(
         f"Forget upload history under {prefix!r} in {db_path}?",
         default=False,
@@ -814,6 +819,11 @@ def state_forget(ctx: click.Context, prefix: str, yes: bool) -> None:
     click.echo(f"Forgot upload history under {prefix!r}.")
     for table, removed in counts.items():
         click.echo(f"  {table}: {removed}")
+    if sum(counts.values()) == 0:
+        click.echo(
+            "Warning: nothing matched. Paths are case-sensitive "
+            "and relative to the watch directory."
+        )
     click.echo("Start the watcher again so it reports those files.")
 
 

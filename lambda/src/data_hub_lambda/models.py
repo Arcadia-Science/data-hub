@@ -58,7 +58,27 @@ class FileResponse(BaseModel):
     created_at: datetime | None = None
 
 
+class RunDetailFile(BaseModel):
+    """One file inside GET run detail.
+
+    That payload has no `instrument_run_id` and no `s3_bucket`, so it cannot
+    reuse `FileResponse`. `deleted_at` defaults to None so a server that has
+    not shipped the field yet still parses.
+    """
+
+    model_config = _API_MODEL_CONFIG
+
+    id: int
+    filename: str
+    relative_path: str | None = None
+    s3_key: str | None = None
+    category: str
+    status: str
+    metadata: dict = Field(default_factory=dict)
+    deleted_at: datetime | None = None
+
+
 class RunDetailResponse(RunResponse):
     """GET run detail. `files` is what DishCam uses to pair a capture."""
 
-    files: list[FileResponse] = Field(default_factory=list)
+    files: list[RunDetailFile] = Field(default_factory=list)

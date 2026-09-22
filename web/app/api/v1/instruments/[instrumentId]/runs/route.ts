@@ -140,12 +140,8 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       .where(eq(instrumentRuns.id, run.id));
   }
 
-  // Watcher payloads may include detected files alongside the run.
-  // Watchers that can upload a renamed file get a second row when the
-  // same name arrives from another folder. Older watchers keep the
-  // insert that skips a name the run already has: the unique index on
-  // (instrument_run_id, filename) is what actually drops the duplicate,
-  // not the relative-path index.
+  // 1.1.0 watchers get a second row when the same name arrives from
+  // another folder. Older watchers skip a name the run already has.
   await recordDetectedFiles(
     db,
     run.id,
