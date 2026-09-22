@@ -50,7 +50,8 @@ export function InstrumentRunsTableSkeleton({ rows = 10 }: { rows?: number }) {
               <RawFileColumnHeader label="Size" />
             </TableHead>
             <TableHead>Ran By</TableHead>
-            <TableHead className="text-right">Acquired</TableHead>
+            <TableHead className="text-right">Acquisition Started</TableHead>
+            <TableHead className="text-right">Last Updated</TableHead>
             <TableHead className="w-[108px]" />
           </TableRow>
         </TableHeader>
@@ -74,6 +75,9 @@ export function InstrumentRunsTableSkeleton({ rows = 10 }: { rows?: number }) {
               </TableCell>
               <TableCell className="py-2.75">
                 <Skeleton className="h-5 w-16" />
+              </TableCell>
+              <TableCell className="py-2.75 text-right">
+                <Skeleton className="ml-auto h-5 w-20" />
               </TableCell>
               <TableCell className="py-2.75 text-right">
                 <Skeleton className="ml-auto h-5 w-20" />

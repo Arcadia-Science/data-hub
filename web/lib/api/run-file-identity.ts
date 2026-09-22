@@ -5,6 +5,7 @@
 
 import { createHash } from "node:crypto";
 import { and, eq, inArray, isNull, or, type SQL } from "drizzle-orm";
+import { touchRuns } from "@/lib/api/touch-runs";
 import type { DbExecutor } from "@/lib/db";
 import { files } from "@/lib/db/schema";
 
@@ -290,9 +291,47 @@ export async function recordDetectedFiles(
   if (reported.length === 0) {
     return;
   }
-  if (!renameDuplicates) {
+  // A re-report of files the run already holds is a no-op insert. Only a
+  // row that was actually stored should move "Last Updated".
+  let insertedAny = false;
+  if (renameDuplicates) {
+    const incoming = reported.map(toIncoming);
+    const decisions = await resolveRunFiles(
+      executor,
+      instrumentRunId,
+      incoming
+    );
+    const insertedPaths = await insertResolved(
+      executor,
+      instrumentRunId,
+      incoming,
+      decisions
+    );
+    insertedAny = insertedPaths.size > 0;
+    const missing = incoming.filter(
+      (file, index) =>
+        decisions[index]?.action === "insert" &&
+        !insertedPaths.has(file.relativePath)
+    );
+    if (missing.length > 0) {
+      // One retry. The first insert lost a race; deciding again sees the
+      // winner and either reuses it or picks the folder-hash name.
+      const retryDecisions = await resolveRunFiles(
+        executor,
+        instrumentRunId,
+        missing
+      );
+      const retried = await insertResolved(
+        executor,
+        instrumentRunId,
+        missing,
+        retryDecisions
+      );
+      insertedAny = insertedAny || retried.size > 0;
+    }
+  } else {
     const now = new Date();
-    await executor
+    const inserted = await executor
       .insert(files)
       .values(
         reported.map((file) => ({
@@ -307,32 +346,11 @@ export async function recordDetectedFiles(
             : null,
         }))
       )
-      .onConflictDoNothing();
-    return;
+      .onConflictDoNothing()
+      .returning({ id: files.id });
+    insertedAny = inserted.length > 0;
   }
-
-  const incoming = reported.map(toIncoming);
-  const decisions = await resolveRunFiles(executor, instrumentRunId, incoming);
-  const insertedPaths = await insertResolved(
-    executor,
-    instrumentRunId,
-    incoming,
-    decisions
-  );
-  const missing = incoming.filter(
-    (file, index) =>
-      decisions[index]?.action === "insert" &&
-      !insertedPaths.has(file.relativePath)
-  );
-  if (missing.length === 0) {
-    return;
+  if (insertedAny) {
+    await touchRuns([instrumentRunId], executor);
   }
-  // One retry. The first insert lost a race; deciding again sees the
-  // winner and either reuses it or picks the folder-hash name.
-  const retryDecisions = await resolveRunFiles(
-    executor,
-    instrumentRunId,
-    missing
-  );
-  await insertResolved(executor, instrumentRunId, missing, retryDecisions);
 }
