@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { after } from "next/server";
 import { notifyComment } from "@/lib/api/notifications";
+import { touchRuns } from "@/lib/api/touch-runs";
 import { db } from "@/lib/db";
 import { runComments, users } from "@/lib/db/schema";
 import { toInitials } from "@/lib/utils";
@@ -153,6 +154,7 @@ export async function createComment(input: {
       createdAt: runComments.createdAt,
       editedAt: runComments.editedAt,
     });
+  await touchRuns([input.runInternalId]);
 
   // Fetch the joined user row so the DTO is consistent with `listCommentsForRun`.
   const [user] = await db
@@ -280,12 +282,14 @@ export async function updateComment(input: {
       createdAt: runComments.createdAt,
       editedAt: runComments.editedAt,
       userId: runComments.userId,
+      runId: runComments.runId,
     });
 
   if (updated.length === 0) {
     return null;
   }
   const row = updated[0];
+  await touchRuns([row.runId]);
 
   const [user] = await db
     .select({
@@ -330,6 +334,10 @@ export async function softDeleteComment(input: {
         isNull(runComments.deletedAt)
       )
     )
-    .returning({ id: runComments.id });
-  return result.length > 0;
+    .returning({ id: runComments.id, runId: runComments.runId });
+  if (result.length === 0) {
+    return false;
+  }
+  await touchRuns([result[0].runId]);
+  return true;
 }

@@ -12,9 +12,10 @@ import {
   seedTestUser,
 } from "@/tests/integration/helpers";
 
-// "Last Updated" reads instrument_runs.updated_at. A new file moves it; a
-// repeat report does not, unless the file time is earlier. Sorting stays
-// stable when several runs share one timestamp.
+// "Last Updated" reads instrument_runs.updated_at. A new file, a "Ran By"
+// change, or a comment moves it; a repeat report or repeat claim does not,
+// unless the report carries an earlier file time. Sorting stays stable when
+// several runs share one timestamp.
 const watcherHeaders = { [WATCHER_VERSION_HEADER]: "1.1.0" };
 const fileCreatedAt = "2024-06-01T12:00:00.000Z";
 
@@ -321,5 +322,86 @@ describe("Run updated_at", () => {
     expect(queuedA.getTime()).toBeGreaterThan(past.getTime());
     expect(queuedB.getTime()).toBeGreaterThan(past.getTime());
     expect(idle.toISOString()).toBe(past.toISOString());
+  });
+
+  it("moves updated_at on claim and unclaim, but not on a repeat claim", async () => {
+    const instrumentId = "updated-at-attribution";
+    const runId = "claim-run";
+    await createInstrument(instrumentId);
+    await createRun(instrumentId, runId);
+
+    const attributionsUrl = `/api/v1/instruments/${instrumentId}/runs/${runId}/attributions/me`;
+    const past = new Date("2020-05-01T00:00:00.000Z");
+
+    await pinUpdatedAt(instrumentId, runId, past);
+    const claimed = await api(attributionsUrl, { method: "PUT", token });
+    expect(claimed.status).toBe(200);
+    const afterClaim = await readUpdatedAt(instrumentId, runId);
+    expect(afterClaim.getTime()).toBeGreaterThan(past.getTime());
+
+    // Re-claiming stores no new row, so the time stays put.
+    await pinUpdatedAt(instrumentId, runId, past);
+    const reclaimed = await api(attributionsUrl, { method: "PUT", token });
+    expect(reclaimed.status).toBe(200);
+    expect((await readUpdatedAt(instrumentId, runId)).toISOString()).toBe(
+      past.toISOString()
+    );
+
+    await pinUpdatedAt(instrumentId, runId, past);
+    const unclaimed = await api(attributionsUrl, { method: "DELETE", token });
+    expect(unclaimed.status).toBe(200);
+    const afterUnclaim = await readUpdatedAt(instrumentId, runId);
+    expect(afterUnclaim.getTime()).toBeGreaterThan(past.getTime());
+
+    // Unclaiming with no attribution left is a no-op too.
+    await pinUpdatedAt(instrumentId, runId, past);
+    const unclaimedAgain = await api(attributionsUrl, {
+      method: "DELETE",
+      token,
+    });
+    expect(unclaimedAgain.status).toBe(200);
+    expect((await readUpdatedAt(instrumentId, runId)).toISOString()).toBe(
+      past.toISOString()
+    );
+  });
+
+  it("moves updated_at when a comment is added, edited, or deleted", async () => {
+    const instrumentId = "updated-at-comments";
+    const runId = "comment-run";
+    await createInstrument(instrumentId);
+    await createRun(instrumentId, runId);
+
+    const commentsUrl = `/api/v1/instruments/${instrumentId}/runs/${runId}/comments`;
+    const past = new Date("2020-06-01T00:00:00.000Z");
+
+    await pinUpdatedAt(instrumentId, runId, past);
+    const created = await api(commentsUrl, {
+      method: "POST",
+      token,
+      body: { body: "first pass looked clean" },
+    });
+    expect(created.status).toBe(201);
+    const commentId = (await created.json()).id as string;
+    const afterCreate = await readUpdatedAt(instrumentId, runId);
+    expect(afterCreate.getTime()).toBeGreaterThan(past.getTime());
+
+    await pinUpdatedAt(instrumentId, runId, past);
+    const edited = await api(`${commentsUrl}/${commentId}`, {
+      method: "PATCH",
+      token,
+      body: { body: "second pass found a bubble" },
+    });
+    expect(edited.status).toBe(200);
+    const afterEdit = await readUpdatedAt(instrumentId, runId);
+    expect(afterEdit.getTime()).toBeGreaterThan(past.getTime());
+
+    await pinUpdatedAt(instrumentId, runId, past);
+    const deleted = await api(`${commentsUrl}/${commentId}`, {
+      method: "DELETE",
+      token,
+    });
+    expect(deleted.status).toBe(200);
+    const afterDelete = await readUpdatedAt(instrumentId, runId);
+    expect(afterDelete.getTime()).toBeGreaterThan(past.getTime());
   });
 });
