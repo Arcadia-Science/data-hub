@@ -51,7 +51,7 @@ Dispatch is by `instrument_type` (Postgres/TS enum), not instrument ID. The regi
 | `epson_v700_scanner` | `epson_v700_scanner` | `.tif` / `.tiff` |
 | `hina_microscope` | `hina_microscope` | `.nd2` |
 | `plate_reader` | `spectramax_plate_reader` | `.xls` |
-| `dishcam` | `dishcam` | `.tif` / `.tiff` / `run.json` |
+| `dishcam` | `dishcam` | `.tif` / `.tiff` / `run.json` (also `run~<hash>.json`) |
 | `aunty` | `unchained_labs_aunty` | `.xlsx` |
 | `generic`, `instant_raman` | — | — |
 
@@ -60,6 +60,10 @@ Dispatch is by `instrument_type` (Postgres/TS enum), not instrument ID. The regi
 Seeded `jolene-fplc` stays `generic` until an operator confirms its PDFs match the ÄKTA processor and edits the type to `fplc`. Typing an unknown FPLC as `fplc` would feed non-ÄKTA files into that parser.
 
 Each processor module exposes `process_file(instrument_id, run_id, filename)` and reports progress through the Data Hub API.
+
+DishCam reads the run's file list (`GET /instruments/:id/runs/:runId`, which needs `runs:read` on the Lambda token) and pairs each TIFF with the sidecar from the same folder. A run can hold several captures that reuse `run.json`. The later copy is stored as `run~<8 hex>.json`, where the hex is a hash of the folder. The parsed sidecar is written onto that TIFF's file record as well as onto the run. Files with no folder still pair with the top-level `run.json`.
+
+The Lambda scope preset is `instruments:read`, `runs:read`, `runs:create`, `runs:update`, `files:create`, `files:update`, and `archive-jobs:write`. `runs:read` is what lets DishCam load the file list. Mint a new token from the preset and update `DATA_HUB_API_KEY` before deploying a Lambda that calls `get_run`; the previous token returns 403. Confirm another instrument still processes, then revoke the old token. Every processor shares this token.
 
 The `qpcr` processor also reads the Azure Cielo's native `.AZE` project files (`azure_cielo_qpcr/aze.py`, reverse-engineered — no vendor spec exists). An `.AZE` is a sequence of big-endian u32 length-prefixed segments: metadata JSON, plate-layout JSON, analysis settings, and a data segment whose pretty-printed JSON carries the melt curves as flat well-major `MeltCurveChannelN` arrays over a shared centidegree `MeltCurveTemper` axis. A run with melt data produces `{run_id}_aze_melting_curve_derivatives.csv`, `{run_id}_aze_melting_curve_plate.json`, and a `{run_id}_aze_experiment.json` sidecar with instrument metadata (device id, software versions, run times); setup-only projects complete with no artifacts. The CSV export path is untouched when both exist. One caveat: `.AZE` melt arrays are raw fluorescence, while the vendor's `_MeltingCurve.csv` export may be baseline-processed — derivative peak positions (Tm) agree, absolute values can differ.
 
@@ -103,7 +107,7 @@ Available commands:
 | `qpcr` | Parse dye channels from an Azure Cielo qPCR Cq Values CSV |
 | `spectramax` | Parse metadata and raw well data from a SpectraMax `.xls` export |
 | `tapestation` | Extract the tape type from a TapeStation CSV filename |
-| `dishcam` | Convert a DishCam TIFF stack plus `run.json` into an MP4 preview and JPEG poster |
+| `dishcam` | Convert a DishCam TIFF stack plus the `run.json` from the same folder into an MP4 preview and JPEG poster |
 | `aunty` | Parse an Unchained Labs Aunty `.xlsx` export into a curves CSV and plate JSON |
 | `handler` | Stage a file into a local S3 mirror and invoke `lambda_handler` against the local dev API. See [Testing the Lambda end-to-end](local-development.md#testing-the-lambda-end-to-end) for the workflow. |
 

@@ -12,7 +12,9 @@ import {
   parseAcquiredAt,
 } from "@/lib/api/instrument-runs";
 import { patchRunBody, readJsonBody } from "@/lib/api/openapi";
+import { recordDetectedFiles } from "@/lib/api/run-file-identity";
 import { softDeleteRun } from "@/lib/api/run-lifecycle";
+import { watcherClientFrom } from "@/lib/api/watcher-compat";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 import { getPresignedDownloadUrl } from "@/lib/s3";
@@ -164,35 +166,17 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
       .where(eq(instrumentRuns.id, run.id));
   }
 
-  // Handle detected_files upsert (watcher reporting new files for a run).
-  const detectedFiles = body.detected_files ?? [];
-
-  if (detectedFiles.length > 0) {
-    const now = new Date();
-    const fileValues = detectedFiles.map(
-      (f: {
-        relative_path: string;
-        filename: string;
-        size_bytes?: number;
-        file_created_at?: string;
-      }) => ({
-        instrumentRunId: run.id,
-        relativePath: f.relative_path,
-        filename: f.filename,
-        sizeBytes: f.size_bytes ?? null,
-        status: "detected" as const,
-        detectedAt: now,
-        fileCreatedAt:
-          typeof f.file_created_at === "string"
-            ? new Date(f.file_created_at)
-            : null,
-      })
-    );
-
-    // Relies on the partial unique index (instrument_run_id, relative_path)
-    // to skip files already reported for this run.
-    await db.insert(files).values(fileValues).onConflictDoNothing();
-  }
+  // Watchers that can upload a renamed file get a second row when the
+  // same name arrives from another folder. Older watchers keep the
+  // insert that skips a name the run already has: the unique index on
+  // (instrument_run_id, filename) is what actually drops the duplicate,
+  // not the relative-path index.
+  await recordDetectedFiles(
+    db,
+    run.id,
+    body.detected_files ?? [],
+    watcherClientFrom(request).supports("renameDuplicateFilenames")
+  );
 
   // Re-fetch the updated run to return current state.
   const updated = await lookupRunByNaturalKey(instrumentId, runId);

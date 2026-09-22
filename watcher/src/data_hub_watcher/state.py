@@ -295,6 +295,36 @@ class StateDB:
             logger.info("Pruned %d uploaded_files record(s) older than %d days", removed, days)
         return removed
 
+    def forget_prefix(self, prefix: str) -> dict[str, int]:
+        """Delete dedup rows for *prefix* and everything nested under it.
+
+        The next watcher start reports those files again. Compared with
+        ``substr`` rather than ``LIKE`` because names contain ``_``, which
+        ``LIKE`` treats as a single-character wildcard.
+
+        Returns the number of rows removed from each table.
+        """
+        cleaned = prefix.replace("\\", "/").strip("/")
+        if not cleaned or any(part in {"", ".", ".."} for part in cleaned.split("/")):
+            raise ValueError(f"Refusing unsafe prefix: {prefix!r}")
+        boundary = f"{cleaned}/"
+        width = len(boundary)
+        counts: dict[str, int] = {}
+        # Table names are fixed. The prefix is bound, never interpolated.
+        with self._write_lock:
+            for table in ("uploaded_files", "detected_files", "baseline_files"):
+                cur = self._conn.execute(
+                    f"DELETE FROM {table} "
+                    "WHERE relative_path = ? OR substr(relative_path, 1, ?) = ?",
+                    (cleaned, width, boundary),
+                )
+                counts[table] = cur.rowcount
+            self._conn.commit()
+        removed = sum(counts.values())
+        if removed:
+            logger.info("Forgot %d state row(s) under %s", removed, cleaned)
+        return counts
+
     def is_uploaded(self, filename: str, sha256: str, s3_key: str) -> bool:
         """Check whether this exact file has already been uploaded to *s3_key*.
 

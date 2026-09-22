@@ -610,7 +610,10 @@ export const files = pgTable(
     s3Bucket: text("s3_bucket"),
     // NULL until the file is uploaded to S3.
     s3Key: text("s3_key"),
-    // Original filename.
+    // Name stored for this file and used in its S3 key. Usually the
+    // on-disk name. When a watcher at 1.1.0 or newer reports the same
+    // name from another folder, this carries a `~<hash>` suffix so both
+    // files fit the per-run unique name.
     filename: text("filename").notNull(),
     // MIME type.
     contentType: text("content_type"),

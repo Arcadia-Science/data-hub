@@ -3,16 +3,23 @@
 from __future__ import annotations
 import logging
 from pathlib import Path
+from typing import Any
 
 from data_hub_lambda.api_client import ApiError, DataHubClient, get_client
 from data_hub_lambda.dishcam.encode_video import encode_tiff_stack
-from data_hub_lambda.dishcam.filenames import RUN_JSON_NAME, is_tiff, matches_filename
+from data_hub_lambda.dishcam.filenames import is_run_json, is_tiff, matches_filename
 from data_hub_lambda.dishcam.parse_metadata import encode_fps, parse_run_json, playback_fps
-from data_hub_lambda.models import FileResponse
+from data_hub_lambda.models import FileResponse, RunDetailResponse
 from data_hub_shared import s3_utils
 from data_hub_shared.config import config
 
 logger = logging.getLogger(__name__)
+
+# A row in one of these states has bytes in S3. `detected` is still on the
+# instrument PC. The file that triggered this invocation is treated as
+# present even when its row has not been marked uploaded yet: the S3 event
+# is the proof the object landed.
+_IN_S3_STATUSES = {"uploaded", "processing", "completed", "failed"}
 
 
 def process_file(instrument_id: str, run_id: str, filename: str) -> None:
@@ -22,10 +29,16 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
     missing, return without creating a run or flipping status — the later
     event encodes.
 
-    A TIFF event encodes that stack only. A `run.json` event encodes every
-    TIFF currently under the run prefix, so a sidecar that lands last still
-    produces an MP4 per stack. Later TIFFs encode themselves once the
-    sidecar is already in S3.
+    A TIFF event encodes that stack only. A sidecar event encodes every
+    TIFF in the same folder, so a sidecar that lands last still produces
+    an MP4 per stack. Later TIFFs encode themselves once that folder's
+    sidecar is in S3.
+
+    The folder comes from the run's file list, not from the S3 prefix.
+    Several captures can share one run and reuse `run.json` and stack names;
+    the later copies are stored under a folder-hash name. Pairing by
+    folder keeps each stack with its own sidecar. A file with no folder
+    still pairs with the top-level `run.json`.
 
     Reprocess already marks the trigger `processing`, so a missing sibling
     fails that file instead of leaving it stuck. A parsed sidecar is
@@ -54,13 +67,10 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
         return
 
     raw_bucket = config.AWS_S3_RAW_DATA_BUCKET or ""
-    json_key = f"{instrument_id}/{run_id}/{RUN_JSON_NAME}"
-    json_uri = f"s3://{raw_bucket}/{json_key}"
-    tiff_filenames = _tiff_filenames_to_process(raw_bucket, instrument_id, run_id, filename)
-
-    json_exists = s3_utils.object_exists(json_uri)
-    if not tiff_filenames or not json_exists:
-        missing = "run.json" if not json_exists else "TIFF stack"
+    client = get_client()
+    group = _capture_group(_load_run_files(client, instrument_id, run_id), filename)
+    if group is None:
+        missing = "run.json" if is_tiff(filename) else "TIFF stack"
         logger.info("DishCam run %s is missing %s; skipping.", run_id, missing)
         _fail_if_processing(
             instrument_id,
@@ -69,6 +79,8 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
             f"Cannot process: {missing} not found in S3",
         )
         return
+    sidecar_row, tiff_filenames = group
+    json_uri = _object_uri(raw_bucket, sidecar_row, instrument_id, run_id)
 
     logger.info(
         "Processing DishCam TIFF%s %s (run: %s)",
@@ -76,11 +88,10 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
         ", ".join(tiff_filenames),
         run_id,
     )
-    client = get_client()
     client.ensure_run(instrument_id, run_id)
 
     raw_dir = config.LOCAL_RAW_DATA_DIRPATH / instrument_id / run_id
-    local_json = raw_dir / RUN_JSON_NAME
+    local_json = raw_dir / sidecar_row.filename
     try:
         s3_utils.download_file(json_uri, local_json)
         metadata = parse_run_json(local_json)
@@ -97,10 +108,10 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
                 filename=tiff_filename,
             )
             _fail_file(client, record, str(exc))
-        _fail_file(client, _sidecar_file(client, instrument_id, run_id), str(exc))
+        _fail_file(client, _sidecar_record(client, instrument_id, run_id, sidecar_row), str(exc))
         raise
 
-    sidecar = _sidecar_file(client, instrument_id, run_id)
+    sidecar = _sidecar_record(client, instrument_id, run_id, sidecar_row)
     # Only bump uploaded/failed → processing. A completed sidecar from a
     # sibling invocation must stay completed so the run does not flicker
     # back to processing during a duplicate encode.
@@ -119,6 +130,7 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
                 raw_dir,
                 tiff_filename,
                 fps,
+                metadata,
                 owned=owned,
             )
         except Exception as exc:
@@ -139,25 +151,78 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
         raise last_error
 
 
-def _tiff_filenames_to_process(
-    raw_bucket: str,
+def _load_run_files(
+    client: DataHubClient,
     instrument_id: str,
     run_id: str,
+) -> list[FileResponse]:
+    try:
+        detail: RunDetailResponse = client.get_run(instrument_id, run_id)
+    except ApiError as exc:
+        if exc.status_code == 404:
+            return []
+        raise
+    return detail.files
+
+
+def _folder(file: FileResponse) -> str:
+    path = file.relative_path or file.filename
+    slash = path.rfind("/")
+    if slash < 0:
+        return ""
+    return path[:slash]
+
+
+def _bytes_ready(file: FileResponse, *, triggered: bool) -> bool:
+    if triggered or file.s3_key:
+        return True
+    return file.status in _IN_S3_STATUSES
+
+
+def _capture_group(
+    run_files: list[FileResponse],
     filename: str,
-) -> list[str]:
+) -> tuple[FileResponse, list[str]] | None:
+    """Sidecar and TIFF names for the capture folder `filename` belongs to.
+
+    Returns None when that folder has no uploaded sidecar, or a sidecar
+    event finds no uploaded TIFF there.
+    """
+    trigger = next((row for row in run_files if row.filename == filename), None)
+    folder = _folder(trigger) if trigger is not None else ""
+    sidecars = [row for row in run_files if is_run_json(row.filename) and _folder(row) == folder]
+    ready_sidecars = [
+        row
+        for row in sidecars
+        if _bytes_ready(row, triggered=trigger is not None and row.filename == trigger.filename)
+    ]
+    if not ready_sidecars:
+        return None
+    sidecar = ready_sidecars[0]
+
     if is_tiff(filename):
-        return [filename]
-    return _list_tiff_filenames(raw_bucket, instrument_id, run_id)
+        tiff_filenames = [filename]
+    else:
+        tiff_filenames = sorted(
+            row.filename
+            for row in run_files
+            if is_tiff(row.filename)
+            and _folder(row) == folder
+            and _bytes_ready(row, triggered=False)
+        )
+    if not tiff_filenames:
+        return None
+    return sidecar, tiff_filenames
 
 
-def _list_tiff_filenames(raw_bucket: str, instrument_id: str, run_id: str) -> list[str]:
-    prefix = f"s3://{raw_bucket}/{instrument_id}/{run_id}/"
-    names: list[str] = []
-    for uri in sorted(s3_utils.list_objects(prefix)):
-        name = uri.rsplit("/", 1)[-1]
-        if is_tiff(name):
-            names.append(name)
-    return names
+def _object_uri(
+    bucket: str,
+    file: FileResponse,
+    instrument_id: str,
+    run_id: str,
+) -> str:
+    key = file.s3_key or f"{instrument_id}/{run_id}/{file.filename}"
+    return f"s3://{bucket}/{key}"
 
 
 def _encode_tiff(
@@ -168,6 +233,7 @@ def _encode_tiff(
     raw_dir: Path,
     tiff_filename: str,
     fps: float,
+    metadata: dict[str, Any],
     *,
     owned: bool,
 ) -> bool:
@@ -194,6 +260,11 @@ def _encode_tiff(
     poster_path = raw_dir / f"{Path(tiff_filename).stem}.jpg"
 
     if not owned and tiff_record.status in {"completed", "processing"}:
+        # A corrected sidecar should still land on a stack this batch
+        # does not re-encode. In-flight encodes keep the metadata they
+        # already parsed.
+        if tiff_record.status == "completed":
+            client.update_file(tiff_id, metadata=metadata)
         logger.info(
             "Skipping DishCam file %s; already %s.",
             tiff_filename,
@@ -225,7 +296,7 @@ def _encode_tiff(
             "image/jpeg",
         )
 
-        if not _update_file_status(client, tiff_id, "completed"):
+        if not _update_file_status(client, tiff_id, "completed", metadata=metadata):
             logger.info(
                 "DishCam file %s already finished by a sibling invocation.",
                 tiff_filename,
@@ -247,15 +318,25 @@ def _remove_local(*paths: Path) -> None:
         path.unlink(missing_ok=True)
 
 
-def _sidecar_file(client: DataHubClient, instrument_id: str, run_id: str) -> FileResponse:
-    """Return the `run.json` row. The run already exists via `ensure_run`."""
+def _sidecar_record(
+    client: DataHubClient,
+    instrument_id: str,
+    run_id: str,
+    sidecar: FileResponse,
+) -> FileResponse:
+    """Return the sidecar row. The run already exists via `ensure_run`.
+
+    The stored name may be `run~<hash>.json` when another folder already
+    took `run.json`. Creating by that name adopts the watcher row instead
+    of a second plain `run.json`.
+    """
     raw_bucket = config.AWS_S3_RAW_DATA_BUCKET or ""
     return client.create_file(
         instrument_id=instrument_id,
         run_id=run_id,
         s3_bucket=raw_bucket,
-        s3_key=f"{instrument_id}/{run_id}/{RUN_JSON_NAME}",
-        filename=RUN_JSON_NAME,
+        s3_key=sidecar.s3_key or f"{instrument_id}/{run_id}/{sidecar.filename}",
+        filename=sidecar.filename,
     )
 
 
@@ -297,10 +378,16 @@ def _update_file_status(
     status: str,
     *,
     error_message: str | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> bool:
     """Set status. Return False if another invocation already moved the file."""
     try:
-        client.update_file(file_id, status=status, error_message=error_message)
+        client.update_file(
+            file_id,
+            status=status,
+            error_message=error_message,
+            metadata=metadata,
+        )
     except ApiError as exc:
         if exc.status_code == 409:
             logger.info(

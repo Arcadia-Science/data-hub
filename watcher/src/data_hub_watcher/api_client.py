@@ -6,6 +6,7 @@ from typing import Any
 
 import requests
 
+from data_hub_watcher.constants import WATCHER_VERSION, WATCHER_VERSION_HEADER
 from data_hub_watcher.models import (
     ApiErrorDetail,
     ConfigChecksumResponse,
@@ -64,6 +65,10 @@ class DataHubClient:
         key = api_key or os.environ.get("DATA_HUB_API_KEY", "")
         if key:
             self._session.headers["Authorization"] = f"Bearer {key}"
+        # Every request, not just heartbeats. Upload calls carry no watcher
+        # id, so this header is the only way the server can tell a 1.1.0
+        # watcher from one that still uploads by bare filename.
+        self._session.headers[WATCHER_VERSION_HEADER] = WATCHER_VERSION
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -215,12 +220,17 @@ class DataHubClient:
         content_type: str | None = None,
         size_bytes: int | None = None,
         file_created_at_ts: float | None = None,
+        relative_path: str | None = None,
     ) -> PresignedUploadResponse:
         payload: dict[str, Any] = {"filename": filename}
         if content_type:
             payload["content_type"] = content_type
         if size_bytes is not None:
             payload["size_bytes"] = size_bytes
+        # Lets the server tell two same-named files in different folders
+        # apart. Older servers ignore the field.
+        if relative_path:
+            payload["relative_path"] = relative_path
         if file_created_at_ts:
             payload["file_created_at"] = datetime.fromtimestamp(
                 file_created_at_ts, tz=timezone.utc

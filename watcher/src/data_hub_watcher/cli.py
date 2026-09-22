@@ -771,6 +771,53 @@ def _extract_run_id_for_dry_run(
 
 
 # ---------------------------------------------------------------------------
+# state group
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def state() -> None:
+    """Inspect or reset the local upload history."""
+
+
+@state.command("forget")
+@click.option(
+    "--prefix",
+    required=True,
+    help="Folder under the watch directory to forget, e.g. alice/.",
+)
+@click.option("--yes", is_flag=True, help="Skip the confirmation prompt.")
+@click.pass_context
+def state_forget(ctx: click.Context, prefix: str, yes: bool) -> None:
+    """Forget upload history under a folder so those files are reported again.
+
+    Stop the watcher first. It only scans the disk when it starts, so a
+    running watcher will not pick the forgotten files back up.
+    """
+    path = _resolve_path(ctx)
+    cfg = load_config(path)
+    db_path = resolve_state_db_path(path.parent, cfg.environment)
+    if not yes and not click.confirm(
+        f"Forget upload history under {prefix!r} in {db_path}?",
+        default=False,
+    ):
+        raise click.Abort()
+
+    db = StateDB(db_path)
+    try:
+        counts = db.forget_prefix(prefix)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    finally:
+        db.close()
+
+    click.echo(f"Forgot upload history under {prefix!r}.")
+    for table, removed in counts.items():
+        click.echo(f"  {table}: {removed}")
+    click.echo("Start the watcher again so it reports those files.")
+
+
+# ---------------------------------------------------------------------------
 # config group
 # ---------------------------------------------------------------------------
 

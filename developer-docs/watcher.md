@@ -69,7 +69,7 @@ While running:
 - **Run detector** groups stable files into runs by applying the configured regex to each file's relative path. The first file for a run triggers `POST /instruments/:id/runs`; subsequent files for the same run incrementally `PATCH` only the new entries onto the manifest. Files inside the watch tree that don't match the pattern emit a `pattern_mismatch` event (throttled to one per parent directory) so misconfigured patterns surface in the dashboard.
 - **Uploader** requests a presigned S3 URL from the API and uploads each file via HTTP PUT (auto mode), or processes the server's upload queue (manual mode). The watcher does not need AWS credentials. Each upload retries up to 3 times with exponential backoff (1, 2, 4 s) and is recorded locally with its SHA-256 so retries and restarts don't re-upload the same bytes. In manual mode, queue-poll failures are throttled (1st failure, then every 10th) to keep a sustained outage visible without flooding the events stream.
 - **Upload worker** (manual mode only) polls the server's upload queue on its own long-lived thread every 60 seconds, decoupled from the heartbeat so a slow or large upload can't delay heartbeats and make a busy watcher look offline. On shutdown it is stopped and joined before the state DB is closed. Auto mode has no worker: uploads run on the monitor's stability-checker thread via the run detector's upload callback.
-- **Heartbeat loop** sends periodic heartbeats (every 60 seconds) to the API. The payload includes the watcher version, instrument ID, watch directory, upload mode, per-interval activity counters, and process uptime; a final `status="stopped"` heartbeat is sent on graceful shutdown.
+- **Heartbeat loop** sends periodic heartbeats (every 60 seconds) to the API. The payload includes the watcher version, instrument ID, watch directory, upload mode, per-interval activity counters, and process uptime; a final `status="stopped"` heartbeat is sent on graceful shutdown. From 1.1.0 the same version is also sent on every request as `X-Data-Hub-Watcher-Version`. The server uses that header, not the version stored from the last heartbeat, when a request has no watcher id (an upload-link request does not). A missing header means a watcher older than 1.1.0, and the server keeps the behavior that watcher was built for.
 - **Event reporter** batches and flushes lifecycle events (started, stopped, file uploaded, errors) to the API. See [Observability](#observability) for the full taxonomy.
 - **Auto-updater** runs from the same heartbeat tick on every platform — not only Windows services. It polls `GET /watchers/:id/update-check` roughly hourly and applies new releases when the watcher has been idle long enough not to clobber an in-flight run. The full activity-window guard, mandatory-update behavior, and rollback flow are documented in [Roll out watcher releases](https://datahub.arcadiascience.com/docs/watcher-releases); auto-update is hard-disabled in the `preview` environment.
 
@@ -258,6 +258,21 @@ Practical consequences:
 - Upgrading from a pre-`relative_path`/`size_bytes`/`mtime` state DB is a silent, self-healing migration: legacy rows miss the stat lookup, so files are re-enqueued once and then recorded with full stat data on their next upload.
 
 In a `new-only` environment (staging/preview by default — see [Switching environments](#switching-environments)), the first start also seeds `baseline_files` with everything currently on disk so the historical backlog is skipped rather than uploaded. The seeding is one-shot: it only runs when the environment's database has no upload, run, or baseline history yet.
+
+### Forgetting a folder
+
+`data-hub-watcher state forget --prefix alice/` deletes the `uploaded_files`, `detected_files`, and `baseline_files` rows whose path is that folder or sits inside it. The next start reports those files again. Stop the watcher first: a running process does not rescan until it starts. Names that merely begin with the same letters (`alice_notes/`) are left alone; the match is not a `LIKE` pattern, because `_` would otherwise match any character.
+
+This is how a file the watcher already marked as uploaded gets a second chance after the server learns to keep same-named files from different folders.
+
+### Adding a server behavior that needs a newer watcher
+
+1. Ship the watcher change and bump `[project].version` in `watcher/pyproject.toml`.
+2. Add the feature to `WATCHER_FEATURES` in `web/lib/api/watcher-compat.ts`, mapped to that version.
+3. In the route, call `watcherClientFrom(request).supports("…")` and keep the previous behavior in the other branch.
+4. Delete the feature entry and the old branch once `watcher_release_config.min_supported_version` reaches that version. Heartbeats already turn away every older watcher then.
+
+A missing or unreadable version always takes the old branch. That is the opposite of the heartbeat floor check, which lets an unreadable version through rather than locking a lab PC out.
 
 ## Observability
 

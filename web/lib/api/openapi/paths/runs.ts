@@ -198,7 +198,7 @@ registry.registerPath({
   path: "/instruments/{instrumentId}/runs/{runId}/request-upload-url",
   operationId: "requestRunUploadUrl",
   summary: "Request a presigned upload URL",
-  description: scopedPat("runs:upload"),
+  description: `${scopedPat("runs:upload")} Watchers at 1.1.0 or newer send \`relative_path\` and \`X-Data-Hub-Watcher-Version\`. A file whose name is already used by a different folder is stored as \`<stem>~<folder hash>.<ext>\`, and the returned \`s3_key\` uses that stored name. The same name, size, and creation time reuse the existing file. Older watchers are looked up by filename only.`,
   tags: tag,
   security: bearerSecurity,
   request: { params: runParams, body: body(requestUploadUrlBody) },

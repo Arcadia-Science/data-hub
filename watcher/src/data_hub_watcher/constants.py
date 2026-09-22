@@ -22,6 +22,10 @@ def _read_watcher_version() -> str:
 
 WATCHER_VERSION: str = _read_watcher_version()
 
+# Sent on every API request. The server uses it to keep older watchers on
+# the behavior they were built for. Missing on watchers before 1.1.0.
+WATCHER_VERSION_HEADER = "X-Data-Hub-Watcher-Version"
+
 DEFAULT_CONFIG_DIR = Path("~/.data-hub").expanduser()
 DEFAULT_CONFIG_FILENAME = "config.yaml"
 ENV_FILENAME = ".env"
