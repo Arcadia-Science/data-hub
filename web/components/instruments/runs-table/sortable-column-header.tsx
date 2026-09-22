@@ -11,6 +11,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { TableHead } from "@/components/ui/table";
 import { type RUN_SORT_FIELDS, runSortSearchParams } from "@/lib/search-params";
 import { cn } from "@/lib/utils";
 
@@ -40,46 +41,58 @@ export function SortableColumnHeader({
   const isActive = sortState.sort === field;
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          className={cn(
-            "-mr-2 h-8 gap-1 font-medium",
-            isActive && "text-foreground"
-          )}
-          size="sm"
-          variant="ghost"
-        >
-          {isActive ? (
-            sortState.order === "asc" ? (
-              <ArrowUp className="size-3" />
-            ) : (
-              <ArrowDown className="size-3" />
-            )
-          ) : (
-            <ChevronsUpDown className="size-3 opacity-50" />
-          )}
-          {label}
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-44">
-        <DropdownMenuRadioGroup
-          onValueChange={(value) => {
-            if (value !== "asc" && value !== "desc") {
-              return;
-            }
-            setSortState({ sort: field, order: value, page: 1 });
-          }}
-          value={isActive ? sortState.order : ""}
-        >
-          <DropdownMenuRadioItem value="asc">
-            Sort ascending
-          </DropdownMenuRadioItem>
-          <DropdownMenuRadioItem value="desc">
-            Sort descending
-          </DropdownMenuRadioItem>
-        </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <TableHead
+      aria-sort={
+        isActive
+          ? sortState.order === "asc"
+            ? "ascending"
+            : "descending"
+          : undefined
+      }
+    >
+      <div className="flex justify-end">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              className={cn(
+                "-mr-2 h-8 gap-1 font-medium",
+                isActive && "text-foreground"
+              )}
+              size="sm"
+              variant="ghost"
+            >
+              {isActive ? (
+                sortState.order === "asc" ? (
+                  <ArrowUp className="size-3" />
+                ) : (
+                  <ArrowDown className="size-3" />
+                )
+              ) : (
+                <ChevronsUpDown className="size-3 opacity-50" />
+              )}
+              {label}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-44">
+            <DropdownMenuRadioGroup
+              onValueChange={(value) => {
+                if (value !== "asc" && value !== "desc") {
+                  return;
+                }
+                setSortState({ sort: field, order: value, page: 1 });
+              }}
+              value={isActive ? sortState.order : ""}
+            >
+              <DropdownMenuRadioItem value="asc">
+                Sort ascending
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="desc">
+                Sort descending
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </TableHead>
   );
 }

@@ -61,7 +61,10 @@ export const runListQuery = z.object({
   instrument_id: z.string().optional(),
   source: runSourceSchema.optional(),
   search: z.string().optional(),
-  sort: z.string().optional(),
+  sort: z.string().optional().openapi({
+    description:
+      "Sort field: acquired_at (default; when the run started, falling back to created_at), created_at, or updated_at (the last change to the run or any of its files).",
+  }),
   order: z.enum(["asc", "desc"]).optional(),
   date_from: isoDateTime.optional(),
   date_to: isoDateTime.optional(),

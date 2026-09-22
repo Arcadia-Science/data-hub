@@ -1,5 +1,5 @@
 import { RelativeTime } from "@/components/dashboard/relative-time";
-import { TableCell, TableHead } from "@/components/ui/table";
+import { TableCell } from "@/components/ui/table";
 import type { RunListRow } from "@/lib/api/instrument-runs";
 
 import { SortableColumnHeader } from "./sortable-column-header";
@@ -7,19 +7,8 @@ import { SortableColumnHeader } from "./sortable-column-header";
 export function RunTimeHeads() {
   return (
     <>
-      <TableHead>
-        <div className="flex justify-end">
-          <SortableColumnHeader
-            field="acquired_at"
-            label="Acquisition Started"
-          />
-        </div>
-      </TableHead>
-      <TableHead>
-        <div className="flex justify-end">
-          <SortableColumnHeader field="updated_at" label="Last Updated" />
-        </div>
-      </TableHead>
+      <SortableColumnHeader field="acquired_at" label="Run Started" />
+      <SortableColumnHeader field="updated_at" label="Last Updated" />
     </>
   );
 }

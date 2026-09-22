@@ -137,7 +137,6 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
         .update(files)
         .set({ fileCreatedAt })
         .where(eq(files.id, existingFile.id));
-      await touchRuns([run.id]);
     }
   } else {
     const now = new Date();

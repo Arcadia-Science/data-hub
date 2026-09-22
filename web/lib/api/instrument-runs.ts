@@ -6,6 +6,7 @@ import {
   asc,
   desc,
   eq,
+  gt,
   ilike,
   inArray,
   isNull,
@@ -253,6 +254,27 @@ export function parseAcquiredAt(body: Record<string, unknown>): Date | null {
     }
   }
   return floor === null ? null : new Date(floor);
+}
+
+// Writes only when `incoming` is earlier than the stored time, or the stored
+// time is null. Skipping the row otherwise keeps `$onUpdate` from moving
+// `updated_at` on a repeat report of files the run already has.
+export async function foldEarlierAcquiredAt(
+  runId: string,
+  incoming: Date
+): Promise<void> {
+  await db
+    .update(instrumentRuns)
+    .set({ acquiredAt: incoming })
+    .where(
+      and(
+        eq(instrumentRuns.id, runId),
+        or(
+          isNull(instrumentRuns.acquiredAt),
+          gt(instrumentRuns.acquiredAt, incoming)
+        )
+      )
+    );
 }
 
 // ---------------------------------------------------------------------------

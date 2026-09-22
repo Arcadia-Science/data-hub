@@ -1,6 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildRunListQuery } from "@/lib/api/instrument-runs";
+import { WATCHER_VERSION_HEADER } from "@/lib/api/watcher-compat";
 import { revertPendingUploadRequests } from "@/lib/api/watchers";
 import { files, instrumentRuns, instruments } from "@/lib/db/schema";
 import {
@@ -11,9 +12,21 @@ import {
   seedTestUser,
 } from "@/tests/integration/helpers";
 
-// "Last Updated" reads instrument_runs.updated_at, so a file change has to
-// move that column, and a repeat report of files the run already holds must
-// not. Sorting has to stay stable when several runs share one timestamp.
+// "Last Updated" reads instrument_runs.updated_at. A new file moves it; a
+// repeat report does not, unless the file time is earlier. Sorting stays
+// stable when several runs share one timestamp.
+const watcherHeaders = { [WATCHER_VERSION_HEADER]: "1.1.0" };
+const fileCreatedAt = "2024-06-01T12:00:00.000Z";
+
+function reportedFile(filename: string, createdAt = fileCreatedAt) {
+  return {
+    relative_path: filename,
+    filename,
+    size_bytes: 1,
+    file_created_at: createdAt,
+  };
+}
+
 describe("Run updated_at", () => {
   let token: string;
 
@@ -37,11 +50,16 @@ describe("Run updated_at", () => {
   async function createRun(
     instrumentId: string,
     runId: string,
-    detectedFiles: Array<{ filename: string }> = []
+    detectedFiles: Array<{
+      filename: string;
+      file_created_at?: string;
+    }> = [],
+    headers?: Record<string, string>
   ) {
     const res = await api(`/api/v1/instruments/${instrumentId}/runs`, {
       method: "POST",
       token,
+      headers,
       body: {
         run_id: runId,
         source: "watcher",
@@ -49,6 +67,9 @@ describe("Run updated_at", () => {
           relative_path: file.filename,
           filename: file.filename,
           size_bytes: 1,
+          ...(file.file_created_at
+            ? { file_created_at: file.file_created_at }
+            : {}),
         })),
       },
     });
@@ -84,6 +105,22 @@ describe("Run updated_at", () => {
       throw new Error(`Run ${instrumentId}/${runId} not found`);
     }
     return row.updatedAt;
+  }
+
+  async function readAcquiredAt(instrumentId: string, runId: string) {
+    const [row] = await getTestDb()
+      .select({ acquiredAt: instrumentRuns.acquiredAt })
+      .from(instrumentRuns)
+      .where(
+        and(
+          eq(instrumentRuns.instrumentId, instrumentId),
+          eq(instrumentRuns.runId, runId)
+        )
+      );
+    if (!row?.acquiredAt) {
+      throw new Error(`Run ${instrumentId}/${runId} has no acquired_at`);
+    }
+    return row.acquiredAt;
   }
 
   it("sorts by updated_at in both directions and breaks ties on id", async () => {
@@ -148,11 +185,29 @@ describe("Run updated_at", () => {
     expect(updated.getTime()).toBeGreaterThan(past.getTime());
   });
 
-  it("bumps updated_at for a new file and not for a repeat report", async () => {
-    const instrumentId = "updated-at-detected";
+  it.each([
+    {
+      label: "an older watcher",
+      headers: undefined,
+      instrumentId: "updated-at-detected",
+    },
+    {
+      label: "the current watcher",
+      headers: watcherHeaders,
+      instrumentId: "updated-at-detected-current",
+    },
+  ])("bumps updated_at for a new file and not for a repeat report from $label", async ({
+    headers,
+    instrumentId,
+  }) => {
     const runId = "detect-run";
     await createInstrument(instrumentId);
-    await createRun(instrumentId, runId, [{ filename: "a.csv" }]);
+    await createRun(
+      instrumentId,
+      runId,
+      [{ filename: "a.csv", file_created_at: fileCreatedAt }],
+      headers
+    );
 
     const past = new Date("2020-02-01T00:00:00.000Z");
     await pinUpdatedAt(instrumentId, runId, past);
@@ -162,11 +217,9 @@ describe("Run updated_at", () => {
       {
         method: "PATCH",
         token,
+        headers,
         body: {
-          detected_files: [
-            { relative_path: "a.csv", filename: "a.csv", size_bytes: 1 },
-            { relative_path: "b.csv", filename: "b.csv", size_bytes: 1 },
-          ],
+          detected_files: [reportedFile("a.csv"), reportedFile("b.csv")],
         },
       }
     );
@@ -180,17 +233,51 @@ describe("Run updated_at", () => {
       {
         method: "PATCH",
         token,
+        headers,
         body: {
-          detected_files: [
-            { relative_path: "a.csv", filename: "a.csv", size_bytes: 1 },
-            { relative_path: "b.csv", filename: "b.csv", size_bytes: 1 },
-          ],
+          detected_files: [reportedFile("a.csv"), reportedFile("b.csv")],
         },
       }
     );
     expect(repeated.status).toBe(200);
     const afterRepeat = await readUpdatedAt(instrumentId, runId);
     expect(afterRepeat.toISOString()).toBe(past.toISOString());
+  });
+
+  it("moves acquired_at and updated_at when a repeat report has an earlier file time", async () => {
+    const instrumentId = "updated-at-earlier";
+    const runId = "earlier-run";
+    const stored = "2024-06-01T12:00:00.000Z";
+    const earlier = "2024-01-01T00:00:00.000Z";
+    await createInstrument(instrumentId);
+    await createRun(
+      instrumentId,
+      runId,
+      [{ filename: "a.csv", file_created_at: stored }],
+      watcherHeaders
+    );
+    expect((await readAcquiredAt(instrumentId, runId)).toISOString()).toBe(
+      stored
+    );
+
+    const past = new Date("2020-04-01T00:00:00.000Z");
+    await pinUpdatedAt(instrumentId, runId, past);
+
+    const res = await api(`/api/v1/instruments/${instrumentId}/runs/${runId}`, {
+      method: "PATCH",
+      token,
+      headers: watcherHeaders,
+      body: {
+        detected_files: [reportedFile("a.csv", earlier)],
+      },
+    });
+    expect(res.status).toBe(200);
+
+    expect((await readAcquiredAt(instrumentId, runId)).toISOString()).toBe(
+      earlier
+    );
+    const updated = await readUpdatedAt(instrumentId, runId);
+    expect(updated.getTime()).toBeGreaterThan(past.getTime());
   });
 
   it("bumps every run whose pending upload was reverted", async () => {

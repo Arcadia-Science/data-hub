@@ -50,7 +50,7 @@ export function InstrumentRunsTableSkeleton({ rows = 10 }: { rows?: number }) {
               <RawFileColumnHeader label="Size" />
             </TableHead>
             <TableHead>Ran By</TableHead>
-            <TableHead className="text-right">Acquisition Started</TableHead>
+            <TableHead className="text-right">Run Started</TableHead>
             <TableHead className="text-right">Last Updated</TableHead>
             <TableHead className="w-[108px]" />
           </TableRow>
