@@ -18,6 +18,7 @@ def test_cli_catalog_includes_core_commands() -> None:
         "init",
         "self-update",
         "service",
+        "state",
         "upload",
         "watch",
     }

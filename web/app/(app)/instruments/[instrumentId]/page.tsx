@@ -285,6 +285,8 @@ async function InstrumentRunsSection({
       auntyRampRate: filters.aunty_ramp_rate ?? undefined,
       ranBy: filters.ran_by ?? undefined,
       statuses: filters.status.length > 0 ? filters.status : undefined,
+      sort: filters.sort,
+      order: filters.order,
     }),
     getInstrumentFilterOptions(instrument.instrumentType, instrumentId),
     getRanByFilterOptions(instrumentId),

@@ -1,4 +1,3 @@
-import { and, eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { authorize } from "@/lib/api/auth";
 import { apiError, NOT_FOUND } from "@/lib/api/errors";
@@ -6,8 +5,7 @@ import {
   getAttributionsByRunIds,
   lookupRunByNaturalKey,
 } from "@/lib/api/instrument-runs";
-import { db } from "@/lib/db";
-import { runAttributions } from "@/lib/db/schema";
+import { claimRuns, unclaimRuns } from "@/lib/api/run-attributions";
 
 interface RouteContext {
   params: Promise<{ instrumentId: string; runId: string }>;
@@ -38,10 +36,7 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
     );
   }
 
-  await db
-    .insert(runAttributions)
-    .values({ runId: run.id, userId: authResult.userId })
-    .onConflictDoNothing();
+  await claimRuns([run.id], authResult.userId);
 
   const byRun = await getAttributionsByRunIds([run.id]);
   return Response.json(
@@ -74,14 +69,7 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
     );
   }
 
-  await db
-    .delete(runAttributions)
-    .where(
-      and(
-        eq(runAttributions.runId, run.id),
-        eq(runAttributions.userId, authResult.userId)
-      )
-    );
+  await unclaimRuns([run.id], authResult.userId);
 
   const byRun = await getAttributionsByRunIds([run.id]);
   return Response.json(

@@ -512,6 +512,7 @@ class Uploader:
                 content_type=content_type,
                 size_bytes=stat.st_size,
                 file_created_at_ts=file_created_at(stat),
+                relative_path=rel_path,
             )
 
             try:

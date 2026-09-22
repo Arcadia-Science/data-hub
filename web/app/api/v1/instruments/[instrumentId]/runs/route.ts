@@ -1,14 +1,20 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { after, type NextRequest } from "next/server";
 import { authorize, authorizeToken } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
-import { buildRunListQuery, parseAcquiredAt } from "@/lib/api/instrument-runs";
+import {
+  buildRunListQuery,
+  foldEarlierAcquiredAt,
+  parseAcquiredAt,
+} from "@/lib/api/instrument-runs";
 import { notifyRunCreated } from "@/lib/api/notifications";
 import { createRunBody, readJsonBody } from "@/lib/api/openapi";
+import { recordDetectedFiles } from "@/lib/api/run-file-identity";
 import { parseRunMetadataFilters } from "@/lib/api/run-metadata-filters";
 import { parseIntParam, parseRunStatusParam } from "@/lib/api/validators";
+import { watcherClientFrom } from "@/lib/api/watcher-compat";
 import { db } from "@/lib/db";
-import { files, instrumentRuns, instruments, watchers } from "@/lib/db/schema";
+import { instrumentRuns, instruments, watchers } from "@/lib/db/schema";
 import { sendSlackMessage } from "@/lib/slack";
 
 interface RouteContext {
@@ -106,7 +112,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   // If onConflictDoNothing fired, `inserted` is undefined — fetch the
   // existing row by the natural key. When the watcher POST races a
   // lambda-created row, fold the watcher's acquired_at into the existing
-  // row using LEAST so it can only ever move earlier.
+  // row so it can only ever move earlier.
   const [run] = isNew
     ? await db
         .select()
@@ -125,49 +131,17 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
         .limit(1);
 
   if (!isNew && incomingAcquiredAt) {
-    // Bind the ISO string explicitly + cast to timestamptz: drizzle's
-    // sql tag has no PgColumn context here to type a JS Date interpolated
-    // into a raw fragment. See instrument-runs.ts dateFrom/dateTo for
-    // the same pattern.
-    const iso = incomingAcquiredAt.toISOString();
-    await db
-      .update(instrumentRuns)
-      .set({
-        acquiredAt: sql`least(coalesce(${instrumentRuns.acquiredAt}, ${iso}::timestamptz), ${iso}::timestamptz)`,
-      })
-      .where(eq(instrumentRuns.id, run.id));
+    await foldEarlierAcquiredAt(run.id, incomingAcquiredAt);
   }
 
-  // Watcher payloads may include detected files to bulk-insert alongside
-  // the run. Duplicates (same run + relative_path) are silently skipped.
-  const detectedFiles = body.detected_files ?? [];
-
-  if (detectedFiles.length > 0) {
-    const now = new Date();
-    const fileValues = detectedFiles.map(
-      (f: {
-        relative_path: string;
-        filename: string;
-        size_bytes?: number;
-        file_created_at?: string;
-      }) => ({
-        instrumentRunId: run.id,
-        relativePath: f.relative_path,
-        filename: f.filename,
-        sizeBytes: f.size_bytes ?? null,
-        status: "detected" as const,
-        detectedAt: now,
-        fileCreatedAt:
-          typeof f.file_created_at === "string"
-            ? new Date(f.file_created_at)
-            : null,
-      })
-    );
-
-    // Relies on the partial unique index (instrument_run_id, relative_path)
-    // to skip files already reported in a previous request for this run.
-    await db.insert(files).values(fileValues).onConflictDoNothing();
-  }
+  // 1.1.0 watchers get a second row when the same name arrives from
+  // another folder. Older watchers skip a name the run already has.
+  await recordDetectedFiles(
+    db,
+    run.id,
+    body.detected_files ?? [],
+    watcherClientFrom(request).supports("renameDuplicateFilenames")
+  );
 
   // Send Slack channel notification and fan out per-user notifications.
   if (isNew) {

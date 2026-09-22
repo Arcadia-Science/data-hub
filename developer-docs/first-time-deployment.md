@@ -100,11 +100,11 @@ npm run db:migrate
 
 ### Create an API key for the Lambda
 
-Sign in with an account listed in `ADMIN_EMAILS`, then create a personal access token under Settings. Use the **Lambda** scope preset (or an equivalent list that includes `instruments:read`, `runs:create`, `runs:update`, `files:create`, `files:update`, and `archive-jobs:write`). The Lambda looks up each instrument's type before dispatching, so a token without `instruments:read` will 403 on every S3 event.
+Sign in with an account listed in `ADMIN_EMAILS`, then create a personal access token under Settings. Use the **Lambda** scope preset (or an equivalent list that includes `instruments:read`, `runs:read`, `runs:create`, `runs:update`, `files:create`, `files:update`, and `archive-jobs:write`). The Lambda looks up each instrument's type before dispatching, so a token without `instruments:read` will 403 on every S3 event. DishCam also reads the run's file list, so a token without `runs:read` will 403 while pairing a stack with its `run.json`.
 
 The AWS stack and the Lambda use this token as `DATA_HUB_API_KEY` to call the Data Hub API, so create it now and keep it for [step 4](#4-deploy-the-aws-infrastructure). See [Issue and revoke tokens](https://datahub.arcadiascience.com/docs/manage-tokens) for the token UI.
 
-If you previously minted a Lambda token from an older preset that omitted `instruments:read`, revoke it and create a new one with the updated Lambda preset, then update the `DATA_HUB_API_KEY` secret / SAM parameter for each environment.
+If you previously minted a Lambda token from an older preset that omitted `instruments:read` or `runs:read`, revoke it and create a new one with the updated Lambda preset, then update the `DATA_HUB_API_KEY` secret / SAM parameter for each environment. Confirm another instrument still processes before revoking the old token. Every processor shares it.
 
 ## 3. Bootstrap AWS (once per account)
 

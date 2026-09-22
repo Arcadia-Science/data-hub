@@ -10,7 +10,10 @@
 // Real PEP 440 ordering would mean either a dependency or ~200 lines of
 // spec code; the shapes we actually use all fit this simpler model.
 
-export const VERSION_REGEX = /^(\d+)\.(\d+)\.(\d+)([.-].+)?$/;
+// A suffix may start with "." or "-" (`1.2.3.post1`, `1.2.3-rc1`) or run
+// straight into the numbers (`1.2.3rc1`). The form already tells operators
+// that the second shape is valid.
+export const VERSION_REGEX = /^(\d+)\.(\d+)\.(\d+)([.-].+|[a-zA-Z].*)?$/;
 
 export const VERSION_MESSAGE =
   "Use a PEP 440-style version like 1.2.3 or 1.2.3rc1.";
@@ -34,6 +37,44 @@ function parseLoose(v: string): ParsedVersion | null {
 }
 
 /**
+ * Orders two PEP 440-ish versions. Returns -1 when `a` is older, 1 when
+ * `a` is newer, 0 when they match, and `null` when either string can't
+ * be parsed.
+ *
+ * On equal X.Y.Z, an empty suffix (a release) sorts above any suffix, so
+ * `1.2.3` > `1.2.3rc1`. Two suffixed values fall back to string compare,
+ * which is enough for the rare pre-release case.
+ */
+export function compareVersions(
+  a: string | null | undefined,
+  b: string | null | undefined
+): -1 | 0 | 1 | null {
+  if (!(a && b)) {
+    return null;
+  }
+  const left = parseLoose(a);
+  const right = parseLoose(b);
+  if (!(left && right)) {
+    return null;
+  }
+  for (let i = 0; i < 3; i++) {
+    if (left.core[i] !== right.core[i]) {
+      return left.core[i] < right.core[i] ? -1 : 1;
+    }
+  }
+  if (left.suffix === right.suffix) {
+    return 0;
+  }
+  if (left.suffix === "") {
+    return 1;
+  }
+  if (right.suffix === "") {
+    return -1;
+  }
+  return left.suffix < right.suffix ? -1 : 1;
+}
+
+/**
  * Returns `true` only when both `current` and `floor` are present, parse
  * cleanly, and `current < floor`. Any other input — null/undefined,
  * unparseable strings, or current ≥ floor — returns `false`.
@@ -43,37 +84,25 @@ function parseLoose(v: string): ParsedVersion | null {
  * (the next admin save can tighten it) than spuriously orphan a lab PC.
  * Mirrors the philosophy in `evaluate_update` on the watcher side, which
  * also refuses to act on un-parseable version strings.
- *
- * On equal X.Y.Z, an empty suffix (release) is treated as the highest
- * sort key — so `1.2.3` ≥ `1.2.3rc1`, matching PEP 440's release > pre
- * ordering. For two suffixed values we fall back to string compare,
- * which is conservative but enough for the rare pre-release floor case.
  */
 export function isBelowFloor(
   current: string | null | undefined,
   floor: string | null | undefined
 ): boolean {
-  if (!(current && floor)) {
-    return false;
-  }
-  const a = parseLoose(current);
-  const b = parseLoose(floor);
-  if (!(a && b)) {
-    return false;
-  }
-  for (let i = 0; i < 3; i++) {
-    if (a.core[i] !== b.core[i]) {
-      return a.core[i] < b.core[i];
-    }
-  }
-  if (a.suffix === b.suffix) {
-    return false;
-  }
-  if (a.suffix === "") {
-    return false;
-  }
-  if (b.suffix === "") {
-    return true;
-  }
-  return a.suffix < b.suffix;
+  return compareVersions(current, floor) === -1;
+}
+
+/**
+ * Returns `true` only when `current` parses and is at least `min`.
+ *
+ * Missing or unreadable versions return `false`, the opposite of
+ * `isBelowFloor`. Feature gates fall back to the older behavior rather
+ * than turning a new behavior on for a watcher we can't identify.
+ */
+export function isAtLeast(
+  current: string | null | undefined,
+  min: string
+): boolean {
+  const order = compareVersions(current, min);
+  return order !== null && order >= 0;
 }

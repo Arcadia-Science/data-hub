@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { after } from "next/server";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
+import { touchRuns } from "@/lib/api/touch-runs";
 import { db } from "@/lib/db";
 import { files, instrumentRuns, instruments } from "@/lib/db/schema";
 import { isProcessableInstrumentType } from "@/lib/instruments/processable-types";
@@ -157,6 +158,7 @@ export async function reprocessFile(fileId: number): Promise<ReprocessResult> {
       processingStartedAt: new Date(),
     })
     .where(eq(files.id, fileId));
+  await touchRuns([file.instrumentRunId]);
 
   // Build a synthetic S3 event matching the shape parse_s3_event expects.
   // Real S3 events use application/x-www-form-urlencoded encoding for the

@@ -1,5 +1,4 @@
 import type { McpServer } from "@modelcontextprotocol/server";
-import { and, eq } from "drizzle-orm";
 import { reprocessRun } from "@/lib/api/file-reprocessing";
 import {
   buildRunListQuery,
@@ -10,6 +9,7 @@ import {
   lookupRunUuidsByNaturalKeys,
   type RunAttribution,
 } from "@/lib/api/instrument-runs";
+import { claimRuns, unclaimRuns } from "@/lib/api/run-attributions";
 import {
   createCommentAndNotify,
   getCommentForAuthorCheck,
@@ -23,8 +23,6 @@ import { restoreRun, softDeleteRun } from "@/lib/api/run-lifecycle";
 import { pickMetadataFilterArgs } from "@/lib/api/run-metadata-filters";
 import { buildRunReport, getRunFailureSummary } from "@/lib/api/run-reports";
 import { requestAllRunUploads, requestRunUploads } from "@/lib/api/run-uploads";
-import { db } from "@/lib/db";
-import { runAttributions } from "@/lib/db/schema";
 import { toolRegistrationConfig } from "@/lib/mcp/catalog/register";
 import {
   errorResult,
@@ -205,10 +203,7 @@ export function registerRunTools(server: McpServer) {
         return resolved.error;
       }
 
-      await db
-        .insert(runAttributions)
-        .values({ runId: resolved.runUuid, userId: resolved.userId })
-        .onConflictDoNothing();
+      await claimRuns([resolved.runUuid], resolved.userId);
 
       const byRun = await getAttributionsByRunIds([resolved.runUuid]);
       return structuredResult({
@@ -247,10 +242,10 @@ export function registerRunTools(server: McpServer) {
       const claimed: Array<{ runId: string; attributions: RunAttribution[] }> =
         [];
       if (resolved.length > 0) {
-        await db
-          .insert(runAttributions)
-          .values(resolved.map(({ runUuid }) => ({ runId: runUuid, userId })))
-          .onConflictDoNothing();
+        await claimRuns(
+          resolved.map(({ runUuid }) => runUuid),
+          userId
+        );
 
         const byRun = await getAttributionsByRunIds(
           resolved.map(({ runUuid }) => runUuid)
@@ -285,14 +280,7 @@ export function registerRunTools(server: McpServer) {
         return resolved.error;
       }
 
-      await db
-        .delete(runAttributions)
-        .where(
-          and(
-            eq(runAttributions.runId, resolved.runUuid),
-            eq(runAttributions.userId, resolved.userId)
-          )
-        );
+      await unclaimRuns([resolved.runUuid], resolved.userId);
 
       const byRun = await getAttributionsByRunIds([resolved.runUuid]);
       return structuredResult({

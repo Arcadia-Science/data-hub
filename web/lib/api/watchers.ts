@@ -5,6 +5,7 @@ import { type ActorUser, resolveActorUser } from "@/lib/api/actor";
 import type { AuthResult } from "@/lib/api/auth";
 import { apiError, FORBIDDEN } from "@/lib/api/errors";
 import { instrumentHasOnlineWatcher } from "@/lib/api/instruments";
+import { touchRuns } from "@/lib/api/touch-runs";
 import { decideWatcherBinding } from "@/lib/api/watcher-binding";
 import { type DbExecutor, db } from "@/lib/db";
 import {
@@ -131,7 +132,11 @@ export async function revertPendingUploadRequests(
         isNull(files.deletedAt)
       )
     )
-    .returning({ id: files.id });
+    .returning({ id: files.id, instrumentRunId: files.instrumentRunId });
+  await touchRuns(
+    reverted.map((row) => row.instrumentRunId),
+    executor
+  );
   return reverted.map((row) => row.id);
 }
 

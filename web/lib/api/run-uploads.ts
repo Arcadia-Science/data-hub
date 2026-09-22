@@ -1,8 +1,9 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { instrumentHasOnlineWatcher } from "@/lib/api/instruments";
+import { touchRuns } from "@/lib/api/touch-runs";
 import { db } from "@/lib/db";
-import { files, instrumentRuns } from "@/lib/db/schema";
+import { files } from "@/lib/db/schema";
 
 export const MAX_UPLOAD_FILE_IDS = 100;
 
@@ -171,12 +172,8 @@ export async function requestRunUploads(input: {
       .update(files)
       .set({ status: "upload_requested", uploadRequestedAt: now })
       .where(inArray(files.id, toTransition));
+    await touchRuns([run.id]);
   }
-
-  await db
-    .update(instrumentRuns)
-    .set({ updatedAt: now })
-    .where(eq(instrumentRuns.id, run.id));
 
   return {
     ok: true,
@@ -221,10 +218,7 @@ export async function requestAllRunUploads(
     .returning({ id: files.id });
 
   if (updated.length > 0) {
-    await db
-      .update(instrumentRuns)
-      .set({ updatedAt: now })
-      .where(eq(instrumentRuns.id, run.id));
+    await touchRuns([run.id]);
   }
 
   return {

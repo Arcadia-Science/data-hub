@@ -1,6 +1,5 @@
 import { SearchX } from "lucide-react";
 import Link from "next/link";
-import { RelativeTime } from "@/components/dashboard/relative-time";
 import { FilterableColumnHeader } from "@/components/instruments/runs-table/filterable-column-header";
 import type { RanByOption } from "@/components/instruments/runs-table/index";
 import { RanByCell } from "@/components/instruments/runs-table/ran-by-cell";
@@ -12,6 +11,10 @@ import {
   RunSelectCheckbox,
 } from "@/components/instruments/runs-table/run-select-checkbox";
 import type { RunRef } from "@/components/instruments/runs-table/run-selection-provider";
+import {
+  RunTimeCells,
+  RunTimeHeads,
+} from "@/components/instruments/runs-table/run-time-columns";
 import { RunsTableFooter } from "@/components/instruments/runs-table/runs-table-footer";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -97,7 +100,7 @@ export function RunsTable({
                 "Ran By"
               )}
             </TableHead>
-            <TableHead className="text-right">Acquired</TableHead>
+            <RunTimeHeads />
             <TableHead className="w-[108px]">
               <span className="sr-only">Actions</span>
             </TableHead>
@@ -139,13 +142,7 @@ export function RunsTable({
                     runId={row.run_id}
                   />
                 </TableCell>
-                <TableCell className="text-right">
-                  <RelativeTime
-                    date={new Date(
-                      row.acquired_at ?? row.created_at
-                    ).toISOString()}
-                  />
-                </TableCell>
+                <RunTimeCells row={row} />
                 <TableCell className="py-1">
                   <RunRowActions row={row} />
                 </TableCell>
@@ -182,7 +179,8 @@ export function RunsTableSkeleton() {
               <RawFileColumnHeader label="Size" />
             </TableHead>
             <TableHead>Ran By</TableHead>
-            <TableHead className="text-right">Acquired</TableHead>
+            <TableHead className="text-right">Run Started</TableHead>
+            <TableHead className="text-right">Last Updated</TableHead>
             <TableHead className="w-[108px]" />
           </TableRow>
         </TableHeader>
@@ -206,6 +204,9 @@ export function RunsTableSkeleton() {
               </TableCell>
               <TableCell>
                 <Skeleton className="h-6 w-16" />
+              </TableCell>
+              <TableCell className="text-right">
+                <Skeleton className="ml-auto h-4 w-20" />
               </TableCell>
               <TableCell className="text-right">
                 <Skeleton className="ml-auto h-4 w-20" />

@@ -596,6 +596,7 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
     from data_hub_watcher.constants import (
         env_file_path,
         resolve_state_db_path,
+        state_db_dir,
     )
     from data_hub_watcher.logging_setup import (
         attach_servicemanager_handler,
@@ -691,7 +692,7 @@ def _run_service_loop(stop_event: threading.Event, sm: Any) -> None:
         logger.error("No watcher_id in config. Run 'data-hub-watcher init' first.")
         raise SystemExit(1)
 
-    db_path = resolve_state_db_path(path.parent, cfg.environment)
+    db_path = resolve_state_db_path(state_db_dir(path, service=True), cfg.environment)
     # Pass the registry-resolved config directory through to the
     # runtime so the auto-update sentinels land where the SYSTEM-owned
     # upgrade worker (whose paths were baked in at install time

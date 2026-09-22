@@ -9,6 +9,12 @@ import {
 } from "@/lib/api/errors";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { readJsonBody, requestUploadUrlBody } from "@/lib/api/openapi";
+import {
+  type IncomingRunFile,
+  resolveRunFiles,
+} from "@/lib/api/run-file-identity";
+import { touchRuns } from "@/lib/api/touch-runs";
+import { watcherClientFrom } from "@/lib/api/watcher-compat";
 import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
 import { getPresignedUploadUrl, getS3RawDataBucket } from "@/lib/s3";
@@ -70,21 +76,34 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   const fileCreatedAt = body.file_created_at
     ? new Date(body.file_created_at)
     : null;
+  const relativePath = watcherClientFrom(request).supports(
+    "renameDuplicateFilenames"
+  )
+    ? body.relative_path
+    : undefined;
 
-  // Look up existing file record by run + filename.  The file may have been
-  // created by report_run with a full relative_path (e.g. "EXP-001/data.csv"),
-  // but the watcher only sends the bare filename for upload requests.
-  const [existingFile] = await db
-    .select()
-    .from(files)
-    .where(
-      and(
-        eq(files.instrumentRunId, run.id),
-        eq(files.filename, filename),
-        isNull(files.deletedAt)
+  // Older watchers match the row stored under the bare name. A folder
+  // path can point at a renamed row when another folder took that name.
+  const existingFile = relativePath
+    ? await findOrCreateByPath(
+        run.id,
+        {
+          relativePath,
+          filename,
+          sizeBytes: sizeBytes ?? null,
+          fileCreatedAt,
+        },
+        contentType ?? null
       )
-    )
-    .limit(1);
+    : await findByFilename(run.id, filename);
+
+  if (relativePath && !existingFile) {
+    return apiError(
+      409,
+      CONFLICT,
+      `Cannot store a file for '${relativePath}'. A dismissed file may already use that path.`
+    );
+  }
 
   if (existingFile && UPLOADED_OR_LATER_STATUSES.has(existingFile.status)) {
     return Response.json({
@@ -102,7 +121,8 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     return apiError(500, INTERNAL_ERROR, "S3 bucket configuration is missing");
   }
 
-  const s3Key = `${instrumentId}/${runId}/${filename}`;
+  const storedName = existingFile?.filename ?? filename;
+  const s3Key = `${instrumentId}/${runId}/${storedName}`;
 
   let fileId: number;
 
@@ -135,6 +155,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       .returning({ id: files.id });
 
     fileId = inserted.id;
+    await touchRuns([run.id]);
   }
 
   const uploadUrl = await getPresignedUploadUrl(
@@ -152,4 +173,79 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     expires_in: UPLOAD_URL_EXPIRY_SECONDS,
     already_uploaded: false,
   });
+}
+
+async function findByFilename(instrumentRunId: string, filename: string) {
+  const [existingFile] = await db
+    .select()
+    .from(files)
+    .where(
+      and(
+        eq(files.instrumentRunId, instrumentRunId),
+        eq(files.filename, filename),
+        isNull(files.deletedAt)
+      )
+    )
+    .limit(1);
+  return existingFile ?? null;
+}
+
+async function loadActiveFile(id: number) {
+  const [row] = await db
+    .select()
+    .from(files)
+    .where(and(eq(files.id, id), isNull(files.deletedAt)))
+    .limit(1);
+  return row ?? null;
+}
+
+// A conflict means another request stored this path first. Deciding
+// again reuses that row, or takes the folder-hash name.
+async function findOrCreateByPath(
+  instrumentRunId: string,
+  incoming: IncomingRunFile,
+  contentType: string | null
+) {
+  const insertRow = async (storedName: string) => {
+    const [inserted] = await db
+      .insert(files)
+      .values({
+        instrumentRunId,
+        relativePath: incoming.relativePath,
+        filename: storedName,
+        contentType,
+        sizeBytes: incoming.sizeBytes,
+        status: "detected",
+        detectedAt: new Date(),
+        fileCreatedAt: incoming.fileCreatedAt,
+      })
+      .onConflictDoNothing()
+      .returning({ id: files.id });
+    if (!inserted) {
+      return null;
+    }
+    await touchRuns([instrumentRunId]);
+    return loadActiveFile(inserted.id);
+  };
+
+  let [decision] = await resolveRunFiles(db, instrumentRunId, [incoming]);
+  if (decision?.action === "existing" && decision.fileId != null) {
+    return await loadActiveFile(decision.fileId);
+  }
+
+  const created = await insertRow(
+    decision?.action === "insert" ? decision.filename : incoming.filename
+  );
+  if (created) {
+    return created;
+  }
+
+  [decision] = await resolveRunFiles(db, instrumentRunId, [incoming]);
+  if (decision?.action === "existing" && decision.fileId != null) {
+    return await loadActiveFile(decision.fileId);
+  }
+  if (decision?.action === "insert") {
+    return await insertRow(decision.filename);
+  }
+  return null;
 }

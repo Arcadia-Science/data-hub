@@ -1,4 +1,5 @@
 import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { touchRuns } from "@/lib/api/touch-runs";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 
@@ -176,10 +177,7 @@ export async function dismissFile(fileId: number): Promise<DismissFileResult> {
 
   const now = new Date();
   await db.update(files).set({ deletedAt: now }).where(eq(files.id, fileId));
-  await db
-    .update(instrumentRuns)
-    .set({ updatedAt: now })
-    .where(eq(instrumentRuns.id, file.instrumentRunId));
+  await touchRuns([file.instrumentRunId]);
 
   return {
     ok: true,

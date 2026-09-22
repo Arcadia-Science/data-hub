@@ -4,6 +4,7 @@ import { authorizeToken } from "@/lib/api/auth";
 import { apiError, CONFLICT, NOT_FOUND } from "@/lib/api/errors";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { createFileBody, readJsonBody } from "@/lib/api/openapi";
+import { touchRuns } from "@/lib/api/touch-runs";
 import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
 
@@ -107,6 +108,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
         .where(eq(files.id, existing.id))
         .returning();
 
+      await touchRuns([run.id]);
       return Response.json(formatFileResponse(updated), { status: 200 });
     }
 
@@ -167,6 +169,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     return Response.json(formatFileResponse(racedByName), { status: 200 });
   }
 
+  await touchRuns([run.id]);
   return Response.json(formatFileResponse(inserted), { status: 201 });
 }
 

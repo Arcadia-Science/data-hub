@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { authorize, authorizeToken } from "@/lib/api/auth";
 import {
@@ -8,11 +8,14 @@ import {
   NOT_FOUND,
 } from "@/lib/api/errors";
 import {
+  foldEarlierAcquiredAt,
   lookupRunByNaturalKey,
   parseAcquiredAt,
 } from "@/lib/api/instrument-runs";
 import { patchRunBody, readJsonBody } from "@/lib/api/openapi";
+import { recordDetectedFiles } from "@/lib/api/run-file-identity";
 import { softDeleteRun } from "@/lib/api/run-lifecycle";
+import { watcherClientFrom } from "@/lib/api/watcher-compat";
 import { db } from "@/lib/db";
 import { files, instrumentRuns } from "@/lib/db/schema";
 import { getPresignedDownloadUrl } from "@/lib/s3";
@@ -76,6 +79,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
           : null,
       created_at: f.createdAt,
       file_created_at: f.fileCreatedAt,
+      deleted_at: f.deletedAt,
     }))
   );
 
@@ -145,54 +149,19 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
       .where(eq(instrumentRuns.id, run.id));
   }
 
-  // Fold an incoming acquired_at into the row using LEAST so the run's
-  // acquisition time can only ever move earlier (e.g. a later-stabilising
-  // file with an older birthtime). Recomputed from detected_files when not
-  // supplied explicitly — see parseAcquiredAt.
-  //
-  // Bind the ISO string + ::timestamptz cast: drizzle's sql tag has no
-  // PgColumn context here to type a JS Date interpolated into a raw
-  // fragment, so we cast explicitly. See instrument-runs.ts dateFrom/dateTo.
   const incomingAcquiredAt = parseAcquiredAt(body);
   if (incomingAcquiredAt) {
-    const iso = incomingAcquiredAt.toISOString();
-    await db
-      .update(instrumentRuns)
-      .set({
-        acquiredAt: sql`least(coalesce(${instrumentRuns.acquiredAt}, ${iso}::timestamptz), ${iso}::timestamptz)`,
-      })
-      .where(eq(instrumentRuns.id, run.id));
+    await foldEarlierAcquiredAt(run.id, incomingAcquiredAt);
   }
 
-  // Handle detected_files upsert (watcher reporting new files for a run).
-  const detectedFiles = body.detected_files ?? [];
-
-  if (detectedFiles.length > 0) {
-    const now = new Date();
-    const fileValues = detectedFiles.map(
-      (f: {
-        relative_path: string;
-        filename: string;
-        size_bytes?: number;
-        file_created_at?: string;
-      }) => ({
-        instrumentRunId: run.id,
-        relativePath: f.relative_path,
-        filename: f.filename,
-        sizeBytes: f.size_bytes ?? null,
-        status: "detected" as const,
-        detectedAt: now,
-        fileCreatedAt:
-          typeof f.file_created_at === "string"
-            ? new Date(f.file_created_at)
-            : null,
-      })
-    );
-
-    // Relies on the partial unique index (instrument_run_id, relative_path)
-    // to skip files already reported for this run.
-    await db.insert(files).values(fileValues).onConflictDoNothing();
-  }
+  // 1.1.0 watchers get a second row when the same name arrives from
+  // another folder. Older watchers skip a name the run already has.
+  await recordDetectedFiles(
+    db,
+    run.id,
+    body.detected_files ?? [],
+    watcherClientFrom(request).supports("renameDuplicateFilenames")
+  );
 
   // Re-fetch the updated run to return current state.
   const updated = await lookupRunByNaturalKey(instrumentId, runId);
