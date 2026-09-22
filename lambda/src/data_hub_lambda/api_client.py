@@ -10,6 +10,7 @@ from data_hub_lambda.models import (
     ApiErrorDetail,
     FileResponse,
     InstrumentResponse,
+    RunDetailResponse,
     RunResponse,
 )
 
@@ -175,6 +176,16 @@ class DataHubClient:
             json={"run_id": run_id, "source": "lambda"},
         )
         return RunResponse.model_validate(resp.json())
+
+    def get_run(self, instrument_id: str, run_id: str) -> RunDetailResponse:
+        """Fetch a run, including each file's folder path.
+
+        DishCam uses the file list to pair a TIFF with the `run.json` from
+        the same capture folder. A renamed sidecar (`run~<hash>.json`) is
+        indistinguishable from `run.json` without that path.
+        """
+        resp = self._request("GET", f"/instruments/{instrument_id}/runs/{run_id}")
+        return RunDetailResponse.model_validate(resp.json())
 
     def update_run(
         self,

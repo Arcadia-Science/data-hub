@@ -26,6 +26,7 @@ from data_hub_watcher.constants import (
     resolve_config_path,
     resolve_state_db_path,
     save_api_key,
+    state_db_dir,
     state_db_path,
 )
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
@@ -51,7 +52,7 @@ from data_hub_watcher.self_update import (
     evaluate_update,
     run_upgrade,
 )
-from data_hub_watcher.state import StateDB
+from data_hub_watcher.state import StateDB, clean_forget_prefix
 from data_hub_watcher.uploader import Uploader
 
 logger = logging.getLogger(__name__)
@@ -771,6 +772,110 @@ def _extract_run_id_for_dry_run(
 
 
 # ---------------------------------------------------------------------------
+# state group
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def state() -> None:
+    """Inspect or reset the local upload history."""
+
+
+@state.command("forget")
+@click.option(
+    "--prefix",
+    required=True,
+    help="Folder under the watch directory to forget, e.g. alice/.",
+)
+@click.option("--yes", is_flag=True, help="Skip the confirmation prompt.")
+@click.pass_context
+def state_forget(ctx: click.Context, prefix: str, yes: bool) -> None:
+    """Forget upload history under a folder so those files are reported again.
+
+    Clears every state database a watcher on this PC can open: the one
+    `watch` uses and the one the Windows service uses. Stop the watcher
+    first. It only scans the disk when it starts, so a running watcher
+    will not pick the forgotten files back up.
+    """
+    try:
+        clean_forget_prefix(prefix)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    path = _resolve_path(ctx)
+    cfg = load_config(path)
+    checked = _state_db_candidates(path, cfg)
+    db_paths = [candidate for candidate in checked if candidate.is_file()]
+    if not db_paths:
+        looked_for = "\n".join(f"  {candidate}" for candidate in checked)
+        raise click.ClickException(
+            f"No upload history found. Looked for:\n{looked_for}\n"
+            "Pass --config if the watcher uses a different config file."
+        )
+
+    click.echo(f"Forgetting upload history under {prefix!r} in:")
+    for db_path in db_paths:
+        click.echo(f"  {db_path}")
+    if not yes and not click.confirm("Continue?", default=False):
+        raise click.Abort()
+
+    removed_total = 0
+    for db_path in db_paths:
+        db = StateDB(db_path)
+        try:
+            counts = db.forget_prefix(prefix)
+        finally:
+            db.close()
+        click.echo(str(db_path))
+        for table, removed in counts.items():
+            click.echo(f"  {table}: {removed}")
+        removed_total += sum(counts.values())
+    if removed_total == 0:
+        click.echo(
+            "Warning: nothing matched. Paths are case-sensitive "
+            "and relative to the watch directory."
+        )
+    click.echo("Start the watcher again so it reports those files.")
+
+
+def _state_db_candidates(path: Path, cfg: WatcherConfig) -> list[Path]:
+    """Every state DB a watcher on this PC may open, without duplicates.
+
+    Discovery only: unlike `resolve_state_db_path`, this never renames a
+    legacy `watcher.db` before the user confirms.
+    """
+    candidates = [
+        state_db_path(state_db_dir(path, service=False), cfg.environment),
+        state_db_path(state_db_dir(path, service=True), cfg.environment),
+    ]
+    service_config = _installed_service_config()
+    if service_config is not None:
+        try:
+            service_environment = load_config(service_config).environment
+        except click.ClickException:
+            service_environment = None
+        if service_environment:
+            service_dir = state_db_dir(service_config, service=True)
+            candidates.append(state_db_path(service_dir, service_environment))
+    unique: dict[Path, Path] = {}
+    for candidate in candidates:
+        unique.setdefault(candidate.resolve(), candidate)
+    return list(unique.values())
+
+
+def _installed_service_config() -> Path | None:
+    """Config path the Windows service was installed with, or None."""
+    if sys.platform != "win32":
+        return None
+    from data_hub_watcher.service import _read_paths_from_registry
+
+    try:
+        config_path, _ = _read_paths_from_registry()
+    except OSError:
+        return None
+    return config_path
+
+
+# ---------------------------------------------------------------------------
 # config group
 # ---------------------------------------------------------------------------
 
@@ -1031,7 +1136,7 @@ def watch(ctx: click.Context, dry_run: bool) -> None:
     # Step 4: Build the shared runtime (state DB, uploader, detector,
     # monitor, heartbeat — all wired identically to the Windows-service
     # path via data_hub_watcher.runtime).
-    db_path = resolve_state_db_path(DEFAULT_CONFIG_DIR, cfg.environment)
+    db_path = resolve_state_db_path(state_db_dir(path, service=False), cfg.environment)
     rt = build_runtime(client=client, cfg=cfg, db_path=db_path)
 
     # Step 5: sync config (now that we have a reporter, failures are
@@ -1123,7 +1228,7 @@ def upload(ctx: click.Context, file_path: str | None, run_id: str | None, dry_ru
     if detail.status == "pending":
         raise click.ClickException(f"Instrument {inst.id!r} is pending. Cannot upload yet.")
 
-    db_path = resolve_state_db_path(DEFAULT_CONFIG_DIR, cfg.environment)
+    db_path = resolve_state_db_path(state_db_dir(path, service=False), cfg.environment)
     state_db = StateDB(db_path)
     counters = WatcherCounters()
     reporter = EventReporter(client, cfg.watcher_id)

@@ -345,6 +345,125 @@ class TestDishCamHappyPath:
         assert resp.status_code == 404
 
 
+def _report_uploaded_run(
+    base_url: str,
+    api_token: str,
+    run_id: str,
+    detected_files: list[dict[str, object]],
+) -> None:
+    """Create a watcher run, then mark each raw file uploaded.
+
+    The S3 event then hits a run that already has file rows, which is the
+    path `get_run` has to parse.
+    """
+    headers = {
+        "Authorization": f"Bearer {api_token}",
+        "Content-Type": "application/json",
+    }
+    created = requests.post(
+        f"{base_url}/api/v1/instruments/dishcam/runs",
+        headers=headers,
+        json={"run_id": run_id, "source": "watcher", "detected_files": detected_files},
+        timeout=10,
+    )
+    created.raise_for_status()
+    run = _api_get(base_url, api_token, f"/api/v1/instruments/dishcam/runs/{run_id}")
+    for file in run["files"]:
+        uploaded = requests.patch(
+            f"{base_url}/api/v1/files/{file['id']}",
+            headers=headers,
+            json={"status": "uploaded"},
+            timeout=10,
+        )
+        uploaded.raise_for_status()
+
+
+class TestDishCamExistingRun:
+    @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg is not on PATH")
+    def test_tiff_in_an_existing_run_encodes(
+        self,
+        integration_env: IntegrationEnv,
+        make_s3_event: Callable[..., dict[str, Any]],
+        s3_fixture_files: dict[str, Path],
+        mock_context: MagicMock,
+    ) -> None:
+        run_id = "dishcam-existing-same-folder"
+        s3_fixture_files[f"dishcam/{run_id}/stack.tif"] = _FIXTURES_DIR / "dishcam_example.tif"
+        s3_fixture_files[f"dishcam/{run_id}/run.json"] = _FIXTURES_DIR / "dishcam_run.json"
+        _report_uploaded_run(
+            integration_env.base_url,
+            integration_env.api_token,
+            run_id,
+            [
+                {
+                    "relative_path": "capture/stack.tif",
+                    "filename": "stack.tif",
+                    "size_bytes": 1,
+                },
+                {
+                    "relative_path": "capture/run.json",
+                    "filename": "run.json",
+                    "size_bytes": 1,
+                },
+            ],
+        )
+
+        lambda_handler(make_s3_event("dishcam", run_id, "stack.tif"), mock_context)
+
+        run = _api_get(
+            integration_env.base_url,
+            integration_env.api_token,
+            f"/api/v1/instruments/dishcam/runs/{run_id}",
+        )
+        raw = {f["filename"]: f for f in run["files"] if f["category"] == "raw"}
+        assert raw["stack.tif"]["status"] == "completed"
+        assert raw["run.json"]["status"] == "completed"
+        assert {f["filename"] for f in run["files"] if f["category"] == "processed"} == {
+            "stack.mp4",
+            "stack.jpg",
+        }
+
+    @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg is not on PATH")
+    def test_legacy_stack_uses_the_plain_run_json(
+        self,
+        integration_env: IntegrationEnv,
+        make_s3_event: Callable[..., dict[str, Any]],
+        s3_fixture_files: dict[str, Path],
+        mock_context: MagicMock,
+    ) -> None:
+        run_id = "dishcam-existing-legacy"
+        s3_fixture_files[f"dishcam/{run_id}/day-2.tif"] = _FIXTURES_DIR / "dishcam_example.tif"
+        s3_fixture_files[f"dishcam/{run_id}/run.json"] = _FIXTURES_DIR / "dishcam_run.json"
+        # No watcher version header: a second copy of a name would be dropped.
+        # These names are unique, which is what an older watcher managed to store.
+        _report_uploaded_run(
+            integration_env.base_url,
+            integration_env.api_token,
+            run_id,
+            [
+                {"relative_path": "day-1/run.json", "filename": "run.json", "size_bytes": 1},
+                {"relative_path": "day-1/day-1.tif", "filename": "day-1.tif", "size_bytes": 1},
+                {"relative_path": "day-2/day-2.tif", "filename": "day-2.tif", "size_bytes": 1},
+            ],
+        )
+
+        lambda_handler(make_s3_event("dishcam", run_id, "day-2.tif"), mock_context)
+
+        run = _api_get(
+            integration_env.base_url,
+            integration_env.api_token,
+            f"/api/v1/instruments/dishcam/runs/{run_id}",
+        )
+        raw = {f["filename"]: f for f in run["files"] if f["category"] == "raw"}
+        assert raw["day-2.tif"]["status"] == "completed"
+        assert raw["day-1.tif"]["status"] == "uploaded"
+        assert raw["run.json"]["status"] == "completed"
+        assert {f["filename"] for f in run["files"] if f["category"] == "processed"} == {
+            "day-2.mp4",
+            "day-2.jpg",
+        }
+
+
 # ------------------------------------------------------------------
 # Test 4c: Malformed file — failure path
 # ------------------------------------------------------------------

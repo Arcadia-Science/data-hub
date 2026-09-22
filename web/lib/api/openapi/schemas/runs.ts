@@ -140,6 +140,7 @@ export const runDetailFile = z
     download_url: z.string().url().nullable(),
     created_at: isoDateTime,
     file_created_at: isoDateTime.nullable(),
+    deleted_at: isoDateTime.nullable(),
   })
   .openapi("RunDetailFile");
 
@@ -225,10 +226,13 @@ export const requestUploadBody = z.object({
   file_ids: z.array(z.union([z.string(), z.number()])).min(1),
 });
 export const requestUploadUrlBody = z.object({
-  // Persisted as `relative_path` and joined into the S3 key, so it flows to
-  // the watcher's upload queue just like `detected_files`; guard it with the
-  // same path-traversal check.
+  // Persisted as `relative_path` when the watcher sends none, and joined
+  // into the S3 key, so it gets the same path-traversal check.
   filename: safeRelativePath,
+  // Folder path the watcher will read. Sent by watchers that can upload a
+  // renamed file, so a second copy of `filename` from another folder gets
+  // its own row instead of the one this name already belongs to.
+  relative_path: safeRelativePath.optional(),
   content_type: z.string().optional(),
   size_bytes: z.number().optional(),
   file_created_at: isoDateTime.optional(),

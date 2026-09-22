@@ -102,6 +102,7 @@ class TestUploadSingle:
         kwargs = mock_client.request_upload_url.call_args.kwargs
         assert "file_created_at_ts" in kwargs
         assert kwargs["file_created_at_ts"] > 0
+        assert kwargs["relative_path"] == rel_path
 
     def test_already_uploaded_skips(
         self,
