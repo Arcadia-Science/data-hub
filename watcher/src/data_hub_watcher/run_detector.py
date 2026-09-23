@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -72,6 +73,10 @@ class RunState:
     # field when a later-stabilising file reveals an earlier creation
     # time than what the server already knows.
     acquired_at_sent: float | None = None
+    # Transient report/PATCH failures need an in-process retry even when no
+    # other file arrives. The monitor's stability tick services this timer.
+    retry_at: float | None = None
+    retry_attempts: int = 0
 
 
 def _run_acquired_at(files: list[FileInfo]) -> float | None:
@@ -185,6 +190,37 @@ class RunDetector:
         else:
             self._update_run(run)
 
+    def retry_failed_reports(self) -> None:
+        """Retry one due run per monitor tick, independent of new file events."""
+        now = time.monotonic()
+        for run in self._runs.values():
+            if run.retry_at is None or run.retry_at > now:
+                continue
+            # Clear the due timer before sending; a failure schedules the next
+            # attempt, while a success leaves the run out of the retry queue.
+            run.retry_at = None
+            if run.reported:
+                self._update_run(run)
+            else:
+                self._report_new_run(run)
+            return
+
+    @staticmethod
+    def _schedule_retry(run: RunState, exc: ApiError) -> None:
+        # 4xx validation/auth failures need operator action. 429, transport
+        # failures (status 0) and 5xx are transient. POST is safe to replay:
+        # the server upserts on (instrument_id, run_id).
+        if exc.status_code not in (0, 429) and exc.status_code < 500:
+            run.retry_at = None
+            return
+        run.retry_attempts += 1
+        delay = min(5 * 2 ** min(run.retry_attempts - 1, 6), 300)
+        if exc.status_code == 429:
+            delay = max(delay, 60)
+        if exc.retry_after_seconds is not None:
+            delay = max(delay, exc.retry_after_seconds)
+        run.retry_at = time.monotonic() + delay
+
     # ------------------------------------------------------------------
     # run-ID extraction
     # ------------------------------------------------------------------
@@ -272,6 +308,8 @@ class RunDetector:
         try:
             resp = self._client.report_run(self._instrument_id, payload)
             run.reported = True
+            run.retry_at = None
+            run.retry_attempts = 0
             run.api_run_id = resp.id
             run.patched_file_count = len(run.files)
             run.acquired_at_sent = acquired
@@ -288,7 +326,13 @@ class RunDetector:
             )
             logger.info("Reported new run %s (%d files)", run.run_id, len(run.files))
         except ApiError as exc:
-            logger.warning("Failed to report run %s: %s (will retry)", run.run_id, exc.message)
+            self._schedule_retry(run, exc)
+            logger.warning(
+                "Failed to report run %s: %s%s",
+                run.run_id,
+                exc.message,
+                " (retry scheduled)" if run.retry_at is not None else "",
+            )
             self._counters.errors += 1
             self._reporter.report_error(
                 "run_report_failed",
@@ -345,6 +389,8 @@ class RunDetector:
             ).isoformat()
         try:
             self._client.update_run(self._instrument_id, run.run_id, payload)
+            run.retry_at = None
+            run.retry_attempts = 0
             run.patched_file_count = len(run.files)
             if earlier_acquired is not None:
                 run.acquired_at_sent = earlier_acquired
@@ -357,6 +403,7 @@ class RunDetector:
             )
         except ApiError as exc:
             logger.warning("Failed to update run %s: %s", run.run_id, exc.message)
+            self._schedule_retry(run, exc)
             self._counters.errors += 1
             self._reporter.report_error(
                 "run_report_failed",
