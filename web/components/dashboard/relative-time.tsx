@@ -6,16 +6,25 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { formatDateTime } from "@/lib/date";
-import { formatRelativeTime } from "@/lib/utils";
+import { cn, formatRelativeTime } from "@/lib/utils";
 
-export function RelativeTime({ date }: { date: string }) {
+export function RelativeTime({
+  className,
+  date,
+}: {
+  className?: string;
+  date: string;
+}) {
   const full = formatDateTime(new Date(date));
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <time
-          className="relative z-10 cursor-default whitespace-nowrap"
+          className={cn(
+            "relative z-10 cursor-default whitespace-nowrap",
+            className
+          )}
           dateTime={date}
         >
           {formatRelativeTime(date)}

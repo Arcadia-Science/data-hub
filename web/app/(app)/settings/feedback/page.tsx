@@ -2,6 +2,7 @@ import { ShieldOff } from "lucide-react";
 import type { Metadata } from "next/types";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
+import { feedbackStatusLabel } from "@/components/feedback/feedback-badges";
 import { FeedbackDetailSheet } from "@/components/feedback/feedback-detail-sheet";
 import { FeedbackReview } from "@/components/feedback/feedback-review";
 import {
@@ -140,6 +141,7 @@ async function FeedbackSection({
               item.source === "web" ? "Web" : (item.oauthClientName ?? "Agent"),
             createdAt: item.createdAt.toISOString(),
           }))}
+          selectedId={itemId}
           status={status}
         />
         <PaginationNav page={page} pageParam="page" totalPages={totalPages} />
@@ -176,6 +178,8 @@ async function FeedbackSection({
               }
             : null
         }
+        navIds={list.items.map((item) => item.id)}
+        statusLabel={feedbackStatusLabel(status)}
       />
     </>
   );

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { RelativeTime } from "@/components/dashboard/relative-time";
 import {
   FeedbackKindBadge,
   feedbackStatusLabel,
@@ -13,7 +14,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { FeedbackKind, FeedbackStatus } from "@/lib/api/feedback-schema";
-import { formatDateTime } from "@/lib/date";
 
 export interface FeedbackTableRow {
   createdAt: string;
@@ -77,10 +77,12 @@ function FeedbackColumns() {
 export function FeedbackTable({
   hrefFor,
   rows,
+  selectedId,
   status,
 }: {
   hrefFor: (id: string) => string;
   rows: FeedbackTableRow[];
+  selectedId: string | null;
   status: FeedbackStatus;
 }) {
   if (rows.length === 0) {
@@ -102,7 +104,11 @@ export function FeedbackTable({
         <FeedbackColumns />
         <TableBody>
           {rows.map((row) => (
-            <TableRow className="relative cursor-pointer" key={row.id}>
+            <TableRow
+              className="relative cursor-pointer"
+              data-state={row.id === selectedId ? "selected" : undefined}
+              key={row.id}
+            >
               <TableCell>
                 <Link
                   aria-label={row.title}
@@ -123,9 +129,7 @@ export function FeedbackTable({
                 <span translate="no">{row.sourceLabel}</span>
               </TableCell>
               <TableCell className="text-muted-foreground tabular-nums">
-                <time dateTime={row.createdAt}>
-                  {formatDateTime(new Date(row.createdAt))}
-                </time>
+                <RelativeTime date={row.createdAt} />
               </TableCell>
             </TableRow>
           ))}

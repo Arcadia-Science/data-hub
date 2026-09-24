@@ -14,9 +14,17 @@ const KIND_CLASS: Record<FeedbackKind, string> = {
 };
 
 const STATUS_CLASS: Record<FeedbackStatus, string> = {
-  open: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
-  resolved: "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300",
-  declined: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
+  open: "border-blue-200 bg-blue-100 text-blue-800 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-200",
+  resolved:
+    "border-green-200 bg-green-100 text-green-800 dark:border-green-900 dark:bg-green-950 dark:text-green-200",
+  declined:
+    "border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200",
+};
+
+const STATUS_DOT: Record<FeedbackStatus, string> = {
+  open: "bg-blue-600",
+  resolved: "bg-green-600",
+  declined: "bg-zinc-500",
 };
 
 export function FeedbackKindBadge({ kind }: { kind: FeedbackKind }) {
@@ -27,9 +35,15 @@ export function FeedbackKindBadge({ kind }: { kind: FeedbackKind }) {
 
 export function FeedbackStatusBadge({ status }: { status: FeedbackStatus }) {
   return (
-    <Badge className={STATUS_CLASS[status]}>
+    <span
+      className={`inline-flex h-[26px] items-center gap-1.5 rounded-full border px-2.5 font-medium text-[13px] ${STATUS_CLASS[status]}`}
+    >
+      <span
+        aria-hidden="true"
+        className={`size-[7px] rounded-full ${STATUS_DOT[status]}`}
+      />
       {FEEDBACK_STATUS_LABELS[status]}
-    </Badge>
+    </span>
   );
 }
 
