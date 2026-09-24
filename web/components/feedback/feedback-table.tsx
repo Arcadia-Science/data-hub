@@ -32,7 +32,7 @@ export function FeedbackTableSkeleton() {
       className="overflow-hidden rounded-lg border bg-background dark:bg-muted"
       role="status"
     >
-      <Table className="table-fixed">
+      <Table className="min-w-[48rem] table-fixed">
         <FeedbackColumns />
         <TableBody>
           {Array.from({ length: 4 }).map((_, index) => (
@@ -98,7 +98,7 @@ export function FeedbackTable({
 
   return (
     <div className="overflow-hidden rounded-lg border bg-background dark:bg-muted">
-      <Table className="table-fixed">
+      <Table className="min-w-[48rem] table-fixed">
         <FeedbackColumns />
         <TableBody>
           {rows.map((row) => (
@@ -111,15 +111,15 @@ export function FeedbackTable({
                 />
                 <FeedbackKindBadge kind={row.kind} />
               </TableCell>
-              <TableCell className="max-w-0">
+              <TableCell className="max-w-0 overflow-hidden">
                 <span className="block min-w-0 truncate font-medium">
                   {row.title}
                 </span>
               </TableCell>
-              <TableCell className="max-w-0 truncate text-muted-foreground">
+              <TableCell className="max-w-0 overflow-hidden truncate text-muted-foreground">
                 {row.reporterLabel}
               </TableCell>
-              <TableCell className="max-w-0 truncate text-muted-foreground">
+              <TableCell className="max-w-0 overflow-hidden truncate text-muted-foreground">
                 <span translate="no">{row.sourceLabel}</span>
               </TableCell>
               <TableCell className="text-muted-foreground tabular-nums">
