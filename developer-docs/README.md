@@ -19,3 +19,4 @@ see the root [README](../README.md#documentation) for that split.
 - [CI and deployment](ci-and-deployment.md) — GitHub Actions workflows, branch strategy, and how CI redeploys each piece
 - [Run archives](run-archives.md) — "Download all" flow, cache/dedup model, and on-call runbook
 - [Conventions](conventions.md) — S3 key layout, instrument IDs, code style, environments
+- Usage events are listed under [Architecture](architecture.md#key-design-decisions) (Vercel Web Analytics custom events)

@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { analyticsSurface, trackEvent } from "@/lib/analytics/track";
 import { authorize } from "@/lib/api/auth";
 import { apiError, INTERNAL_ERROR, NOT_FOUND } from "@/lib/api/errors";
 import {
@@ -175,6 +176,10 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
   const wantsJson = clientWantsJson(request);
 
   if (result.status === "ready") {
+    trackEvent("archive_downloaded", {
+      user_id: authResult.userId,
+      surface: analyticsSurface(authResult.authMethod),
+    });
     return wantsJson
       ? readyJsonResponse(result.downloadUrl, result.sizeBytes)
       : redirectResponse(result.downloadUrl);
