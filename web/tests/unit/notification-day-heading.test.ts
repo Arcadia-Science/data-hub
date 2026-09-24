@@ -30,4 +30,15 @@ describe("formatNotificationDayHeading", () => {
       "Wednesday · Sep 16"
     );
   });
+
+  it("adds the year for dates outside the current year when asked", () => {
+    expect(
+      formatNotificationDayHeading("2025-09-16", TZ, now, {
+        yearIfNotCurrent: true,
+      })
+    ).toBe("Tuesday · Sep 16, 2025");
+    expect(formatNotificationDayHeading("2025-09-16", TZ, now)).toBe(
+      "Tuesday · Sep 16"
+    );
+  });
 });

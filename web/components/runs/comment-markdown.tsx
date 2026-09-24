@@ -1,5 +1,3 @@
-"use client";
-
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -19,7 +17,7 @@ export function CommentMarkdown({ body }: { body: string }) {
           a: (props) => (
             <a
               {...props}
-              className="text-primary underline underline-offset-2 hover:no-underline"
+              className="relative z-10 text-primary underline underline-offset-2 hover:no-underline"
               rel="noopener noreferrer"
               target="_blank"
             />

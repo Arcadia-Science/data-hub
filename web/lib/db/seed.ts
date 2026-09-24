@@ -22,6 +22,7 @@ import {
   startOfMonthISO,
   startOfTodayISO,
   startOfWeekISO,
+  startOfYesterdayISO,
 } from "@/lib/date";
 import { DEV_PASSWORD } from "@/lib/dev-auth";
 import { generateToken, getTokenPrefix, hashToken } from "@/lib/tokens";
@@ -1581,6 +1582,31 @@ export async function seedRunComments(
       createdAt: idxOnInstrument % 4 === 3 ? lastWeekCommentAt : new Date(),
     });
   }
+
+  // Pin one comment to yesterday noon and one to the same instant last year
+  // so the /comments day headings always include Yesterday and a prior-year
+  // date, independent of when the seed runs.
+  const yesterdayNoon = new Date(
+    new Date(startOfYesterdayISO(timeZone)).getTime() + 12 * HOUR_MS
+  );
+  const lastYearNoon = new Date(yesterdayNoon);
+  lastYearNoon.setUTCFullYear(lastYearNoon.getUTCFullYear() - 1);
+  const anchorRun = runs[0];
+  const anchorAuthor = authors[1 % authors.length];
+  rows.push(
+    {
+      runId: anchorRun.id,
+      userId: anchorAuthor.id,
+      body: "Flagging yesterday's batch — the blank wells drifted after calibration.",
+      createdAt: yesterdayNoon,
+    },
+    {
+      runId: anchorRun.id,
+      userId: authors[0].id,
+      body: "Archived note from last year's calibration. Kept for the QC binder.",
+      createdAt: lastYearNoon,
+    }
+  );
 
   await db.insert(schema.runComments).values(rows);
 }

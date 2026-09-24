@@ -144,6 +144,18 @@ export const runDetailParamsCache = createSearchParamsCache(
   runDetailSearchParams
 );
 
+// Cross-run comments page. `author` and `ran_by` are mutually exclusive in
+// the UI (a person filter replaces the All / On my runs tabs) but the query
+// applies whichever are present.
+export const commentsSearchParams = {
+  author: parseAsString,
+  ran_by: parseAsString,
+  page: parseAsInteger.withDefault(1),
+};
+
+export const commentsParamsCache =
+  createSearchParamsCache(commentsSearchParams);
+
 export function hasActiveFilters(params: {
   search: string;
   instrument_id: string[];

@@ -3,6 +3,12 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import {
+  CommentCardGrid,
+  CommentCardGridSkeleton,
+  ViewAllCommentsLink,
+} from "@/components/comments/comment-card-grid";
+import { CommentTabs } from "@/components/comments/comment-tabs";
+import {
   DashboardStatsCards,
   StatCardsSkeleton,
 } from "@/components/dashboard/dashboard-stats";
@@ -22,6 +28,7 @@ import {
   TablePendingBoundary,
   TablePendingProvider,
 } from "@/components/table-pending";
+import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   getDashboardStats,
   getInstruments,
@@ -32,6 +39,7 @@ import {
   getRanByFilterOptions,
 } from "@/lib/api/instrument-runs";
 import { getRecentActiveInstrumentsForDashboard } from "@/lib/api/instruments";
+import { listCommentFeed } from "@/lib/api/run-comments";
 import { auth } from "@/lib/auth";
 import { startOfTodayISO } from "@/lib/date";
 import { dashboardParamsCache, hasActiveFilters } from "@/lib/search-params";
@@ -40,6 +48,7 @@ import { getViewerTimeZone } from "@/lib/viewer-timezone";
 type DashboardParams = Awaited<ReturnType<typeof dashboardParamsCache.parse>>;
 
 const RECENT_INSTRUMENTS_LIMIT = 3;
+const RECENT_COMMENTS_LIMIT = 6;
 
 export default async function DashboardPage({
   searchParams,
@@ -91,6 +100,12 @@ export default async function DashboardPage({
         <h2 className="font-medium text-lg tracking-tight">Recent runs</h2>
         <Suspense fallback={<DashboardRunsSkeleton />}>
           <DashboardRunsSection currentUserId={currentUserId} params={params} />
+        </Suspense>
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <Suspense fallback={<CommentCardGridSkeleton />}>
+          <DashboardCommentsSection currentUserId={currentUserId} />
         </Suspense>
       </section>
     </div>
@@ -218,5 +233,51 @@ async function DashboardRunsSection({
         </div>
       </TablePendingProvider>
     </RunSelectionProvider>
+  );
+}
+
+async function DashboardCommentsSection({
+  currentUserId,
+}: {
+  currentUserId: string | null;
+}) {
+  const [all, mine] = await Promise.all([
+    listCommentFeed({ count: false, perPage: RECENT_COMMENTS_LIMIT }),
+    currentUserId
+      ? listCommentFeed({
+          count: false,
+          perPage: RECENT_COMMENTS_LIMIT,
+          ranBy: currentUserId,
+        })
+      : Promise.resolve(null),
+  ]);
+
+  return (
+    <CommentTabs defaultValue="all" values={["all", "mine"]}>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-pretty font-medium text-lg tracking-tight">
+          Recent comments
+        </h2>
+        <TabsList>
+          <TabsTrigger value="all">All</TabsTrigger>
+          <TabsTrigger value="mine">On my runs</TabsTrigger>
+        </TabsList>
+      </div>
+      <TabsContent className="flex flex-col gap-3" value="all">
+        <CommentCardGrid comments={all.data} emptyLabel="No comments yet." />
+        {all.data.length > 0 ? <ViewAllCommentsLink href="/comments" /> : null}
+      </TabsContent>
+      <TabsContent className="flex flex-col gap-3" value="mine">
+        <CommentCardGrid
+          comments={mine?.data ?? []}
+          emptyLabel="No comments on your runs yet."
+        />
+        {currentUserId && mine && mine.data.length > 0 ? (
+          <ViewAllCommentsLink
+            href={`/comments?ran_by=${encodeURIComponent(currentUserId)}`}
+          />
+        ) : null}
+      </TabsContent>
+    </CommentTabs>
   );
 }

@@ -131,7 +131,8 @@ export function calendarDayKey(date: Date, timeZone: string): string {
 export function formatNotificationDayHeading(
   dayKey: string,
   timeZone: string,
-  now: Date = new Date()
+  now: Date = new Date(),
+  options?: { yearIfNotCurrent?: boolean }
 ): string {
   if (dayKey === calendarDayKey(now, timeZone)) {
     return "Today";
@@ -144,7 +145,12 @@ export function formatNotificationDayHeading(
   }
   // Noon on that local day avoids DST start/end edges that midnight can hit.
   const midday = fromZonedTime(`${dayKey}T12:00:00.000`, timeZone);
-  return formatInTimeZone(midday, timeZone, "EEEE · MMM d");
+  const currentYear = calendarDayKey(now, timeZone).slice(0, 4);
+  const pattern =
+    options?.yearIfNotCurrent && dayKey.slice(0, 4) !== currentYear
+      ? "EEEE · MMM d, yyyy"
+      : "EEEE · MMM d";
+  return formatInTimeZone(midday, timeZone, pattern);
 }
 
 /** Formats a date as a 12-hour time string, e.g. `"2:30 PM"`. */

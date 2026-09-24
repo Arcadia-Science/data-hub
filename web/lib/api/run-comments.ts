@@ -1,9 +1,15 @@
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { after } from "next/server";
+import { attributedToUser } from "@/lib/api/dashboard";
 import { notifyComment } from "@/lib/api/notifications";
 import { touchRuns } from "@/lib/api/touch-runs";
 import { db } from "@/lib/db";
-import { runComments, users } from "@/lib/db/schema";
+import {
+  instrumentRuns,
+  instruments,
+  runComments,
+  users,
+} from "@/lib/db/schema";
 import { toInitials } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -129,6 +135,113 @@ export async function getCommentCountsByRunIds(
     counts.set(row.runId, row.count);
   }
   return counts;
+}
+
+// ---------------------------------------------------------------------------
+// Cross-run feed — newest first, for the home page, profile pages, and
+// `/comments`. Soft-deleted comments and comments on soft-deleted runs are
+// excluded; retired instruments stay, matching global search.
+// ---------------------------------------------------------------------------
+
+const FEED_DEFAULT_PER_PAGE = 20;
+const FEED_MAX_PER_PAGE = 100;
+
+export interface CommentFeedItem extends RunCommentDto {
+  run: {
+    instrumentDisplayName: string;
+    instrumentId: string;
+    runId: string;
+  };
+}
+
+export interface CommentFeedPage {
+  data: CommentFeedItem[];
+  pagination: {
+    page: number;
+    per_page: number;
+    total: number;
+    total_pages: number;
+  };
+}
+
+export async function listCommentFeed(input: {
+  authorId?: string;
+  /**
+   * Skip the COUNT query. Previews that only render `data` pass `false`.
+   * `pagination.total` then equals the page length, not the full result set.
+   */
+  count?: boolean;
+  page?: number;
+  perPage?: number;
+  ranBy?: string;
+}): Promise<CommentFeedPage> {
+  const perPage = Math.min(
+    Math.max(input.perPage ?? FEED_DEFAULT_PER_PAGE, 1),
+    FEED_MAX_PER_PAGE
+  );
+  const page = Math.max(input.page ?? 1, 1);
+  const offset = (page - 1) * perPage;
+  const includeTotal = input.count !== false;
+
+  const where = and(
+    isNull(runComments.deletedAt),
+    isNull(instrumentRuns.deletedAt),
+    input.authorId ? eq(runComments.userId, input.authorId) : undefined,
+    input.ranBy ? attributedToUser(input.ranBy) : undefined
+  );
+
+  const rowsQuery = db
+    .select({
+      id: runComments.id,
+      body: runComments.body,
+      createdAt: runComments.createdAt,
+      editedAt: runComments.editedAt,
+      userId: users.id,
+      userName: users.name,
+      userEmail: users.email,
+      userImage: users.image,
+      instrumentId: instruments.id,
+      instrumentDisplayName: instruments.displayName,
+      runDisplayId: instrumentRuns.runId,
+    })
+    .from(runComments)
+    .innerJoin(instrumentRuns, eq(runComments.runId, instrumentRuns.id))
+    .innerJoin(instruments, eq(instrumentRuns.instrumentId, instruments.id))
+    .innerJoin(users, eq(runComments.userId, users.id))
+    .where(where)
+    .orderBy(desc(runComments.createdAt), desc(runComments.id))
+    .limit(perPage)
+    .offset(offset);
+
+  const totalQuery = db
+    .select({ total: sql<number>`cast(count(*) as int)` })
+    .from(runComments)
+    .innerJoin(instrumentRuns, eq(runComments.runId, instrumentRuns.id))
+    .where(where);
+
+  const [rows, totals] = await Promise.all([
+    rowsQuery,
+    includeTotal ? totalQuery : Promise.resolve(null),
+  ]);
+
+  const total = totals ? (totals[0]?.total ?? 0) : rows.length;
+
+  return {
+    data: rows.map((row) => ({
+      ...toDto(row),
+      run: {
+        instrumentId: row.instrumentId,
+        instrumentDisplayName: row.instrumentDisplayName,
+        runId: row.runDisplayId,
+      },
+    })),
+    pagination: {
+      page,
+      per_page: perPage,
+      total,
+      total_pages: includeTotal ? Math.ceil(total / perPage) : 1,
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------

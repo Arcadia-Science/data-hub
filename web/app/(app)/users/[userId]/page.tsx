@@ -3,6 +3,12 @@ import type { Metadata } from "next/types";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import {
+  CommentCardGrid,
+  CommentCardGridSkeleton,
+  ViewAllCommentsLink,
+} from "@/components/comments/comment-card-grid";
+import { CommentTabs } from "@/components/comments/comment-tabs";
+import {
   MyRunsStatsCards,
   MyRunsStatsCardsSkeleton,
 } from "@/components/dashboard/dashboard-stats";
@@ -18,6 +24,7 @@ import {
   TablePendingBoundary,
   TablePendingProvider,
 } from "@/components/table-pending";
+import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UserAvatar } from "@/components/user-avatar";
 import {
   getInstruments,
@@ -26,6 +33,7 @@ import {
   type UserProfile,
 } from "@/lib/api/dashboard";
 import { buildRunListQuery } from "@/lib/api/instrument-runs";
+import { listCommentFeed } from "@/lib/api/run-comments";
 import { auth } from "@/lib/auth";
 import { dashboardParamsCache, hasActiveFilters } from "@/lib/search-params";
 
@@ -109,6 +117,12 @@ export default async function UserRunsPage({ params, searchParams }: Props) {
             params={dashboardParams}
             profile={profile}
           />
+        </Suspense>
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <Suspense fallback={<CommentCardGridSkeleton />}>
+          <ProfileCommentsSection isSelf={isSelf} profile={profile} />
         </Suspense>
       </section>
     </div>
@@ -205,5 +219,76 @@ async function UserRunsSection({
         </div>
       </TablePendingProvider>
     </RunSelectionProvider>
+  );
+}
+
+const PROFILE_COMMENTS_LIMIT = 6;
+
+async function ProfileCommentsSection({
+  profile,
+  isSelf,
+}: {
+  profile: UserProfile;
+  isSelf: boolean;
+}) {
+  const [written, onRuns] = await Promise.all([
+    listCommentFeed({
+      authorId: profile.userId,
+      count: false,
+      perPage: PROFILE_COMMENTS_LIMIT,
+    }),
+    listCommentFeed({
+      count: false,
+      perPage: PROFILE_COMMENTS_LIMIT,
+      ranBy: profile.userId,
+    }),
+  ]);
+
+  const name = firstName(profile.displayName);
+  const writtenLabel = isSelf ? "Written by you" : `Written by ${name}`;
+  const onRunsLabel = isSelf
+    ? "On your runs"
+    : `On ${possessive(profile.displayName)} runs`;
+  const writtenHref = `/comments?author=${encodeURIComponent(profile.userId)}`;
+  const onRunsHref = `/comments?ran_by=${encodeURIComponent(profile.userId)}`;
+
+  return (
+    <CommentTabs defaultValue="written" values={["written", "on_runs"]}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-pretty font-medium text-lg tracking-tight">
+          Recent comments
+        </h2>
+        <TabsList>
+          <TabsTrigger value="written">{writtenLabel}</TabsTrigger>
+          <TabsTrigger value="on_runs">{onRunsLabel}</TabsTrigger>
+        </TabsList>
+      </div>
+      <TabsContent className="flex flex-col gap-3" value="written">
+        <CommentCardGrid
+          comments={written.data}
+          emptyLabel={
+            isSelf
+              ? "You haven't written any comments yet."
+              : `${name} hasn't written any comments yet.`
+          }
+        />
+        {written.data.length > 0 ? (
+          <ViewAllCommentsLink href={writtenHref} />
+        ) : null}
+      </TabsContent>
+      <TabsContent className="flex flex-col gap-3" value="on_runs">
+        <CommentCardGrid
+          comments={onRuns.data}
+          emptyLabel={
+            isSelf
+              ? "No comments on your runs yet."
+              : `No comments on ${possessive(profile.displayName)} runs yet.`
+          }
+        />
+        {onRuns.data.length > 0 ? (
+          <ViewAllCommentsLink href={onRunsHref} />
+        ) : null}
+      </TabsContent>
+    </CommentTabs>
   );
 }
