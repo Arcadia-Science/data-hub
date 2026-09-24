@@ -93,9 +93,7 @@ export function FeedbackDetailSheet({ item }: { item: FeedbackDetail | null }) {
             ) : null}
             {item.pageUrl ? (
               <Detail label="Page">
-                <span className="break-all" translate="no">
-                  {item.pageUrl}
-                </span>
+                <PageLink url={item.pageUrl} />
               </Detail>
             ) : null}
             <FeedbackStatusForm
@@ -109,6 +107,39 @@ export function FeedbackDetailSheet({ item }: { item: FeedbackDetail | null }) {
       ) : null}
     </Sheet>
   );
+}
+
+function PageLink({ url }: { url: string }) {
+  const href = pageHref(url);
+  if (!href) {
+    return (
+      <span className="break-all" translate="no">
+        {url}
+      </span>
+    );
+  }
+  return (
+    <a
+      className="break-all underline underline-offset-4"
+      href={href}
+      rel="noreferrer"
+      translate="no"
+    >
+      {url}
+    </a>
+  );
+}
+
+function pageHref(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return parsed.href;
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 function Detail({

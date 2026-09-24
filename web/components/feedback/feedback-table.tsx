@@ -102,17 +102,19 @@ export function FeedbackTable({
         <FeedbackColumns />
         <TableBody>
           {rows.map((row) => (
-            <TableRow key={row.id}>
+            <TableRow className="relative cursor-pointer" key={row.id}>
               <TableCell>
+                <Link
+                  aria-label={row.title}
+                  className="absolute inset-0 z-10"
+                  href={hrefFor(row.id)}
+                />
                 <FeedbackKindBadge kind={row.kind} />
               </TableCell>
               <TableCell className="max-w-0">
-                <Link
-                  className="block min-w-0 truncate font-medium hover:underline"
-                  href={hrefFor(row.id)}
-                >
+                <span className="block min-w-0 truncate font-medium">
                   {row.title}
-                </Link>
+                </span>
               </TableCell>
               <TableCell className="max-w-0 truncate text-muted-foreground">
                 {row.reporterLabel}

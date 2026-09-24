@@ -108,14 +108,14 @@ export function InstrumentNotificationSwitch({
               control, so the markup stays valid. */}
           <label
             className={cn(
-              "flex h-8 items-center gap-2 rounded-md border bg-background px-2.5 shadow-xs transition-colors",
+              "flex h-8 items-center gap-2 rounded-md border bg-background px-2.5 text-foreground shadow-xs transition-colors",
               disabled
                 ? "cursor-not-allowed opacity-70"
                 : "cursor-pointer hover:bg-muted"
             )}
             htmlFor={switchId}
           >
-            <Bell className="size-3.5 text-muted-foreground" />
+            <Bell className="size-3.5" />
             <span className="text-sm">Notifications</span>
             {control}
           </label>

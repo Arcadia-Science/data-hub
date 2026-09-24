@@ -13,7 +13,6 @@ function RunsTableFooterSkeleton() {
   return (
     <div className="flex items-center justify-between border-t px-4 py-3">
       <Skeleton className="h-3 w-24" />
-      <Skeleton className="h-3 w-56" />
     </div>
   );
 }

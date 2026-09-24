@@ -82,20 +82,20 @@ export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
             side={isMobile ? "bottom" : "top"}
             sideOffset={4}
           >
-            <DropdownMenuItem asChild>
-              <DocsLink href={DOCS_URL}>
-                <BookOpen data-icon="inline-start" />
-                Docs
-                <ExternalLink className="ml-auto size-3.5 text-muted-foreground" />
-              </DocsLink>
-            </DropdownMenuItem>
             <DropdownMenuItem
               onFocus={preloadSendFeedbackForm}
               onMouseEnter={preloadSendFeedbackForm}
               onSelect={() => setFeedbackOpen(true)}
             >
               <MessageSquarePlus data-icon="inline-start" />
-              Send feedback
+              Feedback
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <DocsLink href={DOCS_URL}>
+                <BookOpen data-icon="inline-start" />
+                Docs
+                <ExternalLink className="ml-auto size-3.5 text-muted-foreground" />
+              </DocsLink>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
               <Link href="/settings/notifications">

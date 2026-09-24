@@ -244,7 +244,9 @@ export function SendFeedbackForm({
 
         <Accordion collapsible type="single">
           <AccordionItem value="details">
-            <AccordionTrigger>More details (optional)</AccordionTrigger>
+            <AccordionTrigger className="cursor-pointer items-center py-2.5">
+              More details (optional)
+            </AccordionTrigger>
             <AccordionContent>
               <form.Subscribe selector={(state) => state.values}>
                 {(values) => (
