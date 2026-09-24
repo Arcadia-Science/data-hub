@@ -21,6 +21,10 @@ const PREFERENCE_FIELDS = {
   slack_comments_attributed_enabled: "slackCommentsAttributedEnabled",
   slack_comments_participated_enabled: "slackCommentsParticipatedEnabled",
   slack_generic_enabled: "slackGenericEnabled",
+  feedback_submitted_enabled: "feedbackSubmittedEnabled",
+  feedback_updated_enabled: "feedbackUpdatedEnabled",
+  slack_feedback_submitted_enabled: "slackFeedbackSubmittedEnabled",
+  slack_feedback_updated_enabled: "slackFeedbackUpdatedEnabled",
 } as const satisfies Record<string, keyof NotificationPreferencesDto>;
 
 type ApiPreferenceKey = keyof typeof PREFERENCE_FIELDS;

@@ -93,11 +93,13 @@ async function NotificationsFormSection({
         commentsAttributedEnabled: prefs.commentsAttributedEnabled,
         commentsParticipatedEnabled: prefs.commentsParticipatedEnabled,
         genericEnabled: prefs.genericEnabled,
+        feedbackUpdatedEnabled: prefs.feedbackUpdatedEnabled,
         slackRunsEnabled: prefs.slackRunsEnabled,
         slackCommentsAttributedEnabled: prefs.slackCommentsAttributedEnabled,
         slackCommentsParticipatedEnabled:
           prefs.slackCommentsParticipatedEnabled,
         slackGenericEnabled: prefs.slackGenericEnabled,
+        slackFeedbackUpdatedEnabled: prefs.slackFeedbackUpdatedEnabled,
       }}
       slackChannelConfig={
         slackChannelConfig
@@ -122,6 +124,17 @@ async function NotificationsFormSection({
             }
           : { connected: false, slackTeamName: null, revoked: false }
       }
+      {...(isAdmin
+        ? {
+            adminNewFeedback: {
+              inApp: prefs.feedbackSubmittedEnabled,
+              slack:
+                slackConn !== null && slackConn.revokedAt === null
+                  ? prefs.slackFeedbackSubmittedEnabled
+                  : null,
+            },
+          }
+        : {})}
     />
   );
 }

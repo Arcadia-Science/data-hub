@@ -8,6 +8,7 @@ import {
   isNull,
   sql,
 } from "drizzle-orm";
+import { FEEDBACK_STATUS_LABELS } from "@/lib/api/feedback-schema";
 import { runCommentHref } from "@/lib/comment-hash";
 import { db } from "@/lib/db";
 import {
@@ -25,6 +26,8 @@ import {
 } from "@/lib/db/schema";
 import {
   buildCommentBlocks,
+  buildFeedbackSubmittedBlocks,
+  buildFeedbackUpdatedBlocks,
   buildGenericBlocks,
   buildRunCreatedBlocks,
   deliverSlackDms,
@@ -47,6 +50,9 @@ import { toInitials } from "@/lib/utils";
 //   - `generic`               : an integration posted a free-text message
 //                                via `POST /api/v1/notifications/dispatch`
 //                                (gated by the `notifications:create` scope).
+//   - `feedback_submitted`    : a new product-feedback report; admins only.
+//   - `feedback_updated`      : an admin resolved or declined a report; the
+//                                reporter only.
 //
 // Preference-mutating routes remain session-only — they're personal-UX
 // surfaces, never invoked by PATs.
@@ -55,6 +61,8 @@ import { toInitials } from "@/lib/utils";
 export interface NotificationPreferencesDto {
   commentsAttributedEnabled: boolean;
   commentsParticipatedEnabled: boolean;
+  feedbackSubmittedEnabled: boolean;
+  feedbackUpdatedEnabled: boolean;
   // In-app `generic` delivery defaults on — dispatch messages are always
   // addressed to the recipient, so they're expected to be low-volume.
   genericEnabled: boolean;
@@ -62,6 +70,8 @@ export interface NotificationPreferencesDto {
   runsAllMuted: boolean;
   slackCommentsAttributedEnabled: boolean;
   slackCommentsParticipatedEnabled: boolean;
+  slackFeedbackSubmittedEnabled: boolean;
+  slackFeedbackUpdatedEnabled: boolean;
   slackGenericEnabled: boolean;
   // Slack delivery — independent of in-app; all default false until the user
   // connects Slack (at which point the OAuth callback flips these to true).
@@ -77,6 +87,10 @@ const DEFAULT_PREFERENCES: NotificationPreferencesDto = {
   slackCommentsAttributedEnabled: false,
   slackCommentsParticipatedEnabled: false,
   slackGenericEnabled: false,
+  feedbackSubmittedEnabled: true,
+  feedbackUpdatedEnabled: true,
+  slackFeedbackSubmittedEnabled: false,
+  slackFeedbackUpdatedEnabled: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -103,6 +117,13 @@ export async function getPreferences(
       slackCommentsParticipatedEnabled:
         notificationPreferences.slackCommentsParticipatedEnabled,
       slackGenericEnabled: notificationPreferences.slackGenericEnabled,
+      feedbackSubmittedEnabled:
+        notificationPreferences.feedbackSubmittedEnabled,
+      feedbackUpdatedEnabled: notificationPreferences.feedbackUpdatedEnabled,
+      slackFeedbackSubmittedEnabled:
+        notificationPreferences.slackFeedbackSubmittedEnabled,
+      slackFeedbackUpdatedEnabled:
+        notificationPreferences.slackFeedbackUpdatedEnabled,
     })
     .from(notificationPreferences)
     .where(eq(notificationPreferences.userId, userId))
@@ -220,8 +241,8 @@ export interface NotificationDto {
     initials: string;
     avatarUrl: string | null;
   } | null;
-  // Caller-supplied message for `generic` rows, preview-truncated like
-  // `commentBody`. NULL for every other type.
+  // Caller-supplied message for `generic` and feedback rows, preview-truncated
+  // like `commentBody`. NULL for every other type.
   body: string | null;
   // Truncated markdown body of the originating comment — only populated
   // when `commentId` is set. NULL for `run_created` rows and for comment
@@ -229,6 +250,8 @@ export interface NotificationDto {
   commentBody: string | null;
   commentId: string | null;
   createdAt: Date;
+  // Set for feedback notifications so the bell can link admins to the report.
+  feedbackId: string | null;
   // Raw-file counts for run-anchored rows. Null on anchor-less `generic`.
   fileCount: number | null;
   filesFailed: number | null;
@@ -249,7 +272,9 @@ export interface NotificationDto {
     | "run_created"
     | "comment_attributed"
     | "comment_participated"
-    | "generic";
+    | "generic"
+    | "feedback_submitted"
+    | "feedback_updated";
 }
 
 export async function listNotifications(
@@ -279,6 +304,7 @@ export async function listNotifications(
       // the run, the popover just renders without a preview.
       commentBody: runComments.body,
       body: notifications.body,
+      feedbackId: notifications.feedbackId,
       actorId: actor.id,
       actorName: actor.name,
       actorEmail: actor.email,
@@ -353,7 +379,11 @@ export async function listNotifications(
       instrumentType: row.instrumentType,
       commentId: row.commentId,
       commentBody: toPreview(row.commentBody),
-      body: toPreview(row.body),
+      body:
+        row.type === "feedback_submitted" || row.type === "feedback_updated"
+          ? row.body
+          : toPreview(row.body),
+      feedbackId: row.feedbackId,
       fileCount: row.runId ? (stats?.fileCount ?? 0) : null,
       filesFailed: row.runId ? (stats?.filesFailed ?? 0) : null,
       actor:
@@ -851,4 +881,149 @@ export async function notifyGeneric(input: {
     ],
     slackJobs,
   };
+}
+
+function feedbackUpdateBody(
+  title: string,
+  status: "resolved" | "declined",
+  note: string | null
+): string {
+  const label = FEEDBACK_STATUS_LABELS[status];
+  const headline = `Your feedback "${title}" was marked ${label}.`;
+  return note ? `${headline} ${note}` : headline;
+}
+
+// Admins except the reporter. Missing preference rows count as in-app on.
+export async function notifyFeedbackSubmitted(input: {
+  feedbackId: string;
+  reporterUserId: string;
+  reporterDisplayName: string;
+  title: string;
+  origin?: string;
+}): Promise<void> {
+  const admins = await db
+    .select({
+      userId: users.id,
+      feedbackSubmittedEnabled:
+        notificationPreferences.feedbackSubmittedEnabled,
+      slackUserId: slackConnections.slackUserId,
+      slackFeedbackSubmittedEnabled:
+        notificationPreferences.slackFeedbackSubmittedEnabled,
+      slackRevokedAt: slackConnections.revokedAt,
+    })
+    .from(users)
+    .leftJoin(
+      notificationPreferences,
+      eq(notificationPreferences.userId, users.id)
+    )
+    .leftJoin(slackConnections, eq(slackConnections.userId, users.id))
+    .where(eq(users.isAdmin, true));
+
+  const recipients = admins.filter(
+    (row) => row.userId !== input.reporterUserId
+  );
+  const inAppRows = recipients
+    .filter((row) => row.feedbackSubmittedEnabled !== false)
+    .map((row) => ({
+      userId: row.userId,
+      type: "feedback_submitted" as const,
+      actorUserId: input.reporterUserId,
+      feedbackId: input.feedbackId,
+      body: input.title,
+    }));
+  if (inAppRows.length > 0) {
+    await db.insert(notifications).values(inAppRows);
+  }
+
+  const feedbackUrl = input.origin
+    ? `${input.origin}/settings/feedback?item=${input.feedbackId}`
+    : undefined;
+  const slackJobs: SlackDmJob[] = recipients
+    .filter(
+      (row) =>
+        row.slackUserId &&
+        !row.slackRevokedAt &&
+        (row.slackFeedbackSubmittedEnabled ?? false)
+    )
+    .map((row) => ({
+      userId: row.userId,
+      slackUserId: row.slackUserId ?? "",
+      payload: {
+        text: `${input.reporterDisplayName} sent feedback: ${input.title}`,
+        blocks: buildFeedbackSubmittedBlocks({
+          actorDisplayName: input.reporterDisplayName,
+          title: input.title,
+          feedbackUrl,
+        }),
+      },
+    }));
+  await deliverSlackDms(slackJobs);
+}
+
+// Reporter only, and only for resolved / declined. Skips self-updates.
+export async function notifyFeedbackUpdated(input: {
+  feedbackId: string;
+  reporterUserId: string;
+  adminUserId: string;
+  title: string;
+  status: "resolved" | "declined";
+  note: string | null;
+}): Promise<void> {
+  if (input.reporterUserId === input.adminUserId) {
+    return;
+  }
+
+  const [recipient] = await db
+    .select({
+      userId: users.id,
+      feedbackUpdatedEnabled: notificationPreferences.feedbackUpdatedEnabled,
+      slackUserId: slackConnections.slackUserId,
+      slackFeedbackUpdatedEnabled:
+        notificationPreferences.slackFeedbackUpdatedEnabled,
+      slackRevokedAt: slackConnections.revokedAt,
+    })
+    .from(users)
+    .leftJoin(
+      notificationPreferences,
+      eq(notificationPreferences.userId, users.id)
+    )
+    .leftJoin(slackConnections, eq(slackConnections.userId, users.id))
+    .where(eq(users.id, input.reporterUserId))
+    .limit(1);
+
+  if (!recipient) {
+    return;
+  }
+
+  const body = feedbackUpdateBody(input.title, input.status, input.note);
+  if (recipient.feedbackUpdatedEnabled !== false) {
+    await db.insert(notifications).values({
+      userId: recipient.userId,
+      type: "feedback_updated",
+      actorUserId: input.adminUserId,
+      feedbackId: input.feedbackId,
+      body,
+    });
+  }
+
+  if (
+    recipient.slackUserId &&
+    !recipient.slackRevokedAt &&
+    (recipient.slackFeedbackUpdatedEnabled ?? false)
+  ) {
+    await deliverSlackDms([
+      {
+        userId: recipient.userId,
+        slackUserId: recipient.slackUserId,
+        payload: {
+          text: `Your feedback "${input.title}" was marked ${FEEDBACK_STATUS_LABELS[input.status]}.`,
+          blocks: buildFeedbackUpdatedBlocks({
+            title: input.title,
+            statusLabel: FEEDBACK_STATUS_LABELS[input.status],
+            note: input.note,
+          }),
+        },
+      },
+    ]);
+  }
 }

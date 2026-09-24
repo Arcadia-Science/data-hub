@@ -197,6 +197,53 @@ export function buildCommentBlocks(opts: {
   ];
 }
 
+// Feedback text is typed by any signed-in user. Slack treats `<...|...>` as a
+// link, so unescaped titles would become clickable in every admin's DM.
+function escapeMrkdwn(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+export function buildFeedbackSubmittedBlocks(opts: {
+  actorDisplayName: string;
+  title: string;
+  feedbackUrl?: string;
+}): (Block | KnownBlock)[] {
+  const link = opts.feedbackUrl
+    ? `\n<${opts.feedbackUrl}|Review in Data Hub>`
+    : "";
+  return [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*${escapeMrkdwn(opts.actorDisplayName)}* sent feedback:\n${escapeMrkdwn(opts.title)}${link}`,
+      },
+    },
+  ];
+}
+
+export function buildFeedbackUpdatedBlocks(opts: {
+  title: string;
+  statusLabel: string;
+  note: string | null;
+}): (Block | KnownBlock)[] {
+  const note = opts.note
+    ? `\n> ${escapeMrkdwn(opts.note).replace(/\n/g, "\n> ")}`
+    : "";
+  return [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `Your feedback *${escapeMrkdwn(opts.title)}* was marked *${escapeMrkdwn(opts.statusLabel)}*.${note}`,
+      },
+    },
+  ];
+}
+
 export function buildGenericBlocks(opts: {
   actorDisplayName: string;
   message: string;

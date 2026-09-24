@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import { after } from "next/server";
 import { apiError, FORBIDDEN, UNAUTHORIZED } from "@/lib/api/errors";
 import { hasScope, type Scope } from "@/lib/api/scopes";
+import { userIsAdmin } from "@/lib/api/user-admin";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { personalAccessTokens, users } from "@/lib/db/schema";
@@ -116,6 +117,18 @@ export async function authenticateWithToken(
   return await validatePat(request.headers.get("authorization"));
 }
 
+// Any signed-in session or valid PAT. Feedback submission stays available to
+// read-only tokens; it does not require a fine-grained scope.
+export async function authorizeAuthenticated(
+  request: NextRequest
+): Promise<AuthResult | Response> {
+  const authResult = await authenticateRequest(request);
+  if (authResult === null) {
+    return apiError(401, UNAUTHORIZED, "Authentication required");
+  }
+  return authResult;
+}
+
 export async function requireSession(): Promise<AuthResult | null> {
   const session = await auth();
   if (session?.user?.id) {
@@ -156,6 +169,17 @@ export async function requireAdmin(): Promise<{ userId: string } | Response> {
   }
 
   return { userId: session.user.id };
+}
+
+// Admin gate for either a session or a PAT. `requireAdminForSession` skips
+// tokens; feedback triage must reject a non-admin token too.
+export async function requireUserIsAdmin(
+  userId: string
+): Promise<Response | null> {
+  if (await userIsAdmin(userId)) {
+    return null;
+  }
+  return apiError(403, FORBIDDEN, "Admin role required");
 }
 
 /**

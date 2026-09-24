@@ -7,6 +7,7 @@ import "./paths/files";
 import "./paths/watchers";
 import "./paths/archive";
 import "./paths/notifications";
+import "./paths/feedback";
 
 const DOCUMENT_TAGS = [
   { name: "Meta", description: "Schema discovery" },
@@ -19,6 +20,7 @@ const DOCUMENT_TAGS = [
   { name: "Watchers", description: "Watcher registration and telemetry" },
   { name: "Archive", description: "Run archive builds" },
   { name: "Notifications", description: "User notifications" },
+  { name: "Feedback", description: "Product feedback reports" },
 ] as const;
 
 export function buildOpenApiDocument() {
