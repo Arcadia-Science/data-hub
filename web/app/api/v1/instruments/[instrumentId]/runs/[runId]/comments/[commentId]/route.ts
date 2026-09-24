@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { analyticsSurface, trackEvent } from "@/lib/analytics/track";
 import { authorize } from "@/lib/api/auth";
 import {
   apiError,
@@ -25,7 +26,12 @@ interface RouteContext {
 }
 
 type PreflightResult =
-  | { kind: "ok"; userId: string; commentId: string }
+  | {
+      kind: "ok";
+      userId: string;
+      commentId: string;
+      surface: "web" | "api";
+    }
   | { kind: "error"; response: Response };
 
 // Shared preflight: resolves the run, validates the comment exists and
@@ -88,7 +94,12 @@ async function preflight(
     };
   }
 
-  return { kind: "ok", userId: authResult.userId, commentId };
+  return {
+    kind: "ok",
+    userId: authResult.userId,
+    commentId,
+    surface: analyticsSurface(authResult.authMethod),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +137,11 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     return apiError(404, NOT_FOUND, `Comment '${pre.commentId}' not found`);
   }
 
+  trackEvent("comment_edited", {
+    user_id: pre.userId,
+    surface: pre.surface,
+  });
+
   return Response.json(updated);
 }
 
@@ -146,6 +162,11 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
   await softDeleteComment({
     commentId: pre.commentId,
     userId: pre.userId,
+  });
+
+  trackEvent("comment_deleted", {
+    user_id: pre.userId,
+    surface: pre.surface,
   });
 
   return Response.json({ id: pre.commentId, deleted: true });

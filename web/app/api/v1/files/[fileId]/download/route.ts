@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { analyticsSurface, trackEvent } from "@/lib/analytics/track";
 import { authorize } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { lookupFileForDownload } from "@/lib/api/files";
@@ -47,6 +48,15 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     file.s3Key,
     inline ? embedDownloadOptions(file.filename, file.contentType) : {}
   );
+
+  // Inline fetches are report embeds (CSV, image, PDF iframe), not downloads.
+  if (!inline) {
+    trackEvent("file_downloaded", {
+      user_id: authResult.userId,
+      surface: analyticsSurface(authResult.authMethod),
+      category: file.category,
+    });
+  }
 
   return new Response(null, {
     status: 302,

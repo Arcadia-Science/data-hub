@@ -1,5 +1,6 @@
 import { desc, eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
+import { trackEvent } from "@/lib/analytics/track";
 import { requireAdmin, requireSession } from "@/lib/api/auth";
 import { apiError, UNAUTHORIZED, VALIDATION_ERROR } from "@/lib/api/errors";
 import { validateRequestedScopes } from "@/lib/api/scopes";
@@ -131,6 +132,8 @@ export async function POST(request: NextRequest) {
       expires_at: personalAccessTokens.expiresAt,
       created_at: personalAccessTokens.createdAt,
     });
+
+  trackEvent("token_created", { user_id: authResult.userId });
 
   return Response.json({ ...inserted, token: plaintext }, { status: 201 });
 }

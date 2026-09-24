@@ -10,6 +10,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
+import { trackEvent } from "@/lib/analytics/track";
 import { countUnread } from "@/lib/api/notifications";
 import { getSidebarInstruments } from "@/lib/api/sidebar";
 import { auth, authInstance } from "@/lib/auth";
@@ -51,6 +52,15 @@ export default async function AppLayout({
 
   if (!session) {
     return children;
+  }
+
+  // `router.refresh()` re-renders this layout (the files table polls every
+  // few seconds). Only a document navigation should count as a visit.
+  if ((await headers()).get("sec-fetch-mode") === "navigate") {
+    trackEvent("web_visit", {
+      user_id: session.user.id,
+      is_admin: session.user.isAdmin,
+    });
   }
 
   return (
