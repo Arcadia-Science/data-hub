@@ -20,7 +20,9 @@ export function CommentCard({ comment }: { comment: CommentFeedItem }) {
       >
         <RelativeTime date={toIsoString(comment.created_at)} />
       </CommentAuthor>
-      <div className="line-clamp-3 overflow-hidden">
+      {/* `line-clamp` doesn't clip block children such as code blocks and
+          tables, so the preview is a fixed three-line window instead. */}
+      <div className="max-h-[4.3rem] overflow-hidden">
         <CommentMarkdown body={comment.body} />
       </div>
       <div className="mt-auto border-border border-t border-dashed pt-3">
