@@ -49,11 +49,14 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     inline ? embedDownloadOptions(file.filename, file.contentType) : {}
   );
 
-  trackEvent("file_downloaded", {
-    user_id: authResult.userId,
-    surface: analyticsSurface(authResult.authMethod),
-    category: file.category,
-  });
+  // Inline fetches are report embeds (CSV, image, PDF iframe), not downloads.
+  if (!inline) {
+    trackEvent("file_downloaded", {
+      user_id: authResult.userId,
+      surface: analyticsSurface(authResult.authMethod),
+      category: file.category,
+    });
+  }
 
   return new Response(null, {
     status: 302,

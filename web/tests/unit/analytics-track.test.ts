@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const track = vi.fn();
 const scheduled: Array<() => Promise<void>> = [];
+const callOrder: string[] = [];
 let afterThrows = false;
 
 vi.mock("@vercel/analytics/server", () => ({
@@ -10,6 +11,7 @@ vi.mock("@vercel/analytics/server", () => ({
 
 vi.mock("next/server", () => ({
   after: (fn: () => Promise<void>) => {
+    callOrder.push("after");
     if (afterThrows) {
       throw new Error("no request scope");
     }
@@ -18,24 +20,26 @@ vi.mock("next/server", () => ({
 }));
 
 vi.mock("next/headers", () => ({
-  headers: async () => new Headers({ "user-agent": "test" }),
+  headers: () => {
+    callOrder.push("headers");
+    return Promise.resolve(new Headers({ "user-agent": "test" }));
+  },
 }));
 
 import { trackEvent } from "@/lib/analytics/track";
 
 describe("trackEvent", () => {
-  const env = { ...process.env };
-
   beforeEach(() => {
     track.mockReset();
     scheduled.length = 0;
+    callOrder.length = 0;
     afterThrows = false;
     vi.spyOn(console, "debug").mockImplementation(() => undefined);
     vi.spyOn(console, "error").mockImplementation(() => undefined);
   });
 
   afterEach(() => {
-    process.env = { ...env };
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
@@ -44,6 +48,7 @@ describe("trackEvent", () => {
     trackEvent("web_visit", { user_id: "user-1", is_admin: false });
     expect(track).not.toHaveBeenCalled();
     expect(scheduled).toHaveLength(0);
+    expect(callOrder).toEqual([]);
     expect(console.debug).not.toHaveBeenCalled();
   });
 
@@ -57,11 +62,11 @@ describe("trackEvent", () => {
     expect(scheduled).toHaveLength(0);
   });
 
-  it("sends after the response in production", async () => {
-    process.env.VERCEL_ENV = "production";
+  it("reads headers before scheduling the send", async () => {
+    vi.stubEnv("VERCEL_ENV", "production");
     trackEvent("sign_in", { user_id: "user-1", method: "google" });
+    expect(callOrder).toEqual(["headers", "after"]);
     expect(track).not.toHaveBeenCalled();
-    expect(scheduled).toHaveLength(1);
     await scheduled[0]?.();
     expect(track).toHaveBeenCalledWith(
       "sign_in",
@@ -71,7 +76,7 @@ describe("trackEvent", () => {
   });
 
   it("swallows a failed send", async () => {
-    process.env.VERCEL_ENV = "production";
+    vi.stubEnv("VERCEL_ENV", "production");
     track.mockRejectedValueOnce(new Error("intake down"));
     trackEvent("web_visit", { user_id: "user-1", is_admin: true });
     await expect(scheduled[0]?.()).resolves.toBeUndefined();
@@ -83,7 +88,7 @@ describe("trackEvent", () => {
   });
 
   it("swallows a failure to schedule", () => {
-    process.env.VERCEL_ENV = "production";
+    vi.stubEnv("VERCEL_ENV", "production");
     afterThrows = true;
     expect(() =>
       trackEvent("web_visit", { user_id: "user-1", is_admin: false })

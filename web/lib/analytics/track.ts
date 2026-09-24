@@ -126,14 +126,16 @@ export function trackEvent<N extends AnalyticsEventName>(
   const load = typeof props === "function" ? props : () => props;
 
   try {
+    // Start the headers() read during the request. Next.js 16 throws if it
+    // is first called inside `after()` from a Server Component (web_visit).
+    const requestHeaders = headers();
     after(async () => {
       try {
         const data = await load();
-        const requestHeaders = await headers();
         await track(
           name,
           data as Record<string, string | number | boolean | null>,
-          { headers: requestHeaders }
+          { headers: await requestHeaders }
         );
       } catch (error) {
         console.error("[analytics] failed to send event", name, error);

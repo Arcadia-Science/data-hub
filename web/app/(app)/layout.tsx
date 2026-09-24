@@ -54,10 +54,14 @@ export default async function AppLayout({
     return children;
   }
 
-  trackEvent("web_visit", {
-    user_id: session.user.id,
-    is_admin: session.user.isAdmin,
-  });
+  // `router.refresh()` re-renders this layout (the files table polls every
+  // few seconds). Only a document navigation should count as a visit.
+  if ((await headers()).get("sec-fetch-mode") === "navigate") {
+    trackEvent("web_visit", {
+      user_id: session.user.id,
+      is_admin: session.user.isAdmin,
+    });
+  }
 
   return (
     <NotificationsProvider initialUnreadCount={initialUnreadCount}>

@@ -148,10 +148,13 @@ export function withMcpTracking(server: McpServer): McpServer {
   const registerPrompt = loose.registerPrompt.bind(loose);
 
   loose.registerTool = (name, config, cb) =>
-    registerTool(name, config, async (args, ctx) => {
+    // Schemaless tools are invoked as `handler(ctx)`. Tools with an input
+    // schema are `handler(args, ctx)`. The context is always last.
+    registerTool(name, config, async (...args: unknown[]) => {
+      const ctx = args.at(-1);
       const started = Date.now();
       try {
-        const result = await cb(args, ctx);
+        const result = await cb(...args);
         reportTool(
           name,
           ctx,

@@ -1,34 +1,35 @@
-import type { AuthInfo, McpServer } from "@modelcontextprotocol/server";
+import { Client } from "@modelcontextprotocol/client";
+import {
+  type AuthInfo,
+  InMemoryTransport,
+  McpServer,
+  ResourceTemplate,
+} from "@modelcontextprotocol/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 const trackEvent = vi.fn();
 const mcpClientLabel = vi.fn(async (_authInfo?: unknown) => "Cursor");
 
-vi.mock("@/lib/analytics/track", () => ({
-  durationBucket: (elapsedMs: number) => {
-    if (elapsedMs < 1000) {
-      return "under_1s";
-    }
-    if (elapsedMs < 5000) {
-      return "1_to_5s";
-    }
-    if (elapsedMs < 30_000) {
-      return "5_to_30s";
-    }
-    return "over_30s";
-  },
-  trackEvent: (...args: unknown[]) => trackEvent(...args),
+vi.mock("@/lib/db", () => ({
+  db: {},
 }));
 
-vi.mock("@/lib/mcp/client-name", () => ({
-  isPatAuth: (authInfo: AuthInfo | undefined) =>
-    Boolean(
-      authInfo &&
-        typeof authInfo.extra?.userId === "string" &&
-        authInfo.clientId === authInfo.extra.userId
-    ),
-  mcpClientLabel: (authInfo: unknown) => mcpClientLabel(authInfo),
-}));
+vi.mock("@/lib/analytics/track", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/analytics/track")>();
+  return {
+    ...actual,
+    trackEvent: (...args: unknown[]) => trackEvent(...args),
+  };
+});
+
+vi.mock("@/lib/mcp/client-name", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/mcp/client-name")>();
+  return {
+    ...actual,
+    mcpClientLabel: (authInfo: unknown) => mcpClientLabel(authInfo),
+  };
+});
 
 import { trackMcpConnect, withMcpTracking } from "@/lib/mcp/analytics";
 
@@ -39,47 +40,13 @@ const authInfo: AuthInfo = {
   extra: { userId: "user-1" },
 };
 
-function ctx() {
-  return { http: { authInfo } };
+function httpCtx(info: AuthInfo | undefined = authInfo) {
+  return { http: { authInfo: info } };
 }
 
-type AnyFn = (...args: unknown[]) => Promise<unknown>;
-
 function trackedServer() {
-  const calls = {
-    tool: undefined as AnyFn | undefined,
-    resource: undefined as AnyFn | undefined,
-    prompt: undefined as AnyFn | undefined,
-  };
-  const server = {
-    registerTool(_name: string, _config: unknown, cb: AnyFn) {
-      calls.tool = cb;
-    },
-    registerResource(
-      _name: string,
-      _uri: unknown,
-      _config: unknown,
-      cb: AnyFn
-    ) {
-      calls.resource = cb;
-    },
-    registerPrompt(_name: string, _config: unknown, cb: AnyFn) {
-      calls.prompt = cb;
-    },
-  };
-  const tracked = withMcpTracking(
-    server as unknown as McpServer
-  ) as unknown as {
-    registerTool: (name: string, config: unknown, cb: AnyFn) => void;
-    registerResource: (
-      name: string,
-      uri: unknown,
-      config: unknown,
-      cb: AnyFn
-    ) => void;
-    registerPrompt: (name: string, config: unknown, cb: AnyFn) => void;
-  };
-  return { tracked, calls };
+  const server = new McpServer({ name: "data-hub-test", version: "0.0.0" });
+  return withMcpTracking(server);
 }
 
 async function lastProps(): Promise<Record<string, unknown>> {
@@ -94,16 +61,37 @@ describe("withMcpTracking", () => {
     vi.restoreAllMocks();
   });
 
+  it("records a schemaless tool, which the SDK calls with context only", async () => {
+    const server = trackedServer();
+    const tool = server.registerTool(
+      "get_me",
+      { description: "who" },
+      async () => ({
+        content: [{ type: "text" as const, text: "ok" }],
+      })
+    );
+    await tool.executor({}, httpCtx() as never);
+    expect(trackEvent.mock.calls[0]?.[0]).toBe("mcp_tool_call");
+    await expect(lastProps()).resolves.toMatchObject({
+      user_id: "user-1",
+      tool: "get_me",
+      client: "Cursor",
+      outcome: "ok",
+      auth: "oauth",
+    });
+  });
+
   it("records an ok tool call and its duration bucket", async () => {
     vi.spyOn(Date, "now").mockReturnValueOnce(0).mockReturnValueOnce(1500);
-    const { tracked, calls } = trackedServer();
-    tracked.registerTool("search_runs", {}, async () => ({ content: [] }));
-    await calls.tool?.({}, ctx());
-    expect(trackEvent.mock.calls[0]?.[0]).toBe("mcp_tool_call");
-    await expect(lastProps()).resolves.toEqual({
-      user_id: "user-1",
+    const server = trackedServer();
+    const tool = server.registerTool(
+      "search_runs",
+      { inputSchema: z.object({ q: z.string() }) },
+      async () => ({ content: [{ type: "text" as const, text: "ok" }] })
+    );
+    await tool.executor({ q: "plate" }, httpCtx() as never);
+    await expect(lastProps()).resolves.toMatchObject({
       tool: "search_runs",
-      client: "Cursor",
       outcome: "ok",
       duration_bucket: "1_to_5s",
       auth: "oauth",
@@ -112,12 +100,16 @@ describe("withMcpTracking", () => {
 
   it("counts an isError result as a tool error", async () => {
     vi.spyOn(Date, "now").mockReturnValue(0);
-    const { tracked, calls } = trackedServer();
-    tracked.registerTool("claim_run", {}, async () => ({
-      isError: true,
-      content: [],
-    }));
-    await calls.tool?.({}, ctx());
+    const server = trackedServer();
+    const tool = server.registerTool(
+      "claim_run",
+      { inputSchema: z.object({}) },
+      async () => ({
+        isError: true,
+        content: [{ type: "text" as const, text: "no" }],
+      })
+    );
+    await tool.executor({}, httpCtx() as never);
     await expect(lastProps()).resolves.toMatchObject({
       outcome: "tool_error",
       duration_bucket: "under_1s",
@@ -126,11 +118,17 @@ describe("withMcpTracking", () => {
 
   it("records an exception and rethrows it", async () => {
     vi.spyOn(Date, "now").mockReturnValueOnce(0).mockReturnValueOnce(31_000);
-    const { tracked, calls } = trackedServer();
-    tracked.registerTool("get_run", {}, () => {
-      throw new Error("db down");
-    });
-    await expect(calls.tool?.({}, ctx())).rejects.toThrow("db down");
+    const server = trackedServer();
+    const tool = server.registerTool(
+      "get_run",
+      { inputSchema: z.object({}) },
+      () => {
+        throw new Error("db down");
+      }
+    );
+    await expect(tool.executor({}, httpCtx() as never)).rejects.toThrow(
+      "db down"
+    );
     await expect(lastProps()).resolves.toMatchObject({
       outcome: "exception",
       duration_bucket: "over_30s",
@@ -139,32 +137,66 @@ describe("withMcpTracking", () => {
 
   it("buckets a multi-second call", async () => {
     vi.spyOn(Date, "now").mockReturnValueOnce(0).mockReturnValueOnce(8000);
-    const { tracked, calls } = trackedServer();
-    tracked.registerTool("get_file", {}, async () => ({ content: [] }));
-    await calls.tool?.({}, ctx());
+    const server = trackedServer();
+    const tool = server.registerTool(
+      "get_file",
+      { description: "file" },
+      async () => ({
+        content: [{ type: "text" as const, text: "ok" }],
+      })
+    );
+    await tool.executor({}, httpCtx() as never);
     await expect(lastProps()).resolves.toMatchObject({
       duration_bucket: "5_to_30s",
     });
   });
 
+  it("labels a personal access token", async () => {
+    const server = trackedServer();
+    const tool = server.registerTool(
+      "get_me",
+      { description: "who" },
+      async () => ({
+        content: [{ type: "text" as const, text: "ok" }],
+      })
+    );
+    await tool.executor(
+      {},
+      httpCtx({ ...authInfo, clientId: "user-1" }) as never
+    );
+    await expect(lastProps()).resolves.toMatchObject({ auth: "pat" });
+  });
+
   it("skips tool events when the caller is anonymous", async () => {
-    const { tracked, calls } = trackedServer();
-    tracked.registerTool("get_me", {}, async () => ({ content: [] }));
-    await calls.tool?.({}, { http: {} });
+    const server = trackedServer();
+    const tool = server.registerTool(
+      "get_me",
+      { description: "who" },
+      async () => ({
+        content: [{ type: "text" as const, text: "ok" }],
+      })
+    );
+    await tool.executor({}, { http: {} } as never);
     expect(trackEvent).not.toHaveBeenCalled();
   });
 
   it("records the resource name and never the URI", async () => {
-    const { tracked, calls } = trackedServer();
-    tracked.registerResource(
+    const server = trackedServer();
+    const resource = server.registerResource(
       "instrument-filter-options",
-      "datahub://instruments/akta-fplc/filter-options",
-      {},
+      new ResourceTemplate(
+        "datahub://instruments/{instrumentId}/filter-options",
+        {
+          list: undefined,
+        }
+      ),
+      { description: "filters" },
       async () => ({ contents: [] })
     );
-    await calls.resource?.(
+    await resource.readCallback(
       new URL("datahub://instruments/akta-fplc/filter-options"),
-      ctx()
+      { instrumentId: "akta-fplc" },
+      httpCtx() as never
     );
     const props = await lastProps();
     expect(trackEvent.mock.calls[0]?.[0]).toBe("mcp_resource_read");
@@ -177,27 +209,88 @@ describe("withMcpTracking", () => {
     expect(JSON.stringify(props)).not.toContain("akta-fplc");
   });
 
-  it("records a resource exception", async () => {
-    const { tracked, calls } = trackedServer();
-    tracked.registerResource("me", "datahub://me", {}, () => {
-      throw new Error("nope");
+  it("records a static resource read", async () => {
+    const server = trackedServer();
+    const resource = server.registerResource(
+      "me",
+      "datahub://me",
+      { description: "me" },
+      async () => ({ contents: [] })
+    );
+    await resource.readCallback(new URL("datahub://me"), httpCtx() as never);
+    await expect(lastProps()).resolves.toMatchObject({
+      resource: "me",
+      outcome: "ok",
     });
+  });
+
+  it("records a resource exception", async () => {
+    const server = trackedServer();
+    const resource = server.registerResource(
+      "me",
+      "datahub://me",
+      { description: "me" },
+      () => {
+        throw new Error("nope");
+      }
+    );
     await expect(
-      calls.resource?.(new URL("datahub://me"), ctx())
+      resource.readCallback(new URL("datahub://me"), httpCtx() as never)
     ).rejects.toThrow("nope");
     await expect(lastProps()).resolves.toMatchObject({ outcome: "exception" });
   });
 
-  it("records a prompt by name", async () => {
-    const { tracked, calls } = trackedServer();
-    tracked.registerPrompt("daily_summary", {}, async () => ({ messages: [] }));
-    await calls.prompt?.({}, ctx());
+  it("records a prompt that takes arguments", async () => {
+    const server = trackedServer();
+    const prompt = server.registerPrompt(
+      "daily_summary",
+      { argsSchema: z.object({ date: z.string() }) },
+      async () => ({ messages: [] })
+    );
+    await prompt.handler({ date: "2026-01-01" }, httpCtx() as never);
     await expect(lastProps()).resolves.toEqual({
       user_id: "user-1",
       prompt: "daily_summary",
       client: "Cursor",
     });
-    expect(trackEvent.mock.calls[0]?.[0]).toBe("mcp_prompt_get");
+  });
+
+  it("records a prompt the SDK calls with context only", async () => {
+    const server = trackedServer();
+    const prompt = server.registerPrompt(
+      "find_my_runs",
+      { description: "mine" },
+      async () => ({ messages: [] })
+    );
+    await prompt.handler({}, httpCtx() as never);
+    await expect(lastProps()).resolves.toMatchObject({
+      prompt: "find_my_runs",
+    });
+  });
+
+  it("still serves a schemaless tool over the MCP transport", async () => {
+    const server = trackedServer();
+    server.registerTool(
+      "get_system_status",
+      { description: "status" },
+      async () => ({
+        content: [{ type: "text" as const, text: "up" }],
+      })
+    );
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test-client", version: "0.0.0" });
+    await Promise.all([
+      client.connect(clientTransport),
+      server.connect(serverTransport),
+    ]);
+    const result = await client.callTool({
+      name: "get_system_status",
+      arguments: {},
+    });
+    expect(result.isError).toBeFalsy();
+    await client.close();
+    await server.close();
   });
 });
 
