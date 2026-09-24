@@ -1,15 +1,16 @@
 import type { NextRequest } from "next/server";
-import { authorizeAuthenticated, requireUserIsAdmin } from "@/lib/api/auth";
+import { authorize, requireUserIsAdmin } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { updateFeedback } from "@/lib/api/feedback";
 import { serializeFeedback } from "@/lib/api/feedback-json";
 import { readJsonBody, updateFeedbackBody } from "@/lib/api/openapi";
+import { isValidUUID } from "@/lib/api/validators";
 
 export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
-  const authResult = await authorizeAuthenticated(request);
+  const authResult = await authorize(request, "feedback:admin");
   if (authResult instanceof Response) {
     return authResult;
   }
@@ -20,9 +21,7 @@ export async function PATCH(
   }
 
   const { id } = await context.params;
-  if (
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
-  ) {
+  if (!isValidUUID(id)) {
     return apiError(400, VALIDATION_ERROR, "Invalid feedback id");
   }
 

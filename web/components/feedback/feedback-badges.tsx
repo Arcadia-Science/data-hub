@@ -1,17 +1,10 @@
 import { Badge } from "@/components/ui/badge";
-import type { FeedbackKind, FeedbackStatus } from "@/lib/api/feedback-schema";
-
-const KIND_LABELS: Record<FeedbackKind, string> = {
-  bug: "Bug",
-  feature_request: "Feature request",
-  other: "Other",
-};
-
-const STATUS_LABELS: Record<FeedbackStatus, string> = {
-  open: "Open",
-  resolved: "Resolved",
-  declined: "Declined",
-};
+import {
+  FEEDBACK_KIND_LABELS,
+  FEEDBACK_STATUS_LABELS,
+  type FeedbackKind,
+  type FeedbackStatus,
+} from "@/lib/api/feedback-schema";
 
 const KIND_CLASS: Record<FeedbackKind, string> = {
   bug: "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
@@ -27,19 +20,19 @@ const STATUS_CLASS: Record<FeedbackStatus, string> = {
 };
 
 export function FeedbackKindBadge({ kind }: { kind: FeedbackKind }) {
-  return <Badge className={KIND_CLASS[kind]}>{KIND_LABELS[kind]}</Badge>;
+  return (
+    <Badge className={KIND_CLASS[kind]}>{FEEDBACK_KIND_LABELS[kind]}</Badge>
+  );
 }
 
 export function FeedbackStatusBadge({ status }: { status: FeedbackStatus }) {
   return (
-    <Badge className={STATUS_CLASS[status]}>{STATUS_LABELS[status]}</Badge>
+    <Badge className={STATUS_CLASS[status]}>
+      {FEEDBACK_STATUS_LABELS[status]}
+    </Badge>
   );
 }
 
-export function feedbackKindLabel(kind: FeedbackKind): string {
-  return KIND_LABELS[kind];
-}
-
 export function feedbackStatusLabel(status: FeedbackStatus): string {
-  return STATUS_LABELS[status];
+  return FEEDBACK_STATUS_LABELS[status];
 }

@@ -11,9 +11,11 @@ import {
   api,
   clearCapturedSlackDms,
   closeTestDb,
+  getBaseUrl,
   getCapturedSlackDms,
   getTestDb,
   resetDb,
+  seedSessionCookie,
   seedTestUser,
 } from "@/tests/integration/helpers";
 
@@ -64,7 +66,7 @@ describe("Feedback", () => {
         description: "Tried again.",
       },
     });
-    expect(second.status).toBe(201);
+    expect(second.status).toBe(200);
     const secondBody = await second.json();
     expect(secondBody.duplicate).toBe(true);
     expect(secondBody.feedback.id).toBe(firstBody.feedback.id);
@@ -254,5 +256,93 @@ describe("Feedback", () => {
     const listBody = await listed.json();
     expect(listBody.feedback).toHaveLength(1);
     expect(listBody.feedback[0].title).toBe("Search misses files");
+  });
+
+  it("rejects an admin token that lacks feedback:admin", async () => {
+    const admin = await seedTestUser({
+      isAdmin: true,
+      scopes: ["instruments:read"],
+      email: "scoped-admin@example.com",
+    });
+    const created = await api("/api/v1/feedback", {
+      method: "POST",
+      token: admin.token,
+      body: {
+        kind: "bug",
+        title: "Scoped admin report",
+        description: "Sent with a read token.",
+      },
+    });
+    expect(created.status).toBe(201);
+    const payload = await created.json();
+
+    const listed = await api("/api/v1/feedback", { token: admin.token });
+    expect(listed.status).toBe(200);
+    const listBody = await listed.json();
+    expect(listBody.feedback).toHaveLength(1);
+
+    const other = await seedTestUser({ email: "other-reporter@example.com" });
+    await getTestDb().insert(feedback).values({
+      userId: other.userId,
+      source: "web",
+      kind: "bug",
+      title: "Someone else's report",
+      description: "Should stay hidden.",
+    });
+    const listedAgain = await api("/api/v1/feedback", { token: admin.token });
+    const againBody = await listedAgain.json();
+    expect(againBody.total).toBe(1);
+
+    const patched = await api(`/api/v1/feedback/${payload.feedback.id}`, {
+      method: "PATCH",
+      token: admin.token,
+      body: { status: "resolved" },
+    });
+    expect(patched.status).toBe(403);
+  });
+
+  it("keeps the review page up when the item id is not a uuid", async () => {
+    const admin = await seedTestUser({
+      isAdmin: true,
+      email: "page-admin@example.com",
+    });
+    const cookie = await seedSessionCookie(admin.userId);
+    const res = await fetch(
+      `${getBaseUrl()}/settings/feedback?item=not-a-uuid`,
+      { headers: { cookie }, redirect: "manual" }
+    );
+    expect(res.status).toBeLessThan(500);
+  });
+
+  it("sends feedback over MCP with a read-only token", async () => {
+    const { token } = await seedTestUser({
+      scopes: ["instruments:read"],
+      email: "mcp-reader@example.com",
+    });
+    const res = await api("/mcp/v1", {
+      method: "POST",
+      token,
+      headers: { Accept: "application/json, text/event-stream" },
+      body: {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: {
+          name: "send_feedback",
+          arguments: {
+            kind: "bug",
+            title: "MCP read token",
+            description: "A long enough description.",
+          },
+        },
+      },
+    });
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    const dataLine = text.split("\n").find((line) => line.startsWith("data: "));
+    expect(dataLine).toBeTruthy();
+    const payload = JSON.parse(dataLine?.slice("data: ".length) ?? "{}");
+    expect(payload.result?.isError).not.toBe(true);
+    expect(payload.result?.content?.[0]?.text).toContain("MCP read token");
   });
 });

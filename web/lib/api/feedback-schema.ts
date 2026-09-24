@@ -5,6 +5,21 @@ export const FEEDBACK_DESCRIPTION_MAX = 10_000;
 export const FEEDBACK_DETAIL_MAX = 2000;
 export const FEEDBACK_PAGE_SIZE = 25;
 export const FEEDBACK_LIST_MAX = 100;
+// List tools shorten the description so an agent does not pull every report
+// in full. `get_feedback` returns the complete text.
+export const FEEDBACK_LIST_DESCRIPTION_MAX = 280;
+
+export const FEEDBACK_KIND_LABELS = {
+  bug: "Bug",
+  feature_request: "Feature request",
+  other: "Other",
+} as const;
+
+export const FEEDBACK_STATUS_LABELS = {
+  open: "Open",
+  resolved: "Resolved",
+  declined: "Declined",
+} as const;
 
 export const feedbackKindSchema = z.enum(["bug", "feature_request", "other"]);
 export const feedbackStatusSchema = z.enum(["open", "resolved", "declined"]);
@@ -32,18 +47,20 @@ function optionalText(max: number) {
     .transform((value) => (value && value.length > 0 ? value : undefined));
 }
 
+const feedbackTitleSchema = requiredText(FEEDBACK_TITLE_MAX, "Enter a title");
+const feedbackDescriptionSchema = requiredText(
+  FEEDBACK_DESCRIPTION_MAX,
+  "Enter a description"
+);
+const feedbackDetailSchema = optionalText(FEEDBACK_DETAIL_MAX);
+
 export const feedbackContentSchema = z.object({
   kind: feedbackKindSchema,
-  title: requiredText(FEEDBACK_TITLE_MAX, "Enter a title"),
-  description: requiredText(FEEDBACK_DESCRIPTION_MAX, "Enter a description"),
-  attemptedAction: optionalText(FEEDBACK_DETAIL_MAX),
-  toolName: optionalText(FEEDBACK_DETAIL_MAX),
-  errorMessage: optionalText(FEEDBACK_DETAIL_MAX),
+  title: feedbackTitleSchema,
+  description: feedbackDescriptionSchema,
+  attemptedAction: feedbackDetailSchema,
+  toolName: feedbackDetailSchema,
+  errorMessage: feedbackDetailSchema,
 });
 
 export type FeedbackContent = z.infer<typeof feedbackContentSchema>;
-
-export const updateFeedbackSchema = z.object({
-  status: feedbackStatusSchema,
-  note: optionalText(FEEDBACK_DETAIL_MAX),
-});

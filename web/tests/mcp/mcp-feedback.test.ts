@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { userIsAdmin } from "@/lib/api/user-admin";
 import { requireMcpAdmin, requireMcpWrite } from "@/lib/mcp/tools/helpers";
 
-vi.mock("@/lib/db", () => ({ db: {} }));
 vi.mock("@/lib/api/user-admin", () => ({
   userIsAdmin: vi.fn(),
 }));

@@ -25,6 +25,7 @@ export const ALL_SCOPES = [
   "archive-jobs:read",
   "archive-jobs:write",
   "notifications:create",
+  "feedback:admin",
 ] as const;
 
 export type Scope = (typeof ALL_SCOPES)[number];

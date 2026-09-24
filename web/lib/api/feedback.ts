@@ -1,6 +1,7 @@
 import { aliasedTable, and, count, desc, eq, gte } from "drizzle-orm";
 import { after } from "next/server";
 import {
+  FEEDBACK_LIST_DESCRIPTION_MAX,
   FEEDBACK_LIST_MAX,
   type FeedbackKind,
   type FeedbackSource,
@@ -10,10 +11,18 @@ import {
   notifyFeedbackSubmitted,
   notifyFeedbackUpdated,
 } from "@/lib/api/notifications";
+import { appOrigin } from "@/lib/app-origin";
 import { db } from "@/lib/db";
 import { feedback, oauthClients, users } from "@/lib/db/schema";
 
 const DUPLICATE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+export function previewFeedbackDescription(description: string): string {
+  if (description.length <= FEEDBACK_LIST_DESCRIPTION_MAX) {
+    return description;
+  }
+  return `${description.slice(0, FEEDBACK_LIST_DESCRIPTION_MAX).trimEnd()}…`;
+}
 
 export interface FeedbackPerson {
   email: string | null;
@@ -56,54 +65,59 @@ function person(
   return { id, name, email };
 }
 
-function appOrigin(): string | undefined {
-  const configured = process.env.BETTER_AUTH_URL?.replace(/\/$/, "");
-  if (configured) {
-    return configured;
-  }
-  if (process.env.VERCEL_PROJECT_PRODUCTION_URL) {
-    return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`;
-  }
-  return;
+function feedbackSelection() {
+  return {
+    id: feedback.id,
+    kind: feedback.kind,
+    title: feedback.title,
+    description: feedback.description,
+    attemptedAction: feedback.attemptedAction,
+    toolName: feedback.toolName,
+    errorMessage: feedback.errorMessage,
+    source: feedback.source,
+    oauthClientId: feedback.oauthClientId,
+    oauthClientName: oauthClients.name,
+    pageUrl: feedback.pageUrl,
+    status: feedback.status,
+    adminNote: feedback.adminNote,
+    statusUpdatedAt: feedback.statusUpdatedAt,
+    createdAt: feedback.createdAt,
+    updatedAt: feedback.updatedAt,
+    reporterId: reporter.id,
+    reporterName: reporter.name,
+    reporterEmail: reporter.email,
+    editorId: statusEditor.id,
+    editorName: statusEditor.name,
+    editorEmail: statusEditor.email,
+  };
 }
 
-async function loadFeedback(id: string): Promise<FeedbackItem | null> {
-  const [row] = await db
-    .select({
-      id: feedback.id,
-      kind: feedback.kind,
-      title: feedback.title,
-      description: feedback.description,
-      attemptedAction: feedback.attemptedAction,
-      toolName: feedback.toolName,
-      errorMessage: feedback.errorMessage,
-      source: feedback.source,
-      oauthClientId: feedback.oauthClientId,
-      oauthClientName: oauthClients.name,
-      pageUrl: feedback.pageUrl,
-      status: feedback.status,
-      adminNote: feedback.adminNote,
-      statusUpdatedAt: feedback.statusUpdatedAt,
-      createdAt: feedback.createdAt,
-      updatedAt: feedback.updatedAt,
-      reporterId: reporter.id,
-      reporterName: reporter.name,
-      reporterEmail: reporter.email,
-      editorId: statusEditor.id,
-      editorName: statusEditor.name,
-      editorEmail: statusEditor.email,
-    })
-    .from(feedback)
-    .leftJoin(reporter, eq(reporter.id, feedback.userId))
-    .leftJoin(statusEditor, eq(statusEditor.id, feedback.statusUpdatedBy))
-    .leftJoin(oauthClients, eq(oauthClients.clientId, feedback.oauthClientId))
-    .where(eq(feedback.id, id))
-    .limit(1);
+interface FeedbackRow {
+  adminNote: string | null;
+  attemptedAction: string | null;
+  createdAt: Date;
+  description: string;
+  editorEmail: string | null;
+  editorId: string | null;
+  editorName: string | null;
+  errorMessage: string | null;
+  id: string;
+  kind: FeedbackKind;
+  oauthClientId: string | null;
+  oauthClientName: string | null;
+  pageUrl: string | null;
+  reporterEmail: string | null;
+  reporterId: string | null;
+  reporterName: string | null;
+  source: FeedbackSource;
+  status: FeedbackStatus;
+  statusUpdatedAt: Date | null;
+  title: string;
+  toolName: string | null;
+  updatedAt: Date;
+}
 
-  if (!row) {
-    return null;
-  }
-
+function toFeedbackItem(row: FeedbackRow): FeedbackItem {
   return {
     id: row.id,
     kind: row.kind,
@@ -124,6 +138,20 @@ async function loadFeedback(id: string): Promise<FeedbackItem | null> {
     reporter: person(row.reporterId, row.reporterName, row.reporterEmail),
     statusUpdatedBy: person(row.editorId, row.editorName, row.editorEmail),
   };
+}
+
+function feedbackQuery() {
+  return db
+    .select(feedbackSelection())
+    .from(feedback)
+    .leftJoin(reporter, eq(reporter.id, feedback.userId))
+    .leftJoin(statusEditor, eq(statusEditor.id, feedback.statusUpdatedBy))
+    .leftJoin(oauthClients, eq(oauthClients.clientId, feedback.oauthClientId));
+}
+
+async function loadFeedback(id: string): Promise<FeedbackItem | null> {
+  const [row] = await feedbackQuery().where(eq(feedback.id, id)).limit(1);
+  return row ? toFeedbackItem(row) : null;
 }
 
 export async function createFeedback(input: {
@@ -222,35 +250,7 @@ export async function listFeedback(input: {
 
   const [totalRow, rows] = await Promise.all([
     db.select({ total: count() }).from(feedback).where(where),
-    db
-      .select({
-        id: feedback.id,
-        kind: feedback.kind,
-        title: feedback.title,
-        description: feedback.description,
-        attemptedAction: feedback.attemptedAction,
-        toolName: feedback.toolName,
-        errorMessage: feedback.errorMessage,
-        source: feedback.source,
-        oauthClientId: feedback.oauthClientId,
-        oauthClientName: oauthClients.name,
-        pageUrl: feedback.pageUrl,
-        status: feedback.status,
-        adminNote: feedback.adminNote,
-        statusUpdatedAt: feedback.statusUpdatedAt,
-        createdAt: feedback.createdAt,
-        updatedAt: feedback.updatedAt,
-        reporterId: reporter.id,
-        reporterName: reporter.name,
-        reporterEmail: reporter.email,
-        editorId: statusEditor.id,
-        editorName: statusEditor.name,
-        editorEmail: statusEditor.email,
-      })
-      .from(feedback)
-      .leftJoin(reporter, eq(reporter.id, feedback.userId))
-      .leftJoin(statusEditor, eq(statusEditor.id, feedback.statusUpdatedBy))
-      .leftJoin(oauthClients, eq(oauthClients.clientId, feedback.oauthClientId))
+    feedbackQuery()
       .where(where)
       .orderBy(desc(feedback.createdAt))
       .limit(limit)
@@ -258,26 +258,7 @@ export async function listFeedback(input: {
   ]);
 
   return {
-    items: rows.map((row) => ({
-      id: row.id,
-      kind: row.kind,
-      title: row.title,
-      description: row.description,
-      attemptedAction: row.attemptedAction,
-      toolName: row.toolName,
-      errorMessage: row.errorMessage,
-      source: row.source,
-      oauthClientId: row.oauthClientId,
-      oauthClientName: row.oauthClientName,
-      pageUrl: row.pageUrl,
-      status: row.status,
-      adminNote: row.adminNote,
-      statusUpdatedAt: row.statusUpdatedAt,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-      reporter: person(row.reporterId, row.reporterName, row.reporterEmail),
-      statusUpdatedBy: person(row.editorId, row.editorName, row.editorEmail),
-    })),
+    items: rows.map(toFeedbackItem),
     total: totalRow[0]?.total ?? 0,
   };
 }
@@ -332,7 +313,8 @@ export async function updateFeedback(input: {
   }
 
   const note = input.note === undefined ? current.adminNote : input.note;
-  if (current.status === input.status && current.adminNote === note) {
+  const statusChanged = current.status !== input.status;
+  if (!statusChanged && current.adminNote === note) {
     return current;
   }
 
@@ -352,8 +334,11 @@ export async function updateFeedback(input: {
     return null;
   }
 
+  // A note-only edit on an already resolved or declined report stays quiet.
+  // Saving again would otherwise notify the reporter a second time.
   if (
     updated.reporter &&
+    statusChanged &&
     (input.status === "resolved" || input.status === "declined")
   ) {
     const reporterUserId = updated.reporter.id;

@@ -6,6 +6,7 @@ import {
   parseAsString,
   parseAsStringLiteral,
 } from "nuqs/server";
+import { feedbackStatusSchema } from "@/lib/api/feedback-schema";
 import { FILES_LIFECYCLE_FILTER_VALUES } from "@/lib/runs/file-lifecycle-filter";
 import { RUN_STATUS_VALUES, type RunStatus } from "@/lib/runs/run-status";
 
@@ -49,10 +50,8 @@ export const dashboardParamsCache = createSearchParamsCache(
   dashboardSearchParams
 );
 
-export const FEEDBACK_STATUS_VALUES = ["open", "resolved", "declined"] as const;
-
 export const feedbackSearchParams = {
-  status: parseAsStringLiteral(FEEDBACK_STATUS_VALUES)
+  status: parseAsStringLiteral(feedbackStatusSchema.options)
     .withDefault("open")
     .withOptions({ clearOnDefault: true }),
   page: parseAsInteger.withDefault(1),

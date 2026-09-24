@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   FEEDBACK_DESCRIPTION_MAX,
   FEEDBACK_DETAIL_MAX,
+  FEEDBACK_LIST_DESCRIPTION_MAX,
   FEEDBACK_LIST_MAX,
   FEEDBACK_TITLE_MAX,
   feedbackKindSchema,
@@ -9,17 +10,11 @@ import {
 } from "@/lib/api/feedback-schema";
 import type { McpToolDef } from "@/lib/mcp/catalog/types";
 import {
+  feedbackItemSchema,
   listFeedbackOutputSchema,
   sendFeedbackOutputSchema,
   updateFeedbackOutputSchema,
 } from "./feedback.output";
-
-const optionalDetail = z
-  .string()
-  .trim()
-  .max(FEEDBACK_DETAIL_MAX)
-  .optional()
-  .describe("Optional extra detail");
 
 export const sendFeedbackTool = {
   name: "send_feedback",
@@ -41,9 +36,24 @@ export const sendFeedbackTool = {
       .min(1)
       .max(FEEDBACK_DESCRIPTION_MAX)
       .describe("What happened or what you want"),
-    attemptedAction: optionalDetail.describe("What the user was trying to do"),
-    toolName: optionalDetail.describe("MCP tool involved, if any"),
-    errorMessage: optionalDetail.describe("Error text, if any"),
+    attemptedAction: z
+      .string()
+      .trim()
+      .max(FEEDBACK_DETAIL_MAX)
+      .optional()
+      .describe("What the user was trying to do"),
+    toolName: z
+      .string()
+      .trim()
+      .max(FEEDBACK_DETAIL_MAX)
+      .optional()
+      .describe("MCP tool involved, if any"),
+    errorMessage: z
+      .string()
+      .trim()
+      .max(FEEDBACK_DETAIL_MAX)
+      .optional()
+      .describe("Error text, if any"),
   },
   outputSchema: sendFeedbackOutputSchema,
   annotations: {
@@ -56,8 +66,7 @@ export const sendFeedbackTool = {
 export const listFeedbackTool = {
   name: "list_feedback",
   title: "List Feedback",
-  description:
-    "List feedback reports. Workspace admins see every report; everyone else sees only their own. Filter by status or kind.",
+  description: `List feedback reports. Workspace admins see every report; everyone else sees only their own. Descriptions longer than ${FEEDBACK_LIST_DESCRIPTION_MAX} characters are shortened. Use get_feedback for the full report.`,
   group: "feedback",
   inputSchema: {
     status: feedbackStatusSchema
@@ -88,7 +97,7 @@ export const updateFeedbackTool = {
   name: "update_feedback",
   title: "Update Feedback",
   description:
-    "Set a feedback report's status to open, resolved, or declined, with an optional note. Workspace admin only, and requires the write scope. Resolving or declining notifies the reporter.",
+    "Set a feedback report's status to open, resolved, or declined, with an optional note shown to the reporter. Workspace admin only, and requires the write scope. Changing the status to resolved or declined notifies the reporter. Editing only the note does not.",
   group: "feedback",
   inputSchema: {
     id: z.string().uuid().describe("Feedback report id"),
@@ -98,7 +107,9 @@ export const updateFeedbackTool = {
       .trim()
       .max(FEEDBACK_DETAIL_MAX)
       .optional()
-      .describe("Note shown to the reporter"),
+      .describe(
+        "Note shown to the reporter. Pass an empty string to clear it."
+      ),
   },
   outputSchema: updateFeedbackOutputSchema,
   annotations: {
@@ -108,8 +119,22 @@ export const updateFeedbackTool = {
   },
 } as const satisfies McpToolDef;
 
+export const getFeedbackTool = {
+  name: "get_feedback",
+  title: "Get Feedback",
+  description:
+    "Get one feedback report, including the full description. Workspace admins can read any report; everyone else can read only their own.",
+  group: "feedback",
+  inputSchema: {
+    id: z.string().uuid().describe("Feedback report id"),
+  },
+  outputSchema: z.object({ feedback: feedbackItemSchema }),
+  annotations: { readOnlyHint: true },
+} as const satisfies McpToolDef;
+
 export const FEEDBACK_TOOL_DEFS = [
   sendFeedbackTool,
   listFeedbackTool,
+  getFeedbackTool,
   updateFeedbackTool,
 ] as const;

@@ -37,6 +37,7 @@ const inAppPreferencesSchema = z.object({
   commentsParticipatedEnabled: z.boolean(),
   genericEnabled: z.boolean(),
   feedbackUpdatedEnabled: z.boolean(),
+  feedbackSubmittedEnabled: z.boolean().optional(),
 });
 
 type InAppPreferences = z.infer<typeof inAppPreferencesSchema>;
@@ -70,6 +71,12 @@ type FormValues = InAppPreferences & {
 };
 
 interface Props {
+  // Present only for workspace admins. Folded into this form and the Slack
+  // card so new-feedback toggles share those Save buttons.
+  adminNewFeedback?: {
+    inApp: boolean;
+    slack: boolean | null;
+  };
   initialInstruments: InstrumentRow[];
   // The page supplies both channels' prefs; the in-app subset seeds this
   // form, the Slack subset is handed to `SlackConnectionCard.Connected`.
@@ -85,6 +92,7 @@ export function NotificationsSettingsForm({
   initialInstruments,
   slackConnection,
   slackChannelConfig,
+  adminNewFeedback,
 }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -126,6 +134,9 @@ export function NotificationsSettingsForm({
         initialPreferences.commentsParticipatedEnabled,
       genericEnabled: initialPreferences.genericEnabled,
       feedbackUpdatedEnabled: initialPreferences.feedbackUpdatedEnabled,
+      ...(adminNewFeedback
+        ? { feedbackSubmittedEnabled: adminNewFeedback.inApp }
+        : {}),
       perInstrument: initialPerInstrument,
     } satisfies FormValues,
     validators: {
@@ -148,6 +159,11 @@ export function NotificationsSettingsForm({
         comments_participated_enabled: value.commentsParticipatedEnabled,
         generic_enabled: value.genericEnabled,
         feedback_updated_enabled: value.feedbackUpdatedEnabled,
+        ...(adminNewFeedback
+          ? {
+              feedback_submitted_enabled: value.feedbackSubmittedEnabled,
+            }
+          : {}),
       };
 
       const changedInstruments = initialInstruments.filter(
@@ -328,6 +344,31 @@ export function NotificationsSettingsForm({
                   </Field>
                 )}
               </prefsForm.Field>
+
+              {adminNewFeedback ? (
+                <prefsForm.Field name="feedbackSubmittedEnabled">
+                  {(field) => (
+                    <Field orientation="horizontal">
+                      <FieldContent>
+                        <FieldLabel htmlFor={field.name}>
+                          New feedback
+                        </FieldLabel>
+                        <FieldDescription>
+                          Show new feedback in the notification bell. Admins get
+                          these when someone sends feedback about Data Hub.
+                        </FieldDescription>
+                      </FieldContent>
+                      <Switch
+                        aria-label="Notify me in the app when someone sends feedback"
+                        checked={field.state.value ?? false}
+                        id={field.name}
+                        name={field.name}
+                        onCheckedChange={field.handleChange}
+                      />
+                    </Field>
+                  )}
+                </prefsForm.Field>
+              ) : null}
             </FieldGroup>
           </CardContent>
 
@@ -445,6 +486,11 @@ export function NotificationsSettingsForm({
             slackGenericEnabled: initialPreferences.slackGenericEnabled,
             slackFeedbackUpdatedEnabled:
               initialPreferences.slackFeedbackUpdatedEnabled,
+            ...(adminNewFeedback?.slack === null || !adminNewFeedback
+              ? {}
+              : {
+                  slackFeedbackSubmittedEnabled: adminNewFeedback.slack,
+                }),
           }}
           revoked={slackConnection.revoked}
         />

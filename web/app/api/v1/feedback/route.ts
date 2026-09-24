@@ -16,6 +16,7 @@ import {
   listFeedbackQuery,
   readJsonBody,
 } from "@/lib/api/openapi";
+import { hasScope } from "@/lib/api/scopes";
 import { userIsAdmin } from "@/lib/api/user-admin";
 
 export async function POST(request: NextRequest) {
@@ -50,7 +51,7 @@ export async function POST(request: NextRequest) {
 
   return Response.json(
     { duplicate: result.duplicate, feedback: serializeFeedback(result.item) },
-    { status: 201 }
+    { status: result.duplicate ? 200 : 201 }
   );
 }
 
@@ -71,7 +72,11 @@ export async function GET(request: NextRequest) {
     return apiError(400, VALIDATION_ERROR, "Invalid query");
   }
 
-  const isAdmin = await userIsAdmin(authResult.userId);
+  // The full list includes other people's email addresses. A read-only token
+  // owned by an admin still only sees that admin's own reports.
+  const isAdmin =
+    (await userIsAdmin(authResult.userId)) &&
+    hasScope(authResult, "feedback:admin");
   const perPage = query.data.per_page ?? FEEDBACK_PAGE_SIZE;
   const page = query.data.page ?? 1;
   const viewer = { viewerId: authResult.userId, isAdmin };

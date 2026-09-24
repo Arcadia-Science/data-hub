@@ -3,7 +3,7 @@ import type { Metadata } from "next/types";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import { FeedbackDetailSheet } from "@/components/feedback/feedback-detail-sheet";
-import { FeedbackStatusFilter } from "@/components/feedback/feedback-status-filter";
+import { FeedbackReview } from "@/components/feedback/feedback-review";
 import {
   FeedbackTable,
   FeedbackTableSkeleton,
@@ -16,6 +16,7 @@ import {
   listFeedback,
 } from "@/lib/api/feedback";
 import { FEEDBACK_PAGE_SIZE } from "@/lib/api/feedback-schema";
+import { isValidUUID } from "@/lib/api/validators";
 import { auth } from "@/lib/auth";
 import { feedbackParamsCache } from "@/lib/search-params";
 
@@ -105,7 +106,9 @@ async function FeedbackSection({
       offset: (page - 1) * FEEDBACK_PAGE_SIZE,
     }),
     countFeedbackByStatus(viewer),
-    itemId ? getFeedbackForViewer(itemId, viewer) : Promise.resolve(null),
+    itemId && isValidUUID(itemId)
+      ? getFeedbackForViewer(itemId, viewer)
+      : Promise.resolve(null),
   ]);
 
   const totalPages = Math.max(1, Math.ceil(list.total / FEEDBACK_PAGE_SIZE));
@@ -123,23 +126,24 @@ async function FeedbackSection({
   }
 
   return (
-    <div className="grid gap-4">
-      <FeedbackStatusFilter counts={counts} />
-      <FeedbackTable
-        hrefFor={hrefFor}
-        rows={list.items.map((item) => ({
-          id: item.id,
-          kind: item.kind,
-          title: item.title,
-          reporterLabel:
-            item.reporter?.name ?? item.reporter?.email ?? "Deleted user",
-          sourceLabel:
-            item.source === "web" ? "Web" : (item.oauthClientName ?? "Agent"),
-          createdAt: item.createdAt.toISOString(),
-        }))}
-        status={status}
-      />
-      <PaginationNav page={page} pageParam="page" totalPages={totalPages} />
+    <>
+      <FeedbackReview counts={counts}>
+        <FeedbackTable
+          hrefFor={hrefFor}
+          rows={list.items.map((item) => ({
+            id: item.id,
+            kind: item.kind,
+            title: item.title,
+            reporterLabel:
+              item.reporter?.name ?? item.reporter?.email ?? "Deleted user",
+            sourceLabel:
+              item.source === "web" ? "Web" : (item.oauthClientName ?? "Agent"),
+            createdAt: item.createdAt.toISOString(),
+          }))}
+          status={status}
+        />
+        <PaginationNav page={page} pageParam="page" totalPages={totalPages} />
+      </FeedbackReview>
       <FeedbackDetailSheet
         item={
           selected
@@ -159,6 +163,12 @@ async function FeedbackSection({
                   selected.reporter?.name ??
                   selected.reporter?.email ??
                   "Deleted user",
+                statusUpdatedAt:
+                  selected.statusUpdatedAt?.toISOString() ?? null,
+                statusUpdatedByLabel:
+                  selected.statusUpdatedBy?.name ??
+                  selected.statusUpdatedBy?.email ??
+                  null,
                 sourceLabel:
                   selected.source === "web"
                     ? "Web"
@@ -167,6 +177,6 @@ async function FeedbackSection({
             : null
         }
       />
-    </div>
+    </>
   );
 }

@@ -1,7 +1,9 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import {
   createFeedback,
+  getFeedbackForViewer,
   listFeedback,
+  previewFeedbackDescription,
   updateFeedback,
 } from "@/lib/api/feedback";
 import {
@@ -18,6 +20,7 @@ import {
   structuredResult,
 } from "@/lib/mcp/tools/helpers";
 import {
+  getFeedbackTool,
   listFeedbackTool,
   sendFeedbackTool,
   updateFeedbackTool,
@@ -70,7 +73,32 @@ export function registerFeedbackTools(server: McpServer) {
         limit,
         offset: (page - 1) * limit,
       });
-      return structuredResult({ feedback: result.items, total: result.total });
+      return structuredResult({
+        feedback: result.items.map((item) => ({
+          ...item,
+          description: previewFeedbackDescription(item.description),
+        })),
+        total: result.total,
+      });
+    }
+  );
+
+  server.registerTool(
+    getFeedbackTool.name,
+    toolRegistrationConfig(getFeedbackTool),
+    async (args, ctx) => {
+      const userId = getMcpUserId(ctx.http?.authInfo);
+      if (!userId) {
+        return errorResult("Authenticated user not available on this session.");
+      }
+      const item = await getFeedbackForViewer(args.id, {
+        viewerId: userId,
+        isAdmin: await userIsAdmin(userId),
+      });
+      if (!item) {
+        return errorResult(`Feedback '${args.id}' not found.`);
+      }
+      return structuredResult({ feedback: item });
     }
   );
 

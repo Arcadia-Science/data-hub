@@ -39,6 +39,12 @@ export interface GenericEntry {
   notification: NotificationItem;
 }
 
+export interface FeedbackEntry {
+  id: string;
+  kind: "feedback";
+  notification: NotificationItem;
+}
+
 export interface RunGroupEntry {
   id: string;
   instrumentDisplayName: string;
@@ -49,7 +55,11 @@ export interface RunGroupEntry {
   runs: AnchoredNotificationItem[];
 }
 
-export type FeedEntry = CommentEntry | GenericEntry | RunGroupEntry;
+export type FeedEntry =
+  | CommentEntry
+  | FeedbackEntry
+  | GenericEntry
+  | RunGroupEntry;
 
 export interface DaySection {
   dayKey: string;
@@ -79,11 +89,11 @@ export function buildNotificationFeed(
       sections.push(section);
     }
 
-    if (
-      n.type === "generic" ||
-      n.type === "feedback_submitted" ||
-      n.type === "feedback_updated"
-    ) {
+    if (n.type === "feedback_submitted" || n.type === "feedback_updated") {
+      section.entries.push({ kind: "feedback", id: n.id, notification: n });
+      continue;
+    }
+    if (n.type === "generic") {
       section.entries.push({ kind: "generic", id: n.id, notification: n });
       continue;
     }

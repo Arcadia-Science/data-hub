@@ -1,6 +1,7 @@
 "use client";
 
 import { parseAsString, useQueryState } from "nuqs";
+import { useState } from "react";
 import {
   FeedbackKindBadge,
   FeedbackStatusBadge,
@@ -28,15 +29,24 @@ export interface FeedbackDetail {
   reporterLabel: string;
   sourceLabel: string;
   status: FeedbackStatus;
+  statusUpdatedAt: string | null;
+  statusUpdatedByLabel: string | null;
   title: string;
   toolName: string | null;
 }
 
 export function FeedbackDetailSheet({ item }: { item: FeedbackDetail | null }) {
-  const [, setItem] = useQueryState(
+  const [itemId, setItem] = useQueryState(
     "item",
     parseAsString.withOptions({ shallow: false, history: "push" })
   );
+  // Keep the last loaded report mounted while the sheet animates closed.
+  // `item` comes from the server and is cleared only after the URL refresh.
+  const [displayed, setDisplayed] = useState(item);
+  if (item && item !== displayed) {
+    setDisplayed(item);
+  }
+  const shown = displayed;
 
   return (
     <Sheet
@@ -45,62 +55,73 @@ export function FeedbackDetailSheet({ item }: { item: FeedbackDetail | null }) {
           void setItem(null);
         }
       }}
-      open={item !== null}
+      open={itemId !== null && shown !== null}
     >
-      {item ? (
+      {shown ? (
         <SheetContent className="overflow-y-auto overscroll-contain sm:max-w-lg">
           <SheetHeader>
             <SheetTitle className="text-pretty break-words pr-8">
-              {item.title}
+              {shown.title}
             </SheetTitle>
             <SheetDescription>
-              {item.reporterLabel} ·{" "}
-              <time dateTime={item.createdAt} suppressHydrationWarning>
-                {formatDateTime(new Date(item.createdAt))}
+              {shown.reporterLabel} ·{" "}
+              <time dateTime={shown.createdAt} suppressHydrationWarning>
+                {formatDateTime(new Date(shown.createdAt))}
               </time>
             </SheetDescription>
           </SheetHeader>
           <div className="grid gap-4 px-4 pb-6">
             <div className="flex flex-wrap gap-2">
-              <FeedbackKindBadge kind={item.kind} />
-              <FeedbackStatusBadge status={item.status} />
+              <FeedbackKindBadge kind={shown.kind} />
+              <FeedbackStatusBadge status={shown.status} />
               <span className="text-muted-foreground text-sm" translate="no">
-                {item.sourceLabel}
+                {shown.sourceLabel}
               </span>
             </div>
             <p className="whitespace-pre-wrap break-words text-sm">
-              {item.description}
+              {shown.description}
             </p>
-            {item.attemptedAction ? (
+            {shown.attemptedAction ? (
               <Detail label="What they were trying to do">
-                {item.attemptedAction}
+                {shown.attemptedAction}
               </Detail>
             ) : null}
-            {item.toolName ? (
+            {shown.toolName ? (
               <Detail label="Tool">
-                <code translate="no">{item.toolName}</code>
+                <code translate="no">{shown.toolName}</code>
               </Detail>
             ) : null}
-            {item.errorMessage ? (
+            {shown.errorMessage ? (
               <Detail label="Error">
                 <code
                   className="whitespace-pre-wrap break-words"
                   translate="no"
                 >
-                  {item.errorMessage}
+                  {shown.errorMessage}
                 </code>
               </Detail>
             ) : null}
-            {item.pageUrl ? (
+            {shown.pageUrl ? (
               <Detail label="Page">
-                <PageLink url={item.pageUrl} />
+                <PageLink url={shown.pageUrl} />
               </Detail>
             ) : null}
+            {shown.statusUpdatedAt ? (
+              <p className="text-muted-foreground text-sm">
+                Status last changed
+                {shown.statusUpdatedByLabel
+                  ? ` by ${shown.statusUpdatedByLabel}`
+                  : ""}{" "}
+                <time dateTime={shown.statusUpdatedAt} suppressHydrationWarning>
+                  {formatDateTime(new Date(shown.statusUpdatedAt))}
+                </time>
+              </p>
+            ) : null}
             <FeedbackStatusForm
-              id={item.id}
-              key={item.id}
-              note={item.adminNote}
-              status={item.status}
+              id={shown.id}
+              key={shown.id}
+              note={shown.adminNote}
+              status={shown.status}
             />
           </div>
         </SheetContent>

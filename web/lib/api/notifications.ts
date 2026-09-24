@@ -8,6 +8,7 @@ import {
   isNull,
   sql,
 } from "drizzle-orm";
+import { FEEDBACK_STATUS_LABELS } from "@/lib/api/feedback-schema";
 import { runCommentHref } from "@/lib/comment-hash";
 import { db } from "@/lib/db";
 import {
@@ -378,7 +379,10 @@ export async function listNotifications(
       instrumentType: row.instrumentType,
       commentId: row.commentId,
       commentBody: toPreview(row.commentBody),
-      body: toPreview(row.body),
+      body:
+        row.type === "feedback_submitted" || row.type === "feedback_updated"
+          ? row.body
+          : toPreview(row.body),
       feedbackId: row.feedbackId,
       fileCount: row.runId ? (stats?.fileCount ?? 0) : null,
       filesFailed: row.runId ? (stats?.filesFailed ?? 0) : null,
@@ -879,17 +883,14 @@ export async function notifyGeneric(input: {
   };
 }
 
-const FEEDBACK_STATUS_LABEL = {
-  resolved: "Resolved",
-  declined: "Declined",
-} as const;
-
 function feedbackUpdateBody(
-  status: keyof typeof FEEDBACK_STATUS_LABEL,
+  title: string,
+  status: "resolved" | "declined",
   note: string | null
 ): string {
-  const label = FEEDBACK_STATUS_LABEL[status];
-  return note ? `${label}: ${note}` : label;
+  const label = FEEDBACK_STATUS_LABELS[status];
+  const headline = `Your feedback "${title}" was marked ${label}.`;
+  return note ? `${headline} ${note}` : headline;
 }
 
 // Admins except the reporter. Missing preference rows count as in-app on.
@@ -994,7 +995,7 @@ export async function notifyFeedbackUpdated(input: {
     return;
   }
 
-  const body = feedbackUpdateBody(input.status, input.note);
+  const body = feedbackUpdateBody(input.title, input.status, input.note);
   if (recipient.feedbackUpdatedEnabled !== false) {
     await db.insert(notifications).values({
       userId: recipient.userId,
@@ -1015,10 +1016,10 @@ export async function notifyFeedbackUpdated(input: {
         userId: recipient.userId,
         slackUserId: recipient.slackUserId,
         payload: {
-          text: `Your feedback "${input.title}" was marked ${FEEDBACK_STATUS_LABEL[input.status]}.`,
+          text: `Your feedback "${input.title}" was marked ${FEEDBACK_STATUS_LABELS[input.status]}.`,
           blocks: buildFeedbackUpdatedBlocks({
             title: input.title,
-            statusLabel: FEEDBACK_STATUS_LABEL[input.status],
+            statusLabel: FEEDBACK_STATUS_LABELS[input.status],
             note: input.note,
           }),
         },

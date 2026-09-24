@@ -42,5 +42,6 @@ full CSVs.
 Feedback: send_feedback reports bugs and requests about Data Hub itself.
 Confirm the draft with the user before sending. Problems with a specific
 run's data belong in add_run_comment. list_feedback shows your own reports
-(admins see every report). update_feedback is admin-only and needs write.
+(admins see every report) with shortened descriptions; get_feedback returns
+one full report. update_feedback is admin-only and needs write.
 `.trim();

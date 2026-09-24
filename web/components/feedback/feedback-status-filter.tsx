@@ -1,25 +1,30 @@
 "use client";
 
 import { useQueryStates } from "nuqs";
+import type { TransitionStartFunction } from "react";
 import { Button } from "@/components/ui/button";
-import type { FeedbackStatus } from "@/lib/api/feedback-schema";
+import {
+  type FeedbackStatus,
+  feedbackStatusSchema,
+} from "@/lib/api/feedback-schema";
 import { feedbackSearchParams } from "@/lib/search-params";
 import { feedbackStatusLabel } from "./feedback-badges";
 
-const STATUSES: FeedbackStatus[] = ["open", "resolved", "declined"];
-
 export function FeedbackStatusFilter({
   counts,
+  startTransition,
 }: {
   counts: Record<FeedbackStatus, number>;
+  startTransition: TransitionStartFunction;
 }) {
   const [filters, setFilters] = useQueryStates(feedbackSearchParams, {
     shallow: false,
+    startTransition,
   });
 
   return (
     <div className="flex flex-wrap gap-2">
-      {STATUSES.map((status) => (
+      {feedbackStatusSchema.options.map((status) => (
         <Button
           aria-pressed={filters.status === status}
           key={status}

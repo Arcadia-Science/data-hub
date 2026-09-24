@@ -28,6 +28,10 @@ registry.registerPath({
     },
   },
   responses: {
+    200: jsonResponse(
+      "An open report with this title already exists. Nothing new was saved.",
+      feedbackCreated
+    ),
     201: jsonResponse("The saved feedback report.", feedbackCreated),
     ...errorResponses(),
   },
@@ -39,7 +43,7 @@ registry.registerPath({
   operationId: "listFeedback",
   summary: "List feedback",
   description:
-    "Admins see every report. Other callers see only their own. Filter with status and kind query parameters.",
+    "Callers with the `feedback:admin` scope see every report. Everyone else sees only their own, including an admin using a token without that scope.",
   tags: ["Feedback"],
   security: bearerSecurity,
   request: {
@@ -57,7 +61,7 @@ registry.registerPath({
   operationId: "updateFeedback",
   summary: "Update feedback status",
   description:
-    "Workspace admin only, for both sessions and personal access tokens. Resolving or declining notifies the reporter.",
+    "Workspace admin only. Requires the `feedback:admin` scope (browser sessions have it). Resolving or declining notifies the reporter. A note-only save does not.",
   tags: ["Feedback"],
   security: bearerSecurity,
   request: {

@@ -123,4 +123,25 @@ describe("buildNotificationFeed", () => {
       "run_group",
     ]);
   });
+
+  it("keeps feedback rows out of the generic bucket", () => {
+    const feed = buildNotificationFeed(
+      [
+        item({
+          id: "fb",
+          type: "feedback_updated",
+          runId: null,
+          runDisplayId: null,
+          instrumentId: null,
+          instrumentDisplayName: null,
+          instrumentType: null,
+          body: "Your feedback was marked Resolved.",
+          feedbackId: "fb-1",
+        }),
+      ],
+      TZ,
+      NOW
+    );
+    expect(feed[0].entries.map((entry) => entry.kind)).toEqual(["feedback"]);
+  });
 });

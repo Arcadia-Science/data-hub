@@ -44,6 +44,7 @@ interface UserMenuFooterProps {
 
 export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
   const { isMobile } = useSidebar();
+  const [menuOpen, setMenuOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const avatarUser = toUserAvatarUser({
@@ -56,7 +57,7 @@ export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
   return (
     <SidebarMenu>
       <SidebarMenuItem>
-        <DropdownMenu>
+        <DropdownMenu onOpenChange={setMenuOpen} open={menuOpen}>
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton
               className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
@@ -85,7 +86,11 @@ export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
             <DropdownMenuItem
               onFocus={preloadSendFeedbackForm}
               onMouseEnter={preloadSendFeedbackForm}
-              onSelect={() => setFeedbackOpen(true)}
+              onSelect={(event) => {
+                event.preventDefault();
+                setMenuOpen(false);
+                setFeedbackOpen(true);
+              }}
             >
               <MessageSquarePlus data-icon="inline-start" />
               Feedback

@@ -34,6 +34,7 @@ export function FeedbackStatusForm({
   const [nextStatus, setNextStatus] = useState(status);
   const [nextNote, setNextNote] = useState(note ?? "");
   const [isPending, startTransition] = useTransition();
+  const unchanged = nextStatus === status && nextNote === (note ?? "");
 
   return (
     <form
@@ -41,22 +42,28 @@ export function FeedbackStatusForm({
       onSubmit={(event) => {
         event.preventDefault();
         startTransition(async () => {
-          const res = await fetch(`/api/v1/feedback/${id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              status: nextStatus,
-              note: nextNote,
-            }),
-          });
-          if (!res.ok) {
+          try {
+            const res = await fetch(`/api/v1/feedback/${id}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                status: nextStatus,
+                note: nextNote,
+              }),
+            });
+            if (!res.ok) {
+              toast.error(
+                "Couldn't update this report. Refresh the page and try again."
+              );
+              return;
+            }
+            toast.success("Status updated");
+            router.refresh();
+          } catch {
             toast.error(
-              "Couldn't update this report. Refresh the page and try again."
+              "Couldn't update this report. Check your connection and try again."
             );
-            return;
           }
-          toast.success("Status updated");
-          router.refresh();
         });
       }}
     >
@@ -81,8 +88,13 @@ export function FeedbackStatusForm({
         </Select>
       </div>
       <div className="grid gap-2">
-        <Label htmlFor="feedback-note">Note</Label>
+        <Label htmlFor="feedback-note">Note to reporter</Label>
+        <p className="text-muted-foreground text-sm" id="feedback-note-hint">
+          The reporter sees this note when you resolve or decline the report.
+          Editing only the note does not send another notification.
+        </p>
         <Textarea
+          aria-describedby="feedback-note-hint"
           autoComplete="off"
           id="feedback-note"
           maxLength={FEEDBACK_DETAIL_MAX}
@@ -93,7 +105,7 @@ export function FeedbackStatusForm({
           value={nextNote}
         />
       </div>
-      <Button disabled={isPending} type="submit">
+      <Button disabled={isPending || unchanged} type="submit">
         {isPending ? (
           <Loader2 className="animate-spin" data-icon="inline-start" />
         ) : null}

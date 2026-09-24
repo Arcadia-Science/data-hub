@@ -39,7 +39,7 @@ export const EMPTY_FEEDBACK_DRAFT: FeedbackDraft = {
   errorMessage: "",
 };
 
-type View = { kind: "form" } | { kind: "sent" };
+type View = { kind: "form" } | { duplicate: boolean; kind: "sent" };
 
 export function preloadSendFeedbackForm() {
   void import("@/components/feedback/send-feedback-form");
@@ -71,8 +71,9 @@ export function SendFeedbackDialog({
           <DialogHeader>
             <DialogTitle>Feedback sent</DialogTitle>
             <DialogDescription>
-              Workspace admins can see this report. You’ll get a notification
-              when someone resolves or declines it.
+              {view.kind === "sent" && view.duplicate
+                ? "You already sent a report with this title, and it is still open. We kept that one."
+                : "Workspace admins can see this report. You’ll get a notification when someone resolves or declines it."}
             </DialogDescription>
           </DialogHeader>
         ) : (
@@ -84,16 +85,14 @@ export function SendFeedbackDialog({
                 run belong in a comment on that run.
               </DialogDescription>
             </DialogHeader>
-            {open ? (
-              <SendFeedbackForm
-                draft={draft}
-                onDraftChange={setDraft}
-                onSent={() => {
-                  setDraft(EMPTY_FEEDBACK_DRAFT);
-                  setView({ kind: "sent" });
-                }}
-              />
-            ) : null}
+            <SendFeedbackForm
+              draft={draft}
+              onDraftChange={setDraft}
+              onSent={(duplicate) => {
+                setDraft(EMPTY_FEEDBACK_DRAFT);
+                setView({ kind: "sent", duplicate });
+              }}
+            />
           </>
         )}
       </DialogContent>
