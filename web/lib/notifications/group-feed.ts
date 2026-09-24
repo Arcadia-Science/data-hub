@@ -79,7 +79,11 @@ export function buildNotificationFeed(
       sections.push(section);
     }
 
-    if (n.type === "generic") {
+    if (
+      n.type === "generic" ||
+      n.type === "feedback_submitted" ||
+      n.type === "feedback_updated"
+    ) {
       section.entries.push({ kind: "generic", id: n.id, notification: n });
       continue;
     }

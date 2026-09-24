@@ -5,11 +5,16 @@ import {
   ChevronsUpDown,
   ExternalLink,
   LogOut,
+  MessageSquarePlus,
   Settings,
 } from "lucide-react";
 import Link from "next/link";
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { DocsLink } from "@/components/docs-link";
+import {
+  preloadSendFeedbackForm,
+  SendFeedbackDialog,
+} from "@/components/feedback/send-feedback-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,6 +44,7 @@ interface UserMenuFooterProps {
 
 export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
   const { isMobile } = useSidebar();
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const avatarUser = toUserAvatarUser({
     userId: user.id,
@@ -83,6 +89,14 @@ export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
                 <ExternalLink className="ml-auto size-3.5 text-muted-foreground" />
               </DocsLink>
             </DropdownMenuItem>
+            <DropdownMenuItem
+              onFocus={preloadSendFeedbackForm}
+              onMouseEnter={preloadSendFeedbackForm}
+              onSelect={() => setFeedbackOpen(true)}
+            >
+              <MessageSquarePlus data-icon="inline-start" />
+              Send feedback
+            </DropdownMenuItem>
             <DropdownMenuItem asChild>
               <Link href="/settings/notifications">
                 <Settings data-icon="inline-start" />
@@ -99,6 +113,10 @@ export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        <SendFeedbackDialog
+          onOpenChange={setFeedbackOpen}
+          open={feedbackOpen}
+        />
       </SidebarMenuItem>
     </SidebarMenu>
   );

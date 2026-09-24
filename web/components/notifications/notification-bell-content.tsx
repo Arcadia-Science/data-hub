@@ -129,6 +129,18 @@ export function NotificationBellContent({
                   }
                   onNavigate?.();
                 };
+                if (
+                  entry.notification.type === "feedback_submitted" ||
+                  entry.notification.type === "feedback_updated"
+                ) {
+                  return (
+                    <FeedbackNotificationRow
+                      key={entry.id}
+                      notification={entry.notification}
+                      onActivate={activate}
+                    />
+                  );
+                }
                 return entry.kind === "comment" ? (
                   <CommentNotificationRow
                     key={entry.id}
@@ -291,6 +303,88 @@ function CommentNotificationRow({
           </p>
         </div>
       </Link>
+    </NotificationRowShell>
+  );
+}
+
+function FeedbackNotificationRow({
+  notification: n,
+  onActivate,
+}: {
+  notification: NotificationItem;
+  onActivate: () => void;
+}) {
+  const isUnread = n.readAt === null;
+  const actor = n.actor?.displayName ?? "Someone";
+  const content = (
+    <>
+      {n.actor ? (
+        <UserAvatar
+          size="sm"
+          user={{
+            userId: n.actor.id,
+            displayName: n.actor.displayName,
+            initials: n.actor.initials,
+            avatarUrl: n.actor.avatarUrl,
+          }}
+        />
+      ) : (
+        <UnknownUserAvatar size="sm" />
+      )}
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <p className="text-sm leading-snug">
+          {n.type === "feedback_submitted" ? (
+            <>
+              <span className="font-medium">{actor}</span> sent feedback
+            </>
+          ) : (
+            <span className="font-medium">Update on your feedback</span>
+          )}
+        </p>
+        {n.body ? (
+          <p
+            className={
+              n.type === "feedback_updated"
+                ? "line-clamp-3 text-muted-foreground text-sm"
+                : "truncate text-muted-foreground text-sm"
+            }
+          >
+            {n.body}
+          </p>
+        ) : null}
+        <p
+          className="text-muted-foreground/80 text-xs"
+          suppressHydrationWarning
+        >
+          {formatRelativeTime(n.createdAt)}
+        </p>
+      </div>
+    </>
+  );
+
+  if (n.type === "feedback_submitted" && n.feedbackId) {
+    return (
+      <NotificationRowShell isUnread={isUnread}>
+        <Link
+          className="flex items-start gap-3 px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          href={`/settings/feedback?item=${n.feedbackId}`}
+          onClick={onActivate}
+        >
+          {content}
+        </Link>
+      </NotificationRowShell>
+    );
+  }
+
+  return (
+    <NotificationRowShell isUnread={isUnread}>
+      <button
+        className="flex w-full cursor-pointer items-start gap-3 px-4 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        onClick={onActivate}
+        type="button"
+      >
+        {content}
+      </button>
     </NotificationRowShell>
   );
 }

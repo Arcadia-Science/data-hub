@@ -330,6 +330,13 @@
       "when": 1788891244869,
       "tag": "0046_many_bucky",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1790279069884,
+      "tag": "0047_daffy_mongu",
+      "breakpoints": true
     }
   ]
 }

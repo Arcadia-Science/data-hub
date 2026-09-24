@@ -111,6 +111,7 @@ const slackPreferencesSchema = z.object({
   slackCommentsAttributedEnabled: z.boolean(),
   slackCommentsParticipatedEnabled: z.boolean(),
   slackGenericEnabled: z.boolean(),
+  slackFeedbackUpdatedEnabled: z.boolean(),
 });
 
 export type SlackPreferences = z.infer<typeof slackPreferencesSchema>;
@@ -146,6 +147,7 @@ function Connected({
           slack_comments_participated_enabled:
             value.slackCommentsParticipatedEnabled,
           slack_generic_enabled: value.slackGenericEnabled,
+          slack_feedback_updated_enabled: value.slackFeedbackUpdatedEnabled,
         }),
       });
 
@@ -282,6 +284,29 @@ function Connected({
                     </FieldContent>
                     <Switch
                       aria-label="Send service notifications via Slack DM"
+                      checked={field.state.value}
+                      id={field.name}
+                      name={field.name}
+                      onCheckedChange={field.handleChange}
+                    />
+                  </Field>
+                )}
+              </form.Field>
+
+              <form.Field name="slackFeedbackUpdatedEnabled">
+                {(field) => (
+                  <Field orientation="horizontal">
+                    <FieldContent>
+                      <FieldLabel htmlFor={field.name}>
+                        Updates on your feedback
+                      </FieldLabel>
+                      <FieldDescription>
+                        DM me when an admin resolves or declines feedback I
+                        sent.
+                      </FieldDescription>
+                    </FieldContent>
+                    <Switch
+                      aria-label="Send feedback updates via Slack DM"
                       checked={field.state.value}
                       id={field.name}
                       name={field.name}

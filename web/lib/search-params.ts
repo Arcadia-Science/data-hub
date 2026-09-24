@@ -49,6 +49,19 @@ export const dashboardParamsCache = createSearchParamsCache(
   dashboardSearchParams
 );
 
+export const FEEDBACK_STATUS_VALUES = ["open", "resolved", "declined"] as const;
+
+export const feedbackSearchParams = {
+  status: parseAsStringLiteral(FEEDBACK_STATUS_VALUES)
+    .withDefault("open")
+    .withOptions({ clearOnDefault: true }),
+  page: parseAsInteger.withDefault(1),
+  item: parseAsString,
+};
+
+export const feedbackParamsCache =
+  createSearchParamsCache(feedbackSearchParams);
+
 // Mirrors dashboardSearchParams but omits `instrument_id` (implicit from the
 // route segment). Sort defaults to acquisition time, newest first.
 export const instrumentDetailSearchParams = {

@@ -36,6 +36,7 @@ const inAppPreferencesSchema = z.object({
   commentsAttributedEnabled: z.boolean(),
   commentsParticipatedEnabled: z.boolean(),
   genericEnabled: z.boolean(),
+  feedbackUpdatedEnabled: z.boolean(),
 });
 
 type InAppPreferences = z.infer<typeof inAppPreferencesSchema>;
@@ -124,6 +125,7 @@ export function NotificationsSettingsForm({
       commentsParticipatedEnabled:
         initialPreferences.commentsParticipatedEnabled,
       genericEnabled: initialPreferences.genericEnabled,
+      feedbackUpdatedEnabled: initialPreferences.feedbackUpdatedEnabled,
       perInstrument: initialPerInstrument,
     } satisfies FormValues,
     validators: {
@@ -145,6 +147,7 @@ export function NotificationsSettingsForm({
         comments_attributed_enabled: value.commentsAttributedEnabled,
         comments_participated_enabled: value.commentsParticipatedEnabled,
         generic_enabled: value.genericEnabled,
+        feedback_updated_enabled: value.feedbackUpdatedEnabled,
       };
 
       const changedInstruments = initialInstruments.filter(
@@ -302,6 +305,29 @@ export function NotificationsSettingsForm({
                   </Field>
                 )}
               </prefsForm.Field>
+
+              <prefsForm.Field name="feedbackUpdatedEnabled">
+                {(field) => (
+                  <Field orientation="horizontal">
+                    <FieldContent>
+                      <FieldLabel htmlFor={field.name}>
+                        Updates on your feedback
+                      </FieldLabel>
+                      <FieldDescription>
+                        Notify me when an admin resolves or declines feedback I
+                        sent.
+                      </FieldDescription>
+                    </FieldContent>
+                    <Switch
+                      aria-label="Notify me when an admin updates my feedback"
+                      checked={field.state.value}
+                      id={field.name}
+                      name={field.name}
+                      onCheckedChange={field.handleChange}
+                    />
+                  </Field>
+                )}
+              </prefsForm.Field>
             </FieldGroup>
           </CardContent>
 
@@ -417,6 +443,8 @@ export function NotificationsSettingsForm({
             slackCommentsParticipatedEnabled:
               initialPreferences.slackCommentsParticipatedEnabled,
             slackGenericEnabled: initialPreferences.slackGenericEnabled,
+            slackFeedbackUpdatedEnabled:
+              initialPreferences.slackFeedbackUpdatedEnabled,
           }}
           revoked={slackConnection.revoked}
         />

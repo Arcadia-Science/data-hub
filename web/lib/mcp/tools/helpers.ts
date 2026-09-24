@@ -1,5 +1,6 @@
 import type { AuthInfo } from "@modelcontextprotocol/server";
 import { lookupRunByNaturalKey, type RunFile } from "@/lib/api/instrument-runs";
+import { userIsAdmin } from "@/lib/api/user-admin";
 import { isStalledProcessing } from "@/lib/runs/stalled-processing";
 
 /**
@@ -52,6 +53,21 @@ export function toMcpFile(f: RunFile) {
     processedAt: f.processedAt,
     stalled: isStalledProcessing(f),
   };
+}
+
+// Reads `users.is_admin` on every call. Unlike `requireMcpWrite`, a missing
+// auth identity is a failure: we cannot tell whether the caller is an admin.
+export async function requireMcpAdmin(
+  authInfo: AuthInfo | undefined
+): Promise<McpErrorResult | null> {
+  const userId = getMcpUserId(authInfo);
+  if (!userId) {
+    return errorResult("Authenticated user not available on this session.");
+  }
+  if (await userIsAdmin(userId)) {
+    return null;
+  }
+  return errorResult("Admin role required");
 }
 
 // Mutating MCP tools require the coarse OAuth `write` scope. Transport-level

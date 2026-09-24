@@ -14,7 +14,7 @@ export function buildMcpCatalogDocument(): McpCatalogDocument {
       title: "Data Hub MCP",
       version: "1.0.0",
       description:
-        "Model Context Protocol server for Data Hub. Authenticate with an OAuth / Bearer access token (`Authorization: Bearer …`). The transport requires the `read` scope; mutating tools additionally require `write`.",
+        "Model Context Protocol server for Data Hub. Authenticate with an OAuth / Bearer access token (`Authorization: Bearer …`). The transport requires the `read` scope; mutating tools additionally require `write`, except `send_feedback`, which any read token can call.",
       endpoint: "/mcp/v1",
       transport: "streamable-http",
     },

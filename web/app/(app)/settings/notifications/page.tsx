@@ -1,6 +1,7 @@
 import type { Metadata } from "next/types";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
+import { AdminFeedbackNotificationsCard } from "@/components/notifications/admin-feedback-notifications-card";
 import { NotificationsSettingsForm } from "@/components/notifications/notifications-settings-form";
 import { NotificationsSettingsFormSkeleton } from "@/components/notifications/notifications-settings-skeleton";
 import { SettingsPageContent } from "@/components/settings/settings-page-content";
@@ -82,46 +83,57 @@ async function NotificationsFormSection({
     ]);
 
   return (
-    <NotificationsSettingsForm
-      initialInstruments={subscriptions.map((s) => ({
-        instrumentId: s.instrumentId,
-        displayName: s.displayName,
-        enabled: s.enabled,
-      }))}
-      initialPreferences={{
-        runsAllMuted: prefs.runsAllMuted,
-        commentsAttributedEnabled: prefs.commentsAttributedEnabled,
-        commentsParticipatedEnabled: prefs.commentsParticipatedEnabled,
-        genericEnabled: prefs.genericEnabled,
-        slackRunsEnabled: prefs.slackRunsEnabled,
-        slackCommentsAttributedEnabled: prefs.slackCommentsAttributedEnabled,
-        slackCommentsParticipatedEnabled:
-          prefs.slackCommentsParticipatedEnabled,
-        slackGenericEnabled: prefs.slackGenericEnabled,
-      }}
-      slackChannelConfig={
-        slackChannelConfig
-          ? {
-              configured: slackChannelConfig.configured,
-              lastUpdated: slackChannelConfig.updatedAt
-                ? {
-                    at: slackChannelConfig.updatedAt.toISOString(),
-                    byName: slackChannelConfig.updatedByName,
-                    byEmail: slackChannelConfig.updatedByEmail,
-                  }
-                : null,
-            }
-          : null
-      }
-      slackConnection={
-        slackConn
-          ? {
-              connected: true,
-              slackTeamName: slackConn.slackTeamName,
-              revoked: slackConn.revokedAt !== null,
-            }
-          : { connected: false, slackTeamName: null, revoked: false }
-      }
-    />
+    <>
+      <NotificationsSettingsForm
+        initialInstruments={subscriptions.map((s) => ({
+          instrumentId: s.instrumentId,
+          displayName: s.displayName,
+          enabled: s.enabled,
+        }))}
+        initialPreferences={{
+          runsAllMuted: prefs.runsAllMuted,
+          commentsAttributedEnabled: prefs.commentsAttributedEnabled,
+          commentsParticipatedEnabled: prefs.commentsParticipatedEnabled,
+          genericEnabled: prefs.genericEnabled,
+          feedbackUpdatedEnabled: prefs.feedbackUpdatedEnabled,
+          slackRunsEnabled: prefs.slackRunsEnabled,
+          slackCommentsAttributedEnabled: prefs.slackCommentsAttributedEnabled,
+          slackCommentsParticipatedEnabled:
+            prefs.slackCommentsParticipatedEnabled,
+          slackGenericEnabled: prefs.slackGenericEnabled,
+          slackFeedbackUpdatedEnabled: prefs.slackFeedbackUpdatedEnabled,
+        }}
+        slackChannelConfig={
+          slackChannelConfig
+            ? {
+                configured: slackChannelConfig.configured,
+                lastUpdated: slackChannelConfig.updatedAt
+                  ? {
+                      at: slackChannelConfig.updatedAt.toISOString(),
+                      byName: slackChannelConfig.updatedByName,
+                      byEmail: slackChannelConfig.updatedByEmail,
+                    }
+                  : null,
+              }
+            : null
+        }
+        slackConnection={
+          slackConn
+            ? {
+                connected: true,
+                slackTeamName: slackConn.slackTeamName,
+                revoked: slackConn.revokedAt !== null,
+              }
+            : { connected: false, slackTeamName: null, revoked: false }
+        }
+      />
+      {isAdmin ? (
+        <AdminFeedbackNotificationsCard
+          feedbackSubmittedEnabled={prefs.feedbackSubmittedEnabled}
+          slackConnected={slackConn !== null && slackConn.revokedAt === null}
+          slackFeedbackSubmittedEnabled={prefs.slackFeedbackSubmittedEnabled}
+        />
+      ) : null}
+    </>
   );
 }

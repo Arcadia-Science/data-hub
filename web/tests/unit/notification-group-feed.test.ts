@@ -23,6 +23,7 @@ function item(overrides: Partial<NotificationItem>): NotificationItem {
     commentId: null,
     commentBody: null,
     body: null,
+    feedbackId: null,
     actor: null,
     ...overrides,
   };

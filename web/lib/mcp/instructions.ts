@@ -38,4 +38,9 @@ Tool routing:
 A run can have thousands of files: filter list_run_files by status rather than
 paging all of it, and prefer get_run_report's bounded sample over downloading
 full CSVs.
+
+Feedback: send_feedback reports bugs and requests about Data Hub itself.
+Confirm the draft with the user before sending. Problems with a specific
+run's data belong in add_run_comment. list_feedback shows your own reports
+(admins see every report). update_feedback is admin-only and needs write.
 `.trim();

@@ -54,6 +54,7 @@ interface ApiNotification {
   comment_body: string | null;
   comment_id: string | null;
   created_at: string;
+  feedback_id: string | null;
   file_count: number | null;
   files_failed: number | null;
   id: string;
@@ -84,6 +85,7 @@ function fromApi(n: ApiNotification): NotificationItem {
     commentId: n.comment_id,
     commentBody: n.comment_body,
     body: n.body,
+    feedbackId: n.feedback_id,
     actor: n.actor,
   };
 }

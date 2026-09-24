@@ -197,6 +197,42 @@ export function buildCommentBlocks(opts: {
   ];
 }
 
+export function buildFeedbackSubmittedBlocks(opts: {
+  actorDisplayName: string;
+  title: string;
+  feedbackUrl?: string;
+}): (Block | KnownBlock)[] {
+  const link = opts.feedbackUrl
+    ? `\n<${opts.feedbackUrl}|Review in Data Hub>`
+    : "";
+  return [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*${opts.actorDisplayName}* sent feedback:\n${opts.title}${link}`,
+      },
+    },
+  ];
+}
+
+export function buildFeedbackUpdatedBlocks(opts: {
+  title: string;
+  statusLabel: string;
+  note: string | null;
+}): (Block | KnownBlock)[] {
+  const note = opts.note ? `\n> ${opts.note.replace(/\n/g, "\n> ")}` : "";
+  return [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `Your feedback *${opts.title}* was marked *${opts.statusLabel}*.${note}`,
+      },
+    },
+  ];
+}
+
 export function buildGenericBlocks(opts: {
   actorDisplayName: string;
   message: string;
