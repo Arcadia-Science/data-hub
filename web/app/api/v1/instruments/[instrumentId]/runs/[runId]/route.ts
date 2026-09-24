@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
+import { analyticsSurface, trackEvent } from "@/lib/analytics/track";
 import { authorize, authorizeToken } from "@/lib/api/auth";
 import {
   apiError,
@@ -205,6 +206,11 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
   if (!result.ok) {
     return apiErrorFromResult(result);
   }
+
+  trackEvent("run_deleted", {
+    user_id: authResult.userId,
+    surface: analyticsSurface(authResult.authMethod),
+  });
 
   return Response.json({
     instrument_id: result.instrumentId,

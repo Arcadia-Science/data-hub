@@ -65,6 +65,7 @@ export async function findActiveFileBySuffix(
 
 export type FileDownloadLookup =
   | {
+      category: string;
       contentType: string | null;
       filename: string;
       ok: true;
@@ -81,6 +82,7 @@ export async function lookupFileForDownload(
 ): Promise<FileDownloadLookup> {
   const [file] = await db
     .select({
+      category: files.category,
       contentType: files.contentType,
       filename: files.filename,
       s3Bucket: files.s3Bucket,
@@ -112,6 +114,7 @@ export async function lookupFileForDownload(
 
   return {
     ok: true,
+    category: file.category,
     contentType: file.contentType,
     filename: file.filename,
     s3Bucket: file.s3Bucket,

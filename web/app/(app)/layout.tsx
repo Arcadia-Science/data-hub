@@ -10,6 +10,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
+import { trackEvent } from "@/lib/analytics/track";
 import { countUnread } from "@/lib/api/notifications";
 import { getSidebarInstruments } from "@/lib/api/sidebar";
 import { auth, authInstance } from "@/lib/auth";
@@ -52,6 +53,11 @@ export default async function AppLayout({
   if (!session) {
     return children;
   }
+
+  trackEvent("web_visit", {
+    user_id: session.user.id,
+    is_admin: session.user.isAdmin,
+  });
 
   return (
     <NotificationsProvider initialUnreadCount={initialUnreadCount}>

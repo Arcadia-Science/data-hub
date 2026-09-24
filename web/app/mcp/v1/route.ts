@@ -1,6 +1,7 @@
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import { authBaseURL } from "@/lib/auth";
 import { MCP_ADVERTISED_SCOPES } from "@/lib/mcp/advertised-scopes";
+import { trackMcpConnect, withMcpTracking } from "@/lib/mcp/analytics";
 import { verifyMcpToken } from "@/lib/mcp/auth";
 import { mcpCorsPreflight, withMcpCors } from "@/lib/mcp/cors";
 import { MCP_SERVER_INSTRUCTIONS } from "@/lib/mcp/instructions";
@@ -12,9 +13,10 @@ export const maxDuration = 60;
 
 const handler = createMcpHandler(
   (server) => {
-    registerTools(server);
-    registerResources(server);
-    registerPrompts(server);
+    const tracked = withMcpTracking(server);
+    registerTools(tracked);
+    registerResources(tracked);
+    registerPrompts(tracked);
   },
   {
     serverInfo: { name: "data-hub", version: "1.0.0" },
@@ -37,7 +39,12 @@ const handler = createMcpHandler(
 // below advertises the wider set — clients such as Cursor copy `scope=` when
 // requesting an authorization code, and `requiredScopes` alone would make
 // every advertised scope mandatory for every connection.
-const mcpAuthHandler = withMcpAuth(handler, verifyMcpToken, {
+const trackedHandler = (req: Request) => {
+  trackMcpConnect(req);
+  return handler(req);
+};
+
+const mcpAuthHandler = withMcpAuth(trackedHandler, verifyMcpToken, {
   required: true,
   requiredScopes: ["read"],
   resourceMetadataPath: "/.well-known/oauth-protected-resource/mcp/v1",

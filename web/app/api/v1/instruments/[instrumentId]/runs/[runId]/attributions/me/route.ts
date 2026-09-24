@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { analyticsSurface, trackEvent } from "@/lib/analytics/track";
 import { authorize } from "@/lib/api/auth";
 import { apiError, NOT_FOUND } from "@/lib/api/errors";
 import {
@@ -37,6 +38,10 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
   }
 
   await claimRuns([run.id], authResult.userId);
+  trackEvent("run_claimed", {
+    user_id: authResult.userId,
+    surface: analyticsSurface(authResult.authMethod),
+  });
 
   const byRun = await getAttributionsByRunIds([run.id]);
   return Response.json(
@@ -70,6 +75,10 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
   }
 
   await unclaimRuns([run.id], authResult.userId);
+  trackEvent("run_unclaimed", {
+    user_id: authResult.userId,
+    surface: analyticsSurface(authResult.authMethod),
+  });
 
   const byRun = await getAttributionsByRunIds([run.id]);
   return Response.json(

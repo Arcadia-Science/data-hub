@@ -7,6 +7,7 @@ import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
 import { cache } from "react";
 import { isAdminEmail } from "@/lib/admin-emails";
+import { trackEvent } from "@/lib/analytics/track";
 import { db } from "@/lib/db";
 import {
   accounts,
@@ -231,6 +232,16 @@ export const authInstance = betterAuth({
         before: async (session) => {
           await promoteAdminIfAllowlisted(session.userId);
           return { data: session };
+        },
+        after: (session, context) => {
+          const path = context?.path ?? "";
+          const method = path.includes("/sign-in/social")
+            ? "google"
+            : path.includes("/sign-in/email")
+              ? "credential"
+              : "session";
+          trackEvent("sign_in", { user_id: session.userId, method });
+          return Promise.resolve();
         },
       },
     },
