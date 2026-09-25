@@ -134,7 +134,12 @@ export function MembersTable({ data, currentUserId }: MembersTableProps) {
                       Admin
                     </Badge>
                   ) : (
-                    <Badge variant="outline">Member</Badge>
+                    <Badge
+                      className="bg-slate-200 font-normal text-slate-800 dark:bg-slate-800 dark:text-slate-200"
+                      variant="outline"
+                    >
+                      Member
+                    </Badge>
                   )}
                 </TableCell>
                 <TableCell className="overflow-hidden text-right">

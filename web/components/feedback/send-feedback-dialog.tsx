@@ -1,7 +1,7 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import { useState } from "react";
+import { SendFeedbackForm } from "@/components/feedback/send-feedback-form";
 import {
   Dialog,
   DialogContent,
@@ -10,16 +10,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { FeedbackKind } from "@/lib/api/feedback-schema";
-
-const SendFeedbackForm = dynamic(
-  () =>
-    import("@/components/feedback/send-feedback-form").then(
-      (mod) => mod.SendFeedbackForm
-    ),
-  {
-    loading: () => <p className="text-muted-foreground text-sm">Loading…</p>,
-  }
-);
 
 export interface FeedbackDraft {
   attemptedAction: string;
@@ -40,10 +30,6 @@ export const EMPTY_FEEDBACK_DRAFT: FeedbackDraft = {
 };
 
 type View = { kind: "form" } | { duplicate: boolean; kind: "sent" };
-
-export function preloadSendFeedbackForm() {
-  void import("@/components/feedback/send-feedback-form");
-}
 
 export function SendFeedbackDialog({
   onOpenChange,
