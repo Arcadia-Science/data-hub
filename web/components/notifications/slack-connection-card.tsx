@@ -111,6 +111,8 @@ const slackPreferencesSchema = z.object({
   slackCommentsAttributedEnabled: z.boolean(),
   slackCommentsParticipatedEnabled: z.boolean(),
   slackGenericEnabled: z.boolean(),
+  slackFeedbackUpdatedEnabled: z.boolean(),
+  slackFeedbackSubmittedEnabled: z.boolean().optional(),
 });
 
 export type SlackPreferences = z.infer<typeof slackPreferencesSchema>;
@@ -146,6 +148,13 @@ function Connected({
           slack_comments_participated_enabled:
             value.slackCommentsParticipatedEnabled,
           slack_generic_enabled: value.slackGenericEnabled,
+          slack_feedback_updated_enabled: value.slackFeedbackUpdatedEnabled,
+          ...(value.slackFeedbackSubmittedEnabled === undefined
+            ? {}
+            : {
+                slack_feedback_submitted_enabled:
+                  value.slackFeedbackSubmittedEnabled,
+              }),
         }),
       });
 
@@ -290,6 +299,54 @@ function Connected({
                   </Field>
                 )}
               </form.Field>
+
+              <form.Field name="slackFeedbackUpdatedEnabled">
+                {(field) => (
+                  <Field orientation="horizontal">
+                    <FieldContent>
+                      <FieldLabel htmlFor={field.name}>
+                        Updates on your feedback
+                      </FieldLabel>
+                      <FieldDescription>
+                        DM me when an admin resolves or declines feedback I
+                        sent.
+                      </FieldDescription>
+                    </FieldContent>
+                    <Switch
+                      aria-label="Send feedback updates via Slack DM"
+                      checked={field.state.value}
+                      id={field.name}
+                      name={field.name}
+                      onCheckedChange={field.handleChange}
+                    />
+                  </Field>
+                )}
+              </form.Field>
+
+              {initialPreferences.slackFeedbackSubmittedEnabled ===
+              undefined ? null : (
+                <form.Field name="slackFeedbackSubmittedEnabled">
+                  {(field) => (
+                    <Field orientation="horizontal">
+                      <FieldContent>
+                        <FieldLabel htmlFor={field.name}>
+                          New feedback
+                        </FieldLabel>
+                        <FieldDescription>
+                          DM me when someone sends feedback about Data Hub.
+                        </FieldDescription>
+                      </FieldContent>
+                      <Switch
+                        aria-label="Send new feedback notifications via Slack DM"
+                        checked={field.state.value ?? false}
+                        id={field.name}
+                        name={field.name}
+                        onCheckedChange={field.handleChange}
+                      />
+                    </Field>
+                  )}
+                </form.Field>
+              )}
             </FieldGroup>
           </form>
         )}

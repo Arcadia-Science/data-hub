@@ -55,6 +55,7 @@ export async function GET(request: NextRequest) {
       comment_id: n.commentId,
       comment_body: n.commentBody,
       body: n.body,
+      feedback_id: n.feedbackId,
       actor: n.actor,
     })),
   });

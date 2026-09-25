@@ -9,6 +9,7 @@ export const MCP_TOOL_GROUPS = {
   files: "Files",
   watchers: "Watchers",
   discovery: "Discovery",
+  feedback: "Feedback",
 } as const;
 
 export type McpToolGroup = keyof typeof MCP_TOOL_GROUPS;

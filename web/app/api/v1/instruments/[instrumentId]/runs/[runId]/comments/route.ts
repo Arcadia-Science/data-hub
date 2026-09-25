@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { analyticsSurface, trackEvent } from "@/lib/analytics/track";
 import { authorize } from "@/lib/api/auth";
 import {
   apiError,
@@ -91,6 +92,11 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     instrumentDisplayName: run.instrumentDisplayName,
     runDisplayId: runId,
     origin: new URL(request.url).origin,
+  });
+
+  trackEvent("comment_added", {
+    user_id: authResult.userId,
+    surface: analyticsSurface(authResult.authMethod),
   });
 
   return Response.json(comment, { status: 201 });

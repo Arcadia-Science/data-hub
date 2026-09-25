@@ -7,6 +7,9 @@ import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
 import { cache } from "react";
 import { isAdminEmail } from "@/lib/admin-emails";
+import { signInMethod } from "@/lib/analytics/sign-in-method";
+import { trackEvent } from "@/lib/analytics/track";
+import { appOrigin } from "@/lib/app-origin";
 import { db } from "@/lib/db";
 import {
   accounts,
@@ -36,18 +39,7 @@ function originFromUrl(value: string | undefined): string | null {
 }
 
 function resolveBaseURL(): string {
-  if (process.env.BETTER_AUTH_URL) {
-    return process.env.BETTER_AUTH_URL.replace(/\/$/, "");
-  }
-  // Prefer the stable production hostname over the per-deployment VERCEL_URL
-  // (which changes every deploy and would invalidate OAuth issuer/audience).
-  if (process.env.VERCEL_PROJECT_PRODUCTION_URL) {
-    return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL.replace(/\/$/, "")}`;
-  }
-  if (process.env.VERCEL_URL) {
-    return `https://${process.env.VERCEL_URL.replace(/\/$/, "")}`;
-  }
-  return "http://localhost:3000";
+  return appOrigin();
 }
 
 const baseURL = resolveBaseURL();
@@ -231,6 +223,13 @@ export const authInstance = betterAuth({
         before: async (session) => {
           await promoteAdminIfAllowlisted(session.userId);
           return { data: session };
+        },
+        after: (session, context) => {
+          trackEvent("sign_in", {
+            user_id: session.userId,
+            method: signInMethod(context?.path ?? ""),
+          });
+          return Promise.resolve();
         },
       },
     },

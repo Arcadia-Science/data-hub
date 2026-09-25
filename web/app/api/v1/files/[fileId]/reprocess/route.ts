@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { analyticsSurface, trackEvent } from "@/lib/analytics/track";
 import { authorize } from "@/lib/api/auth";
 import {
   apiError,
@@ -37,6 +38,11 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   if (!result.ok) {
     return apiErrorFromResult(result);
   }
+
+  trackEvent("file_reprocessed", {
+    user_id: authResult.userId,
+    surface: analyticsSurface(authResult.authMethod),
+  });
 
   return Response.json({ status: "processing", file_id: result.fileId });
 }

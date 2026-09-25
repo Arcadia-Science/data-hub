@@ -181,17 +181,6 @@ async function DashboardRunsSection({
   ];
 
   const hasFilters = hasActiveFilters(params);
-  const pendingUploadCount = runResult.data.filter(
-    (row) => row.files_pending_upload > 0
-  ).length;
-  const unattributedCount = runResult.data.filter(
-    (row) => row.attributions.length === 0
-  ).length;
-  const ranByYouCount = currentUserId
-    ? runResult.data.filter((row) =>
-        row.attributions.some((a) => a.userId === currentUserId)
-      ).length
-    : 0;
 
   return (
     <RunSelectionProvider>
@@ -203,11 +192,8 @@ async function DashboardRunsSection({
             <RunsTable
               data={runResult.data}
               hasFilters={hasFilters}
-              pendingUploadCount={pendingUploadCount}
               ranByOptions={ranByOptions}
-              ranByYouCount={ranByYouCount}
               totalCount={runResult.pagination.total}
-              unattributedCount={unattributedCount}
             />
           </TablePendingBoundary>
           <PaginationNav

@@ -38,18 +38,12 @@ export function InstrumentRunsTableShell({
   hasFilters,
   shownCount,
   totalCount,
-  pendingUploadCount,
-  unattributedCount,
-  ranByYouCount,
   children,
 }: {
   isEmpty: boolean;
   hasFilters: boolean;
   shownCount: number;
   totalCount: number;
-  pendingUploadCount: number;
-  unattributedCount: number;
-  ranByYouCount: number;
   children: React.ReactNode;
 }) {
   if (isEmpty) {
@@ -70,13 +64,7 @@ export function InstrumentRunsTableShell({
     // the fixed sidebar, which shares `z-10` in the root stacking context.
     <div className="isolate min-w-0 rounded-lg border bg-background dark:bg-muted">
       {children}
-      <RunsTableFooter
-        pendingUploadCount={pendingUploadCount}
-        ranByYouCount={ranByYouCount}
-        shownCount={shownCount}
-        totalCount={totalCount}
-        unattributedCount={unattributedCount}
-      />
+      <RunsTableFooter shownCount={shownCount} totalCount={totalCount} />
     </div>
   );
 }

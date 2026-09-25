@@ -317,16 +317,6 @@ async function InstrumentRunsSection({
     filters.ran_by !== null ||
     filters.status.length > 0;
 
-  const pendingUploadCount = runResult.data.filter(
-    (row) => row.files_pending_upload > 0
-  ).length;
-  const unattributedCount = runResult.data.filter(
-    (row) => row.attributions.length === 0
-  ).length;
-  const ranByYouCount = runResult.data.filter((row) =>
-    row.attributions.some((a) => a.userId === userId)
-  ).length;
-
   // Build the "Ran By" dropdown options: the current user (labelled "You"),
   // pinned to the top if they've attributed anything here, followed by other
   // attributors by display name, then the "Unattributed" sentinel.
@@ -349,11 +339,8 @@ async function InstrumentRunsSection({
             <InstrumentRunsTableShell
               hasFilters={hasFilters}
               isEmpty={runResult.data.length === 0}
-              pendingUploadCount={pendingUploadCount}
-              ranByYouCount={ranByYouCount}
               shownCount={runResult.data.length}
               totalCount={runResult.pagination.total}
-              unattributedCount={unattributedCount}
             >
               {renderRunsTableVariant(
                 filterOptions,

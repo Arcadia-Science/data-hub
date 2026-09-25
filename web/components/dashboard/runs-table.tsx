@@ -33,25 +33,16 @@ export function RunsTable({
   data,
   hasFilters,
   totalCount,
-  pendingUploadCount,
-  unattributedCount,
-  ranByYouCount,
   ranByOptions,
-  ranByLabel,
   emptyLabel = "No instrument runs yet.",
 }: {
   data: RunListRow[];
   hasFilters: boolean;
   totalCount: number;
-  pendingUploadCount: number;
-  unattributedCount: number;
-  ranByYouCount: number;
   // When provided, the "Ran By" column becomes a filterable dropdown bound to
   // the dashboard `ran_by` search param. Omitted on a member's runs page, where
   // every row is the same user, so a plain header is rendered instead.
   ranByOptions?: RanByOption[];
-  // Footer suffix for the ran-by count; third-person on another member's page.
-  ranByLabel?: string;
   // Copy shown when there are no rows and no active filters. Overridden on a
   // member's runs page, where "No instrument runs yet." would misdescribe the
   // user-scoped list.
@@ -151,14 +142,7 @@ export function RunsTable({
           })}
         </TableBody>
       </Table>
-      <RunsTableFooter
-        pendingUploadCount={pendingUploadCount}
-        ranByLabel={ranByLabel}
-        ranByYouCount={ranByYouCount}
-        shownCount={data.length}
-        totalCount={totalCount}
-        unattributedCount={unattributedCount}
-      />
+      <RunsTableFooter shownCount={data.length} totalCount={totalCount} />
     </div>
   );
 }

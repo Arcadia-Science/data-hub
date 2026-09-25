@@ -1,4 +1,9 @@
 import type { NextRequest } from "next/server";
+import {
+  analyticsSurface,
+  searchResultBucket,
+  trackEvent,
+} from "@/lib/analytics/track";
 import { authorize } from "@/lib/api/auth";
 import { globalSearch, type SearchScope } from "@/lib/api/search";
 
@@ -41,6 +46,13 @@ export async function GET(request: NextRequest) {
   // The builder itself returns an empty result below the minimum length, so
   // the guard here just avoids the DB round-trip for 0–1 char queries.
   const result = await globalSearch({ query, scope });
+
+  trackEvent("search_performed", {
+    user_id: authResult.userId,
+    surface: analyticsSurface(authResult.authMethod),
+    scope,
+    result_bucket: searchResultBucket(result.counts.total),
+  });
 
   return Response.json(result);
 }

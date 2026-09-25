@@ -127,16 +127,14 @@ export function WatchersTable({
                   <span className="text-muted-foreground">—</span>
                 )}
               </TableCell>
-              <TableCell>
-                {row.watcherVersion ? (
-                  <span className="font-mono">{row.watcherVersion}</span>
-                ) : (
+              <TableCell className="font-mono text-xs">
+                {row.watcherVersion ?? (
                   <span className="text-muted-foreground">—</span>
                 )}
               </TableCell>
               <TableCell>
                 <WatcherStatusBadge
-                  className="text-sm"
+                  className="text-xs"
                   status={row.effectiveStatus}
                 />
               </TableCell>
