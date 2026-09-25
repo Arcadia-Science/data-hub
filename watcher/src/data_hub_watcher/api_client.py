@@ -2,6 +2,7 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import requests
@@ -34,11 +35,13 @@ class ApiError(Exception):
         message: str,
         status_code: int = 0,
         detail: ApiErrorDetail | None = None,
+        retry_after_seconds: float | None = None,
     ) -> None:
         super().__init__(message)
         self.message = message
         self.status_code = status_code
         self.detail = detail
+        self.retry_after_seconds = retry_after_seconds
 
 
 DEFAULT_TIMEOUT: tuple[float, float] = (5, 30)  # (connect, read) seconds
@@ -79,6 +82,21 @@ class DataHubClient:
 
     def _handle_error(self, resp: requests.Response) -> None:
         """Parse an error body and raise `ApiError`."""
+        retry_after: float | None = None
+        raw_retry_after = resp.headers.get("Retry-After")
+        if raw_retry_after:
+            try:
+                retry_after = max(0.0, float(raw_retry_after))
+            except ValueError:
+                try:
+                    retry_after = max(
+                        0.0,
+                        (
+                            parsedate_to_datetime(raw_retry_after) - datetime.now(timezone.utc)
+                        ).total_seconds(),
+                    )
+                except (TypeError, ValueError, OverflowError):
+                    pass
         detail: ApiErrorDetail | None = None
         try:
             body = resp.json()
@@ -89,7 +107,12 @@ class DataHubClient:
                 msg = resp.text
         except Exception:
             msg = resp.text
-        raise ApiError(msg, status_code=resp.status_code, detail=detail)
+        raise ApiError(
+            msg,
+            status_code=resp.status_code,
+            detail=detail,
+            retry_after_seconds=retry_after,
+        )
 
     def _request(
         self,

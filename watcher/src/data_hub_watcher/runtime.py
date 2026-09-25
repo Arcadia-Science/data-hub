@@ -297,6 +297,7 @@ def build_runtime(
         stability_period=inst.stability_period_seconds,
         max_stability_wait_seconds=inst.max_stability_wait_seconds,
         on_stable_file=detector.on_stable_file,
+        on_retry_tick=detector.retry_failed_reports,
         state_db=state_db,
         recursive=inst.run_detection.recursive,
         event_reporter=reporter,
