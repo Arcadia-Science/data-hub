@@ -247,7 +247,7 @@ function GroupedRunLink({
   return (
     <li>
       <Link
-        className="flex min-h-[59px] items-start rounded-lg py-[11px] outline-none transition-colors hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-ring/50"
+        className="flex min-h-12 items-start rounded-lg py-1.5 outline-none transition-colors hover:bg-foreground/10 focus-visible:ring-2 focus-visible:ring-ring/50"
         href={notificationHref(run)}
         onClick={() => {
           if (unread) {

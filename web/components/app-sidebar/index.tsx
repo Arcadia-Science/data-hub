@@ -27,7 +27,7 @@ export function AppSidebar({
 }: AppSidebarProps) {
   return (
     <Sidebar collapsible="offcanvas">
-      <SidebarHeader className="px-2">
+      <SidebarHeader className="h-14 justify-center px-2 py-0">
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton

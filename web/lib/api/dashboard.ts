@@ -1,5 +1,6 @@
-import { and, desc, eq, isNull, type SQL, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { cache } from "react";
+import { attributedToUser } from "@/lib/api/attributions";
 import type { UserAvatarUser } from "@/lib/avatar-color";
 import { startOfTodayISO, startOfWeekISO } from "@/lib/date";
 import { db } from "@/lib/db";
@@ -320,13 +321,6 @@ export interface MyRunsStats {
     total: number;
     bytesGenerated: number;
   };
-}
-
-// Correlated EXISTS against `run_attributions`, matching the `ranBy` predicate
-// used by `buildRunListQuery` so the "My runs" cards count the same runs the
-// table below them lists.
-function attributedToUser(userId: string): SQL {
-  return sql`exists (select 1 from ${runAttributions} where ${runAttributions.runId} = ${instrumentRuns.id} and ${runAttributions.userId} = ${userId})`;
 }
 
 /**
