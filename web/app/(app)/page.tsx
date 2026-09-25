@@ -95,7 +95,9 @@ export default async function DashboardPage({
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="font-medium text-lg tracking-tight">Recent runs</h2>
+        <h2 className="font-medium text-lg tracking-tight">
+          Recent instrument runs
+        </h2>
         <Suspense fallback={<DashboardRunsSkeleton />}>
           <DashboardRunsSection currentUserId={currentUserId} params={params} />
         </Suspense>

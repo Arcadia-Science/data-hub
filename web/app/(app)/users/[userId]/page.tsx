@@ -6,6 +6,7 @@ import {
   CommentListSkeleton,
   CommentPreviewPanel,
 } from "@/components/comments/comment-list";
+import { CommentScopeFilter } from "@/components/comments/comment-scope-filter";
 import { CommentTabs } from "@/components/comments/comment-tabs";
 import {
   MyRunsStatsCards,
@@ -23,7 +24,6 @@ import {
   TablePendingBoundary,
   TablePendingProvider,
 } from "@/components/table-pending";
-import { TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UserAvatar } from "@/components/user-avatar";
 import {
   getInstruments,
@@ -58,8 +58,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     return { title: "User not found" };
   }
 
-  const title = `${possessive(profile.displayName)} instrument runs`;
-  const description = `Runs attributed to ${profile.displayName} across the lab's instruments.`;
+  const title = profile.displayName;
+  const description = `Runs and comments for ${profile.displayName}.`;
 
   return {
     title,
@@ -88,9 +88,6 @@ export default async function UserRunsPage({ params, searchParams }: Props) {
 
   const dashboardParams = dashboardParamsCache.parse(await searchParams);
   const isSelf = session.user.id === userId;
-  const heading = isSelf
-    ? "My instrument runs"
-    : `${possessive(profile.displayName)} instrument runs`;
 
   // Each section fetches its own data behind a Suspense boundary so the static
   // shell paints immediately and the stats + runs stream in independently.
@@ -99,7 +96,9 @@ export default async function UserRunsPage({ params, searchParams }: Props) {
       <section className="flex flex-col gap-6">
         <div className="flex items-center gap-3">
           <UserAvatar size="lg" user={profile} />
-          <h1 className="font-medium text-2xl tracking-tight">{heading}</h1>
+          <h1 className="font-medium text-2xl tracking-tight">
+            {profile.displayName}
+          </h1>
         </div>
         <Suspense fallback={<MyRunsStatsCardsSkeleton />}>
           <UserRunsStatsSection isSelf={isSelf} profile={profile} />
@@ -107,6 +106,9 @@ export default async function UserRunsPage({ params, searchParams }: Props) {
       </section>
 
       <section className="flex flex-col gap-3">
+        <h2 className="font-medium text-lg tracking-tight">
+          Recent instrument runs
+        </h2>
         <Suspense fallback={<DashboardRunsSkeleton />}>
           <UserRunsSection
             isSelf={isSelf}
@@ -122,14 +124,20 @@ export default async function UserRunsPage({ params, searchParams }: Props) {
             <h2 className="text-pretty font-medium text-lg tracking-tight">
               Recent comments
             </h2>
-            <TabsList>
-              <TabsTrigger value="written">
-                {writtenByLabel(profile.displayName, isSelf)}
-              </TabsTrigger>
-              <TabsTrigger value="on_runs">
-                {onRunsLabel(profile.displayName, isSelf)}
-              </TabsTrigger>
-            </TabsList>
+            <CommentScopeFilter
+              defaultValue="written"
+              options={[
+                {
+                  label: writtenByLabel(profile.displayName, isSelf),
+                  value: "written",
+                },
+                {
+                  label: onRunsLabel(profile.displayName, isSelf),
+                  value: "on_runs",
+                },
+              ]}
+              values={["written", "on_runs"]}
+            />
           </div>
           <Suspense fallback={<CommentListSkeleton />}>
             <ProfileCommentPanels isSelf={isSelf} profile={profile} />
