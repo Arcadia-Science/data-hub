@@ -7,6 +7,7 @@ import type {
   MyRunsStats,
   TopAttributor,
 } from "@/lib/api/dashboard";
+import { firstName } from "@/lib/display-name";
 import { cn, formatBytes } from "@/lib/utils";
 
 const DASHBOARD_STAT_LABELS = [
@@ -27,13 +28,6 @@ const numberFormatter = new Intl.NumberFormat("en-US");
 
 function formatNumber(n: number): string {
   return numberFormatter.format(n);
-}
-
-// The leaderboard card shows only the given (first) name to keep the value
-// compact next to the avatar; falls back to the full label when there's no
-// whitespace to split on (e.g. an email-only display name).
-function firstName(displayName: string): string {
-  return displayName.trim().split(/\s+/)[0] || displayName;
 }
 
 function StatCard({

@@ -5,12 +5,15 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 
-export function TimeOfDay({
+export function Timestamp({
+  className,
   dateTime,
   full,
   label,
 }: {
+  className?: string;
   dateTime: string;
   full: string;
   label: string;
@@ -19,7 +22,10 @@ export function TimeOfDay({
     <Tooltip>
       <TooltipTrigger asChild>
         <time
-          className="relative z-10 cursor-default whitespace-nowrap tabular-nums"
+          className={cn(
+            "relative z-10 cursor-default whitespace-nowrap tabular-nums",
+            className
+          )}
           dateTime={dateTime}
         >
           {label}

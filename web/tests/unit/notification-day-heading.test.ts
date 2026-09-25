@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calendarDayKey, formatNotificationDayHeading } from "@/lib/date";
+import { calendarDayKey, formatDayHeading } from "@/lib/date";
 
 const TZ = "America/Los_Angeles";
 
@@ -12,33 +12,27 @@ describe("calendarDayKey", () => {
   });
 });
 
-describe("formatNotificationDayHeading", () => {
+describe("formatDayHeading", () => {
   const now = new Date("2026-09-18T17:30:00.000Z"); // Fri Sep 18 10:30 AM PDT
 
   it("labels the current local day as Today", () => {
-    expect(formatNotificationDayHeading("2026-09-18", TZ, now)).toBe("Today");
+    expect(formatDayHeading("2026-09-18", TZ, now)).toBe("Today");
   });
 
   it("labels the previous local day as Yesterday", () => {
-    expect(formatNotificationDayHeading("2026-09-17", TZ, now)).toBe(
-      "Yesterday"
-    );
+    expect(formatDayHeading("2026-09-17", TZ, now)).toBe("Yesterday");
   });
 
   it("uses weekday + month day for older dates", () => {
-    expect(formatNotificationDayHeading("2026-09-16", TZ, now)).toBe(
-      "Wednesday · Sep 16"
-    );
+    expect(formatDayHeading("2026-09-16", TZ, now)).toBe("Wednesday · Sep 16");
   });
 
   it("adds the year for dates outside the current year when asked", () => {
     expect(
-      formatNotificationDayHeading("2025-09-16", TZ, now, {
+      formatDayHeading("2025-09-16", TZ, now, {
         yearIfNotCurrent: true,
       })
     ).toBe("Tuesday · Sep 16, 2025");
-    expect(formatNotificationDayHeading("2025-09-16", TZ, now)).toBe(
-      "Tuesday · Sep 16"
-    );
+    expect(formatDayHeading("2025-09-16", TZ, now)).toBe("Tuesday · Sep 16");
   });
 });

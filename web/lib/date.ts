@@ -124,11 +124,11 @@ export function calendarDayKey(date: Date, timeZone: string): string {
 }
 
 /**
- * Section heading for a notification day bucket. Today and yesterday stay
+ * Section heading for a calendar-day bucket. Today and yesterday stay
  * relative so the newest sections scan quickly; older days use the weekday
- * form from the bell mock (`Tuesday · Sep 16`, uppercased in CSS).
+ * form (`Tuesday · Sep 16`, uppercased in CSS).
  */
-export function formatNotificationDayHeading(
+export function formatDayHeading(
   dayKey: string,
   timeZone: string,
   now: Date = new Date(),

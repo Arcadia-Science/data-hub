@@ -1,21 +1,17 @@
-import { TimeOfDay } from "@/components/comments/time-of-day";
 import { CommentMarkdown } from "@/components/runs/comment-markdown";
+import { Timestamp } from "@/components/timestamp";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { CommentFeedItem } from "@/lib/api/run-comments";
 import type { CommentDaySection } from "@/lib/comments/group-by-day";
-import { CommentAuthor, CommentOverlayLink } from "./comment-parts";
+import { CommentAuthor, CommentRunLink } from "./comment-parts";
 
 export interface CommentFeedEntry extends CommentFeedItem {
+  createdAtIso: string;
   timeFull: string;
   timeLabel: string;
 }
 
 function CommentFeedRow({ comment }: { comment: CommentFeedEntry }) {
-  const createdAt =
-    typeof comment.created_at === "string"
-      ? comment.created_at
-      : comment.created_at.toISOString();
-
   return (
     <li>
       <article className="relative flex flex-col gap-2 border-border border-b py-4 transition-colors hover:bg-muted/40">
@@ -27,14 +23,14 @@ function CommentFeedRow({ comment }: { comment: CommentFeedEntry }) {
             avatarUrl: comment.user.avatarUrl,
           }}
         >
-          <TimeOfDay
-            dateTime={createdAt}
+          <Timestamp
+            dateTime={comment.createdAtIso}
             full={comment.timeFull}
             label={comment.timeLabel}
           />
         </CommentAuthor>
         <CommentMarkdown body={comment.body} />
-        <CommentOverlayLink
+        <CommentRunLink
           commentId={comment.id}
           instrumentId={comment.run.instrumentId}
           instrumentName={comment.run.instrumentDisplayName}

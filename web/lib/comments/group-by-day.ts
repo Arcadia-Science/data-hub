@@ -1,4 +1,4 @@
-import { calendarDayKey, formatNotificationDayHeading } from "@/lib/date";
+import { calendarDayKey, formatDayHeading } from "@/lib/date";
 
 export interface CommentDaySection<T> {
   dayKey: string;
@@ -29,7 +29,7 @@ export function groupCommentsByDay<T extends { created_at: Date | string }>(
     if (!section) {
       section = {
         dayKey,
-        label: formatNotificationDayHeading(dayKey, timeZone, now, {
+        label: formatDayHeading(dayKey, timeZone, now, {
           yearIfNotCurrent: true,
         }),
         items: [],

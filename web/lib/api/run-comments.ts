@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { after } from "next/server";
-import { attributedToUser } from "@/lib/api/dashboard";
+import { attributedToUser } from "@/lib/api/attributions";
 import { notifyComment } from "@/lib/api/notifications";
 import { touchRuns } from "@/lib/api/touch-runs";
 import { db } from "@/lib/db";

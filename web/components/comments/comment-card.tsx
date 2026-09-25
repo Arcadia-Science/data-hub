@@ -1,11 +1,7 @@
 import { RelativeTime } from "@/components/dashboard/relative-time";
-import { CommentMarkdown } from "@/components/runs/comment-markdown";
+import { CommentMarkdownPreview } from "@/components/runs/comment-markdown";
 import type { CommentFeedItem } from "@/lib/api/run-comments";
 import { CommentAuthor, CommentOverlayLink } from "./comment-parts";
-
-function toIsoString(value: Date | string): string {
-  return typeof value === "string" ? value : value.toISOString();
-}
 
 export function CommentCard({ comment }: { comment: CommentFeedItem }) {
   return (
@@ -18,12 +14,13 @@ export function CommentCard({ comment }: { comment: CommentFeedItem }) {
           avatarUrl: comment.user.avatarUrl,
         }}
       >
-        <RelativeTime date={toIsoString(comment.created_at)} />
+        <RelativeTime date={comment.created_at.toISOString()} />
       </CommentAuthor>
       {/* `line-clamp` doesn't clip block children such as code blocks and
-          tables, so the preview is a fixed three-line window instead. */}
-      <div className="max-h-[4.3rem] overflow-hidden">
-        <CommentMarkdown body={comment.body} />
+          tables, so the preview is a fixed three-line window. The mask fades
+          the cut so a heading or code block isn't sliced through the glyphs. */}
+      <div className="max-h-[4.3rem] overflow-hidden [mask-image:linear-gradient(to_bottom,black_calc(100%-1.5rem),transparent)]">
+        <CommentMarkdownPreview body={comment.body} />
       </div>
       <div className="mt-auto border-border border-t border-dashed pt-3">
         <CommentOverlayLink

@@ -767,6 +767,11 @@ export const runComments = pgTable(
       comment.createdAt.desc()
     ),
     index("idx_run_comments_user_id").on(comment.userId),
+    // The cross-run feed orders every active comment by recency. The
+    // per-run index above can't serve that scan.
+    index("idx_run_comments_created_at_active")
+      .on(comment.createdAt.desc(), comment.id.desc())
+      .where(sql`${comment.deletedAt} is null`),
     // Trigram GIN index backing global-search `ilike '%…%'` on comment bodies.
     // Scoped to active rows; requires `pg_trgm` (created in migration 0029).
     index("idx_run_comments_body_trgm")

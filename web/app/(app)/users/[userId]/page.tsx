@@ -3,9 +3,8 @@ import type { Metadata } from "next/types";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import {
-  CommentCardGrid,
   CommentCardGridSkeleton,
-  ViewAllCommentsLink,
+  CommentPreviewPanel,
 } from "@/components/comments/comment-card-grid";
 import { CommentTabs } from "@/components/comments/comment-tabs";
 import {
@@ -24,7 +23,7 @@ import {
   TablePendingBoundary,
   TablePendingProvider,
 } from "@/components/table-pending";
-import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UserAvatar } from "@/components/user-avatar";
 import {
   getInstruments,
@@ -35,6 +34,13 @@ import {
 import { buildRunListQuery } from "@/lib/api/instrument-runs";
 import { listCommentFeed } from "@/lib/api/run-comments";
 import { auth } from "@/lib/auth";
+import {
+  onRunsEmptyLabel,
+  onRunsLabel,
+  writtenByEmptyLabel,
+  writtenByLabel,
+} from "@/lib/comments/labels";
+import { firstName, possessive } from "@/lib/display-name";
 import { dashboardParamsCache, hasActiveFilters } from "@/lib/search-params";
 
 type DashboardParams = Awaited<ReturnType<typeof dashboardParamsCache.parse>>;
@@ -42,17 +48,6 @@ type DashboardParams = Awaited<ReturnType<typeof dashboardParamsCache.parse>>;
 interface Props {
   params: Promise<{ userId: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
-}
-
-function firstName(displayName: string): string {
-  return displayName.trim().split(/\s+/)[0] || displayName;
-}
-
-// Possessive form for headings/labels, avoiding the awkward "Nadia Ali's" —
-// the given name reads better next to the avatar.
-function possessive(displayName: string): string {
-  const name = firstName(displayName);
-  return name.endsWith("s") ? `${name}'` : `${name}'s`;
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -121,9 +116,24 @@ export default async function UserRunsPage({ params, searchParams }: Props) {
       </section>
 
       <section className="flex flex-col gap-3">
-        <Suspense fallback={<CommentCardGridSkeleton />}>
-          <ProfileCommentsSection isSelf={isSelf} profile={profile} />
-        </Suspense>
+        <CommentTabs defaultValue="written" values={["written", "on_runs"]}>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-pretty font-medium text-lg tracking-tight">
+              Recent comments
+            </h2>
+            <TabsList>
+              <TabsTrigger value="written">
+                {writtenByLabel(profile.displayName, isSelf)}
+              </TabsTrigger>
+              <TabsTrigger value="on_runs">
+                {onRunsLabel(profile.displayName, isSelf)}
+              </TabsTrigger>
+            </TabsList>
+          </div>
+          <Suspense fallback={<CommentCardGridSkeleton />}>
+            <ProfileCommentPanels isSelf={isSelf} profile={profile} />
+          </Suspense>
+        </CommentTabs>
       </section>
     </div>
   );
@@ -224,7 +234,7 @@ async function UserRunsSection({
 
 const PROFILE_COMMENTS_LIMIT = 6;
 
-async function ProfileCommentsSection({
+async function ProfileCommentPanels({
   profile,
   isSelf,
 }: {
@@ -244,51 +254,20 @@ async function ProfileCommentsSection({
     }),
   ]);
 
-  const name = firstName(profile.displayName);
-  const writtenLabel = isSelf ? "Written by you" : `Written by ${name}`;
-  const onRunsLabel = isSelf
-    ? "On your runs"
-    : `On ${possessive(profile.displayName)} runs`;
-  const writtenHref = `/comments?author=${encodeURIComponent(profile.userId)}`;
-  const onRunsHref = `/comments?ran_by=${encodeURIComponent(profile.userId)}`;
-
   return (
-    <CommentTabs defaultValue="written" values={["written", "on_runs"]}>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-pretty font-medium text-lg tracking-tight">
-          Recent comments
-        </h2>
-        <TabsList>
-          <TabsTrigger value="written">{writtenLabel}</TabsTrigger>
-          <TabsTrigger value="on_runs">{onRunsLabel}</TabsTrigger>
-        </TabsList>
-      </div>
-      <TabsContent className="flex flex-col gap-3" value="written">
-        <CommentCardGrid
-          comments={written.data}
-          emptyLabel={
-            isSelf
-              ? "You haven't written any comments yet."
-              : `${name} hasn't written any comments yet.`
-          }
-        />
-        {written.data.length > 0 ? (
-          <ViewAllCommentsLink href={writtenHref} />
-        ) : null}
-      </TabsContent>
-      <TabsContent className="flex flex-col gap-3" value="on_runs">
-        <CommentCardGrid
-          comments={onRuns.data}
-          emptyLabel={
-            isSelf
-              ? "No comments on your runs yet."
-              : `No comments on ${possessive(profile.displayName)} runs yet.`
-          }
-        />
-        {onRuns.data.length > 0 ? (
-          <ViewAllCommentsLink href={onRunsHref} />
-        ) : null}
-      </TabsContent>
-    </CommentTabs>
+    <>
+      <CommentPreviewPanel
+        comments={written.data}
+        emptyLabel={writtenByEmptyLabel(profile.displayName, isSelf)}
+        href={`/comments?author=${encodeURIComponent(profile.userId)}`}
+        value="written"
+      />
+      <CommentPreviewPanel
+        comments={onRuns.data}
+        emptyLabel={onRunsEmptyLabel(profile.displayName, isSelf)}
+        href={`/comments?ran_by=${encodeURIComponent(profile.userId)}`}
+        value="on_runs"
+      />
+    </>
   );
 }

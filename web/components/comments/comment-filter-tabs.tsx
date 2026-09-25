@@ -18,10 +18,10 @@ function FilterLink({
     <Link
       aria-current={current ? "page" : undefined}
       className={cn(
-        "inline-flex h-[calc(100%-1px)] items-center justify-center rounded-md px-2 py-1 font-medium text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "inline-flex h-[calc(100%-1px)] items-center justify-center rounded-md px-2 py-1 font-medium text-foreground/60 text-sm transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-muted-foreground dark:hover:text-foreground",
         current
-          ? "bg-background text-foreground shadow-sm"
-          : "text-foreground/60 hover:text-foreground"
+          ? "bg-background text-foreground shadow-sm dark:border-input dark:bg-input/30 dark:text-foreground"
+          : undefined
       )}
       href={href}
     >
@@ -38,7 +38,7 @@ export function CommentFilterTabs({
   currentUserId: string;
 }) {
   return (
-    <nav aria-label="Comment filters" className={tabsListVariants()}>
+    <nav aria-label="Comment filters" className={cn(tabsListVariants(), "h-9")}>
       <FilterLink current={active === "all"} href="/comments">
         All
       </FilterLink>

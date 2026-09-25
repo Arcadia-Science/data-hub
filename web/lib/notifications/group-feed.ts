@@ -1,4 +1,4 @@
-import { calendarDayKey, formatNotificationDayHeading } from "@/lib/date";
+import { calendarDayKey, formatDayHeading } from "@/lib/date";
 import type { InstrumentType } from "@/lib/db/schema";
 import type { NotificationItem } from "@/lib/notifications/types";
 
@@ -72,7 +72,7 @@ export function buildNotificationFeed(
     if (!section) {
       section = {
         dayKey,
-        label: formatNotificationDayHeading(dayKey, timeZone, now),
+        label: formatDayHeading(dayKey, timeZone, now),
         entries: [],
       };
       sectionByDay.set(dayKey, section);

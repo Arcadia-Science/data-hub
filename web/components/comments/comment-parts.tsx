@@ -45,6 +45,28 @@ export function CommentRunLabel({
   );
 }
 
+export function CommentRunLink({
+  instrumentId,
+  instrumentName,
+  runId,
+  commentId,
+}: {
+  instrumentId: string;
+  instrumentName: string;
+  runId: string;
+  commentId: string;
+}) {
+  return (
+    <Link
+      className="inline-flex min-w-0 max-w-full rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      href={runCommentHref(instrumentId, runId, commentId)}
+    >
+      <span className="sr-only">Open comment on </span>
+      <CommentRunLabel instrumentName={instrumentName} runId={runId} />
+    </Link>
+  );
+}
+
 export function CommentOverlayLink({
   instrumentId,
   instrumentName,

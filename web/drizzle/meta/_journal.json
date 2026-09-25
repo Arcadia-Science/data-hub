@@ -330,6 +330,13 @@
       "when": 1788891244869,
       "tag": "0046_many_bucky",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1790294421052,
+      "tag": "0047_first_barracuda",
+      "breakpoints": true
     }
   ]
 }

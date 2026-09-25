@@ -13,11 +13,20 @@ import {
   CommentPersonFilter,
 } from "@/components/comments/comment-filter-tabs";
 import { PaginationNav } from "@/components/pagination-nav";
-import { TablePendingProvider } from "@/components/table-pending";
-import { getUserProfile } from "@/lib/api/dashboard";
+import {
+  TablePendingBoundary,
+  TablePendingProvider,
+} from "@/components/table-pending";
+import { getUserProfile, type UserProfile } from "@/lib/api/dashboard";
 import { type CommentFeedItem, listCommentFeed } from "@/lib/api/run-comments";
 import { auth } from "@/lib/auth";
 import { groupCommentsByDay } from "@/lib/comments/group-by-day";
+import {
+  onRunsEmptyLabel,
+  onRunsLabel,
+  writtenByEmptyLabel,
+  writtenByLabel,
+} from "@/lib/comments/labels";
 import { commentsParamsCache } from "@/lib/search-params";
 import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
@@ -27,15 +36,6 @@ export const metadata: Metadata = {
 };
 
 const COMMENTS_PER_PAGE = 20;
-
-function firstName(displayName: string): string {
-  return displayName.trim().split(/\s+/)[0] || displayName;
-}
-
-function possessive(displayName: string): string {
-  const name = firstName(displayName);
-  return name.endsWith("s") ? `${name}'` : `${name}'s`;
-}
 
 export default async function CommentsPage({
   searchParams,
@@ -60,6 +60,15 @@ export default async function CommentsPage({
       : params.ran_by
         ? null
         : "all";
+  // Resolve a person filter before streaming. `notFound()` inside the
+  // Suspense child would already have sent a 200.
+  const personId =
+    params.author ??
+    (params.ran_by && params.ran_by !== currentUserId ? params.ran_by : null);
+  const person = personId ? await getUserProfile(personId) : null;
+  if (personId && !person) {
+    notFound();
+  }
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6 2xl:w-6xl">
@@ -71,12 +80,13 @@ export default async function CommentsPage({
       </div>
       <Suspense
         fallback={<CommentFeedSkeleton />}
-        key={`${params.author ?? ""}:${params.ran_by ?? ""}:${params.page}`}
+        key={`${params.author ?? ""}:${params.ran_by ?? ""}`}
       >
         <CommentsFeed
           authorId={params.author}
           currentUserId={currentUserId}
           page={params.page}
+          person={person}
           ranBy={params.ran_by}
         />
       </Suspense>
@@ -88,33 +98,32 @@ function stampTimes(
   comments: CommentFeedItem[],
   timeZone: string
 ): CommentFeedEntry[] {
-  return comments.map((comment) => {
-    const created =
-      comment.created_at instanceof Date
-        ? comment.created_at
-        : new Date(comment.created_at);
-    return {
-      ...comment,
-      timeLabel: formatInTimeZone(created, timeZone, "h:mm a"),
-      timeFull: formatInTimeZone(created, timeZone, "MMM d, yyyy h:mm a"),
-    };
-  });
+  return comments.map((comment) => ({
+    ...comment,
+    createdAtIso: comment.created_at.toISOString(),
+    timeLabel: formatInTimeZone(comment.created_at, timeZone, "h:mm a"),
+    timeFull: formatInTimeZone(
+      comment.created_at,
+      timeZone,
+      "MMM d, yyyy h:mm a"
+    ),
+  }));
 }
 
 async function CommentsFeed({
   authorId,
   currentUserId,
   page,
+  person,
   ranBy,
 }: {
   authorId: string | null;
   currentUserId: string;
   page: number;
+  person: UserProfile | null;
   ranBy: string | null;
 }) {
-  const personId =
-    authorId ?? (ranBy && ranBy !== currentUserId ? ranBy : null);
-  const [feed, timeZone, person] = await Promise.all([
+  const [feed, timeZone] = await Promise.all([
     listCommentFeed({
       authorId: authorId ?? undefined,
       page,
@@ -122,33 +131,20 @@ async function CommentsFeed({
       ranBy: ranBy ?? undefined,
     }),
     getViewerTimeZone(),
-    personId ? getUserProfile(personId) : Promise.resolve(null),
   ]);
-
-  if (personId && !person) {
-    notFound();
-  }
 
   let filterLabel: string | null = null;
   let emptyLabel = "No comments yet.";
   if (person && authorId) {
     const self = person.userId === currentUserId;
-    filterLabel = self
-      ? "Written by you"
-      : `Written by ${firstName(person.displayName)}`;
-    emptyLabel = self
-      ? "You haven't written any comments yet."
-      : `${firstName(person.displayName)} hasn't written any comments yet.`;
+    filterLabel = writtenByLabel(person.displayName, self);
+    emptyLabel = writtenByEmptyLabel(person.displayName, self);
   } else if (person) {
     const self = person.userId === currentUserId;
-    filterLabel = self
-      ? "On your runs"
-      : `On ${possessive(person.displayName)} runs`;
-    emptyLabel = self
-      ? "No comments on your runs yet."
-      : `No comments on ${possessive(person.displayName)} runs yet.`;
+    filterLabel = onRunsLabel(person.displayName, self);
+    emptyLabel = onRunsEmptyLabel(person.displayName, self);
   } else if (ranBy === currentUserId) {
-    emptyLabel = "No comments on your runs yet.";
+    emptyLabel = onRunsEmptyLabel("", true);
   }
 
   const sections = groupCommentsByDay(
@@ -160,7 +156,9 @@ async function CommentsFeed({
     <TablePendingProvider>
       <div className="flex flex-col gap-4">
         {filterLabel ? <CommentPersonFilter label={filterLabel} /> : null}
-        <CommentFeedList emptyLabel={emptyLabel} sections={sections} />
+        <TablePendingBoundary>
+          <CommentFeedList emptyLabel={emptyLabel} sections={sections} />
+        </TablePendingBoundary>
         <PaginationNav
           page={feed.pagination.page}
           pageParam="page"

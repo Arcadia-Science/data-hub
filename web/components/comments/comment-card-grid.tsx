@@ -2,6 +2,7 @@ import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { CommentCard } from "@/components/comments/comment-card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { TabsContent } from "@/components/ui/tabs";
 import type { CommentFeedItem } from "@/lib/api/run-comments";
 
 export function CommentCardGrid({
@@ -27,6 +28,25 @@ export function CommentCardGrid({
         </li>
       ))}
     </ul>
+  );
+}
+
+export function CommentPreviewPanel({
+  comments,
+  emptyLabel,
+  href,
+  value,
+}: {
+  comments: CommentFeedItem[];
+  emptyLabel: string;
+  href: string;
+  value: string;
+}) {
+  return (
+    <TabsContent className="flex flex-col gap-3" value={value}>
+      <CommentCardGrid comments={comments} emptyLabel={emptyLabel} />
+      {comments.length > 0 ? <ViewAllCommentsLink href={href} /> : null}
+    </TabsContent>
   );
 }
 

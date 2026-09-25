@@ -3,9 +3,8 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import {
-  CommentCardGrid,
   CommentCardGridSkeleton,
-  ViewAllCommentsLink,
+  CommentPreviewPanel,
 } from "@/components/comments/comment-card-grid";
 import { CommentTabs } from "@/components/comments/comment-tabs";
 import {
@@ -28,7 +27,7 @@ import {
   TablePendingBoundary,
   TablePendingProvider,
 } from "@/components/table-pending";
-import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   getDashboardStats,
   getInstruments,
@@ -41,6 +40,7 @@ import {
 import { getRecentActiveInstrumentsForDashboard } from "@/lib/api/instruments";
 import { listCommentFeed } from "@/lib/api/run-comments";
 import { auth } from "@/lib/auth";
+import { onRunsEmptyLabel } from "@/lib/comments/labels";
 import { startOfTodayISO } from "@/lib/date";
 import { dashboardParamsCache, hasActiveFilters } from "@/lib/search-params";
 import { getViewerTimeZone } from "@/lib/viewer-timezone";
@@ -104,9 +104,20 @@ export default async function DashboardPage({
       </section>
 
       <section className="flex flex-col gap-3">
-        <Suspense fallback={<CommentCardGridSkeleton />}>
-          <DashboardCommentsSection currentUserId={currentUserId} />
-        </Suspense>
+        <CommentTabs defaultValue="all" values={["all", "mine"]}>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-pretty font-medium text-lg tracking-tight">
+              Recent comments
+            </h2>
+            <TabsList>
+              <TabsTrigger value="all">All</TabsTrigger>
+              <TabsTrigger value="mine">On my runs</TabsTrigger>
+            </TabsList>
+          </div>
+          <Suspense fallback={<CommentCardGridSkeleton />}>
+            <DashboardCommentPanels currentUserId={currentUserId} />
+          </Suspense>
+        </CommentTabs>
       </section>
     </div>
   );
@@ -236,7 +247,7 @@ async function DashboardRunsSection({
   );
 }
 
-async function DashboardCommentsSection({
+async function DashboardCommentPanels({
   currentUserId,
 }: {
   currentUserId: string | null;
@@ -253,31 +264,23 @@ async function DashboardCommentsSection({
   ]);
 
   return (
-    <CommentTabs defaultValue="all" values={["all", "mine"]}>
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-pretty font-medium text-lg tracking-tight">
-          Recent comments
-        </h2>
-        <TabsList>
-          <TabsTrigger value="all">All</TabsTrigger>
-          <TabsTrigger value="mine">On my runs</TabsTrigger>
-        </TabsList>
-      </div>
-      <TabsContent className="flex flex-col gap-3" value="all">
-        <CommentCardGrid comments={all.data} emptyLabel="No comments yet." />
-        {all.data.length > 0 ? <ViewAllCommentsLink href="/comments" /> : null}
-      </TabsContent>
-      <TabsContent className="flex flex-col gap-3" value="mine">
-        <CommentCardGrid
-          comments={mine?.data ?? []}
-          emptyLabel="No comments on your runs yet."
-        />
-        {currentUserId && mine && mine.data.length > 0 ? (
-          <ViewAllCommentsLink
-            href={`/comments?ran_by=${encodeURIComponent(currentUserId)}`}
-          />
-        ) : null}
-      </TabsContent>
-    </CommentTabs>
+    <>
+      <CommentPreviewPanel
+        comments={all.data}
+        emptyLabel="No comments yet."
+        href="/comments"
+        value="all"
+      />
+      <CommentPreviewPanel
+        comments={mine?.data ?? []}
+        emptyLabel={onRunsEmptyLabel("", true)}
+        href={
+          currentUserId
+            ? `/comments?ran_by=${encodeURIComponent(currentUserId)}`
+            : "/comments"
+        }
+        value="mine"
+      />
+    </>
   );
 }
