@@ -5,11 +5,16 @@ import {
   ChevronsUpDown,
   ExternalLink,
   LogOut,
+  MessageSquarePlus,
   Settings,
 } from "lucide-react";
 import Link from "next/link";
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { DocsLink } from "@/components/docs-link";
+import {
+  preloadSendFeedbackForm,
+  SendFeedbackDialog,
+} from "@/components/feedback/send-feedback-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,6 +44,8 @@ interface UserMenuFooterProps {
 
 export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
   const { isMobile } = useSidebar();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const avatarUser = toUserAvatarUser({
     userId: user.id,
@@ -50,7 +57,7 @@ export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
   return (
     <SidebarMenu>
       <SidebarMenuItem>
-        <DropdownMenu>
+        <DropdownMenu onOpenChange={setMenuOpen} open={menuOpen}>
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton
               className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
@@ -76,6 +83,18 @@ export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
             side={isMobile ? "bottom" : "top"}
             sideOffset={4}
           >
+            <DropdownMenuItem
+              onFocus={preloadSendFeedbackForm}
+              onMouseEnter={preloadSendFeedbackForm}
+              onSelect={(event) => {
+                event.preventDefault();
+                setMenuOpen(false);
+                setFeedbackOpen(true);
+              }}
+            >
+              <MessageSquarePlus data-icon="inline-start" />
+              Feedback
+            </DropdownMenuItem>
             <DropdownMenuItem asChild>
               <DocsLink href={DOCS_URL}>
                 <BookOpen data-icon="inline-start" />
@@ -99,6 +118,10 @@ export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        <SendFeedbackDialog
+          onOpenChange={setFeedbackOpen}
+          open={feedbackOpen}
+        />
       </SidebarMenuItem>
     </SidebarMenu>
   );

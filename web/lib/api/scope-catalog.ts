@@ -116,6 +116,12 @@ export const SCOPE_METADATA: Record<Scope, ScopeMeta> = {
     description: "Send notifications to users, optionally about a run.",
     destructive: false,
   },
+  "feedback:admin": {
+    label: "Review feedback",
+    description:
+      "See every feedback report and resolve or decline them. Sending feedback does not need this.",
+    destructive: false,
+  },
 };
 
 export interface ScopePreset {

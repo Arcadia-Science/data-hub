@@ -86,6 +86,20 @@ export const archiveJobStatusEnum = pgEnum("archive_job_status", [
   "failed",
 ]);
 
+export const feedbackKindEnum = pgEnum("feedback_kind", [
+  "bug",
+  "feature_request",
+  "other",
+]);
+
+export const feedbackStatusEnum = pgEnum("feedback_status", [
+  "open",
+  "resolved",
+  "declined",
+]);
+
+export const feedbackSourceEnum = pgEnum("feedback_source", ["mcp", "web"]);
+
 export const users = pgTable("user", {
   // Better Auth-generated user ID (preserved across the Auth.js migration).
   id: text("id")
@@ -832,19 +846,78 @@ export const archiveJobs = pgTable(
   ]
 );
 
+// Product feedback (bugs and requests about Data Hub). Distinct from run
+// comments, which stay attached to a specific instrument run.
+export const feedback = pgTable(
+  "feedback",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // Reporter. `set null` so deleting a user keeps the report for admins.
+    userId: text("user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    kind: feedbackKindEnum("kind").notNull(),
+    title: text("title").notNull(),
+    description: text("description").notNull(),
+    attemptedAction: text("attempted_action"),
+    toolName: text("tool_name"),
+    errorMessage: text("error_message"),
+    source: feedbackSourceEnum("source").notNull(),
+    // OAuth client id when sent over MCP. Not a foreign key: PAT fallback
+    // auth puts the user id here, which is not an `oauth_client` row.
+    oauthClientId: text("oauth_client_id"),
+    pageUrl: text("page_url"),
+    status: feedbackStatusEnum("status").notNull().default("open"),
+    adminNote: text("admin_note"),
+    statusUpdatedBy: text("status_updated_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    statusUpdatedAt: timestamp("status_updated_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (row) => [
+    index("idx_feedback_status_created_at").on(
+      row.status,
+      row.createdAt.desc()
+    ),
+    index("idx_feedback_user_id_created_at").on(
+      row.userId,
+      row.createdAt.desc()
+    ),
+  ]
+);
+
 // Notification trigger taxonomy. `run_created` fires once per newly-created
 // run for every user who has an enabled per-instrument subscription;
 // `comment_attributed` and `comment_participated` fire on a new comment for
 // run attributees and prior commenters respectively. The `attributed`
 // variant takes precedence when a single recipient qualifies under both
 // rules so the popover doesn't show the same comment twice. `generic` rows
-// are free-text messages posted by integrations via the dispatch endpoint;
-// they alone may be anchor-less (`runId` NULL).
+// are free-text messages posted by integrations via the dispatch endpoint.
+// `feedback_submitted` and `feedback_updated` are also anchor-less (`runId`
+// NULL) and point at a `feedback` row instead.
 export const notificationTypeEnum = pgEnum("notification_type", [
   "run_created",
   "comment_attributed",
   "comment_participated",
   "generic",
+  "feedback_submitted",
+  "feedback_updated",
 ]);
 
 // One row per user holding the global notification toggles. Created on
@@ -890,6 +963,21 @@ export const notificationPreferences = pgTable("notification_preferences", {
     .notNull()
     .default(false),
   slackGenericEnabled: boolean("slack_generic_enabled")
+    .notNull()
+    .default(false),
+  // In-app: admins hear about new feedback; reporters hear when theirs is
+  // resolved or declined. Both default on. Slack counterparts default off
+  // until the user connects Slack.
+  feedbackSubmittedEnabled: boolean("feedback_submitted_enabled")
+    .notNull()
+    .default(true),
+  feedbackUpdatedEnabled: boolean("feedback_updated_enabled")
+    .notNull()
+    .default(true),
+  slackFeedbackSubmittedEnabled: boolean("slack_feedback_submitted_enabled")
+    .notNull()
+    .default(false),
+  slackFeedbackUpdatedEnabled: boolean("slack_feedback_updated_enabled")
     .notNull()
     .default(false),
   updatedAt: timestamp("updated_at", {
@@ -955,9 +1043,14 @@ export const notifications = pgTable(
     // The run the notification refers to; cascade on delete so soft- or
     // hard-deleted runs don't leave orphan rows in the popover. (Runs are
     // soft-deleted in practice, but the FK protects against accidental
-    // hard delete in tests / future cleanups.) NULL only for anchor-less
-    // `generic` rows — every other type is always run-anchored.
+    // hard delete in tests / future cleanups.) NULL for anchor-less types:
+    // `generic`, `feedback_submitted`, and `feedback_updated`.
     runId: uuid("run_id").references(() => instrumentRuns.id, {
+      onDelete: "cascade",
+    }),
+    // Set for feedback notifications. Cascade so deleting a report removes
+    // the bell rows that pointed at it.
+    feedbackId: uuid("feedback_id").references(() => feedback.id, {
       onDelete: "cascade",
     }),
     // NULL for `run_created` and `generic`. Set for both comment trigger
@@ -965,8 +1058,9 @@ export const notifications = pgTable(
     commentId: uuid("comment_id").references(() => runComments.id, {
       onDelete: "cascade",
     }),
-    // Caller-supplied message text for `generic` rows; NULL for every
-    // other type, whose copy is derived from type + actor at render time.
+    // Caller-supplied message text for `generic` and feedback rows; NULL
+    // for every other type, whose copy is derived from type + actor at
+    // render time.
     body: text("body"),
     // The user whose action produced the notification. `set null` so a
     // deleted user doesn't take the recipient's history with them.

@@ -12,11 +12,12 @@ export interface NotificationActor {
 
 export interface NotificationItem {
   actor: NotificationActor | null;
-  // Caller-supplied message for `generic` rows; null for every other type.
+  // Caller-supplied message for `generic` and feedback rows; null otherwise.
   body: string | null;
   commentBody: string | null;
   commentId: string | null;
   createdAt: string;
+  feedbackId: string | null;
   // Raw-file counts for run-anchored rows. Null on anchor-less `generic`.
   fileCount: number | null;
   filesFailed: number | null;
@@ -35,5 +36,7 @@ export interface NotificationItem {
     | "run_created"
     | "comment_attributed"
     | "comment_participated"
-    | "generic";
+    | "generic"
+    | "feedback_submitted"
+    | "feedback_updated";
 }

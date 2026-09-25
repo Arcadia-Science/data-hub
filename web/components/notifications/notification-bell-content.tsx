@@ -2,7 +2,7 @@
 
 import { BellOff, Settings } from "lucide-react";
 import Link from "next/link";
-import { type MouseEvent, useMemo } from "react";
+import { type MouseEvent, type ReactNode, useMemo } from "react";
 import { useNotifications } from "@/components/notifications/notifications-provider";
 import { RunGroup } from "@/components/notifications/run-group";
 import { Badge } from "@/components/ui/badge";
@@ -129,6 +129,22 @@ export function NotificationBellContent({
                   }
                   onNavigate?.();
                 };
+                if (entry.kind === "feedback") {
+                  return (
+                    <AnchorlessNotificationRow
+                      heading={feedbackHeading(entry.notification)}
+                      href={
+                        entry.notification.type === "feedback_submitted" &&
+                        entry.notification.feedbackId
+                          ? `/settings/feedback?item=${entry.notification.feedbackId}`
+                          : undefined
+                      }
+                      key={entry.id}
+                      notification={entry.notification}
+                      onActivate={activate}
+                    />
+                  );
+                }
                 return entry.kind === "comment" ? (
                   <CommentNotificationRow
                     key={entry.id}
@@ -136,7 +152,8 @@ export function NotificationBellContent({
                     onActivate={activate}
                   />
                 ) : (
-                  <GenericNotificationRow
+                  <AnchorlessNotificationRow
+                    heading={entry.notification.body}
                     key={entry.id}
                     notification={entry.notification}
                     onActivate={activate}
@@ -295,16 +312,32 @@ function CommentNotificationRow({
   );
 }
 
-function GenericNotificationRow({
+function feedbackHeading(n: NotificationItem): ReactNode {
+  if (n.type === "feedback_submitted") {
+    return (
+      <>
+        <span className="font-medium">{n.actor?.displayName ?? "Someone"}</span>{" "}
+        sent feedback
+      </>
+    );
+  }
+  return <span className="font-medium">Update on your feedback</span>;
+}
+
+function AnchorlessNotificationRow({
+  heading,
+  href,
   notification: n,
   onActivate,
 }: {
+  heading: ReactNode;
+  href?: string;
   notification: NotificationItem;
   onActivate: () => void;
 }) {
   const isUnread = n.readAt === null;
-  const anchored = isAnchored(n);
-
+  const anchored = href === undefined && isAnchored(n);
+  const linkHref = href ?? (anchored ? notificationHref(n) : undefined);
   const content = (
     <>
       {n.actor ? (
@@ -321,8 +354,20 @@ function GenericNotificationRow({
         <UnknownUserAvatar size="sm" />
       )}
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <p className="text-sm leading-snug">{n.body}</p>
-        {anchored ? (
+        <p className="text-sm leading-snug">{heading}</p>
+        {n.type === "feedback_submitted" || n.type === "feedback_updated" ? (
+          n.body ? (
+            <p
+              className={
+                n.type === "feedback_updated"
+                  ? "line-clamp-3 text-muted-foreground text-sm"
+                  : "truncate text-muted-foreground text-sm"
+              }
+            >
+              {n.body}
+            </p>
+          ) : null
+        ) : anchored ? (
           <p className="line-clamp-2 font-mono text-muted-foreground text-xs">
             {n.instrumentDisplayName} · {n.runDisplayId}
           </p>
@@ -337,15 +382,17 @@ function GenericNotificationRow({
     </>
   );
 
-  if (anchored) {
-    const href = notificationHref(n);
+  if (linkHref) {
     return (
       <NotificationRowShell isUnread={isUnread}>
         <Link
           className="flex items-start gap-3 px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-          href={href}
-          onClick={(event) =>
-            handleNotificationNavigate(event, href, onActivate)
+          href={linkHref}
+          onClick={
+            href
+              ? onActivate
+              : (event) =>
+                  handleNotificationNavigate(event, linkHref, onActivate)
           }
           scroll={!n.commentId}
         >

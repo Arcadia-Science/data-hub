@@ -208,8 +208,8 @@ export function TruncatedBadges({
           ))}
           <Badge
             aria-label={`${hiddenCount} more`}
-            className="font-mono text-muted-foreground"
-            variant="outline"
+            className={cn("font-mono", badgeClassName)}
+            variant={variant}
           >
             +{hiddenCount}
           </Badge>

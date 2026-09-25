@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
+import { trackEvent } from "@/lib/analytics/track";
 import { requireAdmin } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { db } from "@/lib/db";
@@ -80,6 +81,11 @@ export async function PATCH(
       image: users.image,
       is_admin: users.isAdmin,
     });
+
+  trackEvent("admin_role_changed", {
+    user_id: authResult.userId,
+    granted: isAdmin,
+  });
 
   return Response.json(updated);
 }

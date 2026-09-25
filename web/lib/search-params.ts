@@ -6,6 +6,7 @@ import {
   parseAsString,
   parseAsStringLiteral,
 } from "nuqs/server";
+import { feedbackStatusSchema } from "@/lib/api/feedback-schema";
 import { FILES_LIFECYCLE_FILTER_VALUES } from "@/lib/runs/file-lifecycle-filter";
 import { RUN_STATUS_VALUES, type RunStatus } from "@/lib/runs/run-status";
 
@@ -48,6 +49,17 @@ export const dashboardSearchParams = {
 export const dashboardParamsCache = createSearchParamsCache(
   dashboardSearchParams
 );
+
+export const feedbackSearchParams = {
+  status: parseAsStringLiteral(feedbackStatusSchema.options)
+    .withDefault("open")
+    .withOptions({ clearOnDefault: true }),
+  page: parseAsInteger.withDefault(1),
+  item: parseAsString,
+};
+
+export const feedbackParamsCache =
+  createSearchParamsCache(feedbackSearchParams);
 
 // Mirrors dashboardSearchParams but omits `instrument_id` (implicit from the
 // route segment). Sort defaults to acquisition time, newest first.

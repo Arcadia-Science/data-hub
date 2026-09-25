@@ -186,22 +186,10 @@ async function UserRunsSection({
   ]);
 
   const hasFilters = hasActiveFilters(params);
-  const pendingUploadCount = runResult.data.filter(
-    (row) => row.files_pending_upload > 0
-  ).length;
-  const unattributedCount = runResult.data.filter(
-    (row) => row.attributions.length === 0
-  ).length;
-  // Every row is attributed to this user, so the ran-by count equals the shown
-  // count; the footer still reports it for consistency with other tables.
-  const ranByYouCount = runResult.data.length;
 
   const emptyLabel = isSelf
     ? "No runs attributed to you yet."
     : `No runs attributed to ${profile.displayName} yet.`;
-  const ranByLabel = isSelf
-    ? "ran by you"
-    : `ran by ${firstName(profile.displayName)}`;
 
   return (
     <RunSelectionProvider>
@@ -214,11 +202,7 @@ async function UserRunsSection({
               data={runResult.data}
               emptyLabel={emptyLabel}
               hasFilters={hasFilters}
-              pendingUploadCount={pendingUploadCount}
-              ranByLabel={ranByLabel}
-              ranByYouCount={ranByYouCount}
               totalCount={runResult.pagination.total}
-              unattributedCount={unattributedCount}
             />
           </TablePendingBoundary>
           <PaginationNav

@@ -41,8 +41,10 @@ function InstrumentNotificationFieldSkeleton() {
 
 function NotificationsInAppCardSkeleton({
   instrumentRows = 8,
+  isAdmin = false,
 }: {
   instrumentRows?: number;
+  isAdmin?: boolean;
 }) {
   return (
     <Card>
@@ -52,6 +54,8 @@ function NotificationsInAppCardSkeleton({
           <div className="border-t" />
           <NotificationFieldSkeleton labelWidth="w-48" />
           <NotificationFieldSkeleton labelWidth="w-40" />
+          <NotificationFieldSkeleton labelWidth="w-52" />
+          {isAdmin ? <NotificationFieldSkeleton labelWidth="w-36" /> : null}
         </div>
       </CardContent>
       <div className="border-t" />
@@ -128,7 +132,10 @@ export function NotificationsSettingsFormSkeleton({
       className="flex flex-col gap-6"
       role="status"
     >
-      <NotificationsInAppCardSkeleton instrumentRows={instrumentRows} />
+      <NotificationsInAppCardSkeleton
+        instrumentRows={instrumentRows}
+        isAdmin={isAdmin}
+      />
       <SlackConnectionSectionSkeleton />
       {isAdmin ? <SlackChannelSectionSkeleton /> : null}
     </div>

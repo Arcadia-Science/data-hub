@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import { trackEvent } from "@/lib/analytics/track";
 import { requireAdmin } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { db } from "@/lib/db";
@@ -33,6 +34,8 @@ export async function DELETE(
   if (deleted.length === 0) {
     return apiError(404, NOT_FOUND, "Token not found");
   }
+
+  trackEvent("token_revoked", { user_id: authResult.userId });
 
   return new Response(null, { status: 204 });
 }

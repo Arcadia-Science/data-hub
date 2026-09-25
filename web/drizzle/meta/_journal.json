@@ -334,8 +334,15 @@
     {
       "idx": 47,
       "version": "7",
-      "when": 1790294421052,
-      "tag": "0047_first_barracuda",
+      "when": 1790279069884,
+      "tag": "0047_daffy_mongu",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1790294853948,
+      "tag": "0048_daffy_stick",
       "breakpoints": true
     }
   ]
