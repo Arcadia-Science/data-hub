@@ -1,32 +1,34 @@
-import { formatInTimeZone } from "date-fns-tz";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import {
-  type CommentFeedEntry,
   CommentFeedList,
   CommentFeedSkeleton,
 } from "@/components/comments/comment-feed-list";
 import {
-  CommentFilterTabs,
-  CommentPersonFilter,
-} from "@/components/comments/comment-filter-tabs";
-import { PaginationNav } from "@/components/pagination-nav";
+  CommentFilterSkeleton,
+  CommentFilters,
+} from "@/components/comments/comment-filters";
 import {
   TablePendingBoundary,
   TablePendingProvider,
 } from "@/components/table-pending";
 import { getUserProfile, type UserProfile } from "@/lib/api/dashboard";
-import { type CommentFeedItem, listCommentFeed } from "@/lib/api/run-comments";
+import { listCommentFeed } from "@/lib/api/run-comments";
 import { auth } from "@/lib/auth";
-import { groupCommentsByDay } from "@/lib/comments/group-by-day";
+import {
+  formatCommentDayHeading,
+  groupCommentsByDay,
+} from "@/lib/comments/group-by-day";
+import { commentsPath } from "@/lib/comments/href";
 import {
   onRunsEmptyLabel,
   onRunsLabel,
   writtenByEmptyLabel,
   writtenByLabel,
 } from "@/lib/comments/labels";
+import { toCommentRow } from "@/lib/comments/present";
 import { commentsParamsCache } from "@/lib/search-params";
 import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
@@ -53,13 +55,6 @@ export default async function CommentsPage({
 
   const params = commentsParamsCache.parse(await searchParams);
   const currentUserId = session.user.id;
-  const active = params.author
-    ? null
-    : params.ran_by === currentUserId
-      ? "mine"
-      : params.ran_by
-        ? null
-        : "all";
   // Resolve a person filter before streaming. `notFound()` inside the
   // Suspense child would already have sent a 200.
   const personId =
@@ -70,62 +65,95 @@ export default async function CommentsPage({
     notFound();
   }
 
+  const { emptyLabel, personLabel } = commentScopeCopy(
+    person,
+    params.author,
+    params.ran_by,
+    currentUserId
+  );
+  const feedKey = `${params.author ?? ""}:${params.ran_by ?? ""}`;
+
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6 2xl:w-6xl">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-pretty font-medium text-2xl tracking-tight">
-          Comments
-        </h1>
-        <CommentFilterTabs active={active} currentUserId={currentUserId} />
+    <TablePendingProvider>
+      <div className="p-6">
+        <div className="mx-auto grid w-full max-w-[1040px] grid-cols-1 items-start gap-8 lg:grid-cols-[minmax(0,1fr)_272px] lg:gap-x-12">
+          <h1 className="font-medium text-2xl tracking-tight lg:col-start-1 lg:row-start-1">
+            Comments
+          </h1>
+          <aside aria-label="Filters" className="lg:col-start-2 lg:row-start-2">
+            <Suspense fallback={<CommentFilterSkeleton />} key={feedKey}>
+              <CommentFilters
+                authorId={params.author}
+                currentUserId={currentUserId}
+                includeIds={params.instrument_id}
+                personLabel={personLabel}
+                ranBy={params.ran_by}
+              />
+            </Suspense>
+          </aside>
+          <div className="min-w-0 lg:col-start-1 lg:row-start-2">
+            <Suspense fallback={<CommentFeedSkeleton />} key={feedKey}>
+              <CommentsFeed
+                authorId={params.author}
+                emptyLabel={emptyLabel}
+                instrumentIds={params.instrument_id}
+                page={params.page}
+                ranBy={params.ran_by}
+              />
+            </Suspense>
+          </div>
+        </div>
       </div>
-      <Suspense
-        fallback={<CommentFeedSkeleton />}
-        key={`${params.author ?? ""}:${params.ran_by ?? ""}`}
-      >
-        <CommentsFeed
-          authorId={params.author}
-          currentUserId={currentUserId}
-          page={params.page}
-          person={person}
-          ranBy={params.ran_by}
-        />
-      </Suspense>
-    </div>
+    </TablePendingProvider>
   );
 }
 
-function stampTimes(
-  comments: CommentFeedItem[],
-  timeZone: string
-): CommentFeedEntry[] {
-  return comments.map((comment) => ({
-    ...comment,
-    createdAtIso: comment.created_at.toISOString(),
-    timeLabel: formatInTimeZone(comment.created_at, timeZone, "h:mm a"),
-    timeFull: formatInTimeZone(
-      comment.created_at,
-      timeZone,
-      "MMM d, yyyy h:mm a"
-    ),
-  }));
+function commentScopeCopy(
+  person: UserProfile | null,
+  authorId: string | null,
+  ranBy: string | null,
+  currentUserId: string
+): { emptyLabel: string; personLabel: string | null } {
+  if (person && authorId) {
+    const self = person.userId === currentUserId;
+    return {
+      emptyLabel: writtenByEmptyLabel(person.displayName, self),
+      personLabel: writtenByLabel(person.displayName, self),
+    };
+  }
+  if (person) {
+    const self = person.userId === currentUserId;
+    return {
+      emptyLabel: onRunsEmptyLabel(person.displayName, self),
+      personLabel: onRunsLabel(person.displayName, self),
+    };
+  }
+  if (ranBy === currentUserId) {
+    return {
+      emptyLabel: onRunsEmptyLabel("", true),
+      personLabel: null,
+    };
+  }
+  return { emptyLabel: "No comments yet.", personLabel: null };
 }
 
 async function CommentsFeed({
   authorId,
-  currentUserId,
+  emptyLabel,
+  instrumentIds,
   page,
-  person,
   ranBy,
 }: {
   authorId: string | null;
-  currentUserId: string;
+  emptyLabel: string;
+  instrumentIds: string[];
   page: number;
-  person: UserProfile | null;
   ranBy: string | null;
 }) {
   const [feed, timeZone] = await Promise.all([
     listCommentFeed({
       authorId: authorId ?? undefined,
+      instrumentIds: instrumentIds.length > 0 ? instrumentIds : undefined,
       page,
       perPage: COMMENTS_PER_PAGE,
       ranBy: ranBy ?? undefined,
@@ -133,38 +161,34 @@ async function CommentsFeed({
     getViewerTimeZone(),
   ]);
 
-  let filterLabel: string | null = null;
-  let emptyLabel = "No comments yet.";
-  if (person && authorId) {
-    const self = person.userId === currentUserId;
-    filterLabel = writtenByLabel(person.displayName, self);
-    emptyLabel = writtenByEmptyLabel(person.displayName, self);
-  } else if (person) {
-    const self = person.userId === currentUserId;
-    filterLabel = onRunsLabel(person.displayName, self);
-    emptyLabel = onRunsEmptyLabel(person.displayName, self);
-  } else if (ranBy === currentUserId) {
-    emptyLabel = onRunsEmptyLabel("", true);
-  }
-
   const sections = groupCommentsByDay(
-    stampTimes(feed.data, timeZone),
-    timeZone
+    feed.data.map((comment) => toCommentRow(comment, timeZone)),
+    timeZone,
+    new Date(),
+    formatCommentDayHeading
   );
+  const query = {
+    author: authorId,
+    instrument_id: instrumentIds,
+    ran_by: ranBy,
+  };
 
   return (
-    <TablePendingProvider>
-      <div className="flex flex-col gap-4">
-        {filterLabel ? <CommentPersonFilter label={filterLabel} /> : null}
-        <TablePendingBoundary>
-          <CommentFeedList emptyLabel={emptyLabel} sections={sections} />
-        </TablePendingBoundary>
-        <PaginationNav
-          page={feed.pagination.page}
-          pageParam="page"
-          totalPages={feed.pagination.total_pages}
-        />
-      </div>
-    </TablePendingProvider>
+    <TablePendingBoundary>
+      <CommentFeedList
+        emptyLabel={emptyLabel}
+        newerHref={
+          feed.pagination.page > 1
+            ? commentsPath({ ...query, page: feed.pagination.page - 1 })
+            : null
+        }
+        olderHref={
+          feed.pagination.page < feed.pagination.total_pages
+            ? commentsPath({ ...query, page: feed.pagination.page + 1 })
+            : null
+        }
+        sections={sections}
+      />
+    </TablePendingBoundary>
   );
 }

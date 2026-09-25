@@ -1,6 +1,7 @@
 import type { ComponentPropsWithoutRef } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { cn } from "@/lib/utils";
 
 // No `rehype-raw`, so embedded HTML stays text. Headings render as paragraphs
 // so a comment can't add an `<h1>` under the page heading. `RunCommentItem`
@@ -85,13 +86,20 @@ const blockComponents = {
 
 function MarkdownBody({
   body,
+  className,
   components,
 }: {
   body: string;
+  className?: string;
   components: Partial<Components>;
 }) {
   return (
-    <div className="break-words text-foreground text-sm leading-relaxed">
+    <div
+      className={cn(
+        "break-words text-foreground text-sm leading-relaxed",
+        className
+      )}
+    >
       <ReactMarkdown components={components} remarkPlugins={[remarkGfm]}>
         {body}
       </ReactMarkdown>
@@ -118,12 +126,19 @@ export function CommentMarkdown({ body }: { body: string }) {
   );
 }
 
-// Card previews clip to a few lines, so links below the clip would still be
-// tabbable. Render them as text; the card itself is the link.
-export function CommentMarkdownPreview({ body }: { body: string }) {
+// The comment row is one link to the run. Nested anchors in the body would
+// be invalid, so markdown links render as text.
+export function CommentMarkdownPreview({
+  body,
+  className,
+}: {
+  body: string;
+  className?: string;
+}) {
   return (
     <MarkdownBody
       body={body}
+      className={className}
       components={{
         ...blockComponents,
         a: ({ children }) => (

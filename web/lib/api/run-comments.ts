@@ -1,4 +1,14 @@
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNull,
+  lte,
+  sql,
+} from "drizzle-orm";
 import { after } from "next/server";
 import { attributedToUser } from "@/lib/api/attributions";
 import { notifyComment } from "@/lib/api/notifications";
@@ -164,6 +174,60 @@ export interface CommentFeedPage {
   };
 }
 
+export interface CommentInstrumentFacet {
+  count: number;
+  displayName: string;
+  id: string;
+}
+
+function createdFrom(dateFrom?: string) {
+  if (!dateFrom) {
+    return;
+  }
+  const from = new Date(dateFrom);
+  if (Number.isNaN(from.getTime())) {
+    return;
+  }
+  return gte(runComments.createdAt, from);
+}
+
+// `dateTo` is the start of the last included day. Advance one day so the
+// bound includes that whole day, matching the runs list filter.
+function createdUntil(dateTo?: string) {
+  if (!dateTo) {
+    return;
+  }
+  const end = new Date(dateTo);
+  if (Number.isNaN(end.getTime())) {
+    return;
+  }
+  end.setDate(end.getDate() + 1);
+  return lte(runComments.createdAt, end);
+}
+
+function commentFeedWhere(input: {
+  authorId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  instrumentIds?: string[];
+  ranBy?: string;
+}) {
+  const instrumentIds = (input.instrumentIds ?? []).filter(
+    (id) => id.length > 0
+  );
+  return and(
+    isNull(runComments.deletedAt),
+    isNull(instrumentRuns.deletedAt),
+    input.authorId ? eq(runComments.userId, input.authorId) : undefined,
+    input.ranBy ? attributedToUser(input.ranBy) : undefined,
+    instrumentIds.length > 0
+      ? inArray(instruments.id, instrumentIds)
+      : undefined,
+    createdFrom(input.dateFrom),
+    createdUntil(input.dateTo)
+  );
+}
+
 export async function listCommentFeed(input: {
   authorId?: string;
   /**
@@ -171,6 +235,9 @@ export async function listCommentFeed(input: {
    * `pagination.total` then equals the page length, not the full result set.
    */
   count?: boolean;
+  dateFrom?: string;
+  dateTo?: string;
+  instrumentIds?: string[];
   page?: number;
   perPage?: number;
   ranBy?: string;
@@ -183,12 +250,7 @@ export async function listCommentFeed(input: {
   const offset = (page - 1) * perPage;
   const includeTotal = input.count !== false;
 
-  const where = and(
-    isNull(runComments.deletedAt),
-    isNull(instrumentRuns.deletedAt),
-    input.authorId ? eq(runComments.userId, input.authorId) : undefined,
-    input.ranBy ? attributedToUser(input.ranBy) : undefined
-  );
+  const where = commentFeedWhere(input);
 
   const rowsQuery = db
     .select({
@@ -217,6 +279,7 @@ export async function listCommentFeed(input: {
     .select({ total: sql<number>`cast(count(*) as int)` })
     .from(runComments)
     .innerJoin(instrumentRuns, eq(runComments.runId, instrumentRuns.id))
+    .innerJoin(instruments, eq(instrumentRuns.instrumentId, instruments.id))
     .where(where);
 
   const [rows, totals] = await Promise.all([
@@ -242,6 +305,53 @@ export async function listCommentFeed(input: {
       total_pages: includeTotal ? Math.ceil(total / perPage) : 1,
     },
   };
+}
+
+// Counts ignore instrument selection so a checked instrument stays listed.
+// `includeIds` keeps a zero-count row when the current scope no longer
+// matches a selection, so that checkbox can still be cleared.
+export async function listCommentInstrumentFacets(input: {
+  authorId?: string;
+  includeIds?: string[];
+  ranBy?: string;
+}): Promise<CommentInstrumentFacet[]> {
+  const rows = await db
+    .select({
+      id: instruments.id,
+      displayName: instruments.displayName,
+      count: sql<number>`cast(count(*) as int)`,
+    })
+    .from(runComments)
+    .innerJoin(instrumentRuns, eq(runComments.runId, instrumentRuns.id))
+    .innerJoin(instruments, eq(instrumentRuns.instrumentId, instruments.id))
+    .where(commentFeedWhere({ authorId: input.authorId, ranBy: input.ranBy }))
+    .groupBy(instruments.id, instruments.displayName);
+
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const missing = (input.includeIds ?? []).filter(
+    (id) => id.length > 0 && !byId.has(id)
+  );
+  if (missing.length > 0) {
+    const extras = await db
+      .select({
+        id: instruments.id,
+        displayName: instruments.displayName,
+      })
+      .from(instruments)
+      .where(inArray(instruments.id, missing));
+    const names = new Map(extras.map((row) => [row.id, row.displayName]));
+    for (const id of missing) {
+      byId.set(id, {
+        id,
+        displayName: names.get(id) ?? id,
+        count: 0,
+      });
+    }
+  }
+
+  return [...byId.values()].sort((a, b) =>
+    a.displayName.localeCompare(b.displayName)
+  );
 }
 
 // ---------------------------------------------------------------------------

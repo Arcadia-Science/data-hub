@@ -1,9 +1,32 @@
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { calendarDayKey, formatDayHeading } from "@/lib/date";
 
 export interface CommentDaySection<T> {
   dayKey: string;
   items: T[];
   label: string;
+}
+
+/** Weekday heading used by the comments page (`Wednesday, September 2`). */
+export function formatCommentDayHeading(
+  dayKey: string,
+  timeZone: string,
+  now: Date = new Date()
+): string {
+  // Noon on that local day avoids DST start/end edges that midnight can hit.
+  const midday = fromZonedTime(`${dayKey}T12:00:00.000`, timeZone);
+  const currentYear = calendarDayKey(now, timeZone).slice(0, 4);
+  const pattern =
+    dayKey.slice(0, 4) === currentYear ? "EEEE, MMMM d" : "EEEE, MMMM d, yyyy";
+  return formatInTimeZone(midday, timeZone, pattern);
+}
+
+function formatRelativeDayHeading(
+  dayKey: string,
+  timeZone: string,
+  now: Date
+): string {
+  return formatDayHeading(dayKey, timeZone, now, { yearIfNotCurrent: true });
 }
 
 /**
@@ -14,7 +37,12 @@ export interface CommentDaySection<T> {
 export function groupCommentsByDay<T extends { created_at: Date | string }>(
   items: T[],
   timeZone: string,
-  now: Date = new Date()
+  now: Date = new Date(),
+  formatHeading: (
+    dayKey: string,
+    timeZone: string,
+    now: Date
+  ) => string = formatRelativeDayHeading
 ): CommentDaySection<T>[] {
   const sections: CommentDaySection<T>[] = [];
   const byDay = new Map<string, CommentDaySection<T>>();
@@ -29,9 +57,7 @@ export function groupCommentsByDay<T extends { created_at: Date | string }>(
     if (!section) {
       section = {
         dayKey,
-        label: formatDayHeading(dayKey, timeZone, now, {
-          yearIfNotCurrent: true,
-        }),
+        label: formatHeading(dayKey, timeZone, now),
         items: [],
       };
       byDay.set(dayKey, section);

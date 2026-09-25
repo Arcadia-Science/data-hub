@@ -3,9 +3,9 @@ import type { Metadata } from "next/types";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import {
-  CommentCardGridSkeleton,
+  CommentListSkeleton,
   CommentPreviewPanel,
-} from "@/components/comments/comment-card-grid";
+} from "@/components/comments/comment-list";
 import { CommentTabs } from "@/components/comments/comment-tabs";
 import {
   MyRunsStatsCards,
@@ -40,8 +40,9 @@ import {
   writtenByEmptyLabel,
   writtenByLabel,
 } from "@/lib/comments/labels";
-import { firstName, possessive } from "@/lib/display-name";
+import { possessive } from "@/lib/display-name";
 import { dashboardParamsCache, hasActiveFilters } from "@/lib/search-params";
+import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
 type DashboardParams = Awaited<ReturnType<typeof dashboardParamsCache.parse>>;
 
@@ -130,7 +131,7 @@ export default async function UserRunsPage({ params, searchParams }: Props) {
               </TabsTrigger>
             </TabsList>
           </div>
-          <Suspense fallback={<CommentCardGridSkeleton />}>
+          <Suspense fallback={<CommentListSkeleton />}>
             <ProfileCommentPanels isSelf={isSelf} profile={profile} />
           </Suspense>
         </CommentTabs>
@@ -216,7 +217,7 @@ async function UserRunsSection({
   );
 }
 
-const PROFILE_COMMENTS_LIMIT = 6;
+const PROFILE_COMMENTS_LIMIT = 4;
 
 async function ProfileCommentPanels({
   profile,
@@ -225,7 +226,7 @@ async function ProfileCommentPanels({
   profile: UserProfile;
   isSelf: boolean;
 }) {
-  const [written, onRuns] = await Promise.all([
+  const [written, onRuns, timeZone] = await Promise.all([
     listCommentFeed({
       authorId: profile.userId,
       count: false,
@@ -236,6 +237,7 @@ async function ProfileCommentPanels({
       perPage: PROFILE_COMMENTS_LIMIT,
       ranBy: profile.userId,
     }),
+    getViewerTimeZone(),
   ]);
 
   return (
@@ -244,12 +246,14 @@ async function ProfileCommentPanels({
         comments={written.data}
         emptyLabel={writtenByEmptyLabel(profile.displayName, isSelf)}
         href={`/comments?author=${encodeURIComponent(profile.userId)}`}
+        timeZone={timeZone}
         value="written"
       />
       <CommentPreviewPanel
         comments={onRuns.data}
         emptyLabel={onRunsEmptyLabel(profile.displayName, isSelf)}
         href={`/comments?ran_by=${encodeURIComponent(profile.userId)}`}
+        timeZone={timeZone}
         value="on_runs"
       />
     </>

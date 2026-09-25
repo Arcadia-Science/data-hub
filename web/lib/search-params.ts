@@ -33,6 +33,10 @@ export const dashboardSearchParams = {
   instrument_id: parseAsArrayOf(parseAsString).withDefault([]),
   date_from: parseAsString.withOptions({ clearOnDefault: true }),
   date_to: parseAsString.withOptions({ clearOnDefault: true }),
+  // Recent-comments preview on the home page. Independent of the runs
+  // table's date range. Empty means the server default (today).
+  comments_from: parseAsString.withOptions({ clearOnDefault: true }),
+  comments_to: parseAsString.withOptions({ clearOnDefault: true }),
   include_deleted: parseAsBoolean.withDefault(false),
   // Derived run status, multi-select. Empty array = no filter (show all).
   status: parseAsArrayOf(parseAsStringLiteral(RUN_STATUS_VALUES))
@@ -157,11 +161,12 @@ export const runDetailParamsCache = createSearchParamsCache(
 );
 
 // Cross-run comments page. `author` and `ran_by` are mutually exclusive in
-// the UI (a person filter replaces the All / On my runs tabs) but the query
-// applies whichever are present.
+// the UI (a person filter replaces the All / Comments on my runs choice) but
+// the query applies whichever are present. `instrument_id` narrows that scope.
 export const commentsSearchParams = {
   author: parseAsString,
   ran_by: parseAsString,
+  instrument_id: parseAsArrayOf(parseAsString).withDefault([]),
   page: parseAsInteger.withDefault(1),
 };
 

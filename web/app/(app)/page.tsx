@@ -2,11 +2,11 @@ import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
+import { CommentDateFilter } from "@/components/comments/comment-date-filter";
 import {
-  CommentCardGridSkeleton,
-  CommentPreviewPanel,
-} from "@/components/comments/comment-card-grid";
-import { CommentTabs } from "@/components/comments/comment-tabs";
+  CommentListSkeleton,
+  CommentPreview,
+} from "@/components/comments/comment-list";
 import {
   DashboardStatsCards,
   StatCardsSkeleton,
@@ -27,7 +27,6 @@ import {
   TablePendingBoundary,
   TablePendingProvider,
 } from "@/components/table-pending";
-import { TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   getDashboardStats,
   getInstruments,
@@ -40,7 +39,6 @@ import {
 import { getRecentActiveInstrumentsForDashboard } from "@/lib/api/instruments";
 import { listCommentFeed } from "@/lib/api/run-comments";
 import { auth } from "@/lib/auth";
-import { onRunsEmptyLabel } from "@/lib/comments/labels";
 import { startOfTodayISO } from "@/lib/date";
 import { dashboardParamsCache, hasActiveFilters } from "@/lib/search-params";
 import { getViewerTimeZone } from "@/lib/viewer-timezone";
@@ -48,7 +46,7 @@ import { getViewerTimeZone } from "@/lib/viewer-timezone";
 type DashboardParams = Awaited<ReturnType<typeof dashboardParamsCache.parse>>;
 
 const RECENT_INSTRUMENTS_LIMIT = 3;
-const RECENT_COMMENTS_LIMIT = 6;
+const RECENT_COMMENTS_LIMIT = 4;
 
 export default async function DashboardPage({
   searchParams,
@@ -104,20 +102,21 @@ export default async function DashboardPage({
       </section>
 
       <section className="flex flex-col gap-3">
-        <CommentTabs defaultValue="all" values={["all", "mine"]}>
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-pretty font-medium text-lg tracking-tight">
-              Recent comments
-            </h2>
-            <TabsList>
-              <TabsTrigger value="all">All</TabsTrigger>
-              <TabsTrigger value="mine">On my runs</TabsTrigger>
-            </TabsList>
-          </div>
-          <Suspense fallback={<CommentCardGridSkeleton />}>
-            <DashboardCommentPanels currentUserId={currentUserId} />
-          </Suspense>
-        </CommentTabs>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-pretty font-medium text-lg tracking-tight">
+            Recent comments
+          </h2>
+          <CommentDateFilter />
+        </div>
+        <Suspense
+          fallback={<CommentListSkeleton />}
+          key={`${params.comments_from ?? ""}:${params.comments_to ?? ""}`}
+        >
+          <DashboardCommentPanels
+            dateFrom={params.comments_from}
+            dateTo={params.comments_to}
+          />
+        </Suspense>
       </section>
     </div>
   );
@@ -234,39 +233,26 @@ async function DashboardRunsSection({
 }
 
 async function DashboardCommentPanels({
-  currentUserId,
+  dateFrom,
+  dateTo,
 }: {
-  currentUserId: string | null;
+  dateFrom: string | null;
+  dateTo: string | null;
 }) {
-  const [all, mine] = await Promise.all([
-    listCommentFeed({ count: false, perPage: RECENT_COMMENTS_LIMIT }),
-    currentUserId
-      ? listCommentFeed({
-          count: false,
-          perPage: RECENT_COMMENTS_LIMIT,
-          ranBy: currentUserId,
-        })
-      : Promise.resolve(null),
-  ]);
+  const timeZone = await getViewerTimeZone();
+  const comments = await listCommentFeed({
+    count: false,
+    dateFrom: dateFrom ?? startOfTodayISO(timeZone),
+    dateTo: dateTo ?? undefined,
+    perPage: RECENT_COMMENTS_LIMIT,
+  });
 
   return (
-    <>
-      <CommentPreviewPanel
-        comments={all.data}
-        emptyLabel="No comments yet."
-        href="/comments"
-        value="all"
-      />
-      <CommentPreviewPanel
-        comments={mine?.data ?? []}
-        emptyLabel={onRunsEmptyLabel("", true)}
-        href={
-          currentUserId
-            ? `/comments?ran_by=${encodeURIComponent(currentUserId)}`
-            : "/comments"
-        }
-        value="mine"
-      />
-    </>
+    <CommentPreview
+      comments={comments.data}
+      emptyLabel="No comments yet."
+      href="/comments"
+      timeZone={timeZone}
+    />
   );
 }
