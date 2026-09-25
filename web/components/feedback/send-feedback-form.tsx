@@ -228,7 +228,7 @@ export function SendFeedbackForm({
               More details (optional)
             </AccordionTrigger>
             <AccordionContent>
-              <div className="grid gap-4">
+              <div className="grid gap-4 pt-2">
                 <form.Field name="attemptedAction">
                   {(field) => (
                     <div className="grid gap-2">

@@ -5,6 +5,11 @@
     "ultracite/biome/react",
     "ultracite/biome/next"
   ],
+  "files": {
+    // Drizzle Kit writes these snapshots. Biome's JSON formatter collapses
+    // short arrays, and the next `drizzle-kit generate` expands them again.
+    "includes": ["!!drizzle/meta"]
+  },
   "linter": {
     "rules": {
       "a11y": {

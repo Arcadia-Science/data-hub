@@ -3,6 +3,12 @@ import type { Metadata } from "next/types";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import {
+  CommentListSkeleton,
+  CommentPreviewPanel,
+} from "@/components/comments/comment-list";
+import { CommentScopeFilter } from "@/components/comments/comment-scope-filter";
+import { CommentTabs } from "@/components/comments/comment-tabs";
+import {
   MyRunsStatsCards,
   MyRunsStatsCardsSkeleton,
 } from "@/components/dashboard/dashboard-stats";
@@ -26,25 +32,23 @@ import {
   type UserProfile,
 } from "@/lib/api/dashboard";
 import { buildRunListQuery } from "@/lib/api/instrument-runs";
+import { listCommentFeed } from "@/lib/api/run-comments";
 import { auth } from "@/lib/auth";
+import {
+  onRunsEmptyLabel,
+  onRunsLabel,
+  writtenByEmptyLabel,
+  writtenByLabel,
+} from "@/lib/comments/labels";
+import { possessive } from "@/lib/display-name";
 import { dashboardParamsCache, hasActiveFilters } from "@/lib/search-params";
+import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
 type DashboardParams = Awaited<ReturnType<typeof dashboardParamsCache.parse>>;
 
 interface Props {
   params: Promise<{ userId: string }>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
-}
-
-function firstName(displayName: string): string {
-  return displayName.trim().split(/\s+/)[0] || displayName;
-}
-
-// Possessive form for headings/labels, avoiding the awkward "Nadia Ali's" —
-// the given name reads better next to the avatar.
-function possessive(displayName: string): string {
-  const name = firstName(displayName);
-  return name.endsWith("s") ? `${name}'` : `${name}'s`;
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -54,8 +58,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     return { title: "User not found" };
   }
 
-  const title = `${possessive(profile.displayName)} instrument runs`;
-  const description = `Runs attributed to ${profile.displayName} across the lab's instruments.`;
+  const title = profile.displayName;
+  const description = `Runs and comments for ${profile.displayName}.`;
 
   return {
     title,
@@ -84,9 +88,6 @@ export default async function UserRunsPage({ params, searchParams }: Props) {
 
   const dashboardParams = dashboardParamsCache.parse(await searchParams);
   const isSelf = session.user.id === userId;
-  const heading = isSelf
-    ? "My instrument runs"
-    : `${possessive(profile.displayName)} instrument runs`;
 
   // Each section fetches its own data behind a Suspense boundary so the static
   // shell paints immediately and the stats + runs stream in independently.
@@ -95,7 +96,9 @@ export default async function UserRunsPage({ params, searchParams }: Props) {
       <section className="flex flex-col gap-6">
         <div className="flex items-center gap-3">
           <UserAvatar size="lg" user={profile} />
-          <h1 className="font-medium text-2xl tracking-tight">{heading}</h1>
+          <h1 className="font-medium text-2xl tracking-tight">
+            {profile.displayName}
+          </h1>
         </div>
         <Suspense fallback={<MyRunsStatsCardsSkeleton />}>
           <UserRunsStatsSection isSelf={isSelf} profile={profile} />
@@ -103,6 +106,9 @@ export default async function UserRunsPage({ params, searchParams }: Props) {
       </section>
 
       <section className="flex flex-col gap-3">
+        <h2 className="font-medium text-lg tracking-tight">
+          Recent instrument runs
+        </h2>
         <Suspense fallback={<DashboardRunsSkeleton />}>
           <UserRunsSection
             isSelf={isSelf}
@@ -110,6 +116,33 @@ export default async function UserRunsPage({ params, searchParams }: Props) {
             profile={profile}
           />
         </Suspense>
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <CommentTabs defaultValue="written" values={["written", "on_runs"]}>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-pretty font-medium text-lg tracking-tight">
+              Recent comments
+            </h2>
+            <CommentScopeFilter
+              defaultValue="written"
+              options={[
+                {
+                  label: writtenByLabel(profile.displayName, isSelf),
+                  value: "written",
+                },
+                {
+                  label: onRunsLabel(profile.displayName, isSelf),
+                  value: "on_runs",
+                },
+              ]}
+              values={["written", "on_runs"]}
+            />
+          </div>
+          <Suspense fallback={<CommentListSkeleton />}>
+            <ProfileCommentPanels isSelf={isSelf} profile={profile} />
+          </Suspense>
+        </CommentTabs>
       </section>
     </div>
   );
@@ -189,5 +222,48 @@ async function UserRunsSection({
         </div>
       </TablePendingProvider>
     </RunSelectionProvider>
+  );
+}
+
+const PROFILE_COMMENTS_LIMIT = 4;
+
+async function ProfileCommentPanels({
+  profile,
+  isSelf,
+}: {
+  profile: UserProfile;
+  isSelf: boolean;
+}) {
+  const [written, onRuns, timeZone] = await Promise.all([
+    listCommentFeed({
+      authorId: profile.userId,
+      count: false,
+      perPage: PROFILE_COMMENTS_LIMIT,
+    }),
+    listCommentFeed({
+      count: false,
+      perPage: PROFILE_COMMENTS_LIMIT,
+      ranBy: profile.userId,
+    }),
+    getViewerTimeZone(),
+  ]);
+
+  return (
+    <>
+      <CommentPreviewPanel
+        comments={written.data}
+        emptyLabel={writtenByEmptyLabel(profile.displayName, isSelf)}
+        href={`/comments?author=${encodeURIComponent(profile.userId)}`}
+        timeZone={timeZone}
+        value="written"
+      />
+      <CommentPreviewPanel
+        comments={onRuns.data}
+        emptyLabel={onRunsEmptyLabel(profile.displayName, isSelf)}
+        href={`/comments?ran_by=${encodeURIComponent(profile.userId)}`}
+        timeZone={timeZone}
+        value="on_runs"
+      />
+    </>
   );
 }

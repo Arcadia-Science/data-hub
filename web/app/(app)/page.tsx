@@ -2,6 +2,11 @@ import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
+import { CommentDateFilter } from "@/components/comments/comment-date-filter";
+import {
+  CommentListSkeleton,
+  CommentPreview,
+} from "@/components/comments/comment-list";
 import {
   DashboardStatsCards,
   StatCardsSkeleton,
@@ -32,6 +37,7 @@ import {
   getRanByFilterOptions,
 } from "@/lib/api/instrument-runs";
 import { getRecentActiveInstrumentsForDashboard } from "@/lib/api/instruments";
+import { listCommentFeed } from "@/lib/api/run-comments";
 import { auth } from "@/lib/auth";
 import { startOfTodayISO } from "@/lib/date";
 import { dashboardParamsCache, hasActiveFilters } from "@/lib/search-params";
@@ -40,6 +46,7 @@ import { getViewerTimeZone } from "@/lib/viewer-timezone";
 type DashboardParams = Awaited<ReturnType<typeof dashboardParamsCache.parse>>;
 
 const RECENT_INSTRUMENTS_LIMIT = 3;
+const RECENT_COMMENTS_LIMIT = 4;
 
 export default async function DashboardPage({
   searchParams,
@@ -88,9 +95,29 @@ export default async function DashboardPage({
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="font-medium text-lg tracking-tight">Recent runs</h2>
+        <h2 className="font-medium text-lg tracking-tight">
+          Recent instrument runs
+        </h2>
         <Suspense fallback={<DashboardRunsSkeleton />}>
           <DashboardRunsSection currentUserId={currentUserId} params={params} />
+        </Suspense>
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-pretty font-medium text-lg tracking-tight">
+            Recent comments
+          </h2>
+          <CommentDateFilter />
+        </div>
+        <Suspense
+          fallback={<CommentListSkeleton />}
+          key={`${params.comments_from ?? ""}:${params.comments_to ?? ""}`}
+        >
+          <DashboardCommentPanels
+            dateFrom={params.comments_from}
+            dateTo={params.comments_to}
+          />
         </Suspense>
       </section>
     </div>
@@ -204,5 +231,30 @@ async function DashboardRunsSection({
         </div>
       </TablePendingProvider>
     </RunSelectionProvider>
+  );
+}
+
+async function DashboardCommentPanels({
+  dateFrom,
+  dateTo,
+}: {
+  dateFrom: string | null;
+  dateTo: string | null;
+}) {
+  const timeZone = await getViewerTimeZone();
+  const comments = await listCommentFeed({
+    count: false,
+    dateFrom: dateFrom ?? startOfTodayISO(timeZone),
+    dateTo: dateTo ?? undefined,
+    perPage: RECENT_COMMENTS_LIMIT,
+  });
+
+  return (
+    <CommentPreview
+      comments={comments.data}
+      emptyLabel="No comments yet."
+      href="/comments"
+      timeZone={timeZone}
+    />
   );
 }

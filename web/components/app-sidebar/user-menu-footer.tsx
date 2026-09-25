@@ -11,10 +11,7 @@ import {
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { DocsLink } from "@/components/docs-link";
-import {
-  preloadSendFeedbackForm,
-  SendFeedbackDialog,
-} from "@/components/feedback/send-feedback-dialog";
+import { SendFeedbackDialog } from "@/components/feedback/send-feedback-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -84,8 +81,6 @@ export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
             sideOffset={4}
           >
             <DropdownMenuItem
-              onFocus={preloadSendFeedbackForm}
-              onMouseEnter={preloadSendFeedbackForm}
               onSelect={(event) => {
                 event.preventDefault();
                 setMenuOpen(false);

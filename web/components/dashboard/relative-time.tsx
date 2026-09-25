@@ -1,12 +1,8 @@
 "use client";
 
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { Timestamp } from "@/components/timestamp";
 import { formatDateTime } from "@/lib/date";
-import { cn, formatRelativeTime } from "@/lib/utils";
+import { formatRelativeTime } from "@/lib/utils";
 
 export function RelativeTime({
   className,
@@ -15,22 +11,12 @@ export function RelativeTime({
   className?: string;
   date: string;
 }) {
-  const full = formatDateTime(new Date(date));
-
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <time
-          className={cn(
-            "relative z-10 cursor-default whitespace-nowrap",
-            className
-          )}
-          dateTime={date}
-        >
-          {formatRelativeTime(date)}
-        </time>
-      </TooltipTrigger>
-      <TooltipContent>{full}</TooltipContent>
-    </Tooltip>
+    <Timestamp
+      className={className}
+      dateTime={date}
+      full={formatDateTime(new Date(date))}
+      label={formatRelativeTime(date)}
+    />
   );
 }

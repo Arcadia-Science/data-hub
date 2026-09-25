@@ -124,14 +124,15 @@ export function calendarDayKey(date: Date, timeZone: string): string {
 }
 
 /**
- * Section heading for a notification day bucket. Today and yesterday stay
+ * Section heading for a calendar-day bucket. Today and yesterday stay
  * relative so the newest sections scan quickly; older days use the weekday
- * form from the bell mock (`Tuesday · Sep 16`, uppercased in CSS).
+ * form (`Tuesday · Sep 16`, uppercased in CSS).
  */
-export function formatNotificationDayHeading(
+export function formatDayHeading(
   dayKey: string,
   timeZone: string,
-  now: Date = new Date()
+  now: Date = new Date(),
+  options?: { yearIfNotCurrent?: boolean }
 ): string {
   if (dayKey === calendarDayKey(now, timeZone)) {
     return "Today";
@@ -144,7 +145,12 @@ export function formatNotificationDayHeading(
   }
   // Noon on that local day avoids DST start/end edges that midnight can hit.
   const midday = fromZonedTime(`${dayKey}T12:00:00.000`, timeZone);
-  return formatInTimeZone(midday, timeZone, "EEEE · MMM d");
+  const currentYear = calendarDayKey(now, timeZone).slice(0, 4);
+  const pattern =
+    options?.yearIfNotCurrent && dayKey.slice(0, 4) !== currentYear
+      ? "EEEE · MMM d, yyyy"
+      : "EEEE · MMM d";
+  return formatInTimeZone(midday, timeZone, pattern);
 }
 
 /** Formats a date as a 12-hour time string, e.g. `"2:30 PM"`. */

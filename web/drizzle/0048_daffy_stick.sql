@@ -1,0 +1,1 @@
+CREATE INDEX "idx_run_comments_created_at_active" ON "run_comments" USING btree ("created_at" DESC NULLS LAST,"id" DESC NULLS LAST) WHERE "run_comments"."deleted_at" is null;
