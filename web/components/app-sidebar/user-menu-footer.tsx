@@ -6,6 +6,7 @@ import {
   ExternalLink,
   LogOut,
   MessageSquarePlus,
+  ScrollText,
   Settings,
 } from "lucide-react";
 import Link from "next/link";
@@ -26,10 +27,12 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { UserAvatar } from "@/components/user-avatar";
+import { useChangelogSeen } from "@/hooks/use-changelog-seen";
 import { toUserAvatarUser } from "@/lib/avatar-color";
 import { DOCS_URL } from "@/lib/docs";
 
 interface UserMenuFooterProps {
+  changelogIds: readonly string[];
   signOutAction: () => Promise<void>;
   user: {
     id: string;
@@ -39,8 +42,14 @@ interface UserMenuFooterProps {
   };
 }
 
-export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
+export function UserMenuFooter({
+  changelogIds,
+  user,
+  signOutAction,
+}: UserMenuFooterProps) {
   const { isMobile } = useSidebar();
+  const { hasUnseen } = useChangelogSeen();
+  const unseen = hasUnseen(changelogIds);
   const [menuOpen, setMenuOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -60,7 +69,15 @@ export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
               className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
               size="lg"
             >
-              <UserAvatar size="default" user={avatarUser} />
+              <span className="relative">
+                <UserAvatar size="default" user={avatarUser} />
+                {unseen ? (
+                  <span
+                    aria-hidden
+                    className="absolute top-0 right-0 size-2 rounded-full bg-primary ring-2 ring-sidebar"
+                  />
+                ) : null}
+              </span>
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-medium">
                   {avatarUser.displayName}
@@ -71,6 +88,9 @@ export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
                   </span>
                 )}
               </div>
+              {unseen ? (
+                <span className="sr-only">New changelog entries</span>
+              ) : null}
               <ChevronsUpDown className="ml-auto size-4" />
             </SidebarMenuButton>
           </DropdownMenuTrigger>
@@ -80,6 +100,25 @@ export function UserMenuFooter({ user, signOutAction }: UserMenuFooterProps) {
             side={isMobile ? "bottom" : "top"}
             sideOffset={4}
           >
+            <DropdownMenuItem asChild>
+              <Link href="/changelog">
+                <ScrollText data-icon="inline-start" />
+                {unseen ? (
+                  <>
+                    <span className="sr-only">Changelog, new entries</span>
+                    <span aria-hidden>Changelog</span>
+                  </>
+                ) : (
+                  "Changelog"
+                )}
+                {unseen ? (
+                  <span
+                    aria-hidden
+                    className="ml-auto size-2 shrink-0 rounded-full bg-primary"
+                  />
+                ) : null}
+              </Link>
+            </DropdownMenuItem>
             <DropdownMenuItem
               onSelect={(event) => {
                 event.preventDefault();

@@ -14,6 +14,7 @@ import { trackEvent } from "@/lib/analytics/track";
 import { countUnread } from "@/lib/api/notifications";
 import { getSidebarInstruments } from "@/lib/api/sidebar";
 import { auth, authInstance } from "@/lib/auth";
+import { listChangelogIds } from "@/lib/changelog/entries";
 import { SIDEBAR_COOKIE_NAME } from "@/lib/sidebar-persistence";
 
 /**
@@ -43,6 +44,7 @@ export default async function AppLayout({
   const [instruments, initialUnreadCount] = session
     ? await Promise.all([getSidebarInstruments(), countUnread(session.user.id)])
     : [[], 0];
+  const changelogIds = session ? listChangelogIds() : [];
 
   // Hydrate the sidebar's open/collapsed state from the cookie that
   // `SidebarProvider` writes on toggle. Defaulting to `true` keeps the
@@ -68,6 +70,7 @@ export default async function AppLayout({
       <ArchiveDownloadProvider>
         <SidebarProvider defaultOpen={sidebarDefaultOpen}>
           <AppSidebar
+            changelogIds={changelogIds}
             instruments={instruments}
             session={session}
             signOutAction={async () => {

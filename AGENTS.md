@@ -22,6 +22,14 @@ This repo's `developer-docs/` covers contributing to and self-hosting Data Hub i
 
 Shipped watcher changes (`watcher/src/`) need a version bump in the same branch. Follow `watcher/AGENTS.md`: bump `[project].version` in `watcher/pyproject.toml` once if it still matches the merge-base, then run `uv lock`. Do not tag the release from the feature branch.
 
+### Changelog
+
+User-visible changes need a dated entry in `web/content/changelog/` in the same branch. That includes the web app, file processing, the API, and AI assistant behavior.
+
+Name the file `YYYY-MM-DD-short-slug.md`. The date is the day the pull request merges into `staging`. The slug is lowercase words separated by hyphens. The file starts with YAML frontmatter (`title`, and `docs` when a docs page explains the change) and a short markdown body. If the change needs a new watcher version, the entry names that version. Watcher versions do not get their own entries.
+
+Do not add an entry for tests, docs, CI, dependency updates, or infrastructure.
+
 ### Watcher CLI catalog (docs site)
 
 The public [Watcher CLI](https://datahub.arcadiascience.com/docs/cli-reference) page renders from a JSON catalog generated from Click in `watcher/src/data_hub_watcher/cli_catalog.py`.

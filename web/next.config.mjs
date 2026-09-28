@@ -25,6 +25,17 @@ const nextConfig = {
     ];
   },
 
+  // `listChangelogEntries` reads these with `fs`. The tracer cannot follow
+  // that call, so a deployment would ship an empty changelog without this.
+  // The layout reads the list on every signed-in page, including nested
+  // routes such as `/instruments/[instrumentId]/runs/[runId]`.
+  outputFileTracingIncludes: {
+    "/": ["./content/changelog/**/*.md"],
+    "/*": ["./content/changelog/**/*.md"],
+    "/**": ["./content/changelog/**/*.md"],
+    "/**/*": ["./content/changelog/**/*.md"],
+  },
+
   async headers() {
     return [
       {
