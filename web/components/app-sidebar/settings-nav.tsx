@@ -1,7 +1,5 @@
 "use client";
 
-// `prefetch={false}`: a run page calls `router.refresh()` while files are in
-// progress, and each refresh makes every visible link prefetch again.
 import { ChevronLeft } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -13,6 +11,8 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 
+// Every link sets `prefetch={false}`. `router.refresh()` prefetches each
+// visible link again, and a run page refreshes while files are in progress.
 interface SettingsSection {
   // Admin-only entries are mounted into the nav only when the viewer is
   // an admin. Using composition here (filter by predicate, then render)

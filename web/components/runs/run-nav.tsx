@@ -1,7 +1,5 @@
 "use client";
 
-// `prefetch={false}`: a run page calls `router.refresh()` while files are in
-// progress, and each refresh makes every visible link prefetch again.
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -11,6 +9,9 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
+// The previous and next links set `prefetch={false}`. `router.refresh()`
+// prefetches each visible link again, and a run page refreshes while files
+// are in progress.
 interface AdjacentRun {
   href: string;
   runId: string;

@@ -11,11 +11,9 @@ import {
 } from "react";
 import { toast } from "sonner";
 
-// A run page used to call `router.refresh()` for as long as any file stayed
-// in `upload_requested`. A file that can never finish kept the tab refreshing,
-// and each refresh made the browser prefetch every visible link. The window
-// is five minutes from when this provider mounts, not from the last status
-// change, so a stuck upload stops on its own.
+// Polling stops `AUTO_REFRESH_WINDOW_MS` after in-flight files first appear
+// or the last `restart`, not after the last status change. A file stuck in
+// `upload_requested` or `processing` then can't keep a tab refreshing.
 const AUTO_REFRESH_INTERVAL_MS = 5000;
 const AUTO_REFRESH_WINDOW_MS = 5 * 60 * 1000;
 const AUTO_REFRESH_TOAST_ID = "run-auto-refresh-stopped";
@@ -40,8 +38,14 @@ export function RunAutoRefreshProvider({
   hasInFlight: boolean;
 }) {
   const router = useRouter();
-  // State, not a ref: changing it is what restarts the timer effect.
-  const [windowStartedAt, setWindowStartedAt] = useState(() => Date.now());
+  // Null until files are in flight or `restart` runs, so an idle page never
+  // starts the window. Held in state so changing it restarts the timer effect.
+  const [windowStartedAt, setWindowStartedAt] = useState<number | null>(null);
+
+  // Arm the window during render so polling starts on that same commit.
+  if (hasInFlight && windowStartedAt === null) {
+    setWindowStartedAt(Date.now());
+  }
 
   const restart = useCallback(() => {
     setWindowStartedAt(Date.now());
@@ -53,7 +57,7 @@ export function RunAutoRefreshProvider({
   );
 
   useEffect(() => {
-    if (!hasInFlight) {
+    if (!hasInFlight || windowStartedAt === null) {
       return;
     }
 
@@ -73,8 +77,9 @@ export function RunAutoRefreshProvider({
       });
     };
 
-    // A filter change after the window can bring in-progress files back.
-    // Show the toast immediately instead of refreshing once more.
+    // This effect can run again after the window has already elapsed, for
+    // example when `hasInFlight` flips back to true. Show the toast without
+    // refreshing again.
     const remaining = AUTO_REFRESH_WINDOW_MS - (Date.now() - windowStartedAt);
     if (remaining <= 0) {
       showStoppedToast();
@@ -84,7 +89,10 @@ export function RunAutoRefreshProvider({
     }
 
     const intervalId = setInterval(() => {
-      router.refresh();
+      // A background tab would spend the whole window on refreshes nobody sees.
+      if (document.visibilityState === "visible") {
+        router.refresh();
+      }
     }, AUTO_REFRESH_INTERVAL_MS);
     const timeoutId = setTimeout(() => {
       clearInterval(intervalId);

@@ -1,7 +1,5 @@
 "use client";
 
-// `prefetch={false}`: a run page calls `router.refresh()` while files are in
-// progress, and each refresh makes every visible link prefetch again.
 import { Trash2 } from "lucide-react";
 import Link from "next/link";
 import { RecordInstrumentVisit } from "@/components/recent-instrument-visit";
@@ -16,6 +14,9 @@ import {
 import { UserAvatarLink } from "@/components/user-avatar";
 import type { RunDetail } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
+
+// Breadcrumb links set `prefetch={false}`. `router.refresh()` prefetches each
+// visible link again, and a run page refreshes while files are in progress.
 
 // Must stay a client component: `formatDateTime` resolves the timezone at
 // runtime, so rendering on the server uses UTC and shifts every timestamp by

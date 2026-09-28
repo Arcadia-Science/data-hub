@@ -1,7 +1,5 @@
 "use client";
 
-// `prefetch={false}`: a run page calls `router.refresh()` while files are in
-// progress, and each refresh makes every visible link prefetch again.
 import {
   ChevronRight,
   Cpu,
@@ -32,6 +30,8 @@ import {
 import { useRecentInstruments } from "@/hooks/use-recent-instruments";
 import type { SidebarInstrument } from "@/lib/api/sidebar";
 
+// Every link sets `prefetch={false}`. `router.refresh()` prefetches each
+// visible link again, and a run page refreshes while files are in progress.
 const SIDEBAR_INSTRUMENTS_LIMIT = 5;
 
 interface MainNavProps {

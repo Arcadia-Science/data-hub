@@ -116,8 +116,8 @@ function fanOutFileDownload(refs: FileRef[]) {
 }
 
 export function RunFilesSection(props: RunFilesSectionProps) {
-  // A boolean, not `stats`: each refresh builds a new stats object, and the
-  // timer must not restart just because that object's identity changed.
+  // `detected` files wait for a manual upload, so only uploads and processing
+  // keep the page refreshing.
   const hasInFlight =
     props.stats.processingInFlight > 0 || props.stats.uploadRequested > 0;
   // TablePendingProvider wraps the whole section so the toolbar's URL updates
