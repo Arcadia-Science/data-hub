@@ -35,7 +35,12 @@ export function AppSidebar({
               className="py-1 group-data-[collapsible=icon]:justify-center"
               tooltip="Data Hub"
             >
-              <Link href="/">
+              <Link
+                href="/"
+                // `router.refresh()` prefetches every visible link again, and
+                // this logo stays visible on a run page that refreshes.
+                prefetch={false}
+              >
                 <Image
                   alt="Data Hub"
                   className="size-5.5 shrink-0"

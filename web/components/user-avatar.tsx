@@ -54,6 +54,9 @@ export function UserAvatarLink({
         className
       )}
       href={`/users/${user.userId}`}
+      // `router.refresh()` prefetches every visible link, and these avatars
+      // sit on run pages that refresh. Spread last so a caller can override.
+      prefetch={false}
       ref={ref}
       {...props}
     >

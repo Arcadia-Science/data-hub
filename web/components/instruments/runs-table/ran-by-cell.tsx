@@ -106,6 +106,9 @@ function AttributionAvatars({
             "rounded-sm outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring"
           )}
           href={`/users/${first.userId}`}
+          // Same reason as `UserAvatarLink`: a run-page refresh prefetches
+          // every visible link again.
+          prefetch={false}
         >
           {first.displayName}
           <span className="text-muted-foreground"> +{hiddenCount}</span>

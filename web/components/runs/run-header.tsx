@@ -15,6 +15,9 @@ import { UserAvatarLink } from "@/components/user-avatar";
 import type { RunDetail } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
 
+// Breadcrumb links set `prefetch={false}`. `router.refresh()` prefetches each
+// visible link again, and a run page refreshes while files are in progress.
+
 // Must stay a client component: `formatDateTime` resolves the timezone at
 // runtime, so rendering on the server uses UTC and shifts every timestamp by
 // the viewer's offset (disagreeing with the client-rendered files table).
@@ -38,19 +41,23 @@ export function RunHeader({
         <BreadcrumbList>
           <BreadcrumbItem>
             <BreadcrumbLink asChild>
-              <Link href="/">Home</Link>
+              <Link href="/" prefetch={false}>
+                Home
+              </Link>
             </BreadcrumbLink>
           </BreadcrumbItem>
           <BreadcrumbSeparator />
           <BreadcrumbItem>
             <BreadcrumbLink asChild>
-              <Link href="/instruments">Instruments</Link>
+              <Link href="/instruments" prefetch={false}>
+                Instruments
+              </Link>
             </BreadcrumbLink>
           </BreadcrumbItem>
           <BreadcrumbSeparator />
           <BreadcrumbItem>
             <BreadcrumbLink asChild>
-              <Link href={`/instruments/${run.instrumentId}`}>
+              <Link href={`/instruments/${run.instrumentId}`} prefetch={false}>
                 {run.instrumentDisplayName}
               </Link>
             </BreadcrumbLink>
