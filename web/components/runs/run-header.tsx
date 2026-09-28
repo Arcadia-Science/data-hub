@@ -1,5 +1,7 @@
 "use client";
 
+// `prefetch={false}`: a run page calls `router.refresh()` while files are in
+// progress, and each refresh makes every visible link prefetch again.
 import { Trash2 } from "lucide-react";
 import Link from "next/link";
 import { RecordInstrumentVisit } from "@/components/recent-instrument-visit";
@@ -38,19 +40,23 @@ export function RunHeader({
         <BreadcrumbList>
           <BreadcrumbItem>
             <BreadcrumbLink asChild>
-              <Link href="/">Home</Link>
+              <Link href="/" prefetch={false}>
+                Home
+              </Link>
             </BreadcrumbLink>
           </BreadcrumbItem>
           <BreadcrumbSeparator />
           <BreadcrumbItem>
             <BreadcrumbLink asChild>
-              <Link href="/instruments">Instruments</Link>
+              <Link href="/instruments" prefetch={false}>
+                Instruments
+              </Link>
             </BreadcrumbLink>
           </BreadcrumbItem>
           <BreadcrumbSeparator />
           <BreadcrumbItem>
             <BreadcrumbLink asChild>
-              <Link href={`/instruments/${run.instrumentId}`}>
+              <Link href={`/instruments/${run.instrumentId}`} prefetch={false}>
                 {run.instrumentDisplayName}
               </Link>
             </BreadcrumbLink>

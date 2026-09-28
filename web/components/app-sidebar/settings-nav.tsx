@@ -1,5 +1,7 @@
 "use client";
 
+// `prefetch={false}`: a run page calls `router.refresh()` while files are in
+// progress, and each refresh makes every visible link prefetch again.
 import { ChevronLeft } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -55,7 +57,7 @@ export function SettingsNav({ isAdmin }: { isAdmin: boolean }) {
                 className="relative justify-center font-medium"
                 tooltip="Exit settings"
               >
-                <Link href={EXIT_SETTINGS_HREF}>
+                <Link href={EXIT_SETTINGS_HREF} prefetch={false}>
                   <ChevronLeft className="absolute left-2" />
                   <span>Settings</span>
                 </Link>
@@ -75,7 +77,7 @@ export function SettingsNav({ isAdmin }: { isAdmin: boolean }) {
                   isActive={pathname.startsWith(section.href)}
                   tooltip={section.label}
                 >
-                  <Link href={section.href}>
+                  <Link href={section.href} prefetch={false}>
                     <span>{section.label}</span>
                   </Link>
                 </SidebarMenuButton>

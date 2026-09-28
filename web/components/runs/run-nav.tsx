@@ -1,5 +1,7 @@
 "use client";
 
+// `prefetch={false}`: a run page calls `router.refresh()` while files are in
+// progress, and each refresh makes every visible link prefetch again.
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -64,7 +66,9 @@ function RunNavButton({
     <Tooltip>
       <TooltipTrigger asChild>
         <Button aria-label={label} asChild size="icon-sm" variant="outline">
-          <Link href={run.href}>{icon}</Link>
+          <Link href={run.href} prefetch={false}>
+            {icon}
+          </Link>
         </Button>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>

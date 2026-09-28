@@ -1,5 +1,7 @@
 "use client";
 
+// `prefetch={false}`: a run page calls `router.refresh()` while files are in
+// progress, and each refresh makes every visible link prefetch again.
 import {
   ChevronRight,
   Cpu,
@@ -79,7 +81,7 @@ export function MainNav({ currentUserId, instruments }: MainNavProps) {
               isActive={pathname === "/"}
               tooltip="Home"
             >
-              <Link href="/">
+              <Link href="/" prefetch={false}>
                 <Home />
                 <span>Home</span>
               </Link>
@@ -92,7 +94,7 @@ export function MainNav({ currentUserId, instruments }: MainNavProps) {
               isActive={pathname === myRunsHref}
               tooltip="My runs"
             >
-              <Link href={myRunsHref}>
+              <Link href={myRunsHref} prefetch={false}>
                 <ListChecks />
                 <span>My runs</span>
               </Link>
@@ -120,7 +122,7 @@ export function MainNav({ currentUserId, instruments }: MainNavProps) {
               isActive={isWatchersActive}
               tooltip="Watchers"
             >
-              <Link href="/watchers">
+              <Link href="/watchers" prefetch={false}>
                 <Radio />
                 <span>Watchers</span>
               </Link>
@@ -173,7 +175,7 @@ function CollapsibleNavSection({
                       asChild
                       isActive={isNavItemActive(currentPath, item.href)}
                     >
-                      <Link href={item.href}>
+                      <Link href={item.href} prefetch={false}>
                         <span className="truncate">{item.label}</span>
                       </Link>
                     </SidebarMenuSubButton>
@@ -186,7 +188,7 @@ function CollapsibleNavSection({
                   asChild
                   isActive={isNavItemActive(currentPath, item.href)}
                 >
-                  <Link href={item.href}>
+                  <Link href={item.href} prefetch={false}>
                     <span className="truncate">{item.label}</span>
                   </Link>
                 </SidebarMenuSubButton>
@@ -198,7 +200,7 @@ function CollapsibleNavSection({
                 className="text-muted-foreground"
                 isActive={currentPath === viewAllHref}
               >
-                <Link href={viewAllHref}>
+                <Link href={viewAllHref} prefetch={false}>
                   <span>View all</span>
                 </Link>
               </SidebarMenuSubButton>
