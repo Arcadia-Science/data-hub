@@ -11,6 +11,8 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 
+// Every link sets `prefetch={false}`. `router.refresh()` prefetches each
+// visible link again, and a run page refreshes while files are in progress.
 interface SettingsSection {
   // Admin-only entries are mounted into the nav only when the viewer is
   // an admin. Using composition here (filter by predicate, then render)
@@ -55,7 +57,7 @@ export function SettingsNav({ isAdmin }: { isAdmin: boolean }) {
                 className="relative justify-center font-medium"
                 tooltip="Exit settings"
               >
-                <Link href={EXIT_SETTINGS_HREF}>
+                <Link href={EXIT_SETTINGS_HREF} prefetch={false}>
                   <ChevronLeft className="absolute left-2" />
                   <span>Settings</span>
                 </Link>
@@ -75,7 +77,7 @@ export function SettingsNav({ isAdmin }: { isAdmin: boolean }) {
                   isActive={pathname.startsWith(section.href)}
                   tooltip={section.label}
                 >
-                  <Link href={section.href}>
+                  <Link href={section.href} prefetch={false}>
                     <span>{section.label}</span>
                   </Link>
                 </SidebarMenuButton>

@@ -9,6 +9,9 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
+// The previous and next links set `prefetch={false}`. `router.refresh()`
+// prefetches each visible link again, and a run page refreshes while files
+// are in progress.
 interface AdjacentRun {
   href: string;
   runId: string;
@@ -64,7 +67,9 @@ function RunNavButton({
     <Tooltip>
       <TooltipTrigger asChild>
         <Button aria-label={label} asChild size="icon-sm" variant="outline">
-          <Link href={run.href}>{icon}</Link>
+          <Link href={run.href} prefetch={false}>
+            {icon}
+          </Link>
         </Button>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>

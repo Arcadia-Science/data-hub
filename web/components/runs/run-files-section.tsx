@@ -3,7 +3,7 @@
 import { Download, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { debounce, useQueryStates } from "nuqs";
-import { useEffect, useTransition } from "react";
+import { useTransition } from "react";
 import { toast } from "sonner";
 import { PaginationNav } from "@/components/pagination-nav";
 import {
@@ -42,6 +42,10 @@ import {
   FileSelectionProvider,
   useFileSelection,
 } from "./file-selection-provider";
+import {
+  RunAutoRefreshProvider,
+  useRunAutoRefresh,
+} from "./run-auto-refresh-provider";
 import {
   EditableRunFilesTable,
   ReadOnlyRunFilesTable,
@@ -112,20 +116,26 @@ function fanOutFileDownload(refs: FileRef[]) {
 }
 
 export function RunFilesSection(props: RunFilesSectionProps) {
+  // `detected` files wait for a manual upload, so only uploads and processing
+  // keep the page refreshing.
+  const hasInFlight =
+    props.stats.processingInFlight > 0 || props.stats.uploadRequested > 0;
   // TablePendingProvider wraps the whole section so the toolbar's URL updates
   // and PaginationNav share the same React transition, dimming the table
   // while the next server page streams in. The read-only path additionally
   // skips the selection provider since those runs can't be modified.
   return (
-    <TablePendingProvider>
-      {props.isDeleted ? (
-        <RunFilesSectionContent {...props} />
-      ) : (
-        <FileSelectionProvider>
+    <RunAutoRefreshProvider hasInFlight={hasInFlight}>
+      <TablePendingProvider>
+        {props.isDeleted ? (
           <RunFilesSectionContent {...props} />
-        </FileSelectionProvider>
-      )}
-    </TablePendingProvider>
+        ) : (
+          <FileSelectionProvider>
+            <RunFilesSectionContent {...props} />
+          </FileSelectionProvider>
+        )}
+      </TablePendingProvider>
+    </RunAutoRefreshProvider>
   );
 }
 
@@ -140,6 +150,7 @@ function RunFilesSectionContent({
   isDeleted,
 }: RunFilesSectionProps) {
   const router = useRouter();
+  const { actions: autoRefreshActions } = useRunAutoRefresh();
   const { actions: archiveActions } = useArchiveDownload();
   // Mutation transition (upload/dismiss/reprocess) — distinct from the table's
   // navigation transition below.
@@ -157,18 +168,6 @@ function RunFilesSectionContent({
     shallow: false,
     startTransition: tableStartTransition,
   });
-
-  // Auto-refresh while work is genuinely in flight (uploading or processing)
-  // so the UI picks up status transitions without a manual reload. Files that
-  // are merely "detected" (awaiting a manual upload) don't trigger polling.
-  const hasInFlight = stats.processingInFlight > 0 || stats.uploadRequested > 0;
-  useEffect(() => {
-    if (!hasInFlight) {
-      return;
-    }
-    const id = setInterval(() => router.refresh(), 3000);
-    return () => clearInterval(id);
-  }, [hasInFlight, router]);
 
   // The archive route resolves the active filters to a downloadable file set
   // server-side, so "Download all" honors search/category/status/dismissed
@@ -348,7 +347,12 @@ function RunFilesSectionContent({
               instrumentType={instrumentType}
               isPending={isPending}
               onReprocess={(id) =>
-                handleSingleReprocess(id, startTransition, router)
+                handleSingleReprocess(
+                  id,
+                  startTransition,
+                  router,
+                  autoRefreshActions.restart
+                )
               }
             />
           ) : (
@@ -360,7 +364,12 @@ function RunFilesSectionContent({
                 handleSingleDismiss(id, startTransition, router)
               }
               onReprocess={(id) =>
-                handleSingleReprocess(id, startTransition, router)
+                handleSingleReprocess(
+                  id,
+                  startTransition,
+                  router,
+                  autoRefreshActions.restart
+                )
               }
               onUpload={(id) =>
                 handleSingleUpload(
@@ -368,7 +377,8 @@ function RunFilesSectionContent({
                   instrumentId,
                   runId,
                   startTransition,
-                  router
+                  router,
+                  autoRefreshActions.restart
                 )
               }
             />
@@ -419,6 +429,7 @@ function BulkActionBarHost({
 }) {
   const router = useRouter();
   const { actions } = useFileSelection();
+  const { actions: autoRefreshActions } = useRunAutoRefresh();
 
   function handleBulkUpload(ids: number[]) {
     if (ids.length === 0) {
@@ -440,6 +451,7 @@ function BulkActionBarHost({
       }
       toast.success(`Upload requested for ${ids.length} file(s)`);
       actions.clear();
+      autoRefreshActions.restart();
       router.refresh();
     });
   }
@@ -491,6 +503,9 @@ function BulkActionBarHost({
         );
       }
       actions.clear();
+      if (ok > 0) {
+        autoRefreshActions.restart();
+      }
       router.refresh();
     });
   }
@@ -527,7 +542,8 @@ function handleSingleUpload(
   instrumentId: string,
   runId: string,
   startTransition: React.TransitionStartFunction,
-  router: ReturnType<typeof useRouter>
+  router: ReturnType<typeof useRouter>,
+  onWorkStarted: () => void
 ) {
   startTransition(async () => {
     const res = await fetch(
@@ -544,6 +560,7 @@ function handleSingleUpload(
       return;
     }
     toast.success("Upload requested");
+    onWorkStarted();
     router.refresh();
   });
 }
@@ -570,7 +587,8 @@ function handleSingleDismiss(
 function handleSingleReprocess(
   fileId: number,
   startTransition: React.TransitionStartFunction,
-  router: ReturnType<typeof useRouter>
+  router: ReturnType<typeof useRouter>,
+  onWorkStarted: () => void
 ) {
   startTransition(async () => {
     const res = await fetch(`/api/v1/files/${fileId}/reprocess`, {
@@ -582,6 +600,7 @@ function handleSingleReprocess(
       return;
     }
     toast.success("Reprocessing started");
+    onWorkStarted();
     router.refresh();
   });
 }
