@@ -94,7 +94,7 @@ npm run db:push
 The Lambda function is deployed as a Docker container image via [AWS SAM](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/). Infrastructure is defined in `infra/template.yaml` and includes:
 
 - S3 buckets (`arcadia-data-hub-raw-{env}` and `arcadia-data-hub-processed-{env}`)
-- The Lambda function (container image, 1024 MB memory, 300 s timeout, function URL)
+- The Lambda function (container image, 10,240 MB memory, 900 s timeout, function URL)
 - S3 event triggers for each supported instrument
 - IAM roles for Lambda execution, GitHub Actions deployment (OIDC), and Vercel web app S3 access (OIDC)
 
@@ -121,6 +121,12 @@ Secrets (`DATA_HUB_API_KEY`, etc.) are stored in GitHub environment secrets scop
 > The bucket policies that deny object writes from unapproved principals (`RawDataBucketPolicy`, `ProcessedDataBucketPolicy`, `ArchivesBucketPolicy`) are managed the same way: adding or changing them requires `s3:PutBucketPolicy`, which the CI role does **not** hold (by design — a routine CI role that could rewrite these policies could also disable the write protection). Apply changes to the deny lists via an admin `make sam-deploy`, not CI. The same policies also deny bucket-configuration actions (`s3:PutBucketPolicy`, `s3:DeleteBucketPolicy`, `s3:PutBucketAcl`, `s3:PutBucketPublicAccessBlock`, `s3:PutBucketVersioning`) to everyone except the account root and the admin principal named by the `AdminDeployPrincipalArn` stack parameter, so no other principal in the account can disable the write protection either.
 >
 > Staging roles carry a permissions boundary (`data-hub-boundary-staging`) that caps their permissions at the actions they already use and explicitly denies access to production buckets, production roles, the production Lambda function, and the production ECR repository. Managed-policy attachment, role creation, and trust-policy changes are admin-only in both environments — with them, a CI role could escalate itself to `AdministratorAccess`. Widening the boundary or changing those grants takes an admin `make sam-deploy`.
+>
+> The optional VPC, NAT gateway, and processing alarms are the same kind of change. CI cannot create a VPC, a NAT gateway, an SNS topic, or a CloudWatch alarm. The first deploy that turns `EnableS3Files` on, and any later change to that network or to the alarms, has to be an admin `make sam-deploy`. Set the GitHub environment variable `ENABLE_S3_FILES` to `true` or `false` before that deploy. The workflow passes the variable on every run, and an empty value is rejected, so a deploy that forgets it stops instead of deleting the network. `ALARM_EMAIL` is optional. A new address has to confirm the subscription from the message AWS sends.
+>
+> Turning `EnableS3Files` off later also needs an admin deploy. Lambda can take up to 20 minutes to release the network interface, so the deploy that deletes the subnets may fail once and then succeed on a retry. If the function stays in the VPC and is idle for 14 days, Lambda reclaims that interface and the next invocation fails until the interface is recreated. S3 events retry on their own. A reprocess or archive build can fail once.
+>
+> The NAT gateway is about $39 a month per environment ($0.048 an hour, plus $0.005 an hour for its public IPv4 address, plus $0.048 per GB of API traffic). S3 reads use a free gateway endpoint and do not go through the NAT gateway. Leave `EnableS3Files` at `false` unless the environment needs it.
 
 #### Local deployment
 

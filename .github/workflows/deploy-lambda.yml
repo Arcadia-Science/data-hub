@@ -69,4 +69,6 @@ jobs:
               "Environment=${{ github.ref_name }}" \
               "GitHubOidcProviderArn=${{ secrets.GH_OIDC_PROVIDER_ARN }}" \
               "VercelOidcProviderArn=${{ secrets.VERCEL_OIDC_PROVIDER_ARN }}" \
-              "AdminDeployPrincipalArn=${{ vars.ADMIN_DEPLOY_PRINCIPAL_ARN }}"
+              "AdminDeployPrincipalArn=${{ vars.ADMIN_DEPLOY_PRINCIPAL_ARN }}" \
+              "EnableS3Files=${{ vars.ENABLE_S3_FILES }}" \
+              "AlarmEmail=${{ vars.ALARM_EMAIL }}"
