@@ -2,12 +2,14 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { hasUnseen } from "@/hooks/use-changelog-seen";
+import { hasUnseen, listUnseen } from "@/hooks/use-changelog-seen";
+import { changelogIntro } from "@/lib/changelog/copy";
 import {
   listChangelogEntries,
   readChangelogEntries,
 } from "@/lib/changelog/entries";
-import { parseChangelogFile } from "@/lib/changelog/parse";
+import { groupChangelogByDate } from "@/lib/changelog/group";
+import { type ChangelogEntry, parseChangelogFile } from "@/lib/changelog/parse";
 
 const VALID = `---
 title: Recent comments
@@ -74,6 +76,19 @@ title: Plate maps
 });
 
 describe("hasUnseen", () => {
+  it("lists the ids that have not been saved", () => {
+    expect(listUnseen(["2026-09-22-runs", "2026-09-25-comments"], [])).toEqual([
+      "2026-09-22-runs",
+      "2026-09-25-comments",
+    ]);
+    expect(
+      listUnseen(
+        ["2026-09-22-runs", "2026-09-25-comments"],
+        ["2026-09-22-runs"]
+      )
+    ).toEqual(["2026-09-25-comments"]);
+  });
+
   it("is true when any current id has not been saved", () => {
     expect(hasUnseen(["2026-09-25-comments"], [])).toBe(true);
     expect(
@@ -148,5 +163,58 @@ describe("listChangelogEntries", () => {
       }
       expect(previous.date >= current.date).toBe(true);
     }
+  });
+});
+
+function entry(date: string, slug: string): ChangelogEntry {
+  return {
+    id: `${date}-${slug}`,
+    date,
+    title: slug,
+    body: "Body",
+  };
+}
+
+describe("groupChangelogByDate", () => {
+  const now = new Date("2026-09-29T17:00:00.000Z");
+  const timeZone = "America/Los_Angeles";
+
+  it("groups a day together and keeps newest first", () => {
+    const sections = groupChangelogByDate(
+      [
+        entry("2026-09-22", "runs"),
+        entry("2026-09-22", "files"),
+        entry("2026-09-02", "plates"),
+        entry("2025-09-16", "older"),
+      ],
+      timeZone,
+      now
+    );
+
+    expect(sections.map((section) => section.date)).toEqual([
+      "2026-09-22",
+      "2026-09-02",
+      "2025-09-16",
+    ]);
+    expect(sections[0]?.entries.map((item) => item.id)).toEqual([
+      "2026-09-22-runs",
+      "2026-09-22-files",
+    ]);
+    expect(sections[0]?.heading).toBe("Tuesday, September 22");
+    expect(sections[0]?.jumpLabel).toBe("September 22");
+    expect(sections[2]?.heading).toBe("Tuesday, September 16, 2025");
+    expect(sections[2]?.jumpLabel).toBe("September 16, 2025");
+  });
+});
+
+describe("changelogIntro", () => {
+  it("mentions how many entries are new", () => {
+    expect(changelogIntro(0)).toBe("What's changed in Data Hub, newest first.");
+    expect(changelogIntro(1)).toBe(
+      "What's changed in Data Hub, newest first. 1 entry is new to you."
+    );
+    expect(changelogIntro(2)).toBe(
+      "What's changed in Data Hub, newest first. 2 entries are new to you."
+    );
   });
 });

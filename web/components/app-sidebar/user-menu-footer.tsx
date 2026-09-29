@@ -29,7 +29,9 @@ import {
 import { UserAvatar } from "@/components/user-avatar";
 import { useChangelogSeen } from "@/hooks/use-changelog-seen";
 import { toUserAvatarUser } from "@/lib/avatar-color";
+import { dataHubMarkBlueClassName } from "@/lib/changelog/copy";
 import { DOCS_URL } from "@/lib/docs";
+import { cn } from "@/lib/utils";
 
 interface UserMenuFooterProps {
   changelogIds: readonly string[];
@@ -74,7 +76,10 @@ export function UserMenuFooter({
                 {unseen ? (
                   <span
                     aria-hidden
-                    className="absolute top-0 right-0 size-2 rounded-full bg-primary ring-2 ring-sidebar"
+                    className={cn(
+                      "absolute top-0 right-0 size-2 rounded-full ring-2 ring-sidebar",
+                      dataHubMarkBlueClassName
+                    )}
                   />
                 ) : null}
               </span>
@@ -114,7 +119,10 @@ export function UserMenuFooter({
                 {unseen ? (
                   <span
                     aria-hidden
-                    className="ml-auto size-2 shrink-0 rounded-full bg-primary"
+                    className={cn(
+                      "ml-auto size-2 shrink-0 rounded-full",
+                      dataHubMarkBlueClassName
+                    )}
                   />
                 ) : null}
               </Link>

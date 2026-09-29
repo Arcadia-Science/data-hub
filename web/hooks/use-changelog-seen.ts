@@ -12,23 +12,30 @@ export function hasUnseen(
   ids: readonly string[],
   seen: readonly string[]
 ): boolean {
+  return listUnseen(ids, seen).length > 0;
+}
+
+export function listUnseen(
+  ids: readonly string[],
+  seen: readonly string[]
+): string[] {
   if (ids.length === 0) {
-    return false;
+    return [];
   }
   const seenSet = new Set(seen);
-  return ids.some((id) => !seenSet.has(id));
+  return ids.filter((id) => !seenSet.has(id));
 }
 
 export function useChangelogSeen() {
   const [seen, setSeen] = useState<string[] | null>(null);
 
   useEffect(() => {
-    setSeen(readSeenIds());
+    setSeen(readChangelogSeenIds());
   }, []);
 
   useEffect(() => {
     function refresh() {
-      setSeen(readSeenIds());
+      setSeen(readChangelogSeenIds());
     }
 
     function onStorage(event: StorageEvent) {
@@ -47,7 +54,7 @@ export function useChangelogSeen() {
 
   const markSeen = useCallback((ids: readonly string[]) => {
     setSeen((current) => {
-      const base = current ?? readSeenIds();
+      const base = current ?? readChangelogSeenIds();
       const next = unionSorted(base, ids);
       if (sameIds(base, next)) {
         return base;
@@ -65,7 +72,7 @@ export function useChangelogSeen() {
   };
 }
 
-function readSeenIds(): string[] {
+export function readChangelogSeenIds(): string[] {
   if (typeof window === "undefined") {
     return [];
   }
