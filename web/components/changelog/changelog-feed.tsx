@@ -96,7 +96,7 @@ export function ChangelogFeed({
             key={section.date}
           >
             <h3
-              className="sticky top-0 z-10 -mx-8 bg-background px-8 pt-5 pb-1.5 font-semibold text-foreground/80 text-sm"
+              className="sticky top-0 z-10 -mx-8 bg-background px-8 pt-5 pb-3 font-semibold text-foreground/80 text-sm"
               id={headingId}
             >
               {section.heading}
