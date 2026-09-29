@@ -5,6 +5,7 @@ import { trackMcpConnect, withMcpTracking } from "@/lib/mcp/analytics";
 import { verifyMcpToken } from "@/lib/mcp/auth";
 import { mcpCorsPreflight, withMcpCors } from "@/lib/mcp/cors";
 import { MCP_SERVER_INSTRUCTIONS } from "@/lib/mcp/instructions";
+import { refuseListenStreams } from "@/lib/mcp/listen-streams";
 import { registerPrompts } from "@/lib/mcp/prompts";
 import { registerResources } from "@/lib/mcp/resources";
 import { registerTools } from "@/lib/mcp/tools";
@@ -19,13 +20,9 @@ const handler = createMcpHandler(
     registerPrompts(tracked);
   },
   {
+    ...refuseListenStreams,
     serverInfo: { name: "data-hub", version: "1.0.0" },
     instructions: MCP_SERVER_INSTRUCTIONS,
-    capabilities: {
-      tools: {},
-      resources: {},
-      prompts: {},
-    },
     verboseLogs: process.env.NODE_ENV !== "production",
   }
 );
