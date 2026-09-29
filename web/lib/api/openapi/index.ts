@@ -19,6 +19,12 @@ export {
   fileDetail,
   fileDismissed,
   fileReprocessed,
+  multipartAbortBody,
+  multipartAbortResponse,
+  multipartCompleteBody,
+  multipartCompleteResponse,
+  multipartPartUrlsBody,
+  multipartPartUrlsResponse,
   patchFileBody,
 } from "./schemas/files";
 export {

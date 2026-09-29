@@ -3,6 +3,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlsplit
 
 import requests
 
@@ -15,6 +16,8 @@ from data_hub_watcher.models import (
     HeartbeatResponse,
     InstrumentDetailResponse,
     InstrumentResponse,
+    MultipartCompleteResponse,
+    MultipartPartUrlsResponse,
     PresignedUploadResponse,
     RegisterWatcherResponse,
     RunDetailResponse,
@@ -98,10 +101,15 @@ class DataHubClient:
         *,
         json: dict[str, Any] | None = None,
         params: dict[str, Any] | None = None,
+        timeout: tuple[float, float] | None = None,
     ) -> requests.Response:
         try:
             resp = self._session.request(
-                method, self._url(path), json=json, params=params, timeout=self._timeout
+                method,
+                self._url(path),
+                json=json,
+                params=params,
+                timeout=timeout or self._timeout,
             )
         except requests.ConnectionError as exc:
             raise ApiError(f"Connection error: {exc}") from exc
@@ -240,7 +248,59 @@ class DataHubClient:
             f"/instruments/{instrument_id}/runs/{run_id}/request-upload-url",
             json=payload,
         )
-        return PresignedUploadResponse.model_validate(resp.json())
+        parsed = PresignedUploadResponse.model_validate(resp.json())
+        if parsed.upload_url:
+            parsed.upload_url = self._absolute_url(parsed.upload_url)
+        return parsed
+
+    def _absolute_url(self, url: str) -> str:
+        # The local S3 stand-in returns a same-origin path. S3 returns https.
+        if url.startswith("/"):
+            # Part URLs are rooted at the site (`/api/local-s3/...`), not at
+            # the `/api/v1` prefix stored on this client.
+            parsed = urlsplit(self.base_url)
+            return f"{parsed.scheme}://{parsed.netloc}{url}"
+        return url
+
+    def get_part_urls(
+        self, file_id: int, upload_id: str, part_numbers: list[int]
+    ) -> MultipartPartUrlsResponse:
+        resp = self._request(
+            "POST",
+            f"/files/{file_id}/multipart-upload/part-urls",
+            json={"upload_id": upload_id, "part_numbers": part_numbers},
+        )
+        parsed = MultipartPartUrlsResponse.model_validate(resp.json())
+        for part in parsed.parts:
+            part.upload_url = self._absolute_url(part.upload_url)
+        return parsed
+
+    def complete_multipart_upload(
+        self,
+        file_id: int,
+        upload_id: str,
+        parts: list[dict[str, Any]],
+        checksum_crc64nvme: str,
+    ) -> MultipartCompleteResponse:
+        # Assembly can take minutes. Match the route's five-minute limit.
+        resp = self._request(
+            "POST",
+            f"/files/{file_id}/multipart-upload/complete",
+            json={
+                "upload_id": upload_id,
+                "parts": parts,
+                "checksum_crc64nvme": checksum_crc64nvme,
+            },
+            timeout=(5, 300),
+        )
+        return MultipartCompleteResponse.model_validate(resp.json())
+
+    def abort_multipart_upload(self, file_id: int, upload_id: str) -> None:
+        self._request(
+            "DELETE",
+            f"/files/{file_id}/multipart-upload",
+            json={"upload_id": upload_id},
+        )
 
     def mark_file_uploaded(self, file_id: int, updates: dict[str, Any]) -> FileResponse:
         resp = self._request("PATCH", f"/files/{file_id}", json=updates)

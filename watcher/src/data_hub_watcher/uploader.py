@@ -10,6 +10,7 @@ watcher does not need AWS credentials.
 from __future__ import annotations
 import logging
 import mimetypes
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, wait
@@ -28,12 +29,73 @@ from data_hub_watcher.constants import (
 )
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import WatcherCounters
-from data_hub_watcher.models import UploadQueueFile
+from data_hub_watcher.models import PresignedUploadResponse, UploadQueueFile
 from data_hub_watcher.run_detector import FileInfo, file_created_at
 from data_hub_watcher.state import StateDB
-from data_hub_watcher.util import file_sha256
+from data_hub_watcher.util import file_digests
 
 logger = logging.getLogger(__name__)
+
+# Part URLs expire with the signing credentials, so fetch a few at a time.
+_PART_URL_BATCH = 8
+# More tries than a whole-file upload. One short network drop must not
+# cancel a multi-gigabyte file that is already mostly in S3.
+_PART_ATTEMPTS = 6
+_PART_BACKOFF_CAP_SECONDS = 30
+
+
+class _UploadStopped(Exception):
+    """The watcher was asked to stop while a part was in progress."""
+
+
+class _FileSlice:
+    """A file range with a known length, so `requests` sends Content-Length.
+
+    S3 rejects a part that arrives with chunked transfer encoding.
+    """
+
+    def __init__(self, path: Path, start: int, length: int) -> None:
+        self._handle = path.open("rb")
+        self._handle.seek(start)
+        self._left = length
+        self._length = length
+
+    def __len__(self) -> int:
+        return self._length
+
+    def read(self, size: int = -1) -> bytes:
+        if self._left <= 0:
+            return b""
+        if size < 0 or size > self._left:
+            size = self._left
+        chunk = self._handle.read(size)
+        self._left -= len(chunk)
+        return chunk
+
+    def close(self) -> None:
+        self._handle.close()
+
+
+def _xml_tag(body: str, tag: str) -> str | None:
+    match = re.search(rf"<{tag}>([^<]*)</{tag}>", body)
+    return match.group(1) if match else None
+
+
+def s3_error_details(exc: BaseException) -> dict[str, str]:
+    """Pull S3's error code and message out of an HTTP error body."""
+    details = {"error": str(exc)}
+    response = getattr(exc, "response", None)
+    text = getattr(response, "text", "") if response is not None else ""
+    if not text:
+        return details
+    code = _xml_tag(text, "Code")
+    message = _xml_tag(text, "Message")
+    if code:
+        details["s3_code"] = code
+    if message:
+        details["s3_message"] = message
+        details["error"] = f"{code}: {message}" if code else message
+    return details
 
 
 @dataclass
@@ -477,6 +539,245 @@ class Uploader:
         with self._counters_lock:
             self._counters.files_uploaded += 1
 
+    def _backoff(self, attempt: int) -> None:
+        self._wait(UPLOAD_RETRY_BASE_DELAY * (2**attempt))
+
+    def _part_backoff(self, attempt: int) -> None:
+        delay = min(UPLOAD_RETRY_BASE_DELAY * (2**attempt), _PART_BACKOFF_CAP_SECONDS)
+        self._wait(delay)
+
+    def _wait(self, delay: float) -> None:
+        if self._stop_event is not None:
+            self._stop_event.wait(delay)
+        else:
+            time.sleep(delay)
+
+    def _fail_upload(self, filename: str, s3_key: str, exc: BaseException) -> None:
+        details = s3_error_details(exc)
+        details["s3_key"] = s3_key
+        logger.error("Upload failed for %s: %s", filename, details["error"])
+        self._reporter.queue_event(
+            WatcherEvent(
+                event_type=EventType.UPLOAD_FAILED,
+                message=f"Upload failed: {filename}",
+                details=details,
+            )
+        )
+        self._bump_errors()
+
+    def _upload_single_put(
+        self,
+        path: Path,
+        presigned: PresignedUploadResponse,
+        content_type: str | None,
+        s3_key: str,
+    ) -> bool:
+        url = presigned.upload_url
+        if not url:
+            self._fail_upload(path.name, s3_key, RuntimeError("missing upload URL"))
+            return False
+
+        last_exc: BaseException | None = None
+        for attempt in range(UPLOAD_RETRY_MAX):
+            try:
+                self._put_to_presigned_url(url, path, content_type)
+                return True
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(
+                    "Upload attempt %d/%d failed for %s: %s",
+                    attempt + 1,
+                    UPLOAD_RETRY_MAX,
+                    path.name,
+                    s3_error_details(exc)["error"],
+                )
+                self._backoff(attempt)
+            if self._stop_requested():
+                logger.info("Stop requested mid-upload; deferring %s", path.name)
+                return False
+        self._fail_upload(path.name, s3_key, last_exc or RuntimeError("upload failed"))
+        return False
+
+    def _upload_multipart(
+        self,
+        path: Path,
+        presigned: PresignedUploadResponse,
+        crc64nvme: str,
+        size_bytes: int,
+        content_type: str | None,
+        relative_path: str | None,
+        run_id: str,
+    ) -> bool:
+        upload = presigned
+        if not upload.upload_id or not upload.part_size or not upload.part_count:
+            self._fail_upload(
+                path.name,
+                upload.s3_key,
+                RuntimeError("incomplete multipart response"),
+            )
+            return False
+
+        # One restart when S3 says the assembled file does not match. A second
+        # mismatch is a real failure.
+        for digest_attempt in range(2):
+            if self._stop_requested():
+                return False
+            try:
+                parts = self._put_parts(path, upload, size_bytes)
+            except _UploadStopped:
+                return False
+            except Exception as exc:
+                self._abort_quietly(upload.file_id, upload.upload_id)
+                self._fail_upload(path.name, upload.s3_key, exc)
+                return False
+            if parts is None:
+                return False
+            try:
+                self._complete_with_retries(upload, parts, crc64nvme)
+                return True
+            except ApiError as exc:
+                code = exc.detail.code if exc.detail else ""
+                if code == "BadDigest" and digest_attempt == 0:
+                    logger.warning("Checksum rejected for %s; starting the upload over", path.name)
+                    self._abort_quietly(upload.file_id, upload.upload_id)
+                    try:
+                        stat = path.stat()
+                        upload = self._client.request_upload_url(
+                            self._instrument_id,
+                            run_id,
+                            path.name,
+                            content_type=content_type,
+                            size_bytes=size_bytes,
+                            file_created_at_ts=file_created_at(stat),
+                            relative_path=relative_path,
+                        )
+                    except ApiError as restart_exc:
+                        self._fail_upload(path.name, upload.s3_key, restart_exc)
+                        return False
+                    if upload.upload_type != "multipart" or not upload.upload_id:
+                        self._fail_upload(
+                            path.name,
+                            upload.s3_key,
+                            RuntimeError("restart did not return a multipart upload"),
+                        )
+                        return False
+                    continue
+                self._abort_quietly(upload.file_id, upload.upload_id)
+                self._fail_upload(path.name, upload.s3_key, exc)
+                return False
+        return False
+
+    def _abort_quietly(self, file_id: int, upload_id: str) -> None:
+        try:
+            self._client.abort_multipart_upload(file_id, upload_id)
+        except ApiError:
+            logger.debug("Abort of upload %s failed", upload_id, exc_info=True)
+
+    def _put_parts(
+        self,
+        path: Path,
+        upload: PresignedUploadResponse,
+        size_bytes: int,
+    ) -> list[dict[str, object]] | None:
+        upload_id, part_size, part_count = self._multipart_plan(upload)
+        finished: list[dict[str, object]] = []
+        part_number = 1
+        while part_number <= part_count:
+            if self._stop_requested():
+                raise _UploadStopped
+            batch_end = min(part_number + _PART_URL_BATCH, part_count + 1)
+            numbers = list(range(part_number, batch_end))
+            urls = self._client.get_part_urls(upload.file_id, upload_id, numbers)
+            by_number = {part.part_number: part.upload_url for part in urls.parts}
+            for number in numbers:
+                start = (number - 1) * part_size
+                length = min(part_size, size_bytes - start)
+                etag = self._put_one_part(path, by_number[number], start, length, upload, number)
+                finished.append({"part_number": number, "etag": etag})
+            part_number = batch_end
+        return finished
+
+    def _multipart_plan(self, upload: PresignedUploadResponse) -> tuple[str, int, int]:
+        if not upload.upload_id or not upload.part_size or not upload.part_count:
+            raise RuntimeError("incomplete multipart response")
+        return upload.upload_id, upload.part_size, upload.part_count
+
+    def _put_one_part(
+        self,
+        path: Path,
+        url: str,
+        start: int,
+        length: int,
+        upload: PresignedUploadResponse,
+        part_number: int,
+    ) -> str:
+        upload_id, _part_size, _part_count = self._multipart_plan(upload)
+        last_exc: BaseException | None = None
+        for attempt in range(_PART_ATTEMPTS):
+            # Refresh on every retry, not only when the error body says the
+            # URL expired. A connection reset mid-body has no body to read,
+            # and the URL may have expired while that body was in flight.
+            current_url = url
+            if attempt > 0:
+                refreshed = self._client.get_part_urls(upload.file_id, upload_id, [part_number])
+                current_url = refreshed.parts[0].upload_url
+            slice_reader = _FileSlice(path, start, length)
+            try:
+                response = self._s3_session.put(
+                    current_url,
+                    data=slice_reader,
+                    headers={"Content-Length": str(length)},
+                    timeout=300,
+                )
+                response.raise_for_status()
+                etag = response.headers.get("ETag") or response.headers.get("etag")
+                if not etag:
+                    raise RuntimeError(f"part {part_number} response had no ETag")
+                return etag
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(
+                    "Part %d attempt %d/%d failed for %s: %s",
+                    part_number,
+                    attempt + 1,
+                    _PART_ATTEMPTS,
+                    path.name,
+                    s3_error_details(exc)["error"],
+                )
+                self._part_backoff(attempt)
+            finally:
+                slice_reader.close()
+            if self._stop_requested():
+                raise _UploadStopped
+        raise last_exc or RuntimeError(f"part {part_number} failed")
+
+    def _complete_with_retries(
+        self,
+        upload: PresignedUploadResponse,
+        parts: list[dict[str, object]],
+        crc64nvme: str,
+    ) -> None:
+        upload_id, _part_size, _part_count = self._multipart_plan(upload)
+        last_exc: ApiError | None = None
+        for attempt in range(UPLOAD_RETRY_MAX):
+            try:
+                self._client.complete_multipart_upload(upload.file_id, upload_id, parts, crc64nvme)
+                return
+            except ApiError as exc:
+                last_exc = exc
+                retryable = exc.status_code == 0 or exc.status_code >= 500
+                if not retryable:
+                    raise
+                logger.warning(
+                    "Complete attempt %d/%d failed: %s",
+                    attempt + 1,
+                    UPLOAD_RETRY_MAX,
+                    exc.message,
+                )
+                self._backoff(attempt)
+        if last_exc:
+            raise last_exc
+
     def _upload_single(self, path: Path, run_id: str) -> bool:
         """Upload one file via a presigned URL, notify the API, and record in StateDB.
 
@@ -484,7 +785,7 @@ class Uploader:
 
         Concurrency note
         ----------------
-        ``file_sha256(path)`` and ``client.request_upload_url(...)``
+        ``file_digests(path)`` and ``client.request_upload_url(...)``
         run on a tiny 2-thread pool so the (CPU+IO bound) hash and the
         (network bound) presigned-URL request fully overlap. On a
         multi-GiB instrument file with a slow API, this halves the
@@ -503,7 +804,7 @@ class Uploader:
         # network. Resolve both before branching so the rest of the
         # method behaves exactly as the old serial version.
         with ThreadPoolExecutor(max_workers=2, thread_name_prefix="upload-prep") as prep:
-            sha_future = prep.submit(file_sha256, path)
+            sha_future = prep.submit(file_digests, path)
             presign_future = prep.submit(
                 self._client.request_upload_url,
                 self._instrument_id,
@@ -538,7 +839,7 @@ class Uploader:
                 return False
 
             try:
-                sha = sha_future.result()
+                sha, crc64nvme = sha_future.result()
             except Exception as exc:
                 # Hashing failed (e.g. the file vanished mid-stream).
                 # Treat as an upload failure so the file is retried
@@ -574,76 +875,43 @@ class Uploader:
             logger.debug("Skipping already-uploaded file: %s", path.name)
             return True
 
-        last_exc: Exception | None = None
-        put_ok = False
-
-        # Exponential backoff: 1s, 2s, 4s. Retries protect against transient
-        # network errors common on lab-PC networks.
-        assert presigned.upload_url is not None
-        for attempt in range(UPLOAD_RETRY_MAX):
-            try:
-                self._put_to_presigned_url(presigned.upload_url, path, content_type)
-                put_ok = True
-                break
-            except Exception as exc:
-                last_exc = exc
-                delay = UPLOAD_RETRY_BASE_DELAY * (2**attempt)
-                logger.warning(
-                    "Upload attempt %d/%d failed for %s: %s (retry in %ds)",
-                    attempt + 1,
-                    UPLOAD_RETRY_MAX,
-                    path.name,
-                    exc,
-                    delay,
-                )
-                # Wait on the stop event when present so a shutdown cuts the
-                # backoff short; falls back to a plain sleep for the one-shot
-                # ``upload`` path that has no worker/event.
-                if self._stop_event is not None:
-                    self._stop_event.wait(delay)
-                else:
-                    time.sleep(delay)
-            # Abandon the remaining retries on shutdown. Returning False (not a
-            # hard failure event) leaves the request pending so the next start
-            # re-uploads it, rather than recording a spurious upload error.
-            if self._stop_requested():
-                logger.info("Stop requested mid-upload; deferring %s", path.name)
+        if presigned.upload_type == "multipart":
+            if not self._upload_multipart(
+                path,
+                presigned,
+                crc64nvme,
+                stat.st_size,
+                content_type,
+                rel_path,
+                run_id,
+            ):
                 return False
-
-        if not put_ok:
-            logger.error("Upload failed after %d attempts: %s", UPLOAD_RETRY_MAX, path.name)
-            self._reporter.queue_event(
-                WatcherEvent(
-                    event_type=EventType.UPLOAD_FAILED,
-                    message=f"Upload failed: {path.name}",
-                    details={"s3_key": s3_key, "error": str(last_exc)},
+        else:
+            if not self._upload_single_put(path, presigned, content_type, s3_key):
+                return False
+            # Notify API — treat a failed PATCH as an upload failure so the file
+            # is not recorded in the dedup DB and will be retried next time. The
+            # server derives the S3 location itself, so we only send status/type.
+            # Multipart completion marks the file uploaded on the server.
+            try:
+                self._client.mark_file_uploaded(
+                    file_id,
+                    {
+                        "content_type": content_type,
+                        "status": "uploaded",
+                    },
                 )
-            )
-            self._bump_errors()
-            return False
-
-        # Notify API — treat a failed PATCH as an upload failure so the file
-        # is not recorded in the dedup DB and will be retried next time. The
-        # server derives the S3 location itself, so we only send status/type.
-        try:
-            self._client.mark_file_uploaded(
-                file_id,
-                {
-                    "content_type": content_type,
-                    "status": "uploaded",
-                },
-            )
-        except ApiError as exc:
-            logger.error("PATCH /files/%d failed: %s", file_id, exc.message)
-            self._bump_errors()
-            self._reporter.queue_event(
-                WatcherEvent(
-                    event_type=EventType.UPLOAD_FAILED,
-                    message=f"Upload notification failed: {path.name}",
-                    details={"s3_key": s3_key, "file_id": file_id, "error": exc.message},
+            except ApiError as exc:
+                logger.error("PATCH /files/%d failed: %s", file_id, exc.message)
+                self._bump_errors()
+                self._reporter.queue_event(
+                    WatcherEvent(
+                        event_type=EventType.UPLOAD_FAILED,
+                        message=f"Upload notification failed: {path.name}",
+                        details={"s3_key": s3_key, "file_id": file_id, "error": exc.message},
+                    )
                 )
-            )
-            return False
+                return False
 
         self._state_db.record_upload(
             path.name,

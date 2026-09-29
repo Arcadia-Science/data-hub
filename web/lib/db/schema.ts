@@ -630,6 +630,10 @@ export const files = pgTable(
     // MIME type.
     contentType: text("content_type"),
     sizeBytes: bigint("size_bytes", { mode: "number" }),
+    // Set while a multipart upload is in progress. Cleared when the upload
+    // finishes or is cancelled. A new request for the same file aborts this
+    // id first so an older upload cannot become the current object version.
+    multipartUploadId: text("multipart_upload_id"),
     // Distinguishes raw uploads from Lambda-generated artifacts.
     category: fileCategoryEnum("category").notNull().default("raw"),
     // detected → upload_requested → uploaded → processing → completed | failed
