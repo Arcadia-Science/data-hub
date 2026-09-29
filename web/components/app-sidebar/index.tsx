@@ -13,16 +13,17 @@ import {
 } from "@/components/ui/sidebar";
 import type { SidebarInstrument } from "@/lib/api/sidebar";
 import type { Session } from "@/lib/auth";
+import type { ChangelogDaySection } from "@/lib/changelog/group";
 
 interface AppSidebarProps {
-  changelogIds: readonly string[];
+  changelogSections: readonly ChangelogDaySection[];
   instruments: SidebarInstrument[];
   session: Session;
   signOutAction: () => Promise<void>;
 }
 
 export function AppSidebar({
-  changelogIds,
+  changelogSections,
   session,
   instruments,
   signOutAction,
@@ -59,7 +60,7 @@ export function AppSidebar({
       />
       <SidebarFooter>
         <UserMenuFooter
-          changelogIds={changelogIds}
+          changelogSections={changelogSections}
           signOutAction={signOutAction}
           user={session.user}
         />

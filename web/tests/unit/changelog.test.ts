@@ -176,7 +176,6 @@ function entry(date: string, slug: string): ChangelogEntry {
 }
 
 describe("groupChangelogByDate", () => {
-  const now = new Date("2026-09-29T17:00:00.000Z");
   const timeZone = "America/Los_Angeles";
 
   it("groups a day together and keeps newest first", () => {
@@ -187,8 +186,7 @@ describe("groupChangelogByDate", () => {
         entry("2026-09-02", "plates"),
         entry("2025-09-16", "older"),
       ],
-      timeZone,
-      now
+      timeZone
     );
 
     expect(sections.map((section) => section.date)).toEqual([
@@ -200,21 +198,13 @@ describe("groupChangelogByDate", () => {
       "2026-09-22-runs",
       "2026-09-22-files",
     ]);
-    expect(sections[0]?.heading).toBe("Tuesday, September 22");
-    expect(sections[0]?.jumpLabel).toBe("September 22");
+    expect(sections[0]?.heading).toBe("Tuesday, September 22, 2026");
     expect(sections[2]?.heading).toBe("Tuesday, September 16, 2025");
-    expect(sections[2]?.jumpLabel).toBe("September 16, 2025");
   });
 });
 
 describe("changelogIntro", () => {
-  it("mentions how many entries are new", () => {
-    expect(changelogIntro(0)).toBe("What's changed in Data Hub, newest first.");
-    expect(changelogIntro(1)).toBe(
-      "What's changed in Data Hub, newest first. 1 entry is new to you."
-    );
-    expect(changelogIntro(2)).toBe(
-      "What's changed in Data Hub, newest first. 2 entries are new to you."
-    );
+  it("is the sentence under the changelog title", () => {
+    expect(changelogIntro).toBe("What’s changed in Data Hub, newest first.");
   });
 });

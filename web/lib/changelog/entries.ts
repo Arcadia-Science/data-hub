@@ -20,10 +20,6 @@ export function listChangelogEntries(): ChangelogEntry[] {
   return entries;
 }
 
-export function listChangelogIds(): string[] {
-  return listChangelogEntries().map((entry) => entry.id);
-}
-
 export function readChangelogEntries(directory: string): ChangelogEntry[] {
   let names: string[];
   try {

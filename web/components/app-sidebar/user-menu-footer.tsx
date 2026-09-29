@@ -9,6 +9,7 @@ import {
   ScrollText,
   Settings,
 } from "lucide-react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { DocsLink } from "@/components/docs-link";
@@ -30,11 +31,26 @@ import { UserAvatar } from "@/components/user-avatar";
 import { useChangelogSeen } from "@/hooks/use-changelog-seen";
 import { toUserAvatarUser } from "@/lib/avatar-color";
 import { dataHubMarkBlueClassName } from "@/lib/changelog/copy";
+import type { ChangelogDaySection } from "@/lib/changelog/group";
 import { DOCS_URL } from "@/lib/docs";
 import { cn } from "@/lib/utils";
 
+// The window pulls in the markdown renderer, which the sidebar does not need
+// until someone opens the account menu.
+const ChangelogDialog = dynamic(
+  () =>
+    import("@/components/changelog/changelog-dialog").then(
+      (module) => module.ChangelogDialog
+    ),
+  { ssr: false }
+);
+
+function preloadChangelogDialog() {
+  import("@/components/changelog/changelog-dialog");
+}
+
 interface UserMenuFooterProps {
-  changelogIds: readonly string[];
+  changelogSections: readonly ChangelogDaySection[];
   signOutAction: () => Promise<void>;
   user: {
     id: string;
@@ -45,14 +61,19 @@ interface UserMenuFooterProps {
 }
 
 export function UserMenuFooter({
-  changelogIds,
+  changelogSections,
   user,
   signOutAction,
 }: UserMenuFooterProps) {
   const { isMobile } = useSidebar();
   const { hasUnseen } = useChangelogSeen();
+  const changelogIds = changelogSections.flatMap((section) =>
+    section.entries.map((entry) => entry.id)
+  );
   const unseen = hasUnseen(changelogIds);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [changelogMounted, setChangelogMounted] = useState(false);
+  const [changelogOpen, setChangelogOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const avatarUser = toUserAvatarUser({
@@ -65,7 +86,15 @@ export function UserMenuFooter({
   return (
     <SidebarMenu>
       <SidebarMenuItem>
-        <DropdownMenu onOpenChange={setMenuOpen} open={menuOpen}>
+        <DropdownMenu
+          onOpenChange={(next) => {
+            setMenuOpen(next);
+            if (next) {
+              preloadChangelogDialog();
+            }
+          }}
+          open={menuOpen}
+        >
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton
               className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
@@ -105,27 +134,32 @@ export function UserMenuFooter({
             side={isMobile ? "bottom" : "top"}
             sideOffset={4}
           >
-            <DropdownMenuItem asChild>
-              <Link href="/changelog">
-                <ScrollText data-icon="inline-start" />
-                {unseen ? (
-                  <>
-                    <span className="sr-only">Changelog, new entries</span>
-                    <span aria-hidden>Changelog</span>
-                  </>
-                ) : (
-                  "Changelog"
-                )}
-                {unseen ? (
-                  <span
-                    aria-hidden
-                    className={cn(
-                      "ml-auto size-2 shrink-0 rounded-full",
-                      dataHubMarkBlueClassName
-                    )}
-                  />
-                ) : null}
-              </Link>
+            <DropdownMenuItem
+              onSelect={(event) => {
+                event.preventDefault();
+                setMenuOpen(false);
+                setChangelogMounted(true);
+                setChangelogOpen(true);
+              }}
+            >
+              <ScrollText data-icon="inline-start" />
+              {unseen ? (
+                <>
+                  <span className="sr-only">Changelog, new entries</span>
+                  <span aria-hidden>Changelog</span>
+                </>
+              ) : (
+                "Changelog"
+              )}
+              {unseen ? (
+                <span
+                  aria-hidden
+                  className={cn(
+                    "ml-auto size-2 shrink-0 rounded-full",
+                    dataHubMarkBlueClassName
+                  )}
+                />
+              ) : null}
             </DropdownMenuItem>
             <DropdownMenuItem
               onSelect={(event) => {
@@ -160,6 +194,14 @@ export function UserMenuFooter({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        {changelogMounted ? (
+          <ChangelogDialog
+            ids={changelogIds}
+            onOpenChange={setChangelogOpen}
+            open={changelogOpen}
+            sections={changelogSections}
+          />
+        ) : null}
         <SendFeedbackDialog
           onOpenChange={setFeedbackOpen}
           open={feedbackOpen}

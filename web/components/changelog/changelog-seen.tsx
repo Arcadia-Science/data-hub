@@ -6,7 +6,7 @@ import {
   readChangelogSeenIds,
   useChangelogSeen,
 } from "@/hooks/use-changelog-seen";
-import { changelogIntro, dataHubMarkBlueClassName } from "@/lib/changelog/copy";
+import { dataHubMarkBlueClassName } from "@/lib/changelog/copy";
 import { cn } from "@/lib/utils";
 
 interface ChangelogSeenContextValue {
@@ -21,7 +21,7 @@ const ChangelogSeenContext = createContext<ChangelogSeenContextValue | null>(
   null
 );
 
-// Kept for this page load. Opening the page writes the ids to localStorage
+// Kept for this visit. Opening the changelog writes the ids to localStorage
 // immediately, and React Strict Mode runs that effect twice. The second pass
 // would otherwise read the just-written ids and hide every New badge.
 let unseenThisLoad: { key: string; ids: ReadonlySet<string> } | null = null;
@@ -70,18 +70,6 @@ export function ChangelogSeenProvider({
   );
 }
 
-export function ChangelogSummary() {
-  const {
-    state: { unseenIds },
-  } = useChangelogSeenState();
-
-  return (
-    <p className="text-muted-foreground text-sm leading-6">
-      {changelogIntro(unseenIds?.size ?? 0)}
-    </p>
-  );
-}
-
 export function ChangelogNewBadge({ id }: { id: string }) {
   const {
     state: { unseenIds },
@@ -94,7 +82,7 @@ export function ChangelogNewBadge({ id }: { id: string }) {
   return (
     <span
       className={cn(
-        "inline-flex h-[23px] shrink-0 items-center rounded-md px-2 font-semibold text-[13px] text-white",
+        "inline-flex h-[22px] shrink-0 items-center rounded-md px-2 font-semibold text-[13px] text-white",
         dataHubMarkBlueClassName
       )}
     >

@@ -1,13 +1,10 @@
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import type { ChangelogEntry } from "@/lib/changelog/parse";
-import { formatCommentDayHeading } from "@/lib/comments/group-by-day";
-import { calendarDayKey } from "@/lib/date";
 
 export interface ChangelogDaySection {
   date: string;
   entries: ChangelogEntry[];
   heading: string;
-  jumpLabel: string;
 }
 
 /**
@@ -16,8 +13,7 @@ export interface ChangelogDaySection {
  */
 export function groupChangelogByDate(
   entries: readonly ChangelogEntry[],
-  timeZone: string,
-  now: Date = new Date()
+  timeZone: string
 ): ChangelogDaySection[] {
   const sections: ChangelogDaySection[] = [];
   const byDate = new Map<string, ChangelogDaySection>();
@@ -28,8 +24,7 @@ export function groupChangelogByDate(
       section = {
         date: entry.date,
         entries: [],
-        heading: formatCommentDayHeading(entry.date, timeZone, now),
-        jumpLabel: formatChangelogJumpLabel(entry.date, timeZone, now),
+        heading: formatChangelogDayHeading(entry.date, timeZone),
       };
       byDate.set(entry.date, section);
       sections.push(section);
@@ -40,15 +35,12 @@ export function groupChangelogByDate(
   return sections;
 }
 
-/** Short label for the jump list (`September 28`, with the year when it differs). */
-export function formatChangelogJumpLabel(
+/** Weekday heading in the changelog window (`Monday, September 28, 2026`). */
+export function formatChangelogDayHeading(
   dayKey: string,
-  timeZone: string,
-  now: Date = new Date()
+  timeZone: string
 ): string {
+  // Noon on that local day avoids DST edges that midnight can hit.
   const midday = fromZonedTime(`${dayKey}T12:00:00.000`, timeZone);
-  const currentYear = calendarDayKey(now, timeZone).slice(0, 4);
-  const pattern =
-    dayKey.slice(0, 4) === currentYear ? "MMMM d" : "MMMM d, yyyy";
-  return formatInTimeZone(midday, timeZone, pattern);
+  return formatInTimeZone(midday, timeZone, "EEEE, MMMM d, yyyy");
 }

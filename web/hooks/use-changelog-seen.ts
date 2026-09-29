@@ -7,7 +7,7 @@ const UPDATE_EVENT = "data-hub:changelog-seen-updated";
 
 // Ids, not a last-visited timestamp. An entry's date is the day it merged
 // to staging, which can be earlier than the last time this person opened
-// the page, so a timestamp would hide an entry they have not seen.
+// the changelog, so a timestamp would hide an entry they have not seen.
 export function hasUnseen(
   ids: readonly string[],
   seen: readonly string[]
