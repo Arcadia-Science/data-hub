@@ -416,10 +416,9 @@ class RunDetector:
                 run_id=run_id,
                 files=files,
                 reported=True,
-                # On restart every hydrated file is either already
-                # uploaded (auto mode, uploader-side dedup will skip it
-                # anyway if not) or server-driven (manual mode, where
-                # `_upload_cb` is None and this counter is unused).
+                # Auto mode retries unfinished uploads from the state DB's
+                # `pending_uploads` on the upload worker, not from here.
+                # Manual mode has no `_upload_cb`, so the counter is unused.
                 uploaded_file_count=len(files),
                 # Every hydrated file came from `detected_files`, which
                 # is only written after a successful POST/PATCH — so the

@@ -4,6 +4,7 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Generator
+from contextlib import nullcontext
 from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
@@ -13,7 +14,7 @@ import requests
 from requests.adapters import HTTPAdapter
 
 from data_hub_watcher.api_client import ApiError
-from data_hub_watcher.constants import MAX_QUEUE_FILE_ATTEMPTS
+from data_hub_watcher.constants import MAX_PENDING_UPLOAD_ATTEMPTS, MAX_QUEUE_FILE_ATTEMPTS
 from data_hub_watcher.events import EventReporter
 from data_hub_watcher.heartbeat import WatcherCounters
 from data_hub_watcher.models import (
@@ -23,8 +24,14 @@ from data_hub_watcher.models import (
     UploadQueueFile,
     UploadQueueResponse,
 )
+from data_hub_watcher.run_detector import FileInfo
 from data_hub_watcher.state import StateDB
-from data_hub_watcher.uploader import Uploader, UploadQueueWorker, _guess_content_type
+from data_hub_watcher.uploader import (
+    Uploader,
+    UploadQueueWorker,
+    _guess_content_type,
+    s3_error_details,
+)
 
 
 @pytest.fixture()
@@ -963,6 +970,309 @@ class TestUploadQueueWorker:
         finally:
             # Let the blocked poll finish so the daemon thread exits cleanly.
             release.set()
+
+    def test_retries_pending_uploads_before_the_first_poll(self) -> None:
+        uploader = MagicMock()
+        stop = threading.Event()
+        stop.set()  # exit the poll loop right after the retry
+        worker = UploadQueueWorker(uploader, stop_event=stop, retry_pending_on_start=True)
+
+        worker._run()
+
+        uploader.retry_pending_uploads.assert_called_once_with()
+        uploader.poll_upload_queue.assert_not_called()
+
+    def test_skips_the_pending_retry_by_default(self) -> None:
+        uploader = MagicMock()
+        stop = threading.Event()
+        stop.set()
+        worker = UploadQueueWorker(uploader, stop_event=stop)
+
+        worker._run()
+
+        uploader.retry_pending_uploads.assert_not_called()
+
+    def test_a_failed_pending_retry_does_not_end_the_worker(self) -> None:
+        uploader = MagicMock()
+        uploader.retry_pending_uploads.side_effect = RuntimeError("boom")
+        stop = threading.Event()
+        stop.set()
+        worker = UploadQueueWorker(uploader, stop_event=stop, retry_pending_on_start=True)
+
+        # Must return normally so the thread goes on to poll the queue.
+        worker._run()
+
+
+class TestSameFileUploadsOneAtATime:
+    """The auto path and the queue worker can reach the same file.
+
+    A second multipart start makes the server abort the first upload, so
+    only one thread may upload a given file at a time.
+    """
+
+    def test_second_upload_waits_for_the_first(self, uploader: Uploader, tmp_file: Path) -> None:
+        first_started = threading.Event()
+        second_started = threading.Event()
+        release_first = threading.Event()
+        calls: list[str] = []
+        calls_lock = threading.Lock()
+
+        def fake_upload(path: Path, run_id: str) -> bool:
+            with calls_lock:
+                calls.append(run_id)
+                is_first = len(calls) == 1
+            if is_first:
+                first_started.set()
+                release_first.wait(timeout=5)
+            else:
+                second_started.set()
+            return True
+
+        results: list[bool] = []
+        with patch.object(uploader, "_upload_single_unlocked", side_effect=fake_upload):
+            first = threading.Thread(
+                target=lambda: results.append(uploader._upload_single(tmp_file, "RUN-001"))
+            )
+            first.start()
+            assert first_started.wait(timeout=5)
+            second = threading.Thread(
+                target=lambda: results.append(uploader._upload_single(tmp_file, "RUN-001"))
+            )
+            second.start()
+
+            assert not second_started.wait(timeout=0.3)
+
+            release_first.set()
+            first.join(timeout=5)
+            second.join(timeout=5)
+
+        assert second_started.is_set()
+        assert results == [True, True]
+
+    def test_waiter_skips_a_file_the_other_upload_recorded(
+        self, uploader: Uploader, tmp_file: Path, state_db: StateDB
+    ) -> None:
+        st = tmp_file.stat()
+        state_db.record_upload(
+            tmp_file.name,
+            "sha",
+            "test-instrument/RUN-001/test_data.csv",
+            relative_path=tmp_file.relative_to(uploader._watch_dir).as_posix(),
+            size_bytes=st.st_size,
+            mtime=st.st_mtime,
+        )
+
+        with (
+            patch.object(Uploader, "_exclusive", lambda self, path: nullcontext(True)),
+            patch.object(uploader, "_upload_single_unlocked") as unlocked,
+        ):
+            assert uploader._upload_single(tmp_file, "RUN-001") is True
+
+        unlocked.assert_not_called()
+
+    def test_waiter_uploads_when_the_other_upload_failed(
+        self, uploader: Uploader, tmp_file: Path
+    ) -> None:
+        with (
+            patch.object(Uploader, "_exclusive", lambda self, path: nullcontext(True)),
+            patch.object(uploader, "_upload_single_unlocked", return_value=True) as unlocked,
+        ):
+            assert uploader._upload_single(tmp_file, "RUN-001") is True
+
+        unlocked.assert_called_once_with(tmp_file, "RUN-001")
+
+
+def _file_info(path: Path) -> FileInfo:
+    st = path.stat()
+    return FileInfo(path=path, filename=path.name, size_bytes=st.st_size, mtime=st.st_mtime)
+
+
+class TestPendingUploads:
+    """Auto-mode uploads that fail or are interrupted are retried on the next start."""
+
+    @pytest.fixture()
+    def run_dir(self, tmp_path: Path) -> Path:
+        run_dir = tmp_path / "RUN-1"
+        run_dir.mkdir()
+        return run_dir
+
+    def test_upload_files_keeps_only_failed_files_pending(
+        self, uploader: Uploader, state_db: StateDB, run_dir: Path
+    ) -> None:
+        ok = run_dir / "ok.csv"
+        ok.write_text("ok")
+        bad = run_dir / "bad.csv"
+        bad.write_text("bad")
+
+        with patch.object(uploader, "_upload_single", side_effect=lambda path, run_id: path == ok):
+            assert uploader.upload_files("RUN-1", [_file_info(ok), _file_info(bad)]) == 1
+
+        assert [p.relative_path for p in state_db.pending_uploads()] == ["RUN-1/bad.csv"]
+
+    def test_retry_uploads_a_pending_file_and_clears_it(
+        self, uploader: Uploader, state_db: StateDB, run_dir: Path
+    ) -> None:
+        (run_dir / "data.csv").write_text("x")
+        state_db.record_pending_uploads("RUN-1", ["RUN-1/data.csv"])
+
+        with patch.object(uploader, "_upload_single", return_value=True) as upload:
+            uploader.retry_pending_uploads()
+
+        upload.assert_called_once_with(run_dir / "data.csv", "RUN-1")
+        assert state_db.pending_uploads() == []
+
+    def test_retry_counts_a_failure_and_keeps_the_file_pending(
+        self, uploader: Uploader, state_db: StateDB, run_dir: Path
+    ) -> None:
+        (run_dir / "data.csv").write_text("x")
+        state_db.record_pending_uploads("RUN-1", ["RUN-1/data.csv"])
+
+        with patch.object(uploader, "_upload_single", return_value=False):
+            uploader.retry_pending_uploads()
+
+        [pending] = state_db.pending_uploads()
+        assert pending.attempts == 1
+        cast(MagicMock, uploader._reporter).report_error.assert_not_called()
+
+    def test_retry_gives_up_after_the_attempt_cap(
+        self, uploader: Uploader, state_db: StateDB, run_dir: Path
+    ) -> None:
+        (run_dir / "data.csv").write_text("x")
+        state_db.record_pending_uploads("RUN-1", ["RUN-1/data.csv"])
+
+        with patch.object(uploader, "_upload_single", return_value=False):
+            for _ in range(MAX_PENDING_UPLOAD_ATTEMPTS):
+                uploader.retry_pending_uploads()
+
+        assert state_db.pending_uploads() == []
+        report_error = cast(MagicMock, uploader._reporter).report_error
+        report_error.assert_called_once()
+        assert report_error.call_args.args[0] == "upload_retries_exhausted"
+        assert report_error.call_args.kwargs == {
+            "relative_path": "RUN-1/data.csv",
+            "run_id": "RUN-1",
+            "attempts": MAX_PENDING_UPLOAD_ATTEMPTS,
+        }
+
+    def test_retry_counts_an_unexpected_error_and_moves_on(
+        self, uploader: Uploader, state_db: StateDB, run_dir: Path
+    ) -> None:
+        (run_dir / "broken.csv").write_text("x")
+        (run_dir / "fine.csv").write_text("x")
+        state_db.record_pending_uploads("RUN-1", ["RUN-1/broken.csv", "RUN-1/fine.csv"])
+
+        def upload(path: Path, run_id: str) -> bool:
+            if path.name == "broken.csv":
+                raise ValueError("unexpected response")
+            return True
+
+        with patch.object(uploader, "_upload_single", side_effect=upload) as upload_mock:
+            uploader.retry_pending_uploads()
+
+        assert [call.args[0].name for call in upload_mock.call_args_list] == [
+            "broken.csv",
+            "fine.csv",
+        ]
+        [pending] = state_db.pending_uploads()
+        assert (pending.relative_path, pending.attempts) == ("RUN-1/broken.csv", 1)
+
+    def test_retry_drops_a_file_that_is_gone(self, uploader: Uploader, state_db: StateDB) -> None:
+        state_db.record_pending_uploads("RUN-1", ["RUN-1/deleted.csv"])
+
+        with patch.object(uploader, "_upload_single") as upload:
+            uploader.retry_pending_uploads()
+
+        upload.assert_not_called()
+        assert state_db.pending_uploads() == []
+        report_error = cast(MagicMock, uploader._reporter).report_error
+        report_error.assert_called_once()
+        assert report_error.call_args.args[0] == "pending_upload_missing"
+        assert report_error.call_args.kwargs == {
+            "relative_path": "RUN-1/deleted.csv",
+            "run_id": "RUN-1",
+        }
+
+    def test_retry_interrupted_by_shutdown_is_not_an_attempt(
+        self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path, run_dir: Path
+    ) -> None:
+        stop = threading.Event()
+        up = Uploader(
+            client=mock_client,
+            state_db=state_db,
+            event_reporter=MagicMock(spec=EventReporter),
+            counters=WatcherCounters(),
+            instrument_id="test-instrument",
+            watcher_id="watcher-123",
+            watch_directory=tmp_path,
+            stop_event=stop,
+        )
+        (run_dir / "data.csv").write_text("x")
+        state_db.record_pending_uploads("RUN-1", ["RUN-1/data.csv"])
+
+        def interrupted(path: Path, run_id: str) -> bool:
+            stop.set()
+            return False
+
+        with patch.object(up, "_upload_single", side_effect=interrupted):
+            up.retry_pending_uploads()
+
+        [pending] = state_db.pending_uploads()
+        assert pending.attempts == 0
+
+
+class TestSignedUrlRedaction:
+    """Signed S3 URLs carry temporary AWS credentials, so events and logs drop the query."""
+
+    def test_http_error_url_loses_its_query_string(self) -> None:
+        exc = requests.HTTPError(
+            "400 Client Error: Bad Request for url: "
+            "https://bucket.s3.us-west-1.amazonaws.com/instrument/run/big.tif"
+            "?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=ASIAEXAMPLE"
+            "&X-Amz-Security-Token=SECRET-TOKEN&X-Amz-Signature=deadbeef&x-id=PutObject"
+        )
+
+        assert s3_error_details(exc)["error"] == (
+            "400 Client Error: Bad Request for url: "
+            "https://bucket.s3.us-west-1.amazonaws.com/instrument/run/big.tif?<redacted>"
+        )
+
+    def test_connection_error_url_loses_its_query_string(self) -> None:
+        exc = requests.ConnectionError(
+            "HTTPSConnectionPool(host='bucket.s3.amazonaws.com', port=443): Max retries "
+            "exceeded with url: /instrument/run/big.tif?partNumber=3&uploadId=abc"
+            "&X-Amz-Security-Token=SECRET-TOKEN&x-id=UploadPart "
+            "(Caused by SSLError('EOF occurred'))"
+        )
+
+        error = s3_error_details(exc)["error"]
+
+        assert "SECRET-TOKEN" not in error
+        assert "/instrument/run/big.tif?<redacted> (Caused by SSLError('EOF occurred'))" in error
+
+    def test_upload_failed_event_has_no_signed_query(
+        self, uploader: Uploader, mock_client: MagicMock, tmp_file: Path
+    ) -> None:
+        mock_client.request_upload_url.return_value = PresignedUploadResponse(
+            upload_url="https://s3.example.com/presigned",
+            s3_bucket="test-bucket",
+            s3_key="test-instrument/RUN-001/test_data.csv",
+            file_id=42,
+            expires_in=3600,
+            already_uploaded=False,
+        )
+        failure = requests.HTTPError(
+            "400 Client Error: Bad Request for url: "
+            "https://s3.example.com/presigned?X-Amz-Security-Token=SECRET-TOKEN"
+        )
+
+        with (
+            patch.object(Uploader, "_put_to_presigned_url", side_effect=failure),
+            patch("data_hub_watcher.uploader.time.sleep"),
+        ):
+            assert uploader._upload_single(tmp_file, "RUN-001") is False
+
+        event = cast(MagicMock, uploader._reporter).queue_event.call_args.args[0]
+        assert "SECRET-TOKEN" not in event.details["error"]
 
 
 def test_guess_content_type_handles_uppercase_pdf() -> None:

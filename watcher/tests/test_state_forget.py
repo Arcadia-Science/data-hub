@@ -51,6 +51,8 @@ def _seed(db: StateDB) -> None:
             ("alice_extra/old.tif", 1, 1.0),
         ]
     )
+    db.record_pending_uploads("alice", ["alice/day-2/capture/pending.tif"])
+    db.record_pending_uploads("alice_notes", ["alice_notes/pending.tif"])
 
 
 def _paths(db: StateDB) -> set[str]:
@@ -61,7 +63,8 @@ def _paths(db: StateDB) -> set[str]:
         for record in db.get_detected_files_for_run(run_id)
     }
     baseline = {row[0] for row in db.iter_baseline_stat_keys()}
-    return uploaded | detected | baseline
+    pending = {record.relative_path for record in db.pending_uploads()}
+    return uploaded | detected | baseline | pending
 
 
 def test_forget_prefix_removes_only_that_folder(tmp_path: Path) -> None:
@@ -70,10 +73,17 @@ def test_forget_prefix_removes_only_that_folder(tmp_path: Path) -> None:
 
     counts = db.forget_prefix("alice/")
 
-    assert counts == {"uploaded_files": 1, "detected_files": 1, "baseline_files": 1}
+    assert counts == {
+        "uploaded_files": 1,
+        "detected_files": 1,
+        "baseline_files": 1,
+        "pending_uploads": 1,
+    }
     remaining = _paths(db)
     assert "alice/day-1/capture/sample.tif" not in remaining
     assert "alice/old.tif" not in remaining
+    assert "alice/day-2/capture/pending.tif" not in remaining
+    assert "alice_notes/pending.tif" in remaining
     # `_` is not a wildcard here: a sibling folder that merely starts
     # with the same letters stays put.
     assert "alice_notes/sample.tif" in remaining

@@ -36,19 +36,25 @@ a database migration. Known ``kind`` values, with their per-kind
   after one or more consecutive failures.
   ``details = {"kind", "consecutive_failures", "gap_seconds"}``.
 * ``upload_queue_poll_failed`` -- ``GET /watchers/:id/upload-queue``
-  failed in manual mode. Emitted on the 1st failure and every 10th
-  repeat so a sustained outage isn't silent.
+  failed. Emitted on the 1st failure and every 10th repeat so a
+  sustained outage isn't silent.
   ``details = {"kind", "error", "consecutive_failures"}``.
 * ``update_check_failed`` -- ``GET /watchers/:id/update-check`` failed.
   Emitted only after 3 consecutive failures so we don't alert on a
   single hourly blip. ``details = {"kind", "error", "consecutive_failures"}``.
-* ``queued_file_missing`` -- a manual-mode upload-queue file was not found
-  on disk at its resolved path. Emitted once per file id (throttled across
-  heartbeat polls). ``details = {"kind", "file_id", "expected_path"}``.
+* ``queued_file_missing`` -- an upload-queue file was not found on disk
+  at its resolved path. Emitted once per file id (throttled across
+  polls). ``details = {"kind", "file_id", "expected_path"}``.
 * ``upload_request_cancelled`` -- the watcher gave up on a queued file
   after ``MAX_QUEUE_FILE_ATTEMPTS`` failed polls (missing or upload error)
   and reverted it to ``detected`` server-side so it leaves the queue.
   ``details = {"kind", "file_id", "attempts", "reason"}``.
+* ``upload_retries_exhausted`` -- an auto-mode upload still failed after
+  ``MAX_PENDING_UPLOAD_ATTEMPTS`` watcher starts, so it is no longer
+  retried. ``details = {"kind", "relative_path", "run_id", "attempts"}``.
+* ``pending_upload_missing`` -- an auto-mode upload waiting for a retry
+  was no longer on disk at startup, so the retry was dropped.
+  ``details = {"kind", "relative_path", "run_id"}``.
 """
 
 from __future__ import annotations
