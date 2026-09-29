@@ -141,6 +141,8 @@ Secrets (`DATA_HUB_API_KEY`, etc.) are stored in GitHub environment secrets scop
 > If the function stays in the VPC and is idle for 14 days, Lambda reclaims that interface and the next invocation fails until the interface is recreated. S3 events retry on their own. A reprocess or archive build can fail once.
 >
 > The NAT gateway is about $39 a month per environment ($0.048 an hour, plus $0.005 an hour for its public IPv4 address, plus $0.048 per GB of API traffic). S3 reads use a free gateway endpoint and do not go through the NAT gateway. Leave `EnableS3Files` at `false` unless the environment needs it.
+>
+> With `EnableS3Files` on, the raw bucket is also mounted in the Lambda at `/mnt/raw` through Amazon S3 Files. The file system policy denies writes and root access to everyone, and denies mounting except for this environment's Lambda role through the stack's access point. S3 Files write actions are not in the CI role or the staging boundary, so changing that policy takes an admin `make sam-deploy`. The raw bucket's notification configuration turns on EventBridge delivery while the mount is on, because S3 replaces the whole configuration on every write and a later deploy would otherwise drop it. Code must open exact paths on the mount and must not list folders there: the first listing of a folder imports metadata for every entry, and each entry is billed.
 
 #### Local deployment
 
