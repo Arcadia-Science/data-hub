@@ -13,14 +13,17 @@ import {
 } from "@/components/ui/sidebar";
 import type { SidebarInstrument } from "@/lib/api/sidebar";
 import type { Session } from "@/lib/auth";
+import type { ChangelogDaySection } from "@/lib/changelog/group";
 
 interface AppSidebarProps {
+  changelogSections: readonly ChangelogDaySection[];
   instruments: SidebarInstrument[];
   session: Session;
   signOutAction: () => Promise<void>;
 }
 
 export function AppSidebar({
+  changelogSections,
   session,
   instruments,
   signOutAction,
@@ -61,7 +64,11 @@ export function AppSidebar({
         isAdmin={session.user.isAdmin === true}
       />
       <SidebarFooter>
-        <UserMenuFooter signOutAction={signOutAction} user={session.user} />
+        <UserMenuFooter
+          changelogSections={changelogSections}
+          signOutAction={signOutAction}
+          user={session.user}
+        />
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
