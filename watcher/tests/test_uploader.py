@@ -1049,6 +1049,38 @@ class TestMultipartUpload:
             assert uploader._upload_single(tmp_file, "RUN-001") is True
         assert mock_client.get_part_urls.call_count == 2
 
+    def test_connection_error_fetches_a_fresh_part_url(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+        tmp_file: Path,
+    ) -> None:
+        payload = tmp_file.read_bytes()
+        mock_client.request_upload_url.return_value = self._presigned(
+            part_size=len(payload), part_count=1
+        )
+        mock_client.get_part_urls.side_effect = [
+            MultipartPartUrlsResponse(
+                expires_in=900,
+                parts=[MultipartPartUrl(part_number=1, upload_url="https://s3.example/old")],
+            ),
+            MultipartPartUrlsResponse(
+                expires_in=900,
+                parts=[MultipartPartUrl(part_number=1, upload_url="https://s3.example/new")],
+            ),
+        ]
+        ok = MagicMock()
+        ok.headers = {"ETag": '"etag-1"'}
+        put = MagicMock(side_effect=[requests.ConnectionError("reset"), ok])
+        with (
+            patch.object(uploader._s3_session, "put", put),
+            patch("data_hub_watcher.uploader.time.sleep"),
+        ):
+            assert uploader._upload_single(tmp_file, "RUN-001") is True
+        assert put.call_args_list[0].args[0] == "https://s3.example/old"
+        assert put.call_args_list[1].args[0] == "https://s3.example/new"
+        assert mock_client.get_part_urls.call_count == 2
+
     def test_other_403_aborts_and_records_the_s3_error(
         self,
         uploader: Uploader,

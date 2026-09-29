@@ -35,7 +35,24 @@ export function multipartPartSizeBytes(): number {
     "MULTIPART_PART_SIZE_BYTES",
     MULTIPART_PART_SIZE_BYTES
   );
-  return Math.max(configured, 1);
+  const size = Math.max(configured, 1);
+  // Tests set a tiny part size. S3 rejects a part under 5 MiB, so that
+  // override is only honored while the local stand-in is actually in use.
+  // The conditions match `mirrorRootForMultipart`.
+  if (standInServesParts()) {
+    return size;
+  }
+  return Math.max(size, MULTIPART_MIN_PART_BYTES);
+}
+
+function standInServesParts(): boolean {
+  if (process.env.NODE_ENV !== "production" && process.env.LOCAL_S3_MIRROR) {
+    return true;
+  }
+  if (process.env.VERCEL) {
+    return false;
+  }
+  return Boolean(process.env.INTEGRATION_TEST_S3_MIRROR);
 }
 
 export function planMultipartUpload(sizeBytes: number): {

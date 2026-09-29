@@ -77,13 +77,6 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   const contentType = body.content_type;
   const sizeBytes = body.size_bytes;
   const watcher = watcherClientFrom(request);
-  if (sizeBytes != null && (!Number.isInteger(sizeBytes) || sizeBytes < 0)) {
-    return apiError(
-      400,
-      "VALIDATION_ERROR",
-      "size_bytes must be a whole number"
-    );
-  }
   if (
     !watcher.supports("multipartUpload") &&
     sizeBytes != null &&

@@ -1,6 +1,10 @@
 // Local-only S3 mirror: reads and writes `<LOCAL_S3_MIRROR>/<bucket>/<key>`,
-// with `*` CORS on GET/HEAD so the MCP Apps sandbox can fetch the files. Every
-// handler 404s in production, so a real build can never read the filesystem.
+// with `*` CORS on GET/HEAD so the MCP Apps sandbox can fetch the files. GET,
+// HEAD, and a whole-file PUT 404 when that root is off, including every
+// production build. A part PUT uses `mirrorRootForMultipart`, which also
+// accepts `INTEGRATION_TEST_S3_MIRROR` when `VERCEL` is unset so the
+// integration harness can store parts without AWS. Vercel sets `VERCEL`,
+// so a deployment still 404s.
 
 import { createReadStream, createWriteStream } from "node:fs";
 import { mkdir, stat } from "node:fs/promises";

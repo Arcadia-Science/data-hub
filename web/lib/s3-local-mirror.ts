@@ -14,7 +14,10 @@
 // Production-safety: `getLocalMirrorRoot()` returns `null` whenever
 // `NODE_ENV === "production"`, so the local code path can never be
 // activated in a Vercel production build even if the env var is
-// somehow leaked into that environment.
+// somehow leaked into that environment. Multipart helpers use
+// `mirrorRootForMultipart` instead, which also reads
+// `INTEGRATION_TEST_S3_MIRROR` when `VERCEL` is unset. Vercel sets
+// `VERCEL` on every deployment, so that path stays off there too.
 
 import { createHash, randomBytes } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";

@@ -6,6 +6,7 @@ import { Crc64Nvme } from "@aws-sdk/crc64-nvme";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   MULTIPART_MAX_PARTS,
+  MULTIPART_MIN_PART_BYTES,
   MULTIPART_PART_SIZE_BYTES,
   planMultipartUpload,
 } from "@/lib/multipart";
@@ -37,6 +38,20 @@ describe("planMultipartUpload", () => {
     const large = planMultipartUpload(huge);
     expect(large.partCount).toBeLessThanOrEqual(MULTIPART_MAX_PARTS);
     expect(large.partSize).toBeGreaterThan(MULTIPART_PART_SIZE_BYTES);
+  });
+
+  it("keeps a tiny part size for the stand-in and raises it otherwise", () => {
+    vi.stubEnv("MULTIPART_PART_SIZE_BYTES", "1024");
+    vi.stubEnv("LOCAL_S3_MIRROR", "");
+    vi.stubEnv("INTEGRATION_TEST_S3_MIRROR", "/tmp/mirror");
+    vi.stubEnv("VERCEL", "");
+    expect(planMultipartUpload(2048).partSize).toBe(1024);
+
+    vi.stubEnv("INTEGRATION_TEST_S3_MIRROR", "");
+    vi.stubEnv("VERCEL", "1");
+    expect(planMultipartUpload(20 * 1024 * 1024).partSize).toBe(
+      MULTIPART_MIN_PART_BYTES
+    );
   });
 });
 
@@ -138,5 +153,68 @@ describe("presigned upload URLs", () => {
       );
       expect(checksumParams).toEqual([]);
     }
+  });
+
+  it("sends the content type and a whole-file CRC64NVME checksum", async () => {
+    vi.stubEnv("LOCAL_S3_MIRROR", "");
+    vi.stubEnv("INTEGRATION_TEST_S3_MIRROR", "");
+    vi.stubEnv("VERCEL", "1");
+    const s3 = await import("@aws-sdk/client-s3");
+    const send = vi
+      .spyOn(s3.S3Client.prototype, "send")
+      .mockResolvedValue({ UploadId: "upload-1" } as never);
+    try {
+      const { completeMultipartUpload, createMultipartUpload } = await import(
+        "@/lib/s3"
+      );
+      await createMultipartUpload("bucket", "inst/run/file.tif", "image/tiff");
+      await completeMultipartUpload({
+        bucket: "bucket",
+        key: "inst/run/file.tif",
+        uploadId: "upload-1",
+        parts: [{ partNumber: 1, etag: '"abc"' }],
+        checksumCrc64nvme: "AuUcyF784aU=",
+        sizeBytes: 12,
+      });
+      const commands = send.mock.calls.map((call) => call[0]);
+      const created = commands.find(
+        (command) => command instanceof s3.CreateMultipartUploadCommand
+      );
+      const finished = commands.find(
+        (command) => command instanceof s3.CompleteMultipartUploadCommand
+      );
+      expect(created?.input).toMatchObject({
+        ContentType: "image/tiff",
+        ChecksumAlgorithm: "CRC64NVME",
+        ChecksumType: "FULL_OBJECT",
+      });
+      expect(finished?.input).toMatchObject({
+        ChecksumCRC64NVME: "AuUcyF784aU=",
+        ChecksumType: "FULL_OBJECT",
+        MpuObjectSize: 12,
+      });
+    } finally {
+      send.mockRestore();
+    }
+  });
+});
+
+describe("multipart S3 errors", () => {
+  it("returns 400 when the watcher can fix the bytes and 502 otherwise", async () => {
+    const { multipartErrorResponse } = await import(
+      "@/lib/api/multipart-upload"
+    );
+    const { MultipartUploadError } = await import("@/lib/s3");
+    const mismatch = multipartErrorResponse(
+      new MultipartUploadError("BadDigest", "checksum mismatch", 400)
+    );
+    expect(mismatch.status).toBe(400);
+    const body = await mismatch.json();
+    expect(body.error.details.s3_code).toBe("BadDigest");
+
+    const denied = multipartErrorResponse(
+      new MultipartUploadError("AccessDenied", "not allowed", 403)
+    );
+    expect(denied.status).toBe(502);
   });
 });

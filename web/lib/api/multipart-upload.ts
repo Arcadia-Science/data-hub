@@ -19,6 +19,16 @@ import {
 } from "@/lib/s3";
 
 const PRE_UPLOAD = new Set(["detected", "upload_requested"]);
+// These are about the bytes the watcher sent. It can retry or start over.
+// Anything else (a missing permission, a 503) is reported as 502 so it is
+// not mistaken for a bad token.
+const CALLER_FIXABLE_S3_ERRORS = new Set([
+  "BadDigest",
+  "InvalidPart",
+  "InvalidPartOrder",
+  "EntityTooSmall",
+  "NoSuchUpload",
+]);
 const UPLOADED_OR_LATER = new Set([
   "uploaded",
   "processing",
@@ -91,12 +101,7 @@ export async function loadMultipartFile(
 
 export function multipartErrorResponse(err: unknown): Response {
   if (err instanceof MultipartUploadError) {
-    const status =
-      err.httpStatus >= 500
-        ? 502
-        : err.httpStatus >= 400
-          ? err.httpStatus
-          : 400;
+    const status = CALLER_FIXABLE_S3_ERRORS.has(err.code) ? 400 : 502;
     return apiError(status, err.code, err.message, { s3_code: err.code });
   }
   throw err;
@@ -127,7 +132,12 @@ export async function beginMultipartUpload(input: {
         input.existingUploadId
       );
     } catch (err) {
-      return multipartErrorResponse(err);
+      // Complete only sends the id stored on the row, so a replaced id
+      // cannot become the object. The bucket deletes leftovers after 7 days.
+      console.error(
+        "Could not cancel the previous multipart upload; starting a new one",
+        err
+      );
     }
   }
 
@@ -252,6 +262,12 @@ export async function finishMultipartUpload(
   checksumCrc64nvme: string
 ): Promise<Response> {
   if (UPLOADED_OR_LATER.has(file.status)) {
+    // The processor can adopt the row as soon as S3 finishes. Clear the
+    // upload id so a later restart does not try to cancel a finished upload.
+    await db
+      .update(files)
+      .set({ multipartUploadId: null })
+      .where(eq(files.id, file.fileId));
     return Response.json({
       file_id: file.fileId,
       status: file.status,

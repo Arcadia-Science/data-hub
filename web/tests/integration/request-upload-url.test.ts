@@ -382,6 +382,46 @@ describe("Request Upload URL API", () => {
     expect(row?.status).toBe("uploaded");
   });
 
+  it("leaves a file the processor already took and clears the upload id", async () => {
+    const res = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${runId}/request-upload-url`,
+      {
+        method: "POST",
+        token,
+        headers: watcher12,
+        body: { filename: "adopted.bin", size_bytes: 1200 },
+      }
+    );
+    const started = await res.json();
+    await getTestDb()
+      .update(files)
+      .set({ status: "processing" })
+      .where(eq(files.id, started.file_id));
+
+    const done = await api(
+      `/api/v1/files/${started.file_id}/multipart-upload/complete`,
+      {
+        method: "POST",
+        token,
+        body: {
+          upload_id: started.upload_id,
+          checksum_crc64nvme: "AuUcyF784aU=",
+          parts: [{ part_number: 1, etag: '"unused"' }],
+        },
+      }
+    );
+    expect(done.status).toBe(200);
+    const finished = await done.json();
+    expect(finished.already_uploaded).toBe(true);
+    expect(finished.status).toBe("processing");
+    const [row] = await getTestDb()
+      .select()
+      .from(files)
+      .where(eq(files.id, started.file_id));
+    expect(row?.status).toBe("processing");
+    expect(row?.multipartUploadId).toBeNull();
+  });
+
   it("requires authentication", async () => {
     const res = await api(
       `/api/v1/instruments/${instrumentId}/runs/${runId}/request-upload-url`,

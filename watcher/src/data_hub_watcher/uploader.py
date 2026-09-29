@@ -29,7 +29,7 @@ from data_hub_watcher.constants import (
 )
 from data_hub_watcher.events import EventReporter, EventType, WatcherEvent
 from data_hub_watcher.heartbeat import WatcherCounters
-from data_hub_watcher.models import UploadQueueFile
+from data_hub_watcher.models import PresignedUploadResponse, UploadQueueFile
 from data_hub_watcher.run_detector import FileInfo, file_created_at
 from data_hub_watcher.state import StateDB
 from data_hub_watcher.util import file_digests
@@ -38,6 +38,10 @@ logger = logging.getLogger(__name__)
 
 # Part URLs expire with the signing credentials, so fetch a few at a time.
 _PART_URL_BATCH = 8
+# More tries than a whole-file upload. One short network drop must not
+# cancel a multi-gigabyte file that is already mostly in S3.
+_PART_ATTEMPTS = 6
+_PART_BACKOFF_CAP_SECONDS = 30
 
 
 class _UploadStopped(Exception):
@@ -92,18 +96,6 @@ def s3_error_details(exc: BaseException) -> dict[str, str]:
         details["s3_message"] = message
         details["error"] = f"{code}: {message}" if code else message
     return details
-
-
-def _part_url_expired(exc: BaseException) -> bool:
-    response = getattr(exc, "response", None)
-    if response is None or getattr(response, "status_code", None) != 403:
-        return False
-    text = getattr(response, "text", "") or ""
-    code = _xml_tag(text, "Code")
-    message = _xml_tag(text, "Message") or ""
-    if code == "ExpiredToken":
-        return True
-    return code == "AccessDenied" and "Request has expired" in message
 
 
 @dataclass
@@ -548,7 +540,13 @@ class Uploader:
             self._counters.files_uploaded += 1
 
     def _backoff(self, attempt: int) -> None:
-        delay = UPLOAD_RETRY_BASE_DELAY * (2**attempt)
+        self._wait(UPLOAD_RETRY_BASE_DELAY * (2**attempt))
+
+    def _part_backoff(self, attempt: int) -> None:
+        delay = min(UPLOAD_RETRY_BASE_DELAY * (2**attempt), _PART_BACKOFF_CAP_SECONDS)
+        self._wait(delay)
+
+    def _wait(self, delay: float) -> None:
         if self._stop_event is not None:
             self._stop_event.wait(delay)
         else:
@@ -570,14 +568,11 @@ class Uploader:
     def _upload_single_put(
         self,
         path: Path,
-        presigned: object,
+        presigned: PresignedUploadResponse,
         content_type: str | None,
         s3_key: str,
     ) -> bool:
-        from data_hub_watcher.models import PresignedUploadResponse
-
-        upload = presigned if isinstance(presigned, PresignedUploadResponse) else None
-        url = upload.upload_url if upload is not None else None
+        url = presigned.upload_url
         if not url:
             self._fail_upload(path.name, s3_key, RuntimeError("missing upload URL"))
             return False
@@ -606,20 +601,18 @@ class Uploader:
     def _upload_multipart(
         self,
         path: Path,
-        presigned: object,
+        presigned: PresignedUploadResponse,
         crc64nvme: str,
         size_bytes: int,
         content_type: str | None,
         relative_path: str | None,
         run_id: str,
     ) -> bool:
-        from data_hub_watcher.models import PresignedUploadResponse
-
-        upload = presigned if isinstance(presigned, PresignedUploadResponse) else None
-        if upload is None or not upload.upload_id or not upload.part_size or not upload.part_count:
+        upload = presigned
+        if not upload.upload_id or not upload.part_size or not upload.part_count:
             self._fail_upload(
                 path.name,
-                getattr(presigned, "s3_key", ""),
+                upload.s3_key,
                 RuntimeError("incomplete multipart response"),
             )
             return False
@@ -683,29 +676,31 @@ class Uploader:
     def _put_parts(
         self,
         path: Path,
-        upload: object,
+        upload: PresignedUploadResponse,
         size_bytes: int,
     ) -> list[dict[str, object]] | None:
-        from data_hub_watcher.models import PresignedUploadResponse
-
-        assert isinstance(upload, PresignedUploadResponse)
-        assert upload.upload_id and upload.part_size and upload.part_count
+        upload_id, part_size, part_count = self._multipart_plan(upload)
         finished: list[dict[str, object]] = []
         part_number = 1
-        while part_number <= upload.part_count:
+        while part_number <= part_count:
             if self._stop_requested():
                 raise _UploadStopped
-            batch_end = min(part_number + _PART_URL_BATCH, upload.part_count + 1)
+            batch_end = min(part_number + _PART_URL_BATCH, part_count + 1)
             numbers = list(range(part_number, batch_end))
-            urls = self._client.get_part_urls(upload.file_id, upload.upload_id, numbers)
+            urls = self._client.get_part_urls(upload.file_id, upload_id, numbers)
             by_number = {part.part_number: part.upload_url for part in urls.parts}
             for number in numbers:
-                start = (number - 1) * upload.part_size
-                length = min(upload.part_size, size_bytes - start)
+                start = (number - 1) * part_size
+                length = min(part_size, size_bytes - start)
                 etag = self._put_one_part(path, by_number[number], start, length, upload, number)
                 finished.append({"part_number": number, "etag": etag})
             part_number = batch_end
         return finished
+
+    def _multipart_plan(self, upload: PresignedUploadResponse) -> tuple[str, int, int]:
+        if not upload.upload_id or not upload.part_size or not upload.part_count:
+            raise RuntimeError("incomplete multipart response")
+        return upload.upload_id, upload.part_size, upload.part_count
 
     def _put_one_part(
         self,
@@ -713,16 +708,19 @@ class Uploader:
         url: str,
         start: int,
         length: int,
-        upload: object,
+        upload: PresignedUploadResponse,
         part_number: int,
     ) -> str:
-        from data_hub_watcher.models import PresignedUploadResponse
-
-        assert isinstance(upload, PresignedUploadResponse)
-        assert upload.upload_id
-        current_url = url
+        upload_id, _part_size, _part_count = self._multipart_plan(upload)
         last_exc: BaseException | None = None
-        for attempt in range(UPLOAD_RETRY_MAX):
+        for attempt in range(_PART_ATTEMPTS):
+            # Refresh on every retry, not only when the error body says the
+            # URL expired. A connection reset mid-body has no body to read,
+            # and the URL may have expired while that body was in flight.
+            current_url = url
+            if attempt > 0:
+                refreshed = self._client.get_part_urls(upload.file_id, upload_id, [part_number])
+                current_url = refreshed.parts[0].upload_url
             slice_reader = _FileSlice(path, start, length)
             try:
                 response = self._s3_session.put(
@@ -738,20 +736,15 @@ class Uploader:
                 return etag
             except Exception as exc:
                 last_exc = exc
-                if _part_url_expired(exc):
-                    refreshed = self._client.get_part_urls(
-                        upload.file_id, upload.upload_id, [part_number]
-                    )
-                    current_url = refreshed.parts[0].upload_url
                 logger.warning(
                     "Part %d attempt %d/%d failed for %s: %s",
                     part_number,
                     attempt + 1,
-                    UPLOAD_RETRY_MAX,
+                    _PART_ATTEMPTS,
                     path.name,
                     s3_error_details(exc)["error"],
                 )
-                self._backoff(attempt)
+                self._part_backoff(attempt)
             finally:
                 slice_reader.close()
             if self._stop_requested():
@@ -760,20 +753,15 @@ class Uploader:
 
     def _complete_with_retries(
         self,
-        upload: object,
+        upload: PresignedUploadResponse,
         parts: list[dict[str, object]],
         crc64nvme: str,
     ) -> None:
-        from data_hub_watcher.models import PresignedUploadResponse
-
-        assert isinstance(upload, PresignedUploadResponse)
-        assert upload.upload_id
+        upload_id, _part_size, _part_count = self._multipart_plan(upload)
         last_exc: ApiError | None = None
         for attempt in range(UPLOAD_RETRY_MAX):
             try:
-                self._client.complete_multipart_upload(
-                    upload.file_id, upload.upload_id, parts, crc64nvme
-                )
+                self._client.complete_multipart_upload(upload.file_id, upload_id, parts, crc64nvme)
                 return
             except ApiError as exc:
                 last_exc = exc
