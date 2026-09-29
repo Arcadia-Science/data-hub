@@ -12,7 +12,7 @@ The Lambda has three invocation paths:
 2. The handler parses the S3 key to extract the instrument ID, run ID, and filename. The expected key layout is `{instrument_id}/{run_id}/{filename}`.
 3. For S3-triggered events, a cheap union of processor filename gates runs first. Non-matching files no-op without an API call.
 4. The handler fetches the instrument via `GET /instruments/:id` and looks up a processor by `instrument_type` in `data_hub_lambda.processors`. Unmapped types (including `generic`) and per-type gate failures no-op.
-5. The processor downloads the raw file from S3, preprocesses it, and creates/updates the run and files via the Data Hub API using the event's `instrument_id`.
+5. The processor downloads the raw file from S3, preprocesses it, and creates/updates the run and files via the Data Hub API using the event's `instrument_id`. Before the download it compares the object size with free disk space. A file that will not fit is marked failed, and the raw object stays in S3.
 
 Slack notifications are sent by the **web app**, not the Lambda — see [Slack notifications](#slack-notifications) below.
 

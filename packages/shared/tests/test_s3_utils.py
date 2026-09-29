@@ -7,7 +7,12 @@ from unittest.mock import MagicMock
 import pytest
 from botocore.exceptions import ClientError
 
-from data_hub_shared.s3_utils import _extra_args, get_content_type, object_exists
+from data_hub_shared.s3_utils import (
+    _extra_args,
+    get_content_type,
+    object_content_length,
+    object_exists,
+)
 
 
 def _client_error(code: str, status: int) -> ClientError:
@@ -59,6 +64,20 @@ def test_object_exists_other_errors_raise() -> None:
     client.head_object.side_effect = _client_error("500", 500)
     with pytest.raises(ClientError):
         object_exists("s3://bucket/key", s3_client=client)
+
+
+def test_object_content_length_reads_head() -> None:
+    client = MagicMock()
+    client.head_object.return_value = {"ContentLength": 42}
+    assert object_content_length("s3://bucket/key", s3_client=client) == 42
+    client.head_object.assert_called_once_with(Bucket="bucket", Key="key")
+
+
+def test_object_content_length_requires_content_length() -> None:
+    client = MagicMock()
+    client.head_object.return_value = {}
+    with pytest.raises(ValueError, match="ContentLength"):
+        object_content_length("s3://bucket/key", s3_client=client)
 
 
 def test_get_content_type_is_case_insensitive() -> None:
