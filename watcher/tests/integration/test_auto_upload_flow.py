@@ -9,11 +9,14 @@ instrument:
 """
 
 from __future__ import annotations
+from pathlib import Path
 
 import pytest
+import requests
 
 from data_hub_shared.testing import IntegrationEnv, db_query
 from data_hub_watcher.api_client import DataHubClient
+from data_hub_watcher.util import file_digests
 
 pytestmark = pytest.mark.integration
 
@@ -391,3 +394,62 @@ class TestFullAutoModeLifecycle:
             (wid,),
         )
         assert rows[0][0] == "stopped"
+
+
+class TestMultipartUpload:
+    def test_large_file_is_uploaded_in_parts(
+        self,
+        client: DataHubClient,
+        instrument_id: str,
+        integration_env: IntegrationEnv,
+        tmp_path: Path,
+    ) -> None:
+        _register_and_report(client, instrument_id, run_id="PARTS-001")
+        payload = b"multipart-bytes-" * 80
+        path = tmp_path / "stack.bin"
+        path.write_bytes(payload)
+        _sha, crc = file_digests(path)
+
+        started = client.request_upload_url(
+            instrument_id,
+            "PARTS-001",
+            "stack.bin",
+            content_type="application/octet-stream",
+            size_bytes=len(payload),
+        )
+        assert started.upload_type == "multipart"
+        assert started.upload_id
+        assert started.part_size == 1024
+        assert started.part_count == 2
+
+        urls = client.get_part_urls(
+            started.file_id,
+            started.upload_id,
+            list(range(1, started.part_count + 1)),
+        )
+        parts: list[dict[str, object]] = []
+        assert started.part_size is not None
+        for part in urls.parts:
+            start = (part.part_number - 1) * started.part_size
+            chunk = payload[start : start + started.part_size]
+            response = requests.put(
+                part.upload_url,
+                data=chunk,
+                headers={"Content-Length": str(len(chunk))},
+                timeout=30,
+            )
+            response.raise_for_status()
+            parts.append({"part_number": part.part_number, "etag": response.headers["ETag"]})
+
+        done = client.complete_multipart_upload(started.file_id, started.upload_id, parts, crc)
+        assert done.already_uploaded is False
+        rows = db_query(
+            integration_env.db_dsn,
+            "SELECT status, multipart_upload_id FROM files WHERE id = %s",
+            (started.file_id,),
+        )
+        assert rows[0] == ("uploaded", None)
+        stored = Path(
+            f"/tmp/data-hub-integration-s3/data-hub-test-raw/{instrument_id}/PARTS-001/stack.bin"
+        )
+        assert stored.read_bytes() == payload

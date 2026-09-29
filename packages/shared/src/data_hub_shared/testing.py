@@ -311,6 +311,12 @@ def start_test_server() -> Generator[IntegrationEnv, None, None]:
         "AWS_SECRET_ACCESS_KEY": os.environ.get("AWS_SECRET_ACCESS_KEY", "test-secret"),
         "AWS_REGION": os.environ.get("AWS_REGION", "us-east-1"),
         "S3_RAW_DATA_BUCKET": os.environ.get("S3_RAW_DATA_BUCKET", "data-hub-test-raw"),
+        # `next start` is production, so LOCAL_S3_MIRROR stays off. This
+        # stand-in lets multipart tests run without AWS. The small threshold
+        # is test-only; production leaves these unset.
+        "INTEGRATION_TEST_S3_MIRROR": "/tmp/data-hub-integration-s3",
+        "MULTIPART_THRESHOLD_BYTES": "1024",
+        "MULTIPART_PART_SIZE_BYTES": "1024",
         # Watcher release defaults are seeded into watcher_release_config
         # above (see seed_watcher_release); the env-var fallback is gone.
     }

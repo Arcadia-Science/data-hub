@@ -304,10 +304,36 @@ class PresignedUploadResponse(BaseModel):
     model_config = _API_MODEL_CONFIG
 
     upload_url: str | None = None
+    upload_type: str | None = None
+    upload_id: str | None = None
+    part_size: int | None = None
+    part_count: int | None = None
     s3_bucket: str
     s3_key: str
     file_id: int
     expires_in: int | None = None
+    already_uploaded: bool = False
+
+
+class MultipartPartUrl(BaseModel):
+    model_config = _API_MODEL_CONFIG
+
+    part_number: int
+    upload_url: str
+
+
+class MultipartPartUrlsResponse(BaseModel):
+    model_config = _API_MODEL_CONFIG
+
+    expires_in: int
+    parts: list[MultipartPartUrl]
+
+
+class MultipartCompleteResponse(BaseModel):
+    model_config = _API_MODEL_CONFIG
+
+    file_id: int
+    status: str
     already_uploaded: bool = False
 
 
