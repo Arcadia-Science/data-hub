@@ -17,10 +17,15 @@ from data_hub_lambda.models import FileResponse, RunResponse
 
 
 @pytest.fixture(autouse=True)
-def _skip_disk_check() -> Any:
-    """Existing cases use stand-in files and do not talk to S3."""
-    with patch("data_hub_lambda.hina_microscope.process_file.ensure_object_fits_on_disk"):
-        yield
+def _small_raw_object(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The shared helper asks S3 for the size before it opens the file."""
+
+    def _download(_uri: str, local_path: Path, **_kwargs: Any) -> None:
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.write_bytes(b"nd2")
+
+    monkeypatch.setattr("data_hub_shared.s3_utils.object_content_length", lambda *_a, **_k: 128)
+    monkeypatch.setattr("data_hub_shared.s3_utils.download_file", _download)
 
 
 @pytest.fixture(autouse=True)
@@ -219,19 +224,14 @@ _TOO_BIG = (
 class TestProcessFileTooLarge:
     def test_oversized_file_is_marked_failed_and_not_downloaded(self, tmp_path: Path) -> None:
         client = _build_client_mock(run_metadata=None)
-        from data_hub_lambda.processing_disk import ensure_object_fits_on_disk
 
         with (
             patch(
-                "data_hub_lambda.hina_microscope.process_file.ensure_object_fits_on_disk",
-                ensure_object_fits_on_disk,
-            ),
-            patch(
-                "data_hub_lambda.processing_disk.s3_utils.object_content_length",
+                "data_hub_shared.s3_utils.object_content_length",
                 return_value=11_097_280_814,
             ),
             patch(
-                "data_hub_lambda.processing_disk.shutil.disk_usage",
+                "data_hub_lambda.raw_access.shutil.disk_usage",
                 return_value=SimpleNamespace(free=10 * 1024**3),
             ),
             patch(
