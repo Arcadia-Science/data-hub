@@ -11,7 +11,10 @@ import type { ReadableStream as NodeWebReadableStream } from "node:stream/web";
 import type { NextRequest } from "next/server";
 import {
   getLocalMirrorRoot,
+  localSavePart,
+  MirrorMultipartError,
   mimeFor,
+  mirrorRootForMultipart,
   parseByteRange,
   resolveMirrorPath,
 } from "@/lib/s3-local-mirror";
@@ -140,6 +143,34 @@ export async function HEAD(request: NextRequest, { params }: RouteContext) {
 }
 
 export async function PUT(request: NextRequest, { params }: RouteContext) {
+  const url = new URL(request.url);
+  const uploadId = url.searchParams.get("uploadId");
+  const partNumberRaw = url.searchParams.get("partNumber");
+  if (uploadId) {
+    const mirror = mirrorRootForMultipart();
+    if (!mirror) {
+      return NOT_FOUND_RESPONSE();
+    }
+    if (!request.body) {
+      return new Response("Empty body", { status: 400 });
+    }
+    const partNumber = Number(partNumberRaw);
+    try {
+      const etag = await localSavePart(
+        mirror,
+        uploadId,
+        partNumber,
+        Readable.fromWeb(request.body as unknown as NodeWebReadableStream)
+      );
+      return new Response(null, { status: 200, headers: { ETag: etag } });
+    } catch (err) {
+      if (err instanceof MirrorMultipartError) {
+        return new Response(err.message, { status: err.httpStatus });
+      }
+      throw err;
+    }
+  }
+
   const root = getLocalMirrorRoot();
   if (!root) {
     return NOT_FOUND_RESPONSE();

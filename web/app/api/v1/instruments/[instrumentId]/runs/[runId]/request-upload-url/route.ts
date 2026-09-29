@@ -6,17 +6,20 @@ import {
   CONFLICT,
   INTERNAL_ERROR,
   NOT_FOUND,
+  PAYLOAD_TOO_LARGE,
 } from "@/lib/api/errors";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
+import { beginMultipartUpload } from "@/lib/api/multipart-upload";
 import { readJsonBody, requestUploadUrlBody } from "@/lib/api/openapi";
 import {
   type IncomingRunFile,
   resolveRunFiles,
 } from "@/lib/api/run-file-identity";
 import { touchRuns } from "@/lib/api/touch-runs";
-import { watcherClientFrom } from "@/lib/api/watcher-compat";
+import { WATCHER_FEATURES, watcherClientFrom } from "@/lib/api/watcher-compat";
 import { db } from "@/lib/db";
 import { files } from "@/lib/db/schema";
+import { multipartThresholdBytes, SINGLE_PUT_MAX_BYTES } from "@/lib/multipart";
 import { getPresignedUploadUrl, getS3RawDataBucket } from "@/lib/s3";
 
 interface RouteContext {
@@ -73,12 +76,29 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   const filename = body.filename;
   const contentType = body.content_type;
   const sizeBytes = body.size_bytes;
+  const watcher = watcherClientFrom(request);
+  if (sizeBytes != null && (!Number.isInteger(sizeBytes) || sizeBytes < 0)) {
+    return apiError(
+      400,
+      "VALIDATION_ERROR",
+      "size_bytes must be a whole number"
+    );
+  }
+  if (
+    !watcher.supports("multipartUpload") &&
+    sizeBytes != null &&
+    sizeBytes > SINGLE_PUT_MAX_BYTES
+  ) {
+    return apiError(
+      413,
+      PAYLOAD_TOO_LARGE,
+      `Files over 5 GB need watcher ${WATCHER_FEATURES.multipartUpload} or newer.`
+    );
+  }
   const fileCreatedAt = body.file_created_at
     ? new Date(body.file_created_at)
     : null;
-  const relativePath = watcherClientFrom(request).supports(
-    "renameDuplicateFilenames"
-  )
+  const relativePath = watcher.supports("renameDuplicateFilenames")
     ? body.relative_path
     : undefined;
 
@@ -156,6 +176,35 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
     fileId = inserted.id;
     await touchRuns([run.id]);
+  }
+
+  if (
+    watcher.supports("multipartUpload") &&
+    sizeBytes != null &&
+    sizeBytes >= multipartThresholdBytes()
+  ) {
+    const started = await beginMultipartUpload({
+      fileId,
+      existingUploadId: existingFile?.multipartUploadId ?? null,
+      bucket: s3Bucket,
+      key: s3Key,
+      contentType,
+      sizeBytes,
+    });
+    if (started instanceof Response) {
+      return started;
+    }
+    return Response.json({
+      upload_type: "multipart",
+      upload_id: started.uploadId,
+      part_size: started.partSize,
+      part_count: started.partCount,
+      s3_bucket: s3Bucket,
+      s3_key: s3Key,
+      file_id: fileId,
+      expires_in: started.expiresIn,
+      already_uploaded: false,
+    });
   }
 
   const uploadUrl = await getPresignedUploadUrl(

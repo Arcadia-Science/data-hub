@@ -279,6 +279,12 @@ export async function setup() {
     AWS_REGION: process.env.AWS_REGION ?? "us-east-1",
     S3_RAW_DATA_BUCKET:
       process.env.S3_RAW_DATA_BUCKET ?? "test-raw-data-bucket",
+    // Multipart uploads call S3 for real. The integration server runs as
+    // production, so LOCAL_S3_MIRROR is off. This directory is the stand-in,
+    // and the small threshold lets tests finish a multipart upload quickly.
+    INTEGRATION_TEST_S3_MIRROR: "/tmp/data-hub-integration-s3",
+    MULTIPART_THRESHOLD_BYTES: "1024",
+    MULTIPART_PART_SIZE_BYTES: "1024",
     // Watcher release-info defaults are seeded into the
     // `watcher_release_config` table above; the env-var fallback is gone.
     // Slack channel webhook URL is seeded into `slack_channel_config`

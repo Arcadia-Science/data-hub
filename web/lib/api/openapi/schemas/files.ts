@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PART_URL_BATCH_LIMIT } from "@/lib/multipart";
 import { fileCategorySchema, fileStatusSchema, isoDateTime } from "./common";
 
 export const createFileBody = z.object({
@@ -59,4 +60,47 @@ export const fileDismissed = z.object({
 export const fileReprocessed = z.object({
   status: z.literal("processing"),
   file_id: z.number().int(),
+});
+
+export const multipartPartUrlsBody = z.object({
+  upload_id: z.string().min(1),
+  part_numbers: z.array(z.number().int()).min(1).max(PART_URL_BATCH_LIMIT),
+});
+
+export const multipartPartUrlsResponse = z.object({
+  expires_in: z.number().int(),
+  parts: z.array(
+    z.object({
+      part_number: z.number().int(),
+      upload_url: z.string().min(1),
+    })
+  ),
+});
+
+export const multipartCompleteBody = z.object({
+  upload_id: z.string().min(1),
+  checksum_crc64nvme: z.string().regex(/^[A-Za-z0-9+/]+={0,2}$/),
+  parts: z
+    .array(
+      z.object({
+        part_number: z.number().int(),
+        etag: z.string().min(1).max(200),
+      })
+    )
+    .min(1),
+});
+
+export const multipartCompleteResponse = z.object({
+  file_id: z.number().int(),
+  status: z.string(),
+  already_uploaded: z.boolean(),
+});
+
+export const multipartAbortBody = z.object({
+  upload_id: z.string().min(1),
+});
+
+export const multipartAbortResponse = z.object({
+  file_id: z.number().int(),
+  aborted: z.literal(true),
 });

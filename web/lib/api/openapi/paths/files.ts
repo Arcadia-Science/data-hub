@@ -13,6 +13,12 @@ import {
   fileDetail,
   fileDismissed,
   fileReprocessed,
+  multipartAbortBody,
+  multipartAbortResponse,
+  multipartCompleteBody,
+  multipartCompleteResponse,
+  multipartPartUrlsBody,
+  multipartPartUrlsResponse,
   patchFileBody,
 } from "../schemas/files";
 
@@ -87,6 +93,42 @@ registry.registerPath({
     302: { description: "Redirect to a presigned download URL." },
     ...errorResponses(),
   },
+});
+registry.registerPath({
+  method: "post",
+  path: "/files/{fileId}/multipart-upload/part-urls",
+  operationId: "signMultipartPartUrls",
+  summary: "Sign URLs for multipart upload parts",
+  description:
+    "Requires scope `runs:upload`. PAT only. Returns a few presigned UploadPart URLs. Fetch the next batch when these expire.",
+  tags: ["Files"],
+  security: bearerSecurity,
+  request: { params: fileParams, body: body(multipartPartUrlsBody) },
+  responses: responses("Part URLs.", multipartPartUrlsResponse),
+});
+registry.registerPath({
+  method: "post",
+  path: "/files/{fileId}/multipart-upload/complete",
+  operationId: "completeMultipartUpload",
+  summary: "Finish a multipart upload",
+  description:
+    "Requires scope `runs:upload`. PAT only. Sends the part list and the whole-file CRC64NVME checksum to S3, then marks the file uploaded.",
+  tags: ["Files"],
+  security: bearerSecurity,
+  request: { params: fileParams, body: body(multipartCompleteBody) },
+  responses: responses("Upload finished.", multipartCompleteResponse),
+});
+registry.registerPath({
+  method: "delete",
+  path: "/files/{fileId}/multipart-upload",
+  operationId: "abortMultipartUpload",
+  summary: "Cancel a multipart upload",
+  description:
+    "Requires scope `runs:upload`. PAT only. Cancels the in-progress S3 upload and clears it from the file.",
+  tags: ["Files"],
+  security: bearerSecurity,
+  request: { params: fileParams, body: body(multipartAbortBody) },
+  responses: responses("Upload cancelled.", multipartAbortResponse),
 });
 registry.registerPath({
   method: "post",

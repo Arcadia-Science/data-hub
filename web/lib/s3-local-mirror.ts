@@ -16,8 +16,13 @@
 // activated in a Vercel production build even if the env var is
 // somehow leaked into that environment.
 
-import { stat } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
+import { createReadStream, createWriteStream } from "node:fs";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { type Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import { Crc64Nvme } from "@aws-sdk/crc64-nvme";
 
 const MIME_MAP: Record<string, string> = {
   ".csv": "text/csv",
@@ -224,4 +229,241 @@ export async function localMirrorHead(
   } catch {
     return { exists: false };
   }
+}
+
+export class MirrorMultipartError extends Error {
+  readonly code: string;
+  readonly httpStatus: number;
+
+  constructor(code: string, message: string, httpStatus = 400) {
+    super(message);
+    this.name = code;
+    this.code = code;
+    this.httpStatus = httpStatus;
+  }
+}
+
+// `next start` in the integration harness sets NODE_ENV=production, which
+// turns `getLocalMirrorRoot` off. The harness sets this instead so multipart
+// tests can run without AWS. Vercel always sets `VERCEL`, so a deployment
+// cannot take this path.
+export function mirrorRootForMultipart(): string | null {
+  const local = getLocalMirrorRoot();
+  if (local) {
+    return local;
+  }
+  if (process.env.VERCEL) {
+    return null;
+  }
+  const testRoot = process.env.INTEGRATION_TEST_S3_MIRROR;
+  return testRoot ? path.resolve(testRoot) : null;
+}
+
+interface MultipartMeta {
+  bucket: string;
+  contentType: string | null;
+  key: string;
+}
+
+function assertUploadId(uploadId: string): void {
+  if (!/^[a-f0-9]{32}$/.test(uploadId)) {
+    throw new MirrorMultipartError("NoSuchUpload", "Unknown multipart upload");
+  }
+}
+
+function multipartDir(root: string, uploadId: string): string {
+  assertUploadId(uploadId);
+  const dir = path.resolve(root, ".multipart", uploadId);
+  const rootWithSep = root.endsWith(path.sep) ? root : root + path.sep;
+  if (!dir.startsWith(rootWithSep)) {
+    throw new MirrorMultipartError("NoSuchUpload", "Unknown multipart upload");
+  }
+  return dir;
+}
+
+async function readMeta(
+  root: string,
+  uploadId: string
+): Promise<MultipartMeta> {
+  try {
+    const raw = await readFile(
+      path.join(multipartDir(root, uploadId), "meta.json"),
+      "utf8"
+    );
+    return JSON.parse(raw) as MultipartMeta;
+  } catch (err) {
+    if (err instanceof MirrorMultipartError) {
+      throw err;
+    }
+    throw new MirrorMultipartError("NoSuchUpload", "Unknown multipart upload");
+  }
+}
+
+export async function localCreateMultipartUpload(
+  root: string,
+  bucket: string,
+  key: string,
+  contentType?: string
+): Promise<string> {
+  const uploadId = randomBytes(16).toString("hex");
+  const dir = multipartDir(root, uploadId);
+  await mkdir(path.join(dir, "parts"), { recursive: true });
+  const meta: MultipartMeta = {
+    bucket,
+    key,
+    contentType: contentType ?? null,
+  };
+  await writeFile(path.join(dir, "meta.json"), JSON.stringify(meta), "utf8");
+  return uploadId;
+}
+
+export function localPartUploadUrl(
+  bucket: string,
+  key: string,
+  uploadId: string,
+  partNumber: number
+): string {
+  const base = localMirrorUploadUrl(bucket, key);
+  const params = new URLSearchParams({
+    uploadId,
+    partNumber: String(partNumber),
+  });
+  return `${base}?${params.toString()}`;
+}
+
+export async function localSavePart(
+  root: string,
+  uploadId: string,
+  partNumber: number,
+  body: Readable
+): Promise<string> {
+  if (!Number.isInteger(partNumber) || partNumber < 1 || partNumber > 10_000) {
+    throw new MirrorMultipartError(
+      "InvalidPart",
+      "Part number must be from 1 to 10000"
+    );
+  }
+  await readMeta(root, uploadId);
+  const partPath = path.join(
+    multipartDir(root, uploadId),
+    "parts",
+    String(partNumber)
+  );
+  const hash = createHash("md5");
+  const hasher = new Transform({
+    transform(chunk, _encoding, callback) {
+      hash.update(chunk);
+      callback(null, chunk);
+    },
+  });
+  await pipeline(body, hasher, createWriteStream(partPath));
+  return `"${hash.digest("hex")}"`;
+}
+
+function normalizeEtag(etag: string): string {
+  return etag.trim().replaceAll('"', "").toLowerCase();
+}
+
+async function crc64nvmeBase64(filePath: string): Promise<string> {
+  const checksum = new Crc64Nvme();
+  for await (const chunk of createReadStream(filePath)) {
+    checksum.update(chunk as Uint8Array);
+  }
+  const digest = await checksum.digest();
+  return Buffer.from(digest).toString("base64");
+}
+
+export async function localCompleteMultipartUpload(
+  root: string,
+  uploadId: string,
+  parts: { partNumber: number; etag: string }[],
+  checksumCrc64nvme: string,
+  sizeBytes: number
+): Promise<void> {
+  const meta = await readMeta(root, uploadId);
+  const dir = multipartDir(root, uploadId);
+  const dest = resolveMirrorPath(root, meta.bucket, meta.key);
+  await mkdir(path.dirname(dest), { recursive: true });
+  const out = createWriteStream(dest);
+  try {
+    for (const part of parts) {
+      const partPath = path.join(dir, "parts", String(part.partNumber));
+      let bytes: Buffer;
+      try {
+        bytes = await readFile(partPath);
+      } catch {
+        throw new MirrorMultipartError(
+          "InvalidPart",
+          `Part ${part.partNumber} was not uploaded`
+        );
+      }
+      const hash = createHash("md5").update(bytes).digest("hex");
+      if (normalizeEtag(part.etag) !== hash) {
+        throw new MirrorMultipartError(
+          "InvalidPart",
+          `ETag for part ${part.partNumber} does not match`
+        );
+      }
+      if (bytes.length < 1 && parts.length > 1) {
+        throw new MirrorMultipartError(
+          "EntityTooSmall",
+          `Part ${part.partNumber} is empty`
+        );
+      }
+      await new Promise<void>((resolve, reject) => {
+        out.write(bytes, (err) => (err ? reject(err) : resolve()));
+      });
+    }
+    await new Promise<void>((resolve, reject) => {
+      out.once("error", reject);
+      out.end(() => resolve());
+    });
+  } catch (err) {
+    out.destroy();
+    await rm(dest, { force: true });
+    throw err;
+  }
+
+  const stored = await stat(dest);
+  const checksum = await crc64nvmeBase64(dest);
+  if (stored.size !== sizeBytes || checksum !== checksumCrc64nvme) {
+    await rm(dest, { force: true });
+    throw new MirrorMultipartError(
+      "BadDigest",
+      "The uploaded bytes do not match the checksum or the file size"
+    );
+  }
+  await rm(dir, { recursive: true, force: true });
+}
+
+export async function localAbortMultipartUpload(
+  root: string,
+  uploadId: string
+): Promise<void> {
+  let dir: string;
+  try {
+    dir = multipartDir(root, uploadId);
+  } catch (err) {
+    if (err instanceof MirrorMultipartError) {
+      return;
+    }
+    throw err;
+  }
+  await rm(dir, { recursive: true, force: true });
+}
+
+export async function localObjectChecksum(
+  root: string,
+  bucket: string,
+  key: string
+): Promise<{ sizeBytes: number; checksumCrc64nvme: string } | null> {
+  const head = await localMirrorHead(root, bucket, key);
+  if (!head.exists) {
+    return null;
+  }
+  const filePath = resolveMirrorPath(root, bucket, key);
+  return {
+    sizeBytes: head.sizeBytes,
+    checksumCrc64nvme: await crc64nvmeBase64(filePath),
+  };
 }

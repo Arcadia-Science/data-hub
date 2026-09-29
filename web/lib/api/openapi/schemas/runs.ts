@@ -279,6 +279,17 @@ export const uploadUrlResponse = z
       file_id: z.number().int(),
       expires_in: z.number().int(),
     }),
+    z.object({
+      already_uploaded: z.literal(false),
+      upload_type: z.literal("multipart"),
+      upload_id: z.string(),
+      part_size: z.number().int(),
+      part_count: z.number().int(),
+      s3_bucket: z.string(),
+      s3_key: z.string(),
+      file_id: z.number().int(),
+      expires_in: z.number().int(),
+    }),
   ])
   .openapi("UploadUrlResponse");
 
