@@ -5,6 +5,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -13,6 +14,13 @@ import pytest
 from data_hub_lambda.api_client import ApiError
 from data_hub_lambda.dishcam.parse_metadata import MIN_PLAYBACK_FPS
 from data_hub_lambda.models import FileResponse, RunDetailFile, RunDetailResponse, RunResponse
+
+
+@pytest.fixture(autouse=True)
+def _skip_disk_check() -> Any:
+    """Existing cases use tiny stand-in files and do not talk to S3."""
+    with patch("data_hub_lambda.dishcam.process_file.ensure_object_fits_on_disk"):
+        yield
 
 
 @pytest.fixture(autouse=True)
@@ -1532,3 +1540,58 @@ class TestLateOwnSidecar:
         encode.assert_called_once()
         assert client.get_run.call_count == 2
         assert store.metadata["stack.tif"] == {"fps": 1, "sidecar": "run.json"}
+
+
+_TOO_BIG = (
+    "File is 10.3 GB, larger than the 10.0 GB of disk available for processing. "
+    "The raw file is stored and can be downloaded."
+)
+
+
+class TestEncodeTiffTooLarge:
+    def test_oversized_tiff_is_marked_failed_and_not_downloaded(self, tmp_path: Path) -> None:
+        client = MagicMock()
+        client.create_file.return_value = _file_response(10, "stack.tif")
+        from data_hub_lambda.processing_disk import (
+            ObjectTooLargeForDiskError,
+            ensure_object_fits_on_disk,
+        )
+
+        with (
+            patch(
+                "data_hub_lambda.dishcam.process_file.ensure_object_fits_on_disk",
+                ensure_object_fits_on_disk,
+            ),
+            patch(
+                "data_hub_lambda.processing_disk.s3_utils.object_content_length",
+                return_value=11_097_280_814,
+            ),
+            patch(
+                "data_hub_lambda.processing_disk.shutil.disk_usage",
+                return_value=SimpleNamespace(free=10 * 1024**3),
+            ),
+            patch("data_hub_lambda.dishcam.process_file.s3_utils.download_file") as download,
+        ):
+            from data_hub_lambda.dishcam.process_file import _encode_tiff
+
+            with pytest.raises(ObjectTooLargeForDiskError, match="10.3 GB"):
+                _encode_tiff(
+                    client,
+                    "dishcam",
+                    "run-xyz",
+                    "raw",
+                    tmp_path,
+                    "stack.tif",
+                    1.0,
+                    {},
+                    "run.json",
+                    owned=True,
+                )
+
+        download.assert_not_called()
+        client.update_file.assert_any_call(
+            10,
+            status="failed",
+            error_message=_TOO_BIG,
+            metadata=None,
+        )

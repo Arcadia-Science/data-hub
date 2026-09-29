@@ -264,6 +264,30 @@ def mock_s3_download(
         yield mock
 
 
+@pytest.fixture(autouse=True)
+def mock_s3_object_content_length(
+    s3_fixture_files: dict[str, Path],
+) -> Generator[MagicMock, None, None]:
+    """Return the fixture file's size so the disk check does not call S3.
+
+    Processors compare that size with free disk before downloading. Without
+    this stand-in, HeadObject runs for real and fails with no AWS credentials.
+    """
+
+    def _length(s3_uri: str, **_: Any) -> int:
+        key = s3_uri.split("//", 1)[1].split("/", 1)[1]
+        src = s3_fixture_files.get(key)
+        if src is None:
+            raise FileNotFoundError(
+                f"No fixture registered for S3 key '{key}'. "
+                f"Registered keys: {list(s3_fixture_files)}"
+            )
+        return src.stat().st_size
+
+    with patch("data_hub_shared.s3_utils.object_content_length", side_effect=_length) as mock:
+        yield mock
+
+
 # ---------------------------------------------------------------------------
 # Step 3b' — S3 upload patch
 # ---------------------------------------------------------------------------

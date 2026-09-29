@@ -4,6 +4,7 @@ import logging
 from data_hub_lambda.api_client import get_client
 from data_hub_lambda.hina_microscope.image_processing import ND2Processor
 from data_hub_lambda.hina_microscope.parse_metadata import parse_metadata
+from data_hub_lambda.processing_disk import ensure_object_fits_on_disk
 from data_hub_shared import s3_utils
 from data_hub_shared.config import config
 
@@ -47,6 +48,7 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
 
         raw_data_dir = config.LOCAL_RAW_DATA_DIRPATH / instrument_id / run_id
         local_file_path = raw_data_dir / filename
+        ensure_object_fits_on_disk(f"s3://{s3_bucket}/{s3_key}", raw_data_dir)
         s3_utils.download_file(f"s3://{s3_bucket}/{s3_key}", local_file_path)
         logger.info("Downloaded %s to %s", filename, local_file_path)
 

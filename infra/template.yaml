@@ -98,6 +98,15 @@ Resources:
         LambdaConfigurations:
           - Event: s3:ObjectCreated:*
             Function: !GetAtt DataHubFunction.Arn
+      # S3 bills for parts until the upload is completed or cancelled. Seven
+      # days covers a watcher that stops mid-file. This is the bucket's only
+      # lifecycle rule; a deploy replaces the whole configuration.
+      LifecycleConfiguration:
+        Rules:
+          - Id: AbortIncompleteMultipartUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
       Tags:
         - Key: project
           Value: arcadia-data-hub
@@ -605,6 +614,9 @@ Resources:
                 Action:
                   - s3:PutObject
                   - s3:GetObject
+                  # PutObject covers starting, uploading, and finishing a
+                  # multipart upload. Cancelling one is a separate action.
+                  - s3:AbortMultipartUpload
                 Resource:
                   - !Sub "arn:aws:s3:::arcadia-data-hub-raw-${Environment}/*"
               - Effect: Allow
