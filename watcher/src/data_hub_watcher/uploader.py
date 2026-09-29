@@ -1,7 +1,7 @@
 """Presigned-URL upload with retry, API notification, and local state recording.
 
-`Uploader` handles both auto-mode (immediate upload after run detection)
-and manual-mode (poll the server's upload queue on heartbeat ticks).
+`Uploader` handles auto-mode uploads (immediately after run detection) and
+the server's upload queue, which `UploadQueueWorker` polls in both modes.
 
 Files are uploaded via presigned S3 PUT URLs obtained from the API, so the
 watcher does not need AWS credentials.
@@ -13,7 +13,9 @@ import mimetypes
 import re
 import threading
 import time
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor, wait
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +24,7 @@ from requests.adapters import HTTPAdapter
 
 from data_hub_watcher.api_client import ApiError, DataHubClient
 from data_hub_watcher.constants import (
+    MAX_PENDING_UPLOAD_ATTEMPTS,
     MAX_QUEUE_FILE_ATTEMPTS,
     UPLOAD_POLL_INTERVAL_SECONDS,
     UPLOAD_RETRY_BASE_DELAY,
@@ -81,9 +84,18 @@ def _xml_tag(body: str, tag: str) -> str | None:
     return match.group(1) if match else None
 
 
+# `requests` and `urllib3` put the full URL in their error text, and a signed
+# S3 URL's query string holds temporary AWS credentials.
+_SIGNED_QUERY = re.compile(r"\?[^\s'\")]*X-Amz-[^\s'\")]*", re.IGNORECASE)
+
+
+def _redact_signed_urls(text: str) -> str:
+    return _SIGNED_QUERY.sub("?<redacted>", text)
+
+
 def s3_error_details(exc: BaseException) -> dict[str, str]:
     """Pull S3's error code and message out of an HTTP error body."""
-    details = {"error": str(exc)}
+    details = {"error": _redact_signed_urls(str(exc))}
     response = getattr(exc, "response", None)
     text = getattr(response, "text", "") if response is not None else ""
     if not text:
@@ -100,7 +112,7 @@ def s3_error_details(exc: BaseException) -> dict[str, str]:
 
 @dataclass
 class _QueueAttempt:
-    """Per-file bookkeeping for manual-mode upload-queue retries.
+    """Per-file bookkeeping for upload-queue retries.
 
     ``count`` is the number of consecutive heartbeat polls that have failed
     to upload the file (missing on disk or upload error); ``reason`` is the
@@ -213,7 +225,7 @@ class Uploader:
         # 1st failure and every 10th repeat. The unthrottled case
         # would emit one event per poll during an outage, crowding out
         # other signals on the dashboard.
-        # Mutated only from the upload worker thread (manual mode), so
+        # Mutated only from the upload worker thread, so
         # not under any explicit lock.
         self._consecutive_queue_poll_failures = 0
         # Per-file upload-queue attempt bookkeeping, keyed by server file id.
@@ -254,6 +266,11 @@ class Uploader:
         # change. Cheap enough at the per-file cadence that the
         # serialisation cost is negligible.
         self._counters_lock = threading.Lock()
+        # Files with an upload in progress, keyed by resolved path. The auto
+        # path and the queue worker can reach the same file, and a second
+        # multipart start makes the server abort the first one.
+        self._in_flight: set[Path] = set()
+        self._in_flight_changed = threading.Condition()
 
     # ------------------------------------------------------------------
     # Auto-mode: upload a batch of files for a reported run
@@ -281,6 +298,10 @@ class Uploader:
             self._state_db.record_run_uploaded(run_id)
             return 0
 
+        self._state_db.record_pending_uploads(
+            run_id, [_relative_path(info.path, self._watch_dir) for info in files]
+        )
+
         # Upper-bound parallelism by the actual file count so a small
         # batch doesn't allocate more threads than it can use.
         max_workers = min(self._parallelism, len(files))
@@ -289,13 +310,13 @@ class Uploader:
             # Fast path: avoid the pool's overhead (thread spin-up,
             # ``Future`` wrapping) when there's nothing to parallelise.
             # Behaviour-identical to the previous serial loop.
-            succeeded = sum(1 for info in files if self._upload_single(info.path, run_id))
+            succeeded = sum(1 for info in files if self._upload_pending(info.path, run_id))
         else:
             with ThreadPoolExecutor(
                 max_workers=max_workers,
                 thread_name_prefix="uploader",
             ) as pool:
-                futures = [pool.submit(self._upload_single, info.path, run_id) for info in files]
+                futures = [pool.submit(self._upload_pending, info.path, run_id) for info in files]
                 # ``wait`` (rather than ``as_completed``) keeps the
                 # success count deterministic without caring about
                 # completion order. Any exception raised inside
@@ -318,8 +339,54 @@ class Uploader:
 
         return succeeded
 
+    def _upload_pending(self, path: Path, run_id: str) -> bool:
+        """Upload an auto-mode file and clear its `pending_uploads` row on success."""
+        if not self._upload_single(path, run_id):
+            return False
+        self._state_db.clear_pending_upload(_relative_path(path, self._watch_dir))
+        return True
+
+    def retry_pending_uploads(self) -> None:
+        """Retry auto-mode uploads that an earlier watcher process never finished.
+
+        Runs once per start on the upload worker. Hydration treats every
+        reported file as handled and the initial scan skips them, so
+        without this a failed or interrupted upload is never tried again.
+        Each start counts as one attempt, capped at
+        ``MAX_PENDING_UPLOAD_ATTEMPTS``.
+        """
+        for pending in self._state_db.pending_uploads():
+            if self._stop_requested():
+                return
+            # The path came from our own state DB, so it is not re-checked
+            # for traversal the way server-supplied queue paths are.
+            path = self._watch_dir / pending.relative_path
+            if not path.is_file():
+                logger.info("Dropping pending upload for missing file: %s", pending.relative_path)
+                self._state_db.clear_pending_upload(pending.relative_path)
+                continue
+            if self._upload_pending(path, pending.run_id):
+                continue
+            if self._stop_requested():
+                # An interrupted upload is not a failed attempt.
+                return
+            attempts = self._state_db.bump_pending_upload_attempts(pending.relative_path)
+            if attempts < MAX_PENDING_UPLOAD_ATTEMPTS:
+                continue
+            self._state_db.clear_pending_upload(pending.relative_path)
+            self._reporter.report_error(
+                "upload_retries_exhausted",
+                (
+                    f"Gave up uploading {path.name} after {attempts} watcher starts; "
+                    "request it from the run page to try again"
+                ),
+                relative_path=pending.relative_path,
+                run_id=pending.run_id,
+                attempts=attempts,
+            )
+
     # ------------------------------------------------------------------
-    # Manual-mode: poll the server queue
+    # Upload queue (both modes)
     # ------------------------------------------------------------------
 
     def _stop_requested(self) -> bool:
@@ -328,9 +395,9 @@ class Uploader:
     def poll_upload_queue(self) -> None:
         """Fetch the upload queue and process each file.
 
-        Driven by the manual-mode ``UploadQueueWorker`` loop on its own
-        thread, decoupled from the heartbeat so a slow upload can't starve
-        the liveness signal.
+        Driven by the ``UploadQueueWorker`` loop on its own thread,
+        decoupled from the heartbeat so a slow upload can't starve the
+        liveness signal.
         """
         try:
             queue = self._client.get_upload_queue(self._watcher_id)
@@ -386,7 +453,7 @@ class Uploader:
     def _process_queued_file(self, qf: UploadQueueFile) -> None:
         """Attempt one queued file, bounding retries across polls.
 
-        Manual-mode polling repeats on the worker's cadence, so a file that
+        Queue polling repeats on the worker's cadence, so a file that
         can't be uploaded -- missing on disk after a watch-directory change, or a
         persistent upload error -- would otherwise re-error forever. We cap
         attempts at ``MAX_QUEUE_FILE_ATTEMPTS`` and then cancel the request
@@ -778,7 +845,41 @@ class Uploader:
         if last_exc:
             raise last_exc
 
+    @contextmanager
+    def _exclusive(self, path: Path) -> Iterator[bool]:
+        """Hold *path* for one upload. Yields whether another thread held it first."""
+        key = path.resolve()
+        waited = False
+        with self._in_flight_changed:
+            while key in self._in_flight:
+                waited = True
+                self._in_flight_changed.wait()
+            self._in_flight.add(key)
+        try:
+            yield waited
+        finally:
+            with self._in_flight_changed:
+                self._in_flight.discard(key)
+                self._in_flight_changed.notify_all()
+
     def _upload_single(self, path: Path, run_id: str) -> bool:
+        """Upload one file unless another thread is already uploading it.
+
+        A caller that had to wait skips the upload when the other thread
+        recorded it, which saves hashing a multi-gigabyte file again.
+        Returns `True` on success, `False` after all retries exhausted.
+        """
+        with self._exclusive(path) as waited:
+            if waited:
+                if self._stop_requested():
+                    return False
+                st = path.stat()
+                rel_path = _relative_path(path, self._watch_dir)
+                if self._state_db.has_stat_match(rel_path, st.st_size, st.st_mtime):
+                    return True
+            return self._upload_single_unlocked(path, run_id)
+
+    def _upload_single_unlocked(self, path: Path, run_id: str) -> bool:
         """Upload one file via a presigned URL, notify the API, and record in StateDB.
 
         Returns `True` on success, `False` after all retries exhausted.
@@ -934,13 +1035,16 @@ class Uploader:
 
 
 class UploadQueueWorker:
-    """Polls the manual-mode upload queue on a dedicated long-lived thread.
+    """Polls the server's upload queue on a dedicated long-lived thread.
 
     Uploads used to run on the heartbeat tick, so a slow or large transfer
     delayed heartbeats and the dashboard flagged a busy watcher as offline.
     Owning the poll loop here keeps the heartbeat free, and the shared
     ``stop_event`` lets a shutdown interrupt an upload so ``stop()`` can join
     before ``StateDB.close`` runs (which assumes writer threads have joined).
+
+    With ``retry_pending_on_start`` (auto mode), the worker first retries
+    uploads the previous process left unfinished.
     """
 
     def __init__(
@@ -949,10 +1053,12 @@ class UploadQueueWorker:
         *,
         stop_event: threading.Event,
         interval_seconds: int = UPLOAD_POLL_INTERVAL_SECONDS,
+        retry_pending_on_start: bool = False,
     ) -> None:
         self._uploader = uploader
         self._stop_event = stop_event
         self._interval = interval_seconds
+        self._retry_pending_on_start = retry_pending_on_start
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
@@ -974,10 +1080,18 @@ class UploadQueueWorker:
         return not self._thread.is_alive()
 
     def _run(self) -> None:
+        if self._retry_pending_on_start:
+            self._retry_pending_once()
         # Wait first (parity with the previous heartbeat-driven cadence),
         # then poll each interval until stop.
         while not self._stop_event.wait(timeout=self._interval):
             self._poll_once()
+
+    def _retry_pending_once(self) -> None:
+        try:
+            self._uploader.retry_pending_uploads()
+        except Exception:
+            logger.exception("Retrying pending uploads failed")
 
     def _poll_once(self) -> None:
         # ``poll_upload_queue`` already handles and reports poll failures; this

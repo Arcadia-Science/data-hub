@@ -75,9 +75,8 @@ class WatcherRuntime:
     # in their stop wait so a shutdown can be triggered from any thread.
     shutdown_event: threading.Event = field(default_factory=threading.Event)
     upgrade_restart_event: threading.Event = field(default_factory=threading.Event)
-    # Manual mode only: the thread that polls the upload queue off the
-    # heartbeat. ``None`` in auto mode, where uploads run on the monitor's
-    # stability-checker thread via the run detector's callback.
+    # The thread that polls the upload queue off the heartbeat. Always set by
+    # ``build_runtime``; ``None`` only in tests that build a runtime by hand.
     upload_worker: UploadQueueWorker | None = None
 
 
@@ -256,9 +255,8 @@ def build_runtime(
 
     is_auto = inst.upload_mode == "auto"
 
-    # Shared with the manual-mode ``UploadQueueWorker`` so a shutdown can
-    # interrupt an in-flight upload's backoff and abort between queued files;
-    # unused (but harmless) in auto mode.
+    # Shared with the ``UploadQueueWorker`` so a shutdown can interrupt an
+    # in-flight upload's backoff and abort between queued files.
     upload_stop_event = threading.Event()
 
     uploader = Uploader(
@@ -275,9 +273,14 @@ def build_runtime(
         stop_event=upload_stop_event,
     )
 
-    # Manual mode polls the server queue on its own thread; auto mode uploads
-    # via the run detector's callback on the stability-checker thread instead.
-    upload_worker = None if is_auto else UploadQueueWorker(uploader, stop_event=upload_stop_event)
+    # Both modes poll the server queue so "Request upload" works everywhere.
+    # Auto mode also uploads through the run detector's callback on the
+    # stability-checker thread, and retries unfinished uploads at startup.
+    upload_worker = UploadQueueWorker(
+        uploader,
+        stop_event=upload_stop_event,
+        retry_pending_on_start=is_auto,
+    )
 
     detector = RunDetector(
         pattern=inst.run_detection.pattern,
@@ -303,9 +306,9 @@ def build_runtime(
         seed_baseline=seed_baseline,
     )
 
-    # Feeds the in-process auto-updater on every tick. Manual-mode upload
-    # polling used to run here too but moved to ``UploadQueueWorker`` so a
-    # slow upload can't delay a heartbeat.
+    # Feeds the in-process auto-updater on every tick. Upload-queue polling
+    # used to run here too but moved to ``UploadQueueWorker`` so a slow
+    # upload can't delay a heartbeat.
     def _on_tick() -> None:
         try:
             updater.on_tick()
@@ -488,8 +491,8 @@ def start_runtime(rt: WatcherRuntime, *, started_message: str) -> None:
     rt.detector.hydrate_from_state_db()
 
     rt.heartbeat.start()
-    # Start manual-mode upload polling before the (potentially long) initial
-    # scan so queued uploads keep draining while the scan walks the backlog.
+    # Start upload polling before the (potentially long) initial scan so
+    # queued uploads keep draining while the scan walks the backlog.
     if rt.upload_worker is not None:
         rt.upload_worker.start()
     rt.monitor.start()

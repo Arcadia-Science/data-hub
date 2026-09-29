@@ -36,7 +36,7 @@ flowchart LR
 1. A lab instrument writes output files to a watched directory.
 2. The **watcher** detects new stable files using filesystem events (`watchdog`).
 3. It groups files into runs (by filename prefix or subdirectory) and reports each run to the **API**.
-4. It uploads raw files to **S3** at the key `{instrument_id}/{run_id}/{filename}`.
+4. It uploads raw files to **S3** at the key `{instrument_id}/{run_id}/{filename}`. If an upload fails, the watcher retries it the next time it starts, and a user can also queue it from the run page (see manual mode below).
 5. The S3 upload triggers the **Lambda** function.
 6. Lambda downloads the file and dispatches to the appropriate instrument processor for preprocessing (e.g., extracting metadata).
 7. Lambda creates/updates the run and files via the **API**. The API sends a **Slack** notification once per newly-created run.
@@ -47,7 +47,7 @@ flowchart LR
 Steps 1–3 are the same, but the watcher does not upload immediately. Instead:
 
 4. The server adds files to an upload queue.
-5. On each heartbeat tick, the watcher polls the upload queue and uploads requested files.
+5. Every 60 seconds, the watcher's upload worker polls the upload queue and uploads requested files. Auto-mode watchers poll the same queue from watcher 1.2.1.
 6. Steps 5–8 from automatic mode follow.
 
 ## Key design decisions

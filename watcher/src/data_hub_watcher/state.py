@@ -79,6 +79,15 @@ class DetectedFileRecord:
     file_created_at: float | None = None
 
 
+@dataclass
+class PendingUploadRecord:
+    """An auto-mode upload that started but has not been confirmed."""
+
+    relative_path: str
+    run_id: str
+    attempts: int
+
+
 def clean_forget_prefix(prefix: str) -> str:
     """Normalize a folder prefix for `StateDB.forget_prefix`.
 
@@ -103,6 +112,9 @@ class StateDB:
       environment was first entered and were deliberately skipped (never
       uploaded). Distinct from `uploaded_files`: a baseline row means
       "ignore", not "sent". Never pruned, unlike `uploaded_files`.
+    - `pending_uploads` — auto-mode uploads that have not succeeded yet,
+      so the next start can retry them. `detected_files` can't answer
+      this because `uploaded_files` is pruned and it is not.
     - `meta` — small key/value store (e.g. the preview deployment URL this
       DB was seeded against) used to decide when to reset on a redeploy.
     """
@@ -254,6 +266,12 @@ class StateDB:
                     mtime         REAL NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS pending_uploads (
+                    relative_path TEXT PRIMARY KEY,
+                    run_id        TEXT NOT NULL,
+                    attempts      INTEGER NOT NULL DEFAULT 0
+                );
+
                 CREATE TABLE IF NOT EXISTS meta (
                     key   TEXT PRIMARY KEY,
                     value TEXT NOT NULL
@@ -321,7 +339,7 @@ class StateDB:
         counts: dict[str, int] = {}
         # Table names are fixed. The prefix is bound, never interpolated.
         with self._write_lock:
-            for table in ("uploaded_files", "detected_files", "baseline_files"):
+            for table in ("uploaded_files", "detected_files", "baseline_files", "pending_uploads"):
                 cur = self._conn.execute(
                     f"DELETE FROM {table} "
                     "WHERE relative_path = ? OR substr(relative_path, 1, ?) = ?",
@@ -410,7 +428,66 @@ class StateDB:
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (filename, sha256, now, s3_key, relative_path, size_bytes, mtime),
             )
+            # Covers queue-driven uploads of a file an auto-mode upload left
+            # pending, so the next start doesn't hash it again for nothing.
+            self._conn.execute(
+                "DELETE FROM pending_uploads WHERE relative_path = ?",
+                (relative_path,),
+            )
             self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # pending_uploads
+    # ------------------------------------------------------------------
+
+    def record_pending_uploads(self, run_id: str, relative_paths: Iterable[str]) -> None:
+        """Mark files as handed to the auto-mode uploader.
+
+        Existing rows keep their attempt count, so a file retried within
+        one session doesn't reset its restart budget.
+        """
+        rows = [(rel_path, run_id) for rel_path in relative_paths]
+        if not rows:
+            return
+        with self._write_lock:
+            self._conn.executemany(
+                "INSERT OR IGNORE INTO pending_uploads (relative_path, run_id) VALUES (?, ?)",
+                rows,
+            )
+            self._conn.commit()
+
+    def pending_uploads(self) -> list[PendingUploadRecord]:
+        """Return every pending upload, oldest first."""
+        cur = self._conn.execute(
+            "SELECT relative_path, run_id, attempts FROM pending_uploads ORDER BY rowid"
+        )
+        return [
+            PendingUploadRecord(relative_path=row[0], run_id=row[1], attempts=row[2])
+            for row in cur.fetchall()
+        ]
+
+    def clear_pending_upload(self, relative_path: str) -> None:
+        with self._write_lock:
+            self._conn.execute(
+                "DELETE FROM pending_uploads WHERE relative_path = ?",
+                (relative_path,),
+            )
+            self._conn.commit()
+
+    def bump_pending_upload_attempts(self, relative_path: str) -> int:
+        """Count one more failed retry and return the new total."""
+        with self._write_lock:
+            self._conn.execute(
+                "UPDATE pending_uploads SET attempts = attempts + 1 WHERE relative_path = ?",
+                (relative_path,),
+            )
+            self._conn.commit()
+            cur = self._conn.execute(
+                "SELECT attempts FROM pending_uploads WHERE relative_path = ?",
+                (relative_path,),
+            )
+            row = cur.fetchone()
+        return 0 if row is None else int(row[0])
 
     # ------------------------------------------------------------------
     # detected_files
