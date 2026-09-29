@@ -10,7 +10,7 @@ from data_hub_lambda.dishcam.encode_video import encode_tiff_stack
 from data_hub_lambda.dishcam.filenames import RUN_JSON_NAME, is_run_json, is_tiff, matches_filename
 from data_hub_lambda.dishcam.parse_metadata import encode_fps, parse_run_json, playback_fps
 from data_hub_lambda.models import FileResponse, RunDetailFile, RunDetailResponse
-from data_hub_lambda.processing_disk import ensure_object_fits_on_disk
+from data_hub_lambda.raw_access import local_raw_file
 from data_hub_shared import s3_utils
 from data_hub_shared.config import config
 
@@ -427,7 +427,6 @@ def _encode_tiff(
         filename=tiff_filename,
     )
     tiff_id = tiff_record.id
-    local_tiff = raw_dir / tiff_filename
     mp4_path = raw_dir / f"{Path(tiff_filename).stem}.mp4"
     poster_path = raw_dir / f"{Path(tiff_filename).stem}.jpg"
     stack_metadata = {**metadata, _SIDECAR_KEY: sidecar_name}
@@ -456,43 +455,43 @@ def _encode_tiff(
     try:
         client.update_file(tiff_id, status="processing")
 
-        ensure_object_fits_on_disk(tiff_uri, raw_dir)
-        s3_utils.download_file(tiff_uri, local_tiff)
-        encode_tiff_stack(local_tiff, mp4_path, poster_path, fps)
+        with local_raw_file(tiff_uri, raw_dir) as tiff_path:
+            encode_tiff_stack(tiff_path, mp4_path, poster_path, fps)
 
-        processed_bucket = config.AWS_S3_PROCESSED_DATA_BUCKET or ""
-        _upload_processed(
-            client,
-            instrument_id,
-            run_id,
-            processed_bucket,
-            mp4_path,
-            "video/mp4",
-        )
-        _upload_processed(
-            client,
-            instrument_id,
-            run_id,
-            processed_bucket,
-            poster_path,
-            "image/jpeg",
-        )
-
-        if not _update_file_status(client, tiff_id, "completed", metadata=stack_metadata):
-            logger.info(
-                "DishCam file %s already finished by a sibling invocation.",
-                tiff_filename,
+            processed_bucket = config.AWS_S3_PROCESSED_DATA_BUCKET or ""
+            _upload_processed(
+                client,
+                instrument_id,
+                run_id,
+                processed_bucket,
+                mp4_path,
+                "video/mp4",
             )
+            _upload_processed(
+                client,
+                instrument_id,
+                run_id,
+                processed_bucket,
+                poster_path,
+                "image/jpeg",
+            )
+
+            if not _update_file_status(client, tiff_id, "completed", metadata=stack_metadata):
+                logger.info(
+                    "DishCam file %s already finished by a sibling invocation.",
+                    tiff_filename,
+                )
+                return True
+            logger.info("DishCam file %s marked as completed.", tiff_filename)
             return True
-        logger.info("DishCam file %s marked as completed.", tiff_filename)
-        return True
     except Exception as exc:
         _update_file_status(client, tiff_id, "failed", error_message=str(exc))
         raise
     finally:
-        # One high-quality stack can be several GB; leaving it on disk
-        # fills the Lambda `/tmp` cap before the next stack in the batch.
-        _remove_local(local_tiff, mp4_path, poster_path)
+        # The helper deletes a downloaded TIFF. A mounted TIFF stays put:
+        # unlinking it fails on the read-only mount. The MP4 and JPEG are
+        # always local, and one stack can be several GB.
+        _remove_local(mp4_path, poster_path)
 
 
 def _remove_local(*paths: Path) -> None:

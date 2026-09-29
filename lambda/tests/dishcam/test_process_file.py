@@ -17,9 +17,21 @@ from data_hub_lambda.models import FileResponse, RunDetailFile, RunDetailRespons
 
 
 @pytest.fixture(autouse=True)
-def _skip_disk_check() -> Any:
-    """Existing cases use tiny stand-in files and do not talk to S3."""
-    with patch("data_hub_lambda.dishcam.process_file.ensure_object_fits_on_disk"):
+def _clear_deadline() -> Any:
+    from data_hub_lambda.deadline import clear_deadline
+
+    clear_deadline()
+    yield
+    clear_deadline()
+
+
+@pytest.fixture(autouse=True)
+def _small_raw_object() -> Any:
+    """Existing cases use tiny stand-in files and do not talk to S3.
+
+    The shared helper asks for the object size before it downloads.
+    """
+    with patch("data_hub_shared.s3_utils.object_content_length", return_value=128):
         yield
 
 
@@ -1552,22 +1564,15 @@ class TestEncodeTiffTooLarge:
     def test_oversized_tiff_is_marked_failed_and_not_downloaded(self, tmp_path: Path) -> None:
         client = MagicMock()
         client.create_file.return_value = _file_response(10, "stack.tif")
-        from data_hub_lambda.processing_disk import (
-            ObjectTooLargeForDiskError,
-            ensure_object_fits_on_disk,
-        )
+        from data_hub_lambda.processing_disk import ObjectTooLargeForDiskError
 
         with (
             patch(
-                "data_hub_lambda.dishcam.process_file.ensure_object_fits_on_disk",
-                ensure_object_fits_on_disk,
-            ),
-            patch(
-                "data_hub_lambda.processing_disk.s3_utils.object_content_length",
+                "data_hub_shared.s3_utils.object_content_length",
                 return_value=11_097_280_814,
             ),
             patch(
-                "data_hub_lambda.processing_disk.shutil.disk_usage",
+                "data_hub_lambda.raw_access.shutil.disk_usage",
                 return_value=SimpleNamespace(free=10 * 1024**3),
             ),
             patch("data_hub_lambda.dishcam.process_file.s3_utils.download_file") as download,
@@ -1595,3 +1600,48 @@ class TestEncodeTiffTooLarge:
             error_message=_TOO_BIG,
             metadata=None,
         )
+
+
+class TestEncodeTiffFromMount:
+    def test_mounted_tiff_is_encoded_and_not_deleted(self, tmp_path: Path) -> None:
+        client = MagicMock()
+        client.create_file.return_value = _file_response(10, "stack.tif")
+        mount = tmp_path / "mount"
+        mounted = mount / "dishcam" / "run-xyz" / "stack.tif"
+        mounted.parent.mkdir(parents=True)
+        mounted.write_bytes(b"tiff-bytes")
+
+        with (
+            patch("data_hub_shared.config.config.RAW_DATA_MOUNT_PATH", str(mount)),
+            patch("data_hub_shared.s3_utils.object_content_length", return_value=1024**3),
+            patch(
+                "data_hub_lambda.raw_access._matching_size",
+                lambda path, _expected: path.is_file(),
+            ),
+            patch("data_hub_lambda.dishcam.process_file.s3_utils.download_file") as download,
+            patch("data_hub_lambda.dishcam.process_file.encode_tiff_stack") as encode,
+            patch("data_hub_lambda.dishcam.process_file.s3_utils.upload_file"),
+        ):
+            def _write_outputs(_tiff: Path, mp4: Path, poster: Path, _fps: float) -> None:
+                mp4.write_bytes(b"mp4")
+                poster.write_bytes(b"jpg")
+
+            encode.side_effect = _write_outputs
+            from data_hub_lambda.dishcam.process_file import _encode_tiff
+
+            assert _encode_tiff(
+                client,
+                "dishcam",
+                "run-xyz",
+                "raw",
+                tmp_path / "work",
+                "stack.tif",
+                1.0,
+                {},
+                "run.json",
+                owned=True,
+            )
+
+        download.assert_not_called()
+        assert encode.call_args.args[0] == mounted
+        assert mounted.exists()
