@@ -9,11 +9,16 @@ instrument:
 """
 
 from __future__ import annotations
+from pathlib import Path
 
 import pytest
 
 from data_hub_shared.testing import IntegrationEnv, db_query
 from data_hub_watcher.api_client import DataHubClient
+from data_hub_watcher.events import EventReporter
+from data_hub_watcher.heartbeat import WatcherCounters
+from data_hub_watcher.state import StateDB
+from data_hub_watcher.uploader import Uploader
 
 pytestmark = pytest.mark.integration
 
@@ -391,3 +396,44 @@ class TestFullAutoModeLifecycle:
             (wid,),
         )
         assert rows[0][0] == "stopped"
+
+
+class TestMultipartUpload:
+    def test_large_file_is_uploaded_in_parts(
+        self,
+        client: DataHubClient,
+        instrument_id: str,
+        integration_env: IntegrationEnv,
+        tmp_path: Path,
+    ) -> None:
+        watcher_id, _run_id = _register_and_report(client, instrument_id, run_id="PARTS-001")
+        payload = b"multipart-bytes-" * 80
+        path = tmp_path / "stack.bin"
+        path.write_bytes(payload)
+        state = StateDB(tmp_path / "state.db")
+        try:
+            uploader = Uploader(
+                client=client,
+                state_db=state,
+                event_reporter=EventReporter(client, watcher_id),
+                counters=WatcherCounters(),
+                instrument_id=instrument_id,
+                watcher_id=watcher_id,
+                watch_directory=tmp_path,
+            )
+            assert uploader._upload_single(path, "PARTS-001") is True
+        finally:
+            state.close()
+
+        rows = db_query(
+            integration_env.db_dsn,
+            """SELECT f.status, f.multipart_upload_id FROM files f
+               JOIN instrument_runs r ON f.instrument_run_id = r.id
+               WHERE r.run_id = %s AND f.filename = %s""",
+            ("PARTS-001", "stack.bin"),
+        )
+        assert rows[0] == ("uploaded", None)
+        stored = Path(
+            f"/tmp/data-hub-integration-s3/data-hub-test-raw/{instrument_id}/PARTS-001/stack.bin"
+        )
+        assert stored.read_bytes() == payload

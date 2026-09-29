@@ -7,12 +7,20 @@ mocking S3 I/O, the API client, the ND2 processor, and the metadata parser.
 
 from __future__ import annotations
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from data_hub_lambda.models import FileResponse, RunResponse
+
+
+@pytest.fixture(autouse=True)
+def _skip_disk_check() -> Any:
+    """Existing cases use stand-in files and do not talk to S3."""
+    with patch("data_hub_lambda.hina_microscope.process_file.ensure_object_fits_on_disk"):
+        yield
 
 
 @pytest.fixture(autouse=True)
@@ -200,3 +208,55 @@ class TestProcessFileFailure:
             if call.kwargs.get("status") == "failed"
         )
         assert failed_call.kwargs["error_message"] == "boom"
+
+
+_TOO_BIG = (
+    "File is 10.3 GB, larger than the 10.0 GB of disk available for processing. "
+    "The raw file is stored and can be downloaded."
+)
+
+
+class TestProcessFileTooLarge:
+    def test_oversized_file_is_marked_failed_and_not_downloaded(self, tmp_path: Path) -> None:
+        client = _build_client_mock(run_metadata=None)
+        from data_hub_lambda.processing_disk import ensure_object_fits_on_disk
+
+        with (
+            patch(
+                "data_hub_lambda.hina_microscope.process_file.ensure_object_fits_on_disk",
+                ensure_object_fits_on_disk,
+            ),
+            patch(
+                "data_hub_lambda.processing_disk.s3_utils.object_content_length",
+                return_value=11_097_280_814,
+            ),
+            patch(
+                "data_hub_lambda.processing_disk.shutil.disk_usage",
+                return_value=SimpleNamespace(free=10 * 1024**3),
+            ),
+            patch(
+                "data_hub_lambda.hina_microscope.process_file.config.LOCAL_RAW_DATA_DIRPATH",
+                tmp_path,
+            ),
+            patch("data_hub_lambda.hina_microscope.process_file.get_client", return_value=client),
+            patch("data_hub_lambda.hina_microscope.process_file.s3_utils") as s3_mock,
+            patch("data_hub_lambda.hina_microscope.process_file.ND2Processor") as processor,
+        ):
+            from data_hub_lambda.hina_microscope.process_file import process_file
+            from data_hub_lambda.processing_disk import ObjectTooLargeForDiskError
+
+            with pytest.raises(ObjectTooLargeForDiskError, match="10.3 GB"):
+                process_file(
+                    instrument_id="hina-microscope",
+                    run_id="run-xyz",
+                    filename="huge.nd2",
+                )
+
+        s3_mock.download_file.assert_not_called()
+        processor.assert_not_called()
+        failed_call = next(
+            call
+            for call in client.update_file.call_args_list
+            if call.kwargs.get("status") == "failed"
+        )
+        assert failed_call.kwargs["error_message"] == _TOO_BIG

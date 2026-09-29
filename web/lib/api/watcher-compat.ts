@@ -13,6 +13,9 @@ export const WATCHER_FEATURES = {
   // name instead of being dropped. Watchers older than this still upload by
   // bare filename, so renaming for them would leave a record nobody uploads.
   renameDuplicateFilenames: "1.1.0",
+  // Files of 100 MB or more are uploaded as parts. Older watchers still get
+  // one URL, and files over 5 GB are refused until the watcher is updated.
+  multipartUpload: "1.2.0",
 } as const satisfies Record<string, string>;
 
 export type WatcherFeature = keyof typeof WATCHER_FEATURES;

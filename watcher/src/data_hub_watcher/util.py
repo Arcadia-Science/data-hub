@@ -1,13 +1,15 @@
-"""Small, dependency-free helpers shared across the watcher.
+"""Small helpers shared across the watcher.
 
-Keep this module lightweight — it is imported by both the monitor and
-the uploader, so introducing heavy imports here would pull them into
-every startup path.
+`file_digests` uses `awscrt` for CRC64NVME, the checksum S3 recommends for
+a whole multipart object. Python's standard library does not implement it.
 """
 
 from __future__ import annotations
+import base64
 import hashlib
 from pathlib import Path
+
+from awscrt import checksums
 
 # 1 MiB read buffer for streamed hashing. The previous 8 KiB value
 # came from CPython's example in the hashlib docs and is fine for
@@ -20,16 +22,23 @@ from pathlib import Path
 HASH_CHUNK_SIZE = 1 << 20
 
 
-def file_sha256(path: Path) -> str:
-    """Return the hex SHA-256 digest of *path*.
+def file_digests(path: Path) -> tuple[str, str]:
+    """Return ``(sha256_hex, crc64nvme_base64)`` for *path* in one read.
 
-    Streams the file in :data:`HASH_CHUNK_SIZE`-byte chunks so we don't
-    load multi-GiB instrument outputs into memory. Lives here rather
-    than next to the uploader so callers don't have to import the full
-    upload module just to hash a file.
+    Streams in :data:`HASH_CHUNK_SIZE`-byte chunks so a multi-gigabyte
+    instrument file is not loaded into memory. The CRC is the value S3
+    checks when a multipart upload is finished.
     """
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(HASH_CHUNK_SIZE), b""):
-            h.update(chunk)
-    return h.hexdigest()
+    sha = hashlib.sha256()
+    crc = 0
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(HASH_CHUNK_SIZE), b""):
+            sha.update(chunk)
+            crc = checksums.crc64nvme(chunk, crc)
+    crc_b64 = base64.b64encode(crc.to_bytes(8, byteorder="big")).decode("ascii")
+    return sha.hexdigest(), crc_b64
+
+
+def file_sha256(path: Path) -> str:
+    """Return the hex SHA-256 digest of *path*."""
+    return file_digests(path)[0]

@@ -9,6 +9,7 @@ from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 from requests.adapters import HTTPAdapter
 
 from data_hub_watcher.api_client import ApiError
@@ -16,6 +17,8 @@ from data_hub_watcher.constants import MAX_QUEUE_FILE_ATTEMPTS
 from data_hub_watcher.events import EventReporter
 from data_hub_watcher.heartbeat import WatcherCounters
 from data_hub_watcher.models import (
+    MultipartPartUrl,
+    MultipartPartUrlsResponse,
     PresignedUploadResponse,
     UploadQueueFile,
     UploadQueueResponse,
@@ -968,3 +971,196 @@ def test_guess_content_type_handles_uppercase_pdf() -> None:
 
 def test_guess_content_type_falls_back_for_unknown_extension() -> None:
     assert _guess_content_type(Path("Experiment_20000101000000.AZE")) == "application/octet-stream"
+
+
+def _http_error(status: int, xml: str) -> requests.HTTPError:
+    response = MagicMock()
+    response.status_code = status
+    response.text = xml
+    return requests.HTTPError(response=response)
+
+
+class TestMultipartUpload:
+    def _presigned(self, *, part_size: int, part_count: int) -> PresignedUploadResponse:
+        return PresignedUploadResponse(
+            upload_type="multipart",
+            upload_id="abc123",
+            part_size=part_size,
+            part_count=part_count,
+            s3_bucket="test-bucket",
+            s3_key="test-instrument/RUN-001/test_data.csv",
+            file_id=42,
+            expires_in=900,
+            already_uploaded=False,
+        )
+
+    def test_uploads_each_part_and_finishes(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+        tmp_file: Path,
+    ) -> None:
+        payload = tmp_file.read_bytes()
+        mock_client.request_upload_url.return_value = self._presigned(
+            part_size=len(payload), part_count=1
+        )
+        mock_client.get_part_urls.return_value = MultipartPartUrlsResponse(
+            expires_in=900,
+            parts=[MultipartPartUrl(part_number=1, upload_url="https://s3.example/1")],
+        )
+        response = MagicMock()
+        response.headers = {"ETag": '"etag-1"'}
+        with patch.object(uploader._s3_session, "put", return_value=response):
+            assert uploader._upload_single(tmp_file, "RUN-001") is True
+        mock_client.complete_multipart_upload.assert_called_once()
+        mock_client.mark_file_uploaded.assert_not_called()
+        assert uploader._counters.files_uploaded == 1
+
+    def test_refreshes_an_expired_part_url(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+        tmp_file: Path,
+    ) -> None:
+        payload = tmp_file.read_bytes()
+        mock_client.request_upload_url.return_value = self._presigned(
+            part_size=len(payload), part_count=1
+        )
+        mock_client.get_part_urls.side_effect = [
+            MultipartPartUrlsResponse(
+                expires_in=900,
+                parts=[MultipartPartUrl(part_number=1, upload_url="https://s3.example/old")],
+            ),
+            MultipartPartUrlsResponse(
+                expires_in=900,
+                parts=[MultipartPartUrl(part_number=1, upload_url="https://s3.example/new")],
+            ),
+        ]
+        expired = _http_error(
+            403,
+            "<Error><Code>AccessDenied</Code><Message>Request has expired</Message></Error>",
+        )
+        ok = MagicMock()
+        ok.headers = {"ETag": '"etag-1"'}
+        with (
+            patch.object(uploader._s3_session, "put", side_effect=[expired, ok]),
+            patch("data_hub_watcher.uploader.time.sleep"),
+        ):
+            assert uploader._upload_single(tmp_file, "RUN-001") is True
+        assert mock_client.get_part_urls.call_count == 2
+
+    def test_connection_error_fetches_a_fresh_part_url(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+        tmp_file: Path,
+    ) -> None:
+        payload = tmp_file.read_bytes()
+        mock_client.request_upload_url.return_value = self._presigned(
+            part_size=len(payload), part_count=1
+        )
+        mock_client.get_part_urls.side_effect = [
+            MultipartPartUrlsResponse(
+                expires_in=900,
+                parts=[MultipartPartUrl(part_number=1, upload_url="https://s3.example/old")],
+            ),
+            MultipartPartUrlsResponse(
+                expires_in=900,
+                parts=[MultipartPartUrl(part_number=1, upload_url="https://s3.example/new")],
+            ),
+        ]
+        ok = MagicMock()
+        ok.headers = {"ETag": '"etag-1"'}
+        put = MagicMock(side_effect=[requests.ConnectionError("reset"), ok])
+        with (
+            patch.object(uploader._s3_session, "put", put),
+            patch("data_hub_watcher.uploader.time.sleep"),
+        ):
+            assert uploader._upload_single(tmp_file, "RUN-001") is True
+        assert put.call_args_list[0].args[0] == "https://s3.example/old"
+        assert put.call_args_list[1].args[0] == "https://s3.example/new"
+        assert mock_client.get_part_urls.call_count == 2
+
+    def test_other_403_aborts_and_records_the_s3_error(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+        tmp_file: Path,
+    ) -> None:
+        payload = tmp_file.read_bytes()
+        mock_client.request_upload_url.return_value = self._presigned(
+            part_size=len(payload), part_count=1
+        )
+        mock_client.get_part_urls.return_value = MultipartPartUrlsResponse(
+            expires_in=900,
+            parts=[MultipartPartUrl(part_number=1, upload_url="https://s3.example/1")],
+        )
+        denied = _http_error(
+            403,
+            "<Error><Code>SignatureDoesNotMatch</Code><Message>bad signature</Message></Error>",
+        )
+        with (
+            patch.object(uploader._s3_session, "put", side_effect=denied),
+            patch("data_hub_watcher.uploader.time.sleep"),
+        ):
+            assert uploader._upload_single(tmp_file, "RUN-001") is False
+        mock_client.abort_multipart_upload.assert_called_once_with(42, "abc123")
+        event = cast(MagicMock, uploader._reporter).queue_event.call_args.args[0]
+        assert event.details["s3_code"] == "SignatureDoesNotMatch"
+        assert "bad signature" in event.details["error"]
+
+    def test_bad_digest_starts_the_file_over_once(
+        self,
+        uploader: Uploader,
+        mock_client: MagicMock,
+        tmp_file: Path,
+    ) -> None:
+        payload = tmp_file.read_bytes()
+        first = self._presigned(part_size=len(payload), part_count=1)
+        second = self._presigned(part_size=len(payload), part_count=1)
+        second.upload_id = "def456"
+        mock_client.request_upload_url.side_effect = [first, second]
+        mock_client.get_part_urls.return_value = MultipartPartUrlsResponse(
+            expires_in=900,
+            parts=[MultipartPartUrl(part_number=1, upload_url="https://s3.example/1")],
+        )
+        response = MagicMock()
+        response.headers = {"ETag": '"etag-1"'}
+        mock_client.complete_multipart_upload.side_effect = [
+            ApiError(
+                "checksum",
+                status_code=400,
+                detail=MagicMock(code="BadDigest"),
+            ),
+            MagicMock(),
+        ]
+        with patch.object(uploader._s3_session, "put", return_value=response):
+            assert uploader._upload_single(tmp_file, "RUN-001") is True
+        assert mock_client.complete_multipart_upload.call_count == 2
+        assert mock_client.request_upload_url.call_count == 2
+
+
+def test_single_put_records_the_s3_error_body(
+    uploader: Uploader,
+    mock_client: MagicMock,
+    tmp_file: Path,
+) -> None:
+    mock_client.request_upload_url.return_value = PresignedUploadResponse(
+        upload_url="https://s3.example.com/presigned",
+        s3_bucket="test-bucket",
+        s3_key="test-instrument/RUN-001/test_data.csv",
+        file_id=42,
+        expires_in=3600,
+        already_uploaded=False,
+    )
+    too_large = _http_error(
+        400,
+        "<Error><Code>EntityTooLarge</Code><Message>too big</Message></Error>",
+    )
+    with (
+        patch.object(Uploader, "_put_to_presigned_url", side_effect=too_large),
+        patch("data_hub_watcher.uploader.time.sleep"),
+    ):
+        assert uploader._upload_single(tmp_file, "RUN-001") is False
+    event = cast(MagicMock, uploader._reporter).queue_event.call_args.args[0]
+    assert event.details["s3_code"] == "EntityTooLarge"

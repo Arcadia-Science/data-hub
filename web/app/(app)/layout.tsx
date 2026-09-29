@@ -14,7 +14,10 @@ import { trackEvent } from "@/lib/analytics/track";
 import { countUnread } from "@/lib/api/notifications";
 import { getSidebarInstruments } from "@/lib/api/sidebar";
 import { auth, authInstance } from "@/lib/auth";
+import { listChangelogEntries } from "@/lib/changelog/entries";
+import { groupChangelogByDate } from "@/lib/changelog/group";
 import { SIDEBAR_COOKIE_NAME } from "@/lib/sidebar-persistence";
+import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
 /**
  * Signed-in app chrome (sidebar, header, notifications). Auth surfaces
@@ -40,9 +43,20 @@ export default async function AppLayout({
   // notification bell renders with an accurate badge on first paint —
   // the partial `idx_notifications_user_id_unread` index keeps the
   // count cheap regardless of total notification volume.
-  const [instruments, initialUnreadCount] = session
-    ? await Promise.all([getSidebarInstruments(), countUnread(session.user.id)])
-    : [[], 0];
+  //
+  // The changelog window opens from the account menu on every page. Grouping
+  // here avoids a second request, and the files are small enough to send
+  // with the sidebar.
+  const [instruments, initialUnreadCount, timeZone] = session
+    ? await Promise.all([
+        getSidebarInstruments(),
+        countUnread(session.user.id),
+        getViewerTimeZone(),
+      ])
+    : [[], 0, "UTC"];
+  const changelogSections = session
+    ? groupChangelogByDate(listChangelogEntries(), timeZone)
+    : [];
 
   // Hydrate the sidebar's open/collapsed state from the cookie that
   // `SidebarProvider` writes on toggle. Defaulting to `true` keeps the
@@ -68,6 +82,7 @@ export default async function AppLayout({
       <ArchiveDownloadProvider>
         <SidebarProvider defaultOpen={sidebarDefaultOpen}>
           <AppSidebar
+            changelogSections={changelogSections}
             instruments={instruments}
             session={session}
             signOutAction={async () => {

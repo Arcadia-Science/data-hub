@@ -1,22 +1,34 @@
 import { createReadStream } from "node:fs";
 import type { Readable } from "node:stream";
 import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
+  CreateMultipartUploadCommand,
   GetObjectCommand,
   HeadObjectCommand,
   NotFound,
   PutObjectCommand,
   S3Client,
   S3ServiceException,
+  UploadPartCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { awsCredentialsProvider } from "@vercel/oidc-aws-credentials-provider";
+import { PART_URL_EXPIRY_SECONDS } from "@/lib/multipart";
 import {
   contentDispositionHeader,
   contentTypeForDownload,
   getLocalMirrorRoot,
+  localAbortMultipartUpload,
+  localCompleteMultipartUpload,
+  localCreateMultipartUpload,
   localMirrorDownloadUrl,
   localMirrorHead,
   localMirrorUploadUrl,
+  localObjectChecksum,
+  localPartUploadUrl,
+  MirrorMultipartError,
+  mirrorRootForMultipart,
   resolveMirrorPath,
 } from "@/lib/s3-local-mirror";
 
@@ -41,6 +53,11 @@ const s3 = new S3Client({
   credentials: process.env.AWS_ROLE_ARN
     ? awsCredentialsProvider({ roleArn: process.env.AWS_ROLE_ARN })
     : undefined,
+  // The SDK otherwise signs a CRC32 of an empty body into presigned PUT and
+  // UploadPart URLs. That algorithm has to match the CRC64NVME chosen when
+  // the multipart upload was created, so the default checksum would make
+  // every part fail.
+  requestChecksumCalculation: "WHEN_REQUIRED",
 });
 
 // Origin `getPresignedDownloadUrl` signs against, named up front for the MCP
@@ -236,4 +253,195 @@ export async function getPresignedUploadUrl(
     ...(contentType && { ContentType: contentType }),
   });
   return await getSignedUrl(s3, command, { expiresIn });
+}
+
+export class MultipartUploadError extends Error {
+  readonly code: string;
+  readonly httpStatus: number;
+
+  constructor(code: string, message: string, httpStatus = 400) {
+    super(message);
+    this.name = code;
+    this.code = code;
+    this.httpStatus = httpStatus;
+  }
+}
+
+function asMultipartError(err: unknown): MultipartUploadError {
+  if (err instanceof MultipartUploadError) {
+    return err;
+  }
+  if (err instanceof MirrorMultipartError) {
+    return new MultipartUploadError(err.code, err.message, err.httpStatus);
+  }
+  if (err instanceof S3ServiceException) {
+    const status = err.$metadata.httpStatusCode ?? 500;
+    return new MultipartUploadError(
+      err.name,
+      err.message,
+      status >= 400 && status < 600 ? status : 500
+    );
+  }
+  throw err;
+}
+
+export async function createMultipartUpload(
+  bucket: string,
+  key: string,
+  contentType?: string
+): Promise<string> {
+  const mirror = mirrorRootForMultipart();
+  if (mirror) {
+    return await localCreateMultipartUpload(mirror, bucket, key, contentType);
+  }
+  try {
+    const response = await s3.send(
+      new CreateMultipartUploadCommand({
+        Bucket: bucket,
+        Key: key,
+        ...(contentType && { ContentType: contentType }),
+        // Whole-file CRC64NVME is what S3 recommends. The watcher sends the
+        // value when it finishes; S3 rejects the object if it does not match.
+        ChecksumAlgorithm: "CRC64NVME",
+        ChecksumType: "FULL_OBJECT",
+      })
+    );
+    if (!response.UploadId) {
+      throw new MultipartUploadError(
+        "InternalError",
+        "S3 did not return an upload id",
+        500
+      );
+    }
+    return response.UploadId;
+  } catch (err) {
+    throw asMultipartError(err);
+  }
+}
+
+export async function getPresignedUploadPartUrl(
+  bucket: string,
+  key: string,
+  uploadId: string,
+  partNumber: number,
+  expiresIn: number = PART_URL_EXPIRY_SECONDS
+): Promise<string> {
+  const mirror = mirrorRootForMultipart();
+  if (mirror) {
+    return localPartUploadUrl(bucket, key, uploadId, partNumber);
+  }
+  const command = new UploadPartCommand({
+    Bucket: bucket,
+    Key: key,
+    UploadId: uploadId,
+    PartNumber: partNumber,
+  });
+  return await getSignedUrl(s3, command, { expiresIn });
+}
+
+export async function completeMultipartUpload(input: {
+  bucket: string;
+  key: string;
+  uploadId: string;
+  parts: { partNumber: number; etag: string }[];
+  checksumCrc64nvme: string;
+  sizeBytes: number;
+}): Promise<void> {
+  const mirror = mirrorRootForMultipart();
+  if (mirror) {
+    try {
+      await localCompleteMultipartUpload(
+        mirror,
+        input.uploadId,
+        input.parts,
+        input.checksumCrc64nvme,
+        input.sizeBytes
+      );
+    } catch (err) {
+      throw asMultipartError(err);
+    }
+    return;
+  }
+  try {
+    await s3.send(
+      new CompleteMultipartUploadCommand({
+        Bucket: input.bucket,
+        Key: input.key,
+        UploadId: input.uploadId,
+        MultipartUpload: {
+          Parts: input.parts.map((part) => ({
+            PartNumber: part.partNumber,
+            ETag: part.etag,
+          })),
+        },
+        ChecksumCRC64NVME: input.checksumCrc64nvme,
+        ChecksumType: "FULL_OBJECT",
+        MpuObjectSize: input.sizeBytes,
+      })
+    );
+  } catch (err) {
+    throw asMultipartError(err);
+  }
+}
+
+export async function abortMultipartUpload(
+  bucket: string,
+  key: string,
+  uploadId: string
+): Promise<void> {
+  const mirror = mirrorRootForMultipart();
+  if (mirror) {
+    await localAbortMultipartUpload(mirror, uploadId);
+    return;
+  }
+  try {
+    await s3.send(
+      new AbortMultipartUploadCommand({
+        Bucket: bucket,
+        Key: key,
+        UploadId: uploadId,
+      })
+    );
+  } catch (err) {
+    if (err instanceof S3ServiceException && err.name === "NoSuchUpload") {
+      return;
+    }
+    throw asMultipartError(err);
+  }
+}
+
+export async function headObjectChecksum(
+  bucket: string,
+  key: string
+): Promise<{ sizeBytes: number; checksumCrc64nvme: string | null } | null> {
+  const mirror = mirrorRootForMultipart();
+  if (mirror) {
+    return await localObjectChecksum(mirror, bucket, key);
+  }
+  try {
+    const response = await s3.send(
+      new HeadObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        ChecksumMode: "ENABLED",
+      })
+    );
+    if (response.ContentLength == null) {
+      return null;
+    }
+    return {
+      sizeBytes: response.ContentLength,
+      checksumCrc64nvme: response.ChecksumCRC64NVME ?? null,
+    };
+  } catch (err) {
+    if (
+      err instanceof NotFound ||
+      (err instanceof S3ServiceException &&
+        (err.$metadata.httpStatusCode === 404 ||
+          err.$metadata.httpStatusCode === 403))
+    ) {
+      return null;
+    }
+    throw asMultipartError(err);
+  }
 }

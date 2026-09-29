@@ -1,9 +1,16 @@
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { Crc64Nvme } from "@aws-sdk/crc64-nvme";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { uploadUrlResponse } from "@/lib/api/openapi";
-import { instruments } from "@/lib/db/schema";
+import { WATCHER_VERSION_HEADER } from "@/lib/api/watcher-compat";
+import { files, instruments } from "@/lib/db/schema";
+import { SINGLE_PUT_MAX_BYTES } from "@/lib/multipart";
 import {
   api,
   closeTestDb,
+  getBaseUrl,
   getTestDb,
   resetDb,
   seedTestUser,
@@ -195,6 +202,225 @@ describe("Request Upload URL API", () => {
   // -------------------------------------------------------------------------
   // Auth
   // -------------------------------------------------------------------------
+
+  const watcher12 = { [WATCHER_VERSION_HEADER]: "1.2.0" };
+
+  it("refuses files over 5 GB from a watcher that cannot split uploads", async () => {
+    const res = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${runId}/request-upload-url`,
+      {
+        method: "POST",
+        token,
+        body: {
+          filename: "too-big.tif",
+          size_bytes: SINGLE_PUT_MAX_BYTES + 1,
+        },
+      }
+    );
+    expect(res.status).toBe(413);
+    const data = await res.json();
+    expect(data.error.message).toContain("1.2.0");
+  });
+
+  it("uploads a file in parts and replaces an unfinished upload", async () => {
+    const body = Buffer.alloc(1500, 7);
+    const checksum = new Crc64Nvme();
+    checksum.update(body);
+    const crc = Buffer.from(await checksum.digest()).toString("base64");
+    const headers = watcher12;
+
+    const first = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${runId}/request-upload-url`,
+      {
+        method: "POST",
+        token,
+        headers,
+        body: {
+          filename: "parts.bin",
+          content_type: "application/octet-stream",
+          size_bytes: body.length,
+        },
+      }
+    );
+    expect(first.status).toBe(200);
+    const started = await first.json();
+    uploadUrlResponse.parse(started);
+    expect(started.upload_type).toBe("multipart");
+    expect(started.part_size).toBe(1024);
+    expect(started.part_count).toBe(2);
+
+    const second = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${runId}/request-upload-url`,
+      {
+        method: "POST",
+        token,
+        headers,
+        body: {
+          filename: "parts.bin",
+          size_bytes: body.length,
+        },
+      }
+    );
+    const restarted = await second.json();
+    expect(restarted.upload_id).not.toBe(started.upload_id);
+
+    const badPart = await api(
+      `/api/v1/files/${restarted.file_id}/multipart-upload/part-urls`,
+      {
+        method: "POST",
+        token,
+        body: { upload_id: restarted.upload_id, part_numbers: [9] },
+      }
+    );
+    expect(badPart.status).toBe(400);
+
+    const urls = await api(
+      `/api/v1/files/${restarted.file_id}/multipart-upload/part-urls`,
+      {
+        method: "POST",
+        token,
+        body: { upload_id: restarted.upload_id, part_numbers: [1, 2] },
+      }
+    );
+    expect(urls.status).toBe(200);
+    const signed = await urls.json();
+    const parts: { part_number: number; etag: string }[] = [];
+    for (const part of signed.parts) {
+      const start = (part.part_number - 1) * started.part_size;
+      const put = await fetch(`${getBaseUrl()}${part.upload_url}`, {
+        method: "PUT",
+        body: body.subarray(start, start + started.part_size),
+      });
+      expect(put.status).toBe(200);
+      const etag = put.headers.get("etag");
+      expect(etag).toBeTruthy();
+      parts.push({ part_number: part.part_number, etag: etag ?? "" });
+    }
+
+    const done = await api(
+      `/api/v1/files/${restarted.file_id}/multipart-upload/complete`,
+      {
+        method: "POST",
+        token,
+        body: {
+          upload_id: restarted.upload_id,
+          checksum_crc64nvme: crc,
+          parts,
+        },
+      }
+    );
+    expect(done.status).toBe(200);
+    const finished = await done.json();
+    expect(finished.already_uploaded).toBe(false);
+
+    const db = getTestDb();
+    const [row] = await db
+      .select()
+      .from(files)
+      .where(eq(files.id, restarted.file_id));
+    expect(row?.status).toBe("uploaded");
+    expect(row?.multipartUploadId).toBeNull();
+    expect(row?.s3Key).toBe(`${instrumentId}/${runId}/parts.bin`);
+    expect(row?.contentType).toBe("application/octet-stream");
+  });
+
+  it("finishes when S3 already assembled the object", async () => {
+    const body = Buffer.alloc(1200, 3);
+    const checksum = new Crc64Nvme();
+    checksum.update(body);
+    const crc = Buffer.from(await checksum.digest()).toString("base64");
+    const res = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${runId}/request-upload-url`,
+      {
+        method: "POST",
+        token,
+        headers: watcher12,
+        body: { filename: "recovered.bin", size_bytes: body.length },
+      }
+    );
+    const started = await res.json();
+    const mirrorFile = path.join(
+      "/tmp/data-hub-integration-s3",
+      "test-raw-data-bucket",
+      instrumentId,
+      runId,
+      "recovered.bin"
+    );
+    await mkdir(path.dirname(mirrorFile), { recursive: true });
+    await writeFile(mirrorFile, body);
+    await rm(
+      path.join(
+        "/tmp/data-hub-integration-s3",
+        ".multipart",
+        started.upload_id
+      ),
+      { recursive: true, force: true }
+    );
+
+    const done = await api(
+      `/api/v1/files/${started.file_id}/multipart-upload/complete`,
+      {
+        method: "POST",
+        token,
+        body: {
+          upload_id: started.upload_id,
+          checksum_crc64nvme: crc,
+          parts: [
+            { part_number: 1, etag: '"missing"' },
+            { part_number: 2, etag: '"missing"' },
+          ],
+        },
+      }
+    );
+    expect(done.status).toBe(200);
+    const finished = await done.json();
+    expect(finished.already_uploaded).toBe(false);
+    const [row] = await getTestDb()
+      .select()
+      .from(files)
+      .where(eq(files.id, started.file_id));
+    expect(row?.status).toBe("uploaded");
+  });
+
+  it("leaves a file the processor already took and clears the upload id", async () => {
+    const res = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${runId}/request-upload-url`,
+      {
+        method: "POST",
+        token,
+        headers: watcher12,
+        body: { filename: "adopted.bin", size_bytes: 1200 },
+      }
+    );
+    const started = await res.json();
+    await getTestDb()
+      .update(files)
+      .set({ status: "processing" })
+      .where(eq(files.id, started.file_id));
+
+    const done = await api(
+      `/api/v1/files/${started.file_id}/multipart-upload/complete`,
+      {
+        method: "POST",
+        token,
+        body: {
+          upload_id: started.upload_id,
+          checksum_crc64nvme: "AuUcyF784aU=",
+          parts: [{ part_number: 1, etag: '"unused"' }],
+        },
+      }
+    );
+    expect(done.status).toBe(200);
+    const finished = await done.json();
+    expect(finished.already_uploaded).toBe(true);
+    expect(finished.status).toBe("processing");
+    const [row] = await getTestDb()
+      .select()
+      .from(files)
+      .where(eq(files.id, started.file_id));
+    expect(row?.status).toBe("processing");
+    expect(row?.multipartUploadId).toBeNull();
+  });
 
   it("requires authentication", async () => {
     const res = await api(
