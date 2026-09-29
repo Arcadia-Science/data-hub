@@ -52,6 +52,9 @@ a database migration. Known ``kind`` values, with their per-kind
 * ``upload_retries_exhausted`` -- an auto-mode upload still failed after
   ``MAX_PENDING_UPLOAD_ATTEMPTS`` watcher starts, so it is no longer
   retried. ``details = {"kind", "relative_path", "run_id", "attempts"}``.
+* ``pending_upload_missing`` -- an auto-mode upload waiting for a retry
+  was no longer on disk at startup, so the retry was dropped.
+  ``details = {"kind", "relative_path", "run_id"}``.
 """
 
 from __future__ import annotations

@@ -1154,6 +1154,28 @@ class TestPendingUploads:
             "attempts": MAX_PENDING_UPLOAD_ATTEMPTS,
         }
 
+    def test_retry_counts_an_unexpected_error_and_moves_on(
+        self, uploader: Uploader, state_db: StateDB, run_dir: Path
+    ) -> None:
+        (run_dir / "broken.csv").write_text("x")
+        (run_dir / "fine.csv").write_text("x")
+        state_db.record_pending_uploads("RUN-1", ["RUN-1/broken.csv", "RUN-1/fine.csv"])
+
+        def upload(path: Path, run_id: str) -> bool:
+            if path.name == "broken.csv":
+                raise ValueError("unexpected response")
+            return True
+
+        with patch.object(uploader, "_upload_single", side_effect=upload) as upload_mock:
+            uploader.retry_pending_uploads()
+
+        assert [call.args[0].name for call in upload_mock.call_args_list] == [
+            "broken.csv",
+            "fine.csv",
+        ]
+        [pending] = state_db.pending_uploads()
+        assert (pending.relative_path, pending.attempts) == ("RUN-1/broken.csv", 1)
+
     def test_retry_drops_a_file_that_is_gone(self, uploader: Uploader, state_db: StateDB) -> None:
         state_db.record_pending_uploads("RUN-1", ["RUN-1/deleted.csv"])
 
@@ -1162,6 +1184,13 @@ class TestPendingUploads:
 
         upload.assert_not_called()
         assert state_db.pending_uploads() == []
+        report_error = cast(MagicMock, uploader._reporter).report_error
+        report_error.assert_called_once()
+        assert report_error.call_args.args[0] == "pending_upload_missing"
+        assert report_error.call_args.kwargs == {
+            "relative_path": "RUN-1/deleted.csv",
+            "run_id": "RUN-1",
+        }
 
     def test_retry_interrupted_by_shutdown_is_not_an_attempt(
         self, mock_client: MagicMock, state_db: StateDB, tmp_path: Path, run_dir: Path

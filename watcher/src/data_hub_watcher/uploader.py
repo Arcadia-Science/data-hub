@@ -114,7 +114,7 @@ def s3_error_details(exc: BaseException) -> dict[str, str]:
 class _QueueAttempt:
     """Per-file bookkeeping for upload-queue retries.
 
-    ``count`` is the number of consecutive heartbeat polls that have failed
+    ``count`` is the number of consecutive queue polls that have failed
     to upload the file (missing on disk or upload error); ``reason`` is the
     most recent failure cause, surfaced in the give-up event.
     """
@@ -362,10 +362,25 @@ class Uploader:
             # for traversal the way server-supplied queue paths are.
             path = self._watch_dir / pending.relative_path
             if not path.is_file():
-                logger.info("Dropping pending upload for missing file: %s", pending.relative_path)
+                logger.warning(
+                    "Dropping pending upload for missing file: %s", pending.relative_path
+                )
                 self._state_db.clear_pending_upload(pending.relative_path)
+                self._reporter.report_error(
+                    "pending_upload_missing",
+                    f"Stopped retrying {path.name}: the file is no longer on disk",
+                    relative_path=pending.relative_path,
+                    run_id=pending.run_id,
+                )
                 continue
-            if self._upload_pending(path, pending.run_id):
+            try:
+                uploaded = self._upload_pending(path, pending.run_id)
+            except Exception:
+                # Count it as a failed attempt. Otherwise the same file fails
+                # first on every start and the files after it are never retried.
+                logger.exception("Retrying upload of %s failed", pending.relative_path)
+                uploaded = False
+            if uploaded:
                 continue
             if self._stop_requested():
                 # An interrupted upload is not a failed attempt.
