@@ -101,6 +101,21 @@ def object_exists(
     return True
 
 
+def object_content_length(
+    s3_uri: str,
+    *,
+    s3_client: S3Client | None = None,
+) -> int:
+    """Return the stored size of *s3_uri* in bytes (`HeadObject`)."""
+    client = s3_client or get_s3_client()
+    bucket, key = parse_s3_uri(s3_uri)
+    response = client.head_object(Bucket=bucket, Key=key)
+    length = response.get("ContentLength")
+    if length is None:
+        raise ValueError(f"HeadObject for {s3_uri} did not include ContentLength")
+    return int(length)
+
+
 def download_file(
     s3_uri: str,
     local_path: Path,

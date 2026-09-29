@@ -10,6 +10,7 @@ from data_hub_lambda.dishcam.encode_video import encode_tiff_stack
 from data_hub_lambda.dishcam.filenames import RUN_JSON_NAME, is_run_json, is_tiff, matches_filename
 from data_hub_lambda.dishcam.parse_metadata import encode_fps, parse_run_json, playback_fps
 from data_hub_lambda.models import FileResponse, RunDetailFile, RunDetailResponse
+from data_hub_lambda.processing_disk import ensure_object_fits_on_disk
 from data_hub_shared import s3_utils
 from data_hub_shared.config import config
 
@@ -455,6 +456,7 @@ def _encode_tiff(
     try:
         client.update_file(tiff_id, status="processing")
 
+        ensure_object_fits_on_disk(tiff_uri, raw_dir)
         s3_utils.download_file(tiff_uri, local_tiff)
         encode_tiff_stack(local_tiff, mp4_path, poster_path, fps)
 
