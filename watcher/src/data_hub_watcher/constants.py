@@ -120,12 +120,15 @@ RUN_DETECTION_PRESETS: list[tuple[str, str, str, bool]] = [
 MAX_STABILITY_WAIT_SECONDS = 300
 UPLOAD_RETRY_MAX = 3
 UPLOAD_RETRY_BASE_DELAY = 1
-# How many manual-mode heartbeat polls re-attempt the same queued file
-# (missing or failing to upload) before the watcher gives up and cancels the
-# request server-side. Distinct from `UPLOAD_RETRY_MAX` (per-upload S3 PUT
-# retries). ~3 min at the 60s heartbeat: long enough to ride out a blip,
-# short enough that a stale entry from a dir change self-clears.
+# How many upload-queue polls re-attempt the same queued file (missing or
+# failing to upload) before the watcher gives up and cancels the request
+# server-side. Distinct from `UPLOAD_RETRY_MAX` (per-upload S3 PUT retries).
+# ~3 min at the 60s poll: long enough to ride out a blip, short enough that
+# a stale entry from a dir change self-clears.
 MAX_QUEUE_FILE_ATTEMPTS = 3
+# How many watcher starts retry an auto-mode upload that never finished.
+# After that the file waits for someone to request it from the run page.
+MAX_PENDING_UPLOAD_ATTEMPTS = 3
 # Upload records older than this are pruned from the local state DB
 # to prevent unbounded growth on long-running watcher instances.
 PRUNE_DAYS = 90

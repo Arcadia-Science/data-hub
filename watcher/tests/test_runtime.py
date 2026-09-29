@@ -8,11 +8,12 @@ wiring contract per `upload_mode` so any future drift fails loudly:
 
 * auto mode    -> `detector._upload_cb` is `uploader.upload_files`,
                   `heartbeat._on_tick` ticks the auto-updater only, and
-                  `rt.upload_worker` is `None`
+                  `rt.upload_worker` polls the queue and retries pending
+                  uploads at startup
 * manual mode  -> `detector._upload_cb` is `None`, `heartbeat._on_tick`
                   ticks the auto-updater only (uploads now run on the
                   dedicated `UploadQueueWorker` thread, not the heartbeat),
-                  and `rt.upload_worker` is set
+                  and `rt.upload_worker` polls the queue only
 """
 
 from __future__ import annotations
@@ -106,11 +107,11 @@ class TestBuildRuntimeAutoMode:
         rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
 
         try:
-            # Auto mode has no server-driven upload queue to poll, but
-            # the in-process updater still needs a tick on every
-            # heartbeat — it gates auto-updates on the cumulative idle
-            # window across many heartbeats. So the hook is non-None
-            # and ticking it must not call `poll_upload_queue`.
+            # The upload worker polls the queue, but the in-process
+            # updater still needs a tick on every heartbeat — it gates
+            # auto-updates on the cumulative idle window across many
+            # heartbeats. So the hook is non-None and ticking it must not
+            # call `poll_upload_queue`.
             assert rt.heartbeat._on_tick is not None
             rt.uploader.poll_upload_queue = MagicMock()  # type: ignore[method-assign]
             rt.updater.on_tick = MagicMock(return_value=None)  # type: ignore[method-assign]
@@ -120,14 +121,20 @@ class TestBuildRuntimeAutoMode:
         finally:
             rt.state_db.close()
 
-    def test_auto_mode_has_no_upload_worker(self, tmp_path: Path, db_path: Path) -> None:
+    def test_auto_mode_builds_upload_worker_that_retries_pending(
+        self, tmp_path: Path, db_path: Path
+    ) -> None:
         cfg = _make_config(tmp_path, upload_mode="auto")
         rt = build_runtime(client=MagicMock(), cfg=cfg, db_path=db_path)
 
         try:
-            # Auto-mode uploads run on the monitor's stability-checker thread
-            # via the detector callback, so there is no upload-queue worker.
-            assert rt.upload_worker is None
+            # "Request upload" on the run page only reaches a watcher that
+            # polls the queue, and auto mode needs the startup retry because
+            # hydration treats every reported file as handled.
+            assert rt.upload_worker is not None
+            assert rt.upload_worker._uploader is rt.uploader
+            assert rt.upload_worker._stop_event is rt.uploader._stop_event
+            assert rt.upload_worker._retry_pending_on_start is True
         finally:
             rt.state_db.close()
 
@@ -177,6 +184,8 @@ class TestBuildRuntimeManualMode:
             assert rt.upload_worker is not None
             assert rt.upload_worker._uploader is rt.uploader
             assert rt.upload_worker._stop_event is rt.uploader._stop_event
+            # Manual mode only uploads what someone requested.
+            assert rt.upload_worker._retry_pending_on_start is False
         finally:
             rt.state_db.close()
 
@@ -244,7 +253,7 @@ class TestStopRuntimeUploadWorkerOrdering:
         worker.stop.assert_called_once()
         state_db.close.assert_not_called()
 
-    def test_closes_db_in_auto_mode_without_worker(self) -> None:
+    def test_closes_db_without_worker(self) -> None:
         state_db = MagicMock()
         rt = self._runtime_with_mocks(state_db, None)
 
