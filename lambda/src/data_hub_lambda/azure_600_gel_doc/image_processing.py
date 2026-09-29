@@ -159,9 +159,13 @@ class TIFFProcessor:
         [ax.axis("off") for ax in axes.flat]
         return fig
 
-    def export_figure(self) -> Path:
+    def export_figure(self, *, output_dir: Path | None = None) -> Path:
         figure = self.generate_figure()
-        png_path = self.path.parent / (self.path.stem + ".png")
+        # A mounted raw file's folder is read-only, so callers that opened
+        # the TIFF from the mount pass a directory on local disk.
+        dest_dir = self.path.parent if output_dir is None else output_dir
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        png_path = dest_dir / (self.path.stem + ".png")
         figure.savefig(png_path, dpi=300)
         return png_path
 

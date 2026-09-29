@@ -755,6 +755,7 @@ Resources:
           AWS_S3_ARCHIVES_BUCKET: !Sub "arcadia-data-hub-archives-${Environment}"
           DATA_HUB_API_URL: !Ref DataHubApiUrl
           DATA_HUB_API_KEY: !Ref DataHubApiKey
+          DATA_HUB_ENVIRONMENT: !Ref Environment
           RAW_DATA_MOUNT_PATH: !If [S3FilesEnabled, "/mnt/raw", ""]
 
   # ---- S3 → Lambda event wiring ----

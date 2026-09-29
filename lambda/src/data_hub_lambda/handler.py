@@ -13,6 +13,7 @@ from aws_lambda_typing.events.s3 import S3Event
 
 from data_hub_lambda import archive_builder
 from data_hub_lambda.api_client import ApiError, get_client
+from data_hub_lambda.deadline import record_invocation_deadline
 from data_hub_lambda.processors import get_processor, matches_any_processor_gate
 from data_hub_shared.logger import get_named_logger
 
@@ -315,6 +316,7 @@ def lambda_handler(event: dict[str, Any], context: Context) -> dict[str, Any] | 
     gate rejects it — the web app already moved the row to ``processing``, so
     a silent return would strand it.
     """
+    record_invocation_deadline(context)
     logger.info("Received event: %s", pformat(event))
 
     # Capture before unwrapping: the payload loses the Function URL envelope.
