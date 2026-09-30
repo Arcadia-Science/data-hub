@@ -1,75 +1,27 @@
 """Unit tests for `hina_microscope.image_processing`.
 
-Covers the deterministic helper functions (`_reduce_to_2d`,
-`_rescale_percentile`) without requiring a real ND2 fixture.
+The helper tests need no ND2 file. The `ND2Processor` tests use the small
+example files that ship with the locked `arcadia-microscopy-tools` package.
 """
 
 from __future__ import annotations
+import importlib.resources
+from pathlib import Path
 
+import nd2
 import numpy as np
 import pytest
+from PIL import Image
 
+from data_hub_lambda.hina_microscope import image_processing
 from data_hub_lambda.hina_microscope.image_processing import (
+    PREVIEW_TOO_LARGE_MESSAGE,
     ND2Processor,
     _rescale_percentile,
 )
+from data_hub_lambda.hina_microscope.parse_metadata import parse_metadata
 
-
-class TestReduceTo2D:
-    def test_2d_input_passes_through(self) -> None:
-        arr = np.arange(16, dtype=np.float64).reshape(4, 4)
-
-        out = ND2Processor._reduce_to_2d(arr, ["Y", "X"])
-
-        np.testing.assert_array_equal(out, arr)
-
-    def test_z_axis_takes_max_projection(self) -> None:
-        # Z-stack with a per-plane max at z=2 in every pixel.
-        stack = np.stack(
-            [
-                np.full((3, 3), 1, dtype=np.float64),
-                np.full((3, 3), 5, dtype=np.float64),
-                np.full((3, 3), 9, dtype=np.float64),
-            ]
-        )
-
-        out = ND2Processor._reduce_to_2d(stack, ["Z", "Y", "X"])
-
-        assert out.shape == (3, 3)
-        assert np.all(out == 9)
-
-    def test_t_axis_takes_first_frame(self) -> None:
-        series = np.stack(
-            [
-                np.full((2, 2), 1, dtype=np.float64),
-                np.full((2, 2), 2, dtype=np.float64),
-            ]
-        )
-
-        out = ND2Processor._reduce_to_2d(series, ["T", "Y", "X"])
-
-        assert np.all(out == 1)
-
-    def test_p_axis_takes_first_point(self) -> None:
-        positions = np.stack(
-            [
-                np.full((2, 2), 7, dtype=np.float64),
-                np.full((2, 2), 8, dtype=np.float64),
-            ]
-        )
-
-        out = ND2Processor._reduce_to_2d(positions, ["P", "Y", "X"])
-
-        assert np.all(out == 7)
-
-    def test_tz_combined_reduces_in_order(self) -> None:
-        # shape: (T=2, Z=3, Y=2, X=2). First T is a Z-stack with max=9.
-        arr = np.arange(24, dtype=np.float64).reshape(2, 3, 2, 2)
-
-        out = ND2Processor._reduce_to_2d(arr, ["T", "Z", "Y", "X"])
-
-        # T=0 slice is arr[0] (shape 3,2,2). Max over Z=0 axis gives arr[0][2].
-        np.testing.assert_array_equal(out, arr[0].max(axis=0))
+_EXAMPLES = Path(str(importlib.resources.files("arcadia_microscopy_tools"))) / "tests" / "data"
 
 
 class TestRescalePercentile:
@@ -94,3 +46,68 @@ class TestRescalePercentile:
         out = _rescale_percentile(arr, (1, 99))
 
         assert out.shape == (0,)
+
+
+class TestExampleFiles:
+    """Regression checks against `nd2`'s own whole-file read of each example."""
+
+    def test_z_stack_preview_is_the_max_projection(self, tmp_path: Path) -> None:
+        path = _EXAMPLES / "example-zstack.nd2"
+        processor = ND2Processor(path)
+        processor.load()
+
+        assert parse_metadata(processor.image) == {
+            "sizes": {"Z": 11, "Y": 128, "X": 128},
+            "channels": [
+                {"name": "FITC", "excitation_nm": 488, "emission_nm": 512, "color": "#07ff00"}
+            ],
+            "dimensions": ["Z_STACK"],
+        }
+        planes = processor._planes
+        assert planes is not None
+        np.testing.assert_array_equal(planes[0], np.asarray(nd2.imread(path)).max(axis=0))
+        assert planes[0].dtype == np.uint16
+
+        jpg = processor.export_jpg(output_dir=tmp_path)
+        with Image.open(jpg) as image:
+            assert image.mode == "RGB"
+            assert image.size == (128, 128)
+
+    def test_multichannel_preview_keeps_every_channel(self) -> None:
+        path = _EXAMPLES / "example-multichannel.nd2"
+        processor = ND2Processor(path)
+        processor.load()
+
+        assert [channel.name for channel in processor.image.channels] == [
+            "BRIGHTFIELD",
+            "DAPI",
+            "FITC",
+            "TRITC",
+        ]
+        planes = processor._planes
+        assert planes is not None
+        np.testing.assert_array_equal(np.stack(planes), np.asarray(nd2.imread(path)))
+
+    def test_timelapse_preview_is_the_first_frame(self) -> None:
+        path = _EXAMPLES / "example-timelapse.nd2"
+        processor = ND2Processor(path)
+        processor.load()
+
+        planes = processor._planes
+        assert planes is not None
+        np.testing.assert_array_equal(planes[0], np.asarray(nd2.imread(path))[0])
+
+    def test_too_large_image_fails_before_reading_frames(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _no_read(*_args: object) -> None:
+            raise AssertionError("an oversized image should not be read")
+
+        monkeypatch.setattr(image_processing, "MAX_PREVIEW_BYTES", 1)
+        monkeypatch.setattr(image_processing, "_preview_planes", _no_read)
+        processor = ND2Processor(_EXAMPLES / "example-zstack.nd2")
+
+        with pytest.raises(ValueError, match="too large for a preview") as exc:
+            processor.load()
+
+        assert str(exc.value) == PREVIEW_TOO_LARGE_MESSAGE

@@ -1,7 +1,9 @@
 from __future__ import annotations
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import nd2
 import numpy as np
@@ -27,6 +29,16 @@ CONTRAST_PERCENTILES: tuple[float, float] = (1.0, 99.0)
 # JPEG quality for the exported composite.
 JPEG_QUALITY = 90
 
+# Measured peak is about 128 bytes per image pixel plus 10 per pixel per
+# channel. At the cap, the process peaked near 6.2 GB of the 10,240 MB Lambda.
+_PREVIEW_BYTES_PER_PIXEL = 128
+_PREVIEW_BYTES_PER_CHANNEL_PIXEL = 10
+MAX_PREVIEW_BYTES = 4 * 1024**3
+
+PREVIEW_TOO_LARGE_MESSAGE = (
+    "Image is too large for a preview. The raw file is stored and can be downloaded."
+)
+
 
 @dataclass(frozen=True)
 class ND2Summary:
@@ -40,17 +52,17 @@ class ND2Summary:
 class ND2Processor:
     """Convert a Nikon ND2 file into a per-run JPG preview.
 
-    The pipeline uses `arcadia_microscopy_tools.MicroscopyImage` to load the
-    ND2, reduces each channel down to a single 2D frame (max-projection over
-    Z, first index over T / P), percentile-stretches intensities, and then
-    composites the channels into an RGB overlay using each channel's native
-    fluorophore color via `overlay_channels`.
+    The pipeline reads the ND2 one frame at a time, reduces each channel to
+    a single 2D frame (max-projection over Z, first index over T / P),
+    percentile-stretches intensities, and then composites the channels into
+    an RGB overlay using each channel's native fluorophore color via
+    `overlay_channels`.
     """
 
     def __init__(self, path: Path) -> None:
         self.path = path
         self._image: ND2Summary | None = None
-        self._planes: list[NDArray[np.float64]] | None = None
+        self._planes: list[NDArray[Any]] | None = None
 
     def load(self) -> None:
         if not self.path.exists():
@@ -63,6 +75,8 @@ class ND2Processor:
         # with the 0.5.0 lock bump; it is a different parser.
         with nd2.ND2File(self.path) as nd2f:
             metadata = _NikonMetadataParser(self.path).parse(nd2f)
+            if preview_bytes(metadata.sizes) > MAX_PREVIEW_BYTES:
+                raise ValueError(PREVIEW_TOO_LARGE_MESSAGE)
             self._planes = _preview_planes(nd2f, metadata.sizes)
         self._image = ND2Summary(
             sizes=metadata.sizes,
@@ -114,44 +128,6 @@ class ND2Processor:
 
         return overlay_channels(background, overlay_inputs)
 
-    def _non_channel_axes(self) -> list[str]:
-        """Ordered axis labels for the per-channel array (C dropped)."""
-        return [axis for axis in self.image.sizes.keys() if axis != "C"]
-
-    @staticmethod
-    def _reduce_to_2d(
-        intensities: NDArray,  # type: ignore[type-arg]
-        axis_labels: list[str],
-    ) -> NDArray[np.float64]:
-        """Collapse leading axes down to a (Y, X) frame.
-
-        Z axes are max-projected; T and P axes fall back to the first index.
-        Any unknown leading axis is also reduced by taking the first index,
-        with a warning logged.
-        """
-        arr = intensities
-        labels = list(axis_labels)
-        while len(labels) > 2:
-            label = labels[0]
-            if label == "Z":
-                arr = arr.max(axis=0)
-            elif label in ("T", "P"):
-                logger.info(
-                    "Reducing axis %s (size %d) by taking first index only.",
-                    label,
-                    arr.shape[0],
-                )
-                arr = arr[0]
-            else:
-                logger.warning(
-                    "Unknown leading axis %s (size %d); taking first index.",
-                    label,
-                    arr.shape[0],
-                )
-                arr = arr[0]
-            labels = labels[1:]
-        return arr
-
     @staticmethod
     def _pick_background(
         per_channel: dict[Channel, NDArray[np.float64]],
@@ -190,7 +166,14 @@ def _rescale_percentile(
     return rescaled.astype(np.float64)
 
 
-def _preview_planes(nd2f: nd2.ND2File, sizes: dict[str, int]) -> list[NDArray[np.float64]]:
+def preview_bytes(sizes: Mapping[str, int]) -> int:
+    """Estimated peak memory to render a preview of an image with *sizes*."""
+    pixels = sizes.get("Y", 1) * sizes.get("X", 1)
+    per_pixel = _PREVIEW_BYTES_PER_PIXEL + _PREVIEW_BYTES_PER_CHANNEL_PIXEL * sizes.get("C", 1)
+    return pixels * per_pixel
+
+
+def _preview_planes(nd2f: nd2.ND2File, sizes: dict[str, int]) -> list[NDArray[Any]]:
     """Max-project Z and keep the first index of every other leading axis.
 
     Each `read_frame` call is one plane, so the decoded image never has to
@@ -211,10 +194,12 @@ def _reduce_loops(
     loops: list[dict[str, int]],
     sizes: dict[str, int],
     total: int,
-) -> list[NDArray[np.float64]]:
+) -> list[NDArray[Any]]:
     n_channels = sizes.get("C", 1)
     first_axes = [axis for axis in sizes if axis not in {"C", "Y", "X", "Z"}]
-    accum: list[NDArray[np.float64] | None] = [None] * n_channels
+    # Planes stay in the file's pixel type. A float64 copy of every channel
+    # was most of the peak memory.
+    accum: list[NDArray[Any] | None] = [None] * n_channels
     for index, loop in enumerate(loops):
         if any(loop.get(axis, 0) != 0 for axis in first_axes):
             continue
@@ -230,7 +215,7 @@ def _reduce_loops(
         for channel, plane in planes:
             current = accum[channel]
             if current is None:
-                accum[channel] = plane
+                accum[channel] = plane.copy()
             else:
                 np.maximum(current, plane, out=current)
     if any(plane is None for plane in accum):
@@ -242,12 +227,12 @@ def path_sizes(sizes: dict[str, int]) -> str:
     return ", ".join(f"{key}={value}" for key, value in sizes.items())
 
 
-def _channel_plane(frame: NDArray, channel_index: int, n_channels: int) -> NDArray[np.float64]:  # type: ignore[type-arg]
+def _channel_plane(frame: NDArray[Any], channel_index: int, n_channels: int) -> NDArray[Any]:
     arr = np.asarray(frame)
     if arr.ndim == 2:
-        return arr.astype(np.float64, copy=False)
+        return arr
     if arr.ndim == 3 and arr.shape[0] == n_channels:
-        return arr[channel_index].astype(np.float64, copy=False)
+        return arr[channel_index]
     if arr.ndim == 3 and arr.shape[-1] == n_channels:
-        return arr[..., channel_index].astype(np.float64, copy=False)
+        return arr[..., channel_index]
     raise ValueError(f"Unexpected ND2 frame shape {arr.shape}")

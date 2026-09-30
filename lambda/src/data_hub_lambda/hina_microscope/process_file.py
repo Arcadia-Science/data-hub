@@ -14,8 +14,9 @@ logger = logging.getLogger(__name__)
 def process_file(instrument_id: str, run_id: str, filename: str) -> None:
     """Process a single Hina microscope ND2 file through the Data Hub API.
 
-    Downloads the raw ND2, runs it through the image processing pipeline to
-    produce a composite JPG overlay, uploads the JPG to the processed bucket,
+    Opens the raw ND2 with `local_raw_file`, from the mount when it is
+    large, runs it through the image processing pipeline to produce a
+    composite JPG overlay, uploads the JPG to the processed bucket,
     and registers both files via the API. Run-level metadata (sizes,
     channels, dimensions) is parsed and stored once per run — the first file
     to arrive wins. Subsequent files in the same run still get a JPG but
@@ -48,7 +49,9 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
 
         raw_data_dir = config.LOCAL_RAW_DATA_DIRPATH / instrument_id / run_id
         output_dir = config.LOCAL_PROCESSED_DATA_DIRPATH / instrument_id / run_id
-        with local_raw_file(f"s3://{s3_bucket}/{s3_key}", raw_data_dir) as local_file_path:
+        with local_raw_file(
+            f"s3://{s3_bucket}/{s3_key}", raw_data_dir, streams=True
+        ) as local_file_path:
             processor = ND2Processor(local_file_path)
             processor.load()
             jpg_file_path = processor.export_jpg(output_dir=output_dir)
