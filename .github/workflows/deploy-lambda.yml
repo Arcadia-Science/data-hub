@@ -53,6 +53,7 @@ jobs:
 
       - name: Deploy SAM stack
         working-directory: infra
+        # AlarmEmail is quoted because SAM CLI rejects an empty `Key=` override.
         run: |
           sam deploy \
             --config-env "${{ github.ref_name }}" \
@@ -71,4 +72,4 @@ jobs:
               "VercelOidcProviderArn=${{ secrets.VERCEL_OIDC_PROVIDER_ARN }}" \
               "AdminDeployPrincipalArn=${{ vars.ADMIN_DEPLOY_PRINCIPAL_ARN }}" \
               "EnableS3Files=${{ vars.ENABLE_S3_FILES }}" \
-              "AlarmEmail=${{ vars.ALARM_EMAIL }}"
+              'AlarmEmail="${{ vars.ALARM_EMAIL }}"'
