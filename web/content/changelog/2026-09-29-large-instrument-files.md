@@ -2,6 +2,6 @@
 title: Large DishCam stacks now process
 ---
 
-DishCam stacks larger than 10 GB now process. Other instruments read files of 1 GiB or more in place, instead of copying them onto the processing disk first.
+DishCam stacks that used to fail as too large to process now process.
 
-Hina Microscope files are still limited. A file that is too large to process shows **Failed** with its size. The raw file is still stored, and you can download it.
+Processing has a 15-minute limit. If Data Hub can’t turn a stack into a video in that time, the stack shows **Failed**. Its message says how many frames were done. You can still download the raw file.

@@ -1622,6 +1622,7 @@ class TestEncodeTiffFromMount:
             patch("data_hub_lambda.dishcam.process_file.encode_tiff_stack") as encode,
             patch("data_hub_lambda.dishcam.process_file.s3_utils.upload_file"),
         ):
+
             def _write_outputs(_tiff: Path, mp4: Path, poster: Path, _fps: float) -> None:
                 mp4.write_bytes(b"mp4")
                 poster.write_bytes(b"jpg")

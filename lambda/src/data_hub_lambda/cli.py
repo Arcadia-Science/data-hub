@@ -23,8 +23,18 @@ def cli() -> None:
 
 @cli.command("synthetic-tiff")
 @click.argument("dest", type=click.Path(dir_okay=False, path_type=Path))
-@click.option("--size-gb", type=float, default=None, help="Approximate stack size in GiB.")
-@click.option("--size-bytes", type=int, default=None, help="Approximate stack size in bytes.")
+@click.option(
+    "--size-gb",
+    type=click.FloatRange(min=0, min_open=True),
+    default=None,
+    help="Approximate stack size in GiB.",
+)
+@click.option(
+    "--size-bytes",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Approximate stack size in bytes.",
+)
 def synthetic_tiff(dest: Path, size_gb: float | None, size_bytes: int | None) -> None:
     """Write an uncompressed RGB TIFF stack for a staging timing test.
 
@@ -32,9 +42,12 @@ def synthetic_tiff(dest: Path, size_gb: float | None, size_bytes: int | None) ->
     """
     from data_hub_lambda.dishcam.synthetic_stack import write_synthetic_tiff_stack
 
-    if (size_gb is None) == (size_bytes is None):
+    if size_bytes is not None and size_gb is None:
+        target = size_bytes
+    elif size_gb is not None and size_bytes is None:
+        target = int(size_gb * 1024**3)
+    else:
         raise click.UsageError("Pass exactly one of --size-gb or --size-bytes.")
-    target = size_bytes if size_bytes is not None else int(size_gb * 1024**3)
     written = write_synthetic_tiff_stack(dest, target)
     click.echo(f"Wrote {dest} ({written} bytes)")
 
