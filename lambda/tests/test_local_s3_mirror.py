@@ -1,24 +1,15 @@
 """Tests for the local S3 mirror behind the `data-hub-process handler` CLI."""
 
 from __future__ import annotations
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 from data_hub_lambda import raw_access
-from data_hub_lambda.deadline import clear_deadline
 from data_hub_lambda.local_s3_mirror import patched_s3
 from data_hub_shared.config import config
 
 _RAW_BUCKET = "test-raw-data-bucket"
-
-
-@pytest.fixture(autouse=True)
-def _no_deadline() -> Iterator[None]:
-    clear_deadline()
-    yield
-    clear_deadline()
 
 
 @pytest.fixture(autouse=True)

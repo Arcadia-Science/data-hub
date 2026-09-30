@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import shutil
+import stat
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -51,9 +52,13 @@ def _object_key(s3_uri: str) -> str:
 def _matching_size(path: Path, expected_size: int) -> bool:
     """True when *path* is a file of *expected_size*. Never lists the folder."""
     try:
-        return path.is_file() and path.stat().st_size == expected_size
-    except OSError:
+        st = path.stat()
+    except (FileNotFoundError, NotADirectoryError):
         return False
+    except OSError as exc:
+        logger.warning("Cannot read mounted file %s: %s", path, exc)
+        return False
+    return stat.S_ISREG(st.st_mode) and st.st_size == expected_size
 
 
 def _emit_mount_wait_timeout() -> None:
@@ -114,18 +119,21 @@ def _too_large_message(size: int, free: int, *, tried_mount: bool) -> str:
 
 
 @contextmanager
-def local_raw_file(s3_uri: str, dest_dir: Path) -> Iterator[Path]:
+def local_raw_file(s3_uri: str, dest_dir: Path, *, streams: bool = False) -> Iterator[Path]:
     """Yield a path to *s3_uri* and delete it afterwards only if we downloaded it.
 
-    Files of `MOUNT_READ_MIN_BYTES` or more, and files that will not fit in
-    *dest_dir*, are opened on the mount when `RAW_DATA_MOUNT_PATH` is set.
+    With *streams*, files of `MOUNT_READ_MIN_BYTES` or more, and files that
+    will not fit in *dest_dir*, are opened on the mount when
+    `RAW_DATA_MOUNT_PATH` is set. Only callers that read the file in pieces
+    pass it. A processor that loads the whole file gains nothing from the
+    mount, because a file too big for the disk is too big for memory too.
     Anything else is downloaded. A mounted file is left in place: deleting
     it fails on the read-only mount and would remove fixture data locally.
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
     size = s3_utils.object_content_length(s3_uri)
     free = shutil.disk_usage(dest_dir).free
-    mount_root = _mount_root()
+    mount_root = _mount_root() if streams else None
     tried_mount = False
     path: Path | None = None
     downloaded = False

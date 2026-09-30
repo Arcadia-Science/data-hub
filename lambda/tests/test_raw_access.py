@@ -34,13 +34,10 @@ class _Clock:
 
 
 @pytest.fixture(autouse=True)
-def _reset_mount(monkeypatch: pytest.MonkeyPatch) -> None:
+def _no_mount_from_the_shell(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("RAW_DATA_MOUNT_PATH", raising=False)
     monkeypatch.delenv("DATA_HUB_ENVIRONMENT", raising=False)
     config.__init__()  # type: ignore[misc]
-    from data_hub_lambda.deadline import clear_deadline
-
-    clear_deadline()
 
 
 def _patch_disk(monkeypatch: pytest.MonkeyPatch, free: int) -> None:
@@ -92,7 +89,9 @@ def test_large_file_is_read_from_the_mount_and_not_deleted(
     # The wait compares the real file size with the reported object size.
     monkeypatch.setattr(raw_access, "_matching_size", lambda path, expected: path.is_file())
 
-    with raw_access.local_raw_file("s3://bucket/inst/run/stack.tif", tmp_path / "dest") as path:
+    with raw_access.local_raw_file(
+        "s3://bucket/inst/run/stack.tif", tmp_path / "dest", streams=True
+    ) as path:
         assert path == mounted
 
     assert mounted.exists()
@@ -128,7 +127,9 @@ def test_wait_accepts_a_file_that_shows_up_at_the_right_size(
 
     monkeypatch.setattr(raw_access.s3_utils, "download_file", _no_download)
 
-    with raw_access.local_raw_file("s3://bucket/inst/run/stack.tif", tmp_path / "dest") as path:
+    with raw_access.local_raw_file(
+        "s3://bucket/inst/run/stack.tif", tmp_path / "dest", streams=True
+    ) as path:
         assert path == mounted
         assert path.read_bytes() == b"1234"
 
@@ -157,7 +158,9 @@ def test_timeout_downloads_and_writes_the_metric(
     _patch_size(monkeypatch, size=_GIB)
     monkeypatch.setattr(raw_access.s3_utils, "download_file", _download)
 
-    with raw_access.local_raw_file("s3://bucket/inst/run/stack.tif", tmp_path / "dest") as path:
+    with raw_access.local_raw_file(
+        "s3://bucket/inst/run/stack.tif", tmp_path / "dest", streams=True
+    ) as path:
         assert path.read_bytes() == b"fallback"
 
     assert downloaded[0].exists() is False
@@ -180,7 +183,9 @@ def test_file_too_big_for_mount_and_disk_says_both(
     _patch_size(monkeypatch, size=_GIB)
 
     with pytest.raises(ObjectTooLargeForDiskError, match="processing mount") as exc:
-        with raw_access.local_raw_file("s3://bucket/inst/run/stack.tif", tmp_path / "dest"):
+        with raw_access.local_raw_file(
+            "s3://bucket/inst/run/stack.tif", tmp_path / "dest", streams=True
+        ):
             pass
 
     assert "disk" in str(exc.value)
@@ -206,5 +211,77 @@ def test_deadline_stops_the_mount_wait(tmp_path: Path, monkeypatch: pytest.Monke
     set_deadline_from_remaining_ms(0)
 
     with pytest.raises(ProcessingDeadlineError, match="mounted file"):
+        with raw_access.local_raw_file(
+            "s3://bucket/inst/run/stack.tif", tmp_path / "dest", streams=True
+        ):
+            pass
+
+
+def test_without_streams_a_large_file_is_downloaded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mount = tmp_path / "mount"
+    mounted = mount / "inst" / "run" / "stack.tif"
+    mounted.parent.mkdir(parents=True)
+    mounted.write_bytes(b"x")
+    monkeypatch.setenv("RAW_DATA_MOUNT_PATH", str(mount))
+    config.__init__()  # type: ignore[misc]
+    downloaded: list[Path] = []
+
+    def _download(_uri: str, local_path: Path, **_k: Any) -> None:
+        local_path.write_bytes(b"copy")
+        downloaded.append(local_path)
+
+    _patch_disk(monkeypatch, free=10 * _GIB)
+    _patch_size(monkeypatch, size=_GIB)
+    monkeypatch.setattr(raw_access.s3_utils, "download_file", _download)
+    monkeypatch.setattr(raw_access, "_matching_size", lambda path, expected: path.is_file())
+
+    with raw_access.local_raw_file("s3://bucket/inst/run/stack.tif", tmp_path / "dest") as path:
+        assert path != mounted
+        assert path.read_bytes() == b"copy"
+
+    assert len(downloaded) == 1
+
+
+def test_without_streams_a_file_too_big_for_disk_names_only_the_disk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mount = tmp_path / "mount"
+    mount.mkdir()
+    monkeypatch.setenv("RAW_DATA_MOUNT_PATH", str(mount))
+    config.__init__()  # type: ignore[misc]
+    _patch_disk(monkeypatch, free=10)
+    _patch_size(monkeypatch, size=_GIB)
+
+    with pytest.raises(ObjectTooLargeForDiskError, match=r"File is 1\.0 GB, larger than") as exc:
         with raw_access.local_raw_file("s3://bucket/inst/run/stack.tif", tmp_path / "dest"):
             pass
+
+    assert "mount" not in str(exc.value)
+
+
+@pytest.mark.parametrize("missing", ["inst/run/stack.tif", "inst/run.tif/stack.tif"])
+def test_a_missing_mounted_file_is_not_ready_and_not_logged(
+    tmp_path: Path, missing: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    (tmp_path / "inst").mkdir()
+    (tmp_path / "inst" / "run.tif").write_bytes(b"x")
+
+    assert raw_access._matching_size(tmp_path / missing, 1) is False
+    assert caplog.records == []
+
+
+def test_an_unreadable_mounted_file_is_not_ready_and_is_logged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    mounted = tmp_path / "stack.tif"
+
+    def _stat(self: Path, **_k: Any) -> Any:
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(Path, "stat", _stat)
+
+    assert raw_access._matching_size(mounted, 1) is False
+    assert "Cannot read mounted file" in caplog.text
+    assert "Permission denied" in caplog.text
