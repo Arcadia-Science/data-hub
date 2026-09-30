@@ -71,7 +71,8 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
     sidecar updates only the stacks in its own folder.
 
     High-quality stacks are a few GB and Lambda `/tmp` is capped, so each
-    encode deletes its local TIFF/MP4/JPEG before the next stack.
+    encode deletes its MP4 and poster, and `local_raw_file` deletes a
+    downloaded TIFF, before the next stack.
     """
     if not matches_filename(filename):
         logger.info("Ignoring DishCam file %s; not a TIFF or run.json.", filename)
@@ -455,7 +456,7 @@ def _encode_tiff(
     try:
         client.update_file(tiff_id, status="processing")
 
-        with local_raw_file(tiff_uri, raw_dir) as tiff_path:
+        with local_raw_file(tiff_uri, raw_dir, streams=True) as tiff_path:
             encode_tiff_stack(tiff_path, mp4_path, poster_path, fps)
 
             processed_bucket = config.AWS_S3_PROCESSED_DATA_BUCKET or ""
@@ -488,9 +489,9 @@ def _encode_tiff(
         _update_file_status(client, tiff_id, "failed", error_message=str(exc))
         raise
     finally:
-        # The helper deletes a downloaded TIFF. A mounted TIFF stays put:
-        # unlinking it fails on the read-only mount. The MP4 and JPEG are
-        # always local, and one stack can be several GB.
+        # `local_raw_file` deletes a downloaded TIFF and leaves a mounted one
+        # alone. The MP4 and poster are always local and would fill `/tmp`
+        # before the next stack in the batch.
         _remove_local(mp4_path, poster_path)
 
 

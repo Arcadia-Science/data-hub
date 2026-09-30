@@ -186,9 +186,9 @@ def encode_tiff_stack(
         def _chunks() -> Iterator[bytes]:
             nonlocal done
             yield first.tobytes()
-            for page in tif.pages[1:]:
+            for index in range(1, total):
                 check_deadline(f"encoding ({done} of {total} frames done)")
                 done += 1
-                yield _as_rgb24(page.asarray()).tobytes()
+                yield _as_rgb24(tif.pages[index].asarray()).tobytes()
 
         _pipe_ffmpeg(cmd, _chunks())

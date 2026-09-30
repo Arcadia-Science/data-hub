@@ -12,15 +12,6 @@ from data_hub_lambda.dishcam.encode_video import encode_tiff_stack
 from data_hub_lambda.dishcam.synthetic_stack import write_synthetic_tiff_stack
 
 
-@pytest.fixture(autouse=True)
-def _clear_deadline():
-    from data_hub_lambda.deadline import clear_deadline
-
-    clear_deadline()
-    yield
-    clear_deadline()
-
-
 def _two_page_tiff(path: Path) -> None:
     frame = np.zeros((8, 8, 3), dtype=np.uint8)
     with tifffile.TiffWriter(path) as writer:
@@ -28,9 +19,12 @@ def _two_page_tiff(path: Path) -> None:
         writer.write(frame, photometric="rgb")
 
 
-def test_encode_stops_before_the_first_frame(tmp_path: Path) -> None:
+def test_encode_stops_before_the_first_frame(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     tiff = tmp_path / "stack.tif"
     _two_page_tiff(tiff)
+    monkeypatch.setattr("data_hub_lambda.dishcam.encode_video.resolve_ffmpeg", lambda: "ffmpeg")
     set_deadline_from_remaining_ms(0)
 
     with pytest.raises(ProcessingDeadlineError, match=r"0 of 2 frames done"):
@@ -66,9 +60,10 @@ def test_encode_stops_between_frames(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
 def test_synthetic_stack_reaches_the_requested_size(tmp_path: Path) -> None:
     dest = tmp_path / "stack.tif"
-    size = write_synthetic_tiff_stack(dest, 50_000)
+    size = write_synthetic_tiff_stack(dest, 50_000, frame_shape=(64, 64, 3))
     assert size >= 50_000
     assert dest.stat().st_size == size
     with tifffile.TiffFile(dest) as tif:
-        assert len(tif.pages) >= 1
+        assert len(tif.pages) > 1
+        assert tif.pages[0].shape == (64, 64, 3)
         assert tif.pages[0].dtype == np.uint8

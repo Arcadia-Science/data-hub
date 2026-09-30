@@ -17,15 +17,6 @@ from data_hub_lambda.models import FileResponse, RunDetailFile, RunDetailRespons
 
 
 @pytest.fixture(autouse=True)
-def _clear_deadline() -> Any:
-    from data_hub_lambda.deadline import clear_deadline
-
-    clear_deadline()
-    yield
-    clear_deadline()
-
-
-@pytest.fixture(autouse=True)
 def _small_raw_object() -> Any:
     """Existing cases use tiny stand-in files and do not talk to S3.
 
