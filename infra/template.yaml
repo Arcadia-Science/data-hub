@@ -548,24 +548,8 @@ Resources:
                 Condition:
                   StringEquals:
                     aws:ResourceAccount: !Ref AWS::AccountId
-              # The bucket uses SSE-S3. This is the key permission from the
-              # S3 Files role example, limited to requests S3 makes for this
-              # bucket, so a customer-managed key can be added later.
-              - Sid: UseKmsKeyWithS3Files
-                Effect: Allow
-                Action:
-                  - kms:GenerateDataKey
-                  - kms:Encrypt
-                  - kms:Decrypt
-                  - kms:ReEncryptFrom
-                  - kms:ReEncryptTo
-                Resource: !Sub "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:*"
-                Condition:
-                  StringLike:
-                    kms:ViaService: !Sub "s3.${AWS::Region}.amazonaws.com"
-                    kms:EncryptionContext:aws:s3:arn:
-                      - !Sub "arn:aws:s3:::arcadia-data-hub-raw-${Environment}"
-                      - !Sub "arn:aws:s3:::arcadia-data-hub-raw-${Environment}/*"
+              # No KMS statement: the raw bucket uses SSE-S3, which makes no KMS
+              # calls. Moving it to SSE-KMS needs one here and in the boundary.
               - Sid: EventBridgeManage
                 Effect: Allow
                 Action:
@@ -863,22 +847,31 @@ Resources:
               - s3files:ListFileSystems
               - s3files:ListMountTargets
               - s3files:ListTagsForResource
+              # Read-only. These do not support `events:ManagedBy`, so they
+              # cannot go in CeilingS3FilesRules.
+              - events:DescribeRule
+              - events:ListRuleNamesByTarget
+              - events:ListRules
+              - events:ListTargetsByRule
+            Resource: "*"
+          # S3 Files edits its sync rule as the sync role. Both environments'
+          # rules share this prefix, so the principal check keeps other staging
+          # roles from granting themselves access to production's rule.
+          - Sid: CeilingS3FilesRules
+            Effect: Allow
+            Action:
               - events:DeleteRule
               - events:DisableRule
               - events:EnableRule
               - events:PutRule
               - events:PutTargets
               - events:RemoveTargets
-              - events:DescribeRule
-              - events:ListRuleNamesByTarget
-              - events:ListRules
-              - events:ListTargetsByRule
-              - kms:GenerateDataKey
-              - kms:Encrypt
-              - kms:Decrypt
-              - kms:ReEncryptFrom
-              - kms:ReEncryptTo
-            Resource: "*"
+            Resource: !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/DO-NOT-DELETE-S3-Files*"
+            Condition:
+              StringEquals:
+                events:ManagedBy: elasticfilesystem.amazonaws.com
+              ArnEquals:
+                aws:PrincipalArn: !Sub "arn:aws:iam::${AWS::AccountId}:role/data-hub-s3files-staging"
           # Explicit because an implicit boundary deny does not restrict access
           # granted by a resource-based policy such as a bucket policy.
           - Sid: DenyProductionResources
