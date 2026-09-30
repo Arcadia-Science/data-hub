@@ -477,9 +477,9 @@ Resources:
       RouteTableIds:
         - !Ref PrivateRouteTable
 
-  # Outbound is only HTTPS for now. The mount layer adds NFS to the mount
-  # targets. Security groups do not filter Amazon DNS, so name lookup still
-  # works.
+  # NFS names the VPC range, not the mount-target group, so all egress stays
+  # inline without a reference cycle. Mixing inline and standalone egress on
+  # one group can drop rules on update. Amazon DNS is never filtered.
   LambdaSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Condition: S3FilesEnabled
@@ -492,6 +492,11 @@ Resources:
           ToPort: 443
           CidrIp: 0.0.0.0/0
           Description: HTTPS to the Data Hub API and AWS APIs
+        - IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          CidrIp: !GetAtt DataHubVpc.CidrBlock
+          Description: NFS to the raw-bucket mount targets
       Tags:
         - Key: Name
           Value: !Sub "data-hub-${Environment}-lambda"
@@ -605,7 +610,6 @@ Resources:
         - Key: Name
           Value: !Sub "data-hub-${Environment}-s3files"
 
-  # Separate rules so the two security groups do not depend on each other.
   MountTargetNfsIngress:
     Type: AWS::EC2::SecurityGroupIngress
     Condition: S3FilesEnabled
@@ -616,17 +620,6 @@ Resources:
       ToPort: 2049
       SourceSecurityGroupId: !Ref LambdaSecurityGroup
       Description: NFS from the Lambda
-
-  LambdaNfsEgress:
-    Type: AWS::EC2::SecurityGroupEgress
-    Condition: S3FilesEnabled
-    Properties:
-      GroupId: !Ref LambdaSecurityGroup
-      IpProtocol: tcp
-      FromPort: 2049
-      ToPort: 2049
-      DestinationSecurityGroupId: !Ref MountTargetSecurityGroup
-      Description: NFS to the raw-bucket mount
 
   RawFilesMountTargetA:
     Type: AWS::S3Files::MountTarget
