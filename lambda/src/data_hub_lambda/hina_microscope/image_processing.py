@@ -1,13 +1,15 @@
 from __future__ import annotations
 import logging
+from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 
 import nd2
 import numpy as np
 import skimage as ski
 from arcadia_microscopy_tools.blending import overlay_channels
 from arcadia_microscopy_tools.channels import BRIGHTFIELD, Channel
+from arcadia_microscopy_tools.metadata_structures import DimensionFlags
+from arcadia_microscopy_tools.nikon import _NikonMetadataParser
 from numpy.typing import NDArray
 from PIL import Image
 
@@ -26,6 +28,15 @@ CONTRAST_PERCENTILES: tuple[float, float] = (1.0, 99.0)
 JPEG_QUALITY = 90
 
 
+@dataclass(frozen=True)
+class ND2Summary:
+    """The ND2 metadata `parse_metadata` reads, without the decoded pixels."""
+
+    sizes: dict[str, int]
+    channels: list[Channel]
+    dimensions: DimensionFlags
+
+
 class ND2Processor:
     """Convert a Nikon ND2 file into a per-run JPG preview.
 
@@ -38,7 +49,7 @@ class ND2Processor:
 
     def __init__(self, path: Path) -> None:
         self.path = path
-        self._image: SimpleNamespace | None = None
+        self._image: ND2Summary | None = None
         self._planes: list[NDArray[np.float64]] | None = None
 
     def load(self) -> None:
@@ -47,17 +58,20 @@ class ND2Processor:
         if self.path.suffix.lower() not in ND2_SUFFIXES:
             raise ValueError(f"Expected ND2 file (.nd2), got: {self.path.suffix}")
 
-        # Metadata only. `from_nd2_path` would decode every pixel into memory.
-        metadata = _instrument_metadata(self.path)
-        self._planes = _preview_planes(self.path, metadata.sizes)
-        self._image = SimpleNamespace(
+        # `from_nd2_path` decodes every pixel at once, so read the metadata and
+        # the preview frames from one handle. Move to `parse_nd2` deliberately
+        # with the 0.5.0 lock bump; it is a different parser.
+        with nd2.ND2File(self.path) as nd2f:
+            metadata = _NikonMetadataParser(self.path).parse(nd2f)
+            self._planes = _preview_planes(nd2f, metadata.sizes)
+        self._image = ND2Summary(
             sizes=metadata.sizes,
             channels=[item.channel for item in metadata.channel_metadata_list],
             dimensions=metadata.dimensions,
         )
 
     @property
-    def image(self) -> SimpleNamespace:
+    def image(self) -> ND2Summary:
         if self._image is None:
             raise RuntimeError("Call load() first.")
         return self._image
@@ -176,36 +190,20 @@ def _rescale_percentile(
     return rescaled.astype(np.float64)
 
 
-def _instrument_metadata(path: Path):  # type: ignore[no-untyped-def]
-    """Read ND2 metadata without decoding pixels.
-
-    `parse_nd2` is the public helper in newer microscopy tools. The locked
-    0.4.1 release only exposes the parser class.
-    """
-    try:
-        from arcadia_microscopy_tools.nikon import parse_nd2
-    except ImportError:
-        from arcadia_microscopy_tools.nikon import _NikonMetadataParser
-
-        return _NikonMetadataParser(path).parse()
-    return parse_nd2(path)
-
-
-def _preview_planes(path: Path, sizes: dict[str, int]) -> list[NDArray[np.float64]]:
+def _preview_planes(nd2f: nd2.ND2File, sizes: dict[str, int]) -> list[NDArray[np.float64]]:
     """Max-project Z and keep the first index of every other leading axis.
 
     Each `read_frame` call is one plane, so the decoded image never has to
     fit in memory at once.
     """
-    with nd2.ND2File(path) as nd2f:
-        loops = list(nd2f.loop_indices)
-        total = len(loops) or 1
-        if not loops:
-            check_deadline(f"reading frame 1 of {total}")
-            frame = nd2f.read_frame(0)
-            count = sizes.get("C", 1)
-            return [_channel_plane(frame, index, count) for index in range(count)]
-        return _reduce_loops(nd2f.read_frame, loops, sizes, total)
+    loops = list(nd2f.loop_indices)
+    total = len(loops) or 1
+    if not loops:
+        check_deadline(f"reading frame 1 of {total}")
+        frame = nd2f.read_frame(0)
+        count = sizes.get("C", 1)
+        return [_channel_plane(frame, index, count) for index in range(count)]
+    return _reduce_loops(nd2f.read_frame, loops, sizes, total)
 
 
 def _reduce_loops(

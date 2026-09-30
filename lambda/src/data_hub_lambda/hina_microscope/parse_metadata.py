@@ -1,12 +1,25 @@
 from __future__ import annotations
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, Protocol
 
-from arcadia_microscopy_tools import MicroscopyImage
 from arcadia_microscopy_tools.channels import Channel
 from arcadia_microscopy_tools.metadata_structures import DimensionFlags
 
 
-def parse_metadata(image: MicroscopyImage) -> dict[str, Any]:
+class ImageSummary(Protocol):
+    """What `parse_metadata` reads. `MicroscopyImage` and `ND2Summary` both fit."""
+
+    @property
+    def sizes(self) -> Mapping[str, int]: ...
+
+    @property
+    def channels(self) -> list[Channel]: ...
+
+    @property
+    def dimensions(self) -> DimensionFlags: ...
+
+
+def parse_metadata(image: ImageSummary) -> dict[str, Any]:
     """Extract run-level metadata from a loaded Nikon ND2 image.
 
     Returns a JSON-serializable dict with three keys:
@@ -15,7 +28,7 @@ def parse_metadata(image: MicroscopyImage) -> dict[str, Any]:
     - `channels`: a list of `{name, excitation_nm, emission_nm, color}` dicts.
     - `dimensions`: a list of `DimensionFlags` member names set on the image.
 
-    The function operates on the already-loaded `MicroscopyImage` so the
+    The function reads the summary the processor already loaded, so the
     caller does not need to re-open the ND2 file for the metadata step.
     """
     return {
