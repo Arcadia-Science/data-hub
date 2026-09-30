@@ -122,9 +122,23 @@ Secrets (`DATA_HUB_API_KEY`, etc.) are stored in GitHub environment secrets scop
 >
 > Staging roles carry a permissions boundary (`data-hub-boundary-staging`) that caps their permissions at the actions they already use and explicitly denies access to production buckets, production roles, the production Lambda function, and the production ECR repository. Managed-policy attachment, role creation, and trust-policy changes are admin-only in both environments — with them, a CI role could escalate itself to `AdministratorAccess`. Widening the boundary or changing those grants takes an admin `make sam-deploy`.
 >
-> The optional VPC, NAT gateway, and processing alarms are the same kind of change. CI cannot create a VPC, a NAT gateway, an SNS topic, or a CloudWatch alarm. The first deploy that turns `EnableS3Files` on, and any later change to that network or to the alarms, has to be an admin `make sam-deploy`. Set the GitHub environment variable `ENABLE_S3_FILES` to `true` or `false` before that deploy. The workflow passes the variable on every run, and an empty value is rejected, so a deploy that forgets it stops instead of deleting the network. `ALARM_EMAIL` is optional. A new address has to confirm the subscription from the message AWS sends.
+> The optional VPC, NAT gateway, and processing alarms are the same kind of change. CI cannot create a VPC, a NAT gateway, an SNS topic, or a CloudWatch alarm. The first deploy that turns `EnableS3Files` on, and any later change to that network or to the alarms, has to be an admin `make sam-deploy`. That deploy reads `ENABLE_S3_FILES` from `infra/.env.<env>`. The GitHub environment variable `ENABLE_S3_FILES` only affects later CI deploys, so set both to the same value, `true` or `false`, before the admin deploy. If they differ, the next CI deploy tries to add or remove the network, lacks the permission, and rolls back. The workflow passes the variable on every run, and an empty value is rejected, so a deploy that forgets it stops instead of deleting the network. `ALARM_EMAIL` is optional. A new address has to confirm the subscription from the message AWS sends.
 >
-> Turning `EnableS3Files` off later also needs an admin deploy. Lambda can take up to 20 minutes to release the network interface, so the deploy that deletes the subnets may fail once and then succeed on a retry. If the function stays in the VPC and is idle for 14 days, Lambda reclaims that interface and the next invocation fails until the interface is recreated. S3 events retry on their own. A reprocess or archive build can fail once.
+> Roll out to production in this order:
+>
+> 1. Set the `production` GitHub environment variables, and the same values in `infra/.env.production`.
+> 2. Run `make sam-deploy ENV=production` from the exact commit being promoted.
+> 3. Push that commit to `production`.
+>
+> An admin deploy from an unmerged branch leaves a gap. Any push to `production` before the promotion, such as a hotfix, makes CI deploy the old template. That deploy tries to delete the alarms, lacks the permission, and rolls back.
+>
+> Turning `EnableS3Files` off later also needs an admin deploy. The execution role keeps its VPC permissions either way, because Lambda deletes the function's network interface with that role after the function leaves the VPC. That can take up to 20 minutes, which can outlast CloudFormation's delete attempts. A delete that fails during cleanup is dropped from the stack, the stack still reports `UPDATE_COMPLETE`, and a second deploy does not retry it. After turning the option off:
+>
+> 1. Check the stack events for `DELETE_FAILED`.
+> 2. If the subnets or security group were left behind, wait for the function's network interface to disappear.
+> 3. Delete the security group, the subnets, and the VPC by hand.
+>
+> If the function stays in the VPC and is idle for 14 days, Lambda reclaims that interface and the next invocation fails until the interface is recreated. S3 events retry on their own. A reprocess or archive build can fail once.
 >
 > The NAT gateway is about $39 a month per environment ($0.048 an hour, plus $0.005 an hour for its public IPv4 address, plus $0.048 per GB of API traffic). S3 reads use a free gateway endpoint and do not go through the NAT gateway. Leave `EnableS3Files` at `false` unless the environment needs it.
 

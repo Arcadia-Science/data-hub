@@ -161,7 +161,7 @@ ALARM_EMAIL=
 
 `ADMIN_DEPLOY_PRINCIPAL_ARN` is the IAM role ARN pattern (wildcards allowed) of the principal that runs admin deploys; the bucket policies exempt it from the bucket-configuration deny. Use the role ARN form, not the `sts::assumed-role` session form — for SSO admin roles, find it with `aws iam list-roles --path-prefix /aws-reserved/sso.amazonaws.com/`.
 
-`ENABLE_S3_FILES` defaults to `false`. Set it to `true` only when this environment should put the Lambda in a VPC with a NAT gateway so it can mount the raw bucket. That network is about $39 a month. An empty value fails the deploy, so the line has to be present. `ALARM_EMAIL` is optional. When it is set, AWS emails that address to confirm the processing-alarm subscription.
+`ENABLE_S3_FILES` is required. Use `false` unless this environment should put the Lambda in a VPC with a NAT gateway so it can mount the raw bucket. That network is about $39 a month, and it only allows outbound HTTPS, so `DATA_HUB_API_URL` has to use `https://` on port 443. An empty value fails the deploy. `ALARM_EMAIL` is optional. When it is set, AWS emails that address to confirm the processing-alarm subscription.
 
 Then deploy. The Makefile loads `infra/.env.staging` automatically when `ENV=staging` is set:
 

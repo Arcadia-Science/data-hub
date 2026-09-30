@@ -314,7 +314,7 @@ Resources:
   # The Lambda calls the Data Hub API on the public internet, so a private
   # subnet needs a NAT gateway. The S3 gateway endpoint keeps bucket traffic
   # off that gateway. Staging and production use different address ranges so
-  # the two networks can never be peered by accident.
+  # the two networks could be peered later without renumbering.
 
   DataHubVpc:
     Type: AWS::EC2::VPC
@@ -666,11 +666,11 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
-      ManagedPolicyArns: !If
-        - S3FilesEnabled
-        - - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-          - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
-        - - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        # Stays attached with the VPC off: Lambda deletes the function's
+        # network interface with this role after it leaves the VPC.
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
       Policies:
         - PolicyName: S3Access
           PolicyDocument:
@@ -702,31 +702,27 @@ Resources:
                 Resource:
                   - !Sub "arn:aws:s3:::arcadia-data-hub-archives-${Environment}"
                   - !Sub "arn:aws:s3:::arcadia-data-hub-archives-${Environment}/*"
-        # The managed VPC policy lets the Lambda service create the network
-        # interface. This deny keeps the function's own code from calling
-        # those same EC2 APIs. The ARN is built from the function name: the
-        # function already references this role, so GetAtt would loop.
-        - !If
-          - S3FilesEnabled
-          - PolicyName: DenyEc2ApiFromFunctionCode
-            PolicyDocument:
-              Version: "2012-10-17"
-              Statement:
-                - Sid: DenyEc2WhenCalledByThisFunction
-                  Effect: Deny
-                  Action:
-                    - ec2:CreateNetworkInterface
-                    - ec2:DeleteNetworkInterface
-                    - ec2:DescribeNetworkInterfaces
-                    - ec2:DescribeSubnets
-                    - ec2:DetachNetworkInterface
-                    - ec2:AssignPrivateIpAddresses
-                    - ec2:UnassignPrivateIpAddresses
-                  Resource: "*"
-                  Condition:
-                    ArnEquals:
-                      lambda:SourceFunctionArn: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:data-hub-${Environment}"
-          - !Ref AWS::NoValue
+        # Lambda creates the network interface through the managed VPC policy.
+        # This deny stops the function's own code from calling those APIs.
+        # The ARN is built from the name because GetAtt would loop.
+        - PolicyName: DenyEc2ApiFromFunctionCode
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: DenyEc2WhenCalledByThisFunction
+                Effect: Deny
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DeleteNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DescribeSubnets
+                  - ec2:DetachNetworkInterface
+                  - ec2:AssignPrivateIpAddresses
+                  - ec2:UnassignPrivateIpAddresses
+                Resource: "*"
+                Condition:
+                  ArnEquals:
+                    lambda:SourceFunctionArn: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:data-hub-${Environment}"
 
   # ---- IAM: GitHub Actions deploy role ----
   # Routine image updates and in-place bucket config only. New buckets or
