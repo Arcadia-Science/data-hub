@@ -502,8 +502,9 @@ Resources:
           Value: !Sub "data-hub-${Environment}-lambda"
 
   # ---- Read-only mount of the raw bucket ----
-  # The sync role cannot write. The bucket policy denies writes as well, so
-  # a change made through the mount cannot replace the stored object.
+  # Nothing can write through the mount: the file system policy denies writes
+  # and root access, and no client role has `s3files:ClientWrite`, so the sync
+  # role never has a change to copy back to the bucket.
 
   S3FilesSyncRole:
     Type: AWS::IAM::Role
@@ -528,7 +529,7 @@ Resources:
               ArnLike:
                 aws:SourceArn: !Sub "arn:${AWS::Partition}:s3files:${AWS::Region}:${AWS::AccountId}:file-system/*"
       Policies:
-        - PolicyName: ReadRawBucket
+        - PolicyName: SyncRawBucket
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -541,14 +542,17 @@ Resources:
                 Condition:
                   StringEquals:
                     aws:ResourceAccount: !Ref AWS::AccountId
-              - Sid: ReadRawObjects
+              # The set AWS documents for the sync role. S3 Files checks all of it
+              # when it creates the file system, and a read-only set fails with
+              # "does not have permission to call s3:HeadObject".
+              - Sid: SyncRawObjects
                 Effect: Allow
                 Action:
-                  - s3:GetObject
-                  - s3:GetObjectVersion
-                  - s3:GetObjectTagging
-                  - s3:GetObjectVersionTagging
-                  - s3:ListMultipartUploadParts
+                  - s3:AbortMultipartUpload
+                  - s3:DeleteObject*
+                  - s3:GetObject*
+                  - s3:List*
+                  - s3:PutObject*
                 Resource: !Sub "arn:aws:s3:::arcadia-data-hub-raw-${Environment}/*"
                 Condition:
                   StringEquals:
