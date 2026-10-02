@@ -489,6 +489,11 @@ Resources:
 
   DataHubFunction:
     Type: AWS::Serverless::Function
+    # The execution role names the staging boundary by ARN, so nothing else
+    # makes the boundary allow EC2 network interfaces before the function
+    # joins the VPC. SAM copies Metadata onto the generated function.
+    Metadata:
+      StagingBoundary: !If [IsStaging, !Ref StagingBoundary, !Ref AWS::NoValue]
     Properties:
       FunctionName: !Sub "data-hub-${Environment}"
       PackageType: Image
