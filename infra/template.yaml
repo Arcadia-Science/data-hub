@@ -48,6 +48,26 @@ Parameters:
       form (arn:aws:iam::<acct>:role/...), not the sts::assumed-role session
       form — aws:PrincipalArn never returns the session form.
 
+  EnableS3Files:
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "false"
+    Description: >-
+      Put the Lambda in a VPC with a NAT gateway so it can mount the raw
+      bucket. Defaults to false so a self-hosted stack does not pay for a
+      NAT gateway. An empty value is rejected, so a deploy that forgets the
+      parameter cannot turn an existing network off.
+
+  AlarmEmail:
+    Type: String
+    Default: ""
+    Description: >-
+      Optional address for processing alarms. Empty means no email
+      subscription. A new subscription stays pending until the address
+      confirms it.
+
 Globals:
   Function:
     # Sized for 3-4 GB Hina microscope ND2s: RAM holds the decoded image and
@@ -61,6 +81,8 @@ Conditions:
   # bypass production branch protection.
   AllowPreviewSubject: !Equals [!Ref Environment, staging]
   IsStaging: !Equals [!Ref Environment, staging]
+  S3FilesEnabled: !Equals [!Ref EnableS3Files, "true"]
+  HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, ""]]
 
 Resources:
   # ---- S3 buckets ----
@@ -288,10 +310,190 @@ Resources:
                   - !Sub "arn:aws:iam::${AWS::AccountId}:root"
                   - !Ref AdminDeployPrincipalArn
 
+  # ---- Network for the raw-bucket mount ----
+  # The Lambda calls the Data Hub API on the public internet, so a private
+  # subnet needs a NAT gateway. The S3 gateway endpoint keeps bucket traffic
+  # off that gateway. Staging and production use different address ranges so
+  # the two networks could be peered later without renumbering.
+
+  DataHubVpc:
+    Type: AWS::EC2::VPC
+    Condition: S3FilesEnabled
+    Properties:
+      CidrBlock: !If [IsStaging, "10.20.0.0/16", "10.21.0.0/16"]
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub "data-hub-${Environment}"
+        - Key: project
+          Value: arcadia-data-hub
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Condition: S3FilesEnabled
+    Properties:
+      VpcId: !Ref DataHubVpc
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: !If [IsStaging, "10.20.0.0/24", "10.21.0.0/24"]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub "data-hub-${Environment}-public"
+
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Condition: S3FilesEnabled
+    Properties:
+      VpcId: !Ref DataHubVpc
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: !If [IsStaging, "10.20.1.0/24", "10.21.1.0/24"]
+      Tags:
+        - Key: Name
+          Value: !Sub "data-hub-${Environment}-private-a"
+
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Condition: S3FilesEnabled
+    Properties:
+      VpcId: !Ref DataHubVpc
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: !If [IsStaging, "10.20.2.0/24", "10.21.2.0/24"]
+      Tags:
+        - Key: Name
+          Value: !Sub "data-hub-${Environment}-private-b"
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Condition: S3FilesEnabled
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "data-hub-${Environment}"
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Condition: S3FilesEnabled
+    Properties:
+      VpcId: !Ref DataHubVpc
+      InternetGatewayId: !Ref InternetGateway
+
+  NatEip:
+    Type: AWS::EC2::EIP
+    Condition: S3FilesEnabled
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "data-hub-${Environment}-nat"
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Condition: S3FilesEnabled
+    Properties:
+      AllocationId: !GetAtt NatEip.AllocationId
+      SubnetId: !Ref PublicSubnet
+      Tags:
+        - Key: Name
+          Value: !Sub "data-hub-${Environment}"
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Condition: S3FilesEnabled
+    Properties:
+      VpcId: !Ref DataHubVpc
+      Tags:
+        - Key: Name
+          Value: !Sub "data-hub-${Environment}-public"
+
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    Condition: S3FilesEnabled
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: S3FilesEnabled
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Condition: S3FilesEnabled
+    Properties:
+      VpcId: !Ref DataHubVpc
+      Tags:
+        - Key: Name
+          Value: !Sub "data-hub-${Environment}-private"
+
+  PrivateDefaultRoute:
+    Type: AWS::EC2::Route
+    Condition: S3FilesEnabled
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnetARouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: S3FilesEnabled
+    Properties:
+      SubnetId: !Ref PrivateSubnetA
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnetBRouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: S3FilesEnabled
+    Properties:
+      SubnetId: !Ref PrivateSubnetB
+      RouteTableId: !Ref PrivateRouteTable
+
+  # Gateway endpoints are free. Without this route, archive builds would
+  # pay NAT data charges for every byte read from S3.
+  S3GatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: S3FilesEnabled
+    Properties:
+      VpcId: !Ref DataHubVpc
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !Ref PrivateRouteTable
+
+  # Outbound is only HTTPS for now. The mount layer adds NFS to the mount
+  # targets. Security groups do not filter Amazon DNS, so name lookup still
+  # works.
+  LambdaSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: S3FilesEnabled
+    Properties:
+      GroupDescription: !Sub "data-hub-${Environment} Lambda"
+      VpcId: !Ref DataHubVpc
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS to the Data Hub API and AWS APIs
+      Tags:
+        - Key: Name
+          Value: !Sub "data-hub-${Environment}-lambda"
+
   # ---- Lambda function ----
 
   DataHubFunction:
     Type: AWS::Serverless::Function
+    # The execution role names the staging boundary by ARN, so nothing else
+    # makes the boundary allow EC2 network interfaces before the function
+    # joins the VPC. SAM copies Metadata onto the generated function.
+    Metadata:
+      StagingBoundary: !If [IsStaging, !Ref StagingBoundary, !Ref AWS::NoValue]
     Properties:
       FunctionName: !Sub "data-hub-${Environment}"
       PackageType: Image
@@ -301,6 +503,14 @@ Resources:
         # raw download, the decoded working copy, and the generated JPG.
         Size: 10240
       Role: !GetAtt LambdaExecutionRole.Arn
+      VpcConfig: !If
+        - S3FilesEnabled
+        - SecurityGroupIds:
+            - !Ref LambdaSecurityGroup
+          SubnetIds:
+            - !Ref PrivateSubnetA
+            - !Ref PrivateSubnetB
+        - !Ref AWS::NoValue
       FunctionUrlConfig:
         # Callers must SigV4-sign with credentials holding
         # lambda:InvokeFunctionUrl on this function ARN.
@@ -376,6 +586,18 @@ Resources:
               # Constrained by DenyBoundaryRemovalOrSwap below.
               - iam:PutRolePermissionsBoundary
               - sts:GetCallerIdentity
+              # The Lambda service creates the VPC network interface with the
+              # execution role. The deploy role describes the same network
+              # when it updates the function.
+              - ec2:CreateNetworkInterface
+              - ec2:DescribeNetworkInterfaces
+              - ec2:DeleteNetworkInterface
+              - ec2:DescribeSubnets
+              - ec2:DescribeSecurityGroups
+              - ec2:DescribeVpcs
+              - ec2:GetSecurityGroupsForVpc
+              - ec2:AssignPrivateIpAddresses
+              - ec2:UnassignPrivateIpAddresses
             Resource: "*"
           # Explicit because an implicit boundary deny does not restrict access
           # granted by a resource-based policy such as a bucket policy.
@@ -404,6 +626,36 @@ Resources:
             Condition:
               StringNotEquals:
                 iam:PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/data-hub-boundary-staging"
+          # A request with no VPC settings has no values for these keys, so
+          # ForAnyValue does not match and an ordinary deploy still works.
+          # AWS::NoValue drops the statement when the subnets do not exist.
+          - !If
+            - S3FilesEnabled
+            - Sid: DenyLambdaOutsideStagingSubnets
+              Effect: Deny
+              Action:
+                - lambda:CreateFunction
+                - lambda:UpdateFunctionConfiguration
+              Resource: "*"
+              Condition:
+                ForAnyValue:StringNotEquals:
+                  lambda:SubnetIds:
+                    - !Ref PrivateSubnetA
+                    - !Ref PrivateSubnetB
+            - !Ref AWS::NoValue
+          - !If
+            - S3FilesEnabled
+            - Sid: DenyLambdaOutsideStagingSecurityGroups
+              Effect: Deny
+              Action:
+                - lambda:CreateFunction
+                - lambda:UpdateFunctionConfiguration
+              Resource: "*"
+              Condition:
+                ForAnyValue:StringNotEquals:
+                  lambda:SecurityGroupIds:
+                    - !Ref LambdaSecurityGroup
+            - !Ref AWS::NoValue
 
   # ---- IAM: Lambda execution role ----
 
@@ -421,6 +673,9 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        # Stays attached with the VPC off: Lambda deletes the function's
+        # network interface with this role after it leaves the VPC.
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
       Policies:
         - PolicyName: S3Access
           PolicyDocument:
@@ -452,6 +707,27 @@ Resources:
                 Resource:
                   - !Sub "arn:aws:s3:::arcadia-data-hub-archives-${Environment}"
                   - !Sub "arn:aws:s3:::arcadia-data-hub-archives-${Environment}/*"
+        # Lambda creates the network interface through the managed VPC policy.
+        # This deny stops the function's own code from calling those APIs.
+        # The ARN is built from the name because GetAtt would loop.
+        - PolicyName: DenyEc2ApiFromFunctionCode
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: DenyEc2WhenCalledByThisFunction
+                Effect: Deny
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DeleteNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DescribeSubnets
+                  - ec2:DetachNetworkInterface
+                  - ec2:AssignPrivateIpAddresses
+                  - ec2:UnassignPrivateIpAddresses
+                Resource: "*"
+                Condition:
+                  ArnEquals:
+                    lambda:SourceFunctionArn: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:data-hub-${Environment}"
 
   # ---- IAM: GitHub Actions deploy role ----
   # Routine image updates and in-place bucket config only. New buckets or
@@ -578,6 +854,18 @@ Resources:
                 Condition:
                   StringEquals:
                     iam:PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/data-hub-boundary-${Environment}"
+        # Lambda checks these when a deploy attaches the function to the VPC.
+        - PolicyName: VpcDescribe
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeVpcs
+                  - ec2:GetSecurityGroupsForVpc
+                Resource: "*"
 
   # ---- IAM: Vercel web app role (OIDC federation) ----
   # Lets the Next.js app presign S3 URLs without long-lived AWS credentials.
@@ -645,6 +933,103 @@ Resources:
                 Condition:
                   StringEquals:
                     lambda:FunctionUrlAuthType: AWS_IAM
+
+  # ---- Processing alarms ----
+  # These stay on even when the VPC is off. A dropped S3 event leaves the
+  # file uploaded, and Reprocess accepts that status.
+
+  ProcessingAlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "data-hub-${Environment}-processing-alarms"
+      Tags:
+        - Key: project
+          Value: arcadia-data-hub
+
+  ProcessingAlarmTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref ProcessingAlarmTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudWatchAlarms
+            Effect: Allow
+            Principal:
+              Service: cloudwatch.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref ProcessingAlarmTopic
+            Condition:
+              ArnLike:
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:*"
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
+  ProcessingAlarmEmail:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlarmEmail
+    Properties:
+      Protocol: email
+      TopicArn: !Ref ProcessingAlarmTopic
+      Endpoint: !Ref AlarmEmail
+
+  AsyncEventsDroppedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "data-hub-${Environment}-async-events-dropped"
+      AlarmDescription: S3 upload events were dropped before the Lambda ran.
+      Namespace: AWS/Lambda
+      MetricName: AsyncEventsDropped
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref DataHubFunction
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ProcessingAlarmTopic
+
+  AsyncEventAgeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "data-hub-${Environment}-async-event-age"
+      AlarmDescription: Queued events are waiting more than ten minutes, which means invocations are being retried.
+      Namespace: AWS/Lambda
+      MetricName: AsyncEventAge
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref DataHubFunction
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 600000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ProcessingAlarmTopic
+
+  FunctionErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "data-hub-${Environment}-function-errors"
+      AlarmDescription: The function returned an error. Invocation failures such as a mount failure may not count here.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref DataHubFunction
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ProcessingAlarmTopic
 
 Outputs:
   DataHubFunctionArn:

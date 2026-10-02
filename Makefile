@@ -167,6 +167,7 @@ sam-bootstrap:
 		--tags project=arcadia-data-hub
 
 # Usage: make sam-deploy ENV=staging
+# AlarmEmail is quoted because SAM CLI rejects an empty `Key=` override.
 .PHONY: sam-deploy
 sam-deploy:
 ifndef ENV
@@ -182,7 +183,9 @@ endif
 		"DataHubApiKey=$(DATA_HUB_API_KEY)" \
 		"GitHubOidcProviderArn=$(GITHUB_OIDC_PROVIDER_ARN)" \
 		"VercelOidcProviderArn=$(VERCEL_OIDC_PROVIDER_ARN)" \
-		"AdminDeployPrincipalArn=$(ADMIN_DEPLOY_PRINCIPAL_ARN)"
+		"AdminDeployPrincipalArn=$(ADMIN_DEPLOY_PRINCIPAL_ARN)" \
+		"EnableS3Files=$(ENABLE_S3_FILES)" \
+		'AlarmEmail="$(ALARM_EMAIL)"'
 
 # Usage: make sam-status ENV=staging
 .PHONY: sam-status
