@@ -25,7 +25,6 @@ import { FilterableColumnHeader } from "./filterable-column-header";
 import { RanByCell } from "./ran-by-cell";
 import { RawFileColumnHeader } from "./raw-file-column-header";
 import { RunIdCell } from "./run-id-cell";
-import { RunRowActions } from "./run-row-actions";
 import { RunSelectAllCheckbox, RunSelectCheckbox } from "./run-select-checkbox";
 import type { RunRef } from "./run-selection-provider";
 import { RunTimeCells, RunTimeHeads } from "./run-time-columns";
@@ -86,9 +85,6 @@ export function HinaRunsTable({
             />
           </TableHead>
           <RunTimeHeads />
-          <TableHead className="w-[108px]">
-            <span className="sr-only">Actions</span>
-          </TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -99,10 +95,7 @@ export function HinaRunsTable({
           const sizes = getMetadataRecord(row.metadata, "sizes");
           const sizesLabel = sizes ? formatHinaSizes(sizes) : "";
           return (
-            <TableRow
-              className={cn("group", isDeleted && "opacity-50")}
-              key={row.id}
-            >
+            <TableRow className={cn(isDeleted && "opacity-50")} key={row.id}>
               <TableCell>
                 <RunSelectCheckbox runRef={runRowToRef(row)} />
               </TableCell>
@@ -141,9 +134,6 @@ export function HinaRunsTable({
                 />
               </TableCell>
               <RunTimeCells row={row} />
-              <TableCell className="py-1">
-                <RunRowActions row={row} />
-              </TableCell>
             </TableRow>
           );
         })}

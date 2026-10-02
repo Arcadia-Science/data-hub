@@ -81,8 +81,8 @@ const STATUS_CONFIG: Record<
   },
 };
 
-// Statuses where a "last online at" tooltip makes sense — i.e. the watcher
-// *should* be reporting but isn't. Excludes `stopped` (intentional) and
+// Statuses where the watcher *should* be reporting but isn't, so the tooltip
+// explains the check-in delay. Excludes `stopped` (intentional) and
 // `registered` (no heartbeat history yet).
 const TOOLTIP_STATUSES = new Set<WatcherBadgeStatus>(["offline", "stale"]);
 
@@ -95,9 +95,9 @@ export function WatcherStatusBadge({
   status: WatcherBadgeStatus;
   /**
    * Most recent watcher heartbeat. When the badge is in an "unexpected
-   * silence" state (`offline` / `stale`) and this is provided, it's
-   * surfaced via tooltip so users can tell at a glance how long the
-   * watcher has been silent.
+   * silence" state (`offline` / `stale`) and this is provided, the tooltip
+   * leads with it so users can tell at a glance how long the watcher has
+   * been silent.
    */
   lastOnlineAt?: Date | null;
   /**
@@ -122,15 +122,24 @@ export function WatcherStatusBadge({
     </Badge>
   );
 
-  if (!(TOOLTIP_STATUSES.has(status) && lastOnlineAt)) {
+  if (!TOOLTIP_STATUSES.has(status)) {
     return badge;
   }
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>{badge}</TooltipTrigger>
-      <TooltipContent className="flex flex-col gap-1">
-        <div>Last online {formatRelativeTime(lastOnlineAt)}</div>
+      <TooltipContent className="flex flex-col items-start gap-1">
+        {lastOnlineAt ? (
+          <p className="font-medium">
+            Last online {formatRelativeTime(lastOnlineAt)}
+          </p>
+        ) : null}
+        <p>
+          The watcher checks in with Data Hub once a minute. If it was just
+          restarted, it can take up to a minute to show as online. Refresh the
+          page to see the latest status.
+        </p>
       </TooltipContent>
     </Tooltip>
   );

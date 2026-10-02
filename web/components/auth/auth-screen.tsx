@@ -12,6 +12,8 @@ import { authInstance } from "@/lib/auth";
 import { DEV_PASSWORD, isDevAuthEnabled } from "@/lib/dev-auth";
 import { DOCS_URL, QUICKSTART_DOCS_URL } from "@/lib/docs";
 
+const SOURCE_URL = "https://github.com/Arcadia-Science/data-hub";
+
 interface AuthScreenProps {
   callbackUrl: string;
   children?: React.ReactNode;
@@ -157,6 +159,14 @@ export function AuthScreen({
             >
               Docs
             </DocsLink>
+            <a
+              className="transition-colors hover:text-foreground"
+              href={SOURCE_URL}
+              rel="noopener noreferrer"
+              target="_blank"
+            >
+              Source
+            </a>
           </div>
         </footer>
       </div>

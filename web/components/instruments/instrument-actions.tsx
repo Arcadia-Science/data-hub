@@ -24,19 +24,17 @@ import {
 import type { InstrumentListItem } from "@/lib/api/instruments";
 
 // Both `InstrumentListItem` (table) and `InstrumentDetail` (header) satisfy
-// this, so one component drives both surfaces. `activeWatcherId` is only on
-// the detail payload, so the watcher link appears in the header menu.
+// this, so one component drives both surfaces.
 export type InstrumentActionTarget = Pick<
   InstrumentListItem,
+  | "activeWatcherId"
   | "displayName"
   | "id"
   | "instrumentType"
   | "runCount"
   | "status"
   | "watcherCount"
-> & {
-  activeWatcherId?: string | null;
-};
+>;
 
 // `variant` only changes the trigger: `expanded` is the outline icon used
 // in the header; `menu` is the denser ghost icon used in the table.
@@ -99,7 +97,7 @@ export function InstrumentActions({
             }}
           >
             <Pencil className="size-3.5" />
-            Edit
+            Edit details
           </DropdownMenuItem>
           {instrument.activeWatcherId ? (
             <DropdownMenuItem asChild>

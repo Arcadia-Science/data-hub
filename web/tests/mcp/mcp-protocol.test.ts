@@ -77,6 +77,7 @@ const {
     };
   }
   const listBase = {
+    activeWatcherId: "watcher-1",
     hasDeregisteredWatcher: false,
     runsThisWeek: 0,
     lastWatcherHeartbeatAt: new Date("2025-01-01"),
@@ -85,6 +86,7 @@ const {
     watchersOffline: 0,
     activeWatcherId: "watcher-1",
     activeWatcherHostname: "lab-pc",
+    activeWatcherWatchDirectory: "C:\\Data",
     activeWatcherDeregistered: false,
     retiredAt: null,
     retiredByUser: null,

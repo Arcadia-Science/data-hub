@@ -1,3 +1,4 @@
+import { RUNS_TABLE_EDGE_PADDING } from "@/components/instruments/runs-table";
 import { RawFileColumnHeader } from "@/components/instruments/runs-table/raw-file-column-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -8,6 +9,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 
 function RunsTableFooterSkeleton() {
   return (
@@ -36,7 +38,12 @@ function InstrumentRunsToolbarSkeleton() {
 // `InstrumentRunsTableShell`.
 export function InstrumentRunsTableSkeleton({ rows = 10 }: { rows?: number }) {
   return (
-    <div className="rounded-lg border bg-background dark:bg-muted">
+    <div
+      className={cn(
+        "rounded-lg border bg-background dark:bg-muted",
+        RUNS_TABLE_EDGE_PADDING
+      )}
+    >
       <Table>
         <TableHeader>
           <TableRow>
@@ -51,7 +58,6 @@ export function InstrumentRunsTableSkeleton({ rows = 10 }: { rows?: number }) {
             <TableHead>Ran By</TableHead>
             <TableHead className="text-right">Run Started</TableHead>
             <TableHead className="text-right">Last Updated</TableHead>
-            <TableHead className="w-[108px]" />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -80,9 +86,6 @@ export function InstrumentRunsTableSkeleton({ rows = 10 }: { rows?: number }) {
               </TableCell>
               <TableCell className="py-2.75 text-right">
                 <Skeleton className="ml-auto h-5 w-20" />
-              </TableCell>
-              <TableCell className="py-2.75">
-                <Skeleton className="ml-auto h-5 w-7" />
               </TableCell>
             </TableRow>
           ))}

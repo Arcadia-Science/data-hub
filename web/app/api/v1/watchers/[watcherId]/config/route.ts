@@ -2,11 +2,11 @@ import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { authorizeToken } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
+import { extractWatchDirectory } from "@/lib/api/instruments";
 import { readJsonBody, watcherConfigBody } from "@/lib/api/openapi";
 import { isValidUUID } from "@/lib/api/validators";
 import {
   enforceWatcherBinding,
-  extractWatchDirectory,
   findActiveWatcher,
   revertPendingUploadRequests,
 } from "@/lib/api/watchers";

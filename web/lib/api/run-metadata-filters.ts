@@ -156,6 +156,9 @@ export const RUN_METADATA_FILTER_DEFS = [
 export type RunMetadataFilterKey =
   (typeof RUN_METADATA_FILTER_DEFS)[number]["key"];
 
+export type RunMetadataFilterParam =
+  (typeof RUN_METADATA_FILTER_DEFS)[number]["queryParam"];
+
 export type RunMetadataFilterArgs = {
   [K in RunMetadataFilterKey]?: string;
 };

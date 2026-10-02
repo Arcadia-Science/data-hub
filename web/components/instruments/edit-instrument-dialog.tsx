@@ -146,7 +146,10 @@ export function EditInstrumentDialog({
               onValueChange={(value) => setType(value as InstrumentType)}
               value={type}
             >
-              <SelectTrigger className="w-full" id="edit-type">
+              <SelectTrigger
+                className="w-full data-[size=default]:h-9"
+                id="edit-type"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
