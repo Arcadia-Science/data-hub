@@ -8,6 +8,7 @@ import { mcpActorUserSchema } from "./common.output";
 
 /** List-row shape from `getInstrumentListWithCounts` after JSON round-trip. */
 export const instrumentListItemSchema = z.object({
+  activeWatcherId: z.string().nullable(),
   id: z.string(),
   displayName: z.string(),
   status: instrumentStatusSchema,
@@ -43,6 +44,7 @@ export const getInstrumentOutputSchema = z.object({
   lastWatcherHeartbeatAt: isoDateTime.nullable(),
   activeWatcherId: z.string().nullable(),
   activeWatcherHostname: z.string().nullable(),
+  activeWatcherWatchDirectory: z.string().nullable(),
   activeWatcherDeregistered: z.boolean(),
   retiredAt: isoDateTime.nullable(),
   retiredByUser: mcpActorUserSchema.nullable(),

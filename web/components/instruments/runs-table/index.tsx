@@ -1,5 +1,6 @@
 import { SearchX } from "lucide-react";
 import type { RunListRow } from "@/lib/api/instrument-runs";
+import { cn } from "@/lib/utils";
 
 import { RunsTableFooter } from "./runs-table-footer";
 
@@ -7,6 +8,11 @@ import { RunsTableFooter } from "./runs-table-footer";
 // `import type { RunRow } from "@/components/instruments/runs-table"`
 // keep working. The type itself is derived server-side.
 export type RunRow = RunListRow;
+
+// Insets the first and last column so row content lines up with the
+// `RunsTableFooter` text (`px-4`) while row borders still run edge to edge.
+export const RUNS_TABLE_EDGE_PADDING =
+  "[&_tr>*:first-child]:pl-4 [&_tr>*:last-child]:pr-4";
 
 export interface RanByOption {
   label: string;
@@ -62,7 +68,12 @@ export function InstrumentRunsTableShell({
   return (
     // `isolate` contains the rows' internal `z-10` so they don't paint over
     // the fixed sidebar, which shares `z-10` in the root stacking context.
-    <div className="isolate min-w-0 rounded-lg border bg-background dark:bg-muted">
+    <div
+      className={cn(
+        "isolate min-w-0 rounded-lg border bg-background dark:bg-muted",
+        RUNS_TABLE_EDGE_PADDING
+      )}
+    >
       {children}
       <RunsTableFooter shownCount={shownCount} totalCount={totalCount} />
     </div>

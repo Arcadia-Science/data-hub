@@ -4,14 +4,15 @@ import {
   getMetadataObjectArray,
   getMetadataRecord,
   sortWavelengths,
-  TruncatedBadges,
 } from "@/components/runs/metadata-badges";
+import { RunFilterLink } from "@/components/runs/run-filter-link";
 import { Badge } from "@/components/ui/badge";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import type { RunMetadataFilterParam } from "@/lib/api/run-metadata-filters";
 import {
   AUNTY_EXPERIMENT_TYPE_COLORS,
   AUNTY_EXPERIMENT_TYPE_LABELS,
@@ -26,6 +27,7 @@ import {
   MEASUREMENT_MODE_COLORS,
   MEASUREMENT_TYPE_COLORS,
 } from "@/lib/instrument-colors";
+import { encodeAuntyTemperatureFilter } from "@/lib/runs/aunty-temperature-filter";
 import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -67,6 +69,74 @@ function ColorBadge({
   return <Badge className={cn("font-mono", colorClass)}>{value}</Badge>;
 }
 
+function FilterBadge({
+  param,
+  value,
+  label = value,
+  colorClass,
+}: {
+  param: RunMetadataFilterParam;
+  value: string;
+  label?: string;
+  colorClass?: string;
+}) {
+  return (
+    <RunFilterLink param={param} value={value}>
+      <ColorBadge colorClass={colorClass} value={label} />
+    </RunFilterLink>
+  );
+}
+
+function FilterBadgeList({
+  param,
+  values,
+  colorMap,
+  maxVisible,
+}: {
+  param: RunMetadataFilterParam;
+  values: string[];
+  colorMap?: Record<string, string>;
+  maxVisible?: number;
+}) {
+  const visible =
+    maxVisible === undefined ? values : values.slice(0, maxVisible);
+  const hidden = values.slice(visible.length);
+
+  return (
+    <>
+      {visible.map((v) => (
+        <FilterBadge
+          colorClass={colorMap?.[v]}
+          key={v}
+          param={param}
+          value={v}
+        />
+      ))}
+      {hidden.length > 0 ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Badge
+              aria-label={`${hidden.length} more`}
+              className="cursor-default font-mono"
+              tabIndex={0}
+              variant="outline"
+            >
+              +{hidden.length}
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-sm">
+            <div className="flex flex-wrap gap-1">
+              {hidden.map((v) => (
+                <ColorBadge colorClass={colorMap?.[v]} key={v} value={v} />
+              ))}
+            </div>
+          </TooltipContent>
+        </Tooltip>
+      ) : null}
+    </>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Plate reader
 // ---------------------------------------------------------------------------
@@ -100,21 +170,30 @@ export function PlateReaderRunBadges({
     <>
       {type && (
         <MetadataRow label="Measurement Type">
-          <ColorBadge colorClass={MEASUREMENT_TYPE_COLORS[type]} value={type} />
+          <FilterBadge
+            colorClass={MEASUREMENT_TYPE_COLORS[type]}
+            param="measurement_type"
+            value={type}
+          />
         </MetadataRow>
       )}
       {mode && (
         <MetadataRow label="Measurement Mode">
-          <ColorBadge colorClass={MEASUREMENT_MODE_COLORS[mode]} value={mode} />
+          <FilterBadge
+            colorClass={MEASUREMENT_MODE_COLORS[mode]}
+            param="measurement_mode"
+            value={mode}
+          />
         </MetadataRow>
       )}
       {wavelengths.length > 0 && (
         <MetadataRow
           label={wavelengths.length === 1 ? "Wavelength" : "Wavelengths"}
         >
-          <TruncatedBadges
+          <FilterBadgeList
             colorMap={wavelengthColors}
             maxVisible={8}
+            param="wavelength"
             values={wavelengths}
           />
         </MetadataRow>
@@ -158,36 +237,38 @@ export function GelDocRunBadges({
     <>
       {captureType && (
         <MetadataRow label="Capture Type">
-          <ColorBadge
+          <FilterBadge
             colorClass={CAPTURE_TYPE_COLORS[captureType]}
+            param="capture_type"
             value={captureType}
           />
         </MetadataRow>
       )}
       {imagingMode && (
         <MetadataRow label="Imaging Mode">
-          <ColorBadge
+          <FilterBadge
             colorClass={IMAGING_MODE_COLORS[imagingMode]}
+            param="imaging_mode"
             value={imagingMode}
           />
         </MetadataRow>
       )}
       {wavelengths.length > 0 && (
         <MetadataRow label="Wavelengths">
-          {wavelengths.map((w) => (
-            <ColorBadge colorClass={wavelengthColors[w]} key={w} value={w} />
-          ))}
+          <FilterBadgeList
+            colorMap={wavelengthColors}
+            param="gel_wavelength"
+            values={wavelengths}
+          />
         </MetadataRow>
       )}
       {colors.length > 0 && (
         <MetadataRow label="Colors">
-          {colors.map((c) => (
-            <ColorBadge
-              colorClass={CHANNEL_COLOR_STYLES[c]}
-              key={c}
-              value={c}
-            />
-          ))}
+          <FilterBadgeList
+            colorMap={CHANNEL_COLOR_STYLES}
+            param="gel_color"
+            values={colors}
+          />
         </MetadataRow>
       )}
     </>
@@ -216,7 +297,12 @@ export function QpcrRunBadges({
   return (
     <MetadataRow label="Dye Channels">
       {dyeChannels.map((ch) => (
-        <ColorBadge colorClass={getDyeChannelColor(ch)} key={ch} value={ch} />
+        <FilterBadge
+          colorClass={getDyeChannelColor(ch)}
+          key={ch}
+          param="dye_channel"
+          value={ch}
+        />
       ))}
     </MetadataRow>
   );
@@ -275,14 +361,16 @@ export function EpsonScannerRunBadges({
     <>
       {dpi && (
         <MetadataRow label="DPI">
-          <ColorBadge colorClass={DPI_COLORS[dpi]} value={dpi} />
+          <FilterBadge colorClass={DPI_COLORS[dpi]} param="dpi" value={dpi} />
         </MetadataRow>
       )}
       {colorMode && (
         <MetadataRow label="Color Mode">
-          <ColorBadge
+          <FilterBadge
             colorClass={COLOR_MODE_COLORS[colorMode]}
-            value={formatColorMode(colorMode)}
+            label={formatColorMode(colorMode)}
+            param="color_mode"
+            value={colorMode}
           />
         </MetadataRow>
       )}
@@ -558,20 +646,24 @@ export function HinaRunBadges({
       {channels.length > 0 && (
         <MetadataRow label={channels.length === 1 ? "Channel" : "Channels"}>
           {channels.map((c) => (
-            <ChannelBadge color={c.color} key={c.name} name={c.name} />
+            <RunFilterLink key={c.name} param="hina_channel" value={c.name}>
+              <ChannelBadge color={c.color} name={c.name} />
+            </RunFilterLink>
           ))}
         </MetadataRow>
       )}
       {dimensions.length > 0 && (
         <MetadataRow label="Dimensions">
-          {dimensions.map((d) => (
-            <ColorBadge key={d} value={d} />
-          ))}
+          <FilterBadgeList param="hina_dimension" values={dimensions} />
         </MetadataRow>
       )}
-      {sizesLabel && (
+      {sizes && sizesLabel && (
         <MetadataRow label="Sizes">
-          <ColorBadge value={sizesLabel} />
+          <FilterBadge
+            label={sizesLabel}
+            param="hina_size"
+            value={JSON.stringify(sizes)}
+          />
         </MetadataRow>
       )}
     </>
@@ -621,6 +713,17 @@ export function formatAuntyTemperatureDisplay(
   return null;
 }
 
+function auntyTemperatureFilterValue(
+  metadata: Record<string, unknown>
+): string | null {
+  const startTemp = getMetadataField(metadata, "start_temp_c");
+  const endTemp = getMetadataField(metadata, "end_temp_c");
+  if (startTemp && endTemp) {
+    return encodeAuntyTemperatureFilter(startTemp, endTemp);
+  }
+  return getMetadataField(metadata, "temperature_c");
+}
+
 export function formatAuntyRampRate(rate: string): string {
   return `${rate} \u00b0C/min`;
 }
@@ -635,6 +738,7 @@ export function AuntyRunBadges({
   const analysisMode = getMetadataField(metadata, "analysis_mode");
   const rate = getMetadataField(metadata, "rate_c_per_min");
   const tempRange = formatAuntyTemperatureDisplay(metadata);
+  const tempFilter = auntyTemperatureFilterValue(metadata);
 
   if (!(experimentTypes.length || analysisMode || tempRange || rate)) {
     return null;
@@ -645,27 +749,37 @@ export function AuntyRunBadges({
       {experimentTypes.length > 0 && (
         <MetadataRow label="Experiment">
           {experimentTypes.map((type) => (
-            <ColorBadge
+            <FilterBadge
               colorClass={AUNTY_EXPERIMENT_TYPE_COLORS[type]}
               key={type}
-              value={formatAuntyExperimentType(type)}
+              label={formatAuntyExperimentType(type)}
+              param="aunty_experiment_type"
+              value={type}
             />
           ))}
         </MetadataRow>
       )}
       {analysisMode && (
         <MetadataRow label="Analysis mode">
-          <ColorBadge value={analysisMode} />
+          <FilterBadge param="aunty_analysis_mode" value={analysisMode} />
         </MetadataRow>
       )}
-      {tempRange && (
+      {tempRange && tempFilter && (
         <MetadataRow label="Temperature">
-          <ColorBadge value={tempRange} />
+          <FilterBadge
+            label={tempRange}
+            param="aunty_temperature"
+            value={tempFilter}
+          />
         </MetadataRow>
       )}
       {rate && (
         <MetadataRow label="Ramp rate">
-          <ColorBadge value={formatAuntyRampRate(rate)} />
+          <FilterBadge
+            label={formatAuntyRampRate(rate)}
+            param="aunty_ramp_rate"
+            value={rate}
+          />
         </MetadataRow>
       )}
     </>

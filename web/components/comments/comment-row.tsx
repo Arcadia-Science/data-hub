@@ -5,7 +5,13 @@ import { UserAvatar } from "@/components/user-avatar";
 import { runCommentHref } from "@/lib/comment-hash";
 import type { CommentRowModel } from "@/lib/comments/present";
 
-export function CommentRow({ comment }: { comment: CommentRowModel }) {
+export function CommentRow({
+  comment,
+  timeLabel,
+}: {
+  comment: CommentRowModel;
+  timeLabel: string;
+}) {
   return (
     <Link
       className="flex h-full gap-3.5 px-5 py-[18px] text-foreground no-underline outline-none transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
@@ -30,7 +36,7 @@ export function CommentRow({ comment }: { comment: CommentRowModel }) {
             dateTime={comment.created_at}
             title={comment.timeFull}
           >
-            {comment.timeLabel}
+            {timeLabel}
           </time>
         </span>
         <CommentMarkdownPreview body={comment.body} className="text-sm" />

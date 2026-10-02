@@ -70,7 +70,7 @@ export function NotificationBell() {
             skipCloseFocusRef.current = false;
           }
         }}
-        sideOffset={8}
+        sideOffset={12}
       >
         <NotificationBellContent
           onNavigate={() => {

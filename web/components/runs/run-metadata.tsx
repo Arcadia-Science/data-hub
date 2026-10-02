@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { RawFileColumnHeader } from "@/components/instruments/runs-table/raw-file-column-header";
+import { RunFilterLinkProvider } from "@/components/runs/run-filter-link";
 import { MetadataField } from "@/components/runs/run-metadata-badges";
 import { RunTimestamps } from "@/components/runs/run-timestamps";
 import { Separator } from "@/components/ui/separator";
@@ -39,7 +40,9 @@ export function RunMetadata({
           </span>
         </MetadataField>
         <MetadataField label="Ran By">{attributionsSlot}</MetadataField>
-        {children}
+        <RunFilterLinkProvider instrumentId={run.instrumentId}>
+          {children}
+        </RunFilterLinkProvider>
       </div>
       <Separator />
       <RunTimestamps run={run} />

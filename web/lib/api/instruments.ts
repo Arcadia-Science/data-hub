@@ -14,6 +14,8 @@ import {
 import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
 export interface InstrumentListItem {
+  /** Watcher the instrument's menu links to; see `pickCanonicalWatcher`. */
+  activeWatcherId: string | null;
   createdAt: Date;
   displayName: string;
   filePatterns: string[];
@@ -87,6 +89,69 @@ function extractFilePatterns(configYaml: string | null): string[] {
     // Malformed YAML — silently ignore.
   }
   return [];
+}
+
+/**
+ * Extracts `instrument.watch_directory` from a watcher's stored config YAML.
+ * Returns null when the YAML is missing or unparseable.
+ */
+export function extractWatchDirectory(
+  configYaml: string | null
+): string | null {
+  if (!configYaml) {
+    return null;
+  }
+  try {
+    const doc = YAML.parse(configYaml);
+    const dir = doc?.instrument?.watch_directory;
+    return typeof dir === "string" ? dir : null;
+  } catch {
+    return null;
+  }
+}
+
+interface WatcherCandidate {
+  createdAt: Date;
+  deletedAt: Date | null;
+  lastHeartbeatAt: Date | null;
+}
+
+/**
+ * The live watcher the UI treats as the instrument's own: the most recently
+ * heartbeating one, else the earliest registered. Keeps the watcher link
+ * aligned with `lastWatcherHeartbeatAt`, so both point at the same row.
+ */
+function pickActiveWatcher<T extends WatcherCandidate>(rows: T[]): T | null {
+  const live = rows.filter((w) => w.deletedAt === null);
+  if (live.length === 0) {
+    return null;
+  }
+  return (
+    live
+      .filter((w) => w.lastHeartbeatAt !== null)
+      .sort(
+        (a, b) =>
+          (b.lastHeartbeatAt?.getTime() ?? 0) -
+          (a.lastHeartbeatAt?.getTime() ?? 0)
+      )[0] ??
+    [...live].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0]
+  );
+}
+
+/**
+ * `pickActiveWatcher`, else the most recently deregistered watcher, so a
+ * retired instrument can still link to the watcher it had.
+ */
+function pickCanonicalWatcher<T extends WatcherCandidate>(rows: T[]): T | null {
+  return (
+    pickActiveWatcher(rows) ??
+    rows
+      .filter((w) => w.deletedAt !== null)
+      .sort(
+        (a, b) => (b.deletedAt?.getTime() ?? 0) - (a.deletedAt?.getTime() ?? 0)
+      )[0] ??
+    null
+  );
 }
 
 /**
@@ -180,32 +245,53 @@ interface InstrumentListRow {
   watchersOnline: number;
 }
 
+interface ListWatcherRow extends WatcherCandidate {
+  configYaml: string | null;
+  id: string;
+  instrumentId: string;
+}
+
+const listWatcherColumns = {
+  id: watchers.id,
+  instrumentId: watchers.instrumentId,
+  configYaml: watchers.configYaml,
+  lastHeartbeatAt: watchers.lastHeartbeatAt,
+  createdAt: watchers.createdAt,
+  deletedAt: watchers.deletedAt,
+};
+
 function hydrateInstrumentRow(
   row: InstrumentListRow,
-  configsByInstrument: Map<string, (string | null)[]>
+  watchersByInstrument: Map<string, ListWatcherRow[]>
 ): InstrumentListItem {
   const { watchersDeregistered, ...rest } = row;
+  const instrumentWatchers = watchersByInstrument.get(row.id) ?? [];
   return {
     ...rest,
     lastRunAt: row.lastRunAt ? new Date(row.lastRunAt) : null,
     lastWatcherHeartbeatAt: row.lastWatcherHeartbeatAt
       ? new Date(row.lastWatcherHeartbeatAt)
       : null,
-    filePatterns: mergeFilePatterns(configsByInstrument.get(row.id) ?? []),
+    filePatterns: mergeFilePatterns(
+      instrumentWatchers
+        .filter((w) => w.deletedAt === null)
+        .map((w) => w.configYaml)
+    ),
+    activeWatcherId: pickCanonicalWatcher(instrumentWatchers)?.id ?? null,
     hasDeregisteredWatcher: watchersDeregistered > 0,
   };
 }
 
-function indexConfigsByInstrument(
-  rows: { instrumentId: string; configYaml: string | null }[]
-): Map<string, (string | null)[]> {
-  const configsByInstrument = new Map<string, (string | null)[]>();
+function indexWatchersByInstrument(
+  rows: ListWatcherRow[]
+): Map<string, ListWatcherRow[]> {
+  const watchersByInstrument = new Map<string, ListWatcherRow[]>();
   for (const w of rows) {
-    const arr = configsByInstrument.get(w.instrumentId) ?? [];
-    arr.push(w.configYaml);
-    configsByInstrument.set(w.instrumentId, arr);
+    const arr = watchersByInstrument.get(w.instrumentId) ?? [];
+    arr.push(w);
+    watchersByInstrument.set(w.instrumentId, arr);
   }
-  return configsByInstrument;
+  return watchersByInstrument;
 }
 
 // Uses pre-aggregated sub-selects instead of direct joins to avoid row
@@ -219,7 +305,7 @@ export const getInstrumentListWithCounts = cache(
     const runCountSq = buildRunCountSubquery(weekStart);
     const watcherCountSq = buildWatcherCountSubquery();
 
-    const [rows, watcherConfigs] = await Promise.all([
+    const [rows, watcherRows] = await Promise.all([
       db
         .select({
           id: instruments.id,
@@ -242,17 +328,11 @@ export const getInstrumentListWithCounts = cache(
           eq(watcherCountSq.instrumentId, instruments.id)
         )
         .orderBy(instruments.displayName),
-      db
-        .select({
-          instrumentId: watchers.instrumentId,
-          configYaml: watchers.configYaml,
-        })
-        .from(watchers)
-        .where(isNull(watchers.deletedAt)),
+      db.select(listWatcherColumns).from(watchers),
     ]);
 
-    const configsByInstrument = indexConfigsByInstrument(watcherConfigs);
-    return rows.map((row) => hydrateInstrumentRow(row, configsByInstrument));
+    const watchersByInstrument = indexWatchersByInstrument(watcherRows);
+    return rows.map((row) => hydrateInstrumentRow(row, watchersByInstrument));
   }
 );
 
@@ -318,25 +398,17 @@ export const getRecentActiveInstrumentsForDashboard = cache(
       return { rows: [], totalActive };
     }
 
-    // Configs only for the selected instruments — bounded by `limit` rather
+    // Watchers only for the selected instruments — bounded by `limit` rather
     // than by total fleet size.
     const instrumentIds = rows.map((r) => r.id);
-    const watcherConfigs = await db
-      .select({
-        instrumentId: watchers.instrumentId,
-        configYaml: watchers.configYaml,
-      })
+    const watcherRows = await db
+      .select(listWatcherColumns)
       .from(watchers)
-      .where(
-        and(
-          isNull(watchers.deletedAt),
-          inArray(watchers.instrumentId, instrumentIds)
-        )
-      );
+      .where(inArray(watchers.instrumentId, instrumentIds));
 
-    const configsByInstrument = indexConfigsByInstrument(watcherConfigs);
+    const watchersByInstrument = indexWatchersByInstrument(watcherRows);
     return {
-      rows: rows.map((row) => hydrateInstrumentRow(row, configsByInstrument)),
+      rows: rows.map((row) => hydrateInstrumentRow(row, watchersByInstrument)),
       totalActive,
     };
   }
@@ -358,6 +430,11 @@ export interface InstrumentDetail {
    * can still link to it (counts below stay based on live watchers).
    */
   activeWatcherId: string | null;
+  /**
+   * `watch_directory` from the canonical watcher's config. Null when no live
+   * watcher remains, since a deregistered watcher no longer watches anything.
+   */
+  activeWatcherWatchDirectory: string | null;
   createdAt: Date;
   displayName: string;
   filePatterns: string[];
@@ -458,35 +535,8 @@ export const getInstrumentById = cache(async function getInstrumentById(
     }
   }
 
-  // Canonical "active" watcher: the most recently heartbeating one, falling
-  // back to the earliest registered when no watcher has ever heartbeated.
-  // This keeps `activeWatcherId` aligned with `lastWatcherHeartbeatAt` so
-  // downstream UI (the watcher link in the header, status badge route)
-  // points at the same row the heartbeat timestamp came from.
-  const activeWatcher =
-    watcherRows.length === 0
-      ? null
-      : (watcherRows
-          .filter((w) => w.lastHeartbeatAt !== null)
-          .sort(
-            (a, b) =>
-              (b.lastHeartbeatAt?.getTime() ?? 0) -
-              (a.lastHeartbeatAt?.getTime() ?? 0)
-          )[0] ??
-        [...watcherRows].sort(
-          (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
-        )[0]);
-
-  // Fall back to the most recently deregistered watcher so the header can
-  // still link to it once no live watcher remains (e.g. after retirement).
-  const canonicalWatcher =
-    activeWatcher ??
-    allWatcherRows
-      .filter((w) => w.deletedAt !== null)
-      .sort(
-        (a, b) => (b.deletedAt?.getTime() ?? 0) - (a.deletedAt?.getTime() ?? 0)
-      )[0] ??
-    null;
+  const activeWatcher = pickActiveWatcher(allWatcherRows);
+  const canonicalWatcher = pickCanonicalWatcher(allWatcherRows);
 
   return {
     id: instrument.id,
@@ -510,6 +560,9 @@ export const getInstrumentById = cache(async function getInstrumentById(
     lastWatcherHeartbeatAt,
     activeWatcherId: canonicalWatcher?.id ?? null,
     activeWatcherHostname: canonicalWatcher?.hostname ?? null,
+    activeWatcherWatchDirectory: activeWatcher
+      ? extractWatchDirectory(activeWatcher.configYaml)
+      : null,
     activeWatcherDeregistered:
       activeWatcher === null && canonicalWatcher !== null,
   };

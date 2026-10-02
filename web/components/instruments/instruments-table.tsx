@@ -1,11 +1,11 @@
 import { ArrowRight, SearchX } from "lucide-react";
 import type { ReactNode } from "react";
 import { RelativeTime } from "@/components/dashboard/relative-time";
+import { FilePatterns } from "@/components/instruments/file-patterns";
 import { InstrumentStatusBadge } from "@/components/instruments/instrument-status-badge";
 import { RowActionsCell } from "@/components/instruments/row-actions-cell";
 import { ClickableRow } from "@/components/instruments/runs-table/clickable-row";
 import { InstrumentNotificationsCell } from "@/components/notifications/instrument-notifications-cell";
-import { TruncatedBadges } from "@/components/runs/metadata-badges";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -193,11 +193,7 @@ export function InstrumentsTable({
                   )}
                 </TableCell>
                 <TableCell>
-                  <TruncatedBadges
-                    badgeClassName="bg-slate-200 font-normal text-slate-800 text-xs dark:bg-slate-800 dark:text-slate-200"
-                    values={row.filePatterns}
-                    variant="outline"
-                  />
+                  <FilePatterns maxVisible={2} patterns={row.filePatterns} />
                 </TableCell>
                 <TableCell className="font-mono">{row.runsThisWeek}</TableCell>
                 <TableCell>

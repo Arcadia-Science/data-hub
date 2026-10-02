@@ -1,11 +1,13 @@
 import { SearchX } from "lucide-react";
 import Link from "next/link";
 import { FilterableColumnHeader } from "@/components/instruments/runs-table/filterable-column-header";
-import type { RanByOption } from "@/components/instruments/runs-table/index";
+import {
+  type RanByOption,
+  RUNS_TABLE_EDGE_PADDING,
+} from "@/components/instruments/runs-table/index";
 import { RanByCell } from "@/components/instruments/runs-table/ran-by-cell";
 import { RawFileColumnHeader } from "@/components/instruments/runs-table/raw-file-column-header";
 import { RunIdCell } from "@/components/instruments/runs-table/run-id-cell";
-import { RunRowActions } from "@/components/instruments/runs-table/run-row-actions";
 import {
   RunSelectAllCheckbox,
   RunSelectCheckbox,
@@ -64,7 +66,12 @@ export function RunsTable({
   return (
     // `isolate` contains the rows' internal `z-10` (status icon / run-id link)
     // so they don't paint over the fixed sidebar, which shares `z-10`.
-    <div className="isolate rounded-lg border bg-background dark:bg-muted">
+    <div
+      className={cn(
+        "isolate rounded-lg border bg-background dark:bg-muted",
+        RUNS_TABLE_EDGE_PADDING
+      )}
+    >
       <Table>
         <TableHeader>
           <TableRow>
@@ -92,9 +99,6 @@ export function RunsTable({
               )}
             </TableHead>
             <RunTimeHeads />
-            <TableHead className="w-[108px]">
-              <span className="sr-only">Actions</span>
-            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -102,10 +106,7 @@ export function RunsTable({
             const isDeleted = row.deleted_at !== null;
             const href = `/instruments/${row.instrument_id}/runs/${encodeURIComponent(row.run_id)}`;
             return (
-              <TableRow
-                className={cn("group", isDeleted && "opacity-50")}
-                key={row.id}
-              >
+              <TableRow className={cn(isDeleted && "opacity-50")} key={row.id}>
                 <TableCell>
                   <RunSelectCheckbox runRef={runRowToRef(row)} />
                 </TableCell>
@@ -134,9 +135,6 @@ export function RunsTable({
                   />
                 </TableCell>
                 <RunTimeCells row={row} />
-                <TableCell className="py-1">
-                  <RunRowActions row={row} />
-                </TableCell>
               </TableRow>
             );
           })}
@@ -149,7 +147,12 @@ export function RunsTable({
 
 export function RunsTableSkeleton() {
   return (
-    <div className="rounded-lg border bg-background dark:bg-muted">
+    <div
+      className={cn(
+        "rounded-lg border bg-background dark:bg-muted",
+        RUNS_TABLE_EDGE_PADDING
+      )}
+    >
       <Table>
         <TableHeader>
           <TableRow>
@@ -165,7 +168,6 @@ export function RunsTableSkeleton() {
             <TableHead>Ran By</TableHead>
             <TableHead className="text-right">Run Started</TableHead>
             <TableHead className="text-right">Last Updated</TableHead>
-            <TableHead className="w-[108px]" />
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -195,7 +197,6 @@ export function RunsTableSkeleton() {
               <TableCell className="text-right">
                 <Skeleton className="ml-auto h-4 w-20" />
               </TableCell>
-              <TableCell />
             </TableRow>
           ))}
         </TableBody>

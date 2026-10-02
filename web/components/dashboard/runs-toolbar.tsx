@@ -95,7 +95,7 @@ export function RunsToolbar({
             <PopoverTrigger asChild>
               <Button
                 aria-expanded={instrumentOpen}
-                className="h-9 gap-1.5"
+                className="h-9 gap-1.5 font-normal"
                 role="combobox"
                 size="sm"
                 variant="outline"
