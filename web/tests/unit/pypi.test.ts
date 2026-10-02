@@ -118,7 +118,7 @@ describe("fetchWatcherVersions", () => {
     });
   });
 
-  it("uses a five-minute Next.js revalidate window", async () => {
+  it("bypasses the Next.js fetch cache", async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ releases: {} }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -127,9 +127,10 @@ describe("fetchWatcherVersions", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "https://pypi.org/pypi/data-hub-watcher/json",
       expect.objectContaining({
-        next: { revalidate: 300 },
+        cache: "no-store",
         headers: { Accept: "application/json" },
       })
     );
+    expect(fetchMock.mock.calls[0][1]).not.toHaveProperty("next");
   });
 });

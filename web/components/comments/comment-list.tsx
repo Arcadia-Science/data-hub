@@ -14,7 +14,7 @@ export function CommentList({ comments }: { comments: CommentRowModel[] }) {
           className="border-border border-t first:border-t-0"
           key={comment.id}
         >
-          <CommentRow comment={comment} />
+          <CommentRow comment={comment} timeLabel={comment.timeOfDay} />
         </li>
       ))}
     </ul>
@@ -60,7 +60,7 @@ function CommentPreviewGrid({ comments }: { comments: CommentRowModel[] }) {
           className="overflow-hidden rounded-lg border bg-background dark:bg-muted"
           key={comment.id}
         >
-          <CommentRow comment={comment} />
+          <CommentRow comment={comment} timeLabel={comment.timeAgo} />
         </li>
       ))}
     </ul>

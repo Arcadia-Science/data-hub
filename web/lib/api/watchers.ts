@@ -1,6 +1,5 @@
 import { and, asc, count, desc, eq, gte, inArray, isNull } from "drizzle-orm";
 import { cache } from "react";
-import YAML from "yaml";
 import { type ActorUser, resolveActorUser } from "@/lib/api/actor";
 import type { AuthResult } from "@/lib/api/auth";
 import { apiError, FORBIDDEN } from "@/lib/api/errors";
@@ -80,26 +79,6 @@ export async function enforceWatcherBinding(
   }
 
   return apiError(403, FORBIDDEN, "Token is not authorized for this watcher");
-}
-
-/**
- * Extracts `instrument.watch_directory` from a watcher's stored config YAML.
- * Returns null when the YAML is missing or unparseable. Mirrors the
- * `extractFilePatterns` helper in `lib/api/instruments.ts`.
- */
-export function extractWatchDirectory(
-  configYaml: string | null
-): string | null {
-  if (!configYaml) {
-    return null;
-  }
-  try {
-    const doc = YAML.parse(configYaml);
-    const dir = doc?.instrument?.watch_directory;
-    return typeof dir === "string" ? dir : null;
-  } catch {
-    return null;
-  }
 }
 
 /**

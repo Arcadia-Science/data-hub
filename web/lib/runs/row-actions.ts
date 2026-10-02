@@ -7,8 +7,7 @@ import type {
 import { isProcessableInstrumentType } from "@/lib/instruments/processable-types";
 
 // ---------------------------------------------------------------------------
-// Predicates that decide which row-level / bulk actions are available for a
-// given run. All predicates read only the aggregate counts already exposed
+// Predicates that decide which bulk actions are available for a given run. All predicates read only the aggregate counts already exposed
 // on RunRow so they're cheap and can be called on every selection change.
 //
 // - Upload:    at least one file still waiting to be uploaded.
@@ -33,8 +32,8 @@ export function canDownloadRun(row: RunRow): boolean {
 
 // Mirrors the server-side file filter in `reprocessRun`, which queues raw
 // files in REPROCESSABLE_STATUSES plus any whose `processing` has passed the
-// stall window. Keeping the buckets in one place stops the row menu from
-// disagreeing with what the endpoint would actually do.
+// stall window. Keeping the buckets in one place stops the bulk action bar
+// from disagreeing with what the endpoint would actually do.
 export function reprocessableFileCount(row: RunRow): number {
   return (
     row.files_uploaded +
