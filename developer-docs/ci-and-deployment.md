@@ -141,6 +141,20 @@ Secrets (`DATA_HUB_API_KEY`, etc.) are stored in GitHub environment secrets scop
 > If the function stays in the VPC and is idle for 14 days, Lambda reclaims that interface and the next invocation fails until the interface is recreated. S3 events retry on their own. A reprocess or archive build can fail once.
 >
 > The NAT gateway is about $39 a month per environment ($0.048 an hour, plus $0.005 an hour for its public IPv4 address, plus $0.048 per GB of API traffic). S3 reads use a free gateway endpoint and do not go through the NAT gateway. Leave `EnableS3Files` at `false` unless the environment needs it.
+>
+> With `EnableS3Files` on, the raw bucket is also mounted in the Lambda at `/mnt/raw` through Amazon S3 Files. Lambda mounts the file system every time it starts an execution environment, before any code reads the mount. A broken file system policy, security group, or execution role therefore stops all processing, not only the files that would use the mount.
+>
+> The file system policy denies writes and root access to everyone, and denies mounting except for this environment's Lambda role through the stack's access point. The S3 Files sync role has the read and write permissions AWS documents, and the raw bucket policy exempts it from the write block, because S3 Files refuses to create the file system otherwise. Since nothing can write through the mount, the sync role never has a change to copy back.
+
+> Turn `EnableS3Files` on in its own admin deploy, after this template is already live with it off. CloudFormation updates the raw bucket policy only after it creates the file system, so the sync role's exemption has to be in place from an earlier deploy. A deploy that upgrades the template and turns the mount on at once fails while creating `RawFilesFileSystem` with "does not have permission to call s3:HeadObject", and rolls back. S3 Files write actions are not in the CI role, so changing that policy takes an admin `make sam-deploy`. The staging boundary enforces this in staging. In production the CI role can edit its own inline policies, so there the rule relies on code review.
+>
+> The raw bucket's notification configuration turns on EventBridge delivery while the mount is on, because S3 replaces the whole configuration on every write and a later deploy would otherwise drop it.
+>
+> Opening a file on the mount imports metadata for every entry in each folder on its path: the root, the instrument folder, and the run folder. S3 Files never removes that metadata, and each entry is billed. Use the mount only for files that need it, and never list or walk folders there.
+>
+> Before the admin deploy that first creates the file system, check the raw bucket's `NumberOfObjects` metric in CloudWatch (`AWS/S3`, `StorageType=AllStorageTypes`). The metric counts old versions too. Above about 12 million objects, `RawFilesFileSystem` needs `AcceptBucketWarning: true`, and setting that later replaces the file system.
+>
+> Staging needs an admin deploy for this change even with `ENABLE_S3_FILES=false`. The permissions boundary changes either way, and the CI role does not have `iam:CreatePolicyVersion`. After the admin deploy, upload a test file to staging and confirm it processes.
 
 #### Local deployment
 

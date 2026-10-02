@@ -120,6 +120,13 @@ Resources:
         LambdaConfigurations:
           - Event: s3:ObjectCreated:*
             Function: !GetAtt DataHubFunction.Arn
+        # S3 replaces the whole notification configuration on every write.
+        # Declaring EventBridge here keeps a later deploy from turning off
+        # the delivery S3 Files uses to learn about new objects.
+        EventBridgeConfiguration: !If
+          - S3FilesEnabled
+          - EventBridgeEnabled: true
+          - !Ref AWS::NoValue
       # S3 bills for parts until the upload is completed or cancelled. Seven
       # days covers a watcher that stops mid-file. This is the bucket's only
       # lifecycle rule; a deploy replaces the whole configuration.
@@ -214,6 +221,10 @@ Resources:
                 aws:PrincipalArn:
                   - !GetAtt WebAppS3Role.Arn
                   - !Sub "arn:aws:iam::${AWS::AccountId}:root"
+                  # The S3 Files sync role. S3 Files will not create the file system
+                  # while this denies it, and this policy updates only after the file
+                  # system, so the exemption is unconditional and must already be live.
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/data-hub-s3files-${Environment}"
           # Config changes stay admin-only so CI can never disable the write
           # protection above. Root can always repair the policy (S3 guarantee).
           - Sid: DenyBucketConfigExceptAdmin
@@ -466,9 +477,9 @@ Resources:
       RouteTableIds:
         - !Ref PrivateRouteTable
 
-  # Outbound is only HTTPS for now. The mount layer adds NFS to the mount
-  # targets. Security groups do not filter Amazon DNS, so name lookup still
-  # works.
+  # NFS names the VPC range, not the mount-target group, so all egress stays
+  # inline without a reference cycle. Mixing inline and standalone egress on
+  # one group can drop rules on update. Amazon DNS is never filtered.
   LambdaSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Condition: S3FilesEnabled
@@ -481,19 +492,236 @@ Resources:
           ToPort: 443
           CidrIp: 0.0.0.0/0
           Description: HTTPS to the Data Hub API and AWS APIs
+        - IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          CidrIp: !GetAtt DataHubVpc.CidrBlock
+          Description: NFS to the raw-bucket mount targets
       Tags:
         - Key: Name
           Value: !Sub "data-hub-${Environment}-lambda"
+
+  # ---- Read-only mount of the raw bucket ----
+  # Nothing can write through the mount: the file system policy denies writes
+  # and root access, and no client role has `s3files:ClientWrite`, so the sync
+  # role never has a change to copy back to the bucket.
+
+  S3FilesSyncRole:
+    Type: AWS::IAM::Role
+    Condition: S3FilesEnabled
+    Properties:
+      RoleName: !Sub "data-hub-s3files-${Environment}"
+      PermissionsBoundary: !If
+        - IsStaging
+        - !Sub "arn:aws:iam::${AWS::AccountId}:policy/data-hub-boundary-staging"
+        - !Ref AWS::NoValue
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowS3FilesAssumeRole
+            Effect: Allow
+            Principal:
+              Service: elasticfilesystem.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub "arn:${AWS::Partition}:s3files:${AWS::Region}:${AWS::AccountId}:file-system/*"
+      Policies:
+        - PolicyName: SyncRawBucket
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ListRawBucket
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:ListBucketVersions
+                Resource: !Sub "arn:aws:s3:::arcadia-data-hub-raw-${Environment}"
+                Condition:
+                  StringEquals:
+                    aws:ResourceAccount: !Ref AWS::AccountId
+              # The set AWS documents for the sync role. S3 Files checks all of it
+              # when it creates the file system, and a read-only set fails with
+              # "does not have permission to call s3:HeadObject".
+              - Sid: SyncRawObjects
+                Effect: Allow
+                Action:
+                  - s3:AbortMultipartUpload
+                  - s3:DeleteObject*
+                  - s3:GetObject*
+                  - s3:List*
+                  - s3:PutObject*
+                Resource: !Sub "arn:aws:s3:::arcadia-data-hub-raw-${Environment}/*"
+                Condition:
+                  StringEquals:
+                    aws:ResourceAccount: !Ref AWS::AccountId
+              # No KMS statement: the raw bucket uses SSE-S3, which makes no KMS
+              # calls. Moving it to SSE-KMS needs one here and in the boundary.
+              - Sid: EventBridgeManage
+                Effect: Allow
+                Action:
+                  - events:DeleteRule
+                  - events:DisableRule
+                  - events:EnableRule
+                  - events:PutRule
+                  - events:PutTargets
+                  - events:RemoveTargets
+                Resource: !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/DO-NOT-DELETE-S3-Files*"
+                Condition:
+                  StringEquals:
+                    events:ManagedBy: elasticfilesystem.amazonaws.com
+              - Sid: EventBridgeRead
+                Effect: Allow
+                Action:
+                  - events:DescribeRule
+                  - events:ListRuleNamesByTarget
+                  - events:ListRules
+                  - events:ListTargetsByRule
+                Resource: !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/*"
+
+  RawFilesFileSystem:
+    Type: AWS::S3Files::FileSystem
+    Condition: S3FilesEnabled
+    Properties:
+      # A GetAtt on the bucket would loop: the function waits for the mount
+      # targets, which wait for this file system, which would wait for the
+      # bucket, which waits for the invoke permission, which waits for the
+      # function. The bucket name is fixed by this template.
+      Bucket: !Sub "arn:aws:s3:::arcadia-data-hub-raw-${Environment}"
+      RoleArn: !GetAtt S3FilesSyncRole.Arn
+      SynchronizationConfiguration:
+        ImportDataRules:
+          - Prefix: ""
+            SizeLessThan: 0
+            Trigger: ON_FILE_ACCESS
+        ExpirationDataRules:
+          - DaysAfterLastAccess: 1
+      Tags:
+        - Key: project
+          Value: arcadia-data-hub
+        - Key: environment
+          Value: !Ref Environment
+
+  MountTargetSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: S3FilesEnabled
+    Properties:
+      GroupDescription: !Sub "data-hub-${Environment} S3 Files mount targets"
+      VpcId: !Ref DataHubVpc
+      Tags:
+        - Key: Name
+          Value: !Sub "data-hub-${Environment}-s3files"
+
+  MountTargetNfsIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: S3FilesEnabled
+    Properties:
+      GroupId: !Ref MountTargetSecurityGroup
+      IpProtocol: tcp
+      FromPort: 2049
+      ToPort: 2049
+      SourceSecurityGroupId: !Ref LambdaSecurityGroup
+      Description: NFS from the Lambda
+
+  RawFilesMountTargetA:
+    Type: AWS::S3Files::MountTarget
+    Condition: S3FilesEnabled
+    Properties:
+      FileSystemId: !GetAtt RawFilesFileSystem.FileSystemId
+      SubnetId: !Ref PrivateSubnetA
+      SecurityGroups:
+        - !Ref MountTargetSecurityGroup
+
+  RawFilesMountTargetB:
+    Type: AWS::S3Files::MountTarget
+    Condition: S3FilesEnabled
+    Properties:
+      FileSystemId: !GetAtt RawFilesFileSystem.FileSystemId
+      SubnetId: !Ref PrivateSubnetB
+      SecurityGroups:
+        - !Ref MountTargetSecurityGroup
+
+  RawFilesAccessPoint:
+    Type: AWS::S3Files::AccessPoint
+    Condition: S3FilesEnabled
+    Properties:
+      FileSystemId: !GetAtt RawFilesFileSystem.FileSystemId
+      PosixUser:
+        Uid: "1000"
+        Gid: "1000"
+      RootDirectory:
+        Path: "/"
+
+  # An allow in either an identity policy or this policy is enough to mount,
+  # and this account grants broad access, so the limits are explicit denies.
+  # The policy cannot deny changes to itself. S3 Files write actions stay
+  # out of the deploy role and the staging boundary, so changing it is an
+  # admin deploy.
+  RawFilesFileSystemPolicy:
+    Type: AWS::S3Files::FileSystemPolicy
+    Condition: S3FilesEnabled
+    Properties:
+      FileSystemId: !GetAtt RawFilesFileSystem.FileSystemId
+      Policy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyWriteAndRoot
+            Effect: Deny
+            Principal: "*"
+            Action:
+              - s3files:ClientWrite
+              - s3files:ClientRootAccess
+            Resource: !GetAtt RawFilesFileSystem.FileSystemArn
+          - Sid: DenyMountExceptLambdaRole
+            Effect: Deny
+            Principal: "*"
+            Action: s3files:ClientMount
+            Resource: !GetAtt RawFilesFileSystem.FileSystemArn
+            Condition:
+              StringNotEquals:
+                aws:PrincipalArn: !GetAtt LambdaExecutionRole.Arn
+          - Sid: DenyMountWithoutAccessPoint
+            Effect: Deny
+            Principal: "*"
+            Action: s3files:ClientMount
+            Resource: !GetAtt RawFilesFileSystem.FileSystemArn
+            Condition:
+              "Null":
+                s3files:AccessPointArn: "true"
+          - Sid: DenyMountExceptOurAccessPoint
+            Effect: Deny
+            Principal: "*"
+            Action: s3files:ClientMount
+            Resource: !GetAtt RawFilesFileSystem.FileSystemArn
+            Condition:
+              StringNotEquals:
+                s3files:AccessPointArn: !GetAtt RawFilesAccessPoint.AccessPointArn
+          - Sid: AllowLambdaMount
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt LambdaExecutionRole.Arn
+            Action: s3files:ClientMount
+            Resource: !GetAtt RawFilesFileSystem.FileSystemArn
+            Condition:
+              StringEquals:
+                s3files:AccessPointArn: !GetAtt RawFilesAccessPoint.AccessPointArn
 
   # ---- Lambda function ----
 
   DataHubFunction:
     Type: AWS::Serverless::Function
-    # The execution role names the staging boundary by ARN, so nothing else
-    # makes the boundary allow EC2 network interfaces before the function
-    # joins the VPC. SAM copies Metadata onto the generated function.
+    # These references make the staging boundary and the mount targets finish
+    # before the function joins the VPC. DependsOn cannot name a resource whose
+    # condition is false. SAM copies Metadata onto the generated function.
     Metadata:
       StagingBoundary: !If [IsStaging, !Ref StagingBoundary, !Ref AWS::NoValue]
+      S3FilesMountTargets: !If
+        - S3FilesEnabled
+        - - !Ref RawFilesMountTargetA
+          - !Ref RawFilesMountTargetB
+        - !Ref AWS::NoValue
     Properties:
       FunctionName: !Sub "data-hub-${Environment}"
       PackageType: Image
@@ -503,6 +731,11 @@ Resources:
         # raw download, the decoded working copy, and the generated JPG.
         Size: 10240
       Role: !GetAtt LambdaExecutionRole.Arn
+      FileSystemConfigs: !If
+        - S3FilesEnabled
+        - - Arn: !GetAtt RawFilesAccessPoint.AccessPointArn
+            LocalMountPath: /mnt/raw
+        - !Ref AWS::NoValue
       VpcConfig: !If
         - S3FilesEnabled
         - SecurityGroupIds:
@@ -522,6 +755,7 @@ Resources:
           AWS_S3_ARCHIVES_BUCKET: !Sub "arcadia-data-hub-archives-${Environment}"
           DATA_HUB_API_URL: !Ref DataHubApiUrl
           DATA_HUB_API_KEY: !Ref DataHubApiKey
+          RAW_DATA_MOUNT_PATH: !If [S3FilesEnabled, "/mnt/raw", ""]
 
   # ---- S3 → Lambda event wiring ----
   # Wired explicitly rather than with SAM Events, which would make the bucket
@@ -598,7 +832,43 @@ Resources:
               - ec2:GetSecurityGroupsForVpc
               - ec2:AssignPrivateIpAddresses
               - ec2:UnassignPrivateIpAddresses
+              # Read and mount only. Write, root, and policy changes stay
+              # off this list so a staging role cannot grant them to itself.
+              - s3files:ClientMount
+              - s3files:GetAccessPoint
+              - s3files:GetFileSystem
+              - s3files:GetFileSystemPolicy
+              - s3files:GetMountTarget
+              - s3files:GetSynchronizationConfiguration
+              - s3files:ListAccessPoints
+              - s3files:ListFileSystems
+              - s3files:ListMountTargets
+              - s3files:ListTagsForResource
+              # Read-only. These do not support `events:ManagedBy`, so they
+              # cannot go in CeilingS3FilesRules.
+              - events:DescribeRule
+              - events:ListRuleNamesByTarget
+              - events:ListRules
+              - events:ListTargetsByRule
             Resource: "*"
+          # S3 Files edits its sync rule as the sync role. Both environments'
+          # rules share this prefix, so the principal check keeps other staging
+          # roles from granting themselves access to production's rule.
+          - Sid: CeilingS3FilesRules
+            Effect: Allow
+            Action:
+              - events:DeleteRule
+              - events:DisableRule
+              - events:EnableRule
+              - events:PutRule
+              - events:PutTargets
+              - events:RemoveTargets
+            Resource: !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/DO-NOT-DELETE-S3-Files*"
+            Condition:
+              StringEquals:
+                events:ManagedBy: elasticfilesystem.amazonaws.com
+              ArnEquals:
+                aws:PrincipalArn: !Sub "arn:aws:iam::${AWS::AccountId}:role/data-hub-s3files-staging"
           # Explicit because an implicit boundary deny does not restrict access
           # granted by a resource-based policy such as a bucket policy.
           - Sid: DenyProductionResources
@@ -656,6 +926,13 @@ Resources:
                   lambda:SecurityGroupIds:
                     - !Ref LambdaSecurityGroup
             - !Ref AWS::NoValue
+          - Sid: DenyProductionS3Files
+            Effect: Deny
+            Action: s3files:*
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:ResourceTag/environment: production
 
   # ---- IAM: Lambda execution role ----
 
@@ -684,6 +961,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - s3:GetObject
+                  - s3:GetObjectVersion
                   - s3:ListBucket
                 Resource:
                   - !Sub "arn:aws:s3:::arcadia-data-hub-raw-${Environment}"
@@ -728,6 +1006,20 @@ Resources:
                 Condition:
                   ArnEquals:
                     lambda:SourceFunctionArn: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:data-hub-${Environment}"
+        - !If
+          - S3FilesEnabled
+          - PolicyName: RawFilesMount
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Sid: MountRawFiles
+                  Effect: Allow
+                  Action: s3files:ClientMount
+                  Resource: !GetAtt RawFilesFileSystem.FileSystemArn
+                  Condition:
+                    StringEquals:
+                      s3files:AccessPointArn: !GetAtt RawFilesAccessPoint.AccessPointArn
+          - !Ref AWS::NoValue
 
   # ---- IAM: GitHub Actions deploy role ----
   # Routine image updates and in-place bucket config only. New buckets or
@@ -865,6 +1157,22 @@ Resources:
                   - ec2:DescribeSubnets
                   - ec2:DescribeVpcs
                   - ec2:GetSecurityGroupsForVpc
+                Resource: "*"
+        # Listed for attaching a file system in the console. The first CI
+        # deploy after the mount exists shows whether an API deploy needs
+        # them too. No write actions: changing the file system policy stays
+        # an admin deploy.
+        - PolicyName: S3FilesRead
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3files:GetAccessPoint
+                  - s3files:GetFileSystem
+                  - s3files:ListAccessPoints
+                  - s3files:ListFileSystems
+                  - s3files:ListMountTargets
                 Resource: "*"
 
   # ---- IAM: Vercel web app role (OIDC federation) ----
@@ -1024,6 +1332,66 @@ Resources:
           Value: !Ref DataHubFunction
       Statistic: Sum
       Period: 60
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ProcessingAlarmTopic
+
+  S3FilesImportFailuresAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: S3FilesEnabled
+    Properties:
+      AlarmName: !Sub "data-hub-${Environment}-s3files-import-failures"
+      AlarmDescription: S3 Files could not import objects from the raw bucket.
+      Namespace: AWS/S3/Files
+      MetricName: ImportFailures
+      Dimensions:
+        - Name: FileSystemId
+          Value: !GetAtt RawFilesFileSystem.FileSystemId
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ProcessingAlarmTopic
+
+  S3FilesExportFailuresAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: S3FilesEnabled
+    Properties:
+      AlarmName: !Sub "data-hub-${Environment}-s3files-export-failures"
+      AlarmDescription: A write through the raw-bucket mount failed to sync. The mount is supposed to be read-only.
+      Namespace: AWS/S3/Files
+      MetricName: ExportFailures
+      Dimensions:
+        - Name: FileSystemId
+          Value: !GetAtt RawFilesFileSystem.FileSystemId
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref ProcessingAlarmTopic
+
+  RawMountWaitTimeoutsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: S3FilesEnabled
+    Properties:
+      AlarmName: !Sub "data-hub-${Environment}-raw-mount-wait-timeouts"
+      AlarmDescription: A raw file did not appear on the mount in time. The file system may have stopped receiving bucket events.
+      Namespace: DataHub
+      MetricName: RawMountWaitTimeouts
+      Dimensions:
+        - Name: Environment
+          Value: !Ref Environment
+      Statistic: Sum
+      Period: 300
       EvaluationPeriods: 1
       Threshold: 0
       ComparisonOperator: GreaterThanThreshold
