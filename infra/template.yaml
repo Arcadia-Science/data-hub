@@ -577,10 +577,15 @@ Resources:
                 Effect: Allow
                 Action:
                   - events:DescribeRule
-                  - events:ListRuleNamesByTarget
-                  - events:ListRules
                   - events:ListTargetsByRule
                 Resource: !Sub "arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:rule/*"
+              # These two have no resource-level permissions, so a rule ARN grants nothing.
+              - Sid: EventBridgeList
+                Effect: Allow
+                Action:
+                  - events:ListRuleNamesByTarget
+                  - events:ListRules
+                Resource: "*"
 
   RawFilesFileSystem:
     Type: AWS::S3Files::FileSystem
@@ -654,12 +659,15 @@ Resources:
         Gid: "1000"
       RootDirectory:
         Path: "/"
+      Tags:
+        - Key: project
+          Value: arcadia-data-hub
+        - Key: environment
+          Value: !Ref Environment
 
-  # An allow in either an identity policy or this policy is enough to mount,
-  # and this account grants broad access, so the limits are explicit denies.
-  # The policy cannot deny changes to itself. S3 Files write actions stay
-  # out of the deploy role and the staging boundary, so changing it is an
-  # admin deploy.
+  # Either an identity policy or this policy can allow a mount, and the account
+  # grants broad access, so the limits are explicit denies. CI cannot change
+  # this policy: S3 Files write actions are not in its role or the boundary.
   RawFilesFileSystemPolicy:
     Type: AWS::S3Files::FileSystemPolicy
     Condition: S3FilesEnabled
@@ -683,14 +691,8 @@ Resources:
             Condition:
               StringNotEquals:
                 aws:PrincipalArn: !GetAtt LambdaExecutionRole.Arn
-          - Sid: DenyMountWithoutAccessPoint
-            Effect: Deny
-            Principal: "*"
-            Action: s3files:ClientMount
-            Resource: !GetAtt RawFilesFileSystem.FileSystemArn
-            Condition:
-              "Null":
-                s3files:AccessPointArn: "true"
+          # StringNotEquals is true when the key is missing, so this also
+          # denies a mount that names no access point.
           - Sid: DenyMountExceptOurAccessPoint
             Effect: Deny
             Principal: "*"
@@ -713,15 +715,17 @@ Resources:
 
   DataHubFunction:
     Type: AWS::Serverless::Function
-    # These references make the staging boundary and the mount targets finish
-    # before the function joins the VPC. DependsOn cannot name a resource whose
-    # condition is false. SAM copies Metadata onto the generated function.
+    # These references make the staging boundary and everything the mount needs
+    # finish before the function joins the VPC. DependsOn cannot name a resource
+    # whose condition is false. SAM copies Metadata onto the generated function.
     Metadata:
       StagingBoundary: !If [IsStaging, !Ref StagingBoundary, !Ref AWS::NoValue]
-      S3FilesMountTargets: !If
+      S3FilesMount: !If
         - S3FilesEnabled
         - - !Ref RawFilesMountTargetA
           - !Ref RawFilesMountTargetB
+          - !Ref RawFilesFileSystemPolicy
+          - !Ref MountTargetNfsIngress
         - !Ref AWS::NoValue
     Properties:
       FunctionName: !Sub "data-hub-${Environment}"
@@ -839,13 +843,9 @@ Resources:
               - s3files:ClientMount
               - s3files:GetAccessPoint
               - s3files:GetFileSystem
-              - s3files:GetFileSystemPolicy
-              - s3files:GetMountTarget
-              - s3files:GetSynchronizationConfiguration
               - s3files:ListAccessPoints
               - s3files:ListFileSystems
               - s3files:ListMountTargets
-              - s3files:ListTagsForResource
               # Read-only. These do not support `events:ManagedBy`, so they
               # cannot go in CeilingS3FilesRules.
               - events:DescribeRule
@@ -960,6 +960,7 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
+              # GetObjectVersion is for Lambda's direct reads from S3 through the mount.
               - Effect: Allow
                 Action:
                   - s3:GetObject
@@ -1160,10 +1161,9 @@ Resources:
                   - ec2:DescribeVpcs
                   - ec2:GetSecurityGroupsForVpc
                 Resource: "*"
-        # Listed for attaching a file system in the console. The first CI
-        # deploy after the mount exists shows whether an API deploy needs
-        # them too. No write actions: changing the file system policy stays
-        # an admin deploy.
+        # Lambda checks the file system with the deployer's permissions. The
+        # AWS::Lambda::Function resource schema lists ListMountTargets, and
+        # Lambda's S3 Files docs list the rest. Read-only, so CI can't edit the mount.
         - PolicyName: S3FilesRead
           PolicyDocument:
             Version: "2012-10-17"
