@@ -214,6 +214,10 @@ Resources:
                 aws:PrincipalArn:
                   - !GetAtt WebAppS3Role.Arn
                   - !Sub "arn:aws:iam::${AWS::AccountId}:root"
+                  # The S3 Files sync role. S3 Files will not create the file system
+                  # while this denies it, and this policy updates only after the file
+                  # system, so the exemption is unconditional and must already be live.
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/data-hub-s3files-${Environment}"
           # Config changes stay admin-only so CI can never disable the write
           # protection above. Root can always repair the policy (S3 guarantee).
           - Sid: DenyBucketConfigExceptAdmin
