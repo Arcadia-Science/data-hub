@@ -140,7 +140,7 @@ Secrets (`DATA_HUB_API_KEY`, etc.) are stored in GitHub environment secrets scop
 >
 > If the function stays in the VPC and is idle for 14 days, Lambda reclaims that interface and the next invocation fails until the interface is recreated. S3 events retry on their own. A reprocess or archive build can fail once.
 >
-> The NAT gateway is about $39 a month per environment ($0.048 an hour, plus $0.005 an hour for its public IPv4 address, plus $0.048 per GB of API traffic). S3 reads use a free gateway endpoint and do not go through the NAT gateway. Leave `EnableS3Files` at `false` unless the environment needs it.
+> The NAT gateway is about $39 a month per environment ($0.048 an hour, plus $0.005 an hour for its public IPv4 address, plus $0.048 per GB of API traffic). S3 reads use a free gateway endpoint and do not go through the NAT gateway. One NAT gateway serves both private subnets, so an outage in its availability zone cuts the Lambda off from the API; a second gateway would double the cost. Leave `EnableS3Files` at `false` unless the environment needs it.
 >
 > With `EnableS3Files` on, the raw bucket is also mounted in the Lambda at `/mnt/raw` through Amazon S3 Files. Lambda mounts the file system every time it starts an execution environment, before any code reads the mount. A broken file system policy, security group, or execution role therefore stops all processing, not only the files that would use the mount.
 >

@@ -347,7 +347,6 @@ Resources:
       VpcId: !Ref DataHubVpc
       AvailabilityZone: !Select [0, !GetAZs ""]
       CidrBlock: !If [IsStaging, "10.20.0.0/24", "10.21.0.0/24"]
-      MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
           Value: !Sub "data-hub-${Environment}-public"
@@ -399,6 +398,8 @@ Resources:
         - Key: Name
           Value: !Sub "data-hub-${Environment}-nat"
 
+  # One gateway serves both private subnets. If its zone has an outage, the
+  # Lambda loses API access until it recovers; a second gateway doubles the cost.
   NatGateway:
     Type: AWS::EC2::NatGateway
     Condition: S3FilesEnabled
@@ -897,36 +898,36 @@ Resources:
             Condition:
               StringNotEquals:
                 iam:PermissionsBoundary: !Sub "arn:aws:iam::${AWS::AccountId}:policy/data-hub-boundary-staging"
-          # A request with no VPC settings has no values for these keys, so
-          # ForAnyValue does not match and an ordinary deploy still works.
-          # AWS::NoValue drops the statement when the subnets do not exist.
-          - !If
-            - S3FilesEnabled
-            - Sid: DenyLambdaOutsideStagingSubnets
-              Effect: Deny
-              Action:
-                - lambda:CreateFunction
-                - lambda:UpdateFunctionConfiguration
-              Resource: "*"
-              Condition:
-                ForAnyValue:StringNotEquals:
+          # ForAnyValue is false when a request has no subnets or security groups,
+          # so ordinary deploys and leaving the VPC still work. With the VPC off,
+          # these deny every subnet and security group, including production's.
+          - Sid: DenyLambdaOutsideStagingSubnets
+            Effect: Deny
+            Action:
+              - lambda:CreateFunction
+              - lambda:UpdateFunctionConfiguration
+            Resource: "*"
+            Condition: !If
+              - S3FilesEnabled
+              - ForAnyValue:StringNotEquals:
                   lambda:SubnetIds:
                     - !Ref PrivateSubnetA
                     - !Ref PrivateSubnetB
-            - !Ref AWS::NoValue
-          - !If
-            - S3FilesEnabled
-            - Sid: DenyLambdaOutsideStagingSecurityGroups
-              Effect: Deny
-              Action:
-                - lambda:CreateFunction
-                - lambda:UpdateFunctionConfiguration
-              Resource: "*"
-              Condition:
-                ForAnyValue:StringNotEquals:
+              - ForAnyValue:StringLike:
+                  lambda:SubnetIds: "*"
+          - Sid: DenyLambdaOutsideStagingSecurityGroups
+            Effect: Deny
+            Action:
+              - lambda:CreateFunction
+              - lambda:UpdateFunctionConfiguration
+            Resource: "*"
+            Condition: !If
+              - S3FilesEnabled
+              - ForAnyValue:StringNotEquals:
                   lambda:SecurityGroupIds:
                     - !Ref LambdaSecurityGroup
-            - !Ref AWS::NoValue
+              - ForAnyValue:StringLike:
+                  lambda:SecurityGroupIds: "*"
           - Sid: DenyProductionS3Files
             Effect: Deny
             Action: s3files:*
@@ -1247,6 +1248,7 @@ Resources:
   # These stay on even when the VPC is off. A dropped S3 event leaves the
   # file uploaded, and Reprocess accepts that status.
 
+  # Unencrypted: alarms can't publish with the AWS-managed SNS key, and messages hold only alarm names and values.
   ProcessingAlarmTopic:
     Type: AWS::SNS::Topic
     Properties:
@@ -1306,7 +1308,7 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: !Sub "data-hub-${Environment}-async-event-age"
-      AlarmDescription: Queued events are waiting more than ten minutes, which means invocations are being retried.
+      AlarmDescription: An S3 event waited more than ten minutes to run. Usually a timed-out run being retried, throttling, or the function recovering from being idle.
       Namespace: AWS/Lambda
       MetricName: AsyncEventAge
       Dimensions:
