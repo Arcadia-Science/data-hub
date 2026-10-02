@@ -15,6 +15,18 @@ from data_hub_lambda.models import FileResponse, RunResponse
 
 
 @pytest.fixture(autouse=True)
+def _small_raw_object(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`local_raw_file` reads the size and downloads through the shared S3 helpers."""
+
+    def _download(_uri: str, local_path: Path, **_kwargs: Any) -> None:
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.write_bytes(b"tif")
+
+    monkeypatch.setattr("data_hub_shared.s3_utils.object_content_length", lambda *_a, **_k: 128)
+    monkeypatch.setattr("data_hub_shared.s3_utils.download_file", _download)
+
+
+@pytest.fixture(autouse=True)
 def _reset_api_client() -> Any:
     """Ensure `get_client()` returns a fresh mock per test."""
     import data_hub_lambda.api_client as api_module
@@ -138,6 +150,8 @@ class TestProcessFileHappyPath:
             )
 
         patched_converter.export_jpg.assert_called_once()
+        output_dir = patched_converter.export_jpg.call_args.kwargs["output_dir"]
+        assert output_dir.name == "run-xyz"
 
         processed_create_call = client.create_file.call_args_list[1]
         assert processed_create_call.kwargs["category"] == "processed"

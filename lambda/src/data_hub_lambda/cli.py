@@ -406,6 +406,8 @@ def handler(
 
     os.environ["AWS_S3_RAW_DATA_BUCKET"] = raw_bucket
     os.environ["AWS_S3_PROCESSED_DATA_BUCKET"] = processed_bucket
+    # Same layout as the S3 Files mount: <root>/<bucket>/<key>.
+    os.environ["RAW_DATA_MOUNT_PATH"] = str(mirror_root / raw_bucket)
     _reset_config_singletons()
 
     # Real S3 events form-encode the object key (spaces -> '+', '+' -> '%2B'),

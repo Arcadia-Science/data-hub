@@ -12,7 +12,12 @@ The Lambda has three invocation paths:
 2. The handler parses the S3 key to extract the instrument ID, run ID, and filename. The expected key layout is `{instrument_id}/{run_id}/{filename}`.
 3. For S3-triggered events, a cheap union of processor filename gates runs first. Non-matching files no-op without an API call.
 4. The handler fetches the instrument via `GET /instruments/:id` and looks up a processor by `instrument_type` in `data_hub_lambda.processors`. Unmapped types (including `generic`) and per-type gate failures no-op.
-5. The processor downloads the raw file from S3, preprocesses it, and creates/updates the run and files via the Data Hub API using the event's `instrument_id`. Before the download it compares the object size with free disk space. A file that will not fit is marked failed, and the raw object stays in S3. `ObjectCreated:CompleteMultipartUpload` is included in the `ObjectCreated:*` trigger, so a multipart upload starts processing the same way a single PUT does.
+5. The processor opens the raw file with `local_raw_file` in `raw_access.py`, then creates or updates the run and files via the Data Hub API using the event's `instrument_id`. `ObjectCreated:CompleteMultipartUpload` is included in the `ObjectCreated:*` trigger, so a multipart upload starts processing the same way a single PUT does.
+   - By default the helper downloads the raw file. A processor that reads the file in pieces passes `streams=True`. For those processors, files of `MOUNT_READ_MIN_BYTES` (1 GiB) or more, and files that will not fit on the function's disk, are read from the raw-bucket mount when `RAW_DATA_MOUNT_PATH` is set (`/mnt/raw` in AWS).
+   - The helper waits up to `MOUNT_WAIT_TIMEOUT_S` for the mounted file to show the size S3 reports, because the mount can lag the upload that started the function. If the file does not appear and it fits on disk, the helper downloads it.
+   - If the file fits neither place, the file is marked failed and the raw object stays in S3. The helper deletes only a file it downloaded.
+   - The wait compares sizes only. The S3 Files docs do not say whether a mounted file's modification time follows the object's `LastModified`, so an object overwritten with one of the same size can be read in its old version until the mount catches up.
+   - Before waiting on the mount and before downloading, the helper stops if less than `DEADLINE_MARGIN_MS` of the invocation remains. Long steps inside a processor need their own `check_deadline` calls.
 
 Slack notifications are sent by the **web app**, not the Lambda — see [Slack notifications](#slack-notifications) below.
 

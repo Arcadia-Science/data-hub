@@ -14,14 +14,20 @@ class ObjectTooLargeForDiskError(Exception):
     """The raw object is already in S3, but processing cannot download it."""
 
 
-def ensure_object_fits_on_disk(s3_uri: str, dest_dir: Path) -> None:
+def ensure_object_fits_on_disk(
+    s3_uri: str,
+    dest_dir: Path,
+    *,
+    size_bytes: int | None = None,
+) -> None:
     """Raise when *s3_uri* is larger than the free space on *dest_dir*.
 
     Processors download the whole object before they write outputs next
     to it. A file bigger than the free space fails the download with a
-    full disk, which hides the reason.
+    full disk, which hides the reason. Pass *size_bytes* when the caller
+    already looked the size up, so this does not ask S3 again.
     """
-    size = s3_utils.object_content_length(s3_uri)
+    size = size_bytes if size_bytes is not None else s3_utils.object_content_length(s3_uri)
     dest_dir.mkdir(parents=True, exist_ok=True)
     free = shutil.disk_usage(dest_dir).free
     if size > free:
