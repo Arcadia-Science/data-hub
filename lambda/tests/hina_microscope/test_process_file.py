@@ -17,10 +17,15 @@ from data_hub_lambda.models import FileResponse, RunResponse
 
 
 @pytest.fixture(autouse=True)
-def _skip_disk_check() -> Any:
-    """Existing cases use stand-in files and do not talk to S3."""
-    with patch("data_hub_lambda.hina_microscope.process_file.ensure_object_fits_on_disk"):
-        yield
+def _small_raw_object(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The shared helper asks S3 for the size before it opens the file."""
+
+    def _download(_uri: str, local_path: Path, **_kwargs: Any) -> None:
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.write_bytes(b"nd2")
+
+    monkeypatch.setattr("data_hub_shared.s3_utils.object_content_length", lambda *_a, **_k: 128)
+    monkeypatch.setattr("data_hub_shared.s3_utils.download_file", _download)
 
 
 @pytest.fixture(autouse=True)
@@ -219,19 +224,14 @@ _TOO_BIG = (
 class TestProcessFileTooLarge:
     def test_oversized_file_is_marked_failed_and_not_downloaded(self, tmp_path: Path) -> None:
         client = _build_client_mock(run_metadata=None)
-        from data_hub_lambda.processing_disk import ensure_object_fits_on_disk
 
         with (
             patch(
-                "data_hub_lambda.hina_microscope.process_file.ensure_object_fits_on_disk",
-                ensure_object_fits_on_disk,
-            ),
-            patch(
-                "data_hub_lambda.processing_disk.s3_utils.object_content_length",
+                "data_hub_shared.s3_utils.object_content_length",
                 return_value=11_097_280_814,
             ),
             patch(
-                "data_hub_lambda.processing_disk.shutil.disk_usage",
+                "data_hub_lambda.raw_access.shutil.disk_usage",
                 return_value=SimpleNamespace(free=10 * 1024**3),
             ),
             patch(
@@ -239,7 +239,7 @@ class TestProcessFileTooLarge:
                 tmp_path,
             ),
             patch("data_hub_lambda.hina_microscope.process_file.get_client", return_value=client),
-            patch("data_hub_lambda.hina_microscope.process_file.s3_utils") as s3_mock,
+            patch("data_hub_shared.s3_utils.download_file") as download,
             patch("data_hub_lambda.hina_microscope.process_file.ND2Processor") as processor,
         ):
             from data_hub_lambda.hina_microscope.process_file import process_file
@@ -252,7 +252,7 @@ class TestProcessFileTooLarge:
                     filename="huge.nd2",
                 )
 
-        s3_mock.download_file.assert_not_called()
+        download.assert_not_called()
         processor.assert_not_called()
         failed_call = next(
             call
@@ -260,3 +260,49 @@ class TestProcessFileTooLarge:
             if call.kwargs.get("status") == "failed"
         )
         assert failed_call.kwargs["error_message"] == _TOO_BIG
+
+
+class TestProcessFileFromMount:
+    def test_mounted_nd2_is_processed_in_place(
+        self, tmp_path: Path, patched_processor: MagicMock
+    ) -> None:
+        client = _build_client_mock(run_metadata={"sizes": {"C": 1}})
+        mount = tmp_path / "mount"
+        mounted = mount / "hina-microscope" / "run-xyz" / "sample.nd2"
+        mounted.parent.mkdir(parents=True)
+        mounted.write_bytes(b"nd2-bytes")
+        output_dir = tmp_path / "processed"
+
+        with (
+            patch("data_hub_shared.config.config.RAW_DATA_MOUNT_PATH", str(mount)),
+            patch(
+                "data_hub_lambda.hina_microscope.process_file.config.LOCAL_PROCESSED_DATA_DIRPATH",
+                output_dir,
+            ),
+            patch("data_hub_shared.s3_utils.object_content_length", return_value=1024**3),
+            patch(
+                "data_hub_lambda.raw_access._matching_size",
+                lambda path, _expected: path.is_file(),
+            ),
+            patch("data_hub_shared.s3_utils.download_file") as download,
+            patch("data_hub_lambda.hina_microscope.process_file.get_client", return_value=client),
+            patch("data_hub_lambda.hina_microscope.process_file.s3_utils"),
+            patch(
+                "data_hub_lambda.hina_microscope.process_file.ND2Processor",
+                return_value=patched_processor,
+            ) as processor_class,
+        ):
+            from data_hub_lambda.hina_microscope.process_file import process_file
+
+            process_file(
+                instrument_id="hina-microscope",
+                run_id="run-xyz",
+                filename="sample.nd2",
+            )
+
+        download.assert_not_called()
+        processor_class.assert_called_once_with(mounted)
+        patched_processor.export_jpg.assert_called_once_with(
+            output_dir=output_dir / "hina-microscope" / "run-xyz"
+        )
+        assert mounted.exists()

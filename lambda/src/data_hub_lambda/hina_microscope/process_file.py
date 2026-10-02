@@ -4,7 +4,7 @@ import logging
 from data_hub_lambda.api_client import get_client
 from data_hub_lambda.hina_microscope.image_processing import ND2Processor
 from data_hub_lambda.hina_microscope.parse_metadata import parse_metadata
-from data_hub_lambda.processing_disk import ensure_object_fits_on_disk
+from data_hub_lambda.raw_access import local_raw_file
 from data_hub_shared import s3_utils
 from data_hub_shared.config import config
 
@@ -14,8 +14,9 @@ logger = logging.getLogger(__name__)
 def process_file(instrument_id: str, run_id: str, filename: str) -> None:
     """Process a single Hina microscope ND2 file through the Data Hub API.
 
-    Downloads the raw ND2, runs it through the image processing pipeline to
-    produce a composite JPG overlay, uploads the JPG to the processed bucket,
+    Opens the raw ND2 with `local_raw_file`, from the mount when it is
+    large, runs it through the image processing pipeline to produce a
+    composite JPG overlay, uploads the JPG to the processed bucket,
     and registers both files via the API. Run-level metadata (sizes,
     channels, dimensions) is parsed and stored once per run — the first file
     to arrive wins. Subsequent files in the same run still get a JPG but
@@ -47,14 +48,13 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
         client.update_file(file_id, status="processing")
 
         raw_data_dir = config.LOCAL_RAW_DATA_DIRPATH / instrument_id / run_id
-        local_file_path = raw_data_dir / filename
-        ensure_object_fits_on_disk(f"s3://{s3_bucket}/{s3_key}", raw_data_dir)
-        s3_utils.download_file(f"s3://{s3_bucket}/{s3_key}", local_file_path)
-        logger.info("Downloaded %s to %s", filename, local_file_path)
-
-        processor = ND2Processor(local_file_path)
-        processor.load()
-        jpg_file_path = processor.export_jpg()
+        output_dir = config.LOCAL_PROCESSED_DATA_DIRPATH / instrument_id / run_id
+        with local_raw_file(
+            f"s3://{s3_bucket}/{s3_key}", raw_data_dir, streams=True
+        ) as local_file_path:
+            processor = ND2Processor(local_file_path)
+            processor.load()
+            jpg_file_path = processor.export_jpg(output_dir=output_dir)
 
         processed_bucket = config.AWS_S3_PROCESSED_DATA_BUCKET
         jpg_s3_key = f"{instrument_id}/{run_id}/{jpg_file_path.name}"
