@@ -70,6 +70,8 @@ DishCam reads the run's file list (`GET /instruments/:id/runs/:runId`, which nee
 
 A folder's own sidecar can be reported after its stacks, so a stack may first be encoded with the plain `run.json`. When that folder's sidecar reaches S3, its event re-encodes every completed stack in the folder whose `sidecar` key names a different file. A stack with no `sidecar` key counts as encoded from `run.json`, which is what the Lambda used before the key existed. That event skips a stack that is still encoding, so an encode that used another folder's sidecar reloads the file list when it finishes and re-encodes if the folder's own sidecar has arrived.
 
+DishCam decodes one TIFF page at a time and pipes it to ffmpeg, so it passes `streams=True` and reads large stacks from the raw-bucket mount. Before each frame it checks the time left in the invocation. When time is short, the encode stops between frames and the stack is marked failed with a message that says how far it got, such as "12 of 400 frames done".
+
 The Lambda scope preset is `instruments:read`, `runs:read`, `runs:create`, `runs:update`, `files:create`, `files:update`, and `archive-jobs:write`. `runs:read` is what lets DishCam load the file list. Mint a new token from the preset and update `DATA_HUB_API_KEY` before deploying a Lambda that calls `get_run`; the previous token returns 403. Confirm another instrument still processes, then revoke the old token. Every processor shares this token.
 
 The `qpcr` processor also reads the Azure Cielo's native `.AZE` project files (`azure_cielo_qpcr/aze.py`, reverse-engineered — no vendor spec exists). An `.AZE` is a sequence of big-endian u32 length-prefixed segments: metadata JSON, plate-layout JSON, analysis settings, and a data segment whose pretty-printed JSON carries the melt curves as flat well-major `MeltCurveChannelN` arrays over a shared centidegree `MeltCurveTemper` axis. A run with melt data produces `{run_id}_aze_melting_curve_derivatives.csv`, `{run_id}_aze_melting_curve_plate.json`, and a `{run_id}_aze_experiment.json` sidecar with instrument metadata (device id, software versions, run times); setup-only projects complete with no artifacts. The CSV export path is untouched when both exist. One caveat: `.AZE` melt arrays are raw fluorescence, while the vendor's `_MeltingCurve.csv` export may be baseline-processed — derivative peak positions (Tm) agree, absolute values can differ.
@@ -115,6 +117,7 @@ Available commands:
 | `spectramax` | Parse metadata and raw well data from a SpectraMax `.xls` export |
 | `tapestation` | Extract the tape type from a TapeStation CSV filename |
 | `dishcam` | Convert a DishCam TIFF stack plus the `run.json` from the same folder into an MP4 preview and JPEG poster |
+| `synthetic-tiff` | Write an uncompressed RGB TIFF stack of 12 MP frames, at least `--size-gb` or `--size-bytes` large, for timing a large DishCam encode |
 | `aunty` | Parse an Unchained Labs Aunty `.xlsx` export into a curves CSV and plate JSON |
 | `handler` | Stage a file into a local S3 mirror and invoke `lambda_handler` against the local dev API. See [Testing the Lambda end-to-end](local-development.md#testing-the-lambda-end-to-end) for the workflow. |
 

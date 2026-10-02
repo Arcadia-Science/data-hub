@@ -21,6 +21,37 @@ def cli() -> None:
     """Locally run instrument-specific file parsing and processing."""
 
 
+@cli.command("synthetic-tiff")
+@click.argument("dest", type=click.Path(dir_okay=False, path_type=Path))
+@click.option(
+    "--size-gb",
+    type=click.FloatRange(min=0, min_open=True),
+    default=None,
+    help="Approximate stack size in GiB.",
+)
+@click.option(
+    "--size-bytes",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Approximate stack size in bytes.",
+)
+def synthetic_tiff(dest: Path, size_gb: float | None, size_bytes: int | None) -> None:
+    """Write an uncompressed RGB TIFF stack for a staging timing test.
+
+    Pass one of --size-gb or --size-bytes. The file is at least that large.
+    """
+    from data_hub_lambda.dishcam.synthetic_stack import write_synthetic_tiff_stack
+
+    if size_bytes is not None and size_gb is None:
+        target = size_bytes
+    elif size_gb is not None and size_bytes is None:
+        target = int(size_gb * 1024**3)
+    else:
+        raise click.UsageError("Pass exactly one of --size-gb or --size-bytes.")
+    written = write_synthetic_tiff_stack(dest, target)
+    click.echo(f"Wrote {dest} ({written} bytes)")
+
+
 # ---------------------------------------------------------------------------
 # Azure 600 Gel Doc
 # ---------------------------------------------------------------------------
