@@ -347,6 +347,9 @@ Resources:
       VpcId: !Ref DataHubVpc
       AvailabilityZone: !Select [0, !GetAZs ""]
       CidrBlock: !If [IsStaging, "10.20.0.0/24", "10.21.0.0/24"]
+      # Set explicitly: deleting the property leaves an existing subnet's
+      # setting unchanged, and the NAT gateway gets its address from NatEip.
+      MapPublicIpOnLaunch: false
       Tags:
         - Key: Name
           Value: !Sub "data-hub-${Environment}-public"
