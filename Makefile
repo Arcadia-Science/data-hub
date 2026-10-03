@@ -157,6 +157,12 @@ sam-validate:
 	cd infra && sam validate --lint --region us-west-1 --template template.yaml
 	cd infra && sam validate --lint --region us-west-1 --template bootstrap.yaml
 
+# Runs the CI and Makefile `sam deploy` commands with dummy credentials and no
+# reachable AWS endpoint, to catch parameter overrides SAM rejects before AWS.
+.PHONY: sam-check-overrides
+sam-check-overrides:
+	uv run --no-project --with pyyaml python .github/scripts/check_sam_deploy_overrides.py
+
 .PHONY: sam-bootstrap
 sam-bootstrap:
 	aws cloudformation deploy \

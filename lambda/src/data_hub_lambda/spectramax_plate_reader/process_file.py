@@ -39,7 +39,7 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
         client.update_file(file_id, status="processing")
 
         raw_data_dir = config.LOCAL_RAW_DATA_DIRPATH / instrument_id / run_id
-        with local_raw_file(f"s3://{s3_bucket}/{s3_key}", raw_data_dir) as local_file_path:
+        with local_raw_file(s3_bucket or "", s3_key, raw_data_dir) as local_file_path:
             metadata = parse_metadata(local_file_path)
             logger.info("Parsed metadata: %s", metadata)
 

@@ -22,9 +22,6 @@ class Config:
     AWS_S3_RAW_DATA_BUCKET: str | None
     AWS_S3_PROCESSED_DATA_BUCKET: str | None
 
-    # Empty when the raw bucket is not mounted. Processors then download.
-    RAW_DATA_MOUNT_PATH: str
-
     def __init__(self) -> None:
         self.LOCAL_DATA_DIRPATH = Path(os.getenv("LOCAL_DATA_DIRPATH") or "/tmp/data")
         self.LOCAL_RAW_DATA_DIRPATH = self.LOCAL_DATA_DIRPATH / "raw-data"
@@ -37,7 +34,6 @@ class Config:
 
         self.AWS_S3_RAW_DATA_BUCKET = os.getenv("AWS_S3_RAW_DATA_BUCKET")
         self.AWS_S3_PROCESSED_DATA_BUCKET = os.getenv("AWS_S3_PROCESSED_DATA_BUCKET")
-        self.RAW_DATA_MOUNT_PATH = os.getenv("RAW_DATA_MOUNT_PATH") or ""
 
 
 config = Config()

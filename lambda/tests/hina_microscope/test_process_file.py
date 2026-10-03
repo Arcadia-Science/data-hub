@@ -29,6 +29,14 @@ def _small_raw_object(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _local_dirs_in_tmp(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from data_hub_lambda.hina_microscope.process_file import config
+
+    monkeypatch.setattr(config, "LOCAL_RAW_DATA_DIRPATH", tmp_path / "raw")
+    monkeypatch.setattr(config, "LOCAL_PROCESSED_DATA_DIRPATH", tmp_path / "processed")
+
+
+@pytest.fixture(autouse=True)
 def _reset_api_client() -> Any:
     """Ensure `get_client()` returns a fresh mock per test."""
     import data_hub_lambda.api_client as api_module
@@ -216,7 +224,7 @@ class TestProcessFileFailure:
 
 
 _TOO_BIG = (
-    "File is 10.3 GB, larger than the 10.0 GB of disk available for processing. "
+    "File is 10.3 GB, larger than the 9.5 GB of disk available for processing. "
     "The raw file is stored and can be downloaded."
 )
 
@@ -243,7 +251,7 @@ class TestProcessFileTooLarge:
             patch("data_hub_lambda.hina_microscope.process_file.ND2Processor") as processor,
         ):
             from data_hub_lambda.hina_microscope.process_file import process_file
-            from data_hub_lambda.processing_disk import ObjectTooLargeForDiskError
+            from data_hub_lambda.raw_access import ObjectTooLargeForDiskError
 
             with pytest.raises(ObjectTooLargeForDiskError, match="10.3 GB"):
                 process_file(
@@ -274,16 +282,16 @@ class TestProcessFileFromMount:
         output_dir = tmp_path / "processed"
 
         with (
-            patch("data_hub_shared.config.config.RAW_DATA_MOUNT_PATH", str(mount)),
+            patch("data_hub_lambda.config.lambda_config.RAW_DATA_MOUNT_PATH", str(mount)),
             patch(
                 "data_hub_lambda.hina_microscope.process_file.config.LOCAL_PROCESSED_DATA_DIRPATH",
                 output_dir,
             ),
-            patch("data_hub_shared.s3_utils.object_content_length", return_value=1024**3),
             patch(
-                "data_hub_lambda.raw_access._matching_size",
-                lambda path, _expected: path.is_file(),
+                "data_hub_shared.s3_utils.object_content_length",
+                return_value=len(b"nd2-bytes"),
             ),
+            patch("data_hub_lambda.raw_access.MOUNT_READ_MIN_BYTES", 1),
             patch("data_hub_shared.s3_utils.download_file") as download,
             patch("data_hub_lambda.hina_microscope.process_file.get_client", return_value=client),
             patch("data_hub_lambda.hina_microscope.process_file.s3_utils"),

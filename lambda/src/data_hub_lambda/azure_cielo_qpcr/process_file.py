@@ -166,7 +166,7 @@ def _open_raw(
     run_id: str,
 ) -> Iterator[Path]:
     raw_data_dir = config.LOCAL_RAW_DATA_DIRPATH / instrument_id / run_id
-    with local_raw_file(f"s3://{s3_bucket}/{s3_key}", raw_data_dir) as local_file_path:
+    with local_raw_file(s3_bucket or "", s3_key, raw_data_dir) as local_file_path:
         yield local_file_path
 
 

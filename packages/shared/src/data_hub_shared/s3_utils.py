@@ -10,7 +10,6 @@ import logging
 import mimetypes
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 import boto3
 from botocore.exceptions import ClientError
@@ -28,13 +27,17 @@ def get_s3_client() -> S3Client:
 def parse_s3_uri(s3_uri: str) -> tuple[str, str]:
     """Split an S3 URI into `(bucket, key)`.
 
-    >>> parse_s3_uri("s3://my-bucket/path/to/file.txt")
-    ('my-bucket', 'path/to/file.txt')
+    The key is taken literally: `urlparse` would cut it at a `#` or `?`, which
+    are ordinary characters in an S3 key.
+
+    >>> parse_s3_uri("s3://my-bucket/path/to/Sample #1.tif")
+    ('my-bucket', 'path/to/Sample #1.tif')
     """
-    parsed = urlparse(s3_uri)
-    if parsed.scheme != "s3":
+    scheme, sep, rest = s3_uri.partition("://")
+    if not sep or scheme.lower() != "s3":
         raise ValueError(f"Invalid S3 URI: {s3_uri}")
-    return parsed.netloc, parsed.path.lstrip("/")
+    bucket, _, key = rest.partition("/")
+    return bucket, key.lstrip("/")
 
 
 def _extra_args(file_path: Path) -> dict[str, str]:

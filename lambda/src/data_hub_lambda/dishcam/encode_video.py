@@ -133,8 +133,9 @@ def encode_tiff_stack(
 
         total = len(tif.pages)
         done = 0
-        # A timed-out invocation is retried twice, and the file can already
-        # look stalled while a retry is still running.
+        # Stop between frames rather than at the Lambda timeout. A timed-out
+        # invocation is retried twice from the start, and the file looks
+        # stalled while those retries run.
         check_deadline(f"encoding ({done} of {total} frames done)")
         first = _as_rgb24(tif.pages[0].asarray())
         done = 1

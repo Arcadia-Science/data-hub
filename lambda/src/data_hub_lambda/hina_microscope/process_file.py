@@ -49,9 +49,7 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
 
         raw_data_dir = config.LOCAL_RAW_DATA_DIRPATH / instrument_id / run_id
         output_dir = config.LOCAL_PROCESSED_DATA_DIRPATH / instrument_id / run_id
-        with local_raw_file(
-            f"s3://{s3_bucket}/{s3_key}", raw_data_dir, streams=True
-        ) as local_file_path:
+        with local_raw_file(s3_bucket or "", s3_key, raw_data_dir, streams=True) as local_file_path:
             processor = ND2Processor(local_file_path)
             processor.load()
             jpg_file_path = processor.export_jpg(output_dir=output_dir)

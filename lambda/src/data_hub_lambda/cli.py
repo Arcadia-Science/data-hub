@@ -24,10 +24,10 @@ def cli() -> None:
 @cli.command("synthetic-tiff")
 @click.argument("dest", type=click.Path(dir_okay=False, path_type=Path))
 @click.option(
-    "--size-gb",
+    "--size-gib",
     type=click.FloatRange(min=0, min_open=True),
     default=None,
-    help="Approximate stack size in GiB.",
+    help="Approximate stack size in GiB (1 GiB is 1024^3 bytes).",
 )
 @click.option(
     "--size-bytes",
@@ -35,19 +35,19 @@ def cli() -> None:
     default=None,
     help="Approximate stack size in bytes.",
 )
-def synthetic_tiff(dest: Path, size_gb: float | None, size_bytes: int | None) -> None:
+def synthetic_tiff(dest: Path, size_gib: float | None, size_bytes: int | None) -> None:
     """Write an uncompressed RGB TIFF stack for a staging timing test.
 
-    Pass one of --size-gb or --size-bytes. The file is at least that large.
+    Pass one of --size-gib or --size-bytes. The file is at least that large.
     """
-    from data_hub_lambda.dishcam.synthetic_stack import write_synthetic_tiff_stack
+    from data_hub_lambda_devtools.synthetic_stack import write_synthetic_tiff_stack
 
-    if size_bytes is not None and size_gb is None:
+    if size_bytes is not None and size_gib is None:
         target = size_bytes
-    elif size_gb is not None and size_bytes is None:
-        target = int(size_gb * 1024**3)
+    elif size_gib is not None and size_bytes is None:
+        target = int(size_gib * 1024**3)
     else:
-        raise click.UsageError("Pass exactly one of --size-gb or --size-bytes.")
+        raise click.UsageError("Pass exactly one of --size-gib or --size-bytes.")
     written = write_synthetic_tiff_stack(dest, target)
     click.echo(f"Wrote {dest} ({written} bytes)")
 
@@ -116,14 +116,7 @@ def hina(file: Path, output_dir: Path | None) -> None:
 
     processor = ND2Processor(file)
     processor.load()
-    jpg_path = processor.export_jpg()
-
-    if output_dir is not None:
-        output_dir.mkdir(parents=True, exist_ok=True)
-        dest = output_dir / jpg_path.name
-        shutil.move(str(jpg_path), str(dest))
-        jpg_path = dest
-
+    jpg_path = processor.export_jpg(output_dir=output_dir)
     click.echo(f"Exported JPG: {jpg_path}")
 
     metadata = parse_metadata(processor.image)

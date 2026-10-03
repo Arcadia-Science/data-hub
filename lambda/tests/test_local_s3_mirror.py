@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 
 from data_hub_lambda import raw_access
+from data_hub_lambda.config import lambda_config
 from data_hub_lambda.local_s3_mirror import patched_s3
-from data_hub_shared.config import config
 
 _RAW_BUCKET = "test-raw-data-bucket"
 
@@ -28,12 +28,12 @@ def test_local_raw_file_downloads_from_the_mirror_without_network(
     staged.parent.mkdir(parents=True)
     staged.write_bytes(b"a,b\n1,2\n")
     # The CLI points the mount at the mirror; small files still download.
-    monkeypatch.setattr(config, "RAW_DATA_MOUNT_PATH", str(mirror / _RAW_BUCKET))
+    monkeypatch.setattr(lambda_config, "RAW_DATA_MOUNT_PATH", str(mirror / _RAW_BUCKET))
     dest = tmp_path / "dest"
 
     with (
         patched_s3(mirror),
-        raw_access.local_raw_file(f"s3://{_RAW_BUCKET}/inst/run/plate.csv", dest) as path,
+        raw_access.local_raw_file(_RAW_BUCKET, "inst/run/plate.csv", dest) as path,
     ):
         assert path == dest / "plate.csv"
         assert path.read_bytes() == b"a,b\n1,2\n"
@@ -46,6 +46,6 @@ def test_size_lookup_names_the_missing_mirror_path(tmp_path: Path) -> None:
     with (
         patched_s3(tmp_path),
         pytest.raises(FileNotFoundError, match="No file staged at"),
-        raw_access.local_raw_file(f"s3://{_RAW_BUCKET}/inst/run/missing.csv", tmp_path / "dest"),
+        raw_access.local_raw_file(_RAW_BUCKET, "inst/run/missing.csv", tmp_path / "dest"),
     ):
         pass
