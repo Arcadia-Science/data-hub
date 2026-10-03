@@ -116,14 +116,7 @@ def hina(file: Path, output_dir: Path | None) -> None:
 
     processor = ND2Processor(file)
     processor.load()
-    jpg_path = processor.export_jpg()
-
-    if output_dir is not None:
-        output_dir.mkdir(parents=True, exist_ok=True)
-        dest = output_dir / jpg_path.name
-        shutil.move(str(jpg_path), str(dest))
-        jpg_path = dest
-
+    jpg_path = processor.export_jpg(output_dir=output_dir)
     click.echo(f"Exported JPG: {jpg_path}")
 
     metadata = parse_metadata(processor.image)

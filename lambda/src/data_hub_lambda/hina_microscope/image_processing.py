@@ -1,6 +1,6 @@
 from __future__ import annotations
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -37,6 +37,11 @@ MAX_PREVIEW_BYTES = 4 * 1024**3
 
 PREVIEW_TOO_LARGE_MESSAGE = (
     "Image is too large for a preview. The raw file is stored and can be downloaded."
+)
+
+RGB_NOT_SUPPORTED_MESSAGE = (
+    "RGB ND2 files from color cameras are not supported for previews. "
+    "The raw file is stored and can be downloaded."
 )
 
 
@@ -176,60 +181,52 @@ def preview_bytes(sizes: Mapping[str, int]) -> int:
 def _preview_planes(nd2f: nd2.ND2File, sizes: dict[str, int]) -> list[NDArray[Any]]:
     """Max-project Z and keep the first index of every other leading axis.
 
-    Each `read_frame` call is one plane, so the decoded image never has to
-    fit in memory at once.
+    Each `read_frame` call returns every channel at one stack position, so
+    memory grows with the frame size, not with the number of frames.
     """
-    loops = list(nd2f.loop_indices)
-    total = len(loops) or 1
-    if not loops:
-        check_deadline(f"reading frame 1 of {total}")
-        frame = nd2f.read_frame(0)
-        count = sizes.get("C", 1)
-        return [_channel_plane(frame, index, count) for index in range(count)]
-    return _reduce_loops(nd2f.read_frame, loops, sizes, total)
+    return _reduce_loops(nd2f.read_frame, list(nd2f.loop_indices), sizes)
 
 
 def _reduce_loops(
-    read_frame,  # type: ignore[no-untyped-def]
+    read_frame: Callable[[int], NDArray[Any]],
     loops: list[dict[str, int]],
     sizes: dict[str, int],
-    total: int,
 ) -> list[NDArray[Any]]:
+    if sizes.get("S", 1) > 1:
+        raise ValueError(RGB_NOT_SUPPORTED_MESSAGE)
     n_channels = sizes.get("C", 1)
     first_axes = [axis for axis in sizes if axis not in {"C", "Y", "X", "Z"}]
+    # `loop_indices` holds only T, P, Z, and U; channels arrive inside each frame.
+    to_read = [
+        index
+        for index, loop in enumerate(loops)
+        if all(loop.get(axis, 0) == 0 for axis in first_axes)
+    ]
     # Planes stay in the file's pixel type. A float64 copy of every channel
     # was most of the peak memory.
     accum: list[NDArray[Any] | None] = [None] * n_channels
-    for index, loop in enumerate(loops):
-        if any(loop.get(axis, 0) != 0 for axis in first_axes):
-            continue
-        check_deadline(f"reading frame {index + 1} of {total}")
+    for done, index in enumerate(to_read):
+        check_deadline(f"reading frame {done + 1} of {len(to_read)}")
         frame = read_frame(index)
-        if "C" in loop:
-            planes = [(int(loop["C"]), _channel_plane(frame, 0, 1))]
-        else:
-            planes = [
-                (channel, _channel_plane(frame, channel, n_channels))
-                for channel in range(n_channels)
-            ]
-        for channel, plane in planes:
+        for channel in range(n_channels):
+            plane = _channel_plane(frame, channel, n_channels)
             current = accum[channel]
             if current is None:
                 accum[channel] = plane.copy()
             else:
                 np.maximum(current, plane, out=current)
     if any(plane is None for plane in accum):
-        raise ValueError(f"ND2 file is missing a channel plane: {path_sizes(sizes)}")
+        raise ValueError(f"ND2 file is missing a channel plane: {_format_sizes(sizes)}")
     return [plane for plane in accum if plane is not None]
 
 
-def path_sizes(sizes: dict[str, int]) -> str:
+def _format_sizes(sizes: dict[str, int]) -> str:
     return ", ".join(f"{key}={value}" for key, value in sizes.items())
 
 
 def _channel_plane(frame: NDArray[Any], channel_index: int, n_channels: int) -> NDArray[Any]:
     arr = np.asarray(frame)
-    if arr.ndim == 2:
+    if arr.ndim == 2 and n_channels == 1:
         return arr
     if arr.ndim == 3 and arr.shape[0] == n_channels:
         return arr[channel_index]
