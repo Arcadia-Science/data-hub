@@ -9,10 +9,42 @@ from botocore.exceptions import ClientError
 
 from data_hub_shared.s3_utils import (
     _extra_args,
+    download_file,
     get_content_type,
     object_content_length,
     object_exists,
+    parse_s3_uri,
 )
+
+
+@pytest.mark.parametrize(
+    ("uri", "expected"),
+    [
+        ("s3://bucket/inst/run/file.csv", ("bucket", "inst/run/file.csv")),
+        ("s3://bucket/inst/run/Sample #1.tif", ("bucket", "inst/run/Sample #1.tif")),
+        ("s3://bucket/inst/run/what?.csv", ("bucket", "inst/run/what?.csv")),
+        ("s3://bucket/inst/run/a b+c%20d.csv", ("bucket", "inst/run/a b+c%20d.csv")),
+        ("S3://bucket/key", ("bucket", "key")),
+        ("s3://bucket/", ("bucket", "")),
+        ("s3://bucket", ("bucket", "")),
+    ],
+)
+def test_parse_s3_uri_keeps_the_key_as_written(uri: str, expected: tuple[str, str]) -> None:
+    assert parse_s3_uri(uri) == expected
+
+
+@pytest.mark.parametrize("uri", ["https://bucket/key", "bucket/key", "s3:bucket/key"])
+def test_parse_s3_uri_rejects_other_schemes(uri: str) -> None:
+    with pytest.raises(ValueError, match="Invalid S3 URI"):
+        parse_s3_uri(uri)
+
+
+def test_download_file_keeps_a_hash_in_the_key(tmp_path: Path) -> None:
+    client = MagicMock()
+    download_file("s3://bucket/inst/run/Sample #1.tif", tmp_path / "x.tif", s3_client=client)
+    client.download_file.assert_called_once_with(
+        "bucket", "inst/run/Sample #1.tif", str(tmp_path / "x.tif")
+    )
 
 
 def _client_error(code: str, status: int) -> ClientError:

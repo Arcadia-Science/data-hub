@@ -216,7 +216,7 @@ class TestProcessFileFailure:
 
 
 _TOO_BIG = (
-    "File is 10.3 GB, larger than the 10.0 GB of disk available for processing. "
+    "File is 10.3 GB, larger than the 9.5 GB of disk available for processing. "
     "The raw file is stored and can be downloaded."
 )
 
@@ -243,7 +243,7 @@ class TestProcessFileTooLarge:
             patch("data_hub_lambda.hina_microscope.process_file.ND2Processor") as processor,
         ):
             from data_hub_lambda.hina_microscope.process_file import process_file
-            from data_hub_lambda.processing_disk import ObjectTooLargeForDiskError
+            from data_hub_lambda.raw_access import ObjectTooLargeForDiskError
 
             with pytest.raises(ObjectTooLargeForDiskError, match="10.3 GB"):
                 process_file(
@@ -274,7 +274,7 @@ class TestProcessFileFromMount:
         output_dir = tmp_path / "processed"
 
         with (
-            patch("data_hub_shared.config.config.RAW_DATA_MOUNT_PATH", str(mount)),
+            patch("data_hub_lambda.config.lambda_config.RAW_DATA_MOUNT_PATH", str(mount)),
             patch(
                 "data_hub_lambda.hina_microscope.process_file.config.LOCAL_PROCESSED_DATA_DIRPATH",
                 output_dir,

@@ -1546,7 +1546,7 @@ class TestLateOwnSidecar:
 
 
 _TOO_BIG = (
-    "File is 10.3 GB, larger than the 10.0 GB of disk available for processing. "
+    "File is 10.3 GB, larger than the 9.5 GB of disk available for processing. "
     "The raw file is stored and can be downloaded."
 )
 
@@ -1555,7 +1555,7 @@ class TestEncodeTiffTooLarge:
     def test_oversized_tiff_is_marked_failed_and_not_downloaded(self, tmp_path: Path) -> None:
         client = MagicMock()
         client.create_file.return_value = _file_response(10, "stack.tif")
-        from data_hub_lambda.processing_disk import ObjectTooLargeForDiskError
+        from data_hub_lambda.raw_access import ObjectTooLargeForDiskError
 
         with (
             patch(
@@ -1603,7 +1603,7 @@ class TestEncodeTiffFromMount:
         mounted.write_bytes(b"tiff-bytes")
 
         with (
-            patch("data_hub_shared.config.config.RAW_DATA_MOUNT_PATH", str(mount)),
+            patch("data_hub_lambda.config.lambda_config.RAW_DATA_MOUNT_PATH", str(mount)),
             patch("data_hub_shared.s3_utils.object_content_length", return_value=1024**3),
             patch(
                 "data_hub_lambda.raw_access._matching_size",

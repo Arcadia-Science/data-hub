@@ -419,7 +419,6 @@ def _encode_tiff(
     reprocessing that TIFF, not another `run.json` batch.
     """
     tiff_key = f"{instrument_id}/{run_id}/{tiff_filename}"
-    tiff_uri = f"s3://{raw_bucket}/{tiff_key}"
     tiff_record = client.create_file(
         instrument_id=instrument_id,
         run_id=run_id,
@@ -456,7 +455,7 @@ def _encode_tiff(
     try:
         client.update_file(tiff_id, status="processing")
 
-        with local_raw_file(tiff_uri, raw_dir, streams=True) as tiff_path:
+        with local_raw_file(raw_bucket, tiff_key, raw_dir, streams=True) as tiff_path:
             encode_tiff_stack(tiff_path, mp4_path, poster_path, fps)
 
             processed_bucket = config.AWS_S3_PROCESSED_DATA_BUCKET or ""
