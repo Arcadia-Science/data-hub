@@ -120,7 +120,7 @@ Available commands:
 | `spectramax` | Parse metadata and raw well data from a SpectraMax `.xls` export |
 | `tapestation` | Extract the tape type from a TapeStation CSV filename |
 | `dishcam` | Convert a DishCam TIFF stack plus the `run.json` from the same folder into an MP4 preview and JPEG poster |
-| `synthetic-tiff` | Write an uncompressed RGB TIFF stack of 12 MP frames, at least `--size-gb` or `--size-bytes` large, for timing a large DishCam encode |
+| `synthetic-tiff` | Write an uncompressed RGB TIFF stack of 12 MP frames, at least `--size-gib` or `--size-bytes` large, for timing a large DishCam encode. The writer lives in the `data_hub_lambda_devtools` package, which the Lambda never imports. |
 | `aunty` | Parse an Unchained Labs Aunty `.xlsx` export into a curves CSV and plate JSON |
 | `handler` | Stage a file into a local S3 mirror and invoke `lambda_handler` against the local dev API. See [Testing the Lambda end-to-end](local-development.md#testing-the-lambda-end-to-end) for the workflow. |
 

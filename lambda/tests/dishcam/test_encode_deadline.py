@@ -9,7 +9,6 @@ import tifffile
 
 from data_hub_lambda.deadline import ProcessingDeadlineError, set_deadline_from_remaining_ms
 from data_hub_lambda.dishcam.encode_video import encode_tiff_stack
-from data_hub_lambda.dishcam.synthetic_stack import write_synthetic_tiff_stack
 
 
 def _two_page_tiff(path: Path) -> None:
@@ -56,14 +55,3 @@ def test_encode_stops_between_frames(tmp_path: Path, monkeypatch: pytest.MonkeyP
         "encoding (0 of 2 frames done)",
         "encoding (1 of 2 frames done)",
     ]
-
-
-def test_synthetic_stack_reaches_the_requested_size(tmp_path: Path) -> None:
-    dest = tmp_path / "stack.tif"
-    size = write_synthetic_tiff_stack(dest, 50_000, frame_shape=(64, 64, 3))
-    assert size >= 50_000
-    assert dest.stat().st_size == size
-    with tifffile.TiffFile(dest) as tif:
-        assert len(tif.pages) > 1
-        assert tif.pages[0].shape == (64, 64, 3)
-        assert tif.pages[0].dtype == np.uint8
