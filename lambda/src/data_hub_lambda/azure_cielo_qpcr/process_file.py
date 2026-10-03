@@ -1,6 +1,8 @@
 from __future__ import annotations
 import json
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from data_hub_lambda.api_client import get_client
@@ -20,6 +22,7 @@ from data_hub_lambda.azure_cielo_qpcr.parse_dye_channels import (
     is_cq_values_filename,
     parse_dye_channels,
 )
+from data_hub_lambda.raw_access import local_raw_file
 from data_hub_shared import s3_utils
 from data_hub_shared.config import config
 
@@ -54,8 +57,8 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
         client.update_file(file_id, status="processing")
 
         if is_melting_curve_filename(filename):
-            local_file_path = _download_raw(s3_bucket, s3_key, instrument_id, run_id, filename)
-            parsed = parse_melting_curve_file(local_file_path)
+            with _open_raw(s3_bucket, s3_key, instrument_id, run_id) as local_file_path:
+                parsed = parse_melting_curve_file(local_file_path)
             logger.info(
                 "Parsed melting curve: %d channels, %d tidy rows.",
                 len(parsed.blocks),
@@ -87,8 +90,8 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
                 content_type="application/json",
             )
         elif is_aze_filename(filename):
-            local_file_path = _download_raw(s3_bucket, s3_key, instrument_id, run_id, filename)
-            parsed_aze = parse_aze_file(local_file_path)
+            with _open_raw(s3_bucket, s3_key, instrument_id, run_id) as local_file_path:
+                parsed_aze = parse_aze_file(local_file_path)
             if not parsed_aze.blocks:
                 # Setup-only project: the run never reached the melt step, so
                 # there is nothing to extract. Completes like a sidecar.
@@ -138,14 +141,9 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
         elif filename.lower().endswith(".pdf"):
             logger.info("qPCR report %s has no preprocessing.", filename)
         elif filename.lower().endswith(".csv"):
-            local_file_path = _download_raw(s3_bucket, s3_key, instrument_id, run_id, filename)
-            try:
-                dye_channels = parse_dye_channels(local_file_path)
-            except Exception as exc:
-                if is_cq_values_filename(filename):
-                    raise
-                logger.info("Skipping qPCR CSV %s: %s", filename, exc)
-            else:
+            with _open_raw(s3_bucket, s3_key, instrument_id, run_id) as local_file_path:
+                dye_channels = _dye_channels_or_skip(filename, local_file_path)
+            if dye_channels is not None:
                 client.update_run(instrument_id, run_id, metadata={"dye_channels": dye_channels})
                 logger.info("Parsed dye channels: %s", dye_channels)
         else:
@@ -160,18 +158,27 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
         raise
 
 
-def _download_raw(
+@contextmanager
+def _open_raw(
     s3_bucket: str | None,
     s3_key: str,
     instrument_id: str,
     run_id: str,
-    filename: str,
-) -> Path:
+) -> Iterator[Path]:
     raw_data_dir = config.LOCAL_RAW_DATA_DIRPATH / instrument_id / run_id
-    local_file_path = raw_data_dir / filename
-    s3_utils.download_file(f"s3://{s3_bucket}/{s3_key}", local_file_path)
-    logger.info("Downloaded %s to %s", filename, local_file_path)
-    return local_file_path
+    with local_raw_file(s3_bucket or "", s3_key, raw_data_dir) as local_file_path:
+        yield local_file_path
+
+
+def _dye_channels_or_skip(filename: str, local_file_path: Path) -> list[str] | None:
+    """Return dye channels, or None when a non-Cq CSV cannot be parsed."""
+    try:
+        return parse_dye_channels(local_file_path)
+    except Exception as exc:
+        if is_cq_values_filename(filename):
+            raise
+        logger.info("Skipping qPCR CSV %s: %s", filename, exc)
+        return None
 
 
 def _upload_processed(

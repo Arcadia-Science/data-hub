@@ -14,6 +14,15 @@ from data_hub_lambda.azure_cielo_qpcr.process_file import process_file
 from data_hub_lambda.models import FileResponse
 
 
+@pytest.fixture(autouse=True)
+def _small_raw_object(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The shared helper asks S3 for the size before it downloads."""
+    monkeypatch.setattr(
+        "data_hub_shared.s3_utils.object_content_length",
+        lambda *_args, **_kwargs: 128,
+    )
+
+
 def _segment(payload: bytes) -> bytes:
     return struct.pack(">I", len(payload)) + payload
 

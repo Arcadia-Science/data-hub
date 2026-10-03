@@ -2,7 +2,6 @@ from __future__ import annotations
 import logging
 
 from data_hub_lambda.api_client import get_client
-from data_hub_shared import s3_utils
 from data_hub_shared.config import config
 
 logger = logging.getLogger(__name__)
@@ -33,14 +32,9 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
     )
     file_id = file_record.id
 
+    # The PDF is only registered. Nothing reads it, so it is never fetched.
     try:
         client.update_file(file_id, status="processing")
-
-        raw_data_dir = config.LOCAL_RAW_DATA_DIRPATH / instrument_id / run_id
-        local_file_path = raw_data_dir / filename
-        s3_utils.download_file(f"s3://{s3_bucket}/{s3_key}", local_file_path)
-        logger.info("Downloaded %s to %s", filename, local_file_path)
-
         client.update_file(file_id, status="completed")
         logger.info("File %s marked as completed.", filename)
 

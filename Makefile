@@ -157,6 +157,12 @@ sam-validate:
 	cd infra && sam validate --lint --region us-west-1 --template template.yaml
 	cd infra && sam validate --lint --region us-west-1 --template bootstrap.yaml
 
+# Runs the CI and Makefile `sam deploy` commands with dummy credentials and no
+# reachable AWS endpoint, to catch parameter overrides SAM rejects before AWS.
+.PHONY: sam-check-overrides
+sam-check-overrides:
+	uv run --no-project --with pyyaml python .github/scripts/check_sam_deploy_overrides.py
+
 .PHONY: sam-bootstrap
 sam-bootstrap:
 	aws cloudformation deploy \
@@ -167,6 +173,7 @@ sam-bootstrap:
 		--tags project=arcadia-data-hub
 
 # Usage: make sam-deploy ENV=staging
+# AlarmEmail is quoted because SAM CLI rejects an empty `Key=` override.
 .PHONY: sam-deploy
 sam-deploy:
 ifndef ENV
@@ -182,7 +189,9 @@ endif
 		"DataHubApiKey=$(DATA_HUB_API_KEY)" \
 		"GitHubOidcProviderArn=$(GITHUB_OIDC_PROVIDER_ARN)" \
 		"VercelOidcProviderArn=$(VERCEL_OIDC_PROVIDER_ARN)" \
-		"AdminDeployPrincipalArn=$(ADMIN_DEPLOY_PRINCIPAL_ARN)"
+		"AdminDeployPrincipalArn=$(ADMIN_DEPLOY_PRINCIPAL_ARN)" \
+		"EnableS3Files=$(ENABLE_S3_FILES)" \
+		'AlarmEmail="$(ALARM_EMAIL)"'
 
 # Usage: make sam-status ENV=staging
 .PHONY: sam-status

@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 
 from data_hub_lambda.api_client import get_client
+from data_hub_lambda.raw_access import local_raw_file
 from data_hub_lambda.unchained_labs_aunty.utils import (
     parse_aunty_workbook,
     write_curves_csv,
@@ -45,11 +46,8 @@ def process_file(instrument_id: str, run_id: str, filename: str) -> None:
         client.update_file(file_id, status="processing")
 
         raw_data_dir = config.LOCAL_RAW_DATA_DIRPATH / instrument_id / run_id
-        local_file_path = raw_data_dir / filename
-        s3_utils.download_file(f"s3://{s3_bucket}/{s3_key}", local_file_path)
-        logger.info("Downloaded %s to %s", filename, local_file_path)
-
-        parsed = parse_aunty_workbook(local_file_path)
+        with local_raw_file(s3_bucket or "", s3_key, raw_data_dir) as local_file_path:
+            parsed = parse_aunty_workbook(local_file_path)
         logger.info(
             "Parsed %d experiments (%d curve rows).",
             len(parsed.experiments),

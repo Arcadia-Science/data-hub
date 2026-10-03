@@ -94,7 +94,7 @@ npm run db:push
 The Lambda function is deployed as a Docker container image via [AWS SAM](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/). Infrastructure is defined in `infra/template.yaml` and includes:
 
 - S3 buckets (`arcadia-data-hub-raw-{env}` and `arcadia-data-hub-processed-{env}`)
-- The Lambda function (container image, 1024 MB memory, 300 s timeout, function URL)
+- The Lambda function (container image, 10,240 MB memory, 900 s timeout, function URL)
 - S3 event triggers for each supported instrument
 - IAM roles for Lambda execution, GitHub Actions deployment (OIDC), and Vercel web app S3 access (OIDC)
 
@@ -121,6 +121,40 @@ Secrets (`DATA_HUB_API_KEY`, etc.) are stored in GitHub environment secrets scop
 > The bucket policies that deny object writes from unapproved principals (`RawDataBucketPolicy`, `ProcessedDataBucketPolicy`, `ArchivesBucketPolicy`) are managed the same way: adding or changing them requires `s3:PutBucketPolicy`, which the CI role does **not** hold (by design — a routine CI role that could rewrite these policies could also disable the write protection). Apply changes to the deny lists via an admin `make sam-deploy`, not CI. The same policies also deny bucket-configuration actions (`s3:PutBucketPolicy`, `s3:DeleteBucketPolicy`, `s3:PutBucketAcl`, `s3:PutBucketPublicAccessBlock`, `s3:PutBucketVersioning`) to everyone except the account root and the admin principal named by the `AdminDeployPrincipalArn` stack parameter, so no other principal in the account can disable the write protection either.
 >
 > Staging roles carry a permissions boundary (`data-hub-boundary-staging`) that caps their permissions at the actions they already use and explicitly denies access to production buckets, production roles, the production Lambda function, and the production ECR repository. Managed-policy attachment, role creation, and trust-policy changes are admin-only in both environments — with them, a CI role could escalate itself to `AdministratorAccess`. Widening the boundary or changing those grants takes an admin `make sam-deploy`.
+>
+> The optional VPC, NAT gateway, and processing alarms are the same kind of change. CI cannot create a VPC, a NAT gateway, an SNS topic, or a CloudWatch alarm. The first deploy that turns `EnableS3Files` on, and any later change to that network or to the alarms, has to be an admin `make sam-deploy`. That deploy reads `ENABLE_S3_FILES` from `infra/.env.<env>`. The GitHub environment variable `ENABLE_S3_FILES` only affects later CI deploys, so set both to the same value, `true` or `false`, before the admin deploy. If they differ, the next CI deploy tries to add or remove the network, lacks the permission, and rolls back. The workflow passes the variable on every run, and an empty value is rejected, so a deploy that forgets it stops instead of deleting the network. `ALARM_EMAIL` is optional. A new address has to confirm the subscription from the message AWS sends.
+>
+> Roll out to production in this order:
+>
+> 1. Set the `production` GitHub environment variables, and the same values in `infra/.env.production`.
+> 2. Run `make sam-deploy ENV=production` from the exact commit being promoted.
+> 3. Push that commit to `production`.
+>
+> An admin deploy from an unmerged branch leaves a gap. Any push to `production` before the promotion, such as a hotfix, makes CI deploy the old template. That deploy tries to delete the alarms, lacks the permission, and rolls back.
+>
+> Turning `EnableS3Files` off later also needs an admin deploy. The execution role keeps its VPC permissions either way, because Lambda deletes the function's network interface with that role after the function leaves the VPC. That can take up to 20 minutes, which can outlast CloudFormation's delete attempts. A delete that fails during cleanup is dropped from the stack, the stack still reports `UPDATE_COMPLETE`, and a second deploy does not retry it. After turning the option off:
+>
+> 1. Check the stack events for `DELETE_FAILED`.
+> 2. If the subnets or security group were left behind, wait for the function's network interface to disappear.
+> 3. Delete the security group, the subnets, and the VPC by hand.
+>
+> If the function stays in the VPC and is idle for 14 days, Lambda reclaims that interface and the next invocation fails until the interface is recreated. S3 events retry on their own. A reprocess or archive build can fail once.
+>
+> The NAT gateway is about $39 a month per environment ($0.048 an hour, plus $0.005 an hour for its public IPv4 address, plus $0.048 per GB of API traffic). S3 reads use a free gateway endpoint and do not go through the NAT gateway. One NAT gateway serves both private subnets, so an outage in its availability zone cuts the Lambda off from the API; a second gateway would double the cost. Leave `EnableS3Files` at `false` unless the environment needs it.
+>
+> With `EnableS3Files` on, the raw bucket is also mounted in the Lambda at `/mnt/raw` through Amazon S3 Files. Lambda mounts the file system every time it starts an execution environment, before any code reads the mount. A broken file system policy, security group, or execution role therefore stops all processing, not only the files that would use the mount.
+>
+> The file system policy denies writes and root access to everyone, and denies mounting except for this environment's Lambda role through the stack's access point. The S3 Files sync role has the read and write permissions AWS documents, and the raw bucket policy exempts it from the write block, because S3 Files refuses to create the file system otherwise. Since nothing can write through the mount, the sync role never has a change to copy back.
+>
+> Turn `EnableS3Files` on in its own admin deploy, after this template is already live with it off. CloudFormation updates the raw bucket policy only after it creates the file system, so the sync role's exemption has to be in place from an earlier deploy. A deploy that upgrades the template and turns the mount on at once fails while creating `RawFilesFileSystem` with "does not have permission to call s3:HeadObject", and rolls back. S3 Files write actions are not in the CI role, so changing the file system policy takes an admin `make sam-deploy`. The staging boundary enforces this in staging. In production the CI role can edit its own inline policies, so there the rule relies on code review.
+>
+> The raw bucket's notification configuration turns on EventBridge delivery while the mount is on, because S3 replaces the whole configuration on every write and a later deploy would otherwise drop it.
+>
+> Opening a file on the mount imports metadata for every entry in each folder on its path: the root, the instrument folder, and the run folder. S3 Files never removes that metadata, and each entry is billed. Use the mount only for files that need it, and never list or walk folders there.
+>
+> Before the admin deploy that first creates the file system, check the raw bucket's `NumberOfObjects` metric in CloudWatch (`AWS/S3`, `StorageType=AllStorageTypes`). The metric counts old versions too. Above about 12 million objects, `RawFilesFileSystem` needs `AcceptBucketWarning: true`, and setting that later replaces the file system.
+>
+> Staging needs an admin deploy for this change even with `ENABLE_S3_FILES=false`. The permissions boundary changes either way, and the CI role does not have `iam:CreatePolicyVersion`. After the admin deploy, upload a test file to staging and confirm it processes.
 
 #### Local deployment
 

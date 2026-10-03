@@ -7,6 +7,8 @@ on:
       - production
     paths:
       - .github/workflows/infra-validate.yml
+      - .github/workflows/deploy-lambda.yml
+      - .github/scripts/check_sam_deploy_overrides.py
       - infra/**
       - Makefile
   pull_request:
@@ -15,6 +17,8 @@ on:
       - production
     paths:
       - .github/workflows/infra-validate.yml
+      - .github/workflows/deploy-lambda.yml
+      - .github/scripts/check_sam_deploy_overrides.py
       - infra/**
       - Makefile
 
@@ -30,6 +34,11 @@ jobs:
       - uses: aws-actions/setup-sam@v3
         with:
           use-installer: true
+      - uses: astral-sh/setup-uv@v8.1.0
 
       - name: Validate CloudFormation templates
         run: make sam-validate
+
+      # The script gives SAM dummy credentials and no reachable AWS endpoint.
+      - name: Check sam deploy parameter overrides
+        run: make sam-check-overrides

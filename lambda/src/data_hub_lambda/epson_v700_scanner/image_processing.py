@@ -127,6 +127,8 @@ class TiffProcessor:
     def export_jpg(
         self,
         colony_results: list[ColonyDetectionResult] | None = None,
+        *,
+        output_dir: Path | None = None,
     ) -> Path:
         """Detect plates, draw overlays, resize, and write a JPEG.
 
@@ -154,7 +156,11 @@ class TiffProcessor:
 
         img = self._resize(img)
 
-        jpg_path = self.path.parent / f"{self.path.stem}.jpg"
+        # A mounted raw file's folder is read-only, so callers that opened
+        # the TIFF from the mount pass a directory on local disk.
+        dest_dir = self.path.parent if output_dir is None else output_dir
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        jpg_path = dest_dir / f"{self.path.stem}.jpg"
         iio.imwrite(jpg_path, img, quality=JPEG_QUALITY)
         return jpg_path
 

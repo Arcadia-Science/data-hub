@@ -14,6 +14,15 @@ _FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures"
 
 
 @pytest.fixture(autouse=True)
+def _small_raw_object(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The shared helper asks S3 for the size before it downloads."""
+    monkeypatch.setattr(
+        "data_hub_shared.s3_utils.object_content_length",
+        lambda *_args, **_kwargs: 128,
+    )
+
+
+@pytest.fixture(autouse=True)
 def _reset_api_client() -> Any:
     import data_hub_lambda.api_client as api_module
 

@@ -1,7 +1,12 @@
 """Unit tests for DishCam `process_file` orchestration."""
 
 from __future__ import annotations
-from collections.abc import Iterator
+import contextlib
+import shutil
+import signal
+import subprocess
+import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -9,17 +14,27 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pytest
+import tifffile
 
 from data_hub_lambda.api_client import ApiError
+from data_hub_lambda.deadline import (
+    ProcessingDeadlineError,
+    check_deadline,
+    set_deadline_from_remaining_ms,
+)
 from data_hub_lambda.dishcam.parse_metadata import MIN_PLAYBACK_FPS
 from data_hub_lambda.models import FileResponse, RunDetailFile, RunDetailResponse, RunResponse
 
 
 @pytest.fixture(autouse=True)
-def _skip_disk_check() -> Any:
-    """Existing cases use tiny stand-in files and do not talk to S3."""
-    with patch("data_hub_lambda.dishcam.process_file.ensure_object_fits_on_disk"):
+def _small_raw_object() -> Any:
+    """Existing cases use tiny stand-in files and do not talk to S3.
+
+    The shared helper asks for the object size before it downloads.
+    """
+    with patch("data_hub_shared.s3_utils.object_content_length", return_value=128):
         yield
 
 
@@ -1543,7 +1558,7 @@ class TestLateOwnSidecar:
 
 
 _TOO_BIG = (
-    "File is 10.3 GB, larger than the 10.0 GB of disk available for processing. "
+    "File is 10.3 GB, larger than the 9.5 GB of disk available for processing. "
     "The raw file is stored and can be downloaded."
 )
 
@@ -1552,22 +1567,15 @@ class TestEncodeTiffTooLarge:
     def test_oversized_tiff_is_marked_failed_and_not_downloaded(self, tmp_path: Path) -> None:
         client = MagicMock()
         client.create_file.return_value = _file_response(10, "stack.tif")
-        from data_hub_lambda.processing_disk import (
-            ObjectTooLargeForDiskError,
-            ensure_object_fits_on_disk,
-        )
+        from data_hub_lambda.raw_access import ObjectTooLargeForDiskError
 
         with (
             patch(
-                "data_hub_lambda.dishcam.process_file.ensure_object_fits_on_disk",
-                ensure_object_fits_on_disk,
-            ),
-            patch(
-                "data_hub_lambda.processing_disk.s3_utils.object_content_length",
+                "data_hub_shared.s3_utils.object_content_length",
                 return_value=11_097_280_814,
             ),
             patch(
-                "data_hub_lambda.processing_disk.shutil.disk_usage",
+                "data_hub_lambda.raw_access.shutil.disk_usage",
                 return_value=SimpleNamespace(free=10 * 1024**3),
             ),
             patch("data_hub_lambda.dishcam.process_file.s3_utils.download_file") as download,
@@ -1595,3 +1603,182 @@ class TestEncodeTiffTooLarge:
             error_message=_TOO_BIG,
             metadata=None,
         )
+
+
+class TestEncodeTiffFromMount:
+    def test_mounted_tiff_is_encoded_and_not_deleted(self, tmp_path: Path) -> None:
+        client = MagicMock()
+        client.create_file.return_value = _file_response(10, "stack.tif")
+        mount = tmp_path / "mount"
+        mounted = mount / "dishcam" / "run-xyz" / "stack.tif"
+        mounted.parent.mkdir(parents=True)
+        mounted.write_bytes(b"tiff-bytes")
+
+        with (
+            patch("data_hub_lambda.config.lambda_config.RAW_DATA_MOUNT_PATH", str(mount)),
+            patch("data_hub_lambda.raw_access.MOUNT_READ_MIN_BYTES", 1),
+            patch(
+                "data_hub_shared.s3_utils.object_content_length",
+                return_value=len(b"tiff-bytes"),
+            ),
+            patch("data_hub_lambda.dishcam.process_file.s3_utils.download_file") as download,
+            patch("data_hub_lambda.dishcam.process_file.encode_tiff_stack") as encode,
+            patch("data_hub_lambda.dishcam.process_file.s3_utils.upload_file"),
+        ):
+
+            def _write_outputs(_tiff: Path, mp4: Path, poster: Path, _fps: float) -> None:
+                mp4.write_bytes(b"mp4")
+                poster.write_bytes(b"jpg")
+
+            encode.side_effect = _write_outputs
+            from data_hub_lambda.dishcam.process_file import _encode_tiff
+
+            assert _encode_tiff(
+                client,
+                "dishcam",
+                "run-xyz",
+                "raw",
+                tmp_path / "work",
+                "stack.tif",
+                1.0,
+                {},
+                "run.json",
+                owned=True,
+            )
+
+        download.assert_not_called()
+        assert encode.call_args.args[0] == mounted
+        assert mounted.exists()
+
+
+def _write_tiff(path: Path, frames: int, height: int = 48, width: int = 64) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rng = np.random.default_rng(0)
+    with tifffile.TiffWriter(path) as writer:
+        for _ in range(frames):
+            frame = rng.integers(0, 256, (height, width, 3), dtype=np.uint8)
+            writer.write(frame, photometric="rgb")
+
+
+def _stop_after(passes: int, before_stop: Callable[[], None] = lambda: None) -> Any:
+    """A `check_deadline` that lets *passes* calls through, then runs out of time."""
+    calls: list[str] = []
+
+    def _check(step: str) -> None:
+        calls.append(step)
+        if len(calls) > passes:
+            before_stop()
+            set_deadline_from_remaining_ms(0)
+        check_deadline(step)
+
+    return _check
+
+
+def _failed_message(client: MagicMock) -> str:
+    failed = [
+        call for call in client.update_file.call_args_list if call.kwargs.get("status") == "failed"
+    ]
+    assert len(failed) == 1
+    return failed[0].kwargs["error_message"]
+
+
+class TestEncodeTiffDeadline:
+    def _encode(self, client: MagicMock, raw_dir: Path) -> bool:
+        from data_hub_lambda.dishcam.process_file import _encode_tiff
+
+        return _encode_tiff(
+            client,
+            "dishcam",
+            "run-xyz",
+            "raw",
+            raw_dir,
+            "stack.tif",
+            1.0,
+            {},
+            "run.json",
+            owned=True,
+        )
+
+    def test_deadline_mid_encode_fails_the_stack_and_removes_local_files(
+        self, tmp_path: Path
+    ) -> None:
+        client = MagicMock()
+        client.create_file.return_value = _file_response(10, "stack.tif")
+        raw_dir = tmp_path / "work"
+        downloaded: list[Path] = []
+
+        def _download(_uri: str, local_path: Path, **_k: Any) -> None:
+            _write_tiff(local_path, frames=3)
+            downloaded.append(local_path)
+
+        def _partial_encode(cmd: list[str], chunks: Any) -> None:
+            with Path(cmd[-1]).open("wb") as out:
+                for chunk in chunks:
+                    out.write(chunk)
+
+        def _poster(_ffmpeg: str, _frame: Any, dest: Path) -> None:
+            dest.write_bytes(b"jpg")
+
+        with (
+            patch("data_hub_shared.s3_utils.download_file", side_effect=_download),
+            patch("data_hub_lambda.dishcam.encode_video.resolve_ffmpeg", return_value="ffmpeg"),
+            patch("data_hub_lambda.dishcam.encode_video._write_jpeg", side_effect=_poster),
+            patch("data_hub_lambda.dishcam.encode_video._pipe_ffmpeg", side_effect=_partial_encode),
+            patch("data_hub_lambda.dishcam.encode_video.check_deadline", _stop_after(1)),
+            pytest.raises(ProcessingDeadlineError, match=r"1 of 3 frames done"),
+        ):
+            self._encode(client, raw_dir)
+
+        assert "1 of 3 frames done" in _failed_message(client)
+        assert downloaded == [raw_dir / "stack.tif"]
+        assert not (raw_dir / "stack.tif").exists()
+        assert not (raw_dir / "stack.mp4").exists()
+        assert not (raw_dir / "stack.jpg").exists()
+
+    @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg is not on PATH")
+    def test_real_ffmpeg_is_killed_and_the_partial_mp4_removed(self, tmp_path: Path) -> None:
+        client = MagicMock()
+        client.create_file.return_value = _file_response(10, "stack.tif")
+        raw_dir = tmp_path / "work"
+        mp4 = raw_dir / "stack.mp4"
+        real_popen = subprocess.Popen
+        processes: list[subprocess.Popen[Any]] = []
+        saw_partial_mp4: list[bool] = []
+
+        def _record(*args: Any, **kwargs: Any) -> subprocess.Popen[Any]:
+            process = real_popen(*args, **kwargs)
+            processes.append(process)
+            return process
+
+        # ffmpeg reads a few seconds of 1 fps input before it opens the MP4.
+        def _wait_for_partial_mp4() -> None:
+            give_up = time.monotonic() + 10
+            while not mp4.exists() and time.monotonic() < give_up:
+                time.sleep(0.05)
+            saw_partial_mp4.append(mp4.exists())
+
+        with (
+            patch(
+                "data_hub_shared.s3_utils.download_file",
+                side_effect=lambda _uri, local_path, **_k: _write_tiff(local_path, frames=16),
+            ),
+            patch("data_hub_lambda.dishcam.encode_video.subprocess.Popen", side_effect=_record),
+            patch(
+                "data_hub_lambda.dishcam.encode_video.check_deadline",
+                _stop_after(12, _wait_for_partial_mp4),
+            ),
+            pytest.raises(ProcessingDeadlineError, match=r"12 of 16 frames done"),
+        ):
+            self._encode(client, raw_dir)
+
+        poster_process, encode_process = processes
+        if encode_process.stdin is not None:
+            with contextlib.suppress(BrokenPipeError):
+                encode_process.stdin.close()
+        assert saw_partial_mp4 == [True]
+        assert poster_process.returncode == 0
+        assert encode_process.returncode == -signal.SIGKILL
+        assert not mp4.exists()
+        assert not (raw_dir / "stack.jpg").exists()
+        assert not (raw_dir / "stack.tif").exists()
+        assert "12 of 16 frames done" in _failed_message(client)

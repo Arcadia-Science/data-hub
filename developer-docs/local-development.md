@@ -173,7 +173,7 @@ What happens under the hood:
 
 1. The CLI copies `--source` into `lambda/.local-s3/test-raw-data-bucket/<instrument-id>/<run-id>/<filename>`. That mirror directory is gitignored.
 2. `AWS_S3_RAW_DATA_BUCKET` / `AWS_S3_PROCESSED_DATA_BUCKET` are set so `process_file()` modules see consistent bucket names.
-3. `data_hub_shared.s3_utils.download_file` and `upload_file` are monkey-patched for the duration of the call to `shutil.copy2` from/to the mirror — no boto3, no AWS credentials, no LocalStack.
+3. `data_hub_shared.s3_utils.download_file` and `upload_file` are monkey-patched for the duration of the call to `shutil.copy2` from/to the mirror, and `object_content_length` returns the mirrored file's size — no boto3, no AWS credentials, no LocalStack.
 4. A synthetic S3 event is built and `lambda_handler(event, ctx)` runs the same dispatch path production uses, calling the dev API at `localhost:3000` for the run/file upserts.
 
 After it returns, navigate to `http://localhost:3000/instruments/<instrument-id>/runs/<run-id>` to inspect what landed; processed artifacts show up under `lambda/.local-s3/test-processed-data-bucket/...`.

@@ -12,6 +12,8 @@ import numpy as np
 import tifffile
 from numpy.typing import NDArray
 
+from data_hub_lambda.deadline import check_deadline
+
 logger = logging.getLogger(__name__)
 
 # Width cap keeps the preview inside H.264 Level 5.2 / browser limits
@@ -129,7 +131,14 @@ def encode_tiff_stack(
         if not tif.pages:
             raise ValueError(f"{tiff_path.name} has no TIFF pages")
 
+        total = len(tif.pages)
+        done = 0
+        # Stop between frames rather than at the Lambda timeout. A timed-out
+        # invocation is retried twice from the start, and the file looks
+        # stalled while those retries run.
+        check_deadline(f"encoding ({done} of {total} frames done)")
         first = _as_rgb24(tif.pages[0].asarray())
+        done = 1
         height, width = first.shape[:2]
         _write_jpeg(ffmpeg, first, poster_path)
 
@@ -176,8 +185,11 @@ def encode_tiff_stack(
         )
 
         def _chunks() -> Iterator[bytes]:
+            nonlocal done
             yield first.tobytes()
-            for page in tif.pages[1:]:
-                yield _as_rgb24(page.asarray()).tobytes()
+            for index in range(1, total):
+                check_deadline(f"encoding ({done} of {total} frames done)")
+                done += 1
+                yield _as_rgb24(tif.pages[index].asarray()).tobytes()
 
         _pipe_ffmpeg(cmd, _chunks())

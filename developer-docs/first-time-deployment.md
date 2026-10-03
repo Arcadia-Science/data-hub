@@ -155,9 +155,13 @@ DATA_HUB_API_KEY=<api-key-from-step-2>
 GITHUB_OIDC_PROVIDER_ARN=<github-oidc-arn-from-step-1>
 VERCEL_OIDC_PROVIDER_ARN=<vercel-oidc-arn-from-step-1>
 ADMIN_DEPLOY_PRINCIPAL_ARN=<admin-role-arn-pattern>
+ENABLE_S3_FILES=false
+ALARM_EMAIL=
 ```
 
 `ADMIN_DEPLOY_PRINCIPAL_ARN` is the IAM role ARN pattern (wildcards allowed) of the principal that runs admin deploys; the bucket policies exempt it from the bucket-configuration deny. Use the role ARN form, not the `sts::assumed-role` session form — for SSO admin roles, find it with `aws iam list-roles --path-prefix /aws-reserved/sso.amazonaws.com/`.
+
+`ENABLE_S3_FILES` is required. Use `false` unless this environment should put the Lambda in a VPC with a NAT gateway so it can mount the raw bucket. Deploy with `false` first even then, and turn it on in a later deploy (see [CI and deployment](ci-and-deployment.md)). That network is about $39 a month, and it only allows outbound HTTPS, so `DATA_HUB_API_URL` has to use `https://` on port 443. An empty value fails the deploy. `ALARM_EMAIL` is optional. When it is set, AWS emails that address to confirm the processing-alarm subscription.
 
 Then deploy. The Makefile loads `infra/.env.staging` automatically when `ENV=staging` is set:
 
@@ -190,7 +194,15 @@ In the GitHub repo, go to **Settings → Environments**, create a `staging` envi
 | `DATA_HUB_API_URL` | Base API URL for the environment. |
 | `DATA_HUB_API_KEY` | API key for Lambda → Data Hub auth (also used by the archive-job callback). |
 
-Also add one environment **variable** (not a secret): `ADMIN_DEPLOY_PRINCIPAL_ARN`, the same admin role ARN pattern used in `infra/.env.staging`. The deploy workflow passes it to the stack on every run.
+Also add environment **variables** (not secrets):
+
+| Variable | Value |
+| --- | --- |
+| `ADMIN_DEPLOY_PRINCIPAL_ARN` | The same admin role ARN pattern used in `infra/.env.staging`. |
+| `ENABLE_S3_FILES` | `true` or `false`. Must be set. An empty value fails the deploy so it cannot turn the network off by accident. |
+| `ALARM_EMAIL` | Optional address for processing alarms. Leave unset for no email. |
+
+The deploy workflow passes these to the stack on every run.
 
 ## 5. Finish wiring the web app
 

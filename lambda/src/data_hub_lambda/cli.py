@@ -21,6 +21,37 @@ def cli() -> None:
     """Locally run instrument-specific file parsing and processing."""
 
 
+@cli.command("synthetic-tiff")
+@click.argument("dest", type=click.Path(dir_okay=False, path_type=Path))
+@click.option(
+    "--size-gib",
+    type=click.FloatRange(min=0, min_open=True),
+    default=None,
+    help="Approximate stack size in GiB (1 GiB is 1024^3 bytes).",
+)
+@click.option(
+    "--size-bytes",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Approximate stack size in bytes.",
+)
+def synthetic_tiff(dest: Path, size_gib: float | None, size_bytes: int | None) -> None:
+    """Write an uncompressed RGB TIFF stack for a staging timing test.
+
+    Pass one of --size-gib or --size-bytes. The file is at least that large.
+    """
+    from data_hub_lambda_devtools.synthetic_stack import write_synthetic_tiff_stack
+
+    if size_bytes is not None and size_gib is None:
+        target = size_bytes
+    elif size_gib is not None and size_bytes is None:
+        target = int(size_gib * 1024**3)
+    else:
+        raise click.UsageError("Pass exactly one of --size-gib or --size-bytes.")
+    written = write_synthetic_tiff_stack(dest, target)
+    click.echo(f"Wrote {dest} ({written} bytes)")
+
+
 # ---------------------------------------------------------------------------
 # Azure 600 Gel Doc
 # ---------------------------------------------------------------------------
@@ -85,14 +116,7 @@ def hina(file: Path, output_dir: Path | None) -> None:
 
     processor = ND2Processor(file)
     processor.load()
-    jpg_path = processor.export_jpg()
-
-    if output_dir is not None:
-        output_dir.mkdir(parents=True, exist_ok=True)
-        dest = output_dir / jpg_path.name
-        shutil.move(str(jpg_path), str(dest))
-        jpg_path = dest
-
+    jpg_path = processor.export_jpg(output_dir=output_dir)
     click.echo(f"Exported JPG: {jpg_path}")
 
     metadata = parse_metadata(processor.image)
@@ -406,6 +430,8 @@ def handler(
 
     os.environ["AWS_S3_RAW_DATA_BUCKET"] = raw_bucket
     os.environ["AWS_S3_PROCESSED_DATA_BUCKET"] = processed_bucket
+    # Same layout as the S3 Files mount: <root>/<bucket>/<key>.
+    os.environ["RAW_DATA_MOUNT_PATH"] = str(mirror_root / raw_bucket)
     _reset_config_singletons()
 
     # Real S3 events form-encode the object key (spaces -> '+', '+' -> '%2B'),
