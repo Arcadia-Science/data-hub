@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { makeSignature } from "better-auth/crypto";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
@@ -164,6 +164,113 @@ export async function api(
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+}
+
+/**
+ * Runs the real OAuth authorization-code + PKCE flow against the test server
+ * and returns an MCP access token (a JWT) for `userId`. MCP does not accept
+ * personal access tokens, so MCP integration tests sign in this way.
+ *
+ * `scope` is the space-separated MCP scope list the client requests and the
+ * user consents to, for example `"read"` or `"read write"`.
+ */
+export async function getMcpAccessToken(
+  userId: string,
+  scope = "read write"
+): Promise<string> {
+  const baseUrl = getBaseUrl();
+  const issuer = `${baseUrl}/api/auth`;
+  const redirectUri = "http://127.0.0.1/callback";
+  const oauthScope = `openid ${scope}`;
+  const verifier = randomBytes(32).toString("base64url");
+  const challenge = createHash("sha256").update(verifier).digest("base64url");
+
+  // The client is inserted directly because `/oauth2/register` is rate
+  // limited per IP and the MCP suites share one server. The row mirrors what
+  // a public PKCE client created by dynamic registration looks like;
+  // authorize, consent, and token exchange below still run for real.
+  const clientId = randomBytes(24).toString("base64url");
+  await getTestDb()
+    .insert(schema.oauthClients)
+    .values({
+      id: crypto.randomUUID(),
+      clientId,
+      name: "Integration Test MCP Client",
+      redirectUris: [redirectUri],
+      scopes: oauthScope.split(" "),
+      tokenEndpointAuthMethod: "none",
+      grantTypes: ["authorization_code"],
+      responseTypes: ["code"],
+      public: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+  const sessionCookie = await seedSessionCookie(userId);
+
+  const authorizeUrl = new URL(`${issuer}/oauth2/authorize`);
+  authorizeUrl.searchParams.set("response_type", "code");
+  authorizeUrl.searchParams.set("client_id", clientId);
+  authorizeUrl.searchParams.set("redirect_uri", redirectUri);
+  authorizeUrl.searchParams.set("scope", oauthScope);
+  authorizeUrl.searchParams.set("code_challenge", challenge);
+  authorizeUrl.searchParams.set("code_challenge_method", "S256");
+
+  const authorizeRes = await fetch(authorizeUrl, {
+    headers: { Cookie: sessionCookie, Accept: "application/json" },
+    redirect: "manual",
+  });
+  const authorizeBody = (await authorizeRes.json()) as { url?: string };
+  if (!authorizeBody.url) {
+    throw new Error("OAuth authorize returned no consent URL");
+  }
+  const consentUrl = new URL(authorizeBody.url, baseUrl);
+
+  const consentRes = await fetch(`${issuer}/oauth2/consent`, {
+    method: "POST",
+    headers: {
+      Cookie: sessionCookie,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({
+      accept: true,
+      scope: oauthScope,
+      oauth_query: consentUrl.searchParams.toString(),
+    }),
+  });
+  const consentBody = (await consentRes.json()) as {
+    url?: string;
+    redirect_uri?: string;
+  };
+  const codeRedirect = consentBody.url ?? consentBody.redirect_uri;
+  const code = codeRedirect
+    ? new URL(codeRedirect).searchParams.get("code")
+    : null;
+  if (!code) {
+    throw new Error("OAuth consent returned no authorization code");
+  }
+
+  const tokenRes = await fetch(`${issuer}/oauth2/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id: clientId,
+      code,
+      code_verifier: verifier,
+      redirect_uri: redirectUri,
+      // Requesting the MCP resource makes the AS mint a JWT access token.
+      resource: `${baseUrl}/mcp/v1`,
+    }),
+  });
+  if (tokenRes.status !== 200) {
+    throw new Error(`OAuth token exchange returned ${tokenRes.status}`);
+  }
+  const { access_token: accessToken } = (await tokenRes.json()) as {
+    access_token: string;
+  };
+  return accessToken;
 }
 
 // ---------------------------------------------------------------------------

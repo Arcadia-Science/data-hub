@@ -2,7 +2,6 @@ import type { AuthInfo } from "@modelcontextprotocol/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { oauthClients } from "@/lib/db/schema";
-import { getMcpUserId } from "@/lib/mcp/tools/helpers";
 
 const CLIENT_NAME_MAX = 100;
 const CACHE_MAX = 500;
@@ -16,24 +15,15 @@ function trimClientLabel(value: string): string {
   return trimmed.length > 0 ? trimmed : "unknown";
 }
 
-/** PAT fallback stores the user id in `clientId`, which is not a client name. */
-export function isPatAuth(authInfo: AuthInfo | undefined): boolean {
-  const userId = getMcpUserId(authInfo);
-  return Boolean(authInfo && userId && authInfo.clientId === userId);
-}
-
 /**
- * Display name registered for the OAuth client ("Cursor", "Claude"), `pat`
- * for the personal-access-token fallback, or `unknown` when the row has no name.
+ * Display name registered for the OAuth client ("Cursor", "Claude"), or
+ * `unknown` when the row has no name.
  */
 export async function mcpClientLabel(
   authInfo: AuthInfo | undefined
 ): Promise<string> {
   if (!authInfo?.clientId || authInfo.clientId === "unknown") {
     return "unknown";
-  }
-  if (isPatAuth(authInfo)) {
-    return "pat";
   }
 
   const cached = nameByClientId.get(authInfo.clientId);

@@ -40,7 +40,6 @@ export interface AnalyticsEvents {
     client: string;
     outcome: "ok" | "tool_error" | "exception";
     duration_bucket: "under_1s" | "1_to_5s" | "5_to_30s" | "over_30s";
-    auth: "oauth" | "pat";
   };
   run_claimed: SurfaceEvent;
   run_deleted: SurfaceEvent;

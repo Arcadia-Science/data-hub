@@ -77,7 +77,6 @@ describe("withMcpTracking", () => {
       tool: "get_me",
       client: "Cursor",
       outcome: "ok",
-      auth: "oauth",
     });
   });
 
@@ -94,7 +93,6 @@ describe("withMcpTracking", () => {
       tool: "search_runs",
       outcome: "ok",
       duration_bucket: "1_to_5s",
-      auth: "oauth",
     });
   });
 
@@ -149,22 +147,6 @@ describe("withMcpTracking", () => {
     await expect(lastProps()).resolves.toMatchObject({
       duration_bucket: "5_to_30s",
     });
-  });
-
-  it("labels a personal access token", async () => {
-    const server = trackedServer();
-    const tool = server.registerTool(
-      "get_me",
-      { description: "who" },
-      async () => ({
-        content: [{ type: "text" as const, text: "ok" }],
-      })
-    );
-    await tool.executor(
-      {},
-      httpCtx({ ...authInfo, clientId: "user-1" }) as never
-    );
-    await expect(lastProps()).resolves.toMatchObject({ auth: "pat" });
   });
 
   it("skips tool events when the caller is anonymous", async () => {

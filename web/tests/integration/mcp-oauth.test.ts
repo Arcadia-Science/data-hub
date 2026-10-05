@@ -7,6 +7,7 @@ import {
   api,
   closeTestDb,
   getBaseUrl,
+  getMcpAccessToken,
   getTestDb,
   resetDb,
   seedSessionCookie,
@@ -431,81 +432,7 @@ describe("MCP OAuth authorization-code flow", () => {
   });
 
   it("read-only OAuth token can read but not mutate via MCP", async () => {
-    const issuer = expectedIssuer();
-    const resource = expectedMcpResource();
-    const redirectUri = "http://127.0.0.1/callback-readonly";
-    const { verifier, challenge } = pkcePair();
-
-    const registerRes = await api("/api/auth/oauth2/register", {
-      method: "POST",
-      body: {
-        client_name: "E2E Read-Only Client",
-        redirect_uris: [redirectUri],
-        token_endpoint_auth_method: "none",
-        grant_types: ["authorization_code"],
-        response_types: ["code"],
-        scope: "openid read",
-      },
-    });
-    expect(registerRes.status).toBe(200);
-    const { client_id: clientId } = (await registerRes.json()) as {
-      client_id: string;
-    };
-
-    const sessionCookie = await seedSessionCookie(userId);
-
-    const authorizeUrl = new URL(`${issuer}/oauth2/authorize`);
-    authorizeUrl.searchParams.set("response_type", "code");
-    authorizeUrl.searchParams.set("client_id", clientId);
-    authorizeUrl.searchParams.set("redirect_uri", redirectUri);
-    authorizeUrl.searchParams.set("scope", "openid read");
-    authorizeUrl.searchParams.set("code_challenge", challenge);
-    authorizeUrl.searchParams.set("code_challenge_method", "S256");
-
-    const authorizeRes = await fetch(authorizeUrl, {
-      headers: { Cookie: sessionCookie, Accept: "application/json" },
-    });
-    const authorizeBody = (await authorizeRes.json()) as { url?: string };
-    const consentUrl = new URL(authorizeBody.url as string, getBaseUrl());
-
-    const consentRes = await fetch(`${issuer}/oauth2/consent`, {
-      method: "POST",
-      headers: {
-        Cookie: sessionCookie,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify({
-        accept: true,
-        scope: "openid read",
-        oauth_query: consentUrl.searchParams.toString(),
-      }),
-    });
-    const consentBody = (await consentRes.json()) as {
-      url?: string;
-      redirect_uri?: string;
-    };
-    const code = new URL(
-      (consentBody.url ?? consentBody.redirect_uri) as string
-    ).searchParams.get("code");
-    expect(code).toBeTruthy();
-
-    const tokenRes = await fetch(`${issuer}/oauth2/token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        client_id: clientId,
-        code: code as string,
-        code_verifier: verifier,
-        redirect_uri: redirectUri,
-        resource,
-      }),
-    });
-    expect(tokenRes.status).toBe(200);
-    const { access_token: accessToken } = (await tokenRes.json()) as {
-      access_token: string;
-    };
+    const accessToken = await getMcpAccessToken(userId, "read");
 
     const listRes = await api("/mcp/v1", {
       method: "POST",

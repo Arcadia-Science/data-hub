@@ -17,7 +17,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-import { isPatAuth, mcpClientLabel } from "@/lib/mcp/client-name";
+import { mcpClientLabel } from "@/lib/mcp/client-name";
 
 function auth(clientId: string, userId = "user-1"): AuthInfo {
   return {
@@ -37,12 +37,6 @@ describe("mcp client name", () => {
   it("returns unknown without a client id", async () => {
     await expect(mcpClientLabel(undefined)).resolves.toBe("unknown");
     await expect(mcpClientLabel(auth("unknown"))).resolves.toBe("unknown");
-    expect(limit).not.toHaveBeenCalled();
-  });
-
-  it("returns pat when the client id is the user id", async () => {
-    expect(isPatAuth(auth("user-1"))).toBe(true);
-    await expect(mcpClientLabel(auth("user-1"))).resolves.toBe("pat");
     expect(limit).not.toHaveBeenCalled();
   });
 

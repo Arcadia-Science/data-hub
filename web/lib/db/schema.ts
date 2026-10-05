@@ -867,8 +867,8 @@ export const feedback = pgTable(
     toolName: text("tool_name"),
     errorMessage: text("error_message"),
     source: feedbackSourceEnum("source").notNull(),
-    // OAuth client id when sent over MCP. Not a foreign key: PAT fallback
-    // auth puts the user id here, which is not an `oauth_client` row.
+    // OAuth client id when sent over MCP. Not a foreign key, so a report
+    // keeps its client id if the client row is later removed.
     oauthClientId: text("oauth_client_id"),
     pageUrl: text("page_url"),
     status: feedbackStatusEnum("status").notNull().default("open"),

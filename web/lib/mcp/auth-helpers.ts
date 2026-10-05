@@ -47,34 +47,3 @@ export function authInfoFromPayload(
     extra: { userId: sub },
   };
 }
-
-function isLoopbackAuthUrl(): boolean {
-  const raw = process.env.BETTER_AUTH_URL;
-  if (!raw) {
-    return false;
-  }
-  try {
-    const host = new URL(raw).hostname;
-    return host === "localhost" || host === "127.0.0.1" || host === "::1";
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Dev/CI PAT Bearer fallback for MCP. Hard-off on Vercel production and on
- * self-hosted production (NODE_ENV=production with a non-loopback
- * BETTER_AUTH_URL). Local/CI `next start` keeps loopback URLs and stays allowed.
- */
-export function isPatFallbackEnabled(): boolean {
-  if (process.env.MCP_ALLOW_PAT_AUTH !== "true") {
-    return false;
-  }
-  if (process.env.VERCEL_ENV === "production") {
-    return false;
-  }
-  if (process.env.NODE_ENV === "production" && !isLoopbackAuthUrl()) {
-    return false;
-  }
-  return true;
-}
