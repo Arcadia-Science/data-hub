@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import type { NextRequest } from "next/server";
 import { trackEvent } from "@/lib/analytics/track";
 import { requireAdmin, requireSession } from "@/lib/api/auth";
@@ -31,7 +31,12 @@ export async function GET() {
       created_at: personalAccessTokens.createdAt,
     })
     .from(personalAccessTokens)
-    .where(eq(personalAccessTokens.userId, authResult.userId))
+    .where(
+      and(
+        eq(personalAccessTokens.userId, authResult.userId),
+        isNull(personalAccessTokens.revokedAt)
+      )
+    )
     .orderBy(desc(personalAccessTokens.createdAt));
 
   return Response.json(tokens);
@@ -118,6 +123,7 @@ export async function POST(request: NextRequest) {
     .insert(personalAccessTokens)
     .values({
       userId: owner.userId,
+      createdBy: authResult.userId,
       name,
       tokenHash,
       tokenPrefix,

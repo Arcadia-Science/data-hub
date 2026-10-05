@@ -57,6 +57,7 @@ try {
   const plaintext = generateToken();
   await db.insert(schema.personalAccessTokens).values({
     userId: adminUser.id,
+    createdBy: adminUser.id,
     name: "db:process-fixtures",
     tokenHash: hashToken(plaintext),
     tokenPrefix: getTokenPrefix(plaintext),

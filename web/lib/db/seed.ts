@@ -140,6 +140,7 @@ export async function seedDevUser(
     .insert(schema.personalAccessTokens)
     .values({
       userId,
+      createdBy: userId,
       name: "seeded-token",
       tokenHash: hashToken(plaintext),
       tokenPrefix: getTokenPrefix(plaintext),

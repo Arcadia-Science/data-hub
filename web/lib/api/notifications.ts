@@ -5,6 +5,7 @@ import {
   desc,
   eq,
   inArray,
+  isNotNull,
   isNull,
   sql,
 } from "drizzle-orm";
@@ -562,7 +563,7 @@ export async function notifyComment(input: {
     // participated on overlap). Each branch pulls all channel-routing columns
     // in one join — candidacy is independent of channel toggles so we can
     // apply per-channel gates in JS after the query.
-    const [attributedRows, participatedRows] = await Promise.all([
+    const [attributedRows, participatedCandidates] = await Promise.all([
       db
         .select({
           userId: runAttributions.userId,
@@ -610,11 +611,18 @@ export async function notifyComment(input: {
         .where(
           and(
             eq(runComments.runId, input.runInternalId),
+            isNotNull(runComments.userId),
             sql`${runComments.userId} <> ${input.authorUserId}`,
             isNull(runComments.deletedAt)
           )
         ),
     ]);
+
+    // Token-authored comments have no user to notify. The query already
+    // excludes them; this narrows the type for the code below.
+    const participatedRows = participatedCandidates.flatMap(
+      ({ userId, ...rest }) => (userId === null ? [] : [{ userId, ...rest }])
+    );
 
     // Attributed wins on overlap: a user already in `attributedRows` is
     // skipped from `participatedRows` to avoid double-delivery.

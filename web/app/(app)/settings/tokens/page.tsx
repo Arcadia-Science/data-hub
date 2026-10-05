@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, isNull } from "drizzle-orm";
 import { KeyRound } from "lucide-react";
 import type { Metadata } from "next/types";
 import { Suspense } from "react";
@@ -112,6 +112,7 @@ async function TokensSection({ isAdmin }: { isAdmin: boolean }) {
     })
     .from(personalAccessTokens)
     .innerJoin(users, eq(users.id, personalAccessTokens.userId))
+    .where(isNull(personalAccessTokens.revokedAt))
     .orderBy(desc(personalAccessTokens.createdAt));
 
   const isExpired = (expiresAt: Date | null) =>
