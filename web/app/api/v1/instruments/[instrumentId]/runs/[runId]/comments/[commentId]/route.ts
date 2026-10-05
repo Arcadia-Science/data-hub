@@ -5,7 +5,7 @@ import {
   trackEvent,
 } from "@/lib/analytics/track";
 import { type ActorRef, actorRefFromAuth } from "@/lib/api/actor";
-import { authorize } from "@/lib/api/auth";
+import { type AuthResult, authorize } from "@/lib/api/auth";
 import {
   apiError,
   CONFLICT,
@@ -17,12 +17,14 @@ import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { commentBody, readJsonBody } from "@/lib/api/openapi";
 import { commentToWire } from "@/lib/api/run-comment-wire";
 import {
+  type CommentDeleter,
   commentWrittenBy,
   getCommentForAuthorCheck,
   softDeleteComment,
   updateComment,
   validateCommentBody,
 } from "@/lib/api/run-comments";
+import { userIsAdmin } from "@/lib/api/user-admin";
 
 interface RouteContext {
   params: Promise<{
@@ -36,20 +38,22 @@ type PreflightResult =
   | {
       kind: "ok";
       actor: ActorRef;
-      commentId: string;
       analytics: SurfaceEvent;
+      authResult: AuthResult;
+      comment: { id: string; userId: string | null; tokenId: string | null };
     }
   | { kind: "error"; response: Response };
 
-// Shared preflight: resolves the run, validates the comment exists and
-// belongs to the requested run, and confirms the caller is the author.
-// Returning a discriminated result lets each handler short-circuit cleanly.
+// Shared preflight: resolves the run and validates the comment exists and
+// belongs to the requested run. Who may change it differs per verb, so each
+// handler checks that itself. Returning a discriminated result lets each
+// handler short-circuit cleanly.
 async function preflight(
   request: NextRequest,
   params: RouteContext["params"]
 ): Promise<PreflightResult> {
   // Both PATCH and DELETE on this route mutate comment state, so both
-  // require runs:write. Bake the check into the shared preflight so a
+  // require runs:comment. Bake the check into the shared preflight so a
   // future verb added here can't accidentally skip it.
   const authResult = await authorize(request, "runs:comment");
   if (authResult instanceof Response) {
@@ -87,26 +91,11 @@ async function preflight(
     };
   }
 
-  // Author-only enforcement at the handler layer so we can return a clean
-  // 403 with a useful message. The library functions also enforce this in
-  // the SQL `where` clause as defense in depth. A token may only change the
-  // comments it posted itself.
-  const actor = actorRefFromAuth(authResult);
-  if (!commentWrittenBy(comment, actor)) {
-    return {
-      kind: "error",
-      response: apiError(
-        403,
-        FORBIDDEN,
-        "Only the comment author may edit or delete this comment"
-      ),
-    };
-  }
-
   return {
     kind: "ok",
-    actor,
-    commentId,
+    authResult,
+    actor: actorRefFromAuth(authResult),
+    comment,
     analytics: surfaceEvent(authResult),
   };
 }
@@ -114,14 +103,27 @@ async function preflight(
 // ---------------------------------------------------------------------------
 // PATCH /api/v1/.../comments/:commentId
 //
-// Update body. Author-only. Sets `editedAt = now()` so the UI can label
-// edited comments without a separate audit table.
+// Update body. Author-only, including for admins: an admin can remove a
+// comment but not put words in someone else's mouth. A token may only edit
+// the comments it posted. Sets `editedAt = now()` so the UI can label edited
+// comments without a separate audit table.
 // ---------------------------------------------------------------------------
 
 export async function PATCH(request: NextRequest, { params }: RouteContext) {
   const pre = await preflight(request, params);
   if (pre.kind === "error") {
     return pre.response;
+  }
+
+  // Enforced here so we can return a clean 403 with a useful message. The
+  // library function also enforces it in the SQL `where` clause as defense
+  // in depth.
+  if (!commentWrittenBy(pre.comment, pre.actor)) {
+    return apiError(
+      403,
+      FORBIDDEN,
+      "Only the comment author may edit this comment"
+    );
   }
 
   const payload = await readJsonBody(request, commentBody);
@@ -135,7 +137,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   }
 
   const updated = await updateComment({
-    commentId: pre.commentId,
+    commentId: pre.comment.id,
     actor: pre.actor,
     body: validated.body,
   });
@@ -143,7 +145,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   // Race condition: comment soft-deleted between the preflight lookup and
   // the update. Treat as 404 — the row is logically gone.
   if (!updated) {
-    return apiError(404, NOT_FOUND, `Comment '${pre.commentId}' not found`);
+    return apiError(404, NOT_FOUND, `Comment '${pre.comment.id}' not found`);
   }
 
   trackEvent("comment_edited", pre.analytics);
@@ -154,9 +156,11 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 // ---------------------------------------------------------------------------
 // DELETE /api/v1/.../comments/:commentId
 //
-// Soft-delete (sets `deletedAt`). Author-only. Idempotent return: if the
-// row is already deleted by the time the update runs, we still return 200
-// since the caller's intent has been satisfied.
+// Soft-delete (sets `deletedAt`). Allowed for the author, or for a workspace
+// admin signed in as a person. Tokens are never admins, so a token can only
+// delete its own comments. Idempotent return: if the row is already deleted
+// by the time the update runs, we still return 200 since the caller's intent
+// has been satisfied.
 // ---------------------------------------------------------------------------
 
 export async function DELETE(request: NextRequest, { params }: RouteContext) {
@@ -165,12 +169,25 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
     return pre.response;
   }
 
-  await softDeleteComment({
-    commentId: pre.commentId,
-    actor: pre.actor,
-  });
+  let deleter: CommentDeleter;
+  if (commentWrittenBy(pre.comment, pre.actor)) {
+    deleter = { as: "author", actor: pre.actor };
+  } else if (
+    pre.authResult.authMethod === "session" &&
+    (await userIsAdmin(pre.authResult.userId))
+  ) {
+    deleter = { as: "admin", adminUserId: pre.authResult.userId };
+  } else {
+    return apiError(
+      403,
+      FORBIDDEN,
+      "Only the comment author or an admin may delete this comment"
+    );
+  }
+
+  await softDeleteComment({ commentId: pre.comment.id, ...deleter });
 
   trackEvent("comment_deleted", pre.analytics);
 
-  return Response.json({ id: pre.commentId, deleted: true });
+  return Response.json({ id: pre.comment.id, deleted: true });
 }

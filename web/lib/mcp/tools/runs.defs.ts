@@ -298,7 +298,7 @@ export const deleteRunCommentTool = {
   scope: "runs:comment",
   title: "Delete Run Comment",
   description:
-    "Soft-delete one of your own comments. Idempotent if already deleted.",
+    "Soft-delete a comment. You can delete your own comments; workspace admins can delete any comment. Idempotent if already deleted.",
   inputSchema: {
     commentId: z.string().describe("Comment UUID"),
   },

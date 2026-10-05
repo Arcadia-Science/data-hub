@@ -446,6 +446,50 @@ describe("MCP Server (HTTP)", () => {
     expect(JSON.parse(del2.content[0].text).deleted).toBe(true);
   });
 
+  // Admins may delete anyone's comment over MCP; members may not.
+  it("delete_run_comment lets an admin remove another user's comment", async () => {
+    const add = await callTool("add_run_comment", {
+      instrumentId,
+      runId,
+      body: "a member's comment",
+    });
+    const created = JSON.parse(add.content[0].text) as { id: string };
+
+    const { userId: adminId } = await seedTestUser({ isAdmin: true });
+    const adminToken = await getMcpAccessToken(adminId);
+    const del = await callTool(
+      "delete_run_comment",
+      { commentId: created.id },
+      adminToken
+    );
+    expect(del.isError).toBeFalsy();
+
+    const [row] = await getTestDb()
+      .select({
+        deletedAt: schema.runComments.deletedAt,
+        deletedBy: schema.runComments.deletedBy,
+      })
+      .from(schema.runComments)
+      .where(eq(schema.runComments.id, created.id));
+    expect(row.deletedAt).toBeInstanceOf(Date);
+    expect(row.deletedBy).toBe(adminId);
+
+    // Edit stays author-only, even for admins.
+    const second = await callTool("add_run_comment", {
+      instrumentId,
+      runId,
+      body: "another comment",
+    });
+    const other = JSON.parse(second.content[0].text) as { id: string };
+    const edit = await callTool(
+      "edit_run_comment",
+      { commentId: other.id, body: "reworded" },
+      adminToken
+    );
+    expect(edit.isError).toBe(true);
+    expect(edit.content[0].text).toMatch(/only edit your own/i);
+  });
+
   // ---- Upload requests (end-to-end) ----------------------------------------
 
   it("request_run_upload queues detected files and rejects unknown ids", async () => {

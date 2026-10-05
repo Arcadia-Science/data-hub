@@ -555,22 +555,31 @@ export async function updateComment(input: {
 }
 
 // ---------------------------------------------------------------------------
-// Soft-delete — author-only. Idempotent: a row already soft-deleted will
-// not match the `isNull(deletedAt)` predicate, so this returns false.
+// Soft-delete — by the author, or by an admin removing someone else's comment.
+// Idempotent: a row already soft-deleted will not match the
+// `isNull(deletedAt)` predicate, so this returns false.
 // ---------------------------------------------------------------------------
 
-export async function softDeleteComment(input: {
-  commentId: string;
-  actor: ActorRef;
-}): Promise<boolean> {
+// Callers decide which path applies, since only they know whether the caller
+// is an admin. An author delete is also pinned to the author in SQL, so a
+// stale permission check cannot delete another author's comment.
+export type CommentDeleter =
+  | { as: "author"; actor: ActorRef }
+  | { as: "admin"; adminUserId: string };
+
+export async function softDeleteComment(
+  input: { commentId: string } & CommentDeleter
+): Promise<boolean> {
   const now = new Date();
+  const deletedBy =
+    input.as === "admin" ? input.adminUserId : actorColumns(input.actor).userId;
   const result = await db
     .update(runComments)
-    .set({ deletedAt: now })
+    .set({ deletedAt: now, deletedBy })
     .where(
       and(
         eq(runComments.id, input.commentId),
-        writtenBy(input.actor),
+        input.as === "author" ? writtenBy(input.actor) : undefined,
         isNull(runComments.deletedAt)
       )
     )

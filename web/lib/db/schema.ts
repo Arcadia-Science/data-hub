@@ -830,6 +830,13 @@ export const runComments = pgTable(
       withTimezone: true,
       mode: "date",
     }),
+    // The person who deleted the comment: its author, or an admin removing
+    // someone else's. NULL while active, when a token deleted its own comment,
+    // and for comments deleted before this column existed. `set null` on user
+    // deletion so removing a user never blocks on history.
+    deletedBy: text("deleted_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
   },
   (comment) => [
     check(

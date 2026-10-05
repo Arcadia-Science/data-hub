@@ -1,10 +1,11 @@
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   commentDeleted,
   commentsListResponse,
   runComment,
 } from "@/lib/api/openapi";
-import { instruments } from "@/lib/db/schema";
+import { instruments, runComments } from "@/lib/db/schema";
 import {
   api,
   closeTestDb,
@@ -398,5 +399,174 @@ describe("Run Comments API", () => {
     expect(body.comments).toHaveLength(2);
     expect(body.comments[0].id).toBe(c1.id);
     expect(body.comments[1].id).toBe(c2.id);
+  });
+});
+
+// Admins can delete any comment, but never edit one. The deleter is recorded
+// on the row: a person's id for every person-made delete, nothing when a
+// token deletes its own comment.
+describe("Run Comments API — deletion by admins", () => {
+  let tokenA: string;
+  let adminId: string;
+  let memberId: string;
+  let authorId: string;
+
+  const instrumentId = "comments-admin-test-instrument";
+
+  beforeAll(async () => {
+    await resetDb();
+    ({ token: tokenA } = await seedTestUser());
+    ({ userId: adminId } = await seedTestUser({ isAdmin: true }));
+    ({ userId: memberId } = await seedTestUser());
+    ({ userId: authorId } = await seedTestUser());
+
+    await getTestDb().insert(instruments).values({
+      id: instrumentId,
+      displayName: "Comments Admin Test Instrument",
+      status: "active",
+    });
+  });
+
+  function commentsPath(runId: string): string {
+    return `/api/v1/instruments/${instrumentId}/runs/${runId}/comments`;
+  }
+
+  async function createRun(runId: string): Promise<void> {
+    const res = await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token: tokenA,
+      body: { run_id: runId, source: "lambda" },
+    });
+    expect([200, 201]).toContain(res.status);
+  }
+
+  async function postAsPerson(
+    runId: string,
+    userId: string,
+    body: string
+  ): Promise<string> {
+    const res = await api(commentsPath(runId), {
+      method: "POST",
+      headers: { Cookie: await seedSessionCookie(userId) },
+      body: { body },
+    });
+    expect(res.status).toBe(201);
+    return ((await res.json()) as { id: string }).id;
+  }
+
+  async function postAsToken(runId: string, body: string): Promise<string> {
+    const res = await api(commentsPath(runId), {
+      method: "POST",
+      token: tokenA,
+      body: { body },
+    });
+    expect(res.status).toBe(201);
+    return ((await res.json()) as { id: string }).id;
+  }
+
+  async function deleteAs(
+    runId: string,
+    commentId: string,
+    userId: string
+  ): Promise<Response> {
+    return await api(`${commentsPath(runId)}/${commentId}`, {
+      method: "DELETE",
+      headers: { Cookie: await seedSessionCookie(userId) },
+    });
+  }
+
+  async function readDeleter(commentId: string) {
+    const [row] = await getTestDb()
+      .select({
+        deletedAt: runComments.deletedAt,
+        deletedBy: runComments.deletedBy,
+      })
+      .from(runComments)
+      .where(eq(runComments.id, commentId));
+    return row;
+  }
+
+  it("lets an admin delete a member's comment and records the admin", async () => {
+    const runId = "admin-deletes-member";
+    await createRun(runId);
+    const commentId = await postAsPerson(runId, authorId, "from a member");
+
+    const res = await deleteAs(runId, commentId, adminId);
+    expect(res.status).toBe(200);
+
+    const row = await readDeleter(commentId);
+    expect(row.deletedAt).toBeInstanceOf(Date);
+    expect(row.deletedBy).toBe(adminId);
+  });
+
+  it("lets an admin delete a comment a token posted", async () => {
+    const runId = "admin-deletes-token-comment";
+    await createRun(runId);
+    const commentId = await postAsToken(runId, "from a token");
+
+    const res = await deleteAs(runId, commentId, adminId);
+    expect(res.status).toBe(200);
+    expect((await readDeleter(commentId)).deletedBy).toBe(adminId);
+  });
+
+  it("does not let a member delete someone else's comment", async () => {
+    const runId = "member-cannot-delete";
+    await createRun(runId);
+    const commentId = await postAsPerson(runId, authorId, "from the author");
+
+    const res = await deleteAs(runId, commentId, memberId);
+    expect(res.status).toBe(403);
+    expect((await readDeleter(commentId)).deletedAt).toBeNull();
+  });
+
+  it("does not let an admin edit someone else's comment", async () => {
+    const runId = "admin-cannot-edit";
+    await createRun(runId);
+    const commentId = await postAsPerson(runId, authorId, "original");
+
+    const res = await api(`${commentsPath(runId)}/${commentId}`, {
+      method: "PATCH",
+      headers: { Cookie: await seedSessionCookie(adminId) },
+      body: { body: "reworded" },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("records the author when they delete their own comment", async () => {
+    const runId = "author-deletes-own";
+    await createRun(runId);
+    const commentId = await postAsPerson(runId, authorId, "mine");
+
+    expect((await deleteAs(runId, commentId, authorId)).status).toBe(200);
+    expect((await readDeleter(commentId)).deletedBy).toBe(authorId);
+  });
+
+  it("records no deleter when a token deletes its own comment", async () => {
+    const runId = "token-deletes-own";
+    await createRun(runId);
+    const commentId = await postAsToken(runId, "mine");
+
+    const res = await api(`${commentsPath(runId)}/${commentId}`, {
+      method: "DELETE",
+      token: tokenA,
+    });
+    expect(res.status).toBe(200);
+    const row = await readDeleter(commentId);
+    expect(row.deletedAt).toBeInstanceOf(Date);
+    expect(row.deletedBy).toBeNull();
+  });
+
+  it("never lets a token delete a person's comment, even an admin's token", async () => {
+    const runId = "token-cannot-delete-person";
+    await createRun(runId);
+    const commentId = await postAsPerson(runId, authorId, "from a person");
+    const adminToken = await seedTestUser({ isAdmin: true });
+
+    const res = await api(`${commentsPath(runId)}/${commentId}`, {
+      method: "DELETE",
+      token: adminToken.token,
+    });
+    expect(res.status).toBe(403);
+    expect((await readDeleter(commentId)).deletedAt).toBeNull();
   });
 });

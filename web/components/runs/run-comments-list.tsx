@@ -13,6 +13,7 @@ import type { RunCommentDto } from "@/lib/api/run-comments";
 import { useSession } from "@/lib/auth-client";
 import { toUserAvatarUser } from "@/lib/avatar-color";
 import { subscribeCommentHashScroll } from "@/lib/comment-hash-nav";
+import { commentPermissions } from "@/lib/comments/permissions";
 
 type Action =
   | { kind: "create"; comment: RunCommentDto }
@@ -63,6 +64,9 @@ export function RunCommentsList({
 }) {
   const { data: session } = useSession();
   const currentUserId = session?.user?.id ?? null;
+  // Cached on the session, so it only decides which controls to show. The
+  // delete route re-checks the role against the database.
+  const isAdmin = session?.user?.isAdmin === true;
 
   const [committed, setCommitted] = useState(initialComments);
   const [optimistic, dispatch] = useOptimistic(committed, applyOptimistic);
@@ -174,7 +178,10 @@ export function RunCommentsList({
                 <div className={rowClass} key={comment.id}>
                   <RunCommentItem
                     comment={comment}
-                    currentUserId={currentUserId}
+                    {...commentPermissions(comment, {
+                      userId: currentUserId,
+                      isAdmin,
+                    })}
                     onDelete={deleteCommentAction}
                     onUpdate={updateCommentAction}
                   />

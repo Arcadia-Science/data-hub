@@ -25,6 +25,7 @@ import { restoreRun, softDeleteRun } from "@/lib/api/run-lifecycle";
 import { pickMetadataFilterArgs } from "@/lib/api/run-metadata-filters";
 import { buildRunReport, getRunFailureSummary } from "@/lib/api/run-reports";
 import { requestAllRunUploads, requestRunUploads } from "@/lib/api/run-uploads";
+import { userIsAdmin } from "@/lib/api/user-admin";
 import { toolRegistrationConfig } from "@/lib/mcp/catalog/register";
 import {
   errorResult,
@@ -429,13 +430,16 @@ export function registerRunTools(server: McpServer) {
       if (!existing) {
         return errorResult(`Comment '${commentId}' not found.`);
       }
-      if (existing.userId !== userId) {
+      const isAuthor = existing.userId === userId;
+      if (!(isAuthor || (await userIsAdmin(userId)))) {
         return errorResult("You can only delete your own comments.");
       }
 
       await softDeleteComment({
         commentId,
-        actor: { kind: "user", userId },
+        ...(isAuthor
+          ? ({ as: "author", actor: { kind: "user", userId } } as const)
+          : ({ as: "admin", adminUserId: userId } as const)),
       });
       return structuredResult({ id: commentId, deleted: true });
     }

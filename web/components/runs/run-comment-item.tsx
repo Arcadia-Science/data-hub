@@ -52,12 +52,16 @@ const MAX_BODY_LENGTH = 10_000;
 
 export function RunCommentItem({
   comment,
-  currentUserId,
+  canEdit,
+  canDelete,
   onUpdate,
   onDelete,
 }: {
   comment: RunCommentDto;
-  currentUserId: string | null;
+  // Edit is for the author alone. Delete also covers admins removing
+  // someone else's comment (see `commentPermissions`).
+  canEdit: boolean;
+  canDelete: boolean;
   onUpdate: (commentId: string, body: string) => Promise<void>;
   onDelete: (commentId: string) => Promise<void>;
 }) {
@@ -67,12 +71,6 @@ export function RunCommentItem({
   const [isSaving, startSavingTransition] = useTransition();
   const [isDeleting, startDeletingTransition] = useTransition();
 
-  // Token-authored comments have no signed-in author to match, so the
-  // browser never offers edit or delete for them.
-  const isAuthor =
-    currentUserId !== null &&
-    comment.author.kind === "user" &&
-    comment.author.user.userId === currentUserId;
   // Deep-link target for notifications / global search (`#comment-{id}`).
   // Scroll-into-view lives on `RunCommentsList` so one listener covers the
   // whole list (including same-page hash changes).
@@ -136,7 +134,7 @@ export function RunCommentItem({
               </span>
             )}
           </div>
-          {isAuthor && !isEditing && (
+          {(canEdit || canDelete) && !isEditing && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -151,21 +149,25 @@ export function RunCommentItem({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-32">
-                <DropdownMenuItem onSelect={() => setIsEditing(true)}>
-                  <Pencil className="size-3.5" />
-                  Edit
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onSelect={(e) => {
-                    e.preventDefault();
-                    setDeleteOpen(true);
-                  }}
-                  variant="destructive"
-                >
-                  <Trash2 className="size-3.5" />
-                  Delete
-                </DropdownMenuItem>
+                {canEdit && (
+                  <DropdownMenuItem onSelect={() => setIsEditing(true)}>
+                    <Pencil className="size-3.5" />
+                    Edit
+                  </DropdownMenuItem>
+                )}
+                {canEdit && canDelete && <DropdownMenuSeparator />}
+                {canDelete && (
+                  <DropdownMenuItem
+                    onSelect={(e) => {
+                      e.preventDefault();
+                      setDeleteOpen(true);
+                    }}
+                    variant="destructive"
+                  >
+                    <Trash2 className="size-3.5" />
+                    Delete
+                  </DropdownMenuItem>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           )}
@@ -223,8 +225,8 @@ export function RunCommentItem({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete comment?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently remove your comment. This action cannot be
-              undone.
+              This will permanently remove {canEdit ? "your" : "this"} comment.
+              This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
