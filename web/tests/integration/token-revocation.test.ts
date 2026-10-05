@@ -149,7 +149,32 @@ describe("Token creator", () => {
     await resetDb();
   });
 
-  it("records the admin who created a token made for another user", async () => {
+  it("records the admin who created a token, with no owner", async () => {
+    const admin = await seedTestUser({ isAdmin: true });
+
+    const res = await api("/api/v1/tokens", {
+      method: "POST",
+      headers: await sessionHeaders(admin.userId),
+      body: { name: "watcher-pc", scopes: ["instruments:read"] },
+    });
+    expect(res.status).toBe(201);
+    const { id, token } = (await res.json()) as { id: string; token: string };
+
+    const [row] = await getTestDb()
+      .select({
+        userId: personalAccessTokens.userId,
+        createdBy: personalAccessTokens.createdBy,
+      })
+      .from(personalAccessTokens)
+      .where(eq(personalAccessTokens.id, id));
+    expect(row).toEqual({ userId: null, createdBy: admin.userId });
+
+    // The new token works even though no user stands behind it.
+    const use = await api("/api/v1/instruments", { token });
+    expect(use.status).toBe(200);
+  });
+
+  it("rejects a user_id, since tokens no longer have an owner", async () => {
     const admin = await seedTestUser({ isAdmin: true });
     const member = await seedTestUser();
 
@@ -162,18 +187,32 @@ describe("Token creator", () => {
         user_id: member.userId,
       },
     });
-    expect(res.status).toBe(201);
-    const { id } = (await res.json()) as { id: string };
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("VALIDATION_ERROR");
+  });
 
-    const [row] = await getTestDb()
-      .select({
-        userId: personalAccessTokens.userId,
-        createdBy: personalAccessTokens.createdBy,
-      })
-      .from(personalAccessTokens)
-      .where(eq(personalAccessTokens.id, id));
-    expect(row?.userId).toBe(member.userId);
-    expect(row?.createdBy).toBe(admin.userId);
+  it("lists the tokens a person created", async () => {
+    const admin = await seedTestUser({ isAdmin: true });
+    const other = await seedTestUser({ isAdmin: true });
+    const headers = await sessionHeaders(admin.userId);
+    const created = await api("/api/v1/tokens", {
+      method: "POST",
+      headers,
+      body: { name: "mine", scopes: ["runs:read"] },
+    });
+    const { id } = (await created.json()) as { id: string };
+
+    const mine = await api("/api/v1/tokens", { headers });
+    const mineIds = ((await mine.json()) as { id: string }[]).map((t) => t.id);
+    expect(mineIds).toContain(id);
+
+    const theirs = await api("/api/v1/tokens", {
+      headers: await sessionHeaders(other.userId),
+    });
+    const theirIds = ((await theirs.json()) as { id: string }[]).map(
+      (t) => t.id
+    );
+    expect(theirIds).not.toContain(id);
   });
 
   it("records the creator on seeded tokens", async () => {

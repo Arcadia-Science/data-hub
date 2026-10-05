@@ -21,10 +21,11 @@ function sessionAuth(): AuthResult {
 
 function tokenAuth(tokenId: string): AuthResult {
   return {
-    userId: "token-user",
+    userId: null,
     authMethod: "token",
     scopes: ["watchers:report"],
     tokenId,
+    tokenName: "watcher-pc",
   };
 }
 
@@ -42,14 +43,8 @@ describe("decideWatcherBinding", () => {
     expect(decideWatcherBinding(tokenAuth("pat-a"), "pat-b")).toBe("deny");
   });
 
-  it("denies token auth with a missing tokenId", () => {
-    const broken: AuthResult = {
-      userId: "token-user",
-      authMethod: "token",
-      scopes: ["watchers:report"],
-      tokenId: null,
-    };
-    expect(decideWatcherBinding(broken, "pat-a")).toBe("deny");
+  it("denies token auth with an empty tokenId", () => {
+    expect(decideWatcherBinding(tokenAuth(""), "pat-a")).toBe("deny");
   });
 
   it("returns tofu when the binding is still null", () => {

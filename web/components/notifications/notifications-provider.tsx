@@ -50,6 +50,7 @@ const POLL_INTERVAL_MS = 60_000;
 
 interface ApiNotification {
   actor: NotificationItem["actor"];
+  actor_token: NotificationItem["actorToken"];
   body: string | null;
   comment_body: string | null;
   comment_id: string | null;
@@ -87,6 +88,7 @@ function fromApi(n: ApiNotification): NotificationItem {
     body: n.body,
     feedbackId: n.feedback_id,
     actor: n.actor,
+    actorToken: n.actor_token,
   };
 }
 

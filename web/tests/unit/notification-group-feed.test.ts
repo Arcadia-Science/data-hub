@@ -25,6 +25,7 @@ function item(overrides: Partial<NotificationItem>): NotificationItem {
     body: null,
     feedbackId: null,
     actor: null,
+    actorToken: null,
     ...overrides,
   };
 }

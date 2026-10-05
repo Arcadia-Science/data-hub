@@ -1,5 +1,6 @@
 import { and, count, eq, isNull } from "drizzle-orm";
 import type { NextRequest } from "next/server";
+import { actorColumns, actorRefFromAuth } from "@/lib/api/actor";
 import { authorize, requireAdminForSession } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { patchInstrumentBody, readJsonBody } from "@/lib/api/openapi";
@@ -78,6 +79,7 @@ export async function PATCH(
   }
 
   const { instrumentId } = await params;
+  const actor = actorRefFromAuth(authResult);
 
   const body = await readJsonBody(request, patchInstrumentBody);
   if (body instanceof Response) {
@@ -100,11 +102,14 @@ export async function PATCH(
     // Keep the retirement audit fields in lockstep with the status: only an
     // `inactive` instrument has a retirer.
     if (body.status === "inactive") {
+      const { userId, tokenId } = actorColumns(actor);
       updates.retiredAt = new Date();
-      updates.retiredBy = authResult.userId;
+      updates.retiredBy = userId;
+      updates.retiredByToken = tokenId;
     } else {
       updates.retiredAt = null;
       updates.retiredBy = null;
+      updates.retiredByToken = null;
     }
   }
   if (body.display_name !== undefined) {
@@ -138,7 +143,7 @@ export async function PATCH(
     // A retired instrument has no live agent, so always tear down its watchers,
     // attributing the teardown to the same actor that retired it.
     if (updates.status === "inactive") {
-      await deregisterInstrumentWatchers(instrumentId, authResult.userId, tx);
+      await deregisterInstrumentWatchers(instrumentId, actor, tx);
     }
 
     return row;

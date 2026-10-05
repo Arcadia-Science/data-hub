@@ -84,7 +84,7 @@ export async function resetDb() {
 export async function seedTestUser(
   options?: Pick<
     SeedUserOptions,
-    "expiresAt" | "scopes" | "isAdmin" | "name" | "email"
+    "expiresAt" | "scopes" | "isAdmin" | "name" | "email" | "tokenName"
   >
 ) {
   const { userId, token, tokenId } = await seedDevUser(getTestDb(), {

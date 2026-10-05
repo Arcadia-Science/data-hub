@@ -13,18 +13,22 @@ import {
   closeTestDb,
   getTestDb,
   resetDb,
+  seedSessionCookie,
   seedTestUser,
   waitForCapturedSlackMessages,
 } from "@/tests/integration/helpers";
 
 describe("Instrument Runs API", () => {
   let token: string;
+  let tokenId: string;
   let userId: string;
   const instrumentId = "runs-test-instrument";
 
   beforeAll(async () => {
     await resetDb();
-    ({ token, userId } = await seedTestUser());
+    ({ token, tokenId, userId } = await seedTestUser({
+      tokenName: "Run Cleanup Bot",
+    }));
 
     const db = getTestDb();
     await db.insert(instruments).values({
@@ -302,9 +306,76 @@ describe("Instrument Runs API", () => {
     const data = await res.json();
     expect(data.deleted_at).toBeTruthy();
     expect(data.run_id).toBe("run-001");
-    // The acting user (the PAT's owner) is recorded as the deleter.
-    expect(data.deleted_by).toBe(userId);
+    // The token itself is recorded as the deleter, not its creator.
+    expect(data.deleted_by).toBeNull();
+    expect(data.deleted_by_token).toEqual({
+      id: tokenId,
+      name: "Run Cleanup Bot",
+    });
     expect(data.already_applied).toBe(false);
+    runDeleted.parse(data);
+  });
+
+  it("GET run detail names the token that deleted the run", async () => {
+    const res = await api(`/api/v1/instruments/${instrumentId}/runs/run-001`, {
+      token,
+    });
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.deleted_by).toBeNull();
+    expect(data.deleted_by_token).toEqual({
+      id: tokenId,
+      name: "Run Cleanup Bot",
+    });
+    runDetail.parse(data);
+  });
+
+  it("restore clears whoever deleted the run", async () => {
+    const res = await api(
+      `/api/v1/instruments/${instrumentId}/runs/run-001/restore`,
+      { method: "POST", token }
+    );
+    expect(res.status).toBe(200);
+
+    const detail = await api(
+      `/api/v1/instruments/${instrumentId}/runs/run-001`,
+      { token }
+    );
+    const data = await detail.json();
+    expect(data.deleted_at).toBeNull();
+    expect(data.deleted_by).toBeNull();
+    expect(data.deleted_by_token).toBeNull();
+
+    // Put the run back in the deleted state the later tests expect.
+    const again = await api(
+      `/api/v1/instruments/${instrumentId}/runs/run-001`,
+      {
+        method: "DELETE",
+        token,
+      }
+    );
+    expect(again.status).toBe(200);
+  });
+
+  it("DELETE from a browser session records the user", async () => {
+    const created = await api(`/api/v1/instruments/${instrumentId}/runs`, {
+      method: "POST",
+      token,
+      body: { run_id: "run-by-person", source: "lambda" },
+    });
+    expect(created.status).toBe(201);
+
+    const res = await api(
+      `/api/v1/instruments/${instrumentId}/runs/run-by-person`,
+      {
+        method: "DELETE",
+        headers: { Cookie: await seedSessionCookie(userId) },
+      }
+    );
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.deleted_by).toBe(userId);
+    expect(data.deleted_by_token).toBeNull();
     runDeleted.parse(data);
   });
 

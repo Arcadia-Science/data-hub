@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { authorize, requireUserIsAdmin } from "@/lib/api/auth";
+import { requireAdmin } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { updateFeedback } from "@/lib/api/feedback";
 import { serializeFeedback } from "@/lib/api/feedback-json";
@@ -10,14 +10,9 @@ export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
-  const authResult = await authorize(request, "feedback:admin");
+  const authResult = await requireAdmin();
   if (authResult instanceof Response) {
     return authResult;
-  }
-
-  const adminError = await requireUserIsAdmin(authResult.userId);
-  if (adminError) {
-    return adminError;
   }
 
   const { id } = await context.params;

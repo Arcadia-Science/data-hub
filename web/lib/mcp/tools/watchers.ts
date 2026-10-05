@@ -1,4 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/server";
+import { actorToken, actorUser } from "@/lib/api/actor";
 import {
   type EffectiveStatus,
   getWatcherById,
@@ -43,7 +44,12 @@ export function registerWatcherTools(server: McpServer) {
       if (!watcher) {
         return errorResult(`Watcher '${watcherId}' not found.`);
       }
-      return structuredResult(watcher);
+      const { deregisteredBy, ...fields } = watcher;
+      return structuredResult({
+        ...fields,
+        deregisteredByUser: actorUser(deregisteredBy),
+        deregisteredByToken: actorToken(deregisteredBy),
+      });
     }
   );
 

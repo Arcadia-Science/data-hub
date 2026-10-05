@@ -1,4 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/server";
+import { actorToken, actorUser } from "@/lib/api/actor";
 import { reprocessRun } from "@/lib/api/file-reprocessing";
 import {
   buildRunListQuery,
@@ -10,6 +11,7 @@ import {
   type RunAttribution,
 } from "@/lib/api/instrument-runs";
 import { claimRuns, unclaimRuns } from "@/lib/api/run-attributions";
+import { commentToWire } from "@/lib/api/run-comment-wire";
 import {
   createCommentAndNotify,
   getCommentForAuthorCheck,
@@ -118,7 +120,13 @@ export function registerRunTools(server: McpServer) {
       }
 
       const extras = new Set(include ?? []);
-      const payload: Record<string, unknown> = { ...run };
+      const { deletedBy: deleter, ...runFields } = run;
+      const payload: Record<string, unknown> = {
+        ...runFields,
+        deletedBy: actorUser(deleter)?.userId ?? null,
+        deletedByUser: actorUser(deleter),
+        deletedByToken: actorToken(deleter),
+      };
 
       const tasks: Promise<void>[] = [];
       if (extras.has("files")) {
@@ -134,7 +142,7 @@ export function registerRunTools(server: McpServer) {
       if (extras.has("comments")) {
         tasks.push(
           listCommentsForRun(run.id).then((comments) => {
-            payload.comments = comments;
+            payload.comments = comments.map(commentToWire);
           })
         );
       }
@@ -311,7 +319,7 @@ export function registerRunTools(server: McpServer) {
         );
       }
       const comments = await listCommentsForRun(run.id);
-      return structuredResult({ comments });
+      return structuredResult({ comments: comments.map(commentToWire) });
     }
   );
 
@@ -350,7 +358,7 @@ export function registerRunTools(server: McpServer) {
 
       const comment = await createCommentAndNotify({
         runInternalId: run.id,
-        userId,
+        actor: { kind: "user", userId },
         body: validated.body,
         instrumentId,
         instrumentDisplayName: run.instrumentDisplayName,
@@ -358,7 +366,7 @@ export function registerRunTools(server: McpServer) {
         origin,
       });
 
-      return structuredResult(comment);
+      return structuredResult(commentToWire(comment));
     }
   );
 
@@ -390,13 +398,13 @@ export function registerRunTools(server: McpServer) {
 
       const updated = await updateComment({
         commentId,
-        userId,
+        actor: { kind: "user", userId },
         body: validated.body,
       });
       if (!updated) {
         return errorResult(`Comment '${commentId}' not found.`);
       }
-      return structuredResult(updated);
+      return structuredResult(commentToWire(updated));
     }
   );
 
@@ -425,7 +433,10 @@ export function registerRunTools(server: McpServer) {
         return errorResult("You can only delete your own comments.");
       }
 
-      await softDeleteComment({ commentId, userId });
+      await softDeleteComment({
+        commentId,
+        actor: { kind: "user", userId },
+      });
       return structuredResult({ id: commentId, deleted: true });
     }
   );
@@ -460,11 +471,11 @@ export function registerRunTools(server: McpServer) {
       if (writeError) {
         return writeError;
       }
-      const userId = getMcpUserId(authInfo) ?? null;
+      const userId = getMcpUserId(authInfo);
       const result = await softDeleteRun({
         instrumentId,
         runId,
-        deletedBy: userId,
+        actor: userId ? { kind: "user", userId } : null,
       });
       if (!result.ok) {
         return errorResult(result.message);
@@ -474,6 +485,7 @@ export function registerRunTools(server: McpServer) {
         runId: result.runId,
         deletedAt: result.deletedAt,
         deletedBy: result.deletedBy ?? null,
+        deletedByToken: result.deletedByToken ?? null,
         alreadyApplied: result.alreadyApplied,
       });
     }

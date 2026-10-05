@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
-import { authorizeAuthenticated } from "@/lib/api/auth";
-import { apiError, VALIDATION_ERROR } from "@/lib/api/errors";
+import { requireSession } from "@/lib/api/auth";
+import { apiError, UNAUTHORIZED, VALIDATION_ERROR } from "@/lib/api/errors";
 import {
   countFeedbackByStatus,
   createFeedback,
@@ -16,13 +16,14 @@ import {
   listFeedbackQuery,
   readJsonBody,
 } from "@/lib/api/openapi";
-import { hasScope } from "@/lib/api/scopes";
 import { userIsAdmin } from "@/lib/api/user-admin";
 
+// Feedback is session-only: a report belongs to the person who wrote it, and
+// tokens do not stand in for a person.
 export async function POST(request: NextRequest) {
-  const authResult = await authorizeAuthenticated(request);
-  if (authResult instanceof Response) {
-    return authResult;
+  const authResult = await requireSession();
+  if (!authResult) {
+    return apiError(401, UNAUTHORIZED, "Authentication required");
   }
 
   const body = await readJsonBody(request, createFeedbackBody);
@@ -56,9 +57,9 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
-  const authResult = await authorizeAuthenticated(request);
-  if (authResult instanceof Response) {
-    return authResult;
+  const authResult = await requireSession();
+  if (!authResult) {
+    return apiError(401, UNAUTHORIZED, "Authentication required");
   }
 
   const params = request.nextUrl.searchParams;
@@ -72,11 +73,9 @@ export async function GET(request: NextRequest) {
     return apiError(400, VALIDATION_ERROR, "Invalid query");
   }
 
-  // The full list includes other people's email addresses. A read-only token
-  // owned by an admin still only sees that admin's own reports.
-  const isAdmin =
-    (await userIsAdmin(authResult.userId)) &&
-    hasScope(authResult, "feedback:admin");
+  // The full list includes other people's email addresses, so only admins
+  // see more than their own reports.
+  const isAdmin = await userIsAdmin(authResult.userId);
   const perPage = query.data.per_page ?? FEEDBACK_PAGE_SIZE;
   const page = query.data.page ?? 1;
   const viewer = { viewerId: authResult.userId, isAdmin };

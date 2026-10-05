@@ -9,6 +9,7 @@ import { prepareRunArchive } from "@/lib/api/run-archive";
 import { toolRegistrationConfig } from "@/lib/mcp/catalog/register";
 import {
   errorResult,
+  getMcpUserId,
   requireMcpWrite,
   structuredResult,
 } from "@/lib/mcp/tools/helpers";
@@ -80,17 +81,12 @@ export function registerFileTools(server: McpServer) {
   server.registerTool(
     getRunArchiveTool.name,
     toolRegistrationConfig(getRunArchiveTool),
-    async ({ instrumentId, runId }) => {
-      // Token-authenticated callers (every MCP request) don't have a
-      // session user to record against `archive_jobs.created_by`, even
-      // though the underlying user id is on `authInfo.extra`. Keep the
-      // audit column NULL for parity with the watcher/Lambda paths and
-      // to avoid a foreign-key surprise if the linked user is later
-      // deleted.
+    async ({ instrumentId, runId }, ctx) => {
+      const userId = getMcpUserId(ctx.http?.authInfo);
       const result = await prepareRunArchive({
         instrumentId,
         runId,
-        createdBy: null,
+        actor: userId ? { kind: "user", userId } : null,
       });
 
       if (!result.ok) {

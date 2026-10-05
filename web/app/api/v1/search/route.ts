@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import {
-  analyticsSurface,
   searchResultBucket,
+  surfaceEvent,
   trackEvent,
 } from "@/lib/analytics/track";
 import { authorize } from "@/lib/api/auth";
@@ -48,8 +48,7 @@ export async function GET(request: NextRequest) {
   const result = await globalSearch({ query, scope });
 
   trackEvent("search_performed", {
-    user_id: authResult.userId,
-    surface: analyticsSurface(authResult.authMethod),
+    ...surfaceEvent(authResult),
     scope,
     result_bucket: searchResultBucket(result.counts.total),
   });

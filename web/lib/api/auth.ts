@@ -3,24 +3,36 @@ import type { NextRequest } from "next/server";
 import { after } from "next/server";
 import { apiError, FORBIDDEN, UNAUTHORIZED } from "@/lib/api/errors";
 import { hasScope, type Scope } from "@/lib/api/scopes";
-import { userIsAdmin } from "@/lib/api/user-admin";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { personalAccessTokens, users } from "@/lib/db/schema";
 import { hashToken } from "@/lib/tokens";
 
-export interface AuthResult {
-  authMethod: "session" | "token";
-  // Permission scopes carried by this request. Token-authenticated requests
-  // carry the scopes column from `personal_access_tokens`. Session
-  // (Better Auth session) authentication is treated as fully privileged and
-  // always returns `["*"]`, so `hasScope` is a no-op for browser sessions.
+// A signed-in person. Sessions are treated as fully privileged, so `scopes`
+// is always `["*"]` and `hasScope` is a no-op for browser sessions.
+export interface SessionAuthResult {
+  authMethod: "session";
   scopes: string[];
-  // PAT row id for token auth; null for sessions. Used to bind watchers to
-  // the credential that registered them (see `enforceWatcherBinding`).
-  tokenId: string | null;
+  tokenId: null;
   userId: string;
 }
+
+// A personal access token acting as itself. It has no user: actions are
+// recorded against `tokenId`, and `tokenName` is the label shown in the UI.
+// The row id also binds watchers to the credential that registered them (see
+// `enforceWatcherBinding`).
+export interface TokenAuthResult {
+  authMethod: "token";
+  // Carries the `scopes` column from `personal_access_tokens`.
+  scopes: string[];
+  tokenId: string;
+  tokenName: string;
+  userId: null;
+}
+
+// Discriminated on `authMethod`, so a caller that needs a person has to
+// narrow before it can read `userId`.
+export type AuthResult = SessionAuthResult | TokenAuthResult;
 
 /**
  * Validate a PAT from the Authorization header. Shared by both
@@ -29,7 +41,7 @@ export interface AuthResult {
  */
 async function validatePat(
   authHeader: string | null
-): Promise<AuthResult | null> {
+): Promise<TokenAuthResult | null> {
   if (!authHeader?.startsWith("Bearer ")) {
     return null;
   }
@@ -45,7 +57,7 @@ async function validatePat(
   const [pat] = await db
     .select({
       id: personalAccessTokens.id,
-      userId: personalAccessTokens.userId,
+      name: personalAccessTokens.name,
       expiresAt: personalAccessTokens.expiresAt,
       revokedAt: personalAccessTokens.revokedAt,
       scopes: personalAccessTokens.scopes,
@@ -67,11 +79,6 @@ async function validatePat(
     return null;
   }
 
-  // A token whose owner was deleted has no acting user.
-  if (!pat.userId) {
-    return null;
-  }
-
   // Defer the last-used timestamp update so it doesn't add latency to the
   // API response. next/server `after()` runs after the response is sent.
   after(async () => {
@@ -82,10 +89,11 @@ async function validatePat(
   });
 
   return {
-    userId: pat.userId,
+    userId: null,
     authMethod: "token",
     scopes: pat.scopes,
     tokenId: pat.id,
+    tokenName: pat.name,
   };
 }
 
@@ -124,23 +132,11 @@ export async function authenticateRequest(
  */
 export async function authenticateWithToken(
   request: Pick<Request, "headers">
-): Promise<AuthResult | null> {
+): Promise<TokenAuthResult | null> {
   return await validatePat(request.headers.get("authorization"));
 }
 
-// Any signed-in session or valid PAT. Feedback submission stays available to
-// read-only tokens; it does not require a fine-grained scope.
-export async function authorizeAuthenticated(
-  request: NextRequest
-): Promise<AuthResult | Response> {
-  const authResult = await authenticateRequest(request);
-  if (authResult === null) {
-    return apiError(401, UNAUTHORIZED, "Authentication required");
-  }
-  return authResult;
-}
-
-export async function requireSession(): Promise<AuthResult | null> {
+export async function requireSession(): Promise<SessionAuthResult | null> {
   const session = await auth();
   if (session?.user?.id) {
     return {
@@ -182,17 +178,6 @@ export async function requireAdmin(): Promise<{ userId: string } | Response> {
   return { userId: session.user.id };
 }
 
-// Admin gate for either a session or a PAT. `requireAdminForSession` skips
-// tokens; feedback triage must reject a non-admin token too.
-export async function requireUserIsAdmin(
-  userId: string
-): Promise<Response | null> {
-  if (await userIsAdmin(userId)) {
-    return null;
-  }
-  return apiError(403, FORBIDDEN, "Admin role required");
-}
-
 /**
  * Layered admin gate for routes that accept either a session or a PAT.
  * Given an already-resolved `AuthResult` from {@link authorize}, enforce
@@ -227,10 +212,10 @@ export async function requireAdminForSession(
 
 // Shared 401/403 gate so both authorize helpers keep an identical, hard-to-
 // minify-away null check (see `authenticateRequest` await note above).
-function enforceScope(
-  authResult: AuthResult | null,
+function enforceScope<T extends AuthResult>(
+  authResult: T | null,
   scope: Scope
-): AuthResult | Response {
+): T | Response {
   if (authResult === null) {
     return apiError(401, UNAUTHORIZED, "Authentication required");
   }
@@ -263,6 +248,6 @@ export async function authorize(
 export async function authorizeToken(
   request: NextRequest,
   scope: Scope
-): Promise<AuthResult | Response> {
+): Promise<TokenAuthResult | Response> {
   return enforceScope(await authenticateWithToken(request), scope);
 }

@@ -7,6 +7,7 @@ import { InstrumentActions } from "@/components/instruments/instrument-actions";
 import { InstrumentStatusBadge } from "@/components/instruments/instrument-status-badge";
 import { InstrumentNotificationSwitch } from "@/components/notifications/instrument-notification-switch";
 import { RecordInstrumentVisit } from "@/components/recent-instrument-visit";
+import { ActorLabel } from "@/components/token-actor";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -21,7 +22,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { UserAvatar } from "@/components/user-avatar";
 import {
   getWatcherOnlineStatus,
   type WatcherOnlineStatus,
@@ -187,13 +187,13 @@ export function InstrumentHeader({
                   {watchDirectory ? <span>·</span> : null}
                   <span className="flex items-center gap-1.5">
                     <span>Retired {formatDate(retiredAt)}</span>
-                    {instrument.retiredByUser ? (
+                    {instrument.retiredBy ? (
                       <span className="flex items-center gap-1.5">
                         <span>by</span>
-                        <UserAvatar size="sm" user={instrument.retiredByUser} />
-                        <span className="font-medium text-foreground">
-                          {instrument.retiredByUser.displayName}
-                        </span>
+                        <ActorLabel
+                          actor={instrument.retiredBy}
+                          nameClassName="font-medium text-foreground"
+                        />
                       </span>
                     ) : null}
                   </span>

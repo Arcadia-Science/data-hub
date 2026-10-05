@@ -1,5 +1,10 @@
 import type { NextRequest } from "next/server";
-import { analyticsSurface, trackEvent } from "@/lib/analytics/track";
+import {
+  type SurfaceEvent,
+  surfaceEvent,
+  trackEvent,
+} from "@/lib/analytics/track";
+import { type ActorRef, actorRefFromAuth } from "@/lib/api/actor";
 import { authorize } from "@/lib/api/auth";
 import {
   apiError,
@@ -10,7 +15,9 @@ import {
 } from "@/lib/api/errors";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { commentBody, readJsonBody } from "@/lib/api/openapi";
+import { commentToWire } from "@/lib/api/run-comment-wire";
 import {
+  commentWrittenBy,
   getCommentForAuthorCheck,
   softDeleteComment,
   updateComment,
@@ -28,9 +35,9 @@ interface RouteContext {
 type PreflightResult =
   | {
       kind: "ok";
-      userId: string;
+      actor: ActorRef;
       commentId: string;
-      surface: "web" | "api";
+      analytics: SurfaceEvent;
     }
   | { kind: "error"; response: Response };
 
@@ -82,8 +89,10 @@ async function preflight(
 
   // Author-only enforcement at the handler layer so we can return a clean
   // 403 with a useful message. The library functions also enforce this in
-  // the SQL `where` clause as defense in depth.
-  if (comment.userId !== authResult.userId) {
+  // the SQL `where` clause as defense in depth. A token may only change the
+  // comments it posted itself.
+  const actor = actorRefFromAuth(authResult);
+  if (!commentWrittenBy(comment, actor)) {
     return {
       kind: "error",
       response: apiError(
@@ -96,9 +105,9 @@ async function preflight(
 
   return {
     kind: "ok",
-    userId: authResult.userId,
+    actor,
     commentId,
-    surface: analyticsSurface(authResult.authMethod),
+    analytics: surfaceEvent(authResult),
   };
 }
 
@@ -127,7 +136,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 
   const updated = await updateComment({
     commentId: pre.commentId,
-    userId: pre.userId,
+    actor: pre.actor,
     body: validated.body,
   });
 
@@ -137,12 +146,9 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     return apiError(404, NOT_FOUND, `Comment '${pre.commentId}' not found`);
   }
 
-  trackEvent("comment_edited", {
-    user_id: pre.userId,
-    surface: pre.surface,
-  });
+  trackEvent("comment_edited", pre.analytics);
 
-  return Response.json(updated);
+  return Response.json(commentToWire(updated));
 }
 
 // ---------------------------------------------------------------------------
@@ -161,13 +167,10 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
 
   await softDeleteComment({
     commentId: pre.commentId,
-    userId: pre.userId,
+    actor: pre.actor,
   });
 
-  trackEvent("comment_deleted", {
-    user_id: pre.userId,
-    surface: pre.surface,
-  });
+  trackEvent("comment_deleted", pre.analytics);
 
   return Response.json({ id: pre.commentId, deleted: true });
 }

@@ -95,6 +95,8 @@ export interface SeedUserOptions {
   // returned token can hit every v1 route — matches the historical test
   // behavior. Pass an explicit list to exercise scope enforcement.
   scopes?: string[];
+  // Name of the minted PAT, shown wherever the token is named as an actor.
+  tokenName?: string;
 }
 
 export interface SeedUserResult {
@@ -139,9 +141,8 @@ export async function seedDevUser(
   const [pat] = await db
     .insert(schema.personalAccessTokens)
     .values({
-      userId,
       createdBy: userId,
-      name: "seeded-token",
+      name: options.tokenName ?? "seeded-token",
       tokenHash: hashToken(plaintext),
       tokenPrefix: getTokenPrefix(plaintext),
       scopes: options.scopes ?? ["*"],

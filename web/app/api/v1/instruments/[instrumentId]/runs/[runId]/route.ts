@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
-import { analyticsSurface, trackEvent } from "@/lib/analytics/track";
+import { surfaceEvent, trackEvent } from "@/lib/analytics/track";
+import { actorRefFromAuth, actorToken, actorUser } from "@/lib/api/actor";
 import { authorize, authorizeToken } from "@/lib/api/auth";
 import {
   apiError,
@@ -95,7 +96,8 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     acquired_at: run.acquiredAt,
     updated_at: run.updatedAt,
     deleted_at: run.deletedAt,
-    deleted_by: run.deletedBy,
+    deleted_by: actorUser(run.deletedBy)?.userId ?? null,
+    deleted_by_token: actorToken(run.deletedBy),
     metadata: run.metadata,
     attributions: run.attributions,
     files: filesWithUrls,
@@ -200,7 +202,7 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
   const result = await softDeleteRun({
     instrumentId,
     runId,
-    deletedBy: authResult.userId,
+    actor: actorRefFromAuth(authResult),
   });
 
   if (!result.ok) {
@@ -208,15 +210,15 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
   }
 
   trackEvent("run_deleted", {
-    user_id: authResult.userId,
-    surface: analyticsSurface(authResult.authMethod),
+    ...surfaceEvent(authResult),
   });
 
   return Response.json({
     instrument_id: result.instrumentId,
     run_id: result.runId,
     deleted_at: result.deletedAt,
-    deleted_by: result.deletedBy,
+    deleted_by: result.deletedBy ?? null,
+    deleted_by_token: result.deletedByToken ?? null,
     already_applied: result.alreadyApplied,
   });
 }

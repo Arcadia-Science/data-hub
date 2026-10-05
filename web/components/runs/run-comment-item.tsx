@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { RelativeTime } from "@/components/dashboard/relative-time";
+import { ActorLabel } from "@/components/token-actor";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,7 +25,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
-import { UserAvatarLink } from "@/components/user-avatar";
 import type { RunCommentDto } from "@/lib/api/run-comments";
 import { commentAnchorId } from "@/lib/comment-hash";
 
@@ -67,7 +67,12 @@ export function RunCommentItem({
   const [isSaving, startSavingTransition] = useTransition();
   const [isDeleting, startDeletingTransition] = useTransition();
 
-  const isAuthor = currentUserId !== null && comment.user.id === currentUserId;
+  // Token-authored comments have no signed-in author to match, so the
+  // browser never offers edit or delete for them.
+  const isAuthor =
+    currentUserId !== null &&
+    comment.author.kind === "user" &&
+    comment.author.user.userId === currentUserId;
   // Deep-link target for notifications / global search (`#comment-{id}`).
   // Scroll-into-view lives on `RunCommentsList` so one listener covers the
   // whole list (including same-page hash changes).
@@ -120,19 +125,10 @@ export function RunCommentItem({
       >
         <div className="flex items-start justify-between gap-2">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground text-sm">
-            <UserAvatarLink
-              size="sm"
-              user={{
-                userId: comment.user.id,
-                displayName: comment.user.displayName,
-                initials: comment.user.initials,
-                avatarUrl: comment.user.avatarUrl,
-              }}
-            >
-              <span className="font-medium text-foreground">
-                {comment.user.displayName}
-              </span>
-            </UserAvatarLink>
+            <ActorLabel
+              actor={comment.author}
+              nameClassName="font-medium text-foreground"
+            />
             <RelativeTime date={toIsoString(comment.created_at)} />
             {comment.edited_at && (
               <span>

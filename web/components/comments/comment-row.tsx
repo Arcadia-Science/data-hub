@@ -1,7 +1,8 @@
 import { Activity } from "lucide-react";
 import Link from "next/link";
 import { CommentMarkdownPreview } from "@/components/runs/comment-markdown";
-import { UserAvatar } from "@/components/user-avatar";
+import { ActorAvatar } from "@/components/token-actor";
+import { actorDisplayName } from "@/lib/api/actor";
 import { runCommentHref } from "@/lib/comment-hash";
 import type { CommentRowModel } from "@/lib/comments/present";
 
@@ -21,15 +22,15 @@ export function CommentRow({
         comment.id
       )}
     >
-      <UserAvatar
+      <ActorAvatar
+        actor={comment.author}
         className="[&_[data-slot=avatar-fallback]]:font-semibold [&_[data-slot=avatar-fallback]]:text-xs"
         size="default"
-        user={comment.user}
       />
       <span className="flex min-w-0 flex-1 flex-col gap-1.5">
         <span className="flex min-w-0 items-baseline justify-between gap-4">
           <span className="truncate font-semibold text-sm">
-            {comment.user.displayName}
+            {actorDisplayName(comment.author)}
           </span>
           <time
             className="shrink-0 text-[13px] text-muted-foreground tabular-nums"

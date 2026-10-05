@@ -4,14 +4,13 @@ import { trackEvent } from "@/lib/analytics/track";
 import { requireAdmin, requireSession } from "@/lib/api/auth";
 import { apiError, UNAUTHORIZED, VALIDATION_ERROR } from "@/lib/api/errors";
 import { validateRequestedScopes } from "@/lib/api/scopes";
-import { resolveTokenOwnerUserId } from "@/lib/api/token-owner";
 import { db } from "@/lib/db";
-import { personalAccessTokens, users } from "@/lib/db/schema";
+import { personalAccessTokens } from "@/lib/db/schema";
 import { generateToken, getTokenPrefix, hashToken } from "@/lib/tokens";
 
 export async function GET() {
-  // Listing is open to any signed-in user — regular members see their own
-  // tokens here. The workspace-wide audit list shown on `/settings/tokens`
+  // Listing is open to any signed-in user — each sees the tokens they created.
+  // The workspace-wide audit list shown on `/settings/tokens`
   // bypasses this endpoint entirely (it queries the DB directly in the
   // server component), so this remains a per-user view consistent with
   // typical PAT-management UIs.
@@ -33,7 +32,7 @@ export async function GET() {
     .from(personalAccessTokens)
     .where(
       and(
-        eq(personalAccessTokens.userId, authResult.userId),
+        eq(personalAccessTokens.createdBy, authResult.userId),
         isNull(personalAccessTokens.revokedAt)
       )
     )
@@ -63,6 +62,16 @@ export async function POST(request: NextRequest) {
     return apiError(400, VALIDATION_ERROR, "Invalid JSON body");
   }
 
+  // Tokens act as themselves and have no owner to name. Rejecting the field
+  // outright keeps older clients from believing a user was attached.
+  if (body.user_id !== undefined) {
+    return apiError(
+      400,
+      VALIDATION_ERROR,
+      "user_id is no longer supported: tokens act as themselves, not as a user"
+    );
+  }
+
   const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!name || name.length > 100) {
     return apiError(
@@ -77,22 +86,6 @@ export async function POST(request: NextRequest) {
     return apiError(400, VALIDATION_ERROR, validation.error);
   }
   const scopes = validation.scopes;
-
-  const owner = await resolveTokenOwnerUserId(
-    body.user_id,
-    authResult.userId,
-    async (id) => {
-      const [row] = await db
-        .select({ id: users.id })
-        .from(users)
-        .where(eq(users.id, id))
-        .limit(1);
-      return Boolean(row);
-    }
-  );
-  if (!owner.ok) {
-    return apiError(400, VALIDATION_ERROR, owner.error);
-  }
 
   let expiresAt: Date | null = null;
   if (body.expires_at) {
@@ -122,7 +115,6 @@ export async function POST(request: NextRequest) {
   const [inserted] = await db
     .insert(personalAccessTokens)
     .values({
-      userId: owner.userId,
       createdBy: authResult.userId,
       name,
       tokenHash,

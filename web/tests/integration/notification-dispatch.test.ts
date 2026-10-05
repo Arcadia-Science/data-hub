@@ -160,8 +160,8 @@ describe("Notification dispatch", () => {
 
   describe("dispatch", () => {
     it("delivers a run-anchored notification in-app by default", async () => {
-      const { userId: actorId, token } = await seedTestUser({
-        name: "Claim Bot",
+      const { tokenId, token } = await seedTestUser({
+        tokenName: "Claim Bot",
         scopes: ["notifications:create"],
       });
       const { userId: recipient } = await seedTestUser();
@@ -182,7 +182,9 @@ describe("Notification dispatch", () => {
       expect(rows[0].type).toBe("generic");
       expect(rows[0].body).toBe(message);
       expect(rows[0].runId).toBe(internalId);
-      expect(rows[0].actorUserId).toBe(actorId);
+      // The sender is the token itself, not any user.
+      expect(rows[0].actorUserId).toBeNull();
+      expect(rows[0].actorTokenId).toBe(tokenId);
       expect(rows[0].readAt).toBeNull();
     });
 
@@ -228,20 +230,37 @@ describe("Notification dispatch", () => {
       expect(body.skipped_user_ids).toEqual(["no-such-user"]);
     });
 
-    it("never notifies the actor, even when listed", async () => {
-      const { userId: actorId, token } = await seedTestUser({
+    it("notifies the token's creator like any other user", async () => {
+      const { userId: creatorId, token } = await seedTestUser({
         scopes: ["notifications:create"],
       });
       const { userId: recipient } = await seedTestUser();
 
       const { body } = await dispatch(token, {
-        user_ids: [actorId, recipient],
+        user_ids: [creatorId, recipient],
         message,
       });
 
-      expect(body.notified_user_ids).toEqual([recipient]);
-      expect(body.skipped_user_ids).toEqual([actorId]);
-      expect(await rowsFor(actorId)).toHaveLength(0);
+      expect(body.notified_user_ids).toEqual([creatorId, recipient]);
+      expect(body.skipped_user_ids).toEqual([]);
+      expect(await rowsFor(creatorId)).toHaveLength(1);
+    });
+
+    it("shows the token's name as the sender in the bell list", async () => {
+      const { token } = await seedTestUser({
+        tokenName: "Claim Bot",
+        scopes: ["notifications:create"],
+      });
+      const { userId: recipient } = await seedTestUser();
+
+      await dispatch(token, { user_ids: [recipient], message });
+
+      const [item] = await listNotifications(recipient);
+      expect(item.actor).toBeNull();
+      expect(item.actorToken).toMatchObject({
+        name: "Claim Bot",
+        revoked: false,
+      });
     });
 
     it("rejects an unknown run reference with 400", async () => {
@@ -378,7 +397,7 @@ describe("Notification dispatch", () => {
 
     it("sends a Slack DM when connected and slackGenericEnabled", async () => {
       const { token } = await seedTestUser({
-        name: "Claim Bot",
+        tokenName: "Claim Bot",
         scopes: ["notifications:create"],
       });
       const { userId: recipient } = await seedTestUser();

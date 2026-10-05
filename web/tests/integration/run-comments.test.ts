@@ -10,6 +10,7 @@ import {
   closeTestDb,
   getTestDb,
   resetDb,
+  seedSessionCookie,
   seedTestUser,
 } from "@/tests/integration/helpers";
 
@@ -19,10 +20,13 @@ import {
 //   - PATCH/DELETE /api/v1/instruments/:instrumentId/runs/:runId/comments/:id
 //
 // Comments are markdown-bodied notes. Reads are open to any authenticated
-// user; mutations are author-only (enforced both in the SQL `where` clause
-// and in the route handler so we can return clean 403/404 distinctions).
+// caller; mutations are author-only (enforced both in the SQL `where` clause
+// and in the route handler so we can return clean 403/404 distinctions). A
+// comment posted with a personal access token is authored by the token, so
+// only that token can change it.
 describe("Run Comments API", () => {
   let tokenA: string;
+  let tokenIdA: string;
   let userIdA: string;
   let tokenB: string;
 
@@ -31,7 +35,11 @@ describe("Run Comments API", () => {
   beforeAll(async () => {
     await resetDb();
 
-    ({ token: tokenA, userId: userIdA } = await seedTestUser());
+    ({
+      token: tokenA,
+      tokenId: tokenIdA,
+      userId: userIdA,
+    } = await seedTestUser({ tokenName: "Comment Bot A" }));
     ({ token: tokenB } = await seedTestUser());
 
     const db = getTestDb();
@@ -114,10 +122,70 @@ describe("Run Comments API", () => {
     const body = await res.json();
     expect(body.comments).toHaveLength(1);
     expect(body.comments[0].id).toBe(created.id);
-    expect(body.comments[0].user.id).toBe(userIdA);
-    expect(body.comments[0].user.displayName).toBeTruthy();
-    expect(body.comments[0].user.initials).toBeTruthy();
+    // A token-authored comment names the token and has no user.
+    expect(body.comments[0].user).toBeNull();
+    expect(body.comments[0].token).toEqual({
+      id: tokenIdA,
+      name: "Comment Bot A",
+    });
     commentsListResponse.parse(body);
+  });
+
+  it("a comment posted from a browser session names the user", async () => {
+    const runId = "run-session-author";
+    await createRun(runId);
+    const cookie = await seedSessionCookie(userIdA);
+
+    const res = await api(commentsPath(runId), {
+      method: "POST",
+      headers: { Cookie: cookie },
+      body: { body: "from the browser" },
+    });
+    expect(res.status).toBe(201);
+    const created = await res.json();
+    expect(created.user.id).toBe(userIdA);
+    expect(created.user.displayName).toBeTruthy();
+    expect(created.token).toBeNull();
+    runComment.parse(created);
+  });
+
+  it("a token cannot edit or delete a comment written by a person", async () => {
+    const runId = "run-person-comment";
+    await createRun(runId);
+    const cookie = await seedSessionCookie(userIdA);
+    const posted = await api(commentsPath(runId), {
+      method: "POST",
+      headers: { Cookie: cookie },
+      body: { body: "written by a person" },
+    });
+    const created = (await posted.json()) as { id: string };
+
+    // Even the token created by the same person is a different author.
+    const patch = await api(commentPath(runId, created.id), {
+      method: "PATCH",
+      token: tokenA,
+      body: { body: "tampered" },
+    });
+    expect(patch.status).toBe(403);
+    const del = await api(commentPath(runId, created.id), {
+      method: "DELETE",
+      token: tokenA,
+    });
+    expect(del.status).toBe(403);
+  });
+
+  it("a person cannot edit a comment written by a token", async () => {
+    const runId = "run-token-comment";
+    await createRun(runId);
+    const created = await postComment(runId, "written by a token", tokenA);
+    const cookie = await seedSessionCookie(userIdA);
+
+    const patch = await api(commentPath(runId, created.id), {
+      method: "PATCH",
+      headers: { Cookie: cookie },
+      body: { body: "tampered" },
+    });
+    expect(patch.status).toBe(403);
   });
 
   it("run list comment_count includes active comments only", async () => {

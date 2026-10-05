@@ -1,3 +1,4 @@
+import type { ActorToken } from "@/lib/api/actor";
 import type { InstrumentType } from "@/lib/db/schema";
 
 // Client-side notification row. The provider maps the GET /notifications
@@ -12,6 +13,8 @@ export interface NotificationActor {
 
 export interface NotificationItem {
   actor: NotificationActor | null;
+  // Set instead of `actor` when a personal access token caused the row.
+  actorToken: ActorToken | null;
   // Caller-supplied message for `generic` and feedback rows; null otherwise.
   body: string | null;
   commentBody: string | null;
