@@ -559,6 +559,11 @@ describe("MCP Server (HTTP)", () => {
 
   it("rejects a dhub_ personal access token", async () => {
     const { token: pat } = await seedTestUser();
+
+    // The same token works on the REST API, so MCP refused a valid token.
+    const rest = await api("/api/v1/instruments", { token: pat });
+    expect(rest.status).toBe(200);
+
     const res = await api("/mcp/v1", {
       method: "POST",
       token: pat,

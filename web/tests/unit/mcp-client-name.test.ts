@@ -19,12 +19,12 @@ vi.mock("@/lib/db", () => ({
 
 import { mcpClientLabel } from "@/lib/mcp/client-name";
 
-function auth(clientId: string, userId = "user-1"): AuthInfo {
+function auth(clientId: string): AuthInfo {
   return {
     token: "token",
     clientId,
     scopes: ["read"],
-    extra: { userId },
+    extra: { userId: "user-1" },
   };
 }
 

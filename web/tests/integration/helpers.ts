@@ -173,6 +173,15 @@ export async function api(
  *
  * `scope` is the space-separated MCP scope list the client requests and the
  * user consents to, for example `"read"` or `"read write"`.
+ *
+ * Call this once per user in `beforeAll`, not per test. Better Auth rate
+ * limits each OAuth path per IP (authorize 30, consent 20, token 20 requests)
+ * and only resets a path's counter after 60 s without requests, so the whole
+ * integration run shares one budget. Failures include the status and body so
+ * a 429 is obvious.
+ *
+ * This is test-only. It writes session and client rows straight into the
+ * test database.
  */
 export async function getMcpAccessToken(
   userId: string,
@@ -185,10 +194,9 @@ export async function getMcpAccessToken(
   const verifier = randomBytes(32).toString("base64url");
   const challenge = createHash("sha256").update(verifier).digest("base64url");
 
-  // The client is inserted directly because `/oauth2/register` is rate
-  // limited per IP and the MCP suites share one server. The row mirrors what
-  // a public PKCE client created by dynamic registration looks like;
-  // authorize, consent, and token exchange below still run for real.
+  // The client is inserted directly because `/oauth2/register` allows only
+  // about 5 requests a minute per IP. The row mirrors a public PKCE client
+  // from dynamic registration. `mcp-oauth.test.ts` covers real registration.
   const clientId = randomBytes(24).toString("base64url");
   await getTestDb()
     .insert(schema.oauthClients)
@@ -220,11 +228,13 @@ export async function getMcpAccessToken(
     headers: { Cookie: sessionCookie, Accept: "application/json" },
     redirect: "manual",
   });
-  const authorizeBody = (await authorizeRes.json()) as { url?: string };
-  if (!authorizeBody.url) {
-    throw new Error("OAuth authorize returned no consent URL");
+  const authorize = await readOAuthResponse<{ url?: string }>(authorizeRes);
+  if (!authorize.body?.url) {
+    throw new Error(
+      `OAuth authorize returned no consent URL (${authorize.detail})`
+    );
   }
-  const consentUrl = new URL(authorizeBody.url, baseUrl);
+  const consentUrl = new URL(authorize.body.url, baseUrl);
 
   const consentRes = await fetch(`${issuer}/oauth2/consent`, {
     method: "POST",
@@ -239,16 +249,18 @@ export async function getMcpAccessToken(
       oauth_query: consentUrl.searchParams.toString(),
     }),
   });
-  const consentBody = (await consentRes.json()) as {
+  const consent = await readOAuthResponse<{
     url?: string;
     redirect_uri?: string;
-  };
-  const codeRedirect = consentBody.url ?? consentBody.redirect_uri;
+  }>(consentRes);
+  const codeRedirect = consent.body?.url ?? consent.body?.redirect_uri;
   const code = codeRedirect
     ? new URL(codeRedirect).searchParams.get("code")
     : null;
   if (!code) {
-    throw new Error("OAuth consent returned no authorization code");
+    throw new Error(
+      `OAuth consent returned no authorization code (${consent.detail})`
+    );
   }
 
   const tokenRes = await fetch(`${issuer}/oauth2/token`, {
@@ -265,12 +277,28 @@ export async function getMcpAccessToken(
     }),
   });
   if (tokenRes.status !== 200) {
-    throw new Error(`OAuth token exchange returned ${tokenRes.status}`);
+    throw new Error(
+      `OAuth token exchange returned ${tokenRes.status}: ${await tokenRes.text()}`
+    );
   }
   const { access_token: accessToken } = (await tokenRes.json()) as {
     access_token: string;
   };
   return accessToken;
+}
+
+// Reads the body once as text so a failed step can report it. A rate limited
+// response (429) is not always JSON, so parsing failure is not an error here.
+async function readOAuthResponse<T>(
+  res: Response
+): Promise<{ body: T | null; detail: string }> {
+  const text = await res.text();
+  const detail = `${res.status}: ${text}`;
+  try {
+    return { body: JSON.parse(text) as T, detail };
+  } catch {
+    return { body: null, detail };
+  }
 }
 
 // ---------------------------------------------------------------------------

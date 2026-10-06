@@ -106,11 +106,14 @@ Three test directories, two Vitest configs:
   `tests/integration/global-setup.ts`, and `fileParallelism: false` because
   every test file shares the one Postgres database and server instance.
   MCP HTTP tests sign in with the `getMcpAccessToken(userId, scope)` helper in
-  `tests/integration/helpers.ts`. It runs the authorization-code flow
-  end-to-end (register → authorize → consent → token) using a DB-seeded session
-  cookie and returns a JWT access token; MCP accepts JWT access tokens only
-  (clients pass RFC 8707 `resource`) and rejects personal access tokens.
-  `mcp-oauth.test.ts` also covers discovery and the consent screen.
+  `tests/integration/helpers.ts`. It inserts the OAuth client row directly
+  (dynamic registration is limited to about 5 requests a minute per IP), then
+  runs authorize → consent → token for real using a DB-seeded session cookie,
+  and returns a JWT access token. MCP accepts JWT access tokens only (clients
+  pass RFC 8707 `resource`) and rejects personal access tokens. Authorize,
+  consent, and token are also rate limited per IP, so call the helper once per
+  user in `beforeAll`, not per test. `mcp-oauth.test.ts` is the place that
+  covers discovery, real client registration, and the consent screen.
 
 `global-setup.ts` mirrors what `start_test_server()` does for Python, plus one
 thing the Python side doesn't need: an in-process HTTP server on a free port

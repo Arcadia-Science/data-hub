@@ -94,7 +94,7 @@ The token carries the `*` (wildcard) scope so every v1 REST endpoint accepts it.
 
 MCP at `/mcp/v1` uses OAuth. Point the client at `http://localhost:3000/mcp/v1` with `BETTER_AUTH_URL=http://localhost:3000`. Clients discover the authorization server via `/.well-known/oauth-protected-resource` (resource-specific: `…/mcp/v1`) and `/.well-known/oauth-authorization-server`. Sign in with the local "Sign in (dev)" flow when prompted (it resumes the OAuth authorize request); on the consent screen grant `read`, and `write` if the client needs mutating tools. Transport requires only `read`; mutating tools additionally require `write`.
 
-MCP does not accept personal access tokens. Scripts and integration tests sign in through the same OAuth flow; `getMcpAccessToken` in `web/tests/integration/helpers.ts` shows how to get an access token for a seeded user.
+MCP does not accept personal access tokens. To try MCP by hand, use a real MCP client such as [MCP Inspector](https://github.com/modelcontextprotocol/inspector) and sign in through the normal OAuth flow. The `getMcpAccessToken` helper in `web/tests/integration/helpers.ts` is test-only (it needs `__TEST_DATABASE_URL` and `__TEST_AUTH_SECRET` and writes session and client rows straight into the database), so do not use it from scripts.
 
 ## Resetting
 
