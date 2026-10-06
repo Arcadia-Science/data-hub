@@ -1,10 +1,12 @@
 import type { Metadata } from "next/types";
 import { SignInRequired } from "@/components/auth/sign-in-required";
+import { LinearCard } from "@/components/integrations/linear-card";
 import { SlackAppCard } from "@/components/integrations/slack-app-card";
 import { SlackChannelCard } from "@/components/notifications/slack-channel-card";
 import { AdminsOnly } from "@/components/settings/admins-only";
 import { SettingsPageContent } from "@/components/settings/settings-page-content";
 import { auth } from "@/lib/auth";
+import { getLinearConfigForAdmin } from "@/lib/linear/config";
 import { getSlackAppConfigForAdmin } from "@/lib/slack/app-config";
 import { getSlackChannelConfigForAdmin } from "@/lib/slack/channel-config";
 
@@ -32,7 +34,8 @@ export default async function IntegrationsSettingsPage() {
     return <AdminsOnly>manage integrations</AdminsOnly>;
   }
 
-  const [slackApp, slackChannel] = await Promise.all([
+  const [linear, slackApp, slackChannel] = await Promise.all([
+    getLinearConfigForAdmin(),
     getSlackAppConfigForAdmin(),
     getSlackChannelConfigForAdmin(),
   ]);
@@ -45,10 +48,21 @@ export default async function IntegrationsSettingsPage() {
         </h2>
         <p className="text-muted-foreground text-sm">
           Connections used by the whole workspace. Personal notification choices
-          stay under Notifications.
+          stay under Notifications. Linear receives feedback reports once a team
+          is saved.
         </p>
       </div>
       <div className="mt-6 flex flex-col gap-6">
+        <LinearCard
+          bugLabel={linear.bugLabel}
+          clientId={linear.clientId}
+          clientSecretSet={linear.clientSecret.set}
+          featureLabel={linear.featureLabel}
+          otherLabel={linear.otherLabel}
+          project={linear.project}
+          team={linear.team}
+          webhookSecretSet={linear.webhookSecret.set}
+        />
         <SlackAppCard
           botToken={slackApp.botToken}
           clientId={slackApp.clientId}

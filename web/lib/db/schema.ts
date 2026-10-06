@@ -299,6 +299,46 @@ export const slackAppConfig = pgTable(
   (config) => [check("slack_app_config_singleton", sql`${config.id} = true`)]
 );
 
+// Linear OAuth app used to store feedback issues. Client secret and webhook
+// signing secret are encrypted. Team, project, and label names are kept so
+// the settings page can show the current choice before Linear answers.
+export const linearIntegrationConfig = pgTable(
+  "linear_integration_config",
+  {
+    id: boolean("id").primaryKey().default(true),
+    clientId: text("client_id"),
+    clientSecret: text("client_secret"),
+    webhookSecret: text("webhook_secret"),
+    teamId: text("team_id"),
+    teamName: text("team_name"),
+    projectId: text("project_id"),
+    projectName: text("project_name"),
+    bugLabelId: text("bug_label_id"),
+    bugLabelName: text("bug_label_name"),
+    featureLabelId: text("feature_label_id"),
+    featureLabelName: text("feature_label_name"),
+    otherLabelId: text("other_label_id"),
+    otherLabelName: text("other_label_name"),
+    lastWebhookAt: timestamp("last_webhook_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+    updatedBy: text("updated_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+  },
+  (config) => [
+    check("linear_integration_config_singleton", sql`${config.id} = true`),
+  ]
+);
+
 export const personalAccessTokens = pgTable(
   "personal_access_tokens",
   {
