@@ -7,10 +7,7 @@ import {
   type FeedbackSource,
   type FeedbackStatus,
 } from "@/lib/api/feedback-schema";
-import {
-  notifyFeedbackSubmitted,
-  notifyFeedbackUpdated,
-} from "@/lib/api/notifications";
+import { notifyFeedbackSubmitted } from "@/lib/api/notifications";
 import { appOrigin } from "@/lib/app-origin";
 import { db } from "@/lib/db";
 import { feedback, oauthClients, users } from "@/lib/db/schema";
@@ -299,61 +296,4 @@ export async function getFeedbackForViewer(
     return item;
   }
   return null;
-}
-
-export async function updateFeedback(input: {
-  adminUserId: string;
-  id: string;
-  note?: string | null;
-  status: FeedbackStatus;
-}): Promise<FeedbackItem | null> {
-  const current = await loadFeedback(input.id);
-  if (!current) {
-    return null;
-  }
-
-  const note = input.note === undefined ? current.adminNote : input.note;
-  const statusChanged = current.status !== input.status;
-  if (!statusChanged && current.adminNote === note) {
-    return current;
-  }
-
-  await db
-    .update(feedback)
-    .set({
-      status: input.status,
-      adminNote: note,
-      statusUpdatedBy: input.adminUserId,
-      statusUpdatedAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(eq(feedback.id, input.id));
-
-  const updated = await loadFeedback(input.id);
-  if (!updated) {
-    return null;
-  }
-
-  // A note-only edit on an already resolved or declined report stays quiet.
-  // Saving again would otherwise notify the reporter a second time.
-  if (
-    updated.reporter &&
-    statusChanged &&
-    (input.status === "resolved" || input.status === "declined")
-  ) {
-    const reporterUserId = updated.reporter.id;
-    const status = input.status;
-    after(async () => {
-      await notifyFeedbackUpdated({
-        feedbackId: updated.id,
-        reporterUserId,
-        adminUserId: input.adminUserId,
-        title: updated.title,
-        status,
-        note,
-      });
-    });
-  }
-
-  return updated;
 }

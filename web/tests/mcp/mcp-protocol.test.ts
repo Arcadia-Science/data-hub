@@ -686,7 +686,6 @@ describe("MCP Protocol (in-memory)", () => {
     "request_run_upload_all",
     "dismiss_file",
     "send_feedback",
-    "update_feedback",
   ]);
 
   it("registers all expected tools", async () => {
@@ -832,7 +831,7 @@ describe("MCP Protocol (in-memory)", () => {
 
   it("every registered tool advertises outputSchema", async () => {
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(38);
+    expect(tools).toHaveLength(37);
     for (const tool of tools) {
       const schema = tool.outputSchema as
         | { type?: string; oneOf?: unknown; anyOf?: unknown }

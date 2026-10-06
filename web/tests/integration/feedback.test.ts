@@ -211,7 +211,7 @@ describe("Feedback", () => {
     );
   });
 
-  it("lets a member submit and see their reports, and rejects a non-admin PATCH", async () => {
+  it("lets a member submit and see their own reports", async () => {
     const admin = await seedTestUser({
       isAdmin: true,
       email: "admin@example.com",
@@ -238,19 +238,12 @@ describe("Feedback", () => {
 
     const patched = await api(`/api/v1/feedback/${payload.feedback.id}`, {
       method: "PATCH",
-      headers: memberHeaders,
-      body: { status: "resolved", note: "nope" },
-    });
-    expect(patched.status).toBe(403);
-
-    const ok = await api(`/api/v1/feedback/${payload.feedback.id}`, {
-      method: "PATCH",
       headers: adminHeaders,
       body: { status: "resolved", note: "Shipped." },
     });
-    expect(ok.status).toBe(200);
+    expect(patched.status).toBe(404);
 
-    const listed = await api("/api/v1/feedback?status=resolved", {
+    const listed = await api("/api/v1/feedback", {
       headers: memberHeaders,
     });
     expect(listed.status).toBe(200);
@@ -318,7 +311,7 @@ describe("Feedback", () => {
       token: admin.token,
       body: { status: "resolved" },
     });
-    expect(patched.status).toBe(401);
+    expect(patched.status).toBe(404);
 
     const rows = await getTestDb().select({ id: feedback.id }).from(feedback);
     expect(rows).toHaveLength(1);
