@@ -157,10 +157,9 @@ def seed_auth(dsn: str, scopes: list[str] | None = None) -> str:
         )
         cur.execute(
             """INSERT INTO personal_access_tokens
-                   (user_id, created_by, name, token_hash, token_prefix, scopes)
-               VALUES (%s, %s, %s, %s, %s, %s)""",
+                   (created_by, name, token_hash, token_prefix, scopes)
+               VALUES (%s, %s, %s, %s, %s)""",
             (
-                user_id,
                 user_id,
                 "integration-test-token",
                 _hash_token(token_plaintext),

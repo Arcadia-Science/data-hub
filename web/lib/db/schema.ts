@@ -275,15 +275,9 @@ export const personalAccessTokens = pgTable(
   "personal_access_tokens",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    // Deprecated and not used for sign-in: a token acts as itself. New tokens
-    // still carry their creator here only so a rollback to the previous
-    // release keeps working. A follow-up change drops this column.
-    userId: text("user_id").references(() => users.id, {
-      onDelete: "set null",
-    }),
-    // The admin who created the token. NULL after that user is deleted, and
-    // for tokens created before this column existed or by code that does not
-    // set it. A record of who made the token, never an acting identity.
+    // The admin who created the token. NULL only after that user is deleted.
+    // A token acts as itself, so this is a record of who made it and never an
+    // acting identity.
     createdBy: text("created_by").references(() => users.id, {
       onDelete: "set null",
     }),
@@ -325,7 +319,6 @@ export const personalAccessTokens = pgTable(
       .defaultNow(),
   },
   (token) => [
-    index("idx_personal_access_tokens_user_id").on(token.userId),
     index("idx_personal_access_tokens_created_by").on(token.createdBy),
   ]
 );
