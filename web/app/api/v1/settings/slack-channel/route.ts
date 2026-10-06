@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { requireAdmin } from "@/lib/api/auth";
-import { apiError, VALIDATION_ERROR } from "@/lib/api/errors";
+import { apiError, INTERNAL_ERROR, VALIDATION_ERROR } from "@/lib/api/errors";
+import { IntegrationSecretsKeyError } from "@/lib/crypto/integration-secrets";
 import {
   getSlackChannelConfigForAdmin,
   upsertSlackChannelWebhookUrl,
@@ -70,10 +71,17 @@ export async function PUT(request: NextRequest) {
     });
   }
 
-  await upsertSlackChannelWebhookUrl(
-    parsed.data.webhook_url,
-    authResult.userId
-  );
+  try {
+    await upsertSlackChannelWebhookUrl(
+      parsed.data.webhook_url,
+      authResult.userId
+    );
+  } catch (err) {
+    if (err instanceof IntegrationSecretsKeyError) {
+      return apiError(500, INTERNAL_ERROR, err.message);
+    }
+    throw err;
+  }
 
   return Response.json(await readCurrent());
 }
