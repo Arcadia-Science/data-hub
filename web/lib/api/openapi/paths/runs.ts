@@ -9,7 +9,6 @@ import {
   runIdParam,
 } from "../registry";
 import {
-  attributionsResponse,
   commentBody,
   commentDeleted,
   commentsListResponse,
@@ -203,28 +202,6 @@ registry.registerPath({
   security: bearerSecurity,
   request: { params: runParams, body: body(requestUploadUrlBody) },
   responses: ok("Upload URL.", uploadUrlResponse),
-});
-registry.registerPath({
-  method: "put",
-  path: "/instruments/{instrumentId}/runs/{runId}/attributions/me",
-  operationId: "claimRun",
-  summary: "Claim a run",
-  description: scoped("runs:attribute"),
-  tags: tag,
-  security: bearerSecurity,
-  request: { params: runParams },
-  responses: ok("Attributions.", attributionsResponse),
-});
-registry.registerPath({
-  method: "delete",
-  path: "/instruments/{instrumentId}/runs/{runId}/attributions/me",
-  operationId: "unclaimRun",
-  summary: "Remove your run claim",
-  description: scoped("runs:attribute"),
-  tags: tag,
-  security: bearerSecurity,
-  request: { params: runParams },
-  responses: ok("Attributions.", attributionsResponse),
 });
 registry.registerPath({
   method: "get",

@@ -40,7 +40,6 @@ export interface AnalyticsEvents {
     client: string;
     outcome: "ok" | "tool_error" | "exception";
     duration_bucket: "under_1s" | "1_to_5s" | "5_to_30s" | "over_30s";
-    auth: "oauth" | "pat";
   };
   run_claimed: SurfaceEvent;
   run_deleted: SurfaceEvent;
@@ -63,10 +62,11 @@ export interface AnalyticsEvents {
   };
 }
 
-interface SurfaceEvent {
-  surface: "web" | "api";
-  user_id: string;
-}
+// People are identified by `user_id`; API tokens by `token_id`. A token never
+// carries a user id, so the two shapes cannot be mixed.
+export type SurfaceEvent =
+  | { surface: "web"; user_id: string }
+  | { surface: "api"; token_id: string };
 
 export type AnalyticsEventName = keyof AnalyticsEvents;
 
@@ -74,10 +74,14 @@ type EventProps<N extends AnalyticsEventName> =
   | AnalyticsEvents[N]
   | (() => AnalyticsEvents[N] | Promise<AnalyticsEvents[N]>);
 
-export function analyticsSurface(
-  authMethod: "session" | "token"
-): "web" | "api" {
-  return authMethod === "session" ? "web" : "api";
+export function surfaceEvent(
+  actor:
+    | { authMethod: "session"; userId: string }
+    | { authMethod: "token"; tokenId: string }
+): SurfaceEvent {
+  return actor.authMethod === "session"
+    ? { surface: "web", user_id: actor.userId }
+    : { surface: "api", token_id: actor.tokenId };
 }
 
 export function durationBucket(

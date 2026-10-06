@@ -56,7 +56,9 @@ try {
   // processing succeeds.
   const plaintext = generateToken();
   await db.insert(schema.personalAccessTokens).values({
+    // Deprecated; written for rollback safety (see POST /api/v1/tokens).
     userId: adminUser.id,
+    createdBy: adminUser.id,
     name: "db:process-fixtures",
     tokenHash: hashToken(plaintext),
     tokenPrefix: getTokenPrefix(plaintext),

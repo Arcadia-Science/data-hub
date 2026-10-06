@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { NextRequest } from "next/server";
+import { actorRefFromAuth } from "@/lib/api/actor";
 import { authorize, requireAdminForSession } from "@/lib/api/auth";
 import {
   apiError,
@@ -100,7 +101,7 @@ export async function DELETE(
   const now = await deregisterWatcherRow(
     { id: watcher.id, instrumentId: watcher.instrumentId },
     "watcher_deregistered",
-    authResult.userId
+    actorRefFromAuth(authResult)
   );
 
   return Response.json({ id: watcherId, deleted_at: now });

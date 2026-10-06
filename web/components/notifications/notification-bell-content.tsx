@@ -5,9 +5,11 @@ import Link from "next/link";
 import { type MouseEvent, type ReactNode, useMemo } from "react";
 import { useNotifications } from "@/components/notifications/notifications-provider";
 import { RunGroup } from "@/components/notifications/run-group";
+import { ActorAvatar } from "@/components/token-actor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { UnknownUserAvatar, UserAvatar } from "@/components/user-avatar";
+import { UnknownUserAvatar } from "@/components/user-avatar";
+import { actorDisplayName } from "@/lib/api/actor";
 import { runCommentHref } from "@/lib/comment-hash";
 import { applySamePageCommentHash } from "@/lib/comment-hash-nav";
 import { getBrowserTimeZone } from "@/lib/date";
@@ -44,8 +46,21 @@ function handleNotificationNavigate(
   }
 }
 
+function actorName(n: NotificationItem): string {
+  return n.actor ? actorDisplayName(n.actor) : "Someone";
+}
+
+// A person or a token (key icon), or a "?" when nobody was recorded.
+function NotificationAvatar({ n }: { n: NotificationItem }) {
+  return n.actor ? (
+    <ActorAvatar actor={n.actor} size="sm" />
+  ) : (
+    <UnknownUserAvatar size="sm" />
+  );
+}
+
 function commentActionLabel(n: NotificationItem): string {
-  const actor = n.actor?.displayName ?? "Someone";
+  const actor = actorName(n);
   switch (n.type) {
     case "comment_attributed":
       return `${actor} commented on a run you ran on`;
@@ -277,19 +292,7 @@ function CommentNotificationRow({
         onClick={(event) => handleNotificationNavigate(event, href, onActivate)}
         scroll={!n.commentId}
       >
-        {n.actor ? (
-          <UserAvatar
-            size="sm"
-            user={{
-              userId: n.actor.id,
-              displayName: n.actor.displayName,
-              initials: n.actor.initials,
-              avatarUrl: n.actor.avatarUrl,
-            }}
-          />
-        ) : (
-          <UnknownUserAvatar size="sm" />
-        )}
+        <NotificationAvatar n={n} />
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <p className="text-sm leading-snug">
             <span className="font-medium">{commentActionLabel(n)}</span>{" "}
@@ -316,8 +319,7 @@ function feedbackHeading(n: NotificationItem): ReactNode {
   if (n.type === "feedback_submitted") {
     return (
       <>
-        <span className="font-medium">{n.actor?.displayName ?? "Someone"}</span>{" "}
-        sent feedback
+        <span className="font-medium">{actorName(n)}</span> sent feedback
       </>
     );
   }
@@ -340,19 +342,7 @@ function AnchorlessNotificationRow({
   const linkHref = href ?? (anchored ? notificationHref(n) : undefined);
   const content = (
     <>
-      {n.actor ? (
-        <UserAvatar
-          size="sm"
-          user={{
-            userId: n.actor.id,
-            displayName: n.actor.displayName,
-            initials: n.actor.initials,
-            avatarUrl: n.actor.avatarUrl,
-          }}
-        />
-      ) : (
-        <UnknownUserAvatar size="sm" />
-      )}
+      <NotificationAvatar n={n} />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <p className="text-sm leading-snug">{heading}</p>
         {n.type === "feedback_submitted" || n.type === "feedback_updated" ? (

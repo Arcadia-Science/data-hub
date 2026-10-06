@@ -13,6 +13,7 @@ import {
   closeTestDb,
   getBaseUrl,
   getCapturedSlackDms,
+  getMcpAccessToken,
   getTestDb,
   resetDb,
   seedSessionCookie,
@@ -45,10 +46,11 @@ describe("Feedback", () => {
   });
 
   it("returns the existing open report when the same title is sent again", async () => {
-    const { token } = await seedTestUser();
+    const { userId } = await seedTestUser();
+    const headers = { Cookie: await seedSessionCookie(userId) };
     const first = await api("/api/v1/feedback", {
       method: "POST",
-      token,
+      headers,
       body: {
         kind: "bug",
         title: "Export fails",
@@ -59,7 +61,7 @@ describe("Feedback", () => {
     const firstBody = await first.json();
     const second = await api("/api/v1/feedback", {
       method: "POST",
-      token,
+      headers,
       body: {
         kind: "bug",
         title: "Export fails",
@@ -209,18 +211,17 @@ describe("Feedback", () => {
     );
   });
 
-  it("accepts a read-only token on POST and rejects a non-admin PATCH", async () => {
+  it("lets a member submit and see their reports, and rejects a non-admin PATCH", async () => {
     const admin = await seedTestUser({
       isAdmin: true,
       email: "admin@example.com",
     });
-    const member = await seedTestUser({
-      scopes: ["instruments:read"],
-      email: "member@example.com",
-    });
+    const member = await seedTestUser({ email: "member@example.com" });
+    const memberHeaders = { Cookie: await seedSessionCookie(member.userId) };
+    const adminHeaders = { Cookie: await seedSessionCookie(admin.userId) };
     const created = await api("/api/v1/feedback", {
       method: "POST",
-      token: member.token,
+      headers: memberHeaders,
       body: {
         kind: "bug",
         title: "Search misses files",
@@ -237,20 +238,20 @@ describe("Feedback", () => {
 
     const patched = await api(`/api/v1/feedback/${payload.feedback.id}`, {
       method: "PATCH",
-      token: member.token,
+      headers: memberHeaders,
       body: { status: "resolved", note: "nope" },
     });
     expect(patched.status).toBe(403);
 
     const ok = await api(`/api/v1/feedback/${payload.feedback.id}`, {
       method: "PATCH",
-      token: admin.token,
+      headers: adminHeaders,
       body: { status: "resolved", note: "Shipped." },
     });
     expect(ok.status).toBe(200);
 
     const listed = await api("/api/v1/feedback?status=resolved", {
-      token: member.token,
+      headers: memberHeaders,
     });
     expect(listed.status).toBe(200);
     const listBody = await listed.json();
@@ -258,47 +259,69 @@ describe("Feedback", () => {
     expect(listBody.feedback[0].title).toBe("Search misses files");
   });
 
-  it("rejects an admin token that lacks feedback:admin", async () => {
+  it("shows an admin every member's reports", async () => {
     const admin = await seedTestUser({
       isAdmin: true,
-      scopes: ["instruments:read"],
-      email: "scoped-admin@example.com",
+      email: "list-admin@example.com",
     });
-    const created = await api("/api/v1/feedback", {
-      method: "POST",
-      token: admin.token,
-      body: {
-        kind: "bug",
-        title: "Scoped admin report",
-        description: "Sent with a read token.",
-      },
-    });
-    expect(created.status).toBe(201);
-    const payload = await created.json();
-
-    const listed = await api("/api/v1/feedback", { token: admin.token });
-    expect(listed.status).toBe(200);
-    const listBody = await listed.json();
-    expect(listBody.feedback).toHaveLength(1);
-
     const other = await seedTestUser({ email: "other-reporter@example.com" });
     await getTestDb().insert(feedback).values({
       userId: other.userId,
       source: "web",
       kind: "bug",
       title: "Someone else's report",
-      description: "Should stay hidden.",
+      description: "Visible to admins.",
     });
-    const listedAgain = await api("/api/v1/feedback", { token: admin.token });
-    const againBody = await listedAgain.json();
-    expect(againBody.total).toBe(1);
 
-    const patched = await api(`/api/v1/feedback/${payload.feedback.id}`, {
+    const listed = await api("/api/v1/feedback", {
+      headers: { Cookie: await seedSessionCookie(admin.userId) },
+    });
+    expect(listed.status).toBe(200);
+    expect((await listed.json()).total).toBe(1);
+  });
+
+  it("rejects personal access tokens on every feedback route", async () => {
+    // Feedback belongs to the person who wrote it, so even an admin's
+    // wildcard token is turned away.
+    const admin = await seedTestUser({
+      isAdmin: true,
+      email: "token-admin@example.com",
+    });
+    const reporter = await seedTestUser({ email: "reporter-2@example.com" });
+    const [report] = await getTestDb()
+      .insert(feedback)
+      .values({
+        userId: reporter.userId,
+        source: "web",
+        kind: "bug",
+        title: "A report",
+        description: "Seeded directly.",
+      })
+      .returning({ id: feedback.id });
+
+    const created = await api("/api/v1/feedback", {
+      method: "POST",
+      token: admin.token,
+      body: {
+        kind: "bug",
+        title: "Sent with a token",
+        description: "This should not be saved.",
+      },
+    });
+    expect(created.status).toBe(401);
+
+    const listed = await api("/api/v1/feedback", { token: admin.token });
+    expect(listed.status).toBe(401);
+
+    const patched = await api(`/api/v1/feedback/${report.id}`, {
       method: "PATCH",
       token: admin.token,
       body: { status: "resolved" },
     });
-    expect(patched.status).toBe(403);
+    expect(patched.status).toBe(401);
+
+    const rows = await getTestDb().select({ id: feedback.id }).from(feedback);
+    expect(rows).toHaveLength(1);
   });
 
   it("keeps the review page up when the item id is not a uuid", async () => {
@@ -314,11 +337,11 @@ describe("Feedback", () => {
     expect(res.status).toBeLessThan(500);
   });
 
-  it("sends feedback over MCP with a read-only token", async () => {
-    const { token } = await seedTestUser({
-      scopes: ["instruments:read"],
+  it("sends feedback over MCP with a read-only access token", async () => {
+    const { userId } = await seedTestUser({
       email: "mcp-reader@example.com",
     });
+    const token = await getMcpAccessToken(userId, "read");
     const res = await api("/mcp/v1", {
       method: "POST",
       token,

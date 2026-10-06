@@ -1,13 +1,14 @@
 import { and, count, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { cache } from "react";
 import YAML from "yaml";
-import { type ActorUser, resolveActorUser } from "@/lib/api/actor";
+import { type Actor, resolveActor } from "@/lib/api/actor";
 import { startOfWeekISO } from "@/lib/date";
 import { type DbExecutor, db } from "@/lib/db";
 import {
   type InstrumentType,
   instrumentRuns,
   instruments,
+  personalAccessTokens,
   users,
   watchers,
 } from "@/lib/db/schema";
@@ -445,7 +446,7 @@ export interface InstrumentDetail {
   /** When the instrument was retired; null unless `status` is `inactive`. */
   retiredAt: Date | null;
   /** Who retired the instrument; null when unknown or not retired. */
-  retiredByUser: ActorUser | null;
+  retiredBy: Actor | null;
   runCount: number;
   status: "pending" | "active" | "inactive";
   updatedAt: Date;
@@ -466,15 +467,22 @@ export const getInstrumentById = cache(async function getInstrumentById(
       createdAt: instruments.createdAt,
       updatedAt: instruments.updatedAt,
       retiredAt: instruments.retiredAt,
-      retiredBy: instruments.retiredBy,
+      retiredByUserId: instruments.retiredBy,
+      retiredByTokenId: instruments.retiredByToken,
       retiredByName: users.name,
       retiredByEmail: users.email,
       retiredByImage: users.image,
+      retiredByTokenName: personalAccessTokens.name,
+      retiredByTokenRevokedAt: personalAccessTokens.revokedAt,
     })
     .from(instruments)
     // Resolve the retirer for display; all NULL when active or retired before
     // `retired_by` existed.
     .leftJoin(users, eq(users.id, instruments.retiredBy))
+    .leftJoin(
+      personalAccessTokens,
+      eq(personalAccessTokens.id, instruments.retiredByToken)
+    )
     .where(eq(instruments.id, instrumentId))
     .limit(1);
 
@@ -547,11 +555,14 @@ export const getInstrumentById = cache(async function getInstrumentById(
     createdAt: instrument.createdAt,
     updatedAt: instrument.updatedAt,
     retiredAt: instrument.retiredAt,
-    retiredByUser: resolveActorUser({
-      userId: instrument.retiredBy,
-      name: instrument.retiredByName,
-      email: instrument.retiredByEmail,
-      image: instrument.retiredByImage,
+    retiredBy: resolveActor({
+      userId: instrument.retiredByUserId,
+      userName: instrument.retiredByName,
+      userEmail: instrument.retiredByEmail,
+      userImage: instrument.retiredByImage,
+      tokenId: instrument.retiredByTokenId,
+      tokenName: instrument.retiredByTokenName,
+      tokenRevokedAt: instrument.retiredByTokenRevokedAt,
     }),
     runCount: runCountResult[0].value,
     watcherCount: watcherRows.length,

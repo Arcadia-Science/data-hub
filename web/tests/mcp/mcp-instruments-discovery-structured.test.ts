@@ -47,7 +47,7 @@ const { MOCK_LIST_INSTRUMENT, MOCK_INSTRUMENT_DETAIL } = vi.hoisted(() => {
       activeWatcherWatchDirectory: "C:\\Data",
       activeWatcherDeregistered: false,
       retiredAt: null,
-      retiredByUser: null,
+      retiredBy: null,
       createdAt: MOCK_LIST_INSTRUMENT.createdAt,
       updatedAt: new Date("2024-06-01T00:00:00.000Z"),
     },

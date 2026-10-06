@@ -11,7 +11,8 @@ export type WatcherBindingVerdict = "allow" | "deny" | "tofu";
  * and HTTP 403/200 behaviour live in the integration suite.
  *
  * Sessions deny so a future slip back to `authorize` cannot impersonate a
- * watcher. Agent routes themselves already use `authorizeToken`.
+ * watcher. Agent routes themselves already use `authorizeToken`. A "deny" for
+ * a token bound elsewhere is not final: see `isBoundToOtherToken`.
  */
 export function decideWatcherBinding(
   authResult: AuthResult,
@@ -27,4 +28,22 @@ export function decideWatcherBinding(
     return "tofu";
   }
   return registeredByToken === authResult.tokenId ? "allow" : "deny";
+}
+
+/**
+ * True when a token caller meets a watcher bound to a different token. That
+ * binding is only binding while the other token is active, so the caller must
+ * check for revocation before giving up. Sessions and callers without a token
+ * id are never in this case.
+ */
+export function isBoundToOtherToken(
+  authResult: AuthResult,
+  registeredByToken: string | null
+): boolean {
+  return (
+    authResult.authMethod === "token" &&
+    Boolean(authResult.tokenId) &&
+    registeredByToken !== null &&
+    registeredByToken !== authResult.tokenId
+  );
 }

@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { analyticsSurface, trackEvent } from "@/lib/analytics/track";
+import { surfaceEvent, trackEvent } from "@/lib/analytics/track";
 import { authorize } from "@/lib/api/auth";
 import { apiErrorFromResult } from "@/lib/api/errors";
 import { restoreRun } from "@/lib/api/run-lifecycle";
@@ -31,8 +31,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   }
 
   trackEvent("run_restored", {
-    user_id: authResult.userId,
-    surface: analyticsSurface(authResult.authMethod),
+    ...surfaceEvent(authResult),
   });
 
   return Response.json({

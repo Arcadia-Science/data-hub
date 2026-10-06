@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, isNull } from "drizzle-orm";
 import { KeyRound } from "lucide-react";
 import type { Metadata } from "next/types";
 import { Suspense } from "react";
@@ -17,11 +17,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { UserAvatar } from "@/components/user-avatar";
 import { auth } from "@/lib/auth";
 import { toUserAvatarUser } from "@/lib/avatar-color";
@@ -75,11 +70,7 @@ export default async function TokensPage() {
               : "View personal access tokens for API authentication."}
           </p>
         </div>
-        {isAdmin ? (
-          <CreateTokenDialog currentUserId={session.user.id} />
-        ) : (
-          <CreateTokenDisabledButton />
-        )}
+        {isAdmin ? <CreateTokenDialog /> : <CreateTokenDisabledButton />}
       </div>
 
       <div className="mt-6">
@@ -103,7 +94,9 @@ async function TokensSection({ isAdmin }: { isAdmin: boolean }) {
       lastUsedAt: personalAccessTokens.lastUsedAt,
       expiresAt: personalAccessTokens.expiresAt,
       createdAt: personalAccessTokens.createdAt,
-      user: {
+      // NULL when the creator's account was deleted, or when the token
+      // predates `created_by`.
+      creator: {
         id: users.id,
         name: users.name,
         email: users.email,
@@ -111,7 +104,8 @@ async function TokensSection({ isAdmin }: { isAdmin: boolean }) {
       },
     })
     .from(personalAccessTokens)
-    .innerJoin(users, eq(users.id, personalAccessTokens.userId))
+    .leftJoin(users, eq(users.id, personalAccessTokens.createdBy))
+    .where(isNull(personalAccessTokens.revokedAt))
     .orderBy(desc(personalAccessTokens.createdAt));
 
   const isExpired = (expiresAt: Date | null) =>
@@ -137,7 +131,7 @@ async function TokensSection({ isAdmin }: { isAdmin: boolean }) {
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
-                <TableHead>User</TableHead>
+                <TableHead>Created by</TableHead>
                 <TableHead>Token</TableHead>
                 <TableHead>Scopes</TableHead>
                 <TableHead>Last used</TableHead>
@@ -148,24 +142,28 @@ async function TokensSection({ isAdmin }: { isAdmin: boolean }) {
             </TableHeader>
             <TableBody>
               {tokens.map((token) => {
-                const avatarUser = toUserAvatarUser({
-                  userId: token.user.id,
-                  name: token.user.name,
-                  email: token.user.email,
-                  image: token.user.image,
-                });
+                const avatarUser = token.creator?.id
+                  ? toUserAvatarUser({
+                      userId: token.creator.id,
+                      name: token.creator.name,
+                      email: token.creator.email,
+                      image: token.creator.image,
+                    })
+                  : null;
                 return (
                   <TableRow key={token.id}>
                     <TableCell className="font-medium">{token.name}</TableCell>
                     <TableCell>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
+                      {avatarUser ? (
+                        <span className="inline-flex items-center gap-2">
                           <UserAvatar size="sm" user={avatarUser} />
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          {avatarUser.displayName}
-                        </TooltipContent>
-                      </Tooltip>
+                          <span className="max-w-40 truncate">
+                            {avatarUser.displayName}
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">Unknown</span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Badge className="font-mono text-xs" variant="secondary">

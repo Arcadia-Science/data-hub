@@ -516,7 +516,7 @@ describe("Notifications", () => {
       await notifyComment({
         runInternalId,
         commentId,
-        authorUserId: author,
+        author: { kind: "user", userId: author },
       });
 
       const db = getTestDb();
@@ -543,7 +543,7 @@ describe("Notifications", () => {
       await notifyComment({
         runInternalId,
         commentId,
-        authorUserId: author,
+        author: { kind: "user", userId: author },
       });
 
       const db = getTestDb();
@@ -570,7 +570,7 @@ describe("Notifications", () => {
       await notifyComment({
         runInternalId,
         commentId,
-        authorUserId: author,
+        author: { kind: "user", userId: author },
       });
 
       const db = getTestDb();
@@ -596,7 +596,7 @@ describe("Notifications", () => {
       await notifyComment({
         runInternalId,
         commentId,
-        authorUserId: author,
+        author: { kind: "user", userId: author },
       });
 
       const db = getTestDb();
@@ -625,7 +625,7 @@ describe("Notifications", () => {
       await notifyComment({
         runInternalId,
         commentId,
-        authorUserId: author,
+        author: { kind: "user", userId: author },
       });
 
       const rows = await db
@@ -658,7 +658,7 @@ describe("Notifications", () => {
       await notifyComment({
         runInternalId,
         commentId,
-        authorUserId: author,
+        author: { kind: "user", userId: author },
       });
 
       const db = getTestDb();
@@ -685,7 +685,7 @@ describe("Notifications", () => {
         notifyComment({
           runInternalId,
           commentId,
-          authorUserId: author,
+          author: { kind: "user", userId: author },
         })
       ).resolves.toBeUndefined();
 
@@ -788,7 +788,7 @@ describe("Notifications", () => {
       await notifyComment({
         runInternalId,
         commentId: comment.id,
-        authorUserId: actor,
+        author: { kind: "user", userId: actor },
       });
 
       return { runInternalId, commentId: comment.id };
@@ -1271,7 +1271,7 @@ describe("Notifications", () => {
       await notifyComment({
         runInternalId,
         commentId,
-        authorUserId: author,
+        author: { kind: "user", userId: author },
         authorDisplayName: "Test Author",
         instrumentId,
         instrumentDisplayName,
@@ -1311,7 +1311,7 @@ describe("Notifications", () => {
       await notifyComment({
         runInternalId,
         commentId,
-        authorUserId: author,
+        author: { kind: "user", userId: author },
         authorDisplayName: "Author",
         instrumentId,
         instrumentDisplayName,

@@ -3,6 +3,7 @@
 import { Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { ActorLabel } from "@/components/token-actor";
 import { Badge } from "@/components/ui/badge";
 import {
   Breadcrumb,
@@ -14,7 +15,6 @@ import {
 } from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { UserAvatar } from "@/components/user-avatar";
 import { DeregisterDialog } from "@/components/watchers/deregister-dialog";
 import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type { WatcherDetail } from "@/lib/api/watchers";
@@ -153,13 +153,13 @@ export function WatcherHeader({
               <span>·</span>
               <span className="flex items-center gap-1.5">
                 <span>Deregistered {formatDate(watcher.deletedAt)}</span>
-                {watcher.deregisteredByUser && (
+                {watcher.deregisteredBy && (
                   <span className="flex items-center gap-1.5">
                     <span>by</span>
-                    <UserAvatar size="sm" user={watcher.deregisteredByUser} />
-                    <span className="font-medium text-foreground">
-                      {watcher.deregisteredByUser.displayName}
-                    </span>
+                    <ActorLabel
+                      actor={watcher.deregisteredBy}
+                      nameClassName="font-medium text-foreground"
+                    />
                   </span>
                 )}
               </span>

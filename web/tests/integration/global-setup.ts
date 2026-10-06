@@ -296,10 +296,6 @@ export async function setup() {
     // Shared secret the cron sweep route checks. Tests send the same value
     // as a Bearer token (see upload-queue-sweep.test.ts).
     CRON_SECRET: "test-cron-secret",
-    // MCP HTTP suite authenticates with PATs. `next start` sets
-    // NODE_ENV=production, but BETTER_AUTH_URL is loopback so the
-    // self-hosted production hard-off does not apply.
-    MCP_ALLOW_PAT_AUTH: "true",
   };
   // Strip the Lambda Function URL so "not configured" test cases work
   // regardless of the developer's local .env. Tests that need a stubbed

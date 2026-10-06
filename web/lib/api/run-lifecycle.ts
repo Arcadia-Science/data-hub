@@ -1,4 +1,10 @@
 import { eq } from "drizzle-orm";
+import {
+  type ActorRef,
+  actorColumns,
+  actorToken,
+  actorUser,
+} from "@/lib/api/actor";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { db } from "@/lib/db";
 import { instrumentRuns } from "@/lib/db/schema";
@@ -12,7 +18,11 @@ export type RunLifecycleResult =
       instrumentId: string;
       runId: string;
       deletedAt: Date | null;
+      // Who deleted the run: a person's user id, or the token that did.
+      // Both null for an active run, or one deleted before the actor was
+      // recorded.
       deletedBy?: string | null;
+      deletedByToken?: { id: string; name: string } | null;
       // True when the run was already in the requested state, so the call made
       // no change. Lets delete/restore stay idempotent (success, not 409) while
       // still letting callers tell a no-op apart from a real transition.
@@ -29,7 +39,7 @@ export type RunLifecycleResult =
 export async function softDeleteRun(input: {
   instrumentId: string;
   runId: string;
-  deletedBy: string | null;
+  actor: ActorRef | null;
 }): Promise<RunLifecycleResult> {
   const run = await lookupRunByNaturalKey(input.instrumentId, input.runId);
   if (!run) {
@@ -50,15 +60,17 @@ export async function softDeleteRun(input: {
       instrumentId: run.instrumentId,
       runId: run.runId,
       deletedAt: run.deletedAt,
-      deletedBy: run.deletedBy,
+      deletedBy: actorUser(run.deletedBy)?.userId ?? null,
+      deletedByToken: actorToken(run.deletedBy),
       alreadyApplied: true,
     };
   }
 
   const now = new Date();
+  const { userId, tokenId } = actorColumns(input.actor);
   await db
     .update(instrumentRuns)
-    .set({ deletedAt: now, deletedBy: input.deletedBy })
+    .set({ deletedAt: now, deletedBy: userId, deletedByToken: tokenId })
     .where(eq(instrumentRuns.id, run.id));
 
   return {
@@ -67,7 +79,11 @@ export async function softDeleteRun(input: {
     instrumentId: run.instrumentId,
     runId: run.runId,
     deletedAt: now,
-    deletedBy: input.deletedBy,
+    deletedBy: userId,
+    deletedByToken:
+      input.actor?.kind === "token"
+        ? { id: input.actor.tokenId, name: input.actor.tokenName }
+        : null,
     alreadyApplied: false,
   };
 }
@@ -102,7 +118,7 @@ export async function restoreRun(
 
   await db
     .update(instrumentRuns)
-    .set({ deletedAt: null, deletedBy: null })
+    .set({ deletedAt: null, deletedBy: null, deletedByToken: null })
     .where(eq(instrumentRuns.id, run.id));
 
   const restored = await lookupRunByNaturalKey(instrumentId, runId);

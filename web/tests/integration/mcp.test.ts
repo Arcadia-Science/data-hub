@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 // biome-ignore lint/performance/noNamespaceImport: integration tests need the full schema module for Db typing
 import * as schema from "@/lib/db/schema";
@@ -5,6 +6,7 @@ import {
   api,
   closeTestDb,
   getBaseUrl,
+  getMcpAccessToken,
   getTestDb,
   resetDb,
   seedTestUser,
@@ -46,14 +48,26 @@ describe("MCP Server (HTTP)", () => {
   let token: string;
   let userId: string;
   let tokenB: string;
+  let adminAId: string;
+  let adminAToken: string;
+  let adminBId: string;
+  let adminBToken: string;
 
   const instrumentId = "mcp-test-instrument";
   const runId = "mcp-test-run";
 
   beforeAll(async () => {
     await resetDb();
-    ({ token, userId } = await seedTestUser());
-    ({ token: tokenB } = await seedTestUser());
+    ({ userId } = await seedTestUser());
+    const { userId: userIdB } = await seedTestUser();
+    token = await getMcpAccessToken(userId);
+    tokenB = await getMcpAccessToken(userIdB);
+    // Two admins for the comment-delete tests. Each OAuth sign-in counts
+    // against a shared per-IP rate limit, so they are made once here.
+    ({ userId: adminAId } = await seedTestUser({ isAdmin: true }));
+    ({ userId: adminBId } = await seedTestUser({ isAdmin: true }));
+    adminAToken = await getMcpAccessToken(adminAId);
+    adminBToken = await getMcpAccessToken(adminBId);
 
     const db = getTestDb();
     await db.insert(schema.instruments).values({
@@ -125,7 +139,7 @@ describe("MCP Server (HTTP)", () => {
 
   // ---- Initialize ----------------------------------------------------------
 
-  it("initializes with valid token", async () => {
+  it("initializes with a valid OAuth access token", async () => {
     const res = await api("/mcp/v1", {
       method: "POST",
       token,
@@ -215,7 +229,7 @@ describe("MCP Server (HTTP)", () => {
   // arguments. They also cover idempotency and the `ranBy` filter that
   // `search_runs` now accepts.
 
-  it("claim_run attributes the run to the token's user and is idempotent", async () => {
+  it("claim_run attributes the run to the signed-in user and is idempotent", async () => {
     const first = await callTool("claim_run", {
       instrumentId,
       runId,
@@ -232,7 +246,7 @@ describe("MCP Server (HTTP)", () => {
     expect(secondParsed.attributions[0].userId).toBe(userId);
   });
 
-  it("claim_run ignores a spoofed userId argument — the token's user is the attributor", async () => {
+  it("claim_run ignores a spoofed userId argument — the signed-in user is the attributor", async () => {
     const result = await callTool("claim_run", {
       instrumentId,
       runId,
@@ -297,7 +311,7 @@ describe("MCP Server (HTTP)", () => {
     expect(unattributedRunIds).not.toContain(runId);
   });
 
-  it('search_runs ranBy="me" resolves to the token owner', async () => {
+  it('search_runs ranBy="me" resolves to the signed-in user', async () => {
     await callTool("claim_run", { instrumentId, runId });
 
     const result = await callTool("search_runs", {
@@ -310,7 +324,7 @@ describe("MCP Server (HTTP)", () => {
     expect(runIds).toContain(runId);
   });
 
-  it("get_me returns the authenticated token owner", async () => {
+  it("get_me returns the signed-in user", async () => {
     const result = await callTool("get_me", {});
     expect(result.isError).toBeFalsy();
     const parsed = JSON.parse(result.content[0].text);
@@ -329,6 +343,40 @@ describe("MCP Server (HTTP)", () => {
     expect(parsed.instruments).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: instrumentId })])
     );
+  });
+
+  it("global_search returns a comment written by a token", async () => {
+    const db = getTestDb();
+    const { tokenId } = await seedTestUser({ tokenName: "mcp-search-bot" });
+    const [run] = await db
+      .select({ id: schema.instrumentRuns.id })
+      .from(schema.instrumentRuns)
+      .where(eq(schema.instrumentRuns.runId, runId));
+    const [comment] = await db
+      .insert(schema.runComments)
+      .values({ runId: run.id, tokenId, body: "Bot note MCPSEARCH-ZQX" })
+      .returning({ id: schema.runComments.id });
+
+    try {
+      const result = await callTool("global_search", {
+        query: "MCPSEARCH-ZQX",
+        scope: "comments",
+      });
+      expect(result.isError).toBeFalsy();
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.comments).toEqual([
+        expect.objectContaining({
+          id: comment.id,
+          userId: null,
+          userName: null,
+          token: { id: tokenId, name: "mcp-search-bot", revoked: false },
+        }),
+      ]);
+    } finally {
+      await db
+        .delete(schema.runComments)
+        .where(eq(schema.runComments.id, comment.id));
+    }
   });
 
   it("list_run_attributors returns the set of attributors for an instrument", async () => {
@@ -356,7 +404,7 @@ describe("MCP Server (HTTP)", () => {
   // ---- Comment mutations (end-to-end) --------------------------------------
   //
   // Exercises the add/edit/delete tools through the HTTP boundary where a real
-  // Bearer token resolves `authInfo.extra.userId`. Covers author-only
+  // OAuth access token resolves `authInfo.extra.userId`. Covers author-only
   // enforcement (a second user's token is rejected) and the documented
   // idempotency of delete_run_comment.
 
@@ -406,6 +454,161 @@ describe("MCP Server (HTTP)", () => {
     });
     expect(del2.isError).toBeFalsy();
     expect(JSON.parse(del2.content[0].text).deleted).toBe(true);
+  });
+
+  // Admins may delete anyone's comment over MCP; members may not.
+  it("delete_run_comment lets an admin remove another user's comment", async () => {
+    const add = await callTool("add_run_comment", {
+      instrumentId,
+      runId,
+      body: "a member's comment",
+    });
+    const created = JSON.parse(add.content[0].text) as { id: string };
+
+    const { userId: adminId } = await seedTestUser({ isAdmin: true });
+    const adminToken = await getMcpAccessToken(adminId);
+    const del = await callTool(
+      "delete_run_comment",
+      { commentId: created.id },
+      adminToken
+    );
+    expect(del.isError).toBeFalsy();
+
+    const [row] = await getTestDb()
+      .select({
+        deletedAt: schema.runComments.deletedAt,
+        deletedBy: schema.runComments.deletedBy,
+      })
+      .from(schema.runComments)
+      .where(eq(schema.runComments.id, created.id));
+    expect(row.deletedAt).toBeInstanceOf(Date);
+    expect(row.deletedBy).toBe(adminId);
+
+    // Edit stays author-only, even for admins.
+    const second = await callTool("add_run_comment", {
+      instrumentId,
+      runId,
+      body: "another comment",
+    });
+    const other = JSON.parse(second.content[0].text) as { id: string };
+    const edit = await callTool(
+      "edit_run_comment",
+      { commentId: other.id, body: "reworded" },
+      adminToken
+    );
+    expect(edit.isError).toBe(true);
+    expect(edit.content[0].text).toMatch(/only edit your own/i);
+  });
+
+  async function addComment(onRunId = runId): Promise<string> {
+    const add = await callTool("add_run_comment", {
+      instrumentId,
+      runId: onRunId,
+      body: "a comment to delete",
+    });
+    return (JSON.parse(add.content[0].text) as { id: string }).id;
+  }
+
+  async function readDeletion(commentId: string) {
+    const [row] = await getTestDb()
+      .select({
+        deletedAt: schema.runComments.deletedAt,
+        deletedBy: schema.runComments.deletedBy,
+      })
+      .from(schema.runComments)
+      .where(eq(schema.runComments.id, commentId));
+    return row;
+  }
+
+  it("delete_run_comment refuses an admin whose role was removed", async () => {
+    const commentId = await addComment();
+    const db = getTestDb();
+    await db
+      .update(schema.users)
+      .set({ isAdmin: false })
+      .where(eq(schema.users.id, adminBId));
+
+    try {
+      // The access token was issued while adminB was an admin. The tool
+      // reads the role from the database on each call, so this is refused.
+      const del = await callTool(
+        "delete_run_comment",
+        { commentId },
+        adminBToken
+      );
+      expect(del.isError).toBe(true);
+      expect(del.content[0].text).toMatch(/only delete your own/i);
+      expect((await readDeletion(commentId)).deletedAt).toBeNull();
+    } finally {
+      await db
+        .update(schema.users)
+        .set({ isAdmin: true })
+        .where(eq(schema.users.id, adminBId));
+    }
+  });
+
+  it("delete_run_comment by a second admin keeps the first deleter", async () => {
+    const commentId = await addComment();
+
+    const first = await callTool(
+      "delete_run_comment",
+      { commentId },
+      adminAToken
+    );
+    expect(first.isError).toBeFalsy();
+    expect((await readDeletion(commentId)).deletedBy).toBe(adminAId);
+
+    const second = await callTool(
+      "delete_run_comment",
+      { commentId },
+      adminBToken
+    );
+    expect(second.isError).toBeFalsy();
+    expect(JSON.parse(second.content[0].text).deleted).toBe(true);
+    expect((await readDeletion(commentId)).deletedBy).toBe(adminAId);
+  });
+
+  it("delete_run_comment refuses a comment on a soft-deleted run", async () => {
+    const db = getTestDb();
+    const deletedRunId = "mcp-comment-deleted-run";
+    const [run] = await db
+      .insert(schema.instrumentRuns)
+      .values({ instrumentId, runId: deletedRunId, source: "lambda" })
+      .returning({ id: schema.instrumentRuns.id });
+    const liveId = await addComment(deletedRunId);
+    const alreadyDeletedId = await addComment(deletedRunId);
+    expect(
+      (
+        await callTool(
+          "delete_run_comment",
+          { commentId: alreadyDeletedId },
+          adminAToken
+        )
+      ).isError
+    ).toBeFalsy();
+
+    await db
+      .update(schema.instrumentRuns)
+      .set({ deletedAt: new Date() })
+      .where(eq(schema.instrumentRuns.id, run.id));
+
+    const refused = await callTool(
+      "delete_run_comment",
+      { commentId: liveId },
+      adminAToken
+    );
+    expect(refused.isError).toBe(true);
+    expect(refused.content[0].text).toMatch(/soft-deleted run/i);
+    expect((await readDeletion(liveId)).deletedAt).toBeNull();
+
+    // A comment that was already deleted stays an idempotent success.
+    const again = await callTool(
+      "delete_run_comment",
+      { commentId: alreadyDeletedId },
+      adminAToken
+    );
+    expect(again.isError).toBeFalsy();
+    expect(JSON.parse(again.content[0].text).deleted).toBe(true);
   });
 
   // ---- Upload requests (end-to-end) ----------------------------------------
@@ -536,83 +739,118 @@ describe("MCP Server (HTTP)", () => {
     expect(JSON.parse(afterRestore.content[0].text).deletedAt).toBeNull();
   });
 
-  // ---- PAT scope enforcement (coarse read / write) -------------------------
+  // ---- Records written by a token ------------------------------------------
+  //
+  // Tokens act as themselves, so rows they write carry a token instead of a
+  // user. MCP callers are always people; they read these rows through the
+  // `*ByToken` fields and cannot edit a token's comments.
+
+  it("read tools name the token that wrote a record", async () => {
+    const { tokenId } = await seedTestUser({ tokenName: "Cleanup Bot" });
+    const db = getTestDb();
+    const tokenInstrument = "mcp-token-written-instrument";
+    await db.insert(schema.instruments).values({
+      id: tokenInstrument,
+      displayName: "Token Written Instrument",
+      status: "inactive",
+      retiredAt: new Date(),
+      retiredByToken: tokenId,
+    });
+    const [run] = await db
+      .insert(schema.instrumentRuns)
+      .values({
+        instrumentId: tokenInstrument,
+        runId: "token-written-run",
+        source: "lambda",
+        deletedAt: new Date(),
+        deletedByToken: tokenId,
+      })
+      .returning({ id: schema.instrumentRuns.id });
+    const [watcher] = await db
+      .insert(schema.watchers)
+      .values({
+        instrumentId: tokenInstrument,
+        hostname: "retired-pc",
+        status: "stopped",
+        deletedAt: new Date(),
+        deregisteredByToken: tokenId,
+      })
+      .returning({ id: schema.watchers.id });
+    const [comment] = await db
+      .insert(schema.runComments)
+      .values({ runId: run.id, tokenId, body: "note from a token" })
+      .returning({ id: schema.runComments.id });
+    const expectedToken = { id: tokenId, name: "Cleanup Bot" };
+
+    const instrument = await callTool("get_instrument", {
+      instrumentId: tokenInstrument,
+    });
+    const instrumentBody = JSON.parse(instrument.content[0].text);
+    expect(instrumentBody.retiredByUser).toBeNull();
+    expect(instrumentBody.retiredByToken).toEqual(expectedToken);
+
+    const runResult = await callTool("get_run", {
+      instrumentId: tokenInstrument,
+      runId: "token-written-run",
+      include: ["comments"],
+    });
+    const runBody = JSON.parse(runResult.content[0].text);
+    expect(runBody.deletedBy).toBeNull();
+    expect(runBody.deletedByUser).toBeNull();
+    expect(runBody.deletedByToken).toEqual(expectedToken);
+    expect(runBody.comments[0].user).toBeNull();
+    expect(runBody.comments[0].token).toEqual(expectedToken);
+
+    const watcherResult = await callTool("get_watcher", {
+      watcherId: watcher.id,
+    });
+    const watcherBody = JSON.parse(watcherResult.content[0].text);
+    expect(watcherBody.deregisteredByUser).toBeNull();
+    expect(watcherBody.deregisteredByToken).toEqual(expectedToken);
+
+    const edit = await callTool("edit_run_comment", {
+      commentId: comment.id,
+      body: "tampered",
+    });
+    expect(edit.isError).toBe(true);
+    expect(edit.content[0].text).toMatch(/only edit your own/i);
+  });
+
+  // ---- OAuth scope enforcement (coarse read / write) ----------------------
   //
   // Transport requires `read` only. The WWW-Authenticate challenge still
-  // advertises `read write` so Cursor requests both. PAT fallback maps to
-  // `read` always and `write` only for `*` (fine-grained mutating PAT scopes
-  // stay read-only over MCP to avoid privilege escalation). Mutating tools
-  // gate on `write` via `requireMcpWrite`.
+  // advertises `read write` so Cursor requests both. Mutating tools gate on
+  // `write` via `requireMcpWrite`. The read-only counterpart lives in
+  // `mcp-oauth.test.ts`.
 
-  it("read-only PAT can read but not mutate", async () => {
-    const { token: scopedToken } = await seedTestUser({
-      scopes: ["runs:read"],
-    });
-
-    const search = await callTool("search_runs", { instrumentId }, scopedToken);
-    expect(search.isError).toBeFalsy();
-
-    const claim = await callTool(
-      "claim_run",
-      { instrumentId, runId },
-      scopedToken
-    );
-    expect(claim.isError).toBe(true);
-    expect(claim.content[0].text).toMatch(/missing required scope: write/);
-  });
-
-  it("fine-grained mutating PAT scopes stay read-only over MCP", async () => {
-    const { token: scopedToken } = await seedTestUser({
-      scopes: ["runs:attribute"],
-    });
-
-    const search = await callTool("search_runs", { instrumentId }, scopedToken);
-    expect(search.isError).toBeFalsy();
-
-    const claim = await callTool(
-      "claim_run",
-      { instrumentId, runId },
-      scopedToken
-    );
-    expect(claim.isError).toBe(true);
-    expect(claim.content[0].text).toMatch(/missing required scope: write/);
-  });
-
-  it("wildcard PAT can call mutating tools", async () => {
-    const { token: scopedToken } = await seedTestUser({
-      scopes: ["*"],
-    });
-
-    const claim = await callTool(
-      "claim_run",
-      { instrumentId, runId },
-      scopedToken
-    );
+  it("an access token with read and write can call mutating tools", async () => {
+    const claim = await callTool("claim_run", { instrumentId, runId });
     expect(claim.isError).toBeFalsy();
 
     // Nonexistent file: write gate passes, then the helper returns not-found.
-    const reprocess = await callTool(
-      "reprocess_file",
-      { fileId: 99_999 },
-      scopedToken
-    );
+    const reprocess = await callTool("reprocess_file", { fileId: 99_999 });
     expect(reprocess.isError).toBe(true);
     expect(reprocess.content[0].text).toMatch(/not found/);
     expect(reprocess.content[0].text).not.toMatch(/missing required scope/);
   });
 
-  it("empty PAT scopes can read (read is always granted) but not mutate", async () => {
-    const { token: scopedToken } = await seedTestUser({ scopes: [] });
+  it("rejects a dhub_ personal access token", async () => {
+    const { token: pat } = await seedTestUser();
 
-    const list = await callTool("list_instruments", {}, scopedToken);
-    expect(list.isError).toBeFalsy();
+    // The same token works on the REST API, so MCP refused a valid token.
+    const rest = await api("/api/v1/instruments", { token: pat });
+    expect(rest.status).toBe(200);
 
-    const claim = await callTool(
-      "claim_run",
-      { instrumentId, runId },
-      scopedToken
-    );
-    expect(claim.isError).toBe(true);
-    expect(claim.content[0].text).toMatch(/missing required scope: write/);
+    const res = await api("/mcp/v1", {
+      method: "POST",
+      token: pat,
+      headers: MCP_HEADERS,
+      body: jsonRpc("initialize", {
+        protocolVersion: "2025-03-26",
+        capabilities: {},
+        clientInfo: { name: "test", version: "1.0" },
+      }),
+    });
+    expect(res.status).toBe(401);
   });
 });

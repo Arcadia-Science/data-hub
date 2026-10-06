@@ -76,6 +76,8 @@ export async function POST(request: NextRequest) {
       status: "registered",
       // Bind this watcher to the registering PAT so later ops can't be
       // driven by a different watchers:report token (cross-control IDOR).
+      // If the token is revoked right after auth, the binding is ignored
+      // later (see `enforceWatcherBinding`), so it cannot lock anyone out.
       registeredByToken: authResult.tokenId,
     })
     .returning({ id: watchers.id });

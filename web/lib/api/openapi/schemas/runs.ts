@@ -96,6 +96,15 @@ export const attribution = z
   })
   .openapi("RunAttribution");
 
+// A personal access token that acted on its own, shown beside the `*_by`
+// user field it replaces for that row.
+export const tokenActor = z
+  .object({
+    id: z.string().uuid(),
+    name: z.string(),
+  })
+  .openapi("TokenActor");
+
 export const runCreated = z
   .object({
     id: z.string().uuid(),
@@ -160,6 +169,7 @@ export const runDetail = z
     updated_at: isoDateTime,
     deleted_at: isoDateTime.nullable(),
     deleted_by: z.string().nullable(),
+    deleted_by_token: tokenActor.nullable(),
     metadata: metadataObject.nullable(),
     attributions: z.array(attribution),
     files: z.array(runDetailFile),
@@ -207,6 +217,7 @@ export const runDeleted = z.object({
   run_id: z.string(),
   deleted_at: isoDateTime.nullable(),
   deleted_by: z.string().nullable(),
+  deleted_by_token: tokenActor.nullable(),
   already_applied: z.boolean(),
 });
 
@@ -308,7 +319,10 @@ export const runComment = z
   .object({
     id: z.string().uuid(),
     body: z.string(),
-    user: commentUser,
+    // Exactly one of `user` and `token` is set: a person, or the personal
+    // access token that posted the comment through the API.
+    user: commentUser.nullable(),
+    token: tokenActor.nullable(),
     created_at: isoDateTime,
     edited_at: isoDateTime.nullable(),
   })

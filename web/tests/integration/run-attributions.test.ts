@@ -6,6 +6,7 @@ import {
   closeTestDb,
   getTestDb,
   resetDb,
+  seedSessionCookie,
   seedTestUser,
 } from "@/tests/integration/helpers";
 
@@ -16,13 +17,16 @@ import {
 //   - The `attributions` field embedded in run detail responses
 //
 // Attribution is strictly self-scoped: the URL and body carry no user id, so
-// these tests prove the authenticated token's user is the only user ever
-// written and that idempotency holds across duplicate PUT/DELETE calls.
+// these tests prove the signed-in user is the only user ever written and that
+// idempotency holds across duplicate PUT/DELETE calls. Claiming needs a
+// browser session: personal access tokens act as themselves and cannot claim.
+// Tokens still create and read runs, so they stay in use for those calls.
 describe("Run Attributions API", () => {
   let tokenA: string;
   let userIdA: string;
-  let tokenB: string;
   let userIdB: string;
+  let cookieA: string;
+  let cookieB: string;
 
   const instrumentId = "attributions-test-instrument";
 
@@ -30,7 +34,9 @@ describe("Run Attributions API", () => {
     await resetDb();
 
     ({ token: tokenA, userId: userIdA } = await seedTestUser());
-    ({ token: tokenB, userId: userIdB } = await seedTestUser());
+    ({ userId: userIdB } = await seedTestUser());
+    cookieA = await seedSessionCookie(userIdA);
+    cookieB = await seedSessionCookie(userIdB);
 
     const db = getTestDb();
     await db.insert(instruments).values({
@@ -70,10 +76,27 @@ describe("Run Attributions API", () => {
     expect(res.status).toBe(401);
   });
 
+  it("PUT with a personal access token returns 401 — tokens cannot claim", async () => {
+    const runId = "run-claim-by-token";
+    await createRun(runId);
+
+    const res = await api(attributionPath(runId), {
+      method: "PUT",
+      token: tokenA,
+    });
+    expect(res.status).toBe(401);
+
+    const detail = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${runId}`,
+      { token: tokenA }
+    );
+    expect((await detail.json()).attributions).toEqual([]);
+  });
+
   it("PUT on an unknown run returns 404 with NOT_FOUND", async () => {
     const res = await api(attributionPath("does-not-exist"), {
       method: "PUT",
-      token: tokenA,
+      headers: { Cookie: cookieA },
     });
     expect(res.status).toBe(404);
     const body = await res.json();
@@ -86,7 +109,7 @@ describe("Run Attributions API", () => {
 
     const res = await api(attributionPath(runId), {
       method: "PUT",
-      token: tokenA,
+      headers: { Cookie: cookieA },
     });
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -103,10 +126,13 @@ describe("Run Attributions API", () => {
     const runId = "run-claim-idempotent";
     await createRun(runId);
 
-    await api(attributionPath(runId), { method: "PUT", token: tokenA });
+    await api(attributionPath(runId), {
+      method: "PUT",
+      headers: { Cookie: cookieA },
+    });
     const res = await api(attributionPath(runId), {
       method: "PUT",
-      token: tokenA,
+      headers: { Cookie: cookieA },
     });
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -123,10 +149,31 @@ describe("Run Attributions API", () => {
     expect(res.status).toBe(401);
   });
 
+  it("DELETE with a personal access token returns 401", async () => {
+    const runId = "run-unclaim-by-token";
+    await createRun(runId);
+    await api(attributionPath(runId), {
+      method: "PUT",
+      headers: { Cookie: cookieA },
+    });
+
+    const res = await api(attributionPath(runId), {
+      method: "DELETE",
+      token: tokenA,
+    });
+    expect(res.status).toBe(401);
+
+    const detail = await api(
+      `/api/v1/instruments/${instrumentId}/runs/${runId}`,
+      { token: tokenA }
+    );
+    expect((await detail.json()).attributions).toHaveLength(1);
+  });
+
   it("DELETE on an unknown run returns 404 with NOT_FOUND", async () => {
     const res = await api(attributionPath("does-not-exist"), {
       method: "DELETE",
-      token: tokenA,
+      headers: { Cookie: cookieA },
     });
     expect(res.status).toBe(404);
     const body = await res.json();
@@ -136,11 +183,14 @@ describe("Run Attributions API", () => {
   it("DELETE removes the attribution", async () => {
     const runId = "run-delete-single";
     await createRun(runId);
-    await api(attributionPath(runId), { method: "PUT", token: tokenA });
+    await api(attributionPath(runId), {
+      method: "PUT",
+      headers: { Cookie: cookieA },
+    });
 
     const res = await api(attributionPath(runId), {
       method: "DELETE",
-      token: tokenA,
+      headers: { Cookie: cookieA },
     });
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -154,7 +204,7 @@ describe("Run Attributions API", () => {
 
     const res = await api(attributionPath(runId), {
       method: "DELETE",
-      token: tokenA,
+      headers: { Cookie: cookieA },
     });
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -171,13 +221,13 @@ describe("Run Attributions API", () => {
 
     const first = await api(attributionPath(runId), {
       method: "PUT",
-      token: tokenA,
+      headers: { Cookie: cookieA },
     });
     expect(first.status).toBe(200);
 
     const second = await api(attributionPath(runId), {
       method: "PUT",
-      token: tokenB,
+      headers: { Cookie: cookieB },
     });
     expect(second.status).toBe(200);
     const body = await second.json();
@@ -197,7 +247,7 @@ describe("Run Attributions API", () => {
     await createRun(otherRunId);
     await api(attributionPath(claimedRunId), {
       method: "PUT",
-      token: tokenA,
+      headers: { Cookie: cookieA },
     });
 
     const res = await api(
@@ -222,7 +272,7 @@ describe("Run Attributions API", () => {
     await createRun(unattributedRunId);
     await api(attributionPath(claimedRunId), {
       method: "PUT",
-      token: tokenA,
+      headers: { Cookie: cookieA },
     });
 
     const res = await api(
@@ -246,7 +296,10 @@ describe("Run Attributions API", () => {
   it("GET run detail includes the attributions array", async () => {
     const runId = "run-detail-attributions";
     await createRun(runId);
-    await api(attributionPath(runId), { method: "PUT", token: tokenA });
+    await api(attributionPath(runId), {
+      method: "PUT",
+      headers: { Cookie: cookieA },
+    });
 
     const res = await api(`/api/v1/instruments/${instrumentId}/runs/${runId}`, {
       token: tokenA,

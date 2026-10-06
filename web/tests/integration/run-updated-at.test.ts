@@ -9,6 +9,7 @@ import {
   closeTestDb,
   getTestDb,
   resetDb,
+  seedSessionCookie,
   seedTestUser,
 } from "@/tests/integration/helpers";
 
@@ -30,10 +31,14 @@ function reportedFile(filename: string, createdAt = fileCreatedAt) {
 
 describe("Run updated_at", () => {
   let token: string;
+  // Claiming needs a signed-in person; the token covers everything else.
+  let cookie: string;
 
   beforeAll(async () => {
     await resetDb();
-    ({ token } = await seedTestUser());
+    let userId: string;
+    ({ token, userId } = await seedTestUser());
+    cookie = await seedSessionCookie(userId);
   });
 
   afterAll(async () => {
@@ -334,21 +339,30 @@ describe("Run updated_at", () => {
     const past = new Date("2020-05-01T00:00:00.000Z");
 
     await pinUpdatedAt(instrumentId, runId, past);
-    const claimed = await api(attributionsUrl, { method: "PUT", token });
+    const claimed = await api(attributionsUrl, {
+      method: "PUT",
+      headers: { Cookie: cookie },
+    });
     expect(claimed.status).toBe(200);
     const afterClaim = await readUpdatedAt(instrumentId, runId);
     expect(afterClaim.getTime()).toBeGreaterThan(past.getTime());
 
     // Re-claiming stores no new row, so the time stays put.
     await pinUpdatedAt(instrumentId, runId, past);
-    const reclaimed = await api(attributionsUrl, { method: "PUT", token });
+    const reclaimed = await api(attributionsUrl, {
+      method: "PUT",
+      headers: { Cookie: cookie },
+    });
     expect(reclaimed.status).toBe(200);
     expect((await readUpdatedAt(instrumentId, runId)).toISOString()).toBe(
       past.toISOString()
     );
 
     await pinUpdatedAt(instrumentId, runId, past);
-    const unclaimed = await api(attributionsUrl, { method: "DELETE", token });
+    const unclaimed = await api(attributionsUrl, {
+      method: "DELETE",
+      headers: { Cookie: cookie },
+    });
     expect(unclaimed.status).toBe(200);
     const afterUnclaim = await readUpdatedAt(instrumentId, runId);
     expect(afterUnclaim.getTime()).toBeGreaterThan(past.getTime());
@@ -357,7 +371,7 @@ describe("Run updated_at", () => {
     await pinUpdatedAt(instrumentId, runId, past);
     const unclaimedAgain = await api(attributionsUrl, {
       method: "DELETE",
-      token,
+      headers: { Cookie: cookie },
     });
     expect(unclaimedAgain.status).toBe(200);
     expect((await readUpdatedAt(instrumentId, runId)).toISOString()).toBe(

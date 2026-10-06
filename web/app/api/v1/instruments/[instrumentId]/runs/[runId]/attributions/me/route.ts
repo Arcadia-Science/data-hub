@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
-import { analyticsSurface, trackEvent } from "@/lib/analytics/track";
-import { authorize } from "@/lib/api/auth";
-import { apiError, NOT_FOUND } from "@/lib/api/errors";
+import { surfaceEvent, trackEvent } from "@/lib/analytics/track";
+import { requireSession } from "@/lib/api/auth";
+import { apiError, NOT_FOUND, UNAUTHORIZED } from "@/lib/api/errors";
 import {
   getAttributionsByRunIds,
   lookupRunByNaturalKey,
@@ -15,16 +15,17 @@ interface RouteContext {
 // ---------------------------------------------------------------------------
 // PUT /api/v1/instruments/:instrumentId/runs/:runId/attributions/me
 //
-// Claim a run for the authenticated user. Idempotent: calling twice has the
-// same effect as calling once. The authenticated user id is the only user id
+// Claim a run for the signed-in user. Idempotent: calling twice has the
+// same effect as calling once. The session's user id is the only user id
 // used — the URL carries no user id, so spoofing another user's attribution
-// is impossible.
+// is impossible. Session-only: a run is claimed by the person who performed
+// it, and API tokens are not people.
 // ---------------------------------------------------------------------------
 
-export async function PUT(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authorize(request, "runs:attribute");
-  if (authResult instanceof Response) {
-    return authResult;
+export async function PUT(_request: NextRequest, { params }: RouteContext) {
+  const authResult = await requireSession();
+  if (!authResult) {
+    return apiError(401, UNAUTHORIZED, "Authentication required");
   }
 
   const { instrumentId, runId } = await params;
@@ -39,8 +40,7 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
 
   await claimRuns([run.id], authResult.userId);
   trackEvent("run_claimed", {
-    user_id: authResult.userId,
-    surface: analyticsSurface(authResult.authMethod),
+    ...surfaceEvent(authResult),
   });
 
   const byRun = await getAttributionsByRunIds([run.id]);
@@ -58,10 +58,10 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
 // "self only" — the query always uses session.user.id.
 // ---------------------------------------------------------------------------
 
-export async function DELETE(request: NextRequest, { params }: RouteContext) {
-  const authResult = await authorize(request, "runs:attribute");
-  if (authResult instanceof Response) {
-    return authResult;
+export async function DELETE(_request: NextRequest, { params }: RouteContext) {
+  const authResult = await requireSession();
+  if (!authResult) {
+    return apiError(401, UNAUTHORIZED, "Authentication required");
   }
 
   const { instrumentId, runId } = await params;
@@ -76,8 +76,7 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
 
   await unclaimRuns([run.id], authResult.userId);
   trackEvent("run_unclaimed", {
-    user_id: authResult.userId,
-    surface: analyticsSurface(authResult.authMethod),
+    ...surfaceEvent(authResult),
   });
 
   const byRun = await getAttributionsByRunIds([run.id]);

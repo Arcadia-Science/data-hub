@@ -3,6 +3,7 @@ import {
   asc,
   desc,
   eq,
+  exists,
   gte,
   inArray,
   isNull,
@@ -10,24 +11,33 @@ import {
   sql,
 } from "drizzle-orm";
 import { after } from "next/server";
+import {
+  type Actor,
+  type ActorRef,
+  actorColumns,
+  resolveActor,
+} from "@/lib/api/actor";
 import { attributedToUser } from "@/lib/api/attributions";
 import { notifyComment } from "@/lib/api/notifications";
 import { touchRuns } from "@/lib/api/touch-runs";
+import { userIsAdmin } from "@/lib/api/user-admin";
 import { db } from "@/lib/db";
 import {
   instrumentRuns,
   instruments,
+  personalAccessTokens,
   runComments,
   users,
 } from "@/lib/db/schema";
-import { toInitials } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
 // Run comments — markdown notes left by users on an instrument run.
 //
-// All mutations are author-only, enforced both by the SQL `where` clause
-// (defense in depth) and by the route handler (which can return a clean
-// 403 vs 404 distinction). Reads are open to any authenticated user.
+// Edit is author-only. Delete is for the author or a signed-in admin. Both
+// are checked by the route handler (which can return a clean 403 vs 404
+// distinction) and again in SQL. The author paths are pinned to the author;
+// the admin path is not, so its SQL checks the admin flag instead. Reads are
+// open to any authenticated user.
 // ---------------------------------------------------------------------------
 
 // Cap shared by REST and MCP. Generous for prose; well below jsonb/text limits.
@@ -53,38 +63,58 @@ export function validateCommentBody(
 }
 
 export interface RunCommentDto {
+  // A person, or a personal access token that posted through the API.
+  author: Actor;
   body: string;
   created_at: Date;
   edited_at: Date | null;
   id: string;
-  user: {
-    id: string;
-    displayName: string;
-    initials: string;
-    avatarUrl: string | null;
-  };
 }
+
+// Shared by every comment query: both author tables are left joined, since
+// exactly one of `user_id` / `token_id` is set on a comment.
+const commentRowColumns = {
+  id: runComments.id,
+  body: runComments.body,
+  createdAt: runComments.createdAt,
+  editedAt: runComments.editedAt,
+  userId: users.id,
+  userName: users.name,
+  userEmail: users.email,
+  userImage: users.image,
+  tokenId: personalAccessTokens.id,
+  tokenName: personalAccessTokens.name,
+  tokenRevokedAt: personalAccessTokens.revokedAt,
+};
 
 function toDto(row: {
   id: string;
   body: string;
   createdAt: Date;
   editedAt: Date | null;
-  userId: string;
+  userId: string | null;
   userName: string | null;
   userEmail: string | null;
   userImage: string | null;
+  tokenId: string | null;
+  tokenName: string | null;
+  tokenRevokedAt: Date | null;
 }): RunCommentDto {
-  const displayName = row.userName ?? row.userEmail ?? "Unknown";
+  // The database guarantees one author; the fallback only covers a row read
+  // mid-delete.
+  const author = resolveActor(row) ?? {
+    kind: "user" as const,
+    user: {
+      userId: "unknown",
+      displayName: "Unknown",
+      initials: "?",
+      avatarUrl: null,
+    },
+  };
   return {
     id: row.id,
     body: row.body,
-    user: {
-      id: row.userId,
-      displayName,
-      initials: toInitials(displayName),
-      avatarUrl: row.userImage,
-    },
+    author,
     created_at: row.createdAt,
     edited_at: row.editedAt,
   };
@@ -100,18 +130,13 @@ export async function listCommentsForRun(
   runInternalId: string
 ): Promise<RunCommentDto[]> {
   const rows = await db
-    .select({
-      id: runComments.id,
-      body: runComments.body,
-      createdAt: runComments.createdAt,
-      editedAt: runComments.editedAt,
-      userId: users.id,
-      userName: users.name,
-      userEmail: users.email,
-      userImage: users.image,
-    })
+    .select(commentRowColumns)
     .from(runComments)
-    .innerJoin(users, eq(users.id, runComments.userId))
+    .leftJoin(users, eq(users.id, runComments.userId))
+    .leftJoin(
+      personalAccessTokens,
+      eq(personalAccessTokens.id, runComments.tokenId)
+    )
     .where(
       and(eq(runComments.runId, runInternalId), isNull(runComments.deletedAt))
     )
@@ -254,14 +279,7 @@ export async function listCommentFeed(input: {
 
   const rowsQuery = db
     .select({
-      id: runComments.id,
-      body: runComments.body,
-      createdAt: runComments.createdAt,
-      editedAt: runComments.editedAt,
-      userId: users.id,
-      userName: users.name,
-      userEmail: users.email,
-      userImage: users.image,
+      ...commentRowColumns,
       instrumentId: instruments.id,
       instrumentDisplayName: instruments.displayName,
       runDisplayId: instrumentRuns.runId,
@@ -269,7 +287,11 @@ export async function listCommentFeed(input: {
     .from(runComments)
     .innerJoin(instrumentRuns, eq(runComments.runId, instrumentRuns.id))
     .innerJoin(instruments, eq(instrumentRuns.instrumentId, instruments.id))
-    .innerJoin(users, eq(runComments.userId, users.id))
+    .leftJoin(users, eq(runComments.userId, users.id))
+    .leftJoin(
+      personalAccessTokens,
+      eq(personalAccessTokens.id, runComments.tokenId)
+    )
     .where(where)
     .orderBy(desc(runComments.createdAt), desc(runComments.id))
     .limit(perPage)
@@ -359,48 +381,63 @@ export async function listCommentInstrumentFacets(input: {
 // Returns the rendered DTO so the API can echo it back to the client.
 // ---------------------------------------------------------------------------
 
+// Reads one comment through the same joins as `listCommentsForRun`, so the
+// DTO a write returns matches what a later read shows.
+async function loadComment(commentId: string): Promise<RunCommentDto | null> {
+  const [row] = await db
+    .select(commentRowColumns)
+    .from(runComments)
+    .leftJoin(users, eq(users.id, runComments.userId))
+    .leftJoin(
+      personalAccessTokens,
+      eq(personalAccessTokens.id, runComments.tokenId)
+    )
+    .where(eq(runComments.id, commentId))
+    .limit(1);
+  return row ? toDto(row) : null;
+}
+
+// Matches the comment's author column to the actor: a person's comments carry
+// `user_id`, a token's carry `token_id`.
+function writtenBy(actor: ActorRef) {
+  return actor.kind === "user"
+    ? eq(runComments.userId, actor.userId)
+    : eq(runComments.tokenId, actor.tokenId);
+}
+
+// True when `actor` wrote the comment described by a lookup row. Handlers use
+// this to answer 403 before calling the author-scoped update or delete.
+export function commentWrittenBy(
+  comment: { userId: string | null; tokenId: string | null },
+  actor: ActorRef
+): boolean {
+  return actor.kind === "user"
+    ? comment.userId === actor.userId
+    : comment.tokenId === actor.tokenId;
+}
+
 export async function createComment(input: {
   runInternalId: string;
-  userId: string;
+  actor: ActorRef;
   body: string;
 }): Promise<RunCommentDto> {
+  const { userId, tokenId } = actorColumns(input.actor);
   const [inserted] = await db
     .insert(runComments)
     .values({
       runId: input.runInternalId,
-      userId: input.userId,
+      userId,
+      tokenId,
       body: input.body,
     })
-    .returning({
-      id: runComments.id,
-      body: runComments.body,
-      createdAt: runComments.createdAt,
-      editedAt: runComments.editedAt,
-    });
+    .returning({ id: runComments.id });
   await touchRuns([input.runInternalId]);
 
-  // Fetch the joined user row so the DTO is consistent with `listCommentsForRun`.
-  const [user] = await db
-    .select({
-      id: users.id,
-      name: users.name,
-      email: users.email,
-      image: users.image,
-    })
-    .from(users)
-    .where(eq(users.id, input.userId))
-    .limit(1);
-
-  return toDto({
-    id: inserted.id,
-    body: inserted.body,
-    createdAt: inserted.createdAt,
-    editedAt: inserted.editedAt,
-    userId: input.userId,
-    userName: user?.name ?? null,
-    userEmail: user?.email ?? null,
-    userImage: user?.image ?? null,
-  });
+  const created = await loadComment(inserted.id);
+  if (!created) {
+    throw new Error(`Comment ${inserted.id} missing right after insert`);
+  }
+  return created;
 }
 
 // Shared by REST POST comments and MCP `add_run_comment`: create the row,
@@ -409,7 +446,7 @@ export async function createComment(input: {
 // (REST) or a production host env (MCP).
 export async function createCommentAndNotify(input: {
   runInternalId: string;
-  userId: string;
+  actor: ActorRef;
   body: string;
   instrumentId: string;
   instrumentDisplayName: string;
@@ -418,7 +455,7 @@ export async function createCommentAndNotify(input: {
 }): Promise<RunCommentDto> {
   const comment = await createComment({
     runInternalId: input.runInternalId,
-    userId: input.userId,
+    actor: input.actor,
     body: input.body,
   });
 
@@ -426,8 +463,11 @@ export async function createCommentAndNotify(input: {
     await notifyComment({
       runInternalId: input.runInternalId,
       commentId: comment.id,
-      authorUserId: input.userId,
-      authorDisplayName: comment.user.displayName,
+      author: input.actor,
+      authorDisplayName:
+        comment.author.kind === "user"
+          ? comment.author.user.displayName
+          : comment.author.token.name,
       instrumentId: input.instrumentId,
       instrumentDisplayName: input.instrumentDisplayName,
       runDisplayId: input.runDisplayId,
@@ -444,13 +484,17 @@ export async function createCommentAndNotify(input: {
 // 403 (exists but caller is not the author).
 // ---------------------------------------------------------------------------
 
-export async function getCommentForAuthorCheck(
-  commentId: string
-): Promise<{ id: string; userId: string; runId: string } | null> {
+export async function getCommentForAuthorCheck(commentId: string): Promise<{
+  id: string;
+  userId: string | null;
+  tokenId: string | null;
+  runId: string;
+} | null> {
   const [row] = await db
     .select({
       id: runComments.id,
       userId: runComments.userId,
+      tokenId: runComments.tokenId,
       runId: runComments.runId,
     })
     .from(runComments)
@@ -462,16 +506,26 @@ export async function getCommentForAuthorCheck(
 // Like `getCommentForAuthorCheck` but includes already soft-deleted rows, so
 // the delete path can stay idempotent: re-deleting your own comment still
 // resolves the author and succeeds instead of 404-ing on the missing row.
+// `runDeletedAt` lets callers refuse changes on a soft-deleted run.
 export async function getCommentForDeleteAuthorCheck(
   commentId: string
-): Promise<{ id: string; userId: string; deletedAt: Date | null } | null> {
+): Promise<{
+  id: string;
+  userId: string | null;
+  tokenId: string | null;
+  deletedAt: Date | null;
+  runDeletedAt: Date | null;
+} | null> {
   const [row] = await db
     .select({
       id: runComments.id,
       userId: runComments.userId,
+      tokenId: runComments.tokenId,
       deletedAt: runComments.deletedAt,
+      runDeletedAt: instrumentRuns.deletedAt,
     })
     .from(runComments)
+    .innerJoin(instrumentRuns, eq(instrumentRuns.id, runComments.runId))
     .where(eq(runComments.id, commentId))
     .limit(1);
   return row ?? null;
@@ -485,7 +539,7 @@ export async function getCommentForDeleteAuthorCheck(
 
 export async function updateComment(input: {
   commentId: string;
-  userId: string;
+  actor: ActorRef;
   body: string;
 }): Promise<RunCommentDto | null> {
   const now = new Date();
@@ -495,65 +549,79 @@ export async function updateComment(input: {
     .where(
       and(
         eq(runComments.id, input.commentId),
-        eq(runComments.userId, input.userId),
+        writtenBy(input.actor),
         isNull(runComments.deletedAt)
       )
     )
-    .returning({
-      id: runComments.id,
-      body: runComments.body,
-      createdAt: runComments.createdAt,
-      editedAt: runComments.editedAt,
-      userId: runComments.userId,
-      runId: runComments.runId,
-    });
+    .returning({ id: runComments.id, runId: runComments.runId });
 
   if (updated.length === 0) {
     return null;
   }
-  const row = updated[0];
-  await touchRuns([row.runId]);
-
-  const [user] = await db
-    .select({
-      id: users.id,
-      name: users.name,
-      email: users.email,
-      image: users.image,
-    })
-    .from(users)
-    .where(eq(users.id, row.userId))
-    .limit(1);
-
-  return toDto({
-    id: row.id,
-    body: row.body,
-    createdAt: row.createdAt,
-    editedAt: row.editedAt,
-    userId: row.userId,
-    userName: user?.name ?? null,
-    userEmail: user?.email ?? null,
-    userImage: user?.image ?? null,
-  });
+  await touchRuns([updated[0].runId]);
+  return await loadComment(updated[0].id);
 }
 
 // ---------------------------------------------------------------------------
-// Soft-delete — author-only. Idempotent: a row already soft-deleted will
-// not match the `isNull(deletedAt)` predicate, so this returns false.
+// Soft-delete — by the author, or by an admin removing someone else's comment.
+// Idempotent: a row already soft-deleted will not match the
+// `isNull(deletedAt)` predicate, so this returns false.
 // ---------------------------------------------------------------------------
 
-export async function softDeleteComment(input: {
-  commentId: string;
-  userId: string;
-}): Promise<boolean> {
+// Which rule lets the caller delete. An author delete is pinned to the author
+// in SQL, so a stale permission check cannot delete another author's comment.
+// The admin path is not pinned to the author, so its SQL checks the admin flag.
+export type CommentDeleter =
+  | { as: "author"; actor: ActorRef }
+  | { as: "admin"; adminUserId: string };
+
+// The one rule for who may delete a comment, shared by REST and MCP. Returns
+// null when the actor may not. A token is never an admin, so it can delete
+// only the comments it wrote. The admin flag is read from the database, not
+// from a cached session.
+export async function commentDeleterFor(
+  comment: { userId: string | null; tokenId: string | null },
+  actor: ActorRef
+): Promise<CommentDeleter | null> {
+  if (commentWrittenBy(comment, actor)) {
+    return { as: "author", actor };
+  }
+  if (actor.kind === "user" && (await userIsAdmin(actor.userId))) {
+    return { as: "admin", adminUserId: actor.userId };
+  }
+  return null;
+}
+
+export async function softDeleteComment(
+  commentId: string,
+  deleter: CommentDeleter
+): Promise<boolean> {
   const now = new Date();
+  const deletedBy =
+    deleter.as === "admin"
+      ? deleter.adminUserId
+      : actorColumns(deleter.actor).userId;
   const result = await db
     .update(runComments)
-    .set({ deletedAt: now })
+    .set({ deletedAt: now, deletedBy })
     .where(
       and(
-        eq(runComments.id, input.commentId),
-        eq(runComments.userId, input.userId),
+        eq(runComments.id, commentId),
+        // A caller that skips `commentDeleterFor` still cannot delete as an
+        // admin unless the database says the user is one.
+        deleter.as === "author"
+          ? writtenBy(deleter.actor)
+          : exists(
+              db
+                .select({ one: sql`1` })
+                .from(users)
+                .where(
+                  and(
+                    eq(users.id, deleter.adminUserId),
+                    eq(users.isAdmin, true)
+                  )
+                )
+            ),
         isNull(runComments.deletedAt)
       )
     )

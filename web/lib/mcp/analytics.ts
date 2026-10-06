@@ -1,6 +1,6 @@
 import type { AuthInfo, McpServer } from "@modelcontextprotocol/server";
 import { durationBucket, trackEvent } from "@/lib/analytics/track";
-import { isPatAuth, mcpClientLabel } from "@/lib/mcp/client-name";
+import { mcpClientLabel } from "@/lib/mcp/client-name";
 
 function mcpUserId(authInfo: AuthInfo | undefined): string | undefined {
   const userId = authInfo?.extra?.userId;
@@ -42,7 +42,6 @@ function reportTool(
     client: await mcpClientLabel(authInfo),
     outcome,
     duration_bucket: durationBucket(elapsedMs),
-    auth: isPatAuth(authInfo) ? "pat" : "oauth",
   }));
 }
 

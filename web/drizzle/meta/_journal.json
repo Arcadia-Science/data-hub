@@ -351,6 +351,27 @@
       "when": 1790652322054,
       "tag": "0049_multipart_upload_id",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1791240955128,
+      "tag": "0050_token_identity_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1791241656282,
+      "tag": "0051_remove_person_only_scopes",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1791243511641,
+      "tag": "0052_comment_deleted_by",
+      "breakpoints": true
     }
   ]
 }

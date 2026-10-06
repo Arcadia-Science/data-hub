@@ -175,7 +175,6 @@ export const listRunFilesTool = {
 export const claimRunTool = {
   name: "claim_run",
   group: "attribution",
-  scope: "runs:attribute",
   title: "Claim Run",
   description:
     "Mark a run as performed by the authenticated user. Idempotent — claiming a run you already claimed is a no-op. Only self-attribution is supported; you cannot claim a run on behalf of another user. Prefer claim_runs when attributing multiple runs.",
@@ -194,7 +193,6 @@ export const claimRunTool = {
 export const claimRunsTool = {
   name: "claim_runs",
   group: "attribution",
-  scope: "runs:attribute",
   title: "Claim Runs",
   description:
     "Mark multiple runs on one instrument as performed by the authenticated user (max 100). Idempotent per run. Returns claimed runs and any runIds that were not found; a missing ID does not fail the whole batch. Only self-attribution is supported.",
@@ -217,7 +215,6 @@ export const claimRunsTool = {
 export const unclaimRunTool = {
   name: "unclaim_run",
   group: "attribution",
-  scope: "runs:attribute",
   title: "Unclaim Run",
   description:
     "Remove the authenticated user's attribution from a run. Idempotent — unclaiming a run you don't currently claim is a no-op. Only self-attribution is supported; you cannot remove another user's attribution.",
@@ -301,7 +298,7 @@ export const deleteRunCommentTool = {
   scope: "runs:comment",
   title: "Delete Run Comment",
   description:
-    "Soft-delete one of your own comments. Idempotent if already deleted.",
+    "Soft-delete a comment. You can delete your own comments; workspace admins can delete any comment. Idempotent if already deleted.",
   inputSchema: {
     commentId: z.string().describe("Comment UUID"),
   },

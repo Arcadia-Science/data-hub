@@ -67,7 +67,6 @@ const {
       deletedBy: null,
       instrumentDisplayName: "Test Plate Reader",
       instrumentType: "plate_reader" as const,
-      deletedByUser: null,
       attributions: [] as Array<{
         userId: string;
         displayName: string;
@@ -89,7 +88,7 @@ const {
     activeWatcherWatchDirectory: "C:\\Data",
     activeWatcherDeregistered: false,
     retiredAt: null,
-    retiredByUser: null,
+    retiredBy: null,
     updatedAt: new Date("2024-06-01"),
     lastWatcherHeartbeatAt: new Date("2025-01-01"),
   };
@@ -397,7 +396,7 @@ vi.mock("@/lib/api/watchers", () => ({
       configYaml: "watch: true\n",
       configChecksum: "abc123",
       updatedAt: new Date("2025-01-01T00:00:00Z"),
-      deregisteredByUser: null,
+      deregisteredBy: null,
     };
   }),
   getWatcherEvents: vi.fn().mockResolvedValue({

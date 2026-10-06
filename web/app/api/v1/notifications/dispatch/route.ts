@@ -1,5 +1,6 @@
 import { inArray } from "drizzle-orm";
 import { after, type NextRequest } from "next/server";
+import { actorRefFromAuth } from "@/lib/api/actor";
 import { authorizeToken } from "@/lib/api/auth";
 import { apiError, CONFLICT, VALIDATION_ERROR } from "@/lib/api/errors";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
@@ -69,23 +70,20 @@ export async function POST(request: NextRequest) {
     };
   }
 
-  // Validate recipients and resolve the actor's display name in one lookup.
+  // Validate recipients. The sender is the token itself, shown by its name.
   const requestedIds = [...new Set(body.user_ids)];
-  const lookupIds = [...new Set([...requestedIds, authResult.userId])];
   const userRows = await db
-    .select({ id: users.id, name: users.name, email: users.email })
+    .select({ id: users.id })
     .from(users)
-    .where(inArray(users.id, lookupIds));
-  const byId = new Map(userRows.map((row) => [row.id, row]));
+    .where(inArray(users.id, requestedIds));
+  const knownIds = new Set(userRows.map((row) => row.id));
 
-  const validRecipientIds = requestedIds.filter((id) => byId.has(id));
-  const unknownUserIds = requestedIds.filter((id) => !byId.has(id));
-  const actor = byId.get(authResult.userId);
-  const actorDisplayName = actor?.name ?? actor?.email ?? "Someone";
+  const validRecipientIds = requestedIds.filter((id) => knownIds.has(id));
+  const unknownUserIds = requestedIds.filter((id) => !knownIds.has(id));
 
   const result = await notifyGeneric({
-    actorUserId: authResult.userId,
-    actorDisplayName,
+    actor: actorRefFromAuth(authResult),
+    actorDisplayName: authResult.tokenName,
     recipientUserIds: validRecipientIds,
     message: body.message,
     run,

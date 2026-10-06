@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { AuthResult } from "@/lib/api/auth";
-import { decideWatcherBinding } from "@/lib/api/watcher-binding";
+import {
+  decideWatcherBinding,
+  isBoundToOtherToken,
+} from "@/lib/api/watcher-binding";
 
 // Pure decision coverage for watcher↔PAT binding. Imports the DB-free
 // helper directly so the unit suite never loads `@/lib/db`. The TOFU claim
@@ -18,10 +21,11 @@ function sessionAuth(): AuthResult {
 
 function tokenAuth(tokenId: string): AuthResult {
   return {
-    userId: "token-user",
+    userId: null,
     authMethod: "token",
     scopes: ["watchers:report"],
     tokenId,
+    tokenName: "watcher-pc",
   };
 }
 
@@ -39,17 +43,30 @@ describe("decideWatcherBinding", () => {
     expect(decideWatcherBinding(tokenAuth("pat-a"), "pat-b")).toBe("deny");
   });
 
-  it("denies token auth with a missing tokenId", () => {
-    const broken: AuthResult = {
-      userId: "token-user",
-      authMethod: "token",
-      scopes: ["watchers:report"],
-      tokenId: null,
-    };
-    expect(decideWatcherBinding(broken, "pat-a")).toBe("deny");
+  it("denies token auth with an empty tokenId", () => {
+    expect(decideWatcherBinding(tokenAuth(""), "pat-a")).toBe("deny");
   });
 
   it("returns tofu when the binding is still null", () => {
     expect(decideWatcherBinding(tokenAuth("pat-a"), null)).toBe("tofu");
+  });
+});
+
+describe("isBoundToOtherToken", () => {
+  it("is true for a token meeting a watcher bound to another token", () => {
+    expect(isBoundToOtherToken(tokenAuth("pat-a"), "pat-b")).toBe(true);
+  });
+
+  it("is false for the bound token and for an unbound watcher", () => {
+    expect(isBoundToOtherToken(tokenAuth("pat-a"), "pat-a")).toBe(false);
+    expect(isBoundToOtherToken(tokenAuth("pat-a"), null)).toBe(false);
+  });
+
+  it("is false for sessions", () => {
+    expect(isBoundToOtherToken(sessionAuth(), "pat-b")).toBe(false);
+  });
+
+  it("is false for token auth with an empty tokenId", () => {
+    expect(isBoundToOtherToken(tokenAuth(""), "pat-b")).toBe(false);
   });
 });

@@ -1,18 +1,18 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { trackEvent } from "@/lib/analytics/track";
 import { requireAdmin } from "@/lib/api/auth";
 import { apiError, NOT_FOUND, VALIDATION_ERROR } from "@/lib/api/errors";
 import { db } from "@/lib/db";
-import { personalAccessTokens } from "@/lib/db/schema";
+import { personalAccessTokens, watchers } from "@/lib/db/schema";
 
 export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  // Token deletion is admin-only. Admins can revoke any user's PAT —
+  // Token revocation is admin-only. Admins can revoke any user's PAT —
   // useful for off-boarding, compromised credentials, and pruning unused
-  // tokens during an audit. The previous owner-scoped delete made
-  // multi-user revocation impossible from the UI.
+  // tokens during an audit. The row is kept (with `revoked_at` set) so audit
+  // columns that reference the token can still show its name.
   const authResult = await requireAdmin();
   if (authResult instanceof Response) {
     return authResult;
@@ -26,12 +26,30 @@ export async function DELETE(
     return apiError(400, VALIDATION_ERROR, "Invalid token ID");
   }
 
-  const deleted = await db
-    .delete(personalAccessTokens)
-    .where(eq(personalAccessTokens.id, id))
-    .returning({ id: personalAccessTokens.id });
+  const revoked = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(personalAccessTokens)
+      .set({ revokedAt: new Date() })
+      .where(
+        and(
+          eq(personalAccessTokens.id, id),
+          isNull(personalAccessTokens.revokedAt)
+        )
+      )
+      .returning({ id: personalAccessTokens.id });
+    if (!row) {
+      return false;
+    }
+    // Watchers bound to this token become claimable again, so a replacement
+    // token can take over the instrument (trust on first use).
+    await tx
+      .update(watchers)
+      .set({ registeredByToken: null })
+      .where(eq(watchers.registeredByToken, id));
+    return true;
+  });
 
-  if (deleted.length === 0) {
+  if (!revoked) {
     return apiError(404, NOT_FOUND, "Token not found");
   }
 
