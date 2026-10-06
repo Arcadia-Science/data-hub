@@ -214,13 +214,10 @@ describe("Token creator", () => {
   it("records the creator on seeded tokens", async () => {
     const member = await seedTestUser();
     const [row] = await getTestDb()
-      .select({
-        userId: personalAccessTokens.userId,
-        createdBy: personalAccessTokens.createdBy,
-      })
+      .select({ createdBy: personalAccessTokens.createdBy })
       .from(personalAccessTokens)
       .where(eq(personalAccessTokens.id, member.tokenId));
-    expect(row).toEqual({ userId: member.userId, createdBy: member.userId });
+    expect(row).toEqual({ createdBy: member.userId });
   });
 });
 

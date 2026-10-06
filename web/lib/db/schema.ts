@@ -275,9 +275,9 @@ export const personalAccessTokens = pgTable(
   "personal_access_tokens",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    // The admin who created the token. NULL only after that user is deleted.
-    // A token acts as itself, so this is a record of who made it and never an
-    // acting identity.
+    // The admin who created the token. NULL after that user is deleted, and
+    // for tokens created by code that does not set it. A token acts as itself,
+    // so this is a record of who made it and never an acting identity.
     createdBy: text("created_by").references(() => users.id, {
       onDelete: "set null",
     }),
