@@ -5,6 +5,10 @@ import { RunCommentForm } from "@/components/runs/run-comment-form";
 import { RunCommentItem } from "@/components/runs/run-comment-item";
 import { RunSectionHeading } from "@/components/runs/run-section-heading";
 import { Card } from "@/components/ui/card";
+import {
+  commentFromWire,
+  type RunCommentWire,
+} from "@/lib/api/run-comment-wire";
 import type { RunCommentDto } from "@/lib/api/run-comments";
 import { useSession } from "@/lib/auth-client";
 import { toUserAvatarUser } from "@/lib/avatar-color";
@@ -84,12 +88,7 @@ export function RunCommentsList({
     return {
       id: `temp-${crypto.randomUUID()}`,
       body,
-      user: {
-        id: avatarUser.userId,
-        displayName: avatarUser.displayName,
-        initials: avatarUser.initials,
-        avatarUrl: avatarUser.avatarUrl,
-      },
+      author: { kind: "user", user: avatarUser },
       created_at: new Date(),
       edited_at: null,
     };
@@ -110,7 +109,7 @@ export function RunCommentsList({
     if (!res.ok) {
       throw new Error(await res.text());
     }
-    const created = (await res.json()) as RunCommentDto;
+    const created = commentFromWire((await res.json()) as RunCommentWire);
     setCommitted((prev) =>
       prev.some((c) => c.id === created.id) ? prev : [...prev, created]
     );
@@ -133,7 +132,7 @@ export function RunCommentsList({
     if (!res.ok) {
       throw new Error(await res.text());
     }
-    const updated = (await res.json()) as RunCommentDto;
+    const updated = commentFromWire((await res.json()) as RunCommentWire);
     setCommitted((prev) =>
       prev.map((c) => (c.id === updated.id ? updated : c))
     );

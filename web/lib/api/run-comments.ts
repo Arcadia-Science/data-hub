@@ -10,6 +10,12 @@ import {
   sql,
 } from "drizzle-orm";
 import { after } from "next/server";
+import {
+  type Actor,
+  type ActorRef,
+  actorColumns,
+  resolveActor,
+} from "@/lib/api/actor";
 import { attributedToUser } from "@/lib/api/attributions";
 import { notifyComment } from "@/lib/api/notifications";
 import { touchRuns } from "@/lib/api/touch-runs";
@@ -17,10 +23,10 @@ import { db } from "@/lib/db";
 import {
   instrumentRuns,
   instruments,
+  personalAccessTokens,
   runComments,
   users,
 } from "@/lib/db/schema";
-import { toInitials } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
 // Run comments — markdown notes left by users on an instrument run.
@@ -53,38 +59,58 @@ export function validateCommentBody(
 }
 
 export interface RunCommentDto {
+  // A person, or a personal access token that posted through the API.
+  author: Actor;
   body: string;
   created_at: Date;
   edited_at: Date | null;
   id: string;
-  user: {
-    id: string;
-    displayName: string;
-    initials: string;
-    avatarUrl: string | null;
-  };
 }
+
+// Shared by every comment query: both author tables are left joined, since
+// exactly one of `user_id` / `token_id` is set on a comment.
+const commentRowColumns = {
+  id: runComments.id,
+  body: runComments.body,
+  createdAt: runComments.createdAt,
+  editedAt: runComments.editedAt,
+  userId: users.id,
+  userName: users.name,
+  userEmail: users.email,
+  userImage: users.image,
+  tokenId: personalAccessTokens.id,
+  tokenName: personalAccessTokens.name,
+  tokenRevokedAt: personalAccessTokens.revokedAt,
+};
 
 function toDto(row: {
   id: string;
   body: string;
   createdAt: Date;
   editedAt: Date | null;
-  userId: string;
+  userId: string | null;
   userName: string | null;
   userEmail: string | null;
   userImage: string | null;
+  tokenId: string | null;
+  tokenName: string | null;
+  tokenRevokedAt: Date | null;
 }): RunCommentDto {
-  const displayName = row.userName ?? row.userEmail ?? "Unknown";
+  // The database guarantees one author; the fallback only covers a row read
+  // mid-delete.
+  const author = resolveActor(row) ?? {
+    kind: "user" as const,
+    user: {
+      userId: "unknown",
+      displayName: "Unknown",
+      initials: "?",
+      avatarUrl: null,
+    },
+  };
   return {
     id: row.id,
     body: row.body,
-    user: {
-      id: row.userId,
-      displayName,
-      initials: toInitials(displayName),
-      avatarUrl: row.userImage,
-    },
+    author,
     created_at: row.createdAt,
     edited_at: row.editedAt,
   };
@@ -100,18 +126,13 @@ export async function listCommentsForRun(
   runInternalId: string
 ): Promise<RunCommentDto[]> {
   const rows = await db
-    .select({
-      id: runComments.id,
-      body: runComments.body,
-      createdAt: runComments.createdAt,
-      editedAt: runComments.editedAt,
-      userId: users.id,
-      userName: users.name,
-      userEmail: users.email,
-      userImage: users.image,
-    })
+    .select(commentRowColumns)
     .from(runComments)
-    .innerJoin(users, eq(users.id, runComments.userId))
+    .leftJoin(users, eq(users.id, runComments.userId))
+    .leftJoin(
+      personalAccessTokens,
+      eq(personalAccessTokens.id, runComments.tokenId)
+    )
     .where(
       and(eq(runComments.runId, runInternalId), isNull(runComments.deletedAt))
     )
@@ -254,14 +275,7 @@ export async function listCommentFeed(input: {
 
   const rowsQuery = db
     .select({
-      id: runComments.id,
-      body: runComments.body,
-      createdAt: runComments.createdAt,
-      editedAt: runComments.editedAt,
-      userId: users.id,
-      userName: users.name,
-      userEmail: users.email,
-      userImage: users.image,
+      ...commentRowColumns,
       instrumentId: instruments.id,
       instrumentDisplayName: instruments.displayName,
       runDisplayId: instrumentRuns.runId,
@@ -269,7 +283,11 @@ export async function listCommentFeed(input: {
     .from(runComments)
     .innerJoin(instrumentRuns, eq(runComments.runId, instrumentRuns.id))
     .innerJoin(instruments, eq(instrumentRuns.instrumentId, instruments.id))
-    .innerJoin(users, eq(runComments.userId, users.id))
+    .leftJoin(users, eq(runComments.userId, users.id))
+    .leftJoin(
+      personalAccessTokens,
+      eq(personalAccessTokens.id, runComments.tokenId)
+    )
     .where(where)
     .orderBy(desc(runComments.createdAt), desc(runComments.id))
     .limit(perPage)
@@ -359,48 +377,63 @@ export async function listCommentInstrumentFacets(input: {
 // Returns the rendered DTO so the API can echo it back to the client.
 // ---------------------------------------------------------------------------
 
+// Reads one comment through the same joins as `listCommentsForRun`, so the
+// DTO a write returns matches what a later read shows.
+async function loadComment(commentId: string): Promise<RunCommentDto | null> {
+  const [row] = await db
+    .select(commentRowColumns)
+    .from(runComments)
+    .leftJoin(users, eq(users.id, runComments.userId))
+    .leftJoin(
+      personalAccessTokens,
+      eq(personalAccessTokens.id, runComments.tokenId)
+    )
+    .where(eq(runComments.id, commentId))
+    .limit(1);
+  return row ? toDto(row) : null;
+}
+
+// Matches the comment's author column to the actor: a person's comments carry
+// `user_id`, a token's carry `token_id`.
+function writtenBy(actor: ActorRef) {
+  return actor.kind === "user"
+    ? eq(runComments.userId, actor.userId)
+    : eq(runComments.tokenId, actor.tokenId);
+}
+
+// True when `actor` wrote the comment described by a lookup row. Handlers use
+// this to answer 403 before calling the author-scoped update or delete.
+export function commentWrittenBy(
+  comment: { userId: string | null; tokenId: string | null },
+  actor: ActorRef
+): boolean {
+  return actor.kind === "user"
+    ? comment.userId === actor.userId
+    : comment.tokenId === actor.tokenId;
+}
+
 export async function createComment(input: {
   runInternalId: string;
-  userId: string;
+  actor: ActorRef;
   body: string;
 }): Promise<RunCommentDto> {
+  const { userId, tokenId } = actorColumns(input.actor);
   const [inserted] = await db
     .insert(runComments)
     .values({
       runId: input.runInternalId,
-      userId: input.userId,
+      userId,
+      tokenId,
       body: input.body,
     })
-    .returning({
-      id: runComments.id,
-      body: runComments.body,
-      createdAt: runComments.createdAt,
-      editedAt: runComments.editedAt,
-    });
+    .returning({ id: runComments.id });
   await touchRuns([input.runInternalId]);
 
-  // Fetch the joined user row so the DTO is consistent with `listCommentsForRun`.
-  const [user] = await db
-    .select({
-      id: users.id,
-      name: users.name,
-      email: users.email,
-      image: users.image,
-    })
-    .from(users)
-    .where(eq(users.id, input.userId))
-    .limit(1);
-
-  return toDto({
-    id: inserted.id,
-    body: inserted.body,
-    createdAt: inserted.createdAt,
-    editedAt: inserted.editedAt,
-    userId: input.userId,
-    userName: user?.name ?? null,
-    userEmail: user?.email ?? null,
-    userImage: user?.image ?? null,
-  });
+  const created = await loadComment(inserted.id);
+  if (!created) {
+    throw new Error(`Comment ${inserted.id} missing right after insert`);
+  }
+  return created;
 }
 
 // Shared by REST POST comments and MCP `add_run_comment`: create the row,
@@ -409,7 +442,7 @@ export async function createComment(input: {
 // (REST) or a production host env (MCP).
 export async function createCommentAndNotify(input: {
   runInternalId: string;
-  userId: string;
+  actor: ActorRef;
   body: string;
   instrumentId: string;
   instrumentDisplayName: string;
@@ -418,7 +451,7 @@ export async function createCommentAndNotify(input: {
 }): Promise<RunCommentDto> {
   const comment = await createComment({
     runInternalId: input.runInternalId,
-    userId: input.userId,
+    actor: input.actor,
     body: input.body,
   });
 
@@ -426,8 +459,11 @@ export async function createCommentAndNotify(input: {
     await notifyComment({
       runInternalId: input.runInternalId,
       commentId: comment.id,
-      authorUserId: input.userId,
-      authorDisplayName: comment.user.displayName,
+      author: input.actor,
+      authorDisplayName:
+        comment.author.kind === "user"
+          ? comment.author.user.displayName
+          : comment.author.token.name,
       instrumentId: input.instrumentId,
       instrumentDisplayName: input.instrumentDisplayName,
       runDisplayId: input.runDisplayId,
@@ -444,13 +480,17 @@ export async function createCommentAndNotify(input: {
 // 403 (exists but caller is not the author).
 // ---------------------------------------------------------------------------
 
-export async function getCommentForAuthorCheck(
-  commentId: string
-): Promise<{ id: string; userId: string | null; runId: string } | null> {
+export async function getCommentForAuthorCheck(commentId: string): Promise<{
+  id: string;
+  userId: string | null;
+  tokenId: string | null;
+  runId: string;
+} | null> {
   const [row] = await db
     .select({
       id: runComments.id,
       userId: runComments.userId,
+      tokenId: runComments.tokenId,
       runId: runComments.runId,
     })
     .from(runComments)
@@ -467,12 +507,14 @@ export async function getCommentForDeleteAuthorCheck(
 ): Promise<{
   id: string;
   userId: string | null;
+  tokenId: string | null;
   deletedAt: Date | null;
 } | null> {
   const [row] = await db
     .select({
       id: runComments.id,
       userId: runComments.userId,
+      tokenId: runComments.tokenId,
       deletedAt: runComments.deletedAt,
     })
     .from(runComments)
@@ -489,7 +531,7 @@ export async function getCommentForDeleteAuthorCheck(
 
 export async function updateComment(input: {
   commentId: string;
-  userId: string;
+  actor: ActorRef;
   body: string;
 }): Promise<RunCommentDto | null> {
   const now = new Date();
@@ -499,45 +541,17 @@ export async function updateComment(input: {
     .where(
       and(
         eq(runComments.id, input.commentId),
-        eq(runComments.userId, input.userId),
+        writtenBy(input.actor),
         isNull(runComments.deletedAt)
       )
     )
-    .returning({
-      id: runComments.id,
-      body: runComments.body,
-      createdAt: runComments.createdAt,
-      editedAt: runComments.editedAt,
-      runId: runComments.runId,
-    });
+    .returning({ id: runComments.id, runId: runComments.runId });
 
   if (updated.length === 0) {
     return null;
   }
-  const row = updated[0];
-  await touchRuns([row.runId]);
-
-  const [user] = await db
-    .select({
-      id: users.id,
-      name: users.name,
-      email: users.email,
-      image: users.image,
-    })
-    .from(users)
-    .where(eq(users.id, input.userId))
-    .limit(1);
-
-  return toDto({
-    id: row.id,
-    body: row.body,
-    createdAt: row.createdAt,
-    editedAt: row.editedAt,
-    userId: input.userId,
-    userName: user?.name ?? null,
-    userEmail: user?.email ?? null,
-    userImage: user?.image ?? null,
-  });
+  await touchRuns([updated[0].runId]);
+  return await loadComment(updated[0].id);
 }
 
 // ---------------------------------------------------------------------------
@@ -547,7 +561,7 @@ export async function updateComment(input: {
 
 export async function softDeleteComment(input: {
   commentId: string;
-  userId: string;
+  actor: ActorRef;
 }): Promise<boolean> {
   const now = new Date();
   const result = await db
@@ -556,7 +570,7 @@ export async function softDeleteComment(input: {
     .where(
       and(
         eq(runComments.id, input.commentId),
-        eq(runComments.userId, input.userId),
+        writtenBy(input.actor),
         isNull(runComments.deletedAt)
       )
     )

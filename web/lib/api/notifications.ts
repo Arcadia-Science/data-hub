@@ -9,6 +9,7 @@ import {
   isNull,
   sql,
 } from "drizzle-orm";
+import { type ActorRef, type ActorToken, actorColumns } from "@/lib/api/actor";
 import { FEEDBACK_STATUS_LABELS } from "@/lib/api/feedback-schema";
 import { runCommentHref } from "@/lib/comment-hash";
 import { db } from "@/lib/db";
@@ -20,6 +21,7 @@ import {
   instruments,
   notificationPreferences,
   notifications,
+  personalAccessTokens,
   runAttributions,
   runComments,
   slackConnections,
@@ -236,12 +238,17 @@ function toPreview(text: string | null): string | null {
 }
 
 export interface NotificationDto {
+  // Set when a person caused the notification. At most one of `actor` and
+  // `actorToken` is set.
   actor: {
     id: string;
     displayName: string;
     initials: string;
     avatarUrl: string | null;
   } | null;
+  // Set when a personal access token caused it (for example an integration
+  // dispatching a generic message).
+  actorToken: ActorToken | null;
   // Caller-supplied message for `generic` and feedback rows, preview-truncated
   // like `commentBody`. NULL for every other type.
   body: string | null;
@@ -310,12 +317,19 @@ export async function listNotifications(
       actorName: actor.name,
       actorEmail: actor.email,
       actorImage: actor.image,
+      actorTokenId: personalAccessTokens.id,
+      actorTokenName: personalAccessTokens.name,
+      actorTokenRevokedAt: personalAccessTokens.revokedAt,
     })
     .from(notifications)
     // Left joins: anchor-less `generic` rows have no run to join through.
     .leftJoin(instrumentRuns, eq(instrumentRuns.id, notifications.runId))
     .leftJoin(instruments, eq(instruments.id, instrumentRuns.instrumentId))
     .leftJoin(actor, eq(actor.id, notifications.actorUserId))
+    .leftJoin(
+      personalAccessTokens,
+      eq(personalAccessTokens.id, notifications.actorTokenId)
+    )
     .leftJoin(
       runComments,
       and(
@@ -396,6 +410,13 @@ export async function listNotifications(
               avatarUrl: row.actorImage,
             }
           : null,
+      actorToken: row.actorTokenId
+        ? {
+            id: row.actorTokenId,
+            name: row.actorTokenName ?? "Unknown token",
+            revoked: row.actorTokenRevokedAt !== null,
+          }
+        : null,
     };
   });
 }
@@ -548,7 +569,10 @@ export async function notifyRunCreated(input: {
 export async function notifyComment(input: {
   runInternalId: string;
   commentId: string;
-  authorUserId: string;
+  // A person is never notified about their own comment. A token has no
+  // inbox, so everyone attributed to or participating in the run hears about
+  // its comments.
+  author: ActorRef;
   // The following are needed to build Slack DM messages. When omitted
   // (e.g. in library-level tests), Slack DMs are silently skipped.
   authorDisplayName?: string;
@@ -558,6 +582,9 @@ export async function notifyComment(input: {
   commentBody?: string;
   origin?: string;
 }): Promise<void> {
+  const { userId: authorUserId, tokenId: authorTokenId } = actorColumns(
+    input.author
+  );
   try {
     // Resolve the two candidate sets independently (attributed wins over
     // participated on overlap). Each branch pulls all channel-routing columns
@@ -586,7 +613,9 @@ export async function notifyComment(input: {
         .where(
           and(
             eq(runAttributions.runId, input.runInternalId),
-            sql`${runAttributions.userId} <> ${input.authorUserId}`
+            authorUserId
+              ? sql`${runAttributions.userId} <> ${authorUserId}`
+              : undefined
           )
         ),
       db
@@ -612,7 +641,9 @@ export async function notifyComment(input: {
           and(
             eq(runComments.runId, input.runInternalId),
             isNotNull(runComments.userId),
-            sql`${runComments.userId} <> ${input.authorUserId}`,
+            authorUserId
+              ? sql`${runComments.userId} <> ${authorUserId}`
+              : undefined,
             isNull(runComments.deletedAt)
           )
         ),
@@ -640,7 +671,8 @@ export async function notifyComment(input: {
           type: "comment_attributed" as const,
           runId: input.runInternalId,
           commentId: input.commentId,
-          actorUserId: input.authorUserId,
+          actorUserId: authorUserId,
+          actorTokenId: authorTokenId,
         })),
       ...participatedOnly
         .filter((r) => r.commentsParticipatedEnabled !== false)
@@ -649,7 +681,8 @@ export async function notifyComment(input: {
           type: "comment_participated" as const,
           runId: input.runInternalId,
           commentId: input.commentId,
-          actorUserId: input.authorUserId,
+          actorUserId: authorUserId,
+          actorTokenId: authorTokenId,
         })),
     ];
 
@@ -760,7 +793,7 @@ export interface NotifyGenericResult {
 }
 
 export async function notifyGeneric(input: {
-  actorUserId: string;
+  actor: ActorRef;
   actorDisplayName: string;
   recipientUserIds: string[];
   message: string;
@@ -775,12 +808,17 @@ export async function notifyGeneric(input: {
   // tests) the DM goes out without a link.
   origin?: string;
 }): Promise<NotifyGenericResult> {
-  // Dedupe and drop the actor — no self-notification.
-  const actorSkipped = input.recipientUserIds.includes(input.actorUserId)
-    ? [input.actorUserId]
-    : [];
+  // Dedupe and drop the actor — no self-notification. A token has no inbox,
+  // so only a person actor is ever removed from the recipients.
+  const { userId: actorUserId, tokenId: actorTokenId } = actorColumns(
+    input.actor
+  );
+  const actorSkipped =
+    actorUserId && input.recipientUserIds.includes(actorUserId)
+      ? [actorUserId]
+      : [];
   const recipients = [...new Set(input.recipientUserIds)].filter(
-    (id) => id !== input.actorUserId
+    (id) => id !== actorUserId
   );
 
   if (recipients.length === 0) {
@@ -873,7 +911,8 @@ export async function notifyGeneric(input: {
       userId: c.userId,
       type: "generic" as const,
       runId: input.run?.internalId ?? null,
-      actorUserId: input.actorUserId,
+      actorUserId,
+      actorTokenId,
       body: input.message,
     }));
   if (inAppRows.length > 0) {

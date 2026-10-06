@@ -72,6 +72,16 @@ describe("validateRequestedScopes", () => {
     }
   });
 
+  it("rejects scopes for actions that need a signed-in person", () => {
+    for (const scope of ["runs:attribute", "feedback:admin"]) {
+      const result = validateRequestedScopes([scope]);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error).toContain(scope);
+      }
+    }
+  });
+
   it("rejects non-string entries", () => {
     const result = validateRequestedScopes(["runs:read", 42]);
     expect(result.ok).toBe(false);
@@ -134,11 +144,14 @@ describe("hasScope", () => {
       "runs:delete",
       "runs:reprocess",
       "runs:upload",
-      "runs:attribute",
       "runs:comment",
     ] as const) {
       expect(hasScope({ scopes: ["runs:write"] }, scope)).toBe(true);
     }
+    // The removed person-only scopes are not part of the legacy expansion.
+    expect(
+      hasScope({ scopes: ["runs:write"] }, "runs:attribute" as never)
+    ).toBe(false);
     // Expansion is scoped to the same resource — it never leaks reads or
     // other resources.
     expect(hasScope({ scopes: ["runs:write"] }, "runs:read")).toBe(false);

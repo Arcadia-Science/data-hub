@@ -106,10 +106,13 @@ describe("buildNotificationFeed", () => {
           commentId: "c1",
           commentBody: "looks off",
           actor: {
-            id: "u1",
-            displayName: "Bob",
-            initials: "BO",
-            avatarUrl: null,
+            kind: "user",
+            user: {
+              userId: "u1",
+              displayName: "Bob",
+              initials: "BO",
+              avatarUrl: null,
+            },
           },
         }),
         item({ id: "run" }),

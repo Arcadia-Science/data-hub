@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
-import { analyticsSurface, trackEvent } from "@/lib/analytics/track";
+import { surfaceEvent, trackEvent } from "@/lib/analytics/track";
+import { actorRefFromAuth } from "@/lib/api/actor";
 import { authorize } from "@/lib/api/auth";
 import {
   apiError,
@@ -9,6 +10,7 @@ import {
 } from "@/lib/api/errors";
 import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { commentBody, readJsonBody } from "@/lib/api/openapi";
+import { commentToWire } from "@/lib/api/run-comment-wire";
 import {
   createCommentAndNotify,
   listCommentsForRun,
@@ -43,15 +45,16 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
   }
 
   const comments = await listCommentsForRun(run.id);
-  return Response.json({ comments });
+  return Response.json({ comments: comments.map(commentToWire) });
 }
 
 // ---------------------------------------------------------------------------
 // POST /api/v1/instruments/:instrumentId/runs/:runId/comments
 //
-// Create a comment. Body: { body: string }. Author is always the
-// authenticated user — the URL/body carry no user id, so attribution
-// spoofing is impossible. Rejects creates on soft-deleted runs with 409.
+// Create a comment. Body: { body: string }. The author is always the caller:
+// the signed-in user, or the token itself for API callers. The URL/body carry
+// no author, so spoofing is impossible. Rejects creates on soft-deleted runs
+// with 409.
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
@@ -86,7 +89,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
   const comment = await createCommentAndNotify({
     runInternalId: run.id,
-    userId: authResult.userId,
+    actor: actorRefFromAuth(authResult),
     body: validated.body,
     instrumentId,
     instrumentDisplayName: run.instrumentDisplayName,
@@ -95,9 +98,8 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
   });
 
   trackEvent("comment_added", {
-    user_id: authResult.userId,
-    surface: analyticsSurface(authResult.authMethod),
+    ...surfaceEvent(authResult),
   });
 
-  return Response.json(comment, { status: 201 });
+  return Response.json(commentToWire(comment), { status: 201 });
 }

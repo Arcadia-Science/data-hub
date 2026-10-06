@@ -21,6 +21,7 @@ import {
   formatAuntyTemperatureRange,
   formatHinaSizes,
 } from "@/components/runs/run-metadata-badges";
+import { type Actor, resolveActor } from "@/lib/api/actor";
 import { escapeLikePattern } from "@/lib/api/like-pattern";
 import { getCommentCountsByRunIds } from "@/lib/api/run-comments";
 import { db } from "@/lib/db";
@@ -29,6 +30,7 @@ import {
   files,
   instrumentRuns,
   instruments,
+  personalAccessTokens,
   runAttributions,
   users,
 } from "@/lib/db/schema";
@@ -59,16 +61,6 @@ import { getS3ObjectStream } from "@/lib/s3";
 // ---------------------------------------------------------------------------
 
 export interface RunAttribution {
-  avatarUrl: string | null;
-  displayName: string;
-  initials: string;
-  userId: string;
-}
-
-// The user who soft-deleted a run, resolved for display in the run header's
-// deleted banner. Shares the shape of `RunAttribution` so the header can
-// render it with the same avatar/initials treatment.
-export interface RunDeleter {
   avatarUrl: string | null;
   displayName: string;
   initials: string;
@@ -151,18 +143,25 @@ export const lookupRunByNaturalKey = cache(async function lookupRunByNaturalKey(
       acquiredAt: instrumentRuns.acquiredAt,
       updatedAt: instrumentRuns.updatedAt,
       deletedAt: instrumentRuns.deletedAt,
-      deletedBy: instrumentRuns.deletedBy,
+      deletedByUserId: instrumentRuns.deletedBy,
+      deletedByTokenId: instrumentRuns.deletedByToken,
       instrumentDisplayName: instruments.displayName,
       instrumentType: instruments.instrumentType,
-      // Deleter identity, resolved via the left join below. All NULL when the
+      // Deleter identity, resolved via the left joins below. All NULL when the
       // run is active or was deleted before `deleted_by` was captured.
       deletedByName: users.name,
       deletedByEmail: users.email,
       deletedByImage: users.image,
+      deletedByTokenName: personalAccessTokens.name,
+      deletedByTokenRevokedAt: personalAccessTokens.revokedAt,
     })
     .from(instrumentRuns)
     .innerJoin(instruments, eq(instrumentRuns.instrumentId, instruments.id))
     .leftJoin(users, eq(users.id, instrumentRuns.deletedBy))
+    .leftJoin(
+      personalAccessTokens,
+      eq(personalAccessTokens.id, instrumentRuns.deletedByToken)
+    )
     .where(
       and(
         eq(instrumentRuns.instrumentId, instrumentId),
@@ -175,23 +174,33 @@ export const lookupRunByNaturalKey = cache(async function lookupRunByNaturalKey(
     return null;
   }
 
-  const { deletedByName, deletedByEmail, deletedByImage, ...runRow } = row;
+  const {
+    deletedByUserId,
+    deletedByTokenId,
+    deletedByName,
+    deletedByEmail,
+    deletedByImage,
+    deletedByTokenName,
+    deletedByTokenRevokedAt,
+    ...runRow
+  } = row;
 
-  // Collapse the three nullable user columns into one object the header can
-  // render directly. Email is the fallback label for users without a name.
-  const deletedByUser: RunDeleter | null = runRow.deletedBy
-    ? {
-        userId: runRow.deletedBy,
-        displayName: deletedByName ?? deletedByEmail ?? "Unknown user",
-        initials: toInitials(deletedByName ?? deletedByEmail ?? "Unknown user"),
-        avatarUrl: deletedByImage,
-      }
-    : null;
+  // Collapse the user and token columns into one actor the header can render
+  // directly. Null when the run is active or the deleter was never recorded.
+  const deletedBy: Actor | null = resolveActor({
+    userId: deletedByUserId,
+    userName: deletedByName,
+    userEmail: deletedByEmail,
+    userImage: deletedByImage,
+    tokenId: deletedByTokenId,
+    tokenName: deletedByTokenName,
+    tokenRevokedAt: deletedByTokenRevokedAt,
+  });
 
   const byRun = await getAttributionsByRunIds([runRow.id]);
   return {
     ...runRow,
-    deletedByUser,
+    deletedBy,
     attributions: byRun.get(runRow.id) ?? [],
   };
 });

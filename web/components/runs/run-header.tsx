@@ -4,6 +4,7 @@ import { Trash2 } from "lucide-react";
 import Link from "next/link";
 import { RecordInstrumentVisit } from "@/components/recent-instrument-visit";
 import { RunSwitcher } from "@/components/runs/run-switcher";
+import { ActorLabel } from "@/components/token-actor";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -11,7 +12,6 @@ import {
   BreadcrumbList,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import { UserAvatarLink } from "@/components/user-avatar";
 import type { RunDetail } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
 
@@ -72,14 +72,10 @@ export function RunHeader({
           <Trash2 className="size-4 shrink-0" />
           <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
             <span>Deleted {formatDateTime(run.deletedAt)}</span>
-            {run.deletedByUser && (
+            {run.deletedBy && (
               <span className="flex items-center gap-1.5">
                 <span>by</span>
-                <UserAvatarLink size="sm" user={run.deletedByUser}>
-                  <span className="font-medium">
-                    {run.deletedByUser.displayName}
-                  </span>
-                </UserAvatarLink>
+                <ActorLabel actor={run.deletedBy} />
               </span>
             )}
           </span>

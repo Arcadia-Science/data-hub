@@ -13,12 +13,14 @@ import {
   getWatcherOnlineStatus,
   type WatcherOnlineStatus,
 } from "@/components/watchers/watcher-online-status";
+import { type ActorToken, actorUser, resolveActor } from "@/lib/api/actor";
 import { getInstrumentListWithCounts } from "@/lib/api/instruments";
 import { db } from "@/lib/db";
 import {
   files,
   instrumentRuns,
   instruments,
+  personalAccessTokens,
   runAttributions,
   runComments,
   users,
@@ -102,6 +104,9 @@ export interface SearchUserResult {
   type: "user";
 }
 
+// A person wrote the comment (`userId` and `userName` set) or a token did
+// (`token` set, user fields null). The user fields keep their original names
+// so existing API and MCP clients keep working.
 export interface SearchCommentResult {
   bodyPreview: string;
   createdAt: string;
@@ -109,9 +114,10 @@ export interface SearchCommentResult {
   instrumentId: string;
   instrumentName: string;
   runId: string;
+  token: ActorToken | null;
   type: "comment";
-  userId: string;
-  userName: string;
+  userId: string | null;
+  userName: string | null;
 }
 
 export interface GlobalSearchResult {
@@ -382,6 +388,9 @@ async function searchComments(
       userId: users.id,
       userName: users.name,
       userEmail: users.email,
+      tokenId: personalAccessTokens.id,
+      tokenName: personalAccessTokens.name,
+      tokenRevokedAt: personalAccessTokens.revokedAt,
       runId: instrumentRuns.runId,
       instrumentId: instrumentRuns.instrumentId,
       instrumentName: instruments.displayName,
@@ -389,7 +398,13 @@ async function searchComments(
     .from(runComments)
     .innerJoin(instrumentRuns, eq(runComments.runId, instrumentRuns.id))
     .innerJoin(instruments, eq(instrumentRuns.instrumentId, instruments.id))
-    .innerJoin(users, eq(runComments.userId, users.id))
+    // Left joins: a comment written by a token has no user, and a comment
+    // whose author was deleted has neither. Neither should drop out of search.
+    .leftJoin(users, eq(runComments.userId, users.id))
+    .leftJoin(
+      personalAccessTokens,
+      eq(personalAccessTokens.id, runComments.tokenId)
+    )
     .where(
       and(
         isNull(runComments.deletedAt),
@@ -400,17 +415,30 @@ async function searchComments(
     .orderBy(desc(relevance), desc(runComments.createdAt))
     .limit(limit);
 
-  return rows.map((row) => ({
-    type: "comment" as const,
-    id: row.id,
-    bodyPreview: commentBodyPreview(row.body, query),
-    createdAt: row.createdAt.toISOString(),
-    userId: row.userId,
-    userName: row.userName ?? row.userEmail ?? "Unknown",
-    runId: row.runId,
-    instrumentId: row.instrumentId,
-    instrumentName: row.instrumentName,
-  }));
+  return rows.map((row) => {
+    const actor = resolveActor({
+      userId: row.userId,
+      userName: row.userName,
+      userEmail: row.userEmail,
+      userImage: null,
+      tokenId: row.tokenId,
+      tokenName: row.tokenName,
+      tokenRevokedAt: row.tokenRevokedAt,
+    });
+    const user = actorUser(actor);
+    return {
+      type: "comment" as const,
+      id: row.id,
+      bodyPreview: commentBodyPreview(row.body, query),
+      createdAt: row.createdAt.toISOString(),
+      userId: user?.userId ?? null,
+      userName: user?.displayName ?? null,
+      token: actor?.kind === "token" ? actor.token : null,
+      runId: row.runId,
+      instrumentId: row.instrumentId,
+      instrumentName: row.instrumentName,
+    };
+  });
 }
 
 function emptyResult(): GlobalSearchResult {

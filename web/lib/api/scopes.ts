@@ -12,7 +12,6 @@ export const ALL_SCOPES = [
   "runs:delete",
   "runs:reprocess",
   "runs:upload",
-  "runs:attribute",
   "runs:comment",
   "files:read",
   "files:create",
@@ -25,7 +24,6 @@ export const ALL_SCOPES = [
   "archive-jobs:read",
   "archive-jobs:write",
   "notifications:create",
-  "feedback:admin",
 ] as const;
 
 export type Scope = (typeof ALL_SCOPES)[number];
@@ -46,7 +44,6 @@ export const LEGACY_SCOPE_EXPANSIONS: Record<string, readonly Scope[]> = {
     "runs:delete",
     "runs:reprocess",
     "runs:upload",
-    "runs:attribute",
     "runs:comment",
   ],
   "files:write": [

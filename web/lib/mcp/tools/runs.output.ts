@@ -7,7 +7,7 @@ import {
   paginationSchema,
   runSourceSchema,
 } from "@/lib/api/openapi/schemas/common";
-import { mcpActorUserSchema } from "./common.output";
+import { mcpActorTokenSchema, mcpActorUserSchema } from "./common.output";
 
 // Plain Zod only — do not import from openapi/schemas/runs (those use
 // `.openapi()` and require registry side effects that unit tests skip).
@@ -44,12 +44,16 @@ export const mcpFailureSummarySchema = z.object({
 export const mcpRunCommentSchema = z.object({
   id: z.string(),
   body: z.string(),
-  user: z.object({
-    id: z.string(),
-    displayName: z.string(),
-    initials: z.string(),
-    avatarUrl: z.string().nullable(),
-  }),
+  // Exactly one of `user` and `token` is set.
+  user: z
+    .object({
+      id: z.string(),
+      displayName: z.string(),
+      initials: z.string(),
+      avatarUrl: z.string().nullable(),
+    })
+    .nullable(),
+  token: mcpActorTokenSchema.nullable(),
   created_at: isoDateTime,
   edited_at: isoDateTime.nullable(),
 });
@@ -106,6 +110,7 @@ export const getRunOutputSchema = z.object({
   instrumentDisplayName: z.string(),
   instrumentType: instrumentTypeSchema,
   deletedByUser: mcpActorUserSchema.nullable(),
+  deletedByToken: mcpActorTokenSchema.nullable(),
   attributions: z.array(mcpActorUserSchema),
   files: z.array(mcpRunFileSchema).optional(),
   filesPagination: paginationSchema.optional(),
@@ -200,6 +205,7 @@ export const deleteRunOutputSchema = z.object({
   runId: z.string(),
   deletedAt: isoDateTime.nullable(),
   deletedBy: z.string().nullable(),
+  deletedByToken: mcpActorTokenSchema.nullable(),
   alreadyApplied: z.boolean(),
 });
 

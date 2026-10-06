@@ -17,11 +17,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { UserAvatar } from "@/components/user-avatar";
 import { auth } from "@/lib/auth";
 import { toUserAvatarUser } from "@/lib/avatar-color";
@@ -75,11 +70,7 @@ export default async function TokensPage() {
               : "View personal access tokens for API authentication."}
           </p>
         </div>
-        {isAdmin ? (
-          <CreateTokenDialog currentUserId={session.user.id} />
-        ) : (
-          <CreateTokenDisabledButton />
-        )}
+        {isAdmin ? <CreateTokenDialog /> : <CreateTokenDisabledButton />}
       </div>
 
       <div className="mt-6">
@@ -103,9 +94,9 @@ async function TokensSection({ isAdmin }: { isAdmin: boolean }) {
       lastUsedAt: personalAccessTokens.lastUsedAt,
       expiresAt: personalAccessTokens.expiresAt,
       createdAt: personalAccessTokens.createdAt,
-      // NULL when the owner's account was deleted, so admins can still see
-      // and revoke the token.
-      user: {
+      // NULL when the creator's account was deleted, or when the token
+      // predates `created_by`.
+      creator: {
         id: users.id,
         name: users.name,
         email: users.email,
@@ -113,7 +104,7 @@ async function TokensSection({ isAdmin }: { isAdmin: boolean }) {
       },
     })
     .from(personalAccessTokens)
-    .leftJoin(users, eq(users.id, personalAccessTokens.userId))
+    .leftJoin(users, eq(users.id, personalAccessTokens.createdBy))
     .where(isNull(personalAccessTokens.revokedAt))
     .orderBy(desc(personalAccessTokens.createdAt));
 
@@ -140,7 +131,7 @@ async function TokensSection({ isAdmin }: { isAdmin: boolean }) {
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
-                <TableHead>User</TableHead>
+                <TableHead>Created by</TableHead>
                 <TableHead>Token</TableHead>
                 <TableHead>Scopes</TableHead>
                 <TableHead>Last used</TableHead>
@@ -151,12 +142,12 @@ async function TokensSection({ isAdmin }: { isAdmin: boolean }) {
             </TableHeader>
             <TableBody>
               {tokens.map((token) => {
-                const avatarUser = token.user?.id
+                const avatarUser = token.creator?.id
                   ? toUserAvatarUser({
-                      userId: token.user.id,
-                      name: token.user.name,
-                      email: token.user.email,
-                      image: token.user.image,
+                      userId: token.creator.id,
+                      name: token.creator.name,
+                      email: token.creator.email,
+                      image: token.creator.image,
                     })
                   : null;
                 return (
@@ -164,14 +155,12 @@ async function TokensSection({ isAdmin }: { isAdmin: boolean }) {
                     <TableCell className="font-medium">{token.name}</TableCell>
                     <TableCell>
                       {avatarUser ? (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <UserAvatar size="sm" user={avatarUser} />
-                          </TooltipTrigger>
-                          <TooltipContent>
+                        <span className="inline-flex items-center gap-2">
+                          <UserAvatar size="sm" user={avatarUser} />
+                          <span className="max-w-40 truncate">
                             {avatarUser.displayName}
-                          </TooltipContent>
-                        </Tooltip>
+                          </span>
+                        </span>
                       ) : (
                         <span className="text-muted-foreground">Unknown</span>
                       )}

@@ -8,3 +8,10 @@ export const mcpActorUserSchema = z.object({
   initials: z.string(),
   avatarUrl: z.string().nullable(),
 });
+
+// A personal access token that acted on its own. Sits beside the matching
+// `*ByUser` field, which is null for token-written rows.
+export const mcpActorTokenSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+});

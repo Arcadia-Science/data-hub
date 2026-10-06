@@ -1,5 +1,6 @@
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { after } from "next/server";
+import { type ActorRef, actorColumns } from "@/lib/api/actor";
 import {
   fingerprintFiles,
   getArchiveDownloadFilename,
@@ -32,10 +33,9 @@ export interface DownloadableFile {
 }
 
 export interface PrepareRunArchiveInput {
-  // User who triggered this build, for the `archive_jobs.created_by`
-  // audit column. Should be `null` for token-authenticated callers
-  // (Lambda, MCP, watcher) since the column references `users.id`.
-  createdBy: string | null;
+  // Who triggered this build, recorded on `archive_jobs` as `created_by` (a
+  // person) or `created_by_token` (a token). Null when unknown.
+  actor: ActorRef | null;
   // Subset of file IDs to include. `null` means "every uploaded file in
   // the run", which matches the default "Download all" behavior. An empty
   // array means the caller asked for a specific subset and supplied none
@@ -180,7 +180,7 @@ export async function prepareRunArchive(
     runInternalId: run.id,
     fingerprint,
     archiveBucket,
-    createdBy: input.createdBy,
+    actor: input.actor,
   });
 
   if (ownsBuild) {
@@ -259,8 +259,8 @@ async function loadDownloadableFiles(
 }
 
 interface EnsureArchiveJobInput {
+  actor: ActorRef | null;
   archiveBucket: string;
-  createdBy: string | null;
   fingerprint: string;
   runInternalId: string;
 }
@@ -281,6 +281,7 @@ interface EnsureArchiveJobResult {
 async function ensureArchiveJob(
   input: EnsureArchiveJobInput
 ): Promise<EnsureArchiveJobResult> {
+  const { userId, tokenId } = actorColumns(input.actor);
   const inserted = await db
     .insert(archiveJobs)
     .values({
@@ -288,7 +289,8 @@ async function ensureArchiveJob(
       fingerprint: input.fingerprint,
       status: "building",
       archiveBucket: input.archiveBucket,
-      createdBy: input.createdBy,
+      createdBy: userId,
+      createdByToken: tokenId,
     })
     .onConflictDoNothing()
     .returning();
@@ -324,7 +326,8 @@ async function ensureArchiveJob(
       fingerprint: input.fingerprint,
       status: "building",
       archiveBucket: input.archiveBucket,
-      createdBy: input.createdBy,
+      createdBy: userId,
+      createdByToken: tokenId,
     })
     .returning();
   return { job: retry, ownsBuild: true };

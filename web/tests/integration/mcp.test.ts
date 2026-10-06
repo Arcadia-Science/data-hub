@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 // biome-ignore lint/performance/noNamespaceImport: integration tests need the full schema module for Db typing
 import * as schema from "@/lib/db/schema";
@@ -334,6 +335,40 @@ describe("MCP Server (HTTP)", () => {
     );
   });
 
+  it("global_search returns a comment written by a token", async () => {
+    const db = getTestDb();
+    const { tokenId } = await seedTestUser({ tokenName: "mcp-search-bot" });
+    const [run] = await db
+      .select({ id: schema.instrumentRuns.id })
+      .from(schema.instrumentRuns)
+      .where(eq(schema.instrumentRuns.runId, runId));
+    const [comment] = await db
+      .insert(schema.runComments)
+      .values({ runId: run.id, tokenId, body: "Bot note MCPSEARCH-ZQX" })
+      .returning({ id: schema.runComments.id });
+
+    try {
+      const result = await callTool("global_search", {
+        query: "MCPSEARCH-ZQX",
+        scope: "comments",
+      });
+      expect(result.isError).toBeFalsy();
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.comments).toEqual([
+        expect.objectContaining({
+          id: comment.id,
+          userId: null,
+          userName: null,
+          token: { id: tokenId, name: "mcp-search-bot", revoked: false },
+        }),
+      ]);
+    } finally {
+      await db
+        .delete(schema.runComments)
+        .where(eq(schema.runComments.id, comment.id));
+    }
+  });
+
   it("list_run_attributors returns the set of attributors for an instrument", async () => {
     await callTool("claim_run", { instrumentId, runId });
 
@@ -537,6 +572,83 @@ describe("MCP Server (HTTP)", () => {
     });
     expect(afterRestore.isError).toBeFalsy();
     expect(JSON.parse(afterRestore.content[0].text).deletedAt).toBeNull();
+  });
+
+  // ---- Records written by a token ------------------------------------------
+  //
+  // Tokens act as themselves, so rows they write carry a token instead of a
+  // user. MCP callers are always people; they read these rows through the
+  // `*ByToken` fields and cannot edit a token's comments.
+
+  it("read tools name the token that wrote a record", async () => {
+    const { tokenId } = await seedTestUser({ tokenName: "Cleanup Bot" });
+    const db = getTestDb();
+    const tokenInstrument = "mcp-token-written-instrument";
+    await db.insert(schema.instruments).values({
+      id: tokenInstrument,
+      displayName: "Token Written Instrument",
+      status: "inactive",
+      retiredAt: new Date(),
+      retiredByToken: tokenId,
+    });
+    const [run] = await db
+      .insert(schema.instrumentRuns)
+      .values({
+        instrumentId: tokenInstrument,
+        runId: "token-written-run",
+        source: "lambda",
+        deletedAt: new Date(),
+        deletedByToken: tokenId,
+      })
+      .returning({ id: schema.instrumentRuns.id });
+    const [watcher] = await db
+      .insert(schema.watchers)
+      .values({
+        instrumentId: tokenInstrument,
+        hostname: "retired-pc",
+        status: "stopped",
+        deletedAt: new Date(),
+        deregisteredByToken: tokenId,
+      })
+      .returning({ id: schema.watchers.id });
+    const [comment] = await db
+      .insert(schema.runComments)
+      .values({ runId: run.id, tokenId, body: "note from a token" })
+      .returning({ id: schema.runComments.id });
+    const expectedToken = { id: tokenId, name: "Cleanup Bot" };
+
+    const instrument = await callTool("get_instrument", {
+      instrumentId: tokenInstrument,
+    });
+    const instrumentBody = JSON.parse(instrument.content[0].text);
+    expect(instrumentBody.retiredByUser).toBeNull();
+    expect(instrumentBody.retiredByToken).toEqual(expectedToken);
+
+    const runResult = await callTool("get_run", {
+      instrumentId: tokenInstrument,
+      runId: "token-written-run",
+      include: ["comments"],
+    });
+    const runBody = JSON.parse(runResult.content[0].text);
+    expect(runBody.deletedBy).toBeNull();
+    expect(runBody.deletedByUser).toBeNull();
+    expect(runBody.deletedByToken).toEqual(expectedToken);
+    expect(runBody.comments[0].user).toBeNull();
+    expect(runBody.comments[0].token).toEqual(expectedToken);
+
+    const watcherResult = await callTool("get_watcher", {
+      watcherId: watcher.id,
+    });
+    const watcherBody = JSON.parse(watcherResult.content[0].text);
+    expect(watcherBody.deregisteredByUser).toBeNull();
+    expect(watcherBody.deregisteredByToken).toEqual(expectedToken);
+
+    const edit = await callTool("edit_run_comment", {
+      commentId: comment.id,
+      body: "tampered",
+    });
+    expect(edit.isError).toBe(true);
+    expect(edit.content[0].text).toMatch(/only edit your own/i);
   });
 
   // ---- OAuth scope enforcement (coarse read / write) ----------------------

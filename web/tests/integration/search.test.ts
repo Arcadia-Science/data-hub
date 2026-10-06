@@ -1,9 +1,11 @@
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { GlobalSearchResult } from "@/lib/api/search";
+import { type GlobalSearchResult, globalSearch } from "@/lib/api/search";
 import {
   files,
   instrumentRuns,
   instruments,
+  personalAccessTokens,
   runComments,
   watchers,
 } from "@/lib/db/schema";
@@ -56,6 +58,7 @@ async function search(
 describe("Global search API", () => {
   let token: string;
   let authorUserId: string;
+  let botTokenId: string;
   let specialRunUuid: string;
 
   beforeAll(async () => {
@@ -65,6 +68,7 @@ describe("Global search API", () => {
       name: "Dakota Lab",
       email: "dakota.search@example.com",
     }));
+    ({ tokenId: botTokenId } = await seedTestUser({ tokenName: "qc-bot" }));
 
     const db = getTestDb();
     await db.insert(instruments).values([
@@ -122,6 +126,12 @@ describe("Global search API", () => {
         // Match sits past the preview window; markdown should be stripped and
         // the snippet should recenter on the hit rather than the head.
         body: `${"**pad** ".repeat(40)}late marker ZYZZYVA-TOKEN in **bold**`,
+      },
+      {
+        // Written by a token, so there is no user to join to.
+        runId: specialRunUuid,
+        tokenId: botTokenId,
+        body: "Automated check flagged an OUTLIER-QZX reading",
       },
     ]);
   });
@@ -234,6 +244,44 @@ describe("Global search API", () => {
     expect(result.comments[0]?.instrumentId).toBe("hina-microscope");
     expect(result.comments[0]?.userId).toBe(authorUserId);
     expect(result.users).toHaveLength(0);
+  });
+
+  it("finds a comment written by a token and names the token", async () => {
+    const result = await search(token, "OUTLIER-QZX", "comments");
+    expect(result.comments).toHaveLength(1);
+    expect(result.comments[0]).toMatchObject({
+      runId: "special-run",
+      instrumentId: "hina-microscope",
+      userId: null,
+      userName: null,
+      token: { id: botTokenId, name: "qc-bot", revoked: false },
+    });
+  });
+
+  it("keeps finding a token comment after the token is revoked", async () => {
+    const db = getTestDb();
+    await db
+      .update(personalAccessTokens)
+      .set({ revokedAt: new Date() })
+      .where(eq(personalAccessTokens.id, botTokenId));
+    try {
+      const result = await globalSearch({
+        query: "OUTLIER-QZX",
+        scope: "comments",
+      });
+      expect(result.comments).toHaveLength(1);
+      expect(result.comments[0]?.token).toEqual({
+        id: botTokenId,
+        name: "qc-bot",
+        revoked: true,
+      });
+      expect(result.comments[0]?.userId).toBeNull();
+    } finally {
+      await db
+        .update(personalAccessTokens)
+        .set({ revokedAt: null })
+        .where(eq(personalAccessTokens.id, botTokenId));
+    }
   });
 
   it("windows comment previews around the match and strips markdown", async () => {

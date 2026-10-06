@@ -2,13 +2,7 @@
 
 import { ChevronsUpDown, Loader2, Plus, TriangleAlert } from "lucide-react";
 import { useRouter } from "next/navigation";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  useTransition,
-} from "react";
+import { useCallback, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { CopyButton } from "@/components/copy-button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -70,12 +64,6 @@ interface ResourceGroup {
   scopes: Scope[];
 }
 
-interface WorkspaceUser {
-  email: string | null;
-  id: string;
-  name: string | null;
-}
-
 // Group scopes by resource, preserving ALL_SCOPES order so the grid layout is
 // deterministic and adding a scope surfaces automatically.
 function groupScopesByResource(): ResourceGroup[] {
@@ -102,15 +90,7 @@ function computeExpiresAt(days: string): string | undefined {
   return d.toISOString();
 }
 
-function userLabel(user: WorkspaceUser): string {
-  return user.name ?? user.email ?? user.id;
-}
-
-export function CreateTokenDialog({
-  currentUserId,
-}: {
-  currentUserId: string;
-}) {
+export function CreateTokenDialog() {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<View>({ kind: "form" });
 
@@ -150,7 +130,6 @@ export function CreateTokenDialog({
       >
         {view.kind === "form" ? (
           <CreateTokenForm
-            currentUserId={currentUserId}
             onCreated={(plaintext) => setView({ kind: "success", plaintext })}
           />
         ) : (
@@ -168,46 +147,15 @@ export function CreateTokenDialog({
 }
 
 function CreateTokenForm({
-  currentUserId,
   onCreated,
 }: {
-  currentUserId: string;
   onCreated: (plaintext: string) => void;
 }) {
   const [name, setName] = useState("");
-  const [ownerId, setOwnerId] = useState(currentUserId);
-  const [users, setUsers] = useState<WorkspaceUser[] | null>(null);
-  const [usersError, setUsersError] = useState(false);
   const [expiry, setExpiry] = useState("90");
   const [selected, setSelected] = useState<Set<Scope>>(() => new Set());
   const [customOpen, setCustomOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
-
-  // Lazy-load the roster when the form mounts (dialog opened), not on the
-  // tokens page itself — most visits are audits, not mints.
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/v1/users")
-      .then((res) => {
-        if (!res.ok) {
-          throw new Error("Failed to load users");
-        }
-        return res.json() as Promise<WorkspaceUser[]>;
-      })
-      .then((rows) => {
-        if (!cancelled) {
-          setUsers(rows);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setUsersError(true);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const groups = useMemo(groupScopesByResource, []);
 
@@ -276,14 +224,7 @@ function CreateTokenForm({
     });
   }, []);
 
-  // A failed roster fetch falls back to a self-mint rather than blocking;
-  // only an in-flight load (no error yet) gates submit.
-  const canSubmit =
-    Boolean(name.trim()) &&
-    selected.size > 0 &&
-    Boolean(ownerId) &&
-    (users !== null || usersError) &&
-    !isPending;
+  const canSubmit = Boolean(name.trim()) && selected.size > 0 && !isPending;
 
   const handleCreate = () => {
     startTransition(async () => {
@@ -295,7 +236,6 @@ function CreateTokenForm({
           name: name.trim(),
           expires_at: expiresAt,
           scopes: Array.from(selected),
-          user_id: ownerId,
         }),
       });
 
@@ -315,9 +255,9 @@ function CreateTokenForm({
       <DialogHeader>
         <DialogTitle>Create access token</DialogTitle>
         <DialogDescription>
-          Tokens are used to authenticate API requests from external tools.
-          Write actions (like claiming a run) are attributed to the selected
-          user.
+          Tokens are used to authenticate API requests from external tools. A
+          token acts as itself: what it does is recorded under its name, not
+          under your account.
         </DialogDescription>
       </DialogHeader>
       <div className="grid gap-4 py-2">
@@ -331,36 +271,6 @@ function CreateTokenForm({
             placeholder="e.g. Plate Reader PC"
             value={name}
           />
-        </div>
-        <div className="grid gap-2">
-          <Label htmlFor="token-owner">User</Label>
-          {usersError ? (
-            <p className="text-muted-foreground text-sm">
-              Couldn't load workspace members. This token will be created for
-              you — reopen the dialog to choose a different owner.
-            </p>
-          ) : (
-            <Select
-              disabled={users === null}
-              onValueChange={setOwnerId}
-              value={ownerId}
-            >
-              <SelectTrigger id="token-owner">
-                <SelectValue
-                  placeholder={
-                    users === null ? "Loading members…" : "Select user"
-                  }
-                />
-              </SelectTrigger>
-              <SelectContent>
-                {(users ?? []).map((user) => (
-                  <SelectItem key={user.id} value={user.id}>
-                    {userLabel(user)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
         </div>
         <div className="grid gap-2">
           <Label htmlFor="token-expiry">Expiration</Label>

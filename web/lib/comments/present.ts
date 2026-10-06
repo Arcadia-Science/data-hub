@@ -1,9 +1,11 @@
 import { formatInTimeZone } from "date-fns-tz";
+import type { Actor } from "@/lib/api/actor";
 import type { CommentFeedItem } from "@/lib/api/run-comments";
-import type { UserAvatarUser } from "@/lib/avatar-color";
 import { formatRelativeTime } from "@/lib/utils";
 
 export interface CommentRowModel {
+  /** A person, or the token that posted the comment through the API. */
+  author: Actor;
   body: string;
   created_at: string;
   id: string;
@@ -13,7 +15,6 @@ export interface CommentRowModel {
   timeFull: string;
   /** e.g. "5:02 PM", for lists grouped under day headings. */
   timeOfDay: string;
-  user: UserAvatarUser;
 }
 
 export function toCommentRow(
@@ -32,12 +33,7 @@ export function toCommentRow(
     ),
     timeOfDay: formatInTimeZone(comment.created_at, timeZone, "h:mm a"),
     timeAgo: formatRelativeTime(comment.created_at),
-    user: {
-      avatarUrl: comment.user.avatarUrl,
-      displayName: comment.user.displayName,
-      initials: comment.user.initials,
-      userId: comment.user.id,
-    },
+    author: comment.author,
     run: comment.run,
   };
 }

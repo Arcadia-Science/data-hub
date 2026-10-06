@@ -149,7 +149,33 @@ describe("Token creator", () => {
     await resetDb();
   });
 
-  it("records the admin who created a token made for another user", async () => {
+  it("records the admin who created a token", async () => {
+    const admin = await seedTestUser({ isAdmin: true });
+
+    const res = await api("/api/v1/tokens", {
+      method: "POST",
+      headers: await sessionHeaders(admin.userId),
+      body: { name: "watcher-pc", scopes: ["instruments:read"] },
+    });
+    expect(res.status).toBe(201);
+    const { id, token } = (await res.json()) as { id: string; token: string };
+
+    const [row] = await getTestDb()
+      .select({
+        userId: personalAccessTokens.userId,
+        createdBy: personalAccessTokens.createdBy,
+      })
+      .from(personalAccessTokens)
+      .where(eq(personalAccessTokens.id, id));
+    // `user_id` is a deprecated copy of the creator, kept so a rollback to the
+    // previous release still works. Nothing reads it for sign-in.
+    expect(row).toEqual({ userId: admin.userId, createdBy: admin.userId });
+
+    const use = await api("/api/v1/instruments", { token });
+    expect(use.status).toBe(200);
+  });
+
+  it("rejects a user_id, since tokens no longer have an owner", async () => {
     const admin = await seedTestUser({ isAdmin: true });
     const member = await seedTestUser();
 
@@ -162,27 +188,44 @@ describe("Token creator", () => {
         user_id: member.userId,
       },
     });
-    expect(res.status).toBe(201);
-    const { id } = (await res.json()) as { id: string };
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("VALIDATION_ERROR");
+  });
 
+  it("lists the tokens a person created", async () => {
+    const admin = await seedTestUser({ isAdmin: true });
+    const other = await seedTestUser({ isAdmin: true });
+    const headers = await sessionHeaders(admin.userId);
+    const created = await api("/api/v1/tokens", {
+      method: "POST",
+      headers,
+      body: { name: "mine", scopes: ["runs:read"] },
+    });
+    const { id } = (await created.json()) as { id: string };
+
+    const mine = await api("/api/v1/tokens", { headers });
+    const mineIds = ((await mine.json()) as { id: string }[]).map((t) => t.id);
+    expect(mineIds).toContain(id);
+
+    const theirs = await api("/api/v1/tokens", {
+      headers: await sessionHeaders(other.userId),
+    });
+    const theirIds = ((await theirs.json()) as { id: string }[]).map(
+      (t) => t.id
+    );
+    expect(theirIds).not.toContain(id);
+  });
+
+  it("records the creator on seeded tokens", async () => {
+    const member = await seedTestUser();
     const [row] = await getTestDb()
       .select({
         userId: personalAccessTokens.userId,
         createdBy: personalAccessTokens.createdBy,
       })
       .from(personalAccessTokens)
-      .where(eq(personalAccessTokens.id, id));
-    expect(row?.userId).toBe(member.userId);
-    expect(row?.createdBy).toBe(admin.userId);
-  });
-
-  it("records the creator on seeded tokens", async () => {
-    const member = await seedTestUser();
-    const [row] = await getTestDb()
-      .select({ createdBy: personalAccessTokens.createdBy })
-      .from(personalAccessTokens)
       .where(eq(personalAccessTokens.id, member.tokenId));
-    expect(row?.createdBy).toBe(member.userId);
+    expect(row).toEqual({ userId: member.userId, createdBy: member.userId });
   });
 });
 
@@ -328,16 +371,6 @@ describe("Token audit columns", () => {
     ).rejects.toThrow();
   });
 
-  it("stops authenticating a token once its owner is deleted", async () => {
-    const before = await api("/api/v1/instruments", { token });
-    expect(before.status).toBe(200);
-
-    await getTestDb().delete(users).where(eq(users.id, userId));
-
-    const after = await api("/api/v1/instruments", { token });
-    expect(after.status).toBe(401);
-  });
-
   it("still notifies other commenters when a run has a token comment", async () => {
     const db = getTestDb();
     const { userId: participant } = await seedTestUser();
@@ -354,7 +387,7 @@ describe("Token audit columns", () => {
     await notifyComment({
       runInternalId: runId,
       commentId: comment.id,
-      authorUserId: author,
+      author: { kind: "user", userId: author },
     });
 
     const rows = await db
@@ -369,16 +402,27 @@ describe("Token audit columns", () => {
     ]);
   });
 
-  it("keeps a token when its owner is deleted", async () => {
+  // Policy: deleting a person must not break machine tokens such as the
+  // Lambda or watcher token. Admins revoke a leaving person's tokens by hand.
+  it("keeps a token working after its creator is deleted", async () => {
     const db = getTestDb();
+    const before = await api("/api/v1/instruments", { token });
+    expect(before.status).toBe(200);
+
     await db.delete(users).where(eq(users.id, userId));
+
+    // The foreign keys null both person columns on the token row.
     const [row] = await db
       .select({
         userId: personalAccessTokens.userId,
         createdBy: personalAccessTokens.createdBy,
+        revokedAt: personalAccessTokens.revokedAt,
       })
       .from(personalAccessTokens)
       .where(eq(personalAccessTokens.id, tokenId));
-    expect(row).toEqual({ userId: null, createdBy: null });
+    expect(row).toEqual({ userId: null, createdBy: null, revokedAt: null });
+
+    const after = await api("/api/v1/instruments", { token });
+    expect(after.status).toBe(200);
   });
 });

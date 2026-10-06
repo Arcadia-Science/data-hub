@@ -51,14 +51,10 @@ export const SCOPE_METADATA: Record<Scope, ScopeMeta> = {
     description: "Request presigned S3 URLs to upload files to a run.",
     destructive: false,
   },
-  "runs:attribute": {
-    label: "Claim runs",
-    description: "Claim or unclaim runs on your own behalf.",
-    destructive: false,
-  },
   "runs:comment": {
     label: "Comment on runs",
-    description: "Add, edit, and delete run comments.",
+    description:
+      "Post run comments as this token, and edit or delete the ones it posted.",
     destructive: false,
   },
   "files:read": {
@@ -114,12 +110,6 @@ export const SCOPE_METADATA: Record<Scope, ScopeMeta> = {
   "notifications:create": {
     label: "Send notifications",
     description: "Send notifications to users, optionally about a run.",
-    destructive: false,
-  },
-  "feedback:admin": {
-    label: "Review feedback",
-    description:
-      "See every feedback report and resolve or decline them. Sending feedback does not need this.",
     destructive: false,
   },
 };

@@ -1,4 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/server";
+import { actorToken, actorUser } from "@/lib/api/actor";
 import {
   getInstrumentById,
   getInstrumentListWithCounts,
@@ -33,7 +34,12 @@ export function registerInstrumentTools(server: McpServer) {
       if (!instrument) {
         return errorResult(`Instrument '${instrumentId}' not found.`);
       }
-      return structuredResult(instrument);
+      const { retiredBy, ...fields } = instrument;
+      return structuredResult({
+        ...fields,
+        retiredByUser: actorUser(retiredBy),
+        retiredByToken: actorToken(retiredBy),
+      });
     }
   );
 

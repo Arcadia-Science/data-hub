@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
-import { analyticsSurface, trackEvent } from "@/lib/analytics/track";
+import { surfaceEvent, trackEvent } from "@/lib/analytics/track";
+import { actorRefFromAuth } from "@/lib/api/actor";
 import { authorize } from "@/lib/api/auth";
 import { apiError, INTERNAL_ERROR, NOT_FOUND } from "@/lib/api/errors";
 import {
@@ -165,7 +166,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     instrumentId,
     runId,
     fileIdsFilter: await resolveFileIdsFilter(request, instrumentId, runId),
-    createdBy: authResult.authMethod === "session" ? authResult.userId : null,
+    actor: actorRefFromAuth(authResult),
   });
 
   if (!result.ok) {
@@ -177,8 +178,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
 
   if (result.status === "ready") {
     trackEvent("archive_downloaded", {
-      user_id: authResult.userId,
-      surface: analyticsSurface(authResult.authMethod),
+      ...surfaceEvent(authResult),
     });
     return wantsJson
       ? readyJsonResponse(result.downloadUrl, result.sizeBytes)

@@ -57,6 +57,7 @@ export async function GET(request: NextRequest) {
       body: n.body,
       feedback_id: n.feedbackId,
       actor: n.actor,
+      actor_token: n.actorToken,
     })),
   });
 }

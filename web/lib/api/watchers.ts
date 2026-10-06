@@ -11,7 +11,12 @@ import {
   or,
 } from "drizzle-orm";
 import { cache } from "react";
-import { type ActorUser, resolveActorUser } from "@/lib/api/actor";
+import {
+  type Actor,
+  type ActorRef,
+  actorColumns,
+  resolveActor,
+} from "@/lib/api/actor";
 import type { AuthResult } from "@/lib/api/auth";
 import { apiError, FORBIDDEN } from "@/lib/api/errors";
 import { instrumentHasOnlineWatcher } from "@/lib/api/instruments";
@@ -218,15 +223,20 @@ export async function revertUploadQueueIfWatcherOffline(
 export async function deregisterWatcherRow(
   watcher: { id: string; instrumentId: string },
   reason: UploadRevertReason,
-  // The acting session/PAT user, recorded on the row for the "Deregistered by"
+  // The acting person or token, recorded on the row for the "Deregistered by"
   // display. Null only when no caller identity is available.
-  actorId: string | null,
+  actor: ActorRef | null,
   executor: DbExecutor = db
 ): Promise<Date> {
   const now = new Date();
+  const { userId, tokenId } = actorColumns(actor);
   await executor
     .update(watchers)
-    .set({ deletedAt: now, deregisteredBy: actorId })
+    .set({
+      deletedAt: now,
+      deregisteredBy: userId,
+      deregisteredByToken: tokenId,
+    })
     .where(eq(watchers.id, watcher.id));
 
   // Must run after the soft-delete so the helper's online check excludes this
@@ -250,7 +260,7 @@ export async function deregisterWatcherRow(
  */
 export async function deregisterInstrumentWatchers(
   instrumentId: string,
-  actorId: string | null,
+  actor: ActorRef | null,
   executor: DbExecutor = db
 ): Promise<number> {
   const active = await executor
@@ -261,12 +271,7 @@ export async function deregisterInstrumentWatchers(
     );
 
   for (const watcher of active) {
-    await deregisterWatcherRow(
-      watcher,
-      "instrument_retired",
-      actorId,
-      executor
-    );
+    await deregisterWatcherRow(watcher, "instrument_retired", actor, executor);
   }
 
   return active.length;
@@ -366,7 +371,7 @@ export type WatcherDetail = WatcherListItem & {
   configChecksum: string | null;
   updatedAt: Date;
   /** Who deregistered the watcher; null when live or unknown. */
-  deregisteredByUser: ActorUser | null;
+  deregisteredBy: Actor | null;
 };
 
 // React.cache() deduplicates calls within a single request — used by both
@@ -389,16 +394,23 @@ export const getWatcherById = cache(async function getWatcherById(
       createdAt: watchers.createdAt,
       updatedAt: watchers.updatedAt,
       deletedAt: watchers.deletedAt,
-      deregisteredBy: watchers.deregisteredBy,
+      deregisteredByUserId: watchers.deregisteredBy,
+      deregisteredByTokenId: watchers.deregisteredByToken,
       deregisteredByName: users.name,
       deregisteredByEmail: users.email,
       deregisteredByImage: users.image,
+      deregisteredByTokenName: personalAccessTokens.name,
+      deregisteredByTokenRevokedAt: personalAccessTokens.revokedAt,
     })
     .from(watchers)
     .leftJoin(instruments, eq(instruments.id, watchers.instrumentId))
     // Resolve the actor who deregistered the watcher for display; all NULL
     // when live or deregistered before `deregistered_by` existed.
     .leftJoin(users, eq(users.id, watchers.deregisteredBy))
+    .leftJoin(
+      personalAccessTokens,
+      eq(personalAccessTokens.id, watchers.deregisteredByToken)
+    )
     // No deletedAt filter — the detail page renders deregistered watchers too,
     // with muted styling and historical data still visible.
     .where(eq(watchers.id, watcherId))
@@ -422,11 +434,14 @@ export const getWatcherById = cache(async function getWatcherById(
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     deletedAt: row.deletedAt,
-    deregisteredByUser: resolveActorUser({
-      userId: row.deregisteredBy,
-      name: row.deregisteredByName,
-      email: row.deregisteredByEmail,
-      image: row.deregisteredByImage,
+    deregisteredBy: resolveActor({
+      userId: row.deregisteredByUserId,
+      userName: row.deregisteredByName,
+      userEmail: row.deregisteredByEmail,
+      userImage: row.deregisteredByImage,
+      tokenId: row.deregisteredByTokenId,
+      tokenName: row.deregisteredByTokenName,
+      tokenRevokedAt: row.deregisteredByTokenRevokedAt,
     }),
   };
 });
