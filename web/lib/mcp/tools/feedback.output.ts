@@ -30,6 +30,11 @@ export const feedbackItemSchema = z.object({
   statusUpdatedAt: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  linearIssue: z.object({
+    identifier: z.string(),
+    stateName: z.string(),
+    url: z.string(),
+  }),
 });
 
 export const sendFeedbackOutputSchema = z.object({

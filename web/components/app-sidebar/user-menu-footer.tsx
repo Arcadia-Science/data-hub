@@ -51,6 +51,7 @@ function preloadChangelogDialog() {
 
 interface UserMenuFooterProps {
   changelogSections: readonly ChangelogDaySection[];
+  feedbackEnabled: boolean;
   signOutAction: () => Promise<void>;
   user: {
     id: string;
@@ -62,6 +63,7 @@ interface UserMenuFooterProps {
 
 export function UserMenuFooter({
   changelogSections,
+  feedbackEnabled,
   user,
   signOutAction,
 }: UserMenuFooterProps) {
@@ -161,16 +163,18 @@ export function UserMenuFooter({
                 />
               ) : null}
             </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={(event) => {
-                event.preventDefault();
-                setMenuOpen(false);
-                setFeedbackOpen(true);
-              }}
-            >
-              <MessageSquarePlus data-icon="inline-start" />
-              Feedback
-            </DropdownMenuItem>
+            {feedbackEnabled ? (
+              <DropdownMenuItem
+                onSelect={(event) => {
+                  event.preventDefault();
+                  setMenuOpen(false);
+                  setFeedbackOpen(true);
+                }}
+              >
+                <MessageSquarePlus data-icon="inline-start" />
+                Feedback
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuItem asChild>
               <DocsLink href={DOCS_URL}>
                 <BookOpen data-icon="inline-start" />
@@ -202,10 +206,12 @@ export function UserMenuFooter({
             sections={changelogSections}
           />
         ) : null}
-        <SendFeedbackDialog
-          onOpenChange={setFeedbackOpen}
-          open={feedbackOpen}
-        />
+        {feedbackEnabled ? (
+          <SendFeedbackDialog
+            onOpenChange={setFeedbackOpen}
+            open={feedbackOpen}
+          />
+        ) : null}
       </SidebarMenuItem>
     </SidebarMenu>
   );

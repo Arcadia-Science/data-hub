@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import http from "node:http";
 
 export const LINEAR_TEAM_ID = "11111111-1111-4111-8111-111111111111";
@@ -45,6 +46,83 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown) {
   res.end(JSON.stringify(body));
 }
 
+interface FakeAttachment {
+  metadata: Record<string, string | number>;
+  url: string;
+}
+
+interface FakeIssue {
+  attachments: FakeAttachment[];
+  canceledAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  description: string;
+  id: string;
+  identifier: string;
+  state: { name: string; type: string };
+  title: string;
+  updatedAt: string;
+  url: string;
+}
+
+const issues: FakeIssue[] = [];
+let issueSeq = 1;
+
+function matchesFilter(
+  issue: FakeIssue,
+  filter: Record<string, unknown> | undefined
+) {
+  if (!filter) {
+    return true;
+  }
+  const idFilter = filter.id as { in?: string[] } | undefined;
+  if (idFilter?.in && !idFilter.in.includes(issue.id)) {
+    return false;
+  }
+  const title = filter.title as { eq?: string } | undefined;
+  if (title?.eq && issue.title !== title.eq) {
+    return false;
+  }
+  const createdAt = filter.createdAt as { gte?: string } | undefined;
+  if (createdAt?.gte && issue.createdAt < createdAt.gte) {
+    return false;
+  }
+  const attachments = filter.attachments as
+    | { some?: { url?: { contains?: string } } }
+    | undefined;
+  const contains = attachments?.some?.url?.contains;
+  if (
+    contains &&
+    !issue.attachments.some((attachment) => attachment.url.includes(contains))
+  ) {
+    return false;
+  }
+  const state = filter.state as { type?: { nin?: string[] } } | undefined;
+  if (state?.type?.nin?.includes(issue.state.type)) {
+    return false;
+  }
+  return true;
+}
+
+function issueConnection(
+  matched: FakeIssue[],
+  variables: { after?: string; first?: number }
+) {
+  const first = variables.first ?? 50;
+  const after = Number(variables.after ?? 0);
+  const slice = matched.slice(after, after + first);
+  return {
+    nodes: slice.map((issue) => ({
+      ...issue,
+      attachments: { nodes: issue.attachments },
+    })),
+    pageInfo: {
+      hasNextPage: after + first < matched.length,
+      endCursor: String(after + first),
+    },
+  };
+}
+
 // Stands in for api.linear.app. Accepts any client credentials except the
 // `LINEAR_BAD_*` and `LINEAR_NO_CLIENT_CREDENTIALS_*` values above.
 export function startLinearFakeServer(): Promise<{
@@ -84,6 +162,36 @@ export function startLinearFakeServer(): Promise<{
       return;
     }
 
+    if (url.pathname === "/__test/reset" && req.method === "POST") {
+      issues.length = 0;
+      issueSeq = 1;
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (url.pathname === "/__test/issues" && req.method === "GET") {
+      sendJson(res, 200, issues);
+      return;
+    }
+    if (url.pathname === "/__test/issues" && req.method === "POST") {
+      const body = JSON.parse(await readBody(req)) as Partial<FakeIssue>;
+      const id = body.id ?? randomUUID();
+      issues.push({
+        id,
+        identifier: body.identifier ?? `DH-${issueSeq++}`,
+        title: body.title ?? "Bare issue",
+        description: body.description ?? "",
+        url: body.url ?? `https://linear.app/test/issue/${id}`,
+        createdAt: body.createdAt ?? new Date().toISOString(),
+        updatedAt: body.updatedAt ?? new Date().toISOString(),
+        completedAt: body.completedAt ?? null,
+        canceledAt: body.canceledAt ?? null,
+        state: body.state ?? { name: "Triage", type: "triage" },
+        attachments: body.attachments ?? [],
+      });
+      sendJson(res, 201, { id });
+      return;
+    }
+
     if (req.method === "POST" && url.pathname === "/graphql") {
       if (!req.headers.authorization?.startsWith("Bearer ")) {
         sendJson(res, 401, { errors: [{ message: "Unauthorized" }] });
@@ -92,7 +200,7 @@ export function startLinearFakeServer(): Promise<{
       const raw = await readBody(req);
       const parsed = JSON.parse(raw) as {
         query?: unknown;
-        variables?: unknown;
+        variables?: Record<string, unknown>;
       };
       const query = typeof parsed.query === "string" ? parsed.query : "";
       if (query.includes("organization")) {
@@ -146,6 +254,101 @@ export function startLinearFakeServer(): Promise<{
         sendJson(res, 200, {
           data: {
             teams: { nodes: [{ id: LINEAR_TEAM_ID, name: "Data Hub" }] },
+          },
+        });
+        return;
+      }
+      const variables = (parsed.variables ?? {}) as {
+        after?: string;
+        filter?: Record<string, unknown>;
+        first?: number;
+        ids?: string[];
+        input?: {
+          createAsUser?: string;
+          description?: string;
+          issueId?: string;
+          metadata?: Record<string, string | number>;
+          title?: string;
+          url?: string;
+        };
+      };
+      if (query.includes("IssueCreate")) {
+        const title = variables.input?.title ?? "";
+        if (title === "__fail_linear__") {
+          sendJson(res, 200, {
+            errors: [{ message: "Linear is down" }],
+          });
+          return;
+        }
+        const id = randomUUID();
+        const identifier = `DH-${issueSeq++}`;
+        const now = new Date().toISOString();
+        issues.push({
+          id,
+          identifier,
+          title,
+          description: variables.input?.description ?? "",
+          url: `https://linear.app/test/issue/${identifier}`,
+          createdAt: now,
+          updatedAt: now,
+          completedAt: null,
+          canceledAt: null,
+          state: { name: "Triage", type: "triage" },
+          attachments: [],
+        });
+        sendJson(res, 200, {
+          data: {
+            issueCreate: {
+              success: true,
+              issue: {
+                id,
+                identifier,
+                url: `https://linear.app/test/issue/${identifier}`,
+              },
+            },
+          },
+        });
+        return;
+      }
+      if (query.includes("AttachmentCreate")) {
+        const issue = issues.find(
+          (item) => item.id === variables.input?.issueId
+        );
+        if (!issue || issue.title.startsWith("__fail_attachment__")) {
+          sendJson(res, 200, {
+            errors: [{ message: "Could not attach" }],
+          });
+          return;
+        }
+        issue.attachments.push({
+          url: variables.input?.url ?? "",
+          metadata: variables.input?.metadata ?? {},
+        });
+        sendJson(res, 200, {
+          data: {
+            attachmentCreate: {
+              success: true,
+              attachment: { id: randomUUID() },
+            },
+          },
+        });
+        return;
+      }
+      if (query.includes("FeedbackIssueDetails")) {
+        const ids = variables.ids ?? [];
+        const matched = issues.filter((issue) => ids.includes(issue.id));
+        sendJson(res, 200, {
+          data: { issues: issueConnection(matched, { first: ids.length }) },
+        });
+        return;
+      }
+      if (query.includes("FeedbackIssueSummaries")) {
+        const matched = issues.filter((issue) =>
+          matchesFilter(issue, variables.filter)
+        );
+        sendJson(res, 200, {
+          data: {
+            issues: issueConnection(matched, variables),
           },
         });
         return;

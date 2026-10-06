@@ -27,5 +27,10 @@ export function serializeFeedback(item: FeedbackItem) {
     status_updated_at: item.statusUpdatedAt?.toISOString() ?? null,
     created_at: item.createdAt.toISOString(),
     updated_at: item.updatedAt.toISOString(),
+    linear_issue: {
+      identifier: item.linearIssue.identifier,
+      url: item.linearIssue.url,
+      state_name: item.linearIssue.stateName,
+    },
   };
 }

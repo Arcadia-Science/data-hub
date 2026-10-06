@@ -17,6 +17,7 @@ import type { ChangelogDaySection } from "@/lib/changelog/group";
 
 interface AppSidebarProps {
   changelogSections: readonly ChangelogDaySection[];
+  feedbackEnabled: boolean;
   instruments: SidebarInstrument[];
   session: Session;
   signOutAction: () => Promise<void>;
@@ -24,6 +25,7 @@ interface AppSidebarProps {
 
 export function AppSidebar({
   changelogSections,
+  feedbackEnabled,
   session,
   instruments,
   signOutAction,
@@ -66,6 +68,7 @@ export function AppSidebar({
       <SidebarFooter>
         <UserMenuFooter
           changelogSections={changelogSections}
+          feedbackEnabled={feedbackEnabled}
           signOutAction={signOutAction}
           user={session.user}
         />

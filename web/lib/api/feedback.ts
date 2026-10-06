@@ -1,18 +1,53 @@
-import { aliasedTable, and, count, desc, eq, gte } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { after } from "next/server";
+import { z } from "zod";
 import {
+  FEEDBACK_KIND_LABELS,
   FEEDBACK_LIST_DESCRIPTION_MAX,
   FEEDBACK_LIST_MAX,
   type FeedbackKind,
   type FeedbackSource,
   type FeedbackStatus,
+  feedbackKindSchema,
+  feedbackSourceSchema,
 } from "@/lib/api/feedback-schema";
 import { notifyFeedbackSubmitted } from "@/lib/api/notifications";
 import { appOrigin } from "@/lib/app-origin";
 import { db } from "@/lib/db";
-import { feedback, oauthClients, users } from "@/lib/db/schema";
+import { oauthClients, users } from "@/lib/db/schema";
+import {
+  createLinearAttachment,
+  createLinearIssue,
+  type LinearIssueDetailNode,
+  LinearRequestError,
+  listLinearIssueDetails,
+  listLinearIssueSummaries,
+} from "@/lib/linear/client";
+import { getLinearFeedbackSetup } from "@/lib/linear/config";
+import {
+  FEEDBACK_REPORT_MARKER,
+  type FeedbackSummary,
+  feedbackAttachmentUrl,
+  feedbackReporterMarker,
+  feedbackStatusFromLinearState,
+  kindFromAttachmentUrl,
+  pageFeedbackSummaries,
+} from "@/lib/linear/feedback-link";
+
+export const FEEDBACK_NOT_CONFIGURED_MESSAGE =
+  "Feedback isn't set up on this Data Hub.";
+export const FEEDBACK_UNAVAILABLE_MESSAGE =
+  "Linear is unavailable. Try again later.";
 
 const DUPLICATE_WINDOW_MS = 24 * 60 * 60 * 1000;
+const SUMMARY_PAGE_CAP = 20;
+
+export class FeedbackServiceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FeedbackServiceError";
+  }
+}
 
 export function previewFeedbackDescription(description: string): string {
   if (description.length <= FEEDBACK_LIST_DESCRIPTION_MAX) {
@@ -27,6 +62,12 @@ export interface FeedbackPerson {
   name: string | null;
 }
 
+export interface FeedbackLinearIssue {
+  identifier: string;
+  stateName: string;
+  url: string;
+}
+
 export interface FeedbackItem {
   adminNote: string | null;
   attemptedAction: string | null;
@@ -35,6 +76,7 @@ export interface FeedbackItem {
   errorMessage: string | null;
   id: string;
   kind: FeedbackKind;
+  linearIssue: FeedbackLinearIssue;
   oauthClientId: string | null;
   oauthClientName: string | null;
   pageUrl: string | null;
@@ -48,110 +90,240 @@ export interface FeedbackItem {
   updatedAt: Date;
 }
 
-const reporter = aliasedTable(users, "feedback_reporter");
-const statusEditor = aliasedTable(users, "feedback_status_editor");
+const metadataSchema = z.object({
+  attemptedAction: z.string().optional(),
+  description: z.string(),
+  errorMessage: z.string().optional(),
+  kind: feedbackKindSchema,
+  oauthClientId: z.string().optional(),
+  pageUrl: z.string().optional(),
+  reporterUserId: z.string(),
+  source: feedbackSourceSchema,
+  title: z.string(),
+  toolName: z.string().optional(),
+  version: z.number(),
+});
 
-function person(
-  id: string | null,
-  name: string | null,
-  email: string | null
-): FeedbackPerson | null {
-  if (!id) {
+function blankToNull(value: string | undefined): string | null {
+  if (!value) {
     return null;
   }
-  return { id, name, email };
+  return value;
 }
 
-function feedbackSelection() {
+function reportAttachment(issue: LinearIssueDetailNode) {
+  return (
+    issue.attachments.nodes.find((attachment) =>
+      attachment.url.includes(FEEDBACK_REPORT_MARKER)
+    ) ?? null
+  );
+}
+
+function toFeedbackItem(
+  issue: LinearIssueDetailNode,
+  people: Map<string, FeedbackPerson>,
+  clientNames: Map<string, string | null>
+): FeedbackItem | null {
+  const attachment = reportAttachment(issue);
+  if (!attachment) {
+    return null;
+  }
+  const metadata = metadataSchema.safeParse(attachment.metadata);
+  if (!metadata.success) {
+    return null;
+  }
+  const status = feedbackStatusFromLinearState(issue.state.type);
+  const statusUpdatedAt =
+    status === "resolved"
+      ? issue.completedAt
+      : status === "declined"
+        ? issue.canceledAt
+        : null;
+  const oauthClientId = blankToNull(metadata.data.oauthClientId);
   return {
-    id: feedback.id,
-    kind: feedback.kind,
-    title: feedback.title,
-    description: feedback.description,
-    attemptedAction: feedback.attemptedAction,
-    toolName: feedback.toolName,
-    errorMessage: feedback.errorMessage,
-    source: feedback.source,
-    oauthClientId: feedback.oauthClientId,
-    oauthClientName: oauthClients.name,
-    pageUrl: feedback.pageUrl,
-    status: feedback.status,
-    adminNote: feedback.adminNote,
-    statusUpdatedAt: feedback.statusUpdatedAt,
-    createdAt: feedback.createdAt,
-    updatedAt: feedback.updatedAt,
-    reporterId: reporter.id,
-    reporterName: reporter.name,
-    reporterEmail: reporter.email,
-    editorId: statusEditor.id,
-    editorName: statusEditor.name,
-    editorEmail: statusEditor.email,
+    id: issue.id,
+    kind: metadata.data.kind,
+    title: metadata.data.title,
+    description: metadata.data.description,
+    attemptedAction: blankToNull(metadata.data.attemptedAction),
+    toolName: blankToNull(metadata.data.toolName),
+    errorMessage: blankToNull(metadata.data.errorMessage),
+    source: metadata.data.source,
+    oauthClientId,
+    oauthClientName: oauthClientId
+      ? (clientNames.get(oauthClientId) ?? null)
+      : null,
+    pageUrl: blankToNull(metadata.data.pageUrl),
+    status,
+    adminNote: null,
+    statusUpdatedAt: statusUpdatedAt ? new Date(statusUpdatedAt) : null,
+    statusUpdatedBy: null,
+    createdAt: new Date(issue.createdAt),
+    updatedAt: new Date(issue.updatedAt),
+    reporter: people.get(metadata.data.reporterUserId) ?? null,
+    linearIssue: {
+      identifier: issue.identifier,
+      url: issue.url,
+      stateName: issue.state.name,
+    },
   };
 }
 
-interface FeedbackRow {
-  adminNote: string | null;
-  attemptedAction: string | null;
-  createdAt: Date;
+async function hydrate(
+  issues: LinearIssueDetailNode[]
+): Promise<FeedbackItem[]> {
+  const parsed = issues.flatMap((issue) => {
+    const attachment = reportAttachment(issue);
+    const metadata = attachment
+      ? metadataSchema.safeParse(attachment.metadata)
+      : null;
+    return metadata?.success ? [metadata.data] : [];
+  });
+  const reporterIds = [...new Set(parsed.map((item) => item.reporterUserId))];
+  const clientIds = [
+    ...new Set(
+      parsed
+        .map((item) => blankToNull(item.oauthClientId))
+        .filter((id): id is string => id != null)
+    ),
+  ];
+
+  const [peopleRows, clientRows] = await Promise.all([
+    reporterIds.length > 0
+      ? db
+          .select({ id: users.id, name: users.name, email: users.email })
+          .from(users)
+          .where(inArray(users.id, reporterIds))
+      : Promise.resolve([]),
+    clientIds.length > 0
+      ? db
+          .select({ clientId: oauthClients.clientId, name: oauthClients.name })
+          .from(oauthClients)
+          .where(inArray(oauthClients.clientId, clientIds))
+      : Promise.resolve([]),
+  ]);
+
+  const people = new Map(peopleRows.map((row) => [row.id, row]));
+  const clientNames = new Map(
+    clientRows.map((row) => [row.clientId, row.name])
+  );
+  return issues.flatMap((issue) => {
+    const item = toFeedbackItem(issue, people, clientNames);
+    return item ? [item] : [];
+  });
+}
+
+async function requireSetup() {
+  const setup = await getLinearFeedbackSetup();
+  if (!setup) {
+    throw new FeedbackServiceError(FEEDBACK_NOT_CONFIGURED_MESSAGE);
+  }
+  return setup;
+}
+
+function credentialsOf(setup: { clientId: string; clientSecret: string }) {
+  return { clientId: setup.clientId, clientSecret: setup.clientSecret };
+}
+
+async function allSummaries(marker: string) {
+  const setup = await requireSetup();
+  const credentials = credentialsOf(setup);
+  const summaries: FeedbackSummary[] = [];
+  let after: string | undefined;
+  for (let page = 0; page < SUMMARY_PAGE_CAP; page += 1) {
+    const connection = await listLinearIssueSummaries(credentials, {
+      after,
+      filter: {
+        attachments: { some: { url: { contains: marker } } },
+      },
+    });
+    for (const node of connection.nodes) {
+      const url = node.attachments.nodes.find((attachment) =>
+        attachment.url.includes(marker)
+      )?.url;
+      const kind = url ? kindFromAttachmentUrl(url) : null;
+      if (!kind) {
+        continue;
+      }
+      summaries.push({
+        id: node.id,
+        createdAt: node.createdAt,
+        kind,
+        status: feedbackStatusFromLinearState(node.state.type),
+      });
+    }
+    if (!(connection.pageInfo.hasNextPage && connection.pageInfo.endCursor)) {
+      break;
+    }
+    after = connection.pageInfo.endCursor;
+  }
+  return summaries;
+}
+
+async function loadIssues(ids: string[]): Promise<FeedbackItem[]> {
+  const setup = await requireSetup();
+  const nodes = await listLinearIssueDetails(credentialsOf(setup), ids);
+  const items = await hydrate(nodes);
+  const byId = new Map(items.map((item) => [item.id, item]));
+  return ids.flatMap((id) => {
+    const item = byId.get(id);
+    return item ? [item] : [];
+  });
+}
+
+function issueDescription(input: {
+  attemptedAction?: string;
   description: string;
-  editorEmail: string | null;
-  editorId: string | null;
-  editorName: string | null;
-  errorMessage: string | null;
-  id: string;
+  errorMessage?: string;
   kind: FeedbackKind;
-  oauthClientId: string | null;
-  oauthClientName: string | null;
-  pageUrl: string | null;
+  pageUrl?: string | null;
   reporterEmail: string | null;
-  reporterId: string | null;
-  reporterName: string | null;
+  reporterName: string;
   source: FeedbackSource;
-  status: FeedbackStatus;
-  statusUpdatedAt: Date | null;
-  title: string;
-  toolName: string | null;
-  updatedAt: Date;
+  toolName?: string;
+}): string {
+  const lines = [
+    input.description,
+    "",
+    "---",
+    "",
+    `Kind: ${FEEDBACK_KIND_LABELS[input.kind]}`,
+  ];
+  if (input.attemptedAction) {
+    lines.push(`Tried: ${input.attemptedAction}`);
+  }
+  if (input.errorMessage) {
+    lines.push(`Error: ${input.errorMessage}`);
+  }
+  if (input.pageUrl) {
+    lines.push(`Page: ${input.pageUrl}`);
+  }
+  if (input.toolName) {
+    lines.push(`Tool: ${input.toolName}`);
+  }
+  lines.push(`Sent from: ${input.source}`);
+  const reporter = input.reporterEmail
+    ? `${input.reporterName} <${input.reporterEmail}>`
+    : input.reporterName;
+  lines.push(`Reporter: ${reporter}`);
+  return lines.join("\n");
 }
 
-function toFeedbackItem(row: FeedbackRow): FeedbackItem {
-  return {
-    id: row.id,
-    kind: row.kind,
-    title: row.title,
-    description: row.description,
-    attemptedAction: row.attemptedAction,
-    toolName: row.toolName,
-    errorMessage: row.errorMessage,
-    source: row.source,
-    oauthClientId: row.oauthClientId,
-    oauthClientName: row.oauthClientName,
-    pageUrl: row.pageUrl,
-    status: row.status,
-    adminNote: row.adminNote,
-    statusUpdatedAt: row.statusUpdatedAt,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-    reporter: person(row.reporterId, row.reporterName, row.reporterEmail),
-    statusUpdatedBy: person(row.editorId, row.editorName, row.editorEmail),
-  };
+async function withLinear<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    if (err instanceof FeedbackServiceError) {
+      throw err;
+    }
+    if (err instanceof LinearRequestError) {
+      throw new FeedbackServiceError(FEEDBACK_UNAVAILABLE_MESSAGE);
+    }
+    throw err;
+  }
 }
 
-function feedbackQuery() {
-  return db
-    .select(feedbackSelection())
-    .from(feedback)
-    .leftJoin(reporter, eq(reporter.id, feedback.userId))
-    .leftJoin(statusEditor, eq(statusEditor.id, feedback.statusUpdatedBy))
-    .leftJoin(oauthClients, eq(oauthClients.clientId, feedback.oauthClientId));
-}
-
-async function loadFeedback(id: string): Promise<FeedbackItem | null> {
-  const [row] = await feedbackQuery().where(eq(feedback.id, id)).limit(1);
-  return row ? toFeedbackItem(row) : null;
-}
-
-export async function createFeedback(input: {
+export function createFeedback(input: {
   attemptedAction?: string;
   description: string;
   errorMessage?: string;
@@ -163,73 +335,102 @@ export async function createFeedback(input: {
   toolName?: string;
   userId: string;
 }): Promise<{ duplicate: boolean; item: FeedbackItem }> {
-  const cutoff = new Date(Date.now() - DUPLICATE_WINDOW_MS);
-  const [existing] = await db
-    .select({ id: feedback.id })
-    .from(feedback)
-    .where(
-      and(
-        eq(feedback.userId, input.userId),
-        eq(feedback.title, input.title),
-        eq(feedback.status, "open"),
-        gte(feedback.createdAt, cutoff)
-      )
-    )
-    .orderBy(desc(feedback.createdAt))
-    .limit(1);
-
-  if (existing) {
-    const item = await loadFeedback(existing.id);
-    if (item) {
-      return { item, duplicate: true };
+  return withLinear(async () => {
+    const setup = await requireSetup();
+    const credentials = credentialsOf(setup);
+    const cutoff = new Date(Date.now() - DUPLICATE_WINDOW_MS).toISOString();
+    const existing = await listLinearIssueSummaries(credentials, {
+      filter: {
+        attachments: {
+          some: { url: { contains: feedbackReporterMarker(input.userId) } },
+        },
+        title: { eq: input.title },
+        createdAt: { gte: cutoff },
+        state: { type: { nin: ["completed", "canceled"] } },
+      },
+    });
+    const duplicateId = existing.nodes[0]?.id;
+    if (duplicateId) {
+      const [item] = await loadIssues([duplicateId]);
+      if (item) {
+        return { item, duplicate: true };
+      }
     }
-  }
 
-  const [inserted] = await db
-    .insert(feedback)
-    .values({
-      userId: input.userId,
+    const [reporter] = await db
+      .select({ name: users.name, email: users.email })
+      .from(users)
+      .where(inArray(users.id, [input.userId]))
+      .limit(1);
+    const reporterName = reporter?.name ?? reporter?.email ?? "Data Hub user";
+    const labelId = setup.labelIds[input.kind];
+    const created = await createLinearIssue(credentials, {
+      title: input.title,
+      description: issueDescription({
+        ...input,
+        reporterName,
+        reporterEmail: reporter?.email ?? null,
+      }),
+      teamId: setup.teamId,
+      projectId: setup.projectId,
+      labelIds: labelId ? [labelId] : [],
+      createAsUser: reporterName,
+    });
+
+    const metadata = {
+      version: 1,
+      reporterUserId: input.userId,
       kind: input.kind,
       title: input.title,
       description: input.description,
-      attemptedAction: input.attemptedAction ?? null,
-      toolName: input.toolName ?? null,
-      errorMessage: input.errorMessage ?? null,
+      attemptedAction: input.attemptedAction ?? "",
+      toolName: input.toolName ?? "",
+      errorMessage: input.errorMessage ?? "",
       source: input.source,
-      oauthClientId: input.oauthClientId ?? null,
-      pageUrl: input.pageUrl ?? null,
-    })
-    .returning({ id: feedback.id });
+      oauthClientId: input.oauthClientId ?? "",
+      pageUrl: input.pageUrl ?? "",
+    };
+    const attachment = {
+      issueId: created.id,
+      title: "Data Hub feedback",
+      url: feedbackAttachmentUrl({
+        origin: appOrigin(),
+        reporterId: input.userId,
+        kind: input.kind,
+        issueId: created.id,
+      }),
+      metadata,
+    };
+    try {
+      await createLinearAttachment(credentials, attachment);
+    } catch (err) {
+      if (!(err instanceof LinearRequestError)) {
+        throw err;
+      }
+      await createLinearAttachment(credentials, attachment);
+    }
 
-  const item = await loadFeedback(inserted.id);
-  if (!item) {
-    throw new Error("Inserted feedback row could not be reloaded.");
-  }
+    const [item] = await loadIssues([created.id]);
+    if (!item) {
+      throw new FeedbackServiceError(FEEDBACK_UNAVAILABLE_MESSAGE);
+    }
 
-  const origin = appOrigin();
-  after(async () => {
-    const [user] = await db
-      .select({ name: users.name, email: users.email })
-      .from(users)
-      .where(eq(users.id, input.userId))
-      .limit(1);
-    await notifyFeedbackSubmitted({
-      feedbackId: item.id,
-      reporterUserId: input.userId,
-      reporterDisplayName: user?.name ?? user?.email ?? "Someone",
-      title: item.title,
-      origin,
+    const origin = appOrigin();
+    after(async () => {
+      await notifyFeedbackSubmitted({
+        feedbackId: item.id,
+        reporterUserId: input.userId,
+        reporterDisplayName: reporterName,
+        title: item.title,
+        origin,
+      });
     });
+
+    return { item, duplicate: false };
   });
-
-  return { item, duplicate: false };
 }
 
-function viewerFilter(viewerId: string, isAdmin: boolean) {
-  return isAdmin ? undefined : eq(feedback.userId, viewerId);
-}
-
-export async function listFeedback(input: {
+export function listFeedback(input: {
   isAdmin: boolean;
   kind?: FeedbackKind;
   limit: number;
@@ -237,63 +438,54 @@ export async function listFeedback(input: {
   status?: FeedbackStatus;
   viewerId: string;
 }): Promise<{ items: FeedbackItem[]; total: number }> {
-  const limit = Math.min(Math.max(input.limit, 1), FEEDBACK_LIST_MAX);
-  const offset = Math.max(input.offset, 0);
-  const where = and(
-    viewerFilter(input.viewerId, input.isAdmin),
-    input.status ? eq(feedback.status, input.status) : undefined,
-    input.kind ? eq(feedback.kind, input.kind) : undefined
-  );
-
-  const [totalRow, rows] = await Promise.all([
-    db.select({ total: count() }).from(feedback).where(where),
-    feedbackQuery()
-      .where(where)
-      .orderBy(desc(feedback.createdAt))
-      .limit(limit)
-      .offset(offset),
-  ]);
-
-  return {
-    items: rows.map(toFeedbackItem),
-    total: totalRow[0]?.total ?? 0,
-  };
+  return withLinear(async () => {
+    const limit = Math.min(Math.max(input.limit, 1), FEEDBACK_LIST_MAX);
+    const offset = Math.max(input.offset, 0);
+    const marker = input.isAdmin
+      ? FEEDBACK_REPORT_MARKER
+      : feedbackReporterMarker(input.viewerId);
+    const summaries = await allSummaries(marker);
+    const page = pageFeedbackSummaries(summaries, {
+      status: input.status,
+      kind: input.kind,
+      limit,
+      offset,
+    });
+    return {
+      items: await loadIssues(page.ids),
+      total: page.total,
+    };
+  });
 }
 
-export async function countFeedbackByStatus(input: {
+export function countFeedbackByStatus(input: {
   isAdmin: boolean;
   viewerId: string;
 }): Promise<Record<FeedbackStatus, number>> {
-  const rows = await db
-    .select({
-      status: feedback.status,
-      total: count(),
-    })
-    .from(feedback)
-    .where(viewerFilter(input.viewerId, input.isAdmin))
-    .groupBy(feedback.status);
-
-  const counts: Record<FeedbackStatus, number> = {
-    open: 0,
-    resolved: 0,
-    declined: 0,
-  };
-  for (const row of rows) {
-    counts[row.status] = row.total;
-  }
-  return counts;
+  return withLinear(async () => {
+    const marker = input.isAdmin
+      ? FEEDBACK_REPORT_MARKER
+      : feedbackReporterMarker(input.viewerId);
+    const summaries = await allSummaries(marker);
+    return pageFeedbackSummaries(summaries, {
+      limit: 1,
+      offset: 0,
+    }).counts;
+  });
 }
 
-export async function getFeedbackForViewer(
+export function getFeedbackForViewer(
   id: string,
   viewer: { isAdmin: boolean; viewerId: string }
 ): Promise<FeedbackItem | null> {
-  const item = await loadFeedback(id);
-  if (!item) {
+  return withLinear(async () => {
+    const [item] = await loadIssues([id]);
+    if (!item) {
+      return null;
+    }
+    if (viewer.isAdmin || item.reporter?.id === viewer.viewerId) {
+      return item;
+    }
     return null;
-  }
-  if (viewer.isAdmin || item.reporter?.id === viewer.viewerId) {
-    return item;
-  }
-  return null;
+  });
 }

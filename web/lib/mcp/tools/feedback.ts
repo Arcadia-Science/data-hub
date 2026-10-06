@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import {
   createFeedback,
+  FeedbackServiceError,
   getFeedbackForViewer,
   listFeedback,
   previewFeedbackDescription,
@@ -37,16 +38,23 @@ export function registerFeedbackTools(server: McpServer) {
           parsed.error.issues[0]?.message ?? "Invalid feedback."
         );
       }
-      const result = await createFeedback({
-        ...parsed.data,
-        userId,
-        source: "mcp",
-        oauthClientId: ctx.http?.authInfo?.clientId ?? null,
-      });
-      return structuredResult({
-        duplicate: result.duplicate,
-        feedback: result.item,
-      });
+      try {
+        const result = await createFeedback({
+          ...parsed.data,
+          userId,
+          source: "mcp",
+          oauthClientId: ctx.http?.authInfo?.clientId ?? null,
+        });
+        return structuredResult({
+          duplicate: result.duplicate,
+          feedback: result.item,
+        });
+      } catch (err) {
+        if (err instanceof FeedbackServiceError) {
+          return errorResult(err.message);
+        }
+        throw err;
+      }
     }
   );
 
@@ -61,14 +69,22 @@ export function registerFeedbackTools(server: McpServer) {
       const isAdmin = await userIsAdmin(userId);
       const limit = args.limit ?? FEEDBACK_PAGE_SIZE;
       const page = args.page ?? 1;
-      const result = await listFeedback({
-        viewerId: userId,
-        isAdmin,
-        status: args.status,
-        kind: args.kind,
-        limit,
-        offset: (page - 1) * limit,
-      });
+      let result: Awaited<ReturnType<typeof listFeedback>>;
+      try {
+        result = await listFeedback({
+          viewerId: userId,
+          isAdmin,
+          status: args.status,
+          kind: args.kind,
+          limit,
+          offset: (page - 1) * limit,
+        });
+      } catch (err) {
+        if (err instanceof FeedbackServiceError) {
+          return errorResult(err.message);
+        }
+        throw err;
+      }
       return structuredResult({
         feedback: result.items.map((item) => ({
           ...item,
@@ -87,10 +103,18 @@ export function registerFeedbackTools(server: McpServer) {
       if (!userId) {
         return errorResult("Authenticated user not available on this session.");
       }
-      const item = await getFeedbackForViewer(args.id, {
-        viewerId: userId,
-        isAdmin: await userIsAdmin(userId),
-      });
+      let item: Awaited<ReturnType<typeof getFeedbackForViewer>>;
+      try {
+        item = await getFeedbackForViewer(args.id, {
+          viewerId: userId,
+          isAdmin: await userIsAdmin(userId),
+        });
+      } catch (err) {
+        if (err instanceof FeedbackServiceError) {
+          return errorResult(err.message);
+        }
+        throw err;
+      }
       if (!item) {
         return errorResult(`Feedback '${args.id}' not found.`);
       }

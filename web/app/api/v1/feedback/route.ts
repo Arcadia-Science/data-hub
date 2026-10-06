@@ -4,6 +4,7 @@ import { apiError, UNAUTHORIZED, VALIDATION_ERROR } from "@/lib/api/errors";
 import {
   countFeedbackByStatus,
   createFeedback,
+  FeedbackServiceError,
   listFeedback,
 } from "@/lib/api/feedback";
 import { serializeFeedback } from "@/lib/api/feedback-json";
@@ -43,12 +44,20 @@ export async function POST(request: NextRequest) {
     return apiError(400, VALIDATION_ERROR, "Invalid request body");
   }
 
-  const result = await createFeedback({
-    ...content.data,
-    userId: authResult.userId,
-    source: "web",
-    pageUrl: body.page_url || null,
-  });
+  let result: Awaited<ReturnType<typeof createFeedback>>;
+  try {
+    result = await createFeedback({
+      ...content.data,
+      userId: authResult.userId,
+      source: "web",
+      pageUrl: body.page_url || null,
+    });
+  } catch (err) {
+    if (err instanceof FeedbackServiceError) {
+      return apiError(503, "FEEDBACK_UNAVAILABLE", err.message);
+    }
+    throw err;
+  }
 
   return Response.json(
     { duplicate: result.duplicate, feedback: serializeFeedback(result.item) },
@@ -80,16 +89,25 @@ export async function GET(request: NextRequest) {
   const page = query.data.page ?? 1;
   const viewer = { viewerId: authResult.userId, isAdmin };
 
-  const [list, counts] = await Promise.all([
-    listFeedback({
-      ...viewer,
-      status: query.data.status,
-      kind: query.data.kind,
-      limit: perPage,
-      offset: (page - 1) * perPage,
-    }),
-    countFeedbackByStatus(viewer),
-  ]);
+  let list: Awaited<ReturnType<typeof listFeedback>>;
+  let counts: Awaited<ReturnType<typeof countFeedbackByStatus>>;
+  try {
+    [list, counts] = await Promise.all([
+      listFeedback({
+        ...viewer,
+        status: query.data.status,
+        kind: query.data.kind,
+        limit: perPage,
+        offset: (page - 1) * perPage,
+      }),
+      countFeedbackByStatus(viewer),
+    ]);
+  } catch (err) {
+    if (err instanceof FeedbackServiceError) {
+      return apiError(503, "FEEDBACK_UNAVAILABLE", err.message);
+    }
+    throw err;
+  }
 
   return Response.json({
     feedback: list.items.map(serializeFeedback),

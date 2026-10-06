@@ -354,6 +354,7 @@ export async function setup() {
   // library-level calls to `notifyRunCreated`/`notifyComment` (which invoke
   // `sendSlackDm` directly in-process) also route through the capture server
   // rather than the real Slack API or no-op on a missing token.
+  process.env.__TEST_LINEAR_API_URL = linearFakeUrl;
   process.env.SLACK_BOT_TOKEN = "xoxb-test-bot-token";
   process.env.__TEST_SLACK_API_URL = `${slackCaptureBaseUrl}/api/`;
   // Point the `@/lib/db` singleton at the test DB so library helpers

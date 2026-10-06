@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { Metadata } from "next/types";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
@@ -13,6 +14,7 @@ import { AdminsOnly } from "@/components/settings/admins-only";
 import { SettingsPageContent } from "@/components/settings/settings-page-content";
 import {
   countFeedbackByStatus,
+  FeedbackServiceError,
   getFeedbackForViewer,
   listFeedback,
 } from "@/lib/api/feedback";
@@ -86,18 +88,38 @@ async function FeedbackSection({
   userId: string;
 }) {
   const viewer = { viewerId: userId, isAdmin: true };
-  const [list, counts, selected] = await Promise.all([
-    listFeedback({
-      ...viewer,
-      status,
-      limit: FEEDBACK_PAGE_SIZE,
-      offset: (page - 1) * FEEDBACK_PAGE_SIZE,
-    }),
-    countFeedbackByStatus(viewer),
-    itemId && isValidUUID(itemId)
-      ? getFeedbackForViewer(itemId, viewer)
-      : Promise.resolve(null),
-  ]);
+  let list: Awaited<ReturnType<typeof listFeedback>>;
+  let counts: Awaited<ReturnType<typeof countFeedbackByStatus>>;
+  let selected: Awaited<ReturnType<typeof getFeedbackForViewer>>;
+  try {
+    [list, counts, selected] = await Promise.all([
+      listFeedback({
+        ...viewer,
+        status,
+        limit: FEEDBACK_PAGE_SIZE,
+        offset: (page - 1) * FEEDBACK_PAGE_SIZE,
+      }),
+      countFeedbackByStatus(viewer),
+      itemId && isValidUUID(itemId)
+        ? getFeedbackForViewer(itemId, viewer)
+        : Promise.resolve(null),
+    ]);
+  } catch (err) {
+    if (err instanceof FeedbackServiceError) {
+      return (
+        <p className="text-muted-foreground text-sm">
+          {err.message}{" "}
+          <Link
+            className="underline underline-offset-2"
+            href="/settings/integrations"
+          >
+            Open Integrations
+          </Link>
+        </p>
+      );
+    }
+    throw err;
+  }
 
   const totalPages = Math.max(1, Math.ceil(list.total / FEEDBACK_PAGE_SIZE));
 
@@ -162,6 +184,7 @@ async function FeedbackSection({
                   selected.source === "web"
                     ? "Web"
                     : (selected.oauthClientName ?? "Agent"),
+                linearUrl: selected.linearIssue.url,
               }
             : null
         }

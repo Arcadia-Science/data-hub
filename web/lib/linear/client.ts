@@ -320,3 +320,212 @@ export async function listLinearTeamOptions(
     throw err;
   }
 }
+
+const issueCreatedSchema = z.object({
+  issueCreate: z.object({
+    issue: z
+      .object({
+        id: z.string(),
+        identifier: z.string(),
+        url: z.string(),
+      })
+      .nullable(),
+    success: z.boolean(),
+  }),
+});
+
+const attachmentCreatedSchema = z.object({
+  attachmentCreate: z.object({
+    attachment: z.object({ id: z.string() }).nullable(),
+    success: z.boolean(),
+  }),
+});
+
+const issueSummaryConnectionSchema = z.object({
+  issues: z.object({
+    nodes: z.array(
+      z.object({
+        attachments: z.object({
+          nodes: z.array(z.object({ url: z.string() })),
+        }),
+        createdAt: z.string(),
+        id: z.string(),
+        state: z.object({ type: z.string() }),
+      })
+    ),
+    pageInfo: z.object({
+      endCursor: z.string().nullable(),
+      hasNextPage: z.boolean(),
+    }),
+  }),
+});
+
+const issueDetailConnectionSchema = z.object({
+  issues: z.object({
+    nodes: z.array(
+      z.object({
+        attachments: z.object({
+          nodes: z.array(
+            z.object({
+              metadata: z.record(z.string(), z.union([z.string(), z.number()])),
+              url: z.string(),
+            })
+          ),
+        }),
+        canceledAt: z.string().nullable(),
+        completedAt: z.string().nullable(),
+        createdAt: z.string(),
+        id: z.string(),
+        identifier: z.string(),
+        state: z.object({ name: z.string(), type: z.string() }),
+        updatedAt: z.string(),
+        url: z.string(),
+      })
+    ),
+  }),
+});
+
+export interface LinearIssueCreated {
+  id: string;
+  identifier: string;
+  url: string;
+}
+
+export async function createLinearIssue(
+  credentials: { clientId: string; clientSecret: string },
+  input: {
+    createAsUser: string;
+    description: string;
+    labelIds: string[];
+    projectId: string | null;
+    teamId: string;
+    title: string;
+  }
+): Promise<LinearIssueCreated> {
+  const data = await graphql(
+    credentials,
+    `mutation IssueCreate($input: IssueCreateInput!) {
+      issueCreate(input: $input) {
+        success
+        issue { id identifier url }
+      }
+    }`,
+    {
+      input: {
+        title: input.title,
+        description: input.description,
+        teamId: input.teamId,
+        projectId: input.projectId,
+        labelIds: input.labelIds,
+        createAsUser: input.createAsUser,
+      },
+    },
+    issueCreatedSchema
+  );
+  if (!(data.issueCreate.success && data.issueCreate.issue)) {
+    throw new LinearRequestError("Linear did not create the issue.");
+  }
+  return data.issueCreate.issue;
+}
+
+export async function createLinearAttachment(
+  credentials: { clientId: string; clientSecret: string },
+  input: {
+    issueId: string;
+    metadata: Record<string, string | number>;
+    title: string;
+    url: string;
+  }
+): Promise<void> {
+  const data = await graphql(
+    credentials,
+    `mutation AttachmentCreate($input: AttachmentCreateInput!) {
+      attachmentCreate(input: $input) {
+        success
+        attachment { id }
+      }
+    }`,
+    { input },
+    attachmentCreatedSchema
+  );
+  if (!data.attachmentCreate.success) {
+    throw new LinearRequestError("Linear did not attach the report.");
+  }
+}
+
+export interface LinearIssueSummaryNode {
+  attachments: { nodes: { url: string }[] };
+  createdAt: string;
+  id: string;
+  state: { type: string };
+}
+
+export async function listLinearIssueSummaries(
+  credentials: { clientId: string; clientSecret: string },
+  input: { after?: string; filter: Record<string, unknown> }
+): Promise<{
+  nodes: LinearIssueSummaryNode[];
+  pageInfo: { endCursor: string | null; hasNextPage: boolean };
+}> {
+  const data = await graphql(
+    credentials,
+    `query FeedbackIssueSummaries($filter: IssueFilter, $after: String) {
+      issues(first: 250, after: $after, filter: $filter) {
+        nodes {
+          id
+          createdAt
+          state { type }
+          attachments(first: 5) { nodes { url } }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }`,
+    { filter: input.filter, after: input.after },
+    issueSummaryConnectionSchema
+  );
+  return data.issues;
+}
+
+export interface LinearIssueDetailNode {
+  attachments: {
+    nodes: { metadata: Record<string, string | number>; url: string }[];
+  };
+  canceledAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  id: string;
+  identifier: string;
+  state: { name: string; type: string };
+  updatedAt: string;
+  url: string;
+}
+
+export async function listLinearIssueDetails(
+  credentials: { clientId: string; clientSecret: string },
+  ids: string[]
+): Promise<LinearIssueDetailNode[]> {
+  if (ids.length === 0) {
+    return [];
+  }
+  const data = await graphql(
+    credentials,
+    `query FeedbackIssueDetails($ids: [ID!]!) {
+      issues(filter: { id: { in: $ids } }) {
+        nodes {
+          id
+          identifier
+          url
+          createdAt
+          updatedAt
+          completedAt
+          canceledAt
+          state { name type }
+          attachments(first: 5) { nodes { url metadata } }
+        }
+      }
+    }`,
+    { ids },
+    issueDetailConnectionSchema
+  );
+  return data.issues.nodes;
+}

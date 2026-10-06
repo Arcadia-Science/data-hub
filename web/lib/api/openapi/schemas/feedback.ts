@@ -62,6 +62,11 @@ export const feedbackDetail = z
     status_updated_at: isoDateTime.nullable(),
     created_at: isoDateTime,
     updated_at: isoDateTime,
+    linear_issue: z.object({
+      identifier: z.string(),
+      url: z.string(),
+      state_name: z.string(),
+    }),
   })
   .openapi("Feedback");
 

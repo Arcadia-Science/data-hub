@@ -42,6 +42,7 @@ export interface FeedbackDetail {
   errorMessage: string | null;
   id: string;
   kind: FeedbackKind;
+  linearUrl: string | null;
   pageUrl: string | null;
   reporterLabel: string;
   sourceLabel: string;
@@ -149,6 +150,17 @@ export function FeedbackDetailSheet({
             </SheetDescription>
             <div className="flex flex-wrap items-center gap-4">
               <FeedbackStatusBadge status={shown.status} />
+              {shown.linearUrl ? (
+                <a
+                  className="inline-flex items-center gap-1 text-sm underline underline-offset-2"
+                  href={shown.linearUrl}
+                  rel="noopener noreferrer"
+                  target="_blank"
+                >
+                  Open in Linear
+                  <ExternalLinkIcon className="size-3.5" />
+                </a>
+              ) : null}
               <Meta label="Type" value={FEEDBACK_KIND_LABELS[shown.kind]} />
               <Meta label="Source" translateNo value={shown.sourceLabel} />
             </div>
