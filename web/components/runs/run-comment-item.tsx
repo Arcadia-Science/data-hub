@@ -25,8 +25,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
+import { actorDisplayName } from "@/lib/api/actor";
 import type { RunCommentDto } from "@/lib/api/run-comments";
 import { commentAnchorId } from "@/lib/comment-hash";
+import { CommentRequestError } from "@/lib/comments/request-error";
 
 // Comment timestamps may arrive as Date objects (server-rendered initial
 // payload) or ISO strings (JSON responses to mutations). Normalize to a
@@ -52,12 +54,16 @@ const MAX_BODY_LENGTH = 10_000;
 
 export function RunCommentItem({
   comment,
-  currentUserId,
+  canEdit,
+  canDelete,
   onUpdate,
   onDelete,
 }: {
   comment: RunCommentDto;
-  currentUserId: string | null;
+  // Edit is for the author alone. Delete also covers admins removing
+  // someone else's comment (see `commentPermissions`).
+  canEdit: boolean;
+  canDelete: boolean;
   onUpdate: (commentId: string, body: string) => Promise<void>;
   onDelete: (commentId: string) => Promise<void>;
 }) {
@@ -67,16 +73,13 @@ export function RunCommentItem({
   const [isSaving, startSavingTransition] = useTransition();
   const [isDeleting, startDeletingTransition] = useTransition();
 
-  // Token-authored comments have no signed-in author to match, so the
-  // browser never offers edit or delete for them.
-  const isAuthor =
-    currentUserId !== null &&
-    comment.author.kind === "user" &&
-    comment.author.user.userId === currentUserId;
   // Deep-link target for notifications / global search (`#comment-{id}`).
   // Scroll-into-view lives on `RunCommentsList` so one listener covers the
   // whole list (including same-page hash changes).
   const anchorId = commentAnchorId(comment.id);
+
+  // An admin removing someone else's comment sees whose it is.
+  const authorPossessive = `${actorDisplayName(comment.author)}'s comment`;
 
   const trimmed = draft.trim();
   const tooLong = draft.length > MAX_BODY_LENGTH;
@@ -111,8 +114,14 @@ export function RunCommentItem({
     startDeletingTransition(async () => {
       try {
         await onDelete(comment.id);
-      } catch {
-        toast.error("Couldn't delete comment. Try again?");
+      } catch (error) {
+        // The cached session can still say admin after the role was removed.
+        // Retrying cannot help then, so say why it failed.
+        toast.error(
+          error instanceof CommentRequestError && error.status === 403
+            ? "You no longer have permission to delete this comment."
+            : "Couldn't delete comment. Try again?"
+        );
       }
     });
   }
@@ -136,7 +145,7 @@ export function RunCommentItem({
               </span>
             )}
           </div>
-          {isAuthor && !isEditing && (
+          {(canEdit || canDelete) && !isEditing && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -151,21 +160,25 @@ export function RunCommentItem({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="min-w-32">
-                <DropdownMenuItem onSelect={() => setIsEditing(true)}>
-                  <Pencil className="size-3.5" />
-                  Edit
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onSelect={(e) => {
-                    e.preventDefault();
-                    setDeleteOpen(true);
-                  }}
-                  variant="destructive"
-                >
-                  <Trash2 className="size-3.5" />
-                  Delete
-                </DropdownMenuItem>
+                {canEdit && (
+                  <DropdownMenuItem onSelect={() => setIsEditing(true)}>
+                    <Pencil className="size-3.5" />
+                    Edit
+                  </DropdownMenuItem>
+                )}
+                {canEdit && canDelete && <DropdownMenuSeparator />}
+                {canDelete && (
+                  <DropdownMenuItem
+                    onSelect={(e) => {
+                      e.preventDefault();
+                      setDeleteOpen(true);
+                    }}
+                    variant="destructive"
+                  >
+                    <Trash2 className="size-3.5" />
+                    Delete
+                  </DropdownMenuItem>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           )}
@@ -221,10 +234,13 @@ export function RunCommentItem({
       <AlertDialog onOpenChange={setDeleteOpen} open={deleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete comment?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {canEdit ? "Delete comment?" : `Remove ${authorPossessive}?`}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently remove your comment. This action cannot be
-              undone.
+              This will permanently remove{" "}
+              {canEdit ? "your comment" : authorPossessive}. This action cannot
+              be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

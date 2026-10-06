@@ -1,0 +1,2 @@
+ALTER TABLE "run_comments" ADD COLUMN "deleted_by" text;--> statement-breakpoint
+ALTER TABLE "run_comments" ADD CONSTRAINT "run_comments_deleted_by_user_id_fk" FOREIGN KEY ("deleted_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;

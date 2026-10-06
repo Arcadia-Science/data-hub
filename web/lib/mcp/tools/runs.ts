@@ -13,6 +13,7 @@ import {
 import { claimRuns, unclaimRuns } from "@/lib/api/run-attributions";
 import { commentToWire } from "@/lib/api/run-comment-wire";
 import {
+  commentDeleterFor,
   createCommentAndNotify,
   getCommentForAuthorCheck,
   getCommentForDeleteAuthorCheck,
@@ -429,14 +430,20 @@ export function registerRunTools(server: McpServer) {
       if (!existing) {
         return errorResult(`Comment '${commentId}' not found.`);
       }
-      if (existing.userId !== userId) {
+      // Same rule as REST, which answers before any permission check. An
+      // already-deleted comment is left alone so the repeat call still works.
+      if (!existing.deletedAt && existing.runDeletedAt) {
+        return errorResult("Cannot modify comments on a soft-deleted run.");
+      }
+      const deleter = await commentDeleterFor(existing, {
+        kind: "user",
+        userId,
+      });
+      if (!deleter) {
         return errorResult("You can only delete your own comments.");
       }
 
-      await softDeleteComment({
-        commentId,
-        actor: { kind: "user", userId },
-      });
+      await softDeleteComment(commentId, deleter);
       return structuredResult({ id: commentId, deleted: true });
     }
   );

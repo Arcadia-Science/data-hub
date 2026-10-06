@@ -48,6 +48,10 @@ describe("MCP Server (HTTP)", () => {
   let token: string;
   let userId: string;
   let tokenB: string;
+  let adminAId: string;
+  let adminAToken: string;
+  let adminBId: string;
+  let adminBToken: string;
 
   const instrumentId = "mcp-test-instrument";
   const runId = "mcp-test-run";
@@ -58,6 +62,12 @@ describe("MCP Server (HTTP)", () => {
     const { userId: userIdB } = await seedTestUser();
     token = await getMcpAccessToken(userId);
     tokenB = await getMcpAccessToken(userIdB);
+    // Two admins for the comment-delete tests. Each OAuth sign-in counts
+    // against a shared per-IP rate limit, so they are made once here.
+    ({ userId: adminAId } = await seedTestUser({ isAdmin: true }));
+    ({ userId: adminBId } = await seedTestUser({ isAdmin: true }));
+    adminAToken = await getMcpAccessToken(adminAId);
+    adminBToken = await getMcpAccessToken(adminBId);
 
     const db = getTestDb();
     await db.insert(schema.instruments).values({
@@ -444,6 +454,161 @@ describe("MCP Server (HTTP)", () => {
     });
     expect(del2.isError).toBeFalsy();
     expect(JSON.parse(del2.content[0].text).deleted).toBe(true);
+  });
+
+  // Admins may delete anyone's comment over MCP; members may not.
+  it("delete_run_comment lets an admin remove another user's comment", async () => {
+    const add = await callTool("add_run_comment", {
+      instrumentId,
+      runId,
+      body: "a member's comment",
+    });
+    const created = JSON.parse(add.content[0].text) as { id: string };
+
+    const { userId: adminId } = await seedTestUser({ isAdmin: true });
+    const adminToken = await getMcpAccessToken(adminId);
+    const del = await callTool(
+      "delete_run_comment",
+      { commentId: created.id },
+      adminToken
+    );
+    expect(del.isError).toBeFalsy();
+
+    const [row] = await getTestDb()
+      .select({
+        deletedAt: schema.runComments.deletedAt,
+        deletedBy: schema.runComments.deletedBy,
+      })
+      .from(schema.runComments)
+      .where(eq(schema.runComments.id, created.id));
+    expect(row.deletedAt).toBeInstanceOf(Date);
+    expect(row.deletedBy).toBe(adminId);
+
+    // Edit stays author-only, even for admins.
+    const second = await callTool("add_run_comment", {
+      instrumentId,
+      runId,
+      body: "another comment",
+    });
+    const other = JSON.parse(second.content[0].text) as { id: string };
+    const edit = await callTool(
+      "edit_run_comment",
+      { commentId: other.id, body: "reworded" },
+      adminToken
+    );
+    expect(edit.isError).toBe(true);
+    expect(edit.content[0].text).toMatch(/only edit your own/i);
+  });
+
+  async function addComment(onRunId = runId): Promise<string> {
+    const add = await callTool("add_run_comment", {
+      instrumentId,
+      runId: onRunId,
+      body: "a comment to delete",
+    });
+    return (JSON.parse(add.content[0].text) as { id: string }).id;
+  }
+
+  async function readDeletion(commentId: string) {
+    const [row] = await getTestDb()
+      .select({
+        deletedAt: schema.runComments.deletedAt,
+        deletedBy: schema.runComments.deletedBy,
+      })
+      .from(schema.runComments)
+      .where(eq(schema.runComments.id, commentId));
+    return row;
+  }
+
+  it("delete_run_comment refuses an admin whose role was removed", async () => {
+    const commentId = await addComment();
+    const db = getTestDb();
+    await db
+      .update(schema.users)
+      .set({ isAdmin: false })
+      .where(eq(schema.users.id, adminBId));
+
+    try {
+      // The access token was issued while adminB was an admin. The tool
+      // reads the role from the database on each call, so this is refused.
+      const del = await callTool(
+        "delete_run_comment",
+        { commentId },
+        adminBToken
+      );
+      expect(del.isError).toBe(true);
+      expect(del.content[0].text).toMatch(/only delete your own/i);
+      expect((await readDeletion(commentId)).deletedAt).toBeNull();
+    } finally {
+      await db
+        .update(schema.users)
+        .set({ isAdmin: true })
+        .where(eq(schema.users.id, adminBId));
+    }
+  });
+
+  it("delete_run_comment by a second admin keeps the first deleter", async () => {
+    const commentId = await addComment();
+
+    const first = await callTool(
+      "delete_run_comment",
+      { commentId },
+      adminAToken
+    );
+    expect(first.isError).toBeFalsy();
+    expect((await readDeletion(commentId)).deletedBy).toBe(adminAId);
+
+    const second = await callTool(
+      "delete_run_comment",
+      { commentId },
+      adminBToken
+    );
+    expect(second.isError).toBeFalsy();
+    expect(JSON.parse(second.content[0].text).deleted).toBe(true);
+    expect((await readDeletion(commentId)).deletedBy).toBe(adminAId);
+  });
+
+  it("delete_run_comment refuses a comment on a soft-deleted run", async () => {
+    const db = getTestDb();
+    const deletedRunId = "mcp-comment-deleted-run";
+    const [run] = await db
+      .insert(schema.instrumentRuns)
+      .values({ instrumentId, runId: deletedRunId, source: "lambda" })
+      .returning({ id: schema.instrumentRuns.id });
+    const liveId = await addComment(deletedRunId);
+    const alreadyDeletedId = await addComment(deletedRunId);
+    expect(
+      (
+        await callTool(
+          "delete_run_comment",
+          { commentId: alreadyDeletedId },
+          adminAToken
+        )
+      ).isError
+    ).toBeFalsy();
+
+    await db
+      .update(schema.instrumentRuns)
+      .set({ deletedAt: new Date() })
+      .where(eq(schema.instrumentRuns.id, run.id));
+
+    const refused = await callTool(
+      "delete_run_comment",
+      { commentId: liveId },
+      adminAToken
+    );
+    expect(refused.isError).toBe(true);
+    expect(refused.content[0].text).toMatch(/soft-deleted run/i);
+    expect((await readDeletion(liveId)).deletedAt).toBeNull();
+
+    // A comment that was already deleted stays an idempotent success.
+    const again = await callTool(
+      "delete_run_comment",
+      { commentId: alreadyDeletedId },
+      adminAToken
+    );
+    expect(again.isError).toBeFalsy();
+    expect(JSON.parse(again.content[0].text).deleted).toBe(true);
   });
 
   // ---- Upload requests (end-to-end) ----------------------------------------
