@@ -809,6 +809,30 @@ export function startLinearFakeServer(): Promise<{
       sendJson(res, 200, issues);
       return;
     }
+    if (url.pathname === "/__test/issues" && req.method === "PATCH") {
+      const body = JSON.parse(await readBody(req)) as {
+        canceledAt?: string | null;
+        completedAt?: string | null;
+        id?: string;
+        state?: { name: string; type: string };
+      };
+      const issue = issues.find((item) => item.id === body.id);
+      if (!issue) {
+        sendJson(res, 404, { error: "missing" });
+        return;
+      }
+      if (body.state) {
+        issue.state = body.state;
+      }
+      if (body.completedAt !== undefined) {
+        issue.completedAt = body.completedAt;
+      }
+      if (body.canceledAt !== undefined) {
+        issue.canceledAt = body.canceledAt;
+      }
+      sendJson(res, 200, { ok: true });
+      return;
+    }
     if (url.pathname === "/__test/issues" && req.method === "POST") {
       const issue = seedIssue(JSON.parse(await readBody(req)));
       issues.push(issue);

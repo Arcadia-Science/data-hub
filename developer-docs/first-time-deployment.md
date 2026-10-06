@@ -223,6 +223,7 @@ Feedback reports are stored as Linear issues. An admin sets this up in the app a
 1. In Linear, create an OAuth application and turn on **client credentials tokens**. The app needs the `read` and `issues:create` scopes. If client credentials are off, **Test connection** in Data Hub says so and tells you to turn them on in the app's settings in Linear.
 2. In Data Hub, open **Settings → Integrations**. In the **Linear** card, paste the client ID and client secret, then choose **Test connection**.
 3. Choose the team that receives reports. Only public teams are listed, because Data Hub signs in to Linear as the app, and the app cannot see private teams. A project is optional. You can also pick one label for each kind of report (bug, feature request, other), from the team's labels or the workspace's labels. Save the card.
+4. In Linear, create a webhook for the **Issue** resource type. Copy the **Webhook URL** shown on the Linear card into Linear, then paste Linear's signing secret into **Webhook signing secret** in Data Hub and save. The card then shows when Linear last sent an event.
 
 Until a team is saved, the Feedback item stays hidden and the feedback tools tell the caller that feedback is not set up.
 

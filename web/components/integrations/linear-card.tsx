@@ -14,6 +14,7 @@ import {
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -35,7 +36,10 @@ import type {
 type Props = Pick<
   LinearConfigForAdmin,
   "clientId" | "clientSecret" | "labels" | "project" | "team" | "webhookSecret"
->;
+> & {
+  lastWebhookAt: string | null;
+  webhookUrl: string;
+};
 
 interface Options {
   labels: LinearChoice[];
@@ -85,9 +89,11 @@ export function LinearCard({
   clientId,
   clientSecret,
   labels: savedLabels,
+  lastWebhookAt,
   project: savedProject,
   team: savedTeam,
   webhookSecret,
+  webhookUrl,
 }: Props) {
   const router = useRouter();
   const [clientIdDraft, setClientIdDraft] = useState(clientId.value ?? "");
@@ -274,7 +280,7 @@ export function LinearCard({
               value={clientSecretDraft}
             />
             <IntegrationField
-              description="From the webhook's page in Linear. Data Hub uses it later to check that status updates really came from Linear."
+              description="From the webhook's page in Linear. Data Hub checks this before it treats a status change as real."
               id="linear-webhook-secret"
               label="Webhook signing secret"
               onChange={setWebhookSecretDraft}
@@ -283,6 +289,34 @@ export function LinearCard({
               type="password"
               value={webhookSecretDraft}
             />
+            <Field>
+              <FieldLabel htmlFor="linear-webhook-url">Webhook URL</FieldLabel>
+              <div className="flex gap-2">
+                <Input
+                  className="font-mono"
+                  id="linear-webhook-url"
+                  readOnly
+                  value={webhookUrl}
+                />
+                <Button
+                  onClick={() => {
+                    void navigator.clipboard.writeText(webhookUrl);
+                    toast.success("Webhook URL copied");
+                  }}
+                  type="button"
+                  variant="outline"
+                >
+                  Copy
+                </Button>
+              </div>
+              <FieldDescription suppressHydrationWarning>
+                In Linear, create a webhook for Issues and paste this URL. Use
+                the signing secret above.{" "}
+                {lastWebhookAt
+                  ? `Last delivery ${new Date(lastWebhookAt).toLocaleString()}.`
+                  : "No delivery yet."}
+              </FieldDescription>
+            </Field>
             <ChoiceSelect
               description="Only public teams are listed. Data Hub signs in as the app, which can't see private teams."
               disabled={choicesDisabled}

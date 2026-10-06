@@ -194,6 +194,13 @@ export async function isFeedbackConfigured(): Promise<boolean> {
   return (await getLinearFeedbackSetup()) != null;
 }
 
+export async function recordLinearWebhookReceived(): Promise<void> {
+  await db
+    .update(linearIntegrationConfig)
+    .set({ lastWebhookAt: new Date() })
+    .where(eq(linearIntegrationConfig.id, true));
+}
+
 export async function getLinearConfigForAdmin(): Promise<LinearConfigForAdmin> {
   const row = await loadRow();
   // No environment variable backs these, so `unreadable` means the saved

@@ -8,6 +8,7 @@ import type { FeedbackKind } from "@/lib/api/feedback-schema";
 import {
   listNotifications,
   notifyFeedbackSubmitted,
+  notifyFeedbackUpdated,
   updatePreferences,
 } from "@/lib/api/notifications";
 import { slackConnections } from "@/lib/db/schema";
@@ -609,6 +610,32 @@ describe("Feedback", () => {
     expect(await listNotifications(muted.userId)).toHaveLength(0);
     const dms = await getCapturedSlackDms();
     expect(dms.map((dm) => dm.channel)).toContain("U_ADMIN");
+  });
+
+  it("notifies the reporter on resolve, and skips them when the switch is off", async () => {
+    const reporter = await seedTestUser({ email: "updated@example.com" });
+    await notifyFeedbackUpdated({
+      feedbackId: randomUUID(),
+      reporterUserId: reporter.userId,
+      title: "Export fails",
+      status: "resolved",
+      stateName: "Done",
+    });
+    const [note] = await listNotifications(reporter.userId);
+    expect(note.body).toContain("Resolved (Done)");
+
+    await updatePreferences(reporter.userId, { feedbackUpdatedEnabled: false });
+    await notifyFeedbackUpdated({
+      feedbackId: randomUUID(),
+      reporterUserId: reporter.userId,
+      title: "Export fails",
+      status: "declined",
+      stateName: "Duplicate",
+    });
+    const notes = await listNotifications(reporter.userId);
+    expect(notes.filter((row) => row.body?.includes("Declined"))).toHaveLength(
+      0
+    );
   });
 
   it("rejects personal access tokens", async () => {
