@@ -5,6 +5,7 @@ import {
   api,
   closeTestDb,
   getBaseUrl,
+  getMcpAccessToken,
   getTestDb,
   resetDb,
   seedTestUser,
@@ -52,8 +53,10 @@ describe("MCP Server (HTTP)", () => {
 
   beforeAll(async () => {
     await resetDb();
-    ({ token, userId } = await seedTestUser());
-    ({ token: tokenB } = await seedTestUser());
+    ({ userId } = await seedTestUser());
+    const { userId: userIdB } = await seedTestUser();
+    token = await getMcpAccessToken(userId);
+    tokenB = await getMcpAccessToken(userIdB);
 
     const db = getTestDb();
     await db.insert(schema.instruments).values({
@@ -125,7 +128,7 @@ describe("MCP Server (HTTP)", () => {
 
   // ---- Initialize ----------------------------------------------------------
 
-  it("initializes with valid token", async () => {
+  it("initializes with a valid OAuth access token", async () => {
     const res = await api("/mcp/v1", {
       method: "POST",
       token,
@@ -215,7 +218,7 @@ describe("MCP Server (HTTP)", () => {
   // arguments. They also cover idempotency and the `ranBy` filter that
   // `search_runs` now accepts.
 
-  it("claim_run attributes the run to the token's user and is idempotent", async () => {
+  it("claim_run attributes the run to the signed-in user and is idempotent", async () => {
     const first = await callTool("claim_run", {
       instrumentId,
       runId,
@@ -232,7 +235,7 @@ describe("MCP Server (HTTP)", () => {
     expect(secondParsed.attributions[0].userId).toBe(userId);
   });
 
-  it("claim_run ignores a spoofed userId argument — the token's user is the attributor", async () => {
+  it("claim_run ignores a spoofed userId argument — the signed-in user is the attributor", async () => {
     const result = await callTool("claim_run", {
       instrumentId,
       runId,
@@ -297,7 +300,7 @@ describe("MCP Server (HTTP)", () => {
     expect(unattributedRunIds).not.toContain(runId);
   });
 
-  it('search_runs ranBy="me" resolves to the token owner', async () => {
+  it('search_runs ranBy="me" resolves to the signed-in user', async () => {
     await callTool("claim_run", { instrumentId, runId });
 
     const result = await callTool("search_runs", {
@@ -310,7 +313,7 @@ describe("MCP Server (HTTP)", () => {
     expect(runIds).toContain(runId);
   });
 
-  it("get_me returns the authenticated token owner", async () => {
+  it("get_me returns the signed-in user", async () => {
     const result = await callTool("get_me", {});
     expect(result.isError).toBeFalsy();
     const parsed = JSON.parse(result.content[0].text);
@@ -356,7 +359,7 @@ describe("MCP Server (HTTP)", () => {
   // ---- Comment mutations (end-to-end) --------------------------------------
   //
   // Exercises the add/edit/delete tools through the HTTP boundary where a real
-  // Bearer token resolves `authInfo.extra.userId`. Covers author-only
+  // OAuth access token resolves `authInfo.extra.userId`. Covers author-only
   // enforcement (a second user's token is rejected) and the documented
   // idempotency of delete_run_comment.
 
@@ -536,83 +539,41 @@ describe("MCP Server (HTTP)", () => {
     expect(JSON.parse(afterRestore.content[0].text).deletedAt).toBeNull();
   });
 
-  // ---- PAT scope enforcement (coarse read / write) -------------------------
+  // ---- OAuth scope enforcement (coarse read / write) ----------------------
   //
   // Transport requires `read` only. The WWW-Authenticate challenge still
-  // advertises `read write` so Cursor requests both. PAT fallback maps to
-  // `read` always and `write` only for `*` (fine-grained mutating PAT scopes
-  // stay read-only over MCP to avoid privilege escalation). Mutating tools
-  // gate on `write` via `requireMcpWrite`.
+  // advertises `read write` so Cursor requests both. Mutating tools gate on
+  // `write` via `requireMcpWrite`. The read-only counterpart lives in
+  // `mcp-oauth.test.ts`.
 
-  it("read-only PAT can read but not mutate", async () => {
-    const { token: scopedToken } = await seedTestUser({
-      scopes: ["runs:read"],
-    });
-
-    const search = await callTool("search_runs", { instrumentId }, scopedToken);
-    expect(search.isError).toBeFalsy();
-
-    const claim = await callTool(
-      "claim_run",
-      { instrumentId, runId },
-      scopedToken
-    );
-    expect(claim.isError).toBe(true);
-    expect(claim.content[0].text).toMatch(/missing required scope: write/);
-  });
-
-  it("fine-grained mutating PAT scopes stay read-only over MCP", async () => {
-    const { token: scopedToken } = await seedTestUser({
-      scopes: ["runs:attribute"],
-    });
-
-    const search = await callTool("search_runs", { instrumentId }, scopedToken);
-    expect(search.isError).toBeFalsy();
-
-    const claim = await callTool(
-      "claim_run",
-      { instrumentId, runId },
-      scopedToken
-    );
-    expect(claim.isError).toBe(true);
-    expect(claim.content[0].text).toMatch(/missing required scope: write/);
-  });
-
-  it("wildcard PAT can call mutating tools", async () => {
-    const { token: scopedToken } = await seedTestUser({
-      scopes: ["*"],
-    });
-
-    const claim = await callTool(
-      "claim_run",
-      { instrumentId, runId },
-      scopedToken
-    );
+  it("an access token with read and write can call mutating tools", async () => {
+    const claim = await callTool("claim_run", { instrumentId, runId });
     expect(claim.isError).toBeFalsy();
 
     // Nonexistent file: write gate passes, then the helper returns not-found.
-    const reprocess = await callTool(
-      "reprocess_file",
-      { fileId: 99_999 },
-      scopedToken
-    );
+    const reprocess = await callTool("reprocess_file", { fileId: 99_999 });
     expect(reprocess.isError).toBe(true);
     expect(reprocess.content[0].text).toMatch(/not found/);
     expect(reprocess.content[0].text).not.toMatch(/missing required scope/);
   });
 
-  it("empty PAT scopes can read (read is always granted) but not mutate", async () => {
-    const { token: scopedToken } = await seedTestUser({ scopes: [] });
+  it("rejects a dhub_ personal access token", async () => {
+    const { token: pat } = await seedTestUser();
 
-    const list = await callTool("list_instruments", {}, scopedToken);
-    expect(list.isError).toBeFalsy();
+    // The same token works on the REST API, so MCP refused a valid token.
+    const rest = await api("/api/v1/instruments", { token: pat });
+    expect(rest.status).toBe(200);
 
-    const claim = await callTool(
-      "claim_run",
-      { instrumentId, runId },
-      scopedToken
-    );
-    expect(claim.isError).toBe(true);
-    expect(claim.content[0].text).toMatch(/missing required scope: write/);
+    const res = await api("/mcp/v1", {
+      method: "POST",
+      token: pat,
+      headers: MCP_HEADERS,
+      body: jsonRpc("initialize", {
+        protocolVersion: "2025-03-26",
+        capabilities: {},
+        clientInfo: { name: "test", version: "1.0" },
+      }),
+    });
+    expect(res.status).toBe(401);
   });
 });

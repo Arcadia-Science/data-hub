@@ -13,6 +13,7 @@ import {
   closeTestDb,
   getBaseUrl,
   getCapturedSlackDms,
+  getMcpAccessToken,
   getTestDb,
   resetDb,
   seedSessionCookie,
@@ -314,11 +315,11 @@ describe("Feedback", () => {
     expect(res.status).toBeLessThan(500);
   });
 
-  it("sends feedback over MCP with a read-only token", async () => {
-    const { token } = await seedTestUser({
-      scopes: ["instruments:read"],
+  it("sends feedback over MCP with a read-only access token", async () => {
+    const { userId } = await seedTestUser({
       email: "mcp-reader@example.com",
     });
+    const token = await getMcpAccessToken(userId, "read");
     const res = await api("/mcp/v1", {
       method: "POST",
       token,

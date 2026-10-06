@@ -1,8 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  authInfoFromPayload,
-  isPatFallbackEnabled,
-} from "@/lib/mcp/auth-helpers";
+import { describe, expect, it } from "vitest";
+import { authInfoFromPayload } from "@/lib/mcp/auth-helpers";
 
 describe("authInfoFromPayload", () => {
   it("maps a user JWT onto AuthInfo", () => {
@@ -87,49 +84,5 @@ describe("authInfoFromPayload", () => {
     expect(
       authInfoFromPayload({ client_id: "c", scope: "read" }, "tok")
     ).toBeUndefined();
-  });
-});
-
-describe("isPatFallbackEnabled", () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  it("requires MCP_ALLOW_PAT_AUTH=true", () => {
-    vi.stubEnv("MCP_ALLOW_PAT_AUTH", "false");
-    vi.stubEnv("NODE_ENV", "development");
-    expect(isPatFallbackEnabled()).toBe(false);
-  });
-
-  it("is hard-off when VERCEL_ENV=production", () => {
-    vi.stubEnv("MCP_ALLOW_PAT_AUTH", "true");
-    vi.stubEnv("VERCEL_ENV", "production");
-    vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("BETTER_AUTH_URL", "https://datahub.example.com");
-    expect(isPatFallbackEnabled()).toBe(false);
-  });
-
-  it("is hard-off for self-hosted production (non-loopback URL)", () => {
-    vi.stubEnv("MCP_ALLOW_PAT_AUTH", "true");
-    vi.stubEnv("VERCEL_ENV", undefined);
-    vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("BETTER_AUTH_URL", "https://datahub.example.com");
-    expect(isPatFallbackEnabled()).toBe(false);
-  });
-
-  it("allows local/CI next start on loopback despite NODE_ENV=production", () => {
-    vi.stubEnv("MCP_ALLOW_PAT_AUTH", "true");
-    vi.stubEnv("VERCEL_ENV", undefined);
-    vi.stubEnv("NODE_ENV", "production");
-    vi.stubEnv("BETTER_AUTH_URL", "http://127.0.0.1:3000");
-    expect(isPatFallbackEnabled()).toBe(true);
-  });
-
-  it("allows development", () => {
-    vi.stubEnv("MCP_ALLOW_PAT_AUTH", "true");
-    vi.stubEnv("VERCEL_ENV", undefined);
-    vi.stubEnv("NODE_ENV", "development");
-    vi.stubEnv("BETTER_AUTH_URL", "http://localhost:3000");
-    expect(isPatFallbackEnabled()).toBe(true);
   });
 });
