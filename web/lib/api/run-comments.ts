@@ -508,7 +508,6 @@ export async function updateComment(input: {
       body: runComments.body,
       createdAt: runComments.createdAt,
       editedAt: runComments.editedAt,
-      userId: runComments.userId,
       runId: runComments.runId,
     });
 

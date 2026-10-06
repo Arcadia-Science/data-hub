@@ -1,8 +1,11 @@
 import { eq } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { notifyComment } from "@/lib/api/notifications";
 import {
+  archiveJobs,
   instrumentRuns,
   instruments,
+  notifications,
   personalAccessTokens,
   runComments,
   users,
@@ -184,13 +187,14 @@ describe("Token creator", () => {
 });
 
 describe("Token audit columns", () => {
+  let token: string;
   let tokenId: string;
   let userId: string;
   let runId: string;
 
   beforeEach(async () => {
     await resetDb();
-    ({ tokenId, userId } = await seedTestUser());
+    ({ token, tokenId, userId } = await seedTestUser());
     const db = getTestDb();
     await db.insert(instruments).values({
       id: "audit-instrument",
@@ -237,6 +241,83 @@ describe("Token audit columns", () => {
     ).rejects.toThrow();
   });
 
+  // Every table that records an actor has a check constraint so one row never
+  // names both a person and a token. Each case inserts the smallest valid row.
+  const pairCases: {
+    constraint: string;
+    insert: (actor: { userId?: string; tokenId?: string }) => Promise<unknown>;
+    table: string;
+  }[] = [
+    {
+      table: "archive_jobs",
+      constraint: "archive_jobs_one_creator",
+      insert: ({ userId: createdBy, tokenId: createdByToken }) =>
+        getTestDb().insert(archiveJobs).values({
+          instrumentRunId: runId,
+          fingerprint: crypto.randomUUID(),
+          createdBy,
+          createdByToken,
+        }),
+    },
+    {
+      table: "instruments",
+      constraint: "instruments_one_retirer",
+      insert: ({ userId: retiredBy, tokenId: retiredByToken }) =>
+        getTestDb()
+          .insert(instruments)
+          .values({
+            id: `retired-${crypto.randomUUID()}`,
+            displayName: "Retired Instrument",
+            retiredBy,
+            retiredByToken,
+          }),
+    },
+    {
+      table: "notifications",
+      constraint: "notifications_one_actor",
+      insert: ({ userId: actorUserId, tokenId: actorTokenId }) =>
+        getTestDb()
+          .insert(notifications)
+          .values({
+            // The recipient is a separate column from the actor.
+            userId: actorUserId ?? userId,
+            type: "generic",
+            body: "hello",
+            actorUserId,
+            actorTokenId,
+          }),
+    },
+    {
+      table: "watchers",
+      constraint: "watchers_one_deregisterer",
+      insert: ({ userId: deregisteredBy, tokenId: deregisteredByToken }) =>
+        getTestDb().insert(watchers).values({
+          instrumentId: "audit-instrument",
+          // Soft-deleted, so rows do not collide on the one-active-watcher
+          // index for the instrument.
+          deletedAt: new Date(),
+          deregisteredBy,
+          deregisteredByToken,
+        }),
+    },
+  ];
+
+  for (const { table, constraint, insert } of pairCases) {
+    it(`${table}: accepts a user or a token but not both`, async () => {
+      await insert({ userId });
+      await insert({ tokenId });
+      await insert({});
+
+      const error = await insert({ userId, tokenId }).then(
+        () => null,
+        (e: unknown) => e as { cause?: { constraint?: string } }
+      );
+      expect(error).not.toBeNull();
+      // Drizzle wraps the Postgres error; the cause carries the constraint.
+      expect(error?.cause?.constraint).toBe(constraint);
+    });
+  }
+
   it("refuses to hard-delete a token that audit rows point at", async () => {
     const db = getTestDb();
     await db.insert(runComments).values({ runId, tokenId, body: "from token" });
@@ -245,6 +326,47 @@ describe("Token audit columns", () => {
         .delete(personalAccessTokens)
         .where(eq(personalAccessTokens.id, tokenId))
     ).rejects.toThrow();
+  });
+
+  it("stops authenticating a token once its owner is deleted", async () => {
+    const before = await api("/api/v1/instruments", { token });
+    expect(before.status).toBe(200);
+
+    await getTestDb().delete(users).where(eq(users.id, userId));
+
+    const after = await api("/api/v1/instruments", { token });
+    expect(after.status).toBe(401);
+  });
+
+  it("still notifies other commenters when a run has a token comment", async () => {
+    const db = getTestDb();
+    const { userId: participant } = await seedTestUser();
+    const { userId: author } = await seedTestUser();
+    await db.insert(runComments).values({ runId, tokenId, body: "from token" });
+    await db
+      .insert(runComments)
+      .values({ runId, userId: participant, body: "earlier comment" });
+    const [comment] = await db
+      .insert(runComments)
+      .values({ runId, userId: author, body: "new comment" })
+      .returning({ id: runComments.id });
+
+    await notifyComment({
+      runInternalId: runId,
+      commentId: comment.id,
+      authorUserId: author,
+    });
+
+    const rows = await db
+      .select({
+        userId: notifications.userId,
+        type: notifications.type,
+      })
+      .from(notifications)
+      .where(eq(notifications.runId, runId));
+    expect(rows).toEqual([
+      { userId: participant, type: "comment_participated" },
+    ]);
   });
 
   it("keeps a token when its owner is deleted", async () => {

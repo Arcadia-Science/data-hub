@@ -103,6 +103,8 @@ async function TokensSection({ isAdmin }: { isAdmin: boolean }) {
       lastUsedAt: personalAccessTokens.lastUsedAt,
       expiresAt: personalAccessTokens.expiresAt,
       createdAt: personalAccessTokens.createdAt,
+      // NULL when the owner's account was deleted, so admins can still see
+      // and revoke the token.
       user: {
         id: users.id,
         name: users.name,
@@ -111,7 +113,7 @@ async function TokensSection({ isAdmin }: { isAdmin: boolean }) {
       },
     })
     .from(personalAccessTokens)
-    .innerJoin(users, eq(users.id, personalAccessTokens.userId))
+    .leftJoin(users, eq(users.id, personalAccessTokens.userId))
     .where(isNull(personalAccessTokens.revokedAt))
     .orderBy(desc(personalAccessTokens.createdAt));
 
@@ -149,24 +151,30 @@ async function TokensSection({ isAdmin }: { isAdmin: boolean }) {
             </TableHeader>
             <TableBody>
               {tokens.map((token) => {
-                const avatarUser = toUserAvatarUser({
-                  userId: token.user.id,
-                  name: token.user.name,
-                  email: token.user.email,
-                  image: token.user.image,
-                });
+                const avatarUser = token.user?.id
+                  ? toUserAvatarUser({
+                      userId: token.user.id,
+                      name: token.user.name,
+                      email: token.user.email,
+                      image: token.user.image,
+                    })
+                  : null;
                 return (
                   <TableRow key={token.id}>
                     <TableCell className="font-medium">{token.name}</TableCell>
                     <TableCell>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <UserAvatar size="sm" user={avatarUser} />
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          {avatarUser.displayName}
-                        </TooltipContent>
-                      </Tooltip>
+                      {avatarUser ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <UserAvatar size="sm" user={avatarUser} />
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {avatarUser.displayName}
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : (
+                        <span className="text-muted-foreground">Unknown</span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Badge className="font-mono text-xs" variant="secondary">

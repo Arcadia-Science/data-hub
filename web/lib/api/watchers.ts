@@ -1,16 +1,31 @@
-import { and, asc, count, desc, eq, gte, inArray, isNull } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  or,
+} from "drizzle-orm";
 import { cache } from "react";
 import { type ActorUser, resolveActorUser } from "@/lib/api/actor";
 import type { AuthResult } from "@/lib/api/auth";
 import { apiError, FORBIDDEN } from "@/lib/api/errors";
 import { instrumentHasOnlineWatcher } from "@/lib/api/instruments";
 import { touchRuns } from "@/lib/api/touch-runs";
-import { decideWatcherBinding } from "@/lib/api/watcher-binding";
+import {
+  decideWatcherBinding,
+  isBoundToOtherToken,
+} from "@/lib/api/watcher-binding";
 import { type DbExecutor, db } from "@/lib/db";
 import {
   files,
   instrumentRuns,
   instruments,
+  personalAccessTokens,
   users,
   watcherEvents,
   watcherEventTypeEnum,
@@ -34,8 +49,8 @@ export async function findActiveWatcher(watcherId: string) {
  * Returns null when the caller may act on this watcher, or a Response the
  * handler should return. Sessions are denied — watcher agent routes are
  * PAT-only via `authorizeToken`. Token callers must match the watcher's
- * registered PAT. A null binding is claimed trust-on-first-use (atomic),
- * then enforced thereafter.
+ * registered PAT. A null binding, or a binding to a revoked token, is claimed
+ * trust-on-first-use (atomic), then enforced thereafter.
  */
 export async function enforceWatcherBinding(
   authResult: AuthResult,
@@ -46,22 +61,39 @@ export async function enforceWatcherBinding(
   if (verdict === "allow") {
     return null;
   }
-  if (verdict === "deny") {
-    return apiError(403, FORBIDDEN, "Token is not authorized for this watcher");
-  }
 
-  // `decideWatcherBinding` only returns "tofu" when tokenId is set.
+  // Revoking a token clears its bindings, but a request that authenticated
+  // just before the revoke can still bind afterwards. So a binding to a
+  // revoked token counts as no binding. Only a token bound elsewhere gets
+  // this second look, which keeps the common allow path free of extra queries.
+  const claimable =
+    verdict === "tofu" ||
+    isBoundToOtherToken(authResult, watcher.registeredByToken);
   const tokenId = authResult.tokenId;
-  if (!tokenId) {
+  if (!(claimable && tokenId)) {
     return apiError(403, FORBIDDEN, "Token is not authorized for this watcher");
   }
 
-  // TOFU: first token to check in claims the row. The `is null` guard
-  // makes concurrent claims atomic — the loser re-reads and is denied.
+  // TOFU: first token to check in claims the row. The `where` clause makes
+  // concurrent claims atomic: the loser re-reads and is denied.
   const claimed = await db
     .update(watchers)
     .set({ registeredByToken: tokenId })
-    .where(and(eq(watchers.id, watcher.id), isNull(watchers.registeredByToken)))
+    .where(
+      and(
+        eq(watchers.id, watcher.id),
+        or(
+          isNull(watchers.registeredByToken),
+          inArray(
+            watchers.registeredByToken,
+            db
+              .select({ id: personalAccessTokens.id })
+              .from(personalAccessTokens)
+              .where(isNotNull(personalAccessTokens.revokedAt))
+          )
+        )
+      )
+    )
     .returning({ id: watchers.id });
 
   if (claimed.length > 0) {

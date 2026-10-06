@@ -282,8 +282,9 @@ export const personalAccessTokens = pgTable(
     userId: text("user_id").references(() => users.id, {
       onDelete: "set null",
     }),
-    // The admin who created the token. NULL only after that user is deleted.
-    // Unlike `userId`, this is never an acting identity.
+    // The admin who created the token. NULL after that user is deleted, and
+    // for tokens created before this column existed or by code that does not
+    // set it. Unlike `userId`, this is never an acting identity.
     createdBy: text("created_by").references(() => users.id, {
       onDelete: "set null",
     }),
@@ -457,7 +458,8 @@ export const watchers = pgTable(
     // events, upload-queue, update-check) require the same PAT. NULL for
     // pre-binding rows (claimed trust-on-first-use) and session registrations.
     // Revoking the token clears this column in the same transaction so a
-    // replacement token can re-claim via TOFU.
+    // replacement token can re-claim via TOFU. A binding to a revoked token
+    // is also treated as no binding, to cover requests that raced the revoke.
     registeredByToken: uuid("registered_by_token").references(
       () => personalAccessTokens.id,
       { onDelete: "set null" }
