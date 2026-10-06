@@ -15,6 +15,7 @@ import { WebClient } from "@slack/web-api";
 import { type NextRequest, NextResponse } from "next/server";
 import { requireSession } from "@/lib/api/auth";
 import { apiError, UNAUTHORIZED } from "@/lib/api/errors";
+import { getSlackAppCredentials } from "@/lib/slack/app-config";
 import { upsertSlackConnection } from "@/lib/slack/connections";
 import { getSlackRedirectUri } from "@/lib/slack/oauth";
 import { verifyState } from "@/lib/slack/state";
@@ -74,8 +75,11 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const clientId = process.env.SLACK_CLIENT_ID;
-  const clientSecret = process.env.SLACK_CLIENT_SECRET;
+  const {
+    clientId,
+    clientSecret,
+    teamId: expectedTeamId,
+  } = await getSlackAppCredentials();
   if (!(clientId && clientSecret)) {
     return NextResponse.redirect(
       new URL(`${SETTINGS_URL}?slack=error`, request.url)
@@ -141,7 +145,6 @@ export async function GET(request: NextRequest) {
 
   // Optionally enforce a specific workspace — prevents linking personal
   // workspaces when the org bot only has access to the company workspace.
-  const expectedTeamId = process.env.SLACK_TEAM_ID;
   if (expectedTeamId && teamId !== expectedTeamId) {
     return NextResponse.redirect(
       new URL(`${SETTINGS_URL}?slack=wrong_workspace`, request.url)

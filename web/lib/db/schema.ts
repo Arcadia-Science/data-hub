@@ -274,6 +274,31 @@ export const slackChannelConfig = pgTable(
   ]
 );
 
+// Slack app credentials for DMs and "Connect Slack". A null column falls
+// back to the matching environment variable. Bot token and client secret
+// are encrypted; client id and team id are not secrets.
+export const slackAppConfig = pgTable(
+  "slack_app_config",
+  {
+    id: boolean("id").primaryKey().default(true),
+    botToken: text("bot_token"),
+    clientId: text("client_id"),
+    clientSecret: text("client_secret"),
+    teamId: text("team_id"),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+    updatedBy: text("updated_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+  },
+  (config) => [check("slack_app_config_singleton", sql`${config.id} = true`)]
+);
+
 export const personalAccessTokens = pgTable(
   "personal_access_tokens",
   {

@@ -58,12 +58,12 @@ vercel env pull
 | `STALLED_PROCESSING_AFTER_MINUTES` | No | Minutes a file may stay in `processing` before it is treated as stalled and becomes reprocessable (defaults to 20). Empty, zero, negative, or non-numeric values keep the default. |
 | `CRON_SECRET` | No | Shared secret for Vercel Cron jobs. The upload-queue sweep (`web/vercel.json`) rejects invocations without it |
 | `INTEGRATION_SECRETS_KEY` | No | 64 hex characters (32 bytes). Encrypts Slack and Linear secrets admins save in the database. Generate with `openssl rand -hex 32`. Saving a secret fails until this is set. Plaintext Slack webhook URLs saved before this existed still work until an admin saves again |
-| `SLACK_BOT_TOKEN` | No | Slack bot token (`xoxb-…`) — required for personal Slack DM notifications |
-| `SLACK_CLIENT_ID` | No | Slack app client ID — required for the "Connect to Slack" OAuth flow on Settings > Notifications |
-| `SLACK_CLIENT_SECRET` | No | Slack app client secret — required for the OAuth flow |
+| `SLACK_BOT_TOKEN` | No | Slack bot token (`xoxb-…`) for personal Slack DM notifications. Used only when an admin has not saved a bot token under Settings > Integrations |
+| `SLACK_CLIENT_ID` | No | Slack app client ID for Connect Slack. Used only when an admin has not saved a client ID under Settings > Integrations |
+| `SLACK_CLIENT_SECRET` | No | Slack app client secret for Connect Slack. Used only when an admin has not saved a client secret under Settings > Integrations |
 | `SLACK_STATE_SECRET` | No | Signing secret for OAuth state tokens; falls back to `AUTH_SECRET` |
 | `SLACK_REDIRECT_URI` | No | Override the OAuth redirect URI (defaults to `<origin>/api/v1/settings/slack/callback`) |
-| `SLACK_TEAM_ID` | No | Restrict Slack connections to a specific workspace ID (recommended for single-tenant deployments) |
+| `SLACK_TEAM_ID` | No | Restrict Slack connections to a specific workspace ID. Used only when an admin has not saved a workspace ID under Settings > Integrations |
 
 > **Local dev note:** the Lambda Function URL is configured with `AuthType: AWS_IAM`, so to invoke it from `make dev` you need AWS credentials with `lambda:InvokeFunctionUrl` on the staging function ARN. The default credential chain (`aws sso login`, `~/.aws/credentials`, or `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`) is used when `AWS_ROLE_ARN` is unset locally.
 

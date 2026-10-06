@@ -2,10 +2,10 @@
 //
 // The bot posts to each recipient's Slack member ID directly — Slack
 // auto-opens the DM channel when `channel` is a user ID with `chat:write`.
-// No per-user token is stored; the shared `SLACK_BOT_TOKEN` env var is the
-// only credential. Like the existing `sendSlackMessage` webhook helper, if
-// the token is absent the function is a no-op so local dev and tests can opt
-// out cleanly.
+// No per-user token is stored. The shared bot token comes from
+// `slack_app_config` when an admin has saved one, and otherwise from
+// `SLACK_BOT_TOKEN`. Like `sendSlackMessage`, a missing token is a no-op so
+// local dev and tests can opt out cleanly.
 //
 // Failures are classified, never thrown — DMs are a side-channel and must not
 // break the mutation that triggered the notification. The classification
@@ -20,6 +20,7 @@ import { WebClient } from "@slack/web-api";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { slackConnections } from "@/lib/db/schema";
+import { getSlackAppCredentials } from "@/lib/slack/app-config";
 
 // The recipient can't be DM'd: their stored member ID no longer resolves to a
 // DM channel (left the workspace, deactivated). Revoke just this connection.
@@ -43,20 +44,28 @@ function extractSlackErrorCode(err: unknown): string | undefined {
     : undefined;
 }
 
-let _client: WebClient | null = null;
+let cachedClient: WebClient | null = null;
+let cachedToken: string | null = null;
 
-function getClient(): WebClient | null {
-  const token = process.env.SLACK_BOT_TOKEN;
-  if (!token) {
+async function getClient(): Promise<WebClient | null> {
+  const { botToken } = await getSlackAppCredentials();
+  if (!botToken) {
+    cachedClient = null;
+    cachedToken = null;
     return null;
   }
-  if (!_client) {
-    // `slackApiUrl` can be overridden in tests to point at the in-process
-    // capture server; in production it defaults to the real Slack API.
-    const slackApiUrl = process.env.__TEST_SLACK_API_URL;
-    _client = new WebClient(token, slackApiUrl ? { slackApiUrl } : undefined);
+  if (cachedClient && cachedToken === botToken) {
+    return cachedClient;
   }
-  return _client;
+  // `slackApiUrl` can be overridden in tests to point at the in-process
+  // capture server; in production it defaults to the real Slack API.
+  const slackApiUrl = process.env.__TEST_SLACK_API_URL;
+  cachedClient = new WebClient(
+    botToken,
+    slackApiUrl ? { slackApiUrl } : undefined
+  );
+  cachedToken = botToken;
+  return cachedClient;
 }
 
 export interface SlackDmPayload {
@@ -77,7 +86,7 @@ async function sendSlackDm(
   slackUserId: string,
   payload: SlackDmPayload
 ): Promise<SlackDmResult> {
-  const client = getClient();
+  const client = await getClient();
   if (!client) {
     return { status: "transient" };
   }
