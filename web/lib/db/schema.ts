@@ -277,9 +277,23 @@ export const personalAccessTokens = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     // Token owner / acting identity for Bearer auth and write attribution.
     // An admin may mint a token bound to another user (e.g. an MCP client).
-    userId: text("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+    // Nullable and `set null` on user delete so tokens that audit rows point
+    // at outlive the user. A token with no owner cannot authenticate.
+    userId: text("user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    // The admin who created the token. NULL after that user is deleted, and
+    // for tokens created before this column existed or by code that does not
+    // set it. Unlike `userId`, this is never an acting identity.
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    // Set when an admin revokes the token. The row is kept so audit columns
+    // that reference it can still show the token's name.
+    revokedAt: timestamp("revoked_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
     // User-provided label (e.g., "Plate Reader PC", "Lambda production").
     name: text("name").notNull(),
     // SHA-256 hash of the token. The plaintext token is shown once at creation
@@ -311,7 +325,10 @@ export const personalAccessTokens = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (token) => [index("idx_personal_access_tokens_user_id").on(token.userId)]
+  (token) => [
+    index("idx_personal_access_tokens_user_id").on(token.userId),
+    index("idx_personal_access_tokens_created_by").on(token.createdBy),
+  ]
 );
 
 export const instruments = pgTable(
@@ -356,8 +373,18 @@ export const instruments = pgTable(
     retiredBy: text("retired_by").references(() => users.id, {
       onDelete: "set null",
     }),
+    // Set instead of `retiredBy` when a personal access token retired the
+    // instrument. At most one of the two is set.
+    retiredByToken: uuid("retired_by_token").references(
+      () => personalAccessTokens.id,
+      { onDelete: "restrict" }
+    ),
   },
   (instrument) => [
+    check(
+      "instruments_one_retirer",
+      sql`num_nonnulls(${instrument.retiredBy}, ${instrument.retiredByToken}) <= 1`
+    ),
     // Trigram GIN index backing the case-insensitive `ilike '%…%'` display-name
     // match in global search. Requires the `pg_trgm` extension (created in
     // migration 0029).
@@ -421,16 +448,28 @@ export const watchers = pgTable(
     deregisteredBy: text("deregistered_by").references(() => users.id, {
       onDelete: "set null",
     }),
+    // Set instead of `deregisteredBy` when a personal access token
+    // deregistered the watcher. At most one of the two is set.
+    deregisteredByToken: uuid("deregistered_by_token").references(
+      () => personalAccessTokens.id,
+      { onDelete: "restrict" }
+    ),
     // PAT that registered this watcher. Watcher-scoped ops (heartbeat, config,
     // events, upload-queue, update-check) require the same PAT. NULL for
     // pre-binding rows (claimed trust-on-first-use) and session registrations.
-    // `set null` on token delete so rotation can re-claim via TOFU.
+    // Revoking the token clears this column in the same transaction so a
+    // replacement token can re-claim via TOFU. A binding to a revoked token
+    // is also treated as no binding, to cover requests that raced the revoke.
     registeredByToken: uuid("registered_by_token").references(
       () => personalAccessTokens.id,
       { onDelete: "set null" }
     ),
   },
   (watcher) => [
+    check(
+      "watchers_one_deregisterer",
+      sql`num_nonnulls(${watcher.deregisteredBy}, ${watcher.deregisteredByToken}) <= 1`
+    ),
     // Partial unique index — at most one active watcher per instrument.
     // Doubles as the lookup index used by getWatcherList / findActiveWatcher.
     uniqueIndex("uq_watchers_active_instrument_id")
@@ -574,8 +613,18 @@ export const instrumentRuns = pgTable(
     deletedBy: text("deleted_by").references(() => users.id, {
       onDelete: "set null",
     }),
+    // Set instead of `deletedBy` when a personal access token deleted the
+    // run. At most one of the two is set. Cleared again on restore.
+    deletedByToken: uuid("deleted_by_token").references(
+      () => personalAccessTokens.id,
+      { onDelete: "restrict" }
+    ),
   },
   (run) => [
+    check(
+      "instrument_runs_one_deleter",
+      sql`num_nonnulls(${run.deletedBy}, ${run.deletedByToken}) <= 1`
+    ),
     unique("uq_instrument_runs_instrument_id_run_id").on(
       run.instrumentId,
       run.runId
@@ -748,9 +797,13 @@ export const runComments = pgTable(
     runId: uuid("run_id")
       .notNull()
       .references(() => instrumentRuns.id, { onDelete: "cascade" }),
-    userId: text("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+    // Author. Exactly one of `userId` and `tokenId` is set: a person, or a
+    // personal access token that posted through the API. Comments stay with
+    // the user (`cascade`) because the author check requires one of the two.
+    userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
+    tokenId: uuid("token_id").references(() => personalAccessTokens.id, {
+      onDelete: "restrict",
+    }),
     // Markdown source. Length-capped at the route layer (10 000 chars) as a
     // cheap guard against abuse; no DB-side limit so we can raise it later
     // without a migration.
@@ -780,6 +833,10 @@ export const runComments = pgTable(
     }),
   },
   (comment) => [
+    check(
+      "run_comments_one_author",
+      sql`num_nonnulls(${comment.userId}, ${comment.tokenId}) = 1`
+    ),
     index("idx_run_comments_run_id_created_at").on(
       comment.runId,
       comment.createdAt.desc()
@@ -823,6 +880,12 @@ export const archiveJobs = pgTable(
     createdBy: text("created_by").references(() => users.id, {
       onDelete: "set null",
     }),
+    // Set instead of `createdBy` when a personal access token triggered the
+    // build. At most one of the two is set.
+    createdByToken: uuid("created_by_token").references(
+      () => personalAccessTokens.id,
+      { onDelete: "restrict" }
+    ),
     createdAt: timestamp("created_at", {
       withTimezone: true,
       mode: "date",
@@ -835,6 +898,10 @@ export const archiveJobs = pgTable(
     }),
   },
   (job) => [
+    check(
+      "archive_jobs_one_creator",
+      sql`num_nonnulls(${job.createdBy}, ${job.createdByToken}) <= 1`
+    ),
     // At most one in-flight job per (run, fingerprint). Concurrent callers
     // ON CONFLICT DO NOTHING and then SELECT the existing row.
     uniqueIndex("uq_archive_jobs_inflight")
@@ -1071,6 +1138,13 @@ export const notifications = pgTable(
     actorUserId: text("actor_user_id").references(() => users.id, {
       onDelete: "set null",
     }),
+    // Set instead of `actorUserId` when a personal access token produced the
+    // notification (for example a generic message dispatched by an
+    // integration). At most one of the two is set.
+    actorTokenId: uuid("actor_token_id").references(
+      () => personalAccessTokens.id,
+      { onDelete: "restrict" }
+    ),
     readAt: timestamp("read_at", {
       withTimezone: true,
       mode: "date",
@@ -1083,6 +1157,10 @@ export const notifications = pgTable(
       .defaultNow(),
   },
   (notification) => [
+    check(
+      "notifications_one_actor",
+      sql`num_nonnulls(${notification.actorUserId}, ${notification.actorTokenId}) <= 1`
+    ),
     index("idx_notifications_user_id_created_at").on(
       notification.userId,
       notification.createdAt.desc()

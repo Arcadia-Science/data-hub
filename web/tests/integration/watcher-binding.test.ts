@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { instruments, watchers } from "@/lib/db/schema";
+import { instruments, personalAccessTokens, watchers } from "@/lib/db/schema";
 import {
   api,
   closeTestDb,
@@ -258,6 +258,80 @@ describe("Watcher PAT binding", () => {
         body: { status: "watching" },
       });
       expect(again.status).toBe(200);
+    });
+  });
+
+  describe("binding to a revoked token", () => {
+    const instrumentId = "binding-instr-revoked";
+    let watcherId: string;
+    let boundTokenId: string;
+    let otherToken: string;
+    let otherTokenId: string;
+
+    beforeEach(async () => {
+      await resetDb();
+      ({ tokenId: boundTokenId } = await seedTestUser({
+        scopes: [...WATCHER_SCOPES],
+      }));
+      ({ token: otherToken, tokenId: otherTokenId } = await seedTestUser({
+        scopes: [...WATCHER_SCOPES],
+      }));
+
+      const db = getTestDb();
+      await db.insert(instruments).values({
+        id: instrumentId,
+        displayName: "Revoked Binding Instrument",
+        status: "active",
+      });
+      const [row] = await db
+        .insert(watchers)
+        .values({
+          instrumentId,
+          hostname: "revoked-pc",
+          status: "registered",
+          registeredByToken: boundTokenId,
+        })
+        .returning({ id: watchers.id });
+      watcherId = row.id;
+    });
+
+    async function heartbeat(token: string) {
+      return await api(`/api/v1/watchers/${watcherId}/heartbeat`, {
+        method: "POST",
+        token,
+        body: { status: "watching" },
+      });
+    }
+
+    it("lets another token claim it even though the binding was never cleared", async () => {
+      const db = getTestDb();
+      // Set `revoked_at` directly so the binding stays in place. This is the
+      // state an in-flight request leaves behind when the revoke clears
+      // bindings before that request binds the watcher.
+      await db
+        .update(personalAccessTokens)
+        .set({ revokedAt: new Date() })
+        .where(eq(personalAccessTokens.id, boundTokenId));
+
+      const res = await heartbeat(otherToken);
+      expect(res.status).toBe(200);
+
+      const [row] = await db
+        .select({ registeredByToken: watchers.registeredByToken })
+        .from(watchers)
+        .where(eq(watchers.id, watcherId));
+      expect(row?.registeredByToken).toBe(otherTokenId);
+    });
+
+    it("still denies another token while the bound token is active", async () => {
+      const res = await heartbeat(otherToken);
+      expect(res.status).toBe(403);
+
+      const [row] = await getTestDb()
+        .select({ registeredByToken: watchers.registeredByToken })
+        .from(watchers)
+        .where(eq(watchers.id, watcherId));
+      expect(row?.registeredByToken).toBe(boundTokenId);
     });
   });
 });

@@ -446,7 +446,7 @@ export async function createCommentAndNotify(input: {
 
 export async function getCommentForAuthorCheck(
   commentId: string
-): Promise<{ id: string; userId: string; runId: string } | null> {
+): Promise<{ id: string; userId: string | null; runId: string } | null> {
   const [row] = await db
     .select({
       id: runComments.id,
@@ -464,7 +464,11 @@ export async function getCommentForAuthorCheck(
 // resolves the author and succeeds instead of 404-ing on the missing row.
 export async function getCommentForDeleteAuthorCheck(
   commentId: string
-): Promise<{ id: string; userId: string; deletedAt: Date | null } | null> {
+): Promise<{
+  id: string;
+  userId: string | null;
+  deletedAt: Date | null;
+} | null> {
   const [row] = await db
     .select({
       id: runComments.id,
@@ -504,7 +508,6 @@ export async function updateComment(input: {
       body: runComments.body,
       createdAt: runComments.createdAt,
       editedAt: runComments.editedAt,
-      userId: runComments.userId,
       runId: runComments.runId,
     });
 
@@ -522,7 +525,7 @@ export async function updateComment(input: {
       image: users.image,
     })
     .from(users)
-    .where(eq(users.id, row.userId))
+    .where(eq(users.id, input.userId))
     .limit(1);
 
   return toDto({
@@ -530,7 +533,7 @@ export async function updateComment(input: {
     body: row.body,
     createdAt: row.createdAt,
     editedAt: row.editedAt,
-    userId: row.userId,
+    userId: input.userId,
     userName: user?.name ?? null,
     userEmail: user?.email ?? null,
     userImage: user?.image ?? null,

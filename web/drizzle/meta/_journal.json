@@ -351,6 +351,13 @@
       "when": 1790652322054,
       "tag": "0049_multipart_upload_id",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1791240955128,
+      "tag": "0050_token_identity_columns",
+      "breakpoints": true
     }
   ]
 }

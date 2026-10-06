@@ -47,6 +47,7 @@ async function validatePat(
       id: personalAccessTokens.id,
       userId: personalAccessTokens.userId,
       expiresAt: personalAccessTokens.expiresAt,
+      revokedAt: personalAccessTokens.revokedAt,
       scopes: personalAccessTokens.scopes,
     })
     .from(personalAccessTokens)
@@ -58,6 +59,16 @@ async function validatePat(
   }
 
   if (pat.expiresAt && pat.expiresAt < new Date()) {
+    return null;
+  }
+
+  // Revoked tokens stay in the table so audit columns can still name them.
+  if (pat.revokedAt) {
+    return null;
+  }
+
+  // A token whose owner was deleted has no acting user.
+  if (!pat.userId) {
     return null;
   }
 
