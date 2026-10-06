@@ -17,14 +17,13 @@ import { lookupRunByNaturalKey } from "@/lib/api/instrument-runs";
 import { commentBody, readJsonBody } from "@/lib/api/openapi";
 import { commentToWire } from "@/lib/api/run-comment-wire";
 import {
-  type CommentDeleter,
+  commentDeleterFor,
   commentWrittenBy,
   getCommentForAuthorCheck,
   softDeleteComment,
   updateComment,
   validateCommentBody,
 } from "@/lib/api/run-comments";
-import { userIsAdmin } from "@/lib/api/user-admin";
 
 interface RouteContext {
   params: Promise<{
@@ -169,15 +168,8 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
     return pre.response;
   }
 
-  let deleter: CommentDeleter;
-  if (commentWrittenBy(pre.comment, pre.actor)) {
-    deleter = { as: "author", actor: pre.actor };
-  } else if (
-    pre.authResult.authMethod === "session" &&
-    (await userIsAdmin(pre.authResult.userId))
-  ) {
-    deleter = { as: "admin", adminUserId: pre.authResult.userId };
-  } else {
+  const deleter = await commentDeleterFor(pre.comment, pre.actor);
+  if (!deleter) {
     return apiError(
       403,
       FORBIDDEN,
@@ -185,7 +177,7 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
     );
   }
 
-  await softDeleteComment({ commentId: pre.comment.id, ...deleter });
+  await softDeleteComment(pre.comment.id, deleter);
 
   trackEvent("comment_deleted", pre.analytics);
 

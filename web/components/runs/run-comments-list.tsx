@@ -14,6 +14,7 @@ import { useSession } from "@/lib/auth-client";
 import { toUserAvatarUser } from "@/lib/avatar-color";
 import { subscribeCommentHashScroll } from "@/lib/comment-hash-nav";
 import { commentPermissions } from "@/lib/comments/permissions";
+import { CommentRequestError } from "@/lib/comments/request-error";
 
 type Action =
   | { kind: "create"; comment: RunCommentDto }
@@ -150,7 +151,7 @@ export function RunCommentsList({
       { method: "DELETE" }
     );
     if (!res.ok) {
-      throw new Error(await res.text());
+      throw new CommentRequestError(res.status, await res.text());
     }
     setCommitted((prev) => prev.filter((c) => c.id !== commentId));
   }

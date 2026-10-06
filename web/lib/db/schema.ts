@@ -783,9 +783,10 @@ export const files = pgTable(
   ]
 );
 
-// User-authored markdown notes on a run. Any authenticated user can read
-// and create comments; only the author may edit or soft-delete their own
-// row (enforced both in the SQL `where` clause and in the route handler).
+// Markdown notes on a run, written by a person or a token. Any authenticated
+// user can read and create comments; only the author may edit one. Delete is
+// for the author or a signed-in admin, and the admin path is not pinned to the
+// author in SQL (it checks the admin flag instead).
 // Soft-delete via `deletedAt` matches the run/file model so historical
 // comments aren't lost. `editedAt` is set on body edits so the UI can
 // label edited comments without a separate audit table.
@@ -831,9 +832,11 @@ export const runComments = pgTable(
       mode: "date",
     }),
     // The person who deleted the comment: its author, or an admin removing
-    // someone else's. NULL while active, when a token deleted its own comment,
-    // and for comments deleted before this column existed. `set null` on user
-    // deletion so removing a user never blocks on history.
+    // someone else's. NULL while active, and for comments deleted before this
+    // column existed. An empty `deleted_by` on a deleted comment written by a
+    // token means the token deleted it: only the token or an admin can, and
+    // admin deletes are recorded. `set null` on user deletion so removing a
+    // user never blocks on history.
     deletedBy: text("deleted_by").references(() => users.id, {
       onDelete: "set null",
     }),

@@ -5,7 +5,8 @@ import {
   commentsListResponse,
   runComment,
 } from "@/lib/api/openapi";
-import { instruments, runComments } from "@/lib/db/schema";
+import { commentDeleterFor, softDeleteComment } from "@/lib/api/run-comments";
+import { instruments, runComments, users } from "@/lib/db/schema";
 import {
   api,
   closeTestDb,
@@ -21,10 +22,11 @@ import {
 //   - PATCH/DELETE /api/v1/instruments/:instrumentId/runs/:runId/comments/:id
 //
 // Comments are markdown-bodied notes. Reads are open to any authenticated
-// caller; mutations are author-only (enforced both in the SQL `where` clause
-// and in the route handler so we can return clean 403/404 distinctions). A
+// caller. Edit is author-only; delete is for the author or a signed-in admin,
+// and the admin path is not pinned to the author in SQL. Both are checked in
+// the route handler too, so we can return clean 403/404 distinctions. A
 // comment posted with a personal access token is authored by the token, so
-// only that token can change it.
+// only that token can edit it, and only that token or an admin can delete it.
 describe("Run Comments API", () => {
   let tokenA: string;
   let tokenIdA: string;
@@ -407,6 +409,7 @@ describe("Run Comments API", () => {
 // token deletes its own comment.
 describe("Run Comments API — deletion by admins", () => {
   let tokenA: string;
+  let tokenIdOther: string;
   let adminId: string;
   let memberId: string;
   let authorId: string;
@@ -416,6 +419,7 @@ describe("Run Comments API — deletion by admins", () => {
   beforeAll(async () => {
     await resetDb();
     ({ token: tokenA } = await seedTestUser());
+    ({ tokenId: tokenIdOther } = await seedTestUser());
     ({ userId: adminId } = await seedTestUser({ isAdmin: true }));
     ({ userId: memberId } = await seedTestUser());
     ({ userId: authorId } = await seedTestUser());
@@ -568,5 +572,142 @@ describe("Run Comments API — deletion by admins", () => {
     });
     expect(res.status).toBe(403);
     expect((await readDeleter(commentId)).deletedAt).toBeNull();
+  });
+
+  it("refuses an admin whose role was removed", async () => {
+    const runId = "demoted-admin";
+    await createRun(runId);
+    const commentId = await postAsPerson(runId, authorId, "from a member");
+    const { userId: demotedId } = await seedTestUser({ isAdmin: true });
+    const cookie = await seedSessionCookie(demotedId);
+
+    await getTestDb()
+      .update(users)
+      .set({ isAdmin: false })
+      .where(eq(users.id, demotedId));
+
+    // `seedSessionCookie` sets only the session token, not the cached session
+    // cookie a browser would still hold. So the role comes from the database,
+    // and the 403 proves the route checks it there.
+    const res = await api(`${commentsPath(runId)}/${commentId}`, {
+      method: "DELETE",
+      headers: { Cookie: cookie },
+    });
+    expect(res.status).toBe(403);
+    expect((await readDeleter(commentId)).deletedAt).toBeNull();
+  });
+
+  it("does not let one token delete another token's comment", async () => {
+    const runId = "token-vs-token";
+    await createRun(runId);
+    const commentId = await postAsToken(runId, "from token A");
+    const other = await seedTestUser();
+
+    const res = await api(`${commentsPath(runId)}/${commentId}`, {
+      method: "DELETE",
+      token: other.token,
+    });
+    expect(res.status).toBe(403);
+    expect((await readDeleter(commentId)).deletedAt).toBeNull();
+  });
+
+  it("returns 404 when the comment belongs to a different run", async () => {
+    await createRun("run-with-comment");
+    await createRun("run-without-comment");
+    const commentId = await postAsPerson(
+      "run-with-comment",
+      authorId,
+      "on the first run"
+    );
+
+    const res = await deleteAs("run-without-comment", commentId, adminId);
+    expect(res.status).toBe(404);
+    expect((await readDeleter(commentId)).deletedAt).toBeNull();
+  });
+
+  it("returns 409 when an admin deletes on a soft-deleted run", async () => {
+    const runId = "admin-deleted-run";
+    await createRun(runId);
+    const commentId = await postAsPerson(runId, authorId, "before the delete");
+    const del = await api(`/api/v1/instruments/${instrumentId}/runs/${runId}`, {
+      method: "DELETE",
+      token: tokenA,
+    });
+    expect(del.status).toBe(200);
+
+    const res = await deleteAs(runId, commentId, adminId);
+    expect(res.status).toBe(409);
+    expect((await readDeleter(commentId)).deletedAt).toBeNull();
+  });
+
+  // The shared rule behind both REST and MCP. These call the library
+  // directly so the token case is covered without an HTTP session.
+  describe("commentDeleterFor and softDeleteComment", () => {
+    it("picks the author, an admin, or nobody", async () => {
+      const comment = { userId: authorId, tokenId: null };
+
+      expect(
+        await commentDeleterFor(comment, { kind: "user", userId: authorId })
+      ).toEqual({
+        as: "author",
+        actor: { kind: "user", userId: authorId },
+      });
+      expect(
+        await commentDeleterFor(comment, { kind: "user", userId: adminId })
+      ).toEqual({ as: "admin", adminUserId: adminId });
+      expect(
+        await commentDeleterFor(comment, { kind: "user", userId: memberId })
+      ).toBeNull();
+    });
+
+    it("never returns an admin deleter for a token", async () => {
+      // This token was created by an admin, but a token is never an admin.
+      const adminsToken = await seedTestUser({ isAdmin: true });
+      const tokenActor = {
+        kind: "token" as const,
+        tokenId: adminsToken.tokenId,
+        tokenName: "admin's token",
+      };
+
+      expect(
+        await commentDeleterFor({ userId: authorId, tokenId: null }, tokenActor)
+      ).toBeNull();
+      expect(
+        await commentDeleterFor(
+          { userId: null, tokenId: tokenIdOther },
+          tokenActor
+        )
+      ).toBeNull();
+      expect(
+        await commentDeleterFor(
+          { userId: null, tokenId: adminsToken.tokenId },
+          tokenActor
+        )
+      ).toEqual({ as: "author", actor: tokenActor });
+    });
+
+    it("checks the admin flag in SQL, not only in the caller", async () => {
+      const runId = "sql-admin-guard";
+      await createRun(runId);
+      const commentId = await postAsPerson(runId, authorId, "from the author");
+
+      // A caller that skipped `commentDeleterFor` and claimed admin for a
+      // member still deletes nothing.
+      expect(
+        await softDeleteComment(commentId, {
+          as: "admin",
+          adminUserId: memberId,
+        })
+      ).toBe(false);
+      expect((await readDeleter(commentId)).deletedAt).toBeNull();
+
+      expect(
+        await softDeleteComment(commentId, {
+          as: "admin",
+          adminUserId: adminId,
+        })
+      ).toBe(true);
+      expect((await readDeleter(commentId)).deletedBy).toBe(adminId);
+    });
   });
 });

@@ -13,6 +13,7 @@ import {
 import { claimRuns, unclaimRuns } from "@/lib/api/run-attributions";
 import { commentToWire } from "@/lib/api/run-comment-wire";
 import {
+  commentDeleterFor,
   createCommentAndNotify,
   getCommentForAuthorCheck,
   getCommentForDeleteAuthorCheck,
@@ -25,7 +26,6 @@ import { restoreRun, softDeleteRun } from "@/lib/api/run-lifecycle";
 import { pickMetadataFilterArgs } from "@/lib/api/run-metadata-filters";
 import { buildRunReport, getRunFailureSummary } from "@/lib/api/run-reports";
 import { requestAllRunUploads, requestRunUploads } from "@/lib/api/run-uploads";
-import { userIsAdmin } from "@/lib/api/user-admin";
 import { toolRegistrationConfig } from "@/lib/mcp/catalog/register";
 import {
   errorResult,
@@ -430,17 +430,20 @@ export function registerRunTools(server: McpServer) {
       if (!existing) {
         return errorResult(`Comment '${commentId}' not found.`);
       }
-      const isAuthor = existing.userId === userId;
-      if (!(isAuthor || (await userIsAdmin(userId)))) {
+      // Same rule as REST, which answers before any permission check. An
+      // already-deleted comment is left alone so the repeat call still works.
+      if (!existing.deletedAt && existing.runDeletedAt) {
+        return errorResult("Cannot modify comments on a soft-deleted run.");
+      }
+      const deleter = await commentDeleterFor(existing, {
+        kind: "user",
+        userId,
+      });
+      if (!deleter) {
         return errorResult("You can only delete your own comments.");
       }
 
-      await softDeleteComment({
-        commentId,
-        ...(isAuthor
-          ? ({ as: "author", actor: { kind: "user", userId } } as const)
-          : ({ as: "admin", adminUserId: userId } as const)),
-      });
+      await softDeleteComment(commentId, deleter);
       return structuredResult({ id: commentId, deleted: true });
     }
   );

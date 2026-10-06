@@ -3,6 +3,7 @@ import {
   asc,
   desc,
   eq,
+  exists,
   gte,
   inArray,
   isNull,
@@ -19,6 +20,7 @@ import {
 import { attributedToUser } from "@/lib/api/attributions";
 import { notifyComment } from "@/lib/api/notifications";
 import { touchRuns } from "@/lib/api/touch-runs";
+import { userIsAdmin } from "@/lib/api/user-admin";
 import { db } from "@/lib/db";
 import {
   instrumentRuns,
@@ -31,9 +33,11 @@ import {
 // ---------------------------------------------------------------------------
 // Run comments — markdown notes left by users on an instrument run.
 //
-// All mutations are author-only, enforced both by the SQL `where` clause
-// (defense in depth) and by the route handler (which can return a clean
-// 403 vs 404 distinction). Reads are open to any authenticated user.
+// Edit is author-only. Delete is for the author or a signed-in admin. Both
+// are checked by the route handler (which can return a clean 403 vs 404
+// distinction) and again in SQL. The author paths are pinned to the author;
+// the admin path is not, so its SQL checks the admin flag instead. Reads are
+// open to any authenticated user.
 // ---------------------------------------------------------------------------
 
 // Cap shared by REST and MCP. Generous for prose; well below jsonb/text limits.
@@ -502,6 +506,7 @@ export async function getCommentForAuthorCheck(commentId: string): Promise<{
 // Like `getCommentForAuthorCheck` but includes already soft-deleted rows, so
 // the delete path can stay idempotent: re-deleting your own comment still
 // resolves the author and succeeds instead of 404-ing on the missing row.
+// `runDeletedAt` lets callers refuse changes on a soft-deleted run.
 export async function getCommentForDeleteAuthorCheck(
   commentId: string
 ): Promise<{
@@ -509,6 +514,7 @@ export async function getCommentForDeleteAuthorCheck(
   userId: string | null;
   tokenId: string | null;
   deletedAt: Date | null;
+  runDeletedAt: Date | null;
 } | null> {
   const [row] = await db
     .select({
@@ -516,8 +522,10 @@ export async function getCommentForDeleteAuthorCheck(
       userId: runComments.userId,
       tokenId: runComments.tokenId,
       deletedAt: runComments.deletedAt,
+      runDeletedAt: instrumentRuns.deletedAt,
     })
     .from(runComments)
+    .innerJoin(instrumentRuns, eq(instrumentRuns.id, runComments.runId))
     .where(eq(runComments.id, commentId))
     .limit(1);
   return row ?? null;
@@ -560,26 +568,60 @@ export async function updateComment(input: {
 // `isNull(deletedAt)` predicate, so this returns false.
 // ---------------------------------------------------------------------------
 
-// Callers decide which path applies, since only they know whether the caller
-// is an admin. An author delete is also pinned to the author in SQL, so a
-// stale permission check cannot delete another author's comment.
+// Which rule lets the caller delete. An author delete is pinned to the author
+// in SQL, so a stale permission check cannot delete another author's comment.
+// The admin path is not pinned to the author, so its SQL checks the admin flag.
 export type CommentDeleter =
   | { as: "author"; actor: ActorRef }
   | { as: "admin"; adminUserId: string };
 
+// The one rule for who may delete a comment, shared by REST and MCP. Returns
+// null when the actor may not. A token is never an admin, so it can delete
+// only the comments it wrote. The admin flag is read from the database, not
+// from a cached session.
+export async function commentDeleterFor(
+  comment: { userId: string | null; tokenId: string | null },
+  actor: ActorRef
+): Promise<CommentDeleter | null> {
+  if (commentWrittenBy(comment, actor)) {
+    return { as: "author", actor };
+  }
+  if (actor.kind === "user" && (await userIsAdmin(actor.userId))) {
+    return { as: "admin", adminUserId: actor.userId };
+  }
+  return null;
+}
+
 export async function softDeleteComment(
-  input: { commentId: string } & CommentDeleter
+  commentId: string,
+  deleter: CommentDeleter
 ): Promise<boolean> {
   const now = new Date();
   const deletedBy =
-    input.as === "admin" ? input.adminUserId : actorColumns(input.actor).userId;
+    deleter.as === "admin"
+      ? deleter.adminUserId
+      : actorColumns(deleter.actor).userId;
   const result = await db
     .update(runComments)
     .set({ deletedAt: now, deletedBy })
     .where(
       and(
-        eq(runComments.id, input.commentId),
-        input.as === "author" ? writtenBy(input.actor) : undefined,
+        eq(runComments.id, commentId),
+        // A caller that skips `commentDeleterFor` still cannot delete as an
+        // admin unless the database says the user is one.
+        deleter.as === "author"
+          ? writtenBy(deleter.actor)
+          : exists(
+              db
+                .select({ one: sql`1` })
+                .from(users)
+                .where(
+                  and(
+                    eq(users.id, deleter.adminUserId),
+                    eq(users.isAdmin, true)
+                  )
+                )
+            ),
         isNull(runComments.deletedAt)
       )
     )
