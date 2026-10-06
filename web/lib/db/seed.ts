@@ -141,6 +141,8 @@ export async function seedDevUser(
   const [pat] = await db
     .insert(schema.personalAccessTokens)
     .values({
+      // Deprecated; written for rollback safety (see POST /api/v1/tokens).
+      userId,
       createdBy: userId,
       name: options.tokenName ?? "seeded-token",
       tokenHash: hashToken(plaintext),

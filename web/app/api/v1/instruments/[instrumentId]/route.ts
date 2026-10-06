@@ -96,7 +96,8 @@ export async function PATCH(
     return apiError(404, NOT_FOUND, `Instrument '${instrumentId}' not found`);
   }
 
-  const updates: Record<string, unknown> = {};
+  // Typed against the table so a misspelled audit column is a type error.
+  const updates: Partial<typeof instruments.$inferInsert> = {};
   if (body.status !== undefined) {
     updates.status = body.status;
     // Keep the retirement audit fields in lockstep with the status: only an

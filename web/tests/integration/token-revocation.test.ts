@@ -149,7 +149,7 @@ describe("Token creator", () => {
     await resetDb();
   });
 
-  it("records the admin who created a token, with no owner", async () => {
+  it("records the admin who created a token", async () => {
     const admin = await seedTestUser({ isAdmin: true });
 
     const res = await api("/api/v1/tokens", {
@@ -167,9 +167,10 @@ describe("Token creator", () => {
       })
       .from(personalAccessTokens)
       .where(eq(personalAccessTokens.id, id));
-    expect(row).toEqual({ userId: null, createdBy: admin.userId });
+    // `user_id` is a deprecated copy of the creator, kept so a rollback to the
+    // previous release still works. Nothing reads it for sign-in.
+    expect(row).toEqual({ userId: admin.userId, createdBy: admin.userId });
 
-    // The new token works even though no user stands behind it.
     const use = await api("/api/v1/instruments", { token });
     expect(use.status).toBe(200);
   });
@@ -218,10 +219,13 @@ describe("Token creator", () => {
   it("records the creator on seeded tokens", async () => {
     const member = await seedTestUser();
     const [row] = await getTestDb()
-      .select({ createdBy: personalAccessTokens.createdBy })
+      .select({
+        userId: personalAccessTokens.userId,
+        createdBy: personalAccessTokens.createdBy,
+      })
       .from(personalAccessTokens)
       .where(eq(personalAccessTokens.id, member.tokenId));
-    expect(row?.createdBy).toBe(member.userId);
+    expect(row).toEqual({ userId: member.userId, createdBy: member.userId });
   });
 });
 
@@ -367,16 +371,6 @@ describe("Token audit columns", () => {
     ).rejects.toThrow();
   });
 
-  it("stops authenticating a token once its owner is deleted", async () => {
-    const before = await api("/api/v1/instruments", { token });
-    expect(before.status).toBe(200);
-
-    await getTestDb().delete(users).where(eq(users.id, userId));
-
-    const after = await api("/api/v1/instruments", { token });
-    expect(after.status).toBe(401);
-  });
-
   it("still notifies other commenters when a run has a token comment", async () => {
     const db = getTestDb();
     const { userId: participant } = await seedTestUser();
@@ -393,7 +387,7 @@ describe("Token audit columns", () => {
     await notifyComment({
       runInternalId: runId,
       commentId: comment.id,
-      authorUserId: author,
+      author: { kind: "user", userId: author },
     });
 
     const rows = await db
@@ -408,16 +402,27 @@ describe("Token audit columns", () => {
     ]);
   });
 
-  it("keeps a token when its owner is deleted", async () => {
+  // Policy: deleting a person must not break machine tokens such as the
+  // Lambda or watcher token. Admins revoke a leaving person's tokens by hand.
+  it("keeps a token working after its creator is deleted", async () => {
     const db = getTestDb();
+    const before = await api("/api/v1/instruments", { token });
+    expect(before.status).toBe(200);
+
     await db.delete(users).where(eq(users.id, userId));
+
+    // The foreign keys null both person columns on the token row.
     const [row] = await db
       .select({
         userId: personalAccessTokens.userId,
         createdBy: personalAccessTokens.createdBy,
+        revokedAt: personalAccessTokens.revokedAt,
       })
       .from(personalAccessTokens)
       .where(eq(personalAccessTokens.id, tokenId));
-    expect(row).toEqual({ userId: null, createdBy: null });
+    expect(row).toEqual({ userId: null, createdBy: null, revokedAt: null });
+
+    const after = await api("/api/v1/instruments", { token });
+    expect(after.status).toBe(200);
   });
 });

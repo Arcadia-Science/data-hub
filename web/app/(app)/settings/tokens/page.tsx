@@ -17,11 +17,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { UserAvatar } from "@/components/user-avatar";
 import { auth } from "@/lib/auth";
 import { toUserAvatarUser } from "@/lib/avatar-color";
@@ -160,14 +155,12 @@ async function TokensSection({ isAdmin }: { isAdmin: boolean }) {
                     <TableCell className="font-medium">{token.name}</TableCell>
                     <TableCell>
                       {avatarUser ? (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <UserAvatar size="sm" user={avatarUser} />
-                          </TooltipTrigger>
-                          <TooltipContent>
+                        <span className="inline-flex items-center gap-2">
+                          <UserAvatar size="sm" user={avatarUser} />
+                          <span className="max-w-40 truncate">
                             {avatarUser.displayName}
-                          </TooltipContent>
-                        </Tooltip>
+                          </span>
+                        </span>
                       ) : (
                         <span className="text-muted-foreground">Unknown</span>
                       )}

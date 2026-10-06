@@ -65,8 +65,12 @@ const searchCommentResultSchema = z.object({
   instrumentId: z.string(),
   instrumentName: z.string(),
   runId: z.string(),
-  userId: z.string(),
-  userName: z.string(),
+  // Null when a token wrote the comment; `token` is set in that case.
+  userId: z.string().nullable(),
+  userName: z.string().nullable(),
+  token: z
+    .object({ id: z.string(), name: z.string(), revoked: z.boolean() })
+    .nullable(),
 });
 
 /** Grouped result from `globalSearch` (dates already ISO strings). */

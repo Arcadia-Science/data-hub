@@ -9,12 +9,10 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
+import type { ActorToken } from "@/lib/api/actor";
 import type { NotificationItem } from "@/lib/notifications/types";
 
-export type {
-  NotificationActor,
-  NotificationItem,
-} from "@/lib/notifications/types";
+export type { NotificationItem } from "@/lib/notifications/types";
 
 // ---------------------------------------------------------------------------
 // Notifications provider — single source of truth for the bell badge and
@@ -49,8 +47,15 @@ const POLL_INTERVAL_MS = 60_000;
 // ---------------------------------------------------------------------------
 
 interface ApiNotification {
-  actor: NotificationItem["actor"];
-  actor_token: NotificationItem["actorToken"];
+  // Set when a person caused the row; at most one of `actor` and
+  // `actor_token` is set.
+  actor: {
+    avatarUrl: string | null;
+    displayName: string;
+    id: string;
+    initials: string;
+  } | null;
+  actor_token: ActorToken | null;
   body: string | null;
   comment_body: string | null;
   comment_id: string | null;
@@ -67,6 +72,21 @@ interface ApiNotification {
   run_display_id: string | null;
   run_id: string | null;
   type: NotificationItem["type"];
+}
+
+function actorFromApi(n: ApiNotification): NotificationItem["actor"] {
+  if (n.actor) {
+    return {
+      kind: "user",
+      user: {
+        userId: n.actor.id,
+        displayName: n.actor.displayName,
+        initials: n.actor.initials,
+        avatarUrl: n.actor.avatarUrl,
+      },
+    };
+  }
+  return n.actor_token ? { kind: "token", token: n.actor_token } : null;
 }
 
 function fromApi(n: ApiNotification): NotificationItem {
@@ -87,8 +107,7 @@ function fromApi(n: ApiNotification): NotificationItem {
     commentBody: n.comment_body,
     body: n.body,
     feedbackId: n.feedback_id,
-    actor: n.actor,
-    actorToken: n.actor_token,
+    actor: actorFromApi(n),
   };
 }
 

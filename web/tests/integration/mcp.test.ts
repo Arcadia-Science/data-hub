@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 // biome-ignore lint/performance/noNamespaceImport: integration tests need the full schema module for Db typing
 import * as schema from "@/lib/db/schema";
@@ -332,6 +333,40 @@ describe("MCP Server (HTTP)", () => {
     expect(parsed.instruments).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: instrumentId })])
     );
+  });
+
+  it("global_search returns a comment written by a token", async () => {
+    const db = getTestDb();
+    const { tokenId } = await seedTestUser({ tokenName: "mcp-search-bot" });
+    const [run] = await db
+      .select({ id: schema.instrumentRuns.id })
+      .from(schema.instrumentRuns)
+      .where(eq(schema.instrumentRuns.runId, runId));
+    const [comment] = await db
+      .insert(schema.runComments)
+      .values({ runId: run.id, tokenId, body: "Bot note MCPSEARCH-ZQX" })
+      .returning({ id: schema.runComments.id });
+
+    try {
+      const result = await callTool("global_search", {
+        query: "MCPSEARCH-ZQX",
+        scope: "comments",
+      });
+      expect(result.isError).toBeFalsy();
+      const parsed = JSON.parse(result.content[0].text);
+      expect(parsed.comments).toEqual([
+        expect.objectContaining({
+          id: comment.id,
+          userId: null,
+          userName: null,
+          token: { id: tokenId, name: "mcp-search-bot", revoked: false },
+        }),
+      ]);
+    } finally {
+      await db
+        .delete(schema.runComments)
+        .where(eq(schema.runComments.id, comment.id));
+    }
   });
 
   it("list_run_attributors returns the set of attributors for an instrument", async () => {

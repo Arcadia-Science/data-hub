@@ -66,13 +66,7 @@ describe("isBoundToOtherToken", () => {
     expect(isBoundToOtherToken(sessionAuth(), "pat-b")).toBe(false);
   });
 
-  it("is false for token auth with a missing tokenId", () => {
-    const broken: AuthResult = {
-      userId: "token-user",
-      authMethod: "token",
-      scopes: ["watchers:report"],
-      tokenId: null,
-    };
-    expect(isBoundToOtherToken(broken, "pat-b")).toBe(false);
+  it("is false for token auth with an empty tokenId", () => {
+    expect(isBoundToOtherToken(tokenAuth(""), "pat-b")).toBe(false);
   });
 });

@@ -115,6 +115,10 @@ export async function POST(request: NextRequest) {
   const [inserted] = await db
     .insert(personalAccessTokens)
     .values({
+      // Deprecated and not read for sign-in. Still written so a rollback to
+      // the previous release keeps new tokens working, until a follow-up
+      // drops the column.
+      userId: authResult.userId,
       createdBy: authResult.userId,
       name,
       tokenHash,

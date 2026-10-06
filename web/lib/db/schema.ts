@@ -275,16 +275,15 @@ export const personalAccessTokens = pgTable(
   "personal_access_tokens",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    // Token owner / acting identity for Bearer auth and write attribution.
-    // An admin may mint a token bound to another user (e.g. an MCP client).
-    // Nullable and `set null` on user delete so tokens that audit rows point
-    // at outlive the user. A token with no owner cannot authenticate.
+    // Deprecated and not used for sign-in: a token acts as itself. New tokens
+    // still carry their creator here only so a rollback to the previous
+    // release keeps working. A follow-up change drops this column.
     userId: text("user_id").references(() => users.id, {
       onDelete: "set null",
     }),
     // The admin who created the token. NULL after that user is deleted, and
     // for tokens created before this column existed or by code that does not
-    // set it. Unlike `userId`, this is never an acting identity.
+    // set it. A record of who made the token, never an acting identity.
     createdBy: text("created_by").references(() => users.id, {
       onDelete: "set null",
     }),

@@ -12,8 +12,10 @@ import {
 } from "lucide-react";
 import { InstrumentStatusBadge } from "@/components/instruments/instrument-status-badge";
 import { Highlight } from "@/components/search/highlight";
+import { ActorAvatar } from "@/components/token-actor";
 import { UserAvatar } from "@/components/user-avatar";
 import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
+import { type Actor, actorDisplayName } from "@/lib/api/actor";
 import type {
   SearchCommentResult,
   SearchFileResult,
@@ -225,6 +227,18 @@ export function SearchUserRow({
   );
 }
 
+// Rebuilds the comment's author from the flat user and token fields. A
+// comment with neither (its author was deleted) shows as "Unknown".
+function commentAuthor(result: SearchCommentResult): Actor | null {
+  if (result.userId) {
+    return {
+      kind: "user",
+      user: toUserAvatarUser({ userId: result.userId, name: result.userName }),
+    };
+  }
+  return result.token ? { kind: "token", token: result.token } : null;
+}
+
 export function SearchCommentRow({
   result,
   query,
@@ -232,6 +246,7 @@ export function SearchCommentRow({
   result: SearchCommentResult;
   query: string;
 }) {
+  const author = commentAuthor(result);
   return (
     <ResultRowShell
       leading={<ResultRowIcon icon={MessageSquare} />}
@@ -241,7 +256,12 @@ export function SearchCommentRow({
         <Highlight query={query} text={result.bodyPreview} />
       </span>
       <span className="flex min-w-0 items-center gap-1 text-muted-foreground text-xs">
-        <span className="truncate">{result.userName}</span>
+        {/* The whole row is already a link, so use the avatar alone rather
+            than a linked label. */}
+        {author ? <ActorAvatar actor={author} className="size-4" /> : null}
+        <span className="truncate">
+          {author ? actorDisplayName(author) : "Unknown"}
+        </span>
         <span aria-hidden="true">·</span>
         <span className="truncate">{result.instrumentName}</span>
         <span aria-hidden="true">›</span>

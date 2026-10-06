@@ -15,7 +15,9 @@ export function TokenAvatar({
   return (
     <Avatar className={className} size={size}>
       <AvatarFallback className="bg-muted text-muted-foreground">
-        <KeyRound className="size-3" />
+        <KeyRound aria-hidden="true" className="size-3" />
+        {/* The key icon carries no text, so name it for screen readers. */}
+        <span className="sr-only">API token</span>
       </AvatarFallback>
     </Avatar>
   );

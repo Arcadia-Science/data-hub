@@ -1,20 +1,12 @@
-import type { ActorToken } from "@/lib/api/actor";
+import type { Actor } from "@/lib/api/actor";
 import type { InstrumentType } from "@/lib/db/schema";
 
 // Client-side notification row. The provider maps the GET /notifications
 // wire shape onto this so grouping and the bell never see snake_case.
 
-export interface NotificationActor {
-  avatarUrl: string | null;
-  displayName: string;
-  id: string;
-  initials: string;
-}
-
 export interface NotificationItem {
-  actor: NotificationActor | null;
-  // Set instead of `actor` when a personal access token caused the row.
-  actorToken: ActorToken | null;
+  // The person or token that caused the row; null when nobody was recorded.
+  actor: Actor | null;
   // Caller-supplied message for `generic` and feedback rows; null otherwise.
   body: string | null;
   commentBody: string | null;
