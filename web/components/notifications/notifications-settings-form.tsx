@@ -6,7 +6,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
-import { SlackChannelCard } from "@/components/notifications/slack-channel-card";
 import {
   SlackConnectionCard,
   type SlackPreferences,
@@ -54,15 +53,6 @@ interface SlackConnectionState {
   slackTeamName: string | null;
 }
 
-interface SlackChannelConfigState {
-  configured: boolean;
-  lastUpdated: {
-    at: string;
-    byEmail: string | null;
-    byName: string | null;
-  } | null;
-}
-
 // The form's `perInstrument` field is a Record<string, boolean> keyed by
 // instrument id. Storing it as a plain map (rather than parallel arrays)
 // keeps the per-row Field paths predictable: `perInstrument.${id}`.
@@ -81,9 +71,6 @@ interface Props {
   // The page supplies both channels' prefs; the in-app subset seeds this
   // form, the Slack subset is handed to `SlackConnectionCard.Connected`.
   initialPreferences: InAppPreferences & SlackPreferences;
-  // Null when the viewer is not a workspace admin — the channel section is
-  // hidden entirely for non-admins.
-  slackChannelConfig: SlackChannelConfigState | null;
   slackConnection: SlackConnectionState;
 }
 
@@ -91,7 +78,6 @@ export function NotificationsSettingsForm({
   initialPreferences,
   initialInstruments,
   slackConnection,
-  slackChannelConfig,
   adminNewFeedback,
 }: Props) {
   const router = useRouter();
@@ -497,18 +483,6 @@ export function NotificationsSettingsForm({
       ) : (
         <SlackConnectionCard.Disconnected />
       )}
-
-      {slackChannelConfig ? (
-        <>
-          <SlackChannelCard.SectionHeader
-            configured={slackChannelConfig.configured}
-          />
-          <SlackChannelCard.Form
-            configured={slackChannelConfig.configured}
-            lastUpdated={slackChannelConfig.lastUpdated}
-          />
-        </>
-      ) : null}
     </div>
   );
 }

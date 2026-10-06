@@ -9,7 +9,7 @@ import {
 import { slackChannelWebhookPutBodySchema } from "@/lib/slack/webhook-url";
 
 // Admin-only read/write of the singleton `slack_channel_config` row,
-// edited via the "Slack channel" section on `/settings/notifications`.
+// edited via the "Slack channel" section on `/settings/integrations`.
 // The webhook URL is never returned on GET — only a `configured` flag.
 
 interface SlackChannelResponse {
