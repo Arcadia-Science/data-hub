@@ -1,6 +1,8 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { AppSidebar } from "@/components/app-sidebar";
+import { FeedbackDialogProvider } from "@/components/feedback/feedback-dialog-provider";
+import { FeedbackMenuItem } from "@/components/feedback/feedback-menu-item";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { NotificationsProvider } from "@/components/notifications/notifications-provider";
 import { ArchiveDownloadProvider } from "@/components/runs/archive-download-provider";
@@ -83,19 +85,22 @@ export default async function AppLayout({
     <NotificationsProvider initialUnreadCount={initialUnreadCount}>
       <ArchiveDownloadProvider>
         <SidebarProvider defaultOpen={sidebarDefaultOpen}>
-          <AppSidebar
-            changelogSections={changelogSections}
-            feedbackEnabled={feedbackEnabled}
-            instruments={instruments}
-            session={session}
-            signOutAction={async () => {
-              "use server";
-              await authInstance.api.signOut({
-                headers: await headers(),
-              });
-              redirect("/login");
-            }}
-          />
+          <FeedbackDialogProvider>
+            <AppSidebar
+              changelogSections={changelogSections}
+              instruments={instruments}
+              session={session}
+              signOutAction={async () => {
+                "use server";
+                await authInstance.api.signOut({
+                  headers: await headers(),
+                });
+                redirect("/login");
+              }}
+            >
+              {feedbackEnabled ? <FeedbackMenuItem /> : null}
+            </AppSidebar>
+          </FeedbackDialogProvider>
           {/* `min-w-0` lets the main pane shrink beside the sidebar so wide
               tables scroll inside their container instead of stretching the page. */}
           <SidebarInset className="min-w-0 pb-12">

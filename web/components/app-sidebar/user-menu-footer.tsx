@@ -5,15 +5,13 @@ import {
   ChevronsUpDown,
   ExternalLink,
   LogOut,
-  MessageSquarePlus,
   ScrollText,
   Settings,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { type ReactNode, useState, useTransition } from "react";
 import { DocsLink } from "@/components/docs-link";
-import { SendFeedbackDialog } from "@/components/feedback/send-feedback-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -51,7 +49,8 @@ function preloadChangelogDialog() {
 
 interface UserMenuFooterProps {
   changelogSections: readonly ChangelogDaySection[];
-  feedbackEnabled: boolean;
+  // Extra account menu items, shown after Changelog.
+  children?: ReactNode;
   signOutAction: () => Promise<void>;
   user: {
     id: string;
@@ -63,7 +62,7 @@ interface UserMenuFooterProps {
 
 export function UserMenuFooter({
   changelogSections,
-  feedbackEnabled,
+  children,
   user,
   signOutAction,
 }: UserMenuFooterProps) {
@@ -76,7 +75,6 @@ export function UserMenuFooter({
   const [menuOpen, setMenuOpen] = useState(false);
   const [changelogMounted, setChangelogMounted] = useState(false);
   const [changelogOpen, setChangelogOpen] = useState(false);
-  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const avatarUser = toUserAvatarUser({
     userId: user.id,
@@ -163,18 +161,7 @@ export function UserMenuFooter({
                 />
               ) : null}
             </DropdownMenuItem>
-            {feedbackEnabled ? (
-              <DropdownMenuItem
-                onSelect={(event) => {
-                  event.preventDefault();
-                  setMenuOpen(false);
-                  setFeedbackOpen(true);
-                }}
-              >
-                <MessageSquarePlus data-icon="inline-start" />
-                Feedback
-              </DropdownMenuItem>
-            ) : null}
+            {children}
             <DropdownMenuItem asChild>
               <DocsLink href={DOCS_URL}>
                 <BookOpen data-icon="inline-start" />
@@ -204,12 +191,6 @@ export function UserMenuFooter({
             onOpenChange={setChangelogOpen}
             open={changelogOpen}
             sections={changelogSections}
-          />
-        ) : null}
-        {feedbackEnabled ? (
-          <SendFeedbackDialog
-            onOpenChange={setFeedbackOpen}
-            open={feedbackOpen}
           />
         ) : null}
       </SidebarMenuItem>

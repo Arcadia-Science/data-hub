@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { AppSidebarContent } from "@/components/app-sidebar/app-sidebar-content";
 import { UserMenuFooter } from "@/components/app-sidebar/user-menu-footer";
 import {
@@ -17,7 +18,8 @@ import type { ChangelogDaySection } from "@/lib/changelog/group";
 
 interface AppSidebarProps {
   changelogSections: readonly ChangelogDaySection[];
-  feedbackEnabled: boolean;
+  // Extra items for the account menu, such as the Feedback entry.
+  children?: ReactNode;
   instruments: SidebarInstrument[];
   session: Session;
   signOutAction: () => Promise<void>;
@@ -25,7 +27,7 @@ interface AppSidebarProps {
 
 export function AppSidebar({
   changelogSections,
-  feedbackEnabled,
+  children,
   session,
   instruments,
   signOutAction,
@@ -68,10 +70,11 @@ export function AppSidebar({
       <SidebarFooter>
         <UserMenuFooter
           changelogSections={changelogSections}
-          feedbackEnabled={feedbackEnabled}
           signOutAction={signOutAction}
           user={session.user}
-        />
+        >
+          {children}
+        </UserMenuFooter>
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
