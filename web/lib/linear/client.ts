@@ -582,3 +582,29 @@ export async function listLinearIssueDetails(
   );
   return data.issues.nodes.filter((node) => !node.trashed);
 }
+
+const workflowStateSchema = z.object({
+  workflowStates: z.object({
+    nodes: z.array(z.object({ type: z.string() })),
+  }),
+});
+
+// Looks the state up in a list, not by `workflowState(id:)`, so a state that
+// an admin deleted comes back as null and not as an error. `includeArchived`
+// keeps those deleted states findable.
+export async function getLinearWorkflowStateType(
+  credentials: { clientId: string; clientSecret: string },
+  stateId: string
+): Promise<string | null> {
+  const data = await graphql(
+    credentials,
+    `query FeedbackWorkflowState($filter: WorkflowStateFilter, $first: Int) {
+      workflowStates(first: $first, includeArchived: true, filter: $filter) {
+        nodes { type }
+      }
+    }`,
+    { filter: { id: { eq: stateId } }, first: 1 },
+    workflowStateSchema
+  );
+  return data.workflowStates.nodes[0]?.type ?? null;
+}

@@ -325,6 +325,19 @@ export const linearIntegrationConfig = pgTable(
   ]
 );
 
+// One row for each Linear webhook delivery that Data Hub acted on. Linear
+// resends a delivery that was slow to answer, and the `Linear-Delivery` id is
+// the only thing that tells a resend apart from a second status change.
+export const linearWebhookDeliveries = pgTable("linear_webhook_deliveries", {
+  deliveryId: text("delivery_id").primaryKey(),
+  receivedAt: timestamp("received_at", {
+    withTimezone: true,
+    mode: "date",
+  })
+    .notNull()
+    .defaultNow(),
+});
+
 export const personalAccessTokens = pgTable(
   "personal_access_tokens",
   {
