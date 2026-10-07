@@ -8,12 +8,9 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { requireSession } from "@/lib/api/auth";
 import { apiError, UNAUTHORIZED } from "@/lib/api/errors";
+import { getSlackAppCredentials } from "@/lib/slack/app-config";
 import { getSlackRedirectUri } from "@/lib/slack/oauth";
 import { generateState } from "@/lib/slack/state";
-
-function getSlackClientId(): string | null {
-  return process.env.SLACK_CLIENT_ID ?? null;
-}
 
 export async function GET(request: NextRequest) {
   const auth = await requireSession();
@@ -21,7 +18,7 @@ export async function GET(request: NextRequest) {
     return apiError(401, UNAUTHORIZED, "Authentication required");
   }
 
-  const clientId = getSlackClientId();
+  const { clientId } = await getSlackAppCredentials();
   if (!clientId) {
     return apiError(500, "CONFIGURATION_ERROR", "Slack is not configured");
   }

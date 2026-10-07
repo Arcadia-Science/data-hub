@@ -74,22 +74,34 @@ export function decryptIntegrationSecret(stored: string): string {
   return plaintext.toString("utf8");
 }
 
+export type SavedValue =
+  | { state: "empty" }
+  | { state: "readable"; value: string }
+  | { state: "unreadable" };
+
 // Plaintext values pass through so rows saved before encryption still work.
-// Encrypted values the current key cannot open are treated as unset: a
-// missing or rotated key must not leak ciphertext into a webhook call.
-export function readMaybeEncryptedSecret(stored: string | null): string | null {
+// Settings screens need "nothing saved" and "saved but the current key cannot
+// open it" kept apart, so a missing or rotated key shows as a warning instead
+// of an empty field. Ciphertext is never returned as a value.
+export function inspectSavedSecret(stored: string | null): SavedValue {
   if (stored == null || stored.length === 0) {
-    return null;
+    return { state: "empty" };
   }
   if (!isEncryptedIntegrationSecret(stored)) {
-    return stored;
+    return { state: "readable", value: stored };
   }
   try {
-    return decryptIntegrationSecret(stored);
+    return { state: "readable", value: decryptIntegrationSecret(stored) };
   } catch (err) {
     if (err instanceof IntegrationSecretsKeyError) {
       console.error(err.message);
     }
-    return null;
+    return { state: "unreadable" };
   }
+}
+
+// Callers that only need the value treat an unreadable secret as unset.
+export function readMaybeEncryptedSecret(stored: string | null): string | null {
+  const saved = inspectSavedSecret(stored);
+  return saved.state === "readable" ? saved.value : null;
 }

@@ -1,9 +1,11 @@
 import type { Metadata } from "next/types";
 import { SignInRequired } from "@/components/auth/sign-in-required";
+import { SlackAppCard } from "@/components/integrations/slack-app-card";
 import { SlackChannelCard } from "@/components/notifications/slack-channel-card";
 import { AdminsOnly } from "@/components/settings/admins-only";
 import { SettingsPageContent } from "@/components/settings/settings-page-content";
 import { auth } from "@/lib/auth";
+import { getSlackAppConfigForAdmin } from "@/lib/slack/app-config";
 import { getSlackChannelConfigForAdmin } from "@/lib/slack/channel-config";
 
 const description =
@@ -30,7 +32,10 @@ export default async function IntegrationsSettingsPage() {
     return <AdminsOnly>manage integrations</AdminsOnly>;
   }
 
-  const slackChannel = await getSlackChannelConfigForAdmin();
+  const [slackApp, slackChannel] = await Promise.all([
+    getSlackAppConfigForAdmin(),
+    getSlackChannelConfigForAdmin(),
+  ]);
 
   return (
     <SettingsPageContent>
@@ -44,18 +49,17 @@ export default async function IntegrationsSettingsPage() {
         </p>
       </div>
       <div className="mt-6 flex flex-col gap-6">
+        <SlackAppCard
+          botToken={slackApp.botToken}
+          clientId={slackApp.clientId}
+          clientSecret={slackApp.clientSecret}
+          key={slackApp.lastUpdated?.at ?? "never-saved"}
+          teamId={slackApp.teamId}
+        />
         <SlackChannelCard.SectionHeader configured={slackChannel.configured} />
         <SlackChannelCard.Form
           configured={slackChannel.configured}
-          lastUpdated={
-            slackChannel.updatedAt
-              ? {
-                  at: slackChannel.updatedAt.toISOString(),
-                  byName: slackChannel.updatedByName,
-                  byEmail: slackChannel.updatedByEmail,
-                }
-              : null
-          }
+          lastUpdated={slackChannel.lastUpdated}
         />
       </div>
     </SettingsPageContent>

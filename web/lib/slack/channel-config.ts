@@ -5,13 +5,15 @@ import {
 } from "@/lib/crypto/integration-secrets";
 import { db } from "@/lib/db";
 import { slackChannelConfig, users } from "@/lib/db/schema";
+import {
+  type LastUpdated,
+  lastUpdatedByColumns,
+  toLastUpdated,
+} from "@/lib/integrations/last-updated";
 
 export interface SlackChannelConfigForAdmin {
   configured: boolean;
-  updatedAt: Date | null;
-  updatedByEmail: string | null;
-  updatedById: string | null;
-  updatedByName: string | null;
+  lastUpdated: LastUpdated | null;
 }
 
 export async function getSlackChannelWebhookUrl(): Promise<string | null> {
@@ -27,29 +29,18 @@ export async function getSlackChannelConfigForAdmin(): Promise<SlackChannelConfi
     .select({
       webhookUrl: slackChannelConfig.webhookUrl,
       updatedAt: slackChannelConfig.updatedAt,
-      updatedById: users.id,
-      updatedByName: users.name,
-      updatedByEmail: users.email,
+      ...lastUpdatedByColumns,
     })
     .from(slackChannelConfig)
     .leftJoin(users, eq(users.id, slackChannelConfig.updatedBy));
 
   if (!row) {
-    return {
-      configured: false,
-      updatedAt: null,
-      updatedById: null,
-      updatedByName: null,
-      updatedByEmail: null,
-    };
+    return { configured: false, lastUpdated: null };
   }
 
   return {
     configured: readMaybeEncryptedSecret(row.webhookUrl) != null,
-    updatedAt: row.updatedAt,
-    updatedById: row.updatedById,
-    updatedByName: row.updatedByName,
-    updatedByEmail: row.updatedByEmail,
+    lastUpdated: toLastUpdated(row),
   };
 }
 
