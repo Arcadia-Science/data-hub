@@ -34,12 +34,12 @@ function unreadableMessage(set: boolean, envName?: string): string {
 
 /**
  * One integration setting: a label, where the current value comes from, an
- * input, and a button that removes the saved value. `type="password"` is for
- * secrets, which are never sent back to the browser, so the input starts empty
- * and a new value replaces the saved one.
+ * input, and, when `onClear` is given, a button that removes the saved value.
+ * `type="password"` is for secrets, which are never sent back to the browser,
+ * so the input starts empty and a new value replaces the saved one.
  */
 export function IntegrationField({
-  clearing,
+  clearing = false,
   description,
   envName,
   id,
@@ -51,20 +51,21 @@ export function IntegrationField({
   type,
   value,
 }: {
-  clearing: boolean;
+  clearing?: boolean;
   description: string;
   envName?: string;
   id: string;
   label: string;
   onChange: (value: string) => void;
-  onClear: () => void;
+  onClear?: () => void;
   placeholder?: string;
   status: PlainFieldStatus | SecretFieldStatus;
   type: "password" | "text";
   value: string;
 }) {
-  const hasSavedValue =
-    status.source === "database" || status.source === "unreadable";
+  const canClear =
+    onClear != null &&
+    (status.source === "database" || status.source === "unreadable");
 
   return (
     <Field>
@@ -94,7 +95,7 @@ export function IntegrationField({
       {status.source === "unreadable" ? (
         <FieldError>{unreadableMessage(status.set, envName)}</FieldError>
       ) : null}
-      {hasSavedValue ? (
+      {canClear ? (
         <Button
           disabled={clearing}
           onClick={onClear}
