@@ -249,7 +249,10 @@ export const watcherReleaseConfig = pgTable(
 // the `SLACK_WEBHOOK_URL` env var.
 //
 // When the table is empty (or `webhook_url` is NULL) channel notifications
-// are disabled — `sendSlackMessage` becomes a no-op.
+// are disabled — `sendSlackMessage` becomes a no-op. New values are stored
+// encrypted with the `PREFIX` marker from `lib/crypto/integration-secrets.ts`.
+// A value without that marker is a legacy plaintext URL and is still used
+// until an admin saves again.
 export const slackChannelConfig = pgTable(
   "slack_channel_config",
   {

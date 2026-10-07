@@ -69,6 +69,7 @@ Explicitly **do not** set the following — leaving them unset is what makes the
 - `SLACK_BOT_TOKEN`, `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET` — Slack DM/OAuth features are disabled when unset; the Settings > Notifications page renders a "Connect to Slack" button that is inert without these.
 - `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` — Google sign-in is unused locally; the non-production email/password path handles auth. Deployed environments need a real client, from [Create a Google OAuth client](first-time-deployment.md#create-a-google-oauth-client).
 - `AWS_ROLE_ARN` — Vercel OIDC federation is for production. The local AWS SDK falls back to the static credentials above.
+- `INTEGRATION_SECRETS_KEY` — only needed if you save a Slack or Linear secret from Settings. Generate 64 hex characters with `openssl rand -hex 32`. Without it, saving those secrets fails; reading a webhook URL that was stored as plaintext still works.
 
 ## Sign in (dev only)
 

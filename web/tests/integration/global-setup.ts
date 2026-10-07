@@ -296,6 +296,8 @@ export async function setup() {
     // Shared secret the cron sweep route checks. Tests send the same value
     // as a Bearer token (see upload-queue-sweep.test.ts).
     CRON_SECRET: "test-cron-secret",
+    // Lets settings routes encrypt secrets they write. 32 bytes, hex.
+    INTEGRATION_SECRETS_KEY: "a".repeat(64),
   };
   // Strip the Lambda Function URL so "not configured" test cases work
   // regardless of the developer's local .env. Tests that need a stubbed
