@@ -6,8 +6,15 @@ import {
   UNAUTHORIZED,
   VALIDATION_ERROR,
 } from "@/lib/api/errors";
-import { createFeedback, listFeedback } from "@/lib/api/feedback";
-import { serializeFeedback } from "@/lib/api/feedback-json";
+import {
+  createFeedback,
+  listFeedback,
+  presentFeedback,
+} from "@/lib/api/feedback";
+import {
+  serializeFeedback,
+  serializeFeedbackGroup,
+} from "@/lib/api/feedback-json";
 import {
   FEEDBACK_PAGE_SIZE,
   feedbackContentSchema,
@@ -54,8 +61,12 @@ export async function POST(request: NextRequest) {
     return apiErrorFromResult(result);
   }
 
+  const isAdmin = await userIsAdmin(authResult.userId);
   return Response.json(
-    { duplicate: result.duplicate, feedback: serializeFeedback(result.item) },
+    {
+      duplicate: result.duplicate,
+      feedback: serializeFeedback(presentFeedback(result.item, isAdmin)),
+    },
     { status: result.duplicate ? 200 : 201 }
   );
 }
@@ -99,5 +110,6 @@ export async function GET(request: NextRequest) {
     feedback: result.items.map(serializeFeedback),
     total: result.total,
     counts: result.counts,
+    groups: result.groups.map(serializeFeedbackGroup),
   });
 }

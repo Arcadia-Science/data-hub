@@ -22,17 +22,35 @@ export interface LinearChoice {
   name: string;
 }
 
+export interface LinearLabelChoice extends LinearChoice {
+  color: string;
+}
+
+export interface LinearTeam extends LinearChoice {
+  key: string;
+}
+
+export interface LinearProject extends LinearChoice {
+  url: string;
+}
+
 export interface LinearTeamOptions {
-  labels: LinearChoice[];
-  projects: LinearChoice[];
+  labels: LinearLabelChoice[];
+  projects: LinearProject[];
 }
 
 // Body of `GET /api/v1/settings/integrations/linear/options`. `projects` and
 // `labels` are null until a team is chosen.
 export interface LinearOptionsResponse {
-  labels: LinearChoice[] | null;
-  projects: LinearChoice[] | null;
-  teams: LinearChoice[];
+  labels: LinearLabelChoice[] | null;
+  projects: LinearProject[] | null;
+  teams: LinearTeam[];
+}
+
+export interface LinearOrganization {
+  id: string;
+  name: string;
+  urlKey: string;
 }
 
 export const LINEAR_RATE_LIMITED = "RATELIMITED";
@@ -57,6 +75,24 @@ export class LinearNotFoundError extends LinearRequestError {
   }
 }
 
+// Linear answers this way when the OAuth app exists but client credentials
+// are turned off, which is a setup mistake rather than a bad secret.
+export class LinearClientCredentialsError extends LinearRequestError {
+  constructor(message: string) {
+    super(message);
+    this.name = "LinearClientCredentialsError";
+  }
+}
+
+// Linear refused the client ID or secret itself, as opposed to being down or
+// rate limiting the app.
+export class LinearCredentialsRejectedError extends LinearRequestError {
+  constructor(message: string) {
+    super(message);
+    this.name = "LinearCredentialsRejectedError";
+  }
+}
+
 interface CachedToken {
   accessToken: string;
   credentialsKey: string;
@@ -77,24 +113,33 @@ const namedNodeSchema = z.object({
   name: z.string(),
 });
 
-const connectionSchema = z.object({
-  nodes: z.array(namedNodeSchema),
-});
-
 const organizationSchema = z.object({
   organization: z.object({
     id: z.string(),
     name: z.string(),
+    urlKey: z.string(),
   }),
 });
 
+const teamNodeSchema = namedNodeSchema.extend({
+  key: z.string(),
+});
+
+const projectNodeSchema = namedNodeSchema.extend({
+  url: z.string(),
+});
+
 const teamsSchema = z.object({
-  teams: connectionSchema,
+  teams: z.object({ nodes: z.array(teamNodeSchema) }),
 });
 
 const teamOptionsSchema = z.object({
-  team: z.object({ projects: connectionSchema }),
-  issueLabels: connectionSchema,
+  team: z.object({
+    projects: z.object({ nodes: z.array(projectNodeSchema) }),
+  }),
+  issueLabels: z.object({
+    nodes: z.array(namedNodeSchema.extend({ color: z.string() })),
+  }),
 });
 
 const tokenErrorSchema = z.object({
@@ -145,7 +190,7 @@ async function tokenFailure(response: Response): Promise<LinearRequestError> {
       description ?? ""
     )
   ) {
-    return new LinearRequestError(
+    return new LinearClientCredentialsError(
       "Client credentials are turned off for this Linear app. In the app's settings in Linear, turn on client credentials tokens."
     );
   }
@@ -155,7 +200,7 @@ async function tokenFailure(response: Response): Promise<LinearRequestError> {
     );
   }
   const reason = description ?? error;
-  return new LinearRequestError(
+  return new LinearCredentialsRejectedError(
     `Linear rejected the app credentials${reason ? ` (${reason})` : ""}. Check the client ID and client secret.`
   );
 }
@@ -283,25 +328,25 @@ async function graphql<T>(
 
 export async function testLinearConnection(
   credentials: LinearCredentials
-): Promise<{ organizationName: string }> {
+): Promise<LinearOrganization> {
   const data = await graphql(
     credentials,
     `query LinearOrganization {
-      organization { id name }
+      organization { id name urlKey }
     }`,
     undefined,
     organizationSchema
   );
-  return { organizationName: data.organization.name };
+  return data.organization;
 }
 
 export async function listLinearTeams(
   credentials: LinearCredentials
-): Promise<LinearChoice[]> {
+): Promise<LinearTeam[]> {
   const data = await graphql(
     credentials,
     `query LinearTeams {
-      teams(first: 100) { nodes { id name } }
+      teams(first: 100) { nodes { id name key } }
     }`,
     undefined,
     teamsSchema
@@ -321,12 +366,12 @@ export async function listLinearTeamOptions(
       credentials,
       `query LinearTeamOptions($teamId: String!, $labelTeamId: ID!) {
         team(id: $teamId) {
-          projects(first: ${OPTIONS_PAGE_SIZE}) { nodes { id name } }
+          projects(first: ${OPTIONS_PAGE_SIZE}) { nodes { id name url } }
         }
         issueLabels(
           first: ${OPTIONS_PAGE_SIZE}
           filter: { or: [{ team: { id: { eq: $labelTeamId } } }, { team: { null: true } }] }
-        ) { nodes { id name } }
+        ) { nodes { id name color } }
       }`,
       { teamId, labelTeamId: teamId },
       teamOptionsSchema
@@ -363,6 +408,13 @@ const attachmentCreatedSchema = z.object({
   }),
 });
 
+const issueStateSchema = z.object({
+  color: z.string(),
+  id: z.string(),
+  name: z.string(),
+  type: z.string(),
+});
+
 const issueSummaryConnectionSchema = z.object({
   issues: z.object({
     nodes: z.array(
@@ -372,7 +424,7 @@ const issueSummaryConnectionSchema = z.object({
         }),
         createdAt: z.string(),
         id: z.string(),
-        state: z.object({ type: z.string() }),
+        state: issueStateSchema.extend({ position: z.number() }),
         trashed: z.boolean().nullable(),
       })
     ),
@@ -385,30 +437,49 @@ const issueSummaryConnectionSchema = z.object({
 
 // Other integrations store lists and nested objects in attachment metadata,
 // so only the Data Hub attachment's metadata is checked, by its caller.
-const issueDetailConnectionSchema = z.object({
-  issues: z.object({
+const linearUserSchema = z.object({
+  avatarUrl: z.string().nullable(),
+  email: z.string().nullable(),
+  id: z.string(),
+  name: z.string(),
+});
+
+const issueDetailNodeSchema = z.object({
+  assignee: linearUserSchema.nullable(),
+  attachments: z.object({
     nodes: z.array(
       z.object({
-        attachments: z.object({
-          nodes: z.array(
-            z.object({
-              metadata: z.record(z.string(), z.unknown()),
-              url: z.string(),
-            })
-          ),
-        }),
-        canceledAt: z.string().nullable(),
-        completedAt: z.string().nullable(),
-        createdAt: z.string(),
-        id: z.string(),
-        identifier: z.string(),
-        state: z.object({ name: z.string(), type: z.string() }),
-        trashed: z.boolean().nullable(),
-        updatedAt: z.string(),
+        metadata: z.record(z.string(), z.unknown()),
         url: z.string(),
       })
     ),
   }),
+  canceledAt: z.string().nullable(),
+  completedAt: z.string().nullable(),
+  createdAt: z.string(),
+  id: z.string(),
+  identifier: z.string(),
+  labels: z.object({
+    nodes: z.array(z.object({ color: z.string(), name: z.string() })),
+  }),
+  priority: z.number(),
+  priorityLabel: z.string(),
+  project: z.object({ name: z.string() }).nullable(),
+  state: issueStateSchema,
+  team: z.object({ key: z.string(), name: z.string() }),
+  trashed: z.boolean().nullable(),
+  updatedAt: z.string(),
+  url: z.string(),
+});
+
+const issueDetailConnectionSchema = z.object({
+  issues: z.object({
+    nodes: z.array(issueDetailNodeSchema),
+  }),
+});
+
+const issueDetailSchema = z.object({
+  issue: issueDetailNodeSchema.nullable(),
 });
 
 export interface LinearIssueCreated {
@@ -483,7 +554,13 @@ export interface LinearIssueSummaryNode {
   attachments: { nodes: { url: string }[] };
   createdAt: string;
   id: string;
-  state: { type: string };
+  state: {
+    color: string;
+    id: string;
+    name: string;
+    position: number;
+    type: string;
+  };
 }
 
 // Linear bills a query by page size even when fewer issues match, so the page
@@ -513,7 +590,7 @@ export async function listLinearIssueSummaries(
           id
           createdAt
           trashed
-          state { type }
+          state { id name type color position }
           attachments(first: 1, filter: { url: { contains: $marker } }) { nodes { url } }
         }
         pageInfo { hasNextPage endCursor }
@@ -533,7 +610,20 @@ export async function listLinearIssueSummaries(
   };
 }
 
+export interface LinearIssueUser {
+  avatarUrl: string | null;
+  email: string | null;
+  id: string;
+  name: string;
+}
+
+export interface LinearIssueLabel {
+  color: string;
+  name: string;
+}
+
 export interface LinearIssueDetailNode {
+  assignee: LinearIssueUser | null;
   attachments: {
     nodes: { metadata: Record<string, unknown>; url: string }[];
   };
@@ -542,10 +632,36 @@ export interface LinearIssueDetailNode {
   createdAt: string;
   id: string;
   identifier: string;
-  state: { name: string; type: string };
+  labels: { nodes: LinearIssueLabel[] };
+  priority: number;
+  priorityLabel: string;
+  project: { name: string } | null;
+  state: { color: string; id: string; name: string; type: string };
+  team: { key: string; name: string };
   updatedAt: string;
   url: string;
 }
+
+// Shared by the page of details and the single-issue lookup. `issue(id:)`
+// accepts either the UUID or the team's issue ID, such as ENG-1476.
+const ISSUE_DETAIL_FIELDS = `
+  id
+  identifier
+  url
+  createdAt
+  updatedAt
+  completedAt
+  canceledAt
+  trashed
+  priority
+  priorityLabel
+  state { id name type color }
+  labels(first: 10) { nodes { name color } }
+  assignee { id name email avatarUrl }
+  project { name }
+  team { name key }
+  attachments(first: 1, filter: { url: { contains: $marker } }) { nodes { url metadata } }
+`;
 
 // `first` matches the number of ids. Without it Linear returns 50 issues.
 export async function listLinearIssueDetails(
@@ -559,17 +675,7 @@ export async function listLinearIssueDetails(
     credentials,
     `query FeedbackIssueDetails($filter: IssueFilter, $first: Int, $marker: String!) {
       issues(first: $first, includeArchived: true, filter: $filter) {
-        nodes {
-          id
-          identifier
-          url
-          createdAt
-          updatedAt
-          completedAt
-          canceledAt
-          trashed
-          state { name type }
-          attachments(first: 1, filter: { url: { contains: $marker } }) { nodes { url metadata } }
+        nodes {${ISSUE_DETAIL_FIELDS}
         }
       }
     }`,
@@ -581,6 +687,151 @@ export async function listLinearIssueDetails(
     issueDetailConnectionSchema
   );
   return data.issues.nodes.filter((node) => !node.trashed);
+}
+
+// One issue, by its UUID or its Linear ID (`ENG-1476`). Missing and deleted
+// issues come back as null.
+export async function getLinearIssueDetail(
+  credentials: LinearCredentials,
+  id: string
+): Promise<LinearIssueDetailNode | null> {
+  try {
+    const data = await graphql(
+      credentials,
+      `query FeedbackIssue($id: String!, $marker: String!) {
+        issue(id: $id) {${ISSUE_DETAIL_FIELDS}
+        }
+      }`,
+      { id, marker: FEEDBACK_REPORT_MARKER },
+      issueDetailSchema
+    );
+    if (!data.issue || data.issue.trashed) {
+      return null;
+    }
+    return data.issue;
+  } catch (err) {
+    if (err instanceof LinearNotFoundError) {
+      return null;
+    }
+    throw err;
+  }
+}
+
+const issueActivitySchema = z.object({
+  issue: z
+    .object({
+      comments: z.object({
+        nodes: z.array(
+          z.object({
+            body: z.string(),
+            createdAt: z.string(),
+            user: z
+              .object({
+                email: z.string().nullable(),
+                name: z.string(),
+              })
+              .nullable(),
+          })
+        ),
+      }),
+      history: z.object({
+        nodes: z.array(
+          z.object({
+            actor: z.object({ name: z.string() }).nullable(),
+            botActor: z.object({ name: z.string().nullable() }).nullable(),
+            createdAt: z.string(),
+            fromState: z.object({ name: z.string() }).nullable(),
+            toState: z
+              .object({ color: z.string(), name: z.string() })
+              .nullable(),
+          })
+        ),
+      }),
+    })
+    .nullable(),
+});
+
+export interface LinearStatusChange {
+  actorName: string | null;
+  at: string;
+  fromState: string | null;
+  toState: string | null;
+  toStateColor: string | null;
+}
+
+export interface LinearComment {
+  at: string;
+  body: string;
+  userEmail: string | null;
+  userName: string | null;
+}
+
+// Status moves and comments for one issue. History rows that did not change
+// the status are dropped here, so the caller can show them in time order.
+export async function getLinearIssueActivity(
+  credentials: LinearCredentials,
+  id: string
+): Promise<{
+  comments: LinearComment[];
+  statusChanges: LinearStatusChange[];
+} | null> {
+  try {
+    const data = await graphql(
+      credentials,
+      `query FeedbackIssueActivity($id: String!) {
+        issue(id: $id) {
+          history(first: 50) {
+            nodes {
+              createdAt
+              fromState { name }
+              toState { name color }
+              actor { name }
+              botActor { name }
+            }
+          }
+          comments(first: 50) {
+            nodes {
+              body
+              createdAt
+              user { name email }
+            }
+          }
+        }
+      }`,
+      { id },
+      issueActivitySchema
+    );
+    if (!data.issue) {
+      return null;
+    }
+    return {
+      statusChanges: data.issue.history.nodes.flatMap((entry) => {
+        if (!(entry.fromState || entry.toState)) {
+          return [];
+        }
+        return [
+          {
+            at: entry.createdAt,
+            fromState: entry.fromState?.name ?? null,
+            toState: entry.toState?.name ?? null,
+            toStateColor: entry.toState?.color ?? null,
+            actorName: entry.actor?.name ?? entry.botActor?.name ?? null,
+          },
+        ];
+      }),
+      comments: data.issue.comments.nodes.map((comment) => ({
+        at: comment.createdAt,
+        body: comment.body,
+        userName: comment.user?.name ?? null,
+        userEmail: comment.user?.email ?? null,
+      })),
+    };
+  } catch (err) {
+    if (err instanceof LinearNotFoundError) {
+      return null;
+    }
+    throw err;
+  }
 }
 
 const workflowStateSchema = z.object({

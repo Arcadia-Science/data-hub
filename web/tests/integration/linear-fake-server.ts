@@ -19,14 +19,50 @@ export const LINEAR_BAD_CLIENT_SECRET = "wrong-linear-secret";
 export const LINEAR_NO_CLIENT_CREDENTIALS_CLIENT_ID = "no-client-credentials";
 
 const LABELS = [
-  { id: LINEAR_BUG_LABEL_ID, name: "Bug", teamId: LINEAR_TEAM_ID },
-  { id: LINEAR_FEATURE_LABEL_ID, name: "Feature", teamId: LINEAR_TEAM_ID },
-  { id: LINEAR_OTHER_LABEL_ID, name: "Other", teamId: LINEAR_TEAM_ID },
-  { id: LINEAR_WORKSPACE_LABEL_ID, name: "Triage", teamId: null },
+  {
+    id: LINEAR_BUG_LABEL_ID,
+    name: "Bug",
+    teamId: LINEAR_TEAM_ID,
+    color: "#eb5757",
+  },
+  {
+    id: LINEAR_FEATURE_LABEL_ID,
+    name: "Feature",
+    teamId: LINEAR_TEAM_ID,
+    color: "#bb87fc",
+  },
+  {
+    id: LINEAR_OTHER_LABEL_ID,
+    name: "Other",
+    teamId: LINEAR_TEAM_ID,
+    color: "#4ea7fc",
+  },
+  {
+    id: LINEAR_WORKSPACE_LABEL_ID,
+    name: "Triage",
+    teamId: null,
+    color: "#f2c94c",
+  },
   {
     id: LINEAR_OTHER_TEAM_LABEL_ID,
     name: "Elsewhere",
     teamId: "88888888-8888-4888-8888-888888888888",
+    color: "#bec2c8",
+  },
+];
+
+const DEFAULT_WORKSPACE = {
+  id: "org-1",
+  name: "Test Org",
+  urlKey: "test-org",
+};
+let workspace = { ...DEFAULT_WORKSPACE };
+
+const PROJECTS = [
+  {
+    id: LINEAR_PROJECT_ID,
+    name: "Feedback",
+    url: "https://linear.app/test-org/project/feedback",
   },
 ];
 
@@ -86,24 +122,82 @@ interface FakeAttachment {
   url: string;
 }
 
+interface FakeState {
+  color?: string;
+  id?: string;
+  name: string;
+  position?: number;
+  type: string;
+}
+
+interface FakeHistory {
+  actorName?: string | null;
+  at: string;
+  fromState?: string | null;
+  toState?: string | null;
+  // Defaults to a grey so a test only sets it when it checks the color.
+  toStateColor?: string;
+}
+
+interface FakeComment {
+  at: string;
+  body: string;
+  userEmail?: string | null;
+  userName?: string | null;
+}
+
 interface FakeIssue {
   archivedAt: string | null;
+  assignee: {
+    avatarUrl: string | null;
+    email: string | null;
+    id: string;
+    name: string;
+  } | null;
   attachments: FakeAttachment[];
   canceledAt: string | null;
+  comments: FakeComment[];
   completedAt: string | null;
   createAsUser: string | null;
   createdAt: string;
   description: string;
+  history: FakeHistory[];
   id: string;
   identifier: string;
   labelIds: string[];
+  priority: number;
+  priorityLabel: string;
   projectId: string | null;
-  state: { name: string; type: string };
+  state: FakeState;
   teamId: string | null;
   title: string;
   trashed: boolean;
   updatedAt: string;
   url: string;
+}
+
+const STATE_DEFAULTS: Record<string, { color: string; position: number }> = {
+  triage: { color: "#f2c94c", position: 0 },
+  backlog: { color: "#bec2c8", position: 1 },
+  unstarted: { color: "#e2e2e2", position: 2 },
+  started: { color: "#f2c94c", position: 3 },
+  completed: { color: "#5e6ad2", position: 4 },
+  canceled: { color: "#95a2b3", position: 5 },
+  duplicate: { color: "#95a2b3", position: 6 },
+};
+
+function presentState(state: FakeState) {
+  const defaults = STATE_DEFAULTS[state.type] ?? {
+    color: "#bec2c8",
+    position: 99,
+  };
+  return {
+    id: state.id ?? `state-${state.type}`,
+    name: state.name,
+    type: state.type,
+    color: state.color ?? defaults.color,
+    position: state.position ?? defaults.position,
+  };
 }
 
 const issues: FakeIssue[] = [];
@@ -448,14 +542,12 @@ const attachmentResolvers: Resolvers<FakeAttachment> = {
   metadata: (attachment) => attachment.metadata,
 };
 
-const workflowStateResolvers: Resolvers<{
-  id?: string;
-  name: string;
-  type: string;
-}> = {
+const workflowStateResolvers: Resolvers<FakeState> = {
   id: (state) => state.id,
   name: (state) => state.name,
   type: (state) => state.type,
+  color: (state) => presentState(state).color,
+  position: (state) => presentState(state).position,
 };
 
 const issueResolvers: Resolvers<FakeIssue> = {
@@ -470,8 +562,143 @@ const issueResolvers: Resolvers<FakeIssue> = {
   canceledAt: (issue) => issue.canceledAt,
   archivedAt: (issue) => issue.archivedAt,
   trashed: (issue) => issue.trashed,
+  priority: (issue) => issue.priority,
+  priorityLabel: (issue) => issue.priorityLabel,
   state: (issue, field) =>
-    project(issue.state, field, workflowStateResolvers, "WorkflowState"),
+    project(
+      presentState(issue.state),
+      field,
+      workflowStateResolvers,
+      "WorkflowState"
+    ),
+  assignee: (issue, field) =>
+    issue.assignee
+      ? project(
+          issue.assignee,
+          field,
+          {
+            id: (user) => user.id,
+            name: (user) => user.name,
+            email: (user) => user.email,
+            avatarUrl: (user) => user.avatarUrl,
+          },
+          "User"
+        )
+      : null,
+  project: (issue, field) => {
+    const match = PROJECTS.find((item) => item.id === issue.projectId);
+    if (!match) {
+      return null;
+    }
+    return project(
+      match,
+      field,
+      {
+        id: (item) => item.id,
+        name: (item) => item.name,
+        url: (item) => item.url,
+      },
+      "Project"
+    );
+  },
+  team: (issue, field) =>
+    project(
+      issue.teamId === LINEAR_TEAM_ID
+        ? { name: "Data Hub", key: "DH" }
+        : { name: "Other", key: "OT" },
+      field,
+      {
+        name: (team) => team.name,
+        key: (team) => team.key,
+      },
+      "Team"
+    ),
+  labels: (issue, field) =>
+    connection(
+      issue.labelIds.flatMap((id) => {
+        const label = LABELS.find((item) => item.id === id);
+        return label ? [label] : [];
+      }),
+      field,
+      [],
+      (label, node) =>
+        project(
+          label,
+          node,
+          {
+            id: (item) => item.id,
+            name: (item) => item.name,
+            color: (item) => item.color,
+          },
+          "IssueLabel"
+        )
+    ),
+  history: (issue, field) =>
+    connection(issue.history, field, [], (entry, node) =>
+      project(
+        entry,
+        node,
+        {
+          createdAt: (item) => item.at,
+          fromState: (item, child) =>
+            item.fromState
+              ? project(
+                  { name: item.fromState },
+                  child,
+                  { name: (state) => state.name },
+                  "WorkflowState"
+                )
+              : null,
+          toState: (item, child) =>
+            item.toState
+              ? project(
+                  { name: item.toState, color: item.toStateColor ?? "#bec2c8" },
+                  child,
+                  {
+                    name: (state) => state.name,
+                    color: (state) => state.color,
+                  },
+                  "WorkflowState"
+                )
+              : null,
+          actor: (item, child) =>
+            item.actorName
+              ? project(
+                  { name: item.actorName },
+                  child,
+                  { name: (actor) => actor.name },
+                  "User"
+                )
+              : null,
+          botActor: () => null,
+        },
+        "IssueHistory"
+      )
+    ),
+  comments: (issue, field) =>
+    connection(issue.comments, field, [], (comment, node) =>
+      project(
+        comment,
+        node,
+        {
+          body: (item) => item.body,
+          createdAt: (item) => item.at,
+          user: (item, child) =>
+            item.userName
+              ? project(
+                  { name: item.userName, email: item.userEmail ?? null },
+                  child,
+                  {
+                    name: (user) => user.name,
+                    email: (user) => user.email,
+                  },
+                  "User"
+                )
+              : null,
+        },
+        "Comment"
+      )
+    ),
   attachments: (issue, field) =>
     connection(
       issue.attachments.filter((attachment) =>
@@ -483,26 +710,6 @@ const issueResolvers: Resolvers<FakeIssue> = {
         project(attachment, node, attachmentResolvers, "Attachment")
     ),
 };
-
-interface Named {
-  id: string;
-  name: string;
-}
-
-const namedResolvers: Resolvers<Named> = {
-  id: (item) => item.id,
-  name: (item) => item.name,
-};
-
-function namedConnection(
-  items: Named[],
-  field: Field,
-  allowedArgs: string[] = []
-) {
-  return connection(items, field, allowedArgs, (item, node) =>
-    project(item, node, namedResolvers, "Node")
-  );
-}
 
 // Supports the filter the settings screen sends: a team's labels plus the
 // workspace labels that belong to no team.
@@ -526,7 +733,18 @@ function listIssueLabels(field: Field) {
       return label.teamId !== null && label.teamId === eq;
     })
   );
-  return namedConnection(matched, field, ["filter"]);
+  return connection(matched, field, ["filter"], (label, node) =>
+    project(
+      label,
+      node,
+      {
+        id: (item) => item.id,
+        name: (item) => item.name,
+        color: (item) => item.color,
+      },
+      "IssueLabel"
+    )
+  );
 }
 
 function listIssues(field: Field) {
@@ -559,13 +777,32 @@ function listWorkflowStates(field: Field) {
 const queryRoots: Record<string, (field: Field) => unknown> = {
   organization: (field) =>
     project(
-      { id: "org-1", name: "Test Org" },
+      workspace,
       field,
-      namedResolvers,
+      {
+        id: (org) => org.id,
+        name: (org) => org.name,
+        urlKey: (org) => org.urlKey,
+      },
       "Organization"
     ),
   teams: (field) =>
-    namedConnection([{ id: LINEAR_TEAM_ID, name: "Data Hub" }], field),
+    connection(
+      [{ id: LINEAR_TEAM_ID, name: "Data Hub", key: "DH" }],
+      field,
+      [],
+      (team, node) =>
+        project(
+          team,
+          node,
+          {
+            id: (item) => item.id,
+            name: (item) => item.name,
+            key: (item) => item.key,
+          },
+          "Team"
+        )
+    ),
   team: (field) => {
     checkArgs(field, ["id"], "Query.team");
     // Linear answers an unknown team ID with an "invalid input" error and a
@@ -581,11 +818,36 @@ const queryRoots: Record<string, (field: Field) => unknown> = {
       });
     }
     return project(
-      { projects: [{ id: LINEAR_PROJECT_ID, name: "Feedback" }] },
+      { projects: PROJECTS },
       field,
-      { projects: (team, node) => namedConnection(team.projects, node) },
+      {
+        projects: (team, node) =>
+          connection(team.projects, node, [], (item, child) =>
+            project(
+              item,
+              child,
+              {
+                id: (projectItem) => projectItem.id,
+                name: (projectItem) => projectItem.name,
+                url: (projectItem) => projectItem.url,
+              },
+              "Project"
+            )
+          ),
+      },
       "Team"
     );
+  },
+  issue: (field) => {
+    checkArgs(field, ["id"], "Query.issue");
+    const ref = String(field.args.id ?? "");
+    const issue = issues.find(
+      (item) => item.id === ref || item.identifier === ref
+    );
+    if (!issue) {
+      return null;
+    }
+    return project(issue, field, issueResolvers, "Issue");
   },
   issueLabels: listIssueLabels,
   issues: listIssues,
@@ -624,6 +886,11 @@ function createIssue(field: Field) {
     trashed: false,
     state: { name: "Triage", type: "triage" },
     attachments: [],
+    assignee: null,
+    comments: [],
+    history: [],
+    priority: 0,
+    priorityLabel: "No priority",
     createAsUser: input.createAsUser ?? null,
     labelIds: input.labelIds ?? [],
     projectId: input.projectId ?? null,
@@ -766,6 +1033,11 @@ function seedIssue(body: Partial<FakeIssue>): FakeIssue {
     archivedAt: body.archivedAt ?? (trashed ? now : null),
     trashed,
     state: body.state ?? { name: "Triage", type: "triage" },
+    assignee: body.assignee ?? null,
+    comments: body.comments ?? [],
+    history: body.history ?? [],
+    priority: body.priority ?? 0,
+    priorityLabel: body.priorityLabel ?? "No priority",
     attachments: (body.attachments ?? []).map((attachment) => ({
       id: attachment.id ?? randomUUID(),
       title: attachment.title ?? "",
@@ -832,6 +1104,7 @@ export function startLinearFakeServer(): Promise<{
       issueSeq = 1;
       rateLimited = false;
       failAttachments = 0;
+      workspace = { ...DEFAULT_WORKSPACE };
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -854,6 +1127,12 @@ export function startLinearFakeServer(): Promise<{
       failAttachments = (JSON.parse(await readBody(req)) as { count: number })
         .count;
       sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (url.pathname === "/__test/workspace" && req.method === "POST") {
+      const body = JSON.parse(await readBody(req)) as Partial<typeof workspace>;
+      workspace = { ...workspace, ...body };
+      sendJson(res, 200, workspace);
       return;
     }
     if (url.pathname === "/__test/issues" && req.method === "GET") {

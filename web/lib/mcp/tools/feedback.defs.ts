@@ -6,7 +6,7 @@ import {
   FEEDBACK_LIST_MAX,
   FEEDBACK_TITLE_MAX,
   feedbackKindSchema,
-  feedbackStatusSchema,
+  feedbackListStatusSchema,
 } from "@/lib/api/feedback-schema";
 import type { McpToolDef } from "@/lib/mcp/catalog/types";
 import {
@@ -22,7 +22,7 @@ export const sendFeedbackTool = {
     "Report a bug or request about Data Hub itself (the web app, MCP tools, or the watcher). Show the user this draft and get their approval before calling. For a problem with a specific run's data, use add_run_comment instead. Any read token can call this.",
   group: "feedback",
   inputSchema: {
-    kind: feedbackKindSchema.describe("bug, feature_request, or other"),
+    kind: feedbackKindSchema.describe("Type: bug, feature_request, or other"),
     title: z
       .string()
       .trim()
@@ -40,19 +40,19 @@ export const sendFeedbackTool = {
       .trim()
       .max(FEEDBACK_DETAIL_MAX)
       .optional()
-      .describe("What the user was trying to do"),
+      .describe("Trying to do, if known"),
     toolName: z
       .string()
       .trim()
       .max(FEEDBACK_DETAIL_MAX)
       .optional()
-      .describe("MCP tool involved, if any"),
+      .describe("Tool, if any"),
     errorMessage: z
       .string()
       .trim()
       .max(FEEDBACK_DETAIL_MAX)
       .optional()
-      .describe("Error text, if any"),
+      .describe("Error message, if any"),
   },
   outputSchema: sendFeedbackOutputSchema,
   annotations: {
@@ -65,12 +65,14 @@ export const sendFeedbackTool = {
 export const listFeedbackTool = {
   name: "list_feedback",
   title: "List Feedback",
-  description: `List feedback reports. Workspace admins see every report; everyone else sees only their own. Descriptions longer than ${FEEDBACK_LIST_DESCRIPTION_MAX} characters are shortened. Use get_feedback for the full report.`,
+  description: `List feedback reports. Workspace admins see every report, including priority and assignee; everyone else sees only their own, without those. Descriptions longer than ${FEEDBACK_LIST_DESCRIPTION_MAX} characters are shortened. Use get_feedback for the full report and its activity.`,
   group: "feedback",
   inputSchema: {
-    status: feedbackStatusSchema
+    status: feedbackListStatusSchema
       .optional()
-      .describe("Filter by open, resolved, or declined"),
+      .describe(
+        "Filter by open, closed, resolved, or declined. closed is resolved and declined together. Results follow Linear's status order, then newest first."
+      ),
     kind: feedbackKindSchema
       .optional()
       .describe("Filter by bug, feature_request, or other"),
@@ -96,10 +98,14 @@ export const getFeedbackTool = {
   name: "get_feedback",
   title: "Get Feedback",
   description:
-    "Get one feedback report, including the full description. Workspace admins can read any report; everyone else can read only their own.",
+    "Get one feedback report, including the full description. Admins also get priority, assignee, and the activity list. Pass the report id or the Linear issue ID, such as ENG-1476. Workspace admins can read any report; everyone else can read only their own.",
   group: "feedback",
   inputSchema: {
-    id: z.string().uuid().describe("Feedback report id"),
+    id: z
+      .string()
+      .trim()
+      .min(1)
+      .describe("Feedback report id or Linear issue ID, such as ENG-1476"),
   },
   outputSchema: z.object({ feedback: feedbackItemSchema }),
   annotations: { readOnlyHint: true },

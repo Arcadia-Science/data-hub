@@ -43,5 +43,7 @@ Feedback: send_feedback reports bugs and requests about Data Hub itself.
 Confirm the draft with the user before sending. Problems with a specific
 run's data belong in add_run_comment. list_feedback shows your own reports
 (admins see every report) with shortened descriptions; get_feedback returns
-one full report. Report status is changed in Linear, not from here.
+one full report, and accepts a Linear issue ID such as ENG-1476. Admins also
+see priority, assignee, and activity. Report status is changed in Linear, not
+from here.
 `.trim();

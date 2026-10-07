@@ -355,6 +355,9 @@ export async function setup() {
   // `sendSlackDm` directly in-process) also route through the capture server
   // rather than the real Slack API or no-op on a missing token.
   process.env.__TEST_LINEAR_API_URL = linearFakeUrl;
+  // Library helpers that open saved secrets in the test process need the same
+  // key the server used to encrypt them.
+  process.env.INTEGRATION_SECRETS_KEY = serverEnv.INTEGRATION_SECRETS_KEY;
   process.env.SLACK_BOT_TOKEN = "xoxb-test-bot-token";
   process.env.__TEST_SLACK_API_URL = `${slackCaptureBaseUrl}/api/`;
   // Point the `@/lib/db` singleton at the test DB so library helpers

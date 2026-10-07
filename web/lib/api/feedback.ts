@@ -1,4 +1,4 @@
-import { inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { after } from "next/server";
 import { LINEAR_UNAVAILABLE } from "@/lib/api/errors";
 import {
@@ -6,30 +6,42 @@ import {
   FEEDBACK_LIST_DESCRIPTION_MAX,
   FEEDBACK_LIST_MAX,
   type FeedbackKind,
+  type FeedbackListStatus,
   type FeedbackSource,
   type FeedbackStatus,
 } from "@/lib/api/feedback-schema";
 import { notifyFeedbackSubmitted } from "@/lib/api/notifications";
 import { appOrigin } from "@/lib/app-origin";
 import { db } from "@/lib/db";
-import { oauthClients, users } from "@/lib/db/schema";
+import {
+  notificationPreferences,
+  notifications,
+  oauthClients,
+  users,
+} from "@/lib/db/schema";
 import {
   createLinearAttachment,
   createLinearIssue,
+  getLinearIssueActivity,
+  getLinearIssueDetail,
   LINEAR_RATE_LIMITED,
   LINEAR_SUMMARY_PAGE_SIZE,
   type LinearIssueDetailNode,
+  type LinearIssueLabel,
   LinearRequestError,
   listLinearIssueDetails,
   listLinearIssueSummaries,
 } from "@/lib/linear/client";
 import {
+  getLinearConfigForAdmin,
   getLinearFeedbackSetup,
   type LinearFeedbackSetup,
 } from "@/lib/linear/config";
 import {
   FEEDBACK_REPORT_MARKER,
+  type FeedbackCounts,
   type FeedbackReportMetadata,
+  type FeedbackStateGroup,
   type FeedbackSummary,
   feedbackAttachmentUrl,
   feedbackIssueMarker,
@@ -40,6 +52,7 @@ import {
   pageFeedbackSummaries,
   readFeedbackReport,
 } from "@/lib/linear/feedback-link";
+import type { LinearWebhookRejectionReason } from "@/lib/linear/webhook";
 
 export const FEEDBACK_NOT_CONFIGURED_MESSAGE =
   "Feedback isn't set up on this Data Hub.";
@@ -101,13 +114,43 @@ export interface FeedbackPerson {
   name: string | null;
 }
 
+export interface FeedbackAssignee {
+  avatarUrl: string | null;
+  email: string | null;
+  name: string;
+  userId: string;
+}
+
+export type FeedbackLabel = LinearIssueLabel;
+
 export interface FeedbackLinearIssue {
+  assignee: FeedbackAssignee | null;
   identifier: string;
+  labels: FeedbackLabel[];
+  priority: number | null;
+  priorityLabel: string | null;
+  projectName: string | null;
+  stateColor: string;
+  stateId: string;
   stateName: string;
+  stateType: string;
+  teamName: string;
   url: string;
 }
 
+export interface FeedbackActivityEvent {
+  actorName: string | null;
+  at: string;
+  body: string | null;
+  fromState: string | null;
+  kind: "comment" | "status";
+  toState: string | null;
+  // The color of the state a status change moved to. Null on a comment.
+  toStateColor: string | null;
+}
+
 export interface FeedbackItem {
+  activity: FeedbackActivityEvent[] | null;
   attemptedAction: string | null;
   createdAt: Date;
   description: string;
@@ -146,10 +189,18 @@ function readReport(issue: LinearIssueDetailNode): Report | null {
   return metadata ? { issue, metadata } : null;
 }
 
+interface AssigneeMatch {
+  email: string | null;
+  id: string;
+  image: string | null;
+  name: string | null;
+}
+
 function toFeedbackItem(
   { issue, metadata }: Report,
   people: Map<string, FeedbackPerson>,
-  clientNames: Map<string, string | null>
+  clientNames: Map<string, string | null>,
+  assigneesByEmail: Map<string, AssigneeMatch>
 ): FeedbackItem {
   const status = feedbackStatusFromLinearState(issue.state.type);
   const statusUpdatedAt =
@@ -159,6 +210,10 @@ function toFeedbackItem(
         ? issue.canceledAt
         : null;
   const oauthClientId = blankToNull(metadata.oauthClientId);
+  const linearAssignee = issue.assignee;
+  const matched = linearAssignee?.email
+    ? assigneesByEmail.get(linearAssignee.email.toLowerCase())
+    : undefined;
   return {
     id: issue.id,
     kind: metadata.kind,
@@ -178,10 +233,48 @@ function toFeedbackItem(
     createdAt: new Date(issue.createdAt),
     updatedAt: new Date(issue.updatedAt),
     reporter: people.get(metadata.reporterUserId) ?? null,
+    activity: null,
     linearIssue: {
       identifier: issue.identifier,
       url: issue.url,
+      stateId: issue.state.id,
       stateName: issue.state.name,
+      stateType: issue.state.type,
+      stateColor: issue.state.color,
+      priority: issue.priority,
+      priorityLabel: issue.priorityLabel,
+      labels: issue.labels.nodes,
+      projectName: issue.project?.name ?? null,
+      teamName: issue.team.name,
+      assignee: linearAssignee
+        ? {
+            userId: matched?.id ?? linearAssignee.id,
+            name: matched?.name ?? linearAssignee.name,
+            email: linearAssignee.email,
+            avatarUrl: matched?.image ?? linearAssignee.avatarUrl,
+          }
+        : null,
+    },
+  };
+}
+
+// Reporters see their own report's status, Linear ID, and label. Assignee,
+// priority, and the activity list stay with admins.
+export function presentFeedback(
+  item: FeedbackItem,
+  isAdmin: boolean
+): FeedbackItem {
+  if (isAdmin) {
+    return item;
+  }
+  return {
+    ...item,
+    activity: null,
+    linearIssue: {
+      ...item.linearIssue,
+      assignee: null,
+      priority: null,
+      priorityLabel: null,
     },
   };
 }
@@ -203,8 +296,16 @@ async function hydrate(
         .filter((id): id is string => id != null)
     ),
   ];
+  const assigneeEmails = [
+    ...new Set(
+      reports.flatMap(({ issue }) => {
+        const email = issue.assignee?.email?.toLowerCase();
+        return email ? [email] : [];
+      })
+    ),
+  ];
 
-  const [peopleRows, clientRows] = await Promise.all([
+  const [peopleRows, clientRows, assigneeRows] = await Promise.all([
     reporterIds.length > 0
       ? db
           .select({ id: users.id, name: users.name, email: users.email })
@@ -217,13 +318,32 @@ async function hydrate(
           .from(oauthClients)
           .where(inArray(oauthClients.clientId, clientIds))
       : Promise.resolve([]),
+    assigneeEmails.length > 0
+      ? db
+          .select({
+            id: users.id,
+            name: users.name,
+            email: users.email,
+            image: users.image,
+          })
+          .from(users)
+          .where(inArray(sql`lower(${users.email})`, assigneeEmails))
+      : Promise.resolve([]),
   ]);
 
   const people = new Map(peopleRows.map((row) => [row.id, row]));
   const clientNames = new Map(
     clientRows.map((row) => [row.clientId, row.name])
   );
-  return reports.map((report) => toFeedbackItem(report, people, clientNames));
+  const assigneesByEmail = new Map(
+    assigneeRows.flatMap((row) => {
+      const email = row.email?.toLowerCase();
+      return email ? [[email, row] as const] : [];
+    })
+  );
+  return reports.map((report) =>
+    toFeedbackItem(report, people, clientNames, assigneesByEmail)
+  );
 }
 
 // Runs `run` with the saved Linear setup and turns the two ways it can fail
@@ -268,6 +388,13 @@ async function allSummaries(setup: LinearFeedbackSetup, marker: string) {
         createdAt: node.createdAt,
         kind,
         status: feedbackStatusFromLinearState(node.state.type),
+        state: {
+          id: node.state.id,
+          name: node.state.name,
+          color: node.state.color,
+          type: node.state.type,
+          position: node.state.position,
+        },
       });
     }
     if (!(connection.pageInfo.hasNextPage && connection.pageInfo.endCursor)) {
@@ -294,7 +421,7 @@ async function loadIssues(
   });
 }
 
-function issueDescription(input: {
+export function issueDescription(input: {
   attemptedAction?: string;
   description: string;
   errorMessage?: string;
@@ -311,13 +438,13 @@ function issueDescription(input: {
     "",
     "---",
     "",
-    `Kind: ${FEEDBACK_KIND_LABELS[input.kind]}`,
+    `Type: ${FEEDBACK_KIND_LABELS[input.kind]}`,
   ];
   if (input.attemptedAction) {
-    lines.push(`Tried: ${input.attemptedAction}`);
+    lines.push(`Trying to do: ${input.attemptedAction}`);
   }
   if (input.errorMessage) {
-    lines.push(`Error: ${input.errorMessage}`);
+    lines.push(`Error message: ${input.errorMessage}`);
   }
   if (input.pageUrl) {
     lines.push(`Page: ${input.pageUrl}`);
@@ -406,6 +533,7 @@ export function createFeedback(input: {
   attemptedAction?: string;
   description: string;
   errorMessage?: string;
+  isTest?: boolean;
   kind: FeedbackKind;
   oauthClientId?: string | null;
   pageUrl?: string | null;
@@ -474,6 +602,7 @@ export function createFeedback(input: {
           source: input.source,
           oauthClientId: input.oauthClientId ?? "",
           pageUrl: input.pageUrl ?? "",
+          ...(input.isTest ? { test: 1 } : {}),
         },
       },
       identifier
@@ -484,18 +613,37 @@ export function createFeedback(input: {
       throw new LinearRequestError("Linear did not return the new report.");
     }
 
-    const origin = appOrigin();
-    after(async () => {
-      await notifyFeedbackSubmitted({
-        feedbackId: item.id,
-        reporterUserId: input.userId,
-        reporterDisplayName: reporterName,
-        title: item.title,
-        origin,
+    if (!input.isTest) {
+      const origin = appOrigin();
+      after(async () => {
+        await notifyFeedbackSubmitted({
+          feedbackId: item.id,
+          reporterUserId: input.userId,
+          reporterDisplayName: reporterName,
+          title: item.title,
+          origin,
+        });
       });
-    });
+    }
 
     return { item, duplicate: false };
+  });
+}
+
+export const TEST_FEEDBACK_TITLE = "Test report from Data Hub";
+export const TEST_FEEDBACK_DESCRIPTION =
+  "Sent from Linear setup to check that a report, a status update, and a notification all arrive.";
+
+export function createTestFeedback(
+  userId: string
+): Promise<FeedbackResult<{ duplicate: boolean; item: FeedbackItem }>> {
+  return createFeedback({
+    userId,
+    kind: "other",
+    title: TEST_FEEDBACK_TITLE,
+    description: TEST_FEEDBACK_DESCRIPTION,
+    source: "web",
+    isTest: true,
   });
 }
 
@@ -506,11 +654,12 @@ export function listFeedback(input: {
   kind?: FeedbackKind;
   limit: number;
   offset: number;
-  status?: FeedbackStatus;
+  status?: FeedbackListStatus;
   viewerId: string;
 }): Promise<
   FeedbackResult<{
-    counts: Record<FeedbackStatus, number>;
+    counts: FeedbackCounts;
+    groups: FeedbackStateGroup[];
     items: FeedbackItem[];
     total: number;
   }>
@@ -528,23 +677,148 @@ export function listFeedback(input: {
       limit,
       offset,
     });
+    const items = await loadIssues(setup, page.ids);
     return {
-      items: await loadIssues(setup, page.ids),
+      items: items.map((item) => presentFeedback(item, input.isAdmin)),
       total: page.total,
       counts: page.counts,
+      groups: page.groups,
     };
   });
 }
 
+async function loadActivity(
+  setup: LinearFeedbackSetup,
+  issueId: string
+): Promise<FeedbackActivityEvent[]> {
+  const activity = await getLinearIssueActivity(setup, issueId);
+  if (!activity) {
+    return [];
+  }
+  const events: FeedbackActivityEvent[] = [
+    ...activity.statusChanges.map((change) => ({
+      kind: "status" as const,
+      at: change.at,
+      actorName: change.actorName,
+      fromState: change.fromState,
+      toState: change.toState,
+      toStateColor: change.toStateColor,
+      body: null,
+    })),
+    ...activity.comments.map((comment) => ({
+      kind: "comment" as const,
+      at: comment.at,
+      actorName: comment.userName,
+      fromState: null,
+      toState: null,
+      toStateColor: null,
+      body: comment.body,
+    })),
+  ];
+  events.sort((left, right) => left.at.localeCompare(right.at));
+  return events;
+}
+
+// `id` is the report's UUID or its Linear ID, such as ENG-1476.
 export function getFeedbackForViewer(
   id: string,
   viewer: { isAdmin: boolean; viewerId: string }
 ): Promise<FeedbackResult<{ item: FeedbackItem | null }>> {
   return withSetup(async (setup) => {
-    const [item] = await loadIssues(setup, [id]);
-    if (item && (viewer.isAdmin || item.reporter?.id === viewer.viewerId)) {
-      return { item };
+    const issue = await getLinearIssueDetail(setup, id);
+    if (!issue) {
+      return { item: null };
     }
-    return { item: null };
+    const [item] = await hydrate([issue]);
+    if (!(item && (viewer.isAdmin || item.reporter?.id === viewer.viewerId))) {
+      return { item: null };
+    }
+    const loaded = viewer.isAdmin
+      ? { ...item, activity: await loadActivity(setup, issue.id) }
+      : item;
+    return { item: presentFeedback(loaded, viewer.isAdmin) };
+  });
+}
+
+export interface TestReportStatus {
+  closed: boolean;
+  id: string;
+  identifier: string;
+  labelName: string | null;
+  notificationAt: string | null;
+  notificationsEnabled: boolean;
+  rejectionReason: LinearWebhookRejectionReason | null;
+  rejections: number;
+  stateName: string;
+  stateType: string;
+  teamName: string;
+  updateReceived: boolean;
+  url: string;
+}
+
+// Only the admin who sent the test report can read its progress, and only
+// while the issue is still marked as that test.
+export function getTestReportStatus(input: {
+  issueId: string;
+  userId: string;
+}): Promise<FeedbackResult<{ status: TestReportStatus | null }>> {
+  return withSetup(async (setup) => {
+    const issue = await getLinearIssueDetail(setup, input.issueId);
+    const report = issue ? readFeedbackReport(issue) : null;
+    if (
+      !(
+        issue &&
+        report &&
+        report.test === 1 &&
+        report.reporterUserId === input.userId
+      )
+    ) {
+      return { status: null };
+    }
+
+    const [config, [note], [prefs]] = await Promise.all([
+      getLinearConfigForAdmin(),
+      db
+        .select({ createdAt: notifications.createdAt })
+        .from(notifications)
+        .where(
+          and(
+            eq(notifications.userId, input.userId),
+            eq(notifications.feedbackId, issue.id),
+            eq(notifications.type, "feedback_updated")
+          )
+        )
+        .orderBy(desc(notifications.createdAt))
+        .limit(1),
+      db
+        .select({ enabled: notificationPreferences.feedbackUpdatedEnabled })
+        .from(notificationPreferences)
+        .where(eq(notificationPreferences.userId, input.userId))
+        .limit(1),
+    ]);
+    const closedAt = issue.completedAt ?? issue.canceledAt;
+    const updateReceived = Boolean(
+      closedAt &&
+        config.lastWebhookAt &&
+        config.lastWebhookAt.getTime() >= new Date(closedAt).getTime()
+    );
+
+    return {
+      status: {
+        id: issue.id,
+        identifier: issue.identifier,
+        url: issue.url,
+        stateName: issue.state.name,
+        stateType: issue.state.type,
+        teamName: issue.team.name,
+        labelName: issue.labels.nodes[0]?.name ?? null,
+        closed: feedbackStatusFromLinearState(issue.state.type) !== "open",
+        updateReceived,
+        notificationAt: note?.createdAt.toISOString() ?? null,
+        notificationsEnabled: prefs ? prefs.enabled : true,
+        rejections: config.webhookRejections,
+        rejectionReason: config.lastWebhookRejectionReason,
+      },
+    };
   });
 }

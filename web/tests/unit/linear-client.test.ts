@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearLinearTokenCache,
+  LinearClientCredentialsError,
+  LinearCredentialsRejectedError,
   LinearNotFoundError,
   LinearRequestError,
   listLinearTeamOptions,
@@ -20,7 +22,11 @@ function json(body: unknown, status = 200) {
 const tokenOk = () =>
   json({ access_token: "token", token_type: "Bearer", expires_in: 3600 });
 const organizationOk = () =>
-  json({ data: { organization: { id: "org-1", name: "Test Org" } } });
+  json({
+    data: {
+      organization: { id: "org-1", name: "Test Org", urlKey: "test-org" },
+    },
+  });
 
 describe("Linear client", () => {
   const fetchMock = vi.fn<typeof fetch>();
@@ -108,6 +114,29 @@ describe("Linear client", () => {
       );
     });
 
+    it("tells a rejected secret apart from client credentials being off", async () => {
+      routeBy({
+        token: () => json({ error: "invalid_client" }, 401),
+        graphql: organizationOk,
+      });
+      const rejected = await testLinearConnection(credentials).catch(
+        (err: unknown) => err
+      );
+      expect(rejected).toBeInstanceOf(LinearCredentialsRejectedError);
+      expect(rejected).toBeInstanceOf(LinearRequestError);
+      expect(rejected).not.toBeInstanceOf(LinearClientCredentialsError);
+
+      routeBy({
+        token: () => json({ error: "server_error" }, 503),
+        graphql: organizationOk,
+      });
+      const outage = await testLinearConnection(credentials).catch(
+        (err: unknown) => err
+      );
+      expect(outage).toBeInstanceOf(LinearRequestError);
+      expect(outage).not.toBeInstanceOf(LinearCredentialsRejectedError);
+    });
+
     it("includes Linear's reason when the credentials are rejected", async () => {
       routeBy({
         token: () =>
@@ -178,11 +207,21 @@ describe("Linear client", () => {
         graphql: () =>
           json({
             data: {
-              team: { projects: { nodes: [{ id: "p1", name: "Feedback" }] } },
+              team: {
+                projects: {
+                  nodes: [
+                    {
+                      id: "p1",
+                      name: "Feedback",
+                      url: "https://linear.app/test/project/feedback",
+                    },
+                  ],
+                },
+              },
               issueLabels: {
                 nodes: [
-                  { id: "l1", name: "Bug" },
-                  { id: "l2", name: "Triage" },
+                  { id: "l1", name: "Bug", color: "#eb5757" },
+                  { id: "l2", name: "Triage", color: "#f2c94c" },
                 ],
               },
             },
@@ -191,10 +230,16 @@ describe("Linear client", () => {
 
       const options = await listLinearTeamOptions(credentials, TEAM_ID);
       expect(options).toEqual({
-        projects: [{ id: "p1", name: "Feedback" }],
+        projects: [
+          {
+            id: "p1",
+            name: "Feedback",
+            url: "https://linear.app/test/project/feedback",
+          },
+        ],
         labels: [
-          { id: "l1", name: "Bug" },
-          { id: "l2", name: "Triage" },
+          { id: "l1", name: "Bug", color: "#eb5757" },
+          { id: "l2", name: "Triage", color: "#f2c94c" },
         ],
       });
 
@@ -210,6 +255,7 @@ describe("Linear client", () => {
         labelTeamId: TEAM_ID,
       });
       expect(sent.query).toContain("issueLabels(");
+      expect(sent.query).toContain("{ nodes { id name color } }");
       expect(sent.query).toContain("{ team: { id: { eq: $labelTeamId } } }");
       expect(sent.query).toContain("{ team: { null: true } }");
     });

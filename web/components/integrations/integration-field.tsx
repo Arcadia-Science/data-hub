@@ -40,7 +40,9 @@ function unreadableMessage(set: boolean, envName?: string): string {
  */
 export function IntegrationField({
   clearing = false,
+  describedBy,
   description,
+  disabled = false,
   envName,
   id,
   label,
@@ -52,7 +54,10 @@ export function IntegrationField({
   value,
 }: {
   clearing?: boolean;
+  // Id of a note that explains why the field is disabled.
+  describedBy?: string;
   description: string;
+  disabled?: boolean;
   envName?: string;
   id: string;
   label: string;
@@ -63,6 +68,8 @@ export function IntegrationField({
   type: "password" | "text";
   value: string;
 }) {
+  // Stays available while the field is disabled for a missing key. Removing
+  // a saved secret needs no key, and it is the fix for one that can't be read.
   const canClear =
     onClear != null &&
     (status.source === "database" || status.source === "unreadable");
@@ -78,8 +85,10 @@ export function IntegrationField({
         </Badge>
       </div>
       <Input
+        aria-describedby={describedBy}
         autoComplete="off"
         className="font-mono"
+        disabled={disabled}
         id={id}
         onChange={(event) => onChange(event.target.value)}
         placeholder={
@@ -104,7 +113,10 @@ export function IntegrationField({
           variant="outline"
         >
           {clearing ? (
-            <Loader2 className="animate-spin" data-icon="inline-start" />
+            <Loader2
+              className="animate-spin motion-reduce:animate-none"
+              data-icon="inline-start"
+            />
           ) : null}
           Remove saved value
         </Button>

@@ -3,39 +3,24 @@ import { requireAdmin } from "@/lib/api/auth";
 import { apiError, INTERNAL_ERROR } from "@/lib/api/errors";
 import { readJsonBody } from "@/lib/api/openapi";
 import { IntegrationSecretsKeyError } from "@/lib/crypto/integration-secrets";
-import { lastUpdatedResponse } from "@/lib/integrations/last-updated";
 import {
+  disconnectLinear,
   getLinearConfigForAdmin,
-  type LinearConfigForAdmin,
   linearConfigPutBodySchema,
   updateLinearConfig,
 } from "@/lib/linear/config";
+import { linearConfigResponse } from "@/lib/linear/config-response";
 
 // Admin-only Linear app settings. Secrets are never returned: the response
-// says whether each one is set. The PUT body mirrors this response, so a
-// client can read, change one field, and send it back.
-
-function toResponse(config: LinearConfigForAdmin) {
-  return {
-    client_id: config.clientId,
-    client_secret: config.clientSecret,
-    webhook_secret: config.webhookSecret,
-    team: config.team,
-    project: config.project,
-    labels: config.labels,
-    last_webhook_at: config.lastWebhookAt
-      ? config.lastWebhookAt.toISOString()
-      : null,
-    ...lastUpdatedResponse(config.lastUpdated),
-  };
-}
+// says whether each one is set. PUT saves the team, project, labels, and
+// signing secret. Credentials go through `/connect`, which checks them first.
 
 export async function GET() {
   const authResult = await requireAdmin();
   if (authResult instanceof Response) {
     return authResult;
   }
-  return Response.json(toResponse(await getLinearConfigForAdmin()));
+  return Response.json(linearConfigResponse(await getLinearConfigForAdmin()));
 }
 
 export async function PUT(request: NextRequest) {
@@ -51,7 +36,7 @@ export async function PUT(request: NextRequest) {
 
   try {
     return Response.json(
-      toResponse(await updateLinearConfig(body, authResult.userId))
+      linearConfigResponse(await updateLinearConfig(body, authResult.userId))
     );
   } catch (err) {
     if (err instanceof IntegrationSecretsKeyError) {
@@ -59,4 +44,13 @@ export async function PUT(request: NextRequest) {
     }
     throw err;
   }
+}
+
+export async function DELETE() {
+  const authResult = await requireAdmin();
+  if (authResult instanceof Response) {
+    return authResult;
+  }
+  await disconnectLinear();
+  return Response.json(linearConfigResponse(await getLinearConfigForAdmin()));
 }

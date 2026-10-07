@@ -1,4 +1,5 @@
 import { createHmac, randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { listNotifications, updatePreferences } from "@/lib/api/notifications";
 import { linearIntegrationConfig, slackConnections } from "@/lib/db/schema";
@@ -57,7 +58,7 @@ function stateChange(issueId: string, previous: { id: string }): string {
   return JSON.stringify({
     action: "update",
     type: "Issue",
-    data: { id: issueId, title: "Export fails" },
+    data: { id: issueId, title: "Export fails", teamId: LINEAR_TEAM_ID },
     updatedFrom: { stateId: previous.id },
     webhookTimestamp: Date.now(),
   });
@@ -130,14 +131,21 @@ describe("Linear feedback webhook", () => {
   });
 
   async function enable(cookie: string) {
+    const connected = await api(
+      "/api/v1/settings/integrations/linear/connect",
+      {
+        method: "POST",
+        headers: { Cookie: cookie },
+        body: { client_id: "client-1", client_secret: "secret" },
+      }
+    );
+    expect(connected.status).toBe(200);
     const res = await api("/api/v1/settings/integrations/linear", {
       method: "PUT",
       headers: { Cookie: cookie },
       body: {
-        client_id: "client-1",
-        client_secret: "secret",
         webhook_secret: WEBHOOK_SECRET,
-        team: { id: LINEAR_TEAM_ID, name: "Data Hub" },
+        team: { id: LINEAR_TEAM_ID, name: "Data Hub", key: "DH" },
       },
     });
     expect(res.status).toBe(200);
@@ -209,7 +217,7 @@ describe("Linear feedback webhook", () => {
     const raw = JSON.stringify({
       action: "update",
       type: "Issue",
-      data: { id: issueId, title: "Export fails" },
+      data: { id: issueId, title: "Export fails", teamId: LINEAR_TEAM_ID },
       updatedFrom: { stateId: "previous-state" },
       webhookTimestamp: Date.now(),
     });
@@ -377,7 +385,8 @@ describe("Linear feedback webhook", () => {
 
     const raw = JSON.stringify({
       action: "create",
-      type: "Comment",
+      type: "Issue",
+      data: { id: randomUUID(), teamId: LINEAR_TEAM_ID },
       webhookTimestamp: Date.now(),
     });
     expect((await postWebhook(raw, sign(raw))).status).toBe(200);
@@ -385,5 +394,75 @@ describe("Linear feedback webhook", () => {
 
     const [after] = await getTestDb().select().from(linearIntegrationConfig);
     expect(after.updatedAt.getTime()).toBe(saved.updatedAt.getTime());
+  });
+
+  it("counts a rejected delivery from Linear for this workspace, then clears it", async () => {
+    const admin = await seedTestUser({ isAdmin: true });
+    await enable(await seedSessionCookie(admin.userId));
+    const [saved] = await getTestDb().select().from(linearIntegrationConfig);
+    await getTestDb()
+      .update(linearIntegrationConfig)
+      .set({ workspaceId: "org-1" })
+      .where(eq(linearIntegrationConfig.id, true));
+
+    const raw = JSON.stringify({
+      type: "Issue",
+      action: "update",
+      organizationId: "org-1",
+      webhookTimestamp: Date.now(),
+    });
+    const linearIp = "35.231.147.226";
+    const rejected = await fetch(
+      `${getBaseUrl()}/api/v1/integrations/linear/webhook`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Linear-Signature": sign("nope"),
+          "x-real-ip": linearIp,
+        },
+        body: raw,
+      }
+    );
+    expect(rejected.status).toBe(401);
+    await waitFor(async () => {
+      const [row] = await getTestDb().select().from(linearIntegrationConfig);
+      return row.webhookRejections === 1;
+    });
+
+    const stranger = await fetch(
+      `${getBaseUrl()}/api/v1/integrations/linear/webhook`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Linear-Signature": sign("nope"),
+          "x-real-ip": "203.0.113.8",
+        },
+        body: raw,
+      }
+    );
+    expect(stranger.status).toBe(401);
+    await settle();
+    const [afterStranger] = await getTestDb()
+      .select()
+      .from(linearIntegrationConfig);
+    expect(afterStranger.webhookRejections).toBe(1);
+
+    const otherTeam = JSON.stringify({
+      action: "update",
+      type: "Issue",
+      data: {
+        id: randomUUID(),
+        teamId: "99999999-9999-4999-8999-999999999999",
+      },
+      webhookTimestamp: Date.now(),
+    });
+    expect((await postWebhook(otherTeam, sign(otherTeam))).status).toBe(200);
+    await waitFor(async () => {
+      const [row] = await getTestDb().select().from(linearIntegrationConfig);
+      return row.webhookRejections === 0 && row.lastWebhookAt === null;
+    });
+    expect(saved.updatedAt).toBeTruthy();
   });
 });

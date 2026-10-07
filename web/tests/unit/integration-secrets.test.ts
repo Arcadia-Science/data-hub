@@ -4,6 +4,7 @@ import {
   encryptIntegrationSecret,
   IntegrationSecretsKeyError,
   inspectSavedSecret,
+  integrationSecretsKeyStatus,
   readMaybeEncryptedSecret,
 } from "@/lib/crypto/integration-secrets";
 
@@ -48,6 +49,24 @@ describe("integration secrets", () => {
     vi.stubEnv("INTEGRATION_SECRETS_KEY", "cd".repeat(32));
 
     expect(() => decryptIntegrationSecret(stored)).toThrow();
+  });
+
+  it("reports whether the key is missing, invalid, or usable", () => {
+    vi.stubEnv("INTEGRATION_SECRETS_KEY", "");
+    expect(integrationSecretsKeyStatus()).toBe("missing");
+
+    vi.stubEnv("INTEGRATION_SECRETS_KEY", "   ");
+    expect(integrationSecretsKeyStatus()).toBe("missing");
+
+    vi.stubEnv("INTEGRATION_SECRETS_KEY", "too-short");
+    expect(integrationSecretsKeyStatus()).toBe("invalid");
+
+    // Right length, but not hex.
+    vi.stubEnv("INTEGRATION_SECRETS_KEY", "g".repeat(64));
+    expect(integrationSecretsKeyStatus()).toBe("invalid");
+
+    vi.stubEnv("INTEGRATION_SECRETS_KEY", KEY);
+    expect(integrationSecretsKeyStatus()).toBe("ok");
   });
 
   it("refuses to encrypt when the key is missing or the wrong shape", () => {

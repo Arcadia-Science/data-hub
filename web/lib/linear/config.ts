@@ -2,7 +2,7 @@
 // are encrypted. Nothing falls back to an environment variable: Linear is
 // off until an admin saves a client ID, client secret, and team.
 
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   type FeedbackKind,
@@ -18,7 +18,7 @@ import {
   linearWebhookDeliveries,
   users,
 } from "@/lib/db/schema";
-import { nextPlain, nextSecret } from "@/lib/integrations/config-patch";
+import { nextSecret } from "@/lib/integrations/config-patch";
 import {
   type PlainFieldStatus,
   plainFieldStatus,
@@ -36,23 +36,30 @@ import {
   clearLinearTokenCache,
   type LinearChoice,
   type LinearCredentials,
+  type LinearOrganization,
+  listLinearTeamOptions,
+  listLinearTeams,
+  testLinearConnection,
 } from "./client";
+import type { LinearWebhookRejectionReason } from "./webhook";
 
 const optionalText = z.string().trim().min(1).nullable().optional();
 
 export const linearChoiceSchema = z.object({
   id: z.string().uuid(),
   name: z.string().trim().min(1),
+  key: z.string().trim().min(1).optional(),
+  url: z.string().trim().min(1).optional(),
 });
 
 export type LinearLabelChoices = Record<FeedbackKind, LinearChoice | null>;
 
 const optionalChoice = linearChoiceSchema.nullable().optional();
 
+// Strict so a client that still sends `client_id` or `client_secret` gets a
+// 400. Credentials are saved only through the connect route.
 export const linearConfigPutBodySchema = z
-  .object({
-    client_id: optionalText,
-    client_secret: optionalText,
+  .strictObject({
     webhook_secret: optionalText,
     team: optionalChoice,
     project: optionalChoice,
@@ -66,10 +73,23 @@ export const linearConfigPutBodySchema = z
 
 export type LinearConfigPutBody = z.infer<typeof linearConfigPutBodySchema>;
 
-export const linearTestBodySchema = z.object({
-  client_id: z.string().trim().min(1).optional(),
-  client_secret: z.string().trim().min(1).optional(),
+export const linearConnectBodySchema = z.object({
+  client_id: z.string().trim().min(1),
+  client_secret: z.string().trim().min(1),
+  confirm_workspace_change: z.boolean().optional(),
 });
+
+export class LinearWorkspaceChangeError extends Error {
+  readonly workspaceId: string;
+  readonly workspaceName: string;
+
+  constructor(workspaceId: string, workspaceName: string) {
+    super(workspaceName);
+    this.name = "LinearWorkspaceChangeError";
+    this.workspaceId = workspaceId;
+    this.workspaceName = workspaceName;
+  }
+}
 
 export interface LinearConfigForAdmin {
   clientId: PlainFieldStatus;
@@ -77,9 +97,17 @@ export interface LinearConfigForAdmin {
   labels: LinearLabelChoices;
   lastUpdated: LastUpdated | null;
   lastWebhookAt: Date | null;
+  lastWebhookRejectedAt: Date | null;
+  lastWebhookRejectionReason: LinearWebhookRejectionReason | null;
   project: LinearChoice | null;
+  projectUrl: string | null;
   team: LinearChoice | null;
+  teamKey: string | null;
+  webhookRejections: number;
   webhookSecret: SecretFieldStatus;
+  workspaceId: string | null;
+  workspaceName: string | null;
+  workspaceUrlKey: string | null;
 }
 
 export interface SavedLinearCredentials extends LinearCredentials {
@@ -110,6 +138,11 @@ const configColumns = {
   featureLabelName: linearIntegrationConfig.featureLabelName,
   otherLabelId: linearIntegrationConfig.otherLabelId,
   otherLabelName: linearIntegrationConfig.otherLabelName,
+  workspaceId: linearIntegrationConfig.workspaceId,
+  workspaceName: linearIntegrationConfig.workspaceName,
+  workspaceUrlKey: linearIntegrationConfig.workspaceUrlKey,
+  teamKey: linearIntegrationConfig.teamKey,
+  projectUrl: linearIntegrationConfig.projectUrl,
 };
 
 type ConfigRow = {
@@ -137,11 +170,25 @@ function nextChoice(
   return keepSaved ? saved : null;
 }
 
+// Both fields must be present and the secret must open. A saved secret that
+// cannot be read counts as missing, the same as no secret at all.
+function savedCredentials(
+  row: { clientId: string | null; clientSecret: string | null } | null
+): LinearCredentials | null {
+  const clientId = row?.clientId?.trim();
+  const clientSecret = readMaybeEncryptedSecret(row?.clientSecret ?? null);
+  return clientId && clientSecret ? { clientId, clientSecret } : null;
+}
+
 async function loadRow() {
   const [row] = await db
     .select({
       ...configColumns,
       lastWebhookAt: linearIntegrationConfig.lastWebhookAt,
+      lastWebhookRejectedAt: linearIntegrationConfig.lastWebhookRejectedAt,
+      lastWebhookRejectionReason:
+        linearIntegrationConfig.lastWebhookRejectionReason,
+      webhookRejections: linearIntegrationConfig.webhookRejections,
       updatedAt: linearIntegrationConfig.updatedAt,
       ...lastUpdatedByColumns,
     })
@@ -152,14 +199,12 @@ async function loadRow() {
 
 export async function getLinearCredentials(): Promise<SavedLinearCredentials | null> {
   const row = await loadRow();
-  const clientId = row?.clientId?.trim() ? row.clientId.trim() : null;
-  const clientSecret = readMaybeEncryptedSecret(row?.clientSecret ?? null);
-  if (!(clientId && clientSecret)) {
+  const credentials = savedCredentials(row);
+  if (!credentials) {
     return null;
   }
   return {
-    clientId,
-    clientSecret,
+    ...credentials,
     webhookSecret: readMaybeEncryptedSecret(row?.webhookSecret ?? null),
   };
 }
@@ -175,15 +220,13 @@ export interface LinearFeedbackSetup {
 // Feedback is on only when an admin has saved credentials and a team.
 export async function getLinearFeedbackSetup(): Promise<LinearFeedbackSetup | null> {
   const row = await loadRow();
-  const clientId = row?.clientId?.trim() ? row.clientId.trim() : null;
-  const clientSecret = readMaybeEncryptedSecret(row?.clientSecret ?? null);
+  const credentials = savedCredentials(row);
   const teamId = row?.teamId ?? null;
-  if (!(clientId && clientSecret && teamId)) {
+  if (!(credentials && teamId)) {
     return null;
   }
   return {
-    clientId,
-    clientSecret,
+    ...credentials,
     teamId,
     projectId: row?.projectId ?? null,
     labelIds: {
@@ -200,14 +243,148 @@ export async function isFeedbackConfigured(): Promise<boolean> {
 
 // `updated_at` is the time of the last admin save. Setting it to itself in the
 // same update stops its `$onUpdate` hook from moving it on every delivery.
-export async function recordLinearWebhookReceived(): Promise<void> {
+function rejectionReason(
+  value: string | null | undefined
+): LinearWebhookRejectionReason | null {
+  if (value === "signature" || value === "stale") {
+    return value;
+  }
+  return null;
+}
+
+// A valid delivery proves the signing secret. It counts as "working" only
+// when the issue is in the saved team, because a webhook covers one team.
+export async function recordLinearWebhookAccepted(input: {
+  forSavedTeam: boolean;
+}): Promise<void> {
   await db
     .update(linearIntegrationConfig)
     .set({
-      lastWebhookAt: new Date(),
+      webhookRejections: 0,
+      lastWebhookRejectedAt: null,
+      lastWebhookRejectionReason: null,
+      ...(input.forSavedTeam ? { lastWebhookAt: new Date() } : {}),
       updatedAt: sql`${linearIntegrationConfig.updatedAt}`,
     })
     .where(eq(linearIntegrationConfig.id, true));
+}
+
+export async function recordLinearWebhookRejection(
+  reason: LinearWebhookRejectionReason
+): Promise<void> {
+  await db
+    .update(linearIntegrationConfig)
+    .set({
+      webhookRejections: sql`${linearIntegrationConfig.webhookRejections} + 1`,
+      lastWebhookRejectedAt: new Date(),
+      lastWebhookRejectionReason: reason,
+      updatedAt: sql`${linearIntegrationConfig.updatedAt}`,
+    })
+    .where(eq(linearIntegrationConfig.id, true));
+}
+
+export interface LinearWebhookContext {
+  credentials: SavedLinearCredentials;
+  teamId: string | null;
+  workspaceId: string | null;
+}
+
+export async function getLinearWebhookContext(): Promise<LinearWebhookContext | null> {
+  const row = await loadRow();
+  const credentials = savedCredentials(row);
+  const webhookSecret = readMaybeEncryptedSecret(row?.webhookSecret ?? null);
+  if (!(credentials && webhookSecret)) {
+    return null;
+  }
+  return {
+    credentials: { ...credentials, webhookSecret },
+    teamId: row?.teamId ?? null,
+    workspaceId: row?.workspaceId ?? null,
+  };
+}
+
+// Fills in what a setup saved before this version never stored: the workspace
+// name, the team key, and the project link. The page runs it in the
+// background, so any failure (Linear down, network error) leaves the row
+// alone and the next page load tries again.
+export async function backfillLinearSetup(): Promise<void> {
+  try {
+    const row = await loadRow();
+    const credentials = savedCredentials(row);
+    if (!credentials) {
+      return;
+    }
+    const missingWorkspace = !row?.workspaceId;
+    const missingTeamKey = Boolean(row?.teamId && !row.teamKey);
+    const missingProjectUrl = Boolean(row?.projectId && !row.projectUrl);
+    if (!(missingWorkspace || missingTeamKey || missingProjectUrl)) {
+      return;
+    }
+
+    const [organization, teams, options] = await Promise.all([
+      missingWorkspace ? testLinearConnection(credentials) : null,
+      missingTeamKey ? listLinearTeams(credentials) : null,
+      missingProjectUrl && row?.teamId
+        ? listLinearTeamOptions(credentials, row.teamId)
+        : null,
+    ]);
+    const teamKey = teams?.find((team) => team.id === row?.teamId)?.key;
+    const projectUrl = options?.projects.find(
+      (project) => project.id === row?.projectId
+    )?.url;
+
+    // The write is skipped if an admin changed the team or project, or
+    // connected a workspace, while Linear was answering.
+    await db
+      .update(linearIntegrationConfig)
+      .set({
+        ...(organization
+          ? {
+              workspaceId: organization.id,
+              workspaceName: organization.name,
+              workspaceUrlKey: organization.urlKey,
+            }
+          : {}),
+        ...(teamKey ? { teamKey } : {}),
+        ...(projectUrl ? { projectUrl } : {}),
+        updatedAt: sql`${linearIntegrationConfig.updatedAt}`,
+      })
+      .where(
+        and(
+          eq(linearIntegrationConfig.id, true),
+          row?.teamId
+            ? eq(linearIntegrationConfig.teamId, row.teamId)
+            : isNull(linearIntegrationConfig.teamId),
+          row?.projectId
+            ? eq(linearIntegrationConfig.projectId, row.projectId)
+            : isNull(linearIntegrationConfig.projectId),
+          missingWorkspace
+            ? isNull(linearIntegrationConfig.workspaceId)
+            : undefined
+        )
+      );
+  } catch (err) {
+    console.error("[linear] Could not fill in the saved setup:", err);
+  }
+}
+
+export function linearFeedbackViewUrl(input: {
+  projectUrl: string | null;
+  teamKey: string | null;
+  workspaceUrlKey: string | null;
+}): string | null {
+  if (input.projectUrl) {
+    return input.projectUrl;
+  }
+  if (
+    input.workspaceUrlKey &&
+    input.teamKey &&
+    /^[A-Za-z0-9_-]+$/.test(input.workspaceUrlKey) &&
+    /^[A-Za-z0-9_-]+$/.test(input.teamKey)
+  ) {
+    return `https://linear.app/${input.workspaceUrlKey}/team/${input.teamKey}/all`;
+  }
+  return null;
 }
 
 // Returns false when this delivery id was seen before, so a resend by Linear
@@ -242,9 +419,19 @@ export async function getLinearConfigForAdmin(): Promise<LinearConfigForAdmin> {
     clientSecret: savedSecret(row?.clientSecret),
     webhookSecret: savedSecret(row?.webhookSecret),
     team: choice(row?.teamId, row?.teamName),
+    teamKey: row?.teamKey ?? null,
     project: choice(row?.projectId, row?.projectName),
+    projectUrl: row?.projectUrl ?? null,
     labels: labelsFromRow(row),
+    workspaceId: row?.workspaceId ?? null,
+    workspaceName: row?.workspaceName ?? null,
+    workspaceUrlKey: row?.workspaceUrlKey ?? null,
+    webhookRejections: row?.webhookRejections ?? 0,
     lastWebhookAt: row?.lastWebhookAt ?? null,
+    lastWebhookRejectedAt: row?.lastWebhookRejectedAt ?? null,
+    lastWebhookRejectionReason: rejectionReason(
+      row?.lastWebhookRejectionReason
+    ),
     lastUpdated: toLastUpdated(row),
   };
 }
@@ -282,6 +469,25 @@ export async function updateLinearConfig(
       choice(row?.projectId, row?.projectName),
       patch.project
     );
+    const teamChanged = team?.id !== savedTeam?.id;
+    const teamKey =
+      team == null
+        ? null
+        : patch.team === undefined
+          ? (row?.teamKey ?? null)
+          : teamChanged
+            ? (patch.team?.key ?? null)
+            : (patch.team?.key ?? row?.teamKey ?? null);
+    let projectUrl: string | null = null;
+    if (project) {
+      if (patch.project === undefined) {
+        projectUrl = row?.projectUrl ?? null;
+      } else if (patch.project?.url) {
+        projectUrl = patch.project.url;
+      } else if (patch.project?.id === row?.projectId) {
+        projectUrl = row?.projectUrl ?? null;
+      }
+    }
     const savedLabels = labelsFromRow(row);
     const labels: LinearLabelChoices = {
       bug: pick(savedLabels.bug, patch.labels?.bug),
@@ -295,33 +501,109 @@ export async function updateLinearConfig(
     await tx
       .update(linearIntegrationConfig)
       .set({
-        clientId: nextPlain(row?.clientId ?? null, patch.client_id),
-        clientSecret: nextSecret(
-          row?.clientSecret ?? null,
-          patch.client_secret
-        ),
         webhookSecret: nextSecret(
           row?.webhookSecret ?? null,
           patch.webhook_secret
         ),
         teamId: team?.id ?? null,
         teamName: team?.name ?? null,
+        teamKey,
         projectId: project?.id ?? null,
         projectName: project?.name ?? null,
+        projectUrl,
         bugLabelId: labels.bug?.id ?? null,
         bugLabelName: labels.bug?.name ?? null,
         featureLabelId: labels.feature_request?.id ?? null,
         featureLabelName: labels.feature_request?.name ?? null,
         otherLabelId: labels.other?.id ?? null,
         otherLabelName: labels.other?.name ?? null,
+        ...(teamChanged ? { lastWebhookAt: null } : {}),
+        ...(patch.webhook_secret === undefined
+          ? {}
+          : {
+              webhookRejections: 0,
+              lastWebhookRejectedAt: null,
+              lastWebhookRejectionReason: null,
+            }),
         updatedAt: new Date(),
         updatedBy,
       })
       .where(eq(linearIntegrationConfig.id, true));
   });
 
-  if (patch.client_id !== undefined || patch.client_secret !== undefined) {
-    clearLinearTokenCache();
-  }
   return getLinearConfigForAdmin();
+}
+
+export async function connectLinearApp(input: {
+  clientId: string;
+  clientSecret: string;
+  confirmWorkspaceChange: boolean;
+  organization: LinearOrganization;
+  updatedBy: string;
+}): Promise<LinearConfigForAdmin> {
+  await db.transaction(async (tx) => {
+    await tx
+      .insert(linearIntegrationConfig)
+      .values({ id: true, updatedBy: input.updatedBy })
+      .onConflictDoNothing();
+    const [row] = await tx
+      .select(configColumns)
+      .from(linearIntegrationConfig)
+      .where(eq(linearIntegrationConfig.id, true))
+      .for("update");
+
+    const workspaceChanged = Boolean(
+      row?.workspaceId && row.workspaceId !== input.organization.id
+    );
+    if (workspaceChanged && !input.confirmWorkspaceChange) {
+      throw new LinearWorkspaceChangeError(
+        input.organization.id,
+        input.organization.name
+      );
+    }
+
+    await tx
+      .update(linearIntegrationConfig)
+      .set({
+        clientId: input.clientId,
+        clientSecret: nextSecret(row?.clientSecret ?? null, input.clientSecret),
+        workspaceId: input.organization.id,
+        workspaceName: input.organization.name,
+        workspaceUrlKey: input.organization.urlKey,
+        ...(workspaceChanged
+          ? {
+              webhookSecret: null,
+              teamId: null,
+              teamName: null,
+              teamKey: null,
+              projectId: null,
+              projectName: null,
+              projectUrl: null,
+              bugLabelId: null,
+              bugLabelName: null,
+              featureLabelId: null,
+              featureLabelName: null,
+              otherLabelId: null,
+              otherLabelName: null,
+              lastWebhookAt: null,
+              webhookRejections: 0,
+              lastWebhookRejectedAt: null,
+              lastWebhookRejectionReason: null,
+            }
+          : {}),
+        updatedAt: new Date(),
+        updatedBy: input.updatedBy,
+      })
+      .where(eq(linearIntegrationConfig.id, true));
+  });
+
+  clearLinearTokenCache();
+  return getLinearConfigForAdmin();
+}
+
+export async function disconnectLinear(): Promise<void> {
+  await db
+    .delete(linearIntegrationConfig)
+    .where(eq(linearIntegrationConfig.id, true));
+  clearLinearTokenCache();
 }

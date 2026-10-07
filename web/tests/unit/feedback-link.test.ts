@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { feedbackKindSchema } from "@/lib/api/feedback-schema";
 import {
   FEEDBACK_REPORT_MARKER,
+  type FeedbackSummary,
   feedbackAttachmentUrl,
   feedbackIssueMarker,
   feedbackReporterMarker,
@@ -11,6 +12,35 @@ import {
   pageFeedbackSummaries,
   readFeedbackReport,
 } from "@/lib/linear/feedback-link";
+
+function summary(
+  input: Pick<FeedbackSummary, "createdAt" | "id" | "kind" | "status"> & {
+    position?: number;
+    stateName?: string;
+    stateType?: string;
+  }
+): FeedbackSummary {
+  const type =
+    input.stateType ??
+    (input.status === "resolved"
+      ? "completed"
+      : input.status === "declined"
+        ? "canceled"
+        : "unstarted");
+  return {
+    id: input.id,
+    createdAt: input.createdAt,
+    kind: input.kind,
+    status: input.status,
+    state: {
+      id: `${type}-${input.position ?? 0}-${input.stateName ?? type}`,
+      name: input.stateName ?? type,
+      color: "#bec2c8",
+      type,
+      position: input.position ?? 0,
+    },
+  };
+}
 
 describe("feedback attachment links", () => {
   it("builds a URL that contains the reporter and the kind", () => {
@@ -71,30 +101,137 @@ describe("feedback attachment links", () => {
   it("counts every status and pages the filtered list", () => {
     const page = pageFeedbackSummaries(
       [
-        {
+        summary({
           id: "a",
           createdAt: "2026-01-01T00:00:00.000Z",
           kind: "bug",
           status: "open",
-        },
-        {
+        }),
+        summary({
           id: "b",
           createdAt: "2026-01-03T00:00:00.000Z",
           kind: "bug",
           status: "resolved",
-        },
-        {
+        }),
+        summary({
           id: "c",
           createdAt: "2026-01-02T00:00:00.000Z",
           kind: "other",
           status: "open",
-        },
+        }),
       ],
       { status: "open", kind: "bug", limit: 10, offset: 0 }
     );
-    expect(page.counts).toEqual({ open: 2, resolved: 1, declined: 0 });
+    expect(page.counts).toEqual({
+      open: 2,
+      closed: 1,
+      resolved: 1,
+      declined: 0,
+    });
     expect(page.total).toBe(1);
     expect(page.ids).toEqual(["a"]);
+  });
+
+  it("orders by Linear status, then newest, and counts a group across pages", () => {
+    const page = pageFeedbackSummaries(
+      [
+        summary({
+          id: "old-backlog",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          kind: "bug",
+          status: "open",
+          stateType: "backlog",
+          stateName: "Backlog",
+          position: 0,
+        }),
+        summary({
+          id: "new-backlog",
+          createdAt: "2026-01-05T00:00:00.000Z",
+          kind: "bug",
+          status: "open",
+          stateType: "backlog",
+          stateName: "Backlog",
+          position: 0,
+        }),
+        summary({
+          id: "started",
+          createdAt: "2026-01-04T00:00:00.000Z",
+          kind: "feature_request",
+          status: "open",
+          stateType: "started",
+          stateName: "In Progress",
+          position: 2,
+        }),
+        summary({
+          id: "done",
+          createdAt: "2026-01-06T00:00:00.000Z",
+          kind: "bug",
+          status: "resolved",
+          stateType: "completed",
+          stateName: "Done",
+        }),
+      ],
+      { status: "open", limit: 2, offset: 0 }
+    );
+    expect(page.ids).toEqual(["new-backlog", "old-backlog"]);
+    expect(page.groups).toEqual([
+      expect.objectContaining({ name: "Backlog", count: 2 }),
+      expect.objectContaining({ name: "In Progress", count: 1 }),
+    ]);
+    expect(page.counts.open).toBe(3);
+    expect(page.counts.closed).toBe(1);
+
+    const closed = pageFeedbackSummaries(
+      [
+        summary({
+          id: "done",
+          createdAt: "2026-01-06T00:00:00.000Z",
+          kind: "bug",
+          status: "resolved",
+          stateName: "Done",
+        }),
+        summary({
+          id: "canceled",
+          createdAt: "2026-01-02T00:00:00.000Z",
+          kind: "other",
+          status: "declined",
+          stateType: "canceled",
+          stateName: "Canceled",
+        }),
+      ],
+      { status: "closed", limit: 10, offset: 0 }
+    );
+    expect(closed.ids).toEqual(["done", "canceled"]);
+    expect(closed.total).toBe(2);
+  });
+
+  it("keeps each state's rows together when two states share a type and position", () => {
+    // After the saved team changes, a report can sit in the old team's "Todo"
+    // while new ones sit in the new team's "Todo" at the same position.
+    const inState = (id: string, createdAt: string, stateId: string) => {
+      const item = summary({
+        id,
+        createdAt,
+        kind: "bug",
+        status: "open",
+        stateName: "Todo",
+      });
+      return { ...item, state: { ...item.state, id: stateId } };
+    };
+    const page = pageFeedbackSummaries(
+      [
+        inState("a-new", "2026-10-03T00:00:00.000Z", "state-a"),
+        inState("b-mid", "2026-10-02T00:00:00.000Z", "state-b"),
+        inState("a-old", "2026-10-01T00:00:00.000Z", "state-a"),
+      ],
+      { limit: 25, offset: 0 }
+    );
+
+    expect(page.ids).toEqual(["a-new", "a-old", "b-mid"]);
+    expect(page.groups.map((group) => [group.stateId, group.count])).toEqual([
+      ["state-a", 2],
+      ["state-b", 1],
+    ]);
   });
 
   it("treats completed, canceled, and duplicate as closed", () => {

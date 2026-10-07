@@ -1,10 +1,21 @@
 import type { FeedbackItem } from "@/lib/api/feedback";
+import type { FeedbackStateGroup } from "@/lib/linear/feedback-link";
 
 function person(value: FeedbackItem["reporter"]) {
   if (!value) {
     return null;
   }
   return { id: value.id, name: value.name, email: value.email };
+}
+
+export function serializeFeedbackGroup(group: FeedbackStateGroup) {
+  return {
+    state_id: group.stateId,
+    name: group.name,
+    color: group.color,
+    type: group.type,
+    count: group.count,
+  };
 }
 
 export function serializeFeedback(item: FeedbackItem) {
@@ -29,6 +40,34 @@ export function serializeFeedback(item: FeedbackItem) {
       identifier: item.linearIssue.identifier,
       url: item.linearIssue.url,
       state_name: item.linearIssue.stateName,
+      state_type: item.linearIssue.stateType,
+      state_color: item.linearIssue.stateColor,
+      priority: item.linearIssue.priority,
+      priority_label: item.linearIssue.priorityLabel,
+      labels: item.linearIssue.labels.map((label) => ({
+        name: label.name,
+        color: label.color,
+      })),
+      assignee: item.linearIssue.assignee
+        ? {
+            name: item.linearIssue.assignee.name,
+            email: item.linearIssue.assignee.email,
+            avatar_url: item.linearIssue.assignee.avatarUrl,
+            user_id: item.linearIssue.assignee.userId,
+          }
+        : null,
+      project_name: item.linearIssue.projectName,
+      team_name: item.linearIssue.teamName,
     },
+    activity: item.activity
+      ? item.activity.map((event) => ({
+          kind: event.kind,
+          at: event.at,
+          actor_name: event.actorName,
+          from_state: event.fromState,
+          to_state: event.toState,
+          body: event.body,
+        }))
+      : null,
   };
 }

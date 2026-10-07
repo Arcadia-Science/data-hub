@@ -1,4 +1,5 @@
 import {
+  createParser,
   createSearchParamsCache,
   parseAsArrayOf,
   parseAsBoolean,
@@ -6,7 +7,6 @@ import {
   parseAsString,
   parseAsStringLiteral,
 } from "nuqs/server";
-import { feedbackStatusSchema } from "@/lib/api/feedback-schema";
 import { FILES_LIFECYCLE_FILTER_VALUES } from "@/lib/runs/file-lifecycle-filter";
 import { RUN_STATUS_VALUES, type RunStatus } from "@/lib/runs/run-status";
 
@@ -54,8 +54,26 @@ export const dashboardParamsCache = createSearchParamsCache(
   dashboardSearchParams
 );
 
+export type FeedbackTab = "closed" | "open";
+
+// Older links used resolved and declined as their own tabs. Both are Closed now.
+const feedbackTabParser = createParser({
+  parse(value: string): FeedbackTab | null {
+    if (value === "open") {
+      return "open";
+    }
+    if (value === "closed" || value === "resolved" || value === "declined") {
+      return "closed";
+    }
+    return null;
+  },
+  serialize(value: FeedbackTab) {
+    return value;
+  },
+});
+
 export const feedbackSearchParams = {
-  status: parseAsStringLiteral(feedbackStatusSchema.options)
+  status: feedbackTabParser
     .withDefault("open")
     .withOptions({ clearOnDefault: true }),
   page: parseAsInteger.withDefault(1),

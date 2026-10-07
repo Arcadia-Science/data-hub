@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import {
   FEEDBACK_KIND_LABELS,
@@ -49,4 +50,54 @@ export function FeedbackStatusBadge({ status }: { status: FeedbackStatus }) {
 
 export function feedbackStatusLabel(status: FeedbackStatus): string {
   return FEEDBACK_STATUS_LABELS[status];
+}
+
+const PRIORITY_CLASS: Record<number, string> = {
+  1: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200",
+  2: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
+  3: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200",
+  4: "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300",
+};
+
+// `empty` is what shows when Linear has no priority for the report. The
+// table passes a dash to keep the column quiet; the sheet spells it out.
+export function FeedbackPriority({
+  empty = <span className="text-muted-foreground">No priority</span>,
+  label,
+  priority,
+}: {
+  empty?: ReactNode;
+  label: string | null;
+  priority: number | null;
+}) {
+  if (priority == null || priority === 0 || !label || label === "No priority") {
+    return empty;
+  }
+  return (
+    <Badge className={PRIORITY_CLASS[priority] ?? PRIORITY_CLASS[3]}>
+      {label}
+    </Badge>
+  );
+}
+
+export function FeedbackLabelChip({
+  color,
+  name,
+}: {
+  color: string;
+  name: string;
+}) {
+  return (
+    <span
+      className="inline-flex max-w-full items-center gap-1.5 rounded-full border bg-background px-2 py-0.5 font-medium text-xs"
+      title={name}
+    >
+      <span
+        aria-hidden="true"
+        className="size-2 shrink-0 rounded-full"
+        style={{ backgroundColor: color }}
+      />
+      <span className="truncate">{name}</span>
+    </span>
+  );
 }
