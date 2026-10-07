@@ -146,7 +146,7 @@ Some features depend on services that aren't running in this workflow. Each one 
 | File reprocessing | The reprocess endpoint returns null and no Lambda is invoked | Same |
 | Slack channel notifications on new runs | `console.warn` only, no HTTP call | Configure an incoming webhook URL in Settings > Integrations (admins only) |
 | Slack DM notifications / Connect to Slack | `console.warn` only; the "Connect to Slack" button redirects to Slack but the callback will error without credentials | Set `SLACK_BOT_TOKEN`, `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, or save them under Settings > Integrations |
-| Feedback | The account menu hides Feedback, and sending a report returns an error | An admin saves a Linear OAuth app under Settings > Integrations. See [Connect Linear](first-time-deployment.md#connect-linear) |
+| Feedback | The account menu hides Feedback, and sending a report returns an error | An admin saves a Linear OAuth app under Settings > Integrations. See [Set up Linear](first-time-deployment.md#set-up-linear) |
 | Watcher uploads → Lambda → API loop | Not exercised end-to-end; the seed inserts the resulting rows directly. For Lambda-only smoke testing, see [Testing the Lambda end-to-end](#testing-the-lambda-end-to-end) below | Run the watcher (`watcher.md`) and the Lambda (`lambda.md`) end-to-end |
 | Sign in with Google | The button still renders but OAuth callback will 4xx without `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | `vercel env pull` per `getting-started.md` |
 
