@@ -1,8 +1,14 @@
 import { after } from "next/server";
-import { apiError, UNAUTHORIZED, VALIDATION_ERROR } from "@/lib/api/errors";
+import {
+  apiError,
+  LINEAR_UNAVAILABLE,
+  UNAUTHORIZED,
+  VALIDATION_ERROR,
+} from "@/lib/api/errors";
 import { notifyFeedbackUpdated } from "@/lib/api/notifications";
 import {
   getLinearWorkflowStateType,
+  type LinearCredentials,
   LinearRequestError,
   listLinearIssueDetails,
 } from "@/lib/linear/client";
@@ -38,7 +44,7 @@ interface PendingNotification {
 // A report notifies its reporter when its issue moves into a closed state
 // from a state that was not closed. Moving from Done to Released stays quiet.
 async function pendingNotification(
-  credentials: { clientId: string; clientSecret: string },
+  credentials: LinearCredentials,
   body: { data?: { id?: string }; updatedFrom?: { stateId?: unknown } | null }
 ): Promise<PendingNotification | null> {
   const issueId = body.data?.id;
@@ -114,7 +120,7 @@ export async function POST(request: Request) {
       notification = await pendingNotification(credentials, body);
     } catch (err) {
       if (err instanceof LinearRequestError) {
-        return apiError(502, "LINEAR_UNAVAILABLE", err.message);
+        return apiError(502, LINEAR_UNAVAILABLE, err.message);
       }
       throw err;
     }

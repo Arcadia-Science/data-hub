@@ -593,7 +593,7 @@ const workflowStateSchema = z.object({
 // an admin deleted comes back as null and not as an error. `includeArchived`
 // keeps those deleted states findable.
 export async function getLinearWorkflowStateType(
-  credentials: { clientId: string; clientSecret: string },
+  credentials: LinearCredentials,
   stateId: string
 ): Promise<string | null> {
   const data = await graphql(
