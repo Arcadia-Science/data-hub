@@ -1,5 +1,4 @@
 import { asc } from "drizzle-orm";
-import { ShieldOff } from "lucide-react";
 import type { Metadata } from "next/types";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
@@ -7,6 +6,7 @@ import {
   MembersTable,
   MembersTableSkeleton,
 } from "@/components/members/members-table";
+import { AdminsOnly } from "@/components/settings/admins-only";
 import { SettingsPageContent } from "@/components/settings/settings-page-content";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -36,20 +36,7 @@ export default async function MembersPage() {
   // than redirecting silently so the missing-permission failure mode is
   // visible. The settings sidebar already hides this entry for non-admins.
   if (!session.user.isAdmin) {
-    return (
-      <SettingsPageContent>
-        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed bg-background py-16 dark:bg-muted">
-          <ShieldOff className="size-10 text-muted-foreground/50" />
-          <p className="mt-3 font-medium text-muted-foreground text-sm">
-            Admins only
-          </p>
-          <p className="mt-1 max-w-sm text-center text-muted-foreground/70 text-sm">
-            You need workspace admin access to view or change member roles. Ask
-            an existing admin if you need to be promoted.
-          </p>
-        </div>
-      </SettingsPageContent>
-    );
+    return <AdminsOnly>view or change member roles</AdminsOnly>;
   }
 
   return (

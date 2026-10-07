@@ -1,7 +1,7 @@
-import { ShieldOff } from "lucide-react";
 import type { Metadata } from "next/types";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import { SlackChannelCard } from "@/components/notifications/slack-channel-card";
+import { AdminsOnly } from "@/components/settings/admins-only";
 import { SettingsPageContent } from "@/components/settings/settings-page-content";
 import { auth } from "@/lib/auth";
 import { getSlackChannelConfigForAdmin } from "@/lib/slack/channel-config";
@@ -27,20 +27,7 @@ export default async function IntegrationsSettingsPage() {
   }
 
   if (!session.user.isAdmin) {
-    return (
-      <SettingsPageContent>
-        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed bg-background py-16 dark:bg-muted">
-          <ShieldOff className="size-10 text-muted-foreground/50" />
-          <p className="mt-3 font-medium text-muted-foreground text-sm">
-            Admins only
-          </p>
-          <p className="mt-1 max-w-sm text-center text-muted-foreground/70 text-sm">
-            You need workspace admin access to manage integrations. Ask an
-            existing admin if you need to be promoted.
-          </p>
-        </div>
-      </SettingsPageContent>
-    );
+    return <AdminsOnly>manage integrations</AdminsOnly>;
   }
 
   const slackChannel = await getSlackChannelConfigForAdmin();
