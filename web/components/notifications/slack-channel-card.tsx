@@ -1,11 +1,9 @@
 "use client";
 
-// Compound component for the org-wide Slack channel webhook on
-// Settings > Integrations. Mirrors `slack-connection-card.tsx`: a
-// section header above the card and an independent form.
-//
-//   <SlackChannelCard.SectionHeader configured={...} />
-//   <SlackChannelCard.Form configured={...} lastUpdated={...} />
+// The org-wide Slack channel webhook on Settings > Integrations: a section
+// header above the card and an independent form. They are separate named
+// exports because the page is a server component, and a server component
+// cannot dot into a client module (`SlackChannelCard.Form` throws on render).
 
 import { useForm } from "@tanstack/react-form";
 import { Loader2 } from "lucide-react";
@@ -35,7 +33,11 @@ import {
 } from "@/lib/slack/webhook-url";
 import { formatRelativeTime } from "@/lib/utils";
 
-function SectionHeader({ configured }: { configured: boolean }) {
+export function SlackChannelSectionHeader({
+  configured,
+}: {
+  configured: boolean;
+}) {
   return (
     <div>
       <div className="flex items-center justify-between gap-2">
@@ -59,7 +61,7 @@ function SectionHeader({ configured }: { configured: boolean }) {
 const MASKED_LENGTH_MIN = 32;
 const MASKED_LENGTH_RANGE = 41;
 
-function Form({
+export function SlackChannelForm({
   configured,
   lastUpdated,
 }: {
@@ -305,8 +307,3 @@ function Form({
     </Card>
   );
 }
-
-export const SlackChannelCard = {
-  SectionHeader,
-  Form,
-};
