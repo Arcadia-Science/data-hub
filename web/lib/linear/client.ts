@@ -6,6 +6,7 @@
 
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { FEEDBACK_REPORT_MARKER } from "@/lib/linear/feedback-link";
 
 const TOKEN_SKEW_MS = 60_000;
 const LINEAR_SCOPES = "read,issues:create";
@@ -34,10 +35,17 @@ export interface LinearOptionsResponse {
   teams: LinearChoice[];
 }
 
+export const LINEAR_RATE_LIMITED = "RATELIMITED";
+
 export class LinearRequestError extends Error {
-  constructor(message: string) {
+  // Set to `LINEAR_RATE_LIMITED` when Linear refuses the call because the app
+  // used up its hourly budget, so callers can tell that apart from an outage.
+  readonly code: string | null;
+
+  constructor(message: string, code: string | null = null) {
     super(message);
     this.name = "LinearRequestError";
+    this.code = code;
   }
 }
 
@@ -95,7 +103,11 @@ const tokenErrorSchema = z.object({
 });
 
 interface GraphqlErrorBody {
-  extensions?: { type?: string; userPresentableMessage?: string };
+  extensions?: {
+    code?: string;
+    type?: string;
+    userPresentableMessage?: string;
+  };
   message?: string;
 }
 
@@ -237,12 +249,22 @@ async function graphql<T>(
     response = await run(true);
   }
 
-  // GraphQL errors can arrive with a 4xx status, so read the body before
-  // judging the status.
+  // GraphQL errors can arrive with a 4xx status (a rate-limited call is a
+  // 400), so read the body before judging the status.
   const body = (await response.json().catch(() => null)) as {
     data?: unknown;
     errors?: GraphqlErrorBody[];
   } | null;
+  if (
+    body?.errors?.some(
+      (error) => error.extensions?.code === LINEAR_RATE_LIMITED
+    )
+  ) {
+    throw new LinearRequestError(
+      "Linear is limiting how often Data Hub can call it. Try again in a few minutes.",
+      LINEAR_RATE_LIMITED
+    );
+  }
   if (body?.errors && body.errors.length > 0) {
     throw graphqlFailure(body.errors[0] ?? {});
   }
@@ -351,6 +373,7 @@ const issueSummaryConnectionSchema = z.object({
         createdAt: z.string(),
         id: z.string(),
         state: z.object({ type: z.string() }),
+        trashed: z.boolean().nullable(),
       })
     ),
     pageInfo: z.object({
@@ -360,6 +383,8 @@ const issueSummaryConnectionSchema = z.object({
   }),
 });
 
+// Other integrations store lists and nested objects in attachment metadata,
+// so only the Data Hub attachment's metadata is checked, by its caller.
 const issueDetailConnectionSchema = z.object({
   issues: z.object({
     nodes: z.array(
@@ -367,7 +392,7 @@ const issueDetailConnectionSchema = z.object({
         attachments: z.object({
           nodes: z.array(
             z.object({
-              metadata: z.record(z.string(), z.union([z.string(), z.number()])),
+              metadata: z.record(z.string(), z.unknown()),
               url: z.string(),
             })
           ),
@@ -378,6 +403,7 @@ const issueDetailConnectionSchema = z.object({
         id: z.string(),
         identifier: z.string(),
         state: z.object({ name: z.string(), type: z.string() }),
+        trashed: z.boolean().nullable(),
         updatedAt: z.string(),
         url: z.string(),
       })
@@ -460,35 +486,56 @@ export interface LinearIssueSummaryNode {
   state: { type: string };
 }
 
+// Linear bills a query by page size even when fewer issues match, so the page
+// stays small and each issue returns only its Data Hub attachment. That keeps
+// one call to a few hundred points, against 2,000,000 per hour.
+export const LINEAR_SUMMARY_PAGE_SIZE = 100;
+
+// `includeArchived` keeps old reports visible, because Linear archives closed
+// issues on its own after the team's auto-archive period. Deleted issues come
+// back with `trashed` set and are dropped here.
 export async function listLinearIssueSummaries(
   credentials: { clientId: string; clientSecret: string },
-  input: { after?: string; filter: Record<string, unknown> }
+  input: {
+    after?: string;
+    filter: Record<string, unknown>;
+    pageSize?: number;
+  }
 ): Promise<{
   nodes: LinearIssueSummaryNode[];
   pageInfo: { endCursor: string | null; hasNextPage: boolean };
 }> {
   const data = await graphql(
     credentials,
-    `query FeedbackIssueSummaries($filter: IssueFilter, $after: String) {
-      issues(first: 250, after: $after, filter: $filter) {
+    `query FeedbackIssueSummaries($filter: IssueFilter, $after: String, $first: Int, $marker: String!) {
+      issues(first: $first, after: $after, includeArchived: true, filter: $filter) {
         nodes {
           id
           createdAt
+          trashed
           state { type }
-          attachments(first: 5) { nodes { url } }
+          attachments(first: 1, filter: { url: { contains: $marker } }) { nodes { url } }
         }
         pageInfo { hasNextPage endCursor }
       }
     }`,
-    { filter: input.filter, after: input.after },
+    {
+      filter: input.filter,
+      after: input.after,
+      first: input.pageSize ?? LINEAR_SUMMARY_PAGE_SIZE,
+      marker: FEEDBACK_REPORT_MARKER,
+    },
     issueSummaryConnectionSchema
   );
-  return data.issues;
+  return {
+    nodes: data.issues.nodes.filter((node) => !node.trashed),
+    pageInfo: data.issues.pageInfo,
+  };
 }
 
 export interface LinearIssueDetailNode {
   attachments: {
-    nodes: { metadata: Record<string, string | number>; url: string }[];
+    nodes: { metadata: Record<string, unknown>; url: string }[];
   };
   canceledAt: string | null;
   completedAt: string | null;
@@ -500,6 +547,7 @@ export interface LinearIssueDetailNode {
   url: string;
 }
 
+// `first` matches the number of ids. Without it Linear returns 50 issues.
 export async function listLinearIssueDetails(
   credentials: { clientId: string; clientSecret: string },
   ids: string[]
@@ -509,8 +557,8 @@ export async function listLinearIssueDetails(
   }
   const data = await graphql(
     credentials,
-    `query FeedbackIssueDetails($ids: [ID!]!) {
-      issues(filter: { id: { in: $ids } }) {
+    `query FeedbackIssueDetails($filter: IssueFilter, $first: Int, $marker: String!) {
+      issues(first: $first, includeArchived: true, filter: $filter) {
         nodes {
           id
           identifier
@@ -519,13 +567,18 @@ export async function listLinearIssueDetails(
           updatedAt
           completedAt
           canceledAt
+          trashed
           state { name type }
-          attachments(first: 5) { nodes { url metadata } }
+          attachments(first: 1, filter: { url: { contains: $marker } }) { nodes { url metadata } }
         }
       }
     }`,
-    { ids },
+    {
+      filter: { id: { in: ids } },
+      first: ids.length,
+      marker: FEEDBACK_REPORT_MARKER,
+    },
     issueDetailConnectionSchema
   );
-  return data.issues.nodes;
+  return data.issues.nodes.filter((node) => !node.trashed);
 }

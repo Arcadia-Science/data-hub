@@ -4,15 +4,26 @@
 // kind. List queries filter on that URL, so Data Hub never has to store the
 // issue id itself.
 
-import type { FeedbackKind, FeedbackStatus } from "@/lib/api/feedback-schema";
-
-const KIND_PATTERN = /\/k\/(bug|feature_request|other)\//;
-
-export function feedbackReporterMarker(reporterId: string): string {
-  return `/feedback/r/${encodeURIComponent(reporterId)}/`;
-}
+import {
+  type FeedbackKind,
+  type FeedbackStatus,
+  feedbackKindSchema,
+} from "@/lib/api/feedback-schema";
 
 export const FEEDBACK_REPORT_MARKER = "/feedback/r/";
+
+// A report is closed once its issue reaches one of these Linear state types.
+// `duplicate` is a type of its own in Linear, next to `completed` and
+// `canceled`, and a team can map its "Duplicate" state to it.
+export const LINEAR_CLOSED_STATE_TYPES = [
+  "completed",
+  "canceled",
+  "duplicate",
+] as const;
+
+export function feedbackReporterMarker(reporterId: string): string {
+  return `${FEEDBACK_REPORT_MARKER}${encodeURIComponent(reporterId)}/`;
+}
 
 export function feedbackAttachmentUrl(input: {
   issueId: string;
@@ -24,19 +35,26 @@ export function feedbackAttachmentUrl(input: {
   return `${origin}${feedbackReporterMarker(input.reporterId)}k/${input.kind}/${input.issueId}`;
 }
 
+// A line in the issue description that exists before the attachment does. If
+// the attachment call fails, a retry searches for this line to finish the
+// same issue instead of opening a second one.
+export function feedbackIssueMarker(input: {
+  kind: FeedbackKind;
+  reporterId: string;
+}): string {
+  return `Data Hub report: ${encodeURIComponent(input.reporterId)} / ${input.kind}`;
+}
+
 export function kindFromAttachmentUrl(url: string): FeedbackKind | null {
-  const match = KIND_PATTERN.exec(url);
-  if (!match) {
-    return null;
-  }
-  return match[1] as FeedbackKind;
+  const kind = feedbackKindSchema.safeParse(/\/k\/([^/]+)\//.exec(url)?.[1]);
+  return kind.success ? kind.data : null;
 }
 
 export function feedbackStatusFromLinearState(type: string): FeedbackStatus {
   if (type === "completed") {
     return "resolved";
   }
-  if (type === "canceled") {
+  if (type === "canceled" || type === "duplicate") {
     return "declined";
   }
   return "open";

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { feedbackKindSchema } from "@/lib/api/feedback-schema";
 import {
+  FEEDBACK_REPORT_MARKER,
   feedbackAttachmentUrl,
+  feedbackIssueMarker,
   feedbackReporterMarker,
   feedbackStatusFromLinearState,
   kindFromAttachmentUrl,
@@ -22,9 +25,43 @@ describe("feedback attachment links", () => {
     expect(kindFromAttachmentUrl(url)).toBe("bug");
   });
 
+  it("builds the reporter marker from the shared report marker", () => {
+    expect(feedbackReporterMarker("user/1")).toBe(
+      `${FEEDBACK_REPORT_MARKER}user%2F1/`
+    );
+  });
+
+  it("reads every kind back from its own URL, and nothing else", () => {
+    for (const kind of feedbackKindSchema.options) {
+      const url = feedbackAttachmentUrl({
+        origin: "https://datahub.test",
+        reporterId: "user-1",
+        kind,
+        issueId: "issue-1",
+      });
+      expect(kindFromAttachmentUrl(url)).toBe(kind);
+    }
+    expect(
+      kindFromAttachmentUrl("https://datahub.test/feedback/r/u/k/praise/i")
+    ).toBeNull();
+    expect(kindFromAttachmentUrl("https://github.com/o/r/pull/1")).toBeNull();
+  });
+
+  it("writes an issue marker that tells reporters and kinds apart", () => {
+    const marker = feedbackIssueMarker({ reporterId: "abc", kind: "bug" });
+    expect(marker).not.toBe(
+      feedbackIssueMarker({ reporterId: "abc", kind: "other" })
+    );
+    // One reporter id that starts with another must not match its marker.
+    expect(
+      feedbackIssueMarker({ reporterId: "abc2", kind: "bug" })
+    ).not.toContain(marker);
+  });
+
   it("maps Linear state types onto feedback statuses", () => {
     expect(feedbackStatusFromLinearState("completed")).toBe("resolved");
     expect(feedbackStatusFromLinearState("canceled")).toBe("declined");
+    expect(feedbackStatusFromLinearState("duplicate")).toBe("declined");
     expect(feedbackStatusFromLinearState("triage")).toBe("open");
     expect(feedbackStatusFromLinearState("started")).toBe("open");
   });
