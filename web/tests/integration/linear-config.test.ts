@@ -41,8 +41,8 @@ describe("Linear integration settings", () => {
     });
   }
 
-  async function testConnection(body: Record<string, unknown> = {}) {
-    return await api(`${SETTINGS}/test`, {
+  async function connect(body: Record<string, unknown>) {
+    return await api(`${SETTINGS}/connect`, {
       method: "POST",
       headers: { Cookie: adminCookie },
       body,
@@ -87,6 +87,9 @@ describe("Linear integration settings", () => {
       other: null,
     });
     expect(body.last_webhook_at).toBeNull();
+    expect(body.webhook_rejections).toBe(0);
+    expect(body.workspace_name).toBeNull();
+    expect(body.secrets_key).toBe("ok");
     expect(body.updated_at).toBeNull();
   });
 
@@ -98,11 +101,13 @@ describe("Linear integration settings", () => {
 
   it("saves encrypted secrets and does not return them", async () => {
     const webhook = "lin_webhook_secret_value";
-    const res = await put({
+    const connected = await connect({
       client_id: "client-1",
       client_secret: CLIENT_SECRET,
-      webhook_secret: webhook,
     });
+    expect(connected.status).toBe(200);
+    expect((await connected.json()).workspace_name).toBe("Test Org");
+    const res = await put({ webhook_secret: webhook });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.client_id).toEqual({
@@ -127,11 +132,7 @@ describe("Linear integration settings", () => {
     expect(row?.webhookSecret?.startsWith("v1:")).toBe(true);
   });
 
-  it("tests the connection and lists teams, projects, and labels", async () => {
-    const test = await testConnection();
-    expect(test.status).toBe(200);
-    expect(await test.json()).toEqual({ organization_name: "Test Org" });
-
+  it("lists teams, projects, and labels", async () => {
     const teams = await api(`${SETTINGS}/options`, {
       headers: { Cookie: adminCookie },
     });
@@ -148,7 +149,11 @@ describe("Linear integration settings", () => {
     expect(options.status).toBe(200);
     const optionsBody = await options.json();
     expect(optionsBody.projects).toEqual([
-      { id: LINEAR_PROJECT_ID, name: "Feedback" },
+      {
+        id: LINEAR_PROJECT_ID,
+        name: "Feedback",
+        url: "https://linear.app/test-org/project/feedback",
+      },
     ]);
     // The team's labels plus the workspace-level one, but not another team's.
     expect(optionsBody.labels).toEqual([
@@ -261,48 +266,39 @@ describe("Linear integration settings", () => {
     }
   });
 
-  it("returns 502 when Linear rejects the credentials", async () => {
-    const res = await testConnection({
+  it("does not save credentials Linear rejects", async () => {
+    const before = await current();
+    const res = await connect({
       client_id: LINEAR_BAD_CLIENT_ID,
       client_secret: "nope",
     });
-    expect(res.status).toBe(502);
-    expect((await res.json()).error.code).toBe("LINEAR_UNAVAILABLE");
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("LINEAR_CREDENTIALS_REJECTED");
+    expect((await current()).client_id).toEqual(before.client_id);
   });
 
-  it("fails the test for the same client ID with a wrong secret, even after a good test", async () => {
-    // A good test first, so a token for this client ID is cached.
-    expect((await testConnection()).status).toBe(200);
-
-    const res = await testConnection({
+  it("does not replace a working secret with a rejected one", async () => {
+    const res = await connect({
       client_id: "client-1",
       client_secret: LINEAR_BAD_CLIENT_SECRET,
     });
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(400);
     expect((await res.json()).error.message).toContain(
       "Linear rejected the app credentials"
     );
-  });
-
-  it("stops using the old token once a new secret is saved", async () => {
-    expect((await testConnection()).status).toBe(200);
-
-    await put({ client_secret: LINEAR_BAD_CLIENT_SECRET });
-    expect((await testConnection()).status).toBe(502);
-
-    await put({ client_secret: CLIENT_SECRET });
-    expect((await testConnection()).status).toBe(200);
+    const options = await api(`${SETTINGS}/options`, {
+      headers: { Cookie: adminCookie },
+    });
+    expect(options.status).toBe(200);
   });
 
   it("tells the admin to turn on client credentials when the app has them off", async () => {
-    const res = await testConnection({
+    const res = await connect({
       client_id: LINEAR_NO_CLIENT_CREDENTIALS_CLIENT_ID,
       client_secret: "any-secret",
     });
-    expect(res.status).toBe(502);
-    expect((await res.json()).error.message).toContain(
-      "turn on client credentials tokens"
-    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("LINEAR_CLIENT_CREDENTIALS_OFF");
   });
 
   it("reports a saved secret the server key cannot open", async () => {
@@ -318,14 +314,62 @@ describe("Linear integration settings", () => {
     expect(body.webhook_secret).toEqual({ set: false, source: "unreadable" });
     expect(JSON.stringify(body)).not.toContain(unreadable);
 
-    // Nothing usable is saved, so a test with nothing typed asks for a save.
-    const test = await testConnection();
-    expect(test.status).toBe(400);
-
-    const saved = await put({ client_secret: CLIENT_SECRET });
+    const saved = await connect({
+      client_id: "client-1",
+      client_secret: CLIENT_SECRET,
+    });
     expect((await saved.json()).client_secret).toEqual({
       set: true,
       source: "database",
     });
+  });
+
+  it("refuses a different workspace until the admin confirms, then clears the team", async () => {
+    await put({ team: { id: LINEAR_TEAM_ID, name: "Data Hub", key: "DH" } });
+    await fetch(`${process.env.__TEST_LINEAR_API_URL}/__test/workspace`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: "org-2",
+        name: "Other Org",
+        urlKey: "other-org",
+      }),
+    });
+
+    const refused = await connect({
+      client_id: "client-2",
+      client_secret: "another-secret",
+    });
+    expect(refused.status).toBe(409);
+    expect((await refused.json()).error.details.workspace_name).toBe(
+      "Other Org"
+    );
+    expect((await current()).team).toEqual({
+      id: LINEAR_TEAM_ID,
+      name: "Data Hub",
+    });
+
+    const confirmed = await connect({
+      client_id: "client-2",
+      client_secret: "another-secret",
+      confirm_workspace_change: true,
+    });
+    expect(confirmed.status).toBe(200);
+    const body = await confirmed.json();
+    expect(body.workspace_name).toBe("Other Org");
+    expect(body.team).toBeNull();
+    expect(body.webhook_secret).toEqual({ set: false, source: null });
+  });
+
+  it("disconnects and turns feedback off", async () => {
+    const res = await api(SETTINGS, {
+      method: "DELETE",
+      headers: { Cookie: adminCookie },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.client_secret).toEqual({ set: false, source: null });
+    expect(body.team).toBeNull();
+    expect(body.workspace_name).toBeNull();
   });
 });

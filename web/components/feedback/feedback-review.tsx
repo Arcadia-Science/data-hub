@@ -7,14 +7,14 @@ import {
   TablePendingProvider,
   useTablePending,
 } from "@/components/table-pending";
-import type { FeedbackStatus } from "@/lib/api/feedback-schema";
+import type { FeedbackCounts } from "@/lib/linear/feedback-link";
 
 export function FeedbackReview({
   children,
   counts,
 }: {
   children: ReactNode;
-  counts: Record<FeedbackStatus, number>;
+  counts: FeedbackCounts;
 }) {
   return (
     <TablePendingProvider>
@@ -28,7 +28,7 @@ function FeedbackReviewLayout({
   counts,
 }: {
   children: ReactNode;
-  counts: Record<FeedbackStatus, number>;
+  counts: FeedbackCounts;
 }) {
   const { startTransition } = useTablePending();
   return (

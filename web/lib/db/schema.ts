@@ -305,6 +305,17 @@ export const linearIntegrationConfig = pgTable(
     featureLabelName: text("feature_label_name"),
     otherLabelId: text("other_label_id"),
     otherLabelName: text("other_label_name"),
+    workspaceId: text("workspace_id"),
+    workspaceName: text("workspace_name"),
+    workspaceUrlKey: text("workspace_url_key"),
+    teamKey: text("team_key"),
+    projectUrl: text("project_url"),
+    webhookRejections: integer("webhook_rejections").notNull().default(0),
+    lastWebhookRejectedAt: timestamp("last_webhook_rejected_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    lastWebhookRejectionReason: text("last_webhook_rejection_reason"),
     lastWebhookAt: timestamp("last_webhook_at", {
       withTimezone: true,
       mode: "date",
@@ -322,6 +333,10 @@ export const linearIntegrationConfig = pgTable(
   },
   (config) => [
     check("linear_integration_config_singleton", sql`${config.id} = true`),
+    check(
+      "linear_webhook_rejection_reason",
+      sql`${config.lastWebhookRejectionReason} is null or ${config.lastWebhookRejectionReason} in ('signature', 'stale')`
+    ),
   ]
 );
 

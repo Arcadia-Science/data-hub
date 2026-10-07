@@ -14,8 +14,9 @@ import {
 } from "@/lib/linear/client";
 import {
   claimLinearWebhookDelivery,
-  getLinearCredentials,
-  recordLinearWebhookReceived,
+  getLinearWebhookContext,
+  recordLinearWebhookAccepted,
+  recordLinearWebhookRejection,
 } from "@/lib/linear/config";
 import {
   feedbackStatusFromLinearState,
@@ -24,6 +25,8 @@ import {
 } from "@/lib/linear/feedback-link";
 import {
   isFreshWebhookTimestamp,
+  linearWebhookClientIp,
+  linearWebhookRejectionReason,
   verifyLinearWebhookSignature,
 } from "@/lib/linear/webhook";
 
@@ -82,42 +85,77 @@ async function pendingNotification(
   };
 }
 
+interface WebhookBody {
+  action?: string;
+  data?: { id?: string; teamId?: string };
+  organizationId?: string;
+  type?: string;
+  updatedFrom?: { stateId?: unknown } | null;
+  webhookTimestamp?: number;
+}
+
+function readWebhookBody(rawBody: string): WebhookBody | null {
+  try {
+    return JSON.parse(rawBody) as WebhookBody;
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(request: Request) {
   const rawBody = await request.text();
-  const credentials = await getLinearCredentials();
-  if (!credentials?.webhookSecret) {
+  const context = await getLinearWebhookContext();
+  if (!context?.credentials.webhookSecret) {
     return apiError(401, UNAUTHORIZED, "Linear webhook is not configured");
   }
-  if (
-    !verifyLinearWebhookSignature(
-      rawBody,
-      request.headers.get("linear-signature"),
-      credentials.webhookSecret
-    )
-  ) {
+
+  const signatureOk = verifyLinearWebhookSignature(
+    rawBody,
+    request.headers.get("linear-signature"),
+    context.credentials.webhookSecret
+  );
+  const parsed = readWebhookBody(rawBody);
+  const fresh = isFreshWebhookTimestamp(parsed?.webhookTimestamp ?? Number.NaN);
+  const rejection = linearWebhookRejectionReason({
+    signatureOk,
+    fresh,
+    ip: linearWebhookClientIp(request),
+    organizationId: parsed?.organizationId ?? null,
+    savedWorkspaceId: context.workspaceId,
+  });
+
+  if (!signatureOk) {
+    if (rejection) {
+      after(async () => {
+        try {
+          await recordLinearWebhookRejection(rejection);
+        } catch (err) {
+          console.error("[linear-webhook] Failed to record a rejection:", err);
+        }
+      });
+    }
     return apiError(401, UNAUTHORIZED, "Invalid Linear signature");
   }
-
-  let body: {
-    action?: string;
-    data?: { id?: string };
-    type?: string;
-    updatedFrom?: { stateId?: unknown } | null;
-    webhookTimestamp?: number;
-  };
-  try {
-    body = JSON.parse(rawBody) as typeof body;
-  } catch {
+  if (!parsed) {
     return apiError(400, VALIDATION_ERROR, "Invalid JSON body");
   }
-  if (!isFreshWebhookTimestamp(body.webhookTimestamp ?? Number.NaN)) {
+  if (!fresh) {
+    if (rejection) {
+      after(async () => {
+        try {
+          await recordLinearWebhookRejection(rejection);
+        } catch (err) {
+          console.error("[linear-webhook] Failed to record a rejection:", err);
+        }
+      });
+    }
     return apiError(401, UNAUTHORIZED, "Linear webhook is too old");
   }
 
   let notification: PendingNotification | null = null;
-  if (body.type === "Issue" && body.action === "update") {
+  if (parsed.type === "Issue" && parsed.action === "update") {
     try {
-      notification = await pendingNotification(credentials, body);
+      notification = await pendingNotification(context.credentials, parsed);
     } catch (err) {
       if (err instanceof LinearRequestError) {
         return apiError(502, LINEAR_UNAVAILABLE, err.message);
@@ -126,10 +164,14 @@ export async function POST(request: Request) {
     }
   }
 
+  const forSavedTeam =
+    parsed.type === "Issue" &&
+    typeof parsed.data?.teamId === "string" &&
+    parsed.data.teamId === context.teamId;
   const deliveryId = request.headers.get("linear-delivery");
   after(async () => {
     try {
-      await recordLinearWebhookReceived();
+      await recordLinearWebhookAccepted({ forSavedTeam });
       // The delivery is claimed before the reporter is told, so a failure
       // after this point is never repeated. Linear will not resend it either.
       if (notification && (await claimLinearWebhookDelivery(deliveryId))) {

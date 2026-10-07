@@ -3,18 +3,20 @@
 import { useQueryStates } from "nuqs";
 import type { TransitionStartFunction } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  type FeedbackStatus,
-  feedbackStatusSchema,
-} from "@/lib/api/feedback-schema";
+import type { FeedbackCounts } from "@/lib/linear/feedback-link";
+import type { FeedbackTab } from "@/lib/search-params";
 import { feedbackSearchParams } from "@/lib/search-params";
-import { feedbackStatusLabel } from "./feedback-badges";
+
+const TABS: { label: string; value: FeedbackTab }[] = [
+  { value: "open", label: "Open" },
+  { value: "closed", label: "Closed" },
+];
 
 export function FeedbackStatusFilter({
   counts,
   startTransition,
 }: {
-  counts: Record<FeedbackStatus, number>;
+  counts: FeedbackCounts;
   startTransition: TransitionStartFunction;
 }) {
   const [filters, setFilters] = useQueryStates(feedbackSearchParams, {
@@ -24,22 +26,22 @@ export function FeedbackStatusFilter({
 
   return (
     <div className="flex flex-wrap gap-2">
-      {feedbackStatusSchema.options.map((status) => (
+      {TABS.map((tab) => (
         <Button
-          aria-pressed={filters.status === status}
-          key={status}
+          aria-pressed={filters.status === tab.value}
+          key={tab.value}
           onClick={() =>
             setFilters({
-              status: status === "open" ? null : status,
+              status: tab.value === "open" ? null : tab.value,
               page: null,
             })
           }
           size="sm"
           type="button"
-          variant={filters.status === status ? "default" : "outline"}
+          variant={filters.status === tab.value ? "default" : "outline"}
         >
-          {feedbackStatusLabel(status)}
-          <span className="tabular-nums">{counts[status]}</span>
+          {tab.label}
+          <span className="tabular-nums">{counts[tab.value]}</span>
         </Button>
       ))}
     </div>

@@ -20,7 +20,11 @@ function json(body: unknown, status = 200) {
 const tokenOk = () =>
   json({ access_token: "token", token_type: "Bearer", expires_in: 3600 });
 const organizationOk = () =>
-  json({ data: { organization: { id: "org-1", name: "Test Org" } } });
+  json({
+    data: {
+      organization: { id: "org-1", name: "Test Org", urlKey: "test-org" },
+    },
+  });
 
 describe("Linear client", () => {
   const fetchMock = vi.fn<typeof fetch>();
@@ -178,7 +182,17 @@ describe("Linear client", () => {
         graphql: () =>
           json({
             data: {
-              team: { projects: { nodes: [{ id: "p1", name: "Feedback" }] } },
+              team: {
+                projects: {
+                  nodes: [
+                    {
+                      id: "p1",
+                      name: "Feedback",
+                      url: "https://linear.app/test/project/feedback",
+                    },
+                  ],
+                },
+              },
               issueLabels: {
                 nodes: [
                   { id: "l1", name: "Bug" },
@@ -191,7 +205,13 @@ describe("Linear client", () => {
 
       const options = await listLinearTeamOptions(credentials, TEAM_ID);
       expect(options).toEqual({
-        projects: [{ id: "p1", name: "Feedback" }],
+        projects: [
+          {
+            id: "p1",
+            name: "Feedback",
+            url: "https://linear.app/test/project/feedback",
+          },
+        ],
         labels: [
           { id: "l1", name: "Bug" },
           { id: "l2", name: "Triage" },

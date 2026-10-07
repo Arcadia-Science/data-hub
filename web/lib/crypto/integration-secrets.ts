@@ -21,18 +21,32 @@ export function isEncryptedIntegrationSecret(value: string): boolean {
   return value.startsWith(`${PREFIX}:`);
 }
 
-function integrationSecretsKey(): Buffer {
+export type IntegrationSecretsKeyStatus = "invalid" | "missing" | "ok";
+
+export function integrationSecretsKeyStatus(): IntegrationSecretsKeyStatus {
   const raw = process.env.INTEGRATION_SECRETS_KEY?.trim();
   if (!raw) {
+    return "missing";
+  }
+  if (!/^[0-9a-fA-F]{64}$/.test(raw)) {
+    return "invalid";
+  }
+  return "ok";
+}
+
+function integrationSecretsKey(): Buffer {
+  const status = integrationSecretsKeyStatus();
+  if (status === "missing") {
     throw new IntegrationSecretsKeyError(
       "INTEGRATION_SECRETS_KEY must be set before integration secrets can be saved."
     );
   }
-  if (!/^[0-9a-fA-F]{64}$/.test(raw)) {
+  if (status === "invalid") {
     throw new IntegrationSecretsKeyError(
       "INTEGRATION_SECRETS_KEY must be 64 hex characters (32 bytes). Generate one with `openssl rand -hex 32`."
     );
   }
+  const raw = process.env.INTEGRATION_SECRETS_KEY?.trim() ?? "";
   return Buffer.from(raw, "hex");
 }
 

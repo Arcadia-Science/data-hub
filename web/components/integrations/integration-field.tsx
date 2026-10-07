@@ -41,6 +41,7 @@ function unreadableMessage(set: boolean, envName?: string): string {
 export function IntegrationField({
   clearing = false,
   description,
+  disabled = false,
   envName,
   id,
   label,
@@ -53,6 +54,7 @@ export function IntegrationField({
 }: {
   clearing?: boolean;
   description: string;
+  disabled?: boolean;
   envName?: string;
   id: string;
   label: string;
@@ -64,6 +66,7 @@ export function IntegrationField({
   value: string;
 }) {
   const canClear =
+    !disabled &&
     onClear != null &&
     (status.source === "database" || status.source === "unreadable");
 
@@ -80,6 +83,7 @@ export function IntegrationField({
       <Input
         autoComplete="off"
         className="font-mono"
+        disabled={disabled}
         id={id}
         onChange={(event) => onChange(event.target.value)}
         placeholder={

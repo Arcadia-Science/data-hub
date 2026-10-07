@@ -23,10 +23,19 @@ export const FEEDBACK_STATUS_LABELS = {
 
 export const feedbackKindSchema = z.enum(["bug", "feature_request", "other"]);
 export const feedbackStatusSchema = z.enum(["open", "resolved", "declined"]);
+// What a list can be filtered by. `closed` is resolved and declined together,
+// which is the Closed tab. `resolved` and `declined` stay available to agents.
+export const feedbackListStatusSchema = z.enum([
+  "open",
+  "closed",
+  "resolved",
+  "declined",
+]);
 export const feedbackSourceSchema = z.enum(["mcp", "web"]);
 
 export type FeedbackKind = z.infer<typeof feedbackKindSchema>;
 export type FeedbackStatus = z.infer<typeof feedbackStatusSchema>;
+export type FeedbackListStatus = z.infer<typeof feedbackListStatusSchema>;
 export type FeedbackSource = z.infer<typeof feedbackSourceSchema>;
 
 function requiredText(max: number, emptyMessage: string) {

@@ -132,13 +132,17 @@ function listAs(cookie: string, query = "") {
 }
 
 async function enableLinear(cookie: string) {
+  const connected = await api("/api/v1/settings/integrations/linear/connect", {
+    method: "POST",
+    headers: { Cookie: cookie },
+    body: { client_id: "client-1", client_secret: "secret" },
+  });
+  expect(connected.status).toBe(200);
   const res = await api("/api/v1/settings/integrations/linear", {
     method: "PUT",
     headers: { Cookie: cookie },
     body: {
-      client_id: "client-1",
-      client_secret: "secret",
-      team: { id: LINEAR_TEAM_ID, name: "Data Hub" },
+      team: { id: LINEAR_TEAM_ID, name: "Data Hub", key: "DH" },
     },
   });
   expect(res.status).toBe(200);
@@ -323,7 +327,12 @@ describe("Feedback", () => {
     const memberBody = await memberList.json();
     expect(memberBody.total).toBe(1);
     expect(memberBody.feedback[0].title).toBe("Member report");
-    expect(memberBody.counts).toEqual({ open: 1, resolved: 0, declined: 0 });
+    expect(memberBody.counts).toEqual({
+      open: 1,
+      closed: 0,
+      resolved: 0,
+      declined: 0,
+    });
 
     const adminList = await api("/api/v1/feedback", {
       headers: { Cookie: await seedSessionCookie(admin.userId) },
@@ -462,7 +471,12 @@ describe("Feedback", () => {
     expect(body.feedback.map((item: { title: string }) => item.title)).toEqual([
       "Resolved long ago",
     ]);
-    expect(body.counts).toEqual({ open: 0, resolved: 1, declined: 0 });
+    expect(body.counts).toEqual({
+      open: 0,
+      closed: 1,
+      resolved: 1,
+      declined: 0,
+    });
   });
 
   it("counts a report closed as a duplicate as declined", async () => {
@@ -477,7 +491,12 @@ describe("Feedback", () => {
     });
 
     const body = await (await listAs(cookie)).json();
-    expect(body.counts).toEqual({ open: 0, resolved: 0, declined: 1 });
+    expect(body.counts).toEqual({
+      open: 0,
+      closed: 1,
+      resolved: 0,
+      declined: 1,
+    });
     expect(body.feedback[0].status).toBe("declined");
     expect(body.feedback[0].linear_issue.state_name).toBe("Duplicate");
   });
@@ -738,5 +757,91 @@ describe("Feedback", () => {
     expect(payload.result?.content?.[0]?.text).toContain(
       FEEDBACK_NOT_CONFIGURED_MESSAGE
     );
+  });
+
+  it("lists closed reports, reads a Linear ID, and keeps a test report quiet", async () => {
+    const sender = await seedTestUser({
+      isAdmin: true,
+      email: "test-sender@example.com",
+    });
+    const otherAdmin = await seedTestUser({
+      isAdmin: true,
+      email: "test-other@example.com",
+    });
+    const cookie = await seedSessionCookie(sender.userId);
+    await enableLinear(cookie);
+
+    const created = await api(
+      "/api/v1/settings/integrations/linear/test-report",
+      { method: "POST", headers: { Cookie: cookie } }
+    );
+    expect(created.status).toBe(201);
+    const { feedback } = await created.json();
+    const progress = await api(
+      `/api/v1/settings/integrations/linear/test-report/${feedback.id}`,
+      { headers: { Cookie: cookie } }
+    );
+    expect(progress.status).toBe(200);
+    expect(await progress.json()).toMatchObject({
+      closed: false,
+      update_received: false,
+      notifications_enabled: true,
+      identifier: feedback.linear_issue.identifier,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(await listNotifications(otherAdmin.userId)).toHaveLength(0);
+    expect(await listNotifications(sender.userId)).toHaveLength(0);
+
+    const openList = await (await listAs(cookie, "?status=open")).json();
+    expect(openList.feedback.map((item: { id: string }) => item.id)).toContain(
+      feedback.id
+    );
+    const closedBefore = await (await listAs(cookie, "?status=closed")).json();
+    expect(closedBefore.total).toBe(0);
+
+    await fetch(`${linearBase()}/__test/issues`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: feedback.id,
+        state: { name: "Done", type: "completed" },
+        completedAt: new Date().toISOString(),
+      }),
+    });
+    const closedList = await (await listAs(cookie, "?status=closed")).json();
+    expect(
+      closedList.feedback.map((item: { title: string }) => item.title)
+    ).toEqual(["Test report from Data Hub"]);
+    const afterClose = await api(
+      `/api/v1/settings/integrations/linear/test-report/${feedback.id}`,
+      { headers: { Cookie: cookie } }
+    );
+    expect(await afterClose.json()).toMatchObject({
+      closed: true,
+      update_received: false,
+      state_name: "Done",
+    });
+
+    const token = await getMcpAccessToken(sender.userId, "read");
+    const lookedUp = await api("/mcp/v1", {
+      method: "POST",
+      token,
+      headers: { Accept: "application/json, text/event-stream" },
+      body: {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: {
+          name: "get_feedback",
+          arguments: { id: feedback.linear_issue.identifier },
+        },
+      },
+    });
+    const text = await lookedUp.text();
+    const dataLine = text.split("\n").find((line) => line.startsWith("data: "));
+    const payload = JSON.parse(dataLine?.slice("data: ".length) ?? "{}");
+    expect(payload.result?.isError).not.toBe(true);
+    expect(JSON.stringify(payload)).toContain(feedback.linear_issue.identifier);
   });
 });

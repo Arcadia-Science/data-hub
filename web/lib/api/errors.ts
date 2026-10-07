@@ -18,6 +18,12 @@ export const PAYLOAD_TOO_LARGE = "PAYLOAD_TOO_LARGE";
 // Paired with HTTP 502 on every route, so a Linear outage or rejection always
 // reads the same way to callers.
 export const LINEAR_UNAVAILABLE = "LINEAR_UNAVAILABLE";
+// The OAuth app exists, but Linear will not issue a client-credentials token
+// until that grant is turned on.
+export const LINEAR_CLIENT_CREDENTIALS_OFF = "LINEAR_CLIENT_CREDENTIALS_OFF";
+// Linear refused the client ID or secret. Distinct from an outage so a bad
+// secret is not saved over a working one.
+export const LINEAR_CREDENTIALS_REJECTED = "LINEAR_CREDENTIALS_REJECTED";
 
 export function apiError(
   status: number,

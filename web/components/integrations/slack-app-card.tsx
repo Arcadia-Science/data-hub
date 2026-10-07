@@ -20,7 +20,9 @@ type SlackPatch = Partial<Record<SlackField, string | null>>;
 type Props = Pick<
   SlackAppConfigForAdmin,
   "botToken" | "clientId" | "clientSecret" | "teamId"
->;
+> & {
+  secretsKeyOk: boolean;
+};
 
 /**
  * Drafts live in state seeded from props, so the page renders this card with
@@ -31,6 +33,7 @@ export function SlackAppCard({
   botToken,
   clientId,
   clientSecret,
+  secretsKeyOk,
   teamId,
 }: Props) {
   const router = useRouter();
@@ -127,9 +130,17 @@ export function SlackAppCard({
       <Card>
         <CardContent className="flex flex-col gap-6">
           <FieldGroup>
+            {secretsKeyOk ? null : (
+              <p className="text-sm">
+                Data Hub can't save secrets until{" "}
+                <span className="font-mono">INTEGRATION_SECRETS_KEY</span> is
+                set. See Linear above.
+              </p>
+            )}
             <IntegrationField
               clearing={clearing === "bot_token"}
               description="Bot user token with the chat:write scope."
+              disabled={!secretsKeyOk}
               envName="SLACK_BOT_TOKEN"
               id="slack-bot-token"
               label="Bot token"
@@ -155,6 +166,7 @@ export function SlackAppCard({
             <IntegrationField
               clearing={clearing === "client_secret"}
               description="From the Slack app's Basic Information page."
+              disabled={!secretsKeyOk}
               envName="SLACK_CLIENT_SECRET"
               id="slack-client-secret"
               label="Client secret"

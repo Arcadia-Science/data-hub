@@ -237,7 +237,7 @@ export function SendFeedbackForm({
                   {(field) => (
                     <div className="grid gap-2">
                       <Label htmlFor="feedback-attemptedAction">
-                        What were you trying to do?
+                        Trying to do
                       </Label>
                       <Textarea
                         autoComplete="off"
@@ -257,7 +257,7 @@ export function SendFeedbackForm({
                 <form.Field name="toolName">
                   {(field) => (
                     <div className="grid gap-2">
-                      <Label htmlFor="feedback-toolName">Tool involved</Label>
+                      <Label htmlFor="feedback-toolName">Tool</Label>
                       <Input
                         autoComplete="off"
                         id="feedback-toolName"

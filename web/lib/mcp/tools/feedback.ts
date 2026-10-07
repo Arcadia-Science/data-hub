@@ -3,6 +3,7 @@ import {
   createFeedback,
   getFeedbackForViewer,
   listFeedback,
+  presentFeedback,
   previewFeedbackDescription,
 } from "@/lib/api/feedback";
 import {
@@ -48,7 +49,7 @@ export function registerFeedbackTools(server: McpServer) {
       }
       return structuredResult({
         duplicate: result.duplicate,
-        feedback: result.item,
+        feedback: presentFeedback(result.item, await userIsAdmin(userId)),
       });
     }
   );
@@ -81,6 +82,8 @@ export function registerFeedbackTools(server: McpServer) {
           description: previewFeedbackDescription(item.description),
         })),
         total: result.total,
+        counts: result.counts,
+        groups: result.groups,
       });
     }
   );

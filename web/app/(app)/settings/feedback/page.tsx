@@ -1,8 +1,8 @@
+import { ExternalLinkIcon } from "lucide-react";
 import Link from "next/link";
 import type { Metadata } from "next/types";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
-import { feedbackStatusLabel } from "@/components/feedback/feedback-badges";
 import { FeedbackDetailSheet } from "@/components/feedback/feedback-detail-sheet";
 import { FeedbackReview } from "@/components/feedback/feedback-review";
 import {
@@ -12,10 +12,18 @@ import {
 import { PaginationNav } from "@/components/pagination-nav";
 import { AdminsOnly } from "@/components/settings/admins-only";
 import { SettingsPageContent } from "@/components/settings/settings-page-content";
-import { getFeedbackForViewer, listFeedback } from "@/lib/api/feedback";
+import { buttonVariants } from "@/components/ui/button";
+import {
+  type FeedbackItem,
+  getFeedbackForViewer,
+  listFeedback,
+} from "@/lib/api/feedback";
 import { FEEDBACK_PAGE_SIZE } from "@/lib/api/feedback-schema";
-import { isValidUUID } from "@/lib/api/validators";
 import { auth } from "@/lib/auth";
+import {
+  getLinearConfigForAdmin,
+  linearFeedbackViewUrl,
+} from "@/lib/linear/config";
 import { feedbackParamsCache } from "@/lib/search-params";
 
 const description = "Review bugs and requests sent about Data Hub.";
@@ -48,14 +56,18 @@ export default async function FeedbackSettingsPage({
   const filters = feedbackParamsCache.parse(await searchParams);
 
   return (
-    <SettingsPageContent className="w-3/4">
-      <div>
-        <h2 className="text-pretty font-semibold text-lg tracking-tight">
-          Feedback
-        </h2>
-        <p className="text-muted-foreground text-sm">
-          Bugs and requests about Data Hub, sent from the app or an agent.
-        </p>
+    <SettingsPageContent>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-pretty font-semibold text-lg tracking-tight">
+            Feedback
+          </h2>
+          <p className="text-muted-foreground text-sm">
+            Bugs and requests about Data Hub, sent from the app or an agent.
+            Each one is an issue in Linear.
+          </p>
+        </div>
+        <LinearReportsLink />
       </div>
       <div className="mt-6">
         <Suspense fallback={<FeedbackTableSkeleton />}>
@@ -79,7 +91,7 @@ async function FeedbackSection({
 }: {
   itemId: string | null;
   page: number;
-  status: "open" | "resolved" | "declined";
+  status: "closed" | "open";
   userId: string;
 }) {
   const viewer = { viewerId: userId, isAdmin: true };
@@ -90,9 +102,7 @@ async function FeedbackSection({
       limit: FEEDBACK_PAGE_SIZE,
       offset: (page - 1) * FEEDBACK_PAGE_SIZE,
     }),
-    itemId && isValidUUID(itemId)
-      ? getFeedbackForViewer(itemId, viewer)
-      : Promise.resolve(null),
+    itemId ? getFeedbackForViewer(itemId, viewer) : Promise.resolve(null),
   ]);
   if (!list.ok) {
     return (
@@ -127,15 +137,25 @@ async function FeedbackSection({
     <>
       <FeedbackReview counts={list.counts}>
         <FeedbackTable
+          groups={list.groups}
           hrefFor={hrefFor}
           rows={list.items.map((item) => ({
             id: item.id,
-            kind: item.kind,
+            identifier: item.linearIssue.identifier,
             title: item.title,
-            reporterLabel:
-              item.reporter?.name ?? item.reporter?.email ?? "Deleted user",
-            sourceLabel:
-              item.source === "web" ? "Web" : (item.oauthClientName ?? "Agent"),
+            labels: item.linearIssue.labels,
+            priority: item.linearIssue.priority,
+            priorityLabel: item.linearIssue.priorityLabel,
+            reporterLabel: reporterLabel(item),
+            assignee: item.linearIssue.assignee
+              ? {
+                  userId: item.linearIssue.assignee.userId,
+                  name: item.linearIssue.assignee.name,
+                  avatarUrl: item.linearIssue.assignee.avatarUrl,
+                }
+              : null,
+            stateId: item.linearIssue.stateId,
+            stateColor: item.linearIssue.stateColor,
             createdAt: item.createdAt.toISOString(),
           }))}
           selectedId={itemId}
@@ -157,23 +177,63 @@ async function FeedbackSection({
                 pageUrl: selected.pageUrl,
                 status: selected.status,
                 createdAt: selected.createdAt.toISOString(),
-                reporterLabel:
-                  selected.reporter?.name ??
-                  selected.reporter?.email ??
-                  "Deleted user",
-                statusUpdatedAt:
-                  selected.statusUpdatedAt?.toISOString() ?? null,
-                sourceLabel:
+                activity: selected.activity ?? [],
+                assignee: selected.linearIssue.assignee,
+                identifier: selected.linearIssue.identifier,
+                labels: selected.linearIssue.labels,
+                priority: selected.linearIssue.priority,
+                priorityLabel: selected.linearIssue.priorityLabel,
+                projectName: selected.linearIssue.projectName,
+                reporterLabel: reporterName(selected),
+                stateColor: selected.linearIssue.stateColor,
+                stateName: selected.linearIssue.stateName,
+                teamName: selected.linearIssue.teamName,
+                viaLabel:
                   selected.source === "web"
-                    ? "Web"
-                    : (selected.oauthClientName ?? "Agent"),
+                    ? null
+                    : (selected.oauthClientName ?? "an agent"),
                 linearUrl: selected.linearIssue.url,
               }
             : null
         }
         navIds={list.items.map((item) => item.id)}
-        statusLabel={feedbackStatusLabel(status)}
+        statusLabel={status}
       />
     </>
+  );
+}
+
+function reporterName(item: Pick<FeedbackItem, "reporter">): string {
+  return item.reporter?.name ?? item.reporter?.email ?? "Deleted user";
+}
+
+function reporterLabel(item: FeedbackItem): string {
+  const name = reporterName(item);
+  if (item.source === "web") {
+    return name;
+  }
+  return `${name} via ${item.oauthClientName ?? "an agent"}`;
+}
+
+async function LinearReportsLink() {
+  const config = await getLinearConfigForAdmin();
+  const href = linearFeedbackViewUrl({
+    projectUrl: config.projectUrl,
+    teamKey: config.teamKey,
+    workspaceUrlKey: config.workspaceUrlKey,
+  });
+  if (!href) {
+    return null;
+  }
+  return (
+    <a
+      className={buttonVariants({ size: "sm", variant: "outline" })}
+      href={href}
+      rel="noopener noreferrer"
+      target="_blank"
+    >
+      View in Linear
+      <ExternalLinkIcon data-icon="inline-end" />
+    </a>
   );
 }
