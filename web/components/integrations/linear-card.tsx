@@ -4,120 +4,181 @@ import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
+import { IntegrationField } from "@/components/integrations/integration-field";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Field,
   FieldDescription,
+  FieldError,
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  FEEDBACK_KIND_LABELS,
+  feedbackKindSchema,
+} from "@/lib/api/feedback-schema";
+import type { LinearChoice, LinearOptionsResponse } from "@/lib/linear/client";
+import type {
+  LinearConfigForAdmin,
+  LinearConfigPutBody,
+  LinearLabelChoices,
+} from "@/lib/linear/config";
 
-interface Choice {
-  id: string;
-  name: string;
+type Props = Pick<
+  LinearConfigForAdmin,
+  "clientId" | "clientSecret" | "labels" | "project" | "team" | "webhookSecret"
+>;
+
+interface Options {
+  labels: LinearChoice[];
+  projects: LinearChoice[];
+  teams: LinearChoice[];
 }
 
-interface Props {
-  bugLabel: Choice | null;
-  clientId: string | null;
-  clientSecretSet: boolean;
-  featureLabel: Choice | null;
-  otherLabel: Choice | null;
-  project: Choice | null;
-  team: Choice | null;
-  webhookSecretSet: boolean;
+// Radix Select reserves the empty string, so "no choice" needs its own value.
+const NO_CHOICE = "__none__";
+
+const NO_LABELS: LinearLabelChoices = {
+  bug: null,
+  feature_request: null,
+  other: null,
+};
+
+async function fetchOptions(
+  teamId: string | null,
+  signal: AbortSignal
+): Promise<Options> {
+  const query = teamId ? `?team_id=${encodeURIComponent(teamId)}` : "";
+  const res = await fetch(
+    `/api/v1/settings/integrations/linear/options${query}`,
+    { signal }
+  );
+  const payload = (await res.json().catch(() => null)) as
+    | (Partial<LinearOptionsResponse> & { error?: { message?: string } })
+    | null;
+  if (!(res.ok && payload?.teams)) {
+    throw new Error(
+      payload?.error?.message ?? "Couldn't load teams from Linear"
+    );
+  }
+  return {
+    teams: payload.teams,
+    projects: payload.projects ?? [],
+    labels: payload.labels ?? [],
+  };
 }
 
-const selectClassName =
-  "h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm dark:bg-input/30";
-
+/**
+ * Drafts live in state seeded from props, so the page renders this card with
+ * a `key` that changes on every save. That remounts it with fresh drafts and
+ * avoids copying props into state in an effect.
+ */
 export function LinearCard({
-  bugLabel,
   clientId,
-  clientSecretSet,
-  featureLabel,
-  otherLabel,
-  project,
-  team,
-  webhookSecretSet,
+  clientSecret,
+  labels: savedLabels,
+  project: savedProject,
+  team: savedTeam,
+  webhookSecret,
 }: Props) {
   const router = useRouter();
-  const [clientIdDraft, setClientIdDraft] = useState(clientId ?? "");
+  const [clientIdDraft, setClientIdDraft] = useState(clientId.value ?? "");
   const [clientSecretDraft, setClientSecretDraft] = useState("");
   const [webhookSecretDraft, setWebhookSecretDraft] = useState("");
-  const [teamId, setTeamId] = useState(team?.id ?? "");
-  const [projectId, setProjectId] = useState(project?.id ?? "");
-  const [bugLabelId, setBugLabelId] = useState(bugLabel?.id ?? "");
-  const [featureLabelId, setFeatureLabelId] = useState(featureLabel?.id ?? "");
-  const [otherLabelId, setOtherLabelId] = useState(otherLabel?.id ?? "");
-  const [teams, setTeams] = useState<Choice[]>(team ? [team] : []);
-  const [projects, setProjects] = useState<Choice[]>(project ? [project] : []);
-  const [labels, setLabels] = useState<Choice[]>(
-    [bugLabel, featureLabel, otherLabel].filter((item) => item != null)
-  );
+  const [team, setTeam] = useState(savedTeam);
+  const [project, setProject] = useState(savedProject);
+  const [labels, setLabels] = useState(savedLabels);
+  const [options, setOptions] = useState<Options>({
+    teams: [],
+    projects: [],
+    labels: [],
+  });
+  const [optionsError, setOptionsError] = useState<string | null>(null);
+  const [loadingOptions, setLoadingOptions] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [loadingOptions, setLoadingOptions] = useState(false);
 
   useEffect(() => {
-    setClientIdDraft(clientId ?? "");
-    setClientSecretDraft("");
-    setWebhookSecretDraft("");
-    setTeamId(team?.id ?? "");
-    setProjectId(project?.id ?? "");
-    setBugLabelId(bugLabel?.id ?? "");
-    setFeatureLabelId(featureLabel?.id ?? "");
-    setOtherLabelId(otherLabel?.id ?? "");
-  }, [
-    bugLabel?.id,
-    clientId,
-    featureLabel?.id,
-    otherLabel?.id,
-    project?.id,
-    team?.id,
-  ]);
-
-  useEffect(() => {
-    if (!clientSecretSet) {
+    if (!clientSecret.set) {
       return;
     }
-    let cancelled = false;
+    const controller = new AbortController();
     setLoadingOptions(true);
-    const teamQuery = teamId ? `?team_id=${encodeURIComponent(teamId)}` : "";
-    fetch(`/api/v1/settings/integrations/linear/options${teamQuery}`)
-      .then(async (res) => {
-        if (!res.ok) {
-          return null;
+    setOptionsError(null);
+    fetchOptions(team?.id ?? null, controller.signal)
+      .then(setOptions)
+      .catch((err: unknown) => {
+        if (!controller.signal.aborted) {
+          setOptionsError(
+            err instanceof Error ? err.message : "Couldn't load from Linear"
+          );
         }
-        return (await res.json()) as {
-          labels: Choice[] | null;
-          projects: Choice[] | null;
-          teams: Choice[];
-        };
-      })
-      .then((body) => {
-        if (cancelled || !body) {
-          return;
-        }
-        setTeams(body.teams);
-        setProjects(body.projects ?? []);
-        setLabels(body.labels ?? []);
       })
       .finally(() => {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setLoadingOptions(false);
         }
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [clientSecretSet, teamId]);
+    return () => controller.abort();
+  }, [clientSecret.set, team?.id]);
+
+  function handleTeamChange(next: LinearChoice | null) {
+    // Projects belong to one team. Dropping them here means anything chosen
+    // afterwards comes from the new team's lists and is saved with the team.
+    if (next?.id === savedTeam?.id) {
+      setProject(savedProject);
+      setLabels(savedLabels);
+    } else if (next?.id !== team?.id) {
+      setProject(null);
+      setLabels(NO_LABELS);
+    }
+    setTeam(next);
+  }
+
+  function buildPatch(): LinearConfigPutBody {
+    const patch: LinearConfigPutBody = {};
+    const nextClientId = clientIdDraft.trim();
+    if (nextClientId !== (clientId.value ?? "")) {
+      patch.client_id = nextClientId || null;
+    }
+    if (clientSecretDraft.trim()) {
+      patch.client_secret = clientSecretDraft.trim();
+    }
+    if (webhookSecretDraft.trim()) {
+      patch.webhook_secret = webhookSecretDraft.trim();
+    }
+
+    // After a team change the server drops saved choices that are not in the
+    // request, so send every choice rather than only the edited ones.
+    const teamChanged = team?.id !== savedTeam?.id;
+    if (teamChanged) {
+      patch.team = team;
+    }
+    if (teamChanged || project?.id !== savedProject?.id) {
+      patch.project = project;
+    }
+    const changedLabels: Partial<LinearLabelChoices> = {};
+    for (const kind of feedbackKindSchema.options) {
+      if (teamChanged || labels[kind]?.id !== savedLabels[kind]?.id) {
+        changedLabels[kind] = labels[kind];
+      }
+    }
+    if (Object.keys(changedLabels).length > 0) {
+      patch.labels = changedLabels;
+    }
+    return patch;
+  }
 
   async function handleTest() {
-    const body: Record<string, string> = {};
+    const body: { client_id?: string; client_secret?: string } = {};
     if (clientSecretDraft.trim()) {
       if (!clientIdDraft.trim()) {
         toast.error("Enter the client ID along with the client secret.");
@@ -150,47 +211,8 @@ export function LinearCard({
   }
 
   async function handleSave() {
-    const body: Record<string, string | null> = {};
-    if (clientIdDraft.trim() !== (clientId ?? "")) {
-      body.client_id = clientIdDraft.trim() || null;
-    }
-    if (clientSecretDraft.trim()) {
-      body.client_secret = clientSecretDraft.trim();
-    }
-    if (webhookSecretDraft.trim()) {
-      body.webhook_secret = webhookSecretDraft.trim();
-    }
-    if (teamId !== (team?.id ?? "")) {
-      const selected = teams.find((item) => item.id === teamId);
-      body.team_id = teamId || null;
-      body.team_name = selected?.name ?? null;
-      body.project_id = null;
-      body.project_name = null;
-      body.bug_label_id = null;
-      body.bug_label_name = null;
-      body.feature_label_id = null;
-      body.feature_label_name = null;
-      body.other_label_id = null;
-      body.other_label_name = null;
-    } else if (teamId) {
-      assignChoice(body, "project", projectId, projects, project?.id ?? "");
-      assignChoice(body, "bug_label", bugLabelId, labels, bugLabel?.id ?? "");
-      assignChoice(
-        body,
-        "feature_label",
-        featureLabelId,
-        labels,
-        featureLabel?.id ?? ""
-      );
-      assignChoice(
-        body,
-        "other_label",
-        otherLabelId,
-        labels,
-        otherLabel?.id ?? ""
-      );
-    }
-    if (Object.keys(body).length === 0) {
+    const patch = buildPatch();
+    if (Object.keys(patch).length === 0) {
       return;
     }
 
@@ -199,7 +221,7 @@ export function LinearCard({
       const res = await fetch("/api/v1/settings/integrations/linear", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify(patch),
       });
       const payload = (await res.json().catch(() => null)) as {
         error?: { message?: string };
@@ -209,8 +231,6 @@ export function LinearCard({
         return;
       }
       toast.success("Linear settings saved");
-      setClientSecretDraft("");
-      setWebhookSecretDraft("");
       router.refresh();
     } catch {
       toast.error("Couldn't save Linear settings");
@@ -218,6 +238,8 @@ export function LinearCard({
       setSaving(false);
     }
   }
+
+  const choicesDisabled = !clientSecret.set || loadingOptions;
 
   return (
     <div className="flex flex-col gap-6">
@@ -232,120 +254,69 @@ export function LinearCard({
       <Card>
         <CardContent className="flex flex-col gap-6">
           <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="linear-client-id">Client ID</FieldLabel>
-              <Input
-                autoComplete="off"
-                className="font-mono"
-                id="linear-client-id"
-                onChange={(event) => setClientIdDraft(event.target.value)}
-                spellCheck={false}
-                value={clientIdDraft}
-              />
-            </Field>
-            <Field>
-              <div className="flex items-center justify-between gap-2">
-                <FieldLabel htmlFor="linear-client-secret">
-                  Client secret
-                </FieldLabel>
-                <Badge variant="secondary">
-                  {clientSecretSet ? "Saved" : "Not set"}
-                </Badge>
-              </div>
-              <Input
-                autoComplete="off"
-                className="font-mono"
-                id="linear-client-secret"
-                onChange={(event) => setClientSecretDraft(event.target.value)}
-                placeholder={
-                  clientSecretSet
-                    ? "Paste a new secret to replace it"
-                    : "Paste the client secret"
-                }
-                spellCheck={false}
-                type="password"
-                value={clientSecretDraft}
-              />
-            </Field>
-            <Field>
-              <div className="flex items-center justify-between gap-2">
-                <FieldLabel htmlFor="linear-webhook-secret">
-                  Webhook signing secret
-                </FieldLabel>
-                <Badge variant="secondary">
-                  {webhookSecretSet ? "Saved" : "Not set"}
-                </Badge>
-              </div>
-              <Input
-                autoComplete="off"
-                className="font-mono"
-                id="linear-webhook-secret"
-                onChange={(event) => setWebhookSecretDraft(event.target.value)}
-                placeholder={
-                  webhookSecretSet
-                    ? "Paste a new secret to replace it"
-                    : "Paste the signing secret"
-                }
-                spellCheck={false}
-                type="password"
-                value={webhookSecretDraft}
-              />
-              <FieldDescription>
-                From the webhook's page in Linear. Data Hub uses it later to
-                check that status updates really came from Linear.
-              </FieldDescription>
-            </Field>
+            <IntegrationField
+              description="From the Linear app's settings."
+              id="linear-client-id"
+              label="Client ID"
+              onChange={setClientIdDraft}
+              status={clientId}
+              type="text"
+              value={clientIdDraft}
+            />
+            <IntegrationField
+              description="From the Linear app's settings."
+              id="linear-client-secret"
+              label="Client secret"
+              onChange={setClientSecretDraft}
+              placeholder="Paste the client secret"
+              status={clientSecret}
+              type="password"
+              value={clientSecretDraft}
+            />
+            <IntegrationField
+              description="From the webhook's page in Linear. Data Hub uses it later to check that status updates really came from Linear."
+              id="linear-webhook-secret"
+              label="Webhook signing secret"
+              onChange={setWebhookSecretDraft}
+              placeholder="Paste the signing secret"
+              status={webhookSecret}
+              type="password"
+              value={webhookSecretDraft}
+            />
             <ChoiceSelect
-              disabled={!clientSecretSet || loadingOptions}
+              description="Only public teams are listed. Data Hub signs in as the app, which can't see private teams."
+              disabled={choicesDisabled}
               emptyLabel="No team"
               id="linear-team"
               label="Team"
-              onChange={(value) => {
-                setTeamId(value);
-                setProjectId("");
-                setBugLabelId("");
-                setFeatureLabelId("");
-                setOtherLabelId("");
-              }}
-              options={withCurrent(teams, team)}
-              value={teamId}
+              onChange={handleTeamChange}
+              options={options.teams}
+              value={team}
             />
+            {optionsError ? <FieldError>{optionsError}</FieldError> : null}
             <ChoiceSelect
-              disabled={!teamId || loadingOptions}
+              disabled={choicesDisabled || !team}
               emptyLabel="No project"
               id="linear-project"
               label="Project"
-              onChange={setProjectId}
-              options={withCurrent(projects, project)}
-              value={projectId}
+              onChange={setProject}
+              options={options.projects}
+              value={project}
             />
-            <ChoiceSelect
-              disabled={!teamId || loadingOptions}
-              emptyLabel="No label"
-              id="linear-bug-label"
-              label="Bug label"
-              onChange={setBugLabelId}
-              options={withCurrent(labels, bugLabel)}
-              value={bugLabelId}
-            />
-            <ChoiceSelect
-              disabled={!teamId || loadingOptions}
-              emptyLabel="No label"
-              id="linear-feature-label"
-              label="Feature request label"
-              onChange={setFeatureLabelId}
-              options={withCurrent(labels, featureLabel)}
-              value={featureLabelId}
-            />
-            <ChoiceSelect
-              disabled={!teamId || loadingOptions}
-              emptyLabel="No label"
-              id="linear-other-label"
-              label="Other label"
-              onChange={setOtherLabelId}
-              options={withCurrent(labels, otherLabel)}
-              value={otherLabelId}
-            />
+            {feedbackKindSchema.options.map((kind) => (
+              <ChoiceSelect
+                disabled={choicesDisabled || !team}
+                emptyLabel="No label"
+                id={`linear-label-${kind}`}
+                key={kind}
+                label={`${FEEDBACK_KIND_LABELS[kind]} label`}
+                onChange={(choice) =>
+                  setLabels((current) => ({ ...current, [kind]: choice }))
+                }
+                options={options.labels}
+                value={labels[kind]}
+              />
+            ))}
           </FieldGroup>
           <div className="flex justify-end gap-2 border-t pt-4">
             <Button
@@ -359,7 +330,11 @@ export function LinearCard({
               ) : null}
               Test connection
             </Button>
-            <Button disabled={saving} onClick={handleSave} type="button">
+            <Button
+              disabled={saving || loadingOptions}
+              onClick={handleSave}
+              type="button"
+            >
               {saving ? (
                 <Loader2 className="animate-spin" data-icon="inline-start" />
               ) : null}
@@ -372,29 +347,20 @@ export function LinearCard({
   );
 }
 
-function withCurrent(options: Choice[], current: Choice | null): Choice[] {
+// The saved choice stays in the list while the options load, so the select
+// can show its name before Linear answers.
+function withCurrent(
+  options: LinearChoice[],
+  current: LinearChoice | null
+): LinearChoice[] {
   if (!current || options.some((option) => option.id === current.id)) {
     return options;
   }
   return [current, ...options];
 }
 
-function assignChoice(
-  body: Record<string, string | null>,
-  key: string,
-  selectedId: string,
-  options: Choice[],
-  savedId: string
-) {
-  if (selectedId === savedId) {
-    return;
-  }
-  const selected = options.find((option) => option.id === selectedId);
-  body[`${key}_id`] = selectedId || null;
-  body[`${key}_name`] = selected?.name ?? null;
-}
-
 function ChoiceSelect({
+  description,
   disabled,
   emptyLabel,
   id,
@@ -403,31 +369,39 @@ function ChoiceSelect({
   options,
   value,
 }: {
+  description?: string;
   disabled: boolean;
   emptyLabel: string;
   id: string;
   label: string;
-  onChange: (value: string) => void;
-  options: Choice[];
-  value: string;
+  onChange: (choice: LinearChoice | null) => void;
+  options: LinearChoice[];
+  value: LinearChoice | null;
 }) {
+  const available = withCurrent(options, value);
   return (
     <Field>
       <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <select
-        className={selectClassName}
+      <Select
         disabled={disabled}
-        id={id}
-        onChange={(event) => onChange(event.target.value)}
-        value={value}
+        onValueChange={(selected) =>
+          onChange(available.find((option) => option.id === selected) ?? null)
+        }
+        value={value?.id ?? NO_CHOICE}
       >
-        <option value="">{emptyLabel}</option>
-        {options.map((option) => (
-          <option key={option.id} value={option.id}>
-            {option.name}
-          </option>
-        ))}
-      </select>
+        <SelectTrigger className="w-full data-[size=default]:h-9" id={id}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={NO_CHOICE}>{emptyLabel}</SelectItem>
+          {available.map((option) => (
+            <SelectItem key={option.id} value={option.id}>
+              {option.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {description ? <FieldDescription>{description}</FieldDescription> : null}
     </Field>
   );
 }

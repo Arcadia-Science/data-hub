@@ -48,20 +48,18 @@ export default async function IntegrationsSettingsPage() {
         </h2>
         <p className="text-muted-foreground text-sm">
           Connections used by the whole workspace. Personal notification choices
-          stay under Notifications. Linear receives feedback reports once a team
-          is saved.
+          stay under Notifications.
         </p>
       </div>
       <div className="mt-6 flex flex-col gap-6">
         <LinearCard
-          bugLabel={linear.bugLabel}
           clientId={linear.clientId}
-          clientSecretSet={linear.clientSecret.set}
-          featureLabel={linear.featureLabel}
-          otherLabel={linear.otherLabel}
+          clientSecret={linear.clientSecret}
+          key={linear.lastUpdated?.at ?? "never-saved"}
+          labels={linear.labels}
           project={linear.project}
           team={linear.team}
-          webhookSecretSet={linear.webhookSecret.set}
+          webhookSecret={linear.webhookSecret}
         />
         <SlackAppCard
           botToken={slackApp.botToken}

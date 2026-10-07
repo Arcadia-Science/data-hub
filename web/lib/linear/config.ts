@@ -5,30 +5,56 @@
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import {
-  encryptIntegrationSecret,
+  type FeedbackKind,
+  feedbackKindSchema,
+} from "@/lib/api/feedback-schema";
+import {
+  inspectSavedSecret,
   readMaybeEncryptedSecret,
 } from "@/lib/crypto/integration-secrets";
 import { db } from "@/lib/db";
 import { linearIntegrationConfig, users } from "@/lib/db/schema";
+import { nextPlain, nextSecret } from "@/lib/integrations/config-patch";
+import {
+  type PlainFieldStatus,
+  plainFieldStatus,
+  resolveIntegrationField,
+  type SecretFieldStatus,
+  savedPlainValue,
+  secretFieldStatus,
+} from "@/lib/integrations/field-status";
+import {
+  type LastUpdated,
+  lastUpdatedByColumns,
+  toLastUpdated,
+} from "@/lib/integrations/last-updated";
+import {
+  clearLinearTokenCache,
+  type LinearChoice,
+  type LinearCredentials,
+} from "./client";
 
 const optionalText = z.string().trim().min(1).nullable().optional();
-const optionalId = z.string().uuid().nullable().optional();
+
+export const linearChoiceSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().trim().min(1),
+});
+
+export type LinearLabelChoices = Record<FeedbackKind, LinearChoice | null>;
+
+const optionalChoice = linearChoiceSchema.nullable().optional();
 
 export const linearConfigPutBodySchema = z
   .object({
     client_id: optionalText,
     client_secret: optionalText,
     webhook_secret: optionalText,
-    team_id: optionalId,
-    team_name: optionalText,
-    project_id: optionalId,
-    project_name: optionalText,
-    bug_label_id: optionalId,
-    bug_label_name: optionalText,
-    feature_label_id: optionalId,
-    feature_label_name: optionalText,
-    other_label_id: optionalId,
-    other_label_name: optionalText,
+    team: optionalChoice,
+    project: optionalChoice,
+    labels: z
+      .partialRecord(feedbackKindSchema, linearChoiceSchema.nullable())
+      .optional(),
   })
   .refine((body) => Object.values(body).some((value) => value !== undefined), {
     message: "No Linear settings to save",
@@ -41,75 +67,86 @@ export const linearTestBodySchema = z.object({
   client_secret: z.string().trim().min(1).optional(),
 });
 
-export interface LinearNamedChoice {
-  id: string;
-  name: string;
-}
-
-export interface LinearSecretStatus {
-  set: boolean;
-}
-
 export interface LinearConfigForAdmin {
-  bugLabel: LinearNamedChoice | null;
-  clientId: string | null;
-  clientSecret: LinearSecretStatus;
-  featureLabel: LinearNamedChoice | null;
+  clientId: PlainFieldStatus;
+  clientSecret: SecretFieldStatus;
+  labels: LinearLabelChoices;
+  lastUpdated: LastUpdated | null;
   lastWebhookAt: Date | null;
-  otherLabel: LinearNamedChoice | null;
-  project: LinearNamedChoice | null;
-  team: LinearNamedChoice | null;
-  updatedAt: Date | null;
-  updatedByEmail: string | null;
-  updatedById: string | null;
-  updatedByName: string | null;
-  webhookSecret: LinearSecretStatus;
+  project: LinearChoice | null;
+  team: LinearChoice | null;
+  webhookSecret: SecretFieldStatus;
 }
 
-export interface LinearCredentials {
-  clientId: string;
-  clientSecret: string;
+export interface SavedLinearCredentials extends LinearCredentials {
   webhookSecret: string | null;
 }
 
 function choice(
   id: string | null | undefined,
   name: string | null | undefined
-): LinearNamedChoice | null {
+): LinearChoice | null {
   if (!(id && name)) {
     return null;
   }
   return { id, name };
 }
 
+const configColumns = {
+  clientId: linearIntegrationConfig.clientId,
+  clientSecret: linearIntegrationConfig.clientSecret,
+  webhookSecret: linearIntegrationConfig.webhookSecret,
+  teamId: linearIntegrationConfig.teamId,
+  teamName: linearIntegrationConfig.teamName,
+  projectId: linearIntegrationConfig.projectId,
+  projectName: linearIntegrationConfig.projectName,
+  bugLabelId: linearIntegrationConfig.bugLabelId,
+  bugLabelName: linearIntegrationConfig.bugLabelName,
+  featureLabelId: linearIntegrationConfig.featureLabelId,
+  featureLabelName: linearIntegrationConfig.featureLabelName,
+  otherLabelId: linearIntegrationConfig.otherLabelId,
+  otherLabelName: linearIntegrationConfig.otherLabelName,
+};
+
+type ConfigRow = {
+  [K in keyof typeof configColumns]: string | null;
+};
+
+function labelsFromRow(row: ConfigRow | null | undefined): LinearLabelChoices {
+  return {
+    bug: choice(row?.bugLabelId, row?.bugLabelName),
+    feature_request: choice(row?.featureLabelId, row?.featureLabelName),
+    other: choice(row?.otherLabelId, row?.otherLabelName),
+  };
+}
+
+// `sent` is what the admin submitted: `undefined` leaves the choice alone and
+// `null` clears it. `keepSaved` is false once the team changes.
+function nextChoice(
+  saved: LinearChoice | null,
+  sent: LinearChoice | null | undefined,
+  keepSaved: boolean
+): LinearChoice | null {
+  if (sent !== undefined) {
+    return sent;
+  }
+  return keepSaved ? saved : null;
+}
+
 async function loadRow() {
   const [row] = await db
     .select({
-      clientId: linearIntegrationConfig.clientId,
-      clientSecret: linearIntegrationConfig.clientSecret,
-      webhookSecret: linearIntegrationConfig.webhookSecret,
-      teamId: linearIntegrationConfig.teamId,
-      teamName: linearIntegrationConfig.teamName,
-      projectId: linearIntegrationConfig.projectId,
-      projectName: linearIntegrationConfig.projectName,
-      bugLabelId: linearIntegrationConfig.bugLabelId,
-      bugLabelName: linearIntegrationConfig.bugLabelName,
-      featureLabelId: linearIntegrationConfig.featureLabelId,
-      featureLabelName: linearIntegrationConfig.featureLabelName,
-      otherLabelId: linearIntegrationConfig.otherLabelId,
-      otherLabelName: linearIntegrationConfig.otherLabelName,
+      ...configColumns,
       lastWebhookAt: linearIntegrationConfig.lastWebhookAt,
       updatedAt: linearIntegrationConfig.updatedAt,
-      updatedById: users.id,
-      updatedByName: users.name,
-      updatedByEmail: users.email,
+      ...lastUpdatedByColumns,
     })
     .from(linearIntegrationConfig)
     .leftJoin(users, eq(users.id, linearIntegrationConfig.updatedBy));
   return row ?? null;
 }
 
-export async function getLinearCredentials(): Promise<LinearCredentials | null> {
+export async function getLinearCredentials(): Promise<SavedLinearCredentials | null> {
   const row = await loadRow();
   const clientId = row?.clientId?.trim() ? row.clientId.trim() : null;
   const clientSecret = readMaybeEncryptedSecret(row?.clientSecret ?? null);
@@ -125,120 +162,99 @@ export async function getLinearCredentials(): Promise<LinearCredentials | null> 
 
 export async function getLinearConfigForAdmin(): Promise<LinearConfigForAdmin> {
   const row = await loadRow();
+  // No environment variable backs these, so `unreadable` means the saved
+  // value cannot be opened and `set` is false.
+  const savedSecret = (stored: string | null | undefined) =>
+    secretFieldStatus(
+      resolveIntegrationField(inspectSavedSecret(stored ?? null))
+    );
   return {
-    clientId: row?.clientId ?? null,
-    clientSecret: {
-      set: readMaybeEncryptedSecret(row?.clientSecret ?? null) != null,
-    },
-    webhookSecret: {
-      set: readMaybeEncryptedSecret(row?.webhookSecret ?? null) != null,
-    },
+    clientId: plainFieldStatus(
+      resolveIntegrationField(savedPlainValue(row?.clientId ?? null))
+    ),
+    clientSecret: savedSecret(row?.clientSecret),
+    webhookSecret: savedSecret(row?.webhookSecret),
     team: choice(row?.teamId, row?.teamName),
     project: choice(row?.projectId, row?.projectName),
-    bugLabel: choice(row?.bugLabelId, row?.bugLabelName),
-    featureLabel: choice(row?.featureLabelId, row?.featureLabelName),
-    otherLabel: choice(row?.otherLabelId, row?.otherLabelName),
+    labels: labelsFromRow(row),
     lastWebhookAt: row?.lastWebhookAt ?? null,
-    updatedAt: row?.updatedAt ?? null,
-    updatedById: row?.updatedById ?? null,
-    updatedByName: row?.updatedByName ?? null,
-    updatedByEmail: row?.updatedByEmail ?? null,
+    lastUpdated: toLastUpdated(row),
   };
-}
-
-function nextPlain(
-  current: string | null,
-  patch: string | null | undefined
-): string | null {
-  if (patch === undefined) {
-    return current;
-  }
-  return patch;
-}
-
-function nextSecret(
-  current: string | null,
-  patch: string | null | undefined
-): string | null {
-  if (patch === undefined) {
-    return current;
-  }
-  if (patch === null) {
-    return null;
-  }
-  return encryptIntegrationSecret(patch);
 }
 
 export async function updateLinearConfig(
   patch: LinearConfigPutBody,
   updatedBy: string
 ): Promise<LinearConfigForAdmin> {
-  const row = await loadRow();
-  const teamChanged =
-    patch.team_id !== undefined && patch.team_id !== (row?.teamId ?? null);
-  const now = new Date();
-  const projectId = nextPlain(
-    teamChanged ? null : (row?.projectId ?? null),
-    patch.project_id
-  );
-  const bugLabelId = nextPlain(
-    teamChanged ? null : (row?.bugLabelId ?? null),
-    patch.bug_label_id
-  );
-  const featureLabelId = nextPlain(
-    teamChanged ? null : (row?.featureLabelId ?? null),
-    patch.feature_label_id
-  );
-  const otherLabelId = nextPlain(
-    teamChanged ? null : (row?.otherLabelId ?? null),
-    patch.other_label_id
-  );
+  await db.transaction(async (tx) => {
+    // Locks the singleton row so two admins saving at once apply one after
+    // the other. The team change below is decided from the locked row, so
+    // it cannot be based on a stale read.
+    await tx
+      .insert(linearIntegrationConfig)
+      .values({ id: true, updatedBy })
+      .onConflictDoNothing();
+    const [row] = await tx
+      .select(configColumns)
+      .from(linearIntegrationConfig)
+      .where(eq(linearIntegrationConfig.id, true))
+      .for("update");
 
-  const teamId = nextPlain(row?.teamId ?? null, patch.team_id);
-  const values = {
-    id: true as const,
-    clientId: nextPlain(row?.clientId ?? null, patch.client_id),
-    clientSecret: nextSecret(row?.clientSecret ?? null, patch.client_secret),
-    webhookSecret: nextSecret(row?.webhookSecret ?? null, patch.webhook_secret),
-    teamId,
-    teamName: teamId ? nextPlain(row?.teamName ?? null, patch.team_name) : null,
-    projectId,
-    projectName: projectId
-      ? nextPlain(
-          teamChanged ? null : (row?.projectName ?? null),
-          patch.project_name
-        )
-      : null,
-    bugLabelId,
-    bugLabelName: bugLabelId
-      ? nextPlain(
-          teamChanged ? null : (row?.bugLabelName ?? null),
-          patch.bug_label_name
-        )
-      : null,
-    featureLabelId,
-    featureLabelName: featureLabelId
-      ? nextPlain(
-          teamChanged ? null : (row?.featureLabelName ?? null),
-          patch.feature_label_name
-        )
-      : null,
-    otherLabelId,
-    otherLabelName: otherLabelId
-      ? nextPlain(
-          teamChanged ? null : (row?.otherLabelName ?? null),
-          patch.other_label_name
-        )
-      : null,
-    updatedAt: now,
-    updatedBy,
-  };
+    const savedTeam = choice(row?.teamId, row?.teamName);
+    const team = patch.team === undefined ? savedTeam : patch.team;
+    // A project or label belongs to one team, so a team change drops saved
+    // ones. Choices sent in the same save came from the new team's lists and
+    // stay. With no team, nothing is kept.
+    const keepSaved = team != null && team.id === savedTeam?.id;
+    const pick = (
+      saved: LinearChoice | null,
+      sent: LinearChoice | null | undefined
+    ) => (team == null ? null : nextChoice(saved, sent, keepSaved));
 
-  const { id: _id, ...update } = values;
-  await db.insert(linearIntegrationConfig).values(values).onConflictDoUpdate({
-    target: linearIntegrationConfig.id,
-    set: update,
+    const project = pick(
+      choice(row?.projectId, row?.projectName),
+      patch.project
+    );
+    const savedLabels = labelsFromRow(row);
+    const labels: LinearLabelChoices = {
+      bug: pick(savedLabels.bug, patch.labels?.bug),
+      feature_request: pick(
+        savedLabels.feature_request,
+        patch.labels?.feature_request
+      ),
+      other: pick(savedLabels.other, patch.labels?.other),
+    };
+
+    await tx
+      .update(linearIntegrationConfig)
+      .set({
+        clientId: nextPlain(row?.clientId ?? null, patch.client_id),
+        clientSecret: nextSecret(
+          row?.clientSecret ?? null,
+          patch.client_secret
+        ),
+        webhookSecret: nextSecret(
+          row?.webhookSecret ?? null,
+          patch.webhook_secret
+        ),
+        teamId: team?.id ?? null,
+        teamName: team?.name ?? null,
+        projectId: project?.id ?? null,
+        projectName: project?.name ?? null,
+        bugLabelId: labels.bug?.id ?? null,
+        bugLabelName: labels.bug?.name ?? null,
+        featureLabelId: labels.feature_request?.id ?? null,
+        featureLabelName: labels.feature_request?.name ?? null,
+        otherLabelId: labels.other?.id ?? null,
+        otherLabelName: labels.other?.name ?? null,
+        updatedAt: new Date(),
+        updatedBy,
+      })
+      .where(eq(linearIntegrationConfig.id, true));
   });
 
+  if (patch.client_id !== undefined || patch.client_secret !== undefined) {
+    clearLinearTokenCache();
+  }
   return getLinearConfigForAdmin();
 }

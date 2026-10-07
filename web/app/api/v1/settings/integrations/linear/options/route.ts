@@ -1,6 +1,11 @@
 import type { NextRequest } from "next/server";
 import { requireAdmin } from "@/lib/api/auth";
-import { apiError, VALIDATION_ERROR } from "@/lib/api/errors";
+import {
+  apiError,
+  LINEAR_UNAVAILABLE,
+  NOT_FOUND,
+  VALIDATION_ERROR,
+} from "@/lib/api/errors";
 import {
   LinearRequestError,
   listLinearTeamOptions,
@@ -32,7 +37,7 @@ export async function GET(request: NextRequest) {
     }
     const options = await listLinearTeamOptions(credentials, teamId);
     if (!options) {
-      return apiError(404, "NOT_FOUND", "That Linear team was not found.");
+      return apiError(404, NOT_FOUND, "That Linear team was not found.");
     }
     return Response.json({
       teams,
@@ -41,7 +46,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (err) {
     if (err instanceof LinearRequestError) {
-      return apiError(502, "LINEAR_UNAVAILABLE", err.message);
+      return apiError(502, LINEAR_UNAVAILABLE, err.message);
     }
     throw err;
   }

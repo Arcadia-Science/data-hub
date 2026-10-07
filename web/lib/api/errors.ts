@@ -15,6 +15,9 @@ export const WATCHER_OFFLINE = "WATCHER_OFFLINE";
 // Paired with HTTP 413. A watcher that cannot split an upload would send
 // the whole file in one request, which S3 rejects above 5 GiB.
 export const PAYLOAD_TOO_LARGE = "PAYLOAD_TOO_LARGE";
+// Paired with HTTP 502 on every route, so a Linear outage or rejection always
+// reads the same way to callers.
+export const LINEAR_UNAVAILABLE = "LINEAR_UNAVAILABLE";
 
 export function apiError(
   status: number,
