@@ -28,6 +28,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import type { LastUpdated } from "@/lib/integrations/last-updated";
 import {
   slackChannelWebhookFormSchema,
   slackWebhookUrlSchema,
@@ -52,12 +53,6 @@ function SectionHeader({ configured }: { configured: boolean }) {
       </p>
     </div>
   );
-}
-
-interface LastUpdated {
-  at: string;
-  byEmail: string | null;
-  byName: string | null;
 }
 
 // Decoy length only — must not reflect the stored webhook URL.

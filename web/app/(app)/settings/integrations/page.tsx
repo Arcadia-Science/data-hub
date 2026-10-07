@@ -53,20 +53,13 @@ export default async function IntegrationsSettingsPage() {
           botToken={slackApp.botToken}
           clientId={slackApp.clientId}
           clientSecret={slackApp.clientSecret}
+          key={slackApp.lastUpdated?.at ?? "never-saved"}
           teamId={slackApp.teamId}
         />
         <SlackChannelCard.SectionHeader configured={slackChannel.configured} />
         <SlackChannelCard.Form
           configured={slackChannel.configured}
-          lastUpdated={
-            slackChannel.updatedAt
-              ? {
-                  at: slackChannel.updatedAt.toISOString(),
-                  byName: slackChannel.updatedByName,
-                  byEmail: slackChannel.updatedByEmail,
-                }
-              : null
-          }
+          lastUpdated={slackChannel.lastUpdated}
         />
       </div>
     </SettingsPageContent>

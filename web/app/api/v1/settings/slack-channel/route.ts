@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { requireAdmin } from "@/lib/api/auth";
 import { apiError, INTERNAL_ERROR, VALIDATION_ERROR } from "@/lib/api/errors";
 import { IntegrationSecretsKeyError } from "@/lib/crypto/integration-secrets";
+import { lastUpdatedResponse } from "@/lib/integrations/last-updated";
 import {
   getSlackChannelConfigForAdmin,
   upsertSlackChannelWebhookUrl,
@@ -27,14 +28,7 @@ async function readCurrent(): Promise<SlackChannelResponse> {
 
   return {
     configured: config.configured,
-    updated_at: config.updatedAt ? config.updatedAt.toISOString() : null,
-    updated_by: config.updatedById
-      ? {
-          id: config.updatedById,
-          name: config.updatedByName,
-          email: config.updatedByEmail,
-        }
-      : null,
+    ...lastUpdatedResponse(config.lastUpdated),
   };
 }
 

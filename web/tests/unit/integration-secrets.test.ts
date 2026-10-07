@@ -3,6 +3,7 @@ import {
   decryptIntegrationSecret,
   encryptIntegrationSecret,
   IntegrationSecretsKeyError,
+  inspectSavedSecret,
   readMaybeEncryptedSecret,
 } from "@/lib/crypto/integration-secrets";
 
@@ -71,5 +72,26 @@ describe("integration secrets", () => {
     const stored = encryptIntegrationSecret("secret-value");
     vi.stubEnv("INTEGRATION_SECRETS_KEY", "");
     expect(readMaybeEncryptedSecret(stored)).toBeNull();
+  });
+
+  it("tells an empty value apart from a saved value that cannot be opened", () => {
+    expect(inspectSavedSecret(null)).toEqual({ state: "empty" });
+    expect(inspectSavedSecret("")).toEqual({ state: "empty" });
+    expect(inspectSavedSecret("legacy-plaintext")).toEqual({
+      state: "readable",
+      value: "legacy-plaintext",
+    });
+
+    vi.stubEnv("INTEGRATION_SECRETS_KEY", KEY);
+    const stored = encryptIntegrationSecret("secret-value");
+    expect(inspectSavedSecret(stored)).toEqual({
+      state: "readable",
+      value: "secret-value",
+    });
+
+    vi.stubEnv("INTEGRATION_SECRETS_KEY", "cd".repeat(32));
+    expect(inspectSavedSecret(stored)).toEqual({ state: "unreadable" });
+    vi.stubEnv("INTEGRATION_SECRETS_KEY", "");
+    expect(inspectSavedSecret(stored)).toEqual({ state: "unreadable" });
   });
 });

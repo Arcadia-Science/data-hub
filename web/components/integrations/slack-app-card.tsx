@@ -2,59 +2,31 @@
 
 import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
+import { IntegrationField } from "@/components/integrations/integration-field";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  Field,
-  FieldDescription,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
-import type { SlackAppConfigSource } from "@/lib/slack/app-config";
+import { FieldGroup } from "@/components/ui/field";
+import type { PlainFieldStatus } from "@/lib/integrations/field-status";
+import type {
+  SlackAppConfigForAdmin,
+  SlackAppConfigPutBody,
+} from "@/lib/slack/app-config";
 
-interface SecretField {
-  set: boolean;
-  source: SlackAppConfigSource | null;
-}
+type SlackField = keyof SlackAppConfigPutBody;
+type SlackPatch = Partial<Record<SlackField, string | null>>;
 
-interface PlainField extends SecretField {
-  value: string | null;
-}
+type Props = Pick<
+  SlackAppConfigForAdmin,
+  "botToken" | "clientId" | "clientSecret" | "teamId"
+>;
 
-interface Props {
-  botToken: SecretField;
-  clientId: PlainField;
-  clientSecret: SecretField;
-  teamId: PlainField;
-}
-
-function sourceText(
-  source: SlackAppConfigSource | null,
-  envName: string
-): string {
-  if (source === "database") {
-    return "Saved here";
-  }
-  if (source === "environment") {
-    return `Using ${envName}`;
-  }
-  return "Not set";
-}
-
-function SourceBadge({
-  source,
-  envName,
-}: {
-  source: SlackAppConfigSource | null;
-  envName: string;
-}) {
-  return <Badge variant="secondary">{sourceText(source, envName)}</Badge>;
-}
-
+/**
+ * Drafts live in state seeded from props, so the page renders this card with
+ * a `key` that changes on every save. That remounts it with fresh drafts and
+ * avoids copying props into state in an effect.
+ */
 export function SlackAppCard({
   botToken,
   clientId,
@@ -67,14 +39,9 @@ export function SlackAppCard({
   const [clientIdDraft, setClientIdDraft] = useState(clientId.value ?? "");
   const [teamIdDraft, setTeamIdDraft] = useState(teamId.value ?? "");
   const [saving, setSaving] = useState(false);
-  const [clearing, setClearing] = useState<string | null>(null);
+  const [clearing, setClearing] = useState<SlackField | null>(null);
 
-  useEffect(() => {
-    setClientIdDraft(clientId.value ?? "");
-    setTeamIdDraft(teamId.value ?? "");
-  }, [clientId.value, teamId.value]);
-
-  async function put(body: Record<string, string | null>) {
+  async function put(body: SlackPatch) {
     const res = await fetch("/api/v1/settings/integrations/slack", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -90,8 +57,8 @@ export function SlackAppCard({
     }
   }
 
-  async function handleSave() {
-    const body: Record<string, string | null> = {};
+  function buildPatch(): SlackPatch {
+    const body: SlackPatch = {};
     const bot = botTokenDraft.trim();
     if (bot) {
       body.bot_token = bot;
@@ -108,16 +75,20 @@ export function SlackAppCard({
     if (nextTeamId !== undefined) {
       body.team_id = nextTeamId;
     }
-    if (Object.keys(body).length === 0) {
+    return body;
+  }
+
+  const patch = buildPatch();
+  const dirty = Object.keys(patch).length > 0;
+
+  async function handleSave() {
+    if (!dirty) {
       return;
     }
-
     setSaving(true);
     try {
-      await put(body);
+      await put(patch);
       toast.success("Slack app settings saved");
-      setBotTokenDraft("");
-      setClientSecretDraft("");
       router.refresh();
     } catch (err) {
       toast.error(
@@ -128,7 +99,7 @@ export function SlackAppCard({
     }
   }
 
-  async function clearSaved(field: string) {
+  async function clearSaved(field: SlackField) {
     setClearing(field);
     try {
       await put({ [field]: null });
@@ -143,12 +114,6 @@ export function SlackAppCard({
     }
   }
 
-  const dirty =
-    botTokenDraft.trim().length > 0 ||
-    clientSecretDraft.trim().length > 0 ||
-    plainPatch(clientId, clientIdDraft) !== undefined ||
-    plainPatch(teamId, teamIdDraft) !== undefined;
-
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -162,66 +127,54 @@ export function SlackAppCard({
       <Card>
         <CardContent className="flex flex-col gap-6">
           <FieldGroup>
-            <SecretInput
+            <IntegrationField
               clearing={clearing === "bot_token"}
               description="Bot user token with the chat:write scope."
               envName="SLACK_BOT_TOKEN"
               id="slack-bot-token"
               label="Bot token"
               onChange={setBotTokenDraft}
-              onClear={
-                botToken.source === "database"
-                  ? () => clearSaved("bot_token")
-                  : null
-              }
+              onClear={() => clearSaved("bot_token")}
               placeholder="xoxb-…"
               status={botToken}
+              type="password"
               value={botTokenDraft}
             />
-            <PlainInput
+            <IntegrationField
               clearing={clearing === "client_id"}
               description="From the Slack app's Basic Information page."
               envName="SLACK_CLIENT_ID"
               id="slack-client-id"
               label="Client ID"
               onChange={setClientIdDraft}
-              onClear={
-                clientId.source === "database"
-                  ? () => clearSaved("client_id")
-                  : null
-              }
+              onClear={() => clearSaved("client_id")}
               status={clientId}
+              type="text"
               value={clientIdDraft}
             />
-            <SecretInput
+            <IntegrationField
               clearing={clearing === "client_secret"}
               description="From the Slack app's Basic Information page."
               envName="SLACK_CLIENT_SECRET"
               id="slack-client-secret"
               label="Client secret"
               onChange={setClientSecretDraft}
-              onClear={
-                clientSecret.source === "database"
-                  ? () => clearSaved("client_secret")
-                  : null
-              }
+              onClear={() => clearSaved("client_secret")}
               placeholder="Paste a client secret"
               status={clientSecret}
+              type="password"
               value={clientSecretDraft}
             />
-            <PlainInput
+            <IntegrationField
               clearing={clearing === "team_id"}
               description="Optional. Limits Connect Slack to this workspace."
               envName="SLACK_TEAM_ID"
               id="slack-team-id"
               label="Allowed workspace ID"
               onChange={setTeamIdDraft}
-              onClear={
-                teamId.source === "database"
-                  ? () => clearSaved("team_id")
-                  : null
-              }
+              onClear={() => clearSaved("team_id")}
               status={teamId}
+              type="text"
               value={teamIdDraft}
             />
           </FieldGroup>
@@ -243,133 +196,18 @@ export function SlackAppCard({
   );
 }
 
+// Emptying a field that has a saved value clears it. Emptying a field that
+// only has an environment value changes nothing.
 function plainPatch(
-  field: PlainField,
+  field: PlainFieldStatus,
   draft: string
 ): string | null | undefined {
   const trimmed = draft.trim();
   if (field.source === "database" && trimmed.length === 0) {
     return null;
   }
-  if (trimmed === (field.value ?? "")) {
-    return;
-  }
-  if (trimmed.length === 0) {
+  if (trimmed === (field.value ?? "") || trimmed.length === 0) {
     return;
   }
   return trimmed;
-}
-
-function SecretInput({
-  clearing,
-  description,
-  envName,
-  id,
-  label,
-  onChange,
-  onClear,
-  placeholder,
-  status,
-  value,
-}: {
-  clearing: boolean;
-  description: string;
-  envName: string;
-  id: string;
-  label: string;
-  onChange: (value: string) => void;
-  onClear: (() => void) | null;
-  placeholder: string;
-  status: SecretField;
-  value: string;
-}) {
-  return (
-    <Field>
-      <div className="flex items-center justify-between gap-2">
-        <FieldLabel htmlFor={id}>{label}</FieldLabel>
-        <SourceBadge envName={envName} source={status.source} />
-      </div>
-      <Input
-        autoComplete="off"
-        className="font-mono"
-        id={id}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={
-          status.set ? "Paste a new value to replace it" : placeholder
-        }
-        spellCheck={false}
-        type="password"
-        value={value}
-      />
-      <FieldDescription>{description}</FieldDescription>
-      {onClear ? (
-        <Button
-          disabled={clearing}
-          onClick={onClear}
-          size="sm"
-          type="button"
-          variant="outline"
-        >
-          {clearing ? (
-            <Loader2 className="animate-spin" data-icon="inline-start" />
-          ) : null}
-          Remove saved value
-        </Button>
-      ) : null}
-    </Field>
-  );
-}
-
-function PlainInput({
-  clearing,
-  description,
-  envName,
-  id,
-  label,
-  onChange,
-  onClear,
-  status,
-  value,
-}: {
-  clearing: boolean;
-  description: string;
-  envName: string;
-  id: string;
-  label: string;
-  onChange: (value: string) => void;
-  onClear: (() => void) | null;
-  status: PlainField;
-  value: string;
-}) {
-  return (
-    <Field>
-      <div className="flex items-center justify-between gap-2">
-        <FieldLabel htmlFor={id}>{label}</FieldLabel>
-        <SourceBadge envName={envName} source={status.source} />
-      </div>
-      <Input
-        autoComplete="off"
-        className="font-mono"
-        id={id}
-        onChange={(event) => onChange(event.target.value)}
-        spellCheck={false}
-        value={value}
-      />
-      <FieldDescription>{description}</FieldDescription>
-      {onClear ? (
-        <Button
-          disabled={clearing}
-          onClick={onClear}
-          size="sm"
-          type="button"
-          variant="outline"
-        >
-          {clearing ? (
-            <Loader2 className="animate-spin" data-icon="inline-start" />
-          ) : null}
-          Remove saved value
-        </Button>
-      ) : null}
-    </Field>
-  );
 }

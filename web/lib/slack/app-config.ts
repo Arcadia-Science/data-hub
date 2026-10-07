@@ -6,14 +6,23 @@
 
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import {
-  encryptIntegrationSecret,
-  readMaybeEncryptedSecret,
-} from "@/lib/crypto/integration-secrets";
+import { inspectSavedSecret } from "@/lib/crypto/integration-secrets";
 import { db } from "@/lib/db";
 import { slackAppConfig, users } from "@/lib/db/schema";
-
-export type SlackAppConfigSource = "database" | "environment";
+import { nextPlain, nextSecret } from "@/lib/integrations/config-patch";
+import {
+  type PlainFieldStatus,
+  plainFieldStatus,
+  resolveIntegrationField,
+  type SecretFieldStatus,
+  savedPlainValue,
+  secretFieldStatus,
+} from "@/lib/integrations/field-status";
+import {
+  type LastUpdated,
+  lastUpdatedByColumns,
+  toLastUpdated,
+} from "@/lib/integrations/last-updated";
 
 export interface SlackAppCredentials {
   botToken: string | null;
@@ -22,24 +31,12 @@ export interface SlackAppCredentials {
   teamId: string | null;
 }
 
-export interface SlackSecretFieldStatus {
-  set: boolean;
-  source: SlackAppConfigSource | null;
-}
-
-export interface SlackPlainFieldStatus extends SlackSecretFieldStatus {
-  value: string | null;
-}
-
 export interface SlackAppConfigForAdmin {
-  botToken: SlackSecretFieldStatus;
-  clientId: SlackPlainFieldStatus;
-  clientSecret: SlackSecretFieldStatus;
-  teamId: SlackPlainFieldStatus;
-  updatedAt: Date | null;
-  updatedByEmail: string | null;
-  updatedById: string | null;
-  updatedByName: string | null;
+  botToken: SecretFieldStatus;
+  clientId: PlainFieldStatus;
+  clientSecret: SecretFieldStatus;
+  lastUpdated: LastUpdated | null;
+  teamId: PlainFieldStatus;
 }
 
 const optionalSecret = z.string().trim().min(1).nullable().optional();
@@ -68,52 +65,18 @@ export const slackAppConfigPutBodySchema = z
 
 export type SlackAppConfigPutBody = z.infer<typeof slackAppConfigPutBodySchema>;
 
-export function resolveSlackSetting(
-  stored: string | null,
-  envValue: string | undefined
-): { source: SlackAppConfigSource | null; value: string | null } {
-  const fromDb = stored?.trim() ? stored.trim() : null;
-  if (fromDb) {
-    return { value: fromDb, source: "database" };
-  }
-  const fromEnv = envValue?.trim() ? envValue.trim() : null;
-  if (fromEnv) {
-    return { value: fromEnv, source: "environment" };
-  }
-  return { value: null, source: null };
-}
-
-function secretStatus(
-  resolved: ReturnType<typeof resolveSlackSetting>
-): SlackSecretFieldStatus {
-  return {
-    set: resolved.value != null,
-    source: resolved.source,
-  };
-}
-
-function plainStatus(
-  resolved: ReturnType<typeof resolveSlackSetting>
-): SlackPlainFieldStatus {
-  return {
-    set: resolved.value != null,
-    source: resolved.source,
-    value: resolved.value,
-  };
-}
+const rowColumns = {
+  botToken: slackAppConfig.botToken,
+  clientId: slackAppConfig.clientId,
+  clientSecret: slackAppConfig.clientSecret,
+  teamId: slackAppConfig.teamId,
+  updatedAt: slackAppConfig.updatedAt,
+  ...lastUpdatedByColumns,
+};
 
 async function loadRow() {
   const [row] = await db
-    .select({
-      botToken: slackAppConfig.botToken,
-      clientId: slackAppConfig.clientId,
-      clientSecret: slackAppConfig.clientSecret,
-      teamId: slackAppConfig.teamId,
-      updatedAt: slackAppConfig.updatedAt,
-      updatedById: users.id,
-      updatedByName: users.name,
-      updatedByEmail: users.email,
-    })
+    .select(rowColumns)
     .from(slackAppConfig)
     .leftJoin(users, eq(users.id, slackAppConfig.updatedBy));
   return row ?? null;
@@ -121,19 +84,22 @@ async function loadRow() {
 
 function resolvedFromRow(row: Awaited<ReturnType<typeof loadRow>>) {
   return {
-    botToken: resolveSlackSetting(
-      readMaybeEncryptedSecret(row?.botToken ?? null),
+    botToken: resolveIntegrationField(
+      inspectSavedSecret(row?.botToken ?? null),
       process.env.SLACK_BOT_TOKEN
     ),
-    clientId: resolveSlackSetting(
-      row?.clientId ?? null,
+    clientId: resolveIntegrationField(
+      savedPlainValue(row?.clientId ?? null),
       process.env.SLACK_CLIENT_ID
     ),
-    clientSecret: resolveSlackSetting(
-      readMaybeEncryptedSecret(row?.clientSecret ?? null),
+    clientSecret: resolveIntegrationField(
+      inspectSavedSecret(row?.clientSecret ?? null),
       process.env.SLACK_CLIENT_SECRET
     ),
-    teamId: resolveSlackSetting(row?.teamId ?? null, process.env.SLACK_TEAM_ID),
+    teamId: resolveIntegrationField(
+      savedPlainValue(row?.teamId ?? null),
+      process.env.SLACK_TEAM_ID
+    ),
   };
 }
 
@@ -151,70 +117,52 @@ export async function getSlackAppConfigForAdmin(): Promise<SlackAppConfigForAdmi
   const row = await loadRow();
   const resolved = resolvedFromRow(row);
   return {
-    botToken: secretStatus(resolved.botToken),
-    clientId: plainStatus(resolved.clientId),
-    clientSecret: secretStatus(resolved.clientSecret),
-    teamId: plainStatus(resolved.teamId),
-    updatedAt: row?.updatedAt ?? null,
-    updatedById: row?.updatedById ?? null,
-    updatedByName: row?.updatedByName ?? null,
-    updatedByEmail: row?.updatedByEmail ?? null,
+    botToken: secretFieldStatus(resolved.botToken),
+    clientId: plainFieldStatus(resolved.clientId),
+    clientSecret: secretFieldStatus(resolved.clientSecret),
+    teamId: plainFieldStatus(resolved.teamId),
+    lastUpdated: toLastUpdated(row),
   };
-}
-
-function nextPlain(
-  current: string | null,
-  patch: string | null | undefined
-): string | null {
-  if (patch === undefined) {
-    return current;
-  }
-  return patch;
-}
-
-function nextSecret(
-  current: string | null,
-  patch: string | null | undefined
-): string | null {
-  if (patch === undefined) {
-    return current;
-  }
-  if (patch === null) {
-    return null;
-  }
-  return encryptIntegrationSecret(patch);
 }
 
 export async function updateSlackAppConfig(
   patch: SlackAppConfigPutBody,
   updatedBy: string
 ): Promise<SlackAppConfigForAdmin> {
-  const row = await loadRow();
-  const now = new Date();
-  const values = {
-    id: true as const,
-    botToken: nextSecret(row?.botToken ?? null, patch.bot_token),
-    clientId: nextPlain(row?.clientId ?? null, patch.client_id),
-    clientSecret: nextSecret(row?.clientSecret ?? null, patch.client_secret),
-    teamId: nextPlain(row?.teamId ?? null, patch.team_id),
-    updatedAt: now,
-    updatedBy,
-  };
+  await db.transaction(async (tx) => {
+    // Locks the singleton row so two admins saving at once apply one after
+    // the other instead of overwriting each other's fields. The insert makes
+    // sure a first-ever save has a row to lock.
+    await tx
+      .insert(slackAppConfig)
+      .values({ id: true, updatedBy })
+      .onConflictDoNothing();
+    const [row] = await tx
+      .select({
+        botToken: slackAppConfig.botToken,
+        clientId: slackAppConfig.clientId,
+        clientSecret: slackAppConfig.clientSecret,
+        teamId: slackAppConfig.teamId,
+      })
+      .from(slackAppConfig)
+      .where(eq(slackAppConfig.id, true))
+      .for("update");
 
-  await db
-    .insert(slackAppConfig)
-    .values(values)
-    .onConflictDoUpdate({
-      target: slackAppConfig.id,
-      set: {
-        botToken: values.botToken,
-        clientId: values.clientId,
-        clientSecret: values.clientSecret,
-        teamId: values.teamId,
-        updatedAt: now,
+    await tx
+      .update(slackAppConfig)
+      .set({
+        botToken: nextSecret(row?.botToken ?? null, patch.bot_token),
+        clientId: nextPlain(row?.clientId ?? null, patch.client_id),
+        clientSecret: nextSecret(
+          row?.clientSecret ?? null,
+          patch.client_secret
+        ),
+        teamId: nextPlain(row?.teamId ?? null, patch.team_id),
+        updatedAt: new Date(),
         updatedBy,
-      },
-    });
+      })
+      .where(eq(slackAppConfig.id, true));
+  });
 
   return getSlackAppConfigForAdmin();
 }
