@@ -73,8 +73,7 @@ describe("Linear feedback webhook", () => {
         client_id: "client-1",
         client_secret: "secret",
         webhook_secret: WEBHOOK_SECRET,
-        team_id: LINEAR_TEAM_ID,
-        team_name: "Data Hub",
+        team: { id: LINEAR_TEAM_ID, name: "Data Hub" },
       },
     });
     expect(res.status).toBe(200);
