@@ -55,9 +55,8 @@ interface CachedToken {
   expiresAt: number;
 }
 
-// Module-level on purpose: every request on a server instance reuses one
-// token. Linear allows up to 1,000 client-credentials tokens per app with the
-// same scopes, so instances do not need to share it.
+// Module-level on purpose: each server instance reuses one token across
+// requests, and Linear allows up to 1,000 such tokens per app.
 let cachedToken: CachedToken | null = null;
 
 const tokenResponseSchema = z.object({
