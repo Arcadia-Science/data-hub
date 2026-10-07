@@ -30,6 +30,10 @@ const LABELS = [
   },
 ];
 
+// Linear's documented default page size and per-query complexity ceiling.
+const DEFAULT_PAGE_SIZE = 50;
+const MAX_COMPLEXITY = 10_000;
+
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let raw = "";
@@ -47,84 +51,693 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown) {
 }
 
 interface FakeAttachment {
-  metadata: Record<string, string | number>;
+  id: string;
+  metadata: Record<string, unknown>;
+  title: string;
   url: string;
 }
 
 interface FakeIssue {
+  archivedAt: string | null;
   attachments: FakeAttachment[];
   canceledAt: string | null;
   completedAt: string | null;
+  createAsUser: string | null;
   createdAt: string;
   description: string;
   id: string;
   identifier: string;
+  labelIds: string[];
+  projectId: string | null;
   state: { name: string; type: string };
+  teamId: string | null;
   title: string;
+  trashed: boolean;
   updatedAt: string;
   url: string;
 }
 
 const issues: FakeIssue[] = [];
+const requests: { complexity: number; operation: string }[] = [];
 let issueSeq = 1;
+let rateLimited = false;
+let failAttachments = 0;
 
-function matchesFilter(
-  issue: FakeIssue,
-  filter: Record<string, unknown> | undefined
-) {
-  if (!filter) {
-    return true;
-  }
-  const idFilter = filter.id as { in?: string[] } | undefined;
-  if (idFilter?.in && !idFilter.in.includes(issue.id)) {
-    return false;
-  }
-  const title = filter.title as { eq?: string } | undefined;
-  if (title?.eq && issue.title !== title.eq) {
-    return false;
-  }
-  const createdAt = filter.createdAt as { gte?: string } | undefined;
-  if (createdAt?.gte && issue.createdAt < createdAt.gte) {
-    return false;
-  }
-  const attachments = filter.attachments as
-    | { some?: { url?: { contains?: string } } }
-    | undefined;
-  const contains = attachments?.some?.url?.contains;
-  if (
-    contains &&
-    !issue.attachments.some((attachment) => attachment.url.includes(contains))
-  ) {
-    return false;
-  }
-  const state = filter.state as { type?: { nin?: string[] } } | undefined;
-  if (state?.type?.nin?.includes(issue.state.type)) {
-    return false;
-  }
-  return true;
+// --- A small GraphQL reader -------------------------------------------------
+// Real Linear rejects a query that names an unknown field, argument, or
+// filter key, and returns only the fields a query selects. Reading the query
+// the same way means a typo or a missing field fails here and not in
+// production. It supports the subset of GraphQL that Data Hub sends.
+
+interface Field {
+  args: Record<string, unknown>;
+  name: string;
+  selection: Field[] | null;
 }
 
-function issueConnection(
-  matched: FakeIssue[],
-  variables: { after?: string; first?: number }
+class GraphqlError extends Error {
+  readonly extensions: Record<string, unknown>;
+  readonly status: number | null;
+
+  constructor(
+    message: string,
+    options: { extensions?: Record<string, unknown>; status?: number } = {}
+  ) {
+    super(message);
+    this.extensions = options.extensions ?? {
+      code: "GRAPHQL_VALIDATION_FAILED",
+    };
+    this.status = options.status ?? null;
+  }
+}
+
+class Reader {
+  private position = 0;
+  private readonly tokens: string[];
+  private readonly variables: Record<string, unknown>;
+
+  constructor(source: string, variables: Record<string, unknown>) {
+    const text = source.replace(/#.*$/gm, "").replace(/,/g, " ");
+    this.tokens =
+      text.match(
+        /[A-Za-z_]\w*|\$\w+|-?\d+(?:\.\d+)?|"(?:[^"\\]|\\.)*"|[{}()[\]:!=]/g
+      ) ?? [];
+    this.variables = variables;
+  }
+
+  operation(): { fields: Field[]; kind: string; name: string } {
+    const kind = this.next();
+    let name = "";
+    if (/^[A-Za-z_]/.test(this.peek())) {
+      name = this.next();
+    }
+    if (this.peek() === "(") {
+      this.skipVariableDefinitions();
+    }
+    return { kind, name, fields: this.selectionSet() };
+  }
+
+  private peek(): string {
+    return this.tokens[this.position] ?? "";
+  }
+
+  private next(): string {
+    const token = this.tokens[this.position];
+    if (token === undefined) {
+      throw new GraphqlError("Syntax Error: unexpected end of query");
+    }
+    this.position += 1;
+    return token;
+  }
+
+  private expect(token: string) {
+    const actual = this.next();
+    if (actual !== token) {
+      throw new GraphqlError(`Syntax Error: expected ${token}, got ${actual}`);
+    }
+  }
+
+  private skipVariableDefinitions() {
+    let depth = 0;
+    do {
+      const token = this.next();
+      if (token === "(") {
+        depth += 1;
+      } else if (token === ")") {
+        depth -= 1;
+      }
+    } while (depth > 0);
+  }
+
+  private selectionSet(): Field[] {
+    this.expect("{");
+    const fields: Field[] = [];
+    while (this.peek() !== "}") {
+      fields.push(this.field());
+    }
+    this.expect("}");
+    return fields;
+  }
+
+  private field(): Field {
+    const name = this.next();
+    const args: Record<string, unknown> = {};
+    if (this.peek() === "(") {
+      this.next();
+      while (this.peek() !== ")") {
+        const key = this.next();
+        this.expect(":");
+        args[key] = this.value();
+      }
+      this.expect(")");
+    }
+    const selection = this.peek() === "{" ? this.selectionSet() : null;
+    return { name, args, selection };
+  }
+
+  private value(): unknown {
+    const token = this.next();
+    if (token.startsWith("$")) {
+      return this.variables[token.slice(1)];
+    }
+    if (token === "{") {
+      const object: Record<string, unknown> = {};
+      while (this.peek() !== "}") {
+        const key = this.next();
+        this.expect(":");
+        object[key] = this.value();
+      }
+      this.next();
+      return object;
+    }
+    if (token === "[") {
+      const list: unknown[] = [];
+      while (this.peek() !== "]") {
+        list.push(this.value());
+      }
+      this.next();
+      return list;
+    }
+    if (token === "true" || token === "false") {
+      return token === "true";
+    }
+    if (token === "null") {
+      return null;
+    }
+    if (token.startsWith('"')) {
+      return JSON.parse(token);
+    }
+    return /^-?\d/.test(token) ? Number(token) : token;
+  }
+}
+
+// --- Resolvers --------------------------------------------------------------
+
+type Resolvers<T> = Record<string, (source: T, field: Field) => unknown>;
+
+function project<T>(
+  source: T,
+  field: Field,
+  resolvers: Resolvers<T>,
+  typeName: string
+): Record<string, unknown> {
+  if (!field.selection) {
+    throw new GraphqlError(
+      `Field "${field.name}" of type "${typeName}" must have a selection of subfields.`
+    );
+  }
+  const result: Record<string, unknown> = {};
+  for (const child of field.selection) {
+    const resolve = resolvers[child.name];
+    if (!resolve) {
+      throw new GraphqlError(
+        `Cannot query field "${child.name}" on type "${typeName}".`
+      );
+    }
+    result[child.name] = resolve(source, child);
+  }
+  return result;
+}
+
+function checkArgs(field: Field, allowed: string[], typeName: string) {
+  for (const name of Object.keys(field.args)) {
+    if (!allowed.includes(name)) {
+      throw new GraphqlError(
+        `Unknown argument "${name}" on field "${typeName}.${field.name}".`
+      );
+    }
+  }
+}
+
+const CONNECTION_ARGS = [
+  "after",
+  "before",
+  "first",
+  "last",
+  "includeArchived",
+  "orderBy",
+];
+
+// Cursors are offsets. Without `first`, Linear returns 50 items.
+function connection<T>(
+  items: T[],
+  field: Field,
+  allowedArgs: string[],
+  build: (item: T, node: Field) => unknown
+): Record<string, unknown> {
+  checkArgs(field, [...CONNECTION_ARGS, ...allowedArgs], field.name);
+  const first =
+    typeof field.args.first === "number" ? field.args.first : DEFAULT_PAGE_SIZE;
+  const start =
+    typeof field.args.after === "string" ? Number(field.args.after) : 0;
+  const page = items.slice(start, start + first);
+  const result: Record<string, unknown> = {};
+  for (const child of field.selection ?? []) {
+    if (child.name === "nodes") {
+      result.nodes = page.map((item) => build(item, child));
+    } else if (child.name === "pageInfo") {
+      result.pageInfo = project(
+        { start, first, total: items.length },
+        child,
+        {
+          hasNextPage: (cursor) => cursor.start + cursor.first < cursor.total,
+          endCursor: (cursor) => String(cursor.start + cursor.first),
+        },
+        "PageInfo"
+      );
+    } else {
+      throw new GraphqlError(
+        `Cannot query field "${child.name}" on type "${field.name}Connection".`
+      );
+    }
+  }
+  return result;
+}
+
+function checkOperators(
+  value: unknown,
+  allowed: string[],
+  typeName: string
+): Record<string, unknown> {
+  const comparator = (value ?? {}) as Record<string, unknown>;
+  for (const key of Object.keys(comparator)) {
+    if (!allowed.includes(key)) {
+      throw new GraphqlError(`Unknown field "${key}" on type "${typeName}".`);
+    }
+  }
+  return comparator;
+}
+
+function matchesString(actual: string, comparator: unknown): boolean {
+  const { eq, contains } = checkOperators(
+    comparator,
+    ["eq", "contains"],
+    "StringComparator"
+  ) as { contains?: string; eq?: string };
+  if (eq !== undefined && actual !== eq) {
+    return false;
+  }
+  return contains === undefined || actual.includes(contains);
+}
+
+function matchesAttachmentFilter(
+  attachment: FakeAttachment,
+  filter: unknown
+): boolean {
+  const { url } = checkOperators(filter, ["url"], "AttachmentFilter");
+  return url === undefined || matchesString(attachment.url, url);
+}
+
+function matchesIssueFilter(issue: FakeIssue, filter: unknown): boolean {
+  const clauses = checkOperators(
+    filter,
+    [
+      "id",
+      "title",
+      "createdAt",
+      "description",
+      "state",
+      "attachments",
+      "and",
+      "or",
+    ],
+    "IssueFilter"
+  );
+  return Object.entries(clauses).every(([key, value]) => {
+    switch (key) {
+      case "id": {
+        const { in: ids } = checkOperators(
+          value,
+          ["in"],
+          "IssueIDComparator"
+        ) as { in?: string[] };
+        return ids === undefined || ids.includes(issue.id);
+      }
+      case "title":
+        return matchesString(issue.title, value);
+      case "description":
+        return matchesString(issue.description, value);
+      case "createdAt": {
+        const { gte } = checkOperators(value, ["gte"], "DateComparator") as {
+          gte?: string;
+        };
+        return gte === undefined || issue.createdAt >= gte;
+      }
+      case "state": {
+        const { type } = checkOperators(value, ["type"], "WorkflowStateFilter");
+        const { nin } = checkOperators(type, ["nin"], "StringComparator") as {
+          nin?: string[];
+        };
+        return !nin?.includes(issue.state.type);
+      }
+      case "attachments": {
+        const { some } = checkOperators(
+          value,
+          ["some"],
+          "AttachmentCollectionFilter"
+        );
+        return issue.attachments.some((attachment) =>
+          matchesAttachmentFilter(attachment, some)
+        );
+      }
+      case "and":
+        return (value as unknown[]).every((part) =>
+          matchesIssueFilter(issue, part)
+        );
+      default:
+        return (value as unknown[]).some((part) =>
+          matchesIssueFilter(issue, part)
+        );
+    }
+  });
+}
+
+const attachmentResolvers: Resolvers<FakeAttachment> = {
+  id: (attachment) => attachment.id,
+  url: (attachment) => attachment.url,
+  title: (attachment) => attachment.title,
+  metadata: (attachment) => attachment.metadata,
+};
+
+const issueResolvers: Resolvers<FakeIssue> = {
+  id: (issue) => issue.id,
+  identifier: (issue) => issue.identifier,
+  url: (issue) => issue.url,
+  title: (issue) => issue.title,
+  description: (issue) => issue.description,
+  createdAt: (issue) => issue.createdAt,
+  updatedAt: (issue) => issue.updatedAt,
+  completedAt: (issue) => issue.completedAt,
+  canceledAt: (issue) => issue.canceledAt,
+  archivedAt: (issue) => issue.archivedAt,
+  trashed: (issue) => issue.trashed,
+  state: (issue, field) =>
+    project(
+      issue.state,
+      field,
+      { name: (state) => state.name, type: (state) => state.type },
+      "WorkflowState"
+    ),
+  attachments: (issue, field) =>
+    connection(
+      issue.attachments.filter((attachment) =>
+        matchesAttachmentFilter(attachment, field.args.filter)
+      ),
+      field,
+      ["filter"],
+      (attachment, node) =>
+        project(attachment, node, attachmentResolvers, "Attachment")
+    ),
+};
+
+interface Named {
+  id: string;
+  name: string;
+}
+
+const namedResolvers: Resolvers<Named> = {
+  id: (item) => item.id,
+  name: (item) => item.name,
+};
+
+function namedConnection(
+  items: Named[],
+  field: Field,
+  allowedArgs: string[] = []
 ) {
-  const first = variables.first ?? 50;
-  const after = Number(variables.after ?? 0);
-  const slice = matched.slice(after, after + first);
-  return {
-    nodes: slice.map((issue) => ({
-      ...issue,
-      attachments: { nodes: issue.attachments },
-    })),
-    pageInfo: {
-      hasNextPage: after + first < matched.length,
-      endCursor: String(after + first),
+  return connection(items, field, allowedArgs, (item, node) =>
+    project(item, node, namedResolvers, "Node")
+  );
+}
+
+// Supports the filter the settings screen sends: a team's labels plus the
+// workspace labels that belong to no team.
+function listIssueLabels(field: Field) {
+  checkArgs(field, [...CONNECTION_ARGS, "filter"], "Query.issueLabels");
+  const { or } = checkOperators(field.args.filter, ["or"], "IssueLabelFilter");
+  const clauses = (or ?? []) as { team?: Record<string, unknown> }[];
+  const matched = LABELS.filter((label) =>
+    clauses.some(({ team }) => {
+      const { id, null: isNull } = checkOperators(
+        team,
+        ["id", "null"],
+        "TeamFilter"
+      );
+      if (isNull === true) {
+        return label.teamId === null;
+      }
+      const { eq } = checkOperators(id, ["eq"], "IDComparator") as {
+        eq?: string;
+      };
+      return label.teamId !== null && label.teamId === eq;
+    })
+  );
+  return namedConnection(matched, field, ["filter"]);
+}
+
+function listIssues(field: Field) {
+  checkArgs(field, [...CONNECTION_ARGS, "filter", "sort"], "Query.issues");
+  const includeArchived = field.args.includeArchived === true;
+  const matched = issues
+    .filter((issue) => includeArchived || !issue.archivedAt)
+    .filter((issue) => matchesIssueFilter(issue, field.args.filter));
+  return connection(matched, field, ["filter", "sort"], (issue, node) =>
+    project(issue, node, issueResolvers, "Issue")
+  );
+}
+
+const queryRoots: Record<string, (field: Field) => unknown> = {
+  organization: (field) =>
+    project(
+      { id: "org-1", name: "Test Org" },
+      field,
+      namedResolvers,
+      "Organization"
+    ),
+  teams: (field) =>
+    namedConnection([{ id: LINEAR_TEAM_ID, name: "Data Hub" }], field),
+  team: (field) => {
+    checkArgs(field, ["id"], "Query.team");
+    // Linear answers an unknown team ID with an "invalid input" error and a
+    // 4xx status, not a null team.
+    if (field.args.id !== LINEAR_TEAM_ID) {
+      throw new GraphqlError("Entity not found", {
+        status: 400,
+        extensions: {
+          type: "invalid input",
+          userError: true,
+          userPresentableMessage: "Could not find referenced Team.",
+        },
+      });
+    }
+    return project(
+      { projects: [{ id: LINEAR_PROJECT_ID, name: "Feedback" }] },
+      field,
+      { projects: (team, node) => namedConnection(team.projects, node) },
+      "Team"
+    );
+  },
+  issueLabels: listIssueLabels,
+  issues: listIssues,
+};
+
+interface IssueCreateInput {
+  createAsUser?: string;
+  description?: string;
+  labelIds?: string[];
+  projectId?: string | null;
+  teamId?: string;
+  title?: string;
+}
+
+function createIssue(field: Field) {
+  checkArgs(field, ["input"], "Mutation.issueCreate");
+  const input = (field.args.input ?? {}) as IssueCreateInput;
+  if (input.title === "__fail_linear__") {
+    throw new GraphqlError("Linear is down");
+  }
+  const id = randomUUID();
+  const identifier = `DH-${issueSeq++}`;
+  const now = new Date().toISOString();
+  const issue: FakeIssue = {
+    id,
+    identifier,
+    title: input.title ?? "",
+    description: input.description ?? "",
+    url: `https://linear.app/test/issue/${identifier}`,
+    createdAt: now,
+    updatedAt: now,
+    completedAt: null,
+    canceledAt: null,
+    archivedAt: null,
+    trashed: false,
+    state: { name: "Triage", type: "triage" },
+    attachments: [],
+    createAsUser: input.createAsUser ?? null,
+    labelIds: input.labelIds ?? [],
+    projectId: input.projectId ?? null,
+    teamId: input.teamId ?? null,
+  };
+  issues.push(issue);
+  return project(
+    { success: true, issue },
+    field,
+    {
+      success: (payload) => payload.success,
+      issue: (payload, node) =>
+        project(payload.issue, node, issueResolvers, "Issue"),
     },
+    "IssuePayload"
+  );
+}
+
+interface AttachmentCreateInput {
+  issueId?: string;
+  metadata?: Record<string, unknown>;
+  title?: string;
+  url?: string;
+}
+
+// Like Linear, a second call with the same issue and URL updates the first
+// attachment instead of adding another.
+function createAttachment(field: Field) {
+  checkArgs(field, ["input"], "Mutation.attachmentCreate");
+  const input = (field.args.input ?? {}) as AttachmentCreateInput;
+  const issue = issues.find((item) => item.id === input.issueId);
+  if (!issue) {
+    throw new GraphqlError("Entity not found: Issue");
+  }
+  if (failAttachments > 0) {
+    failAttachments -= 1;
+    throw new GraphqlError("Could not attach");
+  }
+  if (issue.title.startsWith("__fail_attachment__")) {
+    throw new GraphqlError("Could not attach");
+  }
+  const url = input.url ?? "";
+  let attachment = issue.attachments.find((item) => item.url === url);
+  if (attachment) {
+    attachment.title = input.title ?? attachment.title;
+    attachment.metadata = input.metadata ?? attachment.metadata;
+  } else {
+    attachment = {
+      id: randomUUID(),
+      url,
+      title: input.title ?? "",
+      metadata: input.metadata ?? {},
+    };
+    issue.attachments.push(attachment);
+  }
+  return project(
+    { success: true, attachment },
+    field,
+    {
+      success: (payload) => payload.success,
+      attachment: (payload, node) =>
+        project(payload.attachment, node, attachmentResolvers, "Attachment"),
+    },
+    "AttachmentPayload"
+  );
+}
+
+const mutationRoots: Record<string, (field: Field) => unknown> = {
+  issueCreate: createIssue,
+  attachmentCreate: createAttachment,
+};
+
+// Linear charges 0.1 per property and 1 per object, and multiplies a
+// connection's children by its page size. This approximates that formula.
+function complexityOf(fields: Field[], multiplier: number): number {
+  let total = 0;
+  for (const field of fields) {
+    if (!field.selection) {
+      total += 0.1 * multiplier;
+    } else if (field.selection.some((child) => child.name === "nodes")) {
+      const size =
+        typeof field.args.first === "number"
+          ? field.args.first
+          : DEFAULT_PAGE_SIZE;
+      for (const child of field.selection) {
+        const children = child.selection ?? [];
+        total +=
+          child.name === "nodes"
+            ? size * multiplier + complexityOf(children, size * multiplier)
+            : multiplier + complexityOf(children, multiplier);
+      }
+    } else {
+      total += multiplier + complexityOf(field.selection, multiplier);
+    }
+  }
+  return Math.ceil(total);
+}
+
+function runGraphql(
+  query: string,
+  variables: Record<string, unknown>
+): Record<string, unknown> {
+  const operation = new Reader(query, variables).operation();
+  const complexity = complexityOf(operation.fields, 1);
+  // Logged before running, so a failed call still shows up.
+  requests.push({ operation: operation.name, complexity });
+  if (complexity > MAX_COMPLEXITY) {
+    throw new GraphqlError(
+      `Query too complex: ${complexity} points, the maximum is ${MAX_COMPLEXITY}.`
+    );
+  }
+  const roots = operation.kind === "mutation" ? mutationRoots : queryRoots;
+  const data: Record<string, unknown> = {};
+  for (const field of operation.fields) {
+    const resolve = roots[field.name];
+    if (!resolve) {
+      throw new GraphqlError(
+        `Cannot query field "${field.name}" on type "${operation.kind === "mutation" ? "Mutation" : "Query"}".`
+      );
+    }
+    data[field.name] = resolve(field);
+  }
+  return data;
+}
+
+function seedIssue(body: Partial<FakeIssue>): FakeIssue {
+  const id = body.id ?? randomUUID();
+  const now = new Date().toISOString();
+  const trashed = body.trashed ?? false;
+  return {
+    id,
+    identifier: body.identifier ?? `DH-${issueSeq++}`,
+    title: body.title ?? "Bare issue",
+    description: body.description ?? "",
+    url: body.url ?? `https://linear.app/test/issue/${id}`,
+    createdAt: body.createdAt ?? now,
+    updatedAt: body.updatedAt ?? now,
+    completedAt: body.completedAt ?? null,
+    canceledAt: body.canceledAt ?? null,
+    archivedAt: body.archivedAt ?? (trashed ? now : null),
+    trashed,
+    state: body.state ?? { name: "Triage", type: "triage" },
+    attachments: (body.attachments ?? []).map((attachment) => ({
+      id: attachment.id ?? randomUUID(),
+      title: attachment.title ?? "",
+      url: attachment.url,
+      metadata: attachment.metadata ?? {},
+    })),
+    createAsUser: body.createAsUser ?? null,
+    labelIds: body.labelIds ?? [],
+    projectId: body.projectId ?? null,
+    teamId: body.teamId ?? null,
   };
 }
 
 // Stands in for api.linear.app. Accepts any client credentials except the
 // `LINEAR_BAD_*` and `LINEAR_NO_CLIENT_CREDENTIALS_*` values above.
+//
+// Test controls, all under `/__test/`:
+//   POST reset                    clears issues, request log, and switches
+//   GET/POST issues               read or seed issues
+//   GET requests                  operation name and complexity per call
+//   POST reset-requests           clears only the request log
+//   POST rate-limit {enabled}     answers every call with RATELIMITED
+//   POST fail-attachments {count} fails the next attachment calls
 export function startLinearFakeServer(): Promise<{
   close: () => Promise<void>;
   url: string;
@@ -164,7 +777,31 @@ export function startLinearFakeServer(): Promise<{
 
     if (url.pathname === "/__test/reset" && req.method === "POST") {
       issues.length = 0;
+      requests.length = 0;
       issueSeq = 1;
+      rateLimited = false;
+      failAttachments = 0;
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (url.pathname === "/__test/reset-requests" && req.method === "POST") {
+      requests.length = 0;
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (url.pathname === "/__test/requests" && req.method === "GET") {
+      sendJson(res, 200, requests);
+      return;
+    }
+    if (url.pathname === "/__test/rate-limit" && req.method === "POST") {
+      rateLimited = (JSON.parse(await readBody(req)) as { enabled: boolean })
+        .enabled;
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+    if (url.pathname === "/__test/fail-attachments" && req.method === "POST") {
+      failAttachments = (JSON.parse(await readBody(req)) as { count: number })
+        .count;
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -173,22 +810,9 @@ export function startLinearFakeServer(): Promise<{
       return;
     }
     if (url.pathname === "/__test/issues" && req.method === "POST") {
-      const body = JSON.parse(await readBody(req)) as Partial<FakeIssue>;
-      const id = body.id ?? randomUUID();
-      issues.push({
-        id,
-        identifier: body.identifier ?? `DH-${issueSeq++}`,
-        title: body.title ?? "Bare issue",
-        description: body.description ?? "",
-        url: body.url ?? `https://linear.app/test/issue/${id}`,
-        createdAt: body.createdAt ?? new Date().toISOString(),
-        updatedAt: body.updatedAt ?? new Date().toISOString(),
-        completedAt: body.completedAt ?? null,
-        canceledAt: body.canceledAt ?? null,
-        state: body.state ?? { name: "Triage", type: "triage" },
-        attachments: body.attachments ?? [],
-      });
-      sendJson(res, 201, { id });
+      const issue = seedIssue(JSON.parse(await readBody(req)));
+      issues.push(issue);
+      sendJson(res, 201, { id: issue.id });
       return;
     }
 
@@ -197,163 +821,39 @@ export function startLinearFakeServer(): Promise<{
         sendJson(res, 401, { errors: [{ message: "Unauthorized" }] });
         return;
       }
-      const raw = await readBody(req);
-      const parsed = JSON.parse(raw) as {
+      const parsed = JSON.parse(await readBody(req)) as {
         query?: unknown;
         variables?: Record<string, unknown>;
       };
       const query = typeof parsed.query === "string" ? parsed.query : "";
-      if (query.includes("organization")) {
-        sendJson(res, 200, {
-          data: { organization: { id: "org-1", name: "Test Org" } },
-        });
-        return;
-      }
-      if (query.includes("LinearTeamOptions")) {
-        const variables = (parsed.variables ?? {}) as {
-          labelTeamId?: string;
-          teamId?: string;
-        };
-        // Linear answers an unknown team ID with an "invalid input" error
-        // and a 4xx status, not a null team.
-        if (variables.teamId !== LINEAR_TEAM_ID) {
-          sendJson(res, 400, {
-            errors: [
-              {
-                message: "Entity not found",
-                path: ["team"],
-                extensions: {
-                  type: "invalid input",
-                  userError: true,
-                  userPresentableMessage: "Could not find referenced Team.",
-                },
-              },
-            ],
-            data: null,
-          });
-          return;
-        }
-        // Mirrors the query's filter: the team's labels plus workspace labels.
-        const nodes = LABELS.filter(
-          (label) =>
-            label.teamId === null || label.teamId === variables.labelTeamId
-        ).map(({ id, name }) => ({ id, name }));
-        sendJson(res, 200, {
-          data: {
-            team: {
-              projects: {
-                nodes: [{ id: LINEAR_PROJECT_ID, name: "Feedback" }],
-              },
+      if (rateLimited) {
+        requests.push({ operation: "RATELIMITED", complexity: 0 });
+        sendJson(res, 400, {
+          errors: [
+            {
+              message: "Rate limit exceeded",
+              extensions: { code: "RATELIMITED", type: "ratelimited" },
             },
-            issueLabels: { nodes },
-          },
+          ],
         });
         return;
       }
-      if (query.includes("LinearTeams")) {
+      try {
         sendJson(res, 200, {
-          data: {
-            teams: { nodes: [{ id: LINEAR_TEAM_ID, name: "Data Hub" }] },
-          },
+          data: runGraphql(query, parsed.variables ?? {}),
         });
-        return;
-      }
-      const variables = (parsed.variables ?? {}) as {
-        after?: string;
-        filter?: Record<string, unknown>;
-        first?: number;
-        ids?: string[];
-        input?: {
-          createAsUser?: string;
-          description?: string;
-          issueId?: string;
-          metadata?: Record<string, string | number>;
-          title?: string;
-          url?: string;
-        };
-      };
-      if (query.includes("IssueCreate")) {
-        const title = variables.input?.title ?? "";
-        if (title === "__fail_linear__") {
-          sendJson(res, 200, {
-            errors: [{ message: "Linear is down" }],
-          });
-          return;
+      } catch (err) {
+        if (!(err instanceof GraphqlError)) {
+          throw err;
         }
-        const id = randomUUID();
-        const identifier = `DH-${issueSeq++}`;
-        const now = new Date().toISOString();
-        issues.push({
-          id,
-          identifier,
-          title,
-          description: variables.input?.description ?? "",
-          url: `https://linear.app/test/issue/${identifier}`,
-          createdAt: now,
-          updatedAt: now,
-          completedAt: null,
-          canceledAt: null,
-          state: { name: "Triage", type: "triage" },
-          attachments: [],
+        // Linear answers a query it cannot validate with 400, and a failed
+        // mutation with 200 and an `errors` list.
+        const isMutation = query.trimStart().startsWith("mutation");
+        sendJson(res, err.status ?? (isMutation ? 200 : 400), {
+          errors: [{ message: err.message, extensions: err.extensions }],
+          data: null,
         });
-        sendJson(res, 200, {
-          data: {
-            issueCreate: {
-              success: true,
-              issue: {
-                id,
-                identifier,
-                url: `https://linear.app/test/issue/${identifier}`,
-              },
-            },
-          },
-        });
-        return;
       }
-      if (query.includes("AttachmentCreate")) {
-        const issue = issues.find(
-          (item) => item.id === variables.input?.issueId
-        );
-        if (!issue || issue.title.startsWith("__fail_attachment__")) {
-          sendJson(res, 200, {
-            errors: [{ message: "Could not attach" }],
-          });
-          return;
-        }
-        issue.attachments.push({
-          url: variables.input?.url ?? "",
-          metadata: variables.input?.metadata ?? {},
-        });
-        sendJson(res, 200, {
-          data: {
-            attachmentCreate: {
-              success: true,
-              attachment: { id: randomUUID() },
-            },
-          },
-        });
-        return;
-      }
-      if (query.includes("FeedbackIssueDetails")) {
-        const ids = variables.ids ?? [];
-        const matched = issues.filter((issue) => ids.includes(issue.id));
-        sendJson(res, 200, {
-          data: { issues: issueConnection(matched, { first: ids.length }) },
-        });
-        return;
-      }
-      if (query.includes("FeedbackIssueSummaries")) {
-        const matched = issues.filter((issue) =>
-          matchesFilter(issue, variables.filter)
-        );
-        sendJson(res, 200, {
-          data: {
-            issues: issueConnection(matched, variables),
-          },
-        });
-        return;
-      }
-      sendJson(res, 400, { errors: [{ message: "Unknown query" }] });
       return;
     }
 
