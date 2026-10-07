@@ -4,6 +4,7 @@ import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { CopyButton } from "@/components/copy-button";
 import { IntegrationField } from "@/components/integrations/integration-field";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -298,16 +299,7 @@ export function LinearCard({
                   readOnly
                   value={webhookUrl}
                 />
-                <Button
-                  onClick={() => {
-                    void navigator.clipboard.writeText(webhookUrl);
-                    toast.success("Webhook URL copied");
-                  }}
-                  type="button"
-                  variant="outline"
-                >
-                  Copy
-                </Button>
+                <CopyButton value={webhookUrl} />
               </div>
               <FieldDescription suppressHydrationWarning>
                 In Linear, create a webhook for Issues and paste this URL. Use
