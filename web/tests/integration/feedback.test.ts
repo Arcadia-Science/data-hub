@@ -53,8 +53,7 @@ async function enableLinear(cookie: string) {
     body: {
       client_id: "client-1",
       client_secret: "secret",
-      team_id: LINEAR_TEAM_ID,
-      team_name: "Data Hub",
+      team: { id: LINEAR_TEAM_ID, name: "Data Hub" },
     },
   });
   expect(res.status).toBe(200);

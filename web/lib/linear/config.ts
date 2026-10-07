@@ -4,7 +4,6 @@
 
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import type { FeedbackKind } from "@/lib/api/feedback-schema";
 import {
   type FeedbackKind,
   feedbackKindSchema,
