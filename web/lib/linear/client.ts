@@ -418,7 +418,7 @@ export interface LinearIssueCreated {
 }
 
 export async function createLinearIssue(
-  credentials: { clientId: string; clientSecret: string },
+  credentials: LinearCredentials,
   input: {
     createAsUser: string;
     description: string;
@@ -455,7 +455,7 @@ export async function createLinearIssue(
 }
 
 export async function createLinearAttachment(
-  credentials: { clientId: string; clientSecret: string },
+  credentials: LinearCredentials,
   input: {
     issueId: string;
     metadata: Record<string, string | number>;
@@ -495,7 +495,7 @@ export const LINEAR_SUMMARY_PAGE_SIZE = 100;
 // issues on its own after the team's auto-archive period. Deleted issues come
 // back with `trashed` set and are dropped here.
 export async function listLinearIssueSummaries(
-  credentials: { clientId: string; clientSecret: string },
+  credentials: LinearCredentials,
   input: {
     after?: string;
     filter: Record<string, unknown>;
@@ -549,7 +549,7 @@ export interface LinearIssueDetailNode {
 
 // `first` matches the number of ids. Without it Linear returns 50 issues.
 export async function listLinearIssueDetails(
-  credentials: { clientId: string; clientSecret: string },
+  credentials: LinearCredentials,
   ids: string[]
 ): Promise<LinearIssueDetailNode[]> {
   if (ids.length === 0) {

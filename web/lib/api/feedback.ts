@@ -1,6 +1,7 @@
 import { inArray } from "drizzle-orm";
 import { after } from "next/server";
 import { z } from "zod";
+import { LINEAR_UNAVAILABLE } from "@/lib/api/errors";
 import {
   FEEDBACK_KIND_LABELS,
   FEEDBACK_LIST_DESCRIPTION_MAX,
@@ -49,8 +50,6 @@ export const FEEDBACK_RATE_LIMITED_MESSAGE =
   "Linear is busy with other requests from Data Hub. Try again in a few minutes.";
 
 export const FEEDBACK_NOT_CONFIGURED = "FEEDBACK_NOT_CONFIGURED";
-// The same code the Integrations routes return, always with HTTP 502.
-const LINEAR_UNAVAILABLE = "LINEAR_UNAVAILABLE";
 
 const DUPLICATE_WINDOW_MS = 24 * 60 * 60 * 1000;
 // A page holds LINEAR_SUMMARY_PAGE_SIZE reports, so this reads up to 5,000.
