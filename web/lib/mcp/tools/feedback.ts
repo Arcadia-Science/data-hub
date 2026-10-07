@@ -4,7 +4,6 @@ import {
   getFeedbackForViewer,
   listFeedback,
   previewFeedbackDescription,
-  updateFeedback,
 } from "@/lib/api/feedback";
 import {
   FEEDBACK_PAGE_SIZE,
@@ -15,15 +14,12 @@ import { toolRegistrationConfig } from "@/lib/mcp/catalog/register";
 import {
   errorResult,
   getMcpUserId,
-  requireMcpAdmin,
-  requireMcpWrite,
   structuredResult,
 } from "@/lib/mcp/tools/helpers";
 import {
   getFeedbackTool,
   listFeedbackTool,
   sendFeedbackTool,
-  updateFeedbackTool,
 } from "./feedback.defs";
 
 export function registerFeedbackTools(server: McpServer) {
@@ -99,38 +95,6 @@ export function registerFeedbackTools(server: McpServer) {
         return errorResult(`Feedback '${args.id}' not found.`);
       }
       return structuredResult({ feedback: item });
-    }
-  );
-
-  server.registerTool(
-    updateFeedbackTool.name,
-    toolRegistrationConfig(updateFeedbackTool),
-    async (args, ctx) => {
-      const authInfo = ctx.http?.authInfo;
-      const writeError = requireMcpWrite(authInfo);
-      if (writeError) {
-        return writeError;
-      }
-      const adminError = await requireMcpAdmin(authInfo);
-      if (adminError) {
-        return adminError;
-      }
-      const userId = getMcpUserId(authInfo);
-      if (!userId) {
-        return errorResult("Authenticated user not available on this session.");
-      }
-      const note =
-        args.note === undefined ? undefined : args.note.trim() || null;
-      const updated = await updateFeedback({
-        id: args.id,
-        adminUserId: userId,
-        status: args.status,
-        note,
-      });
-      if (!updated) {
-        return errorResult(`Feedback '${args.id}' not found.`);
-      }
-      return structuredResult({ feedback: updated });
     }
   );
 }

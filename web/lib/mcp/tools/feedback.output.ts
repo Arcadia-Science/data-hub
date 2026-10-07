@@ -41,7 +41,3 @@ export const listFeedbackOutputSchema = z.object({
   feedback: z.array(feedbackItemSchema),
   total: z.number().int(),
 });
-
-export const updateFeedbackOutputSchema = z.object({
-  feedback: feedbackItemSchema,
-});

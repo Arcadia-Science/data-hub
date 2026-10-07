@@ -12,7 +12,6 @@ export {
   feedbackDetail,
   feedbackList,
   listFeedbackQuery,
-  updateFeedbackBody,
 } from "./schemas/feedback";
 export {
   createFileBody,

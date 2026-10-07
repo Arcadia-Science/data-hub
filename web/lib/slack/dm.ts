@@ -234,25 +234,6 @@ export function buildFeedbackSubmittedBlocks(opts: {
   ];
 }
 
-export function buildFeedbackUpdatedBlocks(opts: {
-  title: string;
-  statusLabel: string;
-  note: string | null;
-}): (Block | KnownBlock)[] {
-  const note = opts.note
-    ? `\n> ${escapeMrkdwn(opts.note).replace(/\n/g, "\n> ")}`
-    : "";
-  return [
-    {
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: `Your feedback *${escapeMrkdwn(opts.title)}* was marked *${escapeMrkdwn(opts.statusLabel)}*.${note}`,
-      },
-    },
-  ];
-}
-
 export function buildGenericBlocks(opts: {
   actorDisplayName: string;
   message: string;

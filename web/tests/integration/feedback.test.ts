@@ -3,7 +3,6 @@ import { listFeedback } from "@/lib/api/feedback";
 import {
   listNotifications,
   notifyFeedbackSubmitted,
-  notifyFeedbackUpdated,
   updatePreferences,
 } from "@/lib/api/notifications";
 import { feedback, slackConnections } from "@/lib/db/schema";
@@ -166,52 +165,7 @@ describe("Feedback", () => {
     expect(dms.map((dm) => dm.channel)).toContain("U_ADMIN");
   });
 
-  it("notifies the reporter on resolve, and skips them when the switch is off", async () => {
-    const reporter = await seedTestUser({ email: "reporter@example.com" });
-    const admin = await seedTestUser({
-      isAdmin: true,
-      email: "admin@example.com",
-    });
-    const [created] = await getTestDb()
-      .insert(feedback)
-      .values({
-        userId: reporter.userId,
-        source: "web",
-        kind: "bug",
-        title: "Export fails",
-        description: "Stops halfway.",
-      })
-      .returning({ id: feedback.id, title: feedback.title });
-
-    await notifyFeedbackUpdated({
-      feedbackId: created.id,
-      reporterUserId: reporter.userId,
-      adminUserId: admin.userId,
-      title: created.title,
-      status: "resolved",
-      note: "Fixed in the latest build.",
-    });
-
-    const [note] = await listNotifications(reporter.userId);
-    expect(note.body).toContain("Resolved");
-    expect(note.body).toContain("Fixed in the latest build.");
-
-    await updatePreferences(reporter.userId, { feedbackUpdatedEnabled: false });
-    await notifyFeedbackUpdated({
-      feedbackId: created.id,
-      reporterUserId: reporter.userId,
-      adminUserId: admin.userId,
-      title: created.title,
-      status: "declined",
-      note: "Won't do.",
-    });
-    const notes = await listNotifications(reporter.userId);
-    expect(notes.filter((row) => row.body?.includes("Declined"))).toHaveLength(
-      0
-    );
-  });
-
-  it("lets a member submit and see their reports, and rejects a non-admin PATCH", async () => {
+  it("lets a member submit and see their own reports", async () => {
     const admin = await seedTestUser({
       isAdmin: true,
       email: "admin@example.com",
@@ -238,19 +192,12 @@ describe("Feedback", () => {
 
     const patched = await api(`/api/v1/feedback/${payload.feedback.id}`, {
       method: "PATCH",
-      headers: memberHeaders,
-      body: { status: "resolved", note: "nope" },
-    });
-    expect(patched.status).toBe(403);
-
-    const ok = await api(`/api/v1/feedback/${payload.feedback.id}`, {
-      method: "PATCH",
       headers: adminHeaders,
       body: { status: "resolved", note: "Shipped." },
     });
-    expect(ok.status).toBe(200);
+    expect(patched.status).toBe(404);
 
-    const listed = await api("/api/v1/feedback?status=resolved", {
+    const listed = await api("/api/v1/feedback", {
       headers: memberHeaders,
     });
     expect(listed.status).toBe(200);
@@ -318,7 +265,7 @@ describe("Feedback", () => {
       token: admin.token,
       body: { status: "resolved" },
     });
-    expect(patched.status).toBe(401);
+    expect(patched.status).toBe(404);
 
     const rows = await getTestDb().select({ id: feedback.id }).from(feedback);
     expect(rows).toHaveLength(1);

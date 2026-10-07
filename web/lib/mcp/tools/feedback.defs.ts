@@ -13,7 +13,6 @@ import {
   feedbackItemSchema,
   listFeedbackOutputSchema,
   sendFeedbackOutputSchema,
-  updateFeedbackOutputSchema,
 } from "./feedback.output";
 
 export const sendFeedbackTool = {
@@ -93,32 +92,6 @@ export const listFeedbackTool = {
   annotations: { readOnlyHint: true },
 } as const satisfies McpToolDef;
 
-export const updateFeedbackTool = {
-  name: "update_feedback",
-  title: "Update Feedback",
-  description:
-    "Set a feedback report's status to open, resolved, or declined, with an optional note shown to the reporter. Workspace admin only, and requires the write scope. Changing the status to resolved or declined notifies the reporter. Editing only the note does not.",
-  group: "feedback",
-  inputSchema: {
-    id: z.string().uuid().describe("Feedback report id"),
-    status: feedbackStatusSchema.describe("open, resolved, or declined"),
-    note: z
-      .string()
-      .trim()
-      .max(FEEDBACK_DETAIL_MAX)
-      .optional()
-      .describe(
-        "Note shown to the reporter. Pass an empty string to clear it."
-      ),
-  },
-  outputSchema: updateFeedbackOutputSchema,
-  annotations: {
-    readOnlyHint: false,
-    destructiveHint: false,
-    idempotentHint: true,
-  },
-} as const satisfies McpToolDef;
-
 export const getFeedbackTool = {
   name: "get_feedback",
   title: "Get Feedback",
@@ -136,5 +109,4 @@ export const FEEDBACK_TOOL_DEFS = [
   sendFeedbackTool,
   listFeedbackTool,
   getFeedbackTool,
-  updateFeedbackTool,
 ] as const;

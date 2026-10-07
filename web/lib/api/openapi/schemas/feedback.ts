@@ -36,13 +36,6 @@ export const createFeedbackBody = z
   })
   .openapi("CreateFeedbackBody");
 
-export const updateFeedbackBody = z
-  .object({
-    status: feedbackStatusSchema,
-    note: optionalText(FEEDBACK_DETAIL_MAX),
-  })
-  .openapi("UpdateFeedbackBody");
-
 const feedbackPerson = z.object({
   id: z.string(),
   name: z.string().nullable(),

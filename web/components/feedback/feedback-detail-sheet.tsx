@@ -12,7 +12,6 @@ import { parseAsString, useQueryState } from "nuqs";
 import { useState } from "react";
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import { FeedbackStatusBadge } from "@/components/feedback/feedback-badges";
-import { FeedbackStatusForm } from "@/components/feedback/feedback-status-form";
 import { Button } from "@/components/ui/button";
 import {
   Collapsible,
@@ -158,12 +157,6 @@ export function FeedbackDetailSheet({
             <ReportBody item={shown} key={shown.id} />
             <Activity item={shown} />
           </div>
-          <FeedbackStatusForm
-            id={shown.id}
-            key={shown.id}
-            note={shown.adminNote}
-            status={shown.status}
-          />
         </SheetContent>
       ) : null}
     </Sheet>
