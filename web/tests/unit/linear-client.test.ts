@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearLinearTokenCache,
+  LinearClientCredentialsError,
+  LinearCredentialsRejectedError,
   LinearNotFoundError,
   LinearRequestError,
   listLinearTeamOptions,
@@ -112,6 +114,29 @@ describe("Linear client", () => {
       );
     });
 
+    it("tells a rejected secret apart from client credentials being off", async () => {
+      routeBy({
+        token: () => json({ error: "invalid_client" }, 401),
+        graphql: organizationOk,
+      });
+      const rejected = await testLinearConnection(credentials).catch(
+        (err: unknown) => err
+      );
+      expect(rejected).toBeInstanceOf(LinearCredentialsRejectedError);
+      expect(rejected).toBeInstanceOf(LinearRequestError);
+      expect(rejected).not.toBeInstanceOf(LinearClientCredentialsError);
+
+      routeBy({
+        token: () => json({ error: "server_error" }, 503),
+        graphql: organizationOk,
+      });
+      const outage = await testLinearConnection(credentials).catch(
+        (err: unknown) => err
+      );
+      expect(outage).toBeInstanceOf(LinearRequestError);
+      expect(outage).not.toBeInstanceOf(LinearCredentialsRejectedError);
+    });
+
     it("includes Linear's reason when the credentials are rejected", async () => {
       routeBy({
         token: () =>
@@ -195,8 +220,8 @@ describe("Linear client", () => {
               },
               issueLabels: {
                 nodes: [
-                  { id: "l1", name: "Bug" },
-                  { id: "l2", name: "Triage" },
+                  { id: "l1", name: "Bug", color: "#eb5757" },
+                  { id: "l2", name: "Triage", color: "#f2c94c" },
                 ],
               },
             },
@@ -213,8 +238,8 @@ describe("Linear client", () => {
           },
         ],
         labels: [
-          { id: "l1", name: "Bug" },
-          { id: "l2", name: "Triage" },
+          { id: "l1", name: "Bug", color: "#eb5757" },
+          { id: "l2", name: "Triage", color: "#f2c94c" },
         ],
       });
 
@@ -230,6 +255,7 @@ describe("Linear client", () => {
         labelTeamId: TEAM_ID,
       });
       expect(sent.query).toContain("issueLabels(");
+      expect(sent.query).toContain("{ nodes { id name color } }");
       expect(sent.query).toContain("{ team: { id: { eq: $labelTeamId } } }");
       expect(sent.query).toContain("{ team: { null: true } }");
     });

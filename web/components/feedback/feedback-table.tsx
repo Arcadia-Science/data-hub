@@ -1,9 +1,9 @@
 import Link from "next/link";
-import { RelativeTime } from "@/components/dashboard/relative-time";
 import {
   FeedbackLabelChip,
   FeedbackPriority,
 } from "@/components/feedback/feedback-badges";
+import { SentDate } from "@/components/feedback/sent-date";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -14,6 +14,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { UserAvatar } from "@/components/user-avatar";
+import type { FeedbackAssignee, FeedbackLabel } from "@/lib/api/feedback";
 import { toUserAvatarUser } from "@/lib/avatar-color";
 import type { FeedbackTab } from "@/lib/search-params";
 
@@ -25,21 +26,19 @@ export interface FeedbackTableGroup {
 }
 
 export interface FeedbackTableRow {
-  assignee: {
-    avatarUrl: string | null;
-    name: string;
-    userId: string;
-  } | null;
+  assignee: Pick<FeedbackAssignee, "avatarUrl" | "name" | "userId"> | null;
   createdAt: string;
   id: string;
   identifier: string;
-  labels: { color: string; name: string }[];
+  labels: FeedbackLabel[];
   priority: number | null;
   priorityLabel: string | null;
-  reporterLabel: string;
+  reporterName: string;
   stateColor: string;
   stateId: string;
   title: string;
+  // The agent the report came through, such as "Claude". Null for the web app.
+  viaLabel: string | null;
 }
 
 const COLUMNS = 7;
@@ -52,7 +51,7 @@ export function FeedbackTableSkeleton() {
       className="overflow-hidden rounded-lg border bg-background dark:bg-muted"
       role="status"
     >
-      <Table className="min-w-[64rem] table-fixed">
+      <Table className="min-w-[52rem] table-fixed">
         <FeedbackColumns />
         <TableBody>
           {Array.from({ length: 4 }).map((_, index) => (
@@ -74,13 +73,13 @@ function FeedbackColumns() {
   return (
     <TableHeader>
       <TableRow>
-        <TableHead className="w-28">ID</TableHead>
+        <TableHead className="w-24">ID</TableHead>
         <TableHead>Title</TableHead>
-        <TableHead className="w-40">Label</TableHead>
-        <TableHead className="w-32">Priority</TableHead>
-        <TableHead className="w-44">Reporter</TableHead>
-        <TableHead className="w-28">Assignee</TableHead>
-        <TableHead className="w-28">Sent</TableHead>
+        <TableHead className="w-36">Label</TableHead>
+        <TableHead className="w-28">Priority</TableHead>
+        <TableHead className="w-40">Reporter</TableHead>
+        <TableHead className="w-24">Assignee</TableHead>
+        <TableHead className="w-24 text-right">Sent</TableHead>
       </TableRow>
     </TableHeader>
   );
@@ -115,7 +114,7 @@ export function FeedbackTable({
 
   return (
     <div className="overflow-hidden rounded-lg border bg-background dark:bg-muted">
-      <Table className="min-w-[64rem] table-fixed">
+      <Table className="min-w-[52rem] table-fixed">
         <FeedbackColumns />
         <TableBody>
           {rows.map((row) => {
@@ -185,8 +184,9 @@ function FeedbackRows({
       >
         <TableCell className="font-mono text-muted-foreground text-xs">
           <Link
+            aria-current={selected ? "true" : undefined}
             aria-label={row.title}
-            className="absolute inset-0 z-10"
+            className="absolute inset-0 z-10 outline-none focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:ring-inset"
             href={href}
           />
           {row.identifier}
@@ -196,9 +196,9 @@ function FeedbackRows({
             {row.title}
           </span>
         </TableCell>
-        <TableCell>
+        <TableCell className="overflow-hidden">
           {firstLabel ? (
-            <span className="inline-flex min-w-0 items-center gap-1.5">
+            <span className="inline-flex min-w-0 max-w-full items-center gap-1.5">
               <FeedbackLabelChip
                 color={firstLabel.color}
                 name={firstLabel.name}
@@ -214,16 +214,30 @@ function FeedbackRows({
           )}
         </TableCell>
         <TableCell>
-          <FeedbackPriority label={row.priorityLabel} priority={row.priority} />
+          <FeedbackPriority
+            empty={
+              <>
+                <span aria-hidden="true" className="text-muted-foreground">
+                  —
+                </span>
+                <span className="sr-only">No priority</span>
+              </>
+            }
+            label={row.priorityLabel}
+            priority={row.priority}
+          />
         </TableCell>
-        <TableCell className="max-w-0 overflow-hidden truncate text-muted-foreground">
-          {row.reporterLabel}
+        <TableCell className="max-w-0 overflow-hidden truncate">
+          {row.reporterName}
+          {row.viaLabel ? (
+            <span className="text-muted-foreground"> via {row.viaLabel}</span>
+          ) : null}
         </TableCell>
         <TableCell>
           <Assignee assignee={row.assignee} />
         </TableCell>
-        <TableCell className="text-muted-foreground tabular-nums">
-          <RelativeTime date={row.createdAt} />
+        <TableCell className="text-right text-muted-foreground tabular-nums">
+          <SentDate date={row.createdAt} />
         </TableCell>
       </TableRow>
     </>

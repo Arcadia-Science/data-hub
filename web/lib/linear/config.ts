@@ -37,9 +37,11 @@ import {
   type LinearChoice,
   type LinearCredentials,
   type LinearOrganization,
-  LinearRequestError,
+  listLinearTeamOptions,
+  listLinearTeams,
   testLinearConnection,
 } from "./client";
+import type { LinearWebhookRejectionReason } from "./webhook";
 
 const optionalText = z.string().trim().min(1).nullable().optional();
 
@@ -54,8 +56,10 @@ export type LinearLabelChoices = Record<FeedbackKind, LinearChoice | null>;
 
 const optionalChoice = linearChoiceSchema.nullable().optional();
 
+// Strict so a client that still sends `client_id` or `client_secret` gets a
+// 400. Credentials are saved only through the connect route.
 export const linearConfigPutBodySchema = z
-  .object({
+  .strictObject({
     webhook_secret: optionalText,
     team: optionalChoice,
     project: optionalChoice,
@@ -74,8 +78,6 @@ export const linearConnectBodySchema = z.object({
   client_secret: z.string().trim().min(1),
   confirm_workspace_change: z.boolean().optional(),
 });
-
-export type LinearWebhookRejectionReason = "signature" | "stale";
 
 export class LinearWorkspaceChangeError extends Error {
   readonly workspaceId: string;
@@ -168,6 +170,16 @@ function nextChoice(
   return keepSaved ? saved : null;
 }
 
+// Both fields must be present and the secret must open. A saved secret that
+// cannot be read counts as missing, the same as no secret at all.
+function savedCredentials(
+  row: { clientId: string | null; clientSecret: string | null } | null
+): LinearCredentials | null {
+  const clientId = row?.clientId?.trim();
+  const clientSecret = readMaybeEncryptedSecret(row?.clientSecret ?? null);
+  return clientId && clientSecret ? { clientId, clientSecret } : null;
+}
+
 async function loadRow() {
   const [row] = await db
     .select({
@@ -187,14 +199,12 @@ async function loadRow() {
 
 export async function getLinearCredentials(): Promise<SavedLinearCredentials | null> {
   const row = await loadRow();
-  const clientId = row?.clientId?.trim() ? row.clientId.trim() : null;
-  const clientSecret = readMaybeEncryptedSecret(row?.clientSecret ?? null);
-  if (!(clientId && clientSecret)) {
+  const credentials = savedCredentials(row);
+  if (!credentials) {
     return null;
   }
   return {
-    clientId,
-    clientSecret,
+    ...credentials,
     webhookSecret: readMaybeEncryptedSecret(row?.webhookSecret ?? null),
   };
 }
@@ -210,15 +220,13 @@ export interface LinearFeedbackSetup {
 // Feedback is on only when an admin has saved credentials and a team.
 export async function getLinearFeedbackSetup(): Promise<LinearFeedbackSetup | null> {
   const row = await loadRow();
-  const clientId = row?.clientId?.trim() ? row.clientId.trim() : null;
-  const clientSecret = readMaybeEncryptedSecret(row?.clientSecret ?? null);
+  const credentials = savedCredentials(row);
   const teamId = row?.teamId ?? null;
-  if (!(clientId && clientSecret && teamId)) {
+  if (!(credentials && teamId)) {
     return null;
   }
   return {
-    clientId,
-    clientSecret,
+    ...credentials,
     teamId,
     projectId: row?.projectId ?? null,
     labelIds: {
@@ -283,51 +291,81 @@ export interface LinearWebhookContext {
 
 export async function getLinearWebhookContext(): Promise<LinearWebhookContext | null> {
   const row = await loadRow();
-  const clientId = row?.clientId?.trim() ? row.clientId.trim() : null;
-  const clientSecret = readMaybeEncryptedSecret(row?.clientSecret ?? null);
+  const credentials = savedCredentials(row);
   const webhookSecret = readMaybeEncryptedSecret(row?.webhookSecret ?? null);
-  if (!(clientId && clientSecret && webhookSecret)) {
+  if (!(credentials && webhookSecret)) {
     return null;
   }
   return {
-    credentials: { clientId, clientSecret, webhookSecret },
+    credentials: { ...credentials, webhookSecret },
     teamId: row?.teamId ?? null,
     workspaceId: row?.workspaceId ?? null,
   };
 }
 
-// Fills the workspace name for a setup saved before it was stored. A Linear
-// outage leaves the row alone so the settings page still renders.
-export async function ensureLinearWorkspace(): Promise<void> {
-  const row = await loadRow();
-  const clientId = row?.clientId?.trim() ? row.clientId.trim() : null;
-  const clientSecret = readMaybeEncryptedSecret(row?.clientSecret ?? null);
-  if (!(clientId && clientSecret) || row?.workspaceId) {
-    return;
-  }
-  let organization: LinearOrganization;
+// Fills in what a setup saved before this version never stored: the workspace
+// name, the team key, and the project link. The page runs it in the
+// background, so any failure (Linear down, network error) leaves the row
+// alone and the next page load tries again.
+export async function backfillLinearSetup(): Promise<void> {
   try {
-    organization = await testLinearConnection({ clientId, clientSecret });
-  } catch (err) {
-    if (err instanceof LinearRequestError) {
+    const row = await loadRow();
+    const credentials = savedCredentials(row);
+    if (!credentials) {
       return;
     }
-    throw err;
+    const missingWorkspace = !row?.workspaceId;
+    const missingTeamKey = Boolean(row?.teamId && !row.teamKey);
+    const missingProjectUrl = Boolean(row?.projectId && !row.projectUrl);
+    if (!(missingWorkspace || missingTeamKey || missingProjectUrl)) {
+      return;
+    }
+
+    const [organization, teams, options] = await Promise.all([
+      missingWorkspace ? testLinearConnection(credentials) : null,
+      missingTeamKey ? listLinearTeams(credentials) : null,
+      missingProjectUrl && row?.teamId
+        ? listLinearTeamOptions(credentials, row.teamId)
+        : null,
+    ]);
+    const teamKey = teams?.find((team) => team.id === row?.teamId)?.key;
+    const projectUrl = options?.projects.find(
+      (project) => project.id === row?.projectId
+    )?.url;
+
+    // The write is skipped if an admin changed the team or project, or
+    // connected a workspace, while Linear was answering.
+    await db
+      .update(linearIntegrationConfig)
+      .set({
+        ...(organization
+          ? {
+              workspaceId: organization.id,
+              workspaceName: organization.name,
+              workspaceUrlKey: organization.urlKey,
+            }
+          : {}),
+        ...(teamKey ? { teamKey } : {}),
+        ...(projectUrl ? { projectUrl } : {}),
+        updatedAt: sql`${linearIntegrationConfig.updatedAt}`,
+      })
+      .where(
+        and(
+          eq(linearIntegrationConfig.id, true),
+          row?.teamId
+            ? eq(linearIntegrationConfig.teamId, row.teamId)
+            : isNull(linearIntegrationConfig.teamId),
+          row?.projectId
+            ? eq(linearIntegrationConfig.projectId, row.projectId)
+            : isNull(linearIntegrationConfig.projectId),
+          missingWorkspace
+            ? isNull(linearIntegrationConfig.workspaceId)
+            : undefined
+        )
+      );
+  } catch (err) {
+    console.error("[linear] Could not fill in the saved setup:", err);
   }
-  await db
-    .update(linearIntegrationConfig)
-    .set({
-      workspaceId: organization.id,
-      workspaceName: organization.name,
-      workspaceUrlKey: organization.urlKey,
-      updatedAt: sql`${linearIntegrationConfig.updatedAt}`,
-    })
-    .where(
-      and(
-        eq(linearIntegrationConfig.id, true),
-        isNull(linearIntegrationConfig.workspaceId)
-      )
-    );
 }
 
 export function linearFeedbackViewUrl(input: {

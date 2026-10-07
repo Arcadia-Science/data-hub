@@ -1,11 +1,21 @@
 "use client";
 
-import { createContext, type ReactNode, use, useEffect, useRef } from "react";
+import {
+  createContext,
+  type ReactNode,
+  use,
+  useEffect,
+  useMemo,
+  useRef,
+} from "react";
 import type { FeedbackKind } from "@/lib/api/feedback-schema";
+import type { LinearWebhookRejectionReason } from "@/lib/linear/webhook";
 
 export type LinearStep = "connect" | "destination" | "test" | "updates";
 
 export interface SetupChoice {
+  // Set on the label lists Linear returns. Saved choices don't keep it.
+  color?: string;
   id: string;
   key?: string;
   name: string;
@@ -24,7 +34,7 @@ export interface LinearSetupData {
   lastWebhookAt: string | null;
   origin: string;
   project: SetupChoice | null;
-  rejectionReason: "signature" | "stale" | null;
+  rejectionReason: LinearWebhookRejectionReason | null;
   team: SetupChoice | null;
   webhookRejections: number;
   webhookSecretSet: boolean;
@@ -44,13 +54,21 @@ export interface LinearOptions {
   teams: SetupChoice[];
 }
 
+export interface SentTestReport {
+  id: string;
+  identifier: string;
+  labelName: string | null;
+  teamName: string;
+  url: string;
+}
+
 export interface TestReportProgress {
   closed: boolean;
   identifier: string;
   labelName: string | null;
   notificationAt: string | null;
   notificationsEnabled: boolean;
-  rejectionReason: "signature" | "stale" | null;
+  rejectionReason: LinearWebhookRejectionReason | null;
   rejections: number;
   stateName: string;
   teamName: string;
@@ -58,13 +76,20 @@ export interface TestReportProgress {
   url: string;
 }
 
-interface LinearSetupActions {
+export interface LinearSetupState {
+  data: LinearSetupData;
+  // True once the admin has moved between steps. A step takes focus only
+  // after a move, not when the page first loads.
+  moved: boolean;
+  step: LinearStep | "blocked" | "summary";
+}
+
+export interface LinearSetupActions {
   connect: (input: {
     clientId: string;
     clientSecret: string;
     confirmWorkspaceChange?: boolean;
   }) => Promise<ConnectFailure | null>;
-  data: LinearSetupData;
   disconnect: () => Promise<void>;
   goTo: (step: LinearStep | null) => void;
   loadOptions: (teamId: string | null) => Promise<LinearOptions>;
@@ -75,26 +100,23 @@ interface LinearSetupActions {
     team: SetupChoice | null;
   }) => Promise<void>;
   saveSigningSecret: (secret: string) => Promise<void>;
-  sendTestReport: () => Promise<{
-    id: string;
-    identifier: string;
-    labelName: string | null;
-    teamName: string;
-    url: string;
-  }>;
-  step: LinearStep | "blocked" | "summary";
+  sendTestReport: () => Promise<SentTestReport>;
   testReport: (id: string) => Promise<TestReportProgress>;
 }
 
-const LinearSetupContext = createContext<LinearSetupActions | null>(null);
+interface LinearSetupContextValue {
+  actions: LinearSetupActions;
+  state: LinearSetupState;
+}
+
+const LinearSetupContext = createContext<LinearSetupContextValue | null>(null);
 
 export function LinearSetupProvider({
+  actions,
   children,
-  value,
-}: {
-  children: ReactNode;
-  value: LinearSetupActions;
-}) {
+  state,
+}: LinearSetupContextValue & { children: ReactNode }) {
+  const value = useMemo(() => ({ actions, state }), [actions, state]);
   return (
     <LinearSetupContext.Provider value={value}>
       {children}
@@ -102,7 +124,7 @@ export function LinearSetupProvider({
   );
 }
 
-export function useLinearSetup(): LinearSetupActions {
+export function useLinearSetup(): LinearSetupContextValue {
   const value = use(LinearSetupContext);
   if (!value) {
     throw new Error("Linear setup steps need LinearSetupProvider.");

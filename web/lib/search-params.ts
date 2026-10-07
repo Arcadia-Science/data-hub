@@ -80,15 +80,6 @@ export const feedbackSearchParams = {
   item: parseAsString,
 };
 
-export const linearStepSearchParams = {
-  linear_step: parseAsStringLiteral([
-    "connect",
-    "destination",
-    "updates",
-    "test",
-  ] as const),
-};
-
 export const feedbackParamsCache =
   createSearchParamsCache(feedbackSearchParams);
 

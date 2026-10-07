@@ -170,6 +170,8 @@ function typeRank(type: string): number {
 }
 
 // Status type, then the team's own order for that type, then newest first.
+// Two states can share a type and position (for example after the saved team
+// changes), so the state id keeps each state's rows together.
 function compareSummaries(
   left: FeedbackSummary,
   right: FeedbackSummary
@@ -181,6 +183,10 @@ function compareSummaries(
   const byPosition = left.state.position - right.state.position;
   if (byPosition !== 0) {
     return byPosition;
+  }
+  const byState = left.state.id.localeCompare(right.state.id);
+  if (byState !== 0) {
+    return byState;
   }
   const byCreated = right.createdAt.localeCompare(left.createdAt);
   if (byCreated !== 0) {

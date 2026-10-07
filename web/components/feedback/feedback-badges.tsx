@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import {
   FEEDBACK_KIND_LABELS,
@@ -58,15 +59,19 @@ const PRIORITY_CLASS: Record<number, string> = {
   4: "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300",
 };
 
+// `empty` is what shows when Linear has no priority for the report. The
+// table passes a dash to keep the column quiet; the sheet spells it out.
 export function FeedbackPriority({
+  empty = <span className="text-muted-foreground">No priority</span>,
   label,
   priority,
 }: {
+  empty?: ReactNode;
   label: string | null;
   priority: number | null;
 }) {
   if (priority == null || priority === 0 || !label || label === "No priority") {
-    return <span className="text-muted-foreground">No priority</span>;
+    return empty;
   }
   return (
     <Badge className={PRIORITY_CLASS[priority] ?? PRIORITY_CLASS[3]}>
@@ -83,7 +88,10 @@ export function FeedbackLabelChip({
   name: string;
 }) {
   return (
-    <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border bg-background px-2 py-0.5 font-medium text-xs">
+    <span
+      className="inline-flex max-w-full items-center gap-1.5 rounded-full border bg-background px-2 py-0.5 font-medium text-xs"
+      title={name}
+    >
       <span
         aria-hidden="true"
         className="size-2 shrink-0 rounded-full"

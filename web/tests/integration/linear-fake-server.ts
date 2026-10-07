@@ -135,6 +135,8 @@ interface FakeHistory {
   at: string;
   fromState?: string | null;
   toState?: string | null;
+  // Defaults to a grey so a test only sets it when it checks the color.
+  toStateColor?: string;
 }
 
 interface FakeComment {
@@ -650,9 +652,12 @@ const issueResolvers: Resolvers<FakeIssue> = {
           toState: (item, child) =>
             item.toState
               ? project(
-                  { name: item.toState },
+                  { name: item.toState, color: item.toStateColor ?? "#bec2c8" },
                   child,
-                  { name: (state) => state.name },
+                  {
+                    name: (state) => state.name,
+                    color: (state) => state.color,
+                  },
                   "WorkflowState"
                 )
               : null,
@@ -706,26 +711,6 @@ const issueResolvers: Resolvers<FakeIssue> = {
     ),
 };
 
-interface Named {
-  id: string;
-  name: string;
-}
-
-const namedResolvers: Resolvers<Named> = {
-  id: (item) => item.id,
-  name: (item) => item.name,
-};
-
-function namedConnection(
-  items: Named[],
-  field: Field,
-  allowedArgs: string[] = []
-) {
-  return connection(items, field, allowedArgs, (item, node) =>
-    project(item, node, namedResolvers, "Node")
-  );
-}
-
 // Supports the filter the settings screen sends: a team's labels plus the
 // workspace labels that belong to no team.
 function listIssueLabels(field: Field) {
@@ -748,7 +733,18 @@ function listIssueLabels(field: Field) {
       return label.teamId !== null && label.teamId === eq;
     })
   );
-  return namedConnection(matched, field, ["filter"]);
+  return connection(matched, field, ["filter"], (label, node) =>
+    project(
+      label,
+      node,
+      {
+        id: (item) => item.id,
+        name: (item) => item.name,
+        color: (item) => item.color,
+      },
+      "IssueLabel"
+    )
+  );
 }
 
 function listIssues(field: Field) {

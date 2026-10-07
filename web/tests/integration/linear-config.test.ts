@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { linearIntegrationConfig } from "@/lib/db/schema";
+import { backfillLinearSetup } from "@/lib/linear/config";
 import {
   api,
   closeTestDb,
@@ -99,6 +100,18 @@ describe("Linear integration settings", () => {
     expect((await res.json()).error.code).toBe("VALIDATION_ERROR");
   });
 
+  it("rejects credentials sent to the settings update", async () => {
+    // Credentials are saved only through `/connect`, which checks them first.
+    const res = await put({
+      client_id: "sneaky",
+      client_secret: "sneaky",
+      team: { id: LINEAR_TEAM_ID, name: "Data Hub" },
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe("VALIDATION_ERROR");
+    expect((await current()).team).toBeNull();
+  });
+
   it("saves encrypted secrets and does not return them", async () => {
     const webhook = "lin_webhook_secret_value";
     const connected = await connect({
@@ -157,10 +170,10 @@ describe("Linear integration settings", () => {
     ]);
     // The team's labels plus the workspace-level one, but not another team's.
     expect(optionsBody.labels).toEqual([
-      { id: LINEAR_BUG_LABEL_ID, name: "Bug" },
-      { id: LINEAR_FEATURE_LABEL_ID, name: "Feature" },
-      { id: LINEAR_OTHER_LABEL_ID, name: "Other" },
-      { id: LINEAR_WORKSPACE_LABEL_ID, name: "Triage" },
+      { id: LINEAR_BUG_LABEL_ID, name: "Bug", color: "#eb5757" },
+      { id: LINEAR_FEATURE_LABEL_ID, name: "Feature", color: "#bb87fc" },
+      { id: LINEAR_OTHER_LABEL_ID, name: "Other", color: "#4ea7fc" },
+      { id: LINEAR_WORKSPACE_LABEL_ID, name: "Triage", color: "#f2c94c" },
     ]);
     expect(JSON.stringify(optionsBody)).not.toContain(
       LINEAR_OTHER_TEAM_LABEL_ID
@@ -266,6 +279,45 @@ describe("Linear integration settings", () => {
     }
   });
 
+  it("resets the last update when the team changes and the rejections when a new signing secret is saved", async () => {
+    const stamp = new Date("2026-01-01T00:00:00.000Z");
+    await put({
+      team: { id: LINEAR_TEAM_ID, name: "Data Hub" },
+      webhook_secret: "lin_webhook_secret_one",
+    });
+    await getTestDb()
+      .update(linearIntegrationConfig)
+      .set({
+        lastWebhookAt: stamp,
+        webhookRejections: 3,
+        lastWebhookRejectedAt: stamp,
+        lastWebhookRejectionReason: "signature",
+      })
+      .where(eq(linearIntegrationConfig.id, true));
+
+    // Saving the same team leaves both alone.
+    let body = await (
+      await put({ team: { id: LINEAR_TEAM_ID, name: "Data Hub" } })
+    ).json();
+    expect(body.last_webhook_at).toBe(stamp.toISOString());
+    expect(body.webhook_rejections).toBe(3);
+
+    // A new signing secret clears the rejections, not the last update.
+    body = await (
+      await put({ webhook_secret: "lin_webhook_secret_two" })
+    ).json();
+    expect(body.webhook_rejections).toBe(0);
+    expect(body.last_webhook_rejected_at).toBeNull();
+    expect(body.last_webhook_rejection_reason).toBeNull();
+    expect(body.last_webhook_at).toBe(stamp.toISOString());
+
+    // A different team no longer counts the old team's last update.
+    body = await (
+      await put({ team: { id: SECOND_TEAM_ID, name: "Other Team" } })
+    ).json();
+    expect(body.last_webhook_at).toBeNull();
+  });
+
   it("does not save credentials Linear rejects", async () => {
     const before = await current();
     const res = await connect({
@@ -324,8 +376,77 @@ describe("Linear integration settings", () => {
     });
   });
 
-  it("refuses a different workspace until the admin confirms, then clears the team", async () => {
-    await put({ team: { id: LINEAR_TEAM_ID, name: "Data Hub", key: "DH" } });
+  it("fills in the workspace, team key, and project link on a setup saved before they were stored", async () => {
+    await put({
+      team: { id: LINEAR_TEAM_ID, name: "Data Hub" },
+      project: { id: LINEAR_PROJECT_ID, name: "Feedback" },
+    });
+    await getTestDb()
+      .update(linearIntegrationConfig)
+      .set({
+        workspaceId: null,
+        workspaceName: null,
+        workspaceUrlKey: null,
+        teamKey: null,
+        projectUrl: null,
+      })
+      .where(eq(linearIntegrationConfig.id, true));
+    const before = await current();
+    expect(before.workspace_name).toBeNull();
+    expect(before.team_key).toBeNull();
+    expect(before.project_url).toBeNull();
+
+    await backfillLinearSetup();
+
+    const after = await current();
+    expect(after.workspace_name).toBe("Test Org");
+    expect(after.workspace_url_key).toBe("test-org");
+    expect(after.team_key).toBe("DH");
+    expect(after.project_url).toBe(
+      "https://linear.app/test-org/project/feedback"
+    );
+    // The page's own save time does not move when the page fills these in.
+    expect(after.updated_at).toBe(before.updated_at);
+  });
+
+  it("leaves the setup alone when Linear can't be reached", async () => {
+    await getTestDb()
+      .update(linearIntegrationConfig)
+      .set({ workspaceId: null, workspaceName: null, teamKey: null })
+      .where(eq(linearIntegrationConfig.id, true));
+    const original = process.env.__TEST_LINEAR_API_URL;
+    // Nothing listens on port 9, so `fetch` rejects with a network error.
+    process.env.__TEST_LINEAR_API_URL = "http://127.0.0.1:9";
+    try {
+      await expect(backfillLinearSetup()).resolves.toBeUndefined();
+    } finally {
+      process.env.__TEST_LINEAR_API_URL = original;
+    }
+    const body = await current();
+    expect(body.workspace_name).toBeNull();
+    expect(body.team_key).toBeNull();
+    expect(body.client_secret).toEqual({ set: true, source: "database" });
+
+    await backfillLinearSetup();
+    expect((await current()).workspace_name).toBe("Test Org");
+  });
+
+  it("refuses a different workspace until the admin confirms, then clears the setup", async () => {
+    await put({
+      team: { id: LINEAR_TEAM_ID, name: "Data Hub", key: "DH" },
+      project: { id: LINEAR_PROJECT_ID, name: "Feedback" },
+      labels: { bug: { id: LINEAR_BUG_LABEL_ID, name: "Bug" } },
+      webhook_secret: "lin_webhook_secret_value",
+    });
+    await getTestDb()
+      .update(linearIntegrationConfig)
+      .set({
+        lastWebhookAt: new Date(),
+        webhookRejections: 2,
+        lastWebhookRejectedAt: new Date(),
+        lastWebhookRejectionReason: "signature",
+      })
+      .where(eq(linearIntegrationConfig.id, true));
     await fetch(`${process.env.__TEST_LINEAR_API_URL}/__test/workspace`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -344,10 +465,14 @@ describe("Linear integration settings", () => {
     expect((await refused.json()).error.details.workspace_name).toBe(
       "Other Org"
     );
-    expect((await current()).team).toEqual({
-      id: LINEAR_TEAM_ID,
-      name: "Data Hub",
+    // Refusing changes nothing.
+    const untouched = await current();
+    expect(untouched.team).toEqual({ id: LINEAR_TEAM_ID, name: "Data Hub" });
+    expect(untouched.project).toEqual({
+      id: LINEAR_PROJECT_ID,
+      name: "Feedback",
     });
+    expect(untouched.webhook_rejections).toBe(2);
 
     const confirmed = await connect({
       client_id: "client-2",
@@ -358,7 +483,19 @@ describe("Linear integration settings", () => {
     const body = await confirmed.json();
     expect(body.workspace_name).toBe("Other Org");
     expect(body.team).toBeNull();
+    expect(body.team_key).toBeNull();
+    expect(body.project).toBeNull();
+    expect(body.project_url).toBeNull();
+    expect(body.labels).toEqual({
+      bug: null,
+      feature_request: null,
+      other: null,
+    });
     expect(body.webhook_secret).toEqual({ set: false, source: null });
+    expect(body.last_webhook_at).toBeNull();
+    expect(body.webhook_rejections).toBe(0);
+    expect(body.last_webhook_rejected_at).toBeNull();
+    expect(body.last_webhook_rejection_reason).toBeNull();
   });
 
   it("disconnects and turns feedback off", async () => {

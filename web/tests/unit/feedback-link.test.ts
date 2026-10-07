@@ -205,6 +205,35 @@ describe("feedback attachment links", () => {
     expect(closed.total).toBe(2);
   });
 
+  it("keeps each state's rows together when two states share a type and position", () => {
+    // After the saved team changes, a report can sit in the old team's "Todo"
+    // while new ones sit in the new team's "Todo" at the same position.
+    const inState = (id: string, createdAt: string, stateId: string) => {
+      const item = summary({
+        id,
+        createdAt,
+        kind: "bug",
+        status: "open",
+        stateName: "Todo",
+      });
+      return { ...item, state: { ...item.state, id: stateId } };
+    };
+    const page = pageFeedbackSummaries(
+      [
+        inState("a-new", "2026-10-03T00:00:00.000Z", "state-a"),
+        inState("b-mid", "2026-10-02T00:00:00.000Z", "state-b"),
+        inState("a-old", "2026-10-01T00:00:00.000Z", "state-a"),
+      ],
+      { limit: 25, offset: 0 }
+    );
+
+    expect(page.ids).toEqual(["a-new", "a-old", "b-mid"]);
+    expect(page.groups.map((group) => [group.stateId, group.count])).toEqual([
+      ["state-a", 2],
+      ["state-b", 1],
+    ]);
+  });
+
   it("treats completed, canceled, and duplicate as closed", () => {
     for (const type of ["completed", "canceled", "duplicate"]) {
       expect(isLinearStateClosed(type)).toBe(true);

@@ -12,6 +12,7 @@ import { readJsonBody } from "@/lib/api/openapi";
 import { IntegrationSecretsKeyError } from "@/lib/crypto/integration-secrets";
 import {
   LinearClientCredentialsError,
+  LinearCredentialsRejectedError,
   LinearRequestError,
   testLinearConnection,
 } from "@/lib/linear/client";
@@ -20,7 +21,7 @@ import {
   LinearWorkspaceChangeError,
   linearConnectBodySchema,
 } from "@/lib/linear/config";
-import { linearConfigResponse } from "../route";
+import { linearConfigResponse } from "@/lib/linear/config-response";
 
 // Checks the credentials with Linear before anything is saved, so a bad
 // secret cannot replace a working one.
@@ -45,15 +46,11 @@ export async function POST(request: NextRequest) {
     if (err instanceof LinearClientCredentialsError) {
       return apiError(400, LINEAR_CLIENT_CREDENTIALS_OFF, err.message);
     }
+    if (err instanceof LinearCredentialsRejectedError) {
+      return apiError(400, LINEAR_CREDENTIALS_REJECTED, err.message);
+    }
     if (err instanceof LinearRequestError) {
-      const rejected = err.message.startsWith(
-        "Linear rejected the app credentials"
-      );
-      return apiError(
-        rejected ? 400 : 502,
-        rejected ? LINEAR_CREDENTIALS_REJECTED : LINEAR_UNAVAILABLE,
-        err.message
-      );
+      return apiError(502, LINEAR_UNAVAILABLE, err.message);
     }
     throw err;
   }

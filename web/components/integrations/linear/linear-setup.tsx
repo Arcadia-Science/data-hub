@@ -1,127 +1,104 @@
 "use client";
 
+import { TriangleAlertIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { parseAsStringLiteral, useQueryState } from "nuqs";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { CopyButton } from "@/components/copy-button";
+import { type ComponentType, useCallback, useMemo, useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { formatDateTimeShort } from "@/lib/date";
+import { cn } from "@/lib/utils";
 import { ConnectStep } from "./connect-step";
 import { DestinationStep } from "./destination-step";
 import {
+  applyPayload,
+  fetchConfig,
+  requestConnect,
+  requestDisconnect,
+  requestOptions,
+  requestSave,
+  requestTestReport,
+  requestTestReportProgress,
+  SetupRequestError,
+} from "./linear-setup-api";
+import {
   type ConnectFailure,
-  type LinearOptions,
+  type LinearSetupActions,
   type LinearSetupData,
   LinearSetupProvider,
+  type LinearSetupState,
   type LinearStep,
-  type SetupChoice,
-  type TestReportProgress,
   useLinearSetup,
 } from "./linear-setup-context";
 import { StatusUpdatesStep } from "./status-updates-step";
-import { CompletedStep, CurrentStep, SetupSteps, UpcomingStep } from "./steps";
+import {
+  CompletedStep,
+  CopyValue,
+  CurrentStep,
+  SetupSteps,
+  UpcomingStep,
+} from "./steps";
 import { LinearSummary } from "./summary";
 import { TestReportStep } from "./test-report-step";
 
-const STEP_ORDER = ["connect", "destination", "updates", "test"] as const;
+interface StepDefinition {
+  Body: ComponentType;
+  description: string;
+  // What the completed row says once the admin has moved past this step.
+  doneDetail: (data: LinearSetupData) => string;
+  isDone: (data: LinearSetupData) => boolean;
+  number: number;
+  title: string;
+}
 
-const STEP_COPY = {
+const STEPS: Record<LinearStep, StepDefinition> = {
   connect: {
     number: 1,
     title: "Connect your Linear app",
     description: "Data Hub signs in to Linear as an app to file reports.",
-    upcoming: "Opens once the key is set.",
+    Body: ConnectStep,
+    isDone: (data) => data.clientSecretSet,
+    doneDetail: (data) => `Connected to ${data.workspaceName ?? "Linear"}.`,
   },
   destination: {
     number: 2,
     title: "Choose where reports go",
     description: "Pick the team, project, and labels for new reports.",
-    upcoming: "Pick the team, project, and labels for new reports.",
+    Body: DestinationStep,
+    isDone: (data) => data.team !== null,
+    doneDetail: (data) => {
+      const project = data.project ? `, ${data.project.name} project` : "";
+      return `${data.team?.name ?? "Team"} team${project}. Feedback is on.`;
+    },
   },
   updates: {
     number: 3,
     title: "Get status updates from Linear",
     description: "When an issue closes, Data Hub tells the person who sent it.",
-    upcoming: "When an issue closes, Data Hub tells the person who sent it.",
+    Body: StatusUpdatesStep,
+    isDone: (data) => data.webhookSecretSet,
+    doneDetail: (data) =>
+      data.lastWebhookAt
+        ? `Working. Linear's last update arrived ${formatDateTimeShort(new Date(data.lastWebhookAt))}.`
+        : "Waiting for Linear's first update.",
   },
   test: {
     number: 4,
     title: "Send a test report",
     description:
       "Check the whole path, from a new report to the message its sender gets.",
-    upcoming:
-      "Check the whole path, from a new report to the message its sender gets.",
+    Body: TestReportStep,
+    isDone: () => false,
+    doneDetail: () => "",
   },
-} as const;
+};
 
-const SETTINGS = "/api/v1/settings/integrations/linear";
-
-interface ConfigPayload {
-  client_id: { set: boolean; value: string | null };
-  client_secret: { set: boolean };
-  labels: LinearSetupData["labels"];
-  last_webhook_at: string | null;
-  last_webhook_rejection_reason: "signature" | "stale" | null;
-  project: SetupChoice | null;
-  secrets_key: LinearSetupData["keyStatus"];
-  team: SetupChoice | null;
-  team_key: string | null;
-  updated_at: string | null;
-  updated_by: { name: string | null } | null;
-  webhook_rejections: number;
-  webhook_secret: { set: boolean };
-  workspace_name: string | null;
-}
-
-function applyPayload(
-  payload: ConfigPayload,
-  previous: LinearSetupData
-): LinearSetupData {
-  return {
-    ...previous,
-    clientId: payload.client_id.value,
-    clientSecretSet: payload.client_secret.set,
-    keyStatus: payload.secrets_key,
-    labels: payload.labels,
-    lastUpdatedAt: payload.updated_at,
-    lastUpdatedBy: payload.updated_by?.name ?? null,
-    lastWebhookAt: payload.last_webhook_at,
-    project: payload.project,
-    rejectionReason: payload.last_webhook_rejection_reason,
-    team: payload.team
-      ? { ...payload.team, key: payload.team_key ?? payload.team.key }
-      : null,
-    webhookRejections: payload.webhook_rejections,
-    webhookSecretSet: payload.webhook_secret.set,
-    workspaceName: payload.workspace_name,
-  };
-}
-
-async function readPayload(res: Response): Promise<ConfigPayload> {
-  const payload = (await res.json().catch(() => null)) as {
-    error?: {
-      code?: string;
-      details?: { workspace_name?: string };
-      message?: string;
-    };
-  } & Partial<ConfigPayload>;
-  if (!(res.ok && payload?.client_id)) {
-    const error = new Error(
-      payload?.error?.message ?? "Couldn't save Linear settings"
-    ) as Error & {
-      code?: string;
-      workspaceName?: string;
-    };
-    error.code = payload?.error?.code;
-    error.workspaceName = payload?.error?.details?.workspace_name;
-    throw error;
-  }
-  return payload as ConfigPayload;
-}
+const STEP_ORDER = ["connect", "destination", "updates", "test"] as const;
 
 function resolveStep(
   data: LinearSetupData,
   requested: LinearStep | null
-): LinearStep | "blocked" | "summary" {
+): LinearSetupState["step"] {
   if (data.keyStatus !== "ok") {
     return "blocked";
   }
@@ -134,9 +111,12 @@ function resolveStep(
   return requested ?? "summary";
 }
 
+// `initial` seeds the state once. The page remounts this component (through a
+// `key`) after every admin save, so it never needs to copy new props in.
 export function LinearSetup({ initial }: { initial: LinearSetupData }) {
   const router = useRouter();
   const [data, setData] = useState(initial);
+  const [moved, setMoved] = useState(false);
   const [requested, setRequested] = useQueryState(
     "linear_step",
     parseAsStringLiteral(STEP_ORDER).withOptions({
@@ -145,27 +125,22 @@ export function LinearSetup({ initial }: { initial: LinearSetupData }) {
     })
   );
 
-  useEffect(() => {
-    setData(initial);
-  }, [initial]);
-
-  const step = resolveStep(data, requested);
-
-  const refresh = useCallback(async () => {
-    const res = await fetch(SETTINGS);
-    if (!res.ok) {
-      return;
-    }
-    const payload = (await res.json()) as ConfigPayload;
-    setData((current) => applyPayload(payload, current));
-  }, []);
-
   const goTo = useCallback(
     (next: LinearStep | null) => {
+      setMoved(true);
       void setRequested(next);
     },
     [setRequested]
   );
+
+  const refresh = useCallback(async () => {
+    try {
+      const payload = await fetchConfig();
+      setData((current) => applyPayload(payload, current));
+    } catch {
+      // Polling asks again on the next tick.
+    }
+  }, []);
 
   const connect = useCallback(
     async (input: {
@@ -173,177 +148,84 @@ export function LinearSetup({ initial }: { initial: LinearSetupData }) {
       clientSecret: string;
       confirmWorkspaceChange?: boolean;
     }): Promise<ConnectFailure | null> => {
-      const res = await fetch(`${SETTINGS}/connect`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          client_id: input.clientId.trim(),
-          client_secret: input.clientSecret.trim(),
-          confirm_workspace_change: input.confirmWorkspaceChange === true,
-        }),
-      });
       try {
-        const payload = await readPayload(res);
+        const payload = await requestConnect({
+          ...input,
+          confirmWorkspaceChange: input.confirmWorkspaceChange === true,
+        });
         setData((current) => applyPayload(payload, current));
-        void setRequested("destination");
+        goTo("destination");
         router.refresh();
         return null;
       } catch (err) {
-        const failure = err as Error & {
-          code?: string;
-          workspaceName?: string;
-        };
+        const request = err instanceof SetupRequestError ? err : null;
         return {
-          code: failure.code ?? "ERROR",
-          message: failure.message,
-          workspaceName: failure.workspaceName,
+          code: request?.code ?? "ERROR",
+          message:
+            err instanceof Error
+              ? err.message
+              : "Couldn't save Linear settings",
+          workspaceName: request?.workspaceName,
         };
       }
     },
-    [router, setRequested]
+    [goTo, router]
   );
 
   const save = useCallback(
     async (body: Record<string, unknown>) => {
-      const res = await fetch(SETTINGS, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const payload = await readPayload(res);
+      const payload = await requestSave(body);
       setData((current) => applyPayload(payload, current));
       router.refresh();
     },
     [router]
   );
 
-  const value = useMemo(
+  const disconnect = useCallback(async () => {
+    const payload = await requestDisconnect();
+    setData((current) => applyPayload(payload, current));
+    goTo(null);
+    router.refresh();
+  }, [goTo, router]);
+
+  const actions = useMemo<LinearSetupActions>(
     () => ({
       connect,
-      data,
-      disconnect: async () => {
-        const res = await fetch(SETTINGS, { method: "DELETE" });
-        const payload = await readPayload(res);
-        setData((current) => applyPayload(payload, current));
-        void setRequested(null);
-        router.refresh();
-      },
+      disconnect,
       goTo,
-      loadOptions: async (teamId: string | null): Promise<LinearOptions> => {
-        const query = teamId ? `?team_id=${encodeURIComponent(teamId)}` : "";
-        const res = await fetch(`${SETTINGS}/options${query}`);
-        const payload = (await res.json().catch(() => null)) as {
-          error?: { message?: string };
-          labels?: SetupChoice[] | null;
-          projects?: SetupChoice[] | null;
-          teams?: SetupChoice[];
-        } | null;
-        if (!(res.ok && payload?.teams)) {
-          throw new Error(
-            payload?.error?.message ?? "Couldn't load teams from Linear"
-          );
-        }
-        return {
-          teams: payload.teams,
-          projects: payload.projects ?? [],
-          labels: payload.labels ?? [],
-        };
-      },
+      loadOptions: requestOptions,
       refresh,
-      saveDestination: (input: {
-        labels: LinearSetupData["labels"];
-        project: SetupChoice | null;
-        team: SetupChoice | null;
-      }) =>
+      saveDestination: (input) =>
         save({
           team: input.team,
           project: input.project,
           labels: input.labels,
         }),
       saveSigningSecret: (secret: string) => save({ webhook_secret: secret }),
-      sendTestReport: async () => {
-        const res = await fetch(`${SETTINGS}/test-report`, { method: "POST" });
-        const payload = (await res.json().catch(() => null)) as {
-          error?: { message?: string };
-          feedback?: {
-            id: string;
-            linear_issue: {
-              identifier: string;
-              labels: { name: string }[];
-              team_name: string;
-              url: string;
-            };
-          };
-        } | null;
-        const issue = payload?.feedback;
-        if (!(res.ok && issue)) {
-          throw new Error(
-            payload?.error?.message ?? "Couldn't send the test report"
-          );
-        }
-        return {
-          id: issue.id,
-          identifier: issue.linear_issue.identifier,
-          url: issue.linear_issue.url,
-          teamName: issue.linear_issue.team_name,
-          labelName: issue.linear_issue.labels[0]?.name ?? null,
-        };
-      },
-      step,
-      testReport: async (id: string): Promise<TestReportProgress> => {
-        const res = await fetch(
-          `${SETTINGS}/test-report/${encodeURIComponent(id)}`
-        );
-        const payload = (await res.json().catch(() => null)) as {
-          closed?: boolean;
-          error?: { message?: string };
-          identifier?: string;
-          label_name?: string | null;
-          last_webhook_rejection_reason?: "signature" | "stale" | null;
-          notification_at?: string | null;
-          notifications_enabled?: boolean;
-          state_name?: string;
-          team_name?: string;
-          update_received?: boolean;
-          url?: string;
-          webhook_rejections?: number;
-        } | null;
-        if (!(res.ok && payload?.identifier && payload.url)) {
-          throw new Error(payload?.error?.message ?? "Couldn't check the test");
-        }
-        return {
-          closed: payload.closed === true,
-          identifier: payload.identifier,
-          labelName: payload.label_name ?? null,
-          notificationAt: payload.notification_at ?? null,
-          notificationsEnabled: payload.notifications_enabled !== false,
-          rejectionReason: payload.last_webhook_rejection_reason ?? null,
-          rejections: payload.webhook_rejections ?? 0,
-          stateName: payload.state_name ?? "",
-          teamName: payload.team_name ?? "",
-          updateReceived: payload.update_received === true,
-          url: payload.url,
-        };
-      },
+      sendTestReport: requestTestReport,
+      testReport: requestTestReportProgress,
     }),
-    [connect, data, goTo, refresh, router, save, setRequested, step]
+    [connect, disconnect, goTo, refresh, save]
   );
 
+  const step = resolveStep(data, requested);
+  const state = useMemo(() => ({ data, moved, step }), [data, moved, step]);
+
   return (
-    <LinearSetupProvider value={value}>
+    <LinearSetupProvider actions={actions} state={state}>
       <section className="flex flex-col gap-3">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="font-semibold text-lg tracking-tight">Linear</h2>
-            <p className="text-muted-foreground text-sm">
+            <p className="text-pretty text-muted-foreground text-sm">
               Bugs and requests people send from Data Hub become issues in
               Linear.
             </p>
           </div>
           <ConnectionBadge data={data} />
         </div>
-        <Card>
-          <CardContent>
+        <Card className="gap-0 py-0">
+          <CardContent className="px-0">
             {step === "blocked" ? (
               <BlockedSetup />
             ) : step === "summary" ? (
@@ -358,72 +240,91 @@ export function LinearSetup({ initial }: { initial: LinearSetupData }) {
   );
 }
 
+const BADGE_TONE = {
+  attention:
+    "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-100",
+  muted: "",
+  ok: "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200",
+} as const;
+
 function ConnectionBadge({ data }: { data: LinearSetupData }) {
   if (data.keyStatus !== "ok" || !data.clientSecretSet) {
-    return <Badge tone="muted">Not connected</Badge>;
+    return <StatusBadge tone="muted">Not connected</StatusBadge>;
   }
   if (data.webhookRejections > 0) {
-    return <Badge tone="attention">Needs attention</Badge>;
+    return <StatusBadge tone="attention">Needs attention</StatusBadge>;
   }
   return (
-    <Badge tone="ok">
+    <StatusBadge tone="ok">
       {data.workspaceName ? `Connected · ${data.workspaceName}` : "Connected"}
-    </Badge>
+    </StatusBadge>
   );
 }
 
-function Badge({
+// The workspace name is the admin's own text, so the badge truncates it
+// instead of pushing the header apart.
+function StatusBadge({
   children,
   tone,
 }: {
   children: string;
-  tone: "attention" | "muted" | "ok";
+  tone: keyof typeof BADGE_TONE;
 }) {
-  const toneClass = {
-    attention:
-      "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-100",
-    muted: "bg-muted text-muted-foreground",
-    ok: "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200",
-  }[tone];
   return (
-    <span
-      className={`rounded-full px-2.5 py-1 font-medium text-xs ${toneClass}`}
-    >
-      {children}
-    </span>
+    <div className="flex min-w-0 max-w-[50%] shrink-0 justify-end">
+      <Badge
+        className={cn("max-w-full", BADGE_TONE[tone])}
+        variant={tone === "muted" ? "secondary" : "default"}
+      >
+        <span className="truncate">{children}</span>
+      </Badge>
+    </div>
   );
 }
 
 function BlockedSetup() {
-  const { data } = useLinearSetup();
   return (
-    <div className="flex flex-col gap-2">
-      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-950 text-sm dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100">
-        <p className="font-medium">Data Hub can't store Linear secrets yet</p>
-        <p className="mt-1">
-          This deployment has no usable{" "}
-          <span className="font-mono">INTEGRATION_SECRETS_KEY</span>, which Data
-          Hub needs to encrypt the client secret. Ask a developer to add it in
-          Vercel and redeploy. This command makes one:
-        </p>
-        <div className="mt-2 flex gap-2">
-          <code className="flex h-8 flex-1 items-center rounded-md border bg-background px-2 font-mono text-xs">
-            openssl rand -hex 32
-          </code>
-          <CopyButton size="icon-sm" value="openssl rand -hex 32" />
+    <div>
+      <div
+        className="grid grid-cols-[1.25rem_minmax(0,1fr)] gap-3 border-amber-200 border-b bg-amber-50 px-6 py-4 text-amber-950 text-sm dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100"
+        role="alert"
+      >
+        <TriangleAlertIcon
+          aria-hidden="true"
+          className="mt-0.5 size-5 text-amber-600 dark:text-amber-400"
+        />
+        <div className="flex min-w-0 flex-col gap-1">
+          <p className="font-semibold">
+            Data Hub can't store Linear secrets yet
+          </p>
+          <p className="text-pretty">
+            This deployment has no usable{" "}
+            <code
+              className="rounded bg-amber-100 px-1 font-mono text-[13px] dark:bg-amber-900"
+              translate="no"
+            >
+              INTEGRATION_SECRETS_KEY
+            </code>
+            , which Data Hub needs to encrypt the client secret. Ask a developer
+            to add it in Vercel and redeploy. This command makes one:
+          </p>
+          <CopyValue
+            label="Command that makes the key"
+            value="openssl rand -hex 32"
+          />
         </div>
       </div>
       <SetupSteps>
         {STEP_ORDER.map((id) => (
           <UpcomingStep
             description={
-              id === "connect" && data.keyStatus !== "ok"
-                ? STEP_COPY.connect.upcoming
-                : STEP_COPY[id].description
+              id === "connect"
+                ? "Opens once the key is set."
+                : STEPS[id].description
             }
             key={id}
-            number={STEP_COPY[id].number}
-            title={STEP_COPY[id].title}
+            number={STEPS[id].number}
+            title={STEPS[id].title}
           />
         ))}
       </SetupSteps>
@@ -432,84 +333,44 @@ function BlockedSetup() {
 }
 
 function Wizard({ current }: { current: LinearStep }) {
-  const { data, goTo } = useLinearSetup();
+  const { actions, state } = useLinearSetup();
   const currentIndex = STEP_ORDER.indexOf(current);
   return (
     <SetupSteps>
-      {STEP_ORDER.map((id) => {
-        const copy = STEP_COPY[id];
-        const index = STEP_ORDER.indexOf(id);
-        if (index < currentIndex && isDone(id, data)) {
+      {STEP_ORDER.map((id, index) => {
+        const step = STEPS[id];
+        if (index < currentIndex && step.isDone(state.data)) {
           return (
             <CompletedStep
-              detail={completedDetail(id, data)}
+              detail={step.doneDetail(state.data)}
               key={id}
-              onChange={() => goTo(id)}
-              title={copy.title}
+              onChange={() => actions.goTo(id)}
+              title={step.title}
             />
           );
         }
         if (id === current) {
           return (
             <CurrentStep
-              description={copy.description}
+              description={step.description}
+              focusHeading={state.moved}
               key={id}
-              number={copy.number}
-              title={copy.title}
+              number={step.number}
+              title={step.title}
             >
-              <StepBody id={id} />
+              <step.Body />
             </CurrentStep>
           );
         }
         return (
           <UpcomingStep
-            description={copy.description}
+            description={step.description}
             key={id}
-            number={copy.number}
-            title={copy.title}
+            number={step.number}
+            title={step.title}
           />
         );
       })}
     </SetupSteps>
   );
-}
-
-function StepBody({ id }: { id: LinearStep }) {
-  if (id === "connect") {
-    return <ConnectStep />;
-  }
-  if (id === "destination") {
-    return <DestinationStep />;
-  }
-  if (id === "updates") {
-    return <StatusUpdatesStep />;
-  }
-  return <TestReportStep />;
-}
-
-function isDone(id: LinearStep, data: LinearSetupData): boolean {
-  if (id === "connect") {
-    return data.clientSecretSet;
-  }
-  if (id === "destination") {
-    return data.team !== null;
-  }
-  if (id === "updates") {
-    return data.webhookSecretSet;
-  }
-  return false;
-}
-
-function completedDetail(id: LinearStep, data: LinearSetupData): string {
-  if (id === "connect") {
-    return `Connected to ${data.workspaceName ?? "Linear"}.`;
-  }
-  if (id === "destination") {
-    const project = data.project ? `, ${data.project.name} project` : "";
-    return `${data.team?.name ?? "Team"} team${project}. Feedback is on.`;
-  }
-  if (data.lastWebhookAt) {
-    return "Working. Linear's first update has arrived.";
-  }
-  return "Waiting for Linear's first update.";
 }

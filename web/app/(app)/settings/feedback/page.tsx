@@ -1,5 +1,6 @@
 import { ExternalLinkIcon } from "lucide-react";
 import Link from "next/link";
+import { after } from "next/server";
 import type { Metadata } from "next/types";
 import { Suspense } from "react";
 import { SignInRequired } from "@/components/auth/sign-in-required";
@@ -21,6 +22,7 @@ import {
 import { FEEDBACK_PAGE_SIZE } from "@/lib/api/feedback-schema";
 import { auth } from "@/lib/auth";
 import {
+  backfillLinearSetup,
   getLinearConfigForAdmin,
   linearFeedbackViewUrl,
 } from "@/lib/linear/config";
@@ -54,9 +56,13 @@ export default async function FeedbackSettingsPage({
   }
 
   const filters = feedbackParamsCache.parse(await searchParams);
+  // Setups saved before this version have no team key or project link, which
+  // the "View in Linear" button needs. This fills them in after the response.
+  after(backfillLinearSetup);
 
+  // Full width because the table needs more room than the default column.
   return (
-    <SettingsPageContent>
+    <SettingsPageContent className="w-full">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-pretty font-semibold text-lg tracking-tight">
@@ -146,7 +152,8 @@ async function FeedbackSection({
             labels: item.linearIssue.labels,
             priority: item.linearIssue.priority,
             priorityLabel: item.linearIssue.priorityLabel,
-            reporterLabel: reporterLabel(item),
+            reporterName: reporterName(item),
+            viaLabel: viaLabel(item),
             assignee: item.linearIssue.assignee
               ? {
                   userId: item.linearIssue.assignee.userId,
@@ -184,20 +191,19 @@ async function FeedbackSection({
                 priority: selected.linearIssue.priority,
                 priorityLabel: selected.linearIssue.priorityLabel,
                 projectName: selected.linearIssue.projectName,
-                reporterLabel: reporterName(selected),
+                reporterFirstName: reporterFirstName(selected),
+                reporterName: reporterName(selected),
                 stateColor: selected.linearIssue.stateColor,
                 stateName: selected.linearIssue.stateName,
                 teamName: selected.linearIssue.teamName,
-                viaLabel:
-                  selected.source === "web"
-                    ? null
-                    : (selected.oauthClientName ?? "an agent"),
+                viaLabel: viaLabel(selected),
                 linearUrl: selected.linearIssue.url,
               }
             : null
         }
         navIds={list.items.map((item) => item.id)}
         statusLabel={status}
+        total={list.total}
       />
     </>
   );
@@ -207,12 +213,14 @@ function reporterName(item: Pick<FeedbackItem, "reporter">): string {
   return item.reporter?.name ?? item.reporter?.email ?? "Deleted user";
 }
 
-function reporterLabel(item: FeedbackItem): string {
-  const name = reporterName(item);
-  if (item.source === "web") {
-    return name;
-  }
-  return `${name} via ${item.oauthClientName ?? "an agent"}`;
+// The first word of the reporter's name, or null when their account is gone.
+function reporterFirstName(item: FeedbackItem): string | null {
+  const name = item.reporter?.name ?? item.reporter?.email;
+  return name?.trim().split(/\s+/)[0] || null;
+}
+
+function viaLabel(item: FeedbackItem): string | null {
+  return item.source === "web" ? null : (item.oauthClientName ?? "an agent");
 }
 
 async function LinearReportsLink() {

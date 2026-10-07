@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   FEEDBACK_NOT_CONFIGURED_MESSAGE,
@@ -11,7 +12,7 @@ import {
   notifyFeedbackUpdated,
   updatePreferences,
 } from "@/lib/api/notifications";
-import { slackConnections } from "@/lib/db/schema";
+import { linearIntegrationConfig, slackConnections } from "@/lib/db/schema";
 import { feedbackAttachmentUrl } from "@/lib/linear/feedback-link";
 import {
   api,
@@ -73,6 +74,8 @@ interface SeededReport {
   archived?: boolean;
   attachmentsBefore?: { metadata: Record<string, unknown>; url: string }[];
   createdAt?: string;
+  // Extra fields for the fake Linear issue, such as `priority` or `history`.
+  issue?: Record<string, unknown>;
   kind?: FeedbackKind;
   reporterId: string;
   stateName?: string;
@@ -91,6 +94,7 @@ async function seedReport(input: SeededReport): Promise<string> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      ...input.issue,
       id,
       title: input.title,
       createdAt: input.createdAt,
@@ -125,6 +129,44 @@ async function seedReport(input: SeededReport): Promise<string> {
   });
   expect(res.status).toBe(201);
   return id;
+}
+
+// Calls an MCP tool and returns the parsed JSON-RPC reply.
+async function callTool(
+  token: string,
+  name: string,
+  args: Record<string, unknown>
+) {
+  const res = await api("/mcp/v1", {
+    method: "POST",
+    token,
+    headers: { Accept: "application/json, text/event-stream" },
+    body: {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name, arguments: args },
+    },
+  });
+  const text = await res.text();
+  const dataLine = text.split("\n").find((line) => line.startsWith("data: "));
+  return JSON.parse(dataLine?.slice("data: ".length) ?? "{}") as {
+    result?: {
+      content?: { text: string }[];
+      isError?: boolean;
+      structuredContent?: Record<string, any>;
+    };
+  };
+}
+
+async function issueIdentifier(issueId: string): Promise<string> {
+  const res = await fetch(`${linearBase()}/__test/issues`);
+  const issues = (await res.json()) as { id: string; identifier: string }[];
+  const match = issues.find((issue) => issue.id === issueId);
+  if (!match) {
+    throw new Error("Seeded issue not found in the Linear fake");
+  }
+  return match.identifier;
 }
 
 function listAs(cookie: string, query = "") {
@@ -843,5 +885,315 @@ describe("Feedback", () => {
     const payload = JSON.parse(dataLine?.slice("data: ".length) ?? "{}");
     expect(payload.result?.isError).not.toBe(true);
     expect(JSON.stringify(payload)).toContain(feedback.linear_issue.identifier);
+  });
+  it("lists reports in the same Linear status order on the page's API and over MCP", async () => {
+    const admin = await seedTestUser({
+      isAdmin: true,
+      email: "order-admin@example.com",
+    });
+    const member = await seedTestUser({ email: "order-member@example.com" });
+    const cookie = await seedSessionCookie(admin.userId);
+    await enableLinear(cookie);
+
+    await seedReport({
+      title: "Done report",
+      reporterId: member.userId,
+      stateName: "Done",
+      stateType: "completed",
+      createdAt: daysAgo(5),
+    });
+    await seedReport({
+      title: "In progress report",
+      reporterId: member.userId,
+      stateName: "In Progress",
+      stateType: "started",
+      createdAt: daysAgo(4),
+    });
+    await seedReport({
+      title: "Older todo report",
+      reporterId: member.userId,
+      stateName: "Todo",
+      stateType: "unstarted",
+      createdAt: daysAgo(3),
+    });
+    await seedReport({
+      title: "Newer todo report",
+      reporterId: member.userId,
+      stateName: "Todo",
+      stateType: "unstarted",
+      createdAt: daysAgo(1),
+    });
+    await seedReport({
+      title: "Backlog report",
+      reporterId: member.userId,
+      stateName: "Backlog",
+      stateType: "backlog",
+      createdAt: daysAgo(2),
+    });
+
+    const expected = [
+      "Backlog report",
+      "Newer todo report",
+      "Older todo report",
+      "In progress report",
+      "Done report",
+    ];
+    const rest = await (await listAs(cookie)).json();
+    expect(rest.feedback.map((item: { title: string }) => item.title)).toEqual(
+      expected
+    );
+    expect(
+      rest.groups.map((group: { name: string; count: number }) => [
+        group.name,
+        group.count,
+      ])
+    ).toEqual([
+      ["Backlog", 1],
+      ["Todo", 2],
+      ["In Progress", 1],
+      ["Done", 1],
+    ]);
+
+    const token = await getMcpAccessToken(admin.userId, "read");
+    const mcp = await callTool(token, "list_feedback", {});
+    expect(mcp.result?.isError).not.toBe(true);
+    expect(
+      mcp.result?.structuredContent?.feedback.map(
+        (item: { title: string }) => item.title
+      )
+    ).toEqual(expected);
+
+    // The Closed tab holds only the completed report; counts match the page.
+    const closed = await (await listAs(cookie, "?status=closed")).json();
+    expect(
+      closed.feedback.map((item: { title: string }) => item.title)
+    ).toEqual(["Done report"]);
+    expect(rest.counts).toEqual({
+      open: 4,
+      closed: 1,
+      resolved: 1,
+      declined: 0,
+    });
+  });
+
+  it("shows assignee, priority, and activity to admins only, on the API and over MCP", async () => {
+    const admin = await seedTestUser({
+      isAdmin: true,
+      email: "redact-admin@example.com",
+    });
+    const member = await seedTestUser({ email: "redact-member@example.com" });
+    const stranger = await seedTestUser({
+      email: "redact-stranger@example.com",
+    });
+    const adminCookie = await seedSessionCookie(admin.userId);
+    const memberCookie = await seedSessionCookie(member.userId);
+    await enableLinear(adminCookie);
+
+    const reportId = await seedReport({
+      title: "Member report with details",
+      reporterId: member.userId,
+      stateName: "Todo",
+      stateType: "unstarted",
+      issue: {
+        priority: 2,
+        priorityLabel: "High",
+        assignee: {
+          id: "linear-user-1",
+          name: "Ada Lovelace",
+          email: "ada@example.com",
+          avatarUrl: null,
+        },
+        history: [
+          {
+            at: "2026-10-01T10:00:00.000Z",
+            fromState: "Backlog",
+            toState: "Todo",
+            toStateColor: "#e2e2e2",
+            actorName: "Ada Lovelace",
+          },
+        ],
+        comments: [
+          {
+            at: "2026-10-01T10:30:00.000Z",
+            body: "Internal note for admins.",
+            userName: "Ada Lovelace",
+            userEmail: "ada@example.com",
+          },
+        ],
+      },
+    });
+    const identifier = await issueIdentifier(reportId);
+
+    const adminItem = (await (await listAs(adminCookie)).json()).feedback[0];
+    expect(adminItem.linear_issue.priority).toBe(2);
+    expect(adminItem.linear_issue.assignee.name).toBe("Ada Lovelace");
+
+    const memberBody = await (await listAs(memberCookie)).json();
+    expect(memberBody.feedback[0].linear_issue.priority).toBeNull();
+    expect(memberBody.feedback[0].linear_issue.priority_label).toBeNull();
+    expect(memberBody.feedback[0].linear_issue.assignee).toBeNull();
+    expect(memberBody.feedback[0].activity).toBeNull();
+    // What reporters do see is unchanged.
+    expect(memberBody.feedback[0].linear_issue.state_name).toBe("Todo");
+
+    const adminToken = await getMcpAccessToken(admin.userId, "read");
+    const memberToken = await getMcpAccessToken(member.userId, "read");
+    const strangerToken = await getMcpAccessToken(stranger.userId, "read");
+
+    // An admin reads the activity, with the color of the state each move
+    // went to, by Linear ID or by report ID.
+    for (const id of [identifier, reportId]) {
+      const read = await callTool(adminToken, "get_feedback", { id });
+      const feedback = read.result?.structuredContent?.feedback;
+      expect(feedback.linearIssue.priority).toBe(2);
+      expect(feedback.linearIssue.assignee.name).toBe("Ada Lovelace");
+      expect(feedback.activity).toEqual([
+        expect.objectContaining({
+          kind: "status",
+          fromState: "Backlog",
+          toState: "Todo",
+          toStateColor: "#e2e2e2",
+          actorName: "Ada Lovelace",
+        }),
+        expect.objectContaining({
+          kind: "comment",
+          body: "Internal note for admins.",
+        }),
+      ]);
+    }
+
+    // The reporter reads their own report without those fields.
+    const own = await callTool(memberToken, "get_feedback", { id: identifier });
+    expect(own.result?.isError).not.toBe(true);
+    const ownFeedback = own.result?.structuredContent?.feedback;
+    expect(ownFeedback.title).toBe("Member report with details");
+    expect(ownFeedback.linearIssue.priority).toBeNull();
+    expect(ownFeedback.linearIssue.priorityLabel).toBeNull();
+    expect(ownFeedback.linearIssue.assignee).toBeNull();
+    expect(ownFeedback.activity).toBeNull();
+
+    const ownList = await callTool(memberToken, "list_feedback", {});
+    const listed = ownList.result?.structuredContent?.feedback[0];
+    expect(listed.linearIssue.assignee).toBeNull();
+    expect(listed.linearIssue.priority).toBeNull();
+    expect(listed.activity).toBeNull();
+
+    // Someone else's report can't be read, even with its Linear ID.
+    const denied = await callTool(strangerToken, "get_feedback", {
+      id: identifier,
+    });
+    expect(denied.result?.isError).toBe(true);
+  });
+
+  it("reports each stage of a test report", async () => {
+    const sender = await seedTestUser({
+      isAdmin: true,
+      email: "stages-sender@example.com",
+    });
+    const otherAdmin = await seedTestUser({
+      isAdmin: true,
+      email: "stages-other@example.com",
+    });
+    const member = await seedTestUser({ email: "stages-member@example.com" });
+    const cookie = await seedSessionCookie(sender.userId);
+    await enableLinear(cookie);
+
+    const created = await api(
+      "/api/v1/settings/integrations/linear/test-report",
+      { method: "POST", headers: { Cookie: cookie } }
+    );
+    expect(created.status).toBe(201);
+    const { feedback } = await created.json();
+    const status = async (asCookie = cookie, id: string = feedback.id) =>
+      await api(`/api/v1/settings/integrations/linear/test-report/${id}`, {
+        headers: { Cookie: asCookie },
+      });
+
+    // Sent, and nothing has happened in Linear yet.
+    expect(await (await status()).json()).toMatchObject({
+      closed: false,
+      update_received: false,
+      notification_at: null,
+      notifications_enabled: true,
+      webhook_rejections: 0,
+      last_webhook_rejection_reason: null,
+    });
+
+    // Linear's updates are being rejected, which the setup page points to.
+    await getTestDb()
+      .update(linearIntegrationConfig)
+      .set({ webhookRejections: 2, lastWebhookRejectionReason: "signature" })
+      .where(eq(linearIntegrationConfig.id, true));
+    expect(await (await status()).json()).toMatchObject({
+      webhook_rejections: 2,
+      last_webhook_rejection_reason: "signature",
+    });
+
+    // Closed in Linear, but no update has reached Data Hub.
+    await fetch(`${linearBase()}/__test/issues`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: feedback.id,
+        state: { name: "Done", type: "completed" },
+        completedAt: new Date().toISOString(),
+      }),
+    });
+    expect(await (await status()).json()).toMatchObject({
+      closed: true,
+      state_name: "Done",
+      update_received: false,
+    });
+
+    // Linear's update arrived and in-app notifications are off, so no
+    // notification is ever written.
+    await updatePreferences(sender.userId, { feedbackUpdatedEnabled: false });
+    await getTestDb()
+      .update(linearIntegrationConfig)
+      .set({
+        lastWebhookAt: new Date(Date.now() + 5000),
+        webhookRejections: 0,
+        lastWebhookRejectionReason: null,
+      })
+      .where(eq(linearIntegrationConfig.id, true));
+    expect(await (await status()).json()).toMatchObject({
+      closed: true,
+      update_received: true,
+      notification_at: null,
+      notifications_enabled: false,
+      webhook_rejections: 0,
+    });
+
+    // Notifications on, and the notification is written.
+    await updatePreferences(sender.userId, { feedbackUpdatedEnabled: true });
+    await notifyFeedbackUpdated({
+      feedbackId: feedback.id,
+      reporterUserId: sender.userId,
+      title: "Test report from Data Hub",
+      status: "resolved",
+      stateName: "Done",
+    });
+    const finished = await (await status()).json();
+    expect(finished).toMatchObject({
+      closed: true,
+      update_received: true,
+      notifications_enabled: true,
+    });
+    expect(finished.notification_at).not.toBeNull();
+
+    // Only the admin who sent it can follow it.
+    expect(
+      (await status(await seedSessionCookie(otherAdmin.userId))).status
+    ).toBe(404);
+    expect((await status(await seedSessionCookie(member.userId))).status).toBe(
+      403
+    );
+
+    // An ordinary report is not a test report, even from the same admin.
+    const ordinary = await seedReport({
+      title: "Not a test",
+      reporterId: sender.userId,
+    });
+    expect((await status(cookie, ordinary)).status).toBe(404);
   });
 });

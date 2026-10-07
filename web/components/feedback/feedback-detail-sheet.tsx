@@ -7,16 +7,16 @@ import {
   ChevronRightIcon,
   CopyIcon,
   ExternalLinkIcon,
+  XIcon,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { parseAsString, useQueryState } from "nuqs";
 import { useState } from "react";
-import { RelativeTime } from "@/components/dashboard/relative-time";
 import {
   FeedbackLabelChip,
   FeedbackPriority,
 } from "@/components/feedback/feedback-badges";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Collapsible,
   CollapsibleContent,
@@ -24,12 +24,18 @@ import {
 } from "@/components/ui/collapsible";
 import {
   Sheet,
+  SheetClose,
   SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
 import { UserAvatar } from "@/components/user-avatar";
+import type {
+  FeedbackActivityEvent,
+  FeedbackAssignee,
+  FeedbackLabel,
+} from "@/lib/api/feedback";
 import {
   FEEDBACK_KIND_LABELS,
   FEEDBACK_STATUS_LABELS,
@@ -37,6 +43,7 @@ import {
   type FeedbackStatus,
 } from "@/lib/api/feedback-schema";
 import { toUserAvatarUser } from "@/lib/avatar-color";
+import { formatDateTime, formatDateTimeShort } from "@/lib/date";
 
 const CommentMarkdown = dynamic(
   () =>
@@ -50,25 +57,9 @@ const CommentMarkdown = dynamic(
   }
 );
 
-import { formatDateTime } from "@/lib/date";
-
-export interface FeedbackDetailActivity {
-  actorName: string | null;
-  at: string;
-  body: string | null;
-  fromState: string | null;
-  kind: "comment" | "status";
-  toState: string | null;
-}
-
 export interface FeedbackDetail {
-  activity: FeedbackDetailActivity[];
-  assignee: {
-    avatarUrl: string | null;
-    email: string | null;
-    name: string;
-    userId: string;
-  } | null;
+  activity: FeedbackActivityEvent[];
+  assignee: FeedbackAssignee | null;
   attemptedAction: string | null;
   createdAt: string;
   description: string;
@@ -76,13 +67,16 @@ export interface FeedbackDetail {
   id: string;
   identifier: string;
   kind: FeedbackKind;
-  labels: { color: string; name: string }[];
+  labels: FeedbackLabel[];
   linearUrl: string | null;
   pageUrl: string | null;
   priority: number | null;
   priorityLabel: string | null;
   projectName: string | null;
-  reporterLabel: string;
+  // First word of the reporter's name, for "Matt sees Open". Null when the
+  // reporter's account is gone.
+  reporterFirstName: string | null;
+  reporterName: string;
   stateColor: string;
   stateName: string;
   status: FeedbackStatus;
@@ -96,10 +90,13 @@ export function FeedbackDetailSheet({
   item,
   navIds,
   statusLabel,
+  total,
 }: {
   item: FeedbackDetail | null;
   navIds: string[];
   statusLabel: string;
+  // Reports in the whole tab, across every page of the table.
+  total: number;
 }) {
   const [itemId, setItem] = useQueryState(
     "item",
@@ -164,16 +161,29 @@ export function FeedbackDetailSheet({
                 </Button>
                 {index >= 0 ? (
                   <span className="ml-2 text-[13px] text-muted-foreground tabular-nums">
-                    {index + 1} of {navIds.length} {statusLabel}
+                    {index + 1} of {navIds.length}{" "}
+                    {total > navIds.length ? "on this page" : statusLabel}
                   </span>
                 ) : null}
               </div>
-              <CopyReportButton item={shown} key={shown.id} />
+              <div className="flex items-center gap-1">
+                <CopyReportButton item={shown} key={shown.id} />
+                <SheetClose asChild>
+                  <Button
+                    aria-label="Close"
+                    size="icon-sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <XIcon aria-hidden="true" />
+                  </Button>
+                </SheetClose>
+              </div>
             </div>
             <p className="font-mono text-muted-foreground text-xs">
               {shown.identifier}
             </p>
-            <SheetTitle className="text-pretty font-semibold text-[22px] leading-snug tracking-tight">
+            <SheetTitle className="text-pretty break-words font-semibold text-[22px] leading-snug tracking-tight">
               {shown.title}
             </SheetTitle>
             <SheetDescription className="text-sm text-zinc-600 dark:text-zinc-400">
@@ -182,13 +192,13 @@ export function FeedbackDetailSheet({
             {shown.linearUrl ? (
               <div>
                 <a
-                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 font-medium text-sm"
+                  className={buttonVariants({ size: "sm", variant: "outline" })}
                   href={shown.linearUrl}
                   rel="noopener noreferrer"
                   target="_blank"
                 >
                   Open in Linear
-                  <ExternalLinkIcon className="size-3.5" />
+                  <ExternalLinkIcon aria-hidden="true" data-icon="inline-end" />
                 </a>
               </div>
             ) : null}
@@ -237,7 +247,7 @@ function feedbackMarkdown(item: FeedbackDetail): string {
   const sections = [
     `# ${item.identifier} ${item.title}`,
     "",
-    `**Reporter:** ${item.reporterLabel}`,
+    `**Reporter:** ${item.reporterName}`,
     `**Received:** ${formatDateTime(new Date(item.createdAt))}`,
     `**Status:** ${item.stateName} (${FEEDBACK_STATUS_LABELS[item.status]})`,
     `**Type:** ${FEEDBACK_KIND_LABELS[item.kind]}`,
@@ -423,13 +433,11 @@ function TechnicalDetails({
 
 function sentSentence(item: FeedbackDetail): string {
   const from = item.viaLabel ?? "the web app";
-  return `${item.reporterLabel} sent this from ${from} on ${formatDateTime(new Date(item.createdAt))}.`;
+  return `${item.reporterName} sent this from ${from} on ${formatDateTime(new Date(item.createdAt))}.`;
 }
 
 function reporterSees(item: FeedbackDetail): string {
-  const first = item.reporterLabel.trim().split(/\s+/)[0];
-  const who =
-    !first || item.reporterLabel === "Deleted user" ? "The reporter" : first;
+  const who = item.reporterFirstName ?? "The reporter";
   return `${who} sees ${FEEDBACK_STATUS_LABELS[item.status]}`;
 }
 
@@ -443,58 +451,63 @@ function LinearProperties({ item }: { item: FeedbackDetail }) {
       })
     : null;
   return (
-    <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-2.5 text-sm">
-      <dt className="text-muted-foreground">Status</dt>
-      <dd className="flex min-w-0 flex-wrap items-center gap-2">
-        <span className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-medium text-xs">
-          <span
-            aria-hidden="true"
-            className="size-2 rounded-full"
-            style={{ backgroundColor: item.stateColor }}
-          />
-          {item.stateName}
-        </span>
-        <span className="text-muted-foreground text-xs">
-          {reporterSees(item)}
-        </span>
-      </dd>
-      <dt className="text-muted-foreground">Priority</dt>
-      <dd>
-        <FeedbackPriority label={item.priorityLabel} priority={item.priority} />
-      </dd>
-      <dt className="text-muted-foreground">Assignee</dt>
-      <dd>
-        {assignee ? (
-          <span className="inline-flex items-center gap-2">
-            <UserAvatar size="sm" user={assignee} />
-            {assignee.displayName}
-          </span>
-        ) : (
-          <span className="text-muted-foreground">Unassigned</span>
-        )}
-      </dd>
-      <dt className="text-muted-foreground">Labels</dt>
-      <dd className="flex flex-wrap gap-1.5">
-        {item.labels.length > 0 ? (
-          item.labels.map((label) => (
-            <FeedbackLabelChip
-              color={label.color}
-              key={label.name}
-              name={label.name}
+    <>
+      <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-2.5 text-sm">
+        <dt className="text-muted-foreground">Status</dt>
+        <dd className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-medium text-xs">
+            <span
+              aria-hidden="true"
+              className="size-2 rounded-full"
+              style={{ backgroundColor: item.stateColor }}
             />
-          ))
-        ) : (
-          <span className="text-muted-foreground">None</span>
-        )}
-      </dd>
-      <dt className="text-muted-foreground">Project</dt>
-      <dd>{item.projectName ?? "None"}</dd>
-      <dt className="text-muted-foreground">Team</dt>
-      <dd>{item.teamName}</dd>
-      <dd className="col-span-2 text-muted-foreground text-xs">
+            {item.stateName}
+          </span>
+          <span className="text-muted-foreground text-xs">
+            {reporterSees(item)}
+          </span>
+        </dd>
+        <dt className="text-muted-foreground">Priority</dt>
+        <dd>
+          <FeedbackPriority
+            label={item.priorityLabel}
+            priority={item.priority}
+          />
+        </dd>
+        <dt className="text-muted-foreground">Assignee</dt>
+        <dd>
+          {assignee ? (
+            <span className="inline-flex items-center gap-2">
+              <UserAvatar size="sm" user={assignee} />
+              {assignee.displayName}
+            </span>
+          ) : (
+            <span className="text-muted-foreground">Unassigned</span>
+          )}
+        </dd>
+        <dt className="text-muted-foreground">Labels</dt>
+        <dd className="flex flex-wrap gap-1.5">
+          {item.labels.length > 0 ? (
+            item.labels.map((label) => (
+              <FeedbackLabelChip
+                color={label.color}
+                key={label.name}
+                name={label.name}
+              />
+            ))
+          ) : (
+            <span className="text-muted-foreground">None</span>
+          )}
+        </dd>
+        <dt className="text-muted-foreground">Project</dt>
+        <dd>{item.projectName ?? "None"}</dd>
+        <dt className="text-muted-foreground">Team</dt>
+        <dd>{item.teamName}</dd>
+      </dl>
+      <p className="mt-3.5 text-muted-foreground text-xs">
         These come from Linear. To change them, open the issue there.
-      </dd>
-    </dl>
+      </p>
+    </>
   );
 }
 
@@ -532,10 +545,12 @@ function Activity({ item }: { item: FeedbackDetail }) {
                   <CommentMarkdown body={event.body} />
                 </div>
               ) : null}
-              <RelativeTime
+              <time
                 className="text-[13px] text-muted-foreground tabular-nums"
-                date={event.at}
-              />
+                dateTime={event.at}
+              >
+                {formatDateTimeShort(new Date(event.at))}
+              </time>
             </div>
           </li>
         ))}
@@ -561,7 +576,7 @@ function activityEvents(item: FeedbackDetail): {
       at: item.createdAt,
       body: null,
       color: null,
-      text: `${item.reporterLabel} sent this report from ${from}. Linear filed it as ${item.identifier}.`,
+      text: `${item.reporterName} sent this report from ${from}. Linear filed it as ${item.identifier}.`,
     },
   ];
   for (const event of item.activity) {
@@ -584,7 +599,7 @@ function activityEvents(item: FeedbackDetail): {
     events.push({
       at: event.at,
       body: null,
-      color: item.stateColor,
+      color: event.toStateColor,
       text: `${actor} ${moved}.`,
     });
   }

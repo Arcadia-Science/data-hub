@@ -27,6 +27,7 @@ import {
   LINEAR_RATE_LIMITED,
   LINEAR_SUMMARY_PAGE_SIZE,
   type LinearIssueDetailNode,
+  type LinearIssueLabel,
   LinearRequestError,
   listLinearIssueDetails,
   listLinearIssueSummaries,
@@ -51,6 +52,7 @@ import {
   pageFeedbackSummaries,
   readFeedbackReport,
 } from "@/lib/linear/feedback-link";
+import type { LinearWebhookRejectionReason } from "@/lib/linear/webhook";
 
 export const FEEDBACK_NOT_CONFIGURED_MESSAGE =
   "Feedback isn't set up on this Data Hub.";
@@ -119,10 +121,7 @@ export interface FeedbackAssignee {
   userId: string;
 }
 
-export interface FeedbackLabel {
-  color: string;
-  name: string;
-}
+export type FeedbackLabel = LinearIssueLabel;
 
 export interface FeedbackLinearIssue {
   assignee: FeedbackAssignee | null;
@@ -146,6 +145,8 @@ export interface FeedbackActivityEvent {
   fromState: string | null;
   kind: "comment" | "status";
   toState: string | null;
+  // The color of the state a status change moved to. Null on a comment.
+  toStateColor: string | null;
 }
 
 export interface FeedbackItem {
@@ -629,8 +630,6 @@ export function createFeedback(input: {
   });
 }
 
-// One Linear read serves the page, the total, and the counts, so a list
-// request costs one summary query and one details query.
 export const TEST_FEEDBACK_TITLE = "Test report from Data Hub";
 export const TEST_FEEDBACK_DESCRIPTION =
   "Sent from Linear setup to check that a report, a status update, and a notification all arrive.";
@@ -648,6 +647,8 @@ export function createTestFeedback(
   });
 }
 
+// One Linear read serves the page, the total, and the counts, so a list
+// request costs one summary query and one details query.
 export function listFeedback(input: {
   isAdmin: boolean;
   kind?: FeedbackKind;
@@ -701,6 +702,7 @@ async function loadActivity(
       actorName: change.actorName,
       fromState: change.fromState,
       toState: change.toState,
+      toStateColor: change.toStateColor,
       body: null,
     })),
     ...activity.comments.map((comment) => ({
@@ -709,6 +711,7 @@ async function loadActivity(
       actorName: comment.userName,
       fromState: null,
       toState: null,
+      toStateColor: null,
       body: comment.body,
     })),
   ];
@@ -744,7 +747,7 @@ export interface TestReportStatus {
   labelName: string | null;
   notificationAt: string | null;
   notificationsEnabled: boolean;
-  rejectionReason: "signature" | "stale" | null;
+  rejectionReason: LinearWebhookRejectionReason | null;
   rejections: number;
   stateName: string;
   stateType: string;
@@ -773,32 +776,32 @@ export function getTestReportStatus(input: {
       return { status: null };
     }
 
-    const config = await getLinearConfigForAdmin();
+    const [config, [note], [prefs]] = await Promise.all([
+      getLinearConfigForAdmin(),
+      db
+        .select({ createdAt: notifications.createdAt })
+        .from(notifications)
+        .where(
+          and(
+            eq(notifications.userId, input.userId),
+            eq(notifications.feedbackId, issue.id),
+            eq(notifications.type, "feedback_updated")
+          )
+        )
+        .orderBy(desc(notifications.createdAt))
+        .limit(1),
+      db
+        .select({ enabled: notificationPreferences.feedbackUpdatedEnabled })
+        .from(notificationPreferences)
+        .where(eq(notificationPreferences.userId, input.userId))
+        .limit(1),
+    ]);
     const closedAt = issue.completedAt ?? issue.canceledAt;
     const updateReceived = Boolean(
       closedAt &&
         config.lastWebhookAt &&
         config.lastWebhookAt.getTime() >= new Date(closedAt).getTime()
     );
-    const [note] = await db
-      .select({ createdAt: notifications.createdAt })
-      .from(notifications)
-      .where(
-        and(
-          eq(notifications.userId, input.userId),
-          eq(notifications.feedbackId, issue.id),
-          eq(notifications.type, "feedback_updated")
-        )
-      )
-      .orderBy(desc(notifications.createdAt))
-      .limit(1);
-    const [prefs] = await db
-      .select({
-        enabled: notificationPreferences.feedbackUpdatedEnabled,
-      })
-      .from(notificationPreferences)
-      .where(eq(notificationPreferences.userId, input.userId))
-      .limit(1);
 
     return {
       status: {

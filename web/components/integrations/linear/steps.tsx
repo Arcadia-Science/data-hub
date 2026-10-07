@@ -3,10 +3,62 @@
 import { CheckIcon, ExternalLinkIcon } from "lucide-react";
 import { type ReactNode, useEffect, useRef } from "react";
 import { CopyButton } from "@/components/copy-button";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
+
+const STEP_GRID = "grid grid-cols-[1.5rem_minmax(0,1fr)_auto] gap-x-4";
 
 export function SetupSteps({ children }: { children: ReactNode }) {
-  return <div className="divide-y">{children}</div>;
+  return (
+    <ol aria-label="Linear setup" className="divide-y">
+      {children}
+    </ol>
+  );
+}
+
+export function ExternalLinkButton({
+  children,
+  href,
+}: {
+  children: ReactNode;
+  href: string;
+}) {
+  return (
+    <a
+      className={buttonVariants({ size: "sm", variant: "outline" })}
+      href={href}
+      rel="noopener noreferrer"
+      target="_blank"
+    >
+      {children}
+      <ExternalLinkIcon aria-hidden="true" data-icon="inline-end" />
+    </a>
+  );
+}
+
+function StepMarker({
+  number,
+  state,
+}: {
+  number?: number;
+  state: "active" | "done" | "next";
+}) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "flex size-6 shrink-0 items-center justify-center rounded-full font-semibold text-xs",
+        state === "active" && "bg-foreground text-background",
+        state === "done" &&
+          "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300",
+        state === "next" &&
+          "bg-background text-muted-foreground ring-1 ring-border ring-inset"
+      )}
+    >
+      {state === "done" ? <CheckIcon className="size-3.5" /> : number}
+    </span>
+  );
 }
 
 export function CompletedStep({
@@ -19,23 +71,26 @@ export function CompletedStep({
   title: string;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 py-4">
-      <div className="flex gap-3">
-        <CheckIcon
-          aria-hidden="true"
-          className="mt-0.5 size-4 text-green-600"
-        />
+    <li className="px-6 py-4">
+      <div className={STEP_GRID}>
+        <StepMarker state="done" />
         <div>
-          <p className="font-medium text-sm">{title}</p>
-          <p className="text-muted-foreground text-sm">{detail}</p>
+          <h3 className="font-semibold text-sm leading-6">
+            <span className="sr-only">Done: </span>
+            {title}
+          </h3>
+          <p className="text-pretty text-muted-foreground text-sm">{detail}</p>
         </div>
+        {onChange ? (
+          <Button onClick={onChange} size="sm" type="button" variant="ghost">
+            Change
+            <span className="sr-only">: {title}</span>
+          </Button>
+        ) : (
+          <span />
+        )}
       </div>
-      {onChange ? (
-        <Button onClick={onChange} size="sm" type="button" variant="ghost">
-          Change
-        </Button>
-      ) : null}
-    </div>
+    </li>
   );
 }
 
@@ -49,120 +104,110 @@ export function UpcomingStep({
   title: string;
 }) {
   return (
-    <div className="flex gap-3 py-4 text-muted-foreground">
-      <StepNumber number={number} />
-      <div>
-        <p className="font-medium text-foreground text-sm">{title}</p>
-        <p className="text-sm">{description}</p>
+    <li className="px-6 py-5">
+      <div className={STEP_GRID}>
+        <StepMarker number={number} state="next" />
+        <div>
+          <h3 className="font-semibold text-neutral-600 text-sm leading-6 dark:text-neutral-400">
+            <span className="sr-only">Not started: </span>
+            {title}
+          </h3>
+          <p className="text-pretty text-muted-foreground text-sm">
+            {description}
+          </p>
+        </div>
       </div>
-    </div>
+    </li>
   );
 }
 
+// `focusHeading` is set when the admin moved here from another step, so
+// keyboard and screen reader users land on the new step. It stays off on the
+// first page load, where moving focus would scroll the page.
 export function CurrentStep({
   children,
   description,
+  focusHeading,
   number,
   title,
 }: {
   children: ReactNode;
   description: string;
+  focusHeading: boolean;
   number: number;
   title: string;
 }) {
   const headingRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
-    headingRef.current?.focus();
-  }, []);
+    if (focusHeading) {
+      headingRef.current?.focus();
+    }
+  }, [focusHeading]);
 
   return (
-    <div className="flex gap-3 py-4">
-      <StepNumber current number={number} />
-      <div className="flex min-w-0 flex-1 flex-col gap-4">
+    <li aria-current="step" className="px-6 py-5">
+      <div className={STEP_GRID}>
+        <StepMarker number={number} state="active" />
         <div>
           <h3
-            className="font-medium text-sm outline-none"
+            className="rounded-sm font-semibold text-sm leading-6 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
             ref={headingRef}
             tabIndex={-1}
           >
+            <span className="sr-only">Current step: </span>
             {title}
           </h3>
-          <p className="text-muted-foreground text-sm">{description}</p>
+          <p className="text-pretty text-muted-foreground text-sm">
+            {description}
+          </p>
         </div>
+      </div>
+      <div className="mt-4 flex min-w-0 flex-col gap-5 sm:ml-10">
         {children}
       </div>
-    </div>
-  );
-}
-
-function StepNumber({
-  current = false,
-  number,
-}: {
-  current?: boolean;
-  number: number;
-}) {
-  return (
-    <span
-      aria-hidden="true"
-      className={
-        current
-          ? "flex size-5 shrink-0 items-center justify-center rounded-full bg-foreground font-medium text-[11px] text-background"
-          : "flex size-5 shrink-0 items-center justify-center rounded-full border font-medium text-[11px] text-muted-foreground"
-      }
-    >
-      {number}
-    </span>
+    </li>
   );
 }
 
 export function InLinearInstructions({
   children,
   href,
-  label = "In Linear",
 }: {
   children: ReactNode;
   href: string;
-  label?: string;
 }) {
   return (
     <div className="rounded-lg bg-muted/60 p-4">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <p className="font-medium text-sm">{label}</p>
-        <a
-          className="inline-flex items-center gap-1 text-sm underline underline-offset-2"
-          href={href}
-          rel="noopener noreferrer"
-          target="_blank"
-        >
-          Open in Linear
-          <ExternalLinkIcon aria-hidden="true" className="size-3.5" />
-        </a>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h4 className="font-semibold text-sm">In Linear</h4>
+        <ExternalLinkButton href={href}>Open in Linear</ExternalLinkButton>
       </div>
-      <ol className="flex flex-col gap-2 text-sm">{children}</ol>
+      <ol className="mt-3 flex list-decimal flex-col gap-2.5 pl-5 text-sm leading-normal marker:text-muted-foreground">
+        {children}
+      </ol>
     </div>
   );
 }
 
-export function CopyValue({
-  id,
-  label,
-  value,
-}: {
-  id: string;
-  label: string;
-  value: string;
-}) {
+// A read-only field with a copy button, such as the callback URL. `label`
+// names the field for screen readers and the copy button.
+export function CopyValue({ label, value }: { label: string; value: string }) {
   return (
-    <div className="mt-1 flex gap-2">
-      <input
+    <div className="mt-2 flex gap-2">
+      <Input
         aria-label={label}
-        className="h-8 min-w-0 flex-1 rounded-md border bg-background px-2 font-mono text-xs"
-        id={id}
+        autoComplete="off"
+        className="font-mono text-[13px]"
+        onFocus={(event) => event.currentTarget.select()}
         readOnly
+        spellCheck={false}
+        translate="no"
         value={value}
       />
-      <CopyButton size="icon-sm" value={value} />
+      <CopyButton
+        label={`Copy ${label.charAt(0).toLowerCase()}${label.slice(1)}`}
+        value={value}
+      />
     </div>
   );
 }

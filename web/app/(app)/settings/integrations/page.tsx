@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import type { Metadata } from "next/types";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import { LinearSetup } from "@/components/integrations/linear/linear-setup";
@@ -16,7 +17,7 @@ import {
   integrationSecretsKeyStatus,
 } from "@/lib/crypto/integration-secrets";
 import {
-  ensureLinearWorkspace,
+  backfillLinearSetup,
   getLinearConfigForAdmin,
   type LinearConfigForAdmin,
 } from "@/lib/linear/config";
@@ -47,7 +48,9 @@ export default async function IntegrationsSettingsPage() {
     return <AdminsOnly>manage integrations</AdminsOnly>;
   }
 
-  await ensureLinearWorkspace();
+  // Runs after the page is sent, so a slow or unreachable Linear never holds
+  // up or breaks the page. The values it saves show on the next load.
+  after(backfillLinearSetup);
   const [linear, slackApp, slackChannel] = await Promise.all([
     getLinearConfigForAdmin(),
     getSlackAppConfigForAdmin(),
@@ -65,15 +68,17 @@ export default async function IntegrationsSettingsPage() {
         <p className="text-muted-foreground text-sm">{description}</p>
       </div>
       <div className="mt-6 flex flex-col gap-6">
+        {/* Each key has its own prefix. Two siblings with the same key make React
+            keep the old one on screen when one of them remounts. */}
         <LinearSetup
           initial={linearSetupData(linear, keyStatus, origin)}
-          key={linear.lastUpdated?.at ?? "never-saved"}
+          key={`linear-${linear.lastUpdated?.at ?? "never-saved"}`}
         />
         <SlackAppCard
           botToken={slackApp.botToken}
           clientId={slackApp.clientId}
           clientSecret={slackApp.clientSecret}
-          key={slackApp.lastUpdated?.at ?? "never-saved"}
+          key={`slack-app-${slackApp.lastUpdated?.at ?? "never-saved"}`}
           secretsKeyOk={keyStatus === "ok"}
           teamId={slackApp.teamId}
         />

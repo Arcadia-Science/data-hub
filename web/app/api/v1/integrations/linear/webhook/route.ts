@@ -25,6 +25,7 @@ import {
 } from "@/lib/linear/feedback-link";
 import {
   isFreshWebhookTimestamp,
+  type LinearWebhookRejectionReason,
   linearWebhookClientIp,
   linearWebhookRejectionReason,
   verifyLinearWebhookSignature,
@@ -94,6 +95,21 @@ interface WebhookBody {
   webhookTimestamp?: number;
 }
 
+// A rejection is recorded only when it plausibly came from Linear, so the
+// caller passes the reason `linearWebhookRejectionReason` decided on.
+function recordRejection(reason: LinearWebhookRejectionReason | null) {
+  if (!reason) {
+    return;
+  }
+  after(async () => {
+    try {
+      await recordLinearWebhookRejection(reason);
+    } catch (err) {
+      console.error("[linear-webhook] Failed to record a rejection:", err);
+    }
+  });
+}
+
 function readWebhookBody(rawBody: string): WebhookBody | null {
   try {
     return JSON.parse(rawBody) as WebhookBody;
@@ -125,30 +141,14 @@ export async function POST(request: Request) {
   });
 
   if (!signatureOk) {
-    if (rejection) {
-      after(async () => {
-        try {
-          await recordLinearWebhookRejection(rejection);
-        } catch (err) {
-          console.error("[linear-webhook] Failed to record a rejection:", err);
-        }
-      });
-    }
+    recordRejection(rejection);
     return apiError(401, UNAUTHORIZED, "Invalid Linear signature");
   }
   if (!parsed) {
     return apiError(400, VALIDATION_ERROR, "Invalid JSON body");
   }
   if (!fresh) {
-    if (rejection) {
-      after(async () => {
-        try {
-          await recordLinearWebhookRejection(rejection);
-        } catch (err) {
-          console.error("[linear-webhook] Failed to record a rejection:", err);
-        }
-      });
-    }
+    recordRejection(rejection);
     return apiError(401, UNAUTHORIZED, "Linear webhook is too old");
   }
 

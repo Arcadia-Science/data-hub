@@ -2,175 +2,239 @@
 
 import { CheckIcon, CircleIcon, Loader2 } from "lucide-react";
 import Link from "next/link";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
+  type SentTestReport,
   type TestReportProgress,
   useLinearSetup,
   useVisibleInterval,
 } from "./linear-setup-context";
+import { ExternalLinkButton } from "./steps";
 
 const WAIT_MS = 60_000;
 
+type LineState = "active" | "done" | "pending";
+
+// Files nothing until the admin chooses to, because `?linear_step=test` stays
+// in the URL and a reload would otherwise file another report.
 export function TestReportStep() {
-  const { goTo, sendTestReport, testReport } = useLinearSetup();
-  const [issueId, setIssueId] = useState<string | null>(null);
-  const [created, setCreated] = useState<{
-    identifier: string;
-    labelName: string | null;
-    teamName: string;
-    url: string;
-  } | null>(null);
+  const { actions } = useLinearSetup();
+  const [sent, setSent] = useState<SentTestReport | null>(null);
   const [progress, setProgress] = useState<TestReportProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [checkFailed, setCheckFailed] = useState(false);
   const [sending, setSending] = useState(false);
   const [closedAt, setClosedAt] = useState<number | null>(null);
   const [gaveUp, setGaveUp] = useState(false);
-  const started = useRef(false);
 
-  useEffect(() => {
-    if (started.current) {
+  const closed = progress?.closed === true;
+  const notified = Boolean(progress?.notificationAt);
+  // With in-app notifications off no notification is ever written, so the
+  // arrival of Linear's update is the end of the test.
+  const quiet =
+    progress?.updateReceived === true &&
+    progress.notificationsEnabled === false;
+  const finished = notified || quiet;
+
+  async function send() {
+    setSending(true);
+    setError(null);
+    try {
+      setSent(await actions.sendTestReport());
+      setProgress(null);
+      setClosedAt(null);
+      setGaveUp(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't send the test");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  useVisibleInterval(sent !== null && !finished && !gaveUp, 2000, () => {
+    if (!sent) {
       return;
     }
-    started.current = true;
-    setSending(true);
-    sendTestReport()
-      .then((report) => {
-        setIssueId(report.id);
-        setCreated(report);
-      })
-      .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : "Couldn't send the test");
-      })
-      .finally(() => setSending(false));
-  }, [sendTestReport]);
-
-  useVisibleInterval(
-    issueId !== null && progress?.notificationAt == null,
-    2000,
-    () => {
-      if (!issueId) {
-        return;
-      }
-      void testReport(issueId).then((next) => {
+    actions
+      .testReport(sent.id)
+      .then((next) => {
         setProgress(next);
+        setCheckFailed(false);
         if (next.closed && closedAt === null) {
           setClosedAt(Date.now());
         }
-      });
-    }
-  );
+      })
+      .catch(() => setCheckFailed(true));
+  });
 
   useEffect(() => {
-    if (
-      closedAt === null ||
-      progress?.updateReceived ||
-      progress?.notificationAt
-    ) {
+    if (closedAt === null || progress?.updateReceived || finished) {
       return;
     }
     const timer = window.setTimeout(() => setGaveUp(true), WAIT_MS);
     return () => window.clearTimeout(timer);
-  }, [closedAt, progress?.notificationAt, progress?.updateReceived]);
+  }, [closedAt, finished, progress?.updateReceived]);
 
-  const sent = created !== null;
-  const closed = progress?.closed === true;
-  const notified = Boolean(progress?.notificationAt);
-  const quiet =
-    progress?.updateReceived === true &&
-    progress.notificationsEnabled === false;
+  const missingUpdate = gaveUp && progress !== null && !progress.updateReceived;
 
   return (
-    <div className="flex flex-col gap-4">
-      <p className="text-sm">
+    <>
+      <p className="text-pretty text-sm">
         Data Hub files a report as you. When you close it in Linear, Data Hub
         tells you, the same way it tells anyone who sends feedback.
       </p>
-      {error ? (
-        <p className="text-destructive text-sm" role="alert">
-          {error}
-        </p>
-      ) : null}
-      {sending ? (
-        <p className="inline-flex items-center gap-2 text-sm">
-          <Loader2 className="size-4 animate-spin" />
-          Sending the test report…
-        </p>
-      ) : null}
-      {sent && created ? (
-        <ol aria-live="polite" className="flex flex-col gap-3 text-sm">
-          <CheckLine done>
-            Report sent. Linear created {created.identifier} in{" "}
-            {created.teamName}
-            {created.labelName ? `, with the ${created.labelName} label` : ""}.
-            <a
-              className="ml-2 underline underline-offset-2"
-              href={created.url}
-              rel="noopener noreferrer"
-              target="_blank"
+      <div aria-live="polite" className="flex flex-col gap-4">
+        {sending ? (
+          <p className="inline-flex items-center gap-2 text-sm">
+            <Loader2
+              aria-hidden="true"
+              className="size-4 animate-spin motion-reduce:animate-none"
+            />
+            Sending the test report…
+          </p>
+        ) : null}
+        {error ? (
+          <p className="text-destructive text-sm" role="alert">
+            {error}
+          </p>
+        ) : null}
+        {sent ? (
+          <ol aria-label="Test progress" className="flex flex-col gap-3.5">
+            <CheckLine state="done">
+              <p>
+                <strong className="font-semibold">Report sent.</strong> Linear
+                created {sent.identifier} in {sent.teamName}
+                {sent.labelName ? `, with the ${sent.labelName} label` : ""}.
+              </p>
+              <ExternalLinkButton href={sent.url}>
+                Open {sent.identifier}
+              </ExternalLinkButton>
+            </CheckLine>
+            <CheckLine state={closed ? "done" : "active"}>
+              {closed ? (
+                <p>
+                  {sent.identifier} is{" "}
+                  {progress?.stateName ? progress.stateName : "closed"}.
+                </p>
+              ) : (
+                <p>
+                  <strong className="font-semibold">
+                    Waiting for {sent.identifier} to close.
+                  </strong>{" "}
+                  In Linear, move it to Done.
+                </p>
+              )}
+            </CheckLine>
+            <CheckLine
+              state={finished ? "done" : closed ? "active" : "pending"}
             >
-              Open {created.identifier}
-            </a>
-          </CheckLine>
-          <CheckLine done={closed}>
-            {closed
-              ? `${created.identifier} is ${progress?.stateName ?? "closed"}.`
-              : `Waiting for ${created.identifier} to close. In Linear, move it to Done.`}
-          </CheckLine>
-          <CheckLine done={notified || quiet}>
-            {notified
-              ? "You got a Data Hub notification."
-              : quiet
-                ? "The update arrived, but your in-app notifications for feedback are off."
-                : "You get a Data Hub notification that says Resolved (Done)."}
-          </CheckLine>
-        </ol>
-      ) : null}
-      {quiet ? (
-        <Link
-          className="text-sm underline underline-offset-2"
-          href="/settings/notifications"
+              {notified ? (
+                <p>You got a Data Hub notification.</p>
+              ) : quiet ? (
+                <>
+                  <p>
+                    The update arrived, but your in-app notifications for
+                    feedback are off.
+                  </p>
+                  <Link
+                    className="text-sm underline underline-offset-2 hover:text-foreground"
+                    href="/settings/notifications"
+                  >
+                    Open Notifications
+                  </Link>
+                </>
+              ) : (
+                <p>
+                  You get a Data Hub notification that says Resolved (Done).
+                </p>
+              )}
+            </CheckLine>
+          </ol>
+        ) : null}
+        {checkFailed && !finished ? (
+          <p className="text-muted-foreground text-sm">
+            Couldn't check the test. Trying again…
+          </p>
+        ) : null}
+        {missingUpdate && progress ? (
+          <div className="flex flex-col items-start gap-2 text-pretty text-sm">
+            <p>
+              {sent?.identifier} closed, but no update has arrived.
+              {progress.rejections > 0
+                ? ` Data Hub rejected Linear's last ${progress.rejections} ${progress.rejections === 1 ? "update" : "updates"}${progress.rejectionReason === "signature" ? " because the signing secret doesn't match" : ""}.`
+                : ""}{" "}
+              Linear may have turned the webhook off after repeated failures.
+              Check the signing secret in step 3.
+            </p>
+            <Button
+              onClick={() => {
+                setGaveUp(false);
+                setClosedAt(Date.now());
+              }}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              Check again
+            </Button>
+          </div>
+        ) : null}
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        {sent ? null : (
+          <Button disabled={sending} onClick={() => void send()} type="button">
+            {error ? "Try again" : "Send test report"}
+          </Button>
+        )}
+        <Button
+          onClick={() => actions.goTo(null)}
+          type="button"
+          variant={finished ? "default" : "ghost"}
         >
-          Open Notifications
-        </Link>
-      ) : null}
-      {gaveUp && progress && !progress.updateReceived ? (
-        <p className="text-sm" role="status">
-          {created?.identifier} closed, but no update has arrived.
-          {progress.rejections > 0
-            ? ` Data Hub rejected Linear's last ${progress.rejections} ${progress.rejections === 1 ? "update" : "updates"}${progress.rejectionReason === "signature" ? " because the signing secret doesn't match" : ""}.`
-            : ""}{" "}
-          Linear may have turned the webhook off after repeated failures. Check
-          the signing secret in step 3.
-        </p>
-      ) : null}
-      <Button
-        onClick={() => goTo(null)}
-        size="sm"
-        type="button"
-        variant="ghost"
-      >
-        Skip the test
-      </Button>
-    </div>
+          {finished ? "Done" : "Skip the test"}
+        </Button>
+      </div>
+    </>
   );
 }
 
-function CheckLine({ children, done }: { children: ReactNode; done: boolean }) {
+const STATE_LABEL: Record<LineState, string> = {
+  active: "In progress: ",
+  done: "Done: ",
+  pending: "Not started: ",
+};
+
+function CheckLine({
+  children,
+  state,
+}: {
+  children: ReactNode;
+  state: LineState;
+}) {
   return (
-    <li className="flex gap-2">
-      {done ? (
-        <CheckIcon
-          aria-hidden="true"
-          className="mt-0.5 size-4 text-green-600"
-        />
-      ) : (
-        <CircleIcon
-          aria-hidden="true"
-          className="mt-0.5 size-4 text-muted-foreground"
-        />
-      )}
-      <span>{children}</span>
+    <li
+      className={`grid grid-cols-[1.25rem_minmax(0,1fr)] items-start gap-2.5 text-sm ${state === "pending" ? "text-muted-foreground" : ""}`}
+    >
+      <span className="inline-flex size-5 items-center justify-center">
+        {state === "done" ? (
+          <CheckIcon
+            aria-hidden="true"
+            className="size-4 text-green-600 dark:text-green-400"
+          />
+        ) : state === "active" ? (
+          <Loader2
+            aria-hidden="true"
+            className="size-4 animate-spin motion-reduce:animate-none"
+          />
+        ) : (
+          <CircleIcon aria-hidden="true" className="size-4" />
+        )}
+      </span>
+      <div className="flex flex-col items-start gap-1.5">
+        <span className="sr-only">{STATE_LABEL[state]}</span>
+        {children}
+      </div>
     </li>
   );
 }

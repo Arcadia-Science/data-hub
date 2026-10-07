@@ -5,6 +5,8 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 export const LINEAR_WEBHOOK_MAX_AGE_MS = 60_000;
 
+export type LinearWebhookRejectionReason = "signature" | "stale";
+
 export function verifyLinearWebhookSignature(
   rawBody: string,
   header: string | null,
@@ -21,11 +23,9 @@ export function verifyLinearWebhookSignature(
   return timingSafeEqual(received, expected);
 }
 
-// Linear publishes these at
-// https://linear.app/.well-known/appspecific/app.linear.ips.json and aims to
-// update that file four weeks before using a new address. A delivery from
-// anywhere else can still be accepted when its signature is valid; this list
-// only decides whether a rejection counts as Linear's.
+// Published at https://linear.app/.well-known/appspecific/app.linear.ips.json.
+// A valid signature is accepted from any address; this list only decides
+// whether a rejection counts as Linear's.
 export const LINEAR_WEBHOOK_IPS = new Set([
   "34.134.222.122",
   "34.140.253.14",
@@ -60,7 +60,7 @@ export function linearWebhookRejectionReason(input: {
   organizationId: string | null;
   savedWorkspaceId: string | null;
   signatureOk: boolean;
-}): "signature" | "stale" | null {
+}): LinearWebhookRejectionReason | null {
   if (input.signatureOk && input.fresh) {
     return null;
   }

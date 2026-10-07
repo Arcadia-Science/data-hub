@@ -22,6 +22,10 @@ export interface LinearChoice {
   name: string;
 }
 
+export interface LinearLabelChoice extends LinearChoice {
+  color: string;
+}
+
 export interface LinearTeam extends LinearChoice {
   key: string;
 }
@@ -31,14 +35,14 @@ export interface LinearProject extends LinearChoice {
 }
 
 export interface LinearTeamOptions {
-  labels: LinearChoice[];
+  labels: LinearLabelChoice[];
   projects: LinearProject[];
 }
 
 // Body of `GET /api/v1/settings/integrations/linear/options`. `projects` and
 // `labels` are null until a team is chosen.
 export interface LinearOptionsResponse {
-  labels: LinearChoice[] | null;
+  labels: LinearLabelChoice[] | null;
   projects: LinearProject[] | null;
   teams: LinearTeam[];
 }
@@ -80,6 +84,15 @@ export class LinearClientCredentialsError extends LinearRequestError {
   }
 }
 
+// Linear refused the client ID or secret itself, as opposed to being down or
+// rate limiting the app.
+export class LinearCredentialsRejectedError extends LinearRequestError {
+  constructor(message: string) {
+    super(message);
+    this.name = "LinearCredentialsRejectedError";
+  }
+}
+
 interface CachedToken {
   accessToken: string;
   credentialsKey: string;
@@ -98,10 +111,6 @@ const tokenResponseSchema = z.object({
 const namedNodeSchema = z.object({
   id: z.string(),
   name: z.string(),
-});
-
-const connectionSchema = z.object({
-  nodes: z.array(namedNodeSchema),
 });
 
 const organizationSchema = z.object({
@@ -128,7 +137,9 @@ const teamOptionsSchema = z.object({
   team: z.object({
     projects: z.object({ nodes: z.array(projectNodeSchema) }),
   }),
-  issueLabels: connectionSchema,
+  issueLabels: z.object({
+    nodes: z.array(namedNodeSchema.extend({ color: z.string() })),
+  }),
 });
 
 const tokenErrorSchema = z.object({
@@ -189,7 +200,7 @@ async function tokenFailure(response: Response): Promise<LinearRequestError> {
     );
   }
   const reason = description ?? error;
-  return new LinearRequestError(
+  return new LinearCredentialsRejectedError(
     `Linear rejected the app credentials${reason ? ` (${reason})` : ""}. Check the client ID and client secret.`
   );
 }
@@ -360,7 +371,7 @@ export async function listLinearTeamOptions(
         issueLabels(
           first: ${OPTIONS_PAGE_SIZE}
           filter: { or: [{ team: { id: { eq: $labelTeamId } } }, { team: { null: true } }] }
-        ) { nodes { id name } }
+        ) { nodes { id name color } }
       }`,
       { teamId, labelTeamId: teamId },
       teamOptionsSchema
@@ -730,7 +741,9 @@ const issueActivitySchema = z.object({
             botActor: z.object({ name: z.string().nullable() }).nullable(),
             createdAt: z.string(),
             fromState: z.object({ name: z.string() }).nullable(),
-            toState: z.object({ name: z.string() }).nullable(),
+            toState: z
+              .object({ color: z.string(), name: z.string() })
+              .nullable(),
           })
         ),
       }),
@@ -743,6 +756,7 @@ export interface LinearStatusChange {
   at: string;
   fromState: string | null;
   toState: string | null;
+  toStateColor: string | null;
 }
 
 export interface LinearComment {
@@ -770,7 +784,7 @@ export async function getLinearIssueActivity(
             nodes {
               createdAt
               fromState { name }
-              toState { name }
+              toState { name color }
               actor { name }
               botActor { name }
             }
@@ -800,6 +814,7 @@ export async function getLinearIssueActivity(
             at: entry.createdAt,
             fromState: entry.fromState?.name ?? null,
             toState: entry.toState?.name ?? null,
+            toStateColor: entry.toState?.color ?? null,
             actorName: entry.actor?.name ?? entry.botActor?.name ?? null,
           },
         ];
