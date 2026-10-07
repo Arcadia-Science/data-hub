@@ -245,7 +245,7 @@ export const watcherReleaseConfig = pgTable(
 
 // Singleton row holding the org-wide Slack incoming webhook URL for
 // channel notifications on new runs. Edited via the admin-only "Slack
-// channel" section on `/settings/notifications`. Previously sourced from
+// channel" section on `/settings/integrations`. Previously sourced from
 // the `SLACK_WEBHOOK_URL` env var.
 //
 // When the table is empty (or `webhook_url` is NULL) channel notifications

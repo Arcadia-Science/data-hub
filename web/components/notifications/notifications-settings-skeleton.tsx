@@ -1,6 +1,5 @@
 "use client";
 
-import { SlackChannelCard } from "@/components/notifications/slack-channel-card";
 import { SlackConnectionCard } from "@/components/notifications/slack-connection-card";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -96,27 +95,6 @@ function SlackConnectionSectionSkeleton() {
   );
 }
 
-function SlackChannelSectionSkeleton() {
-  return (
-    <>
-      <SlackChannelCard.SectionHeader configured={false} />
-      <Card>
-        <CardContent className="flex flex-col gap-6">
-          <div className="flex flex-col gap-1.5">
-            <Skeleton className="h-4 w-40" />
-            <Skeleton className="h-9 w-full" />
-            <Skeleton className="h-4 w-full max-w-xl" />
-          </div>
-          <div className="flex items-center justify-between gap-4 border-t pt-4">
-            <Skeleton className="h-4 w-56" />
-            <Skeleton className="h-9 w-16" />
-          </div>
-        </CardContent>
-      </Card>
-    </>
-  );
-}
-
 /** Mirrors `NotificationsSettingsForm` layout so streamed settings swap in cleanly. */
 export function NotificationsSettingsFormSkeleton({
   instrumentRows = 8,
@@ -137,7 +115,6 @@ export function NotificationsSettingsFormSkeleton({
         isAdmin={isAdmin}
       />
       <SlackConnectionSectionSkeleton />
-      {isAdmin ? <SlackChannelSectionSkeleton /> : null}
     </div>
   );
 }

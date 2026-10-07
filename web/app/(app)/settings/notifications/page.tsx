@@ -9,7 +9,6 @@ import {
   listInstrumentSubscriptions,
 } from "@/lib/api/notifications";
 import { auth } from "@/lib/auth";
-import { getSlackChannelConfigForAdmin } from "@/lib/slack/channel-config";
 import { getSlackConnection } from "@/lib/slack/connections";
 
 const description = "Choose which events send a notification.";
@@ -71,15 +70,11 @@ async function NotificationsFormSection({
   isAdmin: boolean;
   userId: string;
 }) {
-  // Parallel fetch: the prefs row, per-instrument subscription list, Slack
-  // connection, and (for admins) channel webhook metadata are independent.
-  const [prefs, subscriptions, slackConn, slackChannelConfig] =
-    await Promise.all([
-      getPreferences(userId),
-      listInstrumentSubscriptions(userId, { activeOnly: true }),
-      getSlackConnection(userId),
-      isAdmin ? getSlackChannelConfigForAdmin() : Promise.resolve(null),
-    ]);
+  const [prefs, subscriptions, slackConn] = await Promise.all([
+    getPreferences(userId),
+    listInstrumentSubscriptions(userId, { activeOnly: true }),
+    getSlackConnection(userId),
+  ]);
 
   return (
     <NotificationsSettingsForm
@@ -101,20 +96,6 @@ async function NotificationsFormSection({
         slackGenericEnabled: prefs.slackGenericEnabled,
         slackFeedbackUpdatedEnabled: prefs.slackFeedbackUpdatedEnabled,
       }}
-      slackChannelConfig={
-        slackChannelConfig
-          ? {
-              configured: slackChannelConfig.configured,
-              lastUpdated: slackChannelConfig.updatedAt
-                ? {
-                    at: slackChannelConfig.updatedAt.toISOString(),
-                    byName: slackChannelConfig.updatedByName,
-                    byEmail: slackChannelConfig.updatedByEmail,
-                  }
-                : null,
-            }
-          : null
-      }
       slackConnection={
         slackConn
           ? {

@@ -26,6 +26,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   { href: "/settings/notifications", label: "Notifications" },
   { href: "/settings/tokens", label: "Access Tokens" },
   { href: "/settings/feedback", label: "Feedback", adminOnly: true },
+  { href: "/settings/integrations", label: "Integrations", adminOnly: true },
   { href: "/settings/watchers", label: "Watchers", adminOnly: true },
   { href: "/settings/members", label: "Members", adminOnly: true },
 ];

@@ -1,9 +1,8 @@
 "use client";
 
-// Compound component for the org-wide Slack channel webhook section of the
-// notifications settings page. Mirrors `slack-connection-card.tsx`: a
-// section header above the card and an independent form so dirty state
-// stays isolated from in-app and Slack DM prefs.
+// Compound component for the org-wide Slack channel webhook on
+// Settings > Integrations. Mirrors `slack-connection-card.tsx`: a
+// section header above the card and an independent form.
 //
 //   <SlackChannelCard.SectionHeader configured={...} />
 //   <SlackChannelCard.Form configured={...} lastUpdated={...} />
@@ -48,8 +47,8 @@ function SectionHeader({ configured }: { configured: boolean }) {
       </div>
       <p className="text-muted-foreground text-sm">
         Post a message to a shared Slack channel whenever a new instrument run
-        is reported. This is separate from personal Slack DMs above — channel
-        notifications go to everyone in the channel.
+        is reported. This is separate from personal Slack DMs, which each person
+        turns on under Notifications.
       </p>
     </div>
   );
