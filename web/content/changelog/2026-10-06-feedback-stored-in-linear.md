@@ -1,6 +1,5 @@
 ---
 title: Feedback reports are stored in Linear
-docs: https://datahub.arcadiascience.com/docs/connect-linear
 ---
 
 Sending feedback now creates an issue in your Linear workspace. Data Hub no longer keeps its own copy. Admins still review reports under **Settings → Feedback**, which reads them back from Linear, and members still see only the reports they sent.
