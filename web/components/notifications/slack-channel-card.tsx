@@ -1,12 +1,9 @@
 "use client";
 
-// Compound component for the org-wide Slack channel webhook section of the
-// notifications settings page. Mirrors `slack-connection-card.tsx`: a
-// section header above the card and an independent form so dirty state
-// stays isolated from in-app and Slack DM prefs.
-//
-//   <SlackChannelCard.SectionHeader configured={...} />
-//   <SlackChannelCard.Form configured={...} lastUpdated={...} />
+// The org-wide Slack channel webhook on Settings > Integrations: a section
+// header above the card and an independent form. They are separate named
+// exports because the page is a server component, and a server component
+// cannot dot into a client module (`SlackChannelCard.Form` throws on render).
 
 import { useForm } from "@tanstack/react-form";
 import { Loader2 } from "lucide-react";
@@ -29,13 +26,18 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import type { LastUpdated } from "@/lib/integrations/last-updated";
 import {
   slackChannelWebhookFormSchema,
   slackWebhookUrlSchema,
 } from "@/lib/slack/webhook-url";
 import { formatRelativeTime } from "@/lib/utils";
 
-function SectionHeader({ configured }: { configured: boolean }) {
+export function SlackChannelSectionHeader({
+  configured,
+}: {
+  configured: boolean;
+}) {
   return (
     <div>
       <div className="flex items-center justify-between gap-2">
@@ -48,24 +50,18 @@ function SectionHeader({ configured }: { configured: boolean }) {
       </div>
       <p className="text-muted-foreground text-sm">
         Post a message to a shared Slack channel whenever a new instrument run
-        is reported. This is separate from personal Slack DMs above — channel
-        notifications go to everyone in the channel.
+        is reported. This is separate from personal Slack DMs, which each person
+        turns on under Notifications.
       </p>
     </div>
   );
-}
-
-interface LastUpdated {
-  at: string;
-  byEmail: string | null;
-  byName: string | null;
 }
 
 // Decoy length only — must not reflect the stored webhook URL.
 const MASKED_LENGTH_MIN = 32;
 const MASKED_LENGTH_RANGE = 41;
 
-function Form({
+export function SlackChannelForm({
   configured,
   lastUpdated,
 }: {
@@ -311,8 +307,3 @@ function Form({
     </Card>
   );
 }
-
-export const SlackChannelCard = {
-  SectionHeader,
-  Form,
-};

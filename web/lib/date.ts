@@ -163,6 +163,18 @@ export function formatDate(date: Date): string {
   return formatInTimeZone(date, getTimeZone(), "MMM d, yyyy");
 }
 
+/**
+ * Formats a date as `"MMM d"` in the current year and `"MMM d, yyyy"` in any
+ * other, e.g. `"Oct 7"`. Inject `now` in tests to pin the clock.
+ */
+export function formatDateCompact(date: Date, now: Date = new Date()): string {
+  const zone = getTimeZone();
+  const sameYear =
+    formatInTimeZone(date, zone, "yyyy") ===
+    formatInTimeZone(now, zone, "yyyy");
+  return formatInTimeZone(date, zone, sameYear ? "MMM d" : "MMM d, yyyy");
+}
+
 /** Formats a date as `"d MMMM yyyy"`, e.g. `"12 March 2026"`. */
 export function formatDateLong(date: Date): string {
   return formatInTimeZone(date, getTimeZone(), "d MMMM yyyy");

@@ -75,6 +75,7 @@ In the Vercel dashboard, scoped to the environment, set at least the following. 
 | `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` | Client ID and secret from the [OAuth client](#create-a-google-oauth-client) above. |
 | `ADMIN_EMAILS` | Comma-separated emails auto-promoted to admin on sign-in. This bootstraps the first admin, so set it before you sign in. |
 | `CRON_SECRET` | Shared secret for Vercel Cron jobs. The upload-queue sweep (`web/vercel.json`) rejects invocations without it. |
+| `INTEGRATION_SECRETS_KEY` | 64 hex characters (`openssl rand -hex 32`). Encrypts Slack and Linear secrets admins save in the database. Saving a secret fails until this is set. |
 | `OAUTH_PROXY_URL` | Staging origin that owns the Google redirect URI (e.g. `https://your-staging-deployment.vercel.app`). Set on **Staging** and **Preview** to the same value. |
 | `OAUTH_PROXY_SECRET` | Dedicated shared secret for the preview↔staging OAuth handoff (not `AUTH_SECRET`). Same value on Staging and Preview. |
 
@@ -215,7 +216,18 @@ The AWS stack you just deployed exposes the outputs the web app needs to reach i
 
 The S3 bucket names default to `arcadia-data-hub-raw-<env>` and `arcadia-data-hub-archives-<env>`; override `S3_RAW_DATA_BUCKET` and `S3_ARCHIVES_BUCKET` in Vercel only if your stack uses different names. Also set `S3_PROCESSED_BUCKET` to `arcadia-data-hub-processed-<env>`: presigned download URLs come from each file row's own bucket, so nothing else needs it, but the MCP Apps run report has to name every origin in its content security policy and processed artifacts are most of what it renders. Redeploy the web app (or push a commit) so it picks up the new variables.
 
-> **Note:** Slack channel notifications are configured after deploy, not via an environment variable. A workspace admin pastes the incoming webhook URL under Settings > Notifications > Slack channel (stored in the `slack_channel_config` table). Personal Slack DMs use the optional `SLACK_BOT_TOKEN` / `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET` variables instead — see [Environment variables](getting-started.md#environment-variables).
+### Set up Linear
+
+Feedback reports are stored as Linear issues. An admin sets this up in the app after the deploy. Generate `INTEGRATION_SECRETS_KEY` first (`openssl rand -hex 32`) and set it on the deployment, or saving the Linear secrets fails.
+
+1. In Linear, create an OAuth application and turn on **client credentials tokens**. The app needs the `read` and `issues:create` scopes. If client credentials are off, **Test connection** in Data Hub says so and tells you to turn them on in the app's settings in Linear.
+2. In Data Hub, open **Settings → Integrations**. In the **Linear** card, paste the client ID and client secret, then choose **Test connection**.
+3. Choose the team that receives reports. Only public teams are listed, because Data Hub signs in to Linear as the app, and the app cannot see private teams. A project is optional. You can also pick one label for each kind of report (bug, feature request, other), from the team's labels or the workspace's labels. Save the card.
+4. In Linear, create a webhook for the **Issue** resource type. Copy the **Webhook URL** shown on the Linear card into Linear, then paste Linear's signing secret into **Webhook signing secret** in Data Hub and save. The card then shows when Linear last sent an event.
+
+Until a team is saved, the Feedback item stays hidden and the feedback tools tell the caller that feedback is not set up.
+
+> **Note:** Slack channel notifications are configured after deploy, not via an environment variable. A workspace admin pastes the incoming webhook URL under Settings > Integrations (stored in the `slack_channel_config` table). Personal Slack DMs use `SLACK_BOT_TOKEN`, `SLACK_CLIENT_ID`, and `SLACK_CLIENT_SECRET`, or the same values saved under Settings > Integrations. A saved value wins over the environment variable. See [Environment variables](getting-started.md#environment-variables).
 
 ## After the backend is up
 

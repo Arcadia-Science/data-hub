@@ -7,13 +7,16 @@ import {
   ChevronRightIcon,
   CopyIcon,
   ExternalLinkIcon,
+  XIcon,
 } from "lucide-react";
+import dynamic from "next/dynamic";
 import { parseAsString, useQueryState } from "nuqs";
 import { useState } from "react";
-import { RelativeTime } from "@/components/dashboard/relative-time";
-import { FeedbackStatusBadge } from "@/components/feedback/feedback-badges";
-import { FeedbackStatusForm } from "@/components/feedback/feedback-status-form";
-import { Button } from "@/components/ui/button";
+import {
+  FeedbackLabelChip,
+  FeedbackPriority,
+} from "@/components/feedback/feedback-badges";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Collapsible,
   CollapsibleContent,
@@ -21,55 +24,79 @@ import {
 } from "@/components/ui/collapsible";
 import {
   Sheet,
+  SheetClose,
   SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { UserAvatar } from "@/components/user-avatar";
+import type {
+  FeedbackActivityEvent,
+  FeedbackAssignee,
+  FeedbackLabel,
+} from "@/lib/api/feedback";
 import {
   FEEDBACK_KIND_LABELS,
   FEEDBACK_STATUS_LABELS,
   type FeedbackKind,
   type FeedbackStatus,
 } from "@/lib/api/feedback-schema";
-import { formatDateTime } from "@/lib/date";
-import { cn } from "@/lib/utils";
+import { toUserAvatarUser } from "@/lib/avatar-color";
+import { formatDateTime, formatDateTimeShort } from "@/lib/date";
+
+const CommentMarkdown = dynamic(
+  () =>
+    import("@/components/runs/comment-markdown").then(
+      (mod) => mod.CommentMarkdown
+    ),
+  {
+    loading: () => (
+      <div className="py-1 text-muted-foreground text-sm">Loading…</div>
+    ),
+  }
+);
 
 export interface FeedbackDetail {
-  adminNote: string | null;
+  activity: FeedbackActivityEvent[];
+  assignee: FeedbackAssignee | null;
   attemptedAction: string | null;
   createdAt: string;
   description: string;
   errorMessage: string | null;
   id: string;
+  identifier: string;
   kind: FeedbackKind;
+  labels: FeedbackLabel[];
+  linearUrl: string | null;
   pageUrl: string | null;
-  reporterLabel: string;
-  sourceLabel: string;
+  priority: number | null;
+  priorityLabel: string | null;
+  projectName: string | null;
+  // First word of the reporter's name, for "Matt sees Open". Null when the
+  // reporter's account is gone.
+  reporterFirstName: string | null;
+  reporterName: string;
+  stateColor: string;
+  stateName: string;
   status: FeedbackStatus;
-  statusUpdatedAt: string | null;
-  statusUpdatedByLabel: string | null;
+  teamName: string;
   title: string;
   toolName: string | null;
+  viaLabel: string | null;
 }
-
-const ACTIVITY_DOT = {
-  Reported: "bg-zinc-400",
-  Resolved: "bg-green-600",
-  Declined: "bg-zinc-500",
-  Reopened: "bg-blue-600",
-} as const;
-
-type ActivityVerb = keyof typeof ACTIVITY_DOT;
 
 export function FeedbackDetailSheet({
   item,
   navIds,
   statusLabel,
+  total,
 }: {
   item: FeedbackDetail | null;
   navIds: string[];
   statusLabel: string;
+  // Reports in the whole tab, across every page of the table.
+  total: number;
 }) {
   const [itemId, setItem] = useQueryState(
     "item",
@@ -134,36 +161,55 @@ export function FeedbackDetailSheet({
                 </Button>
                 {index >= 0 ? (
                   <span className="ml-2 text-[13px] text-muted-foreground tabular-nums">
-                    {index + 1} of {navIds.length} in {statusLabel}
+                    {index + 1} of {navIds.length}{" "}
+                    {total > navIds.length ? "on this page" : statusLabel}
                   </span>
                 ) : null}
               </div>
-              <CopyReportButton item={shown} key={shown.id} />
+              <div className="flex items-center gap-1">
+                <CopyReportButton item={shown} key={shown.id} />
+                <SheetClose asChild>
+                  <Button
+                    aria-label="Close"
+                    size="icon-sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <XIcon aria-hidden="true" />
+                  </Button>
+                </SheetClose>
+              </div>
             </div>
-            <SheetTitle className="text-pretty font-semibold text-[22px] leading-snug tracking-tight">
+            <p className="font-mono text-muted-foreground text-xs">
+              {shown.identifier}
+            </p>
+            <SheetTitle className="text-pretty break-words font-semibold text-[22px] leading-snug tracking-tight">
               {shown.title}
             </SheetTitle>
             <SheetDescription className="text-sm text-zinc-600 dark:text-zinc-400">
-              {shown.reporterLabel}
-              {" · "}
-              <RelativeTime date={shown.createdAt} />
+              {sentSentence(shown)}
             </SheetDescription>
-            <div className="flex flex-wrap items-center gap-4">
-              <FeedbackStatusBadge status={shown.status} />
-              <Meta label="Type" value={FEEDBACK_KIND_LABELS[shown.kind]} />
-              <Meta label="Source" translateNo value={shown.sourceLabel} />
-            </div>
+            {shown.linearUrl ? (
+              <div>
+                <a
+                  className={buttonVariants({ size: "sm", variant: "outline" })}
+                  href={shown.linearUrl}
+                  rel="noopener noreferrer"
+                  target="_blank"
+                >
+                  Open in Linear
+                  <ExternalLinkIcon aria-hidden="true" data-icon="inline-end" />
+                </a>
+              </div>
+            ) : null}
           </SheetHeader>
+          <div className="border-b px-6 py-4">
+            <LinearProperties item={shown} />
+          </div>
           <div className="flex min-h-0 flex-1 flex-col gap-7 overflow-y-auto overscroll-contain px-6 py-6">
             <ReportBody item={shown} key={shown.id} />
             <Activity item={shown} />
           </div>
-          <FeedbackStatusForm
-            id={shown.id}
-            key={shown.id}
-            note={shown.adminNote}
-            status={shown.status}
-          />
         </SheetContent>
       ) : null}
     </Sheet>
@@ -199,13 +245,16 @@ function CopyReportButton({ item }: { item: FeedbackDetail }) {
 function feedbackMarkdown(item: FeedbackDetail): string {
   const page = item.pageUrl ? pageParts(item.pageUrl) : null;
   const sections = [
-    `# ${item.title}`,
+    `# ${item.identifier} ${item.title}`,
     "",
-    `**Reporter:** ${item.reporterLabel}`,
+    `**Reporter:** ${item.reporterName}`,
     `**Received:** ${formatDateTime(new Date(item.createdAt))}`,
-    `**Status:** ${FEEDBACK_STATUS_LABELS[item.status]}`,
+    `**Status:** ${item.stateName} (${FEEDBACK_STATUS_LABELS[item.status]})`,
     `**Type:** ${FEEDBACK_KIND_LABELS[item.kind]}`,
-    `**Source:** ${item.sourceLabel}`,
+    `**Priority:** ${item.priorityLabel ?? "No priority"}`,
+    `**Assignee:** ${item.assignee?.name ?? "Unassigned"}`,
+    `**Project:** ${item.projectName ?? "None"}`,
+    `**Team:** ${item.teamName}`,
     "",
     "## Description",
     "",
@@ -235,22 +284,16 @@ function feedbackMarkdown(item: FeedbackDetail): string {
       sections.push("", "**Tool**", "", fenced(item.toolName));
     }
     if (item.errorMessage) {
-      sections.push("", "**Error**", "", fenced(item.errorMessage));
+      sections.push("", "**Error message**", "", fenced(item.errorMessage));
     }
   }
 
   sections.push("", "## Activity", "");
   for (const event of activityEvents(item)) {
-    sections.push(
-      `- **${event.verb}** by ${event.by} — ${formatDateTime(new Date(event.at))}`
-    );
-    if (event.note) {
-      sections.push("", indentQuote(event.note), "");
+    sections.push(`- ${event.text} — ${formatDateTime(new Date(event.at))}`);
+    if (event.body) {
+      sections.push("", event.body, "");
     }
-  }
-
-  if (item.adminNote) {
-    sections.push("", "## Note to reporter", "", item.adminNote);
   }
 
   return sections.join("\n").trimEnd();
@@ -266,35 +309,6 @@ function fenced(text: string): string {
   }
   const marker = "`".repeat(Math.max(3, longest + 1));
   return `${marker}\n${text}\n${marker}`;
-}
-
-function indentQuote(text: string): string {
-  return text
-    .split("\n")
-    .map((line) => `  > ${line}`)
-    .join("\n");
-}
-
-function Meta({
-  label,
-  translateNo = false,
-  value,
-}: {
-  label: string;
-  translateNo?: boolean;
-  value: string;
-}) {
-  return (
-    <span className="text-[13px] text-muted-foreground">
-      {label}{" "}
-      <span
-        className="font-medium text-foreground"
-        translate={translateNo ? "no" : undefined}
-      >
-        {value}
-      </span>
-    </span>
-  );
 }
 
 function ReportBody({ item }: { item: FeedbackDetail }) {
@@ -401,7 +415,9 @@ function TechnicalDetails({
         ) : null}
         {errorMessage ? (
           <div className="flex flex-col gap-1">
-            <p className="font-medium text-muted-foreground text-xs">Error</p>
+            <p className="font-medium text-muted-foreground text-xs">
+              Error message
+            </p>
             <code
               className="whitespace-pre-wrap break-words font-mono text-[13px] leading-normal"
               translate="no"
@@ -415,6 +431,86 @@ function TechnicalDetails({
   );
 }
 
+function sentSentence(item: FeedbackDetail): string {
+  const from = item.viaLabel ?? "the web app";
+  return `${item.reporterName} sent this from ${from} on ${formatDateTime(new Date(item.createdAt))}.`;
+}
+
+function reporterSees(item: FeedbackDetail): string {
+  const who = item.reporterFirstName ?? "The reporter";
+  return `${who} sees ${FEEDBACK_STATUS_LABELS[item.status]}`;
+}
+
+function LinearProperties({ item }: { item: FeedbackDetail }) {
+  const assignee = item.assignee
+    ? toUserAvatarUser({
+        userId: item.assignee.userId,
+        name: item.assignee.name,
+        email: item.assignee.email,
+        image: item.assignee.avatarUrl,
+      })
+    : null;
+  return (
+    <>
+      <dl className="grid grid-cols-[7rem_1fr] gap-x-3 gap-y-2.5 text-sm">
+        <dt className="text-muted-foreground">Status</dt>
+        <dd className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-medium text-xs">
+            <span
+              aria-hidden="true"
+              className="size-2 rounded-full"
+              style={{ backgroundColor: item.stateColor }}
+            />
+            {item.stateName}
+          </span>
+          <span className="text-muted-foreground text-xs">
+            {reporterSees(item)}
+          </span>
+        </dd>
+        <dt className="text-muted-foreground">Priority</dt>
+        <dd>
+          <FeedbackPriority
+            label={item.priorityLabel}
+            priority={item.priority}
+          />
+        </dd>
+        <dt className="text-muted-foreground">Assignee</dt>
+        <dd>
+          {assignee ? (
+            <span className="inline-flex items-center gap-2">
+              <UserAvatar size="sm" user={assignee} />
+              {assignee.displayName}
+            </span>
+          ) : (
+            <span className="text-muted-foreground">Unassigned</span>
+          )}
+        </dd>
+        <dt className="text-muted-foreground">Labels</dt>
+        <dd className="flex flex-wrap gap-1.5">
+          {item.labels.length > 0 ? (
+            item.labels.map((label) => (
+              <FeedbackLabelChip
+                color={label.color}
+                key={label.name}
+                name={label.name}
+              />
+            ))
+          ) : (
+            <span className="text-muted-foreground">None</span>
+          )}
+        </dd>
+        <dt className="text-muted-foreground">Project</dt>
+        <dd>{item.projectName ?? "None"}</dd>
+        <dt className="text-muted-foreground">Team</dt>
+        <dd>{item.teamName}</dd>
+      </dl>
+      <p className="mt-3.5 text-muted-foreground text-xs">
+        These come from Linear. To change them, open the issue there.
+      </p>
+    </>
+  );
+}
+
 function Activity({ item }: { item: FeedbackDetail }) {
   const events = activityEvents(item);
   return (
@@ -424,14 +520,14 @@ function Activity({ item }: { item: FeedbackDetail }) {
       </h3>
       <ol className="flex flex-col">
         {events.map((event, index) => (
-          <li className="flex gap-3" key={event.verb}>
+          <li className="flex gap-3" key={`${event.at}-${event.text}`}>
             <div className="flex w-3 shrink-0 flex-col items-center">
               <span
                 aria-hidden="true"
-                className={cn(
-                  "mt-1.5 size-[9px] rounded-full",
-                  ACTIVITY_DOT[event.verb]
-                )}
+                className="mt-1.5 size-[9px] rounded-full bg-zinc-400"
+                style={
+                  event.color ? { backgroundColor: event.color } : undefined
+                }
               />
               {index < events.length - 1 ? (
                 <span
@@ -442,25 +538,19 @@ function Activity({ item }: { item: FeedbackDetail }) {
             </div>
             <div className="flex min-w-0 flex-1 flex-col gap-1 pb-[18px]">
               <p className="text-sm text-zinc-700 leading-normal dark:text-zinc-300">
-                <span className="font-semibold text-foreground">
-                  {event.verb}
-                </span>{" "}
-                by {event.by}
+                {event.text}
               </p>
-              <RelativeTime
-                className="text-[13px] text-muted-foreground tabular-nums"
-                date={event.at}
-              />
-              {event.note ? (
-                <div className="mt-1.5 flex flex-col gap-1 rounded-lg border bg-zinc-50 px-3 py-2.5 dark:bg-zinc-900">
-                  <p className="font-medium text-muted-foreground text-xs">
-                    Note to reporter
-                  </p>
-                  <p className="whitespace-pre-wrap break-words text-sm leading-normal">
-                    {event.note}
-                  </p>
+              {event.body ? (
+                <div className="rounded-lg bg-muted px-3 py-2">
+                  <CommentMarkdown body={event.body} />
                 </div>
               ) : null}
+              <time
+                className="text-[13px] text-muted-foreground tabular-nums"
+                dateTime={event.at}
+              >
+                {formatDateTimeShort(new Date(event.at))}
+              </time>
             </div>
           </li>
         ))}
@@ -471,38 +561,48 @@ function Activity({ item }: { item: FeedbackDetail }) {
 
 function activityEvents(item: FeedbackDetail): {
   at: string;
-  by: string;
-  note: string | null;
-  verb: ActivityVerb;
+  body: string | null;
+  color: string | null;
+  text: string;
 }[] {
+  const from = item.viaLabel ?? "the web app";
   const events: {
     at: string;
-    by: string;
-    note: string | null;
-    verb: ActivityVerb;
+    body: string | null;
+    color: string | null;
+    text: string;
   }[] = [
     {
-      verb: "Reported",
-      by: item.reporterLabel,
       at: item.createdAt,
-      note: null,
+      body: null,
+      color: null,
+      text: `${item.reporterName} sent this report from ${from}. Linear filed it as ${item.identifier}.`,
     },
   ];
-  if (!item.statusUpdatedAt) {
-    return events;
+  for (const event of item.activity) {
+    const actor = event.actorName ?? "Someone";
+    if (event.kind === "comment") {
+      events.push({
+        at: event.at,
+        body: event.body,
+        color: null,
+        text: `${actor} commented in Linear:`,
+      });
+      continue;
+    }
+    const moved =
+      event.fromState && event.toState
+        ? `moved it from ${event.fromState} to ${event.toState}`
+        : event.toState
+          ? `moved it to ${event.toState}`
+          : "changed its status";
+    events.push({
+      at: event.at,
+      body: null,
+      color: event.toStateColor,
+      text: `${actor} ${moved}.`,
+    });
   }
-  const verb: ActivityVerb =
-    item.status === "open"
-      ? "Reopened"
-      : item.status === "resolved"
-        ? "Resolved"
-        : "Declined";
-  events.push({
-    verb,
-    by: item.statusUpdatedByLabel ?? "Deleted user",
-    at: item.statusUpdatedAt,
-    note: verb === "Reopened" ? null : item.adminNote,
-  });
   return events;
 }
 
@@ -511,12 +611,12 @@ function techSummary(
   errorMessage: string | null
 ): string {
   if (toolName && errorMessage) {
-    return "Tool and error";
+    return "Tool and error message";
   }
   if (toolName) {
     return "Tool";
   }
-  return "Error";
+  return "Error message";
 }
 
 function technicalText(
@@ -525,7 +625,7 @@ function technicalText(
 ): string {
   return [
     toolName ? `Tool: ${toolName}` : "",
-    errorMessage ? `Error: ${errorMessage}` : "",
+    errorMessage ? `Error message: ${errorMessage}` : "",
   ]
     .filter((line) => line.length > 0)
     .join("\n");

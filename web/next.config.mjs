@@ -46,6 +46,13 @@ const nextConfig = {
       },
     ];
   },
+
+  // Next.js 16.3 turned this on, and it can leave an idle tab prefetching every
+  // visible link in a loop (https://github.com/vercel/next.js/issues/97135).
+  // Remove once a release fixes that and an idle production tab stays quiet.
+  experimental: {
+    optimisticRouting: false,
+  },
 };
 
 const withMfe = withMicrofrontends(nextConfig);

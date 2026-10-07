@@ -1,7 +1,7 @@
 // Posts messages to Slack via the configured incoming webhook URL.
 //
 // The webhook URL is stored in the `slack_channel_config` singleton row,
-// edited via Settings > Notifications by workspace admins. If unset, calls
+// edited via Settings > Integrations by workspace admins. If unset, calls
 // become a no-op with a warning so local development and tests don't need a
 // webhook configured. Network/HTTP failures are logged but never thrown —
 // Slack is a notification side-channel and a Slack outage must not break the

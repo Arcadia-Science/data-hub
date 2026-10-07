@@ -1,6 +1,8 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { AppSidebar } from "@/components/app-sidebar";
+import { FeedbackDialogProvider } from "@/components/feedback/feedback-dialog-provider";
+import { FeedbackMenuItem } from "@/components/feedback/feedback-menu-item";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { NotificationsProvider } from "@/components/notifications/notifications-provider";
 import { ArchiveDownloadProvider } from "@/components/runs/archive-download-provider";
@@ -16,6 +18,7 @@ import { getSidebarInstruments } from "@/lib/api/sidebar";
 import { auth, authInstance } from "@/lib/auth";
 import { listChangelogEntries } from "@/lib/changelog/entries";
 import { groupChangelogByDate } from "@/lib/changelog/group";
+import { isFeedbackConfigured } from "@/lib/linear/config";
 import { SIDEBAR_COOKIE_NAME } from "@/lib/sidebar-persistence";
 import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
@@ -47,13 +50,14 @@ export default async function AppLayout({
   // The changelog window opens from the account menu on every page. Grouping
   // here avoids a second request, and the files are small enough to send
   // with the sidebar.
-  const [instruments, initialUnreadCount, timeZone] = session
+  const [instruments, initialUnreadCount, timeZone, feedbackEnabled] = session
     ? await Promise.all([
         getSidebarInstruments(),
         countUnread(session.user.id),
         getViewerTimeZone(),
+        isFeedbackConfigured(),
       ])
-    : [[], 0, "UTC"];
+    : [[], 0, "UTC", false];
   const changelogSections = session
     ? groupChangelogByDate(listChangelogEntries(), timeZone)
     : [];
@@ -81,18 +85,22 @@ export default async function AppLayout({
     <NotificationsProvider initialUnreadCount={initialUnreadCount}>
       <ArchiveDownloadProvider>
         <SidebarProvider defaultOpen={sidebarDefaultOpen}>
-          <AppSidebar
-            changelogSections={changelogSections}
-            instruments={instruments}
-            session={session}
-            signOutAction={async () => {
-              "use server";
-              await authInstance.api.signOut({
-                headers: await headers(),
-              });
-              redirect("/login");
-            }}
-          />
+          <FeedbackDialogProvider>
+            <AppSidebar
+              changelogSections={changelogSections}
+              instruments={instruments}
+              session={session}
+              signOutAction={async () => {
+                "use server";
+                await authInstance.api.signOut({
+                  headers: await headers(),
+                });
+                redirect("/login");
+              }}
+            >
+              {feedbackEnabled ? <FeedbackMenuItem /> : null}
+            </AppSidebar>
+          </FeedbackDialogProvider>
           {/* `min-w-0` lets the main pane shrink beside the sidebar so wide
               tables scroll inside their container instead of stretching the page. */}
           <SidebarInset className="min-w-0 pb-12">

@@ -4,6 +4,7 @@ import http from "node:http";
 import net from "node:net";
 import { Client, Pool } from "pg";
 import { CREATE_NATURAL_FILENAME_COLLATION } from "@/lib/db/collations";
+import { startLinearFakeServer } from "@/tests/integration/linear-fake-server";
 
 const TEST_DB = "data_hub_test";
 // Matches the credentials expected by the CI Postgres service container
@@ -12,6 +13,7 @@ const PG_URL = "postgres://postgres:postgres@127.0.0.1:5432";
 
 let serverProcess: ChildProcess | null = null;
 let slackCaptureServer: http.Server | null = null;
+let closeLinearFake: (() => Promise<void>) | null = null;
 
 // Captured Slack DM calls (chat.postMessage). Separate from the webhook buffer
 // so tests can assert each channel independently.
@@ -260,6 +262,10 @@ export async function setup() {
   //    in tests (PAT auth). AUTH_GOOGLE_* stubs prevent startup errors from
   //    the Google OAuth provider config. BETTER_AUTH_URL must match the
   //    ephemeral test server origin.
+  const linearFake = await startLinearFakeServer();
+  closeLinearFake = linearFake.close;
+  const linearFakeUrl = linearFake.url;
+
   const port = await getFreePort();
   const baseUrl = `http://127.0.0.1:${port}`;
 
@@ -296,6 +302,9 @@ export async function setup() {
     // Shared secret the cron sweep route checks. Tests send the same value
     // as a Bearer token (see upload-queue-sweep.test.ts).
     CRON_SECRET: "test-cron-secret",
+    // Lets settings routes encrypt secrets they write. 32 bytes, hex.
+    INTEGRATION_SECRETS_KEY: "a".repeat(64),
+    __TEST_LINEAR_API_URL: linearFakeUrl,
   };
   // Strip the Lambda Function URL so "not configured" test cases work
   // regardless of the developer's local .env. Tests that need a stubbed
@@ -345,6 +354,10 @@ export async function setup() {
   // library-level calls to `notifyRunCreated`/`notifyComment` (which invoke
   // `sendSlackDm` directly in-process) also route through the capture server
   // rather than the real Slack API or no-op on a missing token.
+  process.env.__TEST_LINEAR_API_URL = linearFakeUrl;
+  // Library helpers that open saved secrets in the test process need the same
+  // key the server used to encrypt them.
+  process.env.INTEGRATION_SECRETS_KEY = serverEnv.INTEGRATION_SECRETS_KEY;
   process.env.SLACK_BOT_TOKEN = "xoxb-test-bot-token";
   process.env.__TEST_SLACK_API_URL = `${slackCaptureBaseUrl}/api/`;
   // Point the `@/lib/db` singleton at the test DB so library helpers
@@ -365,6 +378,10 @@ export async function setup() {
         slackCaptureServer?.close((err) => (err ? reject(err) : resolve()))
       );
       slackCaptureServer = null;
+    }
+    if (closeLinearFake) {
+      await closeLinearFake();
+      closeLinearFake = null;
     }
   };
 }

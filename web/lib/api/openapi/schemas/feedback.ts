@@ -4,6 +4,7 @@ import {
   FEEDBACK_DETAIL_MAX,
   FEEDBACK_TITLE_MAX,
   feedbackKindSchema,
+  feedbackListStatusSchema,
   feedbackSourceSchema,
   feedbackStatusSchema,
 } from "@/lib/api/feedback-schema";
@@ -18,7 +19,7 @@ function optionalText(max: number) {
 }
 
 export const listFeedbackQuery = z.object({
-  status: feedbackStatusSchema.optional(),
+  status: feedbackListStatusSchema.optional(),
   kind: feedbackKindSchema.optional(),
   page: z.coerce.number().int().min(1).optional(),
   per_page: z.coerce.number().int().min(1).max(100).optional(),
@@ -35,13 +36,6 @@ export const createFeedbackBody = z
     page_url: optionalText(FEEDBACK_DETAIL_MAX),
   })
   .openapi("CreateFeedbackBody");
-
-export const updateFeedbackBody = z
-  .object({
-    status: feedbackStatusSchema,
-    note: optionalText(FEEDBACK_DETAIL_MAX),
-  })
-  .openapi("UpdateFeedbackBody");
 
 const feedbackPerson = z.object({
   id: z.string(),
@@ -63,12 +57,42 @@ export const feedbackDetail = z
     oauth_client_name: z.string().nullable(),
     page_url: z.string().nullable(),
     status: feedbackStatusSchema,
-    admin_note: z.string().nullable(),
     reporter: feedbackPerson.nullable(),
-    status_updated_by: feedbackPerson.nullable(),
     status_updated_at: isoDateTime.nullable(),
     created_at: isoDateTime,
     updated_at: isoDateTime,
+    linear_issue: z.object({
+      identifier: z.string(),
+      url: z.string(),
+      state_name: z.string(),
+      state_type: z.string(),
+      state_color: z.string(),
+      priority: z.number().nullable(),
+      priority_label: z.string().nullable(),
+      labels: z.array(z.object({ name: z.string(), color: z.string() })),
+      assignee: z
+        .object({
+          name: z.string(),
+          email: z.string().nullable(),
+          avatar_url: z.string().nullable(),
+          user_id: z.string(),
+        })
+        .nullable(),
+      project_name: z.string().nullable(),
+      team_name: z.string(),
+    }),
+    activity: z
+      .array(
+        z.object({
+          kind: z.enum(["comment", "status"]),
+          at: isoDateTime,
+          actor_name: z.string().nullable(),
+          from_state: z.string().nullable(),
+          to_state: z.string().nullable(),
+          body: z.string().nullable(),
+        })
+      )
+      .nullable(),
   })
   .openapi("Feedback");
 
@@ -85,8 +109,18 @@ export const feedbackList = z
     total: z.number().int(),
     counts: z.object({
       open: z.number().int(),
+      closed: z.number().int(),
       resolved: z.number().int(),
       declined: z.number().int(),
     }),
+    groups: z.array(
+      z.object({
+        state_id: z.string(),
+        name: z.string(),
+        color: z.string(),
+        type: z.string(),
+        count: z.number().int(),
+      })
+    ),
   })
   .openapi("FeedbackList");

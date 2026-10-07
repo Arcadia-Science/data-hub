@@ -161,15 +161,10 @@ describe("Token creator", () => {
     const { id, token } = (await res.json()) as { id: string; token: string };
 
     const [row] = await getTestDb()
-      .select({
-        userId: personalAccessTokens.userId,
-        createdBy: personalAccessTokens.createdBy,
-      })
+      .select({ createdBy: personalAccessTokens.createdBy })
       .from(personalAccessTokens)
       .where(eq(personalAccessTokens.id, id));
-    // `user_id` is a deprecated copy of the creator, kept so a rollback to the
-    // previous release still works. Nothing reads it for sign-in.
-    expect(row).toEqual({ userId: admin.userId, createdBy: admin.userId });
+    expect(row).toEqual({ createdBy: admin.userId });
 
     const use = await api("/api/v1/instruments", { token });
     expect(use.status).toBe(200);
@@ -219,13 +214,10 @@ describe("Token creator", () => {
   it("records the creator on seeded tokens", async () => {
     const member = await seedTestUser();
     const [row] = await getTestDb()
-      .select({
-        userId: personalAccessTokens.userId,
-        createdBy: personalAccessTokens.createdBy,
-      })
+      .select({ createdBy: personalAccessTokens.createdBy })
       .from(personalAccessTokens)
       .where(eq(personalAccessTokens.id, member.tokenId));
-    expect(row).toEqual({ userId: member.userId, createdBy: member.userId });
+    expect(row).toEqual({ createdBy: member.userId });
   });
 });
 
@@ -411,16 +403,15 @@ describe("Token audit columns", () => {
 
     await db.delete(users).where(eq(users.id, userId));
 
-    // The foreign keys null both person columns on the token row.
+    // The foreign key nulls the creator on the token row.
     const [row] = await db
       .select({
-        userId: personalAccessTokens.userId,
         createdBy: personalAccessTokens.createdBy,
         revokedAt: personalAccessTokens.revokedAt,
       })
       .from(personalAccessTokens)
       .where(eq(personalAccessTokens.id, tokenId));
-    expect(row).toEqual({ userId: null, createdBy: null, revokedAt: null });
+    expect(row).toEqual({ createdBy: null, revokedAt: null });
 
     const after = await api("/api/v1/instruments", { token });
     expect(after.status).toBe(200);

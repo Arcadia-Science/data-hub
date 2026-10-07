@@ -86,20 +86,6 @@ export const archiveJobStatusEnum = pgEnum("archive_job_status", [
   "failed",
 ]);
 
-export const feedbackKindEnum = pgEnum("feedback_kind", [
-  "bug",
-  "feature_request",
-  "other",
-]);
-
-export const feedbackStatusEnum = pgEnum("feedback_status", [
-  "open",
-  "resolved",
-  "declined",
-]);
-
-export const feedbackSourceEnum = pgEnum("feedback_source", ["mcp", "web"]);
-
 export const users = pgTable("user", {
   // Better Auth-generated user ID (preserved across the Auth.js migration).
   id: text("id")
@@ -245,11 +231,14 @@ export const watcherReleaseConfig = pgTable(
 
 // Singleton row holding the org-wide Slack incoming webhook URL for
 // channel notifications on new runs. Edited via the admin-only "Slack
-// channel" section on `/settings/notifications`. Previously sourced from
+// channel" section on `/settings/integrations`. Previously sourced from
 // the `SLACK_WEBHOOK_URL` env var.
 //
 // When the table is empty (or `webhook_url` is NULL) channel notifications
-// are disabled — `sendSlackMessage` becomes a no-op.
+// are disabled — `sendSlackMessage` becomes a no-op. New values are stored
+// encrypted with the `PREFIX` marker from `lib/crypto/integration-secrets.ts`.
+// A value without that marker is a legacy plaintext URL and is still used
+// until an admin saves again.
 export const slackChannelConfig = pgTable(
   "slack_channel_config",
   {
@@ -271,19 +260,106 @@ export const slackChannelConfig = pgTable(
   ]
 );
 
+// Slack app credentials for DMs and "Connect Slack". A null column falls
+// back to the matching environment variable. Bot token and client secret
+// are encrypted; client id and team id are not secrets.
+export const slackAppConfig = pgTable(
+  "slack_app_config",
+  {
+    id: boolean("id").primaryKey().default(true),
+    botToken: text("bot_token"),
+    clientId: text("client_id"),
+    clientSecret: text("client_secret"),
+    teamId: text("team_id"),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+    updatedBy: text("updated_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+  },
+  (config) => [check("slack_app_config_singleton", sql`${config.id} = true`)]
+);
+
+// Linear OAuth app used to store feedback issues. Client secret and webhook
+// signing secret are encrypted. Team, project, and label names are kept so
+// the settings page can show the current choice before Linear answers.
+export const linearIntegrationConfig = pgTable(
+  "linear_integration_config",
+  {
+    id: boolean("id").primaryKey().default(true),
+    clientId: text("client_id"),
+    clientSecret: text("client_secret"),
+    webhookSecret: text("webhook_secret"),
+    teamId: text("team_id"),
+    teamName: text("team_name"),
+    projectId: text("project_id"),
+    projectName: text("project_name"),
+    bugLabelId: text("bug_label_id"),
+    bugLabelName: text("bug_label_name"),
+    featureLabelId: text("feature_label_id"),
+    featureLabelName: text("feature_label_name"),
+    otherLabelId: text("other_label_id"),
+    otherLabelName: text("other_label_name"),
+    workspaceId: text("workspace_id"),
+    workspaceName: text("workspace_name"),
+    workspaceUrlKey: text("workspace_url_key"),
+    teamKey: text("team_key"),
+    projectUrl: text("project_url"),
+    webhookRejections: integer("webhook_rejections").notNull().default(0),
+    lastWebhookRejectedAt: timestamp("last_webhook_rejected_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    lastWebhookRejectionReason: text("last_webhook_rejection_reason"),
+    lastWebhookAt: timestamp("last_webhook_at", {
+      withTimezone: true,
+      mode: "date",
+    }),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      mode: "date",
+    })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+    updatedBy: text("updated_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+  },
+  (config) => [
+    check("linear_integration_config_singleton", sql`${config.id} = true`),
+    check(
+      "linear_webhook_rejection_reason",
+      sql`${config.lastWebhookRejectionReason} is null or ${config.lastWebhookRejectionReason} in ('signature', 'stale')`
+    ),
+  ]
+);
+
+// One row for each Linear webhook delivery that Data Hub acted on. Linear
+// resends a delivery that was slow to answer, and the `Linear-Delivery` id is
+// the only thing that tells a resend apart from a second status change.
+export const linearWebhookDeliveries = pgTable("linear_webhook_deliveries", {
+  deliveryId: text("delivery_id").primaryKey(),
+  receivedAt: timestamp("received_at", {
+    withTimezone: true,
+    mode: "date",
+  })
+    .notNull()
+    .defaultNow(),
+});
+
 export const personalAccessTokens = pgTable(
   "personal_access_tokens",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    // Deprecated and not used for sign-in: a token acts as itself. New tokens
-    // still carry their creator here only so a rollback to the previous
-    // release keeps working. A follow-up change drops this column.
-    userId: text("user_id").references(() => users.id, {
-      onDelete: "set null",
-    }),
     // The admin who created the token. NULL after that user is deleted, and
-    // for tokens created before this column existed or by code that does not
-    // set it. A record of who made the token, never an acting identity.
+    // for tokens created by code that does not set it. A token acts as itself,
+    // so this is a record of who made it and never an acting identity.
     createdBy: text("created_by").references(() => users.id, {
       onDelete: "set null",
     }),
@@ -325,7 +401,6 @@ export const personalAccessTokens = pgTable(
       .defaultNow(),
   },
   (token) => [
-    index("idx_personal_access_tokens_user_id").on(token.userId),
     index("idx_personal_access_tokens_created_by").on(token.createdBy),
   ]
 );
@@ -926,62 +1001,6 @@ export const archiveJobs = pgTable(
   ]
 );
 
-// Product feedback (bugs and requests about Data Hub). Distinct from run
-// comments, which stay attached to a specific instrument run.
-export const feedback = pgTable(
-  "feedback",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    // Reporter. `set null` so deleting a user keeps the report for admins.
-    userId: text("user_id").references(() => users.id, {
-      onDelete: "set null",
-    }),
-    kind: feedbackKindEnum("kind").notNull(),
-    title: text("title").notNull(),
-    description: text("description").notNull(),
-    attemptedAction: text("attempted_action"),
-    toolName: text("tool_name"),
-    errorMessage: text("error_message"),
-    source: feedbackSourceEnum("source").notNull(),
-    // OAuth client id when sent over MCP. Not a foreign key, so a report
-    // keeps its client id if the client row is later removed.
-    oauthClientId: text("oauth_client_id"),
-    pageUrl: text("page_url"),
-    status: feedbackStatusEnum("status").notNull().default("open"),
-    adminNote: text("admin_note"),
-    statusUpdatedBy: text("status_updated_by").references(() => users.id, {
-      onDelete: "set null",
-    }),
-    statusUpdatedAt: timestamp("status_updated_at", {
-      withTimezone: true,
-      mode: "date",
-    }),
-    createdAt: timestamp("created_at", {
-      withTimezone: true,
-      mode: "date",
-    })
-      .notNull()
-      .defaultNow(),
-    updatedAt: timestamp("updated_at", {
-      withTimezone: true,
-      mode: "date",
-    })
-      .notNull()
-      .defaultNow()
-      .$onUpdate(() => new Date()),
-  },
-  (row) => [
-    index("idx_feedback_status_created_at").on(
-      row.status,
-      row.createdAt.desc()
-    ),
-    index("idx_feedback_user_id_created_at").on(
-      row.userId,
-      row.createdAt.desc()
-    ),
-  ]
-);
-
 // Notification trigger taxonomy. `run_created` fires once per newly-created
 // run for every user who has an enabled per-instrument subscription;
 // `comment_attributed` and `comment_participated` fire on a new comment for
@@ -990,7 +1009,7 @@ export const feedback = pgTable(
 // rules so the popover doesn't show the same comment twice. `generic` rows
 // are free-text messages posted by integrations via the dispatch endpoint.
 // `feedback_submitted` and `feedback_updated` are also anchor-less (`runId`
-// NULL) and point at a `feedback` row instead.
+// NULL). Their `feedbackId` is the Linear issue id.
 export const notificationTypeEnum = pgEnum("notification_type", [
   "run_created",
   "comment_attributed",
@@ -1128,11 +1147,9 @@ export const notifications = pgTable(
     runId: uuid("run_id").references(() => instrumentRuns.id, {
       onDelete: "cascade",
     }),
-    // Set for feedback notifications. Cascade so deleting a report removes
-    // the bell rows that pointed at it.
-    feedbackId: uuid("feedback_id").references(() => feedback.id, {
-      onDelete: "cascade",
-    }),
+    // Linear issue id for feedback notifications. Not a foreign key: the
+    // issue lives in Linear, not in this database.
+    feedbackId: uuid("feedback_id"),
     // NULL for `run_created` and `generic`. Set for both comment trigger
     // types.
     commentId: uuid("comment_id").references(() => runComments.id, {

@@ -1,12 +1,20 @@
 import type { NextRequest } from "next/server";
 import { requireSession } from "@/lib/api/auth";
-import { apiError, UNAUTHORIZED, VALIDATION_ERROR } from "@/lib/api/errors";
 import {
-  countFeedbackByStatus,
+  apiError,
+  apiErrorFromResult,
+  UNAUTHORIZED,
+  VALIDATION_ERROR,
+} from "@/lib/api/errors";
+import {
   createFeedback,
   listFeedback,
+  presentFeedback,
 } from "@/lib/api/feedback";
-import { serializeFeedback } from "@/lib/api/feedback-json";
+import {
+  serializeFeedback,
+  serializeFeedbackGroup,
+} from "@/lib/api/feedback-json";
 import {
   FEEDBACK_PAGE_SIZE,
   feedbackContentSchema,
@@ -49,9 +57,16 @@ export async function POST(request: NextRequest) {
     source: "web",
     pageUrl: body.page_url || null,
   });
+  if (!result.ok) {
+    return apiErrorFromResult(result);
+  }
 
+  const isAdmin = await userIsAdmin(authResult.userId);
   return Response.json(
-    { duplicate: result.duplicate, feedback: serializeFeedback(result.item) },
+    {
+      duplicate: result.duplicate,
+      feedback: serializeFeedback(presentFeedback(result.item, isAdmin)),
+    },
     { status: result.duplicate ? 200 : 201 }
   );
 }
@@ -80,20 +95,21 @@ export async function GET(request: NextRequest) {
   const page = query.data.page ?? 1;
   const viewer = { viewerId: authResult.userId, isAdmin };
 
-  const [list, counts] = await Promise.all([
-    listFeedback({
-      ...viewer,
-      status: query.data.status,
-      kind: query.data.kind,
-      limit: perPage,
-      offset: (page - 1) * perPage,
-    }),
-    countFeedbackByStatus(viewer),
-  ]);
+  const result = await listFeedback({
+    ...viewer,
+    status: query.data.status,
+    kind: query.data.kind,
+    limit: perPage,
+    offset: (page - 1) * perPage,
+  });
+  if (!result.ok) {
+    return apiErrorFromResult(result);
+  }
 
   return Response.json({
-    feedback: list.items.map(serializeFeedback),
-    total: list.total,
-    counts,
+    feedback: result.items.map(serializeFeedback),
+    total: result.total,
+    counts: result.counts,
+    groups: result.groups.map(serializeFeedbackGroup),
   });
 }

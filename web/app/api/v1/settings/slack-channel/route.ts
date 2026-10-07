@@ -1,6 +1,8 @@
 import type { NextRequest } from "next/server";
 import { requireAdmin } from "@/lib/api/auth";
-import { apiError, VALIDATION_ERROR } from "@/lib/api/errors";
+import { apiError, INTERNAL_ERROR, VALIDATION_ERROR } from "@/lib/api/errors";
+import { IntegrationSecretsKeyError } from "@/lib/crypto/integration-secrets";
+import { lastUpdatedResponse } from "@/lib/integrations/last-updated";
 import {
   getSlackChannelConfigForAdmin,
   upsertSlackChannelWebhookUrl,
@@ -8,7 +10,7 @@ import {
 import { slackChannelWebhookPutBodySchema } from "@/lib/slack/webhook-url";
 
 // Admin-only read/write of the singleton `slack_channel_config` row,
-// edited via the "Slack channel" section on `/settings/notifications`.
+// edited via the "Slack channel" section on `/settings/integrations`.
 // The webhook URL is never returned on GET — only a `configured` flag.
 
 interface SlackChannelResponse {
@@ -26,14 +28,7 @@ async function readCurrent(): Promise<SlackChannelResponse> {
 
   return {
     configured: config.configured,
-    updated_at: config.updatedAt ? config.updatedAt.toISOString() : null,
-    updated_by: config.updatedById
-      ? {
-          id: config.updatedById,
-          name: config.updatedByName,
-          email: config.updatedByEmail,
-        }
-      : null,
+    ...lastUpdatedResponse(config.lastUpdated),
   };
 }
 
@@ -70,10 +65,17 @@ export async function PUT(request: NextRequest) {
     });
   }
 
-  await upsertSlackChannelWebhookUrl(
-    parsed.data.webhook_url,
-    authResult.userId
-  );
+  try {
+    await upsertSlackChannelWebhookUrl(
+      parsed.data.webhook_url,
+      authResult.userId
+    );
+  } catch (err) {
+    if (err instanceof IntegrationSecretsKeyError) {
+      return apiError(500, INTERNAL_ERROR, err.message);
+    }
+    throw err;
+  }
 
   return Response.json(await readCurrent());
 }

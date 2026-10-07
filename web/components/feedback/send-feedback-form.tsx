@@ -91,8 +91,12 @@ export function SendFeedbackForm({
           }),
         });
         if (!res.ok) {
+          const payload = (await res.json().catch(() => null)) as {
+            error?: { message?: string };
+          } | null;
           setSubmitError(
-            "Couldn't send feedback. Check your connection and try again."
+            payload?.error?.message ??
+              "Couldn't send feedback. Check your connection and try again."
           );
           return;
         }
@@ -233,7 +237,7 @@ export function SendFeedbackForm({
                   {(field) => (
                     <div className="grid gap-2">
                       <Label htmlFor="feedback-attemptedAction">
-                        What were you trying to do?
+                        Trying to do
                       </Label>
                       <Textarea
                         autoComplete="off"
@@ -253,7 +257,7 @@ export function SendFeedbackForm({
                 <form.Field name="toolName">
                   {(field) => (
                     <div className="grid gap-2">
-                      <Label htmlFor="feedback-toolName">Tool involved</Label>
+                      <Label htmlFor="feedback-toolName">Tool</Label>
                       <Input
                         autoComplete="off"
                         id="feedback-toolName"

@@ -3,8 +3,8 @@ import {
   createFeedback,
   getFeedbackForViewer,
   listFeedback,
+  presentFeedback,
   previewFeedbackDescription,
-  updateFeedback,
 } from "@/lib/api/feedback";
 import {
   FEEDBACK_PAGE_SIZE,
@@ -15,15 +15,12 @@ import { toolRegistrationConfig } from "@/lib/mcp/catalog/register";
 import {
   errorResult,
   getMcpUserId,
-  requireMcpAdmin,
-  requireMcpWrite,
   structuredResult,
 } from "@/lib/mcp/tools/helpers";
 import {
   getFeedbackTool,
   listFeedbackTool,
   sendFeedbackTool,
-  updateFeedbackTool,
 } from "./feedback.defs";
 
 export function registerFeedbackTools(server: McpServer) {
@@ -47,9 +44,12 @@ export function registerFeedbackTools(server: McpServer) {
         source: "mcp",
         oauthClientId: ctx.http?.authInfo?.clientId ?? null,
       });
+      if (!result.ok) {
+        return errorResult(result.message);
+      }
       return structuredResult({
         duplicate: result.duplicate,
-        feedback: result.item,
+        feedback: presentFeedback(result.item, await userIsAdmin(userId)),
       });
     }
   );
@@ -73,12 +73,17 @@ export function registerFeedbackTools(server: McpServer) {
         limit,
         offset: (page - 1) * limit,
       });
+      if (!result.ok) {
+        return errorResult(result.message);
+      }
       return structuredResult({
         feedback: result.items.map((item) => ({
           ...item,
           description: previewFeedbackDescription(item.description),
         })),
         total: result.total,
+        counts: result.counts,
+        groups: result.groups,
       });
     }
   );
@@ -91,46 +96,17 @@ export function registerFeedbackTools(server: McpServer) {
       if (!userId) {
         return errorResult("Authenticated user not available on this session.");
       }
-      const item = await getFeedbackForViewer(args.id, {
+      const result = await getFeedbackForViewer(args.id, {
         viewerId: userId,
         isAdmin: await userIsAdmin(userId),
       });
-      if (!item) {
+      if (!result.ok) {
+        return errorResult(result.message);
+      }
+      if (!result.item) {
         return errorResult(`Feedback '${args.id}' not found.`);
       }
-      return structuredResult({ feedback: item });
-    }
-  );
-
-  server.registerTool(
-    updateFeedbackTool.name,
-    toolRegistrationConfig(updateFeedbackTool),
-    async (args, ctx) => {
-      const authInfo = ctx.http?.authInfo;
-      const writeError = requireMcpWrite(authInfo);
-      if (writeError) {
-        return writeError;
-      }
-      const adminError = await requireMcpAdmin(authInfo);
-      if (adminError) {
-        return adminError;
-      }
-      const userId = getMcpUserId(authInfo);
-      if (!userId) {
-        return errorResult("Authenticated user not available on this session.");
-      }
-      const note =
-        args.note === undefined ? undefined : args.note.trim() || null;
-      const updated = await updateFeedback({
-        id: args.id,
-        adminUserId: userId,
-        status: args.status,
-        note,
-      });
-      if (!updated) {
-        return errorResult(`Feedback '${args.id}' not found.`);
-      }
-      return structuredResult({ feedback: updated });
+      return structuredResult({ feedback: result.item });
     }
   );
 }
