@@ -2,7 +2,7 @@
 // are encrypted. Nothing falls back to an environment variable: Linear is
 // off until an admin saves a client ID, client secret, and team.
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   type FeedbackKind,
@@ -13,7 +13,11 @@ import {
   readMaybeEncryptedSecret,
 } from "@/lib/crypto/integration-secrets";
 import { db } from "@/lib/db";
-import { linearIntegrationConfig, users } from "@/lib/db/schema";
+import {
+  linearIntegrationConfig,
+  linearWebhookDeliveries,
+  users,
+} from "@/lib/db/schema";
 import { nextPlain, nextSecret } from "@/lib/integrations/config-patch";
 import {
   type PlainFieldStatus,
@@ -192,6 +196,35 @@ export async function getLinearFeedbackSetup(): Promise<LinearFeedbackSetup | nu
 
 export async function isFeedbackConfigured(): Promise<boolean> {
   return (await getLinearFeedbackSetup()) != null;
+}
+
+// `updated_at` is the time of the last admin save. Setting it to itself in the
+// same update stops its `$onUpdate` hook from moving it on every delivery.
+export async function recordLinearWebhookReceived(): Promise<void> {
+  await db
+    .update(linearIntegrationConfig)
+    .set({
+      lastWebhookAt: new Date(),
+      updatedAt: sql`${linearIntegrationConfig.updatedAt}`,
+    })
+    .where(eq(linearIntegrationConfig.id, true));
+}
+
+// Returns false when this delivery id was seen before, so a resend by Linear
+// does not notify the reporter twice. A delivery without an id cannot be
+// told apart and always counts as new.
+export async function claimLinearWebhookDelivery(
+  deliveryId: string | null
+): Promise<boolean> {
+  if (!deliveryId) {
+    return true;
+  }
+  const claimed = await db
+    .insert(linearWebhookDeliveries)
+    .values({ deliveryId })
+    .onConflictDoNothing()
+    .returning({ deliveryId: linearWebhookDeliveries.deliveryId });
+  return claimed.length > 0;
 }
 
 export async function getLinearConfigForAdmin(): Promise<LinearConfigForAdmin> {

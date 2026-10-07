@@ -10,6 +10,7 @@ import {
   sql,
 } from "drizzle-orm";
 import { type ActorRef, type ActorToken, actorColumns } from "@/lib/api/actor";
+import { FEEDBACK_STATUS_LABELS } from "@/lib/api/feedback-schema";
 import { runCommentHref } from "@/lib/comment-hash";
 import { db } from "@/lib/db";
 import {
@@ -29,6 +30,7 @@ import {
 import {
   buildCommentBlocks,
   buildFeedbackSubmittedBlocks,
+  buildFeedbackUpdatedBlocks,
   buildGenericBlocks,
   buildRunCreatedBlocks,
   deliverSlackDms,
@@ -52,8 +54,9 @@ import { toInitials } from "@/lib/utils";
 //                                via `POST /api/v1/notifications/dispatch`
 //                                (gated by the `notifications:create` scope).
 //   - `feedback_submitted`    : a new product-feedback report; admins only.
-//   - `feedback_updated`      : an admin resolved or declined a report; the
-//                                reporter only.
+//   - `feedback_updated`      : Linear moved a report's issue to a completed,
+//                                canceled, or duplicate state; the reporter
+//                                only.
 //
 // Preference-mutating routes remain session-only — they're personal-UX
 // surfaces, never invoked by PATs.
@@ -928,6 +931,14 @@ export async function notifyGeneric(input: {
   };
 }
 
+// "Resolved (Done)": the Data Hub status, then the Linear state it came from.
+function feedbackStatusLabel(
+  status: "resolved" | "declined",
+  stateName: string
+): string {
+  return `${FEEDBACK_STATUS_LABELS[status]} (${stateName})`;
+}
+
 // Admins except the reporter. Missing preference rows count as in-app on.
 export async function notifyFeedbackSubmitted(input: {
   feedbackId: string;
@@ -993,4 +1004,68 @@ export async function notifyFeedbackSubmitted(input: {
       },
     }));
   await deliverSlackDms(slackJobs);
+}
+
+// Reporter only, and only for resolved / declined. The status comes from
+// Linear, so there is no Data Hub admin on the notification.
+export async function notifyFeedbackUpdated(input: {
+  feedbackId: string;
+  reporterUserId: string;
+  title: string;
+  status: "resolved" | "declined";
+  stateName: string;
+}): Promise<void> {
+  const [recipient] = await db
+    .select({
+      userId: users.id,
+      feedbackUpdatedEnabled: notificationPreferences.feedbackUpdatedEnabled,
+      slackUserId: slackConnections.slackUserId,
+      slackFeedbackUpdatedEnabled:
+        notificationPreferences.slackFeedbackUpdatedEnabled,
+      slackRevokedAt: slackConnections.revokedAt,
+    })
+    .from(users)
+    .leftJoin(
+      notificationPreferences,
+      eq(notificationPreferences.userId, users.id)
+    )
+    .leftJoin(slackConnections, eq(slackConnections.userId, users.id))
+    .where(eq(users.id, input.reporterUserId))
+    .limit(1);
+
+  if (!recipient) {
+    return;
+  }
+
+  const statusLabel = feedbackStatusLabel(input.status, input.stateName);
+  const body = `Your feedback "${input.title}" was marked ${statusLabel}.`;
+  if (recipient.feedbackUpdatedEnabled !== false) {
+    await db.insert(notifications).values({
+      userId: recipient.userId,
+      type: "feedback_updated",
+      actorUserId: null,
+      feedbackId: input.feedbackId,
+      body,
+    });
+  }
+
+  if (
+    recipient.slackUserId &&
+    !recipient.slackRevokedAt &&
+    (recipient.slackFeedbackUpdatedEnabled ?? false)
+  ) {
+    await deliverSlackDms([
+      {
+        userId: recipient.userId,
+        slackUserId: recipient.slackUserId,
+        payload: {
+          text: body,
+          blocks: buildFeedbackUpdatedBlocks({
+            title: input.title,
+            statusLabel,
+          }),
+        },
+      },
+    ]);
+  }
 }

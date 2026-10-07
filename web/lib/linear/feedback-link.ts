@@ -4,10 +4,12 @@
 // kind. List queries filter on that URL, so Data Hub never has to store the
 // issue id itself.
 
+import { z } from "zod";
 import {
   type FeedbackKind,
   type FeedbackStatus,
   feedbackKindSchema,
+  feedbackSourceSchema,
 } from "@/lib/api/feedback-schema";
 
 export const FEEDBACK_REPORT_MARKER = "/feedback/r/";
@@ -20,6 +22,10 @@ export const LINEAR_CLOSED_STATE_TYPES = [
   "canceled",
   "duplicate",
 ] as const;
+
+export function isLinearStateClosed(type: string): boolean {
+  return (LINEAR_CLOSED_STATE_TYPES as readonly string[]).includes(type);
+}
 
 export function feedbackReporterMarker(reporterId: string): string {
   return `${FEEDBACK_REPORT_MARKER}${encodeURIComponent(reporterId)}/`;
@@ -43,6 +49,43 @@ export function feedbackIssueMarker(input: {
   reporterId: string;
 }): string {
   return `Data Hub report: ${encodeURIComponent(input.reporterId)} / ${input.kind}`;
+}
+
+// The metadata Data Hub writes on a report's attachment. Both the list views
+// and the webhook read it through `readFeedbackReport`, so they cannot disagree
+// about what counts as a report.
+export const feedbackReportMetadataSchema = z.object({
+  attemptedAction: z.string().optional(),
+  description: z.string(),
+  errorMessage: z.string().optional(),
+  kind: feedbackKindSchema,
+  oauthClientId: z.string().optional(),
+  pageUrl: z.string().optional(),
+  reporterUserId: z.string(),
+  source: feedbackSourceSchema,
+  title: z.string(),
+  toolName: z.string().optional(),
+  version: z.number(),
+});
+
+export type FeedbackReportMetadata = z.infer<
+  typeof feedbackReportMetadataSchema
+>;
+
+// Returns the checked metadata of the issue's Data Hub attachment, or null
+// when the issue is not a Data Hub report. Other integrations' attachments
+// are never parsed.
+export function readFeedbackReport(issue: {
+  attachments: { nodes: { metadata: Record<string, unknown>; url: string }[] };
+}): FeedbackReportMetadata | null {
+  const attachment = issue.attachments.nodes.find((node) =>
+    node.url.includes(FEEDBACK_REPORT_MARKER)
+  );
+  if (!attachment) {
+    return null;
+  }
+  const metadata = feedbackReportMetadataSchema.safeParse(attachment.metadata);
+  return metadata.success ? metadata.data : null;
 }
 
 export function kindFromAttachmentUrl(url: string): FeedbackKind | null {

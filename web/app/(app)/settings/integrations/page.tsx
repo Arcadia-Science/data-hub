@@ -5,6 +5,7 @@ import { SlackAppCard } from "@/components/integrations/slack-app-card";
 import { SlackChannelCard } from "@/components/notifications/slack-channel-card";
 import { AdminsOnly } from "@/components/settings/admins-only";
 import { SettingsPageContent } from "@/components/settings/settings-page-content";
+import { appOrigin } from "@/lib/app-origin";
 import { auth } from "@/lib/auth";
 import { getLinearConfigForAdmin } from "@/lib/linear/config";
 import { getSlackAppConfigForAdmin } from "@/lib/slack/app-config";
@@ -58,9 +59,11 @@ export default async function IntegrationsSettingsPage() {
           clientSecret={linear.clientSecret}
           key={linear.lastUpdated?.at ?? "never-saved"}
           labels={linear.labels}
+          lastWebhookAt={linear.lastWebhookAt?.toISOString() ?? null}
           project={linear.project}
           team={linear.team}
           webhookSecret={linear.webhookSecret}
+          webhookUrl={`${appOrigin()}/api/v1/integrations/linear/webhook`}
         />
         <SlackAppCard
           botToken={slackApp.botToken}

@@ -234,6 +234,21 @@ export function buildFeedbackSubmittedBlocks(opts: {
   ];
 }
 
+export function buildFeedbackUpdatedBlocks(opts: {
+  title: string;
+  statusLabel: string;
+}): (Block | KnownBlock)[] {
+  return [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `Your feedback *${escapeMrkdwn(opts.title)}* was marked *${escapeMrkdwn(opts.statusLabel)}*.`,
+      },
+    },
+  ];
+}
+
 export function buildGenericBlocks(opts: {
   actorDisplayName: string;
   message: string;

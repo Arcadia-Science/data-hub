@@ -6,8 +6,10 @@ import {
   feedbackIssueMarker,
   feedbackReporterMarker,
   feedbackStatusFromLinearState,
+  isLinearStateClosed,
   kindFromAttachmentUrl,
   pageFeedbackSummaries,
+  readFeedbackReport,
 } from "@/lib/linear/feedback-link";
 
 describe("feedback attachment links", () => {
@@ -93,5 +95,47 @@ describe("feedback attachment links", () => {
     expect(page.counts).toEqual({ open: 2, resolved: 1, declined: 0 });
     expect(page.total).toBe(1);
     expect(page.ids).toEqual(["a"]);
+  });
+
+  it("treats completed, canceled, and duplicate as closed", () => {
+    for (const type of ["completed", "canceled", "duplicate"]) {
+      expect(isLinearStateClosed(type)).toBe(true);
+    }
+    for (const type of ["triage", "backlog", "unstarted", "started"]) {
+      expect(isLinearStateClosed(type)).toBe(false);
+    }
+  });
+
+  it("reads the report from the Data Hub attachment and ignores the rest", () => {
+    const metadata = {
+      version: 1,
+      reporterUserId: "user-1",
+      kind: "bug",
+      title: "Export fails",
+      description: "Stops halfway.",
+      source: "web",
+    };
+    const pullRequest = {
+      url: "https://github.com/o/r/pull/1",
+      metadata: { reviews: [{ state: "approved" }], status: { merged: false } },
+    };
+    const report = {
+      url: "https://datahub.test/feedback/r/user-1/k/bug/issue-1",
+      metadata,
+    };
+
+    expect(
+      readFeedbackReport({ attachments: { nodes: [pullRequest, report] } })
+    ).toMatchObject({ reporterUserId: "user-1", title: "Export fails" });
+    expect(
+      readFeedbackReport({ attachments: { nodes: [pullRequest] } })
+    ).toBeNull();
+    expect(
+      readFeedbackReport({
+        attachments: {
+          nodes: [{ ...report, metadata: { ...metadata, kind: "praise" } }],
+        },
+      })
+    ).toBeNull();
   });
 });

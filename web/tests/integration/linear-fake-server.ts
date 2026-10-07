@@ -30,6 +30,35 @@ const LABELS = [
   },
 ];
 
+// Workflow states a webhook payload can name in `updatedFrom.stateId`.
+export const LINEAR_STATES = {
+  todo: {
+    id: "aaaaaaaa-0000-4000-8000-000000000001",
+    name: "Todo",
+    type: "unstarted",
+  },
+  done: {
+    id: "aaaaaaaa-0000-4000-8000-000000000002",
+    name: "Done",
+    type: "completed",
+  },
+  released: {
+    id: "aaaaaaaa-0000-4000-8000-000000000003",
+    name: "Released",
+    type: "completed",
+  },
+  canceled: {
+    id: "aaaaaaaa-0000-4000-8000-000000000004",
+    name: "Canceled",
+    type: "canceled",
+  },
+  duplicate: {
+    id: "aaaaaaaa-0000-4000-8000-000000000005",
+    name: "Duplicate",
+    type: "duplicate",
+  },
+} as const;
+
 // Linear's documented default page size and per-query complexity ceiling.
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_COMPLEXITY = 10_000;
@@ -419,6 +448,16 @@ const attachmentResolvers: Resolvers<FakeAttachment> = {
   metadata: (attachment) => attachment.metadata,
 };
 
+const workflowStateResolvers: Resolvers<{
+  id?: string;
+  name: string;
+  type: string;
+}> = {
+  id: (state) => state.id,
+  name: (state) => state.name,
+  type: (state) => state.type,
+};
+
 const issueResolvers: Resolvers<FakeIssue> = {
   id: (issue) => issue.id,
   identifier: (issue) => issue.identifier,
@@ -432,12 +471,7 @@ const issueResolvers: Resolvers<FakeIssue> = {
   archivedAt: (issue) => issue.archivedAt,
   trashed: (issue) => issue.trashed,
   state: (issue, field) =>
-    project(
-      issue.state,
-      field,
-      { name: (state) => state.name, type: (state) => state.type },
-      "WorkflowState"
-    ),
+    project(issue.state, field, workflowStateResolvers, "WorkflowState"),
   attachments: (issue, field) =>
     connection(
       issue.attachments.filter((attachment) =>
@@ -506,6 +540,22 @@ function listIssues(field: Field) {
   );
 }
 
+function listWorkflowStates(field: Field) {
+  checkArgs(field, [...CONNECTION_ARGS, "filter"], "Query.workflowStates");
+  const { id } = checkOperators(
+    field.args.filter,
+    ["id"],
+    "WorkflowStateFilter"
+  );
+  const { eq } = checkOperators(id, ["eq"], "IDComparator") as { eq?: string };
+  const matched = Object.values(LINEAR_STATES).filter(
+    (state) => eq === undefined || state.id === eq
+  );
+  return connection(matched, field, ["filter"], (state, node) =>
+    project(state, node, workflowStateResolvers, "WorkflowState")
+  );
+}
+
 const queryRoots: Record<string, (field: Field) => unknown> = {
   organization: (field) =>
     project(
@@ -539,6 +589,7 @@ const queryRoots: Record<string, (field: Field) => unknown> = {
   },
   issueLabels: listIssueLabels,
   issues: listIssues,
+  workflowStates: listWorkflowStates,
 };
 
 interface IssueCreateInput {
@@ -807,6 +858,30 @@ export function startLinearFakeServer(): Promise<{
     }
     if (url.pathname === "/__test/issues" && req.method === "GET") {
       sendJson(res, 200, issues);
+      return;
+    }
+    if (url.pathname === "/__test/issues" && req.method === "PATCH") {
+      const body = JSON.parse(await readBody(req)) as {
+        canceledAt?: string | null;
+        completedAt?: string | null;
+        id?: string;
+        state?: { name: string; type: string };
+      };
+      const issue = issues.find((item) => item.id === body.id);
+      if (!issue) {
+        sendJson(res, 404, { error: "missing" });
+        return;
+      }
+      if (body.state) {
+        issue.state = body.state;
+      }
+      if (body.completedAt !== undefined) {
+        issue.completedAt = body.completedAt;
+      }
+      if (body.canceledAt !== undefined) {
+        issue.canceledAt = body.canceledAt;
+      }
+      sendJson(res, 200, { ok: true });
       return;
     }
     if (url.pathname === "/__test/issues" && req.method === "POST") {
