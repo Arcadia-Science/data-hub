@@ -1,6 +1,5 @@
 import { inArray } from "drizzle-orm";
 import { after } from "next/server";
-import { z } from "zod";
 import { LINEAR_UNAVAILABLE } from "@/lib/api/errors";
 import {
   FEEDBACK_KIND_LABELS,
@@ -9,8 +8,6 @@ import {
   type FeedbackKind,
   type FeedbackSource,
   type FeedbackStatus,
-  feedbackKindSchema,
-  feedbackSourceSchema,
 } from "@/lib/api/feedback-schema";
 import { notifyFeedbackSubmitted } from "@/lib/api/notifications";
 import { appOrigin } from "@/lib/app-origin";
@@ -32,6 +29,7 @@ import {
 } from "@/lib/linear/config";
 import {
   FEEDBACK_REPORT_MARKER,
+  type FeedbackReportMetadata,
   type FeedbackSummary,
   feedbackAttachmentUrl,
   feedbackIssueMarker,
@@ -40,6 +38,7 @@ import {
   kindFromAttachmentUrl,
   LINEAR_CLOSED_STATE_TYPES,
   pageFeedbackSummaries,
+  readFeedbackReport,
 } from "@/lib/linear/feedback-link";
 
 export const FEEDBACK_NOT_CONFIGURED_MESSAGE =
@@ -128,27 +127,11 @@ export interface FeedbackItem {
   updatedAt: Date;
 }
 
-const metadataSchema = z.object({
-  attemptedAction: z.string().optional(),
-  description: z.string(),
-  errorMessage: z.string().optional(),
-  kind: feedbackKindSchema,
-  oauthClientId: z.string().optional(),
-  pageUrl: z.string().optional(),
-  reporterUserId: z.string(),
-  source: feedbackSourceSchema,
-  title: z.string(),
-  toolName: z.string().optional(),
-  version: z.number(),
-});
-
-type ReportMetadata = z.infer<typeof metadataSchema>;
-
 // An issue paired with its checked Data Hub metadata. Reading it once here
 // keeps the checks and the lookups that follow from drifting apart.
 interface Report {
   issue: LinearIssueDetailNode;
-  metadata: ReportMetadata;
+  metadata: FeedbackReportMetadata;
 }
 
 function blankToNull(value: string | undefined): string | null {
@@ -159,14 +142,8 @@ function blankToNull(value: string | undefined): string | null {
 }
 
 function readReport(issue: LinearIssueDetailNode): Report | null {
-  const attachment = issue.attachments.nodes.find((node) =>
-    node.url.includes(FEEDBACK_REPORT_MARKER)
-  );
-  if (!attachment) {
-    return null;
-  }
-  const metadata = metadataSchema.safeParse(attachment.metadata);
-  return metadata.success ? { issue, metadata: metadata.data } : null;
+  const metadata = readFeedbackReport(issue);
+  return metadata ? { issue, metadata } : null;
 }
 
 function toFeedbackItem(
