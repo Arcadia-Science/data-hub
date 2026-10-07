@@ -18,19 +18,26 @@ import { oauthClients, users } from "@/lib/db/schema";
 import {
   createLinearAttachment,
   createLinearIssue,
+  LINEAR_RATE_LIMITED,
+  LINEAR_SUMMARY_PAGE_SIZE,
   type LinearIssueDetailNode,
   LinearRequestError,
   listLinearIssueDetails,
   listLinearIssueSummaries,
 } from "@/lib/linear/client";
-import { getLinearFeedbackSetup } from "@/lib/linear/config";
+import {
+  getLinearFeedbackSetup,
+  type LinearFeedbackSetup,
+} from "@/lib/linear/config";
 import {
   FEEDBACK_REPORT_MARKER,
   type FeedbackSummary,
   feedbackAttachmentUrl,
+  feedbackIssueMarker,
   feedbackReporterMarker,
   feedbackStatusFromLinearState,
   kindFromAttachmentUrl,
+  LINEAR_CLOSED_STATE_TYPES,
   pageFeedbackSummaries,
 } from "@/lib/linear/feedback-link";
 
@@ -38,15 +45,49 @@ export const FEEDBACK_NOT_CONFIGURED_MESSAGE =
   "Feedback isn't set up on this Data Hub.";
 export const FEEDBACK_UNAVAILABLE_MESSAGE =
   "Linear is unavailable. Try again later.";
+export const FEEDBACK_RATE_LIMITED_MESSAGE =
+  "Linear is busy with other requests from Data Hub. Try again in a few minutes.";
+
+export const FEEDBACK_NOT_CONFIGURED = "FEEDBACK_NOT_CONFIGURED";
+// The same code the Integrations routes return, always with HTTP 502.
+const LINEAR_UNAVAILABLE = "LINEAR_UNAVAILABLE";
 
 const DUPLICATE_WINDOW_MS = 24 * 60 * 60 * 1000;
-const SUMMARY_PAGE_CAP = 20;
+// A page holds LINEAR_SUMMARY_PAGE_SIZE reports, so this reads up to 5,000.
+const SUMMARY_PAGE_CAP = 50;
+// Linear's issue-creation call can succeed while the attachment call that
+// follows fails, so the attachment gets a second try before the request fails.
+const ATTACHMENT_ATTEMPTS = 2;
 
-export class FeedbackServiceError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "FeedbackServiceError";
-  }
+// Shaped for `apiErrorFromResult`, like the other `{ ok: false, … }` helpers.
+export interface FeedbackFailure {
+  code: typeof LINEAR_UNAVAILABLE | typeof FEEDBACK_NOT_CONFIGURED;
+  message: string;
+  ok: false;
+  status: 502 | 503;
+}
+
+export type FeedbackResult<T extends object> =
+  | ({ ok: true } & T)
+  | FeedbackFailure;
+
+const NOT_CONFIGURED_FAILURE: FeedbackFailure = {
+  ok: false,
+  status: 503,
+  code: FEEDBACK_NOT_CONFIGURED,
+  message: FEEDBACK_NOT_CONFIGURED_MESSAGE,
+};
+
+function linearFailure(err: LinearRequestError): FeedbackFailure {
+  return {
+    ok: false,
+    status: 502,
+    code: LINEAR_UNAVAILABLE,
+    message:
+      err.code === LINEAR_RATE_LIMITED
+        ? FEEDBACK_RATE_LIMITED_MESSAGE
+        : FEEDBACK_UNAVAILABLE_MESSAGE,
+  };
 }
 
 export function previewFeedbackDescription(description: string): string {
@@ -69,7 +110,6 @@ export interface FeedbackLinearIssue {
 }
 
 export interface FeedbackItem {
-  adminNote: string | null;
   attemptedAction: string | null;
   createdAt: Date;
   description: string;
@@ -84,7 +124,6 @@ export interface FeedbackItem {
   source: FeedbackSource;
   status: FeedbackStatus;
   statusUpdatedAt: Date | null;
-  statusUpdatedBy: FeedbackPerson | null;
   title: string;
   toolName: string | null;
   updatedAt: Date;
@@ -104,6 +143,15 @@ const metadataSchema = z.object({
   version: z.number(),
 });
 
+type ReportMetadata = z.infer<typeof metadataSchema>;
+
+// An issue paired with its checked Data Hub metadata. Reading it once here
+// keeps the checks and the lookups that follow from drifting apart.
+interface Report {
+  issue: LinearIssueDetailNode;
+  metadata: ReportMetadata;
+}
+
 function blankToNull(value: string | undefined): string | null {
   if (!value) {
     return null;
@@ -111,27 +159,22 @@ function blankToNull(value: string | undefined): string | null {
   return value;
 }
 
-function reportAttachment(issue: LinearIssueDetailNode) {
-  return (
-    issue.attachments.nodes.find((attachment) =>
-      attachment.url.includes(FEEDBACK_REPORT_MARKER)
-    ) ?? null
+function readReport(issue: LinearIssueDetailNode): Report | null {
+  const attachment = issue.attachments.nodes.find((node) =>
+    node.url.includes(FEEDBACK_REPORT_MARKER)
   );
-}
-
-function toFeedbackItem(
-  issue: LinearIssueDetailNode,
-  people: Map<string, FeedbackPerson>,
-  clientNames: Map<string, string | null>
-): FeedbackItem | null {
-  const attachment = reportAttachment(issue);
   if (!attachment) {
     return null;
   }
   const metadata = metadataSchema.safeParse(attachment.metadata);
-  if (!metadata.success) {
-    return null;
-  }
+  return metadata.success ? { issue, metadata: metadata.data } : null;
+}
+
+function toFeedbackItem(
+  { issue, metadata }: Report,
+  people: Map<string, FeedbackPerson>,
+  clientNames: Map<string, string | null>
+): FeedbackItem {
   const status = feedbackStatusFromLinearState(issue.state.type);
   const statusUpdatedAt =
     status === "resolved"
@@ -139,28 +182,26 @@ function toFeedbackItem(
       : status === "declined"
         ? issue.canceledAt
         : null;
-  const oauthClientId = blankToNull(metadata.data.oauthClientId);
+  const oauthClientId = blankToNull(metadata.oauthClientId);
   return {
     id: issue.id,
-    kind: metadata.data.kind,
-    title: metadata.data.title,
-    description: metadata.data.description,
-    attemptedAction: blankToNull(metadata.data.attemptedAction),
-    toolName: blankToNull(metadata.data.toolName),
-    errorMessage: blankToNull(metadata.data.errorMessage),
-    source: metadata.data.source,
+    kind: metadata.kind,
+    title: metadata.title,
+    description: metadata.description,
+    attemptedAction: blankToNull(metadata.attemptedAction),
+    toolName: blankToNull(metadata.toolName),
+    errorMessage: blankToNull(metadata.errorMessage),
+    source: metadata.source,
     oauthClientId,
     oauthClientName: oauthClientId
       ? (clientNames.get(oauthClientId) ?? null)
       : null,
-    pageUrl: blankToNull(metadata.data.pageUrl),
+    pageUrl: blankToNull(metadata.pageUrl),
     status,
-    adminNote: null,
     statusUpdatedAt: statusUpdatedAt ? new Date(statusUpdatedAt) : null,
-    statusUpdatedBy: null,
     createdAt: new Date(issue.createdAt),
     updatedAt: new Date(issue.updatedAt),
-    reporter: people.get(metadata.data.reporterUserId) ?? null,
+    reporter: people.get(metadata.reporterUserId) ?? null,
     linearIssue: {
       identifier: issue.identifier,
       url: issue.url,
@@ -172,18 +213,17 @@ function toFeedbackItem(
 async function hydrate(
   issues: LinearIssueDetailNode[]
 ): Promise<FeedbackItem[]> {
-  const parsed = issues.flatMap((issue) => {
-    const attachment = reportAttachment(issue);
-    const metadata = attachment
-      ? metadataSchema.safeParse(attachment.metadata)
-      : null;
-    return metadata?.success ? [metadata.data] : [];
+  const reports = issues.flatMap((issue) => {
+    const report = readReport(issue);
+    return report ? [report] : [];
   });
-  const reporterIds = [...new Set(parsed.map((item) => item.reporterUserId))];
+  const reporterIds = [
+    ...new Set(reports.map(({ metadata }) => metadata.reporterUserId)),
+  ];
   const clientIds = [
     ...new Set(
-      parsed
-        .map((item) => blankToNull(item.oauthClientId))
+      reports
+        .map(({ metadata }) => blankToNull(metadata.oauthClientId))
         .filter((id): id is string => id != null)
     ),
   ];
@@ -207,40 +247,42 @@ async function hydrate(
   const clientNames = new Map(
     clientRows.map((row) => [row.clientId, row.name])
   );
-  return issues.flatMap((issue) => {
-    const item = toFeedbackItem(issue, people, clientNames);
-    return item ? [item] : [];
-  });
+  return reports.map((report) => toFeedbackItem(report, people, clientNames));
 }
 
-async function requireSetup() {
+// Runs `run` with the saved Linear setup and turns the two ways it can fail
+// into `{ ok: false }` results, so routes and tools never catch them.
+async function withSetup<T extends object>(
+  run: (setup: LinearFeedbackSetup) => Promise<T>
+): Promise<FeedbackResult<T>> {
   const setup = await getLinearFeedbackSetup();
   if (!setup) {
-    throw new FeedbackServiceError(FEEDBACK_NOT_CONFIGURED_MESSAGE);
+    return NOT_CONFIGURED_FAILURE;
   }
-  return setup;
+  try {
+    return { ok: true, ...(await run(setup)) };
+  } catch (err) {
+    if (err instanceof LinearRequestError) {
+      return linearFailure(err);
+    }
+    throw err;
+  }
 }
 
-function credentialsOf(setup: { clientId: string; clientSecret: string }) {
-  return { clientId: setup.clientId, clientSecret: setup.clientSecret };
-}
-
-async function allSummaries(marker: string) {
-  const setup = await requireSetup();
-  const credentials = credentialsOf(setup);
+// Reads every report summary, newest page last. Stops at the page cap and
+// says so, because a silent stop would hide reports without any sign.
+async function allSummaries(setup: LinearFeedbackSetup, marker: string) {
   const summaries: FeedbackSummary[] = [];
-  let after: string | undefined;
+  let cursor: string | undefined;
   for (let page = 0; page < SUMMARY_PAGE_CAP; page += 1) {
-    const connection = await listLinearIssueSummaries(credentials, {
-      after,
+    const connection = await listLinearIssueSummaries(setup, {
+      after: cursor,
       filter: {
         attachments: { some: { url: { contains: marker } } },
       },
     });
     for (const node of connection.nodes) {
-      const url = node.attachments.nodes.find((attachment) =>
-        attachment.url.includes(marker)
-      )?.url;
+      const url = node.attachments.nodes[0]?.url;
       const kind = url ? kindFromAttachmentUrl(url) : null;
       if (!kind) {
         continue;
@@ -253,16 +295,21 @@ async function allSummaries(marker: string) {
       });
     }
     if (!(connection.pageInfo.hasNextPage && connection.pageInfo.endCursor)) {
-      break;
+      return summaries;
     }
-    after = connection.pageInfo.endCursor;
+    cursor = connection.pageInfo.endCursor;
   }
+  console.warn(
+    `[feedback] Stopped reading Linear after ${SUMMARY_PAGE_CAP * LINEAR_SUMMARY_PAGE_SIZE} reports. Older reports are missing from the list and the counts.`
+  );
   return summaries;
 }
 
-async function loadIssues(ids: string[]): Promise<FeedbackItem[]> {
-  const setup = await requireSetup();
-  const nodes = await listLinearIssueDetails(credentialsOf(setup), ids);
+async function loadIssues(
+  setup: LinearFeedbackSetup,
+  ids: string[]
+): Promise<FeedbackItem[]> {
+  const nodes = await listLinearIssueDetails(setup, ids);
   const items = await hydrate(nodes);
   const byId = new Map(items.map((item) => [item.id, item]));
   return ids.flatMap((id) => {
@@ -278,6 +325,7 @@ function issueDescription(input: {
   kind: FeedbackKind;
   pageUrl?: string | null;
   reporterEmail: string | null;
+  reporterId: string;
   reporterName: string;
   source: FeedbackSource;
   toolName?: string;
@@ -305,21 +353,76 @@ function issueDescription(input: {
   const reporter = input.reporterEmail
     ? `${input.reporterName} <${input.reporterEmail}>`
     : input.reporterName;
-  lines.push(`Reporter: ${reporter}`);
+  lines.push(
+    `Reporter: ${reporter}`,
+    feedbackIssueMarker({ kind: input.kind, reporterId: input.reporterId })
+  );
   return lines.join("\n");
 }
 
-async function withLinear<T>(run: () => Promise<T>): Promise<T> {
-  try {
-    return await run();
-  } catch (err) {
-    if (err instanceof FeedbackServiceError) {
-      throw err;
+// Looks for the same reporter's open report with the same title. A complete
+// match is a duplicate. A match with no Data Hub attachment is an issue whose
+// attachment call failed earlier, which the caller finishes instead of
+// opening a second issue.
+async function findOpenReport(
+  setup: LinearFeedbackSetup,
+  input: { kind: FeedbackKind; title: string; userId: string }
+): Promise<{ attached: string | null; unattached: string | null }> {
+  const cutoff = new Date(Date.now() - DUPLICATE_WINDOW_MS).toISOString();
+  const { nodes } = await listLinearIssueSummaries(setup, {
+    pageSize: 5,
+    filter: {
+      title: { eq: input.title },
+      createdAt: { gte: cutoff },
+      state: { type: { nin: [...LINEAR_CLOSED_STATE_TYPES] } },
+      or: [
+        {
+          attachments: {
+            some: { url: { contains: feedbackReporterMarker(input.userId) } },
+          },
+        },
+        {
+          description: {
+            contains: feedbackIssueMarker({
+              kind: input.kind,
+              reporterId: input.userId,
+            }),
+          },
+        },
+      ],
+    },
+  });
+  return {
+    attached:
+      nodes.find((node) => node.attachments.nodes.length > 0)?.id ?? null,
+    unattached:
+      nodes.find((node) => node.attachments.nodes.length === 0)?.id ?? null,
+  };
+}
+
+async function attachReport(
+  setup: LinearFeedbackSetup,
+  attachment: Parameters<typeof createLinearAttachment>[1],
+  identifier: string | null
+): Promise<void> {
+  for (let attempt = 1; attempt <= ATTACHMENT_ATTEMPTS; attempt += 1) {
+    try {
+      await createLinearAttachment(setup, attachment);
+      return;
+    } catch (err) {
+      if (!(err instanceof LinearRequestError)) {
+        throw err;
+      }
+      if (attempt === ATTACHMENT_ATTEMPTS) {
+        // Data Hub's token cannot delete the issue (`issues:create` does not
+        // cover it), so the issue stays until the reporter sends the same
+        // report again, which finishes it. Log it so an admin can find it.
+        console.error(
+          `[feedback] Linear issue ${identifier ?? attachment.issueId} has no Data Hub attachment.`
+        );
+        throw err;
+      }
     }
-    if (err instanceof LinearRequestError) {
-      throw new FeedbackServiceError(FEEDBACK_UNAVAILABLE_MESSAGE);
-    }
-    throw err;
   }
 }
 
@@ -334,24 +437,11 @@ export function createFeedback(input: {
   title: string;
   toolName?: string;
   userId: string;
-}): Promise<{ duplicate: boolean; item: FeedbackItem }> {
-  return withLinear(async () => {
-    const setup = await requireSetup();
-    const credentials = credentialsOf(setup);
-    const cutoff = new Date(Date.now() - DUPLICATE_WINDOW_MS).toISOString();
-    const existing = await listLinearIssueSummaries(credentials, {
-      filter: {
-        attachments: {
-          some: { url: { contains: feedbackReporterMarker(input.userId) } },
-        },
-        title: { eq: input.title },
-        createdAt: { gte: cutoff },
-        state: { type: { nin: ["completed", "canceled"] } },
-      },
-    });
-    const duplicateId = existing.nodes[0]?.id;
-    if (duplicateId) {
-      const [item] = await loadIssues([duplicateId]);
+}): Promise<FeedbackResult<{ duplicate: boolean; item: FeedbackItem }>> {
+  return withSetup(async (setup) => {
+    const existing = await findOpenReport(setup, input);
+    if (existing.attached) {
+      const [item] = await loadIssues(setup, [existing.attached]);
       if (item) {
         return { item, duplicate: true };
       }
@@ -363,56 +453,59 @@ export function createFeedback(input: {
       .where(inArray(users.id, [input.userId]))
       .limit(1);
     const reporterName = reporter?.name ?? reporter?.email ?? "Data Hub user";
-    const labelId = setup.labelIds[input.kind];
-    const created = await createLinearIssue(credentials, {
-      title: input.title,
-      description: issueDescription({
-        ...input,
-        reporterName,
-        reporterEmail: reporter?.email ?? null,
-      }),
-      teamId: setup.teamId,
-      projectId: setup.projectId,
-      labelIds: labelId ? [labelId] : [],
-      createAsUser: reporterName,
-    });
 
-    const metadata = {
-      version: 1,
-      reporterUserId: input.userId,
-      kind: input.kind,
-      title: input.title,
-      description: input.description,
-      attemptedAction: input.attemptedAction ?? "",
-      toolName: input.toolName ?? "",
-      errorMessage: input.errorMessage ?? "",
-      source: input.source,
-      oauthClientId: input.oauthClientId ?? "",
-      pageUrl: input.pageUrl ?? "",
-    };
-    const attachment = {
-      issueId: created.id,
-      title: "Data Hub feedback",
-      url: feedbackAttachmentUrl({
-        origin: appOrigin(),
-        reporterId: input.userId,
-        kind: input.kind,
-        issueId: created.id,
-      }),
-      metadata,
-    };
-    try {
-      await createLinearAttachment(credentials, attachment);
-    } catch (err) {
-      if (!(err instanceof LinearRequestError)) {
-        throw err;
-      }
-      await createLinearAttachment(credentials, attachment);
+    let issueId = existing.unattached;
+    let identifier: string | null = null;
+    if (!issueId) {
+      const labelId = setup.labelIds[input.kind];
+      const created = await createLinearIssue(setup, {
+        title: input.title,
+        description: issueDescription({
+          ...input,
+          reporterId: input.userId,
+          reporterName,
+          reporterEmail: reporter?.email ?? null,
+        }),
+        teamId: setup.teamId,
+        projectId: setup.projectId,
+        labelIds: labelId ? [labelId] : [],
+        createAsUser: reporterName,
+      });
+      issueId = created.id;
+      identifier = created.identifier;
     }
 
-    const [item] = await loadIssues([created.id]);
+    await attachReport(
+      setup,
+      {
+        issueId,
+        title: "Data Hub feedback",
+        url: feedbackAttachmentUrl({
+          origin: appOrigin(),
+          reporterId: input.userId,
+          kind: input.kind,
+          issueId,
+        }),
+        metadata: {
+          version: 1,
+          reporterUserId: input.userId,
+          kind: input.kind,
+          title: input.title,
+          description: input.description,
+          attemptedAction: input.attemptedAction ?? "",
+          toolName: input.toolName ?? "",
+          errorMessage: input.errorMessage ?? "",
+          source: input.source,
+          oauthClientId: input.oauthClientId ?? "",
+          pageUrl: input.pageUrl ?? "",
+        },
+      },
+      identifier
+    );
+
+    const [item] = await loadIssues(setup, [issueId]);
     if (!item) {
-      throw new FeedbackServiceError(FEEDBACK_UNAVAILABLE_MESSAGE);
+      throw new LinearRequestError("Linear did not return the new report.");
     }
 
     const origin = appOrigin();
@@ -430,6 +523,8 @@ export function createFeedback(input: {
   });
 }
 
+// One Linear read serves the page, the total, and the counts, so a list
+// request costs one summary query and one details query.
 export function listFeedback(input: {
   isAdmin: boolean;
   kind?: FeedbackKind;
@@ -437,14 +532,20 @@ export function listFeedback(input: {
   offset: number;
   status?: FeedbackStatus;
   viewerId: string;
-}): Promise<{ items: FeedbackItem[]; total: number }> {
-  return withLinear(async () => {
+}): Promise<
+  FeedbackResult<{
+    counts: Record<FeedbackStatus, number>;
+    items: FeedbackItem[];
+    total: number;
+  }>
+> {
+  return withSetup(async (setup) => {
     const limit = Math.min(Math.max(input.limit, 1), FEEDBACK_LIST_MAX);
     const offset = Math.max(input.offset, 0);
     const marker = input.isAdmin
       ? FEEDBACK_REPORT_MARKER
       : feedbackReporterMarker(input.viewerId);
-    const summaries = await allSummaries(marker);
+    const summaries = await allSummaries(setup, marker);
     const page = pageFeedbackSummaries(summaries, {
       status: input.status,
       kind: input.kind,
@@ -452,40 +553,22 @@ export function listFeedback(input: {
       offset,
     });
     return {
-      items: await loadIssues(page.ids),
+      items: await loadIssues(setup, page.ids),
       total: page.total,
+      counts: page.counts,
     };
-  });
-}
-
-export function countFeedbackByStatus(input: {
-  isAdmin: boolean;
-  viewerId: string;
-}): Promise<Record<FeedbackStatus, number>> {
-  return withLinear(async () => {
-    const marker = input.isAdmin
-      ? FEEDBACK_REPORT_MARKER
-      : feedbackReporterMarker(input.viewerId);
-    const summaries = await allSummaries(marker);
-    return pageFeedbackSummaries(summaries, {
-      limit: 1,
-      offset: 0,
-    }).counts;
   });
 }
 
 export function getFeedbackForViewer(
   id: string,
   viewer: { isAdmin: boolean; viewerId: string }
-): Promise<FeedbackItem | null> {
-  return withLinear(async () => {
-    const [item] = await loadIssues([id]);
-    if (!item) {
-      return null;
+): Promise<FeedbackResult<{ item: FeedbackItem | null }>> {
+  return withSetup(async (setup) => {
+    const [item] = await loadIssues(setup, [id]);
+    if (item && (viewer.isAdmin || item.reporter?.id === viewer.viewerId)) {
+      return { item };
     }
-    if (viewer.isAdmin || item.reporter?.id === viewer.viewerId) {
-      return item;
-    }
-    return null;
+    return { item: null };
   });
 }

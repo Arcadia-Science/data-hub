@@ -1,7 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import {
   createFeedback,
-  FeedbackServiceError,
   getFeedbackForViewer,
   listFeedback,
   previewFeedbackDescription,
@@ -38,23 +37,19 @@ export function registerFeedbackTools(server: McpServer) {
           parsed.error.issues[0]?.message ?? "Invalid feedback."
         );
       }
-      try {
-        const result = await createFeedback({
-          ...parsed.data,
-          userId,
-          source: "mcp",
-          oauthClientId: ctx.http?.authInfo?.clientId ?? null,
-        });
-        return structuredResult({
-          duplicate: result.duplicate,
-          feedback: result.item,
-        });
-      } catch (err) {
-        if (err instanceof FeedbackServiceError) {
-          return errorResult(err.message);
-        }
-        throw err;
+      const result = await createFeedback({
+        ...parsed.data,
+        userId,
+        source: "mcp",
+        oauthClientId: ctx.http?.authInfo?.clientId ?? null,
+      });
+      if (!result.ok) {
+        return errorResult(result.message);
       }
+      return structuredResult({
+        duplicate: result.duplicate,
+        feedback: result.item,
+      });
     }
   );
 
@@ -69,21 +64,16 @@ export function registerFeedbackTools(server: McpServer) {
       const isAdmin = await userIsAdmin(userId);
       const limit = args.limit ?? FEEDBACK_PAGE_SIZE;
       const page = args.page ?? 1;
-      let result: Awaited<ReturnType<typeof listFeedback>>;
-      try {
-        result = await listFeedback({
-          viewerId: userId,
-          isAdmin,
-          status: args.status,
-          kind: args.kind,
-          limit,
-          offset: (page - 1) * limit,
-        });
-      } catch (err) {
-        if (err instanceof FeedbackServiceError) {
-          return errorResult(err.message);
-        }
-        throw err;
+      const result = await listFeedback({
+        viewerId: userId,
+        isAdmin,
+        status: args.status,
+        kind: args.kind,
+        limit,
+        offset: (page - 1) * limit,
+      });
+      if (!result.ok) {
+        return errorResult(result.message);
       }
       return structuredResult({
         feedback: result.items.map((item) => ({
@@ -103,22 +93,17 @@ export function registerFeedbackTools(server: McpServer) {
       if (!userId) {
         return errorResult("Authenticated user not available on this session.");
       }
-      let item: Awaited<ReturnType<typeof getFeedbackForViewer>>;
-      try {
-        item = await getFeedbackForViewer(args.id, {
-          viewerId: userId,
-          isAdmin: await userIsAdmin(userId),
-        });
-      } catch (err) {
-        if (err instanceof FeedbackServiceError) {
-          return errorResult(err.message);
-        }
-        throw err;
+      const result = await getFeedbackForViewer(args.id, {
+        viewerId: userId,
+        isAdmin: await userIsAdmin(userId),
+      });
+      if (!result.ok) {
+        return errorResult(result.message);
       }
-      if (!item) {
+      if (!result.item) {
         return errorResult(`Feedback '${args.id}' not found.`);
       }
-      return structuredResult({ feedback: item });
+      return structuredResult({ feedback: result.item });
     }
   );
 }

@@ -1,12 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { FEEDBACK_NOT_CONFIGURED_MESSAGE } from "@/lib/api/feedback";
+import {
+  FEEDBACK_NOT_CONFIGURED_MESSAGE,
+  FEEDBACK_RATE_LIMITED_MESSAGE,
+} from "@/lib/api/feedback";
+import type { FeedbackKind } from "@/lib/api/feedback-schema";
 import {
   listNotifications,
   notifyFeedbackSubmitted,
   updatePreferences,
 } from "@/lib/api/notifications";
 import { slackConnections } from "@/lib/db/schema";
+import { feedbackAttachmentUrl } from "@/lib/linear/feedback-link";
 import {
   api,
   clearCapturedSlackDms,
@@ -38,12 +43,91 @@ async function resetLinear() {
 
 async function linearIssues(): Promise<
   {
-    attachments: { metadata: Record<string, string>; url: string }[];
+    attachments: { metadata: Record<string, unknown>; url: string }[];
+    createAsUser: string | null;
     title: string;
   }[]
 > {
   const res = await fetch(`${linearBase()}/__test/issues`);
   return res.json();
+}
+
+async function linearRequests(): Promise<
+  { complexity: number; operation: string }[]
+> {
+  const res = await fetch(`${linearBase()}/__test/requests`);
+  return res.json();
+}
+
+async function linearControl(path: string, body: unknown) {
+  const res = await fetch(`${linearBase()}/__test/${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  expect(res.ok).toBe(true);
+}
+
+interface SeededReport {
+  archived?: boolean;
+  attachmentsBefore?: { metadata: Record<string, unknown>; url: string }[];
+  createdAt?: string;
+  kind?: FeedbackKind;
+  reporterId: string;
+  stateName?: string;
+  stateType?: string;
+  title: string;
+  trashed?: boolean;
+}
+
+// Adds an issue the way Data Hub leaves one in Linear: a report attachment
+// with the metadata Data Hub reads back. Other integrations' attachments can
+// come first.
+async function seedReport(input: SeededReport): Promise<string> {
+  const id = randomUUID();
+  const kind = input.kind ?? "bug";
+  const res = await fetch(`${linearBase()}/__test/issues`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id,
+      title: input.title,
+      createdAt: input.createdAt,
+      archivedAt: input.archived ? new Date().toISOString() : null,
+      trashed: input.trashed ?? false,
+      state: {
+        name: input.stateName ?? "Triage",
+        type: input.stateType ?? "triage",
+      },
+      attachments: [
+        ...(input.attachmentsBefore ?? []),
+        {
+          url: feedbackAttachmentUrl({
+            origin: "https://datahub.test",
+            reporterId: input.reporterId,
+            kind,
+            issueId: id,
+          }),
+          metadata: {
+            version: 1,
+            reporterUserId: input.reporterId,
+            kind,
+            title: input.title,
+            description: "Seeded report.",
+            source: "web",
+            // Extra keys with nested values must not break reading it.
+            extra: { nested: [1, { deeper: true }] },
+          },
+        },
+      ],
+    }),
+  });
+  expect(res.status).toBe(201);
+  return id;
+}
+
+function listAs(cookie: string, query = "") {
+  return api(`/api/v1/feedback${query}`, { headers: { Cookie: cookie } });
 }
 
 async function enableLinear(cookie: string) {
@@ -57,6 +141,10 @@ async function enableLinear(cookie: string) {
     },
   });
   expect(res.status).toBe(200);
+}
+
+function daysAgo(days: number): string {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 }
 
 describe("Feedback", () => {
@@ -135,12 +223,14 @@ describe("Feedback", () => {
     expect(created.status).toBe(201);
     const payload = await created.json();
     expect(payload.feedback.linear_issue.identifier).toMatch(/^DH-/);
-    expect(payload.feedback.admin_note).toBeNull();
-    expect(payload.feedback.status_updated_by).toBeNull();
+    expect(payload.feedback).not.toHaveProperty("admin_note");
+    expect(payload.feedback).not.toHaveProperty("status_updated_by");
     expect(payload.feedback.reporter.email).toBe("ada@example.com");
 
     const [issue] = await linearIssues();
     expect(issue.title).toBe("Export fails");
+    // The reporter's name is the issue author, not the Data Hub app.
+    expect(issue.createAsUser).toBe("Ada Admin");
     expect(issue.attachments).toHaveLength(1);
     expect(issue.attachments[0].url).toContain(
       `/feedback/r/${encodeURIComponent(admin.userId)}/k/bug/`
@@ -153,7 +243,7 @@ describe("Feedback", () => {
     });
   });
 
-  it("returns 503 and creates nothing when Linear rejects the issue", async () => {
+  it("returns 502 and creates nothing when Linear rejects the issue", async () => {
     const admin = await seedTestUser({ isAdmin: true });
     await enableLinear(await seedSessionCookie(admin.userId));
     const res = await api("/api/v1/feedback", {
@@ -165,7 +255,8 @@ describe("Feedback", () => {
         description: "This should not be stored.",
       },
     });
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(502);
+    expect((await res.json()).error.code).toBe("LINEAR_UNAVAILABLE");
     expect(await linearIssues()).toHaveLength(0);
   });
 
@@ -181,9 +272,9 @@ describe("Feedback", () => {
       },
     });
     expect(res.status).toBe(503);
-    expect((await res.json()).error.message).toBe(
-      FEEDBACK_NOT_CONFIGURED_MESSAGE
-    );
+    const { error } = await res.json();
+    expect(error.code).toBe("FEEDBACK_NOT_CONFIGURED");
+    expect(error.message).toBe(FEEDBACK_NOT_CONFIGURED_MESSAGE);
   });
 
   it("shows an admin every report and a member only their own", async () => {
@@ -267,6 +358,216 @@ describe("Feedback", () => {
     const dataLine = text.split("\n").find((line) => line.startsWith("data: "));
     const payload = JSON.parse(dataLine?.slice("data: ".length) ?? "{}");
     expect(payload.result?.isError).toBe(true);
+  });
+
+  it.each([
+    ["more than 24 hours old", { createdAt: daysAgo(2) }],
+    ["completed", { stateName: "Done", stateType: "completed" }],
+    ["canceled", { stateName: "Canceled", stateType: "canceled" }],
+    [
+      "closed as a duplicate",
+      { stateName: "Duplicate", stateType: "duplicate" },
+    ],
+  ] as const)("treats a matching report that is %s as new", async (_label, overrides) => {
+    const admin = await seedTestUser({ isAdmin: true });
+    const cookie = await seedSessionCookie(admin.userId);
+    await enableLinear(cookie);
+    await seedReport({
+      reporterId: admin.userId,
+      title: "Export fails",
+      ...overrides,
+    });
+
+    const res = await api("/api/v1/feedback", {
+      method: "POST",
+      headers: { Cookie: cookie },
+      body: {
+        kind: "bug",
+        title: "Export fails",
+        description: "Stops halfway.",
+      },
+    });
+    expect(res.status).toBe(201);
+    expect((await res.json()).duplicate).toBe(false);
+    expect(await linearIssues()).toHaveLength(2);
+  });
+
+  it("reads a report that has other integrations' attachments around it", async () => {
+    const admin = await seedTestUser({ isAdmin: true });
+    const cookie = await seedSessionCookie(admin.userId);
+    await enableLinear(cookie);
+    // Linear returns the first 5 attachments by default, and other
+    // integrations store lists and nested objects in their metadata.
+    const others = Array.from({ length: 7 }, (_, index) => ({
+      url: `https://github.com/example/repo/pull/${index}`,
+      metadata: {
+        reviews: [{ state: "approved", reviewers: ["a", "b"] }],
+        status: { merged: false, checks: [{ name: "ci", passed: true }] },
+      },
+    }));
+    await seedReport({
+      reporterId: admin.userId,
+      title: "Linked to a pull request",
+      attachmentsBefore: others,
+    });
+
+    const res = await listAs(cookie);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.total).toBe(1);
+    expect(body.feedback[0].title).toBe("Linked to a pull request");
+  });
+
+  it("returns every report on a page of up to 100, not Linear's default 50", async () => {
+    const admin = await seedTestUser({ isAdmin: true });
+    const cookie = await seedSessionCookie(admin.userId);
+    await enableLinear(cookie);
+    // 130 reports need two summary pages, and a page of 100 is above the
+    // default of 50 that Linear applies when a query leaves `first` out.
+    for (let index = 0; index < 130; index += 1) {
+      await seedReport({
+        reporterId: admin.userId,
+        title: `Report ${index}`,
+        createdAt: new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString(),
+      });
+    }
+
+    const res = await listAs(cookie, "?per_page=100");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.total).toBe(130);
+    expect(body.feedback).toHaveLength(100);
+    expect(body.counts.open).toBe(130);
+  });
+
+  it("keeps old reports that Linear archived, and hides deleted ones", async () => {
+    const admin = await seedTestUser({ isAdmin: true });
+    const cookie = await seedSessionCookie(admin.userId);
+    await enableLinear(cookie);
+    await seedReport({
+      reporterId: admin.userId,
+      title: "Resolved long ago",
+      archived: true,
+      stateName: "Done",
+      stateType: "completed",
+    });
+    await seedReport({
+      reporterId: admin.userId,
+      title: "Deleted in Linear",
+      trashed: true,
+    });
+
+    const body = await (await listAs(cookie)).json();
+    expect(body.feedback.map((item: { title: string }) => item.title)).toEqual([
+      "Resolved long ago",
+    ]);
+    expect(body.counts).toEqual({ open: 0, resolved: 1, declined: 0 });
+  });
+
+  it("counts a report closed as a duplicate as declined", async () => {
+    const admin = await seedTestUser({ isAdmin: true });
+    const cookie = await seedSessionCookie(admin.userId);
+    await enableLinear(cookie);
+    await seedReport({
+      reporterId: admin.userId,
+      title: "Same as another",
+      stateName: "Duplicate",
+      stateType: "duplicate",
+    });
+
+    const body = await (await listAs(cookie)).json();
+    expect(body.counts).toEqual({ open: 0, resolved: 0, declined: 1 });
+    expect(body.feedback[0].status).toBe("declined");
+    expect(body.feedback[0].linear_issue.state_name).toBe("Duplicate");
+  });
+
+  it("reads Linear once for the list and once for the details", async () => {
+    const admin = await seedTestUser({ isAdmin: true });
+    const cookie = await seedSessionCookie(admin.userId);
+    await enableLinear(cookie);
+    await seedReport({ reporterId: admin.userId, title: "One report" });
+    await linearControl("reset-requests", {});
+
+    expect((await listAs(cookie)).status).toBe(200);
+
+    const calls = await linearRequests();
+    expect(calls.map((call) => call.operation)).toEqual([
+      "FeedbackIssueSummaries",
+      "FeedbackIssueDetails",
+    ]);
+    // Linear multiplies cost by page size, so a page of 100 stays small.
+    for (const call of calls) {
+      expect(call.complexity).toBeLessThan(1000);
+    }
+  });
+
+  it("says Linear is busy when it rate limits Data Hub", async () => {
+    const admin = await seedTestUser({ isAdmin: true });
+    const cookie = await seedSessionCookie(admin.userId);
+    await enableLinear(cookie);
+    await linearControl("rate-limit", { enabled: true });
+
+    const res = await listAs(cookie);
+    expect(res.status).toBe(502);
+    const { error } = await res.json();
+    expect(error.code).toBe("LINEAR_UNAVAILABLE");
+    expect(error.message).toBe(FEEDBACK_RATE_LIMITED_MESSAGE);
+  });
+
+  it("tries the attachment twice, then fails and logs the issue left behind", async () => {
+    const admin = await seedTestUser({ isAdmin: true });
+    const cookie = await seedSessionCookie(admin.userId);
+    await enableLinear(cookie);
+
+    const res = await api("/api/v1/feedback", {
+      method: "POST",
+      headers: { Cookie: cookie },
+      body: {
+        kind: "bug",
+        title: "__fail_attachment__ Export fails",
+        description: "The attachment never works.",
+      },
+    });
+    expect(res.status).toBe(502);
+
+    const calls = await linearRequests();
+    expect(
+      calls.filter((call) => call.operation === "AttachmentCreate")
+    ).toHaveLength(2);
+    expect(await linearIssues()).toHaveLength(1);
+  });
+
+  it("finishes the issue left by a failed attachment when the report is sent again", async () => {
+    const admin = await seedTestUser({ isAdmin: true });
+    const cookie = await seedSessionCookie(admin.userId);
+    await enableLinear(cookie);
+    const body = {
+      kind: "bug",
+      title: "Export fails",
+      description: "Stops halfway.",
+    };
+
+    await linearControl("fail-attachments", { count: 2 });
+    const failed = await api("/api/v1/feedback", {
+      method: "POST",
+      headers: { Cookie: cookie },
+      body,
+    });
+    expect(failed.status).toBe(502);
+    expect((await linearIssues())[0].attachments).toHaveLength(0);
+
+    const retry = await api("/api/v1/feedback", {
+      method: "POST",
+      headers: { Cookie: cookie },
+      body,
+    });
+    expect(retry.status).toBe(201);
+    const issues = await linearIssues();
+    expect(issues).toHaveLength(1);
+    expect(issues[0].attachments).toHaveLength(1);
+
+    const listed = await (await listAs(cookie)).json();
+    expect(listed.total).toBe(1);
   });
 
   it("notifies admins when feedback is submitted", async () => {

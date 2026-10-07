@@ -12,12 +12,7 @@ import {
 import { PaginationNav } from "@/components/pagination-nav";
 import { AdminsOnly } from "@/components/settings/admins-only";
 import { SettingsPageContent } from "@/components/settings/settings-page-content";
-import {
-  countFeedbackByStatus,
-  FeedbackServiceError,
-  getFeedbackForViewer,
-  listFeedback,
-} from "@/lib/api/feedback";
+import { getFeedbackForViewer, listFeedback } from "@/lib/api/feedback";
 import { FEEDBACK_PAGE_SIZE } from "@/lib/api/feedback-schema";
 import { isValidUUID } from "@/lib/api/validators";
 import { auth } from "@/lib/auth";
@@ -88,38 +83,31 @@ async function FeedbackSection({
   userId: string;
 }) {
   const viewer = { viewerId: userId, isAdmin: true };
-  let list: Awaited<ReturnType<typeof listFeedback>>;
-  let counts: Awaited<ReturnType<typeof countFeedbackByStatus>>;
-  let selected: Awaited<ReturnType<typeof getFeedbackForViewer>>;
-  try {
-    [list, counts, selected] = await Promise.all([
-      listFeedback({
-        ...viewer,
-        status,
-        limit: FEEDBACK_PAGE_SIZE,
-        offset: (page - 1) * FEEDBACK_PAGE_SIZE,
-      }),
-      countFeedbackByStatus(viewer),
-      itemId && isValidUUID(itemId)
-        ? getFeedbackForViewer(itemId, viewer)
-        : Promise.resolve(null),
-    ]);
-  } catch (err) {
-    if (err instanceof FeedbackServiceError) {
-      return (
-        <p className="text-muted-foreground text-sm">
-          {err.message}{" "}
-          <Link
-            className="underline underline-offset-2"
-            href="/settings/integrations"
-          >
-            Open Integrations
-          </Link>
-        </p>
-      );
-    }
-    throw err;
+  const [list, detail] = await Promise.all([
+    listFeedback({
+      ...viewer,
+      status,
+      limit: FEEDBACK_PAGE_SIZE,
+      offset: (page - 1) * FEEDBACK_PAGE_SIZE,
+    }),
+    itemId && isValidUUID(itemId)
+      ? getFeedbackForViewer(itemId, viewer)
+      : Promise.resolve(null),
+  ]);
+  if (!list.ok) {
+    return (
+      <p className="text-muted-foreground text-sm">
+        {list.message}{" "}
+        <Link
+          className="underline underline-offset-2"
+          href="/settings/integrations"
+        >
+          Open Integrations
+        </Link>
+      </p>
+    );
   }
+  const selected = detail?.ok ? detail.item : null;
 
   const totalPages = Math.max(1, Math.ceil(list.total / FEEDBACK_PAGE_SIZE));
 
@@ -137,7 +125,7 @@ async function FeedbackSection({
 
   return (
     <>
-      <FeedbackReview counts={counts}>
+      <FeedbackReview counts={list.counts}>
         <FeedbackTable
           hrefFor={hrefFor}
           rows={list.items.map((item) => ({
@@ -168,7 +156,6 @@ async function FeedbackSection({
                 errorMessage: selected.errorMessage,
                 pageUrl: selected.pageUrl,
                 status: selected.status,
-                adminNote: selected.adminNote,
                 createdAt: selected.createdAt.toISOString(),
                 reporterLabel:
                   selected.reporter?.name ??
@@ -176,10 +163,6 @@ async function FeedbackSection({
                   "Deleted user",
                 statusUpdatedAt:
                   selected.statusUpdatedAt?.toISOString() ?? null,
-                statusUpdatedByLabel:
-                  selected.statusUpdatedBy?.name ??
-                  selected.statusUpdatedBy?.email ??
-                  null,
                 sourceLabel:
                   selected.source === "web"
                     ? "Web"

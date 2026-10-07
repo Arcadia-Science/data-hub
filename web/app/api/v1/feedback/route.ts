@@ -1,12 +1,12 @@
 import type { NextRequest } from "next/server";
 import { requireSession } from "@/lib/api/auth";
-import { apiError, UNAUTHORIZED, VALIDATION_ERROR } from "@/lib/api/errors";
 import {
-  countFeedbackByStatus,
-  createFeedback,
-  FeedbackServiceError,
-  listFeedback,
-} from "@/lib/api/feedback";
+  apiError,
+  apiErrorFromResult,
+  UNAUTHORIZED,
+  VALIDATION_ERROR,
+} from "@/lib/api/errors";
+import { createFeedback, listFeedback } from "@/lib/api/feedback";
 import { serializeFeedback } from "@/lib/api/feedback-json";
 import {
   FEEDBACK_PAGE_SIZE,
@@ -44,19 +44,14 @@ export async function POST(request: NextRequest) {
     return apiError(400, VALIDATION_ERROR, "Invalid request body");
   }
 
-  let result: Awaited<ReturnType<typeof createFeedback>>;
-  try {
-    result = await createFeedback({
-      ...content.data,
-      userId: authResult.userId,
-      source: "web",
-      pageUrl: body.page_url || null,
-    });
-  } catch (err) {
-    if (err instanceof FeedbackServiceError) {
-      return apiError(503, "FEEDBACK_UNAVAILABLE", err.message);
-    }
-    throw err;
+  const result = await createFeedback({
+    ...content.data,
+    userId: authResult.userId,
+    source: "web",
+    pageUrl: body.page_url || null,
+  });
+  if (!result.ok) {
+    return apiErrorFromResult(result);
   }
 
   return Response.json(
@@ -89,29 +84,20 @@ export async function GET(request: NextRequest) {
   const page = query.data.page ?? 1;
   const viewer = { viewerId: authResult.userId, isAdmin };
 
-  let list: Awaited<ReturnType<typeof listFeedback>>;
-  let counts: Awaited<ReturnType<typeof countFeedbackByStatus>>;
-  try {
-    [list, counts] = await Promise.all([
-      listFeedback({
-        ...viewer,
-        status: query.data.status,
-        kind: query.data.kind,
-        limit: perPage,
-        offset: (page - 1) * perPage,
-      }),
-      countFeedbackByStatus(viewer),
-    ]);
-  } catch (err) {
-    if (err instanceof FeedbackServiceError) {
-      return apiError(503, "FEEDBACK_UNAVAILABLE", err.message);
-    }
-    throw err;
+  const result = await listFeedback({
+    ...viewer,
+    status: query.data.status,
+    kind: query.data.kind,
+    limit: perPage,
+    offset: (page - 1) * perPage,
+  });
+  if (!result.ok) {
+    return apiErrorFromResult(result);
   }
 
   return Response.json({
-    feedback: list.items.map(serializeFeedback),
-    total: list.total,
-    counts,
+    feedback: result.items.map(serializeFeedback),
+    total: result.total,
+    counts: result.counts,
   });
 }

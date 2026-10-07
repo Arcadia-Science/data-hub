@@ -35,7 +35,6 @@ import { formatDateTime } from "@/lib/date";
 import { cn } from "@/lib/utils";
 
 export interface FeedbackDetail {
-  adminNote: string | null;
   attemptedAction: string | null;
   createdAt: string;
   description: string;
@@ -48,7 +47,6 @@ export interface FeedbackDetail {
   sourceLabel: string;
   status: FeedbackStatus;
   statusUpdatedAt: string | null;
-  statusUpdatedByLabel: string | null;
   title: string;
   toolName: string | null;
 }
@@ -57,7 +55,6 @@ const ACTIVITY_DOT = {
   Reported: "bg-zinc-400",
   Resolved: "bg-green-600",
   Declined: "bg-zinc-500",
-  Reopened: "bg-blue-600",
 } as const;
 
 type ActivityVerb = keyof typeof ACTIVITY_DOT;
@@ -249,13 +246,6 @@ function feedbackMarkdown(item: FeedbackDetail): string {
     sections.push(
       `- **${event.verb}** by ${event.by} — ${formatDateTime(new Date(event.at))}`
     );
-    if (event.note) {
-      sections.push("", indentQuote(event.note), "");
-    }
-  }
-
-  if (item.adminNote) {
-    sections.push("", "## Note to reporter", "", item.adminNote);
   }
 
   return sections.join("\n").trimEnd();
@@ -271,13 +261,6 @@ function fenced(text: string): string {
   }
   const marker = "`".repeat(Math.max(3, longest + 1));
   return `${marker}\n${text}\n${marker}`;
-}
-
-function indentQuote(text: string): string {
-  return text
-    .split("\n")
-    .map((line) => `  > ${line}`)
-    .join("\n");
 }
 
 function Meta({
@@ -456,16 +439,6 @@ function Activity({ item }: { item: FeedbackDetail }) {
                 className="text-[13px] text-muted-foreground tabular-nums"
                 date={event.at}
               />
-              {event.note ? (
-                <div className="mt-1.5 flex flex-col gap-1 rounded-lg border bg-zinc-50 px-3 py-2.5 dark:bg-zinc-900">
-                  <p className="font-medium text-muted-foreground text-xs">
-                    Note to reporter
-                  </p>
-                  <p className="whitespace-pre-wrap break-words text-sm leading-normal">
-                    {event.note}
-                  </p>
-                </div>
-              ) : null}
             </div>
           </li>
         ))}
@@ -477,37 +450,19 @@ function Activity({ item }: { item: FeedbackDetail }) {
 function activityEvents(item: FeedbackDetail): {
   at: string;
   by: string;
-  note: string | null;
   verb: ActivityVerb;
 }[] {
-  const events: {
-    at: string;
-    by: string;
-    note: string | null;
-    verb: ActivityVerb;
-  }[] = [
-    {
-      verb: "Reported",
-      by: item.reporterLabel,
-      at: item.createdAt,
-      note: null,
-    },
+  const events: { at: string; by: string; verb: ActivityVerb }[] = [
+    { verb: "Reported", by: item.reporterLabel, at: item.createdAt },
   ];
-  if (!item.statusUpdatedAt) {
-    return events;
+  // Status only changes in Linear, so that is who made the change.
+  if (item.statusUpdatedAt && item.status !== "open") {
+    events.push({
+      verb: item.status === "resolved" ? "Resolved" : "Declined",
+      by: "Linear",
+      at: item.statusUpdatedAt,
+    });
   }
-  const verb: ActivityVerb =
-    item.status === "open"
-      ? "Reopened"
-      : item.status === "resolved"
-        ? "Resolved"
-        : "Declined";
-  events.push({
-    verb,
-    by: item.statusUpdatedByLabel ?? "Deleted user",
-    at: item.statusUpdatedAt,
-    note: verb === "Reopened" ? null : item.adminNote,
-  });
   return events;
 }
 
