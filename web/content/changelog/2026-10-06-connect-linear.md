@@ -1,6 +1,5 @@
 ---
 title: Connect Data Hub to Linear in Settings
-docs: https://datahub.arcadiascience.com/docs/connect-linear
 ---
 
 Workspace admins can now connect Data Hub to a Linear workspace from **Settings → Integrations**, in a new **Linear** card. Enter the client ID, client secret, and webhook signing secret from your Linear app. Data Hub stores the secrets encrypted and never shows them again after you save.
