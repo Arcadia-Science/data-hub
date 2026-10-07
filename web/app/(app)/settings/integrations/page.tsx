@@ -2,7 +2,10 @@ import type { Metadata } from "next/types";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import { LinearCard } from "@/components/integrations/linear-card";
 import { SlackAppCard } from "@/components/integrations/slack-app-card";
-import { SlackChannelCard } from "@/components/notifications/slack-channel-card";
+import {
+  SlackChannelForm,
+  SlackChannelSectionHeader,
+} from "@/components/notifications/slack-channel-card";
 import { AdminsOnly } from "@/components/settings/admins-only";
 import { SettingsPageContent } from "@/components/settings/settings-page-content";
 import { appOrigin } from "@/lib/app-origin";
@@ -72,8 +75,8 @@ export default async function IntegrationsSettingsPage() {
           key={slackApp.lastUpdated?.at ?? "never-saved"}
           teamId={slackApp.teamId}
         />
-        <SlackChannelCard.SectionHeader configured={slackChannel.configured} />
-        <SlackChannelCard.Form
+        <SlackChannelSectionHeader configured={slackChannel.configured} />
+        <SlackChannelForm
           configured={slackChannel.configured}
           lastUpdated={slackChannel.lastUpdated}
         />
