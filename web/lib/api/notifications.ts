@@ -54,8 +54,9 @@ import { toInitials } from "@/lib/utils";
 //                                via `POST /api/v1/notifications/dispatch`
 //                                (gated by the `notifications:create` scope).
 //   - `feedback_submitted`    : a new product-feedback report; admins only.
-//   - `feedback_updated`      : an admin resolved or declined a report; the
-//                                reporter only.
+//   - `feedback_updated`      : Linear moved a report's issue to a completed,
+//                                canceled, or duplicate state; the reporter
+//                                only.
 //
 // Preference-mutating routes remain session-only — they're personal-UX
 // surfaces, never invoked by PATs.
@@ -930,13 +931,12 @@ export async function notifyGeneric(input: {
   };
 }
 
-function feedbackUpdateBody(
-  title: string,
+// "Resolved (Done)": the Data Hub status, then the Linear state it came from.
+function feedbackStatusLabel(
   status: "resolved" | "declined",
   stateName: string
 ): string {
-  const label = FEEDBACK_STATUS_LABELS[status];
-  return `Your feedback "${title}" was marked ${label} (${stateName}).`;
+  return `${FEEDBACK_STATUS_LABELS[status]} (${stateName})`;
 }
 
 // Admins except the reporter. Missing preference rows count as in-app on.
@@ -1037,8 +1037,8 @@ export async function notifyFeedbackUpdated(input: {
     return;
   }
 
-  const body = feedbackUpdateBody(input.title, input.status, input.stateName);
-  const statusLabel = `${FEEDBACK_STATUS_LABELS[input.status]} (${input.stateName})`;
+  const statusLabel = feedbackStatusLabel(input.status, input.stateName);
+  const body = `Your feedback "${input.title}" was marked ${statusLabel}.`;
   if (recipient.feedbackUpdatedEnabled !== false) {
     await db.insert(notifications).values({
       userId: recipient.userId,
@@ -1059,11 +1059,10 @@ export async function notifyFeedbackUpdated(input: {
         userId: recipient.userId,
         slackUserId: recipient.slackUserId,
         payload: {
-          text: `Your feedback "${input.title}" was marked ${statusLabel}.`,
+          text: body,
           blocks: buildFeedbackUpdatedBlocks({
             title: input.title,
             statusLabel,
-            note: null,
           }),
         },
       },
