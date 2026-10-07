@@ -91,8 +91,12 @@ export function SendFeedbackForm({
           }),
         });
         if (!res.ok) {
+          const payload = (await res.json().catch(() => null)) as {
+            error?: { message?: string };
+          } | null;
           setSubmitError(
-            "Couldn't send feedback. Check your connection and try again."
+            payload?.error?.message ??
+              "Couldn't send feedback. Check your connection and try again."
           );
           return;
         }

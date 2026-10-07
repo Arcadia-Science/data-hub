@@ -32,6 +32,8 @@ const publicPrefixes = [
   "/api/cron",
   "/instruments",
   "/settings",
+  // Linear attachment links redirect here before the viewer is signed in.
+  "/feedback",
 ];
 
 // Paths that are public for the index URL only — descendants stay

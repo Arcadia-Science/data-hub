@@ -24,12 +24,15 @@ export const feedbackItemSchema = z.object({
   oauthClientName: z.string().nullable(),
   pageUrl: z.string().nullable(),
   status: feedbackStatusSchema,
-  adminNote: z.string().nullable(),
   reporter: feedbackPersonSchema.nullable(),
-  statusUpdatedBy: feedbackPersonSchema.nullable(),
   statusUpdatedAt: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  linearIssue: z.object({
+    identifier: z.string(),
+    stateName: z.string(),
+    url: z.string(),
+  }),
 });
 
 export const sendFeedbackOutputSchema = z.object({

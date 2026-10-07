@@ -48,7 +48,8 @@ export default async function IntegrationsSettingsPage() {
         </h2>
         <p className="text-muted-foreground text-sm">
           Connections used by the whole workspace. Personal notification choices
-          stay under Notifications.
+          stay under Notifications. Linear receives feedback reports once a team
+          is saved.
         </p>
       </div>
       <div className="mt-6 flex flex-col gap-6">

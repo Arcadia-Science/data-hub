@@ -6,6 +6,7 @@
 
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { FEEDBACK_REPORT_MARKER } from "@/lib/linear/feedback-link";
 
 const TOKEN_SKEW_MS = 60_000;
 const LINEAR_SCOPES = "read,issues:create";
@@ -34,10 +35,17 @@ export interface LinearOptionsResponse {
   teams: LinearChoice[];
 }
 
+export const LINEAR_RATE_LIMITED = "RATELIMITED";
+
 export class LinearRequestError extends Error {
-  constructor(message: string) {
+  // Set to `LINEAR_RATE_LIMITED` when Linear refuses the call because the app
+  // used up its hourly budget, so callers can tell that apart from an outage.
+  readonly code: string | null;
+
+  constructor(message: string, code: string | null = null) {
     super(message);
     this.name = "LinearRequestError";
+    this.code = code;
   }
 }
 
@@ -95,7 +103,11 @@ const tokenErrorSchema = z.object({
 });
 
 interface GraphqlErrorBody {
-  extensions?: { type?: string; userPresentableMessage?: string };
+  extensions?: {
+    code?: string;
+    type?: string;
+    userPresentableMessage?: string;
+  };
   message?: string;
 }
 
@@ -237,12 +249,22 @@ async function graphql<T>(
     response = await run(true);
   }
 
-  // GraphQL errors can arrive with a 4xx status, so read the body before
-  // judging the status.
+  // GraphQL errors can arrive with a 4xx status (a rate-limited call is a
+  // 400), so read the body before judging the status.
   const body = (await response.json().catch(() => null)) as {
     data?: unknown;
     errors?: GraphqlErrorBody[];
   } | null;
+  if (
+    body?.errors?.some(
+      (error) => error.extensions?.code === LINEAR_RATE_LIMITED
+    )
+  ) {
+    throw new LinearRequestError(
+      "Linear is limiting how often Data Hub can call it. Try again in a few minutes.",
+      LINEAR_RATE_LIMITED
+    );
+  }
   if (body?.errors && body.errors.length > 0) {
     throw graphqlFailure(body.errors[0] ?? {});
   }
@@ -319,4 +341,244 @@ export async function listLinearTeamOptions(
     }
     throw err;
   }
+}
+
+const issueCreatedSchema = z.object({
+  issueCreate: z.object({
+    issue: z
+      .object({
+        id: z.string(),
+        identifier: z.string(),
+        url: z.string(),
+      })
+      .nullable(),
+    success: z.boolean(),
+  }),
+});
+
+const attachmentCreatedSchema = z.object({
+  attachmentCreate: z.object({
+    attachment: z.object({ id: z.string() }).nullable(),
+    success: z.boolean(),
+  }),
+});
+
+const issueSummaryConnectionSchema = z.object({
+  issues: z.object({
+    nodes: z.array(
+      z.object({
+        attachments: z.object({
+          nodes: z.array(z.object({ url: z.string() })),
+        }),
+        createdAt: z.string(),
+        id: z.string(),
+        state: z.object({ type: z.string() }),
+        trashed: z.boolean().nullable(),
+      })
+    ),
+    pageInfo: z.object({
+      endCursor: z.string().nullable(),
+      hasNextPage: z.boolean(),
+    }),
+  }),
+});
+
+// Other integrations store lists and nested objects in attachment metadata,
+// so only the Data Hub attachment's metadata is checked, by its caller.
+const issueDetailConnectionSchema = z.object({
+  issues: z.object({
+    nodes: z.array(
+      z.object({
+        attachments: z.object({
+          nodes: z.array(
+            z.object({
+              metadata: z.record(z.string(), z.unknown()),
+              url: z.string(),
+            })
+          ),
+        }),
+        canceledAt: z.string().nullable(),
+        completedAt: z.string().nullable(),
+        createdAt: z.string(),
+        id: z.string(),
+        identifier: z.string(),
+        state: z.object({ name: z.string(), type: z.string() }),
+        trashed: z.boolean().nullable(),
+        updatedAt: z.string(),
+        url: z.string(),
+      })
+    ),
+  }),
+});
+
+export interface LinearIssueCreated {
+  id: string;
+  identifier: string;
+  url: string;
+}
+
+export async function createLinearIssue(
+  credentials: LinearCredentials,
+  input: {
+    createAsUser: string;
+    description: string;
+    labelIds: string[];
+    projectId: string | null;
+    teamId: string;
+    title: string;
+  }
+): Promise<LinearIssueCreated> {
+  const data = await graphql(
+    credentials,
+    `mutation IssueCreate($input: IssueCreateInput!) {
+      issueCreate(input: $input) {
+        success
+        issue { id identifier url }
+      }
+    }`,
+    {
+      input: {
+        title: input.title,
+        description: input.description,
+        teamId: input.teamId,
+        projectId: input.projectId,
+        labelIds: input.labelIds,
+        createAsUser: input.createAsUser,
+      },
+    },
+    issueCreatedSchema
+  );
+  if (!(data.issueCreate.success && data.issueCreate.issue)) {
+    throw new LinearRequestError("Linear did not create the issue.");
+  }
+  return data.issueCreate.issue;
+}
+
+export async function createLinearAttachment(
+  credentials: LinearCredentials,
+  input: {
+    issueId: string;
+    metadata: Record<string, string | number>;
+    title: string;
+    url: string;
+  }
+): Promise<void> {
+  const data = await graphql(
+    credentials,
+    `mutation AttachmentCreate($input: AttachmentCreateInput!) {
+      attachmentCreate(input: $input) {
+        success
+        attachment { id }
+      }
+    }`,
+    { input },
+    attachmentCreatedSchema
+  );
+  if (!data.attachmentCreate.success) {
+    throw new LinearRequestError("Linear did not attach the report.");
+  }
+}
+
+export interface LinearIssueSummaryNode {
+  attachments: { nodes: { url: string }[] };
+  createdAt: string;
+  id: string;
+  state: { type: string };
+}
+
+// Linear bills a query by page size even when fewer issues match, so the page
+// stays small and each issue returns only its Data Hub attachment. That keeps
+// one call to a few hundred points, against 2,000,000 per hour.
+export const LINEAR_SUMMARY_PAGE_SIZE = 100;
+
+// `includeArchived` keeps old reports visible, because Linear archives closed
+// issues on its own after the team's auto-archive period. Deleted issues come
+// back with `trashed` set and are dropped here.
+export async function listLinearIssueSummaries(
+  credentials: LinearCredentials,
+  input: {
+    after?: string;
+    filter: Record<string, unknown>;
+    pageSize?: number;
+  }
+): Promise<{
+  nodes: LinearIssueSummaryNode[];
+  pageInfo: { endCursor: string | null; hasNextPage: boolean };
+}> {
+  const data = await graphql(
+    credentials,
+    `query FeedbackIssueSummaries($filter: IssueFilter, $after: String, $first: Int, $marker: String!) {
+      issues(first: $first, after: $after, includeArchived: true, filter: $filter) {
+        nodes {
+          id
+          createdAt
+          trashed
+          state { type }
+          attachments(first: 1, filter: { url: { contains: $marker } }) { nodes { url } }
+        }
+        pageInfo { hasNextPage endCursor }
+      }
+    }`,
+    {
+      filter: input.filter,
+      after: input.after,
+      first: input.pageSize ?? LINEAR_SUMMARY_PAGE_SIZE,
+      marker: FEEDBACK_REPORT_MARKER,
+    },
+    issueSummaryConnectionSchema
+  );
+  return {
+    nodes: data.issues.nodes.filter((node) => !node.trashed),
+    pageInfo: data.issues.pageInfo,
+  };
+}
+
+export interface LinearIssueDetailNode {
+  attachments: {
+    nodes: { metadata: Record<string, unknown>; url: string }[];
+  };
+  canceledAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  id: string;
+  identifier: string;
+  state: { name: string; type: string };
+  updatedAt: string;
+  url: string;
+}
+
+// `first` matches the number of ids. Without it Linear returns 50 issues.
+export async function listLinearIssueDetails(
+  credentials: LinearCredentials,
+  ids: string[]
+): Promise<LinearIssueDetailNode[]> {
+  if (ids.length === 0) {
+    return [];
+  }
+  const data = await graphql(
+    credentials,
+    `query FeedbackIssueDetails($filter: IssueFilter, $first: Int, $marker: String!) {
+      issues(first: $first, includeArchived: true, filter: $filter) {
+        nodes {
+          id
+          identifier
+          url
+          createdAt
+          updatedAt
+          completedAt
+          canceledAt
+          trashed
+          state { name type }
+          attachments(first: 1, filter: { url: { contains: $marker } }) { nodes { url metadata } }
+        }
+      }
+    }`,
+    {
+      filter: { id: { in: ids } },
+      first: ids.length,
+      marker: FEEDBACK_REPORT_MARKER,
+    },
+    issueDetailConnectionSchema
+  );
+  return data.issues.nodes.filter((node) => !node.trashed);
 }

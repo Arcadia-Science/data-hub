@@ -160,6 +160,40 @@ export async function getLinearCredentials(): Promise<SavedLinearCredentials | n
   };
 }
 
+export interface LinearFeedbackSetup {
+  clientId: string;
+  clientSecret: string;
+  labelIds: Record<FeedbackKind, string | null>;
+  projectId: string | null;
+  teamId: string;
+}
+
+// Feedback is on only when an admin has saved credentials and a team.
+export async function getLinearFeedbackSetup(): Promise<LinearFeedbackSetup | null> {
+  const row = await loadRow();
+  const clientId = row?.clientId?.trim() ? row.clientId.trim() : null;
+  const clientSecret = readMaybeEncryptedSecret(row?.clientSecret ?? null);
+  const teamId = row?.teamId ?? null;
+  if (!(clientId && clientSecret && teamId)) {
+    return null;
+  }
+  return {
+    clientId,
+    clientSecret,
+    teamId,
+    projectId: row?.projectId ?? null,
+    labelIds: {
+      bug: row?.bugLabelId ?? null,
+      feature_request: row?.featureLabelId ?? null,
+      other: row?.otherLabelId ?? null,
+    },
+  };
+}
+
+export async function isFeedbackConfigured(): Promise<boolean> {
+  return (await getLinearFeedbackSetup()) != null;
+}
+
 export async function getLinearConfigForAdmin(): Promise<LinearConfigForAdmin> {
   const row = await loadRow();
   // No environment variable backs these, so `unreadable` means the saved

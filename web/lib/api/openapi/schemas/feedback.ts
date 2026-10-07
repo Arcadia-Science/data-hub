@@ -56,12 +56,15 @@ export const feedbackDetail = z
     oauth_client_name: z.string().nullable(),
     page_url: z.string().nullable(),
     status: feedbackStatusSchema,
-    admin_note: z.string().nullable(),
     reporter: feedbackPerson.nullable(),
-    status_updated_by: feedbackPerson.nullable(),
     status_updated_at: isoDateTime.nullable(),
     created_at: isoDateTime,
     updated_at: isoDateTime,
+    linear_issue: z.object({
+      identifier: z.string(),
+      url: z.string(),
+      state_name: z.string(),
+    }),
   })
   .openapi("Feedback");
 
