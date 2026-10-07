@@ -3,7 +3,6 @@ import { listFeedback } from "@/lib/api/feedback";
 import {
   listNotifications,
   notifyFeedbackSubmitted,
-  notifyFeedbackUpdated,
   updatePreferences,
 } from "@/lib/api/notifications";
 import { feedback, slackConnections } from "@/lib/db/schema";
@@ -164,51 +163,6 @@ describe("Feedback", () => {
     expect(await listNotifications(muted.userId)).toHaveLength(0);
     const dms = await getCapturedSlackDms();
     expect(dms.map((dm) => dm.channel)).toContain("U_ADMIN");
-  });
-
-  it("notifies the reporter on resolve, and skips them when the switch is off", async () => {
-    const reporter = await seedTestUser({ email: "reporter@example.com" });
-    const admin = await seedTestUser({
-      isAdmin: true,
-      email: "admin@example.com",
-    });
-    const [created] = await getTestDb()
-      .insert(feedback)
-      .values({
-        userId: reporter.userId,
-        source: "web",
-        kind: "bug",
-        title: "Export fails",
-        description: "Stops halfway.",
-      })
-      .returning({ id: feedback.id, title: feedback.title });
-
-    await notifyFeedbackUpdated({
-      feedbackId: created.id,
-      reporterUserId: reporter.userId,
-      adminUserId: admin.userId,
-      title: created.title,
-      status: "resolved",
-      note: "Fixed in the latest build.",
-    });
-
-    const [note] = await listNotifications(reporter.userId);
-    expect(note.body).toContain("Resolved");
-    expect(note.body).toContain("Fixed in the latest build.");
-
-    await updatePreferences(reporter.userId, { feedbackUpdatedEnabled: false });
-    await notifyFeedbackUpdated({
-      feedbackId: created.id,
-      reporterUserId: reporter.userId,
-      adminUserId: admin.userId,
-      title: created.title,
-      status: "declined",
-      note: "Won't do.",
-    });
-    const notes = await listNotifications(reporter.userId);
-    expect(notes.filter((row) => row.body?.includes("Declined"))).toHaveLength(
-      0
-    );
   });
 
   it("lets a member submit and see their own reports", async () => {

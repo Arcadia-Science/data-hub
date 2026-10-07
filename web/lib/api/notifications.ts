@@ -10,7 +10,6 @@ import {
   sql,
 } from "drizzle-orm";
 import { type ActorRef, type ActorToken, actorColumns } from "@/lib/api/actor";
-import { FEEDBACK_STATUS_LABELS } from "@/lib/api/feedback-schema";
 import { runCommentHref } from "@/lib/comment-hash";
 import { db } from "@/lib/db";
 import {
@@ -30,7 +29,6 @@ import {
 import {
   buildCommentBlocks,
   buildFeedbackSubmittedBlocks,
-  buildFeedbackUpdatedBlocks,
   buildGenericBlocks,
   buildRunCreatedBlocks,
   deliverSlackDms,
@@ -930,16 +928,6 @@ export async function notifyGeneric(input: {
   };
 }
 
-function feedbackUpdateBody(
-  title: string,
-  status: "resolved" | "declined",
-  note: string | null
-): string {
-  const label = FEEDBACK_STATUS_LABELS[status];
-  const headline = `Your feedback "${title}" was marked ${label}.`;
-  return note ? `${headline} ${note}` : headline;
-}
-
 // Admins except the reporter. Missing preference rows count as in-app on.
 export async function notifyFeedbackSubmitted(input: {
   feedbackId: string;
@@ -1005,72 +993,4 @@ export async function notifyFeedbackSubmitted(input: {
       },
     }));
   await deliverSlackDms(slackJobs);
-}
-
-// Reporter only, and only for resolved / declined. Skips self-updates.
-export async function notifyFeedbackUpdated(input: {
-  feedbackId: string;
-  reporterUserId: string;
-  adminUserId: string;
-  title: string;
-  status: "resolved" | "declined";
-  note: string | null;
-}): Promise<void> {
-  if (input.reporterUserId === input.adminUserId) {
-    return;
-  }
-
-  const [recipient] = await db
-    .select({
-      userId: users.id,
-      feedbackUpdatedEnabled: notificationPreferences.feedbackUpdatedEnabled,
-      slackUserId: slackConnections.slackUserId,
-      slackFeedbackUpdatedEnabled:
-        notificationPreferences.slackFeedbackUpdatedEnabled,
-      slackRevokedAt: slackConnections.revokedAt,
-    })
-    .from(users)
-    .leftJoin(
-      notificationPreferences,
-      eq(notificationPreferences.userId, users.id)
-    )
-    .leftJoin(slackConnections, eq(slackConnections.userId, users.id))
-    .where(eq(users.id, input.reporterUserId))
-    .limit(1);
-
-  if (!recipient) {
-    return;
-  }
-
-  const body = feedbackUpdateBody(input.title, input.status, input.note);
-  if (recipient.feedbackUpdatedEnabled !== false) {
-    await db.insert(notifications).values({
-      userId: recipient.userId,
-      type: "feedback_updated",
-      actorUserId: input.adminUserId,
-      feedbackId: input.feedbackId,
-      body,
-    });
-  }
-
-  if (
-    recipient.slackUserId &&
-    !recipient.slackRevokedAt &&
-    (recipient.slackFeedbackUpdatedEnabled ?? false)
-  ) {
-    await deliverSlackDms([
-      {
-        userId: recipient.userId,
-        slackUserId: recipient.slackUserId,
-        payload: {
-          text: `Your feedback "${input.title}" was marked ${FEEDBACK_STATUS_LABELS[input.status]}.`,
-          blocks: buildFeedbackUpdatedBlocks({
-            title: input.title,
-            statusLabel: FEEDBACK_STATUS_LABELS[input.status],
-            note: input.note,
-          }),
-        },
-      },
-    ]);
-  }
 }
