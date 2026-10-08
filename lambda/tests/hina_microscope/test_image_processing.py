@@ -24,6 +24,13 @@ from data_hub_lambda.hina_microscope.parse_metadata import parse_metadata
 _EXAMPLES = Path(str(importlib.resources.files("arcadia_microscopy_tools"))) / "tests" / "data"
 
 
+def _halved(planes: np.ndarray) -> np.ndarray:
+    """Average 2 x 2 blocks of a `(C, Y, X)` stack, written without the code under test."""
+    channels, height, width = planes.shape
+    blocks = planes.reshape(channels, height // 2, 2, width // 2, 2)
+    return np.rint(blocks.mean(axis=(2, 4))).astype(planes.dtype)
+
+
 class TestRescalePercentile:
     def test_range_maps_to_0_1(self) -> None:
         arr = np.linspace(100, 200, 100, dtype=np.float64)
@@ -97,15 +104,57 @@ class TestExampleFiles:
         assert planes is not None
         np.testing.assert_array_equal(planes[0], np.asarray(nd2.imread(path))[0])
 
-    def test_too_large_image_fails_before_reading_frames(
+    @pytest.mark.parametrize(
+        ("name", "cap", "jpg_size"),
+        [
+            ("example-zstack.nd2", 1_000_000, (64, 64)),
+            ("example-multichannel.nd2", 5_000_000, (128, 128)),
+        ],
+        ids=["z-stack", "multichannel"],
+    )
+    def test_image_over_the_cap_is_shrunk_and_still_renders(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        name: str,
+        cap: int,
+        jpg_size: tuple[int, int],
+    ) -> None:
+        path = _EXAMPLES / name
+        full = ND2Processor(path)
+        full.load()
+        assert image_processing.preview_bytes(full.image.sizes) > cap
+        monkeypatch.setattr(image_processing, "MAX_PREVIEW_BYTES", cap)
+        processor = ND2Processor(path)
+
+        processor.load()
+
+        planes = processor._planes
+        assert planes is not None
+        reference = np.asarray(nd2.imread(path))
+        if "Z" in full.image.sizes:
+            reference = reference.max(axis=0)
+        reference = reference.reshape(-1, *reference.shape[-2:])
+        np.testing.assert_array_equal(np.stack(planes), _halved(reference))
+        assert all(plane.dtype == np.uint16 for plane in planes)
+        assert processor.image.sizes == full.image.sizes
+        assert parse_metadata(processor.image) == parse_metadata(full.image)
+        with Image.open(processor.export_jpg(output_dir=tmp_path)) as image:
+            assert image.mode == "RGB"
+            assert image.size == jpg_size
+
+    def test_image_whose_planes_do_not_fit_fails_before_reading_frames(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         def _no_read(*_args: object) -> None:
             raise AssertionError("an oversized image should not be read")
 
-        monkeypatch.setattr(image_processing, "MAX_PREVIEW_BYTES", 1)
+        path = _EXAMPLES / "example-zstack.nd2"
+        with nd2.ND2File(path) as nd2f:
+            planes = image_processing.plane_bytes(dict(nd2f.sizes), nd2f.dtype.itemsize)
+        monkeypatch.setattr(image_processing, "MAX_PREVIEW_BYTES", planes - 1)
         monkeypatch.setattr(image_processing, "_preview_planes", _no_read)
-        processor = ND2Processor(_EXAMPLES / "example-zstack.nd2")
+        processor = ND2Processor(path)
 
         with pytest.raises(ValueError, match="too large for a preview") as exc:
             processor.load()
