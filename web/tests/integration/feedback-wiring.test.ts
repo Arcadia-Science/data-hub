@@ -1,9 +1,9 @@
 import { createHmac, randomUUID } from "node:crypto";
-import { feedbackAttachmentUrl } from "@arcadia-science/app-feedback/contract";
+import { feedbackAttachmentUrl } from "@arcadiascience/app-feedback-toolkit/contract";
 import {
   LINEAR_STATES,
   LINEAR_TEAM_ID,
-} from "@arcadia-science/app-feedback/testing";
+} from "@arcadiascience/app-feedback-toolkit/testing";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {

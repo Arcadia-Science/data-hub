@@ -1,6 +1,6 @@
 "use client";
 
-import { FeedbackProvider } from "@arcadia-science/app-feedback/react";
+import { FeedbackProvider } from "@arcadiascience/app-feedback-toolkit/react";
 import type { ReactNode } from "react";
 import { FEEDBACK_APP } from "@/lib/feedback-app";
 

@@ -1,4 +1,4 @@
-import { LinearSetupSection } from "@arcadia-science/app-feedback/next";
+import { LinearSetupSection } from "@arcadiascience/app-feedback-toolkit/next";
 import type { Metadata } from "next/types";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import { SlackAppCard } from "@/components/integrations/slack-app-card";

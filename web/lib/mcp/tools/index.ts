@@ -1,4 +1,4 @@
-import { registerFeedbackTools } from "@arcadia-science/app-feedback/mcp";
+import { registerFeedbackTools } from "@arcadiascience/app-feedback-toolkit/mcp";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { feedback } from "@/lib/feedback";
 import { registerDiscoveryTools } from "@/lib/mcp/tools/discovery";

@@ -1,6 +1,6 @@
 "use client";
 
-import { useOpenFeedback } from "@arcadia-science/app-feedback/react";
+import { useOpenFeedback } from "@arcadiascience/app-feedback-toolkit/react";
 import { MessageSquarePlus } from "lucide-react";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 

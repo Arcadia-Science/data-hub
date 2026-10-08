@@ -3,7 +3,7 @@ import {
   FEEDBACK_STATUS_LABELS,
   type NotificationOutcome,
   type SubmittedReport,
-} from "@arcadia-science/app-feedback/server";
+} from "@arcadiascience/app-feedback-toolkit/server";
 import {
   aliasedTable,
   and,

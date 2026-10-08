@@ -1191,7 +1191,7 @@ export const runAttributions = pgTable(
 export {
   linearIntegrationConfig,
   linearWebhookDeliveries,
-} from "@arcadia-science/app-feedback/drizzle";
+} from "@arcadiascience/app-feedback-toolkit/drizzle";
 // Better Auth JWT + OAuth provider tables — regenerate via
 // `npm run db:generate-auth-schema` (see `auth-schema.ts` header).
 export {

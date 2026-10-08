@@ -1,4 +1,4 @@
-import { createFeedbackHandlers } from "@arcadia-science/app-feedback/next";
+import { createFeedbackHandlers } from "@arcadiascience/app-feedback-toolkit/next";
 import { feedback } from "@/lib/feedback";
 
 // Linear posts here when an issue changes. The feedback package checks the

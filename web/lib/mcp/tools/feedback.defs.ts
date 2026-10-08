@@ -1,4 +1,4 @@
-import { feedbackToolDefs } from "@arcadia-science/app-feedback/mcp";
+import { feedbackToolDefs } from "@arcadiascience/app-feedback-toolkit/mcp";
 import { FEEDBACK_MCP_OPTIONS } from "@/lib/feedback-app";
 import type { McpToolDef } from "@/lib/mcp/catalog/types";
 

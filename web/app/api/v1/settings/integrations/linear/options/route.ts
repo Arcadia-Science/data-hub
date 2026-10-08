@@ -1,4 +1,4 @@
-import { createFeedbackHandlers } from "@arcadia-science/app-feedback/next";
+import { createFeedbackHandlers } from "@arcadiascience/app-feedback-toolkit/next";
 import { feedback } from "@/lib/feedback";
 
 // Lists the Linear teams, projects, and labels the setup wizard offers.

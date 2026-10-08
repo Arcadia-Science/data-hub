@@ -1,4 +1,4 @@
-import { feedbackInstructions } from "@arcadia-science/app-feedback/mcp";
+import { feedbackInstructions } from "@arcadiascience/app-feedback-toolkit/mcp";
 import { FEEDBACK_MCP_OPTIONS } from "@/lib/feedback-app";
 
 /**

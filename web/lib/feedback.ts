@@ -2,7 +2,7 @@
 // Everything else the package needs, such as the routes and pages, imports
 // `feedback` from here.
 
-import { createAppFeedback } from "@arcadia-science/app-feedback/server";
+import { createAppFeedback } from "@arcadiascience/app-feedback-toolkit/server";
 import { eq, inArray, sql } from "drizzle-orm";
 import { requireSession } from "@/lib/api/auth";
 import {

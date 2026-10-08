@@ -1,4 +1,4 @@
-import { FeedbackReviewPage } from "@arcadia-science/app-feedback/next";
+import { FeedbackReviewPage } from "@arcadiascience/app-feedback-toolkit/next";
 import type { Metadata } from "next/types";
 import { SignInRequired } from "@/components/auth/sign-in-required";
 import { AdminsOnly } from "@/components/settings/admins-only";

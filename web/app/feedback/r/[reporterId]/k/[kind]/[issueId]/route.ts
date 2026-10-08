@@ -1,4 +1,4 @@
-import { createFeedbackHandlers } from "@arcadia-science/app-feedback/next";
+import { createFeedbackHandlers } from "@arcadiascience/app-feedback-toolkit/next";
 import { feedback } from "@/lib/feedback";
 
 // Linear stores this URL on the feedback issue. Opening it lands on the report

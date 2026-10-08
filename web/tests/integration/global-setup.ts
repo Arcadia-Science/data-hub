@@ -2,7 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import { execSync, spawn } from "node:child_process";
 import http from "node:http";
 import net from "node:net";
-import { startLinearFakeServer } from "@arcadia-science/app-feedback/testing";
+import { startLinearFakeServer } from "@arcadiascience/app-feedback-toolkit/testing";
 import { Client, Pool } from "pg";
 import { CREATE_NATURAL_FILENAME_COLLATION } from "@/lib/db/collations";
 
