@@ -1,5 +1,5 @@
 import { feedbackInstructions } from "@arcadia-science/app-feedback/mcp";
-import { FEEDBACK_APP } from "@/lib/feedback-app";
+import { FEEDBACK_MCP_OPTIONS } from "@/lib/feedback-app";
 
 /**
  * Delivered to every MCP client at initialize — reachable without resources.
@@ -42,8 +42,5 @@ A run can have thousands of files: filter list_run_files by status rather than
 paging all of it, and prefer get_run_report's bounded sample over downloading
 full CSVs.
 
-${feedbackInstructions({
-  appName: FEEDBACK_APP.appName,
-  guidance: FEEDBACK_APP.mcpGuidance,
-})}
+${feedbackInstructions(FEEDBACK_MCP_OPTIONS)}
 `.trim();

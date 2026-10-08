@@ -6,7 +6,11 @@ import {
 } from "@arcadia-science/app-feedback/testing";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { listNotifications, updatePreferences } from "@/lib/api/notifications";
+import {
+  listNotifications,
+  notifyFeedbackUpdated,
+  updatePreferences,
+} from "@/lib/api/notifications";
 import { linearIntegrationConfig, slackConnections } from "@/lib/db/schema";
 import {
   api,
@@ -93,7 +97,7 @@ async function waitFor(predicate: () => Promise<boolean>): Promise<void> {
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  throw new Error("Timed out waiting for the notification");
+  throw new Error("Timed out after 5 seconds waiting for the condition");
 }
 
 async function enableLinear(cookie: string) {
@@ -365,6 +369,18 @@ describe("Feedback in Data Hub", () => {
     await deliverClose(feedback.id);
     await waitForOutcome("delivered");
     expect(await listNotifications(sender.userId)).toHaveLength(1);
+  });
+
+  it("tells the package nobody was notified when the reporter's account is gone", async () => {
+    expect(
+      await notifyFeedbackUpdated({
+        feedbackId: randomUUID(),
+        reporterUserId: randomUUID(),
+        title: "Export fails",
+        status: "resolved",
+        stateName: "Done",
+      })
+    ).toBe("none");
   });
 
   it("keeps the report link, the webhook URL, and the review page where Linear and people expect them", async () => {
