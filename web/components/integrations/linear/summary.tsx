@@ -4,6 +4,7 @@ import { ExternalLinkIcon, Loader2 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { RelativeTime } from "@/components/dashboard/relative-time";
 import { FeedbackStatusBadge } from "@/components/feedback/feedback-badges";
+import { SecretInput } from "@/components/integrations/secret-input";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,11 +16,10 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatDateTimeShort } from "@/lib/date";
 import { feedbackStatusFromLinearState } from "@/lib/linear/feedback-link";
-import { useLinearSetup } from "./linear-setup-context";
+import { useLinearSetup, useVisibleInterval } from "./linear-setup-context";
 import { LINEAR_WEBHOOKS_URL } from "./links";
 import { useSigningSecretForm } from "./use-signing-secret-form";
 
@@ -167,6 +167,13 @@ function StatusRow({ needsAttention }: { needsAttention: boolean }) {
   const { actions, state } = useLinearSetup();
   const { data } = state;
   const form = useSigningSecretForm();
+  useVisibleInterval(
+    !needsAttention && data.webhookSecretSet && data.lastWebhookAt === null,
+    5000,
+    () => {
+      void actions.refresh();
+    }
+  );
 
   if (needsAttention) {
     return (
@@ -194,14 +201,11 @@ function StatusRow({ needsAttention }: { needsAttention: boolean }) {
               New signing secret
             </Label>
             <div className="flex gap-2">
-              <Input
-                autoComplete="off"
+              <SecretInput
                 id="linear-new-signing-secret"
                 name="signing_secret"
                 onChange={(event) => form.setSecret(event.target.value)}
                 placeholder="Paste it from the webhook's page in Linear…"
-                spellCheck={false}
-                type="password"
                 value={form.secret}
               />
               <Button disabled={!form.canSave} type="submit">
@@ -260,7 +264,7 @@ function StatusRow({ needsAttention }: { needsAttention: boolean }) {
             </span>
           </>
         ) : (
-          <span>Waiting for Linear's first update.</span>
+          <span>Waiting for an update from Linear.</span>
         )
       ) : (
         <span>Not set up</span>

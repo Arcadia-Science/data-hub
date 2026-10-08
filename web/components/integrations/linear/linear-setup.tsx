@@ -80,7 +80,7 @@ const STEPS: Record<LinearStep, StepDefinition> = {
     doneDetail: (data) =>
       data.lastWebhookAt
         ? `Working. Linear's last update arrived ${formatDateTimeShort(new Date(data.lastWebhookAt))}.`
-        : "Waiting for Linear's first update.",
+        : "Waiting for an update from Linear.",
   },
   test: {
     number: 4,

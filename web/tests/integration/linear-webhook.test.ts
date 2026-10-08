@@ -396,6 +396,44 @@ describe("Linear feedback webhook", () => {
     expect(after.updatedAt.getTime()).toBe(saved.updatedAt.getTime());
   });
 
+  it("waits for Linear again after a new signing secret is saved", async () => {
+    const admin = await seedTestUser({ isAdmin: true });
+    const cookie = await seedSessionCookie(admin.userId);
+    await enable(cookie);
+    const update = () =>
+      JSON.stringify({
+        action: "update",
+        type: "Issue",
+        data: { id: randomUUID(), teamId: LINEAR_TEAM_ID },
+        webhookTimestamp: Date.now(),
+      });
+
+    const first = update();
+    expect((await postWebhook(first, sign(first))).status).toBe(200);
+    await waitFor(async () => (await lastWebhookAt()) !== null);
+
+    const newSecret = "whsec_replaced";
+    const saved = await api("/api/v1/settings/integrations/linear", {
+      method: "PUT",
+      headers: { Cookie: cookie },
+      body: { webhook_secret: newSecret },
+    });
+    expect(saved.status).toBe(200);
+    expect((await saved.json()).last_webhook_at).toBeNull();
+    expect(await lastWebhookAt()).toBeNull();
+
+    const signedWithOld = update();
+    expect((await postWebhook(signedWithOld, sign(signedWithOld))).status).toBe(
+      401
+    );
+    const signedWithNew = update();
+    const newSignature = createHmac("sha256", newSecret)
+      .update(signedWithNew)
+      .digest("hex");
+    expect((await postWebhook(signedWithNew, newSignature)).status).toBe(200);
+    await waitFor(async () => (await lastWebhookAt()) !== null);
+  });
+
   it("counts a rejected delivery from Linear for this workspace, then clears it", async () => {
     const admin = await seedTestUser({ isAdmin: true });
     await enable(await seedSessionCookie(admin.userId));

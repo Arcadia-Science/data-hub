@@ -517,7 +517,11 @@ export async function updateLinearConfig(
         featureLabelName: labels.feature_request?.name ?? null,
         otherLabelId: labels.other?.id ?? null,
         otherLabelName: labels.other?.name ?? null,
-        ...(teamChanged ? { lastWebhookAt: null } : {}),
+        // A new team or signing secret is unproven until Linear's next
+        // update passes, so an older success no longer counts as "Working".
+        ...(teamChanged || patch.webhook_secret !== undefined
+          ? { lastWebhookAt: null }
+          : {}),
         ...(patch.webhook_secret === undefined
           ? {}
           : {
