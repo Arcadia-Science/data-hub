@@ -50,12 +50,19 @@ export default async function AppLayout({
   // The changelog window opens from the account menu on every page. Grouping
   // here avoids a second request, and the files are small enough to send
   // with the sidebar.
+  //
+  // A failed feedback check only hides the Feedback menu item. It reads
+  // columns that a new feedback package version can add, and the app can
+  // deploy before the migration that adds them has run.
   const [instruments, initialUnreadCount, timeZone, feedbackEnabled] = session
     ? await Promise.all([
         getSidebarInstruments(),
         countUnread(session.user.id),
         getViewerTimeZone(),
-        feedback.isConfigured(),
+        feedback.isConfigured().catch((error) => {
+          console.error("Feedback setup check failed", error);
+          return false;
+        }),
       ])
     : [[], 0, "UTC", false];
   const changelogSections = session

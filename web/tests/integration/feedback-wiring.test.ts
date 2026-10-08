@@ -200,20 +200,24 @@ describe("Feedback in Data Hub", () => {
   it("limits the Linear settings to admins, read from the database", async () => {
     const admin = await seedTestUser({ isAdmin: true });
     const member = await seedTestUser();
-    expect(
-      (
-        await api(SETTINGS, {
-          headers: { Cookie: await seedSessionCookie(admin.userId) },
-        })
-      ).status
-    ).toBe(200);
-    expect(
-      (
-        await api(SETTINGS, {
-          headers: { Cookie: await seedSessionCookie(member.userId) },
-        })
-      ).status
-    ).toBe(403);
+    const adminCookie = await seedSessionCookie(admin.userId);
+    const memberCookie = await seedSessionCookie(member.userId);
+    await enableLinear(adminCookie);
+
+    for (const path of [SETTINGS, `${SETTINGS}/options`]) {
+      expect(
+        (await api(path, { headers: { Cookie: adminCookie } })).status
+      ).toBe(200);
+      expect(
+        (await api(path, { headers: { Cookie: memberCookie } })).status
+      ).toBe(403);
+    }
+    const options = await (
+      await api(`${SETTINGS}/options`, { headers: { Cookie: adminCookie } })
+    ).json();
+    expect(options.teams).toContainEqual(
+      expect.objectContaining({ id: LINEAR_TEAM_ID })
+    );
   });
 
   it("tells admins about a new report in the app and in Slack, but not a muted admin", async () => {
@@ -298,13 +302,19 @@ describe("Feedback in Data Hub", () => {
     expect(dms.some((dm) => dm.text.includes("Resolved (Done)"))).toBe(true);
   });
 
-  it("lets the test report say whether the in-app notification was written", async () => {
+  it("lets the test report say whether the reporter was told, in the app or in Slack", async () => {
     const sender = await seedTestUser({
       isAdmin: true,
       email: "stages-sender@example.com",
     });
     const cookie = await seedSessionCookie(sender.userId);
     await enableLinear(cookie);
+    await getTestDb().insert(slackConnections).values({
+      userId: sender.userId,
+      slackUserId: "U_SENDER",
+      slackTeamId: "T_TEST",
+      slackTeamName: "Test",
+    });
 
     const created = await api(`${SETTINGS}/test-report`, {
       method: "POST",
@@ -318,21 +328,42 @@ describe("Feedback in Data Hub", () => {
           headers: { Cookie: cookie },
         })
       ).json();
-    const waitForOutcome = (outcome: string) =>
-      waitFor(async () => (await status()).notification?.outcome === outcome);
+    // Each close records its outcome with a new time, so waiting for the time
+    // to change tells two `delivered` results apart.
+    let lastAt: string | null = null;
+    const waitForOutcome = async (outcome: string) => {
+      await waitFor(async () => {
+        const { notification } = await status();
+        return notification?.outcome === outcome && notification.at !== lastAt;
+      });
+      lastAt = (await status()).notification.at;
+    };
     await closeIssue(feedback.id);
 
-    // With the in-app switch off, the callback reports `disabled`.
+    // With in-app and Slack both off, the callback reports `disabled`.
     await updatePreferences(sender.userId, { feedbackUpdatedEnabled: false });
     await deliverClose(feedback.id);
     await waitForOutcome("disabled");
     expect(await listNotifications(sender.userId)).toHaveLength(0);
 
-    // With it on, the notification is written and the callback says so.
-    await updatePreferences(sender.userId, { feedbackUpdatedEnabled: true });
+    // A Slack message on its own counts as telling the reporter.
+    await updatePreferences(sender.userId, {
+      slackFeedbackUpdatedEnabled: true,
+    });
     await deliverClose(feedback.id);
     await waitForOutcome("delivered");
-    expect((await status()).notification.at).not.toBeNull();
+    expect(await listNotifications(sender.userId)).toHaveLength(0);
+    expect((await getCapturedSlackDms()).map((dm) => dm.channel)).toContain(
+      "U_SENDER"
+    );
+
+    // So does the in-app notification on its own.
+    await updatePreferences(sender.userId, {
+      feedbackUpdatedEnabled: true,
+      slackFeedbackUpdatedEnabled: false,
+    });
+    await deliverClose(feedback.id);
+    await waitForOutcome("delivered");
     expect(await listNotifications(sender.userId)).toHaveLength(1);
   });
 
@@ -361,7 +392,7 @@ describe("Feedback in Data Hub", () => {
         redirect: "manual",
       }
     );
-    expect(page.status).toBeLessThan(500);
+    expect(page.status).toBe(200);
   });
 
   it("shows only this deployment's reports, even in a Linear team that others share", async () => {
@@ -429,6 +460,7 @@ describe("Feedback in Data Hub", () => {
     for (const id of [report.id, report.linearIssue.identifier]) {
       const own = await callTool(readToken, "get_feedback", { id });
       expect(own.result?.isError).not.toBe(true);
+      expect(own.result?.structuredContent?.feedback.activity).toBeNull();
       const denied = await callTool(
         await getMcpAccessToken(stranger.userId, "read"),
         "get_feedback",
@@ -436,6 +468,17 @@ describe("Feedback in Data Hub", () => {
       );
       expect(denied.result?.isError).toBe(true);
     }
+
+    // An admin can read anyone's report, and gets the admin-only activity.
+    const adminRead = await callTool(
+      await getMcpAccessToken(admin.userId, "read"),
+      "get_feedback",
+      { id: report.id }
+    );
+    expect(adminRead.result?.isError).not.toBe(true);
+    expect(adminRead.result?.structuredContent?.feedback.activity).toEqual(
+      expect.any(Array)
+    );
   });
 
   it("tells an MCP client that feedback is not set up, in Data Hub's name", async () => {

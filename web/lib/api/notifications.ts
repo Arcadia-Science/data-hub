@@ -1,4 +1,9 @@
-import { FEEDBACK_STATUS_LABELS } from "@arcadia-science/app-feedback/server";
+import {
+  type ClosedReport,
+  FEEDBACK_STATUS_LABELS,
+  type NotificationOutcome,
+  type SubmittedReport,
+} from "@arcadia-science/app-feedback/server";
 import {
   aliasedTable,
   and,
@@ -940,13 +945,9 @@ function feedbackStatusLabel(
 }
 
 // Admins except the reporter. Missing preference rows count as in-app on.
-export async function notifyFeedbackSubmitted(input: {
-  feedbackId: string;
-  reporterUserId: string;
-  reporterDisplayName: string;
-  title: string;
-  origin?: string;
-}): Promise<void> {
+export async function notifyFeedbackSubmitted(
+  input: SubmittedReport
+): Promise<void> {
   const admins = await db
     .select({
       userId: users.id,
@@ -1008,13 +1009,9 @@ export async function notifyFeedbackSubmitted(input: {
 
 // Reporter only, and only for resolved / declined. The status comes from
 // Linear, so there is no Data Hub admin on the notification.
-export async function notifyFeedbackUpdated(input: {
-  feedbackId: string;
-  reporterUserId: string;
-  title: string;
-  status: "resolved" | "declined";
-  stateName: string;
-}): Promise<"delivered" | "disabled" | "none"> {
+export async function notifyFeedbackUpdated(
+  input: Omit<ClosedReport, "isTest">
+): Promise<NotificationOutcome> {
   const [recipient] = await db
     .select({
       userId: users.id,
@@ -1039,8 +1036,6 @@ export async function notifyFeedbackUpdated(input: {
 
   const statusLabel = feedbackStatusLabel(input.status, input.stateName);
   const body = `Your feedback "${input.title}" was marked ${statusLabel}.`;
-  // The setup wizard's test report shows whether the in-app notification was
-  // written, so that is what the caller is told.
   const inAppEnabled = recipient.feedbackUpdatedEnabled !== false;
   if (inAppEnabled) {
     await db.insert(notifications).values({
@@ -1052,12 +1047,13 @@ export async function notifyFeedbackUpdated(input: {
     });
   }
 
+  let slackSent = false;
   if (
     recipient.slackUserId &&
     !recipient.slackRevokedAt &&
     (recipient.slackFeedbackUpdatedEnabled ?? false)
   ) {
-    await deliverSlackDms([
+    const sent = await deliverSlackDms([
       {
         userId: recipient.userId,
         slackUserId: recipient.slackUserId,
@@ -1070,6 +1066,9 @@ export async function notifyFeedbackUpdated(input: {
         },
       },
     ]);
+    slackSent = sent > 0;
   }
-  return inAppEnabled ? "delivered" : "disabled";
+  // The setup wizard's test report shows this. `delivered` means the reporter
+  // was told, in the app or in Slack.
+  return inAppEnabled || slackSent ? "delivered" : "disabled";
 }

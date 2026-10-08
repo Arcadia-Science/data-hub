@@ -2,6 +2,7 @@
 
 import { FeedbackProvider } from "@arcadia-science/app-feedback/react";
 import type { ReactNode } from "react";
+import { FEEDBACK_APP } from "@/lib/feedback-app";
 
 // Data Hub's pages are `/instruments/<name>/runs/<id>`, so a report sent from
 // one can name the instrument and run instead of just the last path segment.
@@ -22,11 +23,11 @@ function humanizeSlug(slug: string): string {
 }
 
 // A client file because `describePage` is a function, which cannot be passed
-// from a server component. It also keeps Data Hub's URLs in one place.
+// from a server component.
 export function DataHubFeedbackProvider({ children }: { children: ReactNode }) {
   return (
     <FeedbackProvider
-      appName="Data Hub"
+      appName={FEEDBACK_APP.appName}
       describePage={describePage}
       feedbackUrl="/api/v1/feedback"
       linearUrl="/api/v1/settings/integrations/linear"
