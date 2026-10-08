@@ -285,74 +285,6 @@ export const slackAppConfig = pgTable(
   (config) => [check("slack_app_config_singleton", sql`${config.id} = true`)]
 );
 
-// Linear OAuth app used to store feedback issues. Client secret and webhook
-// signing secret are encrypted. Team, project, and label names are kept so
-// the settings page can show the current choice before Linear answers.
-export const linearIntegrationConfig = pgTable(
-  "linear_integration_config",
-  {
-    id: boolean("id").primaryKey().default(true),
-    clientId: text("client_id"),
-    clientSecret: text("client_secret"),
-    webhookSecret: text("webhook_secret"),
-    teamId: text("team_id"),
-    teamName: text("team_name"),
-    projectId: text("project_id"),
-    projectName: text("project_name"),
-    bugLabelId: text("bug_label_id"),
-    bugLabelName: text("bug_label_name"),
-    featureLabelId: text("feature_label_id"),
-    featureLabelName: text("feature_label_name"),
-    otherLabelId: text("other_label_id"),
-    otherLabelName: text("other_label_name"),
-    workspaceId: text("workspace_id"),
-    workspaceName: text("workspace_name"),
-    workspaceUrlKey: text("workspace_url_key"),
-    teamKey: text("team_key"),
-    projectUrl: text("project_url"),
-    webhookRejections: integer("webhook_rejections").notNull().default(0),
-    lastWebhookRejectedAt: timestamp("last_webhook_rejected_at", {
-      withTimezone: true,
-      mode: "date",
-    }),
-    lastWebhookRejectionReason: text("last_webhook_rejection_reason"),
-    lastWebhookAt: timestamp("last_webhook_at", {
-      withTimezone: true,
-      mode: "date",
-    }),
-    updatedAt: timestamp("updated_at", {
-      withTimezone: true,
-      mode: "date",
-    })
-      .notNull()
-      .defaultNow()
-      .$onUpdate(() => new Date()),
-    updatedBy: text("updated_by").references(() => users.id, {
-      onDelete: "set null",
-    }),
-  },
-  (config) => [
-    check("linear_integration_config_singleton", sql`${config.id} = true`),
-    check(
-      "linear_webhook_rejection_reason",
-      sql`${config.lastWebhookRejectionReason} is null or ${config.lastWebhookRejectionReason} in ('signature', 'stale')`
-    ),
-  ]
-);
-
-// One row for each Linear webhook delivery that Data Hub acted on. Linear
-// resends a delivery that was slow to answer, and the `Linear-Delivery` id is
-// the only thing that tells a resend apart from a second status change.
-export const linearWebhookDeliveries = pgTable("linear_webhook_deliveries", {
-  deliveryId: text("delivery_id").primaryKey(),
-  receivedAt: timestamp("received_at", {
-    withTimezone: true,
-    mode: "date",
-  })
-    .notNull()
-    .defaultNow(),
-});
-
 export const personalAccessTokens = pgTable(
   "personal_access_tokens",
   {
@@ -1253,9 +1185,15 @@ export const runAttributions = pgTable(
   ]
 );
 
+// The Linear connection for feedback, owned by the feedback package. `updated_by`
+// is a plain user ID there, with no foreign key to `users`.
+// biome-ignore lint/performance/noBarrelFile: drizzle-kit reads this single schema entrypoint, which also re-exports the Better Auth tables below.
+export {
+  linearIntegrationConfig,
+  linearWebhookDeliveries,
+} from "@arcadia-science/app-feedback/drizzle";
 // Better Auth JWT + OAuth provider tables — regenerate via
 // `npm run db:generate-auth-schema` (see `auth-schema.ts` header).
-// biome-ignore lint/performance/noBarrelFile: drizzle-kit reads this single schema entrypoint
 export {
   jwks,
   oauthAccessTokens,

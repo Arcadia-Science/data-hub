@@ -33,6 +33,7 @@
     "check": "npm run lint:check && npm run typecheck"
   },
   "dependencies": {
+    "@arcadia-science/app-feedback": "^0.1.0",
     "@asteasolutions/zod-to-openapi": "^8.5.0",
     "@aws-sdk/client-s3": "^3.1021.0",
     "@aws-sdk/crc64-nvme": "^3.972.5",

@@ -1,8 +1,6 @@
-import { after } from "next/server";
+import { LinearSetupSection } from "@arcadia-science/app-feedback/next";
 import type { Metadata } from "next/types";
 import { SignInRequired } from "@/components/auth/sign-in-required";
-import { LinearSetup } from "@/components/integrations/linear/linear-setup";
-import type { LinearSetupData } from "@/components/integrations/linear/linear-setup-context";
 import { SlackAppCard } from "@/components/integrations/slack-app-card";
 import {
   SlackChannelForm,
@@ -10,17 +8,9 @@ import {
 } from "@/components/notifications/slack-channel-card";
 import { AdminsOnly } from "@/components/settings/admins-only";
 import { SettingsPageContent } from "@/components/settings/settings-page-content";
-import { appOrigin } from "@/lib/app-origin";
 import { auth } from "@/lib/auth";
-import {
-  type IntegrationSecretsKeyStatus,
-  integrationSecretsKeyStatus,
-} from "@/lib/crypto/integration-secrets";
-import {
-  backfillLinearSetup,
-  getLinearConfigForAdmin,
-  type LinearConfigForAdmin,
-} from "@/lib/linear/config";
+import { integrationSecretsKeyStatus } from "@/lib/crypto/integration-secrets";
+import { feedback } from "@/lib/feedback";
 import { getSlackAppConfigForAdmin } from "@/lib/slack/app-config";
 import { getSlackChannelConfigForAdmin } from "@/lib/slack/channel-config";
 
@@ -48,16 +38,11 @@ export default async function IntegrationsSettingsPage() {
     return <AdminsOnly>manage integrations</AdminsOnly>;
   }
 
-  // Runs after the page is sent, so a slow or unreachable Linear never holds
-  // up or breaks the page. The values it saves show on the next load.
-  after(backfillLinearSetup);
-  const [linear, slackApp, slackChannel] = await Promise.all([
-    getLinearConfigForAdmin(),
+  const [slackApp, slackChannel] = await Promise.all([
     getSlackAppConfigForAdmin(),
     getSlackChannelConfigForAdmin(),
   ]);
   const keyStatus = integrationSecretsKeyStatus();
-  const origin = appOrigin();
 
   return (
     <SettingsPageContent>
@@ -68,11 +53,9 @@ export default async function IntegrationsSettingsPage() {
         <p className="text-muted-foreground text-sm">{description}</p>
       </div>
       <div className="mt-6 flex flex-col gap-6">
-        {/* Each key has its own prefix. Two siblings with the same key make React
-            keep the old one on screen when one of them remounts. */}
-        <LinearSetup
-          initial={linearSetupData(linear, keyStatus, origin)}
-          key={`linear-${linear.lastUpdated?.at ?? "never-saved"}`}
+        <LinearSetupSection
+          feedback={feedback}
+          webhookPath="/api/v1/integrations/linear/webhook"
         />
         <SlackAppCard
           botToken={slackApp.botToken}
@@ -90,30 +73,4 @@ export default async function IntegrationsSettingsPage() {
       </div>
     </SettingsPageContent>
   );
-}
-
-function linearSetupData(
-  config: LinearConfigForAdmin,
-  keyStatus: IntegrationSecretsKeyStatus,
-  origin: string
-): LinearSetupData {
-  return {
-    clientId: config.clientId.value,
-    clientSecretSet: config.clientSecret.set,
-    keyStatus,
-    labels: config.labels,
-    lastUpdatedAt: config.lastUpdated?.at ?? null,
-    lastUpdatedBy: config.lastUpdated?.byName ?? null,
-    lastWebhookAt: config.lastWebhookAt?.toISOString() ?? null,
-    origin,
-    project: config.project,
-    rejectionReason: config.lastWebhookRejectionReason,
-    team: config.team
-      ? { ...config.team, key: config.teamKey ?? undefined }
-      : null,
-    webhookRejections: config.webhookRejections,
-    webhookSecretSet: config.webhookSecret.set,
-    webhookUrl: `${origin}/api/v1/integrations/linear/webhook`,
-    workspaceName: config.workspaceName,
-  };
 }

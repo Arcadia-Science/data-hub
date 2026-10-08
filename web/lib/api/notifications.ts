@@ -1,3 +1,4 @@
+import { FEEDBACK_STATUS_LABELS } from "@arcadia-science/app-feedback/server";
 import {
   aliasedTable,
   and,
@@ -10,7 +11,6 @@ import {
   sql,
 } from "drizzle-orm";
 import { type ActorRef, type ActorToken, actorColumns } from "@/lib/api/actor";
-import { FEEDBACK_STATUS_LABELS } from "@/lib/api/feedback-schema";
 import { runCommentHref } from "@/lib/comment-hash";
 import { db } from "@/lib/db";
 import {
@@ -1014,7 +1014,7 @@ export async function notifyFeedbackUpdated(input: {
   title: string;
   status: "resolved" | "declined";
   stateName: string;
-}): Promise<void> {
+}): Promise<"delivered" | "disabled" | "none"> {
   const [recipient] = await db
     .select({
       userId: users.id,
@@ -1034,12 +1034,15 @@ export async function notifyFeedbackUpdated(input: {
     .limit(1);
 
   if (!recipient) {
-    return;
+    return "none";
   }
 
   const statusLabel = feedbackStatusLabel(input.status, input.stateName);
   const body = `Your feedback "${input.title}" was marked ${statusLabel}.`;
-  if (recipient.feedbackUpdatedEnabled !== false) {
+  // The setup wizard's test report shows whether the in-app notification was
+  // written, so that is what the caller is told.
+  const inAppEnabled = recipient.feedbackUpdatedEnabled !== false;
+  if (inAppEnabled) {
     await db.insert(notifications).values({
       userId: recipient.userId,
       type: "feedback_updated",
@@ -1068,4 +1071,5 @@ export async function notifyFeedbackUpdated(input: {
       },
     ]);
   }
+  return inAppEnabled ? "delivered" : "disabled";
 }
