@@ -1,8 +1,8 @@
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { AppSidebar } from "@/components/app-sidebar";
-import { FeedbackDialogProvider } from "@/components/feedback/feedback-dialog-provider";
 import { FeedbackMenuItem } from "@/components/feedback/feedback-menu-item";
+import { DataHubFeedbackProvider } from "@/components/feedback/feedback-provider";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { NotificationsProvider } from "@/components/notifications/notifications-provider";
 import { ArchiveDownloadProvider } from "@/components/runs/archive-download-provider";
@@ -18,7 +18,7 @@ import { getSidebarInstruments } from "@/lib/api/sidebar";
 import { auth, authInstance } from "@/lib/auth";
 import { listChangelogEntries } from "@/lib/changelog/entries";
 import { groupChangelogByDate } from "@/lib/changelog/group";
-import { isFeedbackConfigured } from "@/lib/linear/config";
+import { feedback } from "@/lib/feedback";
 import { SIDEBAR_COOKIE_NAME } from "@/lib/sidebar-persistence";
 import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
@@ -50,12 +50,19 @@ export default async function AppLayout({
   // The changelog window opens from the account menu on every page. Grouping
   // here avoids a second request, and the files are small enough to send
   // with the sidebar.
+  //
+  // A failed feedback check only hides the Feedback menu item. It reads
+  // columns that a new feedback package version can add, and the app can
+  // deploy before the migration that adds them has run.
   const [instruments, initialUnreadCount, timeZone, feedbackEnabled] = session
     ? await Promise.all([
         getSidebarInstruments(),
         countUnread(session.user.id),
         getViewerTimeZone(),
-        isFeedbackConfigured(),
+        feedback.isConfigured().catch((error) => {
+          console.error("Feedback setup check failed", error);
+          return false;
+        }),
       ])
     : [[], 0, "UTC", false];
   const changelogSections = session
@@ -84,8 +91,10 @@ export default async function AppLayout({
   return (
     <NotificationsProvider initialUnreadCount={initialUnreadCount}>
       <ArchiveDownloadProvider>
-        <SidebarProvider defaultOpen={sidebarDefaultOpen}>
-          <FeedbackDialogProvider>
+        {/* Wraps the whole shell, not just the sidebar: the review page and the
+            Linear setup read their settings from it too. */}
+        <DataHubFeedbackProvider>
+          <SidebarProvider defaultOpen={sidebarDefaultOpen}>
             <AppSidebar
               changelogSections={changelogSections}
               instruments={instruments}
@@ -100,22 +109,22 @@ export default async function AppLayout({
             >
               {feedbackEnabled ? <FeedbackMenuItem /> : null}
             </AppSidebar>
-          </FeedbackDialogProvider>
-          {/* `min-w-0` lets the main pane shrink beside the sidebar so wide
-              tables scroll inside their container instead of stretching the page. */}
-          <SidebarInset className="min-w-0 pb-12">
-            <header className="flex h-14 shrink-0 items-center justify-between gap-2 px-4">
-              <div className="flex h-8 items-center">
-                <SidebarTrigger />
-              </div>
-              <div className="flex h-8 items-center gap-2">
-                <SearchTrigger />
-                <NotificationBell />
-              </div>
-            </header>
-            {children}
-          </SidebarInset>
-        </SidebarProvider>
+            {/* `min-w-0` lets the main pane shrink beside the sidebar so wide
+                tables scroll inside their container instead of stretching the page. */}
+            <SidebarInset className="min-w-0 pb-12">
+              <header className="flex h-14 shrink-0 items-center justify-between gap-2 px-4">
+                <div className="flex h-8 items-center">
+                  <SidebarTrigger />
+                </div>
+                <div className="flex h-8 items-center gap-2">
+                  <SearchTrigger />
+                  <NotificationBell />
+                </div>
+              </header>
+              {children}
+            </SidebarInset>
+          </SidebarProvider>
+        </DataHubFeedbackProvider>
       </ArchiveDownloadProvider>
     </NotificationsProvider>
   );

@@ -1,13 +1,13 @@
 "use client";
 
+import { useOpenFeedback } from "@arcadiascience/app-feedback-toolkit/react";
 import { MessageSquarePlus } from "lucide-react";
-import { useFeedbackDialog } from "@/components/feedback/feedback-dialog-provider";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 
 export function FeedbackMenuItem() {
-  const feedback = useFeedbackDialog();
+  const openFeedback = useOpenFeedback();
   return (
-    <DropdownMenuItem onSelect={feedback.open}>
+    <DropdownMenuItem onSelect={openFeedback}>
       <MessageSquarePlus data-icon="inline-start" />
       Feedback
     </DropdownMenuItem>

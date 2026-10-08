@@ -1,6 +1,7 @@
-"""Frame-by-frame ND2 reduction keeps one plane per channel."""
+"""Frame-by-frame ND2 reduction keeps one plane per channel, and big planes shrink."""
 
 from __future__ import annotations
+import weakref
 from collections.abc import Callable
 from itertools import product
 
@@ -9,11 +10,16 @@ import pytest
 from numpy.typing import NDArray
 
 from data_hub_lambda.deadline import ProcessingDeadlineError, set_deadline_from_remaining_ms
+from data_hub_lambda.hina_microscope import image_processing
 from data_hub_lambda.hina_microscope.image_processing import (
     MAX_PREVIEW_BYTES,
     RGB_NOT_SUPPORTED_MESSAGE,
     _reduce_loops,
+    _shrink_plane,
+    _shrink_planes,
     preview_bytes,
+    preview_shrink_factor,
+    read_peak_bytes,
 )
 
 _SHAPE = (2, 2)
@@ -92,6 +98,23 @@ def test_the_first_frame_is_not_changed_by_later_frames() -> None:
     assert first.tolist() == _expected(1, 1)[0]
 
 
+def test_each_frame_is_released_before_the_next_one_is_read(n_channels: int) -> None:
+    frames: list[weakref.ref[NDArray[np.uint16]]] = []
+    held_when_reading: list[int] = []
+
+    def read_frame(index: int) -> NDArray[np.uint16]:
+        held_when_reading.append(sum(frame() is not None for frame in frames))
+        frame = _frame(index + 1, n_channels)
+        frames.append(weakref.ref(frame))
+        return frame
+
+    sizes = {"Z": 3, "C": n_channels, "Y": 2, "X": 2}
+
+    _reduce_loops(read_frame, [{"Z": z} for z in range(3)], sizes)
+
+    assert held_when_reading == [0, 0, 0]
+
+
 def test_deadline_stops_before_the_first_frame() -> None:
     read: list[int] = []
     set_deadline_from_remaining_ms(0)
@@ -147,3 +170,135 @@ def test_preview_size_grows_with_pixels_and_channels() -> None:
 
     assert small < more_channels < MAX_PREVIEW_BYTES < huge
     assert preview_bytes({"C": 4, "Y": 2048, "X": 2048}) == small
+
+
+@pytest.mark.parametrize(
+    "sizes",
+    [
+        {"Y": 1024, "X": 1024, "T": 400},
+        {"C": 4, "Y": 2304, "X": 2304, "Z": 15},
+        {"C": 3, "Y": 3789, "X": 3789, "Z": 3},
+        {"C": 4, "Y": 4263, "X": 4263, "Z": 9},
+    ],
+    ids=["timelapse", "four-channel-2304", "three-channel-3789", "four-channel-4263"],
+)
+def test_an_image_that_fits_is_not_shrunk(sizes: dict[str, int]) -> None:
+    assert preview_bytes(sizes) <= MAX_PREVIEW_BYTES
+    assert preview_shrink_factor(sizes) == 1
+
+
+@pytest.mark.parametrize(
+    "sizes",
+    [
+        {"C": 2, "Y": 6221, "X": 6221, "Z": 9},
+        {"C": 3, "Y": 6221, "X": 6221, "Z": 5},
+        {"C": 3, "Y": 5530, "X": 5530, "Z": 5},
+        {"C": 4, "Y": 5530, "X": 5530, "Z": 5},
+    ],
+    ids=["two-channel-6221", "three-channel-6221", "three-channel-5530", "four-channel-5530"],
+)
+def test_an_image_over_the_cap_is_halved(sizes: dict[str, int]) -> None:
+    assert preview_bytes(sizes) > MAX_PREVIEW_BYTES
+    assert preview_shrink_factor(sizes) == 2
+
+
+def test_the_shrink_factor_is_the_smallest_one_that_fits() -> None:
+    sizes = {"C": 4, "Y": 20_000, "X": 20_000}
+
+    factor = preview_shrink_factor(sizes)
+
+    def shrunk(by: int) -> dict[str, int]:
+        return {"C": 4, "Y": 20_000 // by, "X": 20_000 // by}
+
+    assert factor > 2
+    assert preview_bytes(shrunk(factor)) <= MAX_PREVIEW_BYTES
+    assert preview_bytes(shrunk(factor - 1)) > MAX_PREVIEW_BYTES
+
+
+def test_the_shrink_factor_never_empties_a_plane(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(image_processing, "MAX_PREVIEW_BYTES", 1)
+
+    assert preview_shrink_factor({"Y": 6, "X": 4}) == 4
+
+
+def test_reading_needs_twice_the_size_of_the_planes() -> None:
+    assert read_peak_bytes({"C": 3, "Y": 10, "X": 10, "Z": 5}, 2) == 2 * 3 * 10 * 10 * 2
+    assert read_peak_bytes({"Y": 10, "X": 10}, 4) == 2 * 10 * 10 * 4
+
+
+def test_reading_a_production_image_fits_easily() -> None:
+    assert read_peak_bytes({"C": 3, "Y": 6221, "X": 6221, "Z": 5}, 2) < MAX_PREVIEW_BYTES // 8
+    assert read_peak_bytes({"C": 3, "Y": 18_800, "X": 18_800}, 2) <= MAX_PREVIEW_BYTES
+    assert read_peak_bytes({"C": 3, "Y": 19_000, "X": 19_000}, 2) > MAX_PREVIEW_BYTES
+
+
+@pytest.mark.parametrize(
+    ("channels", "side"),
+    [(1, 32_768), (3, 18_918), (4, 16_384)],
+    ids=["one-channel", "three-channels", "four-channels"],
+)
+def test_the_largest_readable_image_shrinks_as_channels_are_added(channels: int, side: int) -> None:
+    fits = {"C": channels, "Y": side, "X": side}
+    too_big = {"C": channels, "Y": side + 1, "X": side + 1}
+
+    assert read_peak_bytes(fits, 2) <= MAX_PREVIEW_BYTES
+    assert read_peak_bytes(too_big, 2) > MAX_PREVIEW_BYTES
+
+
+def test_shrinking_averages_each_block() -> None:
+    plane = np.array(
+        [[0, 2, 10, 20], [2, 4, 30, 40], [1, 1, 5, 5], [1, 1, 5, 5]],
+        dtype=np.uint16,
+    )
+
+    shrunk = _shrink_plane(plane, 2)
+
+    assert shrunk.tolist() == [[2, 25], [1, 5]]
+    assert shrunk.dtype == np.uint16
+
+
+def test_shrinking_rounds_to_the_nearest_value() -> None:
+    plane = np.array([[1, 1], [1, 0]], dtype=np.uint16)
+
+    assert _shrink_plane(plane, 2).tolist() == [[1]]
+
+
+def test_shrinking_does_not_overflow_the_pixel_type() -> None:
+    plane = np.full((4, 4), np.iinfo(np.uint16).max, dtype=np.uint16)
+
+    assert _shrink_plane(plane, 2).tolist() == [[65535, 65535], [65535, 65535]]
+
+
+def test_shrinking_keeps_float_values() -> None:
+    plane = np.array([[0.0, 0.25], [0.5, 0.75]], dtype=np.float32)
+
+    shrunk = _shrink_plane(plane, 2)
+
+    assert shrunk.dtype == np.float32
+    assert shrunk.tolist() == [[0.375]]
+
+
+def test_shrinking_drops_a_remainder_smaller_than_a_block() -> None:
+    plane = np.arange(5 * 7, dtype=np.uint16).reshape(5, 7)
+
+    shrunk = _shrink_plane(plane, 2)
+
+    assert shrunk.shape == (2, 3)
+    assert shrunk[0, 0] == round(plane[:2, :2].mean())
+    assert shrunk[1, 2] == round(plane[2:4, 4:6].mean())
+
+
+def test_a_factor_of_one_returns_the_plane_itself() -> None:
+    plane = np.arange(4, dtype=np.uint16).reshape(2, 2)
+
+    assert _shrink_plane(plane, 1) is plane
+
+
+def test_shrinking_planes_replaces_each_one_in_the_list() -> None:
+    planes = [np.zeros((4, 6), dtype=np.uint16), np.ones((4, 6), dtype=np.uint16)]
+
+    result = _shrink_planes(planes, 2)
+
+    assert result is planes
+    assert [plane.shape for plane in planes] == [(2, 3), (2, 3)]
+    assert [plane.tolist() for plane in planes] == [[[0] * 3] * 2, [[1] * 3] * 2]
