@@ -1,6 +1,7 @@
 """Frame-by-frame ND2 reduction keeps one plane per channel, and big planes shrink."""
 
 from __future__ import annotations
+import weakref
 from collections.abc import Callable
 from itertools import product
 
@@ -16,9 +17,9 @@ from data_hub_lambda.hina_microscope.image_processing import (
     _reduce_loops,
     _shrink_plane,
     _shrink_planes,
-    plane_bytes,
     preview_bytes,
     preview_shrink_factor,
+    read_peak_bytes,
 )
 
 _SHAPE = (2, 2)
@@ -95,6 +96,23 @@ def test_the_first_frame_is_not_changed_by_later_frames() -> None:
 
     assert planes[0].tolist() == _expected(9, 1)[0]
     assert first.tolist() == _expected(1, 1)[0]
+
+
+def test_each_frame_is_released_before_the_next_one_is_read(n_channels: int) -> None:
+    frames: list[weakref.ref[NDArray[np.uint16]]] = []
+    held_when_reading: list[int] = []
+
+    def read_frame(index: int) -> NDArray[np.uint16]:
+        held_when_reading.append(sum(frame() is not None for frame in frames))
+        frame = _frame(index + 1, n_channels)
+        frames.append(weakref.ref(frame))
+        return frame
+
+    sizes = {"Z": 3, "C": n_channels, "Y": 2, "X": 2}
+
+    _reduce_loops(read_frame, [{"Z": z} for z in range(3)], sizes)
+
+    assert held_when_reading == [0, 0, 0]
 
 
 def test_deadline_stops_before_the_first_frame() -> None:
@@ -203,15 +221,28 @@ def test_the_shrink_factor_never_empties_a_plane(monkeypatch: pytest.MonkeyPatch
     assert preview_shrink_factor({"Y": 6, "X": 4}) == 4
 
 
-def test_planes_are_read_in_twice_their_size() -> None:
-    assert plane_bytes({"C": 3, "Y": 10, "X": 10, "Z": 5}, 2) == 2 * 3 * 10 * 10 * 2
-    assert plane_bytes({"Y": 10, "X": 10}, 4) == 2 * 10 * 10 * 4
+def test_reading_needs_twice_the_size_of_the_planes() -> None:
+    assert read_peak_bytes({"C": 3, "Y": 10, "X": 10, "Z": 5}, 2) == 2 * 3 * 10 * 10 * 2
+    assert read_peak_bytes({"Y": 10, "X": 10}, 4) == 2 * 10 * 10 * 4
 
 
-def test_planes_for_a_production_image_fit_easily() -> None:
-    assert plane_bytes({"C": 3, "Y": 6221, "X": 6221, "Z": 5}, 2) < MAX_PREVIEW_BYTES // 8
-    assert plane_bytes({"C": 3, "Y": 18_800, "X": 18_800}, 2) <= MAX_PREVIEW_BYTES
-    assert plane_bytes({"C": 3, "Y": 19_000, "X": 19_000}, 2) > MAX_PREVIEW_BYTES
+def test_reading_a_production_image_fits_easily() -> None:
+    assert read_peak_bytes({"C": 3, "Y": 6221, "X": 6221, "Z": 5}, 2) < MAX_PREVIEW_BYTES // 8
+    assert read_peak_bytes({"C": 3, "Y": 18_800, "X": 18_800}, 2) <= MAX_PREVIEW_BYTES
+    assert read_peak_bytes({"C": 3, "Y": 19_000, "X": 19_000}, 2) > MAX_PREVIEW_BYTES
+
+
+@pytest.mark.parametrize(
+    ("channels", "side"),
+    [(1, 32_768), (3, 18_918), (4, 16_384)],
+    ids=["one-channel", "three-channels", "four-channels"],
+)
+def test_the_largest_readable_image_shrinks_as_channels_are_added(channels: int, side: int) -> None:
+    fits = {"C": channels, "Y": side, "X": side}
+    too_big = {"C": channels, "Y": side + 1, "X": side + 1}
+
+    assert read_peak_bytes(fits, 2) <= MAX_PREVIEW_BYTES
+    assert read_peak_bytes(too_big, 2) > MAX_PREVIEW_BYTES
 
 
 def test_shrinking_averages_each_block() -> None:

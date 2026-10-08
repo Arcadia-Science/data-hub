@@ -1,5 +1,6 @@
 ---
 title: Large Hina Microscope images now get a smaller preview
+docs: https://datahub.arcadiascience.com/docs/instrument-preprocessing
 ---
 
 Hina Microscope images that were too large to preview, such as 6221 × 6221 pixel images, used to show **Failed**. They now process, and the preview is a smaller version of the image. The raw file is unchanged, and you can still download it at full size.

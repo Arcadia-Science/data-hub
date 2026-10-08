@@ -29,15 +29,16 @@ CONTRAST_PERCENTILES: tuple[float, float] = (1.0, 99.0)
 # JPEG quality for the exported composite.
 JPEG_QUALITY = 90
 
-# Rendering peaks at about 128 bytes per image pixel plus 10 per pixel per
-# channel. At the cap, the process peaked near 6.2 GB of the 10,240 MB Lambda.
-# An image over the cap is shrunk before rendering instead of failing.
+# Measured render peak: `_PREVIEW_BYTES_PER_PIXEL` per image pixel plus
+# `_PREVIEW_BYTES_PER_CHANNEL_PIXEL` per pixel per channel. At the cap, the
+# process peaked near 6.2 GB of the 10,240 MB Lambda.
 _PREVIEW_BYTES_PER_PIXEL = 128
 _PREVIEW_BYTES_PER_CHANNEL_PIXEL = 10
 MAX_PREVIEW_BYTES = 4 * 1024**3
 
-# Reading holds the running projection and one decoded frame at once, and
-# the same cap bounds them. An image whose planes do not fit still fails.
+# Reading holds the running projection and one decoded frame, because
+# `_reduce_loops` frees each frame before it decodes the next. The same cap
+# bounds them, so an image whose planes do not fit still fails.
 _PLANE_COPIES_WHILE_READING = 2
 
 PREVIEW_TOO_LARGE_MESSAGE = (
@@ -86,7 +87,7 @@ class ND2Processor:
         # with the 0.5.0 lock bump; it is a different parser.
         with nd2.ND2File(self.path) as nd2f:
             metadata = _NikonMetadataParser(self.path).parse(nd2f)
-            if plane_bytes(metadata.sizes, nd2f.dtype.itemsize) > MAX_PREVIEW_BYTES:
+            if read_peak_bytes(metadata.sizes, nd2f.dtype.itemsize) > MAX_PREVIEW_BYTES:
                 raise ValueError(PREVIEW_TOO_LARGE_MESSAGE)
             planes = _preview_planes(nd2f, metadata.sizes)
 
@@ -184,15 +185,13 @@ def _rescale_percentile(
 
 def preview_bytes(sizes: Mapping[str, int]) -> int:
     """Estimated peak memory to render a preview of an image with *sizes*."""
-    pixels = sizes.get("Y", 1) * sizes.get("X", 1)
-    per_pixel = _PREVIEW_BYTES_PER_PIXEL + _PREVIEW_BYTES_PER_CHANNEL_PIXEL * sizes.get("C", 1)
-    return pixels * per_pixel
+    return _render_bytes(*_image_shape(sizes))
 
 
-def plane_bytes(sizes: Mapping[str, int], itemsize: int) -> int:
-    """Estimated memory to read the full-size planes of an image with *sizes*."""
-    pixels = sizes.get("Y", 1) * sizes.get("X", 1)
-    return _PLANE_COPIES_WHILE_READING * pixels * sizes.get("C", 1) * itemsize
+def read_peak_bytes(sizes: Mapping[str, int], itemsize: int) -> int:
+    """Estimated peak memory to read the full-size planes of an image with *sizes*."""
+    height, width, channels = _image_shape(sizes)
+    return _PLANE_COPIES_WHILE_READING * height * width * channels * itemsize
 
 
 def preview_shrink_factor(sizes: Mapping[str, int]) -> int:
@@ -201,15 +200,24 @@ def preview_shrink_factor(sizes: Mapping[str, int]) -> int:
     Returns 1 for an image that already fits, so its preview is unchanged. The
     factor never exceeds the shorter side, which keeps every plane non-empty.
     """
-    height, width = sizes.get("Y", 1), sizes.get("X", 1)
-    channels = sizes.get("C", 1)
+    height, width, channels = _image_shape(sizes)
     factor = 1
-    while factor < min(height, width) and (
-        preview_bytes({"C": channels, "Y": height // factor, "X": width // factor})
-        > MAX_PREVIEW_BYTES
+    while (
+        factor < min(height, width)
+        and _render_bytes(height // factor, width // factor, channels) > MAX_PREVIEW_BYTES
     ):
         factor += 1
     return factor
+
+
+def _image_shape(sizes: Mapping[str, int]) -> tuple[int, int, int]:
+    """Height, width, and channel count, each defaulting to 1 when the file has no such axis."""
+    return sizes.get("Y", 1), sizes.get("X", 1), sizes.get("C", 1)
+
+
+def _render_bytes(height: int, width: int, channels: int) -> int:
+    per_pixel = _PREVIEW_BYTES_PER_PIXEL + _PREVIEW_BYTES_PER_CHANNEL_PIXEL * channels
+    return height * width * per_pixel
 
 
 def _shrink_planes(planes: list[NDArray[Any]], factor: int) -> list[NDArray[Any]]:
@@ -265,17 +273,24 @@ def _reduce_loops(
     accum: list[NDArray[Any] | None] = [None] * n_channels
     for done, index in enumerate(to_read):
         check_deadline(f"reading frame {done + 1} of {len(to_read)}")
-        frame = read_frame(index)
-        for channel in range(n_channels):
-            plane = _channel_plane(frame, channel, n_channels)
-            current = accum[channel]
-            if current is None:
-                accum[channel] = plane.copy()
-            else:
-                np.maximum(current, plane, out=current)
+        # The frame has no name in this scope, so `_max_into` is its last holder
+        # and it is freed before the next, possibly full-size, frame is decoded.
+        _max_into(accum, read_frame(index))
     if any(plane is None for plane in accum):
         raise ValueError(f"ND2 file is missing a channel plane: {_format_sizes(sizes)}")
     return [plane for plane in accum if plane is not None]
+
+
+def _max_into(accum: list[NDArray[Any] | None], frame: NDArray[Any]) -> None:
+    """Fold one frame into the running per-channel maximum."""
+    n_channels = len(accum)
+    for channel in range(n_channels):
+        plane = _channel_plane(frame, channel, n_channels)
+        current = accum[channel]
+        if current is None:
+            accum[channel] = plane.copy()
+        else:
+            np.maximum(current, plane, out=current)
 
 
 def _format_sizes(sizes: dict[str, int]) -> str:

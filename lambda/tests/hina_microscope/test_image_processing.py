@@ -151,8 +151,8 @@ class TestExampleFiles:
 
         path = _EXAMPLES / "example-zstack.nd2"
         with nd2.ND2File(path) as nd2f:
-            planes = image_processing.plane_bytes(dict(nd2f.sizes), nd2f.dtype.itemsize)
-        monkeypatch.setattr(image_processing, "MAX_PREVIEW_BYTES", planes - 1)
+            read_bytes = image_processing.read_peak_bytes(dict(nd2f.sizes), nd2f.dtype.itemsize)
+        monkeypatch.setattr(image_processing, "MAX_PREVIEW_BYTES", read_bytes - 1)
         monkeypatch.setattr(image_processing, "_preview_planes", _no_read)
         processor = ND2Processor(path)
 
