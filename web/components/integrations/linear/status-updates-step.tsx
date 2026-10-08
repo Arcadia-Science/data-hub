@@ -2,8 +2,8 @@
 
 import { CheckIcon, Loader2 } from "lucide-react";
 import { useState } from "react";
+import { SecretInput } from "@/components/integrations/secret-input";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatDateTimeShort } from "@/lib/date";
 import { useLinearSetup, useVisibleInterval } from "./linear-setup-context";
@@ -79,14 +79,11 @@ export function StatusUpdatesStep() {
           }}
         >
           <Label htmlFor="linear-signing-secret">Signing secret</Label>
-          <Input
-            autoComplete="off"
+          <SecretInput
             id="linear-signing-secret"
             name="signing_secret"
             onChange={(event) => form.setSecret(event.target.value)}
             placeholder="Paste the signing secret…"
-            spellCheck={false}
-            type="password"
             value={form.secret}
           />
           <p className="text-pretty text-muted-foreground text-sm">
@@ -167,9 +164,7 @@ function UpdateStatus({
         className="mt-0.5 size-5 animate-spin text-muted-foreground motion-reduce:animate-none"
       />
       <div className="flex flex-col gap-1">
-        <p className="font-semibold">
-          Waiting for the first update from Linear
-        </p>
+        <p className="font-semibold">Waiting for an update from Linear</p>
         <p className="text-muted-foreground">
           Any change to an issue in {team} sends one, including the test report
           in the next step.

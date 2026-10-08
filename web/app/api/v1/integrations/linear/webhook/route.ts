@@ -95,12 +95,23 @@ interface WebhookBody {
   webhookTimestamp?: number;
 }
 
+const REJECTION_LOG_TEXT: Record<LinearWebhookRejectionReason, string> = {
+  signature: "its signature does not match the saved signing secret",
+  stale: "its timestamp is more than a minute old",
+};
+
 // A rejection is recorded only when it plausibly came from Linear, so the
 // caller passes the reason `linearWebhookRejectionReason` decided on.
-function recordRejection(reason: LinearWebhookRejectionReason | null) {
+function recordRejection(
+  reason: LinearWebhookRejectionReason | null,
+  deliveryId: string | null
+) {
   if (!reason) {
     return;
   }
+  console.warn(
+    `[linear-webhook] Rejected Linear delivery ${deliveryId ?? "(no delivery id)"} because ${REJECTION_LOG_TEXT[reason]}.`
+  );
   after(async () => {
     try {
       await recordLinearWebhookRejection(reason);
@@ -139,16 +150,17 @@ export async function POST(request: Request) {
     organizationId: parsed?.organizationId ?? null,
     savedWorkspaceId: context.workspaceId,
   });
+  const deliveryId = request.headers.get("linear-delivery");
 
   if (!signatureOk) {
-    recordRejection(rejection);
+    recordRejection(rejection, deliveryId);
     return apiError(401, UNAUTHORIZED, "Invalid Linear signature");
   }
   if (!parsed) {
     return apiError(400, VALIDATION_ERROR, "Invalid JSON body");
   }
   if (!fresh) {
-    recordRejection(rejection);
+    recordRejection(rejection, deliveryId);
     return apiError(401, UNAUTHORIZED, "Linear webhook is too old");
   }
 
@@ -168,7 +180,6 @@ export async function POST(request: Request) {
     parsed.type === "Issue" &&
     typeof parsed.data?.teamId === "string" &&
     parsed.data.teamId === context.teamId;
-  const deliveryId = request.headers.get("linear-delivery");
   after(async () => {
     try {
       await recordLinearWebhookAccepted({ forSavedTeam });

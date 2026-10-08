@@ -279,7 +279,7 @@ describe("Linear integration settings", () => {
     }
   });
 
-  it("resets the last update when the team changes and the rejections when a new signing secret is saved", async () => {
+  it("resets the last update when the team or signing secret changes, and the rejections when a new signing secret is saved", async () => {
     const stamp = new Date("2026-01-01T00:00:00.000Z");
     await put({
       team: { id: LINEAR_TEAM_ID, name: "Data Hub" },
@@ -302,16 +302,21 @@ describe("Linear integration settings", () => {
     expect(body.last_webhook_at).toBe(stamp.toISOString());
     expect(body.webhook_rejections).toBe(3);
 
-    // A new signing secret clears the rejections, not the last update.
+    // A new signing secret clears the rejections and the last update, since
+    // nothing has been checked against the new secret yet.
     body = await (
       await put({ webhook_secret: "lin_webhook_secret_two" })
     ).json();
     expect(body.webhook_rejections).toBe(0);
     expect(body.last_webhook_rejected_at).toBeNull();
     expect(body.last_webhook_rejection_reason).toBeNull();
-    expect(body.last_webhook_at).toBe(stamp.toISOString());
+    expect(body.last_webhook_at).toBeNull();
 
     // A different team no longer counts the old team's last update.
+    await getTestDb()
+      .update(linearIntegrationConfig)
+      .set({ lastWebhookAt: stamp })
+      .where(eq(linearIntegrationConfig.id, true));
     body = await (
       await put({ team: { id: SECOND_TEAM_ID, name: "Other Team" } })
     ).json();

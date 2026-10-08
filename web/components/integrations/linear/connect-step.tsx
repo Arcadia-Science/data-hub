@@ -2,6 +2,7 @@
 
 import { ChevronRightIcon, CircleAlertIcon, Loader2 } from "lucide-react";
 import { useState } from "react";
+import { SecretInput } from "@/components/integrations/secret-input";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -132,17 +133,13 @@ export function ConnectStep() {
         </div>
         <div className="grid gap-2">
           <Label htmlFor="linear-client-secret">Client secret</Label>
-          <Input
+          <SecretInput
             aria-describedby={error ? ERROR_ID : undefined}
             aria-invalid={error ? true : undefined}
-            autoComplete="off"
-            className="font-mono"
             id="linear-client-secret"
             name="client_secret"
             onChange={(event) => setClientSecret(event.target.value)}
             placeholder="Paste the client secret…"
-            spellCheck={false}
-            type="password"
             value={clientSecret}
           />
         </div>

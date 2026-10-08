@@ -1,4 +1,5 @@
 import { Loader2 } from "lucide-react";
+import { SecretInput } from "@/components/integrations/secret-input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -84,22 +85,31 @@ export function IntegrationField({
           {sourceText(status.source, envName)}
         </Badge>
       </div>
-      <Input
-        aria-describedby={describedBy}
-        autoComplete="off"
-        className="font-mono"
-        disabled={disabled}
-        id={id}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={
-          type === "password" && status.set
-            ? "Paste a new value to replace it"
-            : placeholder
-        }
-        spellCheck={false}
-        type={type}
-        value={value}
-      />
+      {type === "password" ? (
+        <SecretInput
+          aria-describedby={describedBy}
+          disabled={disabled}
+          id={id}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={
+            status.set ? "Paste a new value to replace it" : placeholder
+          }
+          value={value}
+        />
+      ) : (
+        <Input
+          aria-describedby={describedBy}
+          autoComplete="off"
+          className="font-mono"
+          disabled={disabled}
+          id={id}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
+          spellCheck={false}
+          type="text"
+          value={value}
+        />
+      )}
       <FieldDescription>{description}</FieldDescription>
       {status.source === "unreadable" ? (
         <FieldError>{unreadableMessage(status.set, envName)}</FieldError>
