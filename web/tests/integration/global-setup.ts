@@ -2,9 +2,9 @@ import type { ChildProcess } from "node:child_process";
 import { execSync, spawn } from "node:child_process";
 import http from "node:http";
 import net from "node:net";
+import { startLinearFakeServer } from "@arcadia-science/app-feedback/testing";
 import { Client, Pool } from "pg";
 import { CREATE_NATURAL_FILENAME_COLLATION } from "@/lib/db/collations";
-import { startLinearFakeServer } from "@/tests/integration/linear-fake-server";
 
 const TEST_DB = "data_hub_test";
 // Matches the credentials expected by the CI Postgres service container
