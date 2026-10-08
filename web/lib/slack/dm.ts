@@ -120,18 +120,22 @@ export interface SlackDmJob {
 /**
  * Deliver a batch of DMs concurrently and react to per-recipient vs global
  * failures. Only `user_unreachable` revokes a connection; a dead bot token is
- * logged once for ops and leaves every connection intact.
+ * logged once for ops and leaves every connection intact. Returns how many
+ * DMs Slack accepted.
  */
-export async function deliverSlackDms(jobs: SlackDmJob[]): Promise<void> {
+export async function deliverSlackDms(jobs: SlackDmJob[]): Promise<number> {
   if (jobs.length === 0) {
-    return;
+    return 0;
   }
 
   let botTokenInvalid = false;
+  let sent = 0;
   await Promise.all(
     jobs.map(async (job) => {
       const result = await sendSlackDm(job.slackUserId, job.payload);
-      if (result.status === "user_unreachable") {
+      if (result.status === "sent") {
+        sent += 1;
+      } else if (result.status === "user_unreachable") {
         await markSlackConnectionRevoked(job.userId);
       } else if (result.status === "bot_token_invalid") {
         botTokenInvalid = true;
@@ -144,6 +148,7 @@ export async function deliverSlackDms(jobs: SlackDmJob[]): Promise<void> {
       "Slack bot token rejected; DMs skipped until the app is reinstalled or the token is rotated."
     );
   }
+  return sent;
 }
 
 async function markSlackConnectionRevoked(userId: string): Promise<void> {

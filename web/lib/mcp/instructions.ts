@@ -1,3 +1,6 @@
+import { feedbackInstructions } from "@arcadiascience/app-feedback-toolkit/mcp";
+import { FEEDBACK_MCP_OPTIONS } from "@/lib/feedback-app";
+
 /**
  * Delivered to every MCP client at initialize — reachable without resources.
  *
@@ -39,11 +42,5 @@ A run can have thousands of files: filter list_run_files by status rather than
 paging all of it, and prefer get_run_report's bounded sample over downloading
 full CSVs.
 
-Feedback: send_feedback reports bugs and requests about Data Hub itself.
-Confirm the draft with the user before sending. Problems with a specific
-run's data belong in add_run_comment. list_feedback shows your own reports
-(admins see every report) with shortened descriptions; get_feedback returns
-one full report, and accepts a Linear issue ID such as ENG-1476. Admins also
-see priority, assignee, and activity. Report status is changed in Linear, not
-from here.
+${feedbackInstructions(FEEDBACK_MCP_OPTIONS)}
 `.trim();

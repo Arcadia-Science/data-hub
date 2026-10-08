@@ -1,6 +1,7 @@
+import { registerFeedbackTools } from "@arcadiascience/app-feedback-toolkit/mcp";
 import type { McpServer } from "@modelcontextprotocol/server";
+import { feedback } from "@/lib/feedback";
 import { registerDiscoveryTools } from "@/lib/mcp/tools/discovery";
-import { registerFeedbackTools } from "@/lib/mcp/tools/feedback";
 import { registerFileTools } from "@/lib/mcp/tools/files";
 import { registerInstrumentTools } from "@/lib/mcp/tools/instruments";
 import { registerReportViewTools } from "@/lib/mcp/tools/report-views";
@@ -14,5 +15,5 @@ export function registerTools(server: McpServer) {
   registerDiscoveryTools(server);
   registerWatcherTools(server);
   registerFileTools(server);
-  registerFeedbackTools(server);
+  registerFeedbackTools(server, feedback);
 }

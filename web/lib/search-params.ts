@@ -1,5 +1,4 @@
 import {
-  createParser,
   createSearchParamsCache,
   parseAsArrayOf,
   parseAsBoolean,
@@ -53,35 +52,6 @@ export const dashboardSearchParams = {
 export const dashboardParamsCache = createSearchParamsCache(
   dashboardSearchParams
 );
-
-export type FeedbackTab = "closed" | "open";
-
-// Older links used resolved and declined as their own tabs. Both are Closed now.
-const feedbackTabParser = createParser({
-  parse(value: string): FeedbackTab | null {
-    if (value === "open") {
-      return "open";
-    }
-    if (value === "closed" || value === "resolved" || value === "declined") {
-      return "closed";
-    }
-    return null;
-  },
-  serialize(value: FeedbackTab) {
-    return value;
-  },
-});
-
-export const feedbackSearchParams = {
-  status: feedbackTabParser
-    .withDefault("open")
-    .withOptions({ clearOnDefault: true }),
-  page: parseAsInteger.withDefault(1),
-  item: parseAsString,
-};
-
-export const feedbackParamsCache =
-  createSearchParamsCache(feedbackSearchParams);
 
 // Mirrors dashboardSearchParams but omits `instrument_id` (implicit from the
 // route segment). Sort defaults to acquisition time, newest first.
