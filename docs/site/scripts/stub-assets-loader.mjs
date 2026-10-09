@@ -1,4 +1,4 @@
-// Node loader hook for `generate-docs-corpus.mts`. The site's MDX options turn
+// Node loader hook for `generate-docs-bundle.ts`. The site's MDX options turn
 // local images into static imports, which Node cannot load. The Markdown
 // export only needs the original `![alt](path)` text, so image modules can be
 // empty.

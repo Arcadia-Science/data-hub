@@ -1,5 +1,6 @@
 import type { AuthInfo, McpServer } from "@modelcontextprotocol/server";
 import {
+  type AnalyticsEvents,
   durationBucket,
   searchResultBucket,
   trackEvent,
@@ -15,13 +16,6 @@ interface HttpAuth {
   http?: { authInfo?: AuthInfo };
 }
 
-function userIdFrom(ctx: unknown): string | undefined {
-  if (!ctx || typeof ctx !== "object" || !("http" in ctx)) {
-    return;
-  }
-  return mcpUserId((ctx as HttpAuth).http?.authInfo);
-}
-
 function authInfoFrom(ctx: unknown): AuthInfo | undefined {
   if (!ctx || typeof ctx !== "object" || !("http" in ctx)) {
     return;
@@ -29,56 +23,52 @@ function authInfoFrom(ctx: unknown): AuthInfo | undefined {
   return (ctx as HttpAuth).http?.authInfo;
 }
 
-function reportTool(
-  tool: string,
+type CallerEventName =
+  | "mcp_docs_read"
+  | "mcp_docs_search"
+  | "mcp_prompt_get"
+  | "mcp_resource_read"
+  | "mcp_tool_call";
+
+/**
+ * Records an event with the caller's user ID and client label. Calls without
+ * a signed-in user, such as over the in-memory transport, record nothing.
+ */
+function trackForCaller<N extends CallerEventName>(
+  name: N,
   ctx: unknown,
-  outcome: "ok" | "tool_error" | "exception",
-  elapsedMs: number
+  props: Omit<AnalyticsEvents[N], "user_id" | "client">
 ): void {
-  const userId = userIdFrom(ctx);
+  const authInfo = authInfoFrom(ctx);
+  const userId = mcpUserId(authInfo);
   if (!userId) {
     return;
   }
-  const authInfo = authInfoFrom(ctx);
-  trackEvent("mcp_tool_call", async () => ({
-    user_id: userId,
-    tool,
-    client: await mcpClientLabel(authInfo),
-    outcome,
-    duration_bucket: durationBucket(elapsedMs),
-  }));
+  trackEvent(
+    name,
+    async () =>
+      ({
+        ...props,
+        user_id: userId,
+        client: await mcpClientLabel(authInfo),
+      }) as AnalyticsEvents[N]
+  );
 }
 
 /**
- * Counts docs searches by how many passages matched, so a rising share of
- * empty searches shows where the docs have gaps. The query text is never
- * recorded.
+ * Counts docs searches by how many sections answer the question, so a rising
+ * share of searches in the `0` bucket shows where the docs have gaps. The
+ * query text is never recorded.
  */
-export function trackDocsSearch(ctx: unknown, totalMatches: number): void {
-  const userId = userIdFrom(ctx);
-  if (!userId) {
-    return;
-  }
-  const authInfo = authInfoFrom(ctx);
-  trackEvent("mcp_docs_search", async () => ({
-    user_id: userId,
-    client: await mcpClientLabel(authInfo),
-    result_bucket: searchResultBucket(totalMatches),
-  }));
+export function trackDocsSearch(ctx: unknown, goodMatches: number): void {
+  trackForCaller("mcp_docs_search", ctx, {
+    result_bucket: searchResultBucket(goodMatches),
+  });
 }
 
 /** Pass only a page ID that resolved against the bundle, not raw input. */
 export function trackDocsRead(ctx: unknown, page: string): void {
-  const userId = userIdFrom(ctx);
-  if (!userId) {
-    return;
-  }
-  const authInfo = authInfoFrom(ctx);
-  trackEvent("mcp_docs_read", async () => ({
-    user_id: userId,
-    client: await mcpClientLabel(authInfo),
-    page,
-  }));
+  trackForCaller("mcp_docs_read", ctx, { page });
 }
 
 function isToolError(result: unknown): boolean {
@@ -190,15 +180,18 @@ export function withMcpTracking(server: McpServer): McpServer {
       const started = Date.now();
       try {
         const result = await cb(...args);
-        reportTool(
-          name,
-          ctx,
-          isToolError(result) ? "tool_error" : "ok",
-          Date.now() - started
-        );
+        trackForCaller("mcp_tool_call", ctx, {
+          tool: name,
+          outcome: isToolError(result) ? "tool_error" : "ok",
+          duration_bucket: durationBucket(Date.now() - started),
+        });
         return result;
       } catch (error) {
-        reportTool(name, ctx, "exception", Date.now() - started);
+        trackForCaller("mcp_tool_call", ctx, {
+          tool: name,
+          outcome: "exception",
+          duration_bucket: durationBucket(Date.now() - started),
+        });
         throw error;
       }
     });
@@ -212,29 +205,18 @@ export function withMcpTracking(server: McpServer): McpServer {
       // the server context last. The URI itself is never forwarded.
       async (...args: unknown[]) => {
         const ctx = args.at(-1);
-        const userId = userIdFrom(ctx);
         try {
           const result = await readCallback(...args);
-          if (userId) {
-            const authInfo = authInfoFrom(ctx);
-            trackEvent("mcp_resource_read", async () => ({
-              user_id: userId,
-              resource: name,
-              client: await mcpClientLabel(authInfo),
-              outcome: "ok",
-            }));
-          }
+          trackForCaller("mcp_resource_read", ctx, {
+            resource: name,
+            outcome: "ok",
+          });
           return result;
         } catch (error) {
-          if (userId) {
-            const authInfo = authInfoFrom(ctx);
-            trackEvent("mcp_resource_read", async () => ({
-              user_id: userId,
-              resource: name,
-              client: await mcpClientLabel(authInfo),
-              outcome: "exception",
-            }));
-          }
+          trackForCaller("mcp_resource_read", ctx, {
+            resource: name,
+            outcome: "exception",
+          });
           throw error;
         }
       }
@@ -243,16 +225,8 @@ export function withMcpTracking(server: McpServer): McpServer {
   loose.registerPrompt = (name, config, cb) =>
     registerPrompt(name, config, async (...args: unknown[]) => {
       const ctx = args.at(-1);
-      const userId = userIdFrom(ctx);
       const result = await cb(...args);
-      if (userId) {
-        const authInfo = authInfoFrom(ctx);
-        trackEvent("mcp_prompt_get", async () => ({
-          user_id: userId,
-          prompt: name,
-          client: await mcpClientLabel(authInfo),
-        }));
-      }
+      trackForCaller("mcp_prompt_get", ctx, { prompt: name });
       return result;
     });
 

@@ -15,7 +15,7 @@ Five workflows run on pushes to `staging`/`production` and on pull requests targ
 - Starts a Postgres 17 service container.
 - Installs both Node.js 24 and Python packages.
 - `make py-test` — runs all pytest tests (unit and integration). Integration tests build and start a real Next.js production server, seed a test database, and exercise the Lambda and watcher against the live API.
-- `make py-watcher-cli-catalog`, then fails if `docs/site/src/lib/cli-catalog.snapshot.json` changed. The docs site renders its watcher CLI reference from that committed file, so a change to the CLI or a watcher version bump has to commit the regenerated snapshot.
+- `make py-watcher-cli-catalog`, then fails if `docs/site/src/lib/cli-catalog.snapshot.json` changed. The docs site renders its watcher CLI reference from that committed file, so a change to the CLI or a watcher version bump has to commit the regenerated snapshot. The MCP docs bundle embeds the same page, so run `make py-watcher-cli-catalog docs-bundle-generate` and commit both files, or `docs-lint.yml` fails next.
 
 ### TypeScript lint and typecheck (`typescript-lint.yml`)
 
@@ -26,13 +26,13 @@ Five workflows run on pushes to `staging`/`production` and on pull requests targ
 
 ### Docs lint, typecheck, and link check (`docs-lint.yml`)
 
-Runs when `docs/**`, `web/lib/docs.ts`, `web/lib/mcp/docs/docs-corpus.snapshot.json`, `web/content/changelog/**`, or `web/microfrontends.json` changes. It works in `docs/site` with Node.js 24:
+Runs when `docs/**`, `web/lib/docs.ts`, `web/lib/mcp/docs/docs-bundle.snapshot.json`, `web/content/changelog/**`, or `web/microfrontends.json` changes. It works in `docs/site` with Node.js 24:
 
 1. Install dependencies with `npm ci`.
 2. `npm run lint:check` — Biome (via Ultracite), combined formatter + linter check.
 3. `npm run typecheck` — generates page types (which also fails on bad MDX) and runs the TypeScript compiler.
 4. `npm run check:links` — checks that the page names in `web/lib/docs.ts`, the `docs:` links in changelog entries, the GitHub links from the site to `docs/developer`, and the relative links inside `docs/developer` all point at something that exists. It does not check `#heading` anchors.
-5. `npm run docs-corpus:generate`, then fails if `web/lib/mcp/docs/docs-corpus.snapshot.json` changed. The MCP server answers questions about Data Hub from that bundled copy of the docs pages (see [Docs over MCP](mcp-docs.md)). Run `make docs-catalogs` and commit the result to fix a failure.
+5. `npm run docs-bundle:generate`, then fails if `web/lib/mcp/docs/docs-bundle.snapshot.json` changed. The MCP server answers questions about Data Hub from that bundled copy of the docs pages (see [Docs over MCP](mcp-docs.md)). Run `make docs-catalogs` and commit the result to fix a failure.
 
 ### TypeScript tests (`typescript-test.yml`)
 

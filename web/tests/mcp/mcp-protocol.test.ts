@@ -1070,6 +1070,7 @@ describe("MCP Protocol (in-memory)", () => {
         url: string | null;
       }>;
       pages?: unknown;
+      hint?: string;
     };
     expect(result.structuredContent).toEqual(parsed);
     expect(parsed.results.length).toBeGreaterThan(0);
@@ -1080,6 +1081,24 @@ describe("MCP Protocol (in-memory)", () => {
     expect(revoke?.url).toMatch(/\/docs\/manage-tokens#revoke-a-token$/);
     expect(revoke?.excerpt).toBeTruthy();
     expect(parsed.pages).toBeUndefined();
+    expect(parsed.hint).toBeUndefined();
+  });
+
+  it("search_docs flags results that don't answer the question", async () => {
+    const result = await client.callTool({
+      name: "search_docs",
+      arguments: { query: "how do I export runs to Benchling" },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as {
+      results: unknown[];
+      pages?: unknown;
+      hint?: string;
+    };
+    expect(parsed.results.length).toBeGreaterThan(0);
+    expect(parsed.pages).toBeUndefined();
+    expect(parsed.hint).toContain("never mention 'Benchling'");
+    expect(parsed.hint).toContain("send_feedback");
   });
 
   it("search_docs lists every docs page when nothing matches", async () => {

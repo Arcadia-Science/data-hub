@@ -23,7 +23,7 @@ The docs site deploys from the `production` branch, so a docs change goes live w
 
 ### Watcher version
 
-Shipped watcher changes (`watcher/src/`) need a version bump in the same branch. Follow `watcher/AGENTS.md`: bump `[project].version` in `watcher/pyproject.toml` once if it still matches the merge-base, then run `uv lock`, then run `make py-watcher-cli-catalog` and commit the updated `docs/site/src/lib/cli-catalog.snapshot.json`, which records the version. Do not tag the release from the feature branch.
+Shipped watcher changes (`watcher/src/`) need a version bump in the same branch. Follow `watcher/AGENTS.md`: bump `[project].version` in `watcher/pyproject.toml` once if it still matches the merge-base, then run `uv lock`, then run `make py-watcher-cli-catalog docs-bundle-generate` and commit the updated `docs/site/src/lib/cli-catalog.snapshot.json`, which records the version, and `web/lib/mcp/docs/docs-bundle.snapshot.json`, which embeds the CLI reference page. Do not tag the release from the feature branch.
 
 ### Changelog
 
@@ -38,14 +38,14 @@ Do not add an entry for tests, docs, CI, dependency updates, or infrastructure.
 The API, MCP, and [Watcher CLI](https://datahub.arcadiascience.com/docs/cli-reference) pages on the docs site render from three JSON files committed in `docs/site/src/lib/`: `openapi.snapshot.json`, `mcp-catalog.snapshot.json`, and `cli-catalog.snapshot.json`. They are generated from the code and never edited by hand.
 
 1. Change the REST API (`web/lib/api/openapi/`), the MCP tools, prompts, or resources (`web/lib/mcp/`), or the watcher CLI help or options (`watcher/src/data_hub_watcher/cli.py`).
-2. Run `make docs-catalogs`. To refresh only the watcher CLI file, run `make py-watcher-cli-catalog`.
+2. Run `make docs-catalogs`. To refresh only the watcher CLI file, run `make py-watcher-cli-catalog docs-bundle-generate`, because the [docs bundle for the MCP server](#docs-bundle-for-the-mcp-server) embeds the CLI reference page.
 3. Commit the changed snapshot files in the same branch.
 
 CI regenerates each file and fails when the committed copy differs.
 
 ### Docs bundle for the MCP server
 
-The MCP server answers questions about Data Hub from a bundled copy of the docs pages, `web/lib/mcp/docs/docs-corpus.snapshot.json`. It is generated from `docs/site/content/docs/` (and the watcher CLI snapshot) and never edited by hand. After changing a docs page, run `make docs-catalogs` and commit the result in the same branch. CI regenerates it and fails when the committed copy differs. See `docs/developer/mcp-docs.md`.
+The MCP server answers questions about Data Hub from a bundled copy of the docs pages, `web/lib/mcp/docs/docs-bundle.snapshot.json`. It is generated from `docs/site/content/docs/` (and the watcher CLI snapshot) and never edited by hand. After changing a docs page or the watcher CLI snapshot, including a watcher version bump, run `make docs-catalogs` and commit the result in the same branch. CI regenerates it and fails when the committed copy differs. See `docs/developer/mcp-docs.md`.
 
 ## Cursor Cloud specific instructions
 

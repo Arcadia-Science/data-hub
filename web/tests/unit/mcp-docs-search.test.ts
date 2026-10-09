@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { getDocsCorpus, listDocPages } from "@/lib/mcp/docs/corpus";
+import {
+  type ChangelogDocEntry,
+  getDocsBundle,
+  listDocPages,
+} from "@/lib/mcp/docs/bundle";
 import { searchDocs } from "@/lib/mcp/docs/search";
 
 // Real questions a person might put to an assistant, each with the page or
@@ -69,17 +73,41 @@ const GOLDEN_QUESTIONS: Array<{ question: string; pages: string[] }> = [
   },
 ];
 
+// Questions the docs don't answer. Search still finds sections that share a
+// word, so each must come back with no section counted as an answer, which is
+// what makes the agent offer feedback. Remove a question once the docs cover it.
+const UNCOVERED_QUESTIONS = [
+  "how do I export runs to Benchling",
+  "does Data Hub support SAML single sign-on",
+  "is there a mobile app",
+  "can I schedule a weekly email digest",
+  "how do I translate the interface into French",
+  "does it integrate with Google Drive",
+];
+
 describe("docs search", () => {
   it.each(GOLDEN_QUESTIONS)("finds $pages for “$question”", ({
     question,
     pages,
   }) => {
-    const { hits } = searchDocs(question);
-    const top = hits.slice(0, 3).map((hit) => hit.entry.id);
+    const { hits, goodMatches } = searchDocs(question);
+    const top = hits.slice(0, 3).map((hit) => hit.entry.page);
     expect(
       pages.some((page) => top.includes(page)),
       `expected one of ${pages.join(", ")} in the top three, got ${top.join(", ")}`
     ).toBe(true);
+    expect(goodMatches).toBeGreaterThan(0);
+  });
+
+  it.each(UNCOVERED_QUESTIONS)("counts no answer for “%s”", (question) => {
+    expect(searchDocs(question).goodMatches).toBe(0);
+  });
+
+  it("names the words of the question the docs never use, as typed", () => {
+    expect(
+      searchDocs("how do I export runs to Benchling").missingWords
+    ).toEqual(["Benchling"]);
+    expect(searchDocs("how do I revoke a token").missingWords).toEqual([]);
   });
 
   it("returns nothing for a question made only of filler words", () => {
@@ -95,7 +123,7 @@ describe("docs search", () => {
     expect(hits.length).toBeLessThanOrEqual(5);
     const perPage = new Map<string, number>();
     for (const hit of hits) {
-      perPage.set(hit.entry.id, (perPage.get(hit.entry.id) ?? 0) + 1);
+      perPage.set(hit.entry.page, (perPage.get(hit.entry.page) ?? 0) + 1);
     }
     expect(Math.max(...perPage.values())).toBeLessThanOrEqual(2);
   });
@@ -113,7 +141,7 @@ describe("docs search", () => {
   });
 });
 
-describe("docs corpus", () => {
+describe("docs bundle", () => {
   it("lists the hand-written pages and leaves out the generated catalogs", () => {
     const ids = listDocPages().map((doc) => doc.page);
     expect(ids).toContain("manage-tokens");
@@ -134,10 +162,12 @@ describe("docs corpus", () => {
   });
 
   it("includes changelog entries as separate documents", () => {
-    const changes = getDocsCorpus().filter((e) => e.kind === "changelog");
+    const changes = getDocsBundle().filter(
+      (entry): entry is ChangelogDocEntry => entry.kind === "changelog"
+    );
     expect(changes.length).toBeGreaterThan(0);
     for (const change of changes) {
-      expect(change.id.startsWith("changelog/")).toBe(true);
+      expect(change.page.startsWith("changelog/")).toBe(true);
       expect(change.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     }
   });
@@ -146,16 +176,16 @@ describe("docs corpus", () => {
   // token is a deliberately pessimistic estimate for Markdown with code in it.
   it("keeps every page small enough to return in one tool result", () => {
     const limitChars = 25_000 * 3;
-    for (const entry of getDocsCorpus()) {
+    for (const entry of getDocsBundle()) {
       const result = JSON.stringify({ markdown: entry.markdown });
-      expect(result.length, entry.id).toBeLessThan(limitChars);
+      expect(result.length, entry.page).toBeLessThan(limitChars);
     }
   });
 
   it("gives every section on a page a different ID", () => {
-    for (const entry of getDocsCorpus()) {
+    for (const entry of getDocsBundle()) {
       const ids = entry.sections.map((section) => section.id);
-      expect(new Set(ids).size, entry.id).toBe(ids.length);
+      expect(new Set(ids).size, entry.page).toBe(ids.length);
     }
   });
 });

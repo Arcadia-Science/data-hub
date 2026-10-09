@@ -226,8 +226,8 @@ describe("MCP Server (HTTP)", () => {
 
   // ---- Docs tools (end-to-end) ---------------------------------------------
 
-  // The production build has to ship the bundled docs and the changelog files,
-  // which the in-memory tests read straight from the source tree.
+  // Checks the docs bundle is compiled into the production server. The
+  // changelog files still come from the source tree under `next start`.
   it("search_docs and read_doc answer from the built app", async () => {
     const search = await callTool("search_docs", {
       query: "how do I revoke a token",

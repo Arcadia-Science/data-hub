@@ -6,7 +6,7 @@ export const searchDocsTool = {
   name: "search_docs",
   title: "Search Docs",
   description:
-    "Search Data Hub's own documentation and changelog. Use it for how-to and explanation questions about Data Hub itself: setting up instruments and watchers, tokens, permissions, notifications, MCP and API access, and what changed recently. Returns up to five matching sections, each with a short excerpt, a page ID, and a link to cite. Call read_doc to read the full page or section. Not for lab data; use global_search or search_runs for runs, files, and instruments. When nothing matches, the result lists every docs page so you can pick one.",
+    "Search Data Hub's own documentation and changelog. Use it for how-to and explanation questions about Data Hub itself: setting up instruments and watchers, tokens, permissions, notifications, MCP and API access, and what changed recently. Returns up to five matching sections, each with a short excerpt, a page ID, and a link to cite. Call read_doc to read the full page or section. Not for lab data; use global_search or search_runs for runs, files, and instruments. When nothing matches, the result lists every docs page so you can pick one. If the results do not answer the question, say the docs do not cover it and offer to report the gap with send_feedback.",
   group: "docs",
   inputSchema: {
     query: z

@@ -138,6 +138,10 @@ export function toPlainText(markdown: string): string {
     .trim();
 }
 
+const EXCERPT_LENGTH = 300;
+// Characters kept before the first match, so the excerpt reads as a sentence.
+const EXCERPT_LEAD_IN = 80;
+
 /**
  * A short passage around the first place a search term appears, trimmed to
  * word boundaries. Falls back to the start of the text when nothing matches,
@@ -145,10 +149,9 @@ export function toPlainText(markdown: string): string {
  */
 export function makeExcerpt(
   plainText: string,
-  terms: readonly string[],
-  maxLength = 300
+  terms: readonly string[]
 ): string {
-  if (plainText.length <= maxLength) {
+  if (plainText.length <= EXCERPT_LENGTH) {
     return plainText;
   }
 
@@ -158,12 +161,12 @@ export function makeExcerpt(
     .filter((position) => position >= 0);
   const anchor = hits.length > 0 ? Math.min(...hits) : 0;
 
-  let start = Math.max(0, anchor - 80);
+  let start = Math.max(0, anchor - EXCERPT_LEAD_IN);
   if (start > 0) {
     const boundary = plainText.indexOf(" ", start);
     start = boundary === -1 ? start : boundary + 1;
   }
-  let end = Math.min(plainText.length, start + maxLength);
+  let end = Math.min(plainText.length, start + EXCERPT_LENGTH);
   if (end < plainText.length) {
     const boundary = plainText.lastIndexOf(" ", end);
     end = boundary > start ? boundary : end;

@@ -30,7 +30,7 @@ Run every command below from `docs/site/`, or use the `make docs-*` targets from
 ## Watcher CLI catalog
 
 - [`content/docs/cli-reference.mdx`](content/docs/cli-reference.mdx) renders `<WatcherCliCatalog />` from the committed snapshot at `src/lib/cli-catalog.snapshot.json`.
-- Regenerate it with `make py-watcher-cli-catalog` (or `make docs-catalogs`, which also refreshes the other two snapshots) and commit the result. CI fails when it is out of date. A watcher version bump changes it too, because the snapshot records the version.
+- Regenerate it with `make py-watcher-cli-catalog docs-bundle-generate` (or `make docs-catalogs`, which also refreshes the other two snapshots) and commit the result. CI fails when it is out of date. A watcher version bump changes it too, because the snapshot records the version. The [MCP docs bundle](#mcp-docs-bundle) embeds this page, so it changes with it.
 - Keep narrative caveats (interactive prompts, Windows-only service, examples) in the MDX; do not hand-maintain flag tables.
 - Markdown / LLM export expands `WatcherCliCatalog` via `getLLMText` (`src/lib/cli-catalog-markdown.ts`), same placeholder pattern as the MCP catalogs.
 
@@ -40,12 +40,12 @@ The three `src/lib/*.snapshot.json` files are generated output, so Biome skips t
 
 The Data Hub MCP server answers questions from a copy of these pages bundled into the web app, so each deployment answers from the docs that match its own code.
 
-- `scripts/generate-docs-corpus.ts` writes the copy to `web/lib/mcp/docs/docs-corpus.snapshot.json`, using the same `getLLMText` output as `/docs/<path>.md`. It leaves out the generated API endpoint pages and the MCP tool, prompt, and resource catalogs.
-- Regenerate it with `make docs-catalogs` (or `npm run docs-corpus:generate` here) after changing any page, and commit the result. CI fails when it is out of date. Never edit it by hand.
+- `scripts/generate-docs-bundle.ts` writes the copy to `web/lib/mcp/docs/docs-bundle.snapshot.json`, using the same `getLLMText` output as `/docs/<path>.md`. It leaves out the generated API endpoint pages and the MCP tool, prompt, and resource catalogs.
+- Regenerate it with `make docs-catalogs` (or `npm run docs-bundle:generate` here) after changing any page or the watcher CLI snapshot, and commit the result. CI fails when it is out of date. Never edit it by hand.
 - The script loads the pages through `fumadocs-mdx/node`, which needs this package to be an ES module (`"type": "module"`), and runs under `tsx`. `scripts/stub-assets-loader.mjs` stubs image imports, which Node cannot load.
 - The server returns a page in one tool result, so a page must stay under 75,000 characters (the longest today is about 18,000). A test fails above that, because Claude Code caps a tool result at 25,000 tokens. Split a page that grows past it.
 - Give every heading a stable `[#id]` when other pages link to it. The server uses those IDs as section names, and agents quote them back.
-- Search quality is covered by a list of real questions in `web/tests/unit/mcp-docs-search.test.ts`. When a page is renamed or split, update the list.
+- Search quality is covered by a list of real questions in `web/tests/unit/mcp-docs-search.test.ts`, plus questions the docs don't answer, which must come back flagged as weak matches. When a page is renamed or split, or a new page answers one of those questions, update the lists.
 
 ## AI-consumption surface
 

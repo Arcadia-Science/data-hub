@@ -8,7 +8,7 @@ import {
   listDocPages,
   parseDocRef,
   unknownPageMessage,
-} from "@/lib/mcp/docs/corpus";
+} from "@/lib/mcp/docs/bundle";
 import { DATAHUB_GLOSSARY } from "@/lib/mcp/glossary";
 import { resolveInstrumentFilterOptions } from "@/lib/mcp/instrument-filter-options";
 import { loadRunReportHtml } from "@/lib/mcp/run-report-html";
@@ -245,15 +245,14 @@ export function registerResources(server: McpServer) {
       const requested = Array.isArray(variables.page)
         ? variables.page[0]
         : variables.page;
-      const entry = requested
-        ? findDoc(parseDocRef(requested).page)
-        : undefined;
+      const { page } = parseDocRef(requested ?? "");
+      const entry = findDoc(page);
       return {
         contents: [
           {
             uri: uri.href,
             mimeType: docsPageResource.mimeType,
-            text: entry ? entry.markdown : unknownPageMessage(requested ?? ""),
+            text: entry ? entry.markdown : unknownPageMessage(page),
           },
         ],
       };

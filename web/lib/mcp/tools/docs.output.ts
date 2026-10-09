@@ -33,7 +33,12 @@ export const searchDocsOutputSchema = z.object({
     .array(docPageSummarySchema)
     .optional()
     .describe("Every docs page. Present only when nothing matched."),
-  hint: z.string().optional(),
+  hint: z
+    .string()
+    .optional()
+    .describe(
+      "Present when no section matches most of the question. Says what to do next."
+    ),
 });
 
 export const readDocOutputSchema = z.object({

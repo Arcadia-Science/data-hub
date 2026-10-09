@@ -1,15 +1,17 @@
 import MiniSearch from "minisearch";
-import { type DocEntry, type DocSection, getDocsCorpus } from "./corpus";
+import { type DocEntry, type DocSection, getDocsBundle } from "./bundle";
 import { makeExcerpt } from "./markdown";
 
-export const SEARCH_RESULT_LIMIT = 5;
-// Keeps five results from all being sections of one long page.
+const SEARCH_RESULT_LIMIT = 5;
+// Keeps the `SEARCH_RESULT_LIMIT` results from all being sections of one long
+// page.
 const MAX_HITS_PER_PAGE = 2;
 // Changelog entries are short, so they would otherwise outrank the docs page
 // that explains the same thing in more depth.
 const CHANGELOG_WEIGHT = 0.7;
 
 // Questions arrive as sentences. Without this, "how do I" matches every page.
+// `data` and `hub` are here because every page names the product.
 const STOP_WORDS = new Set([
   "a",
   "about",
@@ -25,6 +27,7 @@ const STOP_WORDS = new Set([
   "by",
   "can",
   "could",
+  "data",
   "did",
   "do",
   "does",
@@ -35,6 +38,7 @@ const STOP_WORDS = new Set([
   "has",
   "have",
   "how",
+  "hub",
   "i",
   "if",
   "in",
@@ -43,7 +47,9 @@ const STOP_WORDS = new Set([
   "it",
   "its",
   "me",
+  "much",
   "my",
+  "myself",
   "of",
   "on",
   "or",
@@ -91,54 +97,75 @@ function normalizeTerm(term: string): string | null {
   return lower;
 }
 
+const tokenize: (text: string) => string[] = MiniSearch.getDefault("tokenize");
+
+/** The question's words as the index stores them, mapped to how they were typed. */
+function queryWords(query: string): Map<string, string> {
+  const words = new Map<string, string>();
+  for (const token of tokenize(query)) {
+    const term = normalizeTerm(token);
+    if (term && !words.has(term)) {
+      words.set(term, token);
+    }
+  }
+  return words;
+}
+
+// Search matches any one word, so a result alone says little. A section that
+// holds two thirds of the question's words, rounded up, counts as an answer.
+// The golden questions in `tests/unit/mcp-docs-search.test.ts` check the bar.
+function wordsNeeded(wordCount: number): number {
+  return Math.ceil((wordCount * 2) / 3);
+}
+
 interface IndexedPassage {
   description: string;
-  docId: string;
   heading: string;
   id: string;
   kind: DocEntry["kind"];
   pageTitle: string;
-  sectionId: string | null;
   text: string;
 }
 
 interface Passage {
   entry: DocEntry;
+  /** Text the excerpt is cut from. */
+  excerptSource: string;
+  /** Null for the text before a page's first heading. */
   section: DocSection | null;
 }
 
-function passagesOf(entry: DocEntry): Array<{
-  passage: Passage;
-  indexed: IndexedPassage;
-}> {
-  const base = {
-    docId: entry.id,
-    kind: entry.kind,
-    pageTitle: entry.title,
-    description: entry.description,
-  };
-  const parts: Array<{ section: DocSection | null; heading: string }> = [];
-  if (entry.intro || entry.sections.length === 0) {
-    parts.push({ section: entry.intro, heading: entry.title });
+function passagesOf(
+  entry: DocEntry
+): Array<{ passage: Passage; indexed: IndexedPassage }> {
+  const description = entry.kind === "docs" ? entry.description : "";
+  const parts: Array<{
+    heading: string;
+    section: DocSection | null;
+    text: string;
+  }> = [];
+  if (entry.introText || entry.sections.length === 0) {
+    parts.push({ section: null, heading: entry.title, text: entry.introText });
   }
   for (const section of entry.sections) {
-    parts.push({ section, heading: section.heading });
+    parts.push({ section, heading: section.heading, text: section.plainText });
   }
 
-  return parts.map(({ section, heading }) => ({
-    passage: { entry, section: section?.id ? section : null },
+  return parts.map(({ section, heading, text }) => ({
+    passage: { entry, section, excerptSource: text || description },
     indexed: {
-      ...base,
-      id: `${entry.id}#${section?.id ?? ""}`,
-      sectionId: section?.id ? section.id : null,
+      id: `${entry.page}#${section?.id ?? ""}`,
+      kind: entry.kind,
+      pageTitle: entry.title,
+      description,
       heading,
-      text: section?.plainText ?? "",
+      text,
     },
   }));
 }
 
 interface DocsIndex {
-  corpus: DocEntry[];
+  bundle: DocEntry[];
   index: MiniSearch<IndexedPassage>;
   passages: Map<string, Passage>;
 }
@@ -146,16 +173,16 @@ interface DocsIndex {
 let cached: DocsIndex | null = null;
 
 function getIndex(): DocsIndex {
-  const corpus = getDocsCorpus();
-  // The corpus is the same array on every call in production, so the index is
-  // built once per server instance. Elsewhere it is rebuilt with the corpus.
-  if (cached?.corpus === corpus) {
+  const bundle = getDocsBundle();
+  // The bundle is the same array on every call in production, so the index is
+  // built once per server instance. Elsewhere it is rebuilt with the bundle.
+  if (cached?.bundle === bundle) {
     return cached;
   }
 
   const index = new MiniSearch<IndexedPassage>({
     fields: ["heading", "pageTitle", "description", "text"],
-    storeFields: ["docId", "kind", "sectionId"],
+    storeFields: ["kind"],
     processTerm: normalizeTerm,
     searchOptions: {
       boost: { heading: 3, pageTitle: 2, description: 1.5 },
@@ -169,7 +196,7 @@ function getIndex(): DocsIndex {
 
   const passages = new Map<string, Passage>();
   const documents: IndexedPassage[] = [];
-  for (const entry of corpus) {
+  for (const entry of bundle) {
     for (const { passage, indexed } of passagesOf(entry)) {
       passages.set(indexed.id, passage);
       documents.push(indexed);
@@ -177,7 +204,7 @@ function getIndex(): DocsIndex {
   }
   index.addAll(documents);
 
-  cached = { corpus, index, passages };
+  cached = { bundle, index, passages };
   return cached;
 }
 
@@ -188,9 +215,14 @@ export interface DocsHit {
 }
 
 export interface DocsSearchOutcome {
+  /**
+   * Sections that answer the question by the `wordsNeeded` bar. Zero when a
+   * word appears nowhere in the docs, which usually means they don't cover it.
+   */
+  goodMatches: number;
   hits: DocsHit[];
-  /** Matches before the per-page cap and the result limit. */
-  totalMatches: number;
+  /** Words of the question that appear nowhere in the docs, as typed. */
+  missingWords: string[];
 }
 
 // Matched terms are normalized (and plural-stripped), so cut a letter off long
@@ -199,12 +231,20 @@ function excerptTerms(terms: readonly string[]): string[] {
   return terms.map((term) => (term.length > 4 ? term.slice(0, -1) : term));
 }
 
-export function searchDocs(
-  query: string,
-  limit = SEARCH_RESULT_LIMIT
-): DocsSearchOutcome {
+export function searchDocs(query: string): DocsSearchOutcome {
   const { index, passages } = getIndex();
+  const words = queryWords(query);
   const results = index.search(query);
+
+  const found = new Set(results.flatMap((result) => result.queryTerms));
+  const missingWords = [...words]
+    .filter(([term]) => !found.has(term))
+    .map(([, typed]) => typed);
+  const needed = wordsNeeded(words.size);
+  const goodMatches =
+    missingWords.length > 0
+      ? 0
+      : results.filter((result) => result.queryTerms.length >= needed).length;
 
   const perPage = new Map<string, number>();
   const hits: DocsHit[] = [];
@@ -213,24 +253,21 @@ export function searchDocs(
     if (!passage) {
       continue;
     }
-    const used = perPage.get(passage.entry.id) ?? 0;
+    const used = perPage.get(passage.entry.page) ?? 0;
     if (used >= MAX_HITS_PER_PAGE) {
       continue;
     }
-    perPage.set(passage.entry.id, used + 1);
+    perPage.set(passage.entry.page, used + 1);
 
-    const text = passage.section?.plainText ?? passage.entry.intro?.plainText;
     hits.push({
-      ...passage,
-      excerpt: makeExcerpt(
-        text || passage.entry.description,
-        excerptTerms(result.terms)
-      ),
+      entry: passage.entry,
+      section: passage.section,
+      excerpt: makeExcerpt(passage.excerptSource, excerptTerms(result.terms)),
     });
-    if (hits.length >= limit) {
+    if (hits.length >= SEARCH_RESULT_LIMIT) {
       break;
     }
   }
 
-  return { hits, totalMatches: results.length };
+  return { goodMatches, hits, missingWords };
 }

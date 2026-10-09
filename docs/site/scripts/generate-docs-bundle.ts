@@ -1,22 +1,22 @@
 // Writes the docs bundle the MCP server answers `search_docs` and `read_doc`
 // from. Each deployment ships its own docs with the web app, so the output is
 // committed under `web/`. CI regenerates it and fails when the committed copy
-// is out of date. Run `make docs-catalogs` (or `npm run docs-corpus:generate`
+// is out of date. Run `make docs-catalogs` (or `npm run docs-bundle:generate`
 // here) after changing a docs page or one of the other generated snapshots.
 import { writeFile } from "node:fs/promises";
-import { register as registerHooks } from "node:module";
+import { register as registerAssetsLoader } from "node:module";
 import { flattenTree } from "fumadocs-core/page-tree";
-import { register } from "fumadocs-mdx/node";
+import { register as registerMdxLoader } from "fumadocs-mdx/node";
 
 // `source.ts` imports MDX through the generated `.source/` files, which Node
-// can only load with these hooks in place.
-register();
-registerHooks("./stub-assets-loader.mjs", import.meta.url);
+// can only load with these loaders in place.
+registerMdxLoader();
+registerAssetsLoader("./stub-assets-loader.mjs", import.meta.url);
 
 const { getLLMText, source } = await import("../src/lib/source");
 
 const OUTPUT = new URL(
-  "../../../web/lib/mcp/docs/docs-corpus.snapshot.json",
+  "../../../web/lib/mcp/docs/docs-bundle.snapshot.json",
   import.meta.url
 );
 

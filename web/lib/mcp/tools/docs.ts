@@ -9,15 +9,24 @@ import {
   listDocPages,
   parseDocRef,
   unknownPageMessage,
-} from "@/lib/mcp/docs/corpus";
+} from "@/lib/mcp/docs/bundle";
 import { searchDocs } from "@/lib/mcp/docs/search";
 import { errorResult, structuredResult } from "@/lib/mcp/tools/helpers";
+import { MIN_QUERY_LENGTH } from "@/lib/search-constants";
 import { readDocTool, searchDocsTool } from "./docs.defs";
 
-const MIN_QUERY_LENGTH = 2;
+const REPORT_GAP =
+  "If the docs do not cover the question, say so and offer to report the gap with send_feedback.";
 
-const NO_MATCH_HINT =
-  "Nothing matched. Pick a page from `pages` and call read_doc, or try different words. If the docs do not cover the question, say so and offer to report the gap with send_feedback.";
+const NO_MATCH_HINT = `Nothing matched. Pick a page from \`pages\` and call read_doc, or try different words. ${REPORT_GAP}`;
+
+function weakMatchHint(missingWords: readonly string[]): string {
+  const missing =
+    missingWords.length > 0
+      ? `The docs never mention ${missingWords.map((word) => `'${word}'`).join(", ")}. `
+      : "";
+  return `${missing}No section matches most of the question, so these results may not answer it. ${REPORT_GAP}`;
+}
 
 // `DOCS_URL` is path-only when the docs share the app's origin, and an agent
 // needs a link it can hand to a person.
@@ -27,9 +36,9 @@ function docsBaseUrl(): string {
 
 function docUrl(entry: DocEntry, sectionId: string | null): string | null {
   if (entry.kind === "changelog") {
-    return entry.externalUrl;
+    return entry.docsUrl;
   }
-  return `${docsBaseUrl()}/${entry.id}${sectionId ? `#${sectionId}` : ""}`;
+  return `${docsBaseUrl()}/${entry.page}${sectionId ? `#${sectionId}` : ""}`;
 }
 
 export function registerDocsTools(server: McpServer) {
@@ -44,8 +53,8 @@ export function registerDocsTools(server: McpServer) {
         );
       }
 
-      const { hits, totalMatches } = searchDocs(trimmed);
-      trackDocsSearch(ctx, totalMatches);
+      const { hits, goodMatches, missingWords } = searchDocs(trimmed);
+      trackDocsSearch(ctx, goodMatches);
 
       if (hits.length === 0) {
         return structuredResult({
@@ -56,14 +65,15 @@ export function registerDocsTools(server: McpServer) {
       }
       return structuredResult({
         results: hits.map(({ entry, section, excerpt }) => ({
-          page: entry.id,
+          page: entry.page,
           title: entry.title,
           section: section?.id ?? null,
           heading: section?.heading ?? null,
           excerpt,
           url: docUrl(entry, section?.id ?? null),
-          date: entry.date,
+          date: entry.kind === "changelog" ? entry.date : null,
         })),
+        ...(goodMatches === 0 ? { hint: weakMatchHint(missingWords) } : {}),
       });
     }
   );
@@ -85,7 +95,7 @@ export function registerDocsTools(server: McpServer) {
       if (wanted && !match) {
         const ids = entry.sections.map((s) => s.id).join(", ");
         return errorResult(
-          `Page '${entry.id}' has no section '${ref.section}'.${
+          `Page '${entry.page}' has no section '${ref.section}'.${
             ids
               ? ` Sections: ${ids}.`
               : " It has no sections; read the whole page."
@@ -93,9 +103,9 @@ export function registerDocsTools(server: McpServer) {
         );
       }
 
-      trackDocsRead(ctx, entry.id);
+      trackDocsRead(ctx, entry.page);
       return structuredResult({
-        page: entry.id,
+        page: entry.page,
         title: entry.title,
         section: match?.id ?? null,
         heading: match?.heading ?? null,

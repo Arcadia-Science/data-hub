@@ -9,7 +9,7 @@ on:
       - .github/workflows/docs-lint.yml
       - docs/**
       - web/lib/docs.ts
-      - web/lib/mcp/docs/docs-corpus.snapshot.json
+      - web/lib/mcp/docs/docs-bundle.snapshot.json
       - web/content/changelog/**
       - web/microfrontends.json
       - Makefile
@@ -21,7 +21,7 @@ on:
       - .github/workflows/docs-lint.yml
       - docs/**
       - web/lib/docs.ts
-      - web/lib/mcp/docs/docs-corpus.snapshot.json
+      - web/lib/mcp/docs/docs-bundle.snapshot.json
       - web/content/changelog/**
       - web/microfrontends.json
       - Makefile
@@ -62,8 +62,8 @@ jobs:
       # Regenerate it and fail if the committed copy differs.
       - name: Check docs bundle for the MCP server is current
         run: |
-          npm run docs-corpus:generate
-          bundle="../../web/lib/mcp/docs/docs-corpus.snapshot.json"
+          npm run docs-bundle:generate
+          bundle="../../web/lib/mcp/docs/docs-bundle.snapshot.json"
           if [ -n "$(git status --porcelain -- $bundle)" ]; then
             echo "::error::The docs bundle for the MCP server is out of date. Run 'make docs-catalogs' and commit the result."
             git --no-pager diff --stat -- $bundle

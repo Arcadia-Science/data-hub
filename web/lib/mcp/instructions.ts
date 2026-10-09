@@ -1,13 +1,10 @@
 import { FEEDBACK_APP } from "@/lib/feedback-app";
 
 /**
- * Delivered to every MCP client at initialize, so it works without resources
- * or prompts. Claude Code keeps only the first 2 KB, which is why a unit test
- * caps the length and the most important points come first.
- *
- * Scoped to what tool descriptions cannot carry on their own: what the server
- * is for, cross-tool constraints, routing, and volume limits. Run status and
- * date definitions are in the docs (`search_docs`) and `datahub://glossary`.
+ * Sent to every client at initialize. Claude Code keeps only the first 2 KB, so
+ * a unit test caps the length and the most important points come first. Holds
+ * only what tool descriptions can't: what the server is for, cross-tool rules,
+ * routing, and volume limits. Definitions live in the docs (`search_docs`).
  */
 export const MCP_SERVER_INSTRUCTIONS = `
 Data Hub collects files from lab instruments, processes them, and groups them

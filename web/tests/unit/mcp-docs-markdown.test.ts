@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { findDoc, parseDocRef } from "@/lib/mcp/docs/corpus";
+import {
+  findDoc,
+  parseDocRef,
+  unknownPageMessage,
+} from "@/lib/mcp/docs/bundle";
 import {
   makeExcerpt,
   slugifyHeading,
@@ -201,8 +205,41 @@ describe("findDoc", () => {
 
   it("gives a changelog entry the date in its heading and its docs link", () => {
     const entry = findDoc("changelog/2026-10-08-hina-large-image-previews");
-    expect(entry?.markdown).toContain("(2026-10-08)");
-    expect(entry?.markdown).toContain("Related docs: ");
-    expect(entry?.externalUrl).toContain("/docs/instrument-preprocessing");
+    expect(entry?.kind).toBe("changelog");
+    if (entry?.kind !== "changelog") {
+      return;
+    }
+    expect(entry.markdown).toContain("(2026-10-08)");
+    expect(entry.markdown).toContain("Related docs: ");
+    expect(entry.docsUrl).toContain("/docs/instrument-preprocessing");
+  });
+
+  it("keeps a page's intro as plain text, apart from its sections", () => {
+    const entry = findDoc("manage-tokens");
+    expect(entry?.introText.length).toBeGreaterThan(0);
+    expect(entry?.introText).not.toContain("#");
+    expect(entry?.sections.every((section) => section.id !== "")).toBe(true);
+  });
+});
+
+describe("unknownPageMessage", () => {
+  const closest = (page: string) =>
+    /Closest: ([^.]+)\./.exec(unknownPageMessage(page))?.[1]?.split(", ") ?? [];
+
+  it("suggests the page for a typo, a missing word, or another word form", () => {
+    expect(closest("manage-tokns")[0]).toBe("manage-tokens");
+    expect(closest("manage-token")[0]).toBe("manage-tokens");
+    expect(closest("install-watcher")).toContain("install-the-watcher");
+    expect(closest("troubleshooting")).toContain("troubleshoot-a-watcher");
+  });
+
+  it("suggests nothing for an unrelated name, but still lists every page", () => {
+    const message = unknownPageMessage("zzzz");
+    expect(message).not.toContain("Closest:");
+    expect(message).toContain("Docs pages: overview,");
+  });
+
+  it("caps the suggestions at three", () => {
+    expect(closest("watcher").length).toBeLessThanOrEqual(3);
   });
 });

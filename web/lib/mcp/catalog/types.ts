@@ -64,6 +64,8 @@ export type McpResourceDef = {
 
 /** Shape served by `GET /mcp/v1/schema.json`. */
 export interface McpCatalogDocument {
+  /** Display label for each tool `group`. */
+  groups: typeof MCP_TOOL_GROUPS;
   info: {
     title: string;
     version: string;

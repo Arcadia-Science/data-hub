@@ -29,6 +29,8 @@ export interface AnalyticsEvents {
     page: string;
     client: string;
   };
+  // Counts sections that hold most of the question's words, so `0` marks a
+  // question the docs likely don't cover.
   mcp_docs_search: {
     user_id: string;
     client: string;
