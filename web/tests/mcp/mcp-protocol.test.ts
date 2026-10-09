@@ -831,7 +831,7 @@ describe("MCP Protocol (in-memory)", () => {
 
   it("every registered tool advertises outputSchema", async () => {
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(37);
+    expect(tools).toHaveLength(39);
     for (const tool of tools) {
       const schema = tool.outputSchema as
         | { type?: string; oneOf?: unknown; anyOf?: unknown }
@@ -1054,6 +1054,145 @@ describe("MCP Protocol (in-memory)", () => {
       arguments: { query: "a" },
     });
     expect(result.isError).toBe(true);
+  });
+
+  it("search_docs returns matching sections with links and excerpts", async () => {
+    const result = await client.callTool({
+      name: "search_docs",
+      arguments: { query: "how do I revoke a token" },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as {
+      results: Array<{
+        page: string;
+        section: string | null;
+        excerpt: string;
+        url: string | null;
+      }>;
+      pages?: unknown;
+    };
+    expect(result.structuredContent).toEqual(parsed);
+    expect(parsed.results.length).toBeGreaterThan(0);
+    expect(parsed.results.length).toBeLessThanOrEqual(5);
+    const revoke = parsed.results.find(
+      (r) => r.page === "manage-tokens" && r.section === "revoke-a-token"
+    );
+    expect(revoke?.url).toMatch(/\/docs\/manage-tokens#revoke-a-token$/);
+    expect(revoke?.excerpt).toBeTruthy();
+    expect(parsed.pages).toBeUndefined();
+  });
+
+  it("search_docs lists every docs page when nothing matches", async () => {
+    const result = await client.callTool({
+      name: "search_docs",
+      arguments: { query: "zxqv plorgnak" },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as {
+      results: unknown[];
+      pages: Array<{ page: string; title: string; description: string }>;
+      hint: string;
+    };
+    expect(parsed.results).toEqual([]);
+    expect(parsed.pages.map((p) => p.page)).toContain("manage-tokens");
+    expect(parsed.pages.length).toBeGreaterThan(20);
+    expect(parsed.hint).toContain("send_feedback");
+  });
+
+  it("search_docs rejects short queries", async () => {
+    const result = await client.callTool({
+      name: "search_docs",
+      arguments: { query: " a " },
+    });
+    expect(result.isError).toBe(true);
+  });
+
+  it("read_doc returns a whole page with its section IDs", async () => {
+    const result = await client.callTool({
+      name: "read_doc",
+      arguments: { page: "manage-tokens" },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as {
+      page: string;
+      section: string | null;
+      url: string;
+      markdown: string;
+      sections: Array<{ id: string }>;
+    };
+    expect(result.structuredContent).toEqual(parsed);
+    expect(parsed.page).toBe("manage-tokens");
+    expect(parsed.section).toBeNull();
+    expect(parsed.url).toMatch(/\/docs\/manage-tokens$/);
+    expect(parsed.markdown).toContain("## Revoke a token");
+    expect(parsed.sections.map((s) => s.id)).toContain("revoke-a-token");
+  });
+
+  it("read_doc returns only the requested section", async () => {
+    const result = await client.callTool({
+      name: "read_doc",
+      arguments: { page: "manage-tokens", section: "revoke-a-token" },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as {
+      section: string;
+      heading: string;
+      url: string;
+      markdown: string;
+    };
+    expect(parsed.section).toBe("revoke-a-token");
+    expect(parsed.heading).toBe("Revoke a token");
+    expect(parsed.url).toMatch(/\/docs\/manage-tokens#revoke-a-token$/);
+    expect(parsed.markdown.startsWith("## Revoke a token")).toBe(true);
+    expect(parsed.markdown).not.toContain("## Create a token");
+  });
+
+  it("read_doc accepts a docs URL with a fragment", async () => {
+    const result = await client.callTool({
+      name: "read_doc",
+      arguments: {
+        page: "https://datahub.example.com/docs/manage-tokens#revoke-a-token",
+      },
+    });
+    expect(result.isError).toBeFalsy();
+    expect((parseText(result.content) as { section: string }).section).toBe(
+      "revoke-a-token"
+    );
+  });
+
+  it("read_doc reads a changelog entry", async () => {
+    const result = await client.callTool({
+      name: "read_doc",
+      arguments: { page: "changelog/2026-10-08-hina-large-image-previews" },
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = parseText(result.content) as {
+      markdown: string;
+      url: string | null;
+    };
+    expect(parsed.markdown).toContain("Hina");
+    expect(parsed.url).toContain("/docs/instrument-preprocessing");
+  });
+
+  it("read_doc names the pages it has when the page is unknown", async () => {
+    const result = await client.callTool({
+      name: "read_doc",
+      arguments: { page: "manage-token" },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ text: string }>)[0]?.text ?? "";
+    expect(text).toContain("Closest: manage-tokens");
+    expect(text).toContain("Docs pages:");
+  });
+
+  it("read_doc names the sections it has when the section is unknown", async () => {
+    const result = await client.callTool({
+      name: "read_doc",
+      arguments: { page: "manage-tokens", section: "rotate" },
+    });
+    expect(result.isError).toBe(true);
+    const text = (result.content as Array<{ text: string }>)[0]?.text ?? "";
+    expect(text).toContain("revoke-a-token");
   });
 
   it("get_me errors without auth on the in-memory transport", async () => {
@@ -1771,6 +1910,50 @@ describe("MCP Protocol (in-memory)", () => {
     expect(
       resourceTemplates.some((t) => t.uriTemplate.includes("filter-options"))
     ).toBe(true);
+  });
+
+  it("lists a resource template for docs pages", async () => {
+    const { resourceTemplates } = await client.listResourceTemplates();
+    expect(
+      resourceTemplates.some((t) => t.uriTemplate === "datahub://docs/{page}")
+    ).toBe(true);
+  });
+
+  it("lists each docs page, but not the changelog, with a distinct name", async () => {
+    const { resources } = await client.listResources();
+    const docs = resources.filter((r) => r.uri.startsWith("datahub://docs/"));
+    expect(docs.map((r) => r.uri)).toContain("datahub://docs/manage-tokens");
+    expect(docs.some((r) => r.uri.includes("changelog"))).toBe(false);
+    expect(docs.every((r) => r.mimeType === "text/markdown")).toBe(true);
+    const names = docs.map((r) => r.name);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it("reads a docs page resource as Markdown", async () => {
+    const { contents } = await client.readResource({
+      uri: "datahub://docs/manage-tokens",
+    });
+    expect(contents[0]?.mimeType).toBe("text/markdown");
+    expect((contents[0] as { text: string }).text).toContain(
+      "## Revoke a token"
+    );
+  });
+
+  it("explains an unknown docs page resource", async () => {
+    const { contents } = await client.readResource({
+      uri: "datahub://docs/no-such-page",
+    });
+    expect((contents[0] as { text: string }).text).toContain("not found");
+  });
+
+  it("completes docs page IDs", async () => {
+    const result = await client.complete({
+      ref: { type: "ref/resource", uri: "datahub://docs/{page}" },
+      argument: { name: "page", value: "manage-" },
+    });
+    expect(result.completion.values).toEqual(
+      expect.arrayContaining(["manage-tokens", "manage-members"])
+    );
   });
 
   it("filter-options list surfaces both plate-reader and gel-doc instruments", async () => {

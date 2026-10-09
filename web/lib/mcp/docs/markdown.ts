@@ -119,10 +119,11 @@ const JSX_TEXT_ATTRIBUTE = /\b(?:title|description)="([^"]*)"/g;
 export function toPlainText(markdown: string): string {
   return markdown
     .replace(JSX_TAG, (tag) => {
-      const words = [...tag.matchAll(JSX_TEXT_ATTRIBUTE)].map(
-        (match) => match[1]
-      );
-      return words.length > 0 ? ` ${words.join(". ")}. ` : " ";
+      const phrases = [...tag.matchAll(JSX_TEXT_ATTRIBUTE)]
+        .map((match) => match[1] ?? "")
+        .filter(Boolean)
+        .map((phrase) => (/[.!?]$/.test(phrase) ? phrase : `${phrase}.`));
+      return phrases.length > 0 ? ` ${phrases.join(" ")} ` : " ";
     })
     .replace(/^\s*(`{3,}|~{3,}).*$/gm, " ")
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
