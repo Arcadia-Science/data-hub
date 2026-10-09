@@ -1,46 +1,45 @@
-import { feedbackInstructions } from "@arcadiascience/app-feedback-toolkit/mcp";
-import { FEEDBACK_MCP_OPTIONS } from "@/lib/feedback-app";
+import { FEEDBACK_APP } from "@/lib/feedback-app";
 
 /**
- * Delivered to every MCP client at initialize — reachable without resources.
+ * Delivered to every MCP client at initialize, so it works without resources
+ * or prompts. Claude Code keeps only the first 2 KB, which is why a unit test
+ * caps the length and the most important points come first.
  *
- * Scoped to what tool descriptions cannot carry on their own: cross-tool
- * constraints, routing, and volume limits. Full status and date definitions
- * live in `datahub://glossary` so they are not restated here.
+ * Scoped to what tool descriptions cannot carry on their own: what the server
+ * is for, cross-tool constraints, routing, and volume limits. Run status and
+ * date definitions are in the docs (`search_docs`) and `datahub://glossary`.
  */
 export const MCP_SERVER_INSTRUCTIONS = `
-Data Hub exposes lab instrument runs, their files, watcher agents, and run
-attributions (who ran what).
+Data Hub collects files from lab instruments, processes them, and groups them
+into runs. This server covers instruments, runs, files, watchers (the program
+on each instrument PC that uploads files), who ran what, and Data Hub's own
+documentation.
 
-Writes: mutating tools need the write scope and otherwise fail with "Token is
-missing required scope: write" — ask the user to re-authorize rather than
-retrying. Confirm with the user before deleting, dismissing, unclaiming, or
-reprocessing anything. Attribution and comments always act as the token's
-owner; you cannot claim a run or comment as someone else.
+How-to questions about Data Hub itself (setup, watchers, tokens, permissions,
+recent changes): call search_docs, then read_doc on the best match, and link
+the page in your answer.
 
-Dates: dateFrom/dateTo are inclusive UTC calendar days matched against
-coalesce(acquired_at, created_at). The web dashboard uses the viewer's
-timezone, so its daily counts can differ.
+Writes need the write scope and otherwise fail with "Token is missing required
+scope: write"; ask the user to re-authorize instead of retrying. Confirm before
+deleting, dismissing, unclaiming, or reprocessing. Claims and comments always
+act as the signed-in user.
 
-Run status is derived from a run's file states, in this order of precedence:
-failed > stalled > pending > uploaded > processing > completed > empty.
-Stalled runs recover with reprocess_run; pending runs need
-request_run_upload_all and an online watcher. Definitions: datahub://glossary.
+Dates: dateFrom/dateTo are inclusive UTC days, matched on a run's acquired
+time, or its created time when that is missing. The dashboard uses the
+viewer's timezone, so its daily counts can differ.
+
+Stalled runs recover with reprocess_run. Pending runs need
+request_run_upload_all and an online watcher.
 
 Tool routing:
 - global_search for filenames, instrument names, users, or comments.
-- search_runs for date, status, or instrument-metadata filters.
-- My runs: search_runs with ranBy="me" (or get_me then ranBy=<id>).
-- get_run_report for run results; it also renders an interactive report in
-  hosts that support MCP Apps. get_run returns metadata only.
-- Metadata filter values: get_instrument_filter_options or
-  datahub://instruments/{id}/filter-options.
-- Watcher diagnosis: list_watchers → get_watcher_heartbeats →
-  list_watcher_events (unhealthy agents only).
+- search_runs for date, status, or metadata filters; ranBy="me" for my runs.
+- Metadata filter values: get_instrument_filter_options.
+- get_run_report for results; get_run is metadata only.
+- Watchers: list_watchers → get_watcher_heartbeats → list_watcher_events.
+- Large runs: filter list_run_files by status, and prefer get_run_report's
+  sample over full CSVs.
 
-A run can have thousands of files: filter list_run_files by status rather than
-paging all of it, and prefer get_run_report's bounded sample over downloading
-full CSVs.
-
-${feedbackInstructions(FEEDBACK_MCP_OPTIONS)}
+Feedback: send_feedback for bugs and requests about ${FEEDBACK_APP.appName}
+(show the user the draft first). ${FEEDBACK_APP.mcpGuidance}
 `.trim();
