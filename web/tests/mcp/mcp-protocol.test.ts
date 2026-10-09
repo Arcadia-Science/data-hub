@@ -1927,6 +1927,9 @@ describe("MCP Protocol (in-memory)", () => {
     expect(docs.every((r) => r.mimeType === "text/markdown")).toBe(true);
     const names = docs.map((r) => r.name);
     expect(new Set(names).size).toBe(names.length);
+    expect(names).toEqual(
+      expect.arrayContaining(["Overview", "Overview (api)", "Overview (mcp)"])
+    );
   });
 
   it("reads a docs page resource as Markdown", async () => {

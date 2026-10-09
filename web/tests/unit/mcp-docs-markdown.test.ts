@@ -121,6 +121,18 @@ describe("toPlainText", () => {
   it("removes emphasis and inline code marks without leaving gaps", () => {
     expect(toPlainText("Use **bold** and `code`.")).toBe("Use bold and code.");
   });
+
+  it("keeps angle brackets that are part of the text", () => {
+    expect(toPlainText("DELETE /api/v1/tokens/<token_id> now")).toBe(
+      "DELETE /api/v1/tokens/<token_id> now"
+    );
+  });
+
+  it("drops blockquote markers and table divider rows", () => {
+    const table = "| Status | Meaning |\n| --- | --- |\n| Online | Recent |";
+    expect(toPlainText(table)).toBe("Status Meaning Online Recent");
+    expect(toPlainText("> A quoted note")).toBe("A quoted note");
+  });
 });
 
 describe("makeExcerpt", () => {

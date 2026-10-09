@@ -59,17 +59,17 @@ function filterOptionsDescription(instrumentType: InstrumentType): string {
 // Clients such as Claude Desktop show only a resource's name in their attach
 // menu, and three docs pages share the title "Overview".
 function docsPageResourceList() {
-  const pages = listDocPages();
-  const titleCounts = new Map<string, number>();
-  for (const { title } of pages) {
-    titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
-  }
-  return pages.map(({ page, title, description }) => ({
-    uri: `datahub://docs/${page}`,
-    name: (titleCounts.get(title) ?? 0) > 1 ? `${title} (${page})` : title,
-    description,
-    mimeType: docsPageResource.mimeType,
-  }));
+  const seen = new Set<string>();
+  return listDocPages().map(({ page, title, description }) => {
+    const name = seen.has(title) ? `${title} (${page})` : title;
+    seen.add(title);
+    return {
+      uri: `datahub://docs/${page}`,
+      name,
+      description,
+      mimeType: docsPageResource.mimeType,
+    };
+  });
 }
 
 export function registerResources(server: McpServer) {

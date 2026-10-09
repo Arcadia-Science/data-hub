@@ -130,8 +130,10 @@ export function toPlainText(markdown: string): string {
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
     .replace(EXPLICIT_ID, "")
     .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^[ \t]*>[ \t]?/gm, "")
+    .replace(/^[ \t|:-]{3,}$/gm, " ")
     .replace(/[`*]/g, "")
-    .replace(/[|>]/g, " ")
+    .replace(/\|/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
