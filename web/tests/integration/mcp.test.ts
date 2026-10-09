@@ -13,7 +13,7 @@ import {
 } from "@/tests/integration/helpers";
 
 /** Bump when adding/removing an MCP tool so the change shows up in review. */
-const EXPECTED_MCP_TOOL_COUNT = 37;
+const EXPECTED_MCP_TOOL_COUNT = 39;
 
 function jsonRpc(method: string, params: unknown = {}, id = 1) {
   return {
@@ -197,6 +197,8 @@ describe("MCP Server (HTTP)", () => {
     expect(toolNames).toContain("list_watcher_events");
     expect(toolNames).toContain("claim_runs");
     expect(toolNames).toContain("get_instrument_filter_options");
+    expect(toolNames).toContain("search_docs");
+    expect(toolNames).toContain("read_doc");
     expect(toolNames).toHaveLength(EXPECTED_MCP_TOOL_COUNT);
   });
 
@@ -219,6 +221,42 @@ describe("MCP Server (HTTP)", () => {
     const payload = JSON.parse(text) as { instruments: unknown[] };
     expect(payload.instruments).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: instrumentId })])
+    );
+  });
+
+  // ---- Docs tools (end-to-end) ---------------------------------------------
+
+  // Checks the docs bundle is compiled into the production server. The
+  // changelog files still come from the source tree under `next start`.
+  it("search_docs and read_doc answer from the built app", async () => {
+    const search = await callTool("search_docs", {
+      query: "how do I revoke a token",
+    });
+    expect(search.isError).toBeFalsy();
+    const results = JSON.parse(search.content[0].text) as {
+      results: Array<{ page: string; section: string | null }>;
+    };
+    expect(results.results.map((r) => r.page)).toContain("manage-tokens");
+
+    const read = await callTool("read_doc", {
+      page: "manage-tokens",
+      section: "revoke-a-token",
+    });
+    expect(read.isError).toBeFalsy();
+    const doc = JSON.parse(read.content[0].text) as { markdown: string };
+    expect(doc.markdown).toContain("## Revoke a token");
+  });
+
+  it("search_docs finds changelog entries in the built app", async () => {
+    const result = await callTool("search_docs", {
+      query: "Hina large image preview smaller",
+    });
+    expect(result.isError).toBeFalsy();
+    const parsed = JSON.parse(result.content[0].text) as {
+      results: Array<{ page: string }>;
+    };
+    expect(parsed.results.some((r) => r.page.startsWith("changelog/"))).toBe(
+      true
     );
   });
 

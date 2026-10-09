@@ -82,7 +82,7 @@ jobs:
           make py-watcher-cli-catalog
           snapshot=docs/site/src/lib/cli-catalog.snapshot.json
           if [ -n "$(git status --porcelain -- $snapshot)" ]; then
-            echo "::error::The docs watcher CLI snapshot is out of date. Run 'make py-watcher-cli-catalog' and commit the result."
+            echo "::error::The docs watcher CLI snapshot is out of date. Run 'make py-watcher-cli-catalog docs-bundle-generate' and commit both files."
             git --no-pager diff --stat -- $snapshot
             exit 1
           fi

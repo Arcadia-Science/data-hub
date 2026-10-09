@@ -9,7 +9,7 @@ export const FEEDBACK_APP = {
 } as const;
 
 // The package's MCP functions name these fields differently from its server
-// config, so the tool catalog and the instructions share this mapping.
+// config, so the tool catalog maps them here.
 export const FEEDBACK_MCP_OPTIONS = {
   appName: FEEDBACK_APP.appName,
   appScope: FEEDBACK_APP.mcpAppScope,

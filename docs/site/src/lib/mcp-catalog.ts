@@ -30,6 +30,7 @@ export interface McpCatalogPrompt {
 }
 
 export interface McpCatalogDocument {
+  groups: Record<string, string>;
   info: {
     title: string;
     version: string;
@@ -43,18 +44,8 @@ export interface McpCatalogDocument {
   tools: McpCatalogTool[];
 }
 
-const GROUP_LABELS: Record<string, string> = {
-  instruments: "Instruments",
-  runs: "Runs",
-  attribution: "Run attribution",
-  comments: "Comments",
-  files: "Files",
-  watchers: "Watchers",
-  discovery: "Discovery",
-};
-
 export function groupLabel(group: string): string {
-  return GROUP_LABELS[group] ?? group;
+  return getMcpCatalog().groups[group] ?? group;
 }
 
 /**
