@@ -4,7 +4,7 @@ Data Hub is a platform for automatically capturing, processing, and visualizing 
 
 Nobody signs up for Data Hub. Your team deploys it, so raw instrument data and everything derived from it stay on infrastructure you control. The source is MIT licensed.
 
-[Documentation](https://datahub.arcadiascience.com/docs) · [Set up an instrument](https://datahub.arcadiascience.com/docs/set-up-an-instrument) · [Deploy it yourself](developer-docs/first-time-deployment.md) · [Architecture](developer-docs/architecture.md)
+[Documentation](https://datahub.arcadiascience.com/docs) · [Set up an instrument](https://datahub.arcadiascience.com/docs/set-up-an-instrument) · [Deploy it yourself](docs/developer/first-time-deployment.md) · [Architecture](docs/developer/architecture.md)
 
 ![The Data Hub dashboard, showing run counts, instrument status, and a table of recent runs](.github/images/dashboard.png)
 
@@ -36,7 +36,7 @@ Seven instrument types have a processor that reads the vendor's format after upl
 | Epson V700 scanner | Plate preview and colony measurements |
 | Hina microscope (Nikon ND2) | Channel overlay JPG and channel list |
 
-An instrument with no matching processor still uploads, and its files stay searchable and downloadable. What it misses is extracted metadata and rendered previews. Adding a type is a code change in `web/` and `lambda/` rather than a settings change, described in [Lambda](developer-docs/lambda.md).
+An instrument with no matching processor still uploads, and its files stay searchable and downloadable. What it misses is extracted metadata and rendered previews. Adding a type is a code change in `web/` and `lambda/` rather than a settings change, described in [Lambda](docs/developer/lambda.md).
 
 ## How it works
 
@@ -61,16 +61,17 @@ Four components coordinate through S3 and the API. The watcher and the Lambda ne
 | `watcher/` | `data-hub-watcher` | Command-line program that runs on instrument PCs, published to PyPI. Detects runs, uploads files, reports health. |
 | `packages/shared/` | `data-hub-shared` | S3 utilities, instrument enums, and test infrastructure shared by the two Python packages. |
 | `infra/` | | AWS SAM templates for the S3 buckets, the Lambda, and the IAM roles. |
-| `developer-docs/` | | Contributor and self-hosting documentation. |
+| `docs/site/` | | The public documentation site at `/docs`, built with Fumadocs. |
+| `docs/developer/` | | Contributor and self-hosting documentation, plain Markdown that the site does not render. |
 
-[Architecture](developer-docs/architecture.md) covers the full data flow, both upload modes, and the reasoning behind each design decision.
+[Architecture](docs/developer/architecture.md) covers the full data flow, both upload modes, and the reasoning behind each design decision.
 
 ## Documentation
 
 Docs are split by who is reading:
 
-- **Using Data Hub**: [datahub.arcadiascience.com/docs](https://datahub.arcadiascience.com/docs) covers installing the watcher, setting up an instrument, browsing runs, issuing tokens, permissions, and reference pages for the watcher command line, the API, and MCP. It is built from the [data-hub-docs](https://github.com/Arcadia-Science/data-hub-docs) repository.
-- **Building or hosting Data Hub**: [developer-docs/](developer-docs/README.md) covers local setup, architecture, testing, conventions, CI, and the deployment runbooks.
+- **Using Data Hub**: [datahub.arcadiascience.com/docs](https://datahub.arcadiascience.com/docs) covers installing the watcher, setting up an instrument, browsing runs, issuing tokens, permissions, and reference pages for the watcher command line, the API, and MCP. It is built from [docs/site/](docs/site/README.md).
+- **Building or hosting Data Hub**: [docs/developer/](docs/developer/README.md) covers local setup, architecture, testing, conventions, CI, and the deployment runbooks.
 
 ## Run it locally
 
@@ -79,18 +80,18 @@ The web app, API, and database run with no AWS or Google credentials, which is e
 ```sh
 cd web && npm install && cd ..
 createdb data-hub-local
-# Create web/.env. The keys it needs are listed in developer-docs/local-development.md.
+# Create web/.env. The keys it needs are listed in docs/developer/local-development.md.
 make db-reseed
 make dev
 ```
 
 Open `http://localhost:3000/login` and use the **Sign in (dev)** button with `alice@example.com`. `make db-reseed` seeds instruments, runs, and files, and prints a personal access token for API calls.
 
-Changing the watcher or the Lambda needs Python 3.13 and [uv](https://docs.astral.sh/uv/) as well, then `uv sync --all-packages`. [Getting started](developer-docs/getting-started.md) lists the full prerequisites; [Local development](developer-docs/local-development.md) explains the zero-credential path, including how to render real file bytes from a local S3 mirror.
+Changing the watcher or the Lambda needs Python 3.13 and [uv](https://docs.astral.sh/uv/) as well, then `uv sync --all-packages`. [Getting started](docs/developer/getting-started.md) lists the full prerequisites; [Local development](docs/developer/local-development.md) explains the zero-credential path, including how to render real file bytes from a local S3 mirror.
 
 ## Deploy your own
 
-A deployment is a PostgreSQL database, the web app on Vercel, three S3 buckets, and one Lambda. A Google OAuth client created during the deploy decides who can sign in at all. [First-time deployment](developer-docs/first-time-deployment.md) walks through it in order, and [CI and deployment](developer-docs/ci-and-deployment.md) covers the `staging` and `production` branches and what redeploys on merge.
+A deployment is a PostgreSQL database, the web app on Vercel, three S3 buckets, and one Lambda. A Google OAuth client created during the deploy decides who can sign in at all. [First-time deployment](docs/developer/first-time-deployment.md) walks through it in order, and [CI and deployment](docs/developer/ci-and-deployment.md) covers the `staging` and `production` branches and what redeploys on merge.
 
 ## Checks and tests
 
@@ -101,7 +102,7 @@ make check  # Format, lint, and type-check Python and TypeScript.
 make test       # Python and web tests, unit and integration.
 ```
 
-Integration tests need PostgreSQL, and the web suite builds the app into `web/.next`, so stop `make dev` before running them. [Testing](developer-docs/testing.md) describes each suite and the shared test server; [Conventions](developer-docs/conventions.md) covers S3 key layout, instrument IDs, and code style.
+Integration tests need PostgreSQL, and the web suite builds the app into `web/.next`, so stop `make dev` before running them. [Testing](docs/developer/testing.md) describes each suite and the shared test server; [Conventions](docs/developer/conventions.md) covers S3 key layout, instrument IDs, and code style.
 
 ## License
 

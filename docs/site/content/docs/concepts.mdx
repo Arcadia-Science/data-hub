@@ -1,0 +1,161 @@
+---
+title: Concepts
+description: "Short definitions of the Data Hub vocabulary: instruments, watchers, runs, statuses, processing, and access."
+contentType: Reference
+---
+
+<Audience>Everyone</Audience>
+
+Short definitions of the vocabulary the rest of these docs use. If you’ve arrived mid-page and a term is unfamiliar, it’s defined here. Terms are grouped by what they describe: the equipment, the data, the rules that turn files into runs, and who can do what.
+
+## Equipment and fleet [#equipment-and-fleet]
+
+### Instrument [#instrument]
+
+A piece of lab equipment registered in Data Hub, identified by a kebab-case **instrument ID** (e.g., `akta-fplc`, `bio-rad-cfx96`). The ID is permanent, because it becomes the storage key prefix and the identifier used across the system. A human-readable display name sits alongside it.
+
+An instrument has three states. The dashboard groups instruments into a tab per state and shows connection health separately:
+
+| State      | Shown as                                        | Meaning                                                             |
+| ---------- | ----------------------------------------------- | ------------------------------------------------------------------- |
+| `pending`  | **Pending** tab                                 | Registered but not yet confirmed by an admin. A watcher can’t upload for it. |
+| `active`   | **Active** tab, with Online or Offline health   | Confirmed and accepting uploads.                                    |
+| `inactive` | **Retired** tab                                 | Deactivated. No longer accepting uploads, but its runs stay browsable. |
+
+See [Set up an instrument](/docs/set-up-an-instrument), [Manage instruments](/docs/manage-instruments), and [Retire an instrument](/docs/retire-an-instrument).
+
+### Instrument type [#instrument-type]
+
+Separate from the instrument ID. The type tells Data Hub which [preprocessor](#preprocessor) to run on files from this instrument, so it controls what metadata, badges, and reports you get.
+
+Admins set it from the instrument page: open the three-dot menu, choose **Edit details**, and pick a supported type. An instrument with no matching type still stores and serves raw files. It gets no extracted metadata and no processed artifacts. See [Instrument data preprocessing](/docs/instrument-preprocessing).
+
+### Watcher [#watcher]
+
+The `data-hub-watcher` command-line program that runs on an instrument PC. It monitors a directory, groups new files into runs, uploads them to cloud storage, and reports status to the API. Each instrument can have at most one active watcher at a time.
+
+A watcher is registered with the API and carries one registration ID per [environment](#environment). Deregistering a watcher is a [soft delete](#soft-delete): its history stays visible for auditing. See [Manage the watcher fleet](/docs/manage-watchers).
+
+### Watcher status [#watcher-status]
+
+What the **Watchers** page shows for each watcher, derived from its most recent [heartbeat](#heartbeat):
+
+| Status           | Meaning                                                                                          |
+| ---------------- | ------------------------------------------------------------------------------------------------ |
+| **Online**       | A heartbeat arrived in the last 5 minutes.                                                        |
+| **Unresponsive** | No heartbeat for more than 5 minutes. The process crashed, the PC is off, or the network is blocking the API. |
+| **Stopped**      | The watcher shut down cleanly and said so in its last heartbeat.                                  |
+| **Registered**   | The watcher registered but hasn’t sent its first heartbeat yet.                                   |
+
+An unresponsive watcher keeps its registration and history, so you can read its last events to work out what happened. See [Troubleshoot a watcher](/docs/troubleshoot-a-watcher).
+
+Instrument pages and the instruments table sum this up per instrument: **Online** if any of its watchers is online, **Offline** if none is, and **No Watcher** if none has registered.
+
+### Heartbeat [#heartbeat]
+
+A status ping the watcher sends to the API every 60 seconds. It carries the watcher version, instrument ID, watch directory, upload mode, activity counters, and uptime, and it drives the **Last Heartbeat** column and the online health shown on the dashboard. The same tick runs the auto-updater. The upload queue is checked separately, also once a minute, so a slow upload can’t delay a heartbeat.
+
+### Events [#events]
+
+A per-watcher log of lifecycle moments and errors: `watcher_started`, `run_reported`, `file_uploaded`, `update_succeeded`, and `error` (with a `details.kind` discriminator), among others. Events are batched and flushed on each heartbeat and are visible on the dashboard, which makes them the primary tool for diagnosing a watcher remotely. See [Troubleshoot a watcher](/docs/troubleshoot-a-watcher).
+
+### Environment [#environment]
+
+Which Data Hub deployment a watcher talks to: `staging`, `production`, or `preview` (a Vercel preview deployment, which needs an explicit API base URL). Staging and production are separate deployments with separate databases, so a single PC keeps an independent registration and local state per environment and can switch between them.
+
+## Data [#data]
+
+### Run [#run]
+
+A logical grouping of files produced by one acquisition. The watcher assigns each file a **run ID** using its configured [run detection](#run-detection) method, then reports the run to the API. The first file for a run creates it; later files are added incrementally to the same run’s manifest.
+
+### Run status [#run-status]
+
+How far a run’s files have got from the instrument to the dashboard. These are the values you can filter by under **Add filter** on any run list:
+
+| Status         | Meaning                                                                                  |
+| -------------- | ---------------------------------------------------------------------------------------- |
+| Failed         | At least one file stopped on an error. [Reprocess](/docs/browse-runs#reprocess-and-delete) after a fix. |
+| Stalled        | At least one file has been processing for more than 20 minutes without finishing. Reprocess it to try again. |
+| Pending upload | The watcher found the files but hasn’t sent them yet.                                     |
+| Uploaded       | The files are in storage. Processing hasn’t started, or this instrument type has no preprocessor. |
+| Processing     | The preprocessor is reading the files, extracting metadata, and building reports.          |
+| Completed      | Processing finished.                                                                      |
+| Empty          | The run has no files.                                                                     |
+
+When a run’s files are in different states, the run shows the first status in this table that applies.
+
+### File and file category [#file-and-file-category]
+
+Every file in a run carries a category, shown as a label in the run’s files table:
+
+- **Raw**: what the instrument wrote, uploaded unchanged
+- **Processed**: what a [preprocessor](#preprocessor) generated from a raw file, such as a CSV of well values, a contrast-adjusted PNG, or a preview JPG
+
+Both categories download the same way, and file filters on the run page work on this label. See [Download files](/docs/browse-runs#download-files).
+
+### Preprocessor [#preprocessor]
+
+The server-side code that reads a raw file, extracts metadata, and writes processed files. It runs in an AWS Lambda when a file arrives in raw storage, or when you choose **Reprocess**. Which preprocessor runs depends on the [instrument type](#instrument-type), and not every type has one. Per-type inputs and outputs are in [Instrument data preprocessing](/docs/instrument-preprocessing).
+
+### Run archive [#run-archive]
+
+The zip that **Download all** builds for a run. It covers the run’s active files and respects any file filter you have applied. Large archives build in the background as an archive job, so the first request can return a wait time rather than a file.
+
+### Attribution [#attribution]
+
+The record of who ran a run. Use **Claim** on the run to attribute yourself. Attribution is self-only: you claim or unclaim your own user, and you can’t attribute someone else. API tokens can’t claim runs. Claims drive **My runs** and the “ran by” filters, and claiming a run subscribes you to its comments. See [Claim who ran it](/docs/browse-runs#claim-who-ran-it).
+
+## Turning files into runs [#turning-files-into-runs]
+
+### Run detection [#run-detection]
+
+The rule that maps a file to a run ID. Two broad strategies:
+
+- **Prefix**: a regex extracts the run ID from the filename. The default `^([^_]+)` takes everything before the first underscore, so `RUN001_data.csv` → `RUN001`
+- **Directory**: each subdirectory under the watch directory is its own run, so `RUN001/data.csv` → `RUN001`
+
+The full set of presets, and the custom-regex option, is in the [Configuration reference](/docs/configuration-reference#run-detection).
+
+### Stability period [#stability-period]
+
+How many seconds a file must stay unchanged (same size and modification time) before the watcher treats it as fully written and eligible for upload. The default is 5 seconds; raise it for instruments that write large files slowly. A file that keeps changing past `max_stability_wait_seconds` (default 300, or 5 minutes) is abandoned with a `stability_timeout` error event.
+
+### Upload mode [#upload-mode]
+
+How files get from the instrument to cloud storage:
+
+- **auto**: files upload immediately after they’re detected and stabilized. With watcher 1.2.1 and later, the watcher also uploads files someone requests from the run page
+- **manual**: runs are reported to the server, but files aren’t uploaded until approved through the server-side upload queue, which the watcher checks once a minute. Use this when uploads need human approval
+
+### Initial scan [#initial-scan]
+
+What the watcher does with files already sitting in the watch directory the first time an environment is entered. `production` uploads the existing backlog (`full`). `staging` and `preview` record it as a baseline and skip it (`new-only`), so test environments aren’t flooded with history. See the [Configuration reference](/docs/configuration-reference#initial-scan).
+
+### Dismiss [#dismiss]
+
+For instruments in [manual upload mode](#upload-mode), dismissing a detected file tells the watcher not to upload it. Dismissing differs from deleting: the file never reached Data Hub storage, so there’s nothing to restore. See [Manage the watcher fleet](/docs/manage-watchers#approving-manual-uploads).
+
+### Soft delete [#soft-delete]
+
+Data Hub marks things deleted rather than erasing them, so history survives for auditing. Deleting a run hides it from run lists without removing its stored files, and **Show deleted runs** brings it back into view. Deregistering a watcher keeps its events and heartbeats. Anyone signed in can restore a deleted run from the run page.
+
+## People and access [#people-and-access]
+
+### Role [#role]
+
+Data Hub has two roles, **Member** and **Admin**. Members sign in, browse instruments and runs, claim and comment on runs, send feedback, and read the token list. Admins can also confirm and update instruments, create and revoke tokens, promote or demote other users, delete any comment, review feedback, and manage integrations. Full permission tables are in [Security and permissions](/docs/security#roles).
+
+### Personal access token [#personal-access-token]
+
+A `dhub_`-prefixed bearer token that authenticates the watcher, and other API clients, with the Data Hub API. Tokens carry permission [scopes](#scope) and are created and revoked by admins. The plaintext is shown once, at creation.
+
+A token acts as itself, under its own name. Comments it posts and runs it deletes show the token’s name with a key icon, not a person. Because a token isn’t a person, it can’t claim runs or send feedback. See [Issue and revoke tokens](/docs/manage-tokens).
+
+### Scope [#scope]
+
+A permission string carried by a token, such as `runs:read`. A token-authenticated request is refused with `403 FORBIDDEN` when the token’s scopes don’t cover what the route requires. Dashboard sessions hold every scope, so scope checks only apply to token requests. The scope table is in [Security and permissions](/docs/security#token-scopes).
+
+### Feedback report [#feedback-report]
+
+A bug report or feature request about Data Hub itself, sent from the account menu or by an AI assistant. Each report is stored as an issue in your workspace’s Linear, and its status (Open, Resolved, or Declined) follows that issue. See [Send feedback and see what’s new](/docs/send-feedback).

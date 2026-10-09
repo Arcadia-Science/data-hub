@@ -1,0 +1,140 @@
+---
+title: Watcher configuration
+description: Every config.yaml field, the ~/.data-hub file layout, environment variables, run-detection presets, upload modes, and the initial-scan behavior.
+contentType: Reference
+---
+
+<Audience>Lab operators</Audience>
+
+The complete reference for the watcher’s configuration: the `config.yaml` schema,
+where files live, the environment variables that influence it, and the behaviors
+(run detection, upload modes, initial scan) those fields drive.
+
+## File locations
+
+Everything the watcher persists lives under `~/.data-hub/`:
+
+| Path | Contents |
+| --- | --- |
+| `~/.data-hub/config.yaml` | The main config (below). Override with `--config` or `DATA_HUB_CONFIG_PATH`. |
+| `~/.data-hub/.env.<environment>` | The API key for an environment (e.g. `.env.staging`, `.env.production`, `.env.preview`). The legacy `~/.data-hub/.env` is still loaded, with the per-environment file taking precedence. |
+| `~/.data-hub/watcher-<environment>.db` | Per-environment SQLite state (uploaded files, runs, detected files, baseline). |
+| `~/.data-hub/watcher.log` | Rotating log (10 MB × 5 backups). On Windows: `C:\ProgramData\DataHubWatcher\watcher.log`. |
+| `~/.data-hub/upgrade-worker.log` | Windows uv-tool upgrade transcript. |
+
+## Environment variables
+
+| Variable | Purpose |
+| --- | --- |
+| `DATA_HUB_API_KEY` | Supplies the API key, skipping the `init` prompt. Saved into the per-environment `.env` file. |
+| `DATA_HUB_CONFIG_PATH` | Override the config file path (same as `--config`). |
+| `DATA_HUB_WATCHER_LOG_LEVEL` | Set to `DEBUG` (in the service’s `.env` file) to enable debug logging without a reinstall. |
+
+## `config.yaml`
+
+```yaml
+version: 1
+environment: production          # "staging", "production", or "preview"
+api_base_url: null               # required when environment is "preview"
+watcher_ids:                     # one registration id per environment
+  production: <assigned-by-api>
+initial_scan: null               # null (default), "full", or "new-only"
+instrument:
+  id: akta-fplc                  # kebab-case instrument ID
+  watch_directory: /path/to/data
+  file_patterns:
+    - "*.csv"
+    - "*.xlsx"
+  enabled: true
+  upload_mode: auto              # "auto" or "manual"
+  stability_period_seconds: 5    # 1–300
+  max_stability_wait_seconds: 300  # 1–86400; must be >= stability_period_seconds
+  run_detection:
+    pattern: '^([^/]+)/'         # regex with one capture group (run ID)
+    recursive: true
+```
+
+### Field reference
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `version` | int | Config schema version. Currently `1`. |
+| `environment` | enum | `staging`, `production`, or `preview`. |
+| `api_base_url` | string \| null | Required only for `preview` (the deployment’s `/api/v1` URL). |
+| `watcher_ids` | map | One watcher registration id per environment, assigned by the API. |
+| `initial_scan` | enum \| null | `null` (env default), `full`, or `new-only`. See [Initial scan](#initial-scan). |
+| `instrument.id` | string | Kebab-case instrument ID. Permanent; the storage key prefix. |
+| `instrument.watch_directory` | string | Absolute path the instrument writes to. |
+| `instrument.file_patterns` | string[] | Glob patterns; only matching files are uploaded. |
+| `instrument.enabled` | bool | Whether the watcher processes this instrument. |
+| `instrument.upload_mode` | enum | `auto` or `manual`. See [Upload modes](#upload-modes). |
+| `instrument.stability_period_seconds` | int (1–300) | Seconds a file must stay unchanged before it’s considered written. Default `5`. |
+| `instrument.max_stability_wait_seconds` | int (1–86400) | Seconds a still-changing file may stay pending before the watcher abandons it with a `stability_timeout` event. Must be ≥ `stability_period_seconds`. Default `300` (5 minutes). |
+| `instrument.run_detection.pattern` | regex | One-capture-group regex applied to each file’s path relative to `watch_directory`. |
+| `instrument.run_detection.recursive` | bool | `true` watches subdirectories; `false` only the top level. |
+
+<Callout type="info">
+A config written by an older watcher used a single top-level `watcher_id`. It’s
+migrated transparently on load: lifted into `watcher_ids` under the active
+environment and dropped on the next save.
+</Callout>
+
+## Run detection
+
+The `pattern` regex is applied with `re.search` to each file’s path relative to
+`watch_directory`, with backslashes normalized to `/`. Capture group 1 is the run
+ID, and the pattern must have exactly one capture group. In YAML, single-quote
+patterns so backslash sequences like `\d` don’t need escaping.
+
+The `init` wizard offers these presets (or supply a custom regex):
+
+| Preset | Pattern | Recursive | Run ID is… |
+| --- | --- | --- | --- |
+| Filename prefix | `^([^_]+)` | no | everything before the first `_`: `RUN001_data.csv` → `RUN001` |
+| Top subdirectory | `^([^/]+)/` | yes | the top-level folder: `RUN001/data.csv` → `RUN001` |
+| Deepest subdirectory | `([^/]+)/[^/]+$` | yes | the immediate parent folder: `plate-a/well-b/data.csv` → `well-b` |
+| Timestamp subdirectory | `(?:^\|/)(\d{8}_\d{6}_\d{3})/` | yes | a `YYYYMMDD_HHMMSS_fff` folder anywhere in the path |
+| Filename stem | `^(?:.+/)?([^/]+?)\.[^/.]+$` | no | the filename without its extension (each file is its own run) |
+
+## Upload modes
+
+- **`auto`**: files upload to cloud storage immediately after run detection. From watcher 1.2.1, the watcher also uploads files requested from the run page, and retries an upload that didn’t finish on its next start (up to three starts).
+- **`manual`**: runs are reported without uploading; the server decides which files to upload via a queue the watcher checks once a minute. Useful when uploads need human approval. See [Manage the watcher fleet → Approving manual uploads](/docs/manage-watchers#approving-manual-uploads).
+
+Files of 100 MB or more upload in 64 MB parts from watcher 1.2.0, which is also the first version that can upload files larger than 5 GB.
+
+## Initial scan
+
+The first time an environment is entered (via `init` or `config set-environment`),
+`initial_scan` decides what happens to files already in the watch directory. It
+defaults by environment:
+
+- `production` → `full`: the existing backlog is uploaded (production is the source of truth).
+- `staging` / `preview` → `new-only`: the on-disk files are recorded as a baseline and skipped; only files created afterwards are uploaded.
+
+This is why a fresh `init` on `staging`/`preview` doesn’t upload a PC’s history. Set
+`initial_scan: full` to opt back in (e.g. to deliberately populate staging), or
+`initial_scan: new-only` on production to suppress its backlog. Upgrading an
+existing watcher is unaffected: the environment’s local DB already carries history,
+so baseline seeding is skipped.
+
+## Switching environments
+
+A single PC can move between `staging`, `production`, and `preview`. Because these
+are separate deployments with separate databases, each keeps its own registration
+in `watcher_ids` and its own credentials in `~/.data-hub/.env.<environment>`.
+
+```sh
+# Switch to staging (reuses a stored registration, or registers one).
+data-hub-watcher config set-environment staging
+
+# Point at a preview deployment (the base URL is required).
+data-hub-watcher config set-environment preview \
+  --api-base-url https://data-hub-git-my-branch.vercel.app/api/v1
+```
+
+A switch validates the target API, reuses (or registers) the watcher id for that
+environment, pushes the config, and leaves a breadcrumb event in the old
+environment. A running `watch` process or service keeps using the old
+environment until restarted: on Windows, `service stop && service start`;
+elsewhere, restart `watch`.

@@ -1,0 +1,186 @@
+---
+title: Set up an instrument
+description: Go from a fresh instrument PC to an active instrument uploading runs into Data Hub.
+contentType: Tutorial
+---
+
+<Audience>Lab operators and admins</Audience>
+
+This walkthrough takes you from nothing to an uploading instrument: create an access token, install the watcher, register the instrument, get an admin to confirm it, then start watching. CLI flags, the full config schema, and Windows service setup each have their own page; this guide links them once.
+
+<Callout type="warn">
+Data Hub is self-hosted. The web app, PostgreSQL database, and AWS stack (S3 plus the processing Lambda) must already be running. If they are not, an engineer needs the [Deploy Data Hub](/docs/self-hosting) guide first.
+</Callout>
+
+## Before you start
+
+You need:
+
+- **The watch directory**: the folder your instrument writes output into.
+- **File patterns**: globs to upload, for example `*.csv`, `*.xlsx`, `*.tiff`.
+- **[uv](https://docs.astral.sh/uv/getting-started/installation/)** installed on the instrument PC (it manages Python for you).
+
+To make setup and maintenance easier, we recommend setting up remote access to the instrument PC via [Windows Remote Desktop](https://learn.microsoft.com/en-us/windows-server/remote/remote-desktop-services/remotepc/remote-desktop-allow-access).
+
+## 1. Create an access token
+
+The watcher authenticates to Data Hub with a personal access token. Only workspace admins can create tokens, so ask an admin if you are not one.
+
+<Steps>
+
+<Step>
+In the Data Hub web app, go to **Settings → Access Tokens** and click **Create token**.
+</Step>
+
+<Step>
+Give the token a **Name** that identifies the instrument PC, for example `Plate Reader PC`.
+</Step>
+
+<Step>
+Set **Expiration** to “No expiry”. (The token can always be revoked if necessary.)
+</Step>
+
+<Step>
+Under **Scopes**, click the **Watcher** preset. It grants only what a watcher needs: registering, reporting runs, and uploading files.
+</Step>
+
+<Step>
+Click **Create token**, then copy the token. It starts with `dhub_` and is shown only once.
+</Step>
+
+</Steps>
+
+Keep the token handy: you paste it into the setup wizard in step 3. For rotation, revocation, and the full scope list, see [Issue and revoke tokens](/docs/manage-tokens).
+
+## 2. Install the watcher
+
+On the instrument PC, install the watcher with `uv`. The `windows-service` extra adds `pywin32` so you can follow [Run as a Windows service](/docs/windows-service), which is the default on a lab PC:
+
+```sh
+uv tool install "data-hub-watcher[windows-service]"
+```
+
+On macOS or Linux, omit the extra:
+
+```sh
+uv tool install data-hub-watcher
+```
+
+Full install, verify, and update steps live in [Install and update the watcher](/docs/install-the-watcher).
+
+## 3. Run the setup wizard
+
+Start the wizard with `data-hub-watcher init`. It prompts you for one thing at a time:
+
+<Steps>
+
+<Step>
+Choose the environment. For a live lab, this is production.
+</Step>
+
+<Step>
+Enter your Data Hub API URL e.g. `https://datahub.your-domain.com/api/v1`.
+</Step>
+
+<Step>
+Paste the token from step 1 when it asks for the API key. The wizard checks the key, then lists the instruments already registered.
+</Step>
+
+<Step>
+Pick your instrument from the list, or choose **Register a new instrument** if it is not there.
+</Step>
+
+<Step>
+For a new instrument, enter an ID and a display name. The ID is a short, lowercase, hyphenated name like `bio-rad-cfx96`. **It cannot be changed later.**
+</Step>
+
+<Step>
+Enter the full path to the folder your instrument writes into.
+</Step>
+
+<Step>
+List which files to upload, such as `*.pcrd,*.csv`. The watcher ignores files that do not match.
+</Step>
+
+<Step>
+Choose how files get grouped into runs. Pick the preset that matches how your instrument names its output, or write your own. The wizard previews a few matches so you can check the run IDs. For example, the default preset uses the filename prefix before the first underscore, so `RUN001_quant.csv` and `RUN001_melt.csv` both group into run `RUN001`.
+</Step>
+
+<Step>
+Set the stability period. This is how much time (in seconds) a file must stay unchanged before the watcher counts it as finished. The default is 5 seconds; raise it for instruments that write large files slowly.
+</Step>
+
+<Step>
+Choose the upload mode. “Auto” uploads each file as soon as it is stable; “Manual” waits for your approval first.
+</Step>
+
+</Steps>
+
+For run detection options, see [Configure run detection and uploads](/docs/configure-run-detection); [Watcher configuration](/docs/configuration-reference#run-detection) lists every preset.
+
+The wizard then registers the watcher, saves the config to `~/.data-hub/config.yaml` (`C:\Users\<Username>\data-hub\config.yaml` on Windows), and syncs it to Data Hub. When it reports that setup is complete, start watching.
+
+## 4. Confirm the instrument’s registration
+
+A pending instrument cannot upload to Data Hub until an admin confirms it from the web app.
+
+<Steps>
+
+<Step>
+Open the Data Hub web app and navigate to **Instruments > View all** from the app sidebar.
+</Step>
+
+<Step>
+Select the “Pending” tab and find your instrument. It should show a yellow `pending` badge.
+</Step>
+
+<Step>
+Click **Confirm**. The instrument should move to the “Active” tab and appear as online shortly.
+</Step>
+
+</Steps>
+
+Open the instrument’s page and check the watched folder and file patterns shown under its name. They should match what you entered in the wizard; files outside that folder, or with names that don’t match a pattern, won’t reach Data Hub.
+
+Some instruments also get automated preprocessing (metadata extraction, image conversion, and related outputs). To choose a processor, an admin opens the three-dot menu, selects **Edit details**, and picks a supported instrument type. What each type produces is in [Instrument data preprocessing](/docs/instrument-preprocessing).
+
+<Callout type="info">
+Adding a new processor requires code changes; see [Adding a new instrument](https://github.com/Arcadia-Science/data-hub/blob/production/docs/developer/lambda.md#adding-a-new-instrument) in the developer docs.
+</Callout>
+
+See [Manage instruments](/docs/manage-instruments) for more info.
+
+## 5. Start the watcher service
+
+First, preview what the watcher will do without starting it:
+
+```sh
+data-hub-watcher watch --dry-run
+```
+
+This validates config, checks that the API is reachable and the instrument is active, and previews which files would be picked up.
+
+When it looks right, install and start the watcher as a Windows service. Run these from an **Administrator** terminal:
+
+```sh
+data-hub-watcher service install
+data-hub-watcher service start
+```
+
+The service starts on boot, keeps running after you log out, and auto-updates in the background. Lifecycle and log details are in [Run as a Windows service](/docs/windows-service).
+
+On macOS or Linux, run the watcher in the foreground instead:
+
+```sh
+data-hub-watcher watch
+```
+
+The watcher detects new files, groups them into runs, uploads them (in auto mode), and sends a heartbeat every 60 seconds. Runs appear in the dashboard after upload.
+
+## What you get once it is running
+
+- Raw files upload to cloud storage
+- Instrument runs and files appear in the web dashboard
+- Watcher service automatically restarts on PC restart
+- Watcher health (heartbeats, events) appears under **Watchers**
+- Subscribed users can get in-app and Slack notifications for new runs

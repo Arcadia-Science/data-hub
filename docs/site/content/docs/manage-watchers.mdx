@@ -1,0 +1,49 @@
+---
+title: Manage the watcher fleet
+description: Monitor watcher health, deregister watchers, and approve or request uploads from the admin dashboard.
+contentType: How-to
+---
+
+<Audience>Administrators</Audience>
+
+The **Watchers** area is the fleet view: every registered watcher, its health, deregistration, and the upload queue. Cutting releases and advertising versions is separate: [Roll out watcher releases](/docs/watcher-releases).
+
+## Monitor watcher health [#monitor-watcher-health]
+
+Each watcher sends a [heartbeat](/docs/concepts#heartbeat) every 60 seconds with version, instrument, watch directory, upload mode, activity counters, and uptime. The fleet list surfaces:
+
+- **Status**: **Online**, **Unresponsive** (no heartbeat for more than 5 minutes), **Stopped** (shut down cleanly), or **Registered** (no first heartbeat yet). See [Watcher status](/docs/concepts#watcher-status).
+- **Last heartbeat**: a stale value is the first sign of a stopped, disconnected, or crashed watcher
+- **Hostname and instrument assignment**
+- **Events**: per-watcher log (`watcher_started`, `run_reported`, `file_uploaded`, `update_*`, and `error` with a `details.kind` discriminator)
+
+Events are the primary remote-diagnosis tool. For operator-side symptoms, see [Troubleshoot a watcher](/docs/troubleshoot-a-watcher).
+
+## Deregister a watcher [#deregister-a-watcher]
+
+Each instrument can have at most one active watcher. Deregister the old one when a PC is reimaged or replaced, or to clear “instrument already has an active watcher” on a new install.
+
+- **Web app**: open the watcher under **Watchers** and click **Deregister**, or choose **Deregister** from the watcher’s row menu
+- **API**: `DELETE /api/v1/watchers/:watcherId` (requires `watchers:admin`)
+
+Deregistration is a soft-delete: heartbeats, events, and runs stay under **Watchers → Deregistered**. A watcher removed through the API with a token shows that token’s name as the one that removed it.
+
+Retiring an instrument also deregisters its watchers automatically; see [Retire an instrument](/docs/retire-an-instrument).
+
+You don’t need to deregister a watcher just because its token was revoked. Re-running `data-hub-watcher init` with a new token takes over the existing registration; see [After revoking a token](/docs/manage-tokens#after-revoking-a-token).
+
+## Request uploads [#request-uploads]
+
+**Upload** on a run page, or on selected runs in a run list, asks the watcher to send files that are still on the instrument PC. The watcher polls the server’s upload queue once a minute and uploads the files that were requested.
+
+- In **manual** upload mode, every file waits in this queue until someone requests it.
+- In **auto** upload mode, files upload on their own, and the queue covers files that need another try. This works with watcher 1.2.1 and later; older watchers in auto mode never pick up requests, so the file shows **Uploading** and stays that way.
+
+## Approving manual uploads [#approving-manual-uploads]
+
+For instruments in [manual upload mode](/docs/concepts#upload-mode), the watcher reports runs but waits for server approval before uploading file bytes. Approve a file with **Upload**, or choose **Dismiss** to tell the watcher not to upload it.
+
+Safeguards that keep the queue healthy:
+
+- Changing an instrument’s `watch_directory` reverts pending upload requests to `detected` so stale paths drain instead of erroring
+- A queued file that keeps failing (missing on disk or failing to upload) is retried on at most three polls, then cancelled server-side

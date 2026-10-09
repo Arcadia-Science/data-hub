@@ -1,0 +1,97 @@
+---
+title: Overview
+description: What Data Hub does, what it doesn't do, where your data shows up, and which page to read next.
+contentType: Conceptual
+---
+
+<Audience>Everyone</Audience>
+
+Instrument data tends to stay where it was made. Files sit on the PC wired to the plate reader, named by whoever was at the bench, backed up if someone remembers. Finding a result from three months ago means knowing which machine made it and who was running it.
+
+Data Hub moves that data off the instrument PC automatically. A small program called a watcher runs on each instrument PC, monitors its output folder, uploads new files as they appear, and groups them into runs. From then on the data is searchable in a browser, tied to the person who ran it, and reachable from a script or an AI agent without anyone copying files to a shared drive.
+
+## What Data Hub isn’t [#what-data-hub-isnt]
+
+Worth setting expectations early, because the name invites a few wrong guesses:
+
+- It doesn’t change your raw files. Uploads are byte-for-byte, and processing only ever adds new files alongside them
+- It isn’t an electronic lab notebook. There’s a comment thread per run for notes, and that’s the extent of it
+- It isn’t analysis software. It parses vendor formats into something viewable and downloadable; the analysis is still yours
+- It doesn’t run on the instrument. Processing happens server-side after upload, so nothing competes with acquisition software for resources
+
+## How a file becomes a run [#how-a-file-becomes-a-run]
+
+1. A [watcher](/docs/concepts#watcher) on the instrument PC notices a new file in the folder it’s watching, waits for the file to stop changing, and groups it with the other files from the same acquisition into a [run](/docs/concepts#run).
+2. The watcher uploads those files to cloud storage. For [supported instrument types](/docs/instrument-preprocessing), server-side code then reads the vendor’s format, pulls out settings like wavelength or imaging mode, and builds viewable versions such as plate maps or contrast-adjusted images.
+3. The run appears in the web app, the REST API, and the Model Context Protocol (MCP) endpoint at the same time. They’re three views of one record.
+
+The full picture, including where each piece runs, is in [Architecture](/docs/architecture).
+
+## Where your data shows up [#where-your-data-shows-up]
+
+Five places in the web app, in the order most people use them:
+
+- **Home**: every instrument’s recent runs together, with counts for today and this week, and today’s comments
+- **Instruments**: one instrument’s runs, with columns matching what that instrument records
+- **My runs**: runs you’ve claimed, so you can find your own work without filtering
+- **Comments**: every run comment by day, filtered to your runs or to one instrument if you like
+- **Watchers**: which instrument PCs are reporting in, for whoever maintains them
+
+To see what has changed in Data Hub recently, open **Changelog** from the account menu.
+
+If a term on those pages is unfamiliar, [Concepts](/docs/concepts) defines the vocabulary in one page. Run, watcher, run status, and instrument type are the four worth reading first.
+
+## Get at the same data from code [#get-at-the-same-data-from-code]
+
+The web app has no private back door. Everything it shows comes from a REST API that you can call yourself, and an MCP endpoint that AI clients can call on your behalf. Both read the same records, so a script sees exactly what the dashboard sees.
+
+- **REST**: served at `/api/v1/` on your own deployment host. Each deployment publishes its own OpenAPI 3.1 document at `/api/v1/openapi.json`, so you can generate a client rather than hand-write one. See the [API overview](/docs/api)
+- **MCP**: served at `/mcp/v1` over Streamable HTTP, and added to Claude Code, Claude Desktop, or Cursor by pasting the URL. Agents can then search runs, read metadata, and fetch files during a conversation. Clients that support MCP Apps also show the same interactive run reports as the web app. See the [MCP overview](/docs/mcp)
+
+The two differ in how you authenticate. REST clients carry a [personal access token](/docs/concepts#personal-access-token) that an admin creates in the web app, scoped and revocable. A token acts under its own name, so anything a script does is labeled with the token rather than with a person. MCP clients send you through a browser sign-in and a consent screen instead, then act as you with your own permissions, so nobody has to paste a credential into an AI client.
+
+Typical uses look like pulling every run from an instrument for a batch reanalysis, writing the latest run’s archive to disk from a script, or asking an agent which plates from last week failed processing.
+
+## What’s supported today [#whats-supported-today]
+
+Nine instrument types have a processor, covering plate readers, gel docs, qPCR, TapeStation, FPLC, flatbed plate scanners, ND2 microscopy, DishCam time-lapse photos, and the Unchained Labs Aunty for protein melting temperature and particle size. [Instrument data preprocessing](/docs/instrument-preprocessing) lists what each one extracts.
+
+An instrument without a matching processor still works. Its files upload, and you can search, claim, comment on, and download them. What you don’t get is extracted metadata, badges, or rendered previews. Adding a new type is a development task, not a settings change.
+
+## Self-hosted by design [#self-hosted-by-design]
+
+Data Hub isn’t a service you sign up for. Your team runs it, which is the point: raw instrument data and everything derived from it stay on infrastructure you control, and the source is open under the MIT license.
+
+Running it means four pieces, deployed once by an engineer:
+
+- The web app, which also serves the API and the MCP endpoint, on Vercel
+- A PostgreSQL database for instruments, runs, files, and comments
+- AWS S3 for the files themselves, split into raw and processed buckets
+- An AWS Lambda that does the per-instrument processing and builds download archives
+
+A Google OAuth client, created during that deploy, is the fifth piece and the one worth knowing about even if you’ll never touch the stack. It decides who can sign in at all: only your Google Workspace organization, or any Google account. Nothing inside Data Hub overrides that choice, so it’s a deployment decision rather than a setting an admin can change later.
+
+Until the stack exists, nobody can sign in and no watcher can upload. The deployment runbooks live in the repository rather than on this site; [Deploy Data Hub](/docs/self-hosting) points to them.
+
+## Getting access [#getting-access]
+
+Sign in with your Google account, assuming it’s one the deployment allows. Everyone who signs in can browse instruments, runs, and files, comment on runs, and [send feedback](/docs/send-feedback) about Data Hub. Admins can additionally confirm instruments, issue tokens, promote other users, and connect Linear and Slack, and only an existing admin can grant you that. See [Security and permissions](/docs/security#roles) for what each role can do.
+
+## Start here [#start-here]
+
+<Cards>
+  <Card title="Deploy Data Hub" href="/docs/self-hosting" description="Engineers: the database, web app, and AWS stack." />
+
+  <Card title="Set up an instrument" href="/docs/set-up-an-instrument" description="Operators and admins: go from a new PC to an uploading instrument." />
+
+  <Card title="Browse and analyze runs" href="/docs/browse-runs" description="Everyone: find runs, claim your work, download files, and leave lab notes." />
+
+  <Card title="Administration overview" href="/docs/administration" description="Admins: instruments, watchers, tokens, and members." />
+</Cards>
+
+## Reading these docs with AI [#reading-these-docs-with-ai]
+
+Every page has a **Copy Markdown** button and a **View Options** menu. Use them to:
+
+- Copy a page as Markdown into an assistant
+- Open raw Markdown (`/docs/<path>.md`) or the dumps at [`/docs/llms.txt`](/docs/llms.txt) and [`/docs/llms-full.txt`](/docs/llms-full.txt)

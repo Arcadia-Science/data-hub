@@ -1,0 +1,151 @@
+---
+title: Browse and analyze runs
+description: Use the web app to find runs, inspect processed results, claim attribution, download files, comment, and manage run lifecycle.
+contentType: How-to
+---
+
+<Audience>Everyone</Audience>
+
+After instruments are uploading, the web app is where you find runs and act on them: inspect results, claim work, download files, and leave lab notes. The sections below follow the order you’ll use them in.
+
+## Orient yourself in the app [#find-a-run]
+
+The sidebar and the home page are the two starting points for daily work.
+
+**Home** lists recent runs across instruments, most recent first, with counts for today and this week at the top. Filter by date range, who ran it, and instrument-specific metadata when it’s available, then page through results. Below the runs, Home shows up to four of today’s comments; use the date picker to see comments from a different range.
+
+![Home dashboard with instrument status and recent runs](/images/home.png)
+
+**Instruments** in the sidebar lists five instruments, and **View all** opens the full list. Each instrument’s page shows the folder its watcher reads from and the file patterns it uploads, then a runs table with column filters that match the instrument type (for example wavelengths on a plate reader).
+
+![Plate reader instrument page with the runs table and column filters](/images/plate-reader-runs-table.png)
+
+**My runs** lists runs you’ve claimed, so you can return to your own work without re-filtering the full dashboard.
+
+![My runs page listing runs attributed to the signed-in user](/images/my-runs.png)
+
+**Comments** lists every run comment by day. Open it from **View all comments** on Home. Each person’s profile page also shows the comments they wrote and the comments on runs they ran.
+
+### Narrow a long run list [#narrow-a-long-run-list]
+
+Home and the instrument pages share the same four controls:
+
+- **Search runs**: filters the list by run name as you type
+- **Date range**: presets from Today through Last 4 weeks, plus a custom range
+- **Add filter**: filter by run status, or turn on **Show deleted runs**
+- **Column headers**: sort by **Run Started**, **Last Updated**, size, who ran it, or any instrument-specific column
+
+**Run Started** is when the instrument acquired the run. **Last Updated** changes when the run’s files change, or when someone edits, claims, or comments on it. The default order is newest run first. The sort order is saved in the page link, so a link you share opens with the same order.
+
+### What each run status means [#run-status]
+
+A run’s status tells you how far its files have got from the instrument to the dashboard:
+
+| Status | Meaning |
+| --- | --- |
+| Failed | At least one file failed processing. The file’s row on the run page gives the reason. |
+| Stalled | At least one file has been processing for more than 20 minutes without finishing. Reprocess it to try again. |
+| Pending upload | The watcher found the files but hasn’t sent them yet. |
+| Uploaded | The files are in storage. Processing hasn’t started, or this instrument type has no processor. |
+| Processing | The server is reading the files, extracting metadata, and building reports. |
+| Completed | Processing finished. |
+| Empty | The run has no files. |
+
+A run with files in several states shows the first status in this table that applies. For example, a run with one failed file and nine completed files shows **Failed**.
+
+## Search the workspace [#search]
+
+Press **⌘&nbsp;K** (macOS) or **Ctrl&nbsp;K** (Windows/Linux) to open global search from any page. Results are grouped into runs, files, instruments, users, and comments. That means you can also look up a colleague’s work or the text of a lab note. A file hit opens the parent run with the files table already filtered to that file.
+
+![Global search modal with results for runs and files](/images/search-modal.png)
+
+## Open a run and inspect results [#open-run-detail]
+
+Each run has a details page at `/instruments/your_instrument_id/runs/your_run_id`. The arrows beside the run name step you to the next or previous run without going back to the list.
+
+The top of the page lists who ran it, the number of raw files, and their total size. What you see below that depends on the instrument type and whether a processor ran:
+
+- Metadata tags for extracted fields, such as experiment type, wavelength, or temperature
+- Processed reports such as tables, images, PDFs, and videos, including interactive plate maps for plate readers and a video player for DishCam runs
+- A files table of everything in the run, labeled Raw or Processed, with each file’s size and status
+
+Click a metadata tag to open the instrument’s runs table filtered to that value. For example, clicking a wavelength tag lists every run on that instrument recorded at the same wavelength.
+
+Reports with many images, PDFs, or spectra show one item at a time. Search by filename to jump anywhere in the run, or use the arrows to step through it. The counter beside the arrows shows your position out of the total. Plate maps with more than 12 columns, such as 384-well plates, scroll sideways inside the plate.
+
+Per-type inputs and outputs are in [Instrument data preprocessing](/docs/instrument-preprocessing).
+
+![Gel doc run detail with metadata badges, files table, and report preview](/images/gel-doc-run-details.png)
+
+![Plate reader run detail with plate map visualization](/images/plate-reader-run-details-1.png)
+
+![Plate reader run detail with kinetic traces and comments](/images/plate-reader-run-details-2.png)
+
+### Filter the files table [#filter-files]
+
+The files table has separate **Type** and **Status** filters. Use them to show, for example, only failed files or only processed CSVs. **Download all** and the run archive include only the files the filters show.
+
+### Live file updates [#live-file-updates]
+
+While files are uploading or processing, the run page checks for updates every 5 seconds for up to 5 minutes. After that it stops and shows **Stopped checking for file updates**. Choose **Refresh** to check for another 5 minutes. Uploading or reprocessing files from the page also starts a new 5 minutes.
+
+## Claim who ran it [#claim-who-ran-it]
+
+Use **Claim** on the run details page to attribute yourself. You can claim or unclaim your own user only, so nobody else can attribute a run to you. Claims show on the run and appear in “ran by” filters on Home and elsewhere. API tokens can’t claim runs; a signed-in person has to.
+
+## Download files [#download-files]
+
+From the files table you can:
+
+- Download a single file, which opens a temporary download link
+- Select several files and choose **Download** in the bar that appears at the bottom of the page
+- Choose **Download all** to build a zip of active files in the run, with any active file filters applied
+
+Large zips build in the background. When one isn’t ready yet, Data Hub tells you how long to wait before trying again.
+
+## Act on several runs at once [#bulk-actions]
+
+Select the checkbox on one or more run rows to open an action bar at the bottom of the list. Run rows have no buttons of their own; every run action goes through this bar.
+
+- **I ran these**: claim every selected run in one step
+- **Remove my attribution**: unclaim them
+- **Upload**: ask the watcher to upload files that are still on the instrument PC
+- **Download**: download a zip of each selected run
+- **Reprocess**: run server-side processing again, including on runs whose files have stalled
+- **Delete**: mark the selected runs deleted
+
+**Upload**, **Download**, **Reprocess**, and **Delete** appear only when every selected run allows them. For example, **Reprocess** is hidden if one of the selected runs belongs to an instrument type with no processor. The checkbox in the header row selects every run on the page, and **Clear** drops the selection.
+
+The files table on a run page works the same way: select files to get **Upload**, **Dismiss**, **Reprocess**, and **Download** for just those files.
+
+![Run list with several runs selected and the bulk action bar open](/images/bulk-actions.png)
+
+## Comment on a run [#comment]
+
+The comments thread on run details is for lab notes and follow-ups. Comment activity can notify people who claimed the run or already commented, and clicking a comment notification scrolls to that comment. Set preferences under **Settings → Notifications**; see [Configure notifications](/docs/configure-notifications).
+
+Only the author of a comment can edit it. Authors can delete their own comments, and workspace admins can delete any comment. Comments posted by a script through an API token show the token’s name with a key icon instead of a person.
+
+![Gel doc processed image with a lab comment on the run](/images/gel-doc-run-comments.png)
+
+## Reprocess or delete a run [#reprocess-and-delete]
+
+Reprocessing runs server-side processing again. Use it after a file failed or stalled, or after an engineer fixes the code that reads a file type. The stored result doesn’t change until you reprocess.
+
+- On the run page, hover over a file and choose **Reprocess**.
+- To reprocess several files, select them in the files table and choose **Reprocess** in the bar.
+- To reprocess whole runs, select them in a run list and choose **Reprocess** in the bar.
+
+Reprocessing sends only the original instrument files. Files Data Hub generated, such as videos, previews, and CSVs, have no **Reprocess** button and are rebuilt from the originals.
+
+**Delete** marks the run deleted without removing stored files. To find a deleted run again, turn on **Show deleted runs** under **Add filter**, then open it and choose **Restore**. Anyone signed in can delete or restore a run.
+
+### Request an upload [#request-upload]
+
+A file that the watcher found but hasn’t uploaded shows **Pending**. Choose **Upload** on that file, or select runs and choose **Upload**, to ask the watcher to send it. The watcher picks up the request within a minute. On instruments that upload automatically, this needs watcher 1.2.1 or later; see [Roll out watcher releases](/docs/watcher-releases#what-each-version-adds).
+
+For instruments in [manual upload mode](/docs/concepts#upload-mode), every file waits for this approval. **Dismiss** tells the watcher not to upload a file. See [Manage the watcher fleet](/docs/manage-watchers#approving-manual-uploads).
+
+## Use the same data outside the UI [#programmatic-access]
+
+You can also list and fetch the same runs and files over the [REST API](/docs/api) or the [Model Context Protocol (MCP) endpoint](/docs/mcp). REST needs a [personal access token](/docs/concepts#personal-access-token); scopes and creation are covered in [Issue and revoke tokens](/docs/manage-tokens). MCP clients sign in through the browser instead, and clients that support MCP Apps show the same interactive run report you see here.

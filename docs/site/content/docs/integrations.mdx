@@ -1,0 +1,223 @@
+---
+title: Set up integrations
+description: Connect Data Hub to Linear for feedback reports, and to Slack for personal direct messages and a shared new-run channel, from Settings → Integrations.
+contentType: How-to
+---
+
+<Audience>Administrators and engineers</Audience>
+
+**Settings → Integrations** holds the connections the whole workspace shares. Only admins see it. The page has three parts:
+
+- **Linear**: where feedback reports go, and where their status comes from
+- **Slack app**: the credentials behind personal Slack direct messages and **Connect to Slack**
+- **Slack channel**: a webhook that posts a message to a shared channel whenever a new run arrives
+
+Each person’s own notification choices are separate, under **Settings → Notifications**. See [Configure notifications](/docs/configure-notifications).
+
+## How secrets are stored [#integration-secrets-key]
+
+Data Hub encrypts the secrets you paste on this page before saving them: the Linear client secret and signing secret, and the Slack bot token and client secret. It never shows a saved secret again. To change one, paste a new value and save.
+
+Encryption needs the `INTEGRATION_SECRETS_KEY` environment variable on the web app. It is 64 hexadecimal characters; generate one with `openssl rand -hex 32`, set it in Vercel, and redeploy. Until it is set, saving a secret fails, and the Slack app card says so.
+
+If the key changes after secrets were saved, Data Hub can’t read them anymore. The affected field says **Can’t read saved value**. Put the old key back, or paste the value again and save.
+
+## Linear for feedback reports [#linear]
+
+Feedback that people send from Data Hub becomes an issue in your Linear workspace, and the report’s status follows that issue. Until an admin saves a Linear team here, the **Feedback** item stays out of the account menu, and sending feedback through the API or an AI assistant returns an error saying feedback isn’t set up. What reporters see is in [Send feedback](/docs/send-feedback).
+
+The Linear card walks you through four steps.
+
+### 1. Connect your Linear app [#linear-connect]
+
+Data Hub signs in to Linear as an app, so you create one app in Linear for it.
+
+<Steps>
+
+<Step>
+In Linear, go to **Settings → API → OAuth applications** and create a new application.
+</Step>
+
+<Step>
+Name it **Data Hub**. Linear shows this name on every issue it files.
+</Step>
+
+<Step>
+Linear asks for a callback URL. Data Hub doesn’t use one, so paste the URL shown in the step, which is your deployment’s address.
+</Step>
+
+<Step>
+Turn on **Client credentials**, then save.
+</Step>
+
+<Step>
+Copy the client ID and client secret into the Linear card in Data Hub, and choose **Connect**.
+</Step>
+
+</Steps>
+
+Data Hub checks the credentials with Linear before it saves them. If client credentials are turned off for the app, the card says so; turn them on in the app’s settings in Linear and choose **Connect** again.
+
+If the credentials belong to a different Linear workspace than the one already connected, Data Hub asks before switching. Switching clears the team, project, labels, and signing secret. Issues already in Linear stay there.
+
+### 2. Choose where reports go [#linear-destination]
+
+<Steps>
+
+<Step>
+Pick the **Team** that receives reports. Only public teams are listed, because Linear doesn’t show private teams to apps.
+</Step>
+
+<Step>
+Optionally pick a **Project**.
+</Step>
+
+<Step>
+Optionally pick a label for each kind of report: **Bug**, **Feature request**, and **Other**. Labels can come from the team or from the whole workspace. Linear adds the matching label to each new issue.
+</Step>
+
+<Step>
+Choose **Save and turn on feedback**. Everyone sees **Feedback** in their account menu from then on.
+</Step>
+
+</Steps>
+
+Changing the team later clears the project and labels. Status updates also stop until the Linear webhook from step 3 points at the new team.
+
+### 3. Get status updates from Linear [#linear-status-updates]
+
+A webhook tells Data Hub when an issue changes, so it can update the report and tell the person who sent it when the issue closes.
+
+<Steps>
+
+<Step>
+In Linear, go to **Settings → API** and choose **New webhook**.
+</Step>
+
+<Step>
+Paste the **Webhook URL** shown in the step. It ends in `/api/v1/integrations/linear/webhook`.
+</Step>
+
+<Step>
+For **Team**, choose the team from step 2. Under events, turn on **Issues** only.
+</Step>
+
+<Step>
+Save the webhook, then copy its signing secret into **Signing secret** in Data Hub and save.
+</Step>
+
+</Steps>
+
+Data Hub uses the signing secret to check that each update really comes from Linear. The step shows **Waiting for an update from Linear** until the first one arrives. Any change to an issue in the team sends one, including the test report in the next step.
+
+### 4. Send a test report [#linear-test-report]
+
+Choose **Send test report**. Data Hub files a report as you and links to the new Linear issue. Move that issue to **Done** in Linear. The step confirms that the issue closed and that you got a Data Hub notification. You can also skip the test.
+
+### After setup [#linear-after-setup]
+
+Once setup is finished, the Linear card shows a summary: the connected workspace, where reports go, whether status updates are working and when the last one arrived, and what reporters see for each Linear status.
+
+| When the Linear issue moves to | The reporter sees |
+| --- | --- |
+| **Done**, or any other completed status | Resolved |
+| **Canceled** | Declined |
+| **Duplicate** | Declined |
+| Any other status | Open |
+
+Data Hub notifies the reporter once, when the issue first closes. Moving an issue from one closed status to another, such as **Done** to **Released**, doesn’t notify again. Reopening an issue and closing it again does.
+
+If Data Hub keeps rejecting updates from Linear, **Status updates** shows **Not working**. The usual cause is a wrong signing secret, or Linear turning the webhook off after repeated failures. Paste the signing secret again from the webhook’s page in Linear, and check that the webhook is still turned on.
+
+**Disconnect Linear** turns feedback off. Issues already in Linear stay there.
+
+## Slack app for direct messages [#slack-app]
+
+Personal Slack direct messages and the **Connect to Slack** button use one shared Slack app. Create the app once in the [Slack API portal](https://api.slack.com/apps), then give Data Hub its credentials. You can reuse an existing Slack app, including the one behind the channel webhook.
+
+### Create the app [#create-the-slack-app]
+
+<Steps>
+
+<Step>
+In the Slack API portal, choose **Create New App → From scratch**, or open an existing app.
+</Step>
+
+<Step>
+Under **OAuth & Permissions**, add these scopes:
+
+**Bot Token Scopes:**
+
+| Scope | Purpose |
+| --- | --- |
+| `chat:write` | Send direct messages with `chat.postMessage` |
+
+**User Token Scopes:**
+
+| Scope | Purpose |
+| --- | --- |
+| `openid` | Sign in with Slack (OpenID Connect) |
+| `profile` | Display name in the identity token |
+</Step>
+
+<Step>
+Under **Redirect URLs**, add one callback URL per environment. The path is always `/api/v1/settings/slack/callback`:
+
+| Environment | Example URL |
+| --- | --- |
+| Local | `http://localhost:3000/api/v1/settings/slack/callback` |
+| Staging | `https://staging.datahub.example.com/api/v1/settings/slack/callback` |
+| Production | `https://datahub.example.com/api/v1/settings/slack/callback` |
+
+`SLACK_REDIRECT_URI`, or the request origin plus that path when unset, must match a listed URL exactly.
+</Step>
+
+<Step>
+Under **Install App**, choose **Install to Workspace** (or **Reinstall** after changing scopes).
+</Step>
+
+</Steps>
+
+### Give Data Hub the credentials [#slack-app-credentials]
+
+Enter the credentials in the **Slack app** card under **Settings → Integrations**, or set them as environment variables on the web app. A value saved in the card takes effect right away, with no redeploy, and is used instead of the matching environment variable.
+
+| Card field | Environment variable | Where to find it | Required |
+| --- | --- | --- | --- |
+| **Bot token** | `SLACK_BOT_TOKEN` | **Install App** → Bot User OAuth Token (`xoxb-…`) | Yes |
+| **Client ID** | `SLACK_CLIENT_ID` | **Basic Information** → App Credentials | Yes |
+| **Client secret** | `SLACK_CLIENT_SECRET` | **Basic Information** → App Credentials | Yes |
+| **Allowed workspace ID** | `SLACK_TEAM_ID` | Workspace URL segment `T…` in `app.slack.com/client/T…` | No, but recommended so connections stay on your workspace |
+
+Each field shows where its value comes from: **Saved here**, **Using** followed by the variable name, or **Not set**. **Remove saved value** makes the environment variable the source again. If Data Hub can’t read a saved value, for example because `INTEGRATION_SECRETS_KEY` changed, it uses the environment variable in the meantime.
+
+Two settings exist only as environment variables, and changing them needs a redeploy:
+
+| Variable | Purpose | Required |
+| --- | --- | --- |
+| `SLACK_STATE_SECRET` | Signs the short-lived value Data Hub checks while a person connects Slack. Generate with `openssl rand -base64 32` | No (falls back to `AUTH_SECRET`) |
+| `SLACK_REDIRECT_URI` | Full callback URL, when it differs from the request origin | No |
+
+Members can then connect under **Settings → Notifications**. Deploy runbooks are linked from [Deploy Data Hub](/docs/self-hosting).
+
+## Slack channel for new runs [#slack-channel]
+
+The **Slack channel** card holds a Slack incoming webhook. Data Hub posts one message to that channel each time a new run is reported. This is separate from personal direct messages, which each person turns on for themselves.
+
+<Steps>
+
+<Step>
+In your Slack app, open **Incoming Webhooks**, turn them on, and add a webhook for the channel you want.
+</Step>
+
+<Step>
+Copy the webhook URL. It starts with `https://hooks.slack.com/services/`.
+</Step>
+
+<Step>
+Paste it into the **Slack channel** card and save. The card shows **Configured** and who last changed it.
+</Step>
+
+</Steps>
+
+To change channels, paste a new webhook URL. To stop the messages, remove the webhook. This setting has no environment variable.

@@ -189,11 +189,11 @@ Useful flags (`uv run data-hub-process handler --help` for the full list):
 | `--raw-bucket NAME` | `test-raw-data-bucket` | First path segment under the mirror for the raw file. |
 | `--processed-bucket NAME` | `test-processed-data-bucket` | First path segment for `upload_file` calls from the processor. |
 
-The wiring lives in [lambda/src/data_hub_lambda/cli.py](../lambda/src/data_hub_lambda/cli.py) (`handler` subcommand) and [lambda/src/data_hub_lambda/local_s3_mirror.py](../lambda/src/data_hub_lambda/local_s3_mirror.py) (`patched_s3` context manager). The same patch surface backs the integration suite at [lambda/tests/integration/conftest.py](../lambda/tests/integration/conftest.py), so anything that works under the CLI is exercised in CI too.
+The wiring lives in [lambda/src/data_hub_lambda/cli.py](../../lambda/src/data_hub_lambda/cli.py) (`handler` subcommand) and [lambda/src/data_hub_lambda/local_s3_mirror.py](../../lambda/src/data_hub_lambda/local_s3_mirror.py) (`patched_s3` context manager). The same patch surface backs the integration suite at [lambda/tests/integration/conftest.py](../../lambda/tests/integration/conftest.py), so anything that works under the CLI is exercised in CI too.
 
 ## Working with file bytes locally
 
-`LOCAL_S3_MIRROR` makes the Next.js app share the same on-disk layout the lambda CLI writes to. When it's set (and `NODE_ENV != production`), the four helpers in [web/lib/s3.ts](../web/lib/s3.ts) — `getPresignedDownloadUrl`, `getPresignedUploadUrl`, `headS3Object`, `getS3ObjectStream` — short-circuit AWS and serve from disk. Multipart uploads do the same: parts land under `<mirror>/.multipart/<upload-id>/`, and completing the upload joins them into `<mirror>/<bucket>/<key>` and checks the CRC64NVME checksum. A part PUT uses `?uploadId=&partNumber=` on the same local-s3 URL and returns an `ETag` header. The HTTP face of the mirror is a single dev-only catch-all at [web/app/api/local-s3/[bucket]/[...key]/route.ts](../web/app/api/local-s3/%5Bbucket%5D/%5B...key%5D/route.ts) that handles GET (download with optional `Content-Disposition`) and PUT (writes bytes from the request body). Note the folder is `local-s3` (no leading underscore) — the App Router treats `_`-prefixed folders as private and excludes them from routing.
+`LOCAL_S3_MIRROR` makes the Next.js app share the same on-disk layout the lambda CLI writes to. When it's set (and `NODE_ENV != production`), the four helpers in [web/lib/s3.ts](../../web/lib/s3.ts) — `getPresignedDownloadUrl`, `getPresignedUploadUrl`, `headS3Object`, `getS3ObjectStream` — short-circuit AWS and serve from disk. Multipart uploads do the same: parts land under `<mirror>/.multipart/<upload-id>/`, and completing the upload joins them into `<mirror>/<bucket>/<key>` and checks the CRC64NVME checksum. A part PUT uses `?uploadId=&partNumber=` on the same local-s3 URL and returns an `ETag` header. The HTTP face of the mirror is a single dev-only catch-all at [web/app/api/local-s3/[bucket]/[...key]/route.ts](../../web/app/api/local-s3/%5Bbucket%5D/%5B...key%5D/route.ts) that handles GET (download with optional `Content-Disposition`) and PUT (writes bytes from the request body). Note the folder is `local-s3` (no leading underscore) — the App Router treats `_`-prefixed folders as private and excludes them from routing.
 
 What this gets you out of the box after `make db-reseed`:
 
@@ -215,7 +215,7 @@ npm run dev
 npm run db:process-fixtures
 ```
 
-`npm run db:process-fixtures` mints a fresh PAT for `alice@example.com`, re-derives the fixture-bearing `(instrument_id, run_id, filename)` triples from the database, and spawns `data-hub-process handler` for each. The wiring lives in [web/scripts/process-fixtures.ts](../web/scripts/process-fixtures.ts) — it's the same module the seed calls — so anything that works during a reseed also works post-hoc.
+`npm run db:process-fixtures` mints a fresh PAT for `alice@example.com`, re-derives the fixture-bearing `(instrument_id, run_id, filename)` triples from the database, and spawns `data-hub-process handler` for each. The wiring lives in [web/scripts/process-fixtures.ts](../../web/scripts/process-fixtures.ts) — it's the same module the seed calls — so anything that works during a reseed also works post-hoc.
 
 For instrument types without a fixture (or new file types you're adding components for), the existing CLI flow stays the same: run `data-hub-process handler <instrument-id> <run-id> <filename> --source <FILE>` and the dashboard picks up the file the moment the API row lands.
 
@@ -223,18 +223,18 @@ Components don't need to change — every existing run viewer already fetches `/
 
 A few details worth knowing:
 
-- Adding fixtures for more instruments means an `INSTRUMENT_FIXTURES` entry in [web/lib/db/seed.ts](../web/lib/db/seed.ts) keyed by the kebab-case instrument id from `data_hub_shared.enums.Instrument` (`{ files: [{ filename, contentType }, …], runIds }`) pointing at files under `lambda/tests/fixtures/`. List every fixture you want cycled across seeded runs. The handler rejects unknown instrument ids because `parse_s3_event` only accepts values from that enum.
+- Adding fixtures for more instruments means an `INSTRUMENT_FIXTURES` entry in [web/lib/db/seed.ts](../../web/lib/db/seed.ts) keyed by the kebab-case instrument id from `data_hub_shared.enums.Instrument` (`{ files: [{ filename, contentType }, …], runIds }`) pointing at files under `lambda/tests/fixtures/`. List every fixture you want cycled across seeded runs. The handler rejects unknown instrument ids because `parse_s3_event` only accepts values from that enum.
 - The route is gated on `NODE_ENV !== "production"` AND `LOCAL_S3_MIRROR` set; either condition unmet returns 404 unconditionally, so a production build can never expose the filesystem.
 - The MCP tool at `/mcp/v1` returns a relative `/api/local-s3/...` URL when the mirror is active — browsers resolve it against the current origin, but non-browser MCP clients on localhost may need to prefix with `http://localhost:3000`.
 
 ## Where the seed lives
 
-- [web/lib/db/seed.ts](../web/lib/db/seed.ts) — shared builder functions (`seedDevUser`, `seedInstruments`, `seedRuns`, etc.) plus a schema-driven `clearAll()`.
-- [web/scripts/seed-database.ts](../web/scripts/seed-database.ts) — the entry point that `npm run db:seed` runs.
-- [web/scripts/process-fixtures.ts](../web/scripts/process-fixtures.ts) — shared probe/spawn logic for the post-seed handler step.
-- [web/scripts/process-seeded-fixtures.ts](../web/scripts/process-seeded-fixtures.ts) — `npm run db:process-fixtures` entry point for re-running the handler step on demand.
+- [web/lib/db/seed.ts](../../web/lib/db/seed.ts) — shared builder functions (`seedDevUser`, `seedInstruments`, `seedRuns`, etc.) plus a schema-driven `clearAll()`.
+- [web/scripts/seed-database.ts](../../web/scripts/seed-database.ts) — the entry point that `npm run db:seed` runs.
+- [web/scripts/process-fixtures.ts](../../web/scripts/process-fixtures.ts) — shared probe/spawn logic for the post-seed handler step.
+- [web/scripts/process-seeded-fixtures.ts](../../web/scripts/process-seeded-fixtures.ts) — `npm run db:process-fixtures` entry point for re-running the handler step on demand.
 
-The same builders back the integration test harness in [web/tests/integration/helpers.ts](../web/tests/integration/helpers.ts), so any new table added to `web/lib/db/schema.ts` is automatically included in `clearAll()` and only needs a new builder function if you want it populated by the dev seed.
+The same builders back the integration test harness in [web/tests/integration/helpers.ts](../../web/tests/integration/helpers.ts), so any new table added to `web/lib/db/schema.ts` is automatically included in `clearAll()` and only needs a new builder function if you want it populated by the dev seed.
 
 ## Cross-links
 

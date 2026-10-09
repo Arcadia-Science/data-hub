@@ -46,12 +46,13 @@ py-check-watcher-version:
 	fi; \
 	echo "OK: tag $$TAG matches watcher/pyproject.toml version $$VERSION"
 
-# Write a gitignored Click CLI catalog dump for the docs site.
-# Copy watcher/cli-catalog.snapshot.json to
-# data-hub-docs/src/lib/cli-catalog.snapshot.json and commit it there.
+# Regenerate the watcher CLI catalog the docs site renders its CLI reference
+# from. The snapshot is committed; the Python test workflow fails when it is
+# out of date. Run this after changing watcher/src/data_hub_watcher/cli.py or
+# bumping the watcher version.
 .PHONY: py-watcher-cli-catalog
 py-watcher-cli-catalog:
-	uv run python -m data_hub_watcher.cli_catalog watcher/cli-catalog.snapshot.json
+	uv run python -m data_hub_watcher.cli_catalog docs/site/src/lib/cli-catalog.snapshot.json
 
 # Web app.
 .PHONY: fe-format
@@ -85,7 +86,7 @@ dev:
 # Reset the local Postgres database, re-push the Drizzle schema, and load
 # a deterministic seed (Alice + teammates, prod instrument catalog, watchers,
 # runs, files, comments, attributions, archive jobs). See
-# developer-docs/local-development.md for the full local-only dev workflow.
+# docs/developer/local-development.md for the full local-only dev workflow.
 .PHONY: db-reseed
 db-reseed:
 	cd web && npm run db:reseed
@@ -105,6 +106,45 @@ fe-build:
 openapi-generate:
 	cd web && npm run openapi:generate
 
+.PHONY: mcp-catalog-generate
+mcp-catalog-generate:
+	cd web && npm run mcp-catalog:generate
+
+# Docs site (docs/site). The developer docs in docs/developer are plain
+# Markdown and have no build step.
+.PHONY: docs-dev
+docs-dev:
+	cd docs/site && npm run dev
+
+# Regenerate the three snapshots the docs site renders its API, MCP, and
+# watcher CLI reference pages from. Run after changing the REST API, the MCP
+# tools, or the watcher CLI. CI fails when a committed snapshot is stale.
+.PHONY: docs-catalogs
+docs-catalogs:
+	make openapi-generate
+	make mcp-catalog-generate
+	make py-watcher-cli-catalog
+
+.PHONY: docs-format
+docs-format:
+	cd docs/site && npm run lint:fix
+
+.PHONY: docs-lint
+docs-lint:
+	cd docs/site && npm run lint:check
+
+.PHONY: docs-typecheck
+docs-typecheck:
+	cd docs/site && npm run typecheck
+
+.PHONY: docs-links
+docs-links:
+	cd docs/site && npm run check:links
+
+.PHONY: docs-build
+docs-build:
+	cd docs/site && npm run build
+
 # Formatting, linting, and type checking.
 .PHONY: py-check
 py-check:
@@ -118,10 +158,18 @@ fe-check:
 	make fe-lint
 	make fe-typecheck
 
+.PHONY: docs-check
+docs-check:
+	make docs-format
+	make docs-lint
+	make docs-typecheck
+	make docs-links
+
 .PHONY: check
 check:
 	make py-check
 	make fe-check
+	make docs-check
 
 .PHONY: test
 test:
