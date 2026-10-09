@@ -1,0 +1,64 @@
+---
+title: Retire an instrument
+description: Retire an instrument so it stops accepting uploads and watchers, while keeping historical runs and files.
+contentType: How-to
+---
+
+<Audience>Administrators</Audience>
+
+Retire an instrument when it is decommissioned or out of service for a long stretch. Retirement sets status to `inactive` (shown as **Retired**), removes it from the sidebar and dashboard lists of live instruments, and stops new uploads. Nothing is deleted from storage; you can reactivate later.
+
+## What retirement does
+
+When you retire an instrument:
+
+- Status becomes `inactive` (UI: **Retired**), with `retiredAt` / `retiredBy` audit fields
+- It stops accepting new runs and watchers
+- All existing runs and files stay browsable
+- Every active watcher on that instrument is deregistered in the same request so they stop heartbeating
+
+Instrument IDs stay permanent. Retire rather than trying to rename or delete an instrument that has already produced data.
+
+## Retire from the web app
+
+<Steps>
+
+<Step>
+Open the instrument’s detail page.
+</Step>
+
+<Step>
+Open the admin actions menu and choose **Retire**.
+</Step>
+
+<Step>
+Confirm in the dialog. The dialog lists run count and how many watchers will be deregistered.
+</Step>
+
+</Steps>
+
+The instrument moves to the **Retired** tab on **Instruments**.
+
+## Reactivate
+
+From a retired instrument’s detail page, choose **Reactivate**. Status returns to `active` and the instrument reappears in the sidebar and dashboard.
+
+Watchers deregistered at retirement do **not** reconnect automatically. An operator must re-register (usually `data-hub-watcher init` on the instrument PC) after reactivation.
+
+## Via the API
+
+```sh
+# Retire
+curl -X PATCH https://datahub.example.com/api/v1/instruments/bio-rad-cfx96 \
+  -H "Authorization: Bearer dhub_your_token_here" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"inactive"}'
+
+# Reactivate
+curl -X PATCH https://datahub.example.com/api/v1/instruments/bio-rad-cfx96 \
+  -H "Authorization: Bearer dhub_your_token_here" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"active"}'
+```
+
+Session callers need the admin role; bearer tokens need `instruments:write`.

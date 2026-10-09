@@ -1,0 +1,180 @@
+---
+title: Issue and revoke tokens
+description: Create, use, and revoke personal access tokens that authenticate the watcher and other Data Hub API clients, and see what a token can and can’t do.
+contentType: How-to
+---
+
+<Audience>Administrators</Audience>
+
+Personal access tokens authenticate the watcher, the processing Lambda, and scripts that call the Data Hub API. Creating and revoking tokens requires the workspace admin role. Members can view the list at **Settings → Access Tokens** but cannot create or delete tokens. Roles and scopes: [Security and permissions](/docs/security).
+
+## How a token acts [#how-a-token-acts]
+
+A token acts as itself, under its own name. It doesn’t act as the admin who created it or as any other person.
+
+- Anything a token does is recorded under the token’s name: comments, deleting a run, retiring an instrument, removing a watcher, and notifications sent through the API.
+- Run pages, instrument pages, watcher pages, comments, and the notification bell show the token’s name with a key icon.
+- A token can post comments, and it can edit and delete only the comments it posted.
+
+Some actions need a signed-in person, so tokens can’t do them at all: claiming runs, sending feedback, and reviewing feedback. AI assistants aren’t affected, because they sign in as the person who approved them; see [MCP overview](/docs/mcp).
+
+The reverse also holds: the API routes that the watcher and the Lambda call accept only tokens. A browser session gets `401 Unauthorized` on watcher registration and heartbeats, upload links, file updates, run creation and updates, and instrument creation.
+
+## Create a token [#create-a-token]
+
+### In the web app [#in-the-web-app]
+
+<Steps>
+
+<Step>
+Sign in as an admin.
+</Step>
+
+<Step>
+Go to **Settings → Access Tokens**.
+</Step>
+
+<Step>
+Click **Create token**.
+</Step>
+
+<Step>
+Enter a **Name** that identifies the client (for example, `FPLC watcher, Lab 201`). This is the name people see wherever the token acts, so make it recognizable.
+</Step>
+
+<Step>
+Pick an **Expiration**: 30 days, 90 days (the default), 1 year, or no expiry.
+</Step>
+
+<Step>
+Under **Scopes**, click a preset, or click **Customize scopes** to pick individual scopes.
+</Step>
+
+<Step>
+Click **Create token**.
+</Step>
+
+</Steps>
+
+The plaintext token is shown once: copy it immediately. It starts with `dhub_` followed by a 64-character hex string.
+
+### Scope presets [#scope-presets]
+
+A preset selects the minimum scopes a common client needs:
+
+- **Read-only**: view instruments, runs, files, watchers, and archive jobs; change nothing
+- **Watcher**: what a watcher needs to register, report runs, and upload files
+- **Lambda**: what the processing Lambda needs to read instruments and runs, and write run and file results
+
+<Callout type="info">
+The **Lambda** preset includes `runs:read`, which DishCam processing needs to pair each photo stack with its `run.json`. A Lambda token created from an older preset gets `403 FORBIDDEN` on DishCam files. Create a new token from the current preset and update the Lambda’s `DATA_HUB_API_KEY`; the [Lambda developer docs](https://github.com/Arcadia-Science/data-hub/blob/production/docs/developer/lambda.md#supported-instrument-types) describe the swap.
+</Callout>
+
+You cannot change a token’s scopes after creation. To change them, revoke the token and create a new one.
+
+### Via the API [#via-the-api]
+
+Creating and deleting tokens is admin-only and needs a signed-in browser session (cookie). Tokens cannot manage other tokens.
+
+```sh
+curl -X POST https://datahub.example.com/api/v1/tokens \
+  -H "Cookie: session_cookie_here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "FPLC watcher",
+    "scopes": ["instruments:read", "instruments:write", "watchers:read", "watchers:report", "runs:create", "runs:update", "runs:upload", "files:update"],
+    "expires_at": "2027-01-01T00:00:00Z"
+  }'
+```
+
+`scopes` is required and must be a non-empty list of explicit scopes. The wildcard `*` and the older coarse scopes `runs:write`, `files:write`, and `watchers:write` are rejected. `expires_at` is optional; if omitted, the token never expires. The request is rejected if it includes `user_id`, because tokens don’t belong to a person. The response includes the plaintext once in the `token` field.
+
+## Use a token [#use-a-token]
+
+### With the watcher [#with-the-watcher]
+
+During `data-hub-watcher init`, paste the token when prompted. Or set it first:
+
+```sh
+export DATA_HUB_API_KEY=dhub_your_token_here
+data-hub-watcher init
+```
+
+### With the REST API [#with-the-rest-api]
+
+```sh
+curl https://datahub.example.com/api/v1/instruments \
+  -H "Authorization: Bearer dhub_your_token_here"
+```
+
+More in the [API overview](/docs/api).
+
+Tokens don’t authenticate MCP clients, which sign in with OAuth instead. See [MCP overview](/docs/mcp).
+
+## View tokens [#view-tokens]
+
+**Settings → Access Tokens** lists every active token with these columns:
+
+- **Name**
+- **Created by**: the admin who made the token. For tokens created before October 6, 2026, this shows the person the token used to act as.
+- **Token**: the prefix only, because the full token is never stored
+- **Scopes**
+- **Last used**
+- **Expires**
+- **Created**
+
+## Revoke a token [#revoke-a-token]
+
+<Steps>
+
+<Step>
+Go to **Settings → Access Tokens**.
+</Step>
+
+<Step>
+Click the delete icon on the token’s row and confirm.
+</Step>
+
+</Steps>
+
+The token stops working immediately. Clients using it start receiving `401 Unauthorized`.
+
+```sh
+curl -X DELETE https://datahub.example.com/api/v1/tokens/<token_id> \
+  -H "Cookie: session_cookie_here"
+```
+
+A revoked token leaves the list, but Data Hub keeps its record. Wherever the token acted, its name stays visible and is marked **(revoked)**.
+
+## After revoking a token [#after-revoking-a-token]
+
+If a running watcher used that token:
+
+<Steps>
+
+<Step>
+Create a new token with the **Watcher** preset.
+</Step>
+
+<Step>
+On the instrument PC, re-run `data-hub-watcher init` and enter the new token. The new token takes over the existing watcher registration, so you don’t need to deregister the old one first.
+</Step>
+
+<Step>
+Restart the watcher (`data-hub-watcher watch` or the Windows service).
+</Step>
+
+</Steps>
+
+## When someone leaves [#when-someone-leaves]
+
+Tokens keep working after the admin who created them leaves or their account is deleted, because tokens act as themselves. When someone leaves, check the **Created by** column and revoke any of their tokens that nobody else should keep using.
+
+## Token hygiene [#token-hygiene]
+
+- Name tokens so you can tell which PC or client each belongs to
+- Set expirations for temporary setups
+- Scope to least privilege; see [Token scopes](/docs/security#token-scopes)
+- Revoke immediately when a watcher is decommissioned or a token may have been exposed
+
+Tokens are hashed with SHA-256 before storage; plaintext is never persisted.

@@ -1,0 +1,67 @@
+---
+title: Run as a Windows service
+description: Install and operate the Data Hub watcher as a Windows service so it starts on boot, survives logouts, and can auto-update in the background.
+contentType: How-to
+---
+
+<Audience>Lab operators</Audience>
+
+On a lab instrument PC, run the watcher as a Windows service. This is the default setup: the service starts on boot, keeps running after you log out, restarts on failure, and participates in [fleet auto-update](/docs/watcher-releases). Foreground `data-hub-watcher watch` is for quick checks and non-Windows hosts.
+
+## Install the service extra
+
+The service depends on `pywin32`, which ships in the `windows-service` extra. The [default install](/docs/install-the-watcher#install) already includes it. If you installed without it, add it now:
+
+```sh
+uv tool install "data-hub-watcher[windows-service]"
+```
+
+Run [`data-hub-watcher init`](/docs/install-the-watcher#configure) first if you have not configured the watcher yet. The service uses the same `~/.data-hub/config.yaml` and per-environment `.env` file.
+
+## Install and start
+
+From an **Administrator** terminal:
+
+```sh
+data-hub-watcher service install
+data-hub-watcher service start
+```
+
+`service install` registers delayed auto-start (so it does not race the network stack at boot), configures restart-on-failure recovery, and registers the `DataHubWatcherUpgrade` Scheduled Task used by the auto-updater.
+
+<Callout type="warn">
+The Windows auto-update path requires that `service install` (or `service reinstall`) has been run from an Administrator shell at least once. Fleet PCs upgrading into an auto-update-capable build for the first time need a one-time `service reinstall` to pick up the task.
+</Callout>
+
+## Lifecycle commands
+
+| Command | What it does |
+| --- | --- |
+| `data-hub-watcher service install` | Register the service |
+| `data-hub-watcher service start` | Start the service |
+| `data-hub-watcher service stop` | Stop the service |
+| `data-hub-watcher service status` | Show whether the service is running |
+| `data-hub-watcher service uninstall` | Remove the service |
+| `data-hub-watcher service reinstall` | Stop, uninstall, install, and start in one go |
+
+`service reinstall` is the right command after an out-of-band wheel swap (for example a manual `uv tool install -U` from an Administrator shell). Stop and uninstall are best-effort, so it works even if the service is already gone.
+
+`service install` and `service reinstall` accept `--env-path PATH` to override which `.env` file the service loads (defaults to `~/.data-hub/.env.<environment>`).
+
+## Do not run `watch` alongside the service
+
+Running `data-hub-watcher watch` interactively while the service is also running is not supported: both processes would race on the same log file and watch directory. Stop the service first if you need the CLI for debugging:
+
+```powershell
+data-hub-watcher service stop
+data-hub-watcher --verbose watch
+data-hub-watcher service start
+```
+
+## Where the service writes logs
+
+The service and the CLI share one rotating log:
+
+- `C:\ProgramData\DataHubWatcher\watcher.log`
+
+A separate `service-bootstrap.log` next to it captures crashes before the service control dispatcher takes over (missing `pywin32`, moved venv, corrupt install). To turn on debug logging without a reinstall, add `DATA_HUB_WATCHER_LOG_LEVEL=DEBUG` to the env file the service loads and restart the service.

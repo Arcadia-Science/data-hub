@@ -1,0 +1,50 @@
+---
+title: Configure run detection and uploads
+description: Choose how the watcher groups files into runs, when files are ready to upload, and whether uploads are automatic or approved.
+contentType: How-to
+---
+
+<Audience>Lab operators</Audience>
+
+Tune three behaviors that decide what becomes a run and when bytes leave the instrument PC: run detection, stability period, and upload mode. Field-by-field schema lives in [Watcher configuration](/docs/configuration-reference); this page is the intent guide.
+
+Change these during `data-hub-watcher init`, with `data-hub-watcher config edit`, or by editing `~/.data-hub/config.yaml` then syncing.
+
+## Group files into runs
+
+A **run** is one acquisition: a logical group of files the watcher reports together. **Run detection** maps each file’s path (relative to the watch directory) to a run ID.
+
+Common choices:
+
+- **Prefix from filename**: a regex capture, for example everything before the first underscore so `RUN001_data.csv` → `RUN001`
+- **One subdirectory per run**: each folder under the watch directory is its own run, so `RUN001/data.csv` → `RUN001`
+
+Presets and custom regex options are listed under [Run detection](/docs/configuration-reference#run-detection). Set `recursive: true` when files live in subfolders; otherwise only the top level is watched.
+
+When a run gathers files from several folders, two files can share a name, such as a `run.json` in each capture folder. Watcher 1.1.0 and later keep every copy and add a short tag to the later names, such as `sample~3f9a1c2b.tif`. Older watchers kept only the first; see [Files with the same name were skipped](/docs/troubleshoot-a-watcher#files-with-the-same-name-were-skipped).
+
+If files appear on disk but never become runs, check for `pattern_mismatch` events on the watcher detail page and run `data-hub-watcher watch --dry-run`.
+
+## Wait until writes finish
+
+**Stability period** is how many seconds a file must keep the same size and modification time before the watcher treats it as fully written. Default is 5 seconds (allowed range 1–300). Raise it for instruments that write large files slowly.
+
+A file that keeps changing past `max_stability_wait_seconds` (default 300, or 5 minutes) is abandoned with a `stability_timeout` error event. Raise that cap for instruments whose writes take longer; it must be at least the stability period.
+
+## Choose auto or manual upload
+
+| Mode | Behavior |
+| --- | --- |
+| **auto** | Upload as soon as a file is detected and stable. With watcher 1.2.1 and later, the watcher also picks up files someone requests with **Upload** on the run page, and retries uploads that a restart cut off. |
+| **manual** | Report the run, but wait for server approval before uploading bytes. The watcher checks the upload queue once a minute. |
+
+Use manual mode when someone must approve which files leave the instrument PC. Admins manage the queue from the dashboard; see [Manage the watcher fleet](/docs/manage-watchers#approving-manual-uploads).
+
+## Existing files on first setup
+
+`initial_scan` controls the backlog already in the watch directory when an environment is first entered:
+
+- **`production` default**: upload the backlog (`full`)
+- **`staging` / `preview` default**: record a baseline and skip existing files (`new-only`)
+
+Override in config when you need the other behavior. Details: [Initial scan](/docs/configuration-reference#initial-scan).

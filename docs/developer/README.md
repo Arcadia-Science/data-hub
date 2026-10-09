@@ -4,8 +4,10 @@ Documentation for developing and self-hosting Data Hub itself, including
 deploying the web app and AWS infrastructure (see
 [First-time deployment](first-time-deployment.md)). User, operator, and admin
 documentation (installing a watcher, adding an instrument, managing tokens)
-lives on the [docs site](https://datahub.arcadiascience.com/docs) instead —
-see the root [README](../README.md#documentation) for that split.
+lives on the [docs site](https://datahub.arcadiascience.com/docs) instead. Its
+source is in [`../site`](../site/README.md), and the [`docs/` README](../README.md)
+explains the split. These developer docs are plain Markdown read on GitHub, and
+the docs site does not render them.
 
 - [Getting started](getting-started.md) — development setup, environment variables, running locally
 - [Local development](local-development.md) — zero-credential dev workflow for the web app + API + database (no watcher / Lambda needed)

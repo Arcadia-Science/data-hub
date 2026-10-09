@@ -1,0 +1,83 @@
+---
+title: Send feedback and see what’s new
+description: Report a bug or request a feature about Data Hub from the app or an AI assistant, follow the report’s status, and read the in-app changelog.
+contentType: How-to
+---
+
+<Audience>Everyone</Audience>
+
+Use **Feedback** to tell the team that runs Data Hub about a bug, a missing feature, or anything else about the app itself. Each report becomes an issue in your workspace’s Linear, and Data Hub tells you when that issue is closed.
+
+Feedback is for problems with Data Hub. A problem with one run’s data, such as a wrong plate map, belongs in a comment on that run, where the people who ran it will see it.
+
+## Send a report [#send-a-report]
+
+<Steps>
+
+<Step>
+Open the account menu at the bottom of the sidebar and choose **Feedback**.
+</Step>
+
+<Step>
+Pick a **Type**: **Bug**, **Feature request**, or **Other**.
+</Step>
+
+<Step>
+Enter a **Title** and a **Description**. Say what you expected and what happened instead.
+</Step>
+
+<Step>
+Optionally open **More details** and fill in **Trying to do**, **Tool**, and **Error message**.
+</Step>
+
+<Step>
+Choose **Send feedback**.
+</Step>
+
+</Steps>
+
+Data Hub also records the page you were on, so you don’t need to paste a link. If you send a report with the same title within 24 hours, Data Hub returns the report you already sent instead of creating a second one, unless that report has been closed.
+
+<Callout type="info">
+The **Feedback** item appears only after an admin connects Data Hub to Linear. If you don’t see it, ask an admin to follow [Set up integrations](/docs/integrations#linear).
+</Callout>
+
+## What happens to a report [#what-happens-to-a-report]
+
+- Data Hub creates an issue in the Linear team your admins chose, with the label they picked for that type of report, if any.
+- The team works on the issue in Linear.
+- When the issue closes, Data Hub sends you a notification, and a Slack message if you turned that on.
+
+A report’s status follows its Linear issue:
+
+| Linear issue | Report status |
+| --- | --- |
+| Completed, such as **Done** | Resolved |
+| Canceled, or closed as a duplicate | Declined |
+| Anything else | Open |
+
+The notification names the Linear status too, such as **Resolved (Done)** or **Declined (Duplicate)**. Turn it on or off with **Updates on your feedback** under **Settings → Notifications**; see [Configure notifications](/docs/configure-notifications#in-app-preferences).
+
+You hear about a report once each time it closes. Moving the issue from one closed status to another doesn’t notify you again, but reopening and closing it does.
+
+## Send feedback from an AI assistant [#from-an-ai-assistant]
+
+AI assistants connected to Data Hub over [MCP](/docs/mcp) can send feedback for you, for example when a tool call fails. The assistant shows you the draft first and sends it only after you agree. It can also list the reports you sent and read one in full, by report ID or by Linear issue ID such as `ENG-1476`. The tools are listed under [MCP tools](/docs/mcp/tools).
+
+API tokens can’t send feedback, because every report needs a person behind it. Scripts that call `POST /api/v1/feedback` have to use a signed-in session.
+
+## Who sees which reports [#who-sees-which-reports]
+
+Members see only the reports they sent. They can list them through the API or an AI assistant, without the Linear assignee, priority, or activity.
+
+Admins review every report under **Settings → Feedback**:
+
+- **Open** and **Closed** are separate tabs.
+- Each row shows the Linear issue ID, status, label, priority, and assignee.
+- A report’s detail includes the Linear status changes and comments, and an **Open in Linear** link.
+
+Status changes happen in Linear. Data Hub has no control for changing a report’s status. Admins can also turn on **New feedback** under **Settings → Notifications** to hear when someone sends a report.
+
+## See what’s new in Data Hub [#changelog]
+
+Choose **Changelog** in the account menu to see what has changed in Data Hub, newest first. It opens on top of the page you’re on. A dot on your account button means there’s an entry you haven’t opened yet. Many entries link to the page on this site that covers the change.

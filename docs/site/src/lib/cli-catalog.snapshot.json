@@ -1,0 +1,454 @@
+{
+  "cliCatalog": "1",
+  "command": {
+    "commands": [
+      {
+        "commands": [
+          {
+            "help": "Re-prompt each config field with current values as defaults.",
+            "name": "edit",
+            "params": [],
+            "path": [
+              "data-hub-watcher",
+              "config",
+              "edit"
+            ]
+          },
+          {
+            "help": "Open the config file in your editor, then re-validate.",
+            "name": "open",
+            "params": [
+              {
+                "help": "Editor command (e.g. --editor code).",
+                "isFlag": false,
+                "name": "--editor",
+                "names": [
+                  "--editor"
+                ],
+                "paramType": "option",
+                "required": false,
+                "type": "text"
+              }
+            ],
+            "path": [
+              "data-hub-watcher",
+              "config",
+              "open"
+            ]
+          },
+          {
+            "help": "Print the resolved config file path.",
+            "name": "path",
+            "params": [],
+            "path": [
+              "data-hub-watcher",
+              "config",
+              "path"
+            ]
+          },
+          {
+            "help": "Switch the watcher to a different API environment.",
+            "name": "set-environment",
+            "params": [
+              {
+                "choices": [
+                  "staging",
+                  "production",
+                  "preview"
+                ],
+                "help": null,
+                "isFlag": false,
+                "name": "ENVIRONMENT",
+                "names": [
+                  "environment"
+                ],
+                "paramType": "argument",
+                "required": true,
+                "type": "choice"
+              },
+              {
+                "help": "API base URL for the target environment. Required the first time you switch to an environment; reused from config on later switches.",
+                "isFlag": false,
+                "name": "--api-base-url",
+                "names": [
+                  "--api-base-url"
+                ],
+                "paramType": "option",
+                "required": false,
+                "type": "text"
+              },
+              {
+                "help": "API key for the target environment.",
+                "isFlag": false,
+                "name": "--api-key",
+                "names": [
+                  "--api-key"
+                ],
+                "paramType": "option",
+                "required": false,
+                "type": "text"
+              },
+              {
+                "help": "Echo the API key as typed (useful on Windows terminals).",
+                "isFlag": true,
+                "name": "--show-key",
+                "names": [
+                  "--show-key"
+                ],
+                "paramType": "option",
+                "required": false,
+                "type": "boolean"
+              },
+              {
+                "help": "Fail instead of registering a new watcher if none is stored for the target env.",
+                "isFlag": true,
+                "name": "--no-register",
+                "names": [
+                  "--no-register"
+                ],
+                "paramType": "option",
+                "required": false,
+                "type": "boolean"
+              }
+            ],
+            "path": [
+              "data-hub-watcher",
+              "config",
+              "set-environment"
+            ]
+          },
+          {
+            "help": "Pretty-print the current config.",
+            "name": "show",
+            "params": [],
+            "path": [
+              "data-hub-watcher",
+              "config",
+              "show"
+            ]
+          },
+          {
+            "help": "Validate the config file (offline, no network calls).",
+            "name": "validate",
+            "params": [],
+            "path": [
+              "data-hub-watcher",
+              "config",
+              "validate"
+            ]
+          }
+        ],
+        "help": "View and manage the watcher config file.",
+        "name": "config",
+        "params": [],
+        "path": [
+          "data-hub-watcher",
+          "config"
+        ]
+      },
+      {
+        "help": "Interactive setup wizard + API registration.",
+        "name": "init",
+        "params": [
+          {
+            "help": "Echo the API key as it is typed/pasted. Useful on Windows terminals where hidden input is unreliable for paste.",
+            "isFlag": true,
+            "name": "--show-key",
+            "names": [
+              "--show-key"
+            ],
+            "paramType": "option",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "path": [
+          "data-hub-watcher",
+          "init"
+        ]
+      },
+      {
+        "help": "Check the server for a newer watcher release and upgrade in place. Designed for unattended use \u2014 schedule via Windows Task Scheduler (e.g. weekly) so lab PCs converge on the latest published version without operator intervention.",
+        "name": "self-update",
+        "params": [
+          {
+            "help": "Print the server-reported target version without performing the upgrade.",
+            "isFlag": true,
+            "name": "--check",
+            "names": [
+              "--check"
+            ],
+            "paramType": "option",
+            "required": false,
+            "type": "boolean"
+          },
+          {
+            "help": "Run the upgrade subprocess even if the local version already matches the target.",
+            "isFlag": true,
+            "name": "--force",
+            "names": [
+              "--force"
+            ],
+            "paramType": "option",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "path": [
+          "data-hub-watcher",
+          "self-update"
+        ]
+      },
+      {
+        "commands": [
+          {
+            "help": "Install the watcher as a Windows service.",
+            "name": "install",
+            "params": [
+              {
+                "help": "Path to the .env file. Defaults to ~/.data-hub/.env.<environment>.",
+                "isFlag": false,
+                "metavar": "FILE",
+                "name": "--env-path",
+                "names": [
+                  "--env-path"
+                ],
+                "paramType": "option",
+                "required": false,
+                "type": "file"
+              }
+            ],
+            "path": [
+              "data-hub-watcher",
+              "service",
+              "install"
+            ]
+          },
+          {
+            "help": "Stop, uninstall, install, and start the watcher Windows service. Useful after upgrading the watcher wheel from an Administrator shell so the SCM picks up the new ``data_hub_watcher.service`` entrypoint without needing four separate ``service`` invocations.",
+            "name": "reinstall",
+            "params": [
+              {
+                "help": "Path to the .env file. Defaults to ~/.data-hub/.env.<environment>.",
+                "isFlag": false,
+                "metavar": "FILE",
+                "name": "--env-path",
+                "names": [
+                  "--env-path"
+                ],
+                "paramType": "option",
+                "required": false,
+                "type": "file"
+              }
+            ],
+            "path": [
+              "data-hub-watcher",
+              "service",
+              "reinstall"
+            ]
+          },
+          {
+            "help": "Start the watcher Windows service.",
+            "name": "start",
+            "params": [],
+            "path": [
+              "data-hub-watcher",
+              "service",
+              "start"
+            ]
+          },
+          {
+            "help": "Show the watcher Windows service status.",
+            "name": "status",
+            "params": [],
+            "path": [
+              "data-hub-watcher",
+              "service",
+              "status"
+            ]
+          },
+          {
+            "help": "Stop the watcher Windows service.",
+            "name": "stop",
+            "params": [],
+            "path": [
+              "data-hub-watcher",
+              "service",
+              "stop"
+            ]
+          },
+          {
+            "help": "Uninstall the watcher Windows service.",
+            "name": "uninstall",
+            "params": [],
+            "path": [
+              "data-hub-watcher",
+              "service",
+              "uninstall"
+            ]
+          }
+        ],
+        "help": "Windows service management.",
+        "name": "service",
+        "params": [],
+        "path": [
+          "data-hub-watcher",
+          "service"
+        ]
+      },
+      {
+        "commands": [
+          {
+            "help": "Forget upload history under a folder so those files are reported again. Clears every state database a watcher on this PC can open: the one `watch` uses and the one the Windows service uses. Stop the watcher first. It only scans the disk when it starts, so a running watcher will not pick the forgotten files back up.",
+            "name": "forget",
+            "params": [
+              {
+                "help": "Folder under the watch directory to forget, e.g. alice/.",
+                "isFlag": false,
+                "name": "--prefix",
+                "names": [
+                  "--prefix"
+                ],
+                "paramType": "option",
+                "required": true,
+                "type": "text"
+              },
+              {
+                "help": "Skip the confirmation prompt.",
+                "isFlag": true,
+                "name": "--yes",
+                "names": [
+                  "--yes"
+                ],
+                "paramType": "option",
+                "required": false,
+                "type": "boolean"
+              }
+            ],
+            "path": [
+              "data-hub-watcher",
+              "state",
+              "forget"
+            ]
+          }
+        ],
+        "help": "Inspect or reset the local upload history.",
+        "name": "state",
+        "params": [],
+        "path": [
+          "data-hub-watcher",
+          "state"
+        ]
+      },
+      {
+        "help": "Upload files to Data Hub (manual trigger). One-shot mode: pass both --file and --run-id to upload a single file. Queue mode:    omit both to process the server-side upload queue.",
+        "name": "upload",
+        "params": [
+          {
+            "help": "Specific file to upload.",
+            "isFlag": false,
+            "metavar": "PATH",
+            "name": "--file",
+            "names": [
+              "--file"
+            ],
+            "paramType": "option",
+            "required": false,
+            "type": "path"
+          },
+          {
+            "help": "Associate upload with a specific run.",
+            "isFlag": false,
+            "name": "--run-id",
+            "names": [
+              "--run-id"
+            ],
+            "paramType": "option",
+            "required": false,
+            "type": "text"
+          },
+          {
+            "help": "Log what would be uploaded without uploading.",
+            "isFlag": true,
+            "name": "--dry-run",
+            "names": [
+              "--dry-run"
+            ],
+            "paramType": "option",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "path": [
+          "data-hub-watcher",
+          "upload"
+        ]
+      },
+      {
+        "help": "Start watching for new files.",
+        "name": "watch",
+        "params": [
+          {
+            "help": "Validate and log but don't start monitoring.",
+            "isFlag": true,
+            "name": "--dry-run",
+            "names": [
+              "--dry-run"
+            ],
+            "paramType": "option",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "path": [
+          "data-hub-watcher",
+          "watch"
+        ]
+      }
+    ],
+    "help": "Data Hub Watcher \u2014 file upload service for lab instrument PCs.",
+    "name": "data-hub-watcher",
+    "params": [
+      {
+        "envvar": "DATA_HUB_CONFIG_PATH",
+        "help": "Override config file path.",
+        "isFlag": false,
+        "metavar": "PATH",
+        "name": "--config",
+        "names": [
+          "--config"
+        ],
+        "paramType": "option",
+        "required": false,
+        "type": "path"
+      },
+      {
+        "help": "Enable debug logging.",
+        "isFlag": true,
+        "name": "--verbose",
+        "names": [
+          "--verbose"
+        ],
+        "paramType": "option",
+        "required": false,
+        "type": "boolean"
+      },
+      {
+        "help": "Show the version and exit.",
+        "isFlag": true,
+        "name": "--version",
+        "names": [
+          "--version"
+        ],
+        "paramType": "option",
+        "required": false,
+        "type": "boolean"
+      }
+    ],
+    "path": [
+      "data-hub-watcher"
+    ]
+  },
+  "prog": "data-hub-watcher",
+  "version": "1.2.1"
+}

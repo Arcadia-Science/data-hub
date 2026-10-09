@@ -1,0 +1,142 @@
+---
+title: Security and permissions
+description: Roles and what each can do, personal-access-token scopes, how authentication works, and good token hygiene.
+contentType: Conceptual
+---
+
+<Audience>Administrators and developers</Audience>
+
+This page explains who can do what in Data Hub: the two roles, the scope system
+that gates token-authenticated requests, and how to handle tokens safely. For the
+mechanics of creating and revoking tokens, see [Issue and revoke tokens](/docs/manage-tokens).
+
+## Authentication
+
+The API accepts two kinds of credentials:
+
+- **Session cookies**: used by the web dashboard, which signs people in with Google OAuth via [Better Auth](https://www.better-auth.com). Session callers implicitly hold every scope; scope checks only apply to token requests.
+- **Bearer tokens**: personal access tokens (`dhub_…`) used by the watcher, the Lambda, and scripts, sent as `Authorization: Bearer <token>`. A token acts as itself, under its own name; see [How tokens act](#how-tokens-act).
+- **OAuth access tokens**: issued to MCP clients after you sign in and approve a consent screen. Covered in [MCP access](#mcp-access).
+
+Tokens are hashed with SHA-256 before storage; the plaintext is shown exactly once, at creation.
+
+### Who can sign in
+
+Any Google account that finishes the sign-in flow becomes a member of your deployment. Data Hub itself checks nothing: there is no invite flow, no email allowlist, and no email-domain check, so a first successful sign-in creates the member record.
+
+Restrictions live on the Google side instead, in the OAuth client your team creates at deploy time. A consent screen set to **Internal** accepts only accounts in your Google Workspace organization. Set to **External**, it accepts any Google account, including personal ones. Engineers make that choice when they [create the OAuth client](https://github.com/Arcadia-Science/data-hub/blob/production/docs/developer/first-time-deployment.md#create-a-google-oauth-client).
+
+Data Hub accepts 10 Google sign-in attempts per minute from one IP address and rejects the rest.
+
+Every new member starts in the member role, never admin. See [First admin bootstrap](/docs/manage-members#first-admin-bootstrap) for how the first admin gets the role.
+
+### Session lifetime
+
+Signing in stores a session in the database and sets a signed cookie. The session expires 7 days after its last refresh, and the dashboard refreshes it at most once a day, so a session in daily use doesn’t lapse on its own.
+
+That cookie also carries a signed copy of the session for 5 minutes, which keeps most page loads off the database. Requests read the copy instead of the row. A change made in the database directly, such as deleting a session, therefore applies when the copy expires rather than on the next request.
+
+Revoking someone’s access on the Google side, by removing them from your Workspace organization for example, blocks their next sign-in but leaves any session already open working until it expires. Delete that user’s rows from the `session` table to cut them off sooner. Signing out from the sidebar ends the session immediately.
+
+## Roles
+
+| Role | Can do |
+| --- | --- |
+| **Member** | Sign in to the dashboard; view instruments, runs, files, and the token list; claim runs; comment, and edit or delete their own comments; delete and restore runs; send feedback and see the reports they sent. Cannot create or revoke tokens, confirm or update instruments, or manage other users. |
+| **Admin** | Everything members can, plus: confirm and update instruments; create and revoke tokens; promote and demote other users; delete any run comment; review every feedback report; manage **Settings → Integrations**; and set watcher release versions. |
+
+The first admin is bootstrapped from the `ADMIN_EMAILS` environment variable
+(comma-separated, case-insensitive); listed users are promoted on every sign-in.
+After that, any admin can promote others from **Settings → Members**. Admins
+cannot demote themselves: that guards against locking the workspace out of its
+last admin.
+
+### Admin-gated operations
+
+A subset of mutations require the admin role in addition to (or instead of) a scope
+check:
+
+- `PATCH /api/v1/instruments/:id`: session callers must be admin (bearer-token automation still uses `instruments:write`, so watcher/Lambda flows are unaffected).
+- `POST /api/v1/tokens` and `DELETE /api/v1/tokens/:id`: admin-only, session-only. Bearer tokens cannot manage other tokens.
+- `GET /api/v1/users`, `PATCH /api/v1/users/:userId`: admin-only, session-only. Used by **Settings → Members**.
+- `/api/v1/settings/integrations/*`: admin-only, session-only. Used by **Settings → Integrations**.
+- `DELETE` on a run comment: admins can delete any comment; everyone else, including tokens, can delete only their own.
+- `GET /api/v1/feedback`: admins get every report; members get only the reports they sent.
+
+## How tokens act [#how-tokens-act]
+
+A personal access token acts as itself, not as the admin who created it. Data Hub records everything a token does under the token’s name, and the app shows that name with a key icon: on comments, deleted runs, retired instruments, removed watchers, and notifications sent through the API. A revoked token keeps its record, so its name stays visible and is marked **(revoked)**.
+
+Because a token isn’t a person, three things need a signed-in person instead: claiming runs, sending feedback, and reviewing feedback. Tokens can’t do them, whatever their scopes.
+
+The routes that the watcher and the Lambda call work the other way round. They accept only tokens and return `401 Unauthorized` to a browser session, so a signed-in member can’t act as a watcher. These routes cover watcher registration and heartbeats, upload links, file updates, run creation and updates, and instrument creation.
+
+Tokens keep working when the admin who created them leaves. Revoke a departing person’s tokens yourself; see [When someone leaves](/docs/manage-tokens#when-someone-leaves).
+
+## Token scopes
+
+Every personal access token carries an array of permission **scopes**. A token-authenticated request is rejected with `403 FORBIDDEN` when the token’s scopes don’t include the scope a route requires. Issue tokens with the least privilege they need. New tokens must list fine-grained scopes; `POST /api/v1/tokens` rejects the wildcard `*` and the older coarse scopes `runs:write`, `files:write`, and `watchers:write`. Tokens that already carry those still work until you rotate them.
+
+| Scope | Grants |
+| --- | --- |
+| `instruments:read` | Read instruments, dashboard status, and file patterns |
+| `instruments:write` | Create instruments and edit their configuration |
+| `runs:read` | Read and search runs, their files, comments, and attributions |
+| `runs:create` | Create run records |
+| `runs:update` | Update run metadata |
+| `runs:delete` | Soft-delete and restore runs |
+| `runs:reprocess` | Re-run the processing workflow for a run |
+| `runs:upload` | Request presigned S3 URLs to upload files to a run |
+| `runs:comment` | Post run comments as this token, and edit or delete the ones it posted |
+| `files:read` | Read file metadata and download files and run archives |
+| `files:create` | Register file records against a run |
+| `files:update` | Update file metadata and upload state |
+| `files:delete` | Delete files |
+| `files:reprocess` | Re-run the processing workflow for a file |
+| `watchers:read` | Read watcher status, heartbeats, and upload queues |
+| `watchers:report` | Register, heartbeat, send events, and push watcher config |
+| `watchers:admin` | Delete watchers |
+| `archive-jobs:read` | Read run-archive job status |
+| `archive-jobs:write` | Update run-archive job status (Lambda callback) |
+| `notifications:create` | Send notifications to people, optionally about a run |
+| `*` | Matches every scope. Reserved for legacy backfilled tokens; rejected on new tokens |
+
+A watcher token typically needs `instruments:read`, `instruments:write`, `watchers:read`, `watchers:report`, `runs:create`, `runs:update`, `runs:upload`, and `files:update`. That is what the **Watcher** preset selects. The **Lambda** preset selects `instruments:read`, `runs:read`, `runs:create`, `runs:update`, `files:create`, `files:update`, and `archive-jobs:write`. A read-only analysis token needs the `:read` scopes for the data you want to query.
+
+The `runs:attribute` and `feedback:admin` scopes no longer exist, because claiming runs and reviewing feedback need a signed-in person. They were removed from existing tokens on October 6, 2026.
+
+## Integration secrets [#integration-secrets]
+
+The Linear and Slack secrets that admins save under **Settings → Integrations** are encrypted in the database with the `INTEGRATION_SECRETS_KEY` environment variable, and the app never shows them again after saving. See [Set up integrations](/docs/integrations#integration-secrets-key).
+
+## MCP access
+
+The MCP server at `/mcp/v1` doesn’t accept personal access tokens. An AI client runs an OAuth flow instead: you sign in to Data Hub, approve a consent screen that names the client and the access it wants, and the client receives an access token valid for that deployment’s MCP endpoint alone. A token issued to a client with no person behind it is rejected, so every MCP action attributes to a user.
+
+MCP recognizes two scopes rather than the `<resource>:<action>` pairs above:
+
+- `read`: required to connect, and covers every read-only tool, resource, and prompt
+- `write`: additionally required by any tool that changes data, such as claiming a run or deleting one
+
+A grant belongs to one client and one person, and it carries that person’s own permissions. Clients register themselves at connect time, which creates an OAuth client record but grants nothing on its own: Google sign-in still decides who gets through, and the consent screen still decides what they hand over.
+
+The dashboard has no screen for reviewing or revoking MCP grants yet. Removing someone from your Google Workspace organization blocks new grants; cutting off a client that already holds a token means deleting the matching rows from the `oauthAccessToken` and `oauthRefreshToken` tables.
+
+Client setup is in [MCP overview](/docs/mcp).
+
+## Token hygiene
+
+- **Name tokens descriptively** (e.g. “FPLC watcher, Lab 201”) so you can tell what each one is for.
+- **Set expirations** for temporary setups.
+- **Scope to least privilege**: don’t hand out broad tokens for a single read-only integration.
+- **Revoke immediately** when a watcher is decommissioned or a token may have been exposed. Revocation is instant; clients using the token start getting `401 Unauthorized`. See [After revoking a token](/docs/manage-tokens#after-revoking-a-token).
+- **Revoke a departing person’s tokens.** Tokens don’t stop working when the person who created them leaves. Check the **Created by** column under **Settings → Access Tokens**.
+
+## Public pages, gated bodies
+
+Some web pages (dashboard, instruments, run detail, settings) are reachable without
+a session so link unfurlers can read page metadata. The page body renders a
+sign-in prompt instead of real data when there’s no session, and three independent
+layers (`robots` metadata, `robots.txt`, and an `X-Robots-Tag` header) keep the
+product app out of search indexes. The `/api/v1/*` surface always requires a
+session cookie or bearer token.

@@ -1,0 +1,91 @@
+---
+title: Roll out watcher releases
+description: Publish watcher versions to PyPI, advertise them per environment, set a minimum version, force mandatory updates, roll the fleet back, and see what each version adds.
+contentType: How-to
+---
+
+<Audience>Administrators</Audience>
+
+Lab PCs upgrade themselves toward the version you advertise per environment. You control that from **Settings → Watchers**. How an individual PC installs or runs `self-update` is in [Install and update the watcher](/docs/install-the-watcher).
+
+## How fleet upgrades reach a PC [#how-fleet-upgrades-reach-a-pc]
+
+The in-process updater runs from the heartbeat tick on every platform (not only Windows services). Roughly once an hour the watcher:
+
+1. Asks the server for the latest version and compares it to its own
+2. Upgrades only if a newer version is available, no files have uploaded for several heartbeats, and no run was reported recently (the activity-window guard). Releases flagged **mandatory** skip this guard
+3. Installs the new wheel and restarts into it (Windows services restart via failure-actions policy)
+4. Emits `update_started`, then `update_succeeded` or `update_failed`, visible on the dashboard
+
+Auto-update is disabled in the `preview` environment so pull-request preview deployments cannot push code to lab PCs.
+
+## Cut a new release [#cut-a-new-release]
+
+Releases are tag-driven and publish from a `production` commit.
+
+<Steps>
+
+<Step>
+Bump the version in `watcher/pyproject.toml` and merge through `staging` to `production`.
+</Step>
+
+<Step>
+Tag and push from `production`:
+
+```sh
+git checkout production && git pull
+git tag watcher-v1.3.0 && git push origin watcher-v1.3.0
+```
+</Step>
+
+<Step>
+Approve the `pypi` deployment under **Actions → Publish watcher** in GitHub.
+</Step>
+
+<Step>
+In **Settings → Watchers**, pick the new version under **Latest version**. The list comes straight from PyPI, so a release shows up as soon as PyPI publishes it. If PyPI can’t be reached, the field accepts a typed version instead. Each environment has its own database, so set `staging` and `production` separately to roll the fleet gradually.
+
+![Settings Watchers page with Latest version and release controls](/images/watcher-settings.png)
+</Step>
+
+</Steps>
+
+<Callout type="warn">
+Always tag → publish → verify on PyPI → save. Saving **Latest version** before the wheel is live triggers a wave of `update_failed` events across the fleet.
+</Callout>
+
+## Release settings [#release-config-fields]
+
+| Field | Purpose |
+| --- | --- |
+| **Latest version** | The version watchers upgrade to. Leave it blank to pause self-updates. |
+| **Minimum supported version** | Optional. A watcher older than this has its heartbeats rejected with `426 Upgrade Required`, so it shows as unresponsive until it updates. It still checks for updates every hour, so it upgrades itself as long as **Latest version** is newer. Leave it blank for no minimum. |
+| **Mandatory update** | Skips the activity-window guard; see below. Has no effect while **Latest version** is blank. |
+
+## Mandatory updates [#mandatory-updates]
+
+Toggling **Mandatory update** skips the activity-window guard and fires the upgrade on the next hourly check. The server still compares the running version to **Latest version**, so a correctly pinned PC is not forced past its pin.
+
+Use sparingly: a forced upgrade mid-acquisition can lose data. Reserve it for security fixes, wire-protocol breaks, or cases where leaving the bad version running is worse than restarting in flight.
+
+## Roll back [#roll-back]
+
+Rollback is another release: set **Latest version** back to the older tag for the affected environment(s), turn **Mandatory update** on if you need to bypass the activity-window guard, and wait for the next hourly tick. Turn **Mandatory update** off once the fleet converges. The older wheel remains on PyPI; it is no longer advertised.
+
+If **Minimum supported version** is set above the version you roll back to, lower it first. Otherwise the rolled-back watchers can’t check in.
+
+## What each version adds [#what-each-version-adds]
+
+Some Data Hub features need a minimum watcher version. Set **Latest version** to at least the version below to turn a feature on across the fleet.
+
+| Version | What it adds |
+| --- | --- |
+| 1.2.1 | **Request upload** works on instruments that upload automatically; older watchers in auto mode leave the file showing **Uploading**. The watcher also retries an automatic upload that didn’t finish, such as one cut off by a restart or an update, the next time it starts. It tries on up to three starts. |
+| 1.2.0 | Files of 100 MB or more upload in 64 MB parts, and a failed part is retried on its own. Files larger than 5 GB can upload; older watchers are refused for files that large. |
+| 1.1.0 | When a run gathers files from several folders, files with the same name are all kept instead of only the first. Later copies get a short tag in the name, such as `sample~3f9a1c2b.tif`. Adds the `data-hub-watcher state forget` command. |
+
+After upgrading to 1.1.0 or later, files that an older watcher skipped because of a duplicate name aren’t uploaded on their own. To upload them, stop the watcher, run `data-hub-watcher state forget --prefix your_folder_name/` on the instrument PC, and start the watcher again. See [Troubleshoot a watcher](/docs/troubleshoot-a-watcher#files-with-the-same-name-were-skipped).
+
+## Operator-side failures [#operator-side-failures]
+
+If `update_started` is followed by `update_failed`, or auto-update never fires, point operators at [Troubleshoot a watcher](/docs/troubleshoot-a-watcher#auto-update-never-fires) and [Install and update the watcher](/docs/install-the-watcher#manual-update-self-update).
