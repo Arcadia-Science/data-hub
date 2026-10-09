@@ -3,6 +3,12 @@ import { getInstruments, getUserById } from "@/lib/api/dashboard";
 import { getInstrumentListWithCounts } from "@/lib/api/instruments";
 import type { InstrumentType } from "@/lib/db/schema";
 import { completeInstrumentId } from "@/lib/mcp/completions";
+import {
+  findDoc,
+  listDocPages,
+  parseDocRef,
+  unknownPageMessage,
+} from "@/lib/mcp/docs/corpus";
 import { DATAHUB_GLOSSARY } from "@/lib/mcp/glossary";
 import { resolveInstrumentFilterOptions } from "@/lib/mcp/instrument-filter-options";
 import { loadRunReportHtml } from "@/lib/mcp/run-report-html";
@@ -13,6 +19,7 @@ import {
 } from "@/lib/mcp/ui-apps";
 import { runReportUiMeta } from "@/lib/mcp/ui-csp";
 import {
+  docsPageResource,
   glossaryResource,
   instrumentFilterOptionsResource,
   instrumentsResource,
@@ -47,6 +54,22 @@ function filterOptionsDescription(instrumentType: InstrumentType): string {
     default:
       return "Available filter values";
   }
+}
+
+// Clients such as Claude Desktop show only a resource's name in their attach
+// menu, and three docs pages share the title "Overview".
+function docsPageResourceList() {
+  const pages = listDocPages();
+  const titleCounts = new Map<string, number>();
+  for (const { title } of pages) {
+    titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
+  }
+  return pages.map(({ page, title, description }) => ({
+    uri: `datahub://docs/${page}`,
+    name: (titleCounts.get(title) ?? 0) > 1 ? `${title} (${page})` : title,
+    description,
+    mimeType: docsPageResource.mimeType,
+  }));
 }
 
 export function registerResources(server: McpServer) {
@@ -197,6 +220,40 @@ export function registerResources(server: McpServer) {
             uri: _uri.href,
             mimeType: "application/json",
             text: JSON.stringify(payload, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  server.registerResource(
+    docsPageResource.name,
+    new ResourceTemplate(docsPageResource.uriTemplate, {
+      list: async () => ({ resources: docsPageResourceList() }),
+      complete: {
+        page: (value: string) =>
+          listDocPages()
+            .map(({ page }) => page)
+            .filter((page) => page.startsWith(value.toLowerCase())),
+      },
+    }),
+    {
+      description: docsPageResource.description,
+      mimeType: docsPageResource.mimeType,
+    },
+    (uri, variables) => {
+      const requested = Array.isArray(variables.page)
+        ? variables.page[0]
+        : variables.page;
+      const entry = requested
+        ? findDoc(parseDocRef(requested).page)
+        : undefined;
+      return {
+        contents: [
+          {
+            uri: uri.href,
+            mimeType: docsPageResource.mimeType,
+            text: entry ? entry.markdown : unknownPageMessage(requested ?? ""),
           },
         ],
       };

@@ -5106,6 +5106,246 @@
       }
     },
     {
+      "name": "search_docs",
+      "title": "Search Docs",
+      "description": "Search Data Hub's own documentation and changelog. Use it for how-to and explanation questions about Data Hub itself: setting up instruments and watchers, tokens, permissions, notifications, MCP and API access, and what changed recently. Returns up to five matching sections, each with a short excerpt, a page ID, and a link to cite. Call read_doc to read the full page or section. Not for lab data; use global_search or search_runs for runs, files, and instruments. When nothing matches, the result lists every docs page so you can pick one.",
+      "group": "docs",
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "What to look up, as a question or keywords (min 2 characters)."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "page": {
+                  "type": "string",
+                  "description": "Page ID to pass to read_doc (`changelog/<id>` for a change)."
+                },
+                "title": {
+                  "type": "string"
+                },
+                "section": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Heading ID of the matching section, or null for the intro."
+                },
+                "heading": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "excerpt": {
+                  "type": "string"
+                },
+                "url": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Link to cite. Null for a change that has no docs page."
+                },
+                "date": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "YYYY-MM-DD the change shipped. Null for a docs page."
+                }
+              },
+              "required": [
+                "page",
+                "title",
+                "section",
+                "heading",
+                "excerpt",
+                "url",
+                "date"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "pages": {
+            "description": "Every docs page. Present only when nothing matched.",
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "page": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "page",
+                "title",
+                "description"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "hint": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "results"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "read_doc",
+      "title": "Read Doc",
+      "description": "Read one page of Data Hub's documentation, or one changelog entry, as Markdown. Pass a page ID from search_docs, such as `manage-tokens` or `changelog/2026-10-08-hina-large-image-previews`. Add `section` (a heading ID from the search result) to read only that part. The result lists the page's section IDs, so a long page can be read in pieces. Cite the returned link in your answer.",
+      "group": "docs",
+      "annotations": {
+        "readOnlyHint": true
+      },
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "string",
+            "description": "Page ID from search_docs. A docs path or URL such as /docs/manage-tokens is also accepted."
+          },
+          "section": {
+            "description": "Heading ID within the page. Omit to read the whole page.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "page"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "heading": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "markdown": {
+            "type": "string"
+          },
+          "sections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "heading": {
+                  "type": "string"
+                },
+                "level": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "2 for a section, 3 for a subsection."
+                }
+              },
+              "required": [
+                "id",
+                "heading",
+                "level"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Heading IDs on the page, for reading one section at a time."
+          }
+        },
+        "required": [
+          "page",
+          "title",
+          "section",
+          "heading",
+          "url",
+          "markdown",
+          "sections"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "send_feedback",
       "title": "Send Feedback",
       "description": "Report a bug or request about Data Hub itself (the web app, MCP tools, or the watcher). Show the user this draft and get their approval before calling. For a problem with a specific run's data, use add_run_comment instead. Any read token can call this.",
@@ -6555,6 +6795,12 @@
       "description": "Available filter values for an instrument. Values map directly to search_runs metadata filter arguments (wavelength/measurementMode/measurementType for plate readers; captureType/imagingMode/gelWavelength/gelColor for gel-doc; dyeChannel for qPCR; hinaChannel/hinaDimension/hinaSize for Hina; dpi/colorMode for Epson; auntyExperimentType/auntyAnalysisMode/auntyTemperature/auntyRampRate for Aunty).",
       "mimeType": "application/json",
       "uriTemplate": "datahub://instruments/{instrumentId}/filter-options"
+    },
+    {
+      "name": "docs-page",
+      "description": "A page of Data Hub's own documentation as Markdown, such as datahub://docs/manage-tokens. Same text as the read_doc tool. Use search_docs to find the right page.",
+      "mimeType": "text/markdown",
+      "uriTemplate": "datahub://docs/{page}"
     },
     {
       "name": "run-report",

@@ -51,6 +51,7 @@ const GROUP_LABELS: Record<string, string> = {
   files: "Files",
   watchers: "Watchers",
   discovery: "Discovery",
+  docs: "Documentation",
 };
 
 export function groupLabel(group: string): string {

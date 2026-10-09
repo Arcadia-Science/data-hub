@@ -45,7 +45,6 @@ const entries = await Promise.all(
     page: page.slugs.join("/"),
     title: page.data.title,
     description: page.data.description ?? "",
-    path: page.url,
     markdown: await getLLMText(page),
   }))
 );

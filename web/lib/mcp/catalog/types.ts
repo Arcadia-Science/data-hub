@@ -9,6 +9,7 @@ export const MCP_TOOL_GROUPS = {
   files: "Files",
   watchers: "Watchers",
   discovery: "Discovery",
+  docs: "Documentation",
   feedback: "Feedback",
 } as const;
 

@@ -1,5 +1,9 @@
 import type { AuthInfo, McpServer } from "@modelcontextprotocol/server";
-import { durationBucket, trackEvent } from "@/lib/analytics/track";
+import {
+  durationBucket,
+  searchResultBucket,
+  trackEvent,
+} from "@/lib/analytics/track";
 import { mcpClientLabel } from "@/lib/mcp/client-name";
 
 function mcpUserId(authInfo: AuthInfo | undefined): string | undefined {
@@ -42,6 +46,38 @@ function reportTool(
     client: await mcpClientLabel(authInfo),
     outcome,
     duration_bucket: durationBucket(elapsedMs),
+  }));
+}
+
+/**
+ * Counts docs searches by how many passages matched, so a rising share of
+ * empty searches shows where the docs have gaps. The query text is never
+ * recorded.
+ */
+export function trackDocsSearch(ctx: unknown, totalMatches: number): void {
+  const userId = userIdFrom(ctx);
+  if (!userId) {
+    return;
+  }
+  const authInfo = authInfoFrom(ctx);
+  trackEvent("mcp_docs_search", async () => ({
+    user_id: userId,
+    client: await mcpClientLabel(authInfo),
+    result_bucket: searchResultBucket(totalMatches),
+  }));
+}
+
+/** Pass only a page ID that resolved against the bundle, not raw input. */
+export function trackDocsRead(ctx: unknown, page: string): void {
+  const userId = userIdFrom(ctx);
+  if (!userId) {
+    return;
+  }
+  const authInfo = authInfoFrom(ctx);
+  trackEvent("mcp_docs_read", async () => ({
+    user_id: userId,
+    client: await mcpClientLabel(authInfo),
+    page,
   }));
 }
 

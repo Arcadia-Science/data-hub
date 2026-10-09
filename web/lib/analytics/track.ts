@@ -23,6 +23,17 @@ export interface AnalyticsEvents {
     client: string;
     client_version: string;
   };
+  // Page IDs come from the docs bundle, never from what the caller typed.
+  mcp_docs_read: {
+    user_id: string;
+    page: string;
+    client: string;
+  };
+  mcp_docs_search: {
+    user_id: string;
+    client: string;
+    result_bucket: "0" | "1_to_10" | "over_10";
+  };
   mcp_prompt_get: {
     user_id: string;
     prompt: string;
