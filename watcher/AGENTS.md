@@ -12,7 +12,8 @@ If this branch changes anything under `watcher/src/` (runtime, CLI, upload, upda
    - **minor** (`1.0.1` → `1.1.0`) — new commands, flags, or backward-compatible features
    - **major** (`1.1.0` → `2.0.0`) — breaking CLI, config, or API-protocol changes
 3. Run `uv lock` from the repo root so `uv.lock` records the new workspace version.
-4. Do not bump again for later commits on the same branch. If the base already moved past your number, bump from the current base version instead.
+4. Run `make py-watcher-cli-catalog docs-bundle-generate` from the repo root and commit both changed files. The CLI catalog snapshot records the version, and the MCP docs bundle embeds the CLI reference page. CI fails if either is out of date.
+5. Do not bump again for later commits on the same branch. If the base already moved past your number, bump from the current base version instead.
 
 Do **not** bump for tests-only, docs-only, or `AGENTS.md` edits. Do **not** tag `watcher-v*` from a feature branch. Do **not** change the seeded `watcher_release_config` latest version — that is the advertised fleet pin for local seed data, not this package version.
 

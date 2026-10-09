@@ -35,10 +35,12 @@
     "@types/react-dom": "^19.2.3",
     "postcss": "^8.5.15",
     "tailwindcss": "^4.3.1",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "ultracite": "^7.8.3"
   },
   "name": "docs",
+  "type": "module",
   "scripts": {
     "build": "next build",
     "dev": "export VC_MICROFRONTENDS_CONFIG=../../web/microfrontends.json && next dev --port $(microfrontends port)",
@@ -47,6 +49,7 @@
     "typecheck": "fumadocs-mdx && next typegen && tsc --noEmit",
     "postinstall": "fumadocs-mdx",
     "check:links": "node scripts/check-links.mjs",
+    "docs-bundle:generate": "tsx scripts/generate-docs-bundle.ts",
     "lint:check": "ultracite check",
     "lint:fix": "ultracite fix",
     "precommit": "npm run lint:check && npm run typecheck"

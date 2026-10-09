@@ -31,7 +31,12 @@ vi.mock("@/lib/mcp/client-name", async (importOriginal) => {
   };
 });
 
-import { trackMcpConnect, withMcpTracking } from "@/lib/mcp/analytics";
+import {
+  trackDocsRead,
+  trackDocsSearch,
+  trackMcpConnect,
+  withMcpTracking,
+} from "@/lib/mcp/analytics";
 
 const authInfo: AuthInfo = {
   token: "token",
@@ -310,6 +315,48 @@ describe("trackMcpConnect", () => {
     (req as Request & { auth?: AuthInfo }).auth = authInfo;
     trackMcpConnect(req);
     await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(trackEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe("docs analytics", () => {
+  beforeEach(() => {
+    trackEvent.mockReset();
+    mcpClientLabel.mockClear();
+  });
+
+  it("records a docs search as a result bucket and nothing else", async () => {
+    trackDocsSearch(httpCtx(), 0);
+    expect(trackEvent.mock.calls[0]?.[0]).toBe("mcp_docs_search");
+    await expect(lastProps()).resolves.toEqual({
+      user_id: "user-1",
+      client: "Cursor",
+      result_bucket: "0",
+    });
+
+    trackDocsSearch(httpCtx(), 7);
+    await expect(lastProps()).resolves.toMatchObject({
+      result_bucket: "1_to_10",
+    });
+    trackDocsSearch(httpCtx(), 40);
+    await expect(lastProps()).resolves.toMatchObject({
+      result_bucket: "over_10",
+    });
+  });
+
+  it("records the page ID of a docs read", async () => {
+    trackDocsRead(httpCtx(), "manage-tokens");
+    expect(trackEvent.mock.calls[0]?.[0]).toBe("mcp_docs_read");
+    await expect(lastProps()).resolves.toEqual({
+      user_id: "user-1",
+      client: "Cursor",
+      page: "manage-tokens",
+    });
+  });
+
+  it("records nothing when no user is signed in", () => {
+    trackDocsSearch({ http: {} }, 3);
+    trackDocsRead({ http: {} }, "manage-tokens");
     expect(trackEvent).not.toHaveBeenCalled();
   });
 });

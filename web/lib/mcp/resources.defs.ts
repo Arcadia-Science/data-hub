@@ -40,6 +40,15 @@ export const instrumentFilterOptionsResource = {
   uriTemplate: "datahub://instruments/{instrumentId}/filter-options",
 } as const satisfies McpResourceDef;
 
+export const docsPageResource = {
+  name: "docs-page",
+  description:
+    "A page of Data Hub's own documentation as Markdown, such as datahub://docs/manage-tokens. Same text as the read_doc tool. Use search_docs to find the right page.",
+  mimeType: "text/markdown",
+  kind: "template",
+  uriTemplate: "datahub://docs/{page}",
+} as const satisfies McpResourceDef;
+
 export const runReportUiResource = {
   name: "run-report",
   description:
@@ -54,5 +63,6 @@ export const MCP_RESOURCE_DEFS = [
   meResource,
   glossaryResource,
   instrumentFilterOptionsResource,
+  docsPageResource,
   runReportUiResource,
 ] as const;

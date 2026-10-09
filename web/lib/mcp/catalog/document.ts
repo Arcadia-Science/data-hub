@@ -3,7 +3,10 @@ import {
   zodTypeToJsonSchema,
 } from "@/lib/mcp/catalog/json-schema";
 import { MCP_TOOL_DEFS } from "@/lib/mcp/catalog/tools";
-import type { McpCatalogDocument } from "@/lib/mcp/catalog/types";
+import {
+  MCP_TOOL_GROUPS,
+  type McpCatalogDocument,
+} from "@/lib/mcp/catalog/types";
 import { MCP_PROMPT_DEFS } from "@/lib/mcp/prompts.defs";
 import { MCP_RESOURCE_DEFS } from "@/lib/mcp/resources.defs";
 
@@ -18,6 +21,7 @@ export function buildMcpCatalogDocument(): McpCatalogDocument {
       endpoint: "/mcp/v1",
       transport: "streamable-http",
     },
+    groups: MCP_TOOL_GROUPS,
     tools: MCP_TOOL_DEFS.map((tool) => ({
       name: tool.name,
       title: tool.title,

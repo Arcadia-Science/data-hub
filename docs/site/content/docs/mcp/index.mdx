@@ -91,6 +91,17 @@ Any client that speaks Streamable HTTP and the MCP authorization spec needs one 
 
 Clients that speak MCP but not OAuth can bridge through [`mcp-remote`](https://www.npmjs.com/package/mcp-remote), which runs the browser flow on their behalf.
 
+## Questions about Data Hub [#questions-about-data-hub]
+
+The assistant can answer questions about Data Hub itself, such as how to install a watcher or what a run status means. It searches the documentation and the [changelog](/docs/send-feedback#changelog), reads the page that fits, and links it in its answer. Two tools do this, and both need only the `read` scope:
+
+- `search_docs` returns up to five matching sections, each with a short excerpt and a link
+- `read_doc` returns one page, or one section of a page, as Markdown
+
+The answers come from the docs that ship with your deployment, so they match the version you run, including a staging deployment that is ahead of the published site. Clients that let you attach resources by hand can also attach any page as `datahub://docs/<page>`, for example `datahub://docs/manage-tokens`.
+
+The assistant reads the guides and the changelog. It doesn’t read the generated [API](/docs/api) endpoint pages or the [tools](/docs/mcp/tools), [prompts](/docs/mcp/prompts), and [resources](/docs/mcp/resources) catalogs, because the client already receives the catalog when it connects. When the docs don’t cover a question, the assistant says so and offers to [send feedback](#feedback) about the gap.
+
 ## Interactive run reports [#interactive-run-reports]
 
 Clients that support MCP Apps, an extension of the Model Context Protocol, show the same interactive run report as the web app when the assistant calls `get_run_report`. The report includes image carousels, plate maps, and the Aunty plate with its well charts. Clients without MCP Apps support get the same data as text and describe it instead.
