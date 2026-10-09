@@ -9,6 +9,7 @@ on:
       - .github/workflows/docs-lint.yml
       - docs/**
       - web/lib/docs.ts
+      - web/lib/mcp/docs/docs-corpus.snapshot.json
       - web/content/changelog/**
       - web/microfrontends.json
       - Makefile
@@ -20,6 +21,7 @@ on:
       - .github/workflows/docs-lint.yml
       - docs/**
       - web/lib/docs.ts
+      - web/lib/mcp/docs/docs-corpus.snapshot.json
       - web/content/changelog/**
       - web/microfrontends.json
       - Makefile
@@ -55,3 +57,15 @@ jobs:
       # the site to docs/developer, and relative links in docs/developer.
       - name: Check links
         run: npm run check:links
+
+      # The MCP server answers questions from a bundled copy of these pages.
+      # Regenerate it and fail if the committed copy differs.
+      - name: Check docs bundle for the MCP server is current
+        run: |
+          npm run docs-corpus:generate
+          bundle="../../web/lib/mcp/docs/docs-corpus.snapshot.json"
+          if [ -n "$(git status --porcelain -- $bundle)" ]; then
+            echo "::error::The docs bundle for the MCP server is out of date. Run 'make docs-catalogs' and commit the result."
+            git --no-pager diff --stat -- $bundle
+            exit 1
+          fi

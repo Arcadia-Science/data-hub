@@ -116,14 +116,24 @@ mcp-catalog-generate:
 docs-dev:
 	cd docs/site && npm run dev
 
+# Bundle the docs pages into web/ so the MCP server can answer questions about
+# Data Hub from the docs that ship with each deployment. Run after changing a
+# docs page. CI fails when the committed bundle is stale.
+.PHONY: docs-corpus-generate
+docs-corpus-generate:
+	cd docs/site && npm run docs-corpus:generate
+
 # Regenerate the three snapshots the docs site renders its API, MCP, and
-# watcher CLI reference pages from. Run after changing the REST API, the MCP
-# tools, or the watcher CLI. CI fails when a committed snapshot is stale.
+# watcher CLI reference pages from, then the docs bundle for the MCP server,
+# which embeds the CLI snapshot. Run after changing the REST API, the MCP
+# tools, the watcher CLI, or a docs page. CI fails when a committed copy is
+# stale.
 .PHONY: docs-catalogs
 docs-catalogs:
 	make openapi-generate
 	make mcp-catalog-generate
 	make py-watcher-cli-catalog
+	make docs-corpus-generate
 
 .PHONY: docs-format
 docs-format:
