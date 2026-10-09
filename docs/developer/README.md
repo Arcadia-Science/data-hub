@@ -13,6 +13,7 @@ the docs site does not render them.
 - [Local development](local-development.md) — zero-credential dev workflow for the web app + API + database (no watcher / Lambda needed)
 - [Architecture](architecture.md) — system overview, data flow, and design decisions
 - [MCP Apps](mcp-apps.md) — run-report View: host render flow, the three app-only tools, the shared data source, `mcp-apps:build`, and the gitignored HTML artifact
+- [Docs over MCP](mcp-docs.md) — how the `search_docs` and `read_doc` tools get the docs, how search works, and what to update when docs change
 - [Testing](testing.md) — per-package test frameworks, the shared test-server fixture, S3 mocking
 - [Watcher](watcher.md) — CLI commands, configuration, run detection, upload modes
 - [Lambda](lambda.md) — processing pipeline, supported instruments, adding new instruments

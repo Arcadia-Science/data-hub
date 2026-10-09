@@ -43,6 +43,10 @@ The API, MCP, and [Watcher CLI](https://datahub.arcadiascience.com/docs/cli-refe
 
 CI regenerates each file and fails when the committed copy differs.
 
+### Docs bundle for the MCP server
+
+The MCP server answers questions about Data Hub from a bundled copy of the docs pages, `web/lib/mcp/docs/docs-corpus.snapshot.json`. It is generated from `docs/site/content/docs/` (and the watcher CLI snapshot) and never edited by hand. After changing a docs page, run `make docs-catalogs` and commit the result in the same branch. CI regenerates it and fails when the committed copy differs. See `docs/developer/mcp-docs.md`.
+
 ## Cursor Cloud specific instructions
 
 Data Hub is a multi-component repo (see `README.md`). The component you can run end-to-end locally with zero external credentials is the **Next.js web app + REST API + PostgreSQL** (`web/`). The `lambda/`, `watcher/`, and `packages/shared/` Python packages are exercised via tests and a local S3 mirror — no real AWS is needed for local work.

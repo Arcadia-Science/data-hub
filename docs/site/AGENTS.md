@@ -36,9 +36,20 @@ Run every command below from `docs/site/`, or use the `make docs-*` targets from
 
 The three `src/lib/*.snapshot.json` files are generated output, so Biome skips them. Never edit them by hand.
 
+## MCP docs bundle
+
+The Data Hub MCP server answers questions from a copy of these pages bundled into the web app, so each deployment answers from the docs that match its own code.
+
+- `scripts/generate-docs-corpus.ts` writes the copy to `web/lib/mcp/docs/docs-corpus.snapshot.json`, using the same `getLLMText` output as `/docs/<path>.md`. It leaves out the generated API endpoint pages and the MCP tool, prompt, and resource catalogs.
+- Regenerate it with `make docs-catalogs` (or `npm run docs-corpus:generate` here) after changing any page, and commit the result. CI fails when it is out of date. Never edit it by hand.
+- The script loads the pages through `fumadocs-mdx/node`, which needs this package to be an ES module (`"type": "module"`), and runs under `tsx`. `scripts/stub-assets-loader.mjs` stubs image imports, which Node cannot load.
+- The server returns a page in one tool result, so a page must stay under 75,000 characters (the longest today is about 18,000). A test fails above that, because Claude Code caps a tool result at 25,000 tokens. Split a page that grows past it.
+- Give every heading a stable `[#id]` when other pages link to it. The server uses those IDs as section names, and agents quote them back.
+- Search quality is covered by a list of real questions in `web/tests/unit/mcp-docs-search.test.ts`. When a page is renamed or split, update the list.
+
 ## AI-consumption surface
 
-This site is intentionally public and indexable, and is itself built to be read by agents: `/llms.txt` (page index), `/llms-full.txt` (full corpus dump), and `/docs/<path>.md` (any page as raw Markdown, via content negotiation on `Accept: text/markdown`). When editing docs, keep pages self-contained enough that they still make sense pulled out of the nav and read as a flat Markdown file — that's how most AI clients will actually consume them.
+This site is intentionally public and indexable, and is itself built to be read by agents: `/llms.txt` (page index), `/llms-full.txt` (full corpus dump), and `/docs/<path>.md` (any page as raw Markdown, via content negotiation on `Accept: text/markdown`). The Data Hub MCP server serves the same pages through its `search_docs` and `read_doc` tools (see [MCP docs bundle](#mcp-docs-bundle)). When editing docs, keep pages self-contained enough that they still make sense pulled out of the nav and read as a flat Markdown file — that's how most AI clients will actually consume them.
 
 ## Checks
 
