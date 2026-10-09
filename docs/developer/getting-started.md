@@ -25,6 +25,9 @@ uv sync --all-packages
 
 # Install web app dependencies.
 cd web && npm install && cd ..
+
+# Install docs site dependencies (only needed to work on docs/site, and for `make check`).
+cd docs/site && npm install && cd ../..
 ```
 
 The Python workspace is managed by uv. The root `pyproject.toml` defines three workspace members — `lambda`, `watcher`, and `packages/shared` — and all are installed together by `uv sync --all-packages`.

@@ -1,0 +1,179 @@
+---
+title: Troubleshoot a watcher
+description: "Fix watcher problems by symptom: will not start, files not detected, uploads stuck, auto-update quiet, and where to find logs."
+contentType: Troubleshooting
+---
+
+<Audience>Lab operators and admins</Audience>
+
+Find your symptom below. When you are stuck, the [logs](#where-are-the-logs) are the fastest way in. Admins can also inspect heartbeats and events under **Watchers** in the web app.
+
+## Setup and registration
+
+### “Instrument is still pending activation”
+
+The instrument was registered but an admin has not confirmed it. Ask an admin to open **Instruments** and click **Confirm**. See [Manage instruments](/docs/manage-instruments).
+
+### “Instrument already has an active watcher”
+
+Each instrument can have at most one active watcher. An earlier install (often on another PC, or before a reimage) is still registered. The CLI prints the existing watcher id; deregister it before re-running `init`:
+
+- **Web app**: **Watchers**, open the existing watcher, click **Deregister**
+- **API**: `DELETE /api/v1/watchers/<existing_watcher_id>` with a bearer token that has `watchers:admin`
+
+Deregistration is a soft-delete: history stays under **Watchers → Deregistered**.
+
+### `init` rejects my API key
+
+The wizard rejects values that do not start with `dhub_`, and strips zero-width and non-breaking-space characters that Windows clipboards inject. If a paste keeps failing, pass `--show-key` so you can see what the prompt received.
+
+## The watcher will not start
+
+- Run `data-hub-watcher config show` to confirm config and environment
+- Run `data-hub-watcher watch --dry-run`: it prints the first failing check
+- Confirm the instrument is `active`, not `pending`
+- On Windows, if the **service** will not start, see [Windows service](#windows-service)
+
+## The watcher shows Offline right after a restart
+
+The watcher checks in once a minute, so a watcher that was just restarted can take up to a minute to show as **Online**. Refresh the page after a minute. If it still shows **Offline** or **Unresponsive**, check that the process is running and see [“Connection error” or “Request timed out”](#connection-error-or-request-timed-out).
+
+## Heartbeats fail with `426 Upgrade Required`
+
+The watcher is older than the **Minimum supported version** an admin set under **Settings → Watchers**, so the server rejects its heartbeats and it shows as unresponsive. It keeps checking for updates every hour and upgrades itself if **Latest version** is newer. To upgrade now, run `data-hub-watcher self-update`. See [Roll out watcher releases](/docs/watcher-releases#release-config-fields).
+
+## “Connection error” or “Request timed out” [#connection-error-or-request-timed-out]
+
+The watcher cannot reach the Data Hub API. Check:
+
+- Network connectivity from the instrument PC
+- Environment in config (`staging`, `production`, or `preview`): `data-hub-watcher config show`
+- That the API base URL for that environment is reachable
+
+## Files are not being detected
+
+- Confirm the watch directory and file patterns. The instrument’s page in the web app shows both, or run `data-hub-watcher config show` on the PC
+- Check that the instrument saves its files into that folder, not a shared network drive or another folder
+- Check file patterns. Globs are case-sensitive on some systems (`*.csv` does not match `data.CSV`)
+- If files live in subfolders, set run detection to recursive; see [Configure run detection and uploads](/docs/configure-run-detection)
+- Run `data-hub-watcher watch --dry-run` to preview matches
+- Look for `pattern_mismatch` events on the dashboard
+
+## Files are detected but not uploading
+
+- In **manual** mode, files wait for approval in the upload queue; see [Manage the watcher fleet](/docs/manage-watchers#approving-manual-uploads)
+- Check the log for `upload_failed`
+- A revoked or expired token surfaces as `401 Unauthorized`. Create a new token and re-run `init`; see [Issue and revoke tokens](/docs/manage-tokens#after-revoking-a-token)
+
+### A requested upload stays on Uploading
+
+On an instrument in **auto** mode, **Request upload** needs watcher 1.2.1 or later. Older watchers in auto mode never read the upload queue, so the file shows **Uploading** and never arrives. Update the watcher; see [Roll out watcher releases](/docs/watcher-releases#what-each-version-adds).
+
+### Files larger than 5 GB don’t upload
+
+Watchers older than 1.2.0 can’t upload files larger than 5 GB, and Data Hub refuses the upload instead of letting it fail partway. Update the watcher to 1.2.0 or later, which uploads large files in parts.
+
+### An upload was cut off by a restart or an update
+
+Watcher 1.2.1 and later retry an automatic upload that didn’t finish the next time the watcher starts, on up to three starts. Two events tell you when it stops trying:
+
+- `upload_retries_exhausted`: the upload still failed after three starts. Choose **Upload** on the file’s run page to try again.
+- `pending_upload_missing`: the file was no longer on disk when the watcher started, so there was nothing to retry.
+
+Older watchers don’t retry; use **Upload** on the run page instead.
+
+### Files with the same name were skipped [#files-with-the-same-name-were-skipped]
+
+When a run gathers files from several folders, watchers older than 1.1.0 uploaded only the first file with a given name and skipped the rest. Watcher 1.1.0 and later keep every copy, adding a short tag to later names. To upload files an older watcher skipped:
+
+<Steps>
+
+<Step>
+Update the watcher to 1.1.0 or later.
+</Step>
+
+<Step>
+Stop the watcher (`data-hub-watcher service stop`, or `Ctrl+C` in the foreground).
+</Step>
+
+<Step>
+Run `data-hub-watcher state forget --prefix your_folder_name/` on the instrument PC, where `your_folder_name/` is the folder under the watch directory that held the skipped files.
+</Step>
+
+<Step>
+Start the watcher again. It reports the files in that folder again and uploads the ones Data Hub doesn’t have.
+</Step>
+
+</Steps>
+
+## Auto-update never fires
+
+Check, in order:
+
+- Prefer a long-running service (or scheduled) install; a one-off console session may not stay up for the hourly tick
+- Environment is not `preview`: auto-update is hard-disabled there
+- Activity-window guard is not holding it up: run `data-hub-watcher self-update`, or ask an admin to flag the release **mandatory**
+- **Last Heartbeat** on the dashboard is recent; a stale watcher is not ticking
+
+Upgrade failure modes (`update_started` → `update_failed`, editable installs, missing Scheduled Task) are covered in [Install and update the watcher](/docs/install-the-watcher#manual-update-self-update) and [Roll out watcher releases](/docs/watcher-releases).
+
+## Windows service
+
+### The service exits immediately
+
+If it stops before writing to `watcher.log`:
+
+- Check `C:\ProgramData\DataHubWatcher\service-bootstrap.log` for a pre-dispatcher crash (missing `pywin32`, moved venv, corrupt install)
+- Query the Windows Application event log:
+
+```powershell
+Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddHours(-1)} |
+  Where-Object { $_.ProviderName -match 'Python|DataHubWatcher' -or $_.Message -match 'DataHubWatcher' } |
+  Format-List TimeCreated, ProviderName, Id, LevelDisplayName, Message
+```
+
+- Run the service in the foreground to see the traceback:
+
+```powershell
+& "C:\path\to\venv\Scripts\python.exe" -m win32serviceutil debug DataHubWatcher
+```
+
+### `self-update` says “Upgrade dispatched” but nothing happens
+
+On Windows uv-tool installs, the upgrade runs out of process under SYSTEM and takes 30–60s. Track it:
+
+```powershell
+Get-Service data-hub-watcher
+Get-Content ~/.data-hub/upgrade-worker.log -Tail 20 -Wait
+```
+
+### Turn on debug logging for the service
+
+Add `DATA_HUB_WATCHER_LOG_LEVEL=DEBUG` to the env file the service loads (typically `~/.data-hub/.env.<environment>`) and restart the service. No reinstall needed.
+
+## Where are the logs?
+
+Rotating logs (10 MB each, 5 backups). CLI `watch` and the Windows service share one file:
+
+| Platform | Log file |
+| --- | --- |
+| Windows | `C:\ProgramData\DataHubWatcher\watcher.log` |
+| macOS / Linux | `~/.data-hub/watcher.log` |
+
+Add `--verbose` for debug console output: `data-hub-watcher --verbose watch`. Windows uv-tool upgrade output lands in `~/.data-hub/upgrade-worker.log`.
+
+## API clients get `401 Unauthorized`
+
+The bearer token is missing, mistyped, revoked, or expired. Check **Settings → Access Tokens** and re-issue if needed. See [Issue and revoke tokens](/docs/manage-tokens).
+
+A script that calls the watcher or processing routes with a browser session, instead of a token, also gets `401`. Those routes accept only personal access tokens; see [How a token acts](/docs/manage-tokens#how-a-token-acts).
+
+## MCP clients get `401 Unauthorized`
+
+MCP doesn’t accept personal access tokens, so a client configured with `Authorization: Bearer dhub_…` gets a 401 on every call. Remove the header, leave only the URL, and let the client run its sign-in flow. Setup per client is in [MCP overview](/docs/mcp#connect-a-client).
+
+An already-connected client that starts failing has usually lost its grant: sign in again from the client. If reads work and one tool fails with a missing-scope message, the client holds `read` but not `write`; reconnect and approve both.
+
+## Ask an agent to diagnose it
+
+Use the `troubleshoot_instrument` MCP prompt under [MCP prompts](/docs/mcp/prompts).

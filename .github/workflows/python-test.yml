@@ -10,6 +10,7 @@ on:
       - lambda/**
       - packages/**
       - watcher/**
+      - docs/site/src/lib/cli-catalog.snapshot.json
       - pyproject.toml
       - uv.lock
       - Makefile
@@ -22,6 +23,7 @@ on:
       - lambda/**
       - packages/**
       - watcher/**
+      - docs/site/src/lib/cli-catalog.snapshot.json
       - pyproject.toml
       - uv.lock
       - Makefile
@@ -71,3 +73,16 @@ jobs:
 
       - name: Run all Python tests
         run: make py-test
+
+      # The docs site renders its watcher CLI reference from a committed
+      # snapshot. Regenerate it and fail if the committed copy differs (or is
+      # missing).
+      - name: Check docs watcher CLI snapshot is current
+        run: |
+          make py-watcher-cli-catalog
+          snapshot=docs/site/src/lib/cli-catalog.snapshot.json
+          if [ -n "$(git status --porcelain -- $snapshot)" ]; then
+            echo "::error::The docs watcher CLI snapshot is out of date. Run 'make py-watcher-cli-catalog' and commit the result."
+            git --no-pager diff --stat -- $snapshot
+            exit 1
+          fi

@@ -1,0 +1,57 @@
+name: Docs lint, typecheck, and link check
+
+on:
+  push:
+    branches:
+      - staging
+      - production
+    paths:
+      - .github/workflows/docs-lint.yml
+      - docs/**
+      - web/lib/docs.ts
+      - web/content/changelog/**
+      - web/microfrontends.json
+      - Makefile
+  pull_request:
+    branches:
+      - staging
+      - production
+    paths:
+      - .github/workflows/docs-lint.yml
+      - docs/**
+      - web/lib/docs.ts
+      - web/content/changelog/**
+      - web/microfrontends.json
+      - Makefile
+
+jobs:
+  docs-lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docs/site
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install packages
+        run: npm ci
+
+      # `ultracite check` runs Biome's combined formatter + linter check
+      # (read-only).
+      - name: Lint and format check
+        run: npm run lint:check
+
+      # Also fails on bad MDX (frontmatter, unclosed components), because
+      # `fumadocs-mdx` regenerates page types from `content/docs/`.
+      - name: Type check
+        run: npm run typecheck
+
+      # Checks the docs links that cross folders: page names in
+      # web/lib/docs.ts, `docs:` links in changelog entries, GitHub links from
+      # the site to docs/developer, and relative links in docs/developer.
+      - name: Check links
+        run: npm run check:links

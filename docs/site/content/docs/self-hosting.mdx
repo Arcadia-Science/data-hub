@@ -1,0 +1,98 @@
+---
+title: Deploy Data Hub
+description: What deploying Data Hub involves, what you need before you start, and where the step-by-step runbooks live.
+contentType: Landing
+---
+
+<Audience>Engineers</Audience>
+
+Data Hub is self-hosted, so nobody can sign in or install a watcher until your team has stood up the backend. This page is orientation only: what gets deployed, what access you need, and in what order. It doesn’t walk through the commands.
+
+<Callout type="warn">
+For the actual deploy instructions, open [First-time deployment](https://github.com/Arcadia-Science/data-hub/blob/production/docs/developer/first-time-deployment.md) in the data-hub repository. That guide has every command, env var, and checklist. Read this page first if you want the map before you start.
+</Callout>
+
+## What you’ll deploy [#what-youll-deploy]
+
+Three pieces, each on infrastructure you choose:
+
+| Piece | What it does | Where it runs |
+| --- | --- | --- |
+| PostgreSQL database | Stores instruments, runs, files, watchers, and tokens | Any PostgreSQL host, managed or self-run |
+| Web app | Serves the dashboard, the REST API, and the MCP endpoint | Vercel |
+| Storage and processing | S3 buckets for raw, processed, and archived files, plus the Lambda that processes uploads | AWS, deployed with AWS SAM |
+
+You’ll also create a Google OAuth client, which is what actually controls who can reach your deployment. Data Hub has no invite flow and no email allowlist of its own, so that client’s setting is the whole access policy. Decide it deliberately and read [Who can sign in](/docs/security#who-can-sign-in) first.
+
+Give `staging` and `production` separate databases and separate AWS stacks. They’re independent deployments holding independent data.
+
+## Access you need before you start [#access-you-need-before-you-start]
+
+The deploy stalls without all four, so confirm them up front:
+
+- **Admin-level AWS credentials.** The first deploy creates the stack, which the automated deploy role can’t do. It can only update a stack that already exists
+- **Vercel project access**, including permission to set environment variables for the environment
+- **Google Cloud Console access** to create the OAuth client
+- **GitHub repository settings access**, to store the secrets that let continuous integration handle every deploy after this one
+
+You’ll also need the AWS CLI and the AWS SAM CLI installed locally.
+
+## How the deploy is sequenced [#how-the-deploy-is-sequenced]
+
+The web app and the AWS stack each need something the other produces, so the order matters. This is the sequence only; [First-time deployment](https://github.com/Arcadia-Science/data-hub/blob/production/docs/developer/first-time-deployment.md) has the commands for each step:
+
+<Steps>
+
+<Step>
+**Create the database** and keep its connection string. Make sure the host accepts connections from Vercel and from your continuous integration runners.
+</Step>
+
+<Step>
+**Deploy the web app**, set its environment variables, apply the database migrations, then sign in and create the access token the Lambda will use.
+</Step>
+
+<Step>
+**Bootstrap AWS resources**, once per AWS account rather than once per environment. This creates the shared resources both environments draw on.
+</Step>
+
+<Step>
+**Deploy the AWS stack** for this environment, using the web app’s URL and that token.
+</Step>
+
+<Step>
+**Wire the AWS outputs back into the web app**, then redeploy so it picks them up.
+</Step>
+
+</Steps>
+
+Expect the web app to deploy cleanly at step 2 and still not work. Anything touching files, uploads, reprocessing, and run archives stays broken until step 5 connects it to AWS. A green deployment is not the finish line.
+
+## Things that catch people out [#things-that-catch-people-out]
+
+These failures account for most lost time on a first deploy:
+
+- **Set `ADMIN_EMAILS` before you sign in for the first time.** It’s what promotes the first admin. Sign in before setting it and you get an account with no permission to create tokens or confirm instruments
+- **Point `BETTER_AUTH_URL` at this deployment’s own public origin.** Data Hub builds the Google callback URL from it, so a value copied from another environment sends people to that other host and sign-in fails. AI clients read the same value when they sign in over MCP, so a wrong one breaks them too
+- **Google sign-in on Vercel preview deployments needs `OAUTH_PROXY_URL` and `OAUTH_PROXY_SECRET`.** Google matches each redirect URI exactly and every preview gets a new URL, so previews route the callback through one stable deployment whose URI is registered. Production registers its own and leaves both variables unset
+- **Create the Lambda’s token from the Lambda preset.** The Lambda checks an instrument’s type before choosing a processor, so without `instruments:read` every upload fails on a permission error rather than an obvious misconfiguration. DishCam processing also reads the run’s file list, so it fails without `runs:read`. The **Lambda** preset includes both
+- **Set `ENABLE_S3_FILES` to `true` or `false` for the AWS stack.** An empty value fails the deploy. Use `false` unless you want the Lambda to read very large files from a mounted copy of the raw bucket, which needs a VPC and costs extra; the runbook covers turning it on later
+- **Bootstrapping fails if the AWS account already has a GitHub identity provider** from an unrelated project. Reuse the existing one instead of creating a second
+- **Set `INTEGRATION_SECRETS_KEY` before an admin saves Slack or Linear secrets.** Data Hub encrypts those secrets with it, and saving fails without it. Generate one with `openssl rand -hex 32`
+- **The Slack channel webhook and the Linear connection aren’t environment variables.** A workspace admin sets them under **Settings → Integrations** after the deploy; see [Set up integrations](/docs/integrations). The Slack app credentials for direct messages can be either environment variables or saved there. Feedback stays turned off until an admin connects Linear
+
+## What finished looks like [#what-finished-looks-like]
+
+Operators can install watchers and instruments start uploading. Hand them [Set up an instrument](/docs/set-up-an-instrument), and create their first tokens through [Issue and revoke tokens](/docs/manage-tokens). To turn on feedback reports and Slack messages, an admin then follows [Set up integrations](/docs/integrations).
+
+From then on, deploys are automatic. Merges deploy the web app, apply migrations, and ship the Lambda, so this manual sequence runs once per environment.
+
+## The runbooks [#the-runbooks]
+
+The deploy commands live next to the code in the data-hub repository. Start with [First-time deployment](https://github.com/Arcadia-Science/data-hub/blob/production/docs/developer/first-time-deployment.md):
+
+- [First-time deployment](https://github.com/Arcadia-Science/data-hub/blob/production/docs/developer/first-time-deployment.md): the full sequence above, with every command
+- [Continuous integration and deployment](https://github.com/Arcadia-Science/data-hub/blob/production/docs/developer/ci-and-deployment.md): how later deploys, migrations, and watcher releases happen
+- [Local development](https://github.com/Arcadia-Science/data-hub/blob/production/docs/developer/local-development.md): run the app on a laptop, including a setup that needs no AWS or Google credentials
+- [Architecture for contributors](https://github.com/Arcadia-Science/data-hub/blob/production/docs/developer/architecture.md): internals
+
+For a product-level map of the components and how data moves between them, rather than deploy steps, see [Architecture](/docs/architecture).

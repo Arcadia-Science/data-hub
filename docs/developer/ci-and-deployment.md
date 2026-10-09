@@ -2,7 +2,7 @@
 
 ## GitHub Actions
 
-Four workflows run on pushes to `staging`/`production` and on pull requests targeting those branches. A fifth (`apply-migrations.yml`) runs on merges to `staging`/`production` that touch migration files, and a sixth (`publish-watcher.yml`) runs only on `watcher-v*` tag pushes and manual dispatch.
+Five workflows run on pushes to `staging`/`production` and on pull requests targeting those branches. A sixth (`apply-migrations.yml`) runs on merges to `staging`/`production` that touch migration files, and a seventh (`publish-watcher.yml`) runs only on `watcher-v*` tag pushes and manual dispatch.
 
 ### Python lint and typecheck (`python-lint.yml`)
 
@@ -15,12 +15,23 @@ Four workflows run on pushes to `staging`/`production` and on pull requests targ
 - Starts a Postgres 17 service container.
 - Installs both Node.js 24 and Python packages.
 - `make py-test` — runs all pytest tests (unit and integration). Integration tests build and start a real Next.js production server, seed a test database, and exercise the Lambda and watcher against the live API.
+- `make py-watcher-cli-catalog`, then fails if `docs/site/src/lib/cli-catalog.snapshot.json` changed. The docs site renders its watcher CLI reference from that committed file, so a change to the CLI or a watcher version bump has to commit the regenerated snapshot.
 
 ### TypeScript lint and typecheck (`typescript-lint.yml`)
 
 1. Install dependencies with `npm ci`.
 2. `npm run lint:check` — Biome (via Ultracite), combined formatter + linter check.
 3. `npm run typecheck` — TypeScript compiler.
+4. `npm run openapi:generate` and `npm run mcp-catalog:generate`, then fails if `docs/site/src/lib/openapi.snapshot.json` or `mcp-catalog.snapshot.json` changed. The docs site renders its API and MCP reference pages from those committed files. Run `make docs-catalogs` and commit the result to fix a failure.
+
+### Docs lint, typecheck, and link check (`docs-lint.yml`)
+
+Runs when `docs/**`, `web/lib/docs.ts`, `web/content/changelog/**`, or `web/microfrontends.json` changes. It works in `docs/site` with Node.js 24:
+
+1. Install dependencies with `npm ci`.
+2. `npm run lint:check` — Biome (via Ultracite), combined formatter + linter check.
+3. `npm run typecheck` — generates page types (which also fails on bad MDX) and runs the TypeScript compiler.
+4. `npm run check:links` — checks that the page names in `web/lib/docs.ts`, the `docs:` links in changelog entries, the GitHub links from the site to `docs/developer`, and the relative links inside `docs/developer` all point at something that exists. It does not check `#heading` anchors.
 
 ### TypeScript tests (`typescript-test.yml`)
 
@@ -69,6 +80,25 @@ Environment variables are managed in the Vercel dashboard and can be pulled loca
 cd web
 vercel env pull
 ```
+
+When a push changes only files under `docs/`, the web project skips its build. `web/vercel.json` sets `ignoreCommand` to `web/scripts/vercel-ignore-build.sh`, which compares the pushed commit with the last successful deployment and builds whenever any file outside `docs/` changed.
+
+### Docs site
+
+The docs site in `docs/site/` is its own Vercel project (`data-hub-docs`), separate from the web app. It is served at `/docs` on the web app's domain through [Vercel Microfrontends](https://vercel.com/docs/microfrontends). Both apps read the same routing config, `web/microfrontends.json`.
+
+The project's settings:
+
+| Setting | Value |
+| --- | --- |
+| Git repository | `Arcadia-Science/data-hub` |
+| Root Directory | `docs/site` |
+| Production branch | `production` |
+| Include source files outside of the Root Directory in the Build Step | On (the build reads `web/microfrontends.json`) |
+
+Production deploys when `staging` is promoted to `production`, at the same moment as the web app changes the docs describe. Every other branch and pull request gets a preview deployment. `docs/site/vercel.json` sets `ignoreCommand` to `docs/site/scripts/vercel-ignore-build.sh`, which skips the build when nothing under `docs/site/` or `web/microfrontends.json` changed since the last successful deployment. Changes to `docs/developer/` never rebuild the site, because the site does not render them.
+
+The docs build needs no network. The API, MCP, and watcher CLI reference pages render from the three snapshot files in `docs/site/src/lib/`, which CI keeps in sync with the code (see the TypeScript lint and Python tests workflows above).
 
 ### Database (PostgreSQL)
 

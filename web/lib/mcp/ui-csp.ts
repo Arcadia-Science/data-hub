@@ -26,7 +26,7 @@ function warnMissingBucket(envVar: string): void {
   }
   warnedEnvVars.add(envVar);
   console.warn(
-    `${envVar} is not set, so the MCP run report View is not allowed to load files from that bucket. See developer-docs/mcp-apps.md#content-security-policy.`
+    `${envVar} is not set, so the MCP run report View is not allowed to load files from that bucket. See docs/developer/mcp-apps.md#content-security-policy.`
   );
 }
 

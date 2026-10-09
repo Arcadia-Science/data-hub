@@ -1,0 +1,63 @@
+---
+title: Manage instruments
+description: Confirm pending instruments, read an instrument’s watcher status, watched folder, and file patterns, and edit its name and type.
+contentType: How-to
+---
+
+<Audience>Administrators</Audience>
+
+When a lab operator registers an instrument from the watcher, it appears as `pending` and cannot upload until you confirm it. Operator-side setup is in [Set up an instrument](/docs/set-up-an-instrument). Retiring and reactivating are in [Retire an instrument](/docs/retire-an-instrument).
+
+## Instrument states [#instrument-states]
+
+The **Instruments** page has tabs for active, pending, and retired instruments.
+
+| Status | UI label | Meaning |
+| --- | --- | --- |
+| `pending` | Pending | Registered but not confirmed. Watchers cannot upload. |
+| `active` | Active | Confirmed and accepting uploads. |
+| `inactive` | Retired | Deactivated; no new uploads. Historical runs stay browsable. |
+
+![Instruments page with Active, Pending, and Retired tabs](/images/instruments-table.png)
+
+## Confirm a pending instrument [#confirm-a-pending-instrument]
+
+<Steps>
+
+<Step>
+Open the Data Hub web app and go to **Instruments**.
+</Step>
+
+<Step>
+Open the **Pending** tab (or find the yellow `pending` badge).
+</Step>
+
+<Step>
+Click **Confirm**. Status becomes `active` and the operator’s watcher can upload.
+</Step>
+
+</Steps>
+
+Confirming is admin-only for signed-in users. Under the hood it is `PATCH /api/v1/instruments/:id`. Token automation uses the `instruments:write` scope instead. See the [generated API docs](/docs/api).
+
+## Read an instrument’s page [#view-instrument-health]
+
+The top of each instrument page shows what you need to tell whether its files will reach Data Hub:
+
+- **Watcher status**: a badge next to the instrument name. **Online** means the watcher checked in recently, **Offline** means it hasn’t, and **No Watcher** means none has registered. The watcher checks in once a minute, so a watcher that was just restarted can take up to a minute to show as online. Hover over the badge for details.
+- **Watched folder**: the folder the watcher reads from. Hover over it to see which PC it is on.
+- **File patterns**: the patterns the watcher uploads, such as `*.csv`.
+
+Files saved anywhere other than the watched folder, such as a shared network drive, don’t appear in Data Hub. Neither do files whose names don’t match a pattern. The folder and patterns come from the watcher’s config on the instrument PC, so change them there with `data-hub-watcher config edit`; see [Watcher configuration](/docs/configuration-reference).
+
+Watcher health comes from heartbeats; see [Manage the watcher fleet](/docs/manage-watchers).
+
+## Edit an instrument [#edit-an-instrument]
+
+The three-dot menu on an instrument page, and the row menu on the instruments table, hold the admin actions:
+
+- **Edit details**: change the **Display name** and the **Instrument type**
+- **View watcher**: open the watcher registered for this instrument
+- **Retire** or **Reactivate**: see [Retire an instrument](/docs/retire-an-instrument)
+
+The instrument type decides which processor reads the instrument’s files, including DishCam and Aunty; see [Instrument data preprocessing](/docs/instrument-preprocessing). The instrument ID never changes, because it is the storage key prefix.

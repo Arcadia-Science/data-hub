@@ -1,0 +1,97 @@
+---
+title: Overview
+description: Authenticate to the Data Hub REST API, make a first request, and understand pagination, filtering, token attribution, and errors.
+contentType: Reference
+---
+
+<Audience>Developers and integrators</Audience>
+
+The Data Hub API is served by the web application at `/api/v1/`. The watcher, Lambda, and dashboard all call it. Data Hub is self-hosted, so the base URL is your deployment host plus `/api/v1`. Examples use `https://datahub.example.com`; substitute your host.
+
+Per-endpoint request and response shapes live in the generated pages under this section (same sidebar). Each deployment also publishes OpenAPI 3.1 at `/api/v1/openapi.json`.
+
+## Authentication [#authentication]
+
+Two methods (full model in [Security and permissions](/docs/security)):
+
+- **Session cookies**: web dashboard (Google OAuth). Session callers implicitly hold every scope.
+- **Bearer tokens**: `Authorization: Bearer dhub_…` for the watcher, the Lambda, and scripts
+
+```sh
+curl https://datahub.example.com/api/v1/instruments \
+  -H "Authorization: Bearer dhub_your_token_here"
+```
+
+Every token request needs a [scope](/docs/security#token-scopes). A missing scope returns `403 FORBIDDEN`. Some mutations also require the admin role; see [Admin-gated operations](/docs/security#admin-gated-operations).
+
+Some routes accept only one of the two methods:
+
+- The routes the watcher and the Lambda call accept only tokens, and return `401 UNAUTHORIZED` to a session. These cover watcher registration and heartbeats, upload links, file updates, run creation and updates, and instrument creation.
+- Claiming runs, sending feedback, reviewing feedback, and managing tokens need a signed-in person, so tokens can’t call them.
+
+Mint tokens in the UI: [Issue and revoke tokens](/docs/manage-tokens).
+
+## First request [#first-request]
+
+List instruments:
+
+```sh
+curl https://datahub.example.com/api/v1/instruments \
+  -H "Authorization: Bearer dhub_your_token_here"
+```
+
+Fetch the OpenAPI document (no auth required):
+
+```sh
+curl https://datahub.example.com/api/v1/openapi.json
+```
+
+The document covers the integrator surface: instruments, runs, comments, files, watchers, archive jobs, search, and `POST /notifications/dispatch`. Routes that only the dashboard uses are left out: `/tokens`, `/users`, `/feedback`, `/settings/*`, and the notification inbox. The MCP transport is documented separately.
+
+## Actions taken by a token [#actions-taken-by-a-token]
+
+A token acts under its own name, not as a person, so responses name the token when it did something:
+
+- A comment posted by a token has `user: null` and a `token` object with the token’s `id` and `name`. A comment posted by a person has `token: null`.
+- A run deleted by a token has `deleted_by_token` set, alongside `deleted_at`.
+
+Read both fields when you display who did something. See [How a token acts](/docs/manage-tokens#how-a-token-acts).
+
+## Send notifications [#send-notifications]
+
+`POST /notifications/dispatch` sends a short message to chosen people, with an optional link to a run. It needs a token with the `notifications:create` scope. Each person’s **Service notifications** setting decides whether the message appears in the notification bell, as a Slack direct message, or both. The message shows the token’s name as its sender. Request fields are on the generated [dispatch notifications](/docs/api/notifications/dispatchNotifications) page.
+
+## Pagination and filtering [#pagination-and-filtering]
+
+List endpoints that return pages (notably run search) accept:
+
+- `page`: 1-based page index
+- `per_page`: page size, 1 to 100
+
+Responses include pagination metadata such as `page`, `per_page`, `total`, and `total_pages`.
+
+Run report items page by index instead, with `offset` and `limit` (max 200). Their responses return `offset`, `limit`, and `total`.
+
+Run search also supports filters (instrument, date range, attribution via `ranBy`, and instrument-specific metadata). Exact query parameters are on each generated operation page in the sidebar under this **API** section.
+
+## Error responses [#error-responses]
+
+Errors use a nested envelope:
+
+```json
+{
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "Instrument not found.",
+    "details": null
+  }
+}
+```
+
+Common codes: `VALIDATION_ERROR` (400), `UNAUTHORIZED` (401), `FORBIDDEN` (403), `NOT_FOUND` (404), `CONFLICT` (409). Scope failures use `code: "FORBIDDEN"` with a message naming the missing scope.
+
+Feedback routes have two more. `LINEAR_UNAVAILABLE` (502) means Data Hub couldn’t reach Linear, where reports are stored. `FEEDBACK_NOT_CONFIGURED` (503) means no admin has connected Linear yet; see [Set up integrations](/docs/integrations#linear).
+
+## MCP [#mcp]
+
+`GET` and `POST` `/mcp/v1` expose the MCP server over Streamable HTTP, outside the `/api/v1` tree. Clients authenticate with OAuth rather than a personal access token, and hold `read` to connect plus `write` to call any tool that changes data. See [MCP overview](/docs/mcp).

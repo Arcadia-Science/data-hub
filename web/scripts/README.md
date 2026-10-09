@@ -108,3 +108,18 @@ DATABASE_URL='<remote-url>' npm run db:clear-runs -- --confirm --clear-watcher-a
   (see [Local-only safety gate](#local-only-safety-gate)).
 - `process-fixtures.ts` — shared lambda probe/spawn logic imported by
   `seed-database.ts` and `process-seeded-fixtures.ts`.
+
+## `generate-openapi.ts` and `generate-mcp-catalog.ts`
+
+Write the OpenAPI document and the MCP catalog into `docs/site/src/lib/` as
+`openapi.snapshot.json` and `mcp-catalog.snapshot.json`. The docs site renders
+its API and MCP reference pages from those committed files, and CI fails when
+they are out of date. Run `make docs-catalogs` from the repository root after
+changing the REST API or the MCP tools, prompts, or resources. These two
+scripts do not need `DATABASE_URL`.
+
+## `vercel-ignore-build.sh`
+
+The Ignored Build Step for the web app's Vercel project (see `vercel.json`).
+It skips the build when the only files changed since the last deployment are
+under `docs/`, which has its own Vercel project.

@@ -1,10 +1,11 @@
 """Build a machine-readable catalog of the watcher Click CLI.
 
 The docs site renders its CLI reference from a committed snapshot of this
-catalog, so help text and flags come straight from ``cli.py`` instead of
-hand-maintained MDX tables. The tests here are smoke checks on the walker; they
-don't guard the docs snapshot from going stale, since that copy lives in the
-data-hub-docs repo and is refreshed manually via ``make py-watcher-cli-catalog``.
+catalog (``docs/site/src/lib/cli-catalog.snapshot.json``), so help text and
+flags come straight from ``cli.py`` instead of hand-maintained MDX tables.
+Refresh the snapshot with ``make py-watcher-cli-catalog``. The tests here are
+smoke checks on the walker; the Python test workflow regenerates the snapshot
+and fails when the committed copy is out of date.
 """
 
 from __future__ import annotations
@@ -21,8 +22,15 @@ from data_hub_watcher.constants import WATCHER_VERSION
 PROG = "data-hub-watcher"
 CATALOG_VERSION = "1"
 
-# Default on-disk location next to the watcher package root (repo checkout).
-DEFAULT_SNAPSHOT_PATH = Path(__file__).resolve().parents[2] / "cli-catalog.snapshot.json"
+# Default on-disk location of the docs site snapshot (repo checkout).
+DEFAULT_SNAPSHOT_PATH = (
+    Path(__file__).resolve().parents[3]
+    / "docs"
+    / "site"
+    / "src"
+    / "lib"
+    / "cli-catalog.snapshot.json"
+)
 
 
 def _is_unset(value: Any) -> bool:

@@ -1,0 +1,61 @@
+---
+title: Configure notifications
+description: Choose in-app and Slack notifications for new runs, comments, service messages, and feedback, including per-instrument subscriptions and personal Slack direct messages.
+contentType: How-to
+---
+
+<Audience>Everyone</Audience>
+
+Data Hub can notify you in the app and in Slack when new runs arrive, when someone comments on a run you care about, when a script sends you a message, and when feedback you sent is closed. Open **Settings → Notifications** while signed in. Everything on that page is a personal choice that affects only you.
+
+![Settings Notifications page with in-app preferences and the notification bell](/images/notifications.png)
+
+Connections that the whole workspace shares, such as the Slack channel for new runs and the Slack app behind direct messages, are under **Settings → Integrations** and only admins can change them. See [Set up integrations](/docs/integrations).
+
+In-app and Slack preferences are independent: you can turn on either channel for a type without turning on the other.
+
+## In-app preferences [#in-app-preferences]
+
+| Setting | Effect |
+| --- | --- |
+| **Mute all instrument notifications** | Suppresses new-run notifications for every instrument. Per-instrument choices are preserved and resume when you unmute. |
+| **Comments on runs you ran** | Notify when someone comments on a run you are attributed to. |
+| **Replies to your comments** | Notify when someone comments on a run you previously commented on. |
+| **Service notifications** | Show messages that integrations and scripts send you through the API. |
+| **Updates on your feedback** | Notify when a [feedback report](/docs/send-feedback) you sent is resolved or declined. |
+| **New feedback** | Admins only. Notify when someone sends feedback about Data Hub. |
+
+### Per-instrument subscriptions [#per-instrument-subscriptions]
+
+Under **Per-instrument**, toggle the instruments you want new-run notifications for. Rows are disabled while **Mute all** is on. You can also subscribe from the notifications switch on an instrument’s page, or from the instruments table’s notifications column when that column is shown.
+
+## The notification bell [#notification-bell]
+
+The bell icon in the app lists recent notifications:
+
+- New runs are grouped by day and instrument, and each group expands to show its runs.
+- Clicking a comment notification opens the run and scrolls to that comment.
+- Messages sent by a script through an API token show the token’s name with a key icon.
+
+## Slack direct messages [#slack-direct-messages]
+
+Connect your Slack account on the same settings page to receive matching events as personal direct messages. After connecting, choose which types also go to Slack:
+
+- New instrument runs (respects your instrument subscriptions and mute)
+- Comments on runs you ran
+- Replies to your comments
+- Service notifications
+- Updates on your feedback
+- New feedback (admins only)
+
+Disconnect or reconnect from the same card. You have to connect with your organization’s Slack workspace; Data Hub rejects any other workspace.
+
+If **Connect to Slack** is missing or doesn’t finish, an admin hasn’t set up the Slack app yet. See [Slack app for direct messages](/docs/integrations#slack-app).
+
+## Workspace Slack channel [#workspace-slack-channel-admins]
+
+The shared Slack channel that gets a message whenever a new run is created is set by admins under **Settings → Integrations**. See [Slack channel for new runs](/docs/integrations#slack-channel).
+
+## Set up the Slack app for personal DMs [#set-up-the-slack-app-for-personal-dms]
+
+The Slack app setup, including scopes, redirect URLs, and where to enter its credentials, is in [Slack app for direct messages](/docs/integrations#slack-app).

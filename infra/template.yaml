@@ -1138,7 +1138,7 @@ Resources:
                   - iam:TagRole
                   # CreateRole, AttachRolePolicy, DetachRolePolicy, and DeleteRole
                   # are admin-only: with them, a staging merge could escalate this
-                  # role to AdministratorAccess (developer-docs/ci-and-deployment.md).
+                  # role to AdministratorAccess (docs/developer/ci-and-deployment.md).
                 Resource:
                   - !Sub "arn:aws:iam::${AWS::AccountId}:role/data-hub-*-${Environment}"
               # Lets CloudFormation re-assert the boundary when it updates a role.

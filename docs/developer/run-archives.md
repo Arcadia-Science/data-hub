@@ -29,7 +29,7 @@ Every cache miss goes async, regardless of archive size. The route does the chea
 
 ## S3 layout
 
-Archives live in a separate bucket per environment, provisioned by [`infra/template.yaml`](../infra/template.yaml):
+Archives live in a separate bucket per environment, provisioned by [`infra/template.yaml`](../../infra/template.yaml):
 
 - **Bucket:** `arcadia-data-hub-archives-{staging,production}`.
 - **Public access:** fully blocked. Reads happen exclusively via short-lived presigned GET URLs; writes happen exclusively from the Lambda execution role.

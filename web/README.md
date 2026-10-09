@@ -98,7 +98,7 @@ Run `npm run precommit` locally before pushing to catch the same issues earlier.
 
 ## Deployment
 
-Data Hub is self-hosted. See the [First-time deployment guide](../developer-docs/first-time-deployment.md) for standing up an environment and [CI and deployment](../developer-docs/ci-and-deployment.md) for how deploys run.
+Data Hub is self-hosted. See the [First-time deployment guide](../docs/developer/first-time-deployment.md) for standing up an environment and [CI and deployment](../docs/developer/ci-and-deployment.md) for how deploys run.
 
 ### Web application
 

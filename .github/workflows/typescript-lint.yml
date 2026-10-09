@@ -8,6 +8,8 @@ on:
     paths:
       - .github/workflows/typescript-lint.yml
       - web/**
+      - docs/site/src/lib/mcp-catalog.snapshot.json
+      - docs/site/src/lib/openapi.snapshot.json
       - Makefile
   pull_request:
     branches:
@@ -16,6 +18,8 @@ on:
     paths:
       - .github/workflows/typescript-lint.yml
       - web/**
+      - docs/site/src/lib/mcp-catalog.snapshot.json
+      - docs/site/src/lib/openapi.snapshot.json
       - Makefile
 
 jobs:
@@ -41,3 +45,17 @@ jobs:
 
       - name: Type check
         run: npm run typecheck
+
+      # The docs site renders its API and MCP reference pages from committed
+      # snapshots of these two documents. Regenerate them and fail if the
+      # committed copies differ (or are missing).
+      - name: Check docs API and MCP snapshots are current
+        run: |
+          npm run openapi:generate
+          npm run mcp-catalog:generate
+          snapshots="../docs/site/src/lib/openapi.snapshot.json ../docs/site/src/lib/mcp-catalog.snapshot.json"
+          if [ -n "$(git status --porcelain -- $snapshots)" ]; then
+            echo "::error::The docs API or MCP snapshot is out of date. Run 'make docs-catalogs' and commit the result."
+            git --no-pager diff --stat -- $snapshots
+            exit 1
+          fi
