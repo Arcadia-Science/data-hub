@@ -6,6 +6,10 @@ const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|svg|tiff?)$/i;
 const PDF_EXTENSION = /\.pdf$/i;
 const CSV_EXTENSION = /\.csv$/i;
 const VIDEO_EXTENSION = /\.mp4$/i;
+const TSV_EXTENSION = /\.tsv$/i;
+const JSON_EXTENSION = /\.json$/i;
+const PLAIN_TEXT_EXTENSION = /\.(txt|log|ya?ml|md)$/i;
+const HTML_EXTENSION = /\.html?$/i;
 
 export function fileStem(filename: string): string {
   const dot = filename.lastIndexOf(".");
@@ -34,6 +38,48 @@ export function isVideoFile(file: RunFileIdentity): boolean {
     file.contentType?.startsWith("video/") === true ||
     VIDEO_EXTENSION.test(file.filename)
   );
+}
+
+export type FilePreviewKind = "csv" | "tsv" | "json" | "text";
+
+// Checks the extension before the stored content type because watcher uploads
+// are often stored as `binary/octet-stream` whatever the file holds.
+export function filePreviewKind(file: RunFileIdentity): FilePreviewKind | null {
+  // Drops parameters such as `; charset=utf-8` before comparing.
+  const contentType =
+    file.contentType?.split(";")[0].trim().toLowerCase() ?? null;
+  if (HTML_EXTENSION.test(file.filename) || contentType === "text/html") {
+    return null;
+  }
+  if (CSV_EXTENSION.test(file.filename)) {
+    return "csv";
+  }
+  if (TSV_EXTENSION.test(file.filename)) {
+    return "tsv";
+  }
+  if (JSON_EXTENSION.test(file.filename)) {
+    return "json";
+  }
+  if (PLAIN_TEXT_EXTENSION.test(file.filename)) {
+    return "text";
+  }
+  if (contentType === "text/csv") {
+    return "csv";
+  }
+  if (contentType === "text/tab-separated-values") {
+    return "tsv";
+  }
+  if (contentType === "application/json") {
+    return "json";
+  }
+  if (contentType?.startsWith("text/")) {
+    return "text";
+  }
+  return null;
+}
+
+export function isPreviewableFile(file: RunFileIdentity): boolean {
+  return filePreviewKind(file) !== null;
 }
 
 type PosterSourceFile = Pick<

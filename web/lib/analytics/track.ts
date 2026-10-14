@@ -17,6 +17,9 @@ export interface AnalyticsEvents {
   comment_deleted: SurfaceEvent;
   comment_edited: SurfaceEvent;
   file_downloaded: SurfaceEvent & { category: string };
+  // Sent from the browser, so it has no `user_id`. `kind` is csv, tsv, json,
+  // or text.
+  file_previewed: { category: string; kind: string };
   file_reprocessed: SurfaceEvent;
   mcp_connect: {
     user_id: string;

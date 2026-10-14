@@ -149,7 +149,7 @@ export function ColonyDataTable({ file }: { file: ColonyTableFile }) {
   );
 }
 
-function ColonyDataTableView({
+export function ColonyDataTableView({
   rows,
   page,
   onPageChange,
