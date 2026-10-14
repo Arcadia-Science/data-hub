@@ -28,6 +28,11 @@ export async function fetchFilePreviewBytes(
       signal,
     }
   );
+  // S3 and the local mirror answer a range request on a zero-byte file with
+  // 416, since no byte range of it exists.
+  if (res.status === 416) {
+    return new Uint8Array(0);
+  }
   if (!res.ok) {
     throw new Error(`Failed to load file (HTTP ${res.status})`);
   }
@@ -80,6 +85,11 @@ function buildContent(
         skip_empty_lines: true,
         trim: true,
       }) as FilePreviewRow[];
+      // A cut-off file whose first part holds no whole row would otherwise
+      // look empty.
+      if (truncated && rows.length === 0) {
+        return { kind: "text", text };
+      }
       return { kind: "table", rows };
     } catch {
       return { kind: "text", text };

@@ -84,6 +84,21 @@ describe("buildFilePreview", () => {
     expect(content).toEqual({ kind: "table", rows: [{ a: "1", b: "2" }] });
   });
 
+  it("shows a cut-off CSV with no whole row as text", () => {
+    const text = "a,b,c,d";
+    expect(buildFilePreview("csv", text, true).content).toEqual({
+      kind: "text",
+      text,
+    });
+  });
+
+  it("keeps an untruncated header-only CSV as an empty table", () => {
+    expect(buildFilePreview("csv", "a,b\n", false).content).toEqual({
+      kind: "table",
+      rows: [],
+    });
+  });
+
   it("pretty-prints valid JSON", () => {
     expect(buildFilePreview("json", '{"a":[1,2]}', false).content).toEqual({
       kind: "text",
@@ -153,5 +168,14 @@ describe("fetchFilePreviewBytes", () => {
       vi.fn().mockResolvedValue({ ok: false, status: 403 })
     );
     await expect(fetchFilePreviewBytes(7)).rejects.toThrow("HTTP 403");
+  });
+
+  it("treats 416 on a zero-byte file as empty", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 416 })
+    );
+    const bytes = await fetchFilePreviewBytes(7);
+    expect(bytes.length).toBe(0);
   });
 });
