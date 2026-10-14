@@ -6,28 +6,28 @@ repo: data-hub
 todos:
   - id: file-type-helper
     content: Add the previewable-file check and preview kind to web/lib/runs/run-file-types.ts, with unit tests
-    status: pending
+    status: completed
   - id: preview-loader
     content: Add web/lib/runs/file-preview.ts with the 1 MB ranged fetch, truncation, partial-row trimming, and parsing, with unit tests
-    status: pending
+    status: completed
   - id: export-table-view
     content: Export the paged CSV table view from colony-data-table.tsx so the dialog can reuse it
-    status: pending
+    status: completed
   - id: preview-dialog
     content: Build the preview dialog with Download and next/previous controls
-    status: pending
+    status: completed
   - id: table-wiring
     content: Add the eye icon to FileInfoCells and open the dialog from both the editable and read-only tables
-    status: pending
+    status: completed
   - id: analytics
     content: Add file_previewed to the analytics catalog and record it from the browser when a file is shown
-    status: pending
+    status: completed
   - id: changelog-docs
     content: Add a changelog entry, a line in browse-runs.mdx under Download files, and run make docs-catalogs
-    status: pending
+    status: completed
   - id: checks
     content: Run unit tests and make check, and check the dialog by hand against local seeded files
-    status: pending
+    status: completed
 ---
 
 ## Problem

@@ -1,6 +1,7 @@
 "use client";
 
-import { Download, Loader2, RotateCw, Upload, X } from "lucide-react";
+import { Download, Eye, Loader2, RotateCw, Upload, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,7 +27,9 @@ import type { RunFileRow } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
 import type { InstrumentType } from "@/lib/db/schema";
 import { canReprocessFile } from "@/lib/runs/reprocessable-statuses";
+import { filePreviewKind } from "@/lib/runs/run-file-types";
 import { cn, formatBytes } from "@/lib/utils";
+import { FilePreviewDialog, type PreviewableFile } from "./file-preview-dialog";
 import {
   FileSelectAllCheckbox,
   FileSelectCheckbox,
@@ -67,12 +70,74 @@ function FileColumnHeaders() {
   );
 }
 
-function FileInfoCells({ file }: { file: RunFileRow }) {
+function previewableFileOf(file: RunFileRow): PreviewableFile | null {
+  if (!DOWNLOADABLE_STATUSES.has(file.status)) {
+    return null;
+  }
+  const kind = filePreviewKind(file);
+  return kind
+    ? { category: file.category, filename: file.filename, id: file.id, kind }
+    : null;
+}
+
+// Shared by both table variants. Navigation covers only the files on the
+// current page, in table order.
+function useFilePreview(files: RunFileRow[]) {
+  const [openFileId, setOpenFileId] = useState<number | null>(null);
+  const previewable = useMemo(
+    () =>
+      files
+        .map(previewableFileOf)
+        .filter((f): f is PreviewableFile => f !== null),
+    [files]
+  );
+  const isOpenFileListed = previewable.some((f) => f.id === openFileId);
+
+  // Closes the dialog when its file leaves the page, e.g. it was dismissed in
+  // another tab and the auto-refresh dropped it.
+  useEffect(() => {
+    if (openFileId !== null && !isOpenFileListed) {
+      setOpenFileId(null);
+    }
+  }, [openFileId, isOpenFileListed]);
+
+  const dialog = (
+    <FilePreviewDialog
+      files={previewable}
+      onOpenChange={(open) => {
+        if (!open) {
+          setOpenFileId(null);
+        }
+      }}
+      onSelect={setOpenFileId}
+      openFileId={openFileId}
+    />
+  );
+  return { dialog, openPreview: setOpenFileId };
+}
+
+function FileInfoCells({
+  file,
+  onPreview,
+}: {
+  file: RunFileRow;
+  onPreview: (fileId: number) => void;
+}) {
   return (
     <>
       <TableCell className="py-2 font-mono text-sm">
         <span className="flex items-center gap-1.5">
           {file.filename}
+          {previewableFileOf(file) && (
+            <button
+              aria-label={`Preview ${file.filename}`}
+              className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+              onClick={() => onPreview(file.id)}
+              type="button"
+            >
+              <Eye className="size-4" />
+            </button>
+          )}
           {DOWNLOADABLE_STATUSES.has(file.status) && (
             <a
               className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
@@ -242,39 +307,43 @@ export function ReadOnlyRunFilesTable({
   isPending,
   onReprocess,
 }: ReadOnlyRunFilesTableProps) {
+  const { dialog, openPreview } = useFilePreview(files);
   return (
-    <Table>
-      <TableHeader>
-        <TableRow className="hover:bg-transparent">
-          <FileColumnHeaders />
-          <TableHead className="w-0" />
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {files.map((file) => {
-          const isDismissed = file.deletedAt !== null;
-          return (
-            <TableRow
-              className={`group ${isDismissed ? "opacity-50" : ""}`}
-              key={file.id}
-            >
-              <FileInfoCells file={file} />
-              <TableCell className="py-2 pr-3">
-                {canReprocessFile(file, instrumentType) ? (
-                  <div className="flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-                    <ReprocessAction
-                      file={file}
-                      isPending={isPending}
-                      onReprocess={onReprocess}
-                    />
-                  </div>
-                ) : null}
-              </TableCell>
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
+    <>
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <FileColumnHeaders />
+            <TableHead className="w-0" />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {files.map((file) => {
+            const isDismissed = file.deletedAt !== null;
+            return (
+              <TableRow
+                className={`group ${isDismissed ? "opacity-50" : ""}`}
+                key={file.id}
+              >
+                <FileInfoCells file={file} onPreview={openPreview} />
+                <TableCell className="py-2 pr-3">
+                  {canReprocessFile(file, instrumentType) ? (
+                    <div className="flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                      <ReprocessAction
+                        file={file}
+                        isPending={isPending}
+                        onReprocess={onReprocess}
+                      />
+                    </div>
+                  ) : null}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+      {dialog}
+    </>
   );
 }
 
@@ -304,6 +373,7 @@ export function EditableRunFilesTable({
   onReprocess,
 }: EditableRunFilesTableProps) {
   const { meta } = useFileSelection();
+  const { dialog, openPreview } = useFilePreview(files);
 
   // Pre-compute the FileRef for each visible row once so the select-all
   // header, the per-row checkbox, and the row-state styling all see the
@@ -323,79 +393,83 @@ export function EditableRunFilesTable({
   const hasBulkSelection = meta.count > 0;
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow className="hover:bg-transparent">
-          {showSelectionColumn && (
-            <TableHead className="w-10 pr-0 pl-3">
-              <FileSelectAllCheckbox refs={visibleSelectableRefs} />
-            </TableHead>
-          )}
-          <FileColumnHeaders />
-          <TableHead className="w-0" />
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {files.map((file) => {
-          const isDismissed = file.deletedAt !== null;
-          const ref = refsByFileId.get(file.id) ?? null;
-          const isSelected = ref ? meta.isSelected(ref.id) : false;
-          const canDoUploadDismiss = !isDismissed && file.status === "detected";
-          const canDoReprocess = canReprocessFile(file, instrumentType);
+    <>
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            {showSelectionColumn && (
+              <TableHead className="w-10 pr-0 pl-3">
+                <FileSelectAllCheckbox refs={visibleSelectableRefs} />
+              </TableHead>
+            )}
+            <FileColumnHeaders />
+            <TableHead className="w-0" />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {files.map((file) => {
+            const isDismissed = file.deletedAt !== null;
+            const ref = refsByFileId.get(file.id) ?? null;
+            const isSelected = ref ? meta.isSelected(ref.id) : false;
+            const canDoUploadDismiss =
+              !isDismissed && file.status === "detected";
+            const canDoReprocess = canReprocessFile(file, instrumentType);
 
-          // Reveal classes: hide per-row actions while a bulk selection is
-          // active (the bar is the single entry point) but keep the JSX
-          // mounted so the actions column doesn't collapse and shift
-          // sibling columns. We stay in the opacity-0 baseline in both
-          // states — the only thing that changes is whether the hover/
-          // focus reveal rules are in the class list — so the browser
-          // never has to interpolate between an in-flight hover fade-in
-          // and a different hide mechanism, which is what was producing
-          // a brief "all actions visible" flash on the click frame.
-          const revealClass = hasBulkSelection
-            ? "opacity-0 pointer-events-none"
-            : "opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity";
+            // Reveal classes: hide per-row actions while a bulk selection is
+            // active (the bar is the single entry point) but keep the JSX
+            // mounted so the actions column doesn't collapse and shift
+            // sibling columns. We stay in the opacity-0 baseline in both
+            // states — the only thing that changes is whether the hover/
+            // focus reveal rules are in the class list — so the browser
+            // never has to interpolate between an in-flight hover fade-in
+            // and a different hide mechanism, which is what was producing
+            // a brief "all actions visible" flash on the click frame.
+            const revealClass = hasBulkSelection
+              ? "opacity-0 pointer-events-none"
+              : "opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity";
 
-          return (
-            <TableRow
-              className={`group ${isDismissed ? "opacity-50" : ""}`}
-              data-state={isSelected ? "selected" : undefined}
-              key={file.id}
-            >
-              {showSelectionColumn && (
-                <TableCell className="py-2 pr-0 pl-3">
-                  {ref ? (
-                    <FileSelectCheckbox fileRef={ref} />
-                  ) : (
-                    <div className="size-4" />
-                  )}
+            return (
+              <TableRow
+                className={`group ${isDismissed ? "opacity-50" : ""}`}
+                data-state={isSelected ? "selected" : undefined}
+                key={file.id}
+              >
+                {showSelectionColumn && (
+                  <TableCell className="py-2 pr-0 pl-3">
+                    {ref ? (
+                      <FileSelectCheckbox fileRef={ref} />
+                    ) : (
+                      <div className="size-4" />
+                    )}
+                  </TableCell>
+                )}
+                <FileInfoCells file={file} onPreview={openPreview} />
+                <TableCell className="py-2 pr-3">
+                  {canDoUploadDismiss ? (
+                    <div className={`flex items-center gap-1 ${revealClass}`}>
+                      <UploadDismissActions
+                        file={file}
+                        isPending={isPending}
+                        onDismiss={onDismiss}
+                        onUpload={onUpload}
+                      />
+                    </div>
+                  ) : canDoReprocess ? (
+                    <div className={`flex items-center gap-1 ${revealClass}`}>
+                      <ReprocessAction
+                        file={file}
+                        isPending={isPending}
+                        onReprocess={onReprocess}
+                      />
+                    </div>
+                  ) : null}
                 </TableCell>
-              )}
-              <FileInfoCells file={file} />
-              <TableCell className="py-2 pr-3">
-                {canDoUploadDismiss ? (
-                  <div className={`flex items-center gap-1 ${revealClass}`}>
-                    <UploadDismissActions
-                      file={file}
-                      isPending={isPending}
-                      onDismiss={onDismiss}
-                      onUpload={onUpload}
-                    />
-                  </div>
-                ) : canDoReprocess ? (
-                  <div className={`flex items-center gap-1 ${revealClass}`}>
-                    <ReprocessAction
-                      file={file}
-                      isPending={isPending}
-                      onReprocess={onReprocess}
-                    />
-                  </div>
-                ) : null}
-              </TableCell>
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+      {dialog}
+    </>
   );
 }
