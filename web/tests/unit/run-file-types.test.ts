@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  filePreviewKind,
   fileStem,
   isCsvFile,
   isImageFile,
   isPdfFile,
+  isPreviewableFile,
   isVideoFile,
   posterFileIdsByVideoFilename,
 } from "@/lib/runs/run-file-types";
@@ -121,5 +123,95 @@ describe("posterFileIdsByVideoFilename", () => {
         },
       ])
     ).toEqual({});
+  });
+});
+
+describe("filePreviewKind", () => {
+  it.each([
+    ["data.csv", "csv"],
+    ["DATA.CSV", "csv"],
+    ["data.tsv", "tsv"],
+    ["meta.json", "json"],
+    ["notes.txt", "text"],
+    ["run.log", "text"],
+    ["config.yaml", "text"],
+    ["config.YML", "text"],
+    ["README.md", "text"],
+  ])("detects %s by extension", (filename, kind) => {
+    expect(filePreviewKind({ filename, contentType: null })).toBe(kind);
+  });
+
+  it("trusts the extension over binary/octet-stream", () => {
+    expect(
+      filePreviewKind({ filename: "a.csv", contentType: "binary/octet-stream" })
+    ).toBe("csv");
+  });
+
+  it("falls back to the content type", () => {
+    expect(filePreviewKind({ filename: "a", contentType: "text/csv" })).toBe(
+      "csv"
+    );
+    expect(
+      filePreviewKind({
+        filename: "a",
+        contentType: "text/tab-separated-values",
+      })
+    ).toBe("tsv");
+    expect(
+      filePreviewKind({ filename: "a", contentType: "application/json" })
+    ).toBe("json");
+    expect(filePreviewKind({ filename: "a", contentType: "text/plain" })).toBe(
+      "text"
+    );
+    expect(
+      filePreviewKind({ filename: "a.dat", contentType: "text/x-foo" })
+    ).toBe("text");
+  });
+
+  it("excludes HTML", () => {
+    expect(filePreviewKind({ filename: "a", contentType: "text/html" })).toBe(
+      null
+    );
+    expect(
+      filePreviewKind({ filename: "a.html", contentType: "text/plain" })
+    ).toBe(null);
+    expect(filePreviewKind({ filename: "a.HTM", contentType: null })).toBe(
+      null
+    );
+    expect(
+      filePreviewKind({
+        filename: "a",
+        contentType: "text/html; charset=utf-8",
+      })
+    ).toBe(null);
+  });
+
+  it("ignores content type parameters", () => {
+    expect(
+      filePreviewKind({ filename: "a", contentType: "text/csv; charset=utf-8" })
+    ).toBe("csv");
+    expect(
+      filePreviewKind({
+        filename: "a",
+        contentType: "Application/JSON; charset=utf-8",
+      })
+    ).toBe("json");
+  });
+
+  it("excludes images, PDFs, and binary types", () => {
+    for (const file of [
+      { filename: "a.png", contentType: "image/png" },
+      { filename: "a.pdf", contentType: "application/pdf" },
+      { filename: "a.nd2", contentType: "application/octet-stream" },
+      { filename: "a.mp4", contentType: null },
+    ]) {
+      expect(isPreviewableFile(file)).toBe(false);
+    }
+  });
+
+  it("reports previewable files", () => {
+    expect(isPreviewableFile({ filename: "a.json", contentType: null })).toBe(
+      true
+    );
   });
 });
