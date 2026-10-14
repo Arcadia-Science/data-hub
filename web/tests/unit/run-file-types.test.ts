@@ -178,6 +178,24 @@ describe("filePreviewKind", () => {
     expect(filePreviewKind({ filename: "a.HTM", contentType: null })).toBe(
       null
     );
+    expect(
+      filePreviewKind({
+        filename: "a",
+        contentType: "text/html; charset=utf-8",
+      })
+    ).toBe(null);
+  });
+
+  it("ignores content type parameters", () => {
+    expect(
+      filePreviewKind({ filename: "a", contentType: "text/csv; charset=utf-8" })
+    ).toBe("csv");
+    expect(
+      filePreviewKind({
+        filename: "a",
+        contentType: "Application/JSON; charset=utf-8",
+      })
+    ).toBe("json");
   });
 
   it("excludes images, PDFs, and binary types", () => {

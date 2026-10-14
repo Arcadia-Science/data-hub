@@ -45,7 +45,9 @@ export type FilePreviewKind = "csv" | "tsv" | "json" | "text";
 // Checks the extension before the stored content type because watcher uploads
 // are often stored as `binary/octet-stream` whatever the file holds.
 export function filePreviewKind(file: RunFileIdentity): FilePreviewKind | null {
-  const contentType = file.contentType?.toLowerCase() ?? null;
+  // Drops parameters such as `; charset=utf-8` before comparing.
+  const contentType =
+    file.contentType?.split(";")[0].trim().toLowerCase() ?? null;
   if (HTML_EXTENSION.test(file.filename) || contentType === "text/html") {
     return null;
   }
