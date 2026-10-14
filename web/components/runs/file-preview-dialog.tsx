@@ -13,7 +13,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -150,25 +149,40 @@ export function FilePreviewDialog({
       }}
       open={current !== null}
     >
-      <DialogContent className="sm:max-w-4xl" showCloseButton>
-        <DialogHeader>
-          <div className="flex items-center gap-3 pr-10">
+      <DialogContent className="sm:max-w-4xl" showCloseButton={false}>
+        <DialogHeader className="min-w-0">
+          <div className="flex min-w-0 items-center justify-between gap-3">
             <DialogTitle className="min-w-0 truncate font-mono text-base">
               {current?.filename}
             </DialogTitle>
-            {current && (
+            <div className="flex shrink-0 items-center gap-1">
+              {current && (
+                <Button asChild variant="outline">
+                  <a href={`/api/v1/files/${current.id}/download`}>
+                    <Download />
+                    Download
+                  </a>
+                </Button>
+              )}
               <Button
-                asChild
-                className="h-7 shrink-0 gap-1 text-xs"
-                size="sm"
+                aria-label="Previous file"
+                disabled={previous === null}
+                onClick={() => previous && onSelect(previous.id)}
+                size="icon"
                 variant="outline"
               >
-                <a href={`/api/v1/files/${current.id}/download`}>
-                  <Download className="size-3" />
-                  Download
-                </a>
+                <ChevronLeft className="size-4" />
               </Button>
-            )}
+              <Button
+                aria-label="Next file"
+                disabled={next === null}
+                onClick={() => next && onSelect(next.id)}
+                size="icon"
+                variant="outline"
+              >
+                <ChevronRight className="size-4" />
+              </Button>
+            </div>
           </div>
           <DialogDescription className="sr-only">
             Preview of {current?.filename}
@@ -205,26 +219,6 @@ export function FilePreviewDialog({
             </>
           )}
         </div>
-        <DialogFooter className="sm:justify-between">
-          <Button
-            disabled={previous === null}
-            onClick={() => previous && onSelect(previous.id)}
-            size="sm"
-            variant="outline"
-          >
-            <ChevronLeft className="size-4" />
-            Previous
-          </Button>
-          <Button
-            disabled={next === null}
-            onClick={() => next && onSelect(next.id)}
-            size="sm"
-            variant="outline"
-          >
-            Next
-            <ChevronRight className="size-4" />
-          </Button>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

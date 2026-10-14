@@ -1,7 +1,7 @@
 "use client";
 
-import { Download, Eye, Loader2, RotateCw, Upload, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Loader2, RotateCw, Upload, X } from "lucide-react";
+import { type ComponentProps, useEffect, useMemo, useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -116,6 +116,40 @@ function useFilePreview(files: RunFileRow[]) {
   return { dialog, openPreview: setOpenFileId };
 }
 
+// Checkboxes and row actions are buttons inside the row. A click on those
+// should change the selection or run the action, not also open the preview.
+function FileTableRow({
+  className,
+  file,
+  onPreview,
+  ...props
+}: ComponentProps<typeof TableRow> & {
+  file: RunFileRow;
+  onPreview: (fileId: number) => void;
+}) {
+  const previewable = previewableFileOf(file) !== null;
+  return (
+    <TableRow
+      {...props}
+      className={cn("group", previewable && "cursor-pointer", className)}
+      onClick={
+        previewable
+          ? (event) => {
+              const target = event.target;
+              if (
+                target instanceof Element &&
+                target.closest("button, a, input, [role='checkbox']")
+              ) {
+                return;
+              }
+              onPreview(file.id);
+            }
+          : undefined
+      }
+    />
+  );
+}
+
 function FileInfoCells({
   file,
   onPreview,
@@ -123,30 +157,21 @@ function FileInfoCells({
   file: RunFileRow;
   onPreview: (fileId: number) => void;
 }) {
+  const previewable = previewableFileOf(file);
   return (
     <>
       <TableCell className="py-2 font-mono text-sm">
-        <span className="flex items-center gap-1.5">
-          {file.filename}
-          {previewableFileOf(file) && (
-            <button
-              aria-label={`Preview ${file.filename}`}
-              className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
-              onClick={() => onPreview(file.id)}
-              type="button"
-            >
-              <Eye className="size-4" />
-            </button>
-          )}
-          {DOWNLOADABLE_STATUSES.has(file.status) && (
-            <a
-              className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
-              href={`/api/v1/files/${file.id}/download`}
-            >
-              <Download className="size-4" />
-            </a>
-          )}
-        </span>
+        {previewable ? (
+          <button
+            className="cursor-pointer text-left"
+            onClick={() => onPreview(file.id)}
+            type="button"
+          >
+            {file.filename}
+          </button>
+        ) : (
+          file.filename
+        )}
       </TableCell>
       <TableCell className="py-2">
         <Badge
@@ -321,9 +346,11 @@ export function ReadOnlyRunFilesTable({
           {files.map((file) => {
             const isDismissed = file.deletedAt !== null;
             return (
-              <TableRow
-                className={`group ${isDismissed ? "opacity-50" : ""}`}
+              <FileTableRow
+                className={isDismissed ? "opacity-50" : undefined}
+                file={file}
                 key={file.id}
+                onPreview={openPreview}
               >
                 <FileInfoCells file={file} onPreview={openPreview} />
                 <TableCell className="py-2 pr-3">
@@ -337,7 +364,7 @@ export function ReadOnlyRunFilesTable({
                     </div>
                   ) : null}
                 </TableCell>
-              </TableRow>
+              </FileTableRow>
             );
           })}
         </TableBody>
@@ -429,10 +456,12 @@ export function EditableRunFilesTable({
               : "opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity";
 
             return (
-              <TableRow
-                className={`group ${isDismissed ? "opacity-50" : ""}`}
+              <FileTableRow
+                className={isDismissed ? "opacity-50" : undefined}
                 data-state={isSelected ? "selected" : undefined}
+                file={file}
                 key={file.id}
+                onPreview={openPreview}
               >
                 {showSelectionColumn && (
                   <TableCell className="py-2 pr-0 pl-3">
@@ -464,7 +493,7 @@ export function EditableRunFilesTable({
                     </div>
                   ) : null}
                 </TableCell>
-              </TableRow>
+              </FileTableRow>
             );
           })}
         </TableBody>
