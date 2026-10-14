@@ -59,30 +59,49 @@ export function FilePreviewDialog({
   const requestId = useRef(0);
 
   useEffect(() => {
+    // Bumped on every run, including close, so a response that lands after
+    // the file changed or the dialog closed is ignored.
+    const id = requestId.current + 1;
+    requestId.current = id;
     if (currentId === null || currentKind === null) {
       cacheRef.current.clear();
       return;
     }
     void retryNonce;
-    const id = requestId.current + 1;
-    requestId.current = id;
     setPage(0);
 
     let pending = cacheRef.current.get(currentId);
+    let owned: { controller: AbortController; settled: boolean } | null = null;
     if (!pending) {
-      pending = loadFilePreview(currentId, currentKind);
-      cacheRef.current.set(currentId, pending);
-      const loading = pending;
-      loading.catch(() => {
-        if (cacheRef.current.get(currentId) === loading) {
-          cacheRef.current.delete(currentId);
+      const request = { controller: new AbortController(), settled: false };
+      owned = request;
+      const loading = loadFilePreview(
+        currentId,
+        currentKind,
+        request.controller.signal
+      );
+      pending = loading;
+      cacheRef.current.set(currentId, loading);
+      loading.then(
+        () => {
+          request.settled = true;
+        },
+        () => {
+          request.settled = true;
+          if (cacheRef.current.get(currentId) === loading) {
+            cacheRef.current.delete(currentId);
+          }
         }
-      });
+      );
     }
     pending
       .then((preview) => {
         if (requestId.current === id) {
           setResult({ fileId: currentId, status: "ready", preview });
+          trackClientEvent("file_previewed", {
+            category: currentCategory ?? "",
+            kind: currentKind,
+          });
         }
       })
       .catch((err: unknown) => {
@@ -95,16 +114,18 @@ export function FilePreviewDialog({
           });
         }
       });
-  }, [currentId, currentKind, retryNonce]);
 
-  useEffect(() => {
-    if (currentId !== null && currentKind !== null && currentCategory) {
-      trackClientEvent("file_previewed", {
-        category: currentCategory,
-        kind: currentKind,
-      });
-    }
-  }, [currentId, currentKind, currentCategory]);
+    return () => {
+      // Only an unfinished request started by this run is cancelled. Its cache
+      // entry goes too, so a re-run (Strict Mode, or reopening) fetches again.
+      if (owned && !owned.settled) {
+        if (cacheRef.current.get(currentId) === pending) {
+          cacheRef.current.delete(currentId);
+        }
+        owned.controller.abort();
+      }
+    };
+  }, [currentId, currentKind, currentCategory, retryNonce]);
 
   function handleRetry() {
     if (currentId !== null) {
@@ -219,6 +240,13 @@ function PreviewBody({
   preview: FilePreview;
 }) {
   const { content } = preview;
+  if (content.kind === "table" && content.rows.length === 0) {
+    return (
+      <div className="flex h-24 items-center justify-center rounded-md border border-dashed bg-muted/20 text-muted-foreground text-sm">
+        This file has no rows.
+      </div>
+    );
+  }
   if (content.kind === "table") {
     return (
       <div className="max-h-[60vh] overflow-auto">
