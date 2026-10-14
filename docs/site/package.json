@@ -12,7 +12,7 @@
     "fumadocs-ui": "16.10.5",
     "hast-util-to-jsx-runtime": "^2.3.6",
     "lucide-react": "^1.20.0",
-    "mermaid": "^11.16.0",
+    "mermaid": "^12.2.0",
     "next": "^16.2.12",
     "next-themes": "^0.4.6",
     "react": "^19.2.7",
