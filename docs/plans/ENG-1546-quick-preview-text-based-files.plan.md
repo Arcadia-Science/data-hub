@@ -1,6 +1,6 @@
 ---
 name: Quick-preview text files from the run files table
-overview: Add an eye icon to the run page's files table that opens a CSV, TSV, JSON, or other text file in a dialog, showing up to the first 1 MB, so people can inspect a file without downloading it.
+overview: Clicking a previewable row in the run page's files table opens a CSV, TSV, JSON, or other text file in a dialog, showing up to the first 1 MB, so people can inspect a file without downloading it.
 ticket: ENG-1546
 repo: data-hub
 todos:
@@ -14,10 +14,10 @@ todos:
     content: Export the paged CSV table view from colony-data-table.tsx so the dialog can reuse it
     status: completed
   - id: preview-dialog
-    content: Build the preview dialog with Download and next/previous controls
+    content: Build the preview dialog with Download and the report view's back and forward buttons in the header, and no close button
     status: completed
   - id: table-wiring
-    content: Add the eye icon to FileInfoCells and open the dialog from both the editable and read-only tables
+    content: Open the dialog by clicking a previewable row in both the editable and read-only tables
     status: completed
   - id: analytics
     content: Add file_previewed to the analytics catalog and record it from the browser when a file is shown
@@ -38,13 +38,13 @@ Today the files table on the run page (`/instruments/[instrumentId]/runs/[runId]
 
 ## Decisions
 
-All decisions below come from the engineer interviewed for this ticket.
+Decisions 1 through 3 and 6 through 8 come from the engineer interviewed for this ticket. Decisions 4 and 5 were revised after the first build, when that engineer asked for the row itself to open the preview and for the dialog controls to match the report view.
 
 1. **Which files.** Preview files ending in `.csv`, `.tsv`, `.json`, `.txt`, `.log`, `.yaml` (and `.yml`), and `.md`. Also preview any file whose stored content type starts with `text/`, except HTML. The check is a helper in `web/lib/runs/run-file-types.ts`.
 2. **How it looks.** A dialog on the page. CSV and TSV show as a table that reuses the `ColonyDataTable` view. JSON is pretty-printed. Everything else is monospace text.
 3. **Size limit.** Fetch only the first 1 MB, using a `Range` header on the existing `?disposition=inline` download URL. When the file is bigger, show a "showing the first part of this file" notice. For CSV and TSV, drop the last partial row.
-4. **How it opens.** An eye icon next to the download icon in `FileInfoCells`. It appears only for files that can be previewed, and only for the statuses that show the download icon. It works in both the editable and the read-only table.
-5. **Dialog extras.** The dialog has a Download button and next/previous controls. Next/previous move only within the current page of the table, skip files that can't be previewed, and are disabled at the first and last previewable file on the page.
+4. **How it opens.** Clicking a previewable row opens the dialog. The row uses a pointer cursor, and the filename is a button with the same action so it can be reached from the keyboard. A click on the checkbox, or on upload, dismiss, or reprocess, does not open the preview. There is no eye icon and no per-file download icon. A file that is not opened in the preview is downloaded by selecting it and choosing **Download** in the bar at the bottom of the page. The row is clickable only when `DOWNLOADABLE_STATUSES` includes its status and the file can be previewed. It works in both the editable and the read-only table.
+5. **Dialog extras.** The header shows the filename, then Download, then the same back and forward icon buttons the report view uses. Back and forward move only within the current page of the table, skip files that can't be previewed, and are disabled at the first and last previewable file on the page. There is no close button and no footer. Escape, or a click outside the dialog, closes it.
 6. **Analytics.** Add a `file_previewed` event in `web/lib/analytics/track.ts` and record it when a preview opens.
 7. **Tests.** Unit tests in `web/tests/unit/` for the new pure helpers: the previewable-file check, the size cap and truncation, and trimming the partial CSV row. No component tests, since the table has none today. Run `make check`.
 8. **Scope and release.** Browser code only, with no new server endpoint. Add a changelog entry in `web/content/changelog/` and a line in `docs/site/content/docs/browse-runs.mdx` under "Download files". Run `make docs-catalogs` and commit the regenerated `web/lib/mcp/docs/docs-bundle.snapshot.json`.
@@ -94,16 +94,16 @@ Export the existing `ColonyDataTableView` (rows, page, and `onPageChange`; 10 ro
 
 ### 4. The preview dialog (new `web/components/runs/file-preview-dialog.tsx`)
 
-- Built from `Dialog`, `DialogContent`, `DialogHeader` and `DialogTitle` in `web/components/ui/dialog.tsx`, like `AuntyWellDialog`.
+- Built from `Dialog`, `DialogContent`, `DialogHeader` and `DialogTitle` in `web/components/ui/dialog.tsx`, like `AuntyWellDialog`. The close button is hidden. Escape, or a click outside the dialog, still closes it.
 - Props: the ordered list of previewable files on the current page, the open file's id, and `onOpenChange` and `onSelect` callbacks.
-- Header: the filename in monospace and a Download button. The button is an `<a href="/api/v1/files/{id}/download">`, so it still counts as a download in the server's `file_downloaded` event.
+- Header: the filename in monospace on the left. On the right, in order: Download, then back, then forward. Back and forward are the report view's icon buttons (`size="icon"`, `variant="outline"`, a chevron, and the accessible names "Previous file" and "Next file"). Download is an `<a href="/api/v1/files/{id}/download">`, so it still counts as a download in the server's `file_downloaded` event. The filename truncates on a narrow window so the three buttons stay on screen.
 - Body:
   - A `Skeleton` while loading.
   - An error panel with a Retry button, matching `ColonyDataTable`.
   - Otherwise `ColonyDataTableView` for tables, or a scrollable `<pre>` in monospace for text.
   - The text is rendered as React text, never as HTML.
   - When `truncated` is set, a notice above the content says "Showing the first part of this file." An empty file shows an empty-file message.
-- Footer: Previous and Next buttons that move through the given list. They are disabled at the first and last entry. The table's own page is never changed.
+- There is no footer. Back and forward move through the given list. They are disabled at the first and last entry. The table's own page is never changed.
 - Loading:
   - The dialog caches a promise per file id while it is open, the way `AuntyWellDialog` caches curves, and evicts it on failure so Retry works.
   - A request id (or an `AbortController`) makes sure a slow response for an earlier file cannot replace the current one.
@@ -112,15 +112,16 @@ Export the existing `ColonyDataTableView` (rows, page, and `onPageChange`; 10 ro
 
 ### 5. Opening it from the table (`web/components/runs/run-files-table.tsx`)
 
-- `FileInfoCells` gets an `onPreview(fileId)` prop.
-  - When `DOWNLOADABLE_STATUSES` includes the file's status and `isPreviewableFile(file)` is true, an `Eye` icon button (from `lucide-react`) appears just before the download icon, with the same muted styling.
-  - It has an accessible label "Preview {filename}".
-- A small shared hook or component in the same file is used by both `EditableRunFilesTable` and `ReadOnlyRunFilesTable`. It:
+- There is no eye icon and no per-file download icon in `FileInfoCells`.
+- A previewable row uses `cursor-pointer`. Clicking the row calls `onPreview(fileId)`. The filename is a button with the same action.
+- A click whose target is inside a `button`, link, input, or checkbox does not open the preview. That covers the selection checkbox and the upload, dismiss, and reprocess actions.
+- The row is previewable only when `DOWNLOADABLE_STATUSES` includes the file's status and `isPreviewableFile(file)` is true. Other rows stay plain text with the default cursor.
+- A small shared hook in the same file is used by both `EditableRunFilesTable` and `ReadOnlyRunFilesTable`. It:
   - holds the open file id;
-  - builds the list of previewable files on the page (same status and type rule as the icon, in table order);
+  - builds the list of previewable files on the page (same status and type rule as the row, in table order);
   - renders `FilePreviewDialog`.
 - The run page refreshes itself every few seconds while files are uploading or processing (`RunAutoRefreshProvider`), which re-renders the table rows.
-  - The dialog is keyed by file id, so a refresh does not reload the preview.
+  - A refresh does not reload the preview, because the load effect runs only when the open file changes.
   - If the open file drops off the page (for example, it was dismissed in another tab), the dialog closes.
 
 ### 6. Analytics
@@ -135,8 +136,8 @@ Export the existing `ColonyDataTableView` (rows, page, and `onPageChange`; 10 ro
 
 ### 7. Changelog and docs
 
-- **Changelog:** add `web/content/changelog/YYYY-MM-DD-preview-text-files.md`, named for the day the pull request merges into `staging`. The build agent uses the build date and renames the file if the merge happens on a later day. Frontmatter: `title` and `docs: https://datahub.arcadiascience.com/docs/browse-runs#download-files`. The body says in a sentence or two that the eye icon in a run's files table previews CSV, TSV, JSON and other text files without downloading them, and that large files show the first 1 MB.
-- **Docs:** in `docs/site/content/docs/browse-runs.mdx`, add a bullet to the list under "Download files" (`#download-files`) about previewing a text file with the eye icon, including the 1 MB limit.
+- **Changelog:** add `web/content/changelog/YYYY-MM-DD-preview-text-files.md`, named for the day the pull request merges into `staging`. The build agent uses the build date and renames the file if the merge happens on a later day. Frontmatter: `title` and `docs: https://datahub.arcadiascience.com/docs/browse-runs#download-files`. The body says that clicking a text file's row in a run's files table previews it without downloading, that large files show the first 1 MB, and that back and forward move through the other previewable files on the same page.
+- **Docs:** in `docs/site/content/docs/browse-runs.mdx`, under "Download files" (`#download-files`), say that clicking a text file's row previews the first 1 MB, that back and forward move between previewable files on the same page, and that **Download** in that window saves the file. Selecting one or more files and choosing **Download** covers files that are not opened in the preview.
 - Run `make docs-catalogs` and commit the regenerated `web/lib/mcp/docs/docs-bundle.snapshot.json`. Run `make docs-links` to check the changelog's docs link.
 
 ## Risky parts
@@ -177,9 +178,9 @@ There are no component tests, since the files table has none today.
 
 **Manual check** in local dev (`make dev`, seeded data, and `npm run db:process-fixtures` for processed CSVs):
 
-- Open a run with CSV and JSON files. The eye icon appears only on text files with a downloadable status. The dialog shows a table for CSV and pretty-printed JSON. Next/previous skip files that can't be previewed and stop at the ends of the page. Download saves the file.
+- Open a run with CSV and JSON files. Only a text file with a downloadable status has a pointer cursor, and clicking its row opens the preview. Clicking the checkbox selects the file and does not open the preview. The dialog shows a table for CSV and pretty-printed JSON. Back and forward skip files that can't be previewed and stop at the ends of the page. Download in the header saves the file.
 - Put a CSV larger than 1 MB in the local mirror. The notice appears, and the last row is complete.
-- The icon also works on a deleted (read-only) run.
+- The row click also works on a deleted (read-only) run.
 
 ## Open questions
 
