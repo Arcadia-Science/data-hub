@@ -124,8 +124,9 @@ export function SlackChannelForm({
     },
   });
 
-  // Warn before a reload or tab close discards edits that are not saved yet.
-  useUnsavedChangesWarning(useStore(form.store, (state) => state.isDirty));
+  useUnsavedChangesWarning(
+    useStore(form.store, (state) => !state.isDefaultValue)
+  );
 
   async function handleRemove(): Promise<boolean> {
     try {
@@ -257,11 +258,11 @@ export function SlackChannelForm({
                 <ConfirmDialog
                   confirmLabel="Remove Webhook"
                   description="Data Hub will stop posting new runs to the Slack channel and delete the stored webhook URL. To post again, paste a webhook URL here."
-                  destructive
                   onConfirm={handleRemove}
                   onOpenChange={setConfirmingRemove}
                   open={confirmingRemove}
                   title="Remove the Slack channel webhook?"
+                  variant="destructive"
                 />
               </>
             ) : null}
@@ -299,7 +300,7 @@ export function SlackChannelForm({
               return {
                 canSubmit: state.canSubmit,
                 isSubmitting: state.isSubmitting,
-                isDirty: state.isDirty,
+                isDirty: !state.isDefaultValue,
                 isValidUrl: slackWebhookUrlSchema.safeParse(trimmed).success,
               };
             }}

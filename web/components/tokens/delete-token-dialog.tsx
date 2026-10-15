@@ -56,11 +56,11 @@ export function DeleteTokenDialog({
             Any tools using this token will lose access immediately.
           </>
         }
-        destructive
         onConfirm={handleDelete}
         onOpenChange={setOpen}
         open={open}
         title="Delete access token"
+        variant="destructive"
       />
     </>
   );

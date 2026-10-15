@@ -2,6 +2,7 @@
 
 import { Loader2 } from "lucide-react";
 import { type ReactNode, useTransition } from "react";
+import { toast } from "sonner";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -12,6 +13,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { useReturnFocus } from "@/hooks/use-return-focus";
 
 /**
  * Asks before an action that is hard to undo. The dialog stays open with a
@@ -26,25 +28,34 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel,
-  destructive = false,
+  variant = "default",
   onConfirm,
 }: {
   confirmLabel: string;
   description: ReactNode;
-  destructive?: boolean;
   onConfirm: () => Promise<boolean>;
   onOpenChange: (open: boolean) => void;
   open: boolean;
   title: string;
+  variant?: "default" | "destructive";
 }) {
   const [isPending, startTransition] = useTransition();
+  const returnFocus = useReturnFocus();
 
   function handleConfirm(event: React.MouseEvent) {
     // The action button closes the dialog by default. Wait for the result.
     event.preventDefault();
     startTransition(async () => {
-      if (await onConfirm()) {
-        onOpenChange(false);
+      let succeeded = false;
+      try {
+        succeeded = await onConfirm();
+      } catch {
+        toast.error("Something went wrong. Try again.");
+      }
+      if (succeeded) {
+        // A transition, so the dialog stays until the page refresh that
+        // `onConfirm` started has landed.
+        startTransition(() => onOpenChange(false));
       }
     });
   }
@@ -58,7 +69,7 @@ export function ConfirmDialog({
       }}
       open={open}
     >
-      <AlertDialogContent>
+      <AlertDialogContent {...returnFocus}>
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>
@@ -66,19 +77,12 @@ export function ConfirmDialog({
         <AlertDialogFooter>
           <AlertDialogCancel disabled={isPending}>Cancel</AlertDialogCancel>
           <AlertDialogAction
-            className={
-              destructive
-                ? "bg-destructive/10 text-destructive hover:bg-destructive/20"
-                : undefined
-            }
             disabled={isPending}
             onClick={handleConfirm}
+            variant={variant}
           >
             {isPending ? (
-              <Loader2
-                className="animate-spin motion-reduce:animate-none"
-                data-icon="inline-start"
-              />
+              <Loader2 className="animate-spin" data-icon="inline-start" />
             ) : null}
             {confirmLabel}
           </AlertDialogAction>

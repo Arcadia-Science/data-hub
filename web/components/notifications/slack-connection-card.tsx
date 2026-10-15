@@ -169,14 +169,15 @@ function Connected({
       }
 
       toast.success("Slack notification settings saved");
-      // Re-baseline so `isDirty` resets and Save disables until the next edit.
+      // Re-baseline so the form counts as unchanged until the next edit.
       form.reset(value);
       router.refresh();
     },
   });
 
-  // Warn before a reload or tab close discards edits that are not saved yet.
-  useUnsavedChangesWarning(useStore(form.store, (state) => state.isDirty));
+  useUnsavedChangesWarning(
+    useStore(form.store, (state) => !state.isDefaultValue)
+  );
 
   async function handleDisconnect(): Promise<boolean> {
     try {
@@ -376,11 +377,11 @@ function Connected({
           <ConfirmDialog
             confirmLabel="Disconnect Slack"
             description="Data Hub will stop sending you Slack direct messages. You can connect Slack again from this page."
-            destructive
             onConfirm={handleDisconnect}
             onOpenChange={setConfirmingDisconnect}
             open={confirmingDisconnect}
             title="Disconnect Slack?"
+            variant="destructive"
           />
           {/* Hidden while revoked: the toggles are replaced by the Reconnect
             CTA above, so there's nothing here to save. */}
@@ -389,7 +390,7 @@ function Connected({
               selector={(state) => ({
                 canSubmit: state.canSubmit,
                 isSubmitting: state.isSubmitting,
-                isDirty: state.isDirty,
+                isDirty: !state.isDefaultValue,
               })}
             >
               {({ canSubmit, isSubmitting, isDirty }) => (

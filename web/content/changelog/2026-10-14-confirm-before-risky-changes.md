@@ -7,3 +7,5 @@ Granting or removing admin access, disconnecting Slack, and removing the Slack c
 Deleting an access token already asked first. The confirmation window now stays open with a spinner while the request runs, so a failed request leaves you where you were instead of closing as if it worked.
 
 If you have unsaved changes in your notification settings, the Slack credentials, the watcher release form, or a comment, your browser now asks before you reload the page or close the tab.
+
+Closing a confirmation window with Cancel or Escape now returns keyboard focus to the control that opened it. The unsaved-changes warning also goes away when you undo an edit by hand, and Download in the file preview no longer triggers it.

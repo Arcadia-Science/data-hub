@@ -4,9 +4,8 @@ import { useEffect } from "react";
  * Makes the browser ask before the page is reloaded, closed, or left for
  * another site while a form holds changes that were not saved.
  *
- * Browsers do not let a page block links inside the app, so Next.js
- * navigation is not covered. Save buttons stay disabled until something
- * changes, which keeps the common case visible.
+ * A link between pages inside the app never unloads the document, so no
+ * `beforeunload` event fires, and Next.js has no hook to block those links.
  */
 export function useUnsavedChangesWarning(hasUnsavedChanges: boolean) {
   useEffect(() => {

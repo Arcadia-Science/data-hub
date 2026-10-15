@@ -190,7 +190,7 @@ export function NotificationsSettingsForm({
       }
 
       toast.success("Notification settings saved");
-      // Re-baseline to the just-saved values so `isDirty` returns to false
+      // Re-baseline to the just-saved values so the form counts as unchanged
       // and Save disables until the next edit. `router.refresh()` still
       // re-runs the server component to pick up out-of-band changes.
       prefsForm.reset(value);
@@ -198,8 +198,9 @@ export function NotificationsSettingsForm({
     },
   });
 
-  // Warn before a reload or tab close discards edits that are not saved yet.
-  useUnsavedChangesWarning(useStore(prefsForm.store, (state) => state.isDirty));
+  useUnsavedChangesWarning(
+    useStore(prefsForm.store, (state) => !state.isDefaultValue)
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -438,7 +439,7 @@ export function NotificationsSettingsForm({
                 selector={(state) => ({
                   canSubmit: state.canSubmit,
                   isSubmitting: state.isSubmitting,
-                  isDirty: state.isDirty,
+                  isDirty: !state.isDefaultValue,
                 })}
               >
                 {({ canSubmit, isSubmitting, isDirty }) => (

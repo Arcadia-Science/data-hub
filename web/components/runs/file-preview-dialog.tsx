@@ -158,7 +158,10 @@ export function FilePreviewDialog({
             <div className="flex shrink-0 items-center gap-1">
               {current && (
                 <Button asChild variant="outline">
-                  <a href={`/api/v1/files/${current.id}/download`}>
+                  <a
+                    download={current.filename}
+                    href={`/api/v1/files/${current.id}/download`}
+                  >
                     <Download />
                     Download
                   </a>

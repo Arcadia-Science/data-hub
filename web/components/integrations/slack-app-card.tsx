@@ -87,7 +87,6 @@ export function SlackAppCard({
   const patch = buildPatch();
   const dirty = Object.keys(patch).length > 0;
 
-  // Warn before a reload or tab close discards credentials that are not saved yet.
   useUnsavedChangesWarning(dirty && !saving);
 
   async function handleSave() {

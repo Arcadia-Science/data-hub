@@ -77,7 +77,7 @@ export function WatcherReleaseForm({
     },
     onSubmit: async ({ value }) => {
       // Trim before the wire and before reset so free-text whitespace
-      // doesn't leave isDirty=false with a value that differs from the
+      // doesn't leave a form that looks unchanged but differs from the
       // server-persisted row after refresh.
       const latestVersion = value.latestVersion.trim();
       const minSupportedVersion = value.minSupportedVersion.trim();
@@ -104,8 +104,8 @@ export function WatcherReleaseForm({
       }
 
       toast.success("Watcher release saved");
-      // Re-baseline to the saved values so `isDirty` resets and the Save
-      // button disables until the next edit. router.refresh() still re-runs
+      // Re-baseline to the saved values so the form counts as unchanged and
+      // the Save button disables until the next edit. router.refresh() re-runs
       // the server component so the "last updated by" line re-renders.
       form.reset({
         latestVersion,
@@ -116,8 +116,9 @@ export function WatcherReleaseForm({
     },
   });
 
-  // Warn before a reload or tab close discards edits that are not saved yet.
-  useUnsavedChangesWarning(useStore(form.store, (state) => state.isDirty));
+  useUnsavedChangesWarning(
+    useStore(form.store, (state) => !state.isDefaultValue)
+  );
 
   return (
     // The form renders as a content-only Card (body + footer separated
@@ -294,7 +295,7 @@ export function WatcherReleaseForm({
               selector={(state) => ({
                 canSubmit: state.canSubmit,
                 isSubmitting: state.isSubmitting,
-                isDirty: state.isDirty,
+                isDirty: !state.isDefaultValue,
               })}
             >
               {({ canSubmit, isSubmitting, isDirty }) => (

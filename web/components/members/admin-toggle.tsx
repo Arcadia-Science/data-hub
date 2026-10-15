@@ -100,7 +100,6 @@ export function AdminToggle({
             ? "Admins can create and revoke access tokens, change other members' roles, manage integrations, and update instruments."
             : `${displayName} will no longer be able to create or revoke access tokens, change roles, or manage integrations.`
         }
-        destructive={!requested}
         onConfirm={() => applyRole(requested)}
         onOpenChange={setConfirming}
         open={confirming}
@@ -109,6 +108,7 @@ export function AdminToggle({
             ? `Make ${displayName} an admin?`
             : `Remove admin access for ${displayName}?`
         }
+        variant={requested ? "default" : "destructive"}
       />
     </>
   );
