@@ -39,7 +39,7 @@ export function InstrumentRunsToolbar() {
             aria-label="Search runs"
             className="pl-9"
             onChange={(e) => setFilters({ search: e.target.value, page: 1 })}
-            placeholder="Search runs..."
+            placeholder="Search runs…"
             value={filters.search}
           />
         </div>

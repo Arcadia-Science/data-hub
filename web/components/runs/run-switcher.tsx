@@ -254,7 +254,7 @@ export function RunSwitcher({ run }: { run: RunDetail }) {
         <Command shouldFilter={false}>
           <CommandInput
             onValueChange={setQuery}
-            placeholder="Search runs..."
+            placeholder="Search runs…"
             value={query}
           />
           <CommandList>
@@ -282,7 +282,7 @@ export function RunSwitcher({ run }: { run: RunDetail }) {
                 ) : null}
                 {isLoadingRecentRuns ? (
                   <div className="py-4 text-center text-muted-foreground text-sm">
-                    Loading recent runs...
+                    Loading recent runs…
                   </div>
                 ) : hasRecentRuns ? (
                   <CommandGroup heading="Recent runs">

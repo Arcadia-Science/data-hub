@@ -353,7 +353,7 @@ function FailedGroupedRun({ run }: { run: AnchoredRun }) {
           <span>
             {formatRunFailureLine(fileCount, filesFailed)}{" "}
             <span className="font-medium underline underline-offset-2">
-              Retry
+              View Run
             </span>
           </span>
         </span>

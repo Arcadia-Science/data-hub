@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { parseAsStringLiteral, useQueryState } from "nuqs";
+import { useCallback } from "react";
 import { InstrumentActions } from "@/components/instruments/instrument-actions";
 import {
   InstrumentsTable,
@@ -9,7 +10,8 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { InstrumentListItem } from "@/lib/api/instruments";
 
-type Tab = "active" | "pending" | "retired";
+const TABS = ["active", "pending", "retired"] as const;
+type Tab = (typeof TABS)[number];
 
 export function InstrumentsViewSkeleton() {
   return (
@@ -31,7 +33,8 @@ export function InstrumentsViewSkeleton() {
 }
 
 // All partitions are pre-fetched on the server, so tab switching needs no
-// refetch (the instrument catalogue is small).
+// refetch (the instrument catalogue is small). The tab lives in the URL so a
+// reload or a shared link opens on the same one, and Back returns to the last.
 export function InstrumentsView({
   activeData,
   pendingData,
@@ -48,7 +51,12 @@ export function InstrumentsView({
   };
   isAdmin: boolean;
 }) {
-  const [tab, setTab] = useState<Tab>("active");
+  const [tab, setTab] = useQueryState(
+    "tab",
+    parseAsStringLiteral(TABS)
+      .withDefault("active")
+      .withOptions({ history: "push" })
+  );
 
   // `InstrumentActions` uses hooks, so render it as JSX, not a function call.
   // Memoized so tab switches don't hand the tables a fresh function each render.

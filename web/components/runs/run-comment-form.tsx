@@ -61,7 +61,7 @@ export function RunCommentForm({
         className="-mx-2 w-[calc(100%+1rem)] resize-none border-0 bg-transparent px-2 shadow-none dark:bg-transparent"
         disabled={isPending}
         onChange={(e) => setBody(e.target.value)}
-        placeholder="Add a comment"
+        placeholder="Add a comment…"
         rows={3}
         value={body}
       />

@@ -212,6 +212,7 @@ function RunFilesSectionContent({
             <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               className="h-8 pl-8 text-xs"
+              name="files_search"
               onChange={(e) =>
                 setFilters(
                   { files_search: e.target.value, files_page: 1 },
@@ -221,7 +222,9 @@ function RunFilesSectionContent({
                   { limitUrlUpdates: debounce(SEARCH_DEBOUNCE_MS) }
                 )
               }
-              placeholder="Search files..."
+              placeholder="Search files…"
+              spellCheck={false}
+              type="search"
               value={filters.files_search}
             />
           </div>
@@ -374,7 +377,7 @@ function RunFilesSectionContent({
         </TablePendingBoundary>
 
         {/* Summary footer */}
-        <div className="flex items-center justify-between gap-2 border-t px-3 py-2 text-muted-foreground text-sm">
+        <div className="flex items-center justify-between gap-2 border-t px-3 py-2 text-muted-foreground text-sm tabular-nums">
           <span>
             {pagination.total === 0
               ? `Showing 0 of ${stats.active}`

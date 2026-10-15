@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { parseVersioned, serializeVersioned } from "@/lib/versioned-storage";
 
 export interface RecentInstrument {
   displayName: string;
@@ -18,11 +19,7 @@ function readRecentInstruments(): RecentInstrument[] {
   }
 
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return [];
-    }
-    const parsed: unknown = JSON.parse(raw);
+    const parsed = parseVersioned(localStorage.getItem(STORAGE_KEY));
     if (!Array.isArray(parsed)) {
       return [];
     }
@@ -41,7 +38,7 @@ function readRecentInstruments(): RecentInstrument[] {
 
 function writeRecentInstruments(instruments: RecentInstrument[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(instruments));
+    localStorage.setItem(STORAGE_KEY, serializeVersioned(instruments));
     // Defer so other hook instances (e.g. MainNav) refresh after this
     // setState commit, not synchronously inside the updater.
     queueMicrotask(() => {

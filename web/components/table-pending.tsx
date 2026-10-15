@@ -4,7 +4,7 @@ import {
   createContext,
   type ReactNode,
   type TransitionStartFunction,
-  useContext,
+  use,
   useEffect,
   useState,
   useTransition,
@@ -66,7 +66,7 @@ export function TablePendingProvider({
 }
 
 export function useTablePending(): TablePendingContextValue {
-  return useContext(TablePendingContext);
+  return use(TablePendingContext);
 }
 
 // Wraps a table (or other server-rendered content) and applies the shared

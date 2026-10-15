@@ -208,19 +208,24 @@ function FileInfoCells({
   const previewable = previewableFileOf(file);
   return (
     <>
-      <TableCell className="py-2 font-mono text-sm">
+      {/* Long instrument filenames cut off with an ellipsis instead of pushing
+          the status and action columns off screen. The title shows the rest. */}
+      <TableCell className="max-w-sm py-2 font-mono text-sm">
         {previewable ? (
           <button
-            className="cursor-pointer text-left"
+            className="block max-w-full cursor-pointer truncate text-left"
             onClick={() => onPreview(file.id)}
             onFocus={preloadFilePreviewDialog}
             onMouseEnter={preloadFilePreviewDialog}
+            title={file.filename}
             type="button"
           >
             {file.filename}
           </button>
         ) : (
-          file.filename
+          <span className="block truncate" title={file.filename}>
+            {file.filename}
+          </span>
         )}
       </TableCell>
       <TableCell className="py-2">
@@ -234,10 +239,10 @@ function FileInfoCells({
           {file.category}
         </Badge>
       </TableCell>
-      <TableCell className="py-2 text-muted-foreground text-sm">
+      <TableCell className="py-2 text-muted-foreground text-sm tabular-nums">
         {formatBytes(file.sizeBytes)}
       </TableCell>
-      <TableCell className="py-2 text-muted-foreground text-sm">
+      <TableCell className="py-2 text-muted-foreground text-sm tabular-nums">
         {file.fileCreatedAt
           ? formatDateTime(file.fileCreatedAt, timeZone)
           : file.createdAt

@@ -33,7 +33,7 @@ export function TokensTableSkeleton({
         <TableHeader>
           <TableRow>
             <TableHead>Name</TableHead>
-            <TableHead>User</TableHead>
+            <TableHead>Created by</TableHead>
             <TableHead>Token</TableHead>
             <TableHead>Scopes</TableHead>
             <TableHead>Last used</TableHead>

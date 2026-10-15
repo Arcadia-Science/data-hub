@@ -294,7 +294,7 @@ export function ArchiveDownloadProvider({ children }: { children: ReactNode }) {
             result.downloadUrl,
             result.sizeBytes
           );
-          toast.success(`Downloading ${job.runId}...`);
+          toast.success(`Downloading ${job.runId}…`);
           break;
         case "failed":
           updateJob(job.id, {

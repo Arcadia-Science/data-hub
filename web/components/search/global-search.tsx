@@ -257,7 +257,7 @@ export function GlobalSearch({
             <CommandPrimitive.Input
               className="flex h-12 w-full bg-transparent text-base outline-none placeholder:text-muted-foreground"
               onValueChange={setQuery}
-              placeholder="Search runs, files, instruments, users, or comments"
+              placeholder="Search runs, files, instruments, users, or comments…"
               value={query}
             />
             <Kbd>esc</Kbd>

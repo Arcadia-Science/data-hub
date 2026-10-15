@@ -163,7 +163,7 @@ export function WatcherReleaseForm({
                     noneLabel="None — disable self-updates"
                     onBlur={field.handleBlur}
                     onChange={field.handleChange}
-                    placeholder="e.g. 0.4.2"
+                    placeholder="e.g. 0.4.2…"
                     pypiReachable={pypiReachable}
                     value={field.state.value}
                   />
@@ -194,7 +194,7 @@ export function WatcherReleaseForm({
                     noneLabel="None — no version floor"
                     onBlur={field.handleBlur}
                     onChange={field.handleChange}
-                    placeholder="e.g. 0.1.0"
+                    placeholder="e.g. 0.1.0…"
                     pypiReachable={pypiReachable}
                     value={field.state.value}
                   />

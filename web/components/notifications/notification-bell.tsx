@@ -3,7 +3,7 @@
 import { Bell } from "lucide-react";
 import { useRef, useState } from "react";
 import { NotificationBellContent } from "@/components/notifications/notification-bell-content";
-import { useNotifications } from "@/components/notifications/notifications-provider";
+import { useNotificationsSummary } from "@/components/notifications/notifications-provider";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -15,7 +15,7 @@ import {
 // content component can subscribe to `recent` without re-rendering the
 // trigger button on every poll.
 export function NotificationBell() {
-  const { unreadCount, refresh } = useNotifications();
+  const { unreadCount, refresh } = useNotificationsSummary();
   const [open, setOpen] = useState(false);
   // Closing via a row click restores focus to the bell and scrolls the
   // header back into view — that cancels the `#comment-{id}` jump. Skip

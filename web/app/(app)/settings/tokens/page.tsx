@@ -152,7 +152,11 @@ async function TokensSection({ isAdmin }: { isAdmin: boolean }) {
                   : null;
                 return (
                   <TableRow key={token.id}>
-                    <TableCell className="font-medium">{token.name}</TableCell>
+                    <TableCell className="max-w-64 font-medium">
+                      <span className="block truncate" title={token.name}>
+                        {token.name}
+                      </span>
+                    </TableCell>
                     <TableCell>
                       {avatarUser ? (
                         <span className="inline-flex items-center gap-2">

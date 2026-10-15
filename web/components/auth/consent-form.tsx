@@ -1,9 +1,9 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { authClient, useSession } from "@/lib/auth-client";
+import { authClient } from "@/lib/auth-client";
 
 const SCOPE_LABELS: Record<string, string> = {
   openid: "Verify your identity",
@@ -37,22 +37,13 @@ export function ConsentForm({
   redirectHosts,
   scopes,
 }: ConsentFormProps) {
-  const router = useRouter();
-  const { data: session, isPending: sessionPending } = useSession();
-  const [busy, setBusy] = useState(false);
+  // Which choice is in flight, so its button can say so. The page redirects
+  // signed-out visitors before this renders, so a session is assumed here.
+  const [busy, setBusy] = useState<"allow" | "deny" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (sessionPending) {
-      return;
-    }
-    if (!session) {
-      router.replace(oauthQuery ? `/login?${oauthQuery}` : "/login");
-    }
-  }, [session, sessionPending, router, oauthQuery]);
-
   async function decide(accept: boolean) {
-    setBusy(true);
+    setBusy(accept ? "allow" : "deny");
     setError(null);
     try {
       const { data, error: consentError } = await authClient.oauth2.consent({
@@ -64,7 +55,7 @@ export function ConsentForm({
       });
       if (consentError) {
         setError(consentError.message ?? "Consent failed");
-        setBusy(false);
+        setBusy(null);
         return;
       }
 
@@ -90,15 +81,11 @@ export function ConsentForm({
       }
 
       setError("Consent succeeded but no redirect URL was returned.");
-      setBusy(false);
+      setBusy(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Consent failed");
-      setBusy(false);
+      setBusy(null);
     }
-  }
-
-  if (sessionPending || !session) {
-    return <p className="text-muted-foreground">Checking session…</p>;
   }
 
   if (!clientId) {
@@ -143,24 +130,40 @@ export function ConsentForm({
       ) : null}
 
       {error ? (
-        <p className="text-center text-destructive text-sm">{error}</p>
+        <p className="text-center text-destructive text-sm" role="alert">
+          {error}
+        </p>
       ) : null}
 
       <div className="flex gap-3">
         <Button
+          aria-busy={busy === "deny"}
           className="flex-1"
-          disabled={busy}
+          disabled={busy !== null}
           onClick={() => void decide(false)}
           variant="outline"
         >
-          Deny
+          {busy === "deny" ? (
+            <Loader2
+              className="animate-spin motion-reduce:animate-none"
+              data-icon="inline-start"
+            />
+          ) : null}
+          {busy === "deny" ? "Denying…" : "Deny"}
         </Button>
         <Button
+          aria-busy={busy === "allow"}
           className="flex-1"
-          disabled={busy}
+          disabled={busy !== null}
           onClick={() => void decide(true)}
         >
-          Allow
+          {busy === "allow" ? (
+            <Loader2
+              className="animate-spin motion-reduce:animate-none"
+              data-icon="inline-start"
+            />
+          ) : null}
+          {busy === "allow" ? "Allowing…" : "Allow"}
         </Button>
       </div>
     </div>

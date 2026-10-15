@@ -182,7 +182,7 @@ export function SlackAppCard({
               label="Client secret"
               onChange={setClientSecretDraft}
               onClear={() => clearSaved("client_secret")}
-              placeholder="Paste a client secret"
+              placeholder="Paste a client secret…"
               status={clientSecret}
               type="password"
               value={clientSecretDraft}

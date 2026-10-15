@@ -6,6 +6,7 @@ import {
   type UseReportItemsResult,
   useReportItems,
 } from "@/hooks/use-report-items";
+import { serializePersistedFileId } from "@/lib/runs/persisted-file-id";
 import type { ReportItemKind, ReportItemsPage } from "@/lib/runs/report-items";
 
 // Mirrors FileSelectionProvider in shape (state / actions / meta). Owns the
@@ -91,7 +92,7 @@ export function ReportItemsProvider({
       return;
     }
     try {
-      window.localStorage.setItem(persistKey, JSON.stringify({ fileId }));
+      window.localStorage.setItem(persistKey, serializePersistedFileId(fileId));
     } catch {
       // Private mode and quota failures are fine; restore is optional.
     }

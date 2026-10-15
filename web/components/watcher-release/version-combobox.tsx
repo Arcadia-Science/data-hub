@@ -95,7 +95,7 @@ export function VersionCombobox({
         className="w-[var(--radix-popover-trigger-width)] p-0"
       >
         <Command>
-          <CommandInput placeholder="Search versions..." />
+          <CommandInput placeholder="Search versions…" />
           <CommandList id={listId}>
             <CommandEmpty>No versions found.</CommandEmpty>
             <CommandGroup>

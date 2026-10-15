@@ -173,8 +173,9 @@ export function InstrumentsTable({
               <TableRow className="relative text-sm" key={row.id}>
                 <TableCell>
                   <RowLink
-                    className="font-medium"
+                    className="block max-w-72 truncate font-medium"
                     href={`/instruments/${row.id}`}
+                    title={row.displayName}
                   >
                     {row.displayName}
                   </RowLink>
