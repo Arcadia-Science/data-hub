@@ -5,12 +5,14 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import type { RunFileRow } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
 import { cn } from "@/lib/utils";
 import { FILE_STATUS_CONFIG, getFileStatusKey } from "./file-status-config";
 
 export function FileStatusIndicator({ file }: { file: RunFileRow }) {
+  const timeZone = useViewerTimeZone();
   const key = getFileStatusKey(file);
   const { label, Icon, className, spin } = FILE_STATUS_CONFIG[key];
   const showErrorTooltip = key === "failed" && !!file.errorMessage;
@@ -19,7 +21,7 @@ export function FileStatusIndicator({ file }: { file: RunFileRow }) {
     // Absolute, not relative: polling stops for stalled rows, so an "N minutes
     // ago" rendered here would sit frozen for as long as the tab stays open.
     stalledTooltip = file.processingStartedAt
-      ? `Processing started ${formatDateTime(file.processingStartedAt)} and never finished. You can reprocess this file.`
+      ? `Processing started ${formatDateTime(file.processingStartedAt, timeZone)} and never finished. You can reprocess this file.`
       : "Processing never finished. You can reprocess this file.";
   }
   const tooltip = showErrorTooltip ? file.errorMessage : stalledTooltip;

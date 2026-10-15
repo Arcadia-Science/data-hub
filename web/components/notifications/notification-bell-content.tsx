@@ -9,10 +9,10 @@ import { ActorAvatar } from "@/components/token-actor";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { UnknownUserAvatar } from "@/components/user-avatar";
+import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import { actorDisplayName } from "@/lib/api/actor";
 import { runCommentHref } from "@/lib/comment-hash";
 import { applySamePageCommentHash } from "@/lib/comment-hash-nav";
-import { getBrowserTimeZone } from "@/lib/date";
 import {
   buildNotificationFeed,
   isAnchored,
@@ -91,7 +91,7 @@ export function NotificationBellContent({
   onNavigate?: () => void;
 }) {
   const { recent, markAllRead, markOneRead, unreadCount } = useNotifications();
-  const timeZone = getBrowserTimeZone();
+  const timeZone = useViewerTimeZone();
 
   const sections = useMemo(
     () => buildNotificationFeed(recent, timeZone, new Date()),

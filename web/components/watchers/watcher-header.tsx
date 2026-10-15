@@ -3,6 +3,7 @@
 import { Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { RelativeTime } from "@/components/dashboard/relative-time";
 import { ActorLabel } from "@/components/token-actor";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -15,15 +16,12 @@ import {
 } from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import { DeregisterDialog } from "@/components/watchers/deregister-dialog";
 import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type { WatcherDetail } from "@/lib/api/watchers";
 import { formatDate } from "@/lib/date";
-import { formatRelativeTime } from "@/lib/utils";
 
-// Must stay a client component: `formatDate` resolves the timezone at runtime,
-// so server rendering uses UTC and can land a date on the wrong calendar day
-// near midnight.
 export function WatcherHeaderSkeleton() {
   return (
     <div
@@ -57,6 +55,7 @@ export function WatcherHeader({
   isAdmin?: boolean;
 }) {
   const [deregisterOpen, setDeregisterOpen] = useState(false);
+  const timeZone = useViewerTimeZone();
   const isDeregistered = !!watcher.deletedAt;
 
   return (
@@ -144,7 +143,8 @@ export function WatcherHeader({
             <>
               <span>·</span>
               <span>
-                Last heartbeat {formatRelativeTime(watcher.lastHeartbeatAt)}
+                Last heartbeat{" "}
+                <RelativeTime date={watcher.lastHeartbeatAt.toISOString()} />
               </span>
             </>
           )}
@@ -152,7 +152,9 @@ export function WatcherHeader({
             <>
               <span>·</span>
               <span className="flex items-center gap-1.5">
-                <span>Deregistered {formatDate(watcher.deletedAt)}</span>
+                <span>
+                  Deregistered {formatDate(watcher.deletedAt, timeZone)}
+                </span>
                 {watcher.deregisteredBy && (
                   <span className="flex items-center gap-1.5">
                     <span>by</span>

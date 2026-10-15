@@ -23,6 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import type { RunFileRow } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
 import type { InstrumentType } from "@/lib/db/schema";
@@ -157,6 +158,7 @@ function FileInfoCells({
   file: RunFileRow;
   onPreview: (fileId: number) => void;
 }) {
+  const timeZone = useViewerTimeZone();
   const previewable = previewableFileOf(file);
   return (
     <>
@@ -189,9 +191,9 @@ function FileInfoCells({
       </TableCell>
       <TableCell className="py-2 text-muted-foreground text-sm">
         {file.fileCreatedAt
-          ? formatDateTime(file.fileCreatedAt)
+          ? formatDateTime(file.fileCreatedAt, timeZone)
           : file.createdAt
-            ? formatDateTime(file.createdAt)
+            ? formatDateTime(file.createdAt, timeZone)
             : "—"}
       </TableCell>
       <TableCell className="py-2 align-middle">

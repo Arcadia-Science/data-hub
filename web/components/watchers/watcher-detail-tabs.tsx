@@ -4,6 +4,7 @@ import { parseAsString, useQueryState, useQueryStates } from "nuqs";
 import { TablePendingProvider } from "@/components/table-pending";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import { EventLog } from "@/components/watchers/event-log";
 import { EventLogToolbar } from "@/components/watchers/event-log-toolbar";
 import {
@@ -97,7 +98,8 @@ export function WatcherDetailTabs({
 
   const [{ since }] = useQueryStates(watcherDetailSearchParams);
 
-  const effectiveSince = since ?? todayDateString();
+  const timeZone = useViewerTimeZone();
+  const effectiveSince = since ?? todayDateString(timeZone);
 
   return (
     <Tabs onValueChange={setTab} value={tab}>

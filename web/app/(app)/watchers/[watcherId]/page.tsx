@@ -19,6 +19,7 @@ import {
 import { auth } from "@/lib/auth";
 import { todayDateString } from "@/lib/date";
 import { watcherDetailParamsCache } from "@/lib/search-params";
+import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
 type WatcherDetailFilters = Awaited<
   ReturnType<typeof watcherDetailParamsCache.parse>
@@ -105,10 +106,12 @@ async function WatcherTabsSection({
   watcherId: string;
   filters: WatcherDetailFilters;
 }) {
-  const effectiveSince = filters.since ?? todayDateString();
+  const timeZone = await getViewerTimeZone();
+  const effectiveSince = filters.since ?? todayDateString(timeZone);
   const heartbeatSince = toTzSafeSince(effectiveSince);
 
-  const effectiveEventsSince = filters.events_since ?? todayDateString();
+  const effectiveEventsSince =
+    filters.events_since ?? todayDateString(timeZone);
   const eventsSince = toTzSafeSince(effectiveEventsSince);
 
   // `getWatcherById` is `cache()`-deduped, so this shares the header section's

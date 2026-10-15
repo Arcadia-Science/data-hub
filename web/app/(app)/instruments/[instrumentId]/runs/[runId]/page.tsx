@@ -34,6 +34,7 @@ import {
   reportItemKindForInstrument,
 } from "@/lib/runs/report-items";
 import { runDetailParamsCache } from "@/lib/search-params";
+import { getViewerTimeZone } from "@/lib/viewer-timezone";
 
 const FILES_PER_PAGE = 10;
 
@@ -71,7 +72,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
         ? "1 raw data file."
         : `${rawFileCount} raw data files.`;
 
-  const description = `${dateLabel} ${formatDateLong(effectiveDate)}. ${fileLabel}`;
+  const description = `${dateLabel} ${formatDateLong(effectiveDate, await getViewerTimeZone())}. ${fileLabel}`;
   return {
     title,
     description,

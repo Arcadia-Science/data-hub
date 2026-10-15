@@ -16,6 +16,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import type { WatcherHeartbeatRow } from "@/lib/api/watchers";
 import { formatDateTime, formatTime } from "@/lib/date";
 import { cn } from "@/lib/utils";
@@ -112,6 +113,7 @@ function StatusStrip({
   windowStart: Date;
   windowEnd: Date;
 }) {
+  const timeZone = useViewerTimeZone();
   const buckets = useMemo(
     () => buildBuckets(heartbeats, windowStart, windowEnd),
     [heartbeats, windowStart, windowEnd]
@@ -129,7 +131,8 @@ function StatusStrip({
             <TooltipContent className="text-xs" side="top">
               <p className="font-medium">{bucket.label}</p>
               <p className="text-muted-foreground">
-                {formatTime(bucket.startTime)} – {formatTime(bucket.endTime)}
+                {formatTime(bucket.startTime, timeZone)} –{" "}
+                {formatTime(bucket.endTime, timeZone)}
               </p>
               <p className="text-muted-foreground">
                 {bucket.heartbeatCount} heartbeat
@@ -140,8 +143,8 @@ function StatusStrip({
         ))}
       </div>
       <div className="flex justify-between text-[10px] text-muted-foreground">
-        <span>{formatTime(windowStart)}</span>
-        <span>{formatTime(windowEnd)}</span>
+        <span>{formatTime(windowStart, timeZone)}</span>
+        <span>{formatTime(windowEnd, timeZone)}</span>
       </div>
     </div>
   );
@@ -170,6 +173,7 @@ export function HeartbeatChart({
   // already been applied client-side, so the previously loaded heartbeats fall
   // outside the window and `data` would otherwise be empty.
   const { isPending } = useTablePending();
+  const timeZone = useViewerTimeZone();
 
   const { windowStart, windowEnd } = useMemo(
     () => computeWindow(since),
@@ -286,7 +290,7 @@ export function HeartbeatChart({
                 domain={[startMs, endMs]}
                 minTickGap={40}
                 scale="time"
-                tickFormatter={(v: number) => formatTime(new Date(v))}
+                tickFormatter={(v: number) => formatTime(new Date(v), timeZone)}
                 tickLine={false}
                 tickMargin={8}
                 type="number"
@@ -303,7 +307,7 @@ export function HeartbeatChart({
                   <ChartTooltipContent
                     labelFormatter={(_, payload) => {
                       const ts = payload?.[0]?.payload?.timestamp;
-                      return ts ? formatDateTime(new Date(ts)) : "";
+                      return ts ? formatDateTime(new Date(ts), timeZone) : "";
                     }}
                   />
                 }

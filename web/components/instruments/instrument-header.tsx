@@ -22,6 +22,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import {
   getWatcherOnlineStatus,
   type WatcherOnlineStatus,
@@ -30,9 +31,6 @@ import { WatcherStatusBadge } from "@/components/watchers/watcher-status-badge";
 import type { InstrumentDetail } from "@/lib/api/instruments";
 import { formatDate } from "@/lib/date";
 
-// Must stay a client component: the retired-by line's `formatDate` resolves the
-// timezone at runtime, so server rendering would use UTC and can land the date
-// on the wrong calendar day near midnight.
 export function InstrumentHeaderSkeleton() {
   return (
     <div
@@ -129,6 +127,7 @@ export function InstrumentHeader({
     masterMuted: boolean;
   };
 }) {
+  const timeZone = useViewerTimeZone();
   const watcherStatus = getWatcherOnlineStatus(instrument);
   const watchDirectory = instrument.activeWatcherWatchDirectory;
   const retiredAt =
@@ -186,7 +185,7 @@ export function InstrumentHeader({
                 <>
                   {watchDirectory ? <span>·</span> : null}
                   <span className="flex items-center gap-1.5">
-                    <span>Retired {formatDate(retiredAt)}</span>
+                    <span>Retired {formatDate(retiredAt, timeZone)}</span>
                     {instrument.retiredBy ? (
                       <span className="flex items-center gap-1.5">
                         <span>by</span>

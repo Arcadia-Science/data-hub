@@ -2,6 +2,7 @@
 
 import { Inbox } from "lucide-react";
 import { CopyButton } from "@/components/copy-button";
+import { RelativeTime } from "@/components/dashboard/relative-time";
 import { PaginationNav } from "@/components/pagination-nav";
 import { TablePendingBoundary } from "@/components/table-pending";
 import {
@@ -12,7 +13,6 @@ import {
 } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import type { WatcherEventRow } from "@/lib/api/watchers";
-import { formatRelativeTime } from "@/lib/utils";
 
 const eventTypeMeta: Record<
   string,
@@ -46,7 +46,7 @@ function EventEntry({ event }: { event: WatcherEventRow }) {
         <span className="text-sm">{event.message}</span>
       </div>
       <span className="me-2 shrink-0 text-muted-foreground text-xs">
-        {formatRelativeTime(event.timestamp)}
+        <RelativeTime date={event.timestamp.toISOString()} />
       </span>
     </div>
   );

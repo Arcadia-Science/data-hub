@@ -12,15 +12,13 @@ import {
   BreadcrumbList,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import type { RunDetail } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
 
 // Breadcrumb links set `prefetch={false}`. `router.refresh()` prefetches each
 // visible link again, and a run page refreshes while files are in progress.
 
-// Must stay a client component: `formatDateTime` resolves the timezone at
-// runtime, so rendering on the server uses UTC and shifts every timestamp by
-// the viewer's offset (disagreeing with the client-rendered files table).
 export function RunHeader({
   run,
   runNavSlot,
@@ -31,6 +29,8 @@ export function RunHeader({
   runNavSlot?: React.ReactNode;
   children?: React.ReactNode;
 }) {
+  const timeZone = useViewerTimeZone();
+
   return (
     <div className="flex flex-col gap-4">
       <RecordInstrumentVisit
@@ -71,7 +71,7 @@ export function RunHeader({
         <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-2.5 text-destructive text-sm">
           <Trash2 className="size-4 shrink-0" />
           <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
-            <span>Deleted {formatDateTime(run.deletedAt)}</span>
+            <span>Deleted {formatDateTime(run.deletedAt, timeZone)}</span>
             {run.deletedBy && (
               <span className="flex items-center gap-1.5">
                 <span>by</span>
