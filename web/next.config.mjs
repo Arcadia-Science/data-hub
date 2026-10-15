@@ -64,4 +64,7 @@ export default {
   ...withMfe,
   outputFileTracingRoot: appDir,
   turbopack: { ...withMfe.turbopack, root: appDir },
+  // `npm run docs:screenshots` runs its own dev server. A separate output
+  // folder keeps it from fighting a running `make dev` over `.next`.
+  ...(process.env.NEXT_DIST_DIR ? { distDir: process.env.NEXT_DIST_DIR } : {}),
 };

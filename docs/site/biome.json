@@ -13,7 +13,8 @@
       "!dist",
       "!build",
       "!.source",
-      "!src/lib/*.snapshot.json"
+      "!src/lib/*.snapshot.json",
+      "!src/lib/screenshots.generated.ts"
     ]
   },
   "formatter": {

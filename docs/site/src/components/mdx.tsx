@@ -3,10 +3,10 @@ import defaultMdxComponents from "fumadocs-ui/mdx";
 import type { MDXComponents } from "mdx/types";
 import { Audience } from "./audience";
 import { WatcherCliCatalog } from "./cli/cli-catalog";
-import { MdxImage } from "./docs-image";
 import { McpPromptCatalog } from "./mcp/prompt-catalog";
 import { McpResourceCatalog } from "./mcp/resource-catalog";
 import { McpToolCatalog } from "./mcp/tool-catalog";
+import { MdxImage } from "./mdx-image";
 import { Mermaid } from "./mermaid";
 
 export function getMDXComponents(components?: MDXComponents) {
