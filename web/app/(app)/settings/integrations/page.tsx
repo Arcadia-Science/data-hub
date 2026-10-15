@@ -40,7 +40,8 @@ export default async function IntegrationsSettingsPage() {
     return <AdminsOnly>manage integrations</AdminsOnly>;
   }
 
-  // The header paints now. The cards wait for the saved Slack settings.
+  // The header paints now. The Linear card and the Slack cards each load behind
+  // their own boundary, so all three reads start together.
   return (
     <SettingsPageContent>
       <div>
@@ -50,15 +51,21 @@ export default async function IntegrationsSettingsPage() {
         <p className="text-muted-foreground text-sm">{description}</p>
       </div>
       <div className="mt-6 flex flex-col gap-6">
-        <Suspense fallback={<IntegrationsSkeleton />}>
-          <IntegrationCards />
+        <Suspense fallback={<Skeleton className="h-48 w-full rounded-lg" />}>
+          <LinearSetupSection
+            feedback={feedback}
+            webhookPath="/api/v1/integrations/linear/webhook"
+          />
+        </Suspense>
+        <Suspense fallback={<SlackCardsSkeleton />}>
+          <SlackCards />
         </Suspense>
       </div>
     </SettingsPageContent>
   );
 }
 
-async function IntegrationCards() {
+async function SlackCards() {
   const [slackApp, slackChannel] = await Promise.all([
     getSlackAppConfigForAdmin(),
     getSlackChannelConfigForAdmin(),
@@ -67,10 +74,6 @@ async function IntegrationCards() {
 
   return (
     <>
-      <LinearSetupSection
-        feedback={feedback}
-        webhookPath="/api/v1/integrations/linear/webhook"
-      />
       <SlackAppCard
         botToken={slackApp.botToken}
         clientId={slackApp.clientId}
@@ -88,11 +91,10 @@ async function IntegrationCards() {
   );
 }
 
-function IntegrationsSkeleton() {
+function SlackCardsSkeleton() {
   return (
-    <div aria-busy="true" aria-label="Loading integrations" role="status">
+    <div aria-busy="true" aria-label="Loading Slack settings" role="status">
       <div className="flex flex-col gap-6">
-        <Skeleton className="h-48 w-full rounded-lg" />
         <Skeleton className="h-64 w-full rounded-lg" />
         <Skeleton className="h-40 w-full rounded-lg" />
       </div>

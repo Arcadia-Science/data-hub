@@ -11,6 +11,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { LoadErrorBoundary } from "@/components/load-error-boundary";
+import { TruncatedTooltip } from "@/components/truncated-tooltip";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -212,16 +213,17 @@ function FileInfoCells({
           the status and action columns off screen. The title shows the rest. */}
       <TableCell className="max-w-sm py-2 font-mono text-sm">
         {previewable ? (
-          <button
-            className="block max-w-full cursor-pointer truncate text-left"
-            onClick={() => onPreview(file.id)}
-            onFocus={preloadFilePreviewDialog}
-            onMouseEnter={preloadFilePreviewDialog}
-            title={file.filename}
-            type="button"
-          >
-            {file.filename}
-          </button>
+          <TruncatedTooltip text={file.filename}>
+            <button
+              className="block max-w-full cursor-pointer truncate text-left"
+              onClick={() => onPreview(file.id)}
+              onFocus={preloadFilePreviewDialog}
+              onMouseEnter={preloadFilePreviewDialog}
+              type="button"
+            >
+              {file.filename}
+            </button>
+          </TruncatedTooltip>
         ) : (
           <span className="block truncate" title={file.filename}>
             {file.filename}

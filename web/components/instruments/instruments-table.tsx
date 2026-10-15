@@ -5,6 +5,7 @@ import { FilePatterns } from "@/components/instruments/file-patterns";
 import { InstrumentStatusBadge } from "@/components/instruments/instrument-status-badge";
 import { InstrumentNotificationSwitch } from "@/components/notifications/instrument-notification-switch";
 import { RowControl, RowLink } from "@/components/row-link";
+import { TruncatedTooltip } from "@/components/truncated-tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -172,13 +173,14 @@ export function InstrumentsTable({
             return (
               <TableRow className="relative text-sm" key={row.id}>
                 <TableCell>
-                  <RowLink
-                    className="block max-w-72 truncate font-medium"
-                    href={`/instruments/${row.id}`}
-                    title={row.displayName}
-                  >
-                    {row.displayName}
-                  </RowLink>
+                  <TruncatedTooltip text={row.displayName}>
+                    <RowLink
+                      className="block max-w-72 truncate font-medium"
+                      href={`/instruments/${row.id}`}
+                    >
+                      {row.displayName}
+                    </RowLink>
+                  </TruncatedTooltip>
                   <span className="mt-0.5 block text-muted-foreground text-xs">
                     {row.runCount} total {row.runCount === 1 ? "run" : "runs"}
                   </span>

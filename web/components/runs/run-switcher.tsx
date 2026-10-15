@@ -261,7 +261,7 @@ export function RunSwitcher({ run }: { run: RunDetail }) {
             {query.trim() ? (
               isSearching ? (
                 <div className="py-6 text-center text-muted-foreground text-sm">
-                  Searching...
+                  Searching…
                 </div>
               ) : searchResults.length === 0 ? (
                 <CommandEmpty>No matching runs.</CommandEmpty>

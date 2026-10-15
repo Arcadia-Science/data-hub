@@ -107,7 +107,9 @@ export function WatcherDetailTabs({
 }) {
   const [tab, setTab] = useQueryState(
     "tab",
-    parseAsString.withDefault("logs").withOptions({ shallow: false })
+    parseAsString
+      .withDefault("logs")
+      .withOptions({ history: "push", shallow: false })
   );
 
   const [{ since }] = useQueryStates(watcherDetailSearchParams);

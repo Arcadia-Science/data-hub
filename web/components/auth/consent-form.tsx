@@ -144,10 +144,7 @@ export function ConsentForm({
           variant="outline"
         >
           {busy === "deny" ? (
-            <Loader2
-              className="animate-spin motion-reduce:animate-none"
-              data-icon="inline-start"
-            />
+            <Loader2 className="animate-spin" data-icon="inline-start" />
           ) : null}
           {busy === "deny" ? "Denying…" : "Deny"}
         </Button>
@@ -158,10 +155,7 @@ export function ConsentForm({
           onClick={() => void decide(true)}
         >
           {busy === "allow" ? (
-            <Loader2
-              className="animate-spin motion-reduce:animate-none"
-              data-icon="inline-start"
-            />
+            <Loader2 className="animate-spin" data-icon="inline-start" />
           ) : null}
           {busy === "allow" ? "Allowing…" : "Allow"}
         </Button>

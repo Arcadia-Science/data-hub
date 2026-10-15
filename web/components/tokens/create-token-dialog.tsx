@@ -267,7 +267,7 @@ function CreateTokenForm({
             id="token-name"
             maxLength={100}
             onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Plate Reader PC…"
+            placeholder="e.g. Plate Reader PC"
             value={name}
           />
         </div>

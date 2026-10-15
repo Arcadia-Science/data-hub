@@ -11,6 +11,10 @@ describe("versioned list storage", () => {
     expect(parseVersioned(saved)).toEqual(["a", "b"]);
   });
 
+  it("writes a plain array, so older code can still read it", () => {
+    expect(JSON.parse(serializeVersioned(["a", "b"]))).toEqual(["a", "b"]);
+  });
+
   it("still reads a list saved before versions existed", () => {
     expect(parseVersioned(JSON.stringify(["old", "list"]))).toEqual([
       "old",

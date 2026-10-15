@@ -1,17 +1,18 @@
-// Browser-saved lists (recent runs, recent searches, and the like) are wrapped
-// as `{ v, data }`. A later change to what a list holds can then bump `v`, and
-// old readers and new readers each ignore a format they do not understand
-// instead of misreading it.
+// Browser-saved lists (recent runs, recent searches, and the like) are stored
+// as a plain JSON array, which is what every earlier build wrote. Version 1 is
+// that format, so a tab still running older code, or a rollback, reads what
+// newer code saved instead of finding nothing and overwriting it. A later
+// change to what a list holds can wrap it as `{ v, data }` with a higher `v`,
+// and readers ignore a version they do not know.
 export const STORAGE_FORMAT_VERSION = 1;
 
 export function serializeVersioned(data: unknown): string {
-  return JSON.stringify({ v: STORAGE_FORMAT_VERSION, data });
+  return JSON.stringify(data);
 }
 
 /**
  * Returns the saved data, or `undefined` when there is nothing usable: no value,
- * text that is not JSON, or a version this code does not know. A list saved
- * before versions existed is a bare array, and it is still read.
+ * text that is not JSON, or a version this code does not know.
  */
 export function parseVersioned(raw: string | null): unknown {
   if (!raw) {
