@@ -161,6 +161,13 @@ export const commentsSearchParams = {
 export const commentsParamsCache =
   createSearchParamsCache(commentsSearchParams);
 
+// The changelog window opens over whichever page is showing, so a link can
+// carry this key on any signed-in page. It holds an entry ID and is only
+// written by links, never by opening the window from the account menu.
+export const changelogSearchParams = {
+  changelog: parseAsString,
+};
+
 export function hasActiveFilters(params: {
   search: string;
   instrument_id: string[];

@@ -82,7 +82,7 @@ function splitFrontmatter(
   return { frontmatter: match[1], body: match[2] ?? "" };
 }
 
-function isRealCalendarDate(isoDate: string): boolean {
+export function isRealCalendarDate(isoDate: string): boolean {
   const [year, month, day] = isoDate.split("-").map(Number);
   if (!(year && month && day)) {
     return false;
