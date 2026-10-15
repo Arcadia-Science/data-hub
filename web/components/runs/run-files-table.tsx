@@ -1,8 +1,16 @@
 "use client";
 
 import { Loader2, RotateCw, Upload, X } from "lucide-react";
-import dynamic from "next/dynamic";
-import { type ComponentProps, useEffect, useMemo, useState } from "react";
+import {
+  type ComponentProps,
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import { toast } from "sonner";
+import { LoadErrorBoundary } from "@/components/load-error-boundary";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,10 +36,12 @@ import { useViewerTimeZone } from "@/components/viewer-time-zone-provider";
 import type { RunFileRow } from "@/lib/api/instrument-runs";
 import { formatDateTime } from "@/lib/date";
 import type { InstrumentType } from "@/lib/db/schema";
+import { preloader } from "@/lib/preload";
 import { canReprocessFile } from "@/lib/runs/reprocessable-statuses";
 import { filePreviewKind } from "@/lib/runs/run-file-types";
 import { cn, formatBytes } from "@/lib/utils";
 import type { PreviewableFile } from "./file-preview-dialog";
+import { FilePreviewLoading } from "./file-preview-loading";
 import {
   FileSelectAllCheckbox,
   FileSelectCheckbox,
@@ -83,11 +93,15 @@ function previewableFileOf(file: RunFileRow): PreviewableFile | null {
 }
 
 // The dialog pulls in the CSV parser and the colony table. Most visits never
-// open a preview, so that code loads on the first open instead of with the page.
-const FilePreviewDialog = dynamic(
-  () => import("./file-preview-dialog").then((m) => m.FilePreviewDialog),
-  { ssr: false }
-);
+// open a preview, so that code loads on the first open instead of with the
+// page, or earlier when the pointer or focus reaches a file name.
+const loadFilePreviewDialog = () =>
+  import("./file-preview-dialog").then((m) => ({
+    default: m.FilePreviewDialog,
+  }));
+
+const FilePreviewDialog = lazy(loadFilePreviewDialog);
+const preloadFilePreviewDialog = preloader(loadFilePreviewDialog);
 
 // Shared by both table variants. Navigation covers only the files on the
 // current page, in table order.
@@ -113,16 +127,32 @@ function useFilePreview(files: RunFileRow[]) {
   }, [openFileId, isOpenFileListed]);
 
   const dialog = hasOpened ? (
-    <FilePreviewDialog
-      files={previewable}
-      onOpenChange={(open) => {
-        if (!open) {
-          setOpenFileId(null);
-        }
+    <LoadErrorBoundary
+      fallback={null}
+      onError={() => {
+        setOpenFileId(null);
+        toast.error("Couldn’t load the preview. Reload the page to try again.");
       }}
-      onSelect={setOpenFileId}
-      openFileId={openFileId}
-    />
+    >
+      <Suspense
+        fallback={
+          openFileId === null ? null : (
+            <FilePreviewLoading onClose={() => setOpenFileId(null)} />
+          )
+        }
+      >
+        <FilePreviewDialog
+          files={previewable}
+          onOpenChange={(open) => {
+            if (!open) {
+              setOpenFileId(null);
+            }
+          }}
+          onSelect={setOpenFileId}
+          openFileId={openFileId}
+        />
+      </Suspense>
+    </LoadErrorBoundary>
   ) : null;
 
   function openPreview(fileId: number) {
@@ -183,6 +213,8 @@ function FileInfoCells({
           <button
             className="cursor-pointer text-left"
             onClick={() => onPreview(file.id)}
+            onFocus={preloadFilePreviewDialog}
+            onMouseEnter={preloadFilePreviewDialog}
             type="button"
           >
             {file.filename}

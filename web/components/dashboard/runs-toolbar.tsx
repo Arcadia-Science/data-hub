@@ -4,6 +4,7 @@ import { ChevronsUpDown, Search, X } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useQueryStates } from "nuqs";
 import { useState } from "react";
+import { LoadErrorBoundary } from "@/components/load-error-boundary";
 import { RunFiltersCombobox } from "@/components/runs/run-filters-combobox";
 import {
   type PresetId,
@@ -19,6 +20,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
+import { preloader } from "@/lib/preload";
 import { dashboardSearchParams, hasActiveFilters } from "@/lib/search-params";
 
 interface Instrument {
@@ -27,23 +29,25 @@ interface Instrument {
 }
 
 // The list uses the command palette library, which the dashboard doesn't
-// otherwise need. It loads when the popover first opens.
-const InstrumentFilterList = dynamic(
-  () =>
-    import("@/components/dashboard/instrument-filter-list").then(
-      (m) => m.InstrumentFilterList
-    ),
-  {
-    ssr: false,
-    loading: () => (
-      <div aria-hidden className="flex flex-col gap-2 p-2">
-        <Skeleton className="h-8 w-full" />
-        <Skeleton className="h-6 w-full" />
-        <Skeleton className="h-6 w-full" />
-      </div>
-    ),
-  }
-);
+// otherwise need. It loads when the popover first opens, or earlier when the
+// pointer or focus reaches the button.
+const loadInstrumentFilterList = () =>
+  import("@/components/dashboard/instrument-filter-list").then(
+    (m) => m.InstrumentFilterList
+  );
+
+const preloadInstrumentFilterList = preloader(loadInstrumentFilterList);
+
+const InstrumentFilterList = dynamic(loadInstrumentFilterList, {
+  ssr: false,
+  loading: () => (
+    <div aria-hidden className="flex flex-col gap-2 p-2">
+      <Skeleton className="h-8 w-full" />
+      <Skeleton className="h-6 w-full" />
+      <Skeleton className="h-6 w-full" />
+    </div>
+  ),
+});
 
 export function RunsToolbar({
   instruments,
@@ -108,6 +112,8 @@ export function RunsToolbar({
               <Button
                 aria-expanded={instrumentOpen}
                 className="h-9 gap-1.5 font-normal"
+                onFocus={preloadInstrumentFilterList}
+                onMouseEnter={preloadInstrumentFilterList}
                 role="combobox"
                 size="sm"
                 variant="outline"
@@ -125,11 +131,13 @@ export function RunsToolbar({
               </Button>
             </PopoverTrigger>
             <PopoverContent align="start" className="w-72 p-0">
-              <InstrumentFilterList
-                instruments={instruments}
-                onToggle={toggleInstrument}
-                selectedIds={filters.instrument_id}
-              />
+              <LoadErrorBoundary>
+                <InstrumentFilterList
+                  instruments={instruments}
+                  onToggle={toggleInstrument}
+                  selectedIds={filters.instrument_id}
+                />
+              </LoadErrorBoundary>
             </PopoverContent>
           </Popover>
         </div>

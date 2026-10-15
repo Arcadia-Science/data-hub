@@ -203,9 +203,8 @@ async function RunDetailContentBody({
       : Promise.resolve(emptyReportItemsPage()),
     getInstrumentById(instrumentId),
     getAdjacentRunIds(run),
-    // Only the plate reader view renders these rows. The other instruments
-    // read their processed files client-side, so parsing every CSV here would
-    // add S3 reads and CPU time to every run page for nothing.
+    // Only the plate reader view reads `wellData`, so parsing every CSV here
+    // would add S3 reads and CPU time to every other run page for nothing.
     reportFilesPromise.then((rf) =>
       isPlateReader ? getProcessedCsvData(rf) : Promise.resolve([])
     ),

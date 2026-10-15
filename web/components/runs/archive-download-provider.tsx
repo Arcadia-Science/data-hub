@@ -351,11 +351,12 @@ export function ArchiveDownloadProvider({ children }: { children: ReactNode }) {
       inFlight = true;
       try {
         const building = jobsRef.current.filter((j) => j.status === "building");
-        await Promise.all(building.map(checkJob));
+        await Promise.allSettled(building.map(checkJob));
       } finally {
         inFlight = false;
+        // In `finally` so one bad round never stops the polling.
+        schedule();
       }
-      schedule();
     };
 
     // A hidden tab only needs an occasional check. Coming back to the tab

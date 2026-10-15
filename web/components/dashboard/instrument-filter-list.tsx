@@ -29,7 +29,9 @@ export function InstrumentFilterList({
 }) {
   return (
     <Command>
-      <CommandInput placeholder="Filter instruments…" />
+      {/* Radix focuses a popover's contents once, when it opens. On the first
+          open only the loading placeholder exists then, so ask for focus here. */}
+      <CommandInput autoFocus placeholder="Filter instruments…" />
       <CommandList>
         <CommandEmpty>No instruments found.</CommandEmpty>
         <CommandGroup>

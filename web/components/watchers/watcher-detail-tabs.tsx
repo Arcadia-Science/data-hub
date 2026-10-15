@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { parseAsString, useQueryState, useQueryStates } from "nuqs";
+import { LoadErrorBoundary } from "@/components/load-error-boundary";
 import { TablePendingProvider } from "@/components/table-pending";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -12,16 +13,20 @@ import { HeartbeatChartSkeleton } from "@/components/watchers/heartbeat-chart-sk
 import { StatusToolbar } from "@/components/watchers/status-toolbar";
 import type { WatcherEventRow, WatcherHeartbeatRow } from "@/lib/api/watchers";
 import { todayDateString } from "@/lib/date";
+import { preloader } from "@/lib/preload";
 import { watcherDetailSearchParams } from "@/lib/search-params";
 
 // The chart brings in the charting library, which only the Status tab needs.
-const HeartbeatChart = dynamic(
-  () =>
-    import("@/components/watchers/heartbeat-chart").then(
-      (m) => m.HeartbeatChart
-    ),
-  { ssr: false, loading: () => <HeartbeatChartSkeleton /> }
-);
+// Switching to that tab also waits for the server to send the heartbeats, so
+// the download starts as soon as the tab is hovered, focused, or chosen.
+const loadHeartbeatChart = () =>
+  import("@/components/watchers/heartbeat-chart").then((m) => m.HeartbeatChart);
+const preloadHeartbeatChart = preloader(loadHeartbeatChart);
+
+const HeartbeatChart = dynamic(loadHeartbeatChart, {
+  ssr: false,
+  loading: () => <HeartbeatChartSkeleton />,
+});
 
 export function WatcherDetailTabsSkeleton() {
   return (
@@ -111,10 +116,24 @@ export function WatcherDetailTabs({
   const effectiveSince = since ?? todayDateString(timeZone);
 
   return (
-    <Tabs onValueChange={setTab} value={tab}>
+    <Tabs
+      onValueChange={(next) => {
+        if (next === "status") {
+          preloadHeartbeatChart();
+        }
+        setTab(next);
+      }}
+      value={tab}
+    >
       <TabsList className="mb-4" variant="line">
         <TabsTrigger value="logs">Logs</TabsTrigger>
-        <TabsTrigger value="status">Status</TabsTrigger>
+        <TabsTrigger
+          onFocus={preloadHeartbeatChart}
+          onPointerEnter={preloadHeartbeatChart}
+          value="status"
+        >
+          Status
+        </TabsTrigger>
         <TabsTrigger value="configuration">Configuration</TabsTrigger>
       </TabsList>
 
@@ -148,7 +167,9 @@ export function WatcherDetailTabs({
           {heartbeats === null ? (
             <HeartbeatChartSkeleton />
           ) : (
-            <HeartbeatChart heartbeats={heartbeats} since={effectiveSince} />
+            <LoadErrorBoundary>
+              <HeartbeatChart heartbeats={heartbeats} since={effectiveSince} />
+            </LoadErrorBoundary>
           )}
         </TablePendingProvider>
       </TabsContent>

@@ -3,6 +3,7 @@
 import { ListFilter } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useState } from "react";
+import { LoadErrorBoundary } from "@/components/load-error-boundary";
 import {
   RUN_FILTERS,
   type RunFilterValues,
@@ -15,23 +16,26 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
+import { preloader } from "@/lib/preload";
 import type { RunStatus } from "@/lib/runs/run-status";
 
 // The menu uses the command palette library, which most page visits never
-// need. It loads when the popover first opens.
-const RunFiltersList = dynamic(
-  () =>
-    import("@/components/runs/run-filters-list").then((m) => m.RunFiltersList),
-  {
-    ssr: false,
-    loading: () => (
-      <div aria-hidden className="flex flex-col gap-2 p-2">
-        <Skeleton className="h-6 w-full" />
-        <Skeleton className="h-6 w-full" />
-      </div>
-    ),
-  }
-);
+// need. It loads when the popover first opens, or earlier when the pointer or
+// focus reaches the button.
+const loadRunFiltersList = () =>
+  import("@/components/runs/run-filters-list").then((m) => m.RunFiltersList);
+
+const preloadRunFiltersList = preloader(loadRunFiltersList);
+
+const RunFiltersList = dynamic(loadRunFiltersList, {
+  ssr: false,
+  loading: () => (
+    <div aria-hidden className="flex flex-col gap-2 p-2">
+      <Skeleton className="h-6 w-full" />
+      <Skeleton className="h-6 w-full" />
+    </div>
+  ),
+});
 
 export function RunFiltersCombobox({
   values,
@@ -56,6 +60,8 @@ export function RunFiltersCombobox({
         <Button
           aria-expanded={open}
           className="h-9 gap-2 font-normal"
+          onFocus={preloadRunFiltersList}
+          onMouseEnter={preloadRunFiltersList}
           role="combobox"
           size="sm"
           variant="outline"
@@ -70,12 +76,14 @@ export function RunFiltersCombobox({
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-64 p-0">
-        <RunFiltersList
-          onChange={onChange}
-          onStatusChange={onStatusChange}
-          selectedStatuses={selectedStatuses}
-          values={values}
-        />
+        <LoadErrorBoundary>
+          <RunFiltersList
+            onChange={onChange}
+            onStatusChange={onStatusChange}
+            selectedStatuses={selectedStatuses}
+            values={values}
+          />
+        </LoadErrorBoundary>
       </PopoverContent>
     </Popover>
   );
